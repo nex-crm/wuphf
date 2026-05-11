@@ -161,6 +161,40 @@ Bun's native test runner instead of the repo's Vitest setup.
   the diff is purely test/doc/build config, or the same feature is
   already covered by a linked sibling PR's screenshots.
 
+### Rich HTML Artifacts
+
+Use self-contained HTML artifacts when an agent output needs visual inspection
+more than linear reading: substantial implementation plans, PR explainers,
+architecture maps, design explorations, incident reports, status reports,
+research explainers, annotated diffs, or throwaway editors with copy/export
+buttons.
+
+Use the browser as a high-bandwidth visual output channel when layout,
+diagrams, animation, simulation, or interaction would make the result easier to
+inspect. Do not use HTML just to decorate a short text answer.
+
+Markdown remains the source of truth for wiki facts, briefs, playbooks, and
+short hand-edited notes. HTML artifacts are review surfaces and shareable
+explainers, not a replacement for the wiki rebuild contract.
+
+Repository convention:
+
+- Store durable HTML artifacts under `docs/agent-artifacts/` with a
+  date-prefixed filename.
+- Start from `docs/agent-artifacts/html-artifact-template.html` or run
+  `bash scripts/new-html-artifact.sh <slug> "Title"`.
+- Make artifacts self-contained unless an external dependency is explicitly
+  justified in the artifact metadata.
+- Include provenance: source files, commands, PR number, issue, context source,
+  or prompt.
+- Include an export path for interactive artifacts, such as copy JSON, copy
+  markdown, copy prompt, or copy PR summary.
+- Do not include secrets, bearer tokens, private customer data, or raw logs with
+  credentials.
+- If the artifact establishes a durable decision, link it from the owning
+  markdown doc or summarize the decision there so text search and wiki
+  ingestion still find it.
+
 ### Multi-round review rhythm
 
 Use this heavier rhythm for substantial changes such as new packages,

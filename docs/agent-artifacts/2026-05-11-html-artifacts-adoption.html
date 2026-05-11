@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Adopting HTML Artifacts in WUPHF</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1a1610;
+        --surface: #242018;
+        --surface-high: #2e2820;
+        --border: #3a3028;
+        --text: #f0ebd8;
+        --muted: #a89a84;
+        --faint: #6f6254;
+        --amber: #ecb22e;
+        --blue: #5a9ac8;
+        --green: #5aaa7a;
+        --red: #d66a5c;
+        --shadow: rgba(0, 0, 0, 0.28);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        line-height: 1.55;
+      }
+
+      a {
+        color: var(--blue);
+      }
+
+      .shell {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 32px 20px 60px;
+      }
+
+      .hero,
+      .panel,
+      .lane,
+      .artifact-card {
+        border: 1px solid var(--border);
+        background: var(--surface);
+        box-shadow: 0 18px 60px var(--shadow);
+      }
+
+      .hero {
+        padding: 26px;
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--amber);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        margin: 0;
+        max-width: 850px;
+        font-size: 56px;
+        line-height: 1.02;
+      }
+
+      .lede {
+        max-width: 840px;
+        margin: 18px 0 0;
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 8px;
+        margin-top: 22px;
+      }
+
+      .meta div {
+        border: 1px solid var(--border);
+        background: var(--surface-high);
+        padding: 12px;
+      }
+
+      .meta strong {
+        display: block;
+        color: var(--faint);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0;
+      }
+
+      section {
+        margin-top: 30px;
+      }
+
+      h2 {
+        margin: 0 0 14px;
+        font-size: 22px;
+      }
+
+      h3 {
+        margin: 0 0 8px;
+        color: var(--amber);
+        font-size: 15px;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      ul {
+        margin: 10px 0 0;
+        padding-left: 20px;
+      }
+
+      li + li {
+        margin-top: 6px;
+      }
+
+      .decision {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+        gap: 14px;
+      }
+
+      .panel {
+        padding: 18px;
+      }
+
+      .callout {
+        border-left: 4px solid var(--amber);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 14px;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(140px, 1fr));
+        gap: 10px;
+        overflow-x: auto;
+        padding-bottom: 6px;
+      }
+
+      .lane {
+        min-height: 150px;
+        padding: 14px;
+      }
+
+      .lane strong {
+        display: block;
+        color: var(--amber);
+        margin-bottom: 8px;
+      }
+
+      .lane span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .matrix {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+      }
+
+      .matrix th,
+      .matrix td {
+        border: 1px solid var(--border);
+        padding: 12px;
+        vertical-align: top;
+        text-align: left;
+      }
+
+      .matrix th {
+        color: var(--amber);
+        background: var(--surface-high);
+      }
+
+      .status-yes {
+        color: var(--green);
+        font-weight: 700;
+      }
+
+      .status-no {
+        color: var(--red);
+        font-weight: 700;
+      }
+
+      .artifact-card {
+        padding: 16px;
+      }
+
+      .artifact-card small {
+        display: block;
+        color: var(--faint);
+        margin-top: 8px;
+      }
+
+      .progression {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(180px, 1fr));
+        gap: 10px;
+      }
+
+      .step {
+        border: 1px solid var(--border);
+        background: var(--surface-high);
+        padding: 14px;
+      }
+
+      .step strong {
+        display: block;
+        color: var(--amber);
+        margin-bottom: 6px;
+      }
+
+      .copy-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 14px;
+      }
+
+      button {
+        border: 1px solid var(--amber);
+        background: #120f0b;
+        color: var(--amber);
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      button:focus-visible {
+        outline: 2px solid var(--amber);
+        outline-offset: 3px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 124px;
+        margin-top: 12px;
+        border: 1px solid var(--border);
+        background: #120f0b;
+        color: var(--text);
+        padding: 12px;
+        resize: vertical;
+      }
+
+      code {
+        background: #120f0b;
+        color: #fff6d8;
+        padding: 2px 4px;
+      }
+
+      @media (max-width: 860px) {
+        h1 {
+          font-size: 34px;
+        }
+
+        .decision {
+          grid-template-columns: 1fr;
+        }
+
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        .progression {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">WUPHF adoption artifact</p>
+        <h1>Use HTML when agents need humans to inspect shape, not just prose.</h1>
+        <p class="lede">
+          The linked article's useful idea is not "replace markdown everywhere." For WUPHF,
+          the useful move is to add a first-class review artifact format for dense plans,
+          PR explainers, diagrams, reports, and custom editors while keeping the wiki's
+          markdown rebuild contract intact.
+        </p>
+        <div class="meta" aria-label="Artifact metadata">
+          <div><strong>Date</strong><span>2026-05-11</span></div>
+          <div><strong>Branch</strong><span>codex/html-artifacts-adoption</span></div>
+          <div><strong>Sources</strong><span>article text, examples index, repo docs</span></div>
+          <div><strong>Scope</strong><span>docs and agent workflow only</span></div>
+        </div>
+      </header>
+
+      <section class="decision" aria-labelledby="decision">
+        <article class="panel callout">
+          <h2 id="decision">Decision</h2>
+          <p>
+            Adopt self-contained HTML artifacts as the preferred format for large
+            agent-produced review surfaces. Do not make HTML the canonical memory or wiki
+            substrate yet. The first implementation is a repo convention, a starter
+            template, and an agent instruction update.
+          </p>
+        </article>
+        <aside class="panel">
+          <h3>Why this boundary</h3>
+          <ul>
+            <li>Markdown stays diffable and rebuildable for facts.</li>
+            <li>HTML makes dense reviews more likely to be read.</li>
+            <li>Self-contained files need no app runtime.</li>
+            <li>Interactive artifacts can export back to text or JSON.</li>
+          </ul>
+        </aside>
+      </section>
+
+      <section aria-labelledby="human-io">
+        <h2 id="human-io">Human I/O Thesis</h2>
+        <div class="panel">
+          <p>
+            The Karpathy framing makes the rule sharper: audio, pointing, screenshots,
+            and gestures are becoming natural human input to agents, while visual media
+            is the better output channel back to humans. HTML is the useful current
+            bridge because it is still exact and inspectable, but it can carry layout,
+            diagrams, animation, and interaction.
+          </p>
+          <div class="progression" aria-label="Agent output progression">
+            <div class="step">
+              <strong>1. Raw text</strong>
+              <span>Compact, diffable, but effortful for dense plans and reviews.</span>
+            </div>
+            <div class="step">
+              <strong>2. Markdown</strong>
+              <span>Good current default for structured prose and canonical facts.</span>
+            </div>
+            <div class="step">
+              <strong>3. HTML</strong>
+              <span>Better for spatial review, comparisons, visual state, and interaction.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="workflow">
+        <h2 id="workflow">Operating Flow</h2>
+        <div class="flow" role="list">
+          <div class="lane" role="listitem">
+            <strong>1. Agent reads context</strong>
+            <span>Code, docs, git history, Nex context, screenshots, and command output.</span>
+          </div>
+          <div class="lane" role="listitem">
+            <strong>2. Agent renders HTML</strong>
+            <span>Self-contained page with diagrams, tables, annotated code, and controls.</span>
+          </div>
+          <div class="lane" role="listitem">
+            <strong>3. Human reviews visually</strong>
+            <span>Open locally, attach to PR, or share as a static file.</span>
+          </div>
+          <div class="lane" role="listitem">
+            <strong>4. Artifact exports text</strong>
+            <span>Copy PR body, JSON diff, prompt, decision table, or markdown summary.</span>
+          </div>
+          <div class="lane" role="listitem">
+            <strong>5. Durable state lands</strong>
+            <span>Markdown wiki, code, tests, PR description, or tracked docs record the result.</span>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="matrix">
+        <h2 id="matrix">Where HTML Belongs</h2>
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th>Surface</th>
+              <th>Use HTML?</th>
+              <th>Reason</th>
+              <th>Guardrail</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Implementation plans</td>
+              <td class="status-yes">Yes</td>
+              <td>Plans often need timelines, dependency maps, data flow, and risk grouping.</td>
+              <td>Keep a compact markdown summary if the decision is durable.</td>
+            </tr>
+            <tr>
+              <td>PR review/explainer</td>
+              <td class="status-yes">Yes</td>
+              <td>Diffs, call graphs, and reviewer focus areas are spatial.</td>
+              <td>Do not replace required PR checklist or dispositions.</td>
+            </tr>
+            <tr>
+              <td>Design exploration</td>
+              <td class="status-yes">Yes</td>
+              <td>Variants, states, and tokens need side-by-side inspection.</td>
+              <td>Use repo design tokens and include mobile states.</td>
+            </tr>
+            <tr>
+              <td>Custom editor</td>
+              <td class="status-yes">Yes</td>
+              <td>Drag, sliders, toggles, previews, and export buttons close the loop.</td>
+              <td>Always include a copy/export path.</td>
+            </tr>
+            <tr>
+              <td>Wiki facts and entity logs</td>
+              <td class="status-no">No</td>
+              <td>The wiki rebuild contract depends on markdown and JSONL as source material.</td>
+              <td>Link HTML from wiki pages; do not make it authoritative.</td>
+            </tr>
+            <tr>
+              <td>Short notes</td>
+              <td class="status-no">No</td>
+              <td>HTML generation cost and noisy diffs are not worth it.</td>
+              <td>Use markdown unless visual structure changes the review outcome.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section aria-labelledby="starter">
+        <h2 id="starter">Starter Artifact Types</h2>
+        <div class="grid">
+          <article class="artifact-card">
+            <h3>Plan Map</h3>
+            <p>Timeline, dependency graph, file ownership, test matrix, and risks.</p>
+            <small>Use before substantial implementation or multi-agent dispatch.</small>
+          </article>
+          <article class="artifact-card">
+            <h3>PR Explainer</h3>
+            <p>Annotated diff, changed-file tour, reviewer checklist, and copyable PR body.</p>
+            <small>Use for PRs where GitHub's linear diff hides the concept.</small>
+          </article>
+          <article class="artifact-card">
+            <h3>System Explainer</h3>
+            <p>Flow diagram, hot path, code snippets, glossary, and gotchas.</p>
+            <small>Use when onboarding a human or a verification agent.</small>
+          </article>
+          <article class="artifact-card">
+            <h3>Throwaway Editor</h3>
+            <p>Purpose-built interface for sorting, tuning, tagging, or selecting data.</p>
+            <small>Use when text prompting is a poor input device.</small>
+          </article>
+        </div>
+      </section>
+
+      <section aria-labelledby="prompt">
+        <h2 id="prompt">Copyable Prompt Seed</h2>
+        <div class="panel">
+          <p>
+            This prompt keeps the practice lightweight. It asks for HTML only when the output
+            needs visual review and preserves WUPHF's markdown source-of-truth boundary.
+          </p>
+          <textarea id="promptText" spellcheck="false">Create a self-contained HTML artifact for this WUPHF task. Use it only because the result benefits from visual structure: diagrams, tables, side-by-side comparisons, annotated snippets, or interactive controls. Include provenance, the decision or recommendation, risks, verification, and a copy/export affordance if the artifact is interactive. Keep canonical facts and final durable decisions discoverable in markdown; do not make HTML the source of truth for the wiki.</textarea>
+          <div class="copy-row">
+            <button type="button" id="copyPrompt">Copy prompt</button>
+            <span id="copyStatus" aria-live="polite"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script>
+      const copyButton = document.getElementById("copyPrompt");
+      const copyStatus = document.getElementById("copyStatus");
+      const promptText = document.getElementById("promptText");
+
+      copyButton.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(promptText.value);
+          copyStatus.textContent = "Copied.";
+        } catch (_error) {
+          promptText.focus();
+          promptText.select();
+          copyStatus.textContent = "Select text and copy manually.";
+        }
+      });
+    </script>
+  </body>
+</html>

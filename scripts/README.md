@@ -56,3 +56,17 @@ Some branches include `scripts/dispatch-codex.sh` as a general implementation
 dispatcher for writable Codex agents. Use that kind of wrapper for isolated
 implementation batches in worktrees. Use the verification and triangulation
 wrappers above when the goal is read-only review rather than editing.
+
+## `new-html-artifact.sh`
+
+Creates a dated self-contained HTML artifact from
+`docs/agent-artifacts/html-artifact-template.html`.
+
+```bash
+bash scripts/new-html-artifact.sh runtime-explainer "Runtime explainer"
+```
+
+Use HTML artifacts for dense agent outputs that benefit from visual structure:
+plans, PR explainers, architecture maps, design explorations, reports, and
+throwaway editors with an export button. Markdown remains the canonical wiki
+and fact substrate.

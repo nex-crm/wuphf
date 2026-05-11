@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{TITLE}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1a1610;
+        --surface: #242018;
+        --surface-high: #2e2820;
+        --border: #3a3028;
+        --text: #f0ebd8;
+        --muted: #a89a84;
+        --faint: #6f6254;
+        --amber: #ecb22e;
+        --blue: #5a9ac8;
+        --green: #5aaa7a;
+        --red: #d66a5c;
+        --shadow: rgba(0, 0, 0, 0.28);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        line-height: 1.6;
+      }
+
+      a {
+        color: var(--blue);
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible {
+        outline: 2px solid var(--amber);
+        outline-offset: 3px;
+      }
+
+      .shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px 20px 56px;
+      }
+
+      .hero {
+        border: 1px solid var(--border);
+        background: var(--surface);
+        box-shadow: 0 18px 60px var(--shadow);
+        padding: 24px;
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--amber);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 44px;
+        line-height: 1.05;
+      }
+
+      .lede {
+        max-width: 780px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 8px;
+        margin-top: 20px;
+      }
+
+      .meta div,
+      .panel {
+        border: 1px solid var(--border);
+        background: var(--surface-high);
+        padding: 14px;
+      }
+
+      .meta strong {
+        display: block;
+        color: var(--faint);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      section {
+        margin-top: 28px;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      h3 {
+        margin: 0 0 8px;
+        font-size: 15px;
+        color: var(--amber);
+      }
+
+      ul {
+        padding-left: 20px;
+      }
+
+      code,
+      pre {
+        background: #120f0b;
+        color: #fff6d8;
+      }
+
+      code {
+        padding: 2px 4px;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 14px;
+        border: 1px solid var(--border);
+      }
+
+      .tag {
+        display: inline-block;
+        border: 1px solid var(--border);
+        padding: 2px 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .status-good {
+        color: var(--green);
+      }
+
+      .status-risk {
+        color: var(--red);
+      }
+
+      @media (max-width: 700px) {
+        .shell {
+          padding: 18px 12px 40px;
+        }
+
+        .hero {
+          padding: 18px;
+        }
+
+        h1 {
+          font-size: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">WUPHF HTML artifact</p>
+        <h1>{{TITLE}}</h1>
+        <p class="lede">{{SUMMARY}}</p>
+        <div class="meta" aria-label="Artifact metadata">
+          <div><strong>Date</strong><span>{{DATE}}</span></div>
+          <div><strong>Owner</strong><span>{{OWNER}}</span></div>
+          <div><strong>Sources</strong><span>{{SOURCES}}</span></div>
+        </div>
+      </header>
+
+      <section aria-labelledby="decision">
+        <h2 id="decision">Decision</h2>
+        <div class="panel">
+          <p>Replace this section with the core decision, result, or recommendation.</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="details">
+        <h2 id="details">Details</h2>
+        <div class="grid">
+          <article class="panel">
+            <h3>Context</h3>
+            <p>Summarize the source material and why this artifact exists.</p>
+          </article>
+          <article class="panel">
+            <h3>Tradeoffs</h3>
+            <p>List the meaningful tradeoffs. Avoid decorative cards with no job.</p>
+          </article>
+          <article class="panel">
+            <h3>Verification</h3>
+            <p>Show commands, screenshots, links, or review evidence.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
