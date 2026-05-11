@@ -146,6 +146,12 @@ test.describe("Onboarding → Run a local model", () => {
     await expect(
       page.getByTestId("onboarding-local-llm-tile-exo"),
     ).toBeVisible();
+    await expect(
+      page.getByTestId("onboarding-local-llm-tile-hermes-agent"),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("onboarding-local-llm-tile-openclaw-http"),
+    ).toBeVisible();
 
     // mlx-lm is reachable in the fixture → "Running" badge, selectable.
     const mlxTile = page.getByTestId("onboarding-local-llm-tile-mlx-lm");
