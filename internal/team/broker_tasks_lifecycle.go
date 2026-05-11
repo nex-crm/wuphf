@@ -30,8 +30,7 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		if task.ID != id {
 			continue
 		}
-		status := strings.ToLower(strings.TrimSpace(task.status))
-		if status == "done" || status == "completed" || status == "canceled" || status == "cancelled" {
+		if isTerminalTeamTaskStatus(task.status) {
 			return *task, false, nil
 		}
 		if err := rejectFalseLocalWorktreeBlock(task, reason); err != nil {

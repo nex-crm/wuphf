@@ -237,8 +237,7 @@ func (b *Broker) queueTaskBehindActiveOwnerLaneLocked(task *teamTask) {
 	if !stringSliceContainsFold(task.DependsOn, active.ID) {
 		task.DependsOn = append(task.DependsOn, active.ID)
 	}
-	task.blocked = true
-	task.status = "open"
+	b.markTaskQueuedBehindActiveOwnerLocked(task)
 	queueNote := fmt.Sprintf("Queued behind %s so @%s only carries one active %s lane at a time.", active.ID, strings.TrimSpace(task.Owner), strings.TrimSpace(task.ExecutionMode))
 	switch existing := strings.TrimSpace(task.Details); {
 	case existing == "":
