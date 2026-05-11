@@ -205,9 +205,7 @@ func (b *Broker) migrateLifecycleStatesLocked() {
 	if b == nil {
 		return
 	}
-	if b.lifecycleIndex == nil {
-		b.lifecycleIndex = map[LifecycleState][]string{}
-	}
+	b.lifecycleIndex = map[LifecycleState][]string{}
 	for i := range b.tasks {
 		task := &b.tasks[i]
 		if task.LifecycleState != "" {
@@ -257,6 +255,10 @@ func (b *Broker) reindexTaskLifecycleFromLegacyLocked(task *teamTask) {
 			derived = LifecycleStateReady
 		}
 	}
+	// This helper is used after legacy mutation paths have deliberately
+	// written status/review fields that predate the LifecycleState table.
+	// Preserve that legacy tuple as authoritative and only repair the
+	// typed state plus index classification.
 	prev := task.LifecycleState
 	task.LifecycleState = derived
 	b.indexLifecycleLocked(task.ID, prev, derived)

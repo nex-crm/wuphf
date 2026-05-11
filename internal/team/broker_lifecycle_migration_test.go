@@ -173,3 +173,40 @@ func TestLifecycleMigrationIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrateLifecycleStatesLockedRebuildsIndexOnReentry(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.tasks = []teamTask{
+		{ID: "t1", pipelineStage: "implement", reviewState: "pending_review", status: "in_progress"},
+		{ID: "t2", pipelineStage: "ship", reviewState: "approved", status: "done"},
+	}
+	b.lifecycleIndex = map[LifecycleState][]string{
+		LifecycleStateRunning: {"stale-task"},
+	}
+
+	b.migrateLifecycleStatesLocked()
+	first := b.lifecycleIndexSnapshotLocked()
+	b.migrateLifecycleStatesLocked()
+	second := b.lifecycleIndexSnapshotLocked()
+
+	if containsString(second[LifecycleStateRunning], "stale-task") {
+		t.Fatalf("expected direct migration re-entry to drop stale index entries, got %+v", second)
+	}
+	if len(first) != len(second) {
+		t.Fatalf("index size changed across direct migration re-entry: first=%d second=%d", len(first), len(second))
+	}
+	for state, ids := range first {
+		got := second[state]
+		if len(got) != len(ids) {
+			t.Fatalf("bucket %s changed across direct migration re-entry: first=%v second=%v", state, ids, got)
+		}
+		for i, id := range ids {
+			if got[i] != id {
+				t.Fatalf("bucket %s changed across direct migration re-entry: first=%v second=%v", state, ids, got)
+			}
+		}
+	}
+}
