@@ -1473,6 +1473,14 @@ html[data-theme="nex"]
   text-indent: 0;
   color: var(--text-tertiary);
 }
+.channel-participant-remove.is-pending {
+  min-width: 34px;
+  width: 34px;
+  text-indent: 0;
+}
+.channel-participant-remove.is-pending::before {
+  content: none;
+}
 .channel-participant-toggle:hover:not(:disabled),
 .channel-participant-remove:hover:not(:disabled) {
   border-color: var(--border-dark);

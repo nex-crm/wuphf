@@ -223,7 +223,7 @@ function ParticipantRow({
         </button>
         <button
           type="button"
-          className="channel-participant-remove"
+          className={`channel-participant-remove${removePending ? " is-pending" : ""}`}
           onClick={() => onUpdate(member, "remove")}
           disabled={removePending || isLead}
           aria-label={`Remove ${displayName} from channel`}
@@ -347,6 +347,7 @@ export function ChannelParticipants({ channelSlug }: ChannelParticipantsProps) {
           onClick={() => setAddOpen((open) => !open)}
           aria-expanded={addOpen}
           aria-controls="channel-participants-add-menu"
+          aria-label={`Add participant to #${channelSlug}`}
           title="Add participant"
         >
           +
