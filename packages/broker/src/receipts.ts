@@ -25,16 +25,29 @@ import {
   type ThreadId,
 } from "@wuphf/protocol";
 
-import type { ReceiptStore } from "./receipt-store.ts";
+import { type ReceiptStore, ReceiptStoreFullError } from "./receipt-store.ts";
 import type { BrokerLogger } from "./types.ts";
 
-// 1 MiB body budget. Receipt boundary-budget validation (see
-// @wuphf/protocol#validateReceiptBudget) caps individual receipt size well
-// below this; the limit here is a coarse pre-parse abort so a malicious or
-// runaway producer can't stream gigabytes into V8's parser. If a future
-// receipt schema needs more, raise this value here AND review the
-// protocol-level boundary budget.
+// 1 MiB body budget. This is the broker's wire-layer pre-parse cap and is
+// INTENTIONALLY stricter than the protocol-level receipt budget (see
+// `@wuphf/protocol/src/budgets.ts:MAX_RECEIPT_BYTES`, 10 MiB) — the
+// protocol cap is the global semantic ceiling for a single receipt across
+// all transports (file dumps, IPC, future event logs); the broker cap is
+// a coarse network-layer pre-parse abort so a malicious or runaway HTTP
+// producer can't stream gigabytes into V8's parser before the boundary
+// validator gets a chance to weigh in. A receipt larger than 1 MiB but
+// smaller than the protocol cap is rejected at this layer with 413; raise
+// this value if a future use case needs to submit larger receipts over
+// HTTP, but do NOT raise it past the protocol cap.
 const MAX_RECEIPT_BODY_BYTES = 1_048_576;
+
+// Hard ceiling for thread-scoped list responses. Without a limit a single
+// thread can accumulate enough receipts to make `GET /api/threads/:tid/
+// receipts` a memory-pressure path (the response is materialized as one
+// JSON-array string before send). Branch 6 will replace this with cursor
+// pagination; for branch 5 the cap is coarse but bounded. A 200 response
+// at or near the cap is the signal that pagination will be needed.
+const MAX_THREAD_LIST_RECEIPTS = 1_000;
 
 interface ReceiptRouteDeps {
   readonly receiptStore: ReceiptStore;
@@ -57,12 +70,11 @@ export async function handleReceiptCreate(
   // JSON-looking body are likely confused about the wire shape (e.g., a
   // curl-from-script that forgot `-H content-type`). Reject early so the
   // failure mode is "415, your client is wrong" not "400, my parser is
-  // wrong".
+  // wrong". Match exactly `application/json` (optional whitespace and
+  // optional charset/structured-suffix parameters) — a bare prefix check
+  // would accept `application/jsonp` or `application/json-bogus`.
   const contentType = req.headers["content-type"];
-  if (
-    typeof contentType !== "string" ||
-    !contentType.toLowerCase().startsWith("application/json")
-  ) {
+  if (typeof contentType !== "string" || !isJsonMediaType(contentType)) {
     deps.logger.warn("receipt_post_rejected", { reason: "unsupported_media_type" });
     res.writeHead(415, { "Content-Type": "text/plain" });
     res.end("unsupported_media_type");
@@ -71,12 +83,18 @@ export async function handleReceiptCreate(
 
   // Fast-path: trust an honest Content-Length over MAX_RECEIPT_BODY_BYTES
   // and reject without ever opening the body stream. Cheap protection
-  // against producers that announce their oversize intent up front.
+  // against producers that announce their oversize intent up front. We
+  // cap the logged size at MAX_RECEIPT_BODY_BYTES + 1 to keep the log
+  // bounded — a client claiming Content-Length: 9_999_999_999 should not
+  // become a 13-digit log entry.
   const contentLength = req.headers["content-length"];
   if (typeof contentLength === "string") {
     const parsed = Number(contentLength);
     if (Number.isFinite(parsed) && parsed > MAX_RECEIPT_BODY_BYTES) {
-      deps.logger.warn("receipt_post_rejected", { reason: "body_too_large_declared" });
+      deps.logger.warn("receipt_post_rejected", {
+        reason: "body_too_large_declared",
+        payloadBytes: Math.min(parsed, MAX_RECEIPT_BODY_BYTES + 1),
+      });
       writePayloadTooLarge(res);
       return;
     }
@@ -90,8 +108,12 @@ export async function handleReceiptCreate(
     if (reason === "body_too_large") {
       // The 413 has already been written by readBodyAsString — it owns the
       // response close-handshake so the client receives the status before
-      // the connection terminates.
-      deps.logger.warn("receipt_post_rejected", { reason: "body_too_large_streamed" });
+      // the connection terminates. payloadBytes is capped at the body
+      // limit + 1 (we paused the stream at the overflow byte).
+      deps.logger.warn("receipt_post_rejected", {
+        reason: "body_too_large_streamed",
+        payloadBytes: MAX_RECEIPT_BODY_BYTES + 1,
+      });
       return;
     }
     deps.logger.warn("receipt_post_rejected", { reason: "bad_body" });
@@ -112,25 +134,31 @@ export async function handleReceiptCreate(
   } catch (err) {
     const reason = err instanceof Error ? err.message : "validation_failed";
     deps.logger.warn("receipt_post_rejected", { reason: "invalid_receipt" });
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid_receipt", reason }));
+    writeJsonResponse(res, 400, JSON.stringify({ error: "invalid_receipt", reason }));
     return;
   }
 
-  const result = await deps.receiptStore.put(receipt);
+  let result: { readonly existed: boolean };
+  try {
+    result = await deps.receiptStore.put(receipt);
+  } catch (err) {
+    if (err instanceof ReceiptStoreFullError) {
+      deps.logger.warn("receipt_post_rejected", { reason: "store_full" });
+      writeJsonResponse(res, 507, JSON.stringify({ error: "store_full" }));
+      return;
+    }
+    throw err;
+  }
   if (result.existed) {
     deps.logger.info("receipt_put_conflict", { receiptId: receipt.id });
-    res.writeHead(409, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "receipt_id_exists", id: receipt.id }));
+    writeJsonResponse(res, 409, JSON.stringify({ error: "receipt_id_exists", id: receipt.id }));
     return;
   }
 
   deps.logger.info("receipt_put_ok", { receiptId: receipt.id });
-  res.writeHead(201, {
-    "Content-Type": "application/json",
+  writeJsonResponse(res, 201, receiptToJson(receipt), {
     Location: `/api/receipts/${encodeURIComponent(receipt.id)}`,
   });
-  res.end(receiptToJson(receipt));
 }
 
 export async function handleReceiptGet(
@@ -165,8 +193,7 @@ export async function handleReceiptGet(
     notFoundJson(res);
     return;
   }
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(receiptToJson(receipt));
+  writeJsonResponse(res, 200, receiptToJson(receipt));
 }
 
 export async function handleThreadReceiptsList(
@@ -204,15 +231,53 @@ export async function handleThreadReceiptsList(
   }
 
   const list = await deps.receiptStore.list({ threadId });
-  res.writeHead(200, { "Content-Type": "application/json" });
+  // Cap the response size: a single thread can otherwise accumulate
+  // enough receipts to make this a memory pressure path. Branch 6 adds
+  // cursor pagination; for now we truncate at the ceiling so the response
+  // stays bounded. Clients hitting the cap will see exactly
+  // MAX_THREAD_LIST_RECEIPTS receipts — there is no continuation token
+  // yet (added in branch 6).
+  const truncated =
+    list.length > MAX_THREAD_LIST_RECEIPTS ? list.slice(0, MAX_THREAD_LIST_RECEIPTS) : list;
   // Serialize each via the codec so the wire shape is identical to the
   // single-receipt GET response. Concatenate as a JSON array.
-  res.end(`[${list.map((r) => receiptToJson(r)).join(",")}]`);
+  const body = `[${truncated.map((r) => receiptToJson(r)).join(",")}]`;
+  writeJsonResponse(res, 200, body);
 }
 
 function notFoundJson(res: ServerResponse): void {
-  res.writeHead(404, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: "not_found" }));
+  writeJsonResponse(res, 404, JSON.stringify({ error: "not_found" }));
+}
+
+// Shared JSON response helper. Sets `Content-Type: application/json;
+// charset=utf-8`, `Cache-Control: no-store`, and a byte-accurate
+// `Content-Length` for every receipt-route JSON reply. Matches the
+// convention established by `/api-token` and `/api/health` so future
+// route authors have one pattern to copy, not two.
+function writeJsonResponse(
+  res: ServerResponse,
+  status: number,
+  body: string,
+  extraHeaders: Record<string, string> = {},
+): void {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Length": String(Buffer.byteLength(body, "utf8")),
+    ...extraHeaders,
+  };
+  res.writeHead(status, headers);
+  res.end(body);
+}
+
+// Exact `application/json` media-type match (per RFC 7231 §3.1.1.5).
+// Accepts `application/json`, optional whitespace, and optional
+// `; charset=...` or `; <param>=...` tails. Rejects `application/jsonp`,
+// `application/json-foo`, and other prefix collisions.
+function isJsonMediaType(value: string): boolean {
+  const semi = value.indexOf(";");
+  const head = (semi === -1 ? value : value.slice(0, semi)).trim().toLowerCase();
+  return head === "application/json";
 }
 
 // Stream the request body into a string, aborting once the cumulative

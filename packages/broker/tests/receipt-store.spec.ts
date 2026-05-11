@@ -10,7 +10,7 @@ import {
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 
-import { InMemoryReceiptStore } from "../src/receipt-store.ts";
+import { InMemoryReceiptStore, ReceiptStoreFullError } from "../src/receipt-store.ts";
 
 const TASK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const THREAD_A = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
@@ -122,5 +122,31 @@ describe("InMemoryReceiptStore", () => {
     await store.put(minimalReceiptV1("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
     await store.put(minimalReceiptV2("01ARZ3NDEKTSV4RRFFQ69G5FAY", THREAD_A));
     expect(store.size()).toBe(2);
+  });
+
+  it("throws ReceiptStoreFullError when maxReceipts is exceeded", async () => {
+    const store = new InMemoryReceiptStore({ maxReceipts: 2 });
+    await store.put(minimalReceiptV1("01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+    await store.put(minimalReceiptV1("01ARZ3NDEKTSV4RRFFQ69G5FAY"));
+    await expect(store.put(minimalReceiptV1("01ARZ3NDEKTSV4RRFFQ69G5FB1"))).rejects.toBeInstanceOf(
+      ReceiptStoreFullError,
+    );
+    expect(store.size()).toBe(2);
+  });
+
+  it("returns existed:true (not 507) when a duplicate hits at capacity", async () => {
+    // Cap check runs AFTER the has-check: a duplicate at the cap is a
+    // collision, not a capacity rejection. The correct status for a
+    // bearer-holder retrying a previously-stored receipt is 409, not 507.
+    const store = new InMemoryReceiptStore({ maxReceipts: 1 });
+    const r = minimalReceiptV1("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    await store.put(r);
+    expect(await store.put(r)).toEqual({ existed: true });
+  });
+
+  it("rejects non-positive or non-integer maxReceipts at construction", () => {
+    expect(() => new InMemoryReceiptStore({ maxReceipts: 0 })).toThrow(/positive integer/);
+    expect(() => new InMemoryReceiptStore({ maxReceipts: -1 })).toThrow(/positive integer/);
+    expect(() => new InMemoryReceiptStore({ maxReceipts: 1.5 })).toThrow(/positive integer/);
   });
 });

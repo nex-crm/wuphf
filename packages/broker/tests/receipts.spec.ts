@@ -15,6 +15,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import type { BrokerHandle } from "../src/index.ts";
 import { createBroker } from "../src/index.ts";
+import { InMemoryReceiptStore } from "../src/receipt-store.ts";
 
 const FIXED_TOKEN = asApiToken("test-token-with-enough-entropy-AAAAAAAAA");
 const RECEIPT_ID_A = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -384,6 +385,109 @@ describe("receipts API", () => {
         headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
       });
       expect(res.status).toBe(404);
+    });
+
+    it("truncates the list response at MAX_THREAD_LIST_RECEIPTS (1000)", async () => {
+      // Insert 1001 V2 receipts in the same thread via a direct store, then
+      // route the list through the broker. The truncation cap is enforced
+      // at the route layer (the store has no list-size cap), so we need to
+      // push past 1000 to observe the slice fire. 1001 in-memory inserts
+      // run in ~10ms; cheap enough for a deterministic assertion.
+      const store = new InMemoryReceiptStore({ maxReceipts: 2000 });
+      const template = minimalReceiptV2(RECEIPT_ID_A, THREAD_ID_A);
+      // Crockford base32 alphabet (ULID-compatible).
+      const ALPH = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+      const seen = new Set<string>();
+      for (let i = 0; i < 1001; i++) {
+        // 22-char prefix + 4-char index suffix = 26-char ULID.
+        let suffix = "";
+        for (let k = 3; k >= 0; k--) {
+          suffix += ALPH[(i >> (k * 5)) & 31];
+        }
+        const id = `01ARZ3NDEKTSV4RRFFQ69G${suffix}`;
+        seen.add(id);
+        await store.put({ ...template, id: asReceiptId(id) });
+      }
+      expect(seen.size).toBe(1001); // sanity: ULID generator produces unique ids
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+      expect(res.status).toBe(200);
+      const arr = JSON.parse(await res.text()) as unknown[];
+      expect(arr.length).toBe(1000);
+    });
+  });
+
+  describe("triangulation pass-1 follow-ups", () => {
+    it("returns 415 for application/jsonp (not a JSON-prefix collision)", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const res = await postReceipt(broker.url, "{}", {
+        contentType: "application/jsonp",
+      });
+      expect(res.status).toBe(415);
+    });
+
+    it("returns 415 for application/json-bogus", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const res = await postReceipt(broker.url, "{}", {
+        contentType: "application/json-bogus",
+      });
+      expect(res.status).toBe(415);
+    });
+
+    it("accepts application/json with charset parameter", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const receipt = minimalReceiptV1(RECEIPT_ID_A);
+      const res = await postReceipt(broker.url, receiptToJson(receipt), {
+        contentType: "application/json; charset=utf-8",
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it("emits Cache-Control: no-store and a byte-accurate Content-Length on 200 reads", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const receipt = minimalReceiptV1(RECEIPT_ID_A);
+      await postReceipt(broker.url, receiptToJson(receipt));
+      const res = await fetch(`${broker.url}/api/receipts/${RECEIPT_ID_A}`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
+      const body = await res.text();
+      expect(res.headers.get("content-length")).toBe(String(Buffer.byteLength(body, "utf8")));
+    });
+
+    it("returns 404 (not 405) for authenticated POST to an unknown /api/* path", async () => {
+      // Without the /api/* catchall, this fell through to the static-method
+      // gate and returned `405 Allow: GET, HEAD` — a false contract for
+      // generated clients since no GET resource exists either.
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const res = await fetch(`${broker.url}/api/no-such-route`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${FIXED_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 507 when the receipt store rejects with ReceiptStoreFullError", async () => {
+      // Wire a small-cap store at broker-construction time to exercise the
+      // capacity rejection without inserting 10k receipts.
+      broker = await createBroker({
+        port: 0,
+        token: FIXED_TOKEN,
+        receiptStore: new InMemoryReceiptStore({ maxReceipts: 1 }),
+      });
+      const first = await postReceipt(broker.url, receiptToJson(minimalReceiptV1(RECEIPT_ID_A)));
+      expect(first.status).toBe(201);
+      const second = await postReceipt(broker.url, receiptToJson(minimalReceiptV1(RECEIPT_ID_B)));
+      expect(second.status).toBe(507);
+      const body = (await second.json()) as { error: string };
+      expect(body.error).toBe("store_full");
     });
   });
 });

@@ -155,7 +155,7 @@ async function routeRequest(
   //   - `/api/...` → gated.
   //   - `/api-token` → NOT gated (different prefix shape entirely).
   if (pathname === "/api" || pathname.startsWith("/api/")) {
-    if (!authorize(req, res, deps.token)) return;
+    if (!authorize(req, res, deps.token, deps.logger, pathname)) return;
   }
 
   if (pathname === "/api-token") {
@@ -218,6 +218,17 @@ async function routeRequest(
       return;
     }
     await handleThreadReceiptsList(pathname, res, { receiptStore: deps.receiptStore });
+    return;
+  }
+  // Authenticated catch-all for unknown `/api/*` routes. Without this,
+  // `POST /api/no-such-route` (with a valid bearer) would fall into the
+  // static method gate below and return `405 Allow: GET, HEAD` — a false
+  // contract for generated Go/Rust clients, since no GET resource exists
+  // either. A 404 here also keeps the API/static surfaces semantically
+  // distinct after the method-gate refactor that pushed enforcement down
+  // to each route.
+  if (pathname === "/api" || pathname.startsWith("/api/")) {
+    notFound(res);
     return;
   }
   // Static surfaces are open (loopback-guarded but no bearer): serving the
@@ -317,13 +328,44 @@ function handleEvents(res: ServerResponse): void {
   startSseSession(res);
 }
 
-function authorize(req: IncomingMessage, res: ServerResponse, expected: ApiToken): boolean {
+function authorize(
+  req: IncomingMessage,
+  res: ServerResponse,
+  expected: ApiToken,
+  logger: BrokerLogger,
+  pathname: string,
+): boolean {
   const presented = extractBearerFromHeader(headerString(req.headers.authorization));
   if (!tokenMatches(presented, expected)) {
+    // Low-cardinality auth-reject so on-call can distinguish a stale
+    // bearer (after broker restart or rotation) from a never-reached
+    // route. `reason` carries the failure mode; we deliberately do NOT
+    // log the raw path or the presented token. `routeFamily` is the
+    // top-level /api segment only, so query strings, dynamic ids, and
+    // long attacker payloads can't expand the log surface.
+    logger.warn("api_auth_rejected", {
+      reason: presented === null ? "missing_bearer" : "invalid_bearer",
+      routeFamily: classifyApiRoute(pathname),
+    });
     unauthorized(res);
     return false;
   }
   return true;
+}
+
+// Bucket an `/api/...` pathname into a fixed enum of known route families.
+// Anything else (or shapes attackers could exploit to inflate logs) falls
+// into `unknown`. Keeping cardinality bounded makes the log surface
+// predictable for alerts.
+function classifyApiRoute(pathname: string): string {
+  if (pathname === "/api" || pathname === "/api/health") return "health";
+  if (pathname === "/api/events") return "events";
+  if (pathname === "/api/receipts") return "receipts";
+  if (pathname.startsWith("/api/receipts/")) return "receipt";
+  if (pathname.startsWith("/api/threads/") && pathname.endsWith("/receipts")) {
+    return "thread_receipts";
+  }
+  return "unknown";
 }
 
 async function listen(server: Server, port: number): Promise<number> {
