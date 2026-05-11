@@ -56,6 +56,14 @@ type channelMessage struct {
 	Timestamp        string            `json:"timestamp"`
 	Usage            *messageUsage     `json:"usage,omitempty"`
 	Reactions        []messageReaction `json:"reactions,omitempty"`
+	// SourceTaskID is the lifecycle-tracked task the sender was
+	// actively working on when this message was posted. Empty for
+	// free conversation, system messages, and human posts. Used by
+	// the agent-context builder to suppress pre-review chatter from
+	// agents who are NOT the task's owner or a reviewer — this is
+	// what prevents Agent B from working off Agent A's unreviewed
+	// in-stream commentary.
+	SourceTaskID string `json:"source_task_id,omitempty"`
 }
 
 type agentIssueRecord struct {

@@ -899,7 +899,7 @@ func TestBrokerResumeTaskUnblocksAndSchedulesOwnerLane(t *testing.T) {
 	if err != nil || reused {
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
-	if _, changed, err := b.BlockTask(task.ID, "operator", "Provider cooldown"); err != nil || !changed {
+	if _, changed, err := b.BlockTask(task.ID, "operator", "Provider cooldown", ""); err != nil || !changed {
 		t.Fatalf("block task: %v changed=%v", err, changed)
 	}
 
@@ -947,7 +947,7 @@ func TestBrokerResumeTaskStripsRateLimitMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure planned task: %v", err)
 	}
-	if _, changed, err := b.BlockTask(task.ID, "watchdog", "Provider cooldown"); err != nil || !changed {
+	if _, changed, err := b.BlockTask(task.ID, "watchdog", "Provider cooldown", ""); err != nil || !changed {
 		t.Fatalf("block task: %v changed=%v", err, changed)
 	}
 
@@ -992,7 +992,7 @@ func TestBrokerResumeTaskPreservesDetailsWithoutMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure planned task: %v", err)
 	}
-	if _, changed, err := b.BlockTask(task.ID, "operator", "Manual hold"); err != nil || !changed {
+	if _, changed, err := b.BlockTask(task.ID, "operator", "Manual hold", ""); err != nil || !changed {
 		t.Fatalf("block task: %v changed=%v", err, changed)
 	}
 	resumed, _, err := b.ResumeTask(task.ID, "operator", "Manual unblock")
@@ -1092,7 +1092,7 @@ func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 	if !task.blocked {
 		t.Fatalf("expected second task to start blocked behind active lane, got %+v", task)
 	}
-	if _, changed, err := b.BlockTask(task.ID, "operator", "provider cooldown"); err != nil || !changed {
+	if _, changed, err := b.BlockTask(task.ID, "operator", "provider cooldown", ""); err != nil || !changed {
 		t.Fatalf("block task: %v changed=%v", err, changed)
 	}
 
@@ -1844,7 +1844,7 @@ func TestBrokerHandlePostTaskResumeUnblocksAfterCapabilityRepair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure planned task: %v", err)
 	}
-	if _, changed, err := b.BlockTask(task.ID, "eng", "Unable to continue: missing Slack integration."); err != nil || !changed {
+	if _, changed, err := b.BlockTask(task.ID, "eng", "Unable to continue: missing Slack integration.", ""); err != nil || !changed {
 		t.Fatalf("block task: changed=%v err=%v", changed, err)
 	}
 
@@ -1909,7 +1909,7 @@ func TestBrokerBlockTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *testing.
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	got, changed, err := b.BlockTask(task.ID, "eng", "Need writable workspace because the filesystem sandbox is read-only.")
+	got, changed, err := b.BlockTask(task.ID, "eng", "Need writable workspace because the filesystem sandbox is read-only.", "")
 	if err == nil {
 		t.Fatal("expected false read-only block to be rejected")
 	}
@@ -2144,7 +2144,7 @@ func TestBrokerBlockTaskAllowsReadOnlyBlockWhenWriteProbeFails(t *testing.T) {
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	got, changed, err := b.BlockTask(task.ID, "eng", "Need writable workspace because the filesystem sandbox is read-only.")
+	got, changed, err := b.BlockTask(task.ID, "eng", "Need writable workspace because the filesystem sandbox is read-only.", "")
 	if err != nil {
 		t.Fatalf("expected real write failure blocker to pass through, got %v", err)
 	}

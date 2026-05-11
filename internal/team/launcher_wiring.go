@@ -150,6 +150,12 @@ func newNotifyCtx(l *Launcher) *notificationContextBuilder {
 		},
 		scoreTaskCandidate:   l.scoreMessageForTaskCandidate,
 		activeHeadlessAgents: l.activeHeadlessSlugs,
+		taskByID: func(id string) *teamTask {
+			if l.broker == nil {
+				return nil
+			}
+			return l.broker.TaskByID(id)
+		},
 	}
 }
 

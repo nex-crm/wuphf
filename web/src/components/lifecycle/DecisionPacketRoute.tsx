@@ -100,9 +100,13 @@ export function DecisionPacketRoute({
     forceState === "streaming" ||
     packet.lifecycleState === "running" ||
     packet.lifecycleState === "review";
+  // Defensive against the Go-side encoding empty slices as `null`
+  // instead of `[]`. The TS type declares `banners: PacketBanner[]` so
+  // tsc is happy, but the wire shape can omit it entirely for packets
+  // with no banners.
   const hasPersistenceError =
     forceState === "persistence_error" ||
-    packet.banners.some((b) => b.kind === "persistence_error");
+    (packet.banners ?? []).some((b) => b.kind === "persistence_error");
   const effectivePacket: DecisionPacket =
     forceState === "missing_packet"
       ? { ...packet, regeneratedFromMemory: true }

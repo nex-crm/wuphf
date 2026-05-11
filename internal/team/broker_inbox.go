@@ -43,11 +43,11 @@ import (
 type InboxFilter string
 
 const (
-	InboxFilterNeedsDecision InboxFilter = "needs_decision"
-	InboxFilterRunning       InboxFilter = "running"
-	InboxFilterBlocked       InboxFilter = "blocked"
-	InboxFilterMergedToday   InboxFilter = "merged_today"
-	InboxFilterAll           InboxFilter = "all"
+	InboxFilterDecisionRequired InboxFilter = "decision_required"
+	InboxFilterRunning          InboxFilter = "running"
+	InboxFilterBlocked          InboxFilter = "blocked"
+	InboxFilterMerged           InboxFilter = "merged"
+	InboxFilterAll              InboxFilter = "all"
 )
 
 // ErrInboxFilterUnknown is returned by Inbox when the caller passes a
@@ -106,10 +106,10 @@ type InboxRow struct {
 // the merged bucket is bounded by recent activity and the total broker
 // task count is small enough that this stays under the <100ms ceiling.
 type InboxCounts struct {
-	NeedsDecision int `json:"needsDecision"`
-	Running       int `json:"running"`
-	Blocked       int `json:"blocked"`
-	MergedToday   int `json:"mergedToday"`
+	DecisionRequired int `json:"decisionRequired"`
+	Running          int `json:"running"`
+	Blocked          int `json:"blocked"`
+	MergedToday      int `json:"mergedToday"`
 }
 
 // InboxPayload is the full response to GET /tasks/inbox.
@@ -126,13 +126,13 @@ type InboxPayload struct {
 // canonical state.
 func inboxFilterToStates(filter InboxFilter) ([]LifecycleState, error) {
 	switch filter {
-	case InboxFilterNeedsDecision:
+	case InboxFilterDecisionRequired:
 		return []LifecycleState{LifecycleStateDecision}, nil
 	case InboxFilterRunning:
 		return []LifecycleState{LifecycleStateRunning}, nil
 	case InboxFilterBlocked:
 		return []LifecycleState{LifecycleStateBlockedOnPRMerge}, nil
-	case InboxFilterMergedToday:
+	case InboxFilterMerged:
 		return []LifecycleState{LifecycleStateMerged}, nil
 	case InboxFilterAll:
 		return CanonicalLifecycleStates(), nil
@@ -232,7 +232,7 @@ func (b *Broker) inboxLocked(states []LifecycleState, include func(taskID string
 					// MergedToday post-filter: skip rows older than
 					// today's UTC midnight. The All filter also walks
 					// the merged bucket, but for All the row stays in;
-					// only InboxFilterMergedToday narrows by date.
+					// only InboxFilterMerged narrows by date.
 					if len(states) == 1 {
 						continue
 					}
@@ -264,9 +264,9 @@ func (b *Broker) estimateBucketSizesLocked(states []LifecycleState) int {
 // not segmented by day. v1 accepts this — see InboxCounts doc above.
 func (b *Broker) inboxCountsLocked(cutoff time.Time) InboxCounts {
 	counts := InboxCounts{
-		NeedsDecision: len(b.lifecycleIndex[LifecycleStateDecision]),
-		Running:       len(b.lifecycleIndex[LifecycleStateRunning]),
-		Blocked:       len(b.lifecycleIndex[LifecycleStateBlockedOnPRMerge]),
+		DecisionRequired: len(b.lifecycleIndex[LifecycleStateDecision]),
+		Running:          len(b.lifecycleIndex[LifecycleStateRunning]),
+		Blocked:          len(b.lifecycleIndex[LifecycleStateBlockedOnPRMerge]),
 	}
 	for _, taskID := range b.lifecycleIndex[LifecycleStateMerged] {
 		task := b.findTaskByIDLocked(taskID)

@@ -1543,7 +1543,7 @@ func TestRecordPolicyPersistsAndLoads(t *testing.T) {
 
 func TestBuildNotificationContextEmpty(t *testing.T) {
 	l := &Launcher{}
-	ctx := l.buildNotificationContext("general", "msg-1", "", 5)
+	ctx := l.buildNotificationContext("", "general", "msg-1", "", 5)
 	if ctx != "" {
 		t.Fatalf("expected empty context for nil broker, got %q", ctx)
 	}
@@ -1567,7 +1567,7 @@ func TestBuildNotificationContextFormatsMessages(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b}
-	ctx := l.buildNotificationContext("general", "", "", 5)
+	ctx := l.buildNotificationContext("", "general", "", "", 5)
 
 	if !strings.Contains(ctx, "@you") {
 		t.Error("expected @you in context")
@@ -1599,7 +1599,7 @@ func TestBuildNotificationContextFiltersSystem(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b}
-	ctx := l.buildNotificationContext("general", "", "", 5)
+	ctx := l.buildNotificationContext("", "general", "", "", 5)
 
 	if !strings.Contains(ctx, "@you") {
 		t.Error("expected @you in context")
@@ -1626,7 +1626,7 @@ func TestBuildNotificationContextRespectsLimit(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b}
-	ctx := l.buildNotificationContext("general", "", "", 3)
+	ctx := l.buildNotificationContext("", "general", "", "", 3)
 
 	count := strings.Count(ctx, "@you")
 	if count > 3 {
@@ -1651,7 +1651,7 @@ func TestBuildNotificationContextExcludesTrigger(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b}
-	ctx := l.buildNotificationContext("general", trigger.ID, "", 5)
+	ctx := l.buildNotificationContext("", "general", trigger.ID, "", 5)
 
 	if strings.Contains(ctx, "The trigger message") {
 		t.Error("trigger message should be excluded from context (it is sent separately as [New from @...])")
@@ -1812,7 +1812,7 @@ func TestBuildNotificationContextThreadFiltering(t *testing.T) {
 	l := &Launcher{broker: b}
 
 	// Context filtered to thread A should include root + reply, not thread B.
-	ctx := l.buildNotificationContext("general", "", threadA.ID, 10)
+	ctx := l.buildNotificationContext("", "general", "", threadA.ID, 10)
 
 	if !strings.Contains(ctx, "[Recent thread]") {
 		t.Errorf("expected [Recent thread] label for thread-filtered context, got %q", ctx)
@@ -1866,7 +1866,7 @@ func TestBuildNotificationContextIncludesDeepThreadMessages(t *testing.T) {
 
 	l := &Launcher{broker: b}
 	// Marketing agent receives z as trigger; thread root is x.
-	ctx := l.buildNotificationContext("general", z.ID, x.ID, 4)
+	ctx := l.buildNotificationContext("", "general", z.ID, x.ID, 4)
 
 	if !strings.Contains(ctx, "[Recent thread]") {
 		t.Errorf("expected [Recent thread] label, got %q", ctx)
@@ -2035,7 +2035,7 @@ func TestBuildNotificationContextFallsBackToChannelWhenThreadEmpty(t *testing.T)
 
 	l := &Launcher{broker: b}
 	// triggerMsgID = trigger.ID (excluded), threadRootID = trigger.ID (new root, no replies)
-	ctx := l.buildNotificationContext("general", trigger.ID, trigger.ID, 5)
+	ctx := l.buildNotificationContext("", "general", trigger.ID, trigger.ID, 5)
 
 	if !strings.Contains(ctx, "[Recent channel]") {
 		t.Errorf("expected [Recent channel] fallback label when thread has no prior messages, got %q", ctx)
@@ -2476,7 +2476,7 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 	if err != nil || reused {
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
-	if _, changed, err := b.BlockTask(task.ID, "ceo", "Provider cooldown"); err != nil || !changed {
+	if _, changed, err := b.BlockTask(task.ID, "ceo", "Provider cooldown", ""); err != nil || !changed {
 		t.Fatalf("block task: %v changed=%v", err, changed)
 	}
 

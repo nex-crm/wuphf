@@ -52,7 +52,7 @@ func (b *Broker) handleTasksInbox(w http.ResponseWriter, r *http.Request) {
 	}
 	rawFilter := strings.TrimSpace(r.URL.Query().Get("filter"))
 	if rawFilter == "" {
-		rawFilter = string(InboxFilterNeedsDecision)
+		rawFilter = string(InboxFilterDecisionRequired)
 	}
 	payload, err := b.inboxForActor(InboxFilter(rawFilter), actor.Kind == requestActorKindBroker, actor.Slug)
 	if err != nil {
@@ -201,7 +201,7 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 	if actorSlug == "" {
 		actorSlug = "human"
 	}
-	task, ok, err := b.BlockTask(id, actorSlug, reason)
+	task, ok, err := b.BlockTask(id, actorSlug, reason, strings.TrimSpace(body.On))
 	if err != nil {
 		log.Printf("broker: block task %q: %v", id, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})

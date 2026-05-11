@@ -346,7 +346,7 @@ func (l *Launcher) recoverTimedOutHeadlessTurn(slug string, turn headlessCodexTu
 		return
 	}
 	reason := fmt.Sprintf("Automatic timeout recovery: @%s timed out after %s before posting a substantive update. Requeue, retry, or reassign from here.", slug, timeout)
-	if _, changed, err := l.broker.BlockTask(task.ID, slug, reason); err != nil {
+	if _, changed, err := l.broker.BlockTask(task.ID, slug, reason, ""); err != nil {
 		appendHeadlessCodexLog(slug, fmt.Sprintf("timeout-recovery-error: could not block %s: %v", task.ID, err))
 		return
 	} else if changed {
@@ -393,7 +393,7 @@ func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn
 		trimmed = "unknown headless codex failure"
 	}
 	reason := fmt.Sprintf("Automatic error recovery: @%s failed before a durable task handoff. Last error: %s. Requeue, retry, or reassign from here.", slug, truncate(trimmed, 220))
-	if _, changed, err := l.broker.BlockTask(task.ID, slug, reason); err != nil {
+	if _, changed, err := l.broker.BlockTask(task.ID, slug, reason, ""); err != nil {
 		appendHeadlessCodexLog(slug, fmt.Sprintf("error-recovery-error: could not block %s: %v", task.ID, err))
 		return
 	} else if changed {

@@ -118,6 +118,8 @@ export function DecisionInbox({
   );
 
   // Keyboard navigation on the row list.
+  // Enter/Space are NOT handled here — the row <button> fires onClick natively,
+  // adding another handler would double-invoke onOpen on every Enter press.
   const handleListKey = useCallback(
     (e: KeyboardEvent<HTMLUListElement>) => {
       if (filteredRows.length === 0) return;
@@ -132,12 +134,9 @@ export function DecisionInbox({
         const next = idx <= 0 ? 0 : idx - 1;
         setSelectedTaskId(filteredRows[next].taskId);
         focusRow(filteredRows[next].taskId);
-      } else if (e.key === "Enter" && idx >= 0) {
-        e.preventDefault();
-        handleOpen(filteredRows[idx].taskId);
       }
     },
-    [filteredRows, selectedTaskId, handleOpen],
+    [filteredRows, selectedTaskId],
   );
 
   // Global keys: `/` focuses the filter tabs, Esc returns to dashboard.
@@ -299,12 +298,8 @@ function hasBackHistory(): boolean {
 }
 
 function focusRow(taskId: string) {
-  const escaped =
-    typeof CSS !== "undefined" && typeof CSS.escape === "function"
-      ? CSS.escape(taskId)
-      : taskId.replace(/["\\\]]/g, "\\$&");
   const el = document.querySelector<HTMLButtonElement>(
-    `.inbox-row[data-task-id="${escaped}"]`,
+    `.inbox-row[data-task-id="${CSS.escape(taskId)}"]`,
   );
   el?.focus();
 }
@@ -380,15 +375,41 @@ function Filters({
   counts: InboxPayload["counts"];
   filterRef: React.RefObject<HTMLButtonElement | null>;
 }) {
+  function handleTabKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    const idx = INBOX_FILTERS.findIndex((f) => f.id === filter);
+    let nextIdx: number | null = null;
+    // ARIA Tabs pattern: only Left/Right navigate within a tablist.
+    // ArrowDown/Up must remain free so keyboard users can move from the
+    // filter bar into the row list below without getting trapped.
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      nextIdx = (idx + 1) % INBOX_FILTERS.length;
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      nextIdx = (idx - 1 + INBOX_FILTERS.length) % INBOX_FILTERS.length;
+    }
+    if (nextIdx !== null) {
+      setFilter(INBOX_FILTERS[nextIdx].id);
+      const buttons = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+      buttons[nextIdx]?.focus();
+    }
+  }
+
   return (
-    <div className="inbox-filters" role="tablist" aria-label="Filter tasks">
-      {INBOX_FILTERS.map((f, idx) => (
+    <div
+      className="inbox-filters"
+      role="tablist"
+      aria-label="Filter tasks"
+      onKeyDown={handleTabKey}
+    >
+      {INBOX_FILTERS.map((f) => (
         <button
           key={f.id}
-          ref={idx === 0 ? filterRef : null}
+          ref={f.id === filter ? filterRef : null}
           type="button"
           role="tab"
           aria-selected={filter === f.id}
+          tabIndex={f.id === filter ? 0 : -1}
           className={`inbox-filter${filter === f.id ? " active" : ""}`}
           onClick={() => setFilter(f.id)}
         >
@@ -413,6 +434,14 @@ function RowList({
   onSelect: (id: string) => void;
   handleListKey: (e: KeyboardEvent<HTMLUListElement>) => void;
 }) {
+  // Roving tabindex: only the selected row (or first row when nothing is
+  // selected) stays in the tab order. Tab enters/exits the list as a single
+  // stop; arrow keys navigate within it.
+  const focusableId =
+    selectedTaskId && rows.some((r) => r.taskId === selectedTaskId)
+      ? selectedTaskId
+      : (rows[0]?.taskId ?? null);
+
   return (
     <ul
       className="inbox-list"
@@ -425,6 +454,7 @@ function RowList({
           <InboxRow
             row={row}
             isSelected={row.taskId === selectedTaskId}
+            tabIndex={row.taskId === focusableId ? 0 : -1}
             onOpen={onOpen}
             onSelect={onSelect}
           />

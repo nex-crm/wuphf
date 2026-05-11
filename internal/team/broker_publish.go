@@ -20,6 +20,19 @@ import "strings"
 
 func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
 	msg = sanitizeChannelMessageSecrets(msg)
+	// Tag the message with the sender's current in-flight task so
+	// the agent-context builder can suppress pre-review chatter from
+	// downstream consumers. Already-stamped messages (system posts
+	// from broadcastDecisionLocked, persistence banners, etc.) keep
+	// their explicit value. Human and system senders are never
+	// auto-stamped because they don't have an owner-lane task.
+	if strings.TrimSpace(msg.SourceTaskID) == "" &&
+		!isHumanMessageSender(msg.From) &&
+		msg.From != "system" {
+		if taskID := b.activeOwnerTaskIDLocked(msg.From); taskID != "" {
+			msg.SourceTaskID = taskID
+		}
+	}
 	b.messages = append(b.messages, msg)
 	b.publishMessageLocked(msg)
 	// First-run nudge dismissal: track the very first human-authored message
@@ -33,6 +46,53 @@ func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
 		b.humanHasPosted = true
 	}
 	return msg
+}
+
+// activeOwnerTaskIDLocked returns the task ID for the most recently-
+// updated task owned by `slug` that's in a pre-merge lifecycle state
+// (running, review, decision, blocked_on_pr_merge, changes_requested).
+// Returns the empty string when the agent has no in-flight task. Used
+// by appendMessageLocked to stamp source-task-ID on agent messages.
+//
+// Caller must hold b.mu.
+func (b *Broker) activeOwnerTaskIDLocked(slug string) string {
+	slug = normalizeActorSlug(slug)
+	if b == nil || slug == "" {
+		return ""
+	}
+	var best *teamTask
+	for i := range b.tasks {
+		t := &b.tasks[i]
+		if !strings.EqualFold(strings.TrimSpace(t.Owner), slug) {
+			continue
+		}
+		if !lifecycleStateIsPreMerge(t.LifecycleState) {
+			continue
+		}
+		if best == nil || t.UpdatedAt > best.UpdatedAt {
+			best = t
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.ID
+}
+
+// lifecycleStateIsPreMerge returns true when the state describes work
+// that hasn't been canonically resolved yet. Messages posted under a
+// pre-merge state are still subject to review and should be hidden from
+// downstream agents that aren't authoritatively involved.
+func lifecycleStateIsPreMerge(s LifecycleState) bool {
+	switch s {
+	case LifecycleStateRunning,
+		LifecycleStateReview,
+		LifecycleStateDecision,
+		LifecycleStateBlockedOnPRMerge,
+		LifecycleStateChangesRequested:
+		return true
+	}
+	return false
 }
 
 func (b *Broker) publishMessageLocked(msg channelMessage) {

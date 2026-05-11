@@ -5,6 +5,7 @@ import { SeveritySummaryChip } from "./SeveritySummaryChip";
 interface InboxRowProps {
   row: InboxRowType;
   isSelected: boolean;
+  tabIndex?: number;
   onOpen: (taskId: string) => void;
   onSelect: (taskId: string) => void;
 }
@@ -18,13 +19,14 @@ interface InboxRowProps {
  * `<button>` element so Enter/Space natively trigger onClick, no extra
  * keydown handler needed.
  */
-export function InboxRow({ row, isSelected, onOpen, onSelect }: InboxRowProps) {
+export function InboxRow({ row, isSelected, tabIndex = 0, onOpen, onSelect }: InboxRowProps) {
   return (
     <button
       type="button"
       className="inbox-row"
       data-selected={isSelected ? "true" : "false"}
       data-task-id={row.taskId}
+      tabIndex={tabIndex}
       onClick={() => onOpen(row.taskId)}
       onFocus={() => onSelect(row.taskId)}
       aria-label={`Open task ${row.taskId}: ${row.title}`}

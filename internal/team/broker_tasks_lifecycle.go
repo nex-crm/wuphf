@@ -10,7 +10,15 @@ import (
 	"time"
 )
 
-func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error) {
+// BlockTask transitions taskID to LifecycleStateBlockedOnPRMerge and
+// records `blockerID` in task.BlockedOn so the unblock cascade fires
+// automatically when the blocker merges.
+//
+// Pass blockerID="" to block without a typed blocker (legacy callers
+// that just want to pause a task without naming the dependency).
+// Multiple BlockedOn entries are supported; this call appends without
+// duplicating an existing entry.
+func (b *Broker) BlockTask(taskID, actor, reason, blockerID string) (teamTask, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -23,6 +31,7 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		actor = "system"
 	}
 	reason = strings.TrimSpace(reason)
+	blockerID = strings.TrimSpace(blockerID)
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	for i := range b.tasks {
@@ -44,6 +53,22 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 				task.Details = reason
 			case !strings.Contains(existing, reason):
 				task.Details = existing + "\n\n" + reason
+			}
+		}
+		// Record the blocker ID before the lifecycle transition so the
+		// indexed inbox query sees a consistent (state, BlockedOn) tuple
+		// the first time it reads. dedup against an existing entry so
+		// re-blocking on the same task doesn't grow the list.
+		if blockerID != "" && blockerID != task.ID {
+			already := false
+			for _, b := range task.BlockedOn {
+				if b == blockerID {
+					already = true
+					break
+				}
+			}
+			if !already {
+				task.BlockedOn = append(task.BlockedOn, blockerID)
 			}
 		}
 		// Route the legacy block path through the lifecycle transition
@@ -378,7 +403,12 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 	var pending []pendingTaskTransition
 	for i := range b.tasks {
 		task := &b.tasks[i]
-		if !task.blocked {
+		// A task is "currently blocked" if the legacy `blocked` boolean
+		// is set OR the typed LifecycleState reports the block.  Both
+		// are accepted so harness tasks (which set LifecycleState before
+		// the legacy fields settle) and pre-Lane-A tasks (which only
+		// have the legacy flag) cascade the same way.
+		if !task.blocked && task.LifecycleState != LifecycleStateBlockedOnPRMerge {
 			continue
 		}
 		// Sweep both legacy DependsOn and the new typed BlockedOn list so

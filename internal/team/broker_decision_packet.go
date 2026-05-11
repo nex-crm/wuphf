@@ -777,6 +777,7 @@ func (b *Broker) RecordTaskDecision(taskID, rawAction string) error {
 	})
 	if action == RecordDecisionMerge {
 		b.writeWikiPromotionLocked(taskID, *packet)
+		b.broadcastDecisionLocked(taskID, *packet)
 	}
 	b.mu.Unlock()
 	// OnDecisionRecorded acquires b.mu itself; call it after Unlock
@@ -955,6 +956,55 @@ func (b *Broker) writeWikiPromotionLocked(taskID string, packet DecisionPacket) 
 			log.Printf("broker: wiki promotion for task %q failed: %v", taskID, err)
 		}
 	}()
+}
+
+// broadcastDecisionLocked posts a system message to the task's
+// originating channel announcing the merged decision. This closes the
+// "merging means posting output to everyone in channel and wiki" leg
+// of the multi-agent control loop — wiki promotion is the canonical
+// record, this announce is the discovery hook so other agents
+// subscribed to the channel know to read the wiki.
+//
+// Caller holds b.mu.
+func (b *Broker) broadcastDecisionLocked(taskID string, packet DecisionPacket) {
+	if b == nil {
+		return
+	}
+	task := b.findTaskByIDLocked(taskID)
+	channel := ""
+	if task != nil {
+		channel = normalizeChannelSlug(task.Channel)
+	}
+	if channel == "" {
+		channel = "general"
+	}
+	headline := strings.TrimSpace(packet.Spec.Problem)
+	if headline == "" && task != nil {
+		headline = strings.TrimSpace(task.Title)
+	}
+	if headline == "" {
+		headline = "decision recorded"
+	}
+	relPath := wikiPromotionPath(taskID)
+	wikiNote := ""
+	if relPath != "" {
+		wikiNote = fmt.Sprintf("\nCanonical output: `wiki/%s`", relPath)
+	}
+	content := fmt.Sprintf(
+		"🔔 %s merged: %s. Other agents — read the wiki entry, not pre-merge channel messages.%s",
+		taskID, headline, wikiNote,
+	)
+	b.counter++
+	msg := channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "system",
+		Channel:   channel,
+		Kind:      "decision_merged",
+		Title:     fmt.Sprintf("%s merged", taskID),
+		Content:   content,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	b.appendMessageLocked(msg)
 }
 
 // wikiPromotionContext returns the broker's lifecycle context if

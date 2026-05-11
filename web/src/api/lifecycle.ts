@@ -22,7 +22,7 @@ export type DecisionAction =
   | "request_changes"
   | "defer";
 
-const USE_MOCKS = true;
+const USE_MOCKS = false;
 
 /**
  * Fetch the indexed-lookup payload for the Decision Inbox. Returns
@@ -50,7 +50,42 @@ export async function getDecisionPacket(
   if (USE_MOCKS) {
     return getDecisionPacketMock(taskId);
   }
-  return get<DecisionPacket>(`/tasks/${encodeURIComponent(taskId)}`);
+  const raw = await get<DecisionPacket>(
+    `/tasks/${encodeURIComponent(taskId)}`,
+  );
+  return normalizeDecisionPacket(raw);
+}
+
+/**
+ * Defensive normalization: the Go broker serializes empty Go slices as
+ * `null`, not `[]`. TS components iterate these as if they were always
+ * arrays. Normalize at the API boundary so every component below this
+ * sees the contract their types promise.
+ */
+function normalizeDecisionPacket(p: DecisionPacket): DecisionPacket {
+  return {
+    ...p,
+    banners: p.banners ?? [],
+    changedFiles: p.changedFiles ?? [],
+    reviewerGrades: p.reviewerGrades ?? [],
+    reviewers: p.reviewers ?? [],
+    subIssues: p.subIssues ?? [],
+    spec: {
+      ...p.spec,
+      acceptanceCriteria: p.spec?.acceptanceCriteria ?? [],
+      constraints: p.spec?.constraints ?? [],
+      feedback: p.spec?.feedback ?? [],
+    },
+    sessionReport: {
+      ...p.sessionReport,
+      topWins: p.sessionReport?.topWins ?? [],
+      deadEnds: p.sessionReport?.deadEnds ?? [],
+    },
+    dependencies: {
+      ...p.dependencies,
+      blockedOn: p.dependencies?.blockedOn ?? [],
+    },
+  };
 }
 
 /**
