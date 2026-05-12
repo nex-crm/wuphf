@@ -38,15 +38,33 @@ export interface ProviderRequest {
   readonly model: string;
   readonly prompt: string;
   readonly maxOutputTokens: number;
+  /**
+   * Context-scoped idempotency key the gateway derives from
+   * `hashRequest(ctx, req)`. Adapters that implement provider-side
+   * idempotency (Anthropic, OpenAI) forward this as the
+   * `Idempotency-Key` HTTP header so two different agents sending the
+   * same prompt do NOT share a server-side dedup window. Adapters that
+   * don't (stub, ollama) ignore it. Optional so adapters and tests
+   * outside the gateway path can still construct a request.
+   * See triangulation #3 finding B3-2.
+   */
+  readonly requestKey?: string;
 }
 
 /**
  * What providers return. `usage` populates the cost_event's `units`
  * field directly so cache accounting (Anthropic-style) survives intact.
+ *
+ * `finishReason` and `refusal` are optional adapter signals so callers
+ * can distinguish a real completion from a truncation / content-filter
+ * / refusal — see triangulation #3 finding B3-3. Adapters that don't
+ * surface these (stub, ollama) leave them undefined.
  */
 export interface ProviderResponse {
   readonly text: string;
   readonly usage: CostUnits;
+  readonly finishReason?: string;
+  readonly refusal?: string;
 }
 
 export interface CostEstimator {
@@ -87,6 +105,19 @@ export interface GatewayCompletionResult {
   readonly costEventLsn: EventLsn;
   /** True iff this response was served from the 60s dedupe cache. */
   readonly dedupeReplay: boolean;
+  /**
+   * Provider's finish-reason marker (e.g. OpenAI `stop|length|content_filter|tool_calls`
+   * or Anthropic `end_turn|max_tokens|stop_sequence|refusal`). Undefined
+   * when the adapter doesn't surface it.
+   */
+  readonly finishReason?: string;
+  /**
+   * Refusal text when the model declined to answer (OpenAI message.refusal,
+   * Anthropic stop_reason === "refusal"). Distinct from `text` so callers
+   * can implement policy gates instead of mistaking refusal for normal
+   * output. See triangulation #3 finding B3-3.
+   */
+  readonly refusal?: string;
 }
 
 export interface Gateway {

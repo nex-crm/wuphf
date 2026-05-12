@@ -80,9 +80,11 @@ interface SdkErrorLike {
  * Minimal slice of the Anthropic SDK surface we depend on. Tests inject
  * a fake; the real `Anthropic` client matches.
  *
- * The signature mirrors `client.messages.create(params, options)`. We
- * only use `options.idempotencyKey` — the SDK accepts arbitrary
- * RequestOptions but we don't depend on the rest.
+ * We pass `headers` directly (NOT `options.idempotencyKey`) — the SDK
+ * only forwards the shorthand when its internal `idempotencyHeader`
+ * is configured, which the default client leaves undefined. Same bug
+ * the OpenAI adapter had; same fix. See triangulation #3 finding B3-1
+ * (5-lens BLOCK/HIGH).
  */
 export interface AnthropicMessageCreateParams {
   readonly model: string;
@@ -94,13 +96,7 @@ export interface AnthropicMessageCreateParams {
 }
 
 export interface AnthropicRequestOptions {
-  /**
-   * Stable string the SDK forwards as the `idempotency-key` header.
-   * Anthropic's server deduplicates same-key requests within a window,
-   * which prevents double-charges after lost responses and during SDK
-   * internal retries.
-   */
-  readonly idempotencyKey?: string;
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface AnthropicMessageUsage {
@@ -113,6 +109,15 @@ export interface AnthropicMessageUsage {
 export interface AnthropicMessage {
   readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
   readonly usage: AnthropicMessageUsage;
+  /**
+   * Why the model stopped. `end_turn` is a normal completion;
+   * `max_tokens` is truncation; `stop_sequence` matched a configured
+   * stop; `tool_use` paused for a tool call; `refusal` is a policy
+   * decline; `pause_turn` is a long-running pause to be resumed.
+   * Surfaced through `ProviderResponse.finishReason`. See triangulation
+   * #3 finding B3-3 (parallel to the OpenAI refusal/finish-reason fix).
+   */
+  readonly stop_reason?: string | null;
 }
 
 export interface AnthropicClient {
@@ -173,8 +178,13 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
         max_tokens: req.maxOutputTokens,
         messages: [{ role: "user", content: req.prompt }],
       };
+      // B3-1: explicit Idempotency-Key header. The SDK's
+      // `options.idempotencyKey` shorthand is a no-op unless the
+      // client's internal `idempotencyHeader` is configured.
+      // B3-2: derive from req.requestKey (gateway-computed,
+      // includes ctx).
       const options: AnthropicRequestOptions = {
-        idempotencyKey: deriveIdempotencyKey(req),
+        headers: { "Idempotency-Key": deriveIdempotencyKey(req) },
       };
       let raw: AnthropicMessage;
       try {
@@ -182,9 +192,20 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
       } catch (err) {
         throw classifySdkError(err);
       }
+      // B3-3: surface stop_reason as finishReason and treat
+      // `stop_reason === "refusal"` as a refusal so callers can
+      // implement policy gates without parsing prose. The text-block
+      // content for a refusal is the prose; we route it into `refusal`
+      // and leave `text` empty so a caller that ignores `refusal`
+      // doesn't accidentally treat the prose as a normal completion.
+      const finishReason = raw.stop_reason ?? null;
+      const isRefusal = finishReason === "refusal";
+      const extractedText = extractText(raw.content);
       return {
-        text: extractText(raw.content),
+        text: isRefusal ? "" : extractedText,
         usage: usageToCostUnits(raw.usage),
+        ...(finishReason !== null ? { finishReason } : {}),
+        ...(isRefusal ? { refusal: extractedText } : {}),
       };
     },
   };
@@ -202,13 +223,18 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
  * if support needs to trace one.
  */
 function deriveIdempotencyKey(req: ProviderRequest): string {
+  // Prefer the gateway-computed `requestKey` (context-scoped) so two
+  // agents with the same prompt don't share a server-side dedup
+  // window. Fall back to content-only when constructed outside the
+  // gateway path. See triangulation #3 finding B3-2.
+  if (typeof req.requestKey === "string" && req.requestKey.length > 0) {
+    return `wuphf-${req.requestKey}`;
+  }
   const projection = canonicalJSON({
     model: req.model,
     prompt: req.prompt,
     maxOutputTokens: req.maxOutputTokens,
   });
-  // Idempotency keys are documented as ≤ 256 chars; SHA-256 hex is 64,
-  // well inside the budget, and deterministic across processes.
   return `wuphf-${sha256Hex(projection)}`;
 }
 
@@ -259,13 +285,21 @@ function extractSdkErrorMetadata(err: unknown): ExtractedSdkMetadata {
     }
   }
   if (typeof e.headers === "object" && e.headers !== null) {
-    // SDK's `headers` is a Headers-like; try both .get() (Headers
-    // instance) and indexer (plain object).
-    const retryAfter = readHeader(e.headers, "retry-after");
-    if (retryAfter !== undefined) {
-      const seconds = Number(retryAfter);
-      if (Number.isFinite(seconds) && seconds >= 0) {
-        out.retryAfterMs = Math.round(seconds * 1000);
+    // B3-7: prefer `retry-after-ms` (millisecond precision) over
+    // `retry-after` (seconds). SDK's `headers` is a Headers-like.
+    const retryAfterMs = readHeader(e.headers, "retry-after-ms");
+    if (retryAfterMs !== undefined) {
+      const ms = Number(retryAfterMs);
+      if (Number.isFinite(ms) && ms >= 0) {
+        out.retryAfterMs = Math.round(ms);
+      }
+    } else {
+      const retryAfter = readHeader(e.headers, "retry-after");
+      if (retryAfter !== undefined) {
+        const seconds = Number(retryAfter);
+        if (Number.isFinite(seconds) && seconds >= 0) {
+          out.retryAfterMs = Math.round(seconds * 1000);
+        }
       }
     }
   }

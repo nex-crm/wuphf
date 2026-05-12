@@ -21,7 +21,7 @@ import type { CostLedger } from "@wuphf/broker";
 import type { CostEventAuditPayload, CostUnits, MicroUsd, ProviderKind } from "@wuphf/protocol";
 
 import { Caps, type CapsConfig, DEFAULT_CAPS_CONFIG } from "./caps.ts";
-import { DEFAULT_DEDUPE_CONFIG, DedupeCache, type DedupeConfig } from "./dedupe.ts";
+import { DEFAULT_DEDUPE_CONFIG, DedupeCache, type DedupeConfig, hashRequest } from "./dedupe.ts";
 import { BadRequestError, ProviderError, UnknownModelError } from "./errors.ts";
 import type {
   Gateway,
@@ -72,9 +72,18 @@ export function createGateway(deps: GatewayDeps): Gateway {
       throw new UnknownModelError(req.model);
     }
 
+    // Compute the context-scoped request key once and pass it to the
+    // provider. Adapters that implement provider-side idempotency
+    // (Anthropic, OpenAI) forward this as the Idempotency-Key header
+    // so two different agents sending the same prompt do not share a
+    // server-side dedup window. Adapters that don't (stub, ollama)
+    // ignore it. The hash matches the local dedupe key for symmetry.
+    // See triangulation #3 finding B3-2.
+    const reqWithKey: ProviderRequest = { ...req, requestKey: hashRequest(ctx, req) };
+
     let providerResponse: ProviderResponse;
     try {
-      providerResponse = await provider.complete(req);
+      providerResponse = await provider.complete(reqWithKey);
     } catch (err) {
       // Caller-input errors (400/413/422) do NOT count as breaker
       // strikes — bad input from one caller shouldn't open the breaker
@@ -128,6 +137,10 @@ export function createGateway(deps: GatewayDeps): Gateway {
       costMicroUsd,
       costEventLsn: appended.lsn,
       dedupeReplay: false,
+      ...(providerResponse.finishReason !== undefined
+        ? { finishReason: providerResponse.finishReason }
+        : {}),
+      ...(providerResponse.refusal !== undefined ? { refusal: providerResponse.refusal } : {}),
     };
     dedupe.store(ctx, req, result);
     return result;

@@ -23,8 +23,10 @@ function fakeClient(stub: (params: AnthropicMessageCreateParams) => AnthropicMes
   readonly create: ReturnType<typeof vi.fn>;
 } {
   const create = vi.fn(
-    async (params: AnthropicMessageCreateParams, _options?: { readonly idempotencyKey?: string }) =>
-      Promise.resolve(stub(params)),
+    async (
+      params: AnthropicMessageCreateParams,
+      _options?: { readonly headers?: Readonly<Record<string, string>> },
+    ) => Promise.resolve(stub(params)),
   );
   return { client: { messages: { create } }, create };
 }
@@ -144,9 +146,13 @@ describe("AnthropicProvider", () => {
         max_tokens: 64,
         messages: [{ role: "user", content: "say hi" }],
       },
-      // Second arg is the options bag; idempotencyKey is content-derived.
+      // B3-1: Idempotency-Key is now an explicit HTTP header — the SDK's
+      // `options.idempotencyKey` shorthand is a silent no-op unless the
+      // client's internal `idempotencyHeader` is configured.
       expect.objectContaining({
-        idempotencyKey: expect.stringMatching(/^wuphf-[0-9a-f]{64}$/),
+        headers: expect.objectContaining({
+          "Idempotency-Key": expect.stringMatching(/^wuphf-[0-9a-f]{64}$/),
+        }),
       }),
     );
     expect(res.text).toBe("hello world");
@@ -230,7 +236,7 @@ describe("AnthropicProvider", () => {
     ).rejects.toBeInstanceOf(UnknownModelError);
   });
 
-  it("threads a deterministic idempotency key to messages.create (B2-4)", async () => {
+  it("threads Idempotency-Key as an HTTP header (B3-1: NOT options.idempotencyKey)", async () => {
     const { client, create } = fakeClient(() => emptyMessage());
     const provider = createAnthropicProvider({ client });
     const req: ProviderRequest = {
@@ -240,19 +246,34 @@ describe("AnthropicProvider", () => {
     };
     await provider.complete(req);
     await provider.complete(req);
-    // Same request → same idempotency key on both SDK calls.
     const firstCall = create.mock.calls[0] as unknown as readonly [
       unknown,
-      { readonly idempotencyKey: string },
+      { readonly headers: Record<string, string> },
     ];
     const secondCall = create.mock.calls[1] as unknown as readonly [
       unknown,
-      { readonly idempotencyKey: string },
+      { readonly headers: Record<string, string> },
     ];
-    const firstKey = firstCall[1]?.idempotencyKey;
-    const secondKey = secondCall[1]?.idempotencyKey;
-    expect(firstKey).toBe(secondKey);
-    expect(firstKey).toMatch(/^wuphf-[0-9a-f]{64}$/);
+    const k1 = firstCall[1]?.headers["Idempotency-Key"];
+    const k2 = secondCall[1]?.headers["Idempotency-Key"];
+    expect(k1).toBe(k2);
+    expect(k1).toMatch(/^wuphf-[0-9a-f]{64}$/);
+  });
+
+  it("uses gateway-supplied requestKey when present (B3-2)", async () => {
+    const { client, create } = fakeClient(() => emptyMessage());
+    const provider = createAnthropicProvider({ client });
+    await provider.complete({
+      model: "claude-sonnet-4-6",
+      prompt: "same",
+      maxOutputTokens: 16,
+      requestKey: "ctx-scoped-bbb",
+    });
+    const call = create.mock.calls[0] as unknown as readonly [
+      unknown,
+      { readonly headers: Record<string, string> },
+    ];
+    expect(call[1]?.headers["Idempotency-Key"]).toBe("wuphf-ctx-scoped-bbb");
   });
 
   it("maps SDK 4xx to BadRequestError (NOT breaker-worthy) — B2-7", async () => {

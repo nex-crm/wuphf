@@ -26,7 +26,7 @@ function fakeClient(stub: (params: OpenAIChatCompletionCreateParams) => OpenAICh
   const create = vi.fn(
     async (
       params: OpenAIChatCompletionCreateParams,
-      _options?: { readonly idempotencyKey?: string },
+      _options?: { readonly headers?: Readonly<Record<string, string>> },
     ) => Promise.resolve(stub(params)),
   );
   return { client: { chat: { completions: { create } } }, create };
@@ -109,12 +109,14 @@ describe("OpenAIProvider", () => {
     expect(create).toHaveBeenCalledWith(
       {
         model: "gpt-5-mini",
-        max_tokens: 64,
+        // gpt-5* is a reasoning/GPT-5 model — only max_completion_tokens.
         max_completion_tokens: 64,
         messages: [{ role: "user", content: "say hi" }],
       },
       expect.objectContaining({
-        idempotencyKey: expect.stringMatching(/^wuphf-[0-9a-f]{64}$/),
+        headers: expect.objectContaining({
+          "Idempotency-Key": expect.stringMatching(/^wuphf-[0-9a-f]{64}$/),
+        }),
       }),
     );
     expect(res.text).toBe("hello world");
@@ -153,7 +155,7 @@ describe("OpenAIProvider", () => {
     });
   });
 
-  it("surfaces a refusal as the text response", async () => {
+  it("surfaces a refusal in the separate refusal field — NOT folded into text (B3-3)", async () => {
     const { client } = fakeClient(() => ({
       model: "gpt-5",
       choices: [
@@ -170,7 +172,83 @@ describe("OpenAIProvider", () => {
       prompt: "p",
       maxOutputTokens: 8,
     });
-    expect(res.text).toBe("I can't help with that.");
+    // Refusal lives in its own field; text is empty so a caller that
+    // ignores `refusal` doesn't accidentally treat the refusal prose
+    // as a successful completion.
+    expect(res.text).toBe("");
+    expect(res.refusal).toBe("I can't help with that.");
+    expect(res.finishReason).toBe("content_filter");
+  });
+
+  it("surfaces finishReason for normal completions (B3-3)", async () => {
+    const { client } = fakeClient(() => ({
+      model: "gpt-5",
+      choices: [{ message: { content: "ok", refusal: null }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 5, completion_tokens: 5 },
+    }));
+    const provider = createOpenAIProvider({ client });
+    const res = await provider.complete({
+      model: "gpt-5",
+      prompt: "p",
+      maxOutputTokens: 8,
+    });
+    expect(res.text).toBe("ok");
+    expect(res.refusal).toBeUndefined();
+    expect(res.finishReason).toBe("stop");
+  });
+
+  it("classifies missing usage as ProviderError (B3-5)", async () => {
+    const provider = createOpenAIProvider({
+      client: {
+        chat: {
+          completions: {
+            create: async () => ({
+              model: "gpt-5",
+              choices: [{ message: { content: "ok", refusal: null }, finish_reason: "stop" }],
+              // No usage field at all — SDK marks it optional.
+            }),
+          },
+        },
+      },
+    });
+    await expect(
+      provider.complete({ model: "gpt-5", prompt: "p", maxOutputTokens: 8 }),
+    ).rejects.toBeInstanceOf(ProviderError);
+  });
+
+  it("clamps cached_tokens to prompt_tokens (B3-6)", async () => {
+    // Malformed: cached_tokens > prompt_tokens. Adapter should clamp
+    // cached to prompt_tokens, not pass through unchanged.
+    const { client } = fakeClient(() => ({
+      model: "gpt-5",
+      choices: [{ message: { content: "ok", refusal: null }, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: 100,
+        completion_tokens: 10,
+        prompt_tokens_details: { cached_tokens: 9999 },
+      },
+    }));
+    const provider = createOpenAIProvider({ client });
+    const res = await provider.complete({
+      model: "gpt-5",
+      prompt: "p",
+      maxOutputTokens: 8,
+    });
+    expect(res.usage.cacheReadTokens).toBe(100); // clamped to prompt_tokens
+    expect(res.usage.inputTokens).toBe(0); // 100 - 100
+  });
+
+  it("uses max_tokens (NOT max_completion_tokens) for GPT-4.1 (B3-4)", async () => {
+    const { client, create } = fakeClient(() => ({
+      model: "gpt-4.1",
+      choices: [{ message: { content: "ok", refusal: null }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 5, completion_tokens: 5 },
+    }));
+    const provider = createOpenAIProvider({ client });
+    await provider.complete({ model: "gpt-4.1", prompt: "p", maxOutputTokens: 64 });
+    const params = (create.mock.calls[0] as unknown as readonly [Record<string, unknown>])[0];
+    expect(params).toMatchObject({ max_tokens: 64 });
+    expect(params).not.toHaveProperty("max_completion_tokens");
   });
 
   it("declares models = pricing table keys for gateway routing", () => {
@@ -180,7 +258,7 @@ describe("OpenAIProvider", () => {
     expect(provider.models).toContain("gpt-4.1-nano");
   });
 
-  it("threads a deterministic idempotency key (same request → same key)", async () => {
+  it("threads Idempotency-Key as an HTTP header (B3-1: NOT via options.idempotencyKey)", async () => {
     const { client, create } = fakeClient(() => emptyCompletion());
     const provider = createOpenAIProvider({ client });
     const req: ProviderRequest = {
@@ -192,13 +270,32 @@ describe("OpenAIProvider", () => {
     await provider.complete(req);
     const firstCall = create.mock.calls[0] as unknown as readonly [
       unknown,
-      { readonly idempotencyKey: string },
+      { readonly headers: Record<string, string> },
     ];
     const secondCall = create.mock.calls[1] as unknown as readonly [
       unknown,
-      { readonly idempotencyKey: string },
+      { readonly headers: Record<string, string> },
     ];
-    expect(firstCall[1]?.idempotencyKey).toBe(secondCall[1]?.idempotencyKey);
+    const k1 = firstCall[1]?.headers["Idempotency-Key"];
+    const k2 = secondCall[1]?.headers["Idempotency-Key"];
+    expect(k1).toBe(k2);
+    expect(k1).toMatch(/^wuphf-[0-9a-f]{64}$/);
+  });
+
+  it("uses gateway-supplied requestKey when present (B3-2: context-scoped dedup)", async () => {
+    const { client, create } = fakeClient(() => emptyCompletion());
+    const provider = createOpenAIProvider({ client });
+    await provider.complete({
+      model: "gpt-5",
+      prompt: "same-payload",
+      maxOutputTokens: 16,
+      requestKey: "ctx-scoped-hash-aaa",
+    });
+    const call = create.mock.calls[0] as unknown as readonly [
+      unknown,
+      { readonly headers: Record<string, string> },
+    ];
+    expect(call[1]?.headers["Idempotency-Key"]).toBe("wuphf-ctx-scoped-hash-aaa");
   });
 
   it("maps SDK 400 to BadRequestError (NOT breaker-worthy)", async () => {
