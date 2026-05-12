@@ -239,7 +239,12 @@ func (w *watchdogScheduler) processOnce() {
 
 func (w *watchdogScheduler) processTaskJob(job schedulerJob) {
 	task, ok := w.broker.FindTask(job.Channel, job.TargetID)
-	if !ok || strings.EqualFold(strings.TrimSpace(task.status), "done") {
+	// Treat every terminal status (done / completed / canceled / cancelled)
+	// as terminal so finished/cancelled tasks don't keep getting alerted
+	// or re-processed by the watchdog. isTerminalTeamTaskStatus owns the
+	// canonical set so this stays in sync with the BlockTask / EnsureTask
+	// guards in broker_tasks_lifecycle.go.
+	if !ok || isTerminalTeamTaskStatus(task.status) {
 		_ = w.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
 		return
 	}

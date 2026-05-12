@@ -42,8 +42,19 @@ func (b *Broker) findDecisionPacketLocked(taskID string) *DecisionPacket {
 		return nil
 	}
 	state.mu.Lock()
+	// Re-check the cache: another goroutine may have populated it while
+	// we read from disk. Without this double-check two concurrent callers
+	// for the same taskID would each allocate a fresh *DecisionPacket and
+	// only one pointer would end up in the cache, so callers could see
+	// pointer inequality for identical data and redundant disk reads
+	// would happen on every concurrent miss.
+	if packet, ok := state.packets[taskID]; ok && packet != nil {
+		state.mu.Unlock()
+		return packet
+	}
 	cp := disk
 	state.packets[taskID] = &cp
+	cached := state.packets[taskID]
 	state.mu.Unlock()
-	return &cp
+	return cached
 }

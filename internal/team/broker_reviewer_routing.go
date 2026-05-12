@@ -55,7 +55,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -152,7 +152,10 @@ func (b *Broker) assignReviewersLocked(taskID string, slugs []string) error {
 	deduped := make([]string, 0, len(slugs))
 	seen := make(map[string]struct{}, len(slugs))
 	for _, raw := range slugs {
-		slug := strings.TrimSpace(raw)
+		// Normalize at the assignment boundary so dedupe + later
+		// reviewer-identity comparisons (grade replacement, missing
+		// slot filling) treat "Mira" and "mira" as the same reviewer.
+		slug := normalizeReviewerSlug(raw)
 		if slug == "" {
 			continue
 		}
@@ -198,7 +201,12 @@ func (b *Broker) appendReviewerGradeLocked(taskID string, grade ReviewerGrade) e
 	if taskID == "" {
 		return fmt.Errorf("append reviewer grade: task id required")
 	}
-	if strings.TrimSpace(grade.ReviewerSlug) == "" {
+	// Normalize the incoming slug at the append boundary so the
+	// idempotency check below treats casing/whitespace variants as the
+	// same reviewer (otherwise "Mira" and "mira" would each occupy a
+	// slot and convergence would wait on a phantom reviewer).
+	grade.ReviewerSlug = normalizeReviewerSlug(grade.ReviewerSlug)
+	if grade.ReviewerSlug == "" {
 		return fmt.Errorf("append reviewer grade: reviewer slug required")
 	}
 	task := b.taskByIDLocked(taskID)
@@ -218,7 +226,7 @@ func (b *Broker) appendReviewerGradeLocked(taskID string, grade ReviewerGrade) e
 	// design's "review.submitted with grade present" semantics.
 	replaced := false
 	for i := range existing {
-		if existing[i].ReviewerSlug == grade.ReviewerSlug {
+		if normalizeReviewerSlug(existing[i].ReviewerSlug) == grade.ReviewerSlug {
 			existing[i] = grade
 			replaced = true
 			break
@@ -283,12 +291,12 @@ func (b *Broker) evaluateConvergenceLocked(taskID string) error {
 	grades := b.reviewerGradesByTask[taskID]
 	graded := make(map[string]bool, len(grades))
 	for _, g := range grades {
-		graded[g.ReviewerSlug] = true
+		graded[normalizeReviewerSlug(g.ReviewerSlug)] = true
 	}
 
 	missing := make([]string, 0, len(reviewers))
 	for _, slug := range reviewers {
-		if !graded[slug] {
+		if !graded[normalizeReviewerSlug(slug)] {
 			missing = append(missing, slug)
 		}
 	}
@@ -525,6 +533,19 @@ func (b *Broker) extractRoutingSignalsLocked(task *teamTask) ReviewerRoutingSign
 // lifecycle hot path, so we cannot afford the 60s general-purpose
 // budget here. A slow filesystem yields nil and routing falls back to
 // TaskTags + ToolNames instead of pinning the broker mutex.
+//
+// TODO(v1.1): holding b.mu across an external `git diff` invocation
+// (even with the 5s timeout) means a wedged filesystem can stall every
+// other broker mutator for the full timeout. The right fix is to
+// snapshot {ID, WorktreePath, WorktreeBranch} under b.mu, drop the
+// lock to run the diff, then reacquire to consume the result. Doing
+// that safely requires reworking every call site of
+// extractRoutingSignalsLocked / resolveReviewersLocked (some are
+// invoked from inside transitionLifecycleLocked, which is itself
+// called with b.mu held by upstream mutators that depend on atomicity
+// of the entire transition). Deferred to a follow-up that restructures
+// the routing-resolution call graph rather than punching a one-off
+// hole in the lock here.
 func (b *Broker) taskWorktreeDiffLocked(task *teamTask) []string {
 	worktreePath := strings.TrimSpace(task.WorktreePath)
 	if worktreePath == "" {
@@ -635,10 +656,13 @@ func watchingMatchesSignals(w Watching, s ReviewerRoutingSignals) bool {
 }
 
 // anyGlobMatches reports whether any pattern in patterns matches any
-// candidate in candidates under filepath.Match semantics. Invalid
-// glob patterns are logged and skipped — the routing layer must not
-// fail an entire convergence because one agent's Watching set carries a
-// malformed entry.
+// candidate in candidates under path.Match semantics (forward-slash
+// path separator on every platform, so `git diff --name-only` output
+// matches consistently on Windows). Recursive `**` is NOT supported —
+// callers should constrain Watching patterns to the single-segment glob
+// surface path.Match accepts. Invalid glob patterns are logged and
+// skipped — the routing layer must not fail an entire convergence
+// because one agent's Watching set carries a malformed entry.
 func anyGlobMatches(patterns, candidates []string) bool {
 	for _, pattern := range patterns {
 		pattern = strings.TrimSpace(pattern)
@@ -650,7 +674,7 @@ func anyGlobMatches(patterns, candidates []string) bool {
 			if candidate == "" {
 				continue
 			}
-			ok, err := filepath.Match(pattern, candidate)
+			ok, err := path.Match(pattern, candidate)
 			if err != nil {
 				log.Printf("broker: reviewer routing: invalid glob %q: %v", pattern, err)
 				break

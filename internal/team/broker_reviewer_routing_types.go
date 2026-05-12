@@ -35,15 +35,16 @@ package team
 type Watching struct {
 	// Files is the list of glob patterns matched against the output of
 	// `git diff --name-only` between the task's worktree and the task's
-	// parent branch. Patterns use Go's path/filepath.Match semantics
-	// (no globstar; ** is not expanded). Each entry must be a valid
-	// glob — invalid entries are dropped at match time and logged.
+	// parent branch. Patterns use Go's path.Match semantics
+	// (forward-slash separator across all platforms; no globstar — `**`
+	// is NOT expanded recursively). Each entry must be a valid glob —
+	// invalid entries are dropped at match time and logged.
 	Files []string `json:"files,omitempty"`
 
 	// WikiPaths is the list of glob patterns matched against the
 	// wiki-relative paths that appear in the diff (i.e. the same
 	// `git diff --name-only` output, filtered to entries under the
-	// repo's wiki root). Same matching semantics as Files.
+	// repo's wiki root). Same path.Match semantics as Files.
 	WikiPaths []string `json:"wiki_paths,omitempty"`
 
 	// ToolNames is matched against the union of HeadlessEvent.ToolCalls

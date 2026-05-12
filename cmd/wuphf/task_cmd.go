@@ -203,11 +203,21 @@ func runTaskStartInProcess(ctx context.Context, intent, autoAssignOverride strin
 	return nil
 }
 
-// taskStartHook is the test seam: production overrides this with a
-// helper that boots a transient broker + intake provider; tests inject
-// a fake.
-var taskStartHook = func(ctx context.Context) (*team.Broker, team.IntakeProvider, error) {
-	return nil, nil, fmt.Errorf("task start: not yet wired to a live broker (set WUPHF_TASK_PROVIDER for tests)")
+// taskStartHook is the test seam: production boots a transient broker
+// rooted at the default state path and uses the default LLM intake
+// provider. Tests reassign the hook to inject a fake provider.
+//
+// The CLI does not currently dial a long-running broker process; it
+// constructs a fresh Broker against ~/.wuphf/team/broker-state.json
+// (honouring WUPHF_BROKER_STATE_PATH / WUPHF_RUNTIME_HOME the same way
+// `wuphf` does) so intake runs end-to-end against the same on-disk state
+// the running broker would see. v1.1 will replace this with an HTTP
+// roundtrip to a live broker; the hook seam keeps that change local.
+var taskStartHook = defaultTaskStartHook
+
+func defaultTaskStartHook(_ context.Context) (*team.Broker, team.IntakeProvider, error) {
+	provider := team.NewDefaultIntakeProvider()
+	return team.NewBroker(), provider, nil
 }
 
 func streamElapsed(start time.Time) chan struct{} {

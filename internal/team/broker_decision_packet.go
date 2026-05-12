@@ -667,11 +667,16 @@ func (b *Broker) OnReviewerConvergence(taskID string, reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		reason = "all reviewers graded"
 	}
-	if err := b.TransitionLifecycle(taskID, LifecycleStateDecision, reason); err != nil {
-		return fmt.Errorf("on reviewer convergence: transition: %w", err)
-	}
+	// Hold b.mu across the transition + packet stamp + persist + emit so
+	// the running-flush timer / convergence sweeper / concurrent
+	// RecordTaskDecision cannot fire between the transition and the stamp
+	// and overwrite the just-stamped packet with a pre-decision copy.
+	// Mirrors RecordTaskDecision (code-reviewer H3).
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if _, err := b.transitionLifecycleLocked(taskID, LifecycleStateDecision, reason); err != nil {
+		return fmt.Errorf("on reviewer convergence: transition: %w", err)
+	}
 	packet := b.getOrInitPacketLocked(taskID)
 	b.stampLifecycleStateLocked(packet)
 	b.persistDecisionPacketLocked(taskID, *packet)

@@ -65,7 +65,7 @@ func TestPrintInboxPayloadGroupsByLifecycleState(t *testing.T) {
 			{TaskID: "task-2", Title: "ship the docs", LifecycleState: team.LifecycleStateDecision, ElapsedMs: 120_000},
 			{TaskID: "task-3", Title: "spec the wedge", LifecycleState: team.LifecycleStateRunning, ElapsedMs: 30_000},
 		},
-		Counts:      team.InboxCounts{NeedsDecision: 1, Running: 2, Blocked: 0, MergedToday: 0},
+		Counts:      team.InboxCounts{DecisionRequired: 1, Running: 2, Blocked: 0, MergedToday: 0},
 		RefreshedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	out := captureStdout(t, func() { printInboxPayload(payload) })

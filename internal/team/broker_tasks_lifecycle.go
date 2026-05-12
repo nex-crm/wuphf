@@ -129,6 +129,24 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 		if !changed {
 			return *task, false, nil
 		}
+		// When the task is on a typed lifecycle (blocked_on_pr_merge),
+		// route the resume through the transition layer so LifecycleState
+		// and the inverse index move with the legacy status/blocked
+		// fields. Without this the task keeps its old LifecycleState and
+		// bucket membership and still looks blocked to the inbox even
+		// though task.blocked is now false. Mirrors the typed-unblock
+		// branch in unblockDependentsLocked (which lands the task back
+		// in review for the same reason: blocked_on_pr_merge typically
+		// blocks an in-review task on a dependency PR).
+		if task.LifecycleState == LifecycleStateBlockedOnPRMerge {
+			resumeReason := reason
+			if strings.TrimSpace(resumeReason) == "" {
+				resumeReason = "task resumed"
+			}
+			if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateReview, resumeReason); err != nil {
+				return teamTask{}, false, fmt.Errorf("resume: lifecycle transition: %w", err)
+			}
+		}
 		if reason != "" && !strings.Contains(task.Details, reason) {
 			task.Details = strings.TrimSpace(task.Details)
 			if task.Details != "" {
