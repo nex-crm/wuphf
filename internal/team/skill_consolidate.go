@@ -73,15 +73,18 @@ func (b *Broker) handleSkillConsolidate(w http.ResponseWriter, r *http.Request) 
 	// Merge mode: archive cluster members into the target.
 	b.mu.Lock()
 	merged, archived, mergeErr := b.mergeSkillClusterLocked(mergeTarget, clusters)
+	var saveErr error
 	if mergeErr == nil {
-		if err := b.saveLocked(); err != nil {
-			slog.Warn("skill_consolidate: saveLocked failed after merge", "err", err)
-		}
+		saveErr = b.saveLocked()
 	}
 	b.mu.Unlock()
 
 	if mergeErr != nil {
 		http.Error(w, mergeErr.Error(), http.StatusBadRequest)
+		return
+	}
+	if saveErr != nil {
+		http.Error(w, "merge succeeded in memory but failed to persist: "+saveErr.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -95,34 +98,55 @@ func (b *Broker) handleSkillConsolidate(w http.ResponseWriter, r *http.Request) 
 // For each skill, it finds similar skills via findSimilarSkillsLocked and
 // builds clusters. Caller MUST hold b.mu.
 func (b *Broker) detectSkillClustersLocked() []consolidateCluster {
-	seen := make(map[string]bool)
+	// Build adjacency list for all non-archived skills.
+	type edge struct {
+		target string
+		score  float64
+	}
+	adj := make(map[string][]edge)
+	for i := range b.skills {
+		sk := &b.skills[i]
+		if sk.Status == "archived" {
+			continue
+		}
+		similar := b.findSimilarSkillsLocked(sk.Name, sk.Description)
+		for _, sim := range similar {
+			adj[sk.Name] = append(adj[sk.Name], edge{sim.Skill.Name, combinedScore(sim)})
+			adj[sim.Skill.Name] = append(adj[sim.Skill.Name], edge{sk.Name, combinedScore(sim)})
+		}
+	}
+
+	// BFS to find connected components (transitive overlaps).
+	visited := make(map[string]bool)
 	var clusters []consolidateCluster
 
 	for i := range b.skills {
 		sk := &b.skills[i]
-		if sk.Status == "archived" || seen[sk.Name] {
+		if sk.Status == "archived" || visited[sk.Name] || len(adj[sk.Name]) == 0 {
 			continue
 		}
 
-		similar := b.findSimilarSkillsLocked(sk.Name, sk.Description)
-		if len(similar) == 0 {
-			continue
-		}
-
+		// BFS from this skill.
 		cluster := consolidateCluster{
 			Representative: sk.Name,
-			Members:        make([]string, 0, len(similar)),
-			Scores:         make(map[string]float64, len(similar)),
+			Scores:         make(map[string]float64),
 		}
-		seen[sk.Name] = true
+		queue := []string{sk.Name}
+		visited[sk.Name] = true
 
-		for _, sim := range similar {
-			if seen[sim.Skill.Name] {
-				continue
+		for len(queue) > 0 {
+			current := queue[0]
+			queue = queue[1:]
+
+			for _, e := range adj[current] {
+				if visited[e.target] {
+					continue
+				}
+				visited[e.target] = true
+				cluster.Members = append(cluster.Members, e.target)
+				cluster.Scores[e.target] = e.score
+				queue = append(queue, e.target)
 			}
-			seen[sim.Skill.Name] = true
-			cluster.Members = append(cluster.Members, sim.Skill.Name)
-			cluster.Scores[sim.Skill.Name] = combinedScore(sim)
 		}
 
 		if len(cluster.Members) > 0 {
@@ -316,7 +340,9 @@ func (b *Broker) autoConsolidateSkillsIfNeeded() {
 	}
 
 	if err := b.saveLocked(); err != nil {
-		slog.Warn("skill_consolidation_migration: saveLocked failed", "err", err)
+		slog.Warn("skill_consolidation_migration: saveLocked failed, skipping sentinel", "err", err)
+		// Do NOT write sentinel — next startup should retry.
+		return
 	}
 
 	b.writeConsolidationSentinelLocked(totalMerged, totalArchived)

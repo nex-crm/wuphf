@@ -252,7 +252,12 @@ func (b *Broker) ensureSkillEmbeddingLocked(slug, description string, provider e
 		return nil
 	}
 	atomic.AddInt64(&b.skillCompileMetrics.EmbeddingCacheMissesTotal, 1)
-	b.skillDescEmbeddings[slug] = vec
+	// Recheck: if the cache was invalidated while the lock was released
+	// (e.g. another goroutine updated the skill's description), skip
+	// caching the now-stale vector.
+	if _, alreadyCached := b.skillDescEmbeddings[slug]; !alreadyCached {
+		b.skillDescEmbeddings[slug] = vec
+	}
 	return vec
 }
 

@@ -59,7 +59,10 @@ const agentsDirPrefix = "team/agents/"
 // description, and body should be. Defined where it is consumed per the
 // "accept interfaces, return structs" idiom.
 type llmProvider interface {
-	AskIsSkill(ctx context.Context, articlePath, articleContent string) (isSkill bool, fm SkillFrontmatter, body string, err error)
+	// AskIsSkill classifies an article. existingSkillsSummary is injected
+	// into the user prompt for deduplication (may be empty). enhanceSlug is
+	// non-empty when the LLM returns an "enhance" directive.
+	AskIsSkill(ctx context.Context, articlePath, articleContent, existingSkillsSummary string) (isSkill bool, fm SkillFrontmatter, body, enhanceSlug string, err error)
 }
 
 // SkillSpec is the canonical in-memory representation the scanner produces
@@ -175,13 +178,10 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		res.Errors = append(res.Errors, ScanError{Slug: "", Reason: "walk: " + walkErr.Error()})
 	}
 
-	// Build existing-skills summary once per pass so the LLM can
-	// self-deduplicate. Inject it into the provider if it supports it.
-	if dp, ok := s.provider.(*defaultLLMProvider); ok {
-		s.broker.mu.Lock()
-		dp.existingSkillsSummary = buildExistingSkillsSummary(s.broker.skills, 2048)
-		s.broker.mu.Unlock()
-	}
+	// Build existing-skills summary once per pass (request-scoped).
+	s.broker.mu.Lock()
+	existingSkillsSummary := buildExistingSkillsSummary(s.broker.skills, 2048)
+	s.broker.mu.Unlock()
 
 	updatedCache := make(map[string]string, len(candidates))
 	llmCalls := 0
@@ -228,7 +228,7 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 
 		llmCalls++
 
-		isSkill, fm, body, err := s.provider.AskIsSkill(ctx, c.relPath, c.content)
+		isSkill, fm, body, enhanceSlug, err := s.provider.AskIsSkill(ctx, c.relPath, c.content, existingSkillsSummary)
 		if err != nil {
 			res.Errors = append(res.Errors, ScanError{Slug: c.relPath, Reason: "llm: " + err.Error()})
 			// Leave the cache entry unset so we retry next pass.
@@ -240,13 +240,6 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 			continue
 		}
 		res.Matched++
-
-		// Check if the LLM returned an "enhance" directive.
-		var enhanceSlug string
-		if dp, ok := s.provider.(*defaultLLMProvider); ok {
-			enhanceSlug = dp.lastEnhanceSlug
-			dp.lastEnhanceSlug = ""
-		}
 
 		if dryRun {
 			res.Proposed++
@@ -559,14 +552,6 @@ type defaultLLMProvider struct {
 	prompt  string
 	loaded  bool
 	loadErr error
-
-	// existingSkillsSummary is set once per scan pass by the scanner.
-	// AskIsSkill injects it into the user prompt for deduplication.
-	existingSkillsSummary string
-
-	// lastEnhanceSlug is set by AskIsSkill when the LLM responds with an
-	// "enhance" field. The scanner reads and clears it after each call.
-	lastEnhanceSlug string
 }
 
 // NewDefaultLLMProvider returns a provider that classifies articles via the
@@ -620,10 +605,10 @@ func (p *defaultLLMProvider) SystemPrompt() (string, error) {
 //     provider.RunConfiguredOneShot with the skill-creator.md system prompt.
 //     If the API key is missing or the call fails we log the reason and return
 //     is_skill=false so the scan continues uninterrupted.
-func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articleContent string) (bool, SkillFrontmatter, string, error) {
+func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articleContent, existingSkillsSummary string) (bool, SkillFrontmatter, string, string, error) {
 	sysPrompt, err := p.SystemPrompt()
 	if err != nil {
-		return false, SkillFrontmatter{}, "", err
+		return false, SkillFrontmatter{}, "", "", err
 	}
 
 	// Fast path: explicit frontmatter opt-in.
@@ -634,7 +619,7 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 		if strings.TrimSpace(fm.License) == "" {
 			fm.License = "MIT"
 		}
-		return true, fm, body, nil
+		return true, fm, body, "", nil
 	}
 
 	// LLM path: wrap the caller's context with a per-call deadline so a slow
@@ -642,29 +627,28 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 	timeout := skillLLMTimeout()
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	userPrompt := buildSkillUserPrompt(articlePath, articleContent, p.existingSkillsSummary)
+	userPrompt := buildSkillUserPrompt(articlePath, articleContent, existingSkillsSummary)
 	out, callErr := provider.RunConfiguredOneShotCtx(callCtx, sysPrompt, userPrompt, "")
 	if callErr != nil {
 		if callCtx.Err() != nil {
 			slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
-			return false, SkillFrontmatter{}, "", nil
+			return false, SkillFrontmatter{}, "", "", nil
 		}
 		slog.Warn("skill_scanner: LLM call failed, skipping article",
 			"path", articlePath, "err", callErr)
-		return false, SkillFrontmatter{}, "", nil
+		return false, SkillFrontmatter{}, "", "", nil
 	}
 	if callCtx.Err() != nil {
 		slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
-		return false, SkillFrontmatter{}, "", nil
+		return false, SkillFrontmatter{}, "", "", nil
 	}
 	result := parseSkillJSONFull(out)
 	if result.Err != nil {
 		slog.Warn("skill_scanner: LLM JSON parse failed, treating as not-a-skill",
 			"path", articlePath, "err", result.Err)
-		return false, SkillFrontmatter{}, "", nil
+		return false, SkillFrontmatter{}, "", "", nil
 	}
-	p.lastEnhanceSlug = result.Enhance
-	return result.IsSkill, result.FM, result.Body, nil
+	return result.IsSkill, result.FM, result.Body, result.Enhance, nil
 }
 
 // buildSkillUserPrompt assembles the user-message body sent to the LLM.

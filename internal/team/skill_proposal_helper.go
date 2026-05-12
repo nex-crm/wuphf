@@ -122,6 +122,10 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		// Pure duplicate — discard as before.
 		best.Skill.RelatedSkills = appendUnique(best.Skill.RelatedSkills, slug)
 		best.Skill.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if err := b.saveLocked(); err != nil {
+			slog.Warn("writeSkillProposalLocked: saveLocked after dedup linkage failed",
+				"name", name, "err", err)
+		}
 		atomic.AddInt64(&b.skillCompileMetrics.SemanticDedupHitsTotal, 1)
 		slog.Info("writeSkillProposalLocked: semantic dedup hit",
 			"candidate", name, "existing", best.Skill.Name,
@@ -280,6 +284,11 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription str
 		return nil, fmt.Errorf("enhanceSkillLocked: empty content for %q", existingName)
 	}
 
+	// Capture original state so we can roll back on failure.
+	origContent := sk.Content
+	origDescription := sk.Description
+	origUpdatedAt := sk.UpdatedAt
+
 	// Update the skill's content with the merged body.
 	sk.Content = newContent
 	// Update description if the new one is longer (more specific).
@@ -296,7 +305,11 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription str
 	fm := teamSkillToFrontmatter(*sk)
 	mdBytes, err := RenderSkillMarkdown(fm, sk.Content)
 	if err != nil {
-		return sk, fmt.Errorf("enhanceSkillLocked: render markdown for %q: %w", existingName, err)
+		// Roll back in-memory mutation.
+		sk.Content = origContent
+		sk.Description = origDescription
+		sk.UpdatedAt = origUpdatedAt
+		return nil, fmt.Errorf("enhanceSkillLocked: render markdown for %q: %w", existingName, err)
 	}
 
 	wikiPath := "team/skills/" + slug + ".md"
@@ -317,9 +330,11 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription str
 		)
 		if err != nil {
 			b.mu.Lock()
-			slog.Warn("enhanceSkillLocked: WikiWorker.Enqueue failed",
-				"slug", slug, "err", err)
-			return sk, nil // Return skill anyway — in-memory state is updated.
+			// Roll back in-memory mutation on wiki write failure.
+			sk.Content = origContent
+			sk.Description = origDescription
+			sk.UpdatedAt = origUpdatedAt
+			return nil, fmt.Errorf("enhanceSkillLocked: wiki enqueue for %q: %w", existingName, err)
 		}
 	}
 

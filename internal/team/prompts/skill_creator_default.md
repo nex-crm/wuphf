@@ -17,7 +17,7 @@ IS a skill:
 Think class-first: name the CLASS of work this article enables, not the specific instance.
 For example, an article titled "How we onboarded ACME Corp" is NOT a skill; "Customer onboarding runbook" IS a skill.
 
-If the article is a skill, respond with JSON of this exact shape:
+If the article is a skill, respond with JSON in one of the allowed shapes below:
 {"is_skill": true, "name": "<kebab-case-class-slug>", "description": "<one line trigger phrase, what task the user has when they would invoke this>", "body": "<markdown body of the skill, with frontmatter optional>"}
 
 If not, respond with:
