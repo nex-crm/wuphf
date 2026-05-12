@@ -399,10 +399,13 @@ const PROMPT_BYTE_ENCODER = new TextEncoder();
  * only 64 tokens — concurrent distinct large-prompt calls can then all
  * pass `reserveAndPreflight` and overshoot the daily cap.
  *
- * Now: input tokens are estimated from `prompt.length` using a
- * conservative chars-per-token ratio (`CHARS_PER_INPUT_TOKEN_ESTIMATE`).
- * Output tokens are still bounded by `maxOutputTokens`. The estimator
- * gets called with the larger of the two as a defensive ceiling.
+ * Now: input tokens are estimated from the prompt's UTF-8 byte length
+ * using a conservative bytes-per-token ratio
+ * (`BYTES_PER_INPUT_TOKEN_ESTIMATE`), and output tokens are bounded by
+ * `maxOutputTokens`. Both values are passed to the provider's own
+ * estimator as separate `CostUnits` fields (with cache fields zeroed
+ * so the call bills at the fresh-input rate) so each is priced at its
+ * own per-MTok rate — there is no `max(input, output)` ceiling.
  *
  * Real cost from the provider's response usage is what gets billed; the
  * reservation just ensures concurrent calls can't all pass a stale
