@@ -66,7 +66,7 @@ func (b *Broker) handleSkillConsolidate(w http.ResponseWriter, r *http.Request) 
 	mergeTarget := strings.TrimSpace(req.MergeInto)
 	if req.DryRun || mergeTarget == "" {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 		return
 	}
 
@@ -88,7 +88,7 @@ func (b *Broker) handleSkillConsolidate(w http.ResponseWriter, r *http.Request) 
 	resp.Merged = merged
 	resp.Archived = archived
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // detectSkillClustersLocked groups non-archived skills by semantic similarity.
