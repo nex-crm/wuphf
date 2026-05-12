@@ -65,6 +65,15 @@ export interface ProviderResponse {
   readonly usage: CostUnits;
   readonly finishReason?: string;
   readonly refusal?: string;
+  /**
+   * Model id actually served by the upstream — typically a dated
+   * snapshot like `claude-haiku-4-5-20251001` while `ProviderRequest.model`
+   * carries the alias `claude-haiku-4-5`. The gateway records this in the
+   * cost_event audit row when present, falling back to `req.model` so
+   * replay across runtime versions stays stable. See triangulation B2-defer
+   * #827. Adapters that don't expose the served model leave this undefined.
+   */
+  readonly model?: string;
 }
 
 export interface CostEstimator {

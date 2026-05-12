@@ -118,6 +118,17 @@ export type ReplayDiscrepancy =
       readonly field: "crossedAtLsn" | "observedMicroUsd" | "limitMicroUsd";
       readonly replayed: number;
       readonly stored: number;
+    }
+  | {
+      // #822: surface unparseable event-log rows distinctly so on-call
+      // sees the failing LSN, event type, and parse reason instead of
+      // a bare `internal_error` from the route. The route returns
+      // 200 with `ok: false` so this is observable in the same shape
+      // as any other drift discrepancy.
+      readonly kind: "event_payload_unparseable";
+      readonly lsn: EventLsn;
+      readonly type: string;
+      readonly reason: string;
     };
 
 interface CostEventBatchRow {
@@ -193,6 +204,10 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   const replayedTasks = new Map<string, number>();
   const replayedBudgets = new Map<string, ReplayedBudget>();
   const replayedCrossings = new Map<string, ReplayedCrossing>();
+  // #822: collect per-row parse failures as structured discrepancies
+  // instead of throwing out of the loop. On-call sees the failing LSN
+  // + event type + reason without grepping the listener log.
+  const parseFailures: ReplayDiscrepancy[] = [];
 
   let cursor = 0;
   let scanned = 0;
@@ -201,55 +216,64 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     if (rows.length === 0) break;
     for (const row of rows) {
       const kind = eventTypeToKind(row.type);
-      if (kind === "cost_event") {
-        const parsed = costAuditPayloadFromJsonValue(
-          kind,
-          JSON.parse(row.payload.toString("utf8")),
-        ) as CostEventAuditPayload;
-        const dayUtc = parsed.occurredAt.toISOString().slice(0, 10);
-        const agentKey = agentDayKey(parsed.agentSlug, dayUtc);
-        replayedAgentDays.set(
-          agentKey,
-          (replayedAgentDays.get(agentKey) ?? 0) + (parsed.amountMicroUsd as number),
-        );
-        if (parsed.taskId !== undefined) {
-          replayedTasks.set(
-            parsed.taskId,
-            (replayedTasks.get(parsed.taskId) ?? 0) + (parsed.amountMicroUsd as number),
+      try {
+        if (kind === "cost_event") {
+          const parsed = costAuditPayloadFromJsonValue(
+            kind,
+            JSON.parse(row.payload.toString("utf8")),
+          ) as CostEventAuditPayload;
+          const dayUtc = parsed.occurredAt.toISOString().slice(0, 10);
+          const agentKey = agentDayKey(parsed.agentSlug, dayUtc);
+          replayedAgentDays.set(
+            agentKey,
+            (replayedAgentDays.get(agentKey) ?? 0) + (parsed.amountMicroUsd as number),
           );
+          if (parsed.taskId !== undefined) {
+            replayedTasks.set(
+              parsed.taskId,
+              (replayedTasks.get(parsed.taskId) ?? 0) + (parsed.amountMicroUsd as number),
+            );
+          }
+        } else if (kind === "budget_set") {
+          const parsed = costAuditPayloadFromJsonValue(
+            kind,
+            JSON.parse(row.payload.toString("utf8")),
+          ) as BudgetSetAuditPayload;
+          replayedBudgets.set(parsed.budgetId, {
+            scope: parsed.scope,
+            subjectId: parsed.subjectId ?? null,
+            limitMicroUsd: parsed.limitMicroUsd as number,
+            thresholdsBps: [...parsed.thresholdsBps],
+            setAtLsn: row.lsn,
+            tombstoned: (parsed.limitMicroUsd as number) === 0,
+          });
+        } else if (kind === "budget_threshold_crossed") {
+          // H1 fix: replay every threshold-crossed event into an expected
+          // (budget_id, budget_set_lsn, threshold_bps) → row map. The
+          // comparison below catches missing, ghost, and field-mismatch
+          // drift against cost_threshold_crossings.
+          const parsed = costAuditPayloadFromJsonValue(
+            kind,
+            JSON.parse(row.payload.toString("utf8")),
+          ) as BudgetThresholdCrossedAuditPayload;
+          const budgetSetLsnInt = parseLsn(parsed.budgetSetLsn).localLsn;
+          const crossedAtLsnInt = parseLsn(parsed.crossedAtLsn).localLsn;
+          const key = crossingKey(parsed.budgetId, budgetSetLsnInt, parsed.thresholdBps);
+          replayedCrossings.set(key, {
+            budgetId: parsed.budgetId,
+            budgetSetLsn: budgetSetLsnInt,
+            thresholdBps: parsed.thresholdBps,
+            crossedAtLsn: crossedAtLsnInt,
+            observedMicroUsd: parsed.observedMicroUsd as number,
+            limitMicroUsd: parsed.limitMicroUsd as number,
+          });
         }
-      } else if (kind === "budget_set") {
-        const parsed = costAuditPayloadFromJsonValue(
-          kind,
-          JSON.parse(row.payload.toString("utf8")),
-        ) as BudgetSetAuditPayload;
-        replayedBudgets.set(parsed.budgetId, {
-          scope: parsed.scope,
-          subjectId: parsed.subjectId ?? null,
-          limitMicroUsd: parsed.limitMicroUsd as number,
-          thresholdsBps: [...parsed.thresholdsBps],
-          setAtLsn: row.lsn,
-          tombstoned: (parsed.limitMicroUsd as number) === 0,
-        });
-      } else if (kind === "budget_threshold_crossed") {
-        // H1 fix: replay every threshold-crossed event into an expected
-        // (budget_id, budget_set_lsn, threshold_bps) → row map. The
-        // comparison below catches missing, ghost, and field-mismatch
-        // drift against cost_threshold_crossings.
-        const parsed = costAuditPayloadFromJsonValue(
-          kind,
-          JSON.parse(row.payload.toString("utf8")),
-        ) as BudgetThresholdCrossedAuditPayload;
-        const budgetSetLsnInt = parseLsn(parsed.budgetSetLsn).localLsn;
-        const crossedAtLsnInt = parseLsn(parsed.crossedAtLsn).localLsn;
-        const key = crossingKey(parsed.budgetId, budgetSetLsnInt, parsed.thresholdBps);
-        replayedCrossings.set(key, {
-          budgetId: parsed.budgetId,
-          budgetSetLsn: budgetSetLsnInt,
-          thresholdBps: parsed.thresholdBps,
-          crossedAtLsn: crossedAtLsnInt,
-          observedMicroUsd: parsed.observedMicroUsd as number,
-          limitMicroUsd: parsed.limitMicroUsd as number,
+      } catch (err) {
+        parseFailures.push({
+          kind: "event_payload_unparseable",
+          lsn: lsnFromV1Number(row.lsn),
+          type: row.type,
+          reason: err instanceof Error ? err.message : String(err),
         });
       }
       scanned += 1;
@@ -257,7 +281,11 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     cursor = rows[rows.length - 1]?.lsn ?? cursor;
   }
 
-  const discrepancies: ReplayDiscrepancy[] = [];
+  // Surface per-row parse failures first so on-call sees them at the top
+  // of the discrepancies list; downstream comparators may emit
+  // sum-mismatch discrepancies for the same rows but the parse-failure
+  // is the root cause.
+  const discrepancies: ReplayDiscrepancy[] = [...parseFailures];
 
   const storedAgentDays = new Map<string, number>();
   for (const row of listAgentDaysStmt.all()) {

@@ -12,9 +12,11 @@ import {
   costAuditPayloadToJsonValue,
 } from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { CostLedger } from "../src/cost-ledger/index.ts";
+import { createCostLedger } from "../src/cost-ledger/index.ts";
 import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
-import type { BrokerHandle, CostLedger } from "../src/index.ts";
-import { createBroker, createCostLedger } from "../src/index.ts";
+import type { BrokerHandle } from "../src/index.ts";
+import { createBroker } from "../src/index.ts";
 
 const FIXED_TOKEN = asApiToken("test-token-with-enough-entropy-AAAAAAAAA");
 const BUDGET_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";

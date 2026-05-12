@@ -1,4 +1,4 @@
-import { createCostLedger, createEventLog, openDatabase, runMigrations } from "@wuphf/broker";
+import { createCostLedger, createEventLog, openDatabase, runMigrations } from "@wuphf/broker/cost-ledger";
 import { asAgentSlug, asProviderKind, asReceiptId, asTaskId } from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -404,6 +404,137 @@ describe("inspect()", () => {
       expect(agent?.breaker.status).toBe("closed");
     } finally {
       fix.db.close();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Followups #827 + #828 + #824 — surgical gateway-side fixes
+// ─────────────────────────────────────────────────────────────────────
+
+describe("gateway construction-time validation (#828)", () => {
+  it("rejects a Provider whose .kind is not a registered ProviderKind", () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const stub = createStubProvider();
+    // Forge a fake kind via `as` cast — the defense is the construction
+    // check, not the type system.
+    const forged: Provider = { ...stub, kind: "not-a-real-kind" as never };
+    try {
+      expect(() =>
+        createGateway({ ledger, providers: [forged], nowMs: () => Date.now() }),
+      ).toThrow(/not a registered ProviderKind/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("audit row records served model id (#827)", () => {
+  it("uses ProviderResponse.model when the adapter supplies it", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const fixedKind = asProviderKind("openai-compat");
+    const estimator: CostEstimator = {
+      estimate: (_model, _usage) => 0 as never,
+    };
+    const provider: Provider = {
+      kind: fixedKind,
+      models: ["alias-model"],
+      costEstimator: estimator,
+      complete: async (_req) => ({
+        text: "ok",
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        // Adapter returns a pinned snapshot identifier; gateway should record THIS.
+        model: "alias-model-2025-04-12-snapshot",
+      }),
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await gateway.complete(
+        { agentSlug: asAgentSlug("a") },
+        { model: "alias-model", prompt: "p", maxOutputTokens: 8 },
+      );
+      const row = db
+        .prepare<[], { readonly payload: Buffer }>(
+          "SELECT payload FROM event_log WHERE type = 'cost.event' LIMIT 1",
+        )
+        .get();
+      if (row === undefined) throw new Error("no cost.event row");
+      const parsed = JSON.parse(row.payload.toString("utf8")) as { model: string };
+      expect(parsed.model).toBe("alias-model-2025-04-12-snapshot");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("falls back to ProviderRequest.model when adapter does not supply one", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const gateway = createGateway({
+      ledger,
+      providers: [createStubProvider()],
+      nowMs: () => Date.now(),
+    });
+    try {
+      await gateway.complete(CTX, REQ);
+      const row = db
+        .prepare<[], { readonly payload: Buffer }>(
+          "SELECT payload FROM event_log WHERE type = 'cost.event' LIMIT 1",
+        )
+        .get();
+      if (row === undefined) throw new Error("no cost.event row");
+      const parsed = JSON.parse(row.payload.toString("utf8")) as { model: string };
+      expect(parsed.model).toBe(STUB_MODEL_FIXED_COST);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("gateway rejects runaway cost estimate before ledger append (#824)", () => {
+  it("treats an over-cap estimator output as breaker-worthy and skips the ledger write", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const kind = asProviderKind("openai-compat");
+    // 200 million μUSD = $200 — exceeds the $100 per-event cap.
+    const estimator: CostEstimator = {
+      estimate: (_model, _usage) => 200_000_000 as never,
+    };
+    const provider: Provider = {
+      kind,
+      models: ["runaway-model"],
+      costEstimator: estimator,
+      complete: async () => ({
+        text: "ok",
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      }),
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "runaway-model", prompt: "p", maxOutputTokens: 8 },
+        ),
+      ).rejects.toThrow(/exceeds per-event cap/);
+      // No cost_event written for the over-cap call.
+      const count = db
+        .prepare<[], { readonly n: number }>(
+          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+        )
+        .get();
+      expect(count?.n).toBe(0);
+    } finally {
+      db.close();
     }
   });
 });

@@ -362,6 +362,9 @@ function buildProviderResponse(raw: OpenAIChatCompletion): ProviderResponse {
     usage,
     ...(finishReason !== null ? { finishReason } : {}),
     ...(refusal !== null ? { refusal } : {}),
+    // #827: surface served snapshot id (e.g. gpt-5-2025-08-07) so the
+    // audit row records the actual served model.
+    ...(typeof raw.model === "string" && raw.model.length > 0 ? { model: raw.model } : {}),
   };
 }
 

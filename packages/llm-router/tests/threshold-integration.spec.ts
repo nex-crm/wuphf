@@ -14,7 +14,7 @@ import {
   openDatabase,
   runMigrations,
   runReplayCheck,
-} from "@wuphf/broker";
+} from "@wuphf/broker/cost-ledger";
 import {
   asAgentSlug,
   asBudgetId,

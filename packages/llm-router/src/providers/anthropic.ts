@@ -110,6 +110,14 @@ export interface AnthropicMessage {
   readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
   readonly usage: AnthropicMessageUsage;
   /**
+   * Served model id — typically a dated snapshot like
+   * `claude-haiku-4-5-20251001` while the request alias was
+   * `claude-haiku-4-5`. Surfaced through `ProviderResponse.model` so the
+   * cost_event audit row records the actual served snapshot. See
+   * triangulation B2-defer #827.
+   */
+  readonly model?: string;
+  /**
    * Why the model stopped. `end_turn` is a normal completion;
    * `max_tokens` is truncation; `stop_sequence` matched a configured
    * stop; `tool_use` paused for a tool call; `refusal` is a policy
@@ -206,6 +214,7 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
         usage: usageToCostUnits(raw.usage),
         ...(finishReason !== null ? { finishReason } : {}),
         ...(isRefusal ? { refusal: extractedText } : {}),
+        ...(typeof raw.model === "string" && raw.model.length > 0 ? { model: raw.model } : {}),
       };
     },
   };
@@ -408,7 +417,53 @@ export async function createAnthropicProviderWithKey(args: {
   const AnthropicCtor = sdk.default;
   const client = new AnthropicCtor({ apiKey: args.apiKey });
   return createAnthropicProvider({
-    client: client as unknown as AnthropicClient,
+    client: adaptAnthropicSdkClient(client),
     ...(args.pricing !== undefined ? { pricing: args.pricing } : {}),
   });
+}
+
+/**
+ * Type-checked adapter from the real SDK client to our structural
+ * `AnthropicClient` interface (#829). The previous `as unknown as`
+ * double-cast told tsc nothing about the actual SDK signature, so a
+ * future SDK version that drifted on `messages.create()` overloads or
+ * return shape would silently break at runtime. This wrapper forces
+ * tsc to verify the SDK still satisfies our contract.
+ *
+ * The structural `params.messages` is `ReadonlyArray` (our adapter is
+ * a read-only consumer), but the SDK declares it as mutable
+ * `MessageParam[]`. The clone makes that assignment legal without
+ * weakening our internal immutability guarantee, and the per-call cost
+ * is negligible at one shallow array copy per LLM request.
+ */
+type AnthropicSdkClient = {
+  readonly messages: {
+    create(
+      params: {
+        readonly model: string;
+        readonly max_tokens: number;
+        readonly messages: ReadonlyArray<{
+          readonly role: "user" | "assistant";
+          readonly content: string;
+        }>;
+      } & { messages: Array<{ role: "user" | "assistant"; content: string }> },
+      options?: AnthropicRequestOptions,
+    ): Promise<AnthropicMessage>;
+  };
+};
+
+function adaptAnthropicSdkClient(sdkClient: AnthropicSdkClient): AnthropicClient {
+  return {
+    messages: {
+      create: (params, options) =>
+        sdkClient.messages.create(
+          {
+            model: params.model,
+            max_tokens: params.max_tokens,
+            messages: params.messages.map((m) => ({ role: m.role, content: m.content })),
+          },
+          options,
+        ),
+    },
+  };
 }

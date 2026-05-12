@@ -82,6 +82,14 @@ export interface OpenCodeChatResponse {
   readonly text: string;
   readonly usage: OpenCodeUsage;
   /**
+   * Served model id — typically the underlying upstream the runner is
+   * configured to use (e.g. `claude-sonnet-4-6-20251015`). Surfaced
+   * through `ProviderResponse.model` so the audit row pins the served
+   * snapshot. See #827. Optional — runners that don't expose it leave
+   * this undefined.
+   */
+  readonly model?: string;
+  /**
    * Surface a finish-reason if the runner reports one (e.g.
    * `"stop" | "length" | "tool_call"`). Optional — runners that don't
    * track it leave it undefined.
@@ -224,6 +232,9 @@ function buildProviderResponse(
     usage,
     ...(raw.finishReason !== undefined ? { finishReason: raw.finishReason } : {}),
     ...(isRefusal ? { refusal: raw.refusal as string } : {}),
+    // #827: surface served model id so the audit row pins the upstream
+    // snapshot the runner actually used.
+    ...(typeof raw.model === "string" && raw.model.length > 0 ? { model: raw.model } : {}),
   };
 }
 
@@ -371,6 +382,7 @@ function parseSubprocessResponse(raw: unknown): OpenCodeChatResponse {
   const finishReason =
     typeof obj["finishReason"] === "string" ? (obj["finishReason"] as string) : undefined;
   const refusal = typeof obj["refusal"] === "string" ? (obj["refusal"] as string) : undefined;
+  const model = typeof obj["model"] === "string" ? (obj["model"] as string) : undefined;
   return {
     text,
     usage: {
@@ -378,6 +390,7 @@ function parseSubprocessResponse(raw: unknown): OpenCodeChatResponse {
       outputTokens,
       ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
     },
+    ...(model !== undefined ? { model } : {}),
     ...(finishReason !== undefined ? { finishReason } : {}),
     ...(refusal !== undefined ? { refusal } : {}),
   };
