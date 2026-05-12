@@ -39,6 +39,11 @@ export {
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_AUDIT_EVENT_BODY_BYTES,
+  MAX_BUDGET_LIMIT_MICRO_USD,
+  MAX_BUDGET_THRESHOLD_BPS,
+  MAX_BUDGET_THRESHOLDS,
+  MAX_COST_EVENT_AMOUNT_MICRO_USD,
+  MAX_COST_MODEL_BYTES,
   MAX_EVENT_LSN_BYTES,
   MAX_FROZEN_ARGS_BYTES,
   MAX_LOCAL_ID_BYTES,
@@ -75,6 +80,35 @@ export {
 } from "./budgets.ts";
 export type { JsonPrimitive, JsonValue } from "./canonical-json.ts";
 export { assertJcsValue, canonicalJSON } from "./canonical-json.ts";
+export type {
+  BudgetId,
+  BudgetScope,
+  BudgetSetAuditPayload,
+  BudgetThresholdCrossedAuditPayload,
+  CostAuditEventKind,
+  CostAuditPayload,
+  CostEventAuditPayload,
+  CostUnits,
+  CostValidationError,
+  CostValidationResult,
+  MicroUsd,
+} from "./cost.ts";
+export {
+  asBudgetId,
+  asMicroUsd,
+  BUDGET_SCOPE_VALUES,
+  costAuditPayloadFromJsonValue,
+  costAuditPayloadToBytes,
+  costAuditPayloadToJsonValue,
+  isBudgetId,
+  isBudgetScope,
+  isCostAuditEventKind,
+  isMicroUsd,
+  validateBudgetSetAuditPayload,
+  validateBudgetThresholdCrossedAuditPayload,
+  validateCostAuditPayloadForKind,
+  validateCostEventAuditPayload,
+} from "./cost.ts";
 export type { EventLsn, ParsedLsn } from "./event-lsn.ts";
 export {
   compareLsn,

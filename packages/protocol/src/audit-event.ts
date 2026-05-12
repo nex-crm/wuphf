@@ -25,6 +25,11 @@ import {
   validateMerkleRootSignatureBudget,
 } from "./budgets.ts";
 import { canonicalJSON } from "./canonical-json.ts";
+import {
+  type CostAuditEventKind,
+  costAuditPayloadFromJsonValue,
+  validateCostAuditPayloadForKind,
+} from "./cost.ts";
 import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn, parseLsn } from "./event-lsn.ts";
 import { isReceiptId, type ReceiptId, type ReceiptValidationResult } from "./receipt.ts";
 import { assertKnownKeys, hasOwn, pointer, recordValue, requireRecord } from "./receipt-utils.ts";
@@ -48,6 +53,8 @@ export const AUDIT_EVENT_KIND_VALUES = [
   "approval_requested",
   "approval_decision",
   "cost_event",
+  "budget_set",
+  "budget_threshold_crossed",
   "tool_call_started",
   "tool_call_completed",
   "external_write_proposed",
@@ -91,6 +98,14 @@ export const PAYLOAD_KIND_METADATA = {
   cost_event: {
     description: "Token or cost accounting changed.",
     bodySchemaRef: "wuphf.audit.payload.cost_event.v1",
+  },
+  budget_set: {
+    description: "A cost budget was created, updated, or tombstoned.",
+    bodySchemaRef: "wuphf.audit.payload.budget_set.v1",
+  },
+  budget_threshold_crossed: {
+    description: "Cumulative spend crossed a configured budget threshold.",
+    bodySchemaRef: "wuphf.audit.payload.budget_threshold_crossed.v1",
   },
   tool_call_started: {
     description: "A tool invocation began.",
@@ -140,6 +155,11 @@ const THREAD_AUDIT_EVENT_KIND_SET: ReadonlySet<string> = new Set<string>([
   "thread_spec_edited",
   "thread_status_changed",
 ]);
+const COST_AUDIT_EVENT_KIND_SET: ReadonlySet<string> = new Set<string>([
+  "cost_event",
+  "budget_set",
+  "budget_threshold_crossed",
+]);
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 export interface AuditEventPayload {
@@ -163,8 +183,13 @@ export function validateAuditEventPayloadBody(
   kind: AuditEventKind,
   payload: unknown,
 ): ReceiptValidationResult {
-  if (!isThreadAuditEventKind(kind)) return { ok: true };
-  return validateThreadAuditPayloadForKind(kind, payload);
+  if (isThreadAuditEventKind(kind)) {
+    return validateThreadAuditPayloadForKind(kind, payload);
+  }
+  if (isCostAuditEventKind(kind)) {
+    return validateCostAuditPayloadForKind(kind, payload);
+  }
+  return { ok: true };
 }
 
 export interface MerkleRootRecord {
@@ -522,6 +547,7 @@ function validateAuditEventRecordShape(record: AuditEventRecord): void {
     throw new Error(`serializeAuditEventRecordForHash: ${bodyBudget.reason}`);
   }
   validateThreadAuditEventBodyBytes(record.payload.kind, record.payload.body);
+  validateCostAuditEventBodyBytes(record.payload.kind, record.payload.body);
 }
 
 function assertAuditEventPayloadKind(kind: unknown): asserts kind is AuditEventKind {
@@ -534,6 +560,44 @@ function assertAuditEventPayloadKind(kind: unknown): asserts kind is AuditEventK
 
 function isThreadAuditEventKind(kind: AuditEventKind): kind is ThreadAuditEventKind {
   return THREAD_AUDIT_EVENT_KIND_SET.has(kind);
+}
+
+function isCostAuditEventKind(kind: AuditEventKind): kind is CostAuditEventKind {
+  return COST_AUDIT_EVENT_KIND_SET.has(kind);
+}
+
+function validateCostAuditEventBodyBytes(kind: AuditEventKind, body: Uint8Array): void {
+  if (!isCostAuditEventKind(kind)) return;
+  let parsed: unknown;
+  let decoded: string;
+  try {
+    decoded = UTF8_DECODER.decode(body);
+    parsed = JSON.parse(decoded);
+  } catch (err) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body must be JSON for ${kind}: ${errorMessage(err)}`,
+    );
+  }
+  let canonical: string;
+  try {
+    canonical = canonicalJSON(parsed);
+  } catch (err) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body invalid canonical JSON for ${kind}: ${errorMessage(err)}`,
+    );
+  }
+  if (canonical !== decoded) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body must be canonical JSON for ${kind}`,
+    );
+  }
+  try {
+    costAuditPayloadFromJsonValue(kind, parsed);
+  } catch (err) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body invalid for ${kind}: ${errorMessage(err)}`,
+    );
+  }
 }
 
 function validateThreadAuditEventBodyBytes(kind: AuditEventKind, body: Uint8Array): void {
