@@ -209,7 +209,10 @@ async function routeRequest(
       methodNotAllowed(res);
       return;
     }
-    await handleReceiptGet(pathname, res, { receiptStore: deps.receiptStore });
+    await handleReceiptGet(pathname, res, {
+      receiptStore: deps.receiptStore,
+      logger: deps.logger,
+    });
     return;
   }
   if (pathname.startsWith("/api/threads/") && pathname.endsWith("/receipts")) {
@@ -217,7 +220,10 @@ async function routeRequest(
       methodNotAllowed(res);
       return;
     }
-    await handleThreadReceiptsList(pathname, res, { receiptStore: deps.receiptStore });
+    await handleThreadReceiptsList(req, res, {
+      receiptStore: deps.receiptStore,
+      logger: deps.logger,
+    });
     return;
   }
   // Authenticated catch-all for unknown `/api/*` routes. Without this,

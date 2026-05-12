@@ -19,7 +19,8 @@
     "dev": "bun run electron:install && electron-vite dev",
     "preview": "bun run electron:install && electron-vite preview",
     "check:ipc-allowlist": "bash scripts/check-ipc-allowlist.sh",
-    "check:invariants": "bash scripts/check-invariants.sh"
+    "check:invariants": "bash scripts/check-invariants.sh",
+    "check:build-externals": "bash scripts/check-build-externals.sh"
   },
   "dependencies": {
     "@wuphf/broker": "workspace:*",

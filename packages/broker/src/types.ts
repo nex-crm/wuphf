@@ -58,11 +58,16 @@ export interface BrokerConfig {
   /**
    * Receipt persistence backend. When absent, `createBroker` constructs
    * an in-memory store (`InMemoryReceiptStore`) — process-local, lost
-   * across restarts. Branch 6 (`feat/event-log-projections`) will ship a
-   * durable event-log implementation. The interface in branch 5 is
-   * intentionally minimal; branch 6 will widen `put`'s return shape to
-   * express byte-identical-retry semantics (which the current
-   * `{ existed: boolean }` cannot represent without route-handler help).
+   * across restarts. Durable hosts pass a `SqliteReceiptStore` from
+   * `@wuphf/broker/sqlite`. The interface is intentionally minimal:
+   * idempotency-key semantics (byte-identical retry returns 200 no-op)
+   * are deferred to a future widening of `put`'s return shape.
+   *
+   * Ownership: when a host supplies its own `receiptStore`, the host
+   * owns its lifecycle. `broker.stop()` closes the HTTP/WebSocket
+   * surface and the WS server but does NOT close the injected store —
+   * call `store.close()` (or equivalent) after `broker.stop()` to
+   * release any underlying handle.
    */
   readonly receiptStore?: ReceiptStore;
 }

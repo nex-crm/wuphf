@@ -25,7 +25,15 @@ import {
   type ThreadId,
 } from "@wuphf/protocol";
 
-import { type ReceiptStore, ReceiptStoreFullError } from "./receipt-store.ts";
+import {
+  InvalidListCursorError,
+  InvalidListLimitError,
+  MAX_LIST_LIMIT,
+  type ReceiptStore,
+  ReceiptStoreBusyError,
+  ReceiptStoreFullError,
+  ReceiptStoreUnavailableError,
+} from "./receipt-store.ts";
 import type { BrokerLogger } from "./types.ts";
 
 // 1 MiB body budget. This is the broker's wire-layer pre-parse cap and is
@@ -40,14 +48,7 @@ import type { BrokerLogger } from "./types.ts";
 // this value if a future use case needs to submit larger receipts over
 // HTTP, but do NOT raise it past the protocol cap.
 const MAX_RECEIPT_BODY_BYTES = 1_048_576;
-
-// Hard ceiling for thread-scoped list responses. Without a limit a single
-// thread can accumulate enough receipts to make `GET /api/threads/:tid/
-// receipts` a memory-pressure path (the response is materialized as one
-// JSON-array string before send). Branch 6 will replace this with cursor
-// pagination; for branch 5 the cap is coarse but bounded. A 200 response
-// at or near the cap is the signal that pagination will be needed.
-const MAX_THREAD_LIST_RECEIPTS = 1_000;
+const LIST_LIMIT_PARAM = /^[1-9][0-9]*$/;
 
 interface ReceiptRouteDeps {
   readonly receiptStore: ReceiptStore;
@@ -147,6 +148,9 @@ export async function handleReceiptCreate(
       writeJsonResponse(res, 507, JSON.stringify({ error: "store_full" }));
       return;
     }
+    if (writeStorageErrorResponse(res, err, deps.logger, "receipt_post_rejected")) {
+      return;
+    }
     throw err;
   }
   if (result.existed) {
@@ -164,7 +168,7 @@ export async function handleReceiptCreate(
 export async function handleReceiptGet(
   pathname: string,
   res: ServerResponse,
-  deps: { readonly receiptStore: ReceiptStore },
+  deps: ReceiptRouteDeps,
 ): Promise<void> {
   const idSegment = pathname.slice("/api/receipts/".length);
   if (idSegment.length === 0 || idSegment.includes("/")) {
@@ -188,7 +192,15 @@ export async function handleReceiptGet(
     return;
   }
 
-  const receipt = await deps.receiptStore.get(id);
+  let receipt: ReceiptSnapshot | null;
+  try {
+    receipt = await deps.receiptStore.get(id);
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps.logger, "receipt_get_rejected")) {
+      return;
+    }
+    throw err;
+  }
   if (receipt === null) {
     notFoundJson(res);
     return;
@@ -197,11 +209,13 @@ export async function handleReceiptGet(
 }
 
 export async function handleThreadReceiptsList(
-  pathname: string,
+  req: IncomingMessage,
   res: ServerResponse,
-  deps: { readonly receiptStore: ReceiptStore },
+  deps: ReceiptRouteDeps,
 ): Promise<void> {
   // /api/threads/:tid/receipts — extract :tid and require an exact match.
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  const pathname = url.pathname;
   const prefix = "/api/threads/";
   const suffix = "/receipts";
   if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) {
@@ -230,23 +244,129 @@ export async function handleThreadReceiptsList(
     return;
   }
 
-  const list = await deps.receiptStore.list({ threadId });
-  // Cap the response size: a single thread can otherwise accumulate
-  // enough receipts to make this a memory pressure path. Branch 6 adds
-  // cursor pagination; for now we truncate at the ceiling so the response
-  // stays bounded. Clients hitting the cap will see exactly
-  // MAX_THREAD_LIST_RECEIPTS receipts — there is no continuation token
-  // yet (added in branch 6).
-  const truncated =
-    list.length > MAX_THREAD_LIST_RECEIPTS ? list.slice(0, MAX_THREAD_LIST_RECEIPTS) : list;
-  // Serialize each via the codec so the wire shape is identical to the
-  // single-receipt GET response. Concatenate as a JSON array.
-  const body = `[${truncated.map((r) => receiptToJson(r)).join(",")}]`;
-  writeJsonResponse(res, 200, body);
+  const limitParam = parseListLimitParam(url.searchParams);
+  if (limitParam === "invalid") {
+    writeJsonResponse(res, 400, JSON.stringify({ error: "invalid_limit" }));
+    return;
+  }
+
+  // The route's default `limit` (when the caller didn't supply one) is
+  // `MAX_LIST_LIMIT`, NOT the store's `DEFAULT_LIST_LIMIT`. The pre-
+  // pagination route returned up to 1000 receipts in a single call
+  // without a continuation token; clients that ignore `Link` still
+  // see the same first-page count they did before, so the pagination
+  // roll-out doesn't silently lose receipts 101-1000.
+  //
+  // Canonicalize the effective limit before passing it to the store
+  // and before emitting `Link`. The store already clamps internally,
+  // but the public route contract says `limit` is 1–1000; echoing
+  // `?limit=9999` back in a `Link` URL diverges from that contract
+  // and confuses Go/Rust client generators.
+  const effectiveLimit =
+    limitParam !== undefined ? Math.min(limitParam.value, MAX_LIST_LIMIT) : MAX_LIST_LIMIT;
+
+  // Empty `?cursor=` is normalized to "no cursor". The store throws
+  // `InvalidListCursorError` for `""` which is the right semantic for
+  // a programmatic caller, but at the HTTP boundary `?cursor=` (a
+  // present-but-blank query value) is ergonomically indistinguishable
+  // from "no cursor" and clients should not have to omit the param
+  // entirely just to start at the beginning.
+  const cursorRaw = url.searchParams.get("cursor");
+  const cursor = cursorRaw !== null && cursorRaw.length > 0 ? cursorRaw : undefined;
+
+  let page: Awaited<ReturnType<ReceiptStore["list"]>>;
+  try {
+    page = await deps.receiptStore.list({
+      threadId,
+      ...(cursor !== undefined ? { cursor } : {}),
+      limit: effectiveLimit,
+    });
+  } catch (err) {
+    if (err instanceof InvalidListCursorError) {
+      writeJsonResponse(res, 400, JSON.stringify({ error: "invalid_cursor" }));
+      return;
+    }
+    if (err instanceof InvalidListLimitError) {
+      writeJsonResponse(res, 400, JSON.stringify({ error: "invalid_limit" }));
+      return;
+    }
+    if (writeStorageErrorResponse(res, err, deps.logger, "receipt_list_rejected")) {
+      return;
+    }
+    throw err;
+  }
+
+  const body = `[${page.items.map((r) => receiptToJson(r)).join(",")}]`;
+  // Emit the clamped effective limit in the next-page `Link` URL, not
+  // the caller's raw value, so an over-cap `?limit=9999` doesn't echo
+  // back as a contract-violating cursor. If the caller didn't supply
+  // `limit`, omit it from the URL so the next call inherits the
+  // route's default.
+  const linkLimit = limitParam !== undefined ? String(effectiveLimit) : undefined;
+  const headers =
+    page.nextCursor === null
+      ? {}
+      : {
+          Link: buildThreadReceiptsNextLink(threadId, page.nextCursor, linkLimit),
+        };
+  writeJsonResponse(res, 200, body, headers);
+}
+
+function parseListLimitParam(
+  searchParams: URLSearchParams,
+): { readonly raw: string; readonly value: number } | "invalid" | undefined {
+  if (!searchParams.has("limit")) {
+    return undefined;
+  }
+  const raw = searchParams.get("limit") ?? "";
+  if (!LIST_LIMIT_PARAM.test(raw)) {
+    return "invalid";
+  }
+  return { raw, value: Number(raw) };
+}
+
+function buildThreadReceiptsNextLink(
+  threadId: ThreadId,
+  cursor: string,
+  limit: string | undefined,
+): string {
+  const query = [`cursor=${encodeURIComponent(cursor)}`];
+  if (limit !== undefined) {
+    query.push(`limit=${encodeURIComponent(limit)}`);
+  }
+  return `</api/threads/${encodeURIComponent(threadId)}/receipts?${query.join("&")}>; rel="next"`;
 }
 
 function notFoundJson(res: ServerResponse): void {
   writeJsonResponse(res, 404, JSON.stringify({ error: "not_found" }));
+}
+
+// Shared storage-error → HTTP response mapper used by every receipt
+// route. Returns `true` when the error was classified + handled (the
+// response is now written); returns `false` if the error wasn't a
+// storage-error class (caller should `throw` to surface a 500).
+// Busy → 503 + `Retry-After: 1` (retry will likely succeed once the
+// write lock clears). Unavailable → 503 with no `Retry-After`
+// (operator intervention needed for readonly/IOERR/corruption).
+function writeStorageErrorResponse(
+  res: ServerResponse,
+  err: unknown,
+  logger: BrokerLogger,
+  rejectedEvent: string,
+): boolean {
+  if (err instanceof ReceiptStoreBusyError) {
+    logger.warn(rejectedEvent, { reason: "store_busy" });
+    writeJsonResponse(res, 503, JSON.stringify({ error: "store_busy" }), {
+      "Retry-After": "1",
+    });
+    return true;
+  }
+  if (err instanceof ReceiptStoreUnavailableError) {
+    logger.error(rejectedEvent, { reason: "storage_error" });
+    writeJsonResponse(res, 503, JSON.stringify({ error: "storage_error" }));
+    return true;
+  }
+  return false;
 }
 
 // Shared JSON response helper. Sets `Content-Type: application/json;

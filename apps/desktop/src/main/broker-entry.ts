@@ -8,9 +8,17 @@
 // `/index.html`, and `/assets/*` return 404 — the dev server owns those
 // surfaces in dev.
 
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 import { type BrokerHandle, type BrokerLogger, createBroker } from "@wuphf/broker";
+// `SqliteReceiptStore` and its native `better-sqlite3` binding are loaded
+// lazily via the `@wuphf/broker/sqlite` subpath so the utility process
+// doesn't evaluate the native addon when the durable store isn't wired
+// (e.g. headless smoke tests, or future hosts that bring their own
+// ReceiptStore). Type-only import keeps the field type narrow without
+// triggering runtime evaluation.
+import type { SqliteReceiptStore } from "@wuphf/broker/sqlite";
 
 const parentPort = process.parentPort;
 if (!parentPort) {
@@ -25,9 +33,15 @@ const ALIVE_INTERVAL_MS = 1_000;
 
 const RENDERER_DIST_ENV = "WUPHF_RENDERER_DIST";
 const DEV_RENDERER_ORIGIN_ENV = "WUPHF_DEV_RENDERER_ORIGIN";
+const RECEIPT_STORE_PATH_ENV = "WUPHF_RECEIPT_STORE_PATH";
 
 let aliveInterval: NodeJS.Timeout | null = null;
 let broker: BrokerHandle | null = null;
+// Module-scoped so `shutdown()` can close the SQLite handle after
+// `broker.stop()`. Relying on process teardown to release the DB
+// skips an explicit WAL checkpoint and leaves recovery work for the
+// next launch.
+let receiptStore: SqliteReceiptStore | null = null;
 let shuttingDown = false;
 
 function sendAlive(): void {
@@ -57,6 +71,16 @@ async function shutdown(): Promise<void> {
     } catch {
       // Broker shutdown failures must not block process exit; the supervisor
       // will SIGKILL after the force grace if needed.
+    }
+  }
+  if (receiptStore !== null) {
+    try {
+      // Triggers SQLite's WAL checkpoint + file handle release. Idempotent;
+      // safe to call even when the broker stop above failed.
+      receiptStore.close();
+    } catch {
+      // Same swallow-on-shutdown policy as broker.stop(): a failing close
+      // must not deadlock process exit.
     }
   }
   process.exit(0);
@@ -89,11 +113,45 @@ async function main(): Promise<void> {
   const devOrigin = process.env[DEV_RENDERER_ORIGIN_ENV];
   const trustedOrigins =
     typeof devOrigin === "string" && devOrigin.length > 0 ? [devOrigin] : undefined;
+
+  // Open the durable, SQLite event-log-backed ReceiptStore at the path
+  // `main/index.ts` plumbed through. If the env var is absent we fall
+  // through to `createBroker`'s default (the in-memory store) — useful
+  // for tests and the headless smoke path. The `SqliteReceiptStore`
+  // module is loaded via dynamic import here so the native
+  // `better-sqlite3` binding is only evaluated when the durable store
+  // is actually wired.
+  const receiptStorePath = process.env[RECEIPT_STORE_PATH_ENV];
+  if (typeof receiptStorePath === "string" && receiptStorePath.length > 0) {
+    const storeDir = dirname(receiptStorePath);
+    // Ensure the parent directory exists. `userData` is created by
+    // Electron on first launch; this guards against the host having
+    // deleted it (rare but recoverable).
+    mkdirSync(storeDir, { recursive: true });
+    // POSIX: lock down the receipt store directory and DB sidecar
+    // permissions. Receipts can contain local metadata (worktree paths,
+    // source reads, model details, error text); on shared systems the
+    // default umask may leave the DB world-readable. Windows uses ACLs
+    // and ignores `chmod`, so we no-op there.
+    if (process.platform !== "win32") {
+      tightenStorePermissions(storeDir, receiptStorePath);
+    }
+    const { SqliteReceiptStore } = await import("@wuphf/broker/sqlite");
+    receiptStore = SqliteReceiptStore.open({ path: receiptStorePath });
+    // Tighten again after open — better-sqlite3 creates the DB + WAL/SHM
+    // sidecars with the process umask, so the post-open pass catches
+    // them. Idempotent on the directory.
+    if (process.platform !== "win32") {
+      tightenStorePermissions(storeDir, receiptStorePath);
+    }
+  }
+
   broker = await createBroker({
     port: 0,
     renderer,
     logger,
     ...(trustedOrigins !== undefined ? { trustedOrigins } : {}),
+    ...(receiptStore !== null ? { receiptStore } : {}),
   });
   sendReady(broker.url);
   sendAlive();
@@ -114,4 +172,27 @@ function isShutdownMessage(message: unknown): message is { readonly type: "shutd
     Object.hasOwn(message, "type") &&
     (message as { readonly type?: unknown }).type === "shutdown"
   );
+}
+
+// POSIX-only: tighten the receipt store directory + DB sidecars to
+// owner-only access. Best-effort — if a `chmod` fails we keep going
+// rather than refuse to start (some sandboxed filesystems error on
+// chmod). Windows uses ACLs and ignores `chmod`, so callers branch on
+// `process.platform` before calling this.
+function tightenStorePermissions(storeDir: string, dbPath: string): void {
+  const tryChmod = (path: string, mode: number): void => {
+    try {
+      chmodSync(path, mode);
+    } catch {
+      // Filesystem may refuse (network mount, sandbox, etc). Permissions
+      // are defense-in-depth on top of the userData isolation; not a
+      // showstopper.
+    }
+  };
+  tryChmod(storeDir, 0o700);
+  for (const sidecar of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]) {
+    if (existsSync(sidecar)) {
+      tryChmod(sidecar, 0o600);
+    }
+  }
 }

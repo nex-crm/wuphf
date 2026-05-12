@@ -6,7 +6,8 @@
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./sqlite": "./src/sqlite-receipt-store.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -21,10 +22,12 @@
   },
   "dependencies": {
     "@wuphf/protocol": "workspace:*",
+    "better-sqlite3": "12.9.0",
     "ws": "8.20.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
+    "@types/better-sqlite3": "7.6.13",
     "@types/node": "^22.10.0",
     "@types/ws": "8.18.1",
     "@vitest/coverage-v8": "2.1.9",
