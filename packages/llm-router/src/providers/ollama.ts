@@ -73,7 +73,7 @@ const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
  * the real `Ollama` client matches.
  *
  * The signature mirrors `client.chat(request)` for the non-streaming
- * (`stream: false`) variant. Streaming is out of scope for PR B.4;
+ * (`stream: false`) variant. Streaming is out of scope;
  * the gateway's response shape is a single completion.
  *
  * `OllamaMessage` deliberately omits the SDK's `thinking`, `images`,
@@ -173,7 +173,7 @@ export function createOllamaProvider(args: CreateOllamaProviderArgs): Provider {
       return {
         text: raw.message?.content ?? "",
         usage: usageToCostUnits(raw),
-        // #827: Ollama echoes the served model back; surface it so the
+        // Ollama echoes the served model back; surface it so the
         // audit row records the exact served identifier (host-side
         // model pulls can pin to a digest).
         ...(typeof raw.model === "string" && raw.model.length > 0 ? { model: raw.model } : {}),
@@ -252,12 +252,45 @@ export async function createOllamaProviderWithUrl(
   const sdk = await import("ollama");
   const OllamaCtor = sdk.Ollama;
   const client = new OllamaCtor({ host });
-  // The SDK's `chat()` is overloaded on the `stream` discriminator; the
-  // structural `OllamaClient` we expose only models the non-streaming
-  // form, so we widen via `unknown` rather than collapse the SDK's
-  // overload set on the public type.
   return createOllamaProvider({
-    client: client as unknown as OllamaClient,
+    client: adaptOllamaSdkClient(client),
     ...(args.pricing !== undefined ? { pricing: args.pricing } : {}),
   });
+}
+
+/**
+ * Type-checked adapter from the real Ollama SDK client to our
+ * structural `OllamaClient` interface. The SDK's `chat()` is overloaded
+ * on the `stream` discriminator; we model only the non-streaming form
+ * on `OllamaClient`. The wrapper picks the non-streaming overload by
+ * passing `stream: false` explicitly, which forces tsc to check that
+ * the SDK still exposes that call shape with our return type. Replaces
+ * the previous `as unknown as OllamaClient` cast that hid signature
+ * drift.
+ *
+ * Note on `messages`: the SDK declares `Message[]` with `role: string`
+ * (wider than our narrow `"user" | "assistant" | "system"` union). We
+ * narrow our internal type to keep adapter consumers honest; the SDK's
+ * wider type accepts our narrower values so the assignment is safe.
+ * We materialize a mutable copy once per call.
+ */
+type OllamaSdkClient = {
+  chat(request: {
+    model: string;
+    stream: false;
+    messages: Array<{ role: string; content: string }>;
+    options?: { num_predict?: number };
+  }): Promise<OllamaChatResponse>;
+};
+
+function adaptOllamaSdkClient(sdkClient: OllamaSdkClient): OllamaClient {
+  return {
+    chat: (request) =>
+      sdkClient.chat({
+        model: request.model,
+        stream: false,
+        messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+        ...(request.options !== undefined ? { options: { ...request.options } } : {}),
+      }),
+  };
 }

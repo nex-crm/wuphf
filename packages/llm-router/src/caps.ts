@@ -59,11 +59,32 @@ interface AgentRuntimeState {
   breaker: BreakerState;
 }
 
+/**
+ * In-flight reservation handle. Returned by `reserveAndPreflight`; must
+ * be either committed (success) or released (failure) so the reservation
+ * does not leak. Reservations count toward subsequent preflight checks
+ * until cleared so concurrent calls can't all pass a stale cap check and
+ * then all bill the provider.
+ */
+export interface Reservation {
+  readonly id: number;
+  readonly agentSlug: string;
+  readonly estimatedMicroUsd: number;
+}
+
 export class Caps {
   private readonly ledger: CostLedger;
   private readonly config: CapsConfig;
   private readonly nowMs: () => number;
   private readonly agents = new Map<string, AgentRuntimeState>();
+  /**
+   * Active reservations, keyed by reservation id. Counted toward both the
+   * daily-cap and wake-cap preflight checks so two concurrent calls
+   * can't both pass a stale snapshot of `cost_by_agent`/`wakes[]` and
+   * then both bill the provider.
+   */
+  private readonly reservations = new Map<number, Reservation>();
+  private nextReservationId = 1;
   /**
    * Last "activity" timestamp for the idle gate. Initialised to construction
    * time so the gateway starts active; `noteHumanActivity` resets it on
@@ -131,6 +152,84 @@ export class Caps {
     this.stateFor(agentSlug).wakes.push(this.nowMs());
   }
 
+  /**
+   * Atomically check daily cap + wake cap and reserve a slot. The
+   * `estimatedMicroUsd` is a pessimistic upper bound on what the call
+   * might cost; once the ledger writes the actual cost, the caller
+   * `commitReservation` (or `releaseReservation` on failure) to clear
+   * the reservation.
+   *
+   * The reservation is counted toward subsequent preflight checks so a
+   * burst of concurrent `Gateway.complete()` calls cannot all see the
+   * same pre-call ledger snapshot and all pass. This closes the cost-
+   * ceiling bypass surfaced by the PR #834 round-1 review (adversarial
+   * BLOCK + security HIGH).
+   */
+  reserveAndPreflight(agentSlug: string, estimatedMicroUsd: number): Reservation {
+    if (
+      typeof estimatedMicroUsd !== "number" ||
+      !Number.isSafeInteger(estimatedMicroUsd) ||
+      estimatedMicroUsd < 0
+    ) {
+      throw new Error(
+        `reserveAndPreflight: estimatedMicroUsd must be a non-negative safe integer, got ${String(estimatedMicroUsd)}`,
+      );
+    }
+    const today = isoDateUtc(new Date(this.nowMs()));
+    const ledgerTotal = this.officeSpendMicroUsd(today);
+    const pendingTotal = this.totalPendingReservationsMicroUsd();
+    if (ledgerTotal + pendingTotal + estimatedMicroUsd > this.config.dailyMicroUsd) {
+      const retryAfterMs = msUntilNextUtcMidnight(this.nowMs());
+      throw new CapExceededError(
+        "daily",
+        ledgerTotal + pendingTotal,
+        this.config.dailyMicroUsd,
+        retryAfterMs,
+      );
+    }
+    const now = this.nowMs();
+    const state = this.stateFor(agentSlug);
+    pruneTimestamps(state.wakes, now - this.config.wakeWindowMs);
+    const pendingWakesForAgent = this.pendingWakesFor(agentSlug);
+    if (state.wakes.length + pendingWakesForAgent >= this.config.wakeCapPerHour) {
+      const oldest = state.wakes[0] ?? now;
+      const retryAfterMs = Math.max(0, oldest + this.config.wakeWindowMs - now);
+      throw new CapExceededError(
+        "wake",
+        state.wakes.length + pendingWakesForAgent,
+        this.config.wakeCapPerHour,
+        retryAfterMs,
+      );
+    }
+    const reservation: Reservation = {
+      id: this.nextReservationId++,
+      agentSlug,
+      estimatedMicroUsd,
+    };
+    this.reservations.set(reservation.id, reservation);
+    return reservation;
+  }
+
+  /**
+   * Success path: drop the reservation and record the wake. The actual
+   * spend lives in the ledger; cost_by_agent will reflect it.
+   */
+  commitReservation(reservation: Reservation): void {
+    if (this.reservations.delete(reservation.id)) {
+      this.recordWake(reservation.agentSlug);
+    }
+  }
+
+  /**
+   * Failure path: drop the reservation without recording a wake. The
+   * caller is expected to also call `recordError` for breaker-eligible
+   * failures; bad-input failures release the reservation but skip the
+   * breaker per existing policy.
+   */
+  releaseReservation(reservation: Reservation): void {
+    this.reservations.delete(reservation.id);
+  }
+
   preflightBreaker(agentSlug: string): void {
     const state = this.stateFor(agentSlug);
     if (state.breaker.status === "open") {
@@ -195,6 +294,20 @@ export class Caps {
       total += row.totalMicroUsd as number;
     }
     return total;
+  }
+
+  private totalPendingReservationsMicroUsd(): number {
+    let total = 0;
+    for (const r of this.reservations.values()) total += r.estimatedMicroUsd;
+    return total;
+  }
+
+  private pendingWakesFor(agentSlug: string): number {
+    let n = 0;
+    for (const r of this.reservations.values()) {
+      if (r.agentSlug === agentSlug) n += 1;
+    }
+    return n;
   }
 
   private stateFor(agentSlug: string): AgentRuntimeState {

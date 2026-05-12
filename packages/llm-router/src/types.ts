@@ -46,7 +46,6 @@ export interface ProviderRequest {
    * same prompt do NOT share a server-side dedup window. Adapters that
    * don't (stub, ollama) ignore it. Optional so adapters and tests
    * outside the gateway path can still construct a request.
-   * See triangulation #3 finding B3-2.
    */
   readonly requestKey?: string;
 }
@@ -57,8 +56,8 @@ export interface ProviderRequest {
  *
  * `finishReason` and `refusal` are optional adapter signals so callers
  * can distinguish a real completion from a truncation / content-filter
- * / refusal — see triangulation #3 finding B3-3. Adapters that don't
- * surface these (stub, ollama) leave them undefined.
+ * / refusal. Adapters that don't surface these (stub, ollama) leave
+ * them undefined.
  */
 export interface ProviderResponse {
   readonly text: string;
@@ -70,8 +69,8 @@ export interface ProviderResponse {
    * snapshot like `claude-haiku-4-5-20251001` while `ProviderRequest.model`
    * carries the alias `claude-haiku-4-5`. The gateway records this in the
    * cost_event audit row when present, falling back to `req.model` so
-   * replay across runtime versions stays stable. See triangulation B2-defer
-   * #827. Adapters that don't expose the served model leave this undefined.
+   * replay across runtime versions stays stable. Adapters that don't
+   * expose the served model leave this undefined.
    */
   readonly model?: string;
 }
@@ -93,8 +92,7 @@ export interface Provider {
    * match of `ProviderRequest.model` against this list — NOT by `kind`.
    * Two providers can share a `kind` (e.g. real openai-compat + stub
    * both report `"openai-compat"` for audit purposes) without colliding
-   * because each owns a disjoint set of model strings. See
-   * triangulation finding H4.
+   * because each owns a disjoint set of model strings.
    */
   readonly models: readonly string[];
   readonly costEstimator: CostEstimator;
@@ -124,7 +122,7 @@ export interface GatewayCompletionResult {
    * Refusal text when the model declined to answer (OpenAI message.refusal,
    * Anthropic stop_reason === "refusal"). Distinct from `text` so callers
    * can implement policy gates instead of mistaking refusal for normal
-   * output. See triangulation #3 finding B3-3.
+   * output.
    */
   readonly refusal?: string;
 }

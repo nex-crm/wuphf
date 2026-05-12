@@ -32,9 +32,15 @@ interface DedupeEntry {
  * In-memory dedupe cache. Keyed by SHA-256 of canonical JSON of the
  * request. The result is the original (non-replay) gateway result; we
  * flip `dedupeReplay: true` on every read so callers can log the replay.
+ *
+ * Also tracks **in-flight** promises so a concurrent identical call can
+ * coalesce onto the original instead of issuing a second paid provider
+ * call. Closes the cost-ceiling bypass surfaced by the PR #834 round-1
+ * adversarial + security lenses.
  */
 export class DedupeCache {
   private readonly entries = new Map<Sha256Hex, DedupeEntry>();
+  private readonly inFlight = new Map<Sha256Hex, Promise<GatewayCompletionResult>>();
   private readonly nowMs: () => number;
   private readonly windowMs: number;
 
@@ -94,6 +100,41 @@ export class DedupeCache {
   size(): number {
     return this.entries.size;
   }
+
+  /**
+   * Returns the in-flight promise for an identical pending request, or
+   * `null` if no call is currently in flight for this key. The caller
+   * awaits the returned promise to coalesce onto the original result.
+   */
+  lookupInFlight(
+    ctx: SupervisorContext,
+    req: ProviderRequest,
+  ): Promise<GatewayCompletionResult> | null {
+    const key = hashRequest(ctx, req);
+    return this.inFlight.get(key) ?? null;
+  }
+
+  /**
+   * Register an in-flight promise. The caller must clear the entry once
+   * the promise settles (in either direction) so the slot doesn't leak.
+   */
+  registerInFlight(
+    ctx: SupervisorContext,
+    req: ProviderRequest,
+    promise: Promise<GatewayCompletionResult>,
+  ): void {
+    const key = hashRequest(ctx, req);
+    this.inFlight.set(key, promise);
+  }
+
+  clearInFlight(ctx: SupervisorContext, req: ProviderRequest): void {
+    const key = hashRequest(ctx, req);
+    this.inFlight.delete(key);
+  }
+
+  inFlightSize(): number {
+    return this.inFlight.size;
+  }
 }
 
 /**
@@ -104,7 +145,7 @@ export class DedupeCache {
  * the key so dedupe stays scoped to one caller. Without them the same
  * prompt from a different agent would replay the original caller's
  * `costEventLsn` — leaking cost attribution AND bypassing wake-cap
- * accounting for the second caller. See triangulation finding B3.
+ * accounting for the second caller.
  *
  * `null` is used for absent optional fields so the canonical JSON shape
  * stays stable across callers; `omitUndefined` would shift key ordering

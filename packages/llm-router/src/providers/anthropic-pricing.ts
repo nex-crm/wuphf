@@ -14,8 +14,7 @@
 //   μUSD/tok. Sonnet/Haiku cache-read rates at $0.30/$0.10 per MTok
 //   rounded to 0 μUSD/tok, so a cache-heavy workload could spend
 //   real money while `cost_event.amountMicroUsd` recorded 0 — bypassing
-//   the daily cap. See triangulation #2 finding B2-2 (security BLOCK,
-//   api/sre HIGH).
+//   the daily cap. //   api/sre HIGH).
 //
 // All rates are integer μUSD per million tokens:
 //
@@ -81,7 +80,7 @@ export type AnthropicPricingTable = Readonly<Record<string, AnthropicModelPricin
  * Opus 4.5+ dropped 3x from the 4.1 generation per Anthropic's
  * 2025-11 announcement. The previous draft of this table used 4.1
  * rates for 4.5/4.7, which over-billed by 3x and would have caused
- * false daily-cap trips — see triangulation #2 finding B2-1.
+ * false daily-cap trips.
  *
  * Hosts that want negotiated rates pass a full `AnthropicPricingTable`
  * to `createAnthropicProvider`. The model registry derives from the
@@ -186,7 +185,7 @@ export function createAnthropicCostEstimator(pricing: AnthropicPricingTable): Co
 /**
  * Validate a pricing table at provider construction. Throws on any
  * invalid entry so the gateway never tries to bill a malformed rate.
- * See triangulation #2 finding B2-6.
+ * 
  */
 export function validateAnthropicPricingTable(table: AnthropicPricingTable): void {
   const models = Object.keys(table);

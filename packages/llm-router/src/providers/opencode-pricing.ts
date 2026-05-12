@@ -6,7 +6,7 @@
 // depends on whatever backing model the host has wired into the
 // opencode CLI / HTTP service.
 //
-// For PR B.5 we ship a zero-cost default table: the cost ledger still
+// We ship a zero-cost default table: the cost ledger still
 // writes one `cost_event` per call (Hard rule #1: no row, no
 // response) for accounting symmetry, with `amountMicroUsd = 0`. Hosts
 // override the table to model the real backing-model cost — same

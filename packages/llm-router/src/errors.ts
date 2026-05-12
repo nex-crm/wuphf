@@ -44,7 +44,7 @@ export class IdleModeError extends Error {
  * provider-side error. None are required — older adapters that don't
  * surface these stay backwards-compatible — but a real provider (e.g.
  * Anthropic) SHOULD populate them so on-call has parseable failure
- * info. See triangulation #2 finding B2-5.
+ * info on the wire.
  */
 export interface ProviderErrorMetadata {
   /** HTTP status (or other transport status) when applicable. */
@@ -82,7 +82,7 @@ export class ProviderError extends Error {
  * Caller-input error: the provider rejected the request as malformed
  * (400, 413, 422 in HTTP terms). The gateway does NOT count this as a
  * breaker strike — bad input from one caller shouldn't open the
- * breaker for the whole agent. See triangulation #2 finding B2-7.
+ * breaker for the whole agent.
  */
 export class BadRequestError extends Error {
   readonly code = "bad_request";

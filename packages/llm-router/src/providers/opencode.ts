@@ -85,7 +85,7 @@ export interface OpenCodeChatResponse {
    * Served model id — typically the underlying upstream the runner is
    * configured to use (e.g. `claude-sonnet-4-6-20251015`). Surfaced
    * through `ProviderResponse.model` so the audit row pins the served
-   * snapshot. See #827. Optional — runners that don't expose it leave
+   * snapshot.  Optional — runners that don't expose it leave
    * this undefined.
    */
   readonly model?: string;
@@ -98,7 +98,7 @@ export interface OpenCodeChatResponse {
   /**
    * Surface a refusal string if the runner declined. The gateway
    * routes this into `ProviderResponse.refusal` so callers can
-   * implement policy gates. Same B3-3 contract as the other adapters.
+   * implement policy gates. Same contract as the other adapters.
    */
   readonly refusal?: string;
 }
@@ -168,7 +168,7 @@ function buildProvider(kind: OpenCodeKind, args: CreateOpenCodeProviderArgs): Pr
       // Optional Idempotency-Key for HTTP-backed transports that
       // implement server-side dedup. Local subprocess transports
       // typically ignore headers — that's fine, the value is just
-      // informational. See triangulation #3 finding B3-1 / B3-2.
+      // informational.
       const options: OpenCodeRequestOptions = {
         headers: { "Idempotency-Key": deriveIdempotencyKey(req) },
       };
@@ -225,14 +225,14 @@ function buildProviderResponse(
   // Refusal-routing mirrors the OpenAI/Anthropic adapters: refusal
   // prose goes into the separate `refusal` field, `text` is empty so
   // a caller that ignores `refusal` can't treat refusal prose as a
-  // normal completion. See triangulation #3 finding B3-3.
+  // normal completion. 
   const isRefusal = typeof raw.refusal === "string" && raw.refusal.length > 0;
   return {
     text: isRefusal ? "" : raw.text,
     usage,
     ...(raw.finishReason !== undefined ? { finishReason: raw.finishReason } : {}),
     ...(isRefusal ? { refusal: raw.refusal as string } : {}),
-    // #827: surface served model id so the audit row pins the upstream
+    // Surface served model id so the audit row pins the upstream
     // snapshot the runner actually used.
     ...(typeof raw.model === "string" && raw.model.length > 0 ? { model: raw.model } : {}),
   };
@@ -287,7 +287,7 @@ export {
 // or replace them entirely.
 
 /**
- * Wire protocol the subprocess speaks. PR B.5 picks JSON-lines over
+ * Wire protocol the subprocess speaks. the adapter picks JSON-lines over
  * stdio: one request JSON line in, one response JSON line out. The
  * `opencode` and `opencodego` runners expose this contract; if a
  * specific build does not, the host implements its own transport.

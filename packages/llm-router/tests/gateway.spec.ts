@@ -420,8 +420,14 @@ describe("gateway construction-time validation (#828)", () => {
     const ledger = createCostLedger(db, eventLog);
     const stub = createStubProvider();
     // Forge a fake kind via `as` cast — the defense is the construction
-    // check, not the type system.
-    const forged: Provider = { ...stub, kind: "not-a-real-kind" as never };
+    // check, not the type system. Build the wrapper as a fresh object so
+    // the class-method `complete` is preserved (spread skips prototype).
+    const forged: Provider = {
+      kind: "not-a-real-kind" as never,
+      models: stub.models,
+      costEstimator: stub.costEstimator,
+      complete: stub.complete.bind(stub),
+    };
     try {
       expect(() =>
         createGateway({ ledger, providers: [forged], nowMs: () => Date.now() }),
@@ -505,9 +511,13 @@ describe("gateway rejects runaway cost estimate before ledger append (#824)", ()
     const eventLog = createEventLog(db);
     const ledger = createCostLedger(db, eventLog);
     const kind = asProviderKind("openai-compat");
-    // 200 million μUSD = $200 — exceeds the $100 per-event cap.
+    // Estimator returns $200 only when called with the real usage shape
+    // (output=1). Reservation pre-flight passes because the reservation
+    // estimate uses maxOutputTokens=8 as the hypothetical input/output,
+    // which the estimator stubs to 0 for those shapes.
     const estimator: CostEstimator = {
-      estimate: (_model, _usage) => 200_000_000 as never,
+      estimate: (_model, usage) =>
+        ((usage.outputTokens === 1 ? 200_000_000 : 0) as unknown) as never,
     };
     const provider: Provider = {
       kind,
@@ -518,7 +528,14 @@ describe("gateway rejects runaway cost estimate before ledger append (#824)", ()
         usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
       }),
     };
-    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    // Set daily cap to $300 so the reservation (which would be 0 under
+    // this estimator for max-token shape) doesn't trip on daily cap.
+    const gateway = createGateway({
+      ledger,
+      providers: [provider],
+      nowMs: () => Date.now(),
+      config: { caps: { dailyMicroUsd: 300_000_000 } },
+    });
     try {
       await expect(
         gateway.complete(
@@ -538,3 +555,234 @@ describe("gateway rejects runaway cost estimate before ledger append (#824)", ()
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// PR #834 round-1 BLOCK: concurrent-call bypass of caps + dedupe
+// ─────────────────────────────────────────────────────────────────────
+
+describe("concurrent-call coalescing + reservation atomicity (PR #834 round-1 BLOCK)", () => {
+  it("two concurrent identical calls share ONE paid provider call (in-flight coalescing)", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    let callCount = 0;
+    let resolveProvider: (
+      v: ProviderResponseLike,
+    ) => void = () => {
+      // assigned in the provider call below
+    };
+    const providerCallPromise = new Promise<ProviderResponseLike>((r) => {
+      resolveProvider = r;
+    });
+    const kind = asProviderKind("openai-compat");
+    const estimator: CostEstimator = { estimate: () => 1_000 as never };
+    const provider: Provider = {
+      kind,
+      models: ["coalesce-model"],
+      costEstimator: estimator,
+      complete: async () => {
+        callCount += 1;
+        return providerCallPromise;
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      const ctx: SupervisorContext = { agentSlug: asAgentSlug("a") };
+      const req: ProviderRequest = { model: "coalesce-model", prompt: "p", maxOutputTokens: 8 };
+      // Fire two identical calls before either await resolves.
+      const p1 = gateway.complete(ctx, req);
+      const p2 = gateway.complete(ctx, req);
+      // Drive the provider call resolution.
+      resolveProvider({
+        text: "ok",
+        usage: { inputTokens: 5, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      });
+      const [r1, r2] = await Promise.all([p1, p2]);
+      expect(callCount).toBe(1);
+      expect(r1.text).toBe("ok");
+      expect(r2.text).toBe("ok");
+      expect(r2.dedupeReplay).toBe(true);
+      expect(r1.dedupeReplay).toBe(false);
+      // Exactly one cost_event row was written.
+      const count = db
+        .prepare<[], { readonly n: number }>(
+          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+        )
+        .get();
+      expect(count?.n).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("concurrent identical-payload provider failure rejects BOTH callers, no ledger row", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    let rejectProvider: (e: Error) => void = () => {
+      // assigned below
+    };
+    const providerCallPromise = new Promise<ProviderResponseLike>((_resolve, reject) => {
+      rejectProvider = reject;
+    });
+    const kind = asProviderKind("openai-compat");
+    const estimator: CostEstimator = { estimate: () => 1_000 as never };
+    const provider: Provider = {
+      kind,
+      models: ["fail-coalesce"],
+      costEstimator: estimator,
+      complete: async () => providerCallPromise,
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      const ctx: SupervisorContext = { agentSlug: asAgentSlug("a") };
+      const req: ProviderRequest = { model: "fail-coalesce", prompt: "p", maxOutputTokens: 8 };
+      const p1 = gateway.complete(ctx, req);
+      const p2 = gateway.complete(ctx, req);
+      rejectProvider(new Error("upstream 5xx"));
+      await expect(p1).rejects.toThrow();
+      await expect(p2).rejects.toThrow();
+      const count = db
+        .prepare<[], { readonly n: number }>(
+          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+        )
+        .get();
+      expect(count?.n).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("12 concurrent DIFFERENT-payload calls for one agent cannot blow the wake cap", async () => {
+    // Wake cap = 5/hr. Fire 12 different-prompt calls concurrently; only
+    // 5 should reach the provider. Without reservation, all 12 would
+    // pass the stale wake check and bill the provider.
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const kind = asProviderKind("openai-compat");
+    const estimator: CostEstimator = { estimate: () => 1_000 as never };
+    let inflight = 0;
+    let maxInflight = 0;
+    let totalCalls = 0;
+    const provider: Provider = {
+      kind,
+      models: ["wake-cap-model"],
+      costEstimator: estimator,
+      complete: async () => {
+        totalCalls += 1;
+        inflight += 1;
+        maxInflight = Math.max(maxInflight, inflight);
+        await new Promise((r) => setTimeout(r, 10));
+        inflight -= 1;
+        return {
+          text: "ok",
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        };
+      },
+    };
+    const gateway = createGateway({
+      ledger,
+      providers: [provider],
+      nowMs: () => Date.now(),
+      config: { caps: { wakeCapPerHour: 5, dailyMicroUsd: 1_000_000_000 } },
+    });
+    try {
+      const ctx: SupervisorContext = { agentSlug: asAgentSlug("a") };
+      const promises = Array.from({ length: 12 }, (_, i) =>
+        gateway
+          .complete(ctx, { model: "wake-cap-model", prompt: `p${i}`, maxOutputTokens: 1 })
+          .catch((err) => ({ error: err as Error })),
+      );
+      const results = await Promise.all(promises);
+      const succeeded = results.filter((r) => !("error" in r)).length;
+      const capRejected = results.filter(
+        (r) => "error" in r && (r.error as Error).message.startsWith("cap_exceeded: wake"),
+      ).length;
+      expect(succeeded).toBe(5);
+      expect(capRejected).toBe(7);
+      expect(totalCalls).toBe(5); // never more than 5 paid provider calls
+      expect(maxInflight).toBeLessThanOrEqual(5);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("supervisor context brand validation (PR #834 round-1 HIGH security #3)", () => {
+  it("rejects forged agentSlug at gateway entry — no provider call", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    let providerCalled = false;
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["m"],
+      costEstimator: { estimate: () => 0 as never },
+      complete: async () => {
+        providerCalled = true;
+        return {
+          text: "",
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        };
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      const forgedCtx = { agentSlug: "BAD slug with spaces" as never };
+      await expect(
+        gateway.complete(forgedCtx, { model: "m", prompt: "p", maxOutputTokens: 1 }),
+      ).rejects.toThrow(/invalid SupervisorContext.agentSlug/);
+      expect(providerCalled).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects forged taskId / receiptId at gateway entry — no provider call", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    let providerCalled = false;
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["m"],
+      costEstimator: { estimate: () => 0 as never },
+      complete: async () => {
+        providerCalled = true;
+        return {
+          text: "",
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        };
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      const ctx = {
+        agentSlug: asAgentSlug("a"),
+        taskId: "not-a-ulid" as never,
+      };
+      await expect(
+        gateway.complete(ctx, { model: "m", prompt: "p", maxOutputTokens: 1 }),
+      ).rejects.toThrow(/invalid SupervisorContext.taskId/);
+      expect(providerCalled).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+interface ProviderResponseLike {
+  readonly text: string;
+  readonly usage: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cacheReadTokens: number;
+    readonly cacheCreationTokens: number;
+  };
+}

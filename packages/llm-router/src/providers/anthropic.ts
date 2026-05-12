@@ -1,5 +1,4 @@
 // Anthropic SDK adapter for `Gateway.complete()`.
-//
 // Subpath import: hosts use `import { createAnthropicProvider } from
 // "@wuphf/llm-router/anthropic"`. `@anthropic-ai/sdk` is a peer
 // dependency — hosts that only use the stub do not install it. The
@@ -7,36 +6,29 @@
 // dynamic import so the SDK module is loaded only when the host
 // explicitly asks for it; the structural-client path
 // (`createAnthropicProvider`) never touches the SDK.
-//
 // The adapter wires five things:
-//
 //   1. Provider routing: `models[]` is bound to the pricing-table model
 //      IDs, so the gateway's exact-match registration (post-H4 fix) puts
 //      `claude-*` requests on this provider. A host that adds a new
 //      pricing entry MUST also expand `models[]` —
 //      `createAnthropicProvider` handles this automatically when given
 //      the pricing table.
-//
 //   2. Cost estimation: integer-μUSD pricing (`anthropic-pricing.ts`).
 //      The §15.A invariant is preserved because we never leave integer
 //      math between provider response and `appendCostEvent`.
-//
 //   3. Request translation: `ProviderRequest` carries a single string
 //      prompt today (the simplest shape the gateway needs); we translate
 //      to a single user message and lift `maxOutputTokens` directly into
 //      Anthropic's `max_tokens` field.
-//
 //   4. Error mapping: structured triage of SDK errors. 400/413/422
 //      (caller-input errors) → `BadRequestError`, which the gateway does
-//      NOT count as a breaker strike (triangulation B2-7). 401/403/429/
+//      NOT count as a breaker strike. 401/403/429/
 //      5xx/network → `ProviderError` with structured metadata (status,
 //      requestId, errorType, retryAfterMs) preserved for on-call
-//      (triangulation B2-5).
-//
 //   5. Idempotency-key threading: every call mints a deterministic key
 //      from the request bytes and passes it to `messages.create` so SDK
 //      retries (which are on by default) don't double-charge after a
-//      lost response (triangulation B2-4). The key is content-derived,
+//      lost response. The key is content-derived,
 //      so a logical retry from the same caller reuses it.
 
 import {
@@ -83,8 +75,7 @@ interface SdkErrorLike {
  * We pass `headers` directly (NOT `options.idempotencyKey`) — the SDK
  * only forwards the shorthand when its internal `idempotencyHeader`
  * is configured, which the default client leaves undefined. Same bug
- * the OpenAI adapter had; same fix. See triangulation #3 finding B3-1
- * (5-lens BLOCK/HIGH).
+ * the OpenAI adapter had; same fix. 
  */
 export interface AnthropicMessageCreateParams {
   readonly model: string;
@@ -114,7 +105,6 @@ export interface AnthropicMessage {
    * `claude-haiku-4-5-20251001` while the request alias was
    * `claude-haiku-4-5`. Surfaced through `ProviderResponse.model` so the
    * cost_event audit row records the actual served snapshot. See
-   * triangulation B2-defer #827.
    */
   readonly model?: string;
   /**
@@ -122,8 +112,7 @@ export interface AnthropicMessage {
    * `max_tokens` is truncation; `stop_sequence` matched a configured
    * stop; `tool_use` paused for a tool call; `refusal` is a policy
    * decline; `pause_turn` is a long-running pause to be resumed.
-   * Surfaced through `ProviderResponse.finishReason`. See triangulation
-   * #3 finding B3-3 (parallel to the OpenAI refusal/finish-reason fix).
+   * Surfaced through `ProviderResponse.finishReason`.    * #3 finding.
    */
   readonly stop_reason?: string | null;
 }
@@ -152,7 +141,7 @@ export interface CreateAnthropicProviderArgs {
 
 export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Provider {
   const pricing = args.pricing ?? DEFAULT_ANTHROPIC_PRICING;
-  // B2-6: validate pricing at construction so a bad config never reaches
+  // validate pricing at construction so a bad config never reaches
   // a billable call. The default table is also validated — cheap and
   // catches future drift if someone edits a rate to NaN.
   validateAnthropicPricingTable(pricing);
@@ -174,7 +163,7 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
         // gets a stable error type instead of an SDK-level 4xx.
         throw new UnknownModelError(req.model);
       }
-      // B2-7: pre-validate caller input. max_tokens must be > 0; the
+      // pre-validate caller input. max_tokens must be > 0; the
       // server rejects 0 with 400 anyway, but pre-rejecting locally
       // means we don't burn a network round-trip OR send an idempotency
       // key that the server would reuse for a real retry.
@@ -186,10 +175,10 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
         max_tokens: req.maxOutputTokens,
         messages: [{ role: "user", content: req.prompt }],
       };
-      // B3-1: explicit Idempotency-Key header. The SDK's
+      // explicit Idempotency-Key header. The SDK's
       // `options.idempotencyKey` shorthand is a no-op unless the
       // client's internal `idempotencyHeader` is configured.
-      // B3-2: derive from req.requestKey (gateway-computed,
+      // derive from req.requestKey (gateway-computed,
       // includes ctx).
       const options: AnthropicRequestOptions = {
         headers: { "Idempotency-Key": deriveIdempotencyKey(req) },
@@ -200,7 +189,7 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
       } catch (err) {
         throw classifySdkError(err);
       }
-      // B3-3: surface stop_reason as finishReason and treat
+      // surface stop_reason as finishReason and treat
       // `stop_reason === "refusal"` as a refusal so callers can
       // implement policy gates without parsing prose. The text-block
       // content for a refusal is the prose; we route it into `refusal`
@@ -225,7 +214,7 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
  * request → same key → Anthropic dedupes server-side. Different agents
  * issuing the same prompt get DIFFERENT keys upstream, because the
  * gateway's dedupe already short-circuits same-(ctx, request) repeats
- * before they reach the provider. (See B3 fix in PR B; dedupe key is
+ * before they reach the provider. (dedupe key is
  * (agentSlug, taskId, receiptId, request).)
  *
  * The key prefix `wuphf-` makes it identifiable in Anthropic-side logs
@@ -235,7 +224,7 @@ function deriveIdempotencyKey(req: ProviderRequest): string {
   // Prefer the gateway-computed `requestKey` (context-scoped) so two
   // agents with the same prompt don't share a server-side dedup
   // window. Fall back to content-only when constructed outside the
-  // gateway path. See triangulation #3 finding B3-2.
+  // gateway path. 
   if (typeof req.requestKey === "string" && req.requestKey.length > 0) {
     return `wuphf-${req.requestKey}`;
   }
@@ -294,7 +283,7 @@ function extractSdkErrorMetadata(err: unknown): ExtractedSdkMetadata {
     }
   }
   if (typeof e.headers === "object" && e.headers !== null) {
-    // B3-7: prefer `retry-after-ms` (millisecond precision) over
+    // prefer `retry-after-ms` (millisecond precision) over
     // `retry-after` (seconds). SDK's `headers` is a Headers-like.
     const retryAfterMs = readHeader(e.headers, "retry-after-ms");
     if (retryAfterMs !== undefined) {
@@ -338,10 +327,10 @@ function readHeader(headers: unknown, name: string): string | undefined {
 
 /**
  * Flatten Anthropic's content-block array to a single text response.
- * For PR B.2 we only handle `type === "text"` blocks (the standard
+ * We only handle `type === "text"` blocks (the standard
  * non-streaming, non-tool-use path). Tool-use blocks and thinking blocks
  * are ignored on text extraction; their token usage is still in `usage`
- * so the cost line is correct. PR B.3+ will plumb tool_use through to
+ * so the cost line is correct. Future PRs will plumb tool_use through to
  * the gateway response shape.
  *
  * Uses array-join instead of `+=` so allocation is O(total text) rather
@@ -391,7 +380,7 @@ export {
  * Convenience constructor for the real SDK client. The SDK is a peer
  * dependency; this function uses a dynamic import so a host that only
  * uses the structural-client path (e.g. tests) never loads the SDK
- * module. Triangulation #2 finding perf-1 / B2-3.
+ * module. This is the documented pattern.
  *
  * Reads the key from the argument, NOT from process.env, so the secret
  * boundary stays at the host — per protocol AGENTS.md, "Always source
@@ -424,7 +413,7 @@ export async function createAnthropicProviderWithKey(args: {
 
 /**
  * Type-checked adapter from the real SDK client to our structural
- * `AnthropicClient` interface (#829). The previous `as unknown as`
+ * `AnthropicClient` interface (). The previous `as unknown as`
  * double-cast told tsc nothing about the actual SDK signature, so a
  * future SDK version that drifted on `messages.create()` overloads or
  * return shape would silently break at runtime. This wrapper forces

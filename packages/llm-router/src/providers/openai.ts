@@ -1,35 +1,28 @@
 // OpenAI SDK adapter for `Gateway.complete()`.
-//
 // Subpath import: hosts use `import { createOpenAIProvider } from
 // "@wuphf/llm-router/openai"`. `openai` is a peer dependency — hosts
 // that only use the stub or Anthropic do not install it. The
 // convenience constructor `createOpenAIProviderWithKey` uses a dynamic
 // import so the SDK module loads only when explicitly requested.
-//
-// Mirrors the AnthropicProvider design (post-triangulation-#2):
-//
+// Mirrors the AnthropicProvider design:
 //   1. Provider routing: `models[]` is bound to the pricing-table keys,
 //      so the gateway's exact-match registration puts `gpt-*` requests
 //      on this provider.
-//
 //   2. Cost estimation: integer-μUSD pricing (`openai-pricing.ts`).
 //      OpenAI's `prompt_tokens` already INCLUDES `cached_tokens`; the
 //      adapter splits them so the estimator can apply the discounted
 //      cached-input rate to the cached subset and the full input rate
 //      to the remainder. Same §15.A integer-math invariant.
-//
 //   3. Request translation: `ProviderRequest` carries a single string
 //      prompt → one user message in the chat-completions payload;
 //      `maxOutputTokens` → `max_completion_tokens` (GPT-5 family) or
-//      `max_tokens` (GPT-4.x). For PR B.3 we pass both fields so the
+//      `max_tokens` (GPT-4.x). We pass both fields so the
 //      SDK accepts either generation.
-//
 //   4. Error mapping: 4xx caller-input errors → `BadRequestError`
-//      (NOT a breaker strike — triangulation B2-7); auth/rate-limit/
+//      (NOT a breaker strike); auth/rate-limit/
 //      5xx/network → `ProviderError` with structured metadata
 //      (status, requestId, errorType, retryAfterMs) — same shape as
 //      the Anthropic adapter so PR C's wire mapping stays uniform.
-//
 //   5. Idempotency-key threading: deterministic SHA-256 key from
 //      canonical request bytes, passed via SDK request options.
 
@@ -87,7 +80,6 @@ export interface OpenAIChatCompletionCreateParams {
  * `options.idempotencyKey` when its internal `idempotencyHeader`
  * field is configured, and the default `OpenAI` client leaves it
  * undefined — so the shorthand is a silent no-op.
- * See triangulation #3 finding B3-1 (5-lens BLOCK/HIGH).
  */
 export interface OpenAIRequestOptions {
   readonly headers?: Readonly<Record<string, string>>;
@@ -107,7 +99,6 @@ export interface OpenAIChatCompletion {
   }>;
   // SDK marks `usage` optional. Adapter validates presence before
   // billing rather than throwing an unclassified TypeError.
-  // See triangulation #3 finding B3-5.
   readonly usage?: OpenAIUsage;
 }
 
@@ -151,7 +142,7 @@ export function createOpenAIProvider(args: CreateOpenAIProviderArgs): Provider {
       if (!Number.isSafeInteger(req.maxOutputTokens) || req.maxOutputTokens <= 0) {
         throw new BadRequestError(OPENAI_PROVIDER_KIND, new Error("maxOutputTokens_invalid"));
       }
-      // B3-4: model-aware token field. GPT-5 and reasoning models
+      // model-aware token field. GPT-5 and reasoning models
       // (o1, o3, o4) deprecated `max_tokens` and require
       // `max_completion_tokens`. Legacy GPT-4.1 and earlier use
       // `max_tokens`. Sending both can yield a 400 on reasoning models.
@@ -166,11 +157,11 @@ export function createOpenAIProvider(args: CreateOpenAIProviderArgs): Provider {
             max_tokens: req.maxOutputTokens,
             messages: [{ role: "user", content: req.prompt }],
           };
-      // B3-1: pass an explicit Idempotency-Key header, NOT
+      // pass an explicit Idempotency-Key header, NOT
       // `options.idempotencyKey`. The SDK's `idempotencyKey` shorthand
       // is only forwarded when its internal `idempotencyHeader` field
       // is set, which the default client leaves undefined.
-      // B3-2: derive the key from req.requestKey (gateway-computed,
+      // derive the key from req.requestKey (gateway-computed,
       // includes ctx) so two agents with the same prompt don't share
       // a server-side dedup window.
       const options: OpenAIRequestOptions = {
@@ -193,7 +184,7 @@ export function createOpenAIProvider(args: CreateOpenAIProviderArgs): Provider {
  *   1. `req.requestKey` — gateway-computed `hashRequest(ctx, req)`.
  *      This is context-scoped so two different agents sending the
  *      same prompt do NOT collide on the server-side dedup window.
- *      See triangulation #3 finding B3-2.
+ *      
  *   2. Content-only fallback for callers that build a request outside
  *      the gateway path (direct tests, manual smoke calls). NOT used
  *      in production.
@@ -269,7 +260,7 @@ function extractSdkErrorMetadata(err: unknown): ExtractedSdkMetadata {
     }
   }
   if (typeof e.headers === "object" && e.headers !== null) {
-    // B3-7: prefer `retry-after-ms` (millisecond precision) over
+    // prefer `retry-after-ms` (millisecond precision) over
     // `retry-after` (seconds). The OpenAI SDK reads both for its
     // internal retry logic; we mirror that order.
     const retryAfterMs = readHeader(e.headers, "retry-after-ms");
@@ -318,7 +309,6 @@ function readHeader(headers: unknown, name: string): string | undefined {
  *     content is null and there's no refusal. Refusals are NOT folded
  *     into `text` — they go into the separate `refusal` field so a
  *     caller can implement policy gates without parsing prose. See
- *     triangulation #3 finding B3-3.
  *   - `refusal`: `message.refusal` when present.
  *   - `finishReason`: passed through from the SDK so callers can
  *     distinguish `stop` from `length` (truncation), `content_filter`,
@@ -326,7 +316,7 @@ function readHeader(headers: unknown, name: string): string | undefined {
  *   - `usage`: validated for presence and non-negative-integer shape;
  *     `cached_tokens` is clamped to `prompt_tokens` so a malformed
  *     provider response can't overstate cached billing.
- *     See triangulation #3 findings B3-5, B3-6.
+ *     This protects against malformed provider responses.
  *
  * Throws `ProviderError` if usage is missing — that's a provider
  * post-condition violation and the caller deserves a typed error,
@@ -362,7 +352,7 @@ function buildProviderResponse(raw: OpenAIChatCompletion): ProviderResponse {
     usage,
     ...(finishReason !== null ? { finishReason } : {}),
     ...(refusal !== null ? { refusal } : {}),
-    // #827: surface served snapshot id (e.g. gpt-5-2025-08-07) so the
+    // Surface served snapshot id (e.g. gpt-5-2025-08-07) so the
     // audit row records the actual served model.
     ...(typeof raw.model === "string" && raw.model.length > 0 ? { model: raw.model } : {}),
   };
@@ -417,7 +407,58 @@ export async function createOpenAIProviderWithKey(args: {
   const OpenAICtor = sdk.default;
   const client = new OpenAICtor({ apiKey: args.apiKey });
   return createOpenAIProvider({
-    client: client as unknown as OpenAIClient,
+    client: adaptOpenAISdkClient(client),
     ...(args.pricing !== undefined ? { pricing: args.pricing } : {}),
   });
+}
+
+/**
+ * Type-checked adapter from the real OpenAI SDK client to our
+ * structural `OpenAIClient` interface. The previous `as unknown as`
+ * double cast prevented tsc from catching future SDK signature drift
+ * in `chat.completions.create()` (overload changes, return-shape shifts,
+ * removed optional fields). This wrapper forces tsc to verify the
+ * specific method signature we depend on. Materializes the readonly
+ * `messages` array as the SDK's mutable type — a single shallow copy
+ * per call, negligible on the hot path.
+ */
+type OpenAISdkClient = {
+  readonly chat: {
+    readonly completions: {
+      create(
+        params: {
+          readonly model: string;
+          readonly max_tokens?: number;
+          readonly max_completion_tokens?: number;
+          readonly messages: ReadonlyArray<{
+            readonly role: "user" | "assistant" | "system";
+            readonly content: string;
+          }>;
+        } & {
+          messages: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+        },
+        options?: OpenAIRequestOptions,
+      ): Promise<OpenAIChatCompletion>;
+    };
+  };
+};
+
+function adaptOpenAISdkClient(sdkClient: OpenAISdkClient): OpenAIClient {
+  return {
+    chat: {
+      completions: {
+        create: (params, options) => {
+          const sdkParams = {
+            model: params.model,
+            ...(params.max_tokens !== undefined ? { max_tokens: params.max_tokens } : {}),
+            ...(params.max_completion_tokens !== undefined
+              ? { max_completion_tokens: params.max_completion_tokens }
+              : {}),
+            messages: params.messages.map((m) => ({ role: m.role, content: m.content })),
+          };
+          return sdkClient.chat.completions.create(sdkParams, options);
+        },
+      },
+    },
+  };
 }
