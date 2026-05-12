@@ -1,7 +1,18 @@
 import type Database from "better-sqlite3";
 import BetterSqlite3 from "better-sqlite3";
 
-export type EventType = "receipt.put";
+export type EventType =
+  | "receipt.put"
+  | "cost.event"
+  | "cost.budget.set"
+  | "cost.budget.threshold.crossed";
+
+const EVENT_TYPES: ReadonlySet<EventType> = new Set<EventType>([
+  "receipt.put",
+  "cost.event",
+  "cost.budget.set",
+  "cost.budget.threshold.crossed",
+]);
 
 export interface EventLogRecord {
   readonly lsn: number;
@@ -106,8 +117,8 @@ function rowToEventLogRecord(row: EventLogRow): EventLogRecord {
 }
 
 function toEventType(type: string): EventType {
-  if (type === "receipt.put") {
-    return type;
+  if ((EVENT_TYPES as ReadonlySet<string>).has(type)) {
+    return type as EventType;
   }
   throw new Error(`Unknown event_log type: ${type}`);
 }

@@ -32,6 +32,7 @@ import {
 import { WebSocketServer } from "ws";
 
 import { extractBearerFromHeader, tokenMatches } from "./auth.ts";
+import { type CostRouteDeps, handleCostRoute } from "./cost-ledger/routes.ts";
 import { checkLoopbackRequest } from "./dns-rebinding-guard.ts";
 import { InMemoryReceiptStore, type ReceiptStore } from "./receipt-store.ts";
 import { handleReceiptCreate, handleReceiptGet, handleThreadReceiptsList } from "./receipts.ts";
@@ -52,20 +53,35 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   // 6 hosts will pass a durable event-log-backed store; this default keeps
   // the package self-contained for tests and dev runs.
   const receiptStore: ReceiptStore = config.receiptStore ?? new InMemoryReceiptStore();
+  const cost =
+    config.cost === undefined
+      ? null
+      : ({
+          ledger: config.cost.ledger,
+          idempotency: config.cost.idempotency,
+          db: config.cost.db,
+          logger,
+          nowMs: () => Date.now(),
+        } satisfies CostRouteDeps);
   const server = createServer((req, res) => {
-    routeRequest(req, res, { token, staticHandler, logger, trustedOrigins, receiptStore }).catch(
-      (err: unknown) => {
-        logger.error("listener_route_failed", {
-          error: err instanceof Error ? err.message : String(err),
-          path: req.url ?? null,
-        });
-        if (!res.writableEnded) {
-          res.statusCode = 500;
-          res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          res.end("internal_error");
-        }
-      },
-    );
+    routeRequest(req, res, {
+      token,
+      staticHandler,
+      logger,
+      trustedOrigins,
+      receiptStore,
+      cost,
+    }).catch((err: unknown) => {
+      logger.error("listener_route_failed", {
+        error: err instanceof Error ? err.message : String(err),
+        path: req.url ?? null,
+      });
+      if (!res.writableEnded) {
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.end("internal_error");
+      }
+    });
   });
 
   const wss = new WebSocketServer({ noServer: true });
@@ -100,6 +116,7 @@ interface RouteDeps {
   readonly logger: BrokerLogger;
   readonly trustedOrigins: ReadonlySet<string>;
   readonly receiptStore: ReceiptStore;
+  readonly cost: CostRouteDeps | null;
 }
 
 async function routeRequest(
@@ -225,6 +242,13 @@ async function routeRequest(
       logger: deps.logger,
     });
     return;
+  }
+  // Cost-ledger routes under /api/v1/cost/* — mounted only when the host
+  // supplied a `cost` block at `createBroker` time. When absent the path
+  // falls through to the 404 catch-all below.
+  if (deps.cost !== null && pathname.startsWith("/api/v1/cost/")) {
+    const handled = await handleCostRoute(req, res, pathname, deps.cost);
+    if (handled) return;
   }
   // Authenticated catch-all for unknown `/api/*` routes. Without this,
   // `POST /api/no-such-route` (with a valid bearer) would fall into the
