@@ -61,6 +61,15 @@ export interface CostEstimator {
 
 export interface Provider {
   readonly kind: ProviderKind;
+  /**
+   * Exact model IDs this provider handles. The gateway routes by exact
+   * match of `ProviderRequest.model` against this list — NOT by `kind`.
+   * Two providers can share a `kind` (e.g. real openai-compat + stub
+   * both report `"openai-compat"` for audit purposes) without colliding
+   * because each owns a disjoint set of model strings. See
+   * triangulation finding H4.
+   */
+  readonly models: readonly string[];
   readonly costEstimator: CostEstimator;
   complete(req: ProviderRequest): Promise<ProviderResponse>;
 }

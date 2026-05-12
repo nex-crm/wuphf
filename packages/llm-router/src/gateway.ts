@@ -29,7 +29,7 @@ import {
 import { Caps, type CapsConfig, DEFAULT_CAPS_CONFIG } from "./caps.ts";
 import { DEFAULT_DEDUPE_CONFIG, DedupeCache, type DedupeConfig } from "./dedupe.ts";
 import { ProviderError, UnknownModelError } from "./errors.ts";
-import { isStubModel, STUB_MODEL_ERROR, STUB_MODEL_FIXED_COST } from "./providers/stub.ts";
+import { isStubModel } from "./providers/stub.ts";
 import type {
   Gateway,
   GatewayCompletionResult,
@@ -66,7 +66,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
     caps.preflightIdle();
     caps.preflightBreaker(ctx.agentSlug);
 
-    const replay = dedupe.lookup(req);
+    const replay = dedupe.lookup(ctx, req);
     if (replay !== null) {
       return replay;
     }
@@ -90,24 +90,32 @@ export function createGateway(deps: GatewayDeps): Gateway {
       throw new ProviderError(provider.kind, err);
     }
 
-    const costMicroUsd: MicroUsd = provider.costEstimator.estimate(
-      req.model,
-      providerResponse.usage,
-    );
+    // Estimator + ledger append are post-provider. A failure here means
+    // we paid the provider but couldn't account for it. Treat that as a
+    // breaker-worthy event so a sustained estimator/ledger fault opens
+    // the circuit instead of letting the gateway keep spending while
+    // every accounting layer reads zero. See triangulation finding H5.
+    let costMicroUsd: MicroUsd;
+    let appended: ReturnType<CostLedger["appendCostEvent"]>;
+    try {
+      costMicroUsd = provider.costEstimator.estimate(req.model, providerResponse.usage);
 
-    // The "row before response" point: appendCostEvent is the only place
-    // an EventLsn for this completion is produced. If this throws, the
-    // response is discarded — we do NOT return a completion without a
-    // matching ledger row. The error is re-thrown so the caller sees
-    // the underlying storage problem and can retry.
-    const payload: CostEventAuditPayload = buildCostEventPayload(
-      ctx,
-      req,
-      providerResponse.usage,
-      costMicroUsd,
-      deps.nowMs(),
-    );
-    const appended = deps.ledger.appendCostEvent(payload);
+      // The "row before response" point: appendCostEvent is the only
+      // place an EventLsn for this completion is produced. If this
+      // throws, the response is discarded — we do NOT return a
+      // completion without a matching ledger row.
+      const payload: CostEventAuditPayload = buildCostEventPayload(
+        ctx,
+        req,
+        providerResponse.usage,
+        costMicroUsd,
+        deps.nowMs(),
+      );
+      appended = deps.ledger.appendCostEvent(payload);
+    } catch (err) {
+      caps.recordError(ctx.agentSlug);
+      throw err;
+    }
 
     // Caps housekeeping AFTER the ledger commit so a crash mid-commit
     // doesn't burn a wake slot that the ledger never saw.
@@ -121,7 +129,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
       costEventLsn: appended.lsn,
       dedupeReplay: false,
     };
-    dedupe.store(req, result);
+    dedupe.store(ctx, req, result);
     return result;
   }
 
@@ -170,19 +178,22 @@ function buildCostEventPayload(
 }
 
 /**
- * Resolve a provider for a model name. For PR B we route by exact-model
- * lookup; PR B.2 (real Anthropic SDK) will route by model prefix
- * (`claude-` → anthropic, `gpt-` → openai, etc.).
+ * Resolve a provider for a model name by exact lookup against each
+ * provider's `models` list. Construction-time collision: if two
+ * providers register the same model, throw immediately so the host
+ * sees the conflict at gateway init rather than at first call.
  */
 function indexProvidersByModel(providers: readonly Provider[]): Map<string, Provider> {
   const out = new Map<string, Provider>();
   for (const provider of providers) {
-    // PR B knows the stub models inline; the real-provider adapters in
-    // PR B.2 / PR B.3 will register their own model lists. Until then,
-    // the stub provider claims both stub-* models.
-    if (provider.kind === "openai-compat") {
-      out.set(STUB_MODEL_FIXED_COST, provider);
-      out.set(STUB_MODEL_ERROR, provider);
+    for (const model of provider.models) {
+      const existing = out.get(model);
+      if (existing !== undefined && existing !== provider) {
+        throw new Error(
+          `provider model collision: ${JSON.stringify(model)} claimed by ${existing.kind} and ${provider.kind}`,
+        );
+      }
+      out.set(model, provider);
     }
   }
   return out;
