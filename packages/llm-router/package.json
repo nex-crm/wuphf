@@ -1,0 +1,53 @@
+{
+  "name": "@wuphf/llm-router",
+  "version": "0.0.0",
+  "private": true,
+  "description": "WUPHF v1 AI gateway — single in-process cost chokepoint enforcing per-office daily cap, per-agent wake cap, identical-payload dedupe, and circuit breaker. Every provider call writes a cost_event before returning. Branch-7 slice.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./anthropic": "./src/providers/anthropic.ts",
+    "./openai": "./src/providers/openai.ts",
+    "./ollama": "./src/providers/ollama.ts",
+    "./opencode": "./src/providers/opencode.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome check src/ tests/ scripts/",
+    "lint:fix": "biome check --write src/ tests/ scripts/",
+    "format": "biome format --write src/ tests/ scripts/",
+    "check": "biome check src/ tests/ scripts/",
+    "burn:nightly": "tsx scripts/ci-burn-nightly.ts"
+  },
+  "dependencies": {
+    "@wuphf/broker": "workspace:*",
+    "@wuphf/protocol": "workspace:*",
+    "better-sqlite3": "12.9.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
+    "ollama": "^0.5.0",
+    "openai": "^6.7.0"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": { "optional": true },
+    "ollama": { "optional": true },
+    "openai": { "optional": true }
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "0.71.0",
+    "@biomejs/biome": "2.4.15",
+    "ollama": "0.5.18",
+    "openai": "6.7.0",
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "2.1.9",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

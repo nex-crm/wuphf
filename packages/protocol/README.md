@@ -10,6 +10,7 @@ This package is the moat. It defines the type-system invariants that make tamper
 - **`ReceiptSnapshot`** — append-only audit detail. Every approved tool call produces one.
 - **Audit event** — hash-chained CBOR-line records on disk; the chain hash is computed over a JCS projection (see `serializeAuditEventRecordForHash`) using the formula `eventHash = sha256(asciiLowerHex(prevHash) || jcsBytes(record))`. The ASCII-hex form of `prevHash` is intentional — it keeps debug dumps readable but is non-standard, so cross-language verifiers MUST mix the 64-byte ASCII string, not the 32 raw bytes. `GENESIS_PREV_HASH = sha256("wuphf:audit:genesis:v1")`. Test vectors live in `tests/audit-event.spec.ts` (golden serialization + golden eventHash). Periodic Merkle roots signed by per-install non-exportable key.
 - **IPC envelopes** — renderer ↔ broker over loopback HTTP/SSE/WebSocket. NOT Electron `contextBridge` for app data.
+- **Cost ledger types** — integer `MicroUsd` brand (no float drift), `BudgetId` ULID, closed `BudgetScope`, and three audit payloads (`cost_event`, `budget_set`, `budget_threshold_crossed`) that drive the AI-gateway spend chokepoint. See `docs/modules/cost.md`.
 
 ## No I/O
 
@@ -28,6 +29,20 @@ External writes carry `writeId`. A token with `claims.writeId` authorizes only t
 ## Resource budgets
 
 Protocol-level resource caps live in `src/budgets.ts` and are exported from `src/index.ts` so downstream consumers can enforce the same contract. The receipt cap is 10 MiB serialized; per-blob caps are 1 MiB for `FrozenArgs` canonical JSON, `SanitizedString` UTF-8 text, and each audit event body before base64/JCS serialization; `EventLsn` strings are capped at 256 bytes before format parsing. Receipt arrays are bounded (`toolCalls` 1,024; `filesChanged`, `sourceReads`, `notebookWrites`, and `wikiWrites` 10,000; `commits` 1,024; `writes` 256; `approvals` 64). Approval tokens are capped at a 30-minute lifetime, approval signatures at 4 KiB, and WebAuthn assertions at 16 KiB. These numbers keep normal large tasks viable while preventing runaway receipts, blobs, event bodies, approval submissions, and stale capabilities from exhausting verifier memory.
+
+### Cost-event + budget caps (wire-contract)
+
+The cost-ledger surface adds five caps that are part of the wire contract — wire payloads that violate these are rejected by `costAuditPayloadToBytes` / `receiptFromJson` BEFORE any storage or signing path runs. Downstream verifiers (TS, Go, Rust) must enforce the same numbers:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `MAX_COST_EVENT_AMOUNT_MICRO_USD` | `100_000_000` ($100) | Per-event spend cap; the gateway validates estimator output against this before `appendCostEvent`. |
+| `MAX_BUDGET_LIMIT_MICRO_USD` | `1_000_000_000_000` ($1M) | Per-budget ceiling; covers the upper bound for office/team/agent budgets. |
+| `MAX_BUDGET_THRESHOLD_BPS` | `10_000` | Threshold basis-points are in `(0, 10_000]`; 10_000 bps = 100% of the budget limit. |
+| `MAX_BUDGET_THRESHOLDS` | `8` | At most 8 threshold-crossed events per budget (e.g. 50/75/90/100%). |
+| `MAX_COST_MODEL_BYTES` | `128` | `cost_event.model` string length cap (covers dated snapshots like `claude-haiku-4-5-20251001`). |
+
+These are first-class wire constants: producers must validate before emit, and consumers must reject before deserialize. Crossing the per-event cap is the primary defense against a runaway estimator billing the office budget in one call.
 
 `receiptFromJson` rejects oversized serialized input before parsing, then checks collection budgets before decoding fields. `receiptToJson` runs the typed budget validator before semantic validation and canonicalization.
 

@@ -251,14 +251,14 @@ describe("IPC brand constructors", () => {
       expect(() => asApiToken(`${"a".repeat(15)}=`)).toThrow();
       expect(() => asApiToken(`${"a".repeat(15)}\u{1f608}`)).toThrow();
       expect(() => asApiToken("")).toThrow();
-      // Triangulation review: narrowed from URL-safe to base64url so the
-      // token round-trips through `?token=` query strings unchanged.
+      // API tokens use base64url so they round-trip through `?token=` query
+      // strings unchanged.
       // URLSearchParams treats `+` as space and decodes `/` ambiguously;
       // `.` and `~` are RFC-3986 unreserved but not emitted by any broker.
-      expect(() => asApiToken("a".repeat(15) + "+")).toThrow();
-      expect(() => asApiToken("a".repeat(15) + "/")).toThrow();
-      expect(() => asApiToken("a".repeat(15) + ".")).toThrow();
-      expect(() => asApiToken("a".repeat(15) + "~")).toThrow();
+      expect(() => asApiToken(`${"a".repeat(15)}+`)).toThrow();
+      expect(() => asApiToken(`${"a".repeat(15)}/`)).toThrow();
+      expect(() => asApiToken(`${"a".repeat(15)}.`)).toThrow();
+      expect(() => asApiToken(`${"a".repeat(15)}~`)).toThrow();
       expect(isApiToken("a".repeat(15))).toBe(false);
       expect(isApiToken(123)).toBe(false);
     });

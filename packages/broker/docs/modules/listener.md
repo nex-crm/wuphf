@@ -26,6 +26,7 @@ flowchart LR
   dispatch -- "POST /api/receipts" --> create["receiptFromJson → ReceiptStore.put<br/>201 / 400 / 409 / 413 / 415 / 503 / 507"]
   dispatch -- "GET /api/receipts/:id" --> read["ReceiptStore.get<br/>200 / 404"]
   dispatch -- "GET /api/threads/:tid/receipts" --> list["ReceiptStore.list({threadId, cursor?, limit?})<br/>200 JSON array (+ Link rel=next when more pages)<br/>400 on invalid cursor/limit"]
+  dispatch -- "/api/v1/cost/*" --> cost["cost ledger routes<br/>read: bearer<br/>mutate: bearer + operator capability"]
   dispatch -- "unknown /api/*" --> apinotfound["404"]
   dispatch -- "/, /index.html, /assets/*" --> static["GET/HEAD only · RendererBundleSource"]
   dispatch -- "other" --> notfound["404"]
@@ -46,6 +47,25 @@ falling into static dispatch.
 The broker emits this through `apiBootstrapToJson` from `@wuphf/protocol`; that
 codec is the single source of truth for the wire shape and is round-trip
 verified by both packages' tests.
+
+### Cost-ledger routes
+
+When `createBroker({ cost })` is supplied, the listener mounts the cost-ledger
+routes under `/api/v1/cost/*`. Without a cost config, those paths behave like
+unknown authenticated API routes and return 404.
+
+| Method | Path | Auth | Contract |
+|---|---|---|---|
+| POST | `/api/v1/cost/events` | bearer + operator capability | Append a `cost_event`; requires `Idempotency-Key`, `X-Operator-Identity`, and configured `X-Operator-Capability`. |
+| POST | `/api/v1/cost/budgets` | bearer + operator capability | Set/update a budget; broker overwrites `setBy` and `setAt` server-side. |
+| DELETE | `/api/v1/cost/budgets/:id` | bearer + operator capability | Tombstone a budget by appending a `budget_set` with `limitMicroUsd: 0`. |
+| GET | `/api/v1/cost/budgets` | bearer | List projected budget rows. |
+| GET | `/api/v1/cost/budgets/:id` | bearer | Fetch one projected budget row. |
+| GET | `/api/v1/cost/summary` | bearer | Return aggregate spend, budgets, and threshold crossings. |
+| GET | `/api/v1/cost/replay-check` | bearer | Replay the cost event log and report projection drift. |
+
+See [cost-ledger.md](./cost-ledger.md) for the full route table, idempotency
+keys, replay-check discrepancy contract, and public subpath exports.
 
 ### Receipt write-path status codes
 

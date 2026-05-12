@@ -4,7 +4,12 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
+import {
+  CURRENT_SCHEMA_VERSION,
+  createEventLog,
+  openDatabase,
+  runMigrations,
+} from "../src/event-log/index.ts";
 
 const tempDirs: string[] = [];
 
@@ -79,7 +84,7 @@ describe("event log", () => {
     const first = openDatabase({ path });
     try {
       runMigrations(first);
-      expect(first.pragma("user_version", { simple: true })).toBe(1);
+      expect(first.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
       expect(
         first
           .prepare<[], { readonly name: string }>(
@@ -94,7 +99,7 @@ describe("event log", () => {
     const second = openDatabase({ path });
     try {
       runMigrations(second);
-      expect(second.pragma("user_version", { simple: true })).toBe(1);
+      expect(second.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
       expect(
         second
           .prepare<[], { readonly name: string }>(

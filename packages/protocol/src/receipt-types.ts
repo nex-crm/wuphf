@@ -256,6 +256,27 @@ const AGENT_SLUG_RE = new RegExp(`^[a-z0-9][a-z0-9_-]{0,${MAX_AGENT_SLUG_BYTES -
 const LOCAL_ID_RE = new RegExp(`^[A-Za-z0-9][A-Za-z0-9._-]{0,${MAX_LOCAL_ID_BYTES - 1}}$`);
 export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
+/**
+ * Protocol compatibility floor for readers that process
+ * `cost_event.providerKind`.
+ *
+ * Scope: this floor applies specifically to `cost_event` payloads. The
+ * other audit-event kinds (`budget_set`, `budget_threshold_crossed`) do
+ * not embed `providerKind`. Receipts existed before this PR with
+ * `anthropic` and `openai` already legal, but the cost-event surface is
+ * new and the wire-shape contract is asserted here.
+ *
+ * Cost-event producers must not emit any of the new `cost_event`
+ * `providerKind` values (`anthropic`, `openai`, `openai-compat`,
+ * `ollama`, `opencode`, `opencodego`) until every consumer has deployed
+ * protocol code at or beyond this floor. Older readers keep
+ * `ProviderKind` closed and reject those literals at decode time. The
+ * Go reference verifier in `testdata/verifier-reference.go` accepts the
+ * same cost payload bodies at this floor and sets the Go-side
+ * compatibility baseline.
+ */
+export const MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND = "cost-provider-kind-v1" as const;
+
 // Exported because ProviderKind is `Brand<(typeof PROVIDER_KIND_VALUES)[number], …>`
 // — consumers that need to enumerate the supported providers (forms, picker
 // UI, exhaustive switches) read this tuple. It is the single source of truth;
@@ -264,9 +285,14 @@ export const PROVIDER_KIND_VALUES = [
   "anthropic",
   "openai",
   "openai-compat",
+  "ollama",
   "openclaw",
   "hermes-agent",
   "openclaw-http",
+  // opencode and opencodego each support local CLI and hosted HTTP topologies,
+  // but the TypeScript and Go implementations are billed and audited separately.
+  "opencode",
+  "opencodego",
 ] as const;
 const PROVIDER_KIND_SET: ReadonlySet<string> = new Set(PROVIDER_KIND_VALUES);
 

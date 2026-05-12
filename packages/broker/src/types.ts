@@ -1,7 +1,8 @@
 // Public broker types. No I/O here — implementations live in sibling modules.
 
 import type { ApiToken, BrokerPort } from "@wuphf/protocol";
-
+import type Database from "better-sqlite3";
+import type { CostLedger } from "./cost-ledger/index.ts";
 import type { ReceiptStore } from "./receipt-store.ts";
 
 export interface BrokerLogger {
@@ -70,6 +71,28 @@ export interface BrokerConfig {
    * release any underlying handle.
    */
   readonly receiptStore?: ReceiptStore;
+  /**
+   * Optional cost-ledger feature. When supplied, `/api/v1/cost/*` routes
+   * are mounted; when absent, those paths return 404 like any other
+   * unknown `/api/*` route. Hosts construct the deps via
+   * `createCostLedger(db, eventLog)`.
+   *
+   * Idempotency is now atomic with ledger appends (see
+   * `CostLedger.appendCostEventIdempotent`); the route layer doesn't
+   * need a separate `CommandIdempotencyStore` injected.
+   *
+   * The broker does NOT own the database — closing the broker does not
+   * close `db`. Host owns lifecycle.
+   */
+  readonly cost?: {
+    readonly ledger: CostLedger;
+    readonly db: Database.Database;
+    /**
+     * Additional bearer-like capability required for cost-ledger mutation
+     * routes. Read routes continue to use the broker bearer only.
+     */
+    readonly operatorToken?: ApiToken;
+  };
 }
 
 export interface BrokerHandle {

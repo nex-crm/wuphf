@@ -1,0 +1,1037 @@
+import {
+  createCostLedger,
+  createEventLog,
+  openDatabase,
+  runMigrations,
+} from "@wuphf/broker/cost-ledger";
+import { asAgentSlug, asProviderKind, asReceiptId, asTaskId, type MicroUsd } from "@wuphf/protocol";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  CapExceededError,
+  CircuitBreakerOpenError,
+  type CostEstimator,
+  createGateway,
+  createStubProvider,
+  type Gateway,
+  IdleModeError,
+  type Provider,
+  type ProviderRequest,
+  STUB_FIXED_COST_MICRO_USD,
+  STUB_MODEL_ERROR,
+  STUB_MODEL_FIXED_COST,
+  type SupervisorContext,
+} from "../src/index.ts";
+
+interface Clock {
+  now: number;
+}
+
+function setup(opts: { dailyMicroUsd?: number; wakeCapPerHour?: number } = {}): {
+  gateway: Gateway;
+  clock: Clock;
+  ledger: ReturnType<typeof createCostLedger>;
+  db: ReturnType<typeof openDatabase>;
+} {
+  const db = openDatabase({ path: ":memory:" });
+  runMigrations(db);
+  const eventLog = createEventLog(db);
+  const ledger = createCostLedger(db, eventLog);
+  const clock: Clock = { now: new Date("2026-05-12T10:00:00.000Z").getTime() };
+  const gateway = createGateway({
+    ledger,
+    providers: [createStubProvider()],
+    nowMs: () => clock.now,
+    config: {
+      caps: {
+        ...(opts.dailyMicroUsd !== undefined ? { dailyMicroUsd: opts.dailyMicroUsd } : {}),
+        ...(opts.wakeCapPerHour !== undefined ? { wakeCapPerHour: opts.wakeCapPerHour } : {}),
+      },
+    },
+  });
+  return { gateway, clock, ledger, db };
+}
+
+const CTX: SupervisorContext = {
+  agentSlug: asAgentSlug("primary"),
+  taskId: asTaskId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
+  receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+};
+
+const REQ: ProviderRequest = {
+  model: STUB_MODEL_FIXED_COST,
+  prompt: "hello",
+  maxOutputTokens: 64,
+};
+
+describe("gateway happy path", () => {
+  let fix: ReturnType<typeof setup>;
+  beforeEach(() => {
+    fix = setup();
+  });
+  afterEach(() => {
+    fix.db.close();
+  });
+
+  it("writes a cost_event before returning, and the LSN matches event_log", async () => {
+    const result = await fix.gateway.complete(CTX, REQ);
+    expect(result.text).toBe("ack");
+    expect(result.costMicroUsd as number).toBe(STUB_FIXED_COST_MICRO_USD);
+    expect(result.dedupeReplay).toBe(false);
+    expect(result.costEventLsn).toBe("v1:1");
+
+    // The §15.A invariant: event_log holds exactly one cost.event row at
+    // the LSN we returned.
+    const row = fix.db
+      .prepare<[number], { readonly lsn: number; readonly type: string }>(
+        "SELECT lsn, type FROM event_log WHERE lsn = ?",
+      )
+      .get(1);
+    expect(row?.type).toBe("cost.event");
+    expect(row?.lsn).toBe(1);
+  });
+
+  it("agent + task projections reflect the call atomically", async () => {
+    await fix.gateway.complete(CTX, REQ);
+    const agentRow = fix.ledger.getAgentSpend("primary", "2026-05-12");
+    expect(agentRow?.totalMicroUsd as number).toBe(STUB_FIXED_COST_MICRO_USD);
+    const taskRow = fix.ledger.getTaskSpend("01BRZ3NDEKTSV4RRFFQ69G5FA0");
+    expect(taskRow?.totalMicroUsd as number).toBe(STUB_FIXED_COST_MICRO_USD);
+  });
+});
+
+describe("dedupe", () => {
+  it("identical payload within 60s returns the cached result without a new ledger row", async () => {
+    const fix = setup();
+    try {
+      const r1 = await fix.gateway.complete(CTX, REQ);
+      expect(r1.dedupeReplay).toBe(false);
+
+      fix.clock.now += 30_000; // 30s later
+
+      const r2 = await fix.gateway.complete(CTX, REQ);
+      expect(r2.dedupeReplay).toBe(true);
+      expect(r2.costEventLsn).toBe(r1.costEventLsn);
+      expect(r2.costMicroUsd).toBe(r1.costMicroUsd);
+
+      const eventCount = fix.db
+        .prepare<[], { readonly n: number }>(
+          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+        )
+        .get();
+      expect(eventCount?.n).toBe(1);
+    } finally {
+      fix.db.close();
+    }
+  });
+
+  it("after the 60s window expires, the same payload triggers a fresh ledger write", async () => {
+    const fix = setup();
+    try {
+      const r1 = await fix.gateway.complete(CTX, REQ);
+      fix.clock.now += 61_000; // past the dedupe window
+      const r2 = await fix.gateway.complete(CTX, REQ);
+      expect(r2.dedupeReplay).toBe(false);
+      expect(r2.costEventLsn).not.toBe(r1.costEventLsn);
+    } finally {
+      fix.db.close();
+    }
+  });
+
+  it("dedupe does NOT replay across agents — context is part of the key (B3)", async () => {
+    const fix = setup();
+    try {
+      const ctxA: SupervisorContext = { agentSlug: asAgentSlug("agent_a") };
+      const ctxB: SupervisorContext = { agentSlug: asAgentSlug("agent_b") };
+      // Same prompt, different agents. Each must produce a fresh
+      // cost_event LSN; the second call must NOT replay the first.
+      const r1 = await fix.gateway.complete(ctxA, REQ);
+      const r2 = await fix.gateway.complete(ctxB, REQ);
+      expect(r1.dedupeReplay).toBe(false);
+      expect(r2.dedupeReplay).toBe(false);
+      expect(r2.costEventLsn).not.toBe(r1.costEventLsn);
+      // Both agents have a row in cost_by_agent.
+      expect(fix.ledger.getAgentSpend("agent_a", "2026-05-12")?.totalMicroUsd as number).toBe(
+        STUB_FIXED_COST_MICRO_USD,
+      );
+      expect(fix.ledger.getAgentSpend("agent_b", "2026-05-12")?.totalMicroUsd as number).toBe(
+        STUB_FIXED_COST_MICRO_USD,
+      );
+    } finally {
+      fix.db.close();
+    }
+  });
+
+  it("dedupe does NOT replay across tasks — taskId is part of the key (B3)", async () => {
+    const fix = setup();
+    try {
+      const ctxTask1: SupervisorContext = {
+        agentSlug: asAgentSlug("primary"),
+        taskId: asTaskId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
+      };
+      const ctxTask2: SupervisorContext = {
+        agentSlug: asAgentSlug("primary"),
+        taskId: asTaskId("01BRZ3NDEKTSV4RRFFQ69G5FA1"),
+      };
+      const r1 = await fix.gateway.complete(ctxTask1, REQ);
+      const r2 = await fix.gateway.complete(ctxTask2, REQ);
+      expect(r2.dedupeReplay).toBe(false);
+      expect(r2.costEventLsn).not.toBe(r1.costEventLsn);
+    } finally {
+      fix.db.close();
+    }
+  });
+});
+
+describe("daily cap", () => {
+  it("blocks once today's office spend reaches the cap", async () => {
+    // Cap of one stub call. After call #1 the projection is at the cap,
+    // and call #2 must reject before reaching the provider.
+    const fix = setup({ dailyMicroUsd: STUB_FIXED_COST_MICRO_USD });
+    try {
+      await fix.gateway.complete(CTX, REQ);
+      // Bypass dedupe by changing the prompt.
+      const second: ProviderRequest = { ...REQ, prompt: "different" };
+      await expect(fix.gateway.complete(CTX, second)).rejects.toBeInstanceOf(CapExceededError);
+    } finally {
+      fix.db.close();
+    }
+  });
+
+  it("counts spend across all agents (per-office cap, not per-agent)", async () => {
+    const fix = setup({ dailyMicroUsd: STUB_FIXED_COST_MICRO_USD });
+    try {
+      const ctxA: SupervisorContext = { agentSlug: asAgentSlug("agent_a") };
+      const ctxB: SupervisorContext = { agentSlug: asAgentSlug("agent_b") };
+      await fix.gateway.complete(ctxA, { ...REQ, prompt: "a" });
+      await expect(fix.gateway.complete(ctxB, { ...REQ, prompt: "b" })).rejects.toBeInstanceOf(
+        CapExceededError,
+      );
+    } finally {
+      fix.db.close();
+    }
+  });
+});
+
+describe("wake cap", () => {
+  it("blocks wakes beyond wakeCapPerHour within the window for the same agent", async () => {
+    const fix = setup({ wakeCapPerHour: 3 });
+    try {
+      // 3 successful wakes fit; the 4th is rejected.
+      for (let i = 0; i < 3; i += 1) {
+        await fix.gateway.complete(CTX, { ...REQ, prompt: `unique-${i}` });
+      }
+      await expect(
+        fix.gateway.complete(CTX, { ...REQ, prompt: "overflow" }),
+      ).rejects.toBeInstanceOf(CapExceededError);
+    } finally {
+      fix.db.close();
+    }
+  });
+
+  it("wake-cap window slides — old wakes drop out after wakeWindowMs", async () => {
+    const fix = setup({ wakeCapPerHour: 2 });
+    try {
+      await fix.gateway.complete(CTX, { ...REQ, prompt: "a" });
+      await fix.gateway.complete(CTX, { ...REQ, prompt: "b" });
+      // 3rd within an hour: rejected
+      await expect(fix.gateway.complete(CTX, { ...REQ, prompt: "c" })).rejects.toBeInstanceOf(
+        CapExceededError,
+      );
+      // Advance past the wake window; old wakes drop out. Also note
+      // human activity so we don't trip the idle gate (which has the
+      // same 60min+ horizon as our advance).
+      fix.clock.now += 60 * 60 * 1000 + 1;
+      fix.gateway.noteHumanActivity();
+      const r = await fix.gateway.complete(CTX, { ...REQ, prompt: "c" });
+      expect(r.dedupeReplay).toBe(false);
+    } finally {
+      fix.db.close();
+    }
+  });
+
+  it("wake cap is per-agent (one agent's saturation doesn't block another)", async () => {
+    const fix = setup({ wakeCapPerHour: 1 });
+    try {
+      const ctxA: SupervisorContext = { agentSlug: asAgentSlug("agent_a") };
+      const ctxB: SupervisorContext = { agentSlug: asAgentSlug("agent_b") };
+      await fix.gateway.complete(ctxA, { ...REQ, prompt: "a" });
+      await expect(fix.gateway.complete(ctxA, { ...REQ, prompt: "a2" })).rejects.toBeInstanceOf(
+        CapExceededError,
+      );
+      // Different agent still works.
+      const r = await fix.gateway.complete(ctxB, { ...REQ, prompt: "b" });
+      expect(r.dedupeReplay).toBe(false);
+    } finally {
+      fix.db.close();
+    }
+  });
+});
+
+describe("circuit breaker", () => {
+  it("post-provider failures also record breaker errors (H5)", async () => {
+    // Custom provider whose .complete() succeeds (so the
+    // pre-existing provider-error catch does NOT fire), but whose
+    // estimator throws — exercising the new post-provider catch
+    // around estimate + appendCostEvent. Two failures must open the
+    // breaker.
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const clock: Clock = { now: new Date("2026-05-12T10:00:00.000Z").getTime() };
+    const throwingEstimator: CostEstimator = {
+      estimate() {
+        throw new Error("estimator_unavailable");
+      },
+    };
+    const failingProvider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["test-throwing-model"],
+      costEstimator: throwingEstimator,
+      async complete() {
+        return Promise.resolve({
+          text: "ok",
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        });
+      },
+    };
+    const gateway = createGateway({
+      ledger,
+      providers: [failingProvider],
+      nowMs: () => clock.now,
+    });
+    try {
+      await expect(
+        gateway.complete(CTX, {
+          model: "test-throwing-model",
+          prompt: "p1",
+          maxOutputTokens: 8,
+        }),
+      ).rejects.toThrow(/estimator_unavailable/);
+      await expect(
+        gateway.complete(CTX, {
+          model: "test-throwing-model",
+          prompt: "p2",
+          maxOutputTokens: 8,
+        }),
+      ).rejects.toThrow(/estimator_unavailable/);
+      const inspection = gateway.inspect();
+      const agent = inspection.perAgent.get("primary");
+      expect(agent?.breaker.status).toBe("open");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("opens after 2 errors in the window and rejects further calls until cooldown", async () => {
+    const fix = setup();
+    try {
+      const errReq: ProviderRequest = { ...REQ, model: STUB_MODEL_ERROR };
+      // First error: breaker stays closed.
+      await expect(fix.gateway.complete(CTX, errReq)).rejects.toBeTruthy();
+      // Second error: breaker opens.
+      await expect(fix.gateway.complete(CTX, { ...errReq, prompt: "err2" })).rejects.toBeTruthy();
+      // Third call (even with success-able model): breaker open.
+      await expect(
+        fix.gateway.complete(CTX, { ...REQ, prompt: "after-open" }),
+      ).rejects.toBeInstanceOf(CircuitBreakerOpenError);
+    } finally {
+      fix.db.close();
+    }
+  });
+
+  it("cooldown elapses → breaker half-opens → next call closes it on success", async () => {
+    const fix = setup();
+    try {
+      const errReq: ProviderRequest = { ...REQ, model: STUB_MODEL_ERROR };
+      await expect(fix.gateway.complete(CTX, errReq)).rejects.toBeTruthy();
+      await expect(fix.gateway.complete(CTX, { ...errReq, prompt: "err2" })).rejects.toBeTruthy();
+      // Advance past cooldown. Same horizon as idle threshold (5min), so
+      // note human activity so the idle gate doesn't reject the retry.
+      fix.clock.now += 5 * 60 * 1000 + 1;
+      fix.gateway.noteHumanActivity();
+      const r = await fix.gateway.complete(CTX, { ...REQ, prompt: "after-cooldown" });
+      expect(r.dedupeReplay).toBe(false);
+    } finally {
+      fix.db.close();
+    }
+  });
+});
+
+describe("idle mode", () => {
+  it("rejects after 5min of inactivity", async () => {
+    const fix = setup();
+    try {
+      // Start active.
+      await fix.gateway.complete(CTX, REQ);
+      // Advance past idle threshold. noteHumanActivity is the only reset.
+      fix.clock.now += 5 * 60 * 1000 + 1;
+      await expect(
+        fix.gateway.complete(CTX, { ...REQ, prompt: "after-idle" }),
+      ).rejects.toBeInstanceOf(IdleModeError);
+    } finally {
+      fix.db.close();
+    }
+  });
+
+  it("noteHumanActivity resets the idle clock", async () => {
+    const fix = setup();
+    try {
+      fix.clock.now += 5 * 60 * 1000 + 1;
+      // Without note: rejected.
+      await expect(fix.gateway.complete(CTX, { ...REQ, prompt: "p" })).rejects.toBeInstanceOf(
+        IdleModeError,
+      );
+      fix.gateway.noteHumanActivity();
+      const r = await fix.gateway.complete(CTX, { ...REQ, prompt: "p2" });
+      expect(r.dedupeReplay).toBe(false);
+    } finally {
+      fix.db.close();
+    }
+  });
+});
+
+describe("inspect()", () => {
+  it("returns wake counts and breaker state per agent", async () => {
+    const fix = setup({ wakeCapPerHour: 5 });
+    try {
+      await fix.gateway.complete(CTX, { ...REQ, prompt: "a" });
+      await fix.gateway.complete(CTX, { ...REQ, prompt: "b" });
+      const inspection = fix.gateway.inspect();
+      const agent = inspection.perAgent.get("primary");
+      expect(agent?.recentWakeCount).toBe(2);
+      expect(agent?.breaker.status).toBe("closed");
+    } finally {
+      fix.db.close();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Followups #827 + #828 + #824 — surgical gateway-side fixes
+// ─────────────────────────────────────────────────────────────────────
+
+describe("gateway construction-time validation (#828)", () => {
+  it("rejects a Provider whose .kind is not a registered ProviderKind", () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const stub = createStubProvider();
+    // Forge a fake kind via `as` cast — the defense is the construction
+    // check, not the type system. Build the wrapper as a fresh object so
+    // the class-method `complete` is preserved (spread skips prototype).
+    const forged: Provider = {
+      kind: "not-a-real-kind" as never,
+      models: stub.models,
+      costEstimator: stub.costEstimator,
+      complete: stub.complete.bind(stub),
+    };
+    try {
+      expect(() => createGateway({ ledger, providers: [forged], nowMs: () => Date.now() })).toThrow(
+        /not a registered ProviderKind/,
+      );
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("audit row records served model id (#827)", () => {
+  it("uses ProviderResponse.model when the adapter supplies it", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const fixedKind = asProviderKind("openai-compat");
+    const estimator: CostEstimator = {
+      estimate: (_model, _usage) => 0 as never,
+    };
+    const provider: Provider = {
+      kind: fixedKind,
+      models: ["alias-model"],
+      costEstimator: estimator,
+      complete: async (_req) => ({
+        text: "ok",
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        // Adapter returns a pinned snapshot identifier; gateway should record THIS.
+        model: "alias-model-2025-04-12-snapshot",
+      }),
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await gateway.complete(
+        { agentSlug: asAgentSlug("a") },
+        { model: "alias-model", prompt: "p", maxOutputTokens: 8 },
+      );
+      const row = db
+        .prepare<[], { readonly payload: Buffer }>(
+          "SELECT payload FROM event_log WHERE type = 'cost.event' LIMIT 1",
+        )
+        .get();
+      if (row === undefined) throw new Error("no cost.event row");
+      const parsed = JSON.parse(row.payload.toString("utf8")) as { model: string };
+      expect(parsed.model).toBe("alias-model-2025-04-12-snapshot");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("falls back to ProviderRequest.model when adapter does not supply one", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const gateway = createGateway({
+      ledger,
+      providers: [createStubProvider()],
+      nowMs: () => Date.now(),
+    });
+    try {
+      await gateway.complete(CTX, REQ);
+      const row = db
+        .prepare<[], { readonly payload: Buffer }>(
+          "SELECT payload FROM event_log WHERE type = 'cost.event' LIMIT 1",
+        )
+        .get();
+      if (row === undefined) throw new Error("no cost.event row");
+      const parsed = JSON.parse(row.payload.toString("utf8")) as { model: string };
+      expect(parsed.model).toBe(STUB_MODEL_FIXED_COST);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("gateway rejects runaway cost estimate before ledger append (#824)", () => {
+  it("treats an over-cap estimator output as breaker-worthy and skips the ledger write", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const kind = asProviderKind("openai-compat");
+    // Estimator returns $200 only when called with the real usage shape
+    // (output=1). Reservation pre-flight passes because the reservation
+    // estimate uses maxOutputTokens=8 as the hypothetical input/output,
+    // which the estimator stubs to 0 for those shapes.
+    const estimator: CostEstimator = {
+      estimate: (_model, usage) => (usage.outputTokens === 1 ? 200_000_000 : 0) as unknown as never,
+    };
+    const provider: Provider = {
+      kind,
+      models: ["runaway-model"],
+      costEstimator: estimator,
+      complete: async () => ({
+        text: "ok",
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      }),
+    };
+    // Set daily cap to $300 so the reservation (which would be 0 under
+    // this estimator for max-token shape) doesn't trip on daily cap.
+    const gateway = createGateway({
+      ledger,
+      providers: [provider],
+      nowMs: () => Date.now(),
+      config: { caps: { dailyMicroUsd: 300_000_000 } },
+    });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "runaway-model", prompt: "p", maxOutputTokens: 8 },
+        ),
+      ).rejects.toThrow(/exceeds per-event cap/);
+      // No cost_event written for the over-cap call.
+      const count = db
+        .prepare<[], { readonly n: number }>(
+          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+        )
+        .get();
+      expect(count?.n).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// PR #834 round-1 BLOCK: concurrent-call bypass of caps + dedupe
+// ─────────────────────────────────────────────────────────────────────
+
+describe("concurrent-call coalescing + reservation atomicity (PR #834 round-1 BLOCK)", () => {
+  it("two concurrent identical calls share ONE paid provider call (in-flight coalescing)", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    let callCount = 0;
+    let resolveProvider: (v: ProviderResponseLike) => void = () => {
+      // assigned in the provider call below
+    };
+    const providerCallPromise = new Promise<ProviderResponseLike>((r) => {
+      resolveProvider = r;
+    });
+    const kind = asProviderKind("openai-compat");
+    const estimator: CostEstimator = { estimate: () => 1_000 as never };
+    const provider: Provider = {
+      kind,
+      models: ["coalesce-model"],
+      costEstimator: estimator,
+      complete: async () => {
+        callCount += 1;
+        return providerCallPromise;
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      const ctx: SupervisorContext = { agentSlug: asAgentSlug("a") };
+      const req: ProviderRequest = { model: "coalesce-model", prompt: "p", maxOutputTokens: 8 };
+      // Fire two identical calls before either await resolves.
+      const p1 = gateway.complete(ctx, req);
+      const p2 = gateway.complete(ctx, req);
+      // Drive the provider call resolution.
+      resolveProvider({
+        text: "ok",
+        usage: { inputTokens: 5, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      });
+      const [r1, r2] = await Promise.all([p1, p2]);
+      expect(callCount).toBe(1);
+      expect(r1.text).toBe("ok");
+      expect(r2.text).toBe("ok");
+      expect(r2.dedupeReplay).toBe(true);
+      expect(r1.dedupeReplay).toBe(false);
+      // Exactly one cost_event row was written.
+      const count = db
+        .prepare<[], { readonly n: number }>(
+          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+        )
+        .get();
+      expect(count?.n).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("concurrent identical-payload provider failure rejects BOTH callers, no ledger row", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    let rejectProvider: (e: Error) => void = () => {
+      // assigned below
+    };
+    const providerCallPromise = new Promise<ProviderResponseLike>((_resolve, reject) => {
+      rejectProvider = reject;
+    });
+    const kind = asProviderKind("openai-compat");
+    const estimator: CostEstimator = { estimate: () => 1_000 as never };
+    const provider: Provider = {
+      kind,
+      models: ["fail-coalesce"],
+      costEstimator: estimator,
+      complete: async () => providerCallPromise,
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      const ctx: SupervisorContext = { agentSlug: asAgentSlug("a") };
+      const req: ProviderRequest = { model: "fail-coalesce", prompt: "p", maxOutputTokens: 8 };
+      const p1 = gateway.complete(ctx, req);
+      const p2 = gateway.complete(ctx, req);
+      rejectProvider(new Error("upstream 5xx"));
+      await expect(p1).rejects.toThrow();
+      await expect(p2).rejects.toThrow();
+      const count = db
+        .prepare<[], { readonly n: number }>(
+          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+        )
+        .get();
+      expect(count?.n).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("12 concurrent DIFFERENT-payload calls for one agent cannot blow the wake cap", async () => {
+    // Wake cap = 5/hr. Fire 12 different-prompt calls concurrently; only
+    // 5 should reach the provider. Without reservation, all 12 would
+    // pass the stale wake check and bill the provider.
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const kind = asProviderKind("openai-compat");
+    const estimator: CostEstimator = { estimate: () => 1_000 as never };
+    let inflight = 0;
+    let maxInflight = 0;
+    let totalCalls = 0;
+    const provider: Provider = {
+      kind,
+      models: ["wake-cap-model"],
+      costEstimator: estimator,
+      complete: async () => {
+        totalCalls += 1;
+        inflight += 1;
+        maxInflight = Math.max(maxInflight, inflight);
+        await new Promise((r) => setTimeout(r, 10));
+        inflight -= 1;
+        return {
+          text: "ok",
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        };
+      },
+    };
+    const gateway = createGateway({
+      ledger,
+      providers: [provider],
+      nowMs: () => Date.now(),
+      config: { caps: { wakeCapPerHour: 5, dailyMicroUsd: 1_000_000_000 } },
+    });
+    try {
+      const ctx: SupervisorContext = { agentSlug: asAgentSlug("a") };
+      const promises = Array.from({ length: 12 }, (_, i) =>
+        gateway
+          .complete(ctx, { model: "wake-cap-model", prompt: `p${i}`, maxOutputTokens: 1 })
+          .catch((err) => ({ error: err as Error })),
+      );
+      const results = await Promise.all(promises);
+      const succeeded = results.filter((r) => !("error" in r)).length;
+      const capRejected = results.filter(
+        (r) => "error" in r && (r.error as Error).message.startsWith("cap_exceeded: wake"),
+      ).length;
+      expect(succeeded).toBe(5);
+      expect(capRejected).toBe(7);
+      expect(totalCalls).toBe(5); // never more than 5 paid provider calls
+      expect(maxInflight).toBeLessThanOrEqual(5);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("supervisor context brand validation (PR #834 round-1 HIGH security #3)", () => {
+  it("rejects forged agentSlug at gateway entry — no provider call", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    let providerCalled = false;
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["m"],
+      costEstimator: { estimate: () => 0 as never },
+      complete: async () => {
+        providerCalled = true;
+        return {
+          text: "",
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        };
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      const forgedCtx = { agentSlug: "BAD slug with spaces" as never };
+      await expect(
+        gateway.complete(forgedCtx, { model: "m", prompt: "p", maxOutputTokens: 1 }),
+      ).rejects.toThrow(/invalid SupervisorContext.agentSlug/);
+      expect(providerCalled).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects forged taskId / receiptId at gateway entry — no provider call", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    let providerCalled = false;
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["m"],
+      costEstimator: { estimate: () => 0 as never },
+      complete: async () => {
+        providerCalled = true;
+        return {
+          text: "",
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        };
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      const ctx = {
+        agentSlug: asAgentSlug("a"),
+        taskId: "not-a-ulid" as never,
+      };
+      await expect(
+        gateway.complete(ctx, { model: "m", prompt: "p", maxOutputTokens: 1 }),
+      ).rejects.toThrow(/invalid SupervisorContext.taskId/);
+      expect(providerCalled).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+interface ProviderResponseLike {
+  readonly text: string;
+  readonly usage: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cacheReadTokens: number;
+    readonly cacheCreationTokens: number;
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// PR #834 round-2 codex sweep — adversarial + types findings
+// ─────────────────────────────────────────────────────────────────────
+
+describe("reservation accounts for prompt input tokens (round-2 BLOCK/HIGH)", () => {
+  it("a huge prompt with small maxOutputTokens reserves against input cost too", async () => {
+    // Round-1 reserved using maxOutputTokens for both input AND output.
+    // A 30k-char prompt (~10k input tokens) with maxOutputTokens=4 would
+    // therefore reserve as if it were tiny. Concurrent distinct prompts
+    // could then all pass reserveAndPreflight despite blowing the cap.
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["pricey"],
+      // $3/MTok input, $15/MTok output (claude-sonnet rates).
+      costEstimator: {
+        estimate: (_m, u) =>
+          Math.floor(
+            (u.inputTokens * 3_000_000 + u.outputTokens * 15_000_000) / 1_000_000,
+          ) as unknown as never,
+      },
+      complete: async () => ({
+        text: "tiny",
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      }),
+    };
+    // Daily cap = $0.02 = 20_000 μUSD. A single 30k-char prompt's
+    // pessimistic reservation is (~10k input * $3/MTok) ≈ $0.03 = 30_000,
+    // which exceeds the cap — reservation must reject it.
+    const gateway = createGateway({
+      ledger,
+      providers: [provider],
+      nowMs: () => Date.now(),
+      config: { caps: { dailyMicroUsd: 20_000 } },
+    });
+    try {
+      const ctx: SupervisorContext = { agentSlug: asAgentSlug("a") };
+      const bigPrompt = "x".repeat(30_000);
+      await expect(
+        gateway.complete(ctx, { model: "pricey", prompt: bigPrompt, maxOutputTokens: 4 }),
+      ).rejects.toBeInstanceOf(CapExceededError);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("gateway fails closed on pessimistic reservation estimator failure (CR round-2 critical)", () => {
+  it("throws ProviderError when the estimator returns a non-integer (silent 0 bypass prevented)", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    // Estimator that returns garbage (NaN) — used to silently produce a
+    // 0-reservation that slipped past reserveAndPreflight. Must now surface
+    // as ProviderError before the paid provider call.
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["nan-model"],
+      costEstimator: { estimate: () => Number.NaN as unknown as MicroUsd },
+      complete: async () => {
+        throw new Error("provider must NOT be called when reservation estimate is invalid");
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "nan-model", prompt: "p", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/non-negative safe integer/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("throws ProviderError when the estimator returns a negative integer", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["neg-model"],
+      costEstimator: { estimate: () => -1 as unknown as MicroUsd },
+      complete: async () => {
+        throw new Error("provider must NOT be called when reservation estimate is invalid");
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "neg-model", prompt: "p", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/non-negative safe integer/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records a breaker error so sustained estimator faults open the circuit", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["bad-model"],
+      costEstimator: {
+        estimate: () => {
+          throw new Error("rate_book_missing");
+        },
+      },
+      complete: async () => {
+        throw new Error("provider must NOT be called");
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      // Two failures must open the breaker, same shape as the existing
+      // post-provider estimator test.
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "bad-model", prompt: "p1", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/rate_book_missing/);
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "bad-model", prompt: "p2", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/rate_book_missing/);
+      const agent = gateway.inspect().perAgent.get("a");
+      expect(agent?.breaker.status).toBe("open");
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("gateway post-provider validators reject forged MicroUsd / model id", () => {
+  it("rejects a NaN cost estimate AFTER the provider call (post-provider validateCostEstimate)", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    // First call: reservation estimator returns a sane 0. Second
+    // estimator call (post-provider, on real usage) returns NaN — must
+    // fail closed via validateCostEstimate before the ledger appends.
+    let calls = 0;
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["forged-model"],
+      costEstimator: {
+        estimate: () => {
+          calls += 1;
+          if (calls === 1) return 0 as unknown as MicroUsd; // reservation
+          return Number.NaN as unknown as MicroUsd; // post-provider forgery
+        },
+      },
+      complete: async () => ({
+        text: "ok",
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      }),
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "forged-model", prompt: "p", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/non-negative safe integer/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects an empty audit-model id (validateAuditModel empty branch)", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    // Provider echoes back model="" — validateAuditModel must reject the
+    // empty string before any ledger append.
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["m1"],
+      costEstimator: { estimate: () => 0 as unknown as MicroUsd },
+      complete: async () => ({
+        text: "ok",
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        model: "", // forged empty served model
+      }),
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "m1", prompt: "p", maxOutputTokens: 1 },
+        ),
+      ).rejects.toThrow(/invalid audit model id/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("gateway model length uses UTF-8 byte cap (round-2 LOW)", () => {
+  it("rejects a 129-byte model id even though it's under the old 256-char bound", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const longModel = "m".repeat(129); // 129 ASCII bytes
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: [longModel],
+      costEstimator: { estimate: () => 0 as never },
+      complete: async () => ({
+        text: "",
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        model: longModel, // adapter echoes the served snapshot
+      }),
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: longModel, prompt: "p", maxOutputTokens: 1 },
+        ),
+      ).rejects.toThrow(/exceeds MAX_COST_MODEL_BYTES/);
+    } finally {
+      db.close();
+    }
+  });
+});
