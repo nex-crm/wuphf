@@ -534,8 +534,11 @@ type teamSkill struct {
 	UsageCount          int      `json:"usage_count"`
 	Status              string   `json:"status"`
 	DisabledFromStatus  string   `json:"disabled_from_status,omitempty"`
-	CreatedAt           string   `json:"created_at"`
-	UpdatedAt           string   `json:"updated_at"`
+	// RelatedSkills lists slugs of other skills this skill overlaps with.
+	// Populated by the semantic dedup gate and the consolidation endpoint.
+	RelatedSkills []string `json:"related_skills,omitempty"`
+	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
 }
 
 type brokerState struct {

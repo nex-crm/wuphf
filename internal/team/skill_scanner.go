@@ -59,7 +59,10 @@ const agentsDirPrefix = "team/agents/"
 // description, and body should be. Defined where it is consumed per the
 // "accept interfaces, return structs" idiom.
 type llmProvider interface {
-	AskIsSkill(ctx context.Context, articlePath, articleContent string) (isSkill bool, fm SkillFrontmatter, body string, err error)
+	// AskIsSkill classifies an article. existingSkillsSummary is injected
+	// into the user prompt for deduplication (may be empty). enhanceSlug is
+	// non-empty when the LLM returns an "enhance" directive.
+	AskIsSkill(ctx context.Context, articlePath, articleContent, existingSkillsSummary string) (isSkill bool, fm SkillFrontmatter, body, enhanceSlug string, err error)
 }
 
 // SkillSpec is the canonical in-memory representation the scanner produces
@@ -175,6 +178,11 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		res.Errors = append(res.Errors, ScanError{Slug: "", Reason: "walk: " + walkErr.Error()})
 	}
 
+	// Build existing-skills summary once per pass (request-scoped).
+	s.broker.mu.Lock()
+	existingSkillsSummary := buildExistingSkillsSummary(s.broker.skills, 2048)
+	s.broker.mu.Unlock()
+
 	updatedCache := make(map[string]string, len(candidates))
 	llmCalls := 0
 	budgetExceeded := false
@@ -220,7 +228,7 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 
 		llmCalls++
 
-		isSkill, fm, body, err := s.provider.AskIsSkill(ctx, c.relPath, c.content)
+		isSkill, fm, body, enhanceSlug, err := s.provider.AskIsSkill(ctx, c.relPath, c.content, existingSkillsSummary)
 		if err != nil {
 			res.Errors = append(res.Errors, ScanError{Slug: c.relPath, Reason: "llm: " + err.Error()})
 			// Leave the cache entry unset so we retry next pass.
@@ -236,6 +244,23 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		if dryRun {
 			res.Proposed++
 			continue
+		}
+
+		// Enhancement path: merge new details into the existing skill.
+		if enhanceSlug != "" {
+			s.broker.mu.Lock()
+			enhanced, enhErr := s.broker.enhanceSkillLocked(enhanceSlug, body, fm.Description, skillSlug(fm.Name))
+			s.broker.mu.Unlock()
+			if enhErr != nil {
+				slog.Warn("skill_scanner: enhance failed, falling through to proposal",
+					"enhance_slug", enhanceSlug, "err", enhErr)
+				// Fall through to normal proposal path below.
+			} else if enhanced != nil {
+				slog.Info("skill_scanner: enhanced existing skill",
+					"slug", enhanceSlug, "source", c.relPath)
+				res.Proposed++
+				continue
+			}
 		}
 
 		// Stamp provenance + author identity onto the frontmatter before the
@@ -580,10 +605,10 @@ func (p *defaultLLMProvider) SystemPrompt() (string, error) {
 //     provider.RunConfiguredOneShot with the skill-creator.md system prompt.
 //     If the API key is missing or the call fails we log the reason and return
 //     is_skill=false so the scan continues uninterrupted.
-func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articleContent string) (bool, SkillFrontmatter, string, error) {
+func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articleContent, existingSkillsSummary string) (bool, SkillFrontmatter, string, string, error) {
 	sysPrompt, err := p.SystemPrompt()
 	if err != nil {
-		return false, SkillFrontmatter{}, "", err
+		return false, SkillFrontmatter{}, "", "", err
 	}
 
 	// Fast path: explicit frontmatter opt-in.
@@ -594,7 +619,7 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 		if strings.TrimSpace(fm.License) == "" {
 			fm.License = "MIT"
 		}
-		return true, fm, body, nil
+		return true, fm, body, "", nil
 	}
 
 	// LLM path: wrap the caller's context with a per-call deadline so a slow
@@ -602,39 +627,47 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 	timeout := skillLLMTimeout()
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	userPrompt := buildSkillUserPrompt(articlePath, articleContent)
+	userPrompt := buildSkillUserPrompt(articlePath, articleContent, existingSkillsSummary)
 	out, callErr := provider.RunConfiguredOneShotCtx(callCtx, sysPrompt, userPrompt, "")
 	if callErr != nil {
 		if callCtx.Err() != nil {
 			slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
-			return false, SkillFrontmatter{}, "", nil
+			return false, SkillFrontmatter{}, "", "", nil
 		}
 		slog.Warn("skill_scanner: LLM call failed, skipping article",
 			"path", articlePath, "err", callErr)
-		return false, SkillFrontmatter{}, "", nil
+		return false, SkillFrontmatter{}, "", "", nil
 	}
 	if callCtx.Err() != nil {
 		slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
-		return false, SkillFrontmatter{}, "", nil
+		return false, SkillFrontmatter{}, "", "", nil
 	}
-	isSkill, fm, body, parseErr := parseSkillJSON(out)
-	if parseErr != nil {
+	result := parseSkillJSONFull(out)
+	if result.Err != nil {
 		slog.Warn("skill_scanner: LLM JSON parse failed, treating as not-a-skill",
-			"path", articlePath, "err", parseErr)
-		return false, SkillFrontmatter{}, "", nil
+			"path", articlePath, "err", result.Err)
+		return false, SkillFrontmatter{}, "", "", nil
 	}
-	return isSkill, fm, body, nil
+	return result.IsSkill, result.FM, result.Body, result.Enhance, nil
 }
 
 // buildSkillUserPrompt assembles the user-message body sent to the LLM.
 // Exposed at package scope so tests and the (future) live provider share the
 // exact same prompt structure.
-func buildSkillUserPrompt(articlePath, articleContent string) string {
+//
+// existingSkillsSummary is an optional block listing current skills for
+// deduplication. When non-empty it is appended so the LLM can avoid
+// proposing duplicates.
+func buildSkillUserPrompt(articlePath, articleContent, existingSkillsSummary string) string {
 	var b strings.Builder
 	b.WriteString("ARTICLE PATH: ")
 	b.WriteString(articlePath)
 	b.WriteString("\n\nARTICLE CONTENT:\n")
 	b.WriteString(articleContent)
+	if strings.TrimSpace(existingSkillsSummary) != "" {
+		b.WriteString("\n\n")
+		b.WriteString(existingSkillsSummary)
+	}
 	b.WriteString("\n\nIs this a reusable skill? If yes, respond with JSON: ")
 	b.WriteString(`{"is_skill": true, "name": "kebab-slug", "description": "one line", "body": "markdown body for the skill"}.`)
 	b.WriteString(" If no, respond with: ")
@@ -646,6 +679,14 @@ func buildSkillUserPrompt(articlePath, articleContent string) string {
 // triple the scanner expects. Exposed so the live provider and tests share
 // one decoder.
 func parseSkillJSON(raw string) (bool, SkillFrontmatter, string, error) {
+	res := parseSkillJSONFull(raw)
+	return res.IsSkill, res.FM, res.Body, res.Err
+}
+
+// parseSkillJSONFull is the enhanced parser that also extracts the "enhance"
+// field. The legacy parseSkillJSON wrapper above preserves the existing
+// call-site contract; new callers use parseSkillJSONFull directly.
+func parseSkillJSONFull(raw string) skillJSONParseResult {
 	trimmed := strings.TrimSpace(raw)
 	// Tolerate ```json fences if a model adds them despite the prompt.
 	trimmed = strings.TrimPrefix(trimmed, "```json")
@@ -655,21 +696,22 @@ func parseSkillJSON(raw string) (bool, SkillFrontmatter, string, error) {
 
 	var parsed struct {
 		IsSkill     bool   `json:"is_skill"`
+		Enhance     string `json:"enhance,omitempty"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Body        string `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
-		return false, SkillFrontmatter{}, "", fmt.Errorf("skill_scanner: parse llm json: %w", err)
+		return skillJSONParseResult{Err: fmt.Errorf("skill_scanner: parse llm json: %w", err)}
 	}
 	if !parsed.IsSkill {
-		return false, SkillFrontmatter{}, "", nil
+		return skillJSONParseResult{}
 	}
 	if strings.TrimSpace(parsed.Name) == "" {
-		return false, SkillFrontmatter{}, "", errors.New("skill_scanner: llm returned is_skill=true but no name")
+		return skillJSONParseResult{Err: errors.New("skill_scanner: llm returned is_skill=true but no name")}
 	}
 	if strings.TrimSpace(parsed.Description) == "" {
-		return false, SkillFrontmatter{}, "", errors.New("skill_scanner: llm returned is_skill=true but no description")
+		return skillJSONParseResult{Err: errors.New("skill_scanner: llm returned is_skill=true but no description")}
 	}
 	fm := SkillFrontmatter{
 		Name:        skillSlug(parsed.Name),
@@ -677,5 +719,19 @@ func parseSkillJSON(raw string) (bool, SkillFrontmatter, string, error) {
 		Version:     "1.0.0",
 		License:     "MIT",
 	}
-	return true, fm, parsed.Body, nil
+	return skillJSONParseResult{
+		IsSkill: true,
+		Enhance: strings.TrimSpace(parsed.Enhance),
+		FM:      fm,
+		Body:    parsed.Body,
+	}
+}
+
+// skillJSONParseResult bundles all outputs from parseSkillJSONFull.
+type skillJSONParseResult struct {
+	IsSkill bool
+	Enhance string
+	FM      SkillFrontmatter
+	Body    string
+	Err     error
 }

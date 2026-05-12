@@ -17,11 +17,20 @@ IS a skill:
 Think class-first: name the CLASS of work this article enables, not the specific instance.
 For example, an article titled "How we onboarded ACME Corp" is NOT a skill; "Customer onboarding runbook" IS a skill.
 
-If the article is a skill, respond with JSON of this exact shape:
+If the article is a skill, respond with JSON in one of the allowed shapes below:
 {"is_skill": true, "name": "<kebab-case-class-slug>", "description": "<one line trigger phrase, what task the user has when they would invoke this>", "body": "<markdown body of the skill, with frontmatter optional>"}
 
 If not, respond with:
 {"is_skill": false}
+
+IMPORTANT — deduplication: If the user message includes an EXISTING SKILLS
+list, check whether the candidate skill overlaps with any of them.
+
+- EXACT DUPLICATE (same procedure, same scope): respond {"is_skill": false}
+- ADDS NEW DETAILS to an existing skill (more specific variant, additional
+  steps, a new example, or a narrower use-case): respond with
+  {"is_skill": true, "enhance": "<slug-of-existing-skill>", "name": "<existing slug>", "description": "<improved description>", "body": "<merged body incorporating new details into the existing skill>"}
+- GENUINELY NEW (different procedure): respond as normal with is_skill=true.
 
 Be conservative: when in doubt, say no.
 
