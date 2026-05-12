@@ -252,13 +252,36 @@ func (b *Broker) ensureSkillEmbeddingLocked(slug, description string, provider e
 		return nil
 	}
 	atomic.AddInt64(&b.skillCompileMetrics.EmbeddingCacheMissesTotal, 1)
-	// Recheck: if the cache was invalidated while the lock was released
-	// (e.g. another goroutine updated the skill's description), skip
-	// caching the now-stale vector.
-	if _, alreadyCached := b.skillDescEmbeddings[slug]; !alreadyCached {
-		b.skillDescEmbeddings[slug] = vec
+	// Recheck: another goroutine may have updated the skill's description
+	// (and invalidated the cache) while we were embedding. Re-resolve the
+	// live description for this slug and only cache vec when it still
+	// matches what we embedded. Without this guard a stale embedding can
+	// land in the cache for the new description, corrupting later dedup
+	// decisions. Also skip when the cache already contains a fresh entry
+	// to avoid clobbering a concurrent writer.
+	if _, alreadyCached := b.skillDescEmbeddings[slug]; alreadyCached {
+		return vec
 	}
+	currentDesc := b.skillDescriptionBySlugLocked(slug)
+	if currentDesc != "" && strings.ToLower(strings.TrimSpace(currentDesc)) != desc {
+		// Description changed under us; do not cache the now-stale vector.
+		slog.Debug("skill_dedup: discarding stale embedding (description changed during embed)",
+			"slug", slug)
+		return vec
+	}
+	b.skillDescEmbeddings[slug] = vec
 	return vec
+}
+
+// skillDescriptionBySlugLocked returns the current description of the skill
+// whose slug matches, or "" when no such skill exists. Caller MUST hold b.mu.
+func (b *Broker) skillDescriptionBySlugLocked(slug string) string {
+	for i := range b.skills {
+		if skillSlug(b.skills[i].Name) == slug {
+			return b.skills[i].Description
+		}
+	}
+	return ""
 }
 
 // invalidateSkillEmbeddingLocked removes a cached description embedding.

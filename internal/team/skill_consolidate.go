@@ -70,9 +70,12 @@ func (b *Broker) handleSkillConsolidate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Merge mode: archive cluster members into the target.
+	// Merge mode: archive cluster members into the target. We must recompute
+	// clusters under the same lock as the merge — concurrent proposals or
+	// enhancements could have changed b.skills between detect and merge.
 	b.mu.Lock()
-	merged, archived, mergeErr := b.mergeSkillClusterLocked(mergeTarget, clusters)
+	freshClusters := b.detectSkillClustersLocked()
+	merged, archived, mergeErr := b.mergeSkillClusterLocked(mergeTarget, freshClusters)
 	if mergeErr != nil {
 		b.mu.Unlock()
 		http.Error(w, mergeErr.Error(), http.StatusBadRequest)
@@ -107,9 +110,14 @@ func (b *Broker) handleSkillConsolidate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if wikiErr != nil {
-		slog.Warn("skill_consolidate: wiki write failed but state persisted", "err", wikiErr)
-		// State is saved; wiki will be stale until next skill update.
-		// Don't fail the request — the merge itself succeeded.
+		// Persisted state is correct but the on-disk markdown is stale.
+		// Operators must know consolidation half-succeeded so they can
+		// re-render rather than discovering drift on the next agent run.
+		slog.Warn("skill_consolidate: wiki write failed after persisted merge", "err", wikiErr)
+		http.Error(w,
+			"merge persisted but wiki write failed; team/skills/<slug>.md may be stale: "+wikiErr.Error(),
+			http.StatusInternalServerError)
+		return
 	}
 
 	resp.Merged = merged

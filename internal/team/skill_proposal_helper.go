@@ -111,23 +111,30 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 					"tier", best.Tier)
 				return enhanced, nil
 			}
-			// Enhancement failed — fall through to dedup discard.
+			// Enhancement failed — surface the error rather than silently
+			// dropping the candidate's new content into the dedup discard
+			// path. A transient render/wiki failure should be retryable by
+			// the caller, not converted into a permanent loss of detail.
 			if enhErr != nil {
-				slog.Debug("writeSkillProposalLocked: enhance attempt failed, discarding",
-					"candidate", name, "existing", best.Skill.Name, "err", enhErr)
+				return nil, fmt.Errorf("writeSkillProposalLocked: enhance %q from candidate %q: %w",
+					best.Skill.Name, name, enhErr)
 			}
 		}
 
-		// Pure duplicate — discard as before. RelatedSkills is persisted
-		// via saveLocked; the wiki markdown is not re-rendered here because
-		// related_skills is metadata-only (not consumed by agent routing).
-		// It will sync to disk on the next full skill update or compile.
+		// Pure duplicate — record the dedup linkage on the existing skill
+		// and persist both the broker state AND the wiki markdown so the
+		// on-disk frontmatter stays in sync with related_skills.
 		best.Skill.RelatedSkills = appendUnique(best.Skill.RelatedSkills, slug)
 		best.Skill.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if err := b.saveLocked(); err != nil {
 			slog.Warn("writeSkillProposalLocked: saveLocked after dedup linkage failed",
 				"name", name, "err", err)
 		}
+		// Re-render the existing skill's wiki markdown so related_skills
+		// (surfaced in frontmatter per skill_frontmatter.go) does not drift
+		// from broker state. Failure here is logged but non-fatal: state
+		// is already persisted and the dedup decision itself is sound.
+		b.rerenderSkillWikiLocked(best.Skill, "dedup-linkage")
 		atomic.AddInt64(&b.skillCompileMetrics.SemanticDedupHitsTotal, 1)
 		slog.Info("writeSkillProposalLocked: semantic dedup hit",
 			"candidate", name, "existing", best.Skill.Name,
@@ -346,4 +353,49 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription, ca
 	slog.Info("enhanceSkillLocked: skill enhanced",
 		"name", existingName, "slug", slug)
 	return live, nil
+}
+
+// rerenderSkillWikiLocked re-renders the given skill to its wiki markdown so
+// the on-disk frontmatter stays consistent with broker state after metadata
+// mutations (e.g. RelatedSkills). Caller MUST hold b.mu on entry. The method
+// follows the same deadlock-safe unlock/relock pattern as the other write
+// paths because WikiWorker.Enqueue ultimately calls PublishWikiEvent which
+// re-acquires b.mu.
+//
+// Failures are logged with the supplied reason but not returned: the calling
+// path has already persisted broker state, so a wiki drift is recoverable on
+// the next mutation. Returning an error would force callers to handle a
+// case that is strictly worse than the previous "never re-render" behavior.
+func (b *Broker) rerenderSkillWikiLocked(sk *teamSkill, reason string) {
+	if sk == nil {
+		return
+	}
+	wikiWorker := b.wikiWorker
+	if wikiWorker == nil {
+		return
+	}
+	slug := skillSlug(sk.Name)
+	fm := teamSkillToFrontmatter(*sk)
+	mdBytes, err := RenderSkillMarkdown(fm, sk.Content)
+	if err != nil {
+		slog.Warn("rerenderSkillWikiLocked: render failed",
+			"slug", slug, "reason", reason, "err", err)
+		return
+	}
+	wikiPath := "team/skills/" + slug + ".md"
+	commitMsg := "archivist: rerender skill " + slug + " (" + reason + ")"
+	b.mu.Unlock()
+	_, _, enqErr := wikiWorker.Enqueue(
+		context.Background(),
+		slug,
+		wikiPath,
+		string(mdBytes),
+		"replace",
+		commitMsg,
+	)
+	b.mu.Lock()
+	if enqErr != nil {
+		slog.Warn("rerenderSkillWikiLocked: wiki enqueue failed",
+			"slug", slug, "reason", reason, "err", enqErr)
+	}
 }
