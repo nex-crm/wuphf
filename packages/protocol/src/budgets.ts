@@ -218,6 +218,51 @@ export const MAX_RECEIPT_NOTEBOOK_WRITES = 10_000;
  */
 export const MAX_RECEIPT_WIKI_WRITES = 10_000;
 
+// ────────────────────────────────────────────────────────────────────────────
+// Cost ledger budgets (consumed by packages/protocol/src/cost.ts)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Per-event integer micro-USD cap. $100 per single provider call is already
+ * well past a single completion's realistic cost; 100x would let one runaway
+ * call's amount dominate accumulation. Kept well below
+ * `Number.MAX_SAFE_INTEGER` (which is ≈ $9e9) so per-agent totals stay safe
+ * across a long-lived ledger.
+ */
+export const MAX_COST_EVENT_AMOUNT_MICRO_USD = 100_000_000;
+
+/**
+ * Per-budget integer micro-USD cap. $1M is far past anything the first-run
+ * cost-gate slider should propose ($1–$50/day per RFC §11); the bound exists
+ * to fail an attacker- or bug-supplied "set me to MAX_INTEGER" command before
+ * the value enters the projection where downstream math accumulates against
+ * it.
+ */
+export const MAX_BUDGET_LIMIT_MICRO_USD = 1_000_000_000_000;
+
+/**
+ * Threshold percentages stored as basis points (1bp = 0.01%). The maximum is
+ * 10,000bps (= 100%); the threshold-crosser reactor accepts only values in
+ * `(0, MAX_BUDGET_THRESHOLD_BPS]` so a threshold cannot trigger before any
+ * spending or after the limit is already exhausted.
+ */
+export const MAX_BUDGET_THRESHOLD_BPS = 10_000;
+
+/**
+ * Per-budget cap on threshold count. Eight covers a fine-grained
+ * 50/100/250/500/750/9000/9500/10000 fan-out; 100x would let one budget pin
+ * the threshold-crosser reactor on adversarial input or replay.
+ */
+export const MAX_BUDGET_THRESHOLDS = 8;
+
+/**
+ * Cost-event `model` field UTF-8 byte cap. 128 bytes covers all current
+ * provider model identifiers (`claude-opus-4-7`, `gpt-4o-2025-08`, etc.) plus
+ * generous slack for vendor suffixes; 100x would let one cost event store a
+ * configuration blob keyed off the provider call.
+ */
+export const MAX_COST_MODEL_BYTES = 128;
+
 export function assertWithinBudget(value: number, budget: number, label: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`${label} must be a non-negative finite number`);

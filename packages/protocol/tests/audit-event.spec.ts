@@ -33,9 +33,15 @@ import {
 import { canonicalJSON } from "../src/canonical-json.ts";
 import { type EventLsn, lsnFromV1Number, parseLsn } from "../src/event-lsn.ts";
 import {
+  asAgentSlug,
+  asBudgetId,
+  asMicroUsd,
+  asProviderKind,
   asSignerIdentity,
+  asTaskId,
   asThreadId,
   asThreadSpecRevisionId,
+  costAuditPayloadToBytes,
   threadAuditPayloadToBytes,
   threadSpecContentHash,
 } from "../src/index.ts";
@@ -1346,6 +1352,44 @@ function bodyForAuditKind(kind: AuditEventKind, index: number): Uint8Array {
       toStatus: "in_progress",
       changedBy: asSignerIdentity("fran@example.com"),
       changedAt: new Date("2026-05-08T18:00:00.000Z"),
+    });
+  }
+  if (kind === "cost_event") {
+    return costAuditPayloadToBytes(kind, {
+      receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+      agentSlug: asAgentSlug("eng-a"),
+      taskId: asTaskId("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+      providerKind: asProviderKind("anthropic"),
+      model: "claude-opus-4-7",
+      amountMicroUsd: asMicroUsd(1_234 + index),
+      units: {
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+      occurredAt: new Date("2026-05-08T18:00:00.000Z"),
+    });
+  }
+  if (kind === "budget_set") {
+    return costAuditPayloadToBytes(kind, {
+      budgetId: asBudgetId("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
+      scope: "global",
+      limitMicroUsd: asMicroUsd(5_000_000),
+      thresholdsBps: [5_000, 8_000, 10_000],
+      setBy: asSignerIdentity("fran@example.com"),
+      setAt: new Date("2026-05-08T18:00:00.000Z"),
+    });
+  }
+  if (kind === "budget_threshold_crossed") {
+    return costAuditPayloadToBytes(kind, {
+      budgetId: asBudgetId("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
+      budgetSetLsn: "v1:7" as EventLsn,
+      thresholdBps: 5_000,
+      observedMicroUsd: asMicroUsd(2_500_000),
+      limitMicroUsd: asMicroUsd(5_000_000),
+      crossedAtLsn: "v1:42" as EventLsn,
+      crossedAt: new Date("2026-05-08T18:00:00.000Z"),
     });
   }
   return new Uint8Array([index, 0, 255]);

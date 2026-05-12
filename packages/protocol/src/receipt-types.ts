@@ -264,6 +264,7 @@ export const PROVIDER_KIND_VALUES = [
   "anthropic",
   "openai",
   "openai-compat",
+  "ollama",
   "openclaw",
   "hermes-agent",
   "openclaw-http",
