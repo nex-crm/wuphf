@@ -39,16 +39,67 @@ export class IdleModeError extends Error {
   }
 }
 
+/**
+ * Optional structured metadata an adapter can attach when wrapping a
+ * provider-side error. None are required — older adapters that don't
+ * surface these stay backwards-compatible — but a real provider (e.g.
+ * Anthropic) SHOULD populate them so on-call has parseable failure
+ * info. See triangulation #2 finding B2-5.
+ */
+export interface ProviderErrorMetadata {
+  /** HTTP status (or other transport status) when applicable. */
+  readonly status?: number;
+  /** Provider's request id, when the SDK exposes it. */
+  readonly requestId?: string;
+  /** Provider-specific error-type discriminator (e.g. "rate_limit_error"). */
+  readonly errorType?: string;
+  /** Milliseconds the caller should wait before retrying (e.g. 429 retry-after). */
+  readonly retryAfterMs?: number;
+}
+
 export class ProviderError extends Error {
   readonly code = "provider_error";
   readonly providerKind: string;
   override readonly cause: unknown;
-  constructor(providerKind: string, cause: unknown) {
+  readonly status?: number;
+  readonly requestId?: string;
+  readonly errorType?: string;
+  readonly retryAfterMs?: number;
+  constructor(providerKind: string, cause: unknown, metadata: ProviderErrorMetadata = {}) {
     const causeMsg = cause instanceof Error ? cause.message : String(cause);
     super(`provider_error: kind=${providerKind} cause=${causeMsg}`);
     this.name = "ProviderError";
     this.providerKind = providerKind;
     this.cause = cause;
+    if (metadata.status !== undefined) this.status = metadata.status;
+    if (metadata.requestId !== undefined) this.requestId = metadata.requestId;
+    if (metadata.errorType !== undefined) this.errorType = metadata.errorType;
+    if (metadata.retryAfterMs !== undefined) this.retryAfterMs = metadata.retryAfterMs;
+  }
+}
+
+/**
+ * Caller-input error: the provider rejected the request as malformed
+ * (400, 413, 422 in HTTP terms). The gateway does NOT count this as a
+ * breaker strike — bad input from one caller shouldn't open the
+ * breaker for the whole agent. See triangulation #2 finding B2-7.
+ */
+export class BadRequestError extends Error {
+  readonly code = "bad_request";
+  readonly providerKind: string;
+  override readonly cause: unknown;
+  readonly status?: number;
+  readonly requestId?: string;
+  readonly errorType?: string;
+  constructor(providerKind: string, cause: unknown, metadata: ProviderErrorMetadata = {}) {
+    const causeMsg = cause instanceof Error ? cause.message : String(cause);
+    super(`bad_request: kind=${providerKind} cause=${causeMsg}`);
+    this.name = "BadRequestError";
+    this.providerKind = providerKind;
+    this.cause = cause;
+    if (metadata.status !== undefined) this.status = metadata.status;
+    if (metadata.requestId !== undefined) this.requestId = metadata.requestId;
+    if (metadata.errorType !== undefined) this.errorType = metadata.errorType;
   }
 }
 
@@ -65,6 +116,7 @@ export class UnknownModelError extends Error {
  * `.code` to decide retry behavior without `instanceof` chains.
  */
 export type GatewayError =
+  | BadRequestError
   | CapExceededError
   | CircuitBreakerOpenError
   | IdleModeError
@@ -73,6 +125,7 @@ export type GatewayError =
 
 export function isGatewayError(value: unknown): value is GatewayError {
   return (
+    value instanceof BadRequestError ||
     value instanceof CapExceededError ||
     value instanceof CircuitBreakerOpenError ||
     value instanceof IdleModeError ||

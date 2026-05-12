@@ -22,7 +22,7 @@ import type { CostEventAuditPayload, CostUnits, MicroUsd, ProviderKind } from "@
 
 import { Caps, type CapsConfig, DEFAULT_CAPS_CONFIG } from "./caps.ts";
 import { DEFAULT_DEDUPE_CONFIG, DedupeCache, type DedupeConfig } from "./dedupe.ts";
-import { ProviderError, UnknownModelError } from "./errors.ts";
+import { BadRequestError, ProviderError, UnknownModelError } from "./errors.ts";
 import type {
   Gateway,
   GatewayCompletionResult,
@@ -76,6 +76,12 @@ export function createGateway(deps: GatewayDeps): Gateway {
     try {
       providerResponse = await provider.complete(req);
     } catch (err) {
+      // Caller-input errors (400/413/422) do NOT count as breaker
+      // strikes — bad input from one caller shouldn't open the breaker
+      // for the whole agent. See triangulation #2 finding B2-7.
+      if (err instanceof BadRequestError) {
+        throw err;
+      }
       caps.recordError(ctx.agentSlug);
       if (err instanceof ProviderError || err instanceof UnknownModelError) {
         throw err;

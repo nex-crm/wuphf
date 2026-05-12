@@ -2,8 +2,10 @@ import { createCostLedger, createEventLog, openDatabase, runMigrations } from "@
 import { asAgentSlug, asMicroUsd } from "@wuphf/protocol";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BadRequestError,
   createGateway,
   ProviderError,
+  type ProviderRequest,
   type SupervisorContext,
   UnknownModelError,
 } from "../../src/index.ts";
@@ -20,36 +22,71 @@ function fakeClient(stub: (params: AnthropicMessageCreateParams) => AnthropicMes
   readonly client: AnthropicClient;
   readonly create: ReturnType<typeof vi.fn>;
 } {
-  const create = vi.fn(async (params: AnthropicMessageCreateParams) =>
-    Promise.resolve(stub(params)),
+  const create = vi.fn(
+    async (params: AnthropicMessageCreateParams, _options?: { readonly idempotencyKey?: string }) =>
+      Promise.resolve(stub(params)),
   );
   return { client: { messages: { create } }, create };
 }
 
 describe("Anthropic pricing", () => {
-  it("computes cost as integer μUSD from token counts", () => {
-    // Sonnet 4.6 = $3 / $15 input/output per MTok = 3 / 15 μUSD/tok.
+  it("computes cost as integer μUSD from token counts (per-MTok fixed-point)", () => {
+    // Sonnet 4.6 = $3/$15 per MTok = 3_000_000 / 15_000_000 μUSD/MTok.
     const cost = estimateAnthropicCostMicroUsd(DEFAULT_ANTHROPIC_PRICING, "claude-sonnet-4-6", {
       inputTokens: 1_000,
       outputTokens: 500,
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
     });
-    // 1000 * 3 + 500 * 15 = 3000 + 7500 = 10500 μUSD = $0.0105
+    // (1000*3_000_000 + 500*15_000_000) / 1_000_000 = (3e9 + 7.5e9) / 1e6 = 10_500
     expect(cost as number).toBe(10_500);
   });
 
-  it("accounts for cache read + creation lines", () => {
-    // Opus rates: input 15, output 75, cache_read 1 (1.5 rounded down),
-    // cache_creation 19 (18.75 rounded up).
+  it("accounts for cache read + creation lines (Opus 4.7 = $5/$25/$0.50/$6.25)", () => {
     const cost = estimateAnthropicCostMicroUsd(DEFAULT_ANTHROPIC_PRICING, "claude-opus-4-7", {
       inputTokens: 100,
       outputTokens: 50,
       cacheReadTokens: 1_000,
       cacheCreationTokens: 100,
     });
-    // 100*15 + 50*75 + 1000*1 + 100*19 = 1500 + 3750 + 1000 + 1900 = 8150
-    expect(cost as number).toBe(8_150);
+    // 100*5e6 + 50*25e6 + 1000*5e5 + 100*6.25e6 = 5e8 + 1.25e9 + 5e8 + 6.25e8
+    //   = 2.875e9, /1e6 = 2875.
+    expect(cost as number).toBe(2_875);
+  });
+
+  it("preserves sub-μUSD/tok precision (Sonnet $0.30/MTok cache reads — B2-2 fix)", () => {
+    // 1_000_000 Sonnet cache-read tokens at $0.30/MTok = exactly $0.30 = 300_000 μUSD.
+    // The earlier per-tok-rounded design would have stored 0 μUSD.
+    const cost = estimateAnthropicCostMicroUsd(DEFAULT_ANTHROPIC_PRICING, "claude-sonnet-4-6", {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 1_000_000,
+      cacheCreationTokens: 0,
+    });
+    expect(cost as number).toBe(300_000);
+  });
+
+  it("Opus 4.5/4.6/4.7 use the post-2025-11 reduced pricing (B2-1 fix)", () => {
+    for (const model of ["claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-7"]) {
+      // 1M input tokens at the Opus 4.5+ rate ($5/MTok) = $5 = 5_000_000 μUSD.
+      const cost = estimateAnthropicCostMicroUsd(DEFAULT_ANTHROPIC_PRICING, model, {
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      });
+      expect(cost as number).toBe(5_000_000);
+    }
+  });
+
+  it("Opus 4.1 retains the legacy $15/MTok rate", () => {
+    const cost = estimateAnthropicCostMicroUsd(DEFAULT_ANTHROPIC_PRICING, "claude-opus-4-1", {
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+    expect(cost as number).toBe(15_000_000);
   });
 
   it("throws UnknownModelError for unrecognized models", () => {
@@ -67,16 +104,17 @@ describe("Anthropic pricing", () => {
     const cost = estimateAnthropicCostMicroUsd(
       {
         "negotiated-opus": {
-          inputMicroUsdPerToken: 8, // 8 μUSD/tok = $8/MTok negotiated rate
-          outputMicroUsdPerToken: 40,
-          cacheReadMicroUsdPerToken: 1,
-          cacheCreationMicroUsdPerToken: 10,
+          inputMicroUsdPerMTok: 8_000_000,
+          outputMicroUsdPerMTok: 40_000_000,
+          cacheReadMicroUsdPerMTok: 1_000_000,
+          cacheCreationMicroUsdPerMTok: 10_000_000,
         },
       },
       "negotiated-opus",
       { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheCreationTokens: 0 },
     );
-    expect(cost as number).toBe(100 * 8 + 50 * 40);
+    // (100*8e6 + 50*40e6) / 1e6 = 2.8e9 / 1e6 = 2_800.
+    expect(cost as number).toBe(2_800);
   });
 });
 
@@ -100,11 +138,17 @@ describe("AnthropicProvider", () => {
     });
 
     expect(create).toHaveBeenCalledOnce();
-    expect(create).toHaveBeenCalledWith({
-      model: "claude-sonnet-4-6",
-      max_tokens: 64,
-      messages: [{ role: "user", content: "say hi" }],
-    });
+    expect(create).toHaveBeenCalledWith(
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: 64,
+        messages: [{ role: "user", content: "say hi" }],
+      },
+      // Second arg is the options bag; idempotencyKey is content-derived.
+      expect.objectContaining({
+        idempotencyKey: expect.stringMatching(/^wuphf-[0-9a-f]{64}$/),
+      }),
+    );
     expect(res.text).toBe("hello world");
     expect(res.usage).toEqual({
       inputTokens: 100,
@@ -127,10 +171,10 @@ describe("AnthropicProvider", () => {
       client: fakeClient(() => emptyMessage()).client,
       pricing: {
         "negotiated-x": {
-          inputMicroUsdPerToken: 1,
-          outputMicroUsdPerToken: 1,
-          cacheReadMicroUsdPerToken: 0,
-          cacheCreationMicroUsdPerToken: 0,
+          inputMicroUsdPerMTok: 1_000_000,
+          outputMicroUsdPerMTok: 1_000_000,
+          cacheReadMicroUsdPerMTok: 0,
+          cacheCreationMicroUsdPerMTok: 0,
         },
       },
     });
@@ -184,6 +228,144 @@ describe("AnthropicProvider", () => {
     await expect(
       provider.complete({ model: "claude-not-real", prompt: "p", maxOutputTokens: 8 }),
     ).rejects.toBeInstanceOf(UnknownModelError);
+  });
+
+  it("threads a deterministic idempotency key to messages.create (B2-4)", async () => {
+    const { client, create } = fakeClient(() => emptyMessage());
+    const provider = createAnthropicProvider({ client });
+    const req: ProviderRequest = {
+      model: "claude-sonnet-4-6",
+      prompt: "same-payload",
+      maxOutputTokens: 32,
+    };
+    await provider.complete(req);
+    await provider.complete(req);
+    // Same request → same idempotency key on both SDK calls.
+    const firstCall = create.mock.calls[0] as unknown as readonly [
+      unknown,
+      { readonly idempotencyKey: string },
+    ];
+    const secondCall = create.mock.calls[1] as unknown as readonly [
+      unknown,
+      { readonly idempotencyKey: string },
+    ];
+    const firstKey = firstCall[1]?.idempotencyKey;
+    const secondKey = secondCall[1]?.idempotencyKey;
+    expect(firstKey).toBe(secondKey);
+    expect(firstKey).toMatch(/^wuphf-[0-9a-f]{64}$/);
+  });
+
+  it("maps SDK 4xx to BadRequestError (NOT breaker-worthy) — B2-7", async () => {
+    const sdkErr = {
+      status: 400,
+      headers: {},
+      error: { error: { type: "invalid_request_error" } },
+      requestID: "req_abc123",
+      message: "max_tokens must be ≥ 1",
+    };
+    const provider = createAnthropicProvider({
+      client: {
+        messages: {
+          create: async () => {
+            throw sdkErr;
+          },
+        },
+      },
+    });
+    const promise = provider.complete({
+      model: "claude-sonnet-4-6",
+      prompt: "p",
+      maxOutputTokens: 8,
+    });
+    await expect(promise).rejects.toBeInstanceOf(BadRequestError);
+    await expect(promise).rejects.toMatchObject({
+      status: 400,
+      requestId: "req_abc123",
+      errorType: "invalid_request_error",
+    });
+  });
+
+  it("maps SDK 429 to ProviderError with retryAfterMs extracted (B2-5)", async () => {
+    const sdkErr = {
+      status: 429,
+      headers: { "retry-after": "12" },
+      error: { error: { type: "rate_limit_error" } },
+      requestID: "req_rate_1",
+      message: "rate limited",
+    };
+    const provider = createAnthropicProvider({
+      client: {
+        messages: {
+          create: async () => {
+            throw sdkErr;
+          },
+        },
+      },
+    });
+    const promise = provider.complete({
+      model: "claude-sonnet-4-6",
+      prompt: "p",
+      maxOutputTokens: 8,
+    });
+    await expect(promise).rejects.toBeInstanceOf(ProviderError);
+    await expect(promise).rejects.toMatchObject({
+      status: 429,
+      requestId: "req_rate_1",
+      errorType: "rate_limit_error",
+      retryAfterMs: 12_000,
+    });
+  });
+
+  it("pre-rejects maxOutputTokens <= 0 without an SDK call (B2-7)", async () => {
+    const { client, create } = fakeClient(() => emptyMessage());
+    const provider = createAnthropicProvider({ client });
+    await expect(
+      provider.complete({ model: "claude-sonnet-4-6", prompt: "p", maxOutputTokens: 0 }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("pricing-table validation (B2-6)", () => {
+  it("rejects an empty pricing table at construction", () => {
+    expect(() =>
+      createAnthropicProvider({
+        client: fakeClient(() => emptyMessage()).client,
+        pricing: {},
+      }),
+    ).toThrow(/at least one model/);
+  });
+
+  it("rejects a non-integer rate at construction", () => {
+    expect(() =>
+      createAnthropicProvider({
+        client: fakeClient(() => emptyMessage()).client,
+        pricing: {
+          "bad-model": {
+            inputMicroUsdPerMTok: 1.5,
+            outputMicroUsdPerMTok: 1,
+            cacheReadMicroUsdPerMTok: 0,
+            cacheCreationMicroUsdPerMTok: 0,
+          },
+        },
+      }),
+    ).toThrow(/non-negative safe integer/);
+  });
+
+  it("rejects a negative rate at construction", () => {
+    expect(() =>
+      createAnthropicProvider({
+        client: fakeClient(() => emptyMessage()).client,
+        pricing: {
+          "bad-model": {
+            inputMicroUsdPerMTok: -1,
+            outputMicroUsdPerMTok: 1,
+            cacheReadMicroUsdPerMTok: 0,
+            cacheCreationMicroUsdPerMTok: 0,
+          },
+        },
+      }),
+    ).toThrow(/non-negative safe integer/);
   });
 });
 

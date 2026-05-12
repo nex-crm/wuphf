@@ -2,8 +2,9 @@ export type { CapsConfig } from "./caps.ts";
 export { Caps, DEFAULT_CAPS_CONFIG } from "./caps.ts";
 export type { DedupeConfig } from "./dedupe.ts";
 export { DEFAULT_DEDUPE_CONFIG, DedupeCache, hashRequest } from "./dedupe.ts";
-export type { GatewayError } from "./errors.ts";
+export type { GatewayError, ProviderErrorMetadata } from "./errors.ts";
 export {
+  BadRequestError,
   CapExceededError,
   CircuitBreakerOpenError,
   IdleModeError,
