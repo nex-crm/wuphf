@@ -35,10 +35,10 @@ var (
 // skillSimilarityResult records why a candidate matched an existing skill.
 type skillSimilarityResult struct {
 	Skill     *teamSkill
-	SlugScore float64  // Jaro-Winkler on slug (tier 1)
-	DescScore float64  // Jaro-Winkler on description (tier 2)
-	EmbedCos  float32  // Cosine similarity on embeddings (tier 3)
-	Tier      int      // which tier triggered (1, 2, or 3)
+	SlugScore float64 // Jaro-Winkler on slug (tier 1)
+	DescScore float64 // Jaro-Winkler on description (tier 2)
+	EmbedCos  float32 // Cosine similarity on embeddings (tier 3)
+	Tier      int     // which tier triggered (1, 2, or 3)
 }
 
 // skillDedupEnabled returns false when WUPHF_SKILL_DEDUP_ENABLED=0.

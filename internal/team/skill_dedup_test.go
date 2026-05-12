@@ -276,4 +276,3 @@ func TestBuildExistingSkillsSummary_Truncation(t *testing.T) {
 		t.Error("expected truncation marker")
 	}
 }
-
