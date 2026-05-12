@@ -7,7 +7,8 @@
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./anthropic": "./src/providers/anthropic.ts"
+    "./anthropic": "./src/providers/anthropic.ts",
+    "./openai": "./src/providers/openai.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -26,14 +27,17 @@
     "better-sqlite3": "12.9.0"
   },
   "peerDependencies": {
-    "@anthropic-ai/sdk": "^0.71.0"
+    "@anthropic-ai/sdk": "^0.71.0",
+    "openai": "^6.7.0"
   },
   "peerDependenciesMeta": {
-    "@anthropic-ai/sdk": { "optional": true }
+    "@anthropic-ai/sdk": { "optional": true },
+    "openai": { "optional": true }
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.71.0",
     "@biomejs/biome": "2.4.15",
+    "openai": "6.7.0",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "2.1.9",

@@ -30,7 +30,14 @@ runners — there is no parallel call path to an LLM in this codebase.
   override the pricing table for negotiated rates. The SDK is an
   **optional peer dependency** — hosts using only the stub do not
   install it.
-- `openai` / `ollama` — future PRs.
+- **`openai` — `openai` SDK adapter (PR B.3).** Subpath import:
+  `import { createOpenAIProvider } from "@wuphf/llm-router/openai"`.
+  Covers GPT-5 family (`gpt-5`, `gpt-5-mini`, `gpt-5-nano`) and GPT-4.1
+  family. Splits `prompt_tokens_details.cached_tokens` out of
+  `prompt_tokens` so the discounted cached-input rate applies correctly.
+  SDK is an **optional peer dependency** — only installed if the host
+  wants it.
+- `ollama` — future PR.
 
 ## Usage
 
@@ -108,6 +115,41 @@ const provider = createAnthropicProvider({
   },
 });
 ```
+
+### OpenAI (production)
+
+Install the SDK alongside the router:
+
+```bash
+bun add openai @wuphf/llm-router
+```
+
+```ts
+import { createGateway } from "@wuphf/llm-router";
+import { createOpenAIProviderWithKey } from "@wuphf/llm-router/openai";
+
+const apiKey = process.env.OPENAI_API_KEY;
+if (typeof apiKey !== "string" || apiKey.length === 0) {
+  throw new Error("OPENAI_API_KEY is required");
+}
+
+const gateway = createGateway({
+  ledger,
+  providers: [
+    await createOpenAIProviderWithKey({ apiKey }),
+  ],
+  nowMs: () => Date.now(),
+});
+
+const result = await gateway.complete(
+  { agentSlug: asAgentSlug("primary") },
+  { model: "gpt-5", prompt: "go", maxOutputTokens: 1024 },
+);
+```
+
+The adapter splits OpenAI's `prompt_tokens_details.cached_tokens` out
+of `prompt_tokens` so the discounted cached-input rate applies to the
+cached subset (typically 10% of input cost on GPT-5 family).
 
 ## §10.4 nightly burn-down
 
