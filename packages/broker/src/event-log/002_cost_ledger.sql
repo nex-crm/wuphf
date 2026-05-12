@@ -2,11 +2,14 @@ PRAGMA foreign_keys = ON;
 
 -- §15.A architecture-proof slice: projection tables + reactor-cursor + command
 -- idempotency. Every row references an event_log LSN as the canonical source
--- of truth. The §15.A sum invariant
---   sum(cost_events) == sum(cost_by_agent) == sum(cost_by_task)
--- is decidable because amounts are stored as INTEGER micro-USD throughout —
--- no float drift, no rounding ambiguity. See packages/protocol/src/cost.ts for
--- the wire-shape brand bounds.
+-- of truth. The §15.A invariants this slice guarantees, both decidable:
+--   I1. sum(cost_events) == sum(cost_by_agent across all days)
+--   I2. sum(task-attributed cost_events) == sum(cost_by_task)
+-- Both hold because amounts are stored as INTEGER micro-USD throughout — no
+-- float drift, no rounding ambiguity. Taskless cost events skip the task
+-- projection (cost_event.task_id is optional in the protocol); I2 is scoped
+-- accordingly. See packages/protocol/src/cost.ts for the wire-shape brand
+-- bounds.
 
 -- cost_by_agent: per-(agent, calendar-day-UTC) cumulative spend.
 -- Day key is a UTC date string (YYYY-MM-DD) derived from the cost_event's

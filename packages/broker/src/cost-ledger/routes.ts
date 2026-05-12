@@ -34,11 +34,9 @@ import {
 
 import type { BrokerLogger } from "../types.ts";
 import {
-  type CommandIdempotencyStore,
   type CostCommand,
   type IdempotencyParseError,
   parseIdempotencyKey,
-  runIdempotent,
 } from "./idempotency.ts";
 import type { CostLedger } from "./projections.ts";
 import { runReplayCheck } from "./replay-check.ts";
@@ -51,7 +49,6 @@ const MAX_COST_BODY_BYTES = 256 * 1_024;
 
 export interface CostRouteDeps {
   readonly ledger: CostLedger;
-  readonly idempotency: CommandIdempotencyStore;
   readonly logger: BrokerLogger;
   readonly db: import("better-sqlite3").Database;
   readonly nowMs: () => number;
@@ -153,26 +150,28 @@ async function handleCostEventPost(
     return;
   }
 
-  const result = runIdempotent(deps.idempotency, idemKey.key, deps.nowMs(), () => {
-    const applied = deps.ledger.appendCostEvent(payload);
-    const responseBody = JSON.stringify({
-      lsn: applied.lsn,
-      agentDayTotal: applied.agentDayTotal as number,
-      taskTotal: applied.taskTotal === null ? null : (applied.taskTotal as number),
-      newCrossings: applied.newCrossings.map((c) => ({
-        budgetId: c.budgetId,
-        budgetSetLsn: c.budgetSetLsn,
-        thresholdBps: c.thresholdBps,
-        observedMicroUsd: c.observedMicroUsd as number,
-        limitMicroUsd: c.limitMicroUsd as number,
-        crossingEventLsn: c.crossingEventLsn,
-      })),
-    });
-    return {
-      statusCode: 201,
-      payload: Buffer.from(responseBody, "utf8"),
-      createdAtLsn: applied.newCrossings[0]?.crossingEventLsn ?? null,
-    };
+  // Atomic with the ledger transaction: lookup + append + idempotency
+  // insert all in one SQLite commit. See triangulation finding B1.
+  const result = deps.ledger.appendCostEventIdempotent({
+    payload,
+    idempotency: idemKey.key,
+    nowMs: deps.nowMs(),
+    render: (applied) => {
+      const responseBody = JSON.stringify({
+        lsn: applied.lsn,
+        agentDayTotal: applied.agentDayTotal as number,
+        taskTotal: applied.taskTotal === null ? null : (applied.taskTotal as number),
+        newCrossings: applied.newCrossings.map((c) => ({
+          budgetId: c.budgetId,
+          budgetSetLsn: c.budgetSetLsn,
+          thresholdBps: c.thresholdBps,
+          observedMicroUsd: c.observedMicroUsd as number,
+          limitMicroUsd: c.limitMicroUsd as number,
+          crossingEventLsn: c.crossingEventLsn,
+        })),
+      });
+      return { statusCode: 201, payload: Buffer.from(responseBody, "utf8") };
+    },
   });
   writeJsonRaw(res, result.statusCode, result.payload, result.replayed);
 }
@@ -219,16 +218,17 @@ async function handleBudgetSetPost(
     return;
   }
 
-  const result = runIdempotent(deps.idempotency, idemKey.key, deps.nowMs(), () => {
-    const applied = deps.ledger.appendBudgetSet(payload);
-    return {
+  const result = deps.ledger.appendBudgetSetIdempotent({
+    payload,
+    idempotency: idemKey.key,
+    nowMs: deps.nowMs(),
+    render: (applied) => ({
       statusCode: 201,
       payload: Buffer.from(
         JSON.stringify({ lsn: applied.lsn, tombstoned: applied.tombstoned }),
         "utf8",
       ),
-      createdAtLsn: parseLsnNumber(applied.lsn),
-    };
+    }),
   });
   writeJsonRaw(res, result.statusCode, result.payload, result.replayed);
 }
@@ -291,13 +291,14 @@ async function handleBudgetDelete(
     setAt: new Date(deps.nowMs()),
   };
 
-  const result = runIdempotent(deps.idempotency, idemKey.key, deps.nowMs(), () => {
-    const applied = deps.ledger.appendBudgetSet(tombstonePayload);
-    return {
+  const result = deps.ledger.appendBudgetSetIdempotent({
+    payload: tombstonePayload,
+    idempotency: idemKey.key,
+    nowMs: deps.nowMs(),
+    render: (applied) => ({
       statusCode: 200,
       payload: Buffer.from(JSON.stringify({ lsn: applied.lsn, tombstoned: true }), "utf8"),
-      createdAtLsn: parseLsnNumber(applied.lsn),
-    };
+    }),
   });
   writeJsonRaw(res, result.statusCode, result.payload, result.replayed);
 }
@@ -472,13 +473,6 @@ function notFound(res: ServerResponse): void {
 function methodNotAllowed(res: ServerResponse, allow: string): void {
   res.writeHead(405, { Allow: allow, "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({ error: "method_not_allowed" }));
-}
-
-function parseLsnNumber(lsn: string): number {
-  const tail = lsn.startsWith("v1:") ? lsn.slice(3) : null;
-  if (tail === null) return 0;
-  const n = Number(tail);
-  return Number.isSafeInteger(n) ? n : 0;
 }
 
 // Surface re-exports so test code can compose the route module without

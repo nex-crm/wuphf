@@ -58,7 +58,6 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       ? null
       : ({
           ledger: config.cost.ledger,
-          idempotency: config.cost.idempotency,
           db: config.cost.db,
           logger,
           nowMs: () => Date.now(),

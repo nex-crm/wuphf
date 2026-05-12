@@ -4,7 +4,9 @@
 // `cost.event` to event_log and updates `cost_by_agent` / `cost_by_task`.
 // Why synchronously?
 //
-//   - §15.A's sum invariant `sum(cost_events) == sum(by_agent) == sum(by_task)`
+//   - §15.A's two decidable invariants
+//       I1. sum(cost_events) == sum(by_agent across days)
+//       I2. sum(task-attributed cost_events) == sum(by_task)
 //     must hold at every commit. Inlining the threshold check means a single
 //     commit always carries the cost_event AND the matching threshold-crossed
 //     events (if any), so replay from event_log reproduces identical state at
