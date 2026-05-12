@@ -280,14 +280,20 @@ function parseThresholds(row: BudgetRow): readonly number[] {
   if (!Array.isArray(parsed)) {
     throw new Error(`reactor: thresholds_bps not an array for budget ${row.budgetId}`);
   }
+  // Already ascending+deduped by protocol validators, but re-sort AND
+  // re-dedupe defensively. Without the Set: a tampered DB row containing
+  // the same value twice would pass `ON CONFLICT DO NOTHING` on the
+  // projection insert (suppressing the duplicate row) but still emit a
+  // duplicate `cost.budget.threshold.crossed` event because the audit
+  // append isn't conflict-suppressed.
+  const deduped = new Set<number>();
   for (const v of parsed) {
     if (typeof v !== "number" || !Number.isSafeInteger(v) || v <= 0 || v > 10_000) {
       throw new Error(`reactor: invalid threshold ${String(v)} for budget ${row.budgetId}`);
     }
+    deduped.add(v);
   }
-  // Already ascending+deduped by protocol validators, but re-sort defensively
-  // so a tampered DB row (manual SQL edit, downgrade) doesn't skip crossings.
-  return [...(parsed as number[])].sort((a, b) => a - b);
+  return [...deduped].sort((a, b) => a - b);
 }
 
 /**

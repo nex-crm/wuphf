@@ -4,8 +4,9 @@ WUPHF v1 AI gateway — single in-process cost chokepoint. Per RFC §7.5,
 every agent runner proxies through one `Gateway.complete()` call. The
 gateway:
 
-- enforces the per-office daily token ceiling ($5/day default, reads
-  `cost_by_agent` from `@wuphf/broker`'s cost ledger)
+- enforces the per-office daily cost ceiling ($5/day default in
+  `dailyMicroUsd`, reads spend from `cost_by_agent` projections in
+  `@wuphf/broker`'s cost ledger — measured in micro-USD, not tokens)
 - enforces the per-agent wake cap (12/hr default, in-memory)
 - deduplicates identical payloads within a 60s window (SHA-256 of
   canonical request bytes)

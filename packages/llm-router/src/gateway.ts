@@ -362,14 +362,21 @@ function validateAuditModel(model: string): void {
 }
 
 /**
- * Conservative character-to-token ratio for the input estimate. Real
- * tokenization (Anthropic, GPT) sits in the 3-4 chars/token range for
- * English prose and lower for code; we use 3 to stay on the side of
- * over-reservation rather than under-reservation. This is only used to
- * bound the cap reservation — actual billing comes from the provider's
- * response usage.
+ * Conservative UTF-8-bytes-to-token ratio for the input estimate. Real
+ * tokenization sits at roughly:
+ *   - English prose: 4 chars/token ≈ 4 bytes/token
+ *   - Code: 3-4 chars/token ≈ 3-4 bytes/token
+ *   - CJK/Thai/Arabic: 1 char/token ≈ 3 bytes/token (UTF-8 multibyte)
+ *
+ * Dividing UTF-8 byte length by 3 is therefore conservative for English/
+ * code (≈33% over-estimate) and accurate for CJK. Using char count (which
+ * is JS UTF-16 code units) would 3x underestimate CJK prompts — a real
+ * concern for non-English deployments. This is only used to bound the
+ * cap reservation; actual billing comes from the provider's response
+ * usage.
  */
-const CHARS_PER_INPUT_TOKEN_ESTIMATE = 3;
+const BYTES_PER_INPUT_TOKEN_ESTIMATE = 3;
+const PROMPT_BYTE_ENCODER = new TextEncoder();
 
 /**
  * Pessimistic worst-case cost estimate for a request, used to reserve
@@ -392,8 +399,9 @@ const CHARS_PER_INPUT_TOKEN_ESTIMATE = 3;
  */
 function pessimisticReservationMicroUsd(provider: Provider, req: ProviderRequest): number {
   const outputTokens = Math.max(0, Math.floor(req.maxOutputTokens));
-  const promptLen = typeof req.prompt === "string" ? req.prompt.length : 0;
-  const inputTokens = Math.ceil(promptLen / CHARS_PER_INPUT_TOKEN_ESTIMATE);
+  const promptBytes =
+    typeof req.prompt === "string" ? PROMPT_BYTE_ENCODER.encode(req.prompt).length : 0;
+  const inputTokens = Math.ceil(promptBytes / BYTES_PER_INPUT_TOKEN_ESTIMATE);
   // Use the provider's own estimator so each adapter's pricing applies.
   // Cache fields are zeroed — a fresh-input worst case bills at the
   // higher (non-cached) rate.

@@ -167,11 +167,19 @@ export function createOllamaProvider(args: CreateOllamaProviderArgs): Provider {
       } catch (err) {
         // No status/headers/retry-after convention to extract from a
         // local Ollama error — surface as ProviderError with cause
-        // attached. PR C's wire mapping treats this uniformly.
+        // attached.
         throw new ProviderError(OLLAMA_PROVIDER_KIND, err);
       }
+      // Provider post-condition: a `done: true` Ollama response without
+      // a message field would silently return text="" with a cost row
+      // billed (when host pricing is non-zero). Mirror the OpenAI
+      // empty-choices guard and surface as a typed ProviderError so the
+      // breaker can react.
+      if (raw.message === undefined || raw.message === null) {
+        throw new ProviderError(OLLAMA_PROVIDER_KIND, new Error("ollama_message_missing"));
+      }
       return {
-        text: raw.message?.content ?? "",
+        text: raw.message.content ?? "",
         usage: usageToCostUnits(raw),
         // Ollama echoes the served model back; surface it so the
         // audit row records the exact served identifier (host-side

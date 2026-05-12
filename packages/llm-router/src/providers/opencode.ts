@@ -313,11 +313,25 @@ interface OpenCodeSubprocessRequest {
   readonly maxOutputTokens: number;
 }
 
+/** Default timeout if the host doesn't set one — 60s is long enough for typical
+ *  LLM calls but short enough that a hung runner releases the cap reservation
+ *  rather than holding it indefinitely. */
+const DEFAULT_SUBPROCESS_TIMEOUT_MS = 60_000;
+
 export interface CreateOpenCodeSubprocessClientArgs {
   /**
-   * Path or name of the runner binary. Defaults to `opencode` for the
-   * TypeScript runner and `opencodego` for the Go port; pass an
-   * absolute path if the binary is outside PATH.
+   * Which runner is being wrapped. Picks the default binary name when
+   * `binary` is not supplied: `"ts"` → `"opencode"`, `"go"` → `"opencodego"`.
+   * The subprocess client is transport-only and has no other knowledge of
+   * which provider variant will consume it, so a host wiring
+   * `createOpenCodeGoProvider({ client: await createOpenCodeSubprocessClient() })`
+   * MUST pass `kind: "go"` (or set `binary: "opencodego"` explicitly).
+   * Default: `"ts"`.
+   */
+  readonly kind?: OpenCodeKind;
+  /**
+   * Path or name of the runner binary. Overrides the `kind`-derived
+   * default. Pass an absolute path if the binary is outside PATH.
    */
   readonly binary?: string;
   /**
@@ -331,25 +345,47 @@ export interface CreateOpenCodeSubprocessClientArgs {
    * Defaults to `process.env`.
    */
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Hard timeout per chat call, in milliseconds. The subprocess is
+   * killed and the promise rejects if the runner hangs reading stdin,
+   * stalls between output and exit, or never writes to stdout. Without
+   * this, a stuck runner pins the gateway's cap reservation
+   * indefinitely. Default: 60_000 (60s).
+   */
+  readonly timeoutMs?: number;
 }
 
 export async function createOpenCodeSubprocessClient(
   args: CreateOpenCodeSubprocessClientArgs = {},
 ): Promise<OpenCodeClient> {
   const { spawn } = await import("node:child_process");
-  const binary = args.binary ?? "opencode";
+  const kind: OpenCodeKind = args.kind ?? "opencode";
+  const defaultBinary = kind === "opencodego" ? "opencodego" : "opencode";
+  const binary = args.binary ?? defaultBinary;
   const cliArgs = args.args ?? [];
   const env = args.env ?? process.env;
+  const timeoutMs = args.timeoutMs ?? DEFAULT_SUBPROCESS_TIMEOUT_MS;
   return {
     async chat(req: OpenCodeChatRequest): Promise<OpenCodeChatResponse> {
       return await new Promise<OpenCodeChatResponse>((resolve, reject) => {
         const proc = spawn(binary, [...cliArgs], { env, stdio: ["pipe", "pipe", "pipe"] });
         const stdoutChunks: Buffer[] = [];
         const stderrChunks: Buffer[] = [];
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          proc.kill("SIGKILL");
+          reject(new Error(`opencode runner timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
         proc.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
         proc.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-        proc.on("error", (err) => reject(err));
+        proc.on("error", (err) => {
+          clearTimeout(timer);
+          if (!timedOut) reject(err);
+        });
         proc.on("close", (code) => {
+          clearTimeout(timer);
+          if (timedOut) return;
           if (code !== 0) {
             const stderr = Buffer.concat(stderrChunks).toString("utf8");
             reject(new Error(`opencode runner exited ${code}: ${stderr.slice(0, 256)}`));

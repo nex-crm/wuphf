@@ -214,7 +214,7 @@ describe("daily cap", () => {
 });
 
 describe("wake cap", () => {
-  it("blocks the 13th wake within an hour for the same agent", async () => {
+  it("blocks wakes beyond wakeCapPerHour within the window for the same agent", async () => {
     const fix = setup({ wakeCapPerHour: 3 });
     try {
       // 3 successful wakes fit; the 4th is rejected.

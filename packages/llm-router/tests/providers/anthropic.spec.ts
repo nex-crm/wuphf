@@ -61,6 +61,31 @@ describe("Anthropic pricing", () => {
     expect(cost as number).toBe(2_875);
   });
 
+  it("throws on accumulator overflow before silently truncating (PR #834 CR round-2)", () => {
+    // host overrides rates very high, very large token counts: accumulator
+    // can exceed MAX_SAFE_INTEGER. Without the guard, the result would be
+    // silently truncated by IEEE 754 doubles and the cost_event would be wrong.
+    expect(() =>
+      estimateAnthropicCostMicroUsd(
+        {
+          "overflow-rate": {
+            inputMicroUsdPerMTok: 15_000_000, // $15/MTok
+            outputMicroUsdPerMTok: 0,
+            cacheReadMicroUsdPerMTok: 0,
+            cacheCreationMicroUsdPerMTok: 0,
+          },
+        },
+        "overflow-rate",
+        {
+          inputTokens: 10_000_000_000, // 10B tokens × 15e6 = 1.5e17, > MAX_SAFE_INTEGER
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      ),
+    ).toThrow(/overflowed Number\.MAX_SAFE_INTEGER/);
+  });
+
   it("preserves sub-μUSD/tok precision (Sonnet $0.30/MTok cache reads — B2-2 fix)", () => {
     // 1_000_000 Sonnet cache-read tokens at $0.30/MTok = exactly $0.30 = 300_000 μUSD.
     // The earlier per-tok-rounded design would have stored 0 μUSD.
@@ -473,16 +498,15 @@ describe("Anthropic present-invalid usage counters (PR #834 round-2 MED)", () =>
     const provider = createAnthropicProvider({
       client: {
         messages: {
-          create: async () =>
-            ({
-              content: [{ type: "text", text: "ok" }],
-              usage: {
-                input_tokens: 1,
-                output_tokens: Number.NaN,
-                cache_read_input_tokens: null,
-                cache_creation_input_tokens: null,
-              },
-            }) as never,
+          create: async () => ({
+            content: [{ type: "text", text: "ok" }],
+            usage: {
+              input_tokens: 1,
+              output_tokens: Number.NaN,
+              cache_read_input_tokens: null,
+              cache_creation_input_tokens: null,
+            },
+          }),
         },
       },
     });

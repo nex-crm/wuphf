@@ -165,6 +165,17 @@ export function estimateAnthropicCostMicroUsd(
     rate.outputMicroUsdPerMTok * units.outputTokens +
     rate.cacheReadMicroUsdPerMTok * units.cacheReadTokens +
     rate.cacheCreationMicroUsdPerMTok * units.cacheCreationTokens;
+  // Defense-in-depth: individual operands are validated, but their
+  // product can still overflow if a host overrides rates very high AND
+  // counters are very large (1e10 tokens * 15e6 μUSD/MTok = 1.5e17,
+  // above MAX_SAFE_INTEGER ≈ 9e15). Refuse to bill on a silently
+  // truncated number — `validateCostEstimate` at the gateway boundary
+  // would catch the result, but failing here gives a precise diagnostic.
+  if (!Number.isSafeInteger(accum)) {
+    throw new Error(
+      `anthropic cost accumulator overflowed Number.MAX_SAFE_INTEGER for model ${model}: ${accum}`,
+    );
+  }
   const rounded = Math.floor((accum + ROUND_HALF_UP) / ONE_MILLION);
   return asMicroUsd(rounded);
 }

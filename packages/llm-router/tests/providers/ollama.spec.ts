@@ -429,3 +429,21 @@ function emptyResponse(): OllamaChatResponse {
     eval_count: 0,
   };
 }
+
+describe("Ollama missing message post-condition (PR #834 CR round-2)", () => {
+  it("throws ProviderError when raw.message is missing (silent text=\"\" prevented)", async () => {
+    const { client } = fakeClient(
+      () =>
+        ({
+          model: "llama3.3",
+          done: true,
+          prompt_eval_count: 1,
+          eval_count: 1,
+        }) as unknown as OllamaChatResponse,
+    );
+    const provider = createOllamaProvider({ client });
+    await expect(
+      provider.complete({ model: "llama3.3", prompt: "p", maxOutputTokens: 8 }),
+    ).rejects.toBeInstanceOf(ProviderError);
+  });
+});
