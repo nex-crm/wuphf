@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./anthropic": "./src/providers/anthropic.ts",
-    "./openai": "./src/providers/openai.ts"
+    "./openai": "./src/providers/openai.ts",
+    "./ollama": "./src/providers/ollama.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -28,15 +29,18 @@
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": "^0.71.0",
+    "ollama": "^0.5.0",
     "openai": "^6.7.0"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/sdk": { "optional": true },
+    "ollama": { "optional": true },
     "openai": { "optional": true }
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.71.0",
     "@biomejs/biome": "2.4.15",
+    "ollama": "0.5.18",
     "openai": "6.7.0",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "^22.10.0",
