@@ -168,7 +168,8 @@ func TestEnhanceSkillLocked(t *testing.T) {
 	b.mu.Lock()
 	enhanced, err := b.enhanceSkillLocked("create-pitch-deck",
 		"Generic pitch deck steps\n\n## SaaS variant\n\nInclude ARR metrics and churn analysis.",
-		"Create a pitch deck with SaaS-specific details")
+		"Create a pitch deck with SaaS-specific details",
+		"create-pitch-deck-for-saas")
 	b.mu.Unlock()
 
 	if err != nil {
@@ -189,7 +190,7 @@ func TestEnhanceSkillLocked_SkillNotFound(t *testing.T) {
 	b := newTestBrokerWithSkills(t, []teamSkill{})
 
 	b.mu.Lock()
-	_, err := b.enhanceSkillLocked("nonexistent", "content", "desc")
+	_, err := b.enhanceSkillLocked("nonexistent", "content", "desc", "")
 	b.mu.Unlock()
 
 	if err == nil {
@@ -203,7 +204,7 @@ func TestEnhanceSkillLocked_EmptyContent(t *testing.T) {
 	})
 
 	b.mu.Lock()
-	_, err := b.enhanceSkillLocked("my-skill", "", "new desc")
+	_, err := b.enhanceSkillLocked("my-skill", "", "new desc", "")
 	b.mu.Unlock()
 
 	if err == nil {
@@ -217,7 +218,7 @@ func TestEnhanceSkillLocked_KeepsShorterDescription(t *testing.T) {
 	})
 
 	b.mu.Lock()
-	enhanced, err := b.enhanceSkillLocked("my-skill", "New content", "Short")
+	enhanced, err := b.enhanceSkillLocked("my-skill", "New content", "Short", "")
 	b.mu.Unlock()
 
 	if err != nil {

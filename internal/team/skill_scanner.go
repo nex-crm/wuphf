@@ -249,7 +249,7 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		// Enhancement path: merge new details into the existing skill.
 		if enhanceSlug != "" {
 			s.broker.mu.Lock()
-			enhanced, enhErr := s.broker.enhanceSkillLocked(enhanceSlug, body, fm.Description)
+			enhanced, enhErr := s.broker.enhanceSkillLocked(enhanceSlug, body, fm.Description, skillSlug(fm.Name))
 			s.broker.mu.Unlock()
 			if enhErr != nil {
 				slog.Warn("skill_scanner: enhance failed, falling through to proposal",

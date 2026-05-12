@@ -80,21 +80,22 @@ func (b *Broker) handleSkillConsolidate(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Re-render the target skill's wiki markdown after merge.
+	var wikiErr error
 	if target := b.findSkillByNameLocked(mergeTarget); target != nil {
 		slug := skillSlug(mergeTarget)
 		fm := teamSkillToFrontmatter(*target)
-		if mdBytes, renderErr := RenderSkillMarkdown(fm, target.Content); renderErr == nil {
-			wikiWorker := b.wikiWorker
-			if wikiWorker != nil {
-				wikiPath := "team/skills/" + slug + ".md"
-				b.mu.Unlock()
-				_, _, _ = wikiWorker.Enqueue(
-					context.Background(), slug, wikiPath,
-					string(mdBytes), "replace",
-					"archivist: consolidate skill "+slug,
-				)
-				b.mu.Lock()
-			}
+		mdBytes, renderErr := RenderSkillMarkdown(fm, target.Content)
+		if renderErr != nil {
+			wikiErr = renderErr
+		} else if wikiWorker := b.wikiWorker; wikiWorker != nil {
+			wikiPath := "team/skills/" + slug + ".md"
+			b.mu.Unlock()
+			_, _, wikiErr = wikiWorker.Enqueue(
+				context.Background(), slug, wikiPath,
+				string(mdBytes), "replace",
+				"archivist: consolidate skill "+slug,
+			)
+			b.mu.Lock()
 		}
 	}
 
@@ -104,6 +105,11 @@ func (b *Broker) handleSkillConsolidate(w http.ResponseWriter, r *http.Request) 
 	if saveErr != nil {
 		http.Error(w, "merge succeeded in memory but failed to persist: "+saveErr.Error(), http.StatusInternalServerError)
 		return
+	}
+	if wikiErr != nil {
+		slog.Warn("skill_consolidate: wiki write failed but state persisted", "err", wikiErr)
+		// State is saved; wiki will be stale until next skill update.
+		// Don't fail the request — the merge itself succeeded.
 	}
 
 	resp.Merged = merged

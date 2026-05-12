@@ -103,9 +103,8 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		// If the candidate has substantive new content, enhance the existing
 		// skill instead of discarding the candidate.
 		if candidateContent != "" && candidateContent != existingContent {
-			enhanced, enhErr := b.enhanceSkillLocked(best.Skill.Name, candidateContent, spec.Description)
+			enhanced, enhErr := b.enhanceSkillLocked(best.Skill.Name, candidateContent, spec.Description, slug)
 			if enhErr == nil && enhanced != nil {
-				enhanced.RelatedSkills = appendUnique(enhanced.RelatedSkills, slug)
 				atomic.AddInt64(&b.skillCompileMetrics.SkillEnhancementsTotal, 1)
 				slog.Info("writeSkillProposalLocked: enhanced existing skill",
 					"candidate", name, "existing", best.Skill.Name,
@@ -119,7 +118,10 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 			}
 		}
 
-		// Pure duplicate — discard as before.
+		// Pure duplicate — discard as before. RelatedSkills is persisted
+		// via saveLocked; the wiki markdown is not re-rendered here because
+		// related_skills is metadata-only (not consumed by agent routing).
+		// It will sync to disk on the next full skill update or compile.
 		best.Skill.RelatedSkills = appendUnique(best.Skill.RelatedSkills, slug)
 		best.Skill.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if err := b.saveLocked(); err != nil {
@@ -272,7 +274,7 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 // skill candidate adds specificity to an existing skill (e.g. "create pitch
 // deck for SaaS" enhances "create pitch deck"), the existing skill absorbs
 // the new details rather than the candidate being silently dropped.
-func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription string) (*teamSkill, error) {
+func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription, candidateSlug string) (*teamSkill, error) {
 	sk := b.findSkillByNameLocked(existingName)
 	if sk == nil {
 		return nil, fmt.Errorf("enhanceSkillLocked: skill %q not found", existingName)
@@ -284,32 +286,23 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription str
 		return nil, fmt.Errorf("enhanceSkillLocked: empty content for %q", existingName)
 	}
 
-	// Capture original state so we can roll back on failure.
-	origContent := sk.Content
-	origDescription := sk.Description
-	origUpdatedAt := sk.UpdatedAt
-
-	// Merge the new content into the existing body rather than replacing it.
-	// This preserves the original instructions while absorbing new details.
-	sk.Content = mergeSkillContent(sk.Content, newContent, "enhanced")
-	// Update description if the new one is longer (more specific).
-	if newDescription != "" && len(newDescription) > len(sk.Description) {
-		sk.Description = newDescription
+	// Build the candidate state on a local copy so a concurrent append to
+	// b.skills (which may reallocate the backing array) cannot leave sk
+	// pointing at a stale element while the lock is released for Enqueue.
+	updated := *sk
+	updated.Content = mergeSkillContent(sk.Content, newContent, "enhanced")
+	if newDescription != "" && len(newDescription) > len(updated.Description) {
+		updated.Description = newDescription
 	}
-	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if candidateSlug != "" {
+		updated.RelatedSkills = appendUnique(append([]string(nil), sk.RelatedSkills...), candidateSlug)
+	}
+	updated.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 
-	// Invalidate the embedding cache since the description may have changed.
-	b.invalidateSkillEmbeddingLocked(skillSlug(existingName))
-
-	// Re-render and write to wiki.
 	slug := skillSlug(existingName)
-	fm := teamSkillToFrontmatter(*sk)
-	mdBytes, err := RenderSkillMarkdown(fm, sk.Content)
+	fm := teamSkillToFrontmatter(updated)
+	mdBytes, err := RenderSkillMarkdown(fm, updated.Content)
 	if err != nil {
-		// Roll back in-memory mutation.
-		sk.Content = origContent
-		sk.Description = origDescription
-		sk.UpdatedAt = origUpdatedAt
 		return nil, fmt.Errorf("enhanceSkillLocked: render markdown for %q: %w", existingName, err)
 	}
 
@@ -331,15 +324,20 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription str
 		)
 		if err != nil {
 			b.mu.Lock()
-			// Roll back in-memory mutation on wiki write failure.
-			sk.Content = origContent
-			sk.Description = origDescription
-			sk.UpdatedAt = origUpdatedAt
 			return nil, fmt.Errorf("enhanceSkillLocked: wiki enqueue for %q: %w", existingName, err)
 		}
 	}
 
 	b.mu.Lock()
+
+	// Re-resolve after re-acquiring the lock: the slice may have been
+	// reallocated or the skill may have been archived concurrently.
+	live := b.findSkillByNameLocked(existingName)
+	if live == nil {
+		return nil, fmt.Errorf("enhanceSkillLocked: skill %q vanished during enqueue", existingName)
+	}
+	*live = updated
+	b.invalidateSkillEmbeddingLocked(slug)
 
 	if saveErr := b.saveLocked(); saveErr != nil {
 		slog.Warn("enhanceSkillLocked: saveLocked failed", "slug", slug, "err", saveErr)
@@ -347,5 +345,5 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription str
 
 	slog.Info("enhanceSkillLocked: skill enhanced",
 		"name", existingName, "slug", slug)
-	return sk, nil
+	return live, nil
 }
