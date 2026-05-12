@@ -120,6 +120,48 @@ export type ReplayDiscrepancy =
       readonly stored: number;
     }
   | {
+      // Oracle: the independent threshold replay says this crossing
+      // should have fired, but no `cost.budget.threshold.crossed` event
+      // exists for it. Catches reactor under-emission bugs (e.g. a
+      // regression in `crossesThreshold`'s integer math) that the
+      // event-log-as-oracle replay can't see, because the missing event
+      // is missing in BOTH the log and the projection.
+      readonly kind: "threshold_crossing_unemitted";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly observedMicroUsd: MicroUsd;
+      readonly limitMicroUsd: MicroUsd;
+      readonly crossedAtLsn: EventLsn;
+    }
+  | {
+      // Oracle: a `cost.budget.threshold.crossed` event exists, but the
+      // independent threshold replay says it shouldn't fire. Distinct
+      // from `threshold_crossing_ghost` — that variant is projection-row
+      // drift from event log. This variant is event-log drift from the
+      // oracle's view of cost events + budgets.
+      readonly kind: "threshold_crossing_spurious";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly observedMicroUsd: MicroUsd;
+      readonly limitMicroUsd: MicroUsd;
+      readonly crossedAtLsn: EventLsn;
+    }
+  | {
+      // Oracle: same (budget, epoch, threshold) exists in both the event
+      // log and the oracle, but one of the recorded fields disagrees.
+      // Most likely cause: the reactor and oracle diverged on which
+      // cost_event was the trigger or what cumulative sum was observed.
+      readonly kind: "threshold_crossing_oracle_field_mismatch";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly field: "crossedAtLsn" | "observedMicroUsd" | "limitMicroUsd";
+      readonly expected: number;
+      readonly logged: number;
+    }
+  | {
       // Surface unparseable event-log rows distinctly so on-call sees the
       // failing LSN, event type, and parse reason instead of a bare
       // `internal_error` from the route.
@@ -202,6 +244,17 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   const replayedTasks = new Map<string, number>();
   const replayedBudgets = new Map<string, ReplayedBudget>();
   const replayedCrossings = new Map<string, ReplayedCrossing>();
+  // Oracle: independent threshold replay. Tracks the same lifetime sums
+  // the reactor reads (`lifetimeFor` in reactor.ts), then re-runs the
+  // same integer/BigInt crossing math against current `replayedBudgets`
+  // to derive an expected crossing set without consulting the event log.
+  // Discrepancies between `expectedCrossings` and `replayedCrossings`
+  // surface reactor bugs (under-emission, spurious emission, field drift)
+  // that the event-log-as-oracle replay can't detect.
+  let oracleGlobalLifetime = 0;
+  const oracleAgentLifetime = new Map<string, number>();
+  const oracleTaskLifetime = new Map<string, number>();
+  const expectedCrossings = new Map<string, ExpectedCrossing>();
   // Collect per-row parse failures as structured discrepancies instead
   // of throwing out of the loop.
   const parseFailures: ReplayDiscrepancy[] = [];
@@ -221,16 +274,36 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
           ) as CostEventAuditPayload;
           const dayUtc = parsed.occurredAt.toISOString().slice(0, 10);
           const agentKey = agentDayKey(parsed.agentSlug, dayUtc);
-          replayedAgentDays.set(
-            agentKey,
-            (replayedAgentDays.get(agentKey) ?? 0) + (parsed.amountMicroUsd as number),
+          const amount = parsed.amountMicroUsd as number;
+          replayedAgentDays.set(agentKey, (replayedAgentDays.get(agentKey) ?? 0) + amount);
+          if (parsed.taskId !== undefined) {
+            replayedTasks.set(parsed.taskId, (replayedTasks.get(parsed.taskId) ?? 0) + amount);
+          }
+          // Oracle update: mirror the reactor's post-update lifetime read.
+          // The reactor runs after `cost_by_agent`/`cost_by_task` have
+          // been updated for the current event, so `observed` includes
+          // the event's own amount.
+          oracleGlobalLifetime += amount;
+          oracleAgentLifetime.set(
+            parsed.agentSlug,
+            (oracleAgentLifetime.get(parsed.agentSlug) ?? 0) + amount,
           );
           if (parsed.taskId !== undefined) {
-            replayedTasks.set(
+            oracleTaskLifetime.set(
               parsed.taskId,
-              (replayedTasks.get(parsed.taskId) ?? 0) + (parsed.amountMicroUsd as number),
+              (oracleTaskLifetime.get(parsed.taskId) ?? 0) + amount,
             );
           }
+          computeExpectedCrossings({
+            costEventLsn: row.lsn,
+            agentSlug: parsed.agentSlug,
+            taskId: parsed.taskId,
+            budgets: replayedBudgets,
+            globalLifetime: oracleGlobalLifetime,
+            agentLifetime: oracleAgentLifetime,
+            taskLifetime: oracleTaskLifetime,
+            out: expectedCrossings,
+          });
         } else if (kind === "budget_set") {
           const parsed = costAuditPayloadFromJsonValue(
             kind,
@@ -307,6 +380,11 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     storedCrossings.set(crossingKey(row.budgetId, row.budgetSetLsn, row.thresholdBps), row);
   }
   compareCrossings(replayedCrossings, storedCrossings, discrepancies);
+  // Oracle check: compare the independently-derived `expectedCrossings`
+  // against the crossings replayed from the event log itself. Catches
+  // reactor bugs the event-log-as-oracle replay misses (the missing
+  // event is missing in both the log and the projection).
+  compareExpectedAndLoggedCrossings(expectedCrossings, replayedCrossings, discrepancies);
 
   const highest = highestLsnStmt.get()?.lsn ?? 0;
   return {
@@ -588,6 +666,154 @@ function eventTypeToKind(type: string): AuditEventKind | "other" {
   if (type === "cost.budget.set") return "budget_set";
   if (type === "cost.budget.threshold.crossed") return "budget_threshold_crossed";
   return "other";
+}
+
+interface ExpectedCrossing {
+  readonly budgetId: string;
+  readonly budgetSetLsn: number;
+  readonly thresholdBps: number;
+  readonly crossedAtLsn: number;
+  readonly observedMicroUsd: number;
+  readonly limitMicroUsd: number;
+}
+
+interface ComputeExpectedCrossingsArgs {
+  readonly costEventLsn: number;
+  readonly agentSlug: string;
+  readonly taskId: string | undefined;
+  readonly budgets: ReadonlyMap<string, ReplayedBudget>;
+  readonly globalLifetime: number;
+  readonly agentLifetime: ReadonlyMap<string, number>;
+  readonly taskLifetime: ReadonlyMap<string, number>;
+  readonly out: Map<string, ExpectedCrossing>;
+}
+
+// Independent threshold-crossing oracle for a single cost_event. Mirrors
+// the reactor's logic (`processCostEventForCrossings` in reactor.ts) but
+// derives `observed` from oracle-maintained lifetime trackers rather than
+// reading `cost_by_agent` / `cost_by_task` from disk. The crossing math
+// (`crossesThresholdBigInt`) MUST stay byte-identical with the reactor's
+// `crossesThreshold`; if they diverge, this oracle becomes a tautology.
+function computeExpectedCrossings(args: ComputeExpectedCrossingsArgs): void {
+  for (const [budgetId, budget] of args.budgets.entries()) {
+    if (budget.tombstoned) continue;
+    if (!isOracleApplicable(budget, args.agentSlug, args.taskId)) continue;
+    const observed = oracleObservedFor(budget, args);
+    if (observed === 0 && budget.limitMicroUsd === 0) continue;
+    for (const thresholdBps of budget.thresholdsBps) {
+      const key = crossingKey(budgetId, budget.setAtLsn, thresholdBps);
+      if (args.out.has(key)) continue;
+      if (!crossesThresholdBigInt(observed, budget.limitMicroUsd, thresholdBps)) continue;
+      args.out.set(key, {
+        budgetId,
+        budgetSetLsn: budget.setAtLsn,
+        thresholdBps,
+        crossedAtLsn: args.costEventLsn,
+        observedMicroUsd: observed,
+        limitMicroUsd: budget.limitMicroUsd,
+      });
+    }
+  }
+}
+
+function isOracleApplicable(
+  budget: ReplayedBudget,
+  agentSlug: string,
+  taskId: string | undefined,
+): boolean {
+  if (budget.scope === "global") return true;
+  if (budget.scope === "agent") return budget.subjectId === agentSlug;
+  if (budget.scope === "task") return taskId !== undefined && budget.subjectId === taskId;
+  return false;
+}
+
+function oracleObservedFor(budget: ReplayedBudget, args: ComputeExpectedCrossingsArgs): number {
+  if (budget.scope === "global") return args.globalLifetime;
+  if (budget.scope === "agent") return args.agentLifetime.get(args.agentSlug) ?? 0;
+  // task scope — caller already gated on taskId !== undefined.
+  if (args.taskId === undefined) return 0;
+  return args.taskLifetime.get(args.taskId) ?? 0;
+}
+
+/**
+ * Integer threshold test in BigInt — byte-identical to the reactor's
+ * `crossesThreshold` (see reactor.ts:313). The operand bounds make the
+ * intermediate product reach 1e16, above Number.MAX_SAFE_INTEGER, so
+ * Number-multiplication would silently truncate; BigInt is exact across
+ * the full documented range. If you change the reactor's math, change
+ * this too — otherwise the oracle becomes a tautology.
+ */
+function crossesThresholdBigInt(observed: number, limit: number, thresholdBps: number): boolean {
+  if (limit === 0) return false;
+  return BigInt(observed) * 10_000n >= BigInt(limit) * BigInt(thresholdBps);
+}
+
+function compareExpectedAndLoggedCrossings(
+  expected: ReadonlyMap<string, ExpectedCrossing>,
+  logged: ReadonlyMap<string, ReplayedCrossing>,
+  out: ReplayDiscrepancy[],
+): void {
+  for (const [key, exp] of expected.entries()) {
+    const log = logged.get(key);
+    if (log === undefined) {
+      out.push({
+        kind: "threshold_crossing_unemitted",
+        budgetId: exp.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
+        thresholdBps: exp.thresholdBps,
+        observedMicroUsd: exp.observedMicroUsd as MicroUsd,
+        limitMicroUsd: exp.limitMicroUsd as MicroUsd,
+        crossedAtLsn: lsnFromV1Number(exp.crossedAtLsn),
+      });
+      continue;
+    }
+    if (log.crossedAtLsn !== exp.crossedAtLsn) {
+      out.push({
+        kind: "threshold_crossing_oracle_field_mismatch",
+        budgetId: exp.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
+        thresholdBps: exp.thresholdBps,
+        field: "crossedAtLsn",
+        expected: exp.crossedAtLsn,
+        logged: log.crossedAtLsn,
+      });
+    }
+    if (log.observedMicroUsd !== exp.observedMicroUsd) {
+      out.push({
+        kind: "threshold_crossing_oracle_field_mismatch",
+        budgetId: exp.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
+        thresholdBps: exp.thresholdBps,
+        field: "observedMicroUsd",
+        expected: exp.observedMicroUsd,
+        logged: log.observedMicroUsd,
+      });
+    }
+    if (log.limitMicroUsd !== exp.limitMicroUsd) {
+      out.push({
+        kind: "threshold_crossing_oracle_field_mismatch",
+        budgetId: exp.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
+        thresholdBps: exp.thresholdBps,
+        field: "limitMicroUsd",
+        expected: exp.limitMicroUsd,
+        logged: log.limitMicroUsd,
+      });
+    }
+  }
+  for (const [key, log] of logged.entries()) {
+    if (!expected.has(key)) {
+      out.push({
+        kind: "threshold_crossing_spurious",
+        budgetId: log.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(log.budgetSetLsn),
+        thresholdBps: log.thresholdBps,
+        observedMicroUsd: log.observedMicroUsd as MicroUsd,
+        limitMicroUsd: log.limitMicroUsd as MicroUsd,
+        crossedAtLsn: lsnFromV1Number(log.crossedAtLsn),
+      });
+    }
+  }
 }
 
 // Used only inside the batch loop; importing the type without using it
