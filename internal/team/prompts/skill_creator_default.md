@@ -23,6 +23,15 @@ If the article is a skill, respond with JSON of this exact shape:
 If not, respond with:
 {"is_skill": false}
 
+IMPORTANT — deduplication: If the user message includes an EXISTING SKILLS
+list, check whether the candidate skill overlaps with any of them.
+
+- EXACT DUPLICATE (same procedure, same scope): respond {"is_skill": false}
+- ADDS NEW DETAILS to an existing skill (more specific variant, additional
+  steps, a new example, or a narrower use-case): respond with
+  {"is_skill": true, "enhance": "<slug-of-existing-skill>", "name": "<existing slug>", "description": "<improved description>", "body": "<merged body incorporating new details into the existing skill>"}
+- GENUINELY NEW (different procedure): respond as normal with is_skill=true.
+
 Be conservative: when in doubt, say no.
 
 Return ONLY JSON. No prose. No markdown fences.

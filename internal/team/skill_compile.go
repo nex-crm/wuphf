@@ -85,6 +85,12 @@ type SkillCompileMetrics struct {
 	// notebook_signal_scanner_embeddings.go so reads + writes are
 	// lock-free.
 	EmbeddingCostUsdBits uint64
+	// SemanticDedupHitsTotal counts proposals that matched an existing
+	// skill via the semantic dedup gate (Jaro-Winkler or embedding cosine).
+	SemanticDedupHitsTotal int64
+	// SkillEnhancementsTotal counts proposals that enhanced an existing
+	// skill instead of being discarded or created as new.
+	SkillEnhancementsTotal int64
 }
 
 // snapshotSkillCompileMetrics returns a copy of m suitable for serialization.
@@ -110,6 +116,8 @@ func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 		EmbeddingCacheHitsTotal:       atomic.LoadInt64(&m.EmbeddingCacheHitsTotal),
 		EmbeddingCacheMissesTotal:     atomic.LoadInt64(&m.EmbeddingCacheMissesTotal),
 		EmbeddingCostUsdBits:          atomic.LoadUint64(&m.EmbeddingCostUsdBits),
+		SemanticDedupHitsTotal:        atomic.LoadInt64(&m.SemanticDedupHitsTotal),
+		SkillEnhancementsTotal:        atomic.LoadInt64(&m.SkillEnhancementsTotal),
 	}
 }
 

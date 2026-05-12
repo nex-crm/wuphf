@@ -131,7 +131,11 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: context: %w", ctx.Err())
 	}
 
-	userPrompt := buildStageBSynthUserPromptForCandidate(cand, wikiContext)
+	// Build existing-skills summary so the LLM can self-deduplicate.
+	p.broker.mu.Lock()
+	existingSummary := buildExistingSkillsSummary(p.broker.skills, 2048)
+	p.broker.mu.Unlock()
+	userPrompt := buildStageBSynthUserPromptForCandidate(cand, wikiContext, existingSummary)
 
 	if cand.Source == SourceSelfHealResolved {
 		atomic.AddInt64(&p.broker.skillCompileMetrics.SelfHealCandidatesScanned, 1)
@@ -262,11 +266,21 @@ func (p *defaultStageBLLMProvider) loadSystemPromptFromWiki() string {
 // buildStageBSynthUserPromptForCandidate dispatches to the source-specific
 // prompt builder. Self-heal candidates get the structured RESOLVED INCIDENT
 // frame; everything else falls back to the generic notebook-cluster prompt.
-func buildStageBSynthUserPromptForCandidate(cand SkillCandidate, wikiContext string) string {
+//
+// existingSkillsSummary is appended to both paths so the LLM can avoid
+// proposing duplicates. It is placed OUTSIDE the untrusted envelope for
+// the self-heal path because it is system-generated context.
+func buildStageBSynthUserPromptForCandidate(cand SkillCandidate, wikiContext, existingSkillsSummary string) string {
+	var base string
 	if cand.Source == SourceSelfHealResolved {
-		return buildSelfHealSynthUserPrompt(cand, wikiContext)
+		base = buildSelfHealSynthUserPrompt(cand, wikiContext)
+	} else {
+		base = buildStageBSynthUserPrompt(cand, wikiContext)
 	}
-	return buildStageBSynthUserPrompt(cand, wikiContext)
+	if summary := strings.TrimSpace(existingSkillsSummary); summary != "" {
+		base += "\n" + summary + "\n"
+	}
+	return base
 }
 
 // buildSelfHealSynthUserPrompt assembles the user message for a resolved
