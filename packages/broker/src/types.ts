@@ -2,6 +2,8 @@
 
 import type { ApiToken, BrokerPort } from "@wuphf/protocol";
 
+import type { ReceiptStore } from "./receipt-store.ts";
+
 export interface BrokerLogger {
   info(event: string, payload?: Readonly<Record<string, unknown>>): void;
   warn(event: string, payload?: Readonly<Record<string, unknown>>): void;
@@ -53,6 +55,21 @@ export interface BrokerConfig {
    */
   readonly trustedOrigins?: readonly string[];
   readonly logger?: BrokerLogger;
+  /**
+   * Receipt persistence backend. When absent, `createBroker` constructs
+   * an in-memory store (`InMemoryReceiptStore`) — process-local, lost
+   * across restarts. Durable hosts pass a `SqliteReceiptStore` from
+   * `@wuphf/broker/sqlite`. The interface is intentionally minimal:
+   * idempotency-key semantics (byte-identical retry returns 200 no-op)
+   * are deferred to a future widening of `put`'s return shape.
+   *
+   * Ownership: when a host supplies its own `receiptStore`, the host
+   * owns its lifecycle. `broker.stop()` closes the HTTP/WebSocket
+   * surface and the WS server but does NOT close the injected store —
+   * call `store.close()` (or equivalent) after `broker.stop()` to
+   * release any underlying handle.
+   */
+  readonly receiptStore?: ReceiptStore;
 }
 
 export interface BrokerHandle {

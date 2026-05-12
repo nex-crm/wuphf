@@ -843,7 +843,7 @@ func TestTaskNotificationTargetsFollowOwnerAndCEOHeadStart(t *testing.T) {
 		Title:     "Positioning work",
 		Details:   "Draft a tighter launch narrative",
 		Owner:     "cmo",
-		Status:    "in_progress",
+		status:    "in_progress",
 		CreatedBy: "you",
 	}
 
@@ -887,8 +887,8 @@ func TestTaskNotificationTargetsFollowOwnerAndCEOHeadStart(t *testing.T) {
 		t.Fatalf("expected no delayed target on in-progress owner update, got %+v", delayed)
 	}
 
-	task.Status = "review"
-	task.ReviewState = "ready_for_review"
+	task.status = "review"
+	task.reviewState = "ready_for_review"
 	immediate, delayed = l.taskNotificationTargets(officeActionLog{
 		Kind:      "task_updated",
 		Actor:     "cmo",
@@ -918,8 +918,8 @@ func TestTaskNotificationTargetsWakeCEOWhenOwnerBlocksTask(t *testing.T) {
 		Channel:   "general",
 		Title:     "Implement publisher integration",
 		Owner:     "eng",
-		Status:    "blocked",
-		Blocked:   true,
+		status:    "blocked",
+		blocked:   true,
 		CreatedBy: "ceo",
 	}
 
@@ -957,7 +957,7 @@ func TestTaskNotificationContentIncludesOwnershipAndGuidance(t *testing.T) {
 		Title:   "Launch page",
 		Details: "Tighten the story and assign follow-up",
 		Owner:   "cmo",
-		Status:  "in_progress",
+		status:  "in_progress",
 	})
 	if !strings.Contains(got, "Task created #task-9 on #general") {
 		t.Fatalf("unexpected content prefix: %q", got)
@@ -980,7 +980,7 @@ func TestTaskNotificationContentIncludesWorktreeDetails(t *testing.T) {
 		Channel:        "general",
 		Title:          "Landing page polish",
 		Owner:          "fe",
-		Status:         "in_progress",
+		status:         "in_progress",
 		ExecutionMode:  "local_worktree",
 		WorktreeBranch: "wuphf-task-10",
 		WorktreePath:   "/tmp/wuphf-task-task-10",
@@ -1007,7 +1007,7 @@ func TestBuildTaskExecutionPacketLocalWorktreeForbidsNestedOffice(t *testing.T) 
 		Title:         "Build the channel operations MVP",
 		Details:       "Wire `docs/youtube-factory/default-channel-pack.yaml` into `cmd/wuphf/main.go` first.",
 		Owner:         "eng",
-		Status:        "in_progress",
+		status:        "in_progress",
 		ExecutionMode: "local_worktree",
 		WorktreePath:  "/tmp/wuphf-task-task-11",
 	}, "Start implementing the web UI MVP now.")
@@ -1051,7 +1051,7 @@ func TestBuildTaskExecutionPacketRequiresRealExternalExecution(t *testing.T) {
 		Title:   "Create one new Notion proof artifact for the consulting proof",
 		Details: "Use the connected Notion workspace and then post the companion Slack handoff.",
 		Owner:   "builder",
-		Status:  "in_progress",
+		status:  "in_progress",
 	}, "Use the connected systems now.")
 	if !strings.Contains(got, "real action there") {
 		t.Fatalf("expected external execution rule in packet: %q", got)
@@ -1213,7 +1213,7 @@ func TestResponseInstructionForTargetLiveExternalTaskPromptsCapabilityCreation(t
 			Title:    "Notion client handoff",
 			Details:  "Create the live Notion record in the connected workspace.",
 			Owner:    "builder",
-			Status:   "in_progress",
+			status:   "in_progress",
 			ThreadID: "msg-1",
 		}},
 	}
@@ -1259,7 +1259,7 @@ func TestTaskNotificationContentIncludesCapabilityGapRecovery(t *testing.T) {
 		Title:         "Create the live Slack and Notion handoff",
 		Details:       "Use the connected Slack workspace and Notion page to publish the deliverable.",
 		Owner:         "builder",
-		Status:        "in_progress",
+		status:        "in_progress",
 		ExecutionMode: "office",
 	})
 	if !strings.Contains(got, "Capability-gap rule: if the work is blocked because the needed specialist, channel, skill, or tool path does not exist yet") {
@@ -1365,8 +1365,8 @@ func TestBuildTaskNotificationContextLeadFlagsReviewAction(t *testing.T) {
 					ID:          "task-1",
 					Title:       "Audit repo and define fastest path",
 					Owner:       "eng",
-					Status:      "review",
-					ReviewState: "ready_for_review",
+					status:      "review",
+					reviewState: "ready_for_review",
 					UpdatedAt:   "2026-04-14T01:23:02Z",
 				},
 			},
@@ -1422,7 +1422,7 @@ func TestTaskNotificationTargetsWakeOwnerOnWatchdog(t *testing.T) {
 		Channel: "general",
 		Title:   "Build signup conversion fix",
 		Owner:   "fe",
-		Status:  "in_progress",
+		status:  "in_progress",
 	}
 
 	immediate, delayed := l.taskNotificationTargets(officeActionLog{
@@ -1459,7 +1459,7 @@ func TestTaskNotificationTargetsDoNotRewakeCEOForOwnCreatedTask(t *testing.T) {
 		Channel: "general",
 		Title:   "Build signup conversion fix",
 		Owner:   "fe",
-		Status:  "in_progress",
+		status:  "in_progress",
 	}
 
 	immediate, delayed := l.taskNotificationTargets(officeActionLog{
@@ -2250,15 +2250,15 @@ func TestBlockedTaskNotificationAndUnblockFlow(t *testing.T) {
 	}
 
 	// Simulate research completing: task_created action for the marketing task.
-	// With task.Blocked=true, taskNotificationTargets should NOT add marketing to immediate.
+	// With task.blocked=true, taskNotificationTargets should NOT add marketing to immediate.
 	blockedTask := teamTask{
 		ID:        marketingTask.ID,
 		Channel:   "general",
 		Title:     "Write blog copy",
 		Owner:     "marketing",
-		Status:    "in_progress",
+		status:    "in_progress",
 		DependsOn: []string{researchTask.ID},
-		Blocked:   true,
+		blocked:   true,
 	}
 	createdAction := officeActionLog{Kind: "task_created", Actor: "ceo", Channel: "general", RelatedID: marketingTask.ID}
 	immediate, _ := l.taskNotificationTargets(createdAction, blockedTask)
@@ -2274,7 +2274,7 @@ func TestBlockedTaskNotificationAndUnblockFlow(t *testing.T) {
 	b.mu.Lock()
 	for i := range b.tasks {
 		if b.tasks[i].ID == researchTask.ID {
-			b.tasks[i].Status = "done"
+			b.tasks[i].status = "done"
 		}
 	}
 	b.unblockDependentsLocked(researchTask.ID)
@@ -2305,8 +2305,8 @@ func TestBlockedTaskNotificationAndUnblockFlow(t *testing.T) {
 		Channel: "general",
 		Title:   "Write blog copy",
 		Owner:   "marketing",
-		Status:  "in_progress",
-		Blocked: false, // now unblocked
+		status:  "in_progress",
+		blocked: false, // now unblocked
 	}
 	immediate2, _ := l.taskNotificationTargets(unblockedAction, unblockedTaskState)
 	hasMarketing := false
@@ -2359,7 +2359,7 @@ func TestActionLoopAllowsTaskUnblocked(t *testing.T) {
 	for i := range b.tasks {
 		if b.tasks[i].ID == marketingTask.ID {
 			b.tasks[i].DependsOn = []string{researchTask.ID}
-			b.tasks[i].Blocked = true
+			b.tasks[i].blocked = true
 		}
 	}
 	b.mu.Unlock()
@@ -2383,7 +2383,7 @@ drain:
 	b.mu.Lock()
 	for i := range b.tasks {
 		if b.tasks[i].ID == researchTask.ID {
-			b.tasks[i].Status = "done"
+			b.tasks[i].status = "done"
 		}
 	}
 	b.unblockDependentsLocked(researchTask.ID)
@@ -2435,8 +2435,8 @@ done:
 		Channel: "general",
 		Title:   "Write blog post about findings",
 		Owner:   "marketing",
-		Status:  "in_progress",
-		Blocked: false,
+		status:  "in_progress",
+		blocked: false,
 	}
 	immediate, _ := l.taskNotificationTargets(unblockedAction, unblockedState)
 	hasMarketing := false
@@ -2505,7 +2505,7 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 	if !ok {
 		t.Fatal("expected resumed task to still exist")
 	}
-	if resumed.Blocked || resumed.Status != "in_progress" {
+	if resumed.Blocked() || resumed.Status() != "in_progress" {
 		t.Fatalf("expected blocked task to resume after retry window, got %+v", resumed)
 	}
 	if delivered != 1 {
@@ -2535,7 +2535,7 @@ func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) 
 			Channel: "youtube-factory",
 			Title:   "Stand up integration stub matrix and workflow harness",
 			Owner:   "ops",
-			Status:  "in_progress",
+			status:  "in_progress",
 		},
 	}
 	b.mu.Unlock()
@@ -2587,15 +2587,15 @@ func TestOfficeChangeTaskNotificationsBackfillChannelMembershipTask(t *testing.T
 			Channel: "youtube-factory",
 			Title:   "Stand up integration stub matrix and workflow harness",
 			Owner:   "ops",
-			Status:  "in_progress",
+			status:  "in_progress",
 		},
 		{
 			ID:      "task-5",
 			Channel: "youtube-factory",
 			Title:   "Already blocked",
 			Owner:   "ops",
-			Status:  "in_progress",
-			Blocked: true,
+			status:  "in_progress",
+			blocked: true,
 		},
 	}
 	b.mu.Unlock()

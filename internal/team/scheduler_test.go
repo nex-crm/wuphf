@@ -43,7 +43,7 @@ func TestNextWorkflowRun_ValidCronAdvances(t *testing.T) {
 func TestSchedulerProcessOnce_TaskUnclaimedFiresAlert(t *testing.T) {
 	b := newSchedulerFixtureBroker(t)
 	b.tasks = []teamTask{{
-		ID: "t1", Channel: "general", Title: "do thing", Owner: "", Status: "in_progress",
+		ID: "t1", Channel: "general", Title: "do thing", Owner: "", status: "in_progress",
 	}}
 	b.dueJobs = []schedulerJob{{
 		Slug: "j1", Channel: "general", TargetType: "task", TargetID: "t1",
@@ -71,7 +71,7 @@ func TestSchedulerProcessOnce_TaskUnclaimedFiresAlert(t *testing.T) {
 func TestSchedulerProcessOnce_TaskOwnedFiresStalled(t *testing.T) {
 	b := newSchedulerFixtureBroker(t)
 	b.tasks = []teamTask{{
-		ID: "t1", Channel: "general", Title: "do thing", Owner: "eng", Status: "in_progress",
+		ID: "t1", Channel: "general", Title: "do thing", Owner: "eng", status: "in_progress",
 	}}
 	b.dueJobs = []schedulerJob{{
 		Slug: "j1", Channel: "general", TargetType: "task", TargetID: "t1",
@@ -92,7 +92,7 @@ func TestSchedulerProcessOnce_TaskOwnedFiresStalled(t *testing.T) {
 func TestSchedulerProcessOnce_DoneTaskMarksJobDone(t *testing.T) {
 	b := newSchedulerFixtureBroker(t)
 	b.tasks = []teamTask{{
-		ID: "t1", Channel: "general", Title: "do thing", Owner: "eng", Status: "done",
+		ID: "t1", Channel: "general", Title: "do thing", Owner: "eng", status: "done",
 	}}
 	b.dueJobs = []schedulerJob{{
 		Slug: "j1", Channel: "general", TargetType: "task", TargetID: "t1",
@@ -112,7 +112,7 @@ func TestSchedulerProcessOnce_DoneTaskMarksJobDone(t *testing.T) {
 func TestSchedulerProcessOnce_BlockedTaskSkipsAlert(t *testing.T) {
 	b := newSchedulerFixtureBroker(t)
 	b.tasks = []teamTask{{
-		ID: "t1", Channel: "general", Title: "do thing", Owner: "eng", Status: "in_progress", Blocked: true,
+		ID: "t1", Channel: "general", Title: "do thing", Owner: "eng", status: "in_progress", blocked: true,
 	}}
 	b.dueJobs = []schedulerJob{{
 		Slug: "j1", Channel: "general", TargetType: "task", TargetID: "t1",

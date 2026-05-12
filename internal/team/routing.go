@@ -27,7 +27,7 @@ func (l *Launcher) taskOwnerForMessage(msg channelMessage) string {
 	var owner string
 	bestScore := 0.0
 	for _, task := range l.broker.AllTasks() {
-		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			continue
 		}
 		taskOwner := strings.TrimSpace(task.Owner)

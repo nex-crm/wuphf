@@ -121,7 +121,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	}
 
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
-	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
+	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPromptCtx)
 	if err := l.broker.ServeWebUI(webPort); err != nil {
 		// The broker is already running and the office PID file is on
 		// disk (above). On a port-bind failure we exit, so tear both

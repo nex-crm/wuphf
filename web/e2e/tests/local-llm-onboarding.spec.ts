@@ -36,6 +36,24 @@ const STATUS_FIXTURE = [
     platform_supported: false,
     windows_note: "WSL2 recommended.",
   },
+  {
+    kind: "hermes-agent",
+    binary_installed: false,
+    endpoint: "http://127.0.0.1:8642/v1",
+    model: "hermes-agent",
+    reachable: false,
+    probed: false,
+    platform_supported: true,
+  },
+  {
+    kind: "openclaw-http",
+    binary_installed: false,
+    endpoint: "http://127.0.0.1:18789/v1",
+    model: "openclaw/default",
+    reachable: false,
+    probed: false,
+    platform_supported: true,
+  },
 ];
 
 async function waitForReactMount(page: Page): Promise<void> {
@@ -100,7 +118,7 @@ async function advanceToSetupStep(page: Page) {
 }
 
 test.describe("Onboarding → Run a local model", () => {
-  test("meta-tile reveals the picker grid with all three runtimes and their badges", async ({
+  test("meta-tile reveals the picker grid with all registered runtimes and their badges", async ({
     page,
   }) => {
     stubStatusEndpoint(page);
@@ -128,7 +146,6 @@ test.describe("Onboarding → Run a local model", () => {
     await expect(
       page.getByTestId("onboarding-local-llm-tile-exo"),
     ).toBeVisible();
-
     // mlx-lm is reachable in the fixture → "Running" badge, selectable.
     const mlxTile = page.getByTestId("onboarding-local-llm-tile-mlx-lm");
     await expect(mlxTile.getByText(/Running/)).toBeVisible();
@@ -141,6 +158,25 @@ test.describe("Onboarding → Run a local model", () => {
     const ollamaTile = page.getByTestId("onboarding-local-llm-tile-ollama");
     await expect(ollamaTile.getByText(/Not installed.*Settings/)).toBeVisible();
     await expect(ollamaTile).toBeDisabled();
+
+    // Hermes Agent and OpenClaw Gateway are registered local runtimes too; in
+    // this fixture they are installable but unavailable, so they should match
+    // ollama's disabled "install from Settings" behavior.
+    const hermesTile = page.getByTestId(
+      "onboarding-local-llm-tile-hermes-agent",
+    );
+    await expect(hermesTile).toBeVisible();
+    await expect(hermesTile.getByText(/Not installed.*Settings/)).toBeVisible();
+    await expect(hermesTile).toBeDisabled();
+
+    const openclawTile = page.getByTestId(
+      "onboarding-local-llm-tile-openclaw-http",
+    );
+    await expect(openclawTile).toBeVisible();
+    await expect(
+      openclawTile.getByText(/Not installed.*Settings/),
+    ).toBeVisible();
+    await expect(openclawTile).toBeDisabled();
 
     // exo is platform_supported=false → tile is disabled and surfaces
     // "Not supported on this OS".

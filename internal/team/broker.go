@@ -59,18 +59,25 @@ type ipRateLimitBucket struct {
 // Broker is a lightweight HTTP message broker for the team channel.
 // All agent MCP instances connect to this shared broker.
 type Broker struct {
-	channelStore            *channel.Store
-	messages                []channelMessage
-	agentIssues             []agentIssueRecord
-	members                 []officeMember
-	memberIndex             map[string]int                  // slug → index into members; guarded by mu
-	memberPresence          map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
-	presenceKeyToSlug       map[string]string               // "adapter:key" → slug; guarded by mu
-	channels                []teamChannel
-	sessionMode             string
-	oneOnOneAgent           string
-	focusMode               bool
-	tasks                   []teamTask
+	channelStore      *channel.Store
+	messages          []channelMessage
+	agentIssues       []agentIssueRecord
+	members           []officeMember
+	memberIndex       map[string]int                  // slug → index into members; guarded by mu
+	memberPresence    map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
+	presenceKeyToSlug map[string]string               // "adapter:key" → slug; guarded by mu
+	channels          []teamChannel
+	sessionMode       string
+	oneOnOneAgent     string
+	focusMode         bool
+	tasks             []teamTask
+	// lifecycleIndex is the inverse-index map maintained by the
+	// broker_lifecycle_transition.go layer. Inbox queries for "all tasks
+	// in state X" are O(1) lookups against this map instead of O(N) scans
+	// of b.tasks. Guarded by b.mu — only the lifecycle transition layer
+	// writes to it, and the snapshot accessor copies under the lock.
+	lifecycleIndex          map[LifecycleState][]string
+	lifecycleMigrationOnce  sync.Once
 	requests                []humanInterview
 	humanInvites            []humanInvite
 	humanSessions           []humanSession
@@ -177,7 +184,7 @@ type Broker struct {
 	// not contend with adapter registration on a different goroutine.
 	shareTransport     atomic.Pointer[ShareTransport]
 	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
-	generateChannelFn  func(prompt string) (generatedChannelTemplate, error)
+	generateChannelFn  func(context.Context, string) (generatedChannelTemplate, error)
 	policies           []officePolicy // active office operating rules
 	rateLimitBuckets   map[string]ipRateLimitBucket
 	rateLimitWindow    time.Duration
@@ -390,6 +397,11 @@ func (b *Broker) ChannelStore() *channel.Store {
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
+	// Lane A migration: derive LifecycleState for every persisted task
+	// that came back from disk without one, and rebuild the inverse
+	// lifecycle index. Idempotent across restarts and per-process
+	// guarded so additional startup hooks invoking it are no-ops.
+	b.MigrateLifecycleStatesOnce()
 	// Seed company context from previous onboarding skip, if pending.
 	// configMu guards the read-modify-write so a concurrent broker retry
 	// goroutine re-arming the flag under the same lock cannot race with
@@ -1029,7 +1041,7 @@ func (b *Broker) SetGenerateMemberFn(fn func(string) (generatedMemberTemplate, e
 	b.generateMemberFn = fn
 }
 
-func (b *Broker) SetGenerateChannelFn(fn func(string) (generatedChannelTemplate, error)) {
+func (b *Broker) SetGenerateChannelFn(fn func(context.Context, string) (generatedChannelTemplate, error)) {
 	b.generateChannelFn = fn
 }
 

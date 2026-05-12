@@ -113,6 +113,44 @@ var localProviderSpecs = []localProviderSpec{
 			"Exo distributes inference across multiple machines. On a single Mac it offers little over MLX-LM directly; install on a second machine and run `exo` on each to enable.",
 		},
 	},
+	{
+		kind:        provider.KindHermesAgent,
+		binaryName:  "hermes",
+		versionArgs: []string{"--version"},
+		platformAllowed: func(goos, _ string) bool {
+			return goos == "darwin" || goos == "linux"
+		},
+		install: map[string]string{
+			"macos": "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+			"linux": "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+		},
+		start: map[string]string{
+			"macos": "hermes gateway",
+			"linux": "hermes gateway",
+		},
+		notes: []string{
+			"Hermes Agent is reached through its OpenAI-compatible API server on port 8642. If you set API_SERVER_KEY for Hermes, set the same value as WUPHF_HERMES_AGENT_API_KEY before starting WUPHF.",
+		},
+	},
+	{
+		kind:        provider.KindOpenclawHTTP,
+		binaryName:  "openclaw",
+		versionArgs: []string{"--version"},
+		platformAllowed: func(goos, _ string) bool {
+			return goos == "darwin" || goos == "linux"
+		},
+		install: map[string]string{
+			"macos": "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
+			"linux": "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
+		},
+		start: map[string]string{
+			"macos": "openclaw gateway run",
+			"linux": "openclaw gateway run",
+		},
+		notes: []string{
+			"OpenClaw Gateway's OpenAI-compatible endpoint is disabled by default. Enable gateway.http.endpoints.chatCompletions.enabled, then use gateway.auth.token as WUPHF_OPENCLAW_HTTP_API_KEY, OPENCLAW_GATEWAY_TOKEN, or WUPHF_OPENCLAW_TOKEN.",
+		},
+	},
 }
 
 // localProvidersStatusOverrides lets tests stub binary detection,
@@ -121,7 +159,7 @@ var localProviderSpecs = []localProviderSpec{
 type localProvidersStatusOverrides struct {
 	lookPath func(name string) (string, error)
 	runVer   func(ctx context.Context, path string, args []string) (string, error)
-	probe    func(ctx context.Context, baseURL string) (reachable bool, loadedModel string, ok bool)
+	probe    func(ctx context.Context, kind, baseURL string) (reachable bool, loadedModel string, ok bool)
 	goos     string
 	goarch   string
 }
@@ -207,7 +245,7 @@ func computeOneStatus(ctx context.Context, spec localProviderSpec, ov localProvi
 		// PlatformSupported to render the disabled state.
 	case isLoopbackBaseURL(endpoint):
 		probeCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
-		reachable, loadedModel, _ := ov.probe(probeCtx, endpoint)
+		reachable, loadedModel, _ := ov.probe(probeCtx, spec.kind, endpoint)
 		cancel()
 		st.Reachable = reachable
 		st.LoadedModel = loadedModel
@@ -270,15 +308,18 @@ func runVersionCommand(ctx context.Context, path string, args []string) (string,
 }
 
 // probeOpenAICompatEndpoint hits `<baseURL>/models` (the OpenAI list-
-// models endpoint, which all three runtimes support) and reports
-// whether the server is reachable plus, if the response is the
+// models endpoint, which all local OpenAI-compatible runtimes support) and
+// reports whether the server is reachable plus, if the response is the
 // expected shape, the first model id it advertises. Any error or
 // non-2xx → reachable=false.
-func probeOpenAICompatEndpoint(ctx context.Context, baseURL string) (bool, string, bool) {
+func probeOpenAICompatEndpoint(ctx context.Context, kind, baseURL string) (bool, string, bool) {
 	endpoint := strings.TrimRight(baseURL, "/") + "/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return false, "", false
+	}
+	if apiKey := provider.OpenAICompatAPIKey(kind); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	client := &http.Client{
 		Transport: &http.Transport{

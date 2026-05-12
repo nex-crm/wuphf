@@ -1,8 +1,17 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { filterPayloadToSafeKeys } from "../src/main/broker-internal.ts";
 import {
   createLogger,
   type LogPayload,
@@ -10,9 +19,27 @@ import {
   UnsafeLogPayloadError,
 } from "../src/main/logger.ts";
 
+const MAX_LOG_STRING_BYTES = 8_192;
+
+const fsMock = vi.hoisted(() => ({
+  mkdirSync: vi.fn<typeof import("node:fs").mkdirSync>(),
+  statSync: vi.fn<typeof import("node:fs").statSync>(),
+}));
+
 const electronMock = vi.hoisted(() => ({
   getPath: vi.fn<(name: string) => string>(),
 }));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  fsMock.mkdirSync.mockImplementation(actual.mkdirSync);
+  fsMock.statSync.mockImplementation(actual.statSync);
+  return {
+    ...actual,
+    mkdirSync: fsMock.mkdirSync,
+    statSync: fsMock.statSync,
+  };
+});
 
 vi.mock("electron", () => ({
   app: {
@@ -25,6 +52,8 @@ const tempDirs: string[] = [];
 describe("StructuredLogger", () => {
   beforeEach(() => {
     electronMock.getPath.mockReset();
+    fsMock.mkdirSync.mockClear();
+    fsMock.statSync.mockClear();
   });
 
   afterEach(() => {
@@ -99,11 +128,144 @@ describe("StructuredLogger", () => {
     expect(existsSync(join(logDirectory, "main.1.log"))).toBe(true);
     expect(existsSync(join(logDirectory, "main.2.log"))).toBe(true);
     expect(existsSync(join(logDirectory, "main.3.log"))).toBe(false);
+    expect(fsMock.statSync).toHaveBeenCalledTimes(1);
     expect(readLogRecords(logDirectory).at(-1)).toMatchObject({
       module: "broker",
       event: "broker_restart_scheduled",
       restartCount: 7,
     });
+  });
+
+  it("initializes the log directory once across repeated writes", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("broker");
+
+    for (let index = 0; index < 100; index += 1) {
+      logger.info("broker_liveness_ping");
+    }
+
+    expect(fsMock.mkdirSync).toHaveBeenCalledOnce();
+    expect(fsMock.mkdirSync).toHaveBeenCalledWith(logDirectory, { recursive: true });
+    expect(readLogRecords(logDirectory)).toHaveLength(100);
+  });
+
+  it("recreates the log directory if it is deleted after initialization", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("broker");
+
+    logger.info("broker_liveness_ping");
+    expect(readLogRecords(logDirectory)).toHaveLength(1);
+
+    rmSync(logDirectory, { recursive: true });
+    logger.warn("broker_restart_scheduled", {
+      reason: "after-cleanup",
+      restartCount: 1,
+      backoffMs: 250,
+      maxRestartRetries: 5,
+    });
+
+    expect(existsSync(logDirectory)).toBe(true);
+    expect(fsMock.mkdirSync).toHaveBeenCalledTimes(2);
+    expect(readLogRecords(logDirectory)).toEqual([
+      expect.objectContaining({
+        module: "broker",
+        event: "broker_restart_scheduled",
+        reason: "after-cleanup",
+      }),
+    ]);
+  });
+
+  it("continues without throwing if log directory recovery fails", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("broker");
+
+    logger.info("broker_liveness_ping");
+    rmSync(logDirectory, { recursive: true });
+    fsMock.mkdirSync.mockImplementationOnce(() => {
+      throw new Error("mkdir retry failed");
+    });
+
+    expect(() => logger.info("broker_liveness_ping")).not.toThrow();
+    expect(existsSync(logDirectory)).toBe(false);
+  });
+
+  it("writes a single line larger than the rotation threshold without rotating", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      maxFileBytes: 1,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+
+    logger.error("app_start_failed", { error: "boom" });
+
+    expect(existsSync(join(logDirectory, "main.log"))).toBe(true);
+    expect(existsSync(join(logDirectory, "main.1.log"))).toBe(false);
+    expect(fsMock.statSync).not.toHaveBeenCalled();
+    expect(readLogRecords(logDirectory)).toHaveLength(1);
+  });
+
+  it("skips rotation without throwing if the active log is deleted before rename", () => {
+    const logDirectory = createTempDir();
+    const activePath = join(logDirectory, "main.log");
+    writeFileSync(activePath, "x".repeat(360), "utf8");
+    const renameCalls: Array<readonly [string, string]> = [];
+    const rotationFs = {
+      existsSync(path: Parameters<typeof existsSync>[0]) {
+        if (String(path) === activePath) {
+          unlinkSync(activePath);
+          return false;
+        }
+        return existsSync(path);
+      },
+      renameSync(
+        sourcePath: Parameters<typeof renameSync>[0],
+        targetPath: Parameters<typeof renameSync>[1],
+      ) {
+        renameCalls.push([String(sourcePath), String(targetPath)]);
+        renameSync(sourcePath, targetPath);
+      },
+      unlinkSync(path: Parameters<typeof unlinkSync>[0]) {
+        unlinkSync(path);
+      },
+    };
+    const sink = new StructuredLogger({
+      logDirectory,
+      rotationFs,
+      maxFileBytes: 400,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+
+    expect(() => logger.info("app_start_failed", { error: "boom" })).not.toThrow();
+
+    expect(renameCalls).toHaveLength(0);
+    expect(existsSync(join(logDirectory, "main.1.log"))).toBe(false);
+    expect(readLogRecords(logDirectory)).toEqual([
+      expect.objectContaining({
+        module: "main",
+        event: "app_start_failed",
+        error: "boom",
+      }),
+    ]);
   });
 
   it("routes default console writes by level and accepts a directory resolver", () => {
@@ -189,6 +351,51 @@ describe("StructuredLogger", () => {
     );
   });
 
+  it("ignores inherited payload keys", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const payload = Object.create({ reason: "inherited" }) as LogPayload;
+
+    logger.error("unhandled_rejection", payload);
+
+    const record = readLogRecords(logDirectory)[0];
+    expect(record).not.toHaveProperty("reason");
+  });
+
+  it("drops forged broker payload eventLsn before writing the logger envelope", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("broker");
+    const { safePayload, droppedKeyCount } = filterPayloadToSafeKeys({
+      port: 7891,
+      eventLsn: 999_999,
+    });
+
+    logger.info("broker_listener_started", {
+      ...safePayload,
+      ...(droppedKeyCount > 0 ? { droppedKeys: droppedKeyCount } : {}),
+    });
+
+    const record = readLogRecords(logDirectory)[0] as
+      | { readonly droppedKeys?: unknown; readonly eventLsn?: unknown; readonly port?: unknown }
+      | undefined;
+    expect(record).toMatchObject({
+      eventLsn: 1,
+      port: 7891,
+      droppedKeys: 1,
+    });
+    expect(record?.eventLsn).not.toBe(999_999);
+  });
+
   it("truncates oversized safe string values before writing", () => {
     const logDirectory = createTempDir();
     const sink = new StructuredLogger({
@@ -200,10 +407,101 @@ describe("StructuredLogger", () => {
 
     logger.error("unhandled_rejection", { reason: "x".repeat(9_000) });
 
-    const record = readLogRecords(logDirectory)[0] as { readonly reason?: unknown } | undefined;
-    expect(typeof record?.reason).toBe("string");
-    expect((record?.reason as string).endsWith("...")).toBe(true);
-    expect((record?.reason as string).length).toBeLessThan(9_000);
+    const reason = readFirstReason(logDirectory);
+    expect(reason.endsWith("...")).toBe(true);
+    expect(reason.length).toBeLessThan(9_000);
+    expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
+  });
+
+  it("keeps byte-safe ASCII string values unchanged", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const fastPathReason = "a".repeat(1_000);
+    const byteCheckedReason = "b".repeat(3_000);
+
+    logger.error("unhandled_rejection", { reason: fastPathReason });
+    logger.error("unhandled_rejection", { reason: byteCheckedReason });
+
+    const records = readLogRecords(logDirectory) as ReadonlyArray<{ readonly reason?: unknown }>;
+    expect(records[0]?.reason).toBe(fastPathReason);
+    expect(records[1]?.reason).toBe(byteCheckedReason);
+  });
+
+  it("truncates byte-oversized string values that fit within the char cap", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const reason = "€".repeat(MAX_LOG_STRING_BYTES);
+
+    logger.error("unhandled_rejection", { reason });
+
+    const loggedReason = readFirstReason(logDirectory);
+    expect(loggedReason).not.toBe(reason);
+    expect(loggedReason.endsWith("...")).toBe(true);
+    expect(Buffer.byteLength(loggedReason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
+  });
+
+  it("truncates multibyte strings that exceed the byte cap by one byte", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const reason = "€".repeat(2_731);
+
+    logger.error("unhandled_rejection", { reason });
+
+    const loggedReason = readFirstReason(logDirectory);
+    expect(loggedReason).not.toBe(reason);
+    expect(loggedReason.endsWith("...")).toBe(true);
+    expect(Buffer.byteLength(loggedReason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
+  });
+
+  it("truncates surrogate-pair strings without splitting encoded characters", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+    const reason = "😀".repeat(2_049);
+
+    logger.error("unhandled_rejection", { reason });
+
+    const loggedReason = readFirstReason(logDirectory);
+    expect(loggedReason).not.toBe(reason);
+    expect(loggedReason.endsWith("...")).toBe(true);
+    expect(loggedReason).not.toContain("\uFFFD");
+    expect(Buffer.byteLength(loggedReason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
+  });
+
+  it("pre-caps multi-megabyte string values before writing", () => {
+    const logDirectory = createTempDir();
+    const sink = new StructuredLogger({
+      logDirectory,
+      consoleWriter: () => undefined,
+      monotonicNow: () => 1,
+    });
+    const logger = sink.forModule("main");
+
+    logger.error("unhandled_rejection", { reason: "x".repeat(2 * 1024 * 1024) });
+
+    const reason = readFirstReason(logDirectory);
+    expect(reason.endsWith("...")).toBe(true);
+    expect(reason).toHaveLength(MAX_LOG_STRING_BYTES);
+    expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(MAX_LOG_STRING_BYTES);
   });
 
   it.each(["url", "path", "token", "secret"])("rejects banned payload key %s", (key) => {
@@ -232,4 +530,13 @@ function readLogRecords(logDirectory: string): readonly Record<string, unknown>[
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function readFirstReason(logDirectory: string): string {
+  const record = readLogRecords(logDirectory)[0] as { readonly reason?: unknown } | undefined;
+  const reason = record?.reason;
+  if (typeof reason !== "string") {
+    throw new Error("Expected first log record reason to be a string");
+  }
+  return reason;
 }

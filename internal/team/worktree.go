@@ -361,7 +361,7 @@ func overlayPersistedTaskWorktrees(worktreePath string, currentTaskID string) er
 		if !strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
 			continue
 		}
-		status := strings.ToLower(strings.TrimSpace(task.Status))
+		status := strings.ToLower(strings.TrimSpace(task.status))
 		if status != "done" && status != "review" {
 			continue
 		}

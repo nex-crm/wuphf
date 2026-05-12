@@ -167,6 +167,94 @@ func (req humanInterview) TitleOrDefault() string {
 }
 
 type teamTask struct {
+	ID      string `json:"id"`
+	Channel string `json:"channel,omitempty"`
+	Title   string `json:"title"`
+	Details string `json:"details,omitempty"`
+	Owner   string `json:"owner,omitempty"`
+	// status, reviewState, pipelineStage, and blocked are unexported by
+	// design: only the lifecycle transition layer (broker_lifecycle_transition.go)
+	// is permitted to write them, and read access from outside the team
+	// package goes through the Status()/ReviewState()/PipelineStage()/Blocked()
+	// accessor methods. The wire format is preserved verbatim by the custom
+	// MarshalJSON / UnmarshalJSON below, so persisted broker state and HTTP
+	// responses look identical to pre-Lane-A clients.
+	status           string
+	CreatedBy        string `json:"created_by"`
+	ThreadID         string `json:"thread_id,omitempty"`
+	TaskType         string `json:"task_type,omitempty"`
+	PipelineID       string `json:"pipeline_id,omitempty"`
+	pipelineStage    string
+	ExecutionMode    string `json:"execution_mode,omitempty"`
+	reviewState      string
+	SourceSignalID   string   `json:"source_signal_id,omitempty"`
+	SourceDecisionID string   `json:"source_decision_id,omitempty"`
+	WorktreePath     string   `json:"worktree_path,omitempty"`
+	WorktreeBranch   string   `json:"worktree_branch,omitempty"`
+	DependsOn        []string `json:"depends_on,omitempty"`
+	// BlockedOn is the typed-blocker list that supersedes DependsOn for
+	// the multi-agent harness path (Lane A foundation). Entries are task IDs
+	// or PR identifiers that must resolve before the task can leave
+	// blocked_on_pr_merge. DependsOn is preserved for legacy unblock paths;
+	// the extended unblockDependentsLocked sweeps the union of both.
+	BlockedOn []string `json:"blocked_on,omitempty"`
+	blocked   bool
+	// LifecycleState is the source of truth for the multi-agent control loop.
+	// Direct callers must NOT write this field — route through the broker's
+	// transition layer (b.transitionLifecycleLocked / b.TransitionLifecycle)
+	// so derived fields, the indexed lookup, and self-heal gating all stay
+	// in sync.
+	LifecycleState LifecycleState  `json:"lifecycle_state,omitempty"`
+	AckedAt        string          `json:"acked_at,omitempty"`
+	DueAt          string          `json:"due_at,omitempty"`
+	FollowUpAt     string          `json:"follow_up_at,omitempty"`
+	ReminderAt     string          `json:"reminder_at,omitempty"`
+	RecheckAt      string          `json:"recheck_at,omitempty"`
+	MemoryWorkflow *MemoryWorkflow `json:"memory_workflow,omitempty"`
+	CreatedAt      string          `json:"created_at"`
+	UpdatedAt      string          `json:"updated_at"`
+	CompletedAt    string          `json:"completed_at,omitempty"`
+}
+
+// Status returns the persisted status string. Read accessor for callers
+// outside the team package; in-package writers must go through the
+// lifecycle transition layer.
+func (t *teamTask) Status() string {
+	if t == nil {
+		return ""
+	}
+	return t.status
+}
+
+// ReviewState returns the persisted review state string.
+func (t *teamTask) ReviewState() string {
+	if t == nil {
+		return ""
+	}
+	return t.reviewState
+}
+
+// PipelineStage returns the persisted pipeline stage string.
+func (t *teamTask) PipelineStage() string {
+	if t == nil {
+		return ""
+	}
+	return t.pipelineStage
+}
+
+// Blocked reports whether the task is in a blocked state.
+func (t *teamTask) Blocked() bool {
+	if t == nil {
+		return false
+	}
+	return t.blocked
+}
+
+// teamTaskWire mirrors teamTask's JSON shape with exported field names so
+// encoding/json can serialise the unexported derived fields without breaking
+// the on-disk and HTTP wire formats. teamTask.MarshalJSON / UnmarshalJSON
+// route through this shadow type.
+type teamTaskWire struct {
 	ID               string          `json:"id"`
 	Channel          string          `json:"channel,omitempty"`
 	Title            string          `json:"title"`
@@ -185,7 +273,9 @@ type teamTask struct {
 	WorktreePath     string          `json:"worktree_path,omitempty"`
 	WorktreeBranch   string          `json:"worktree_branch,omitempty"`
 	DependsOn        []string        `json:"depends_on,omitempty"`
+	BlockedOn        []string        `json:"blocked_on,omitempty"`
 	Blocked          bool            `json:"blocked,omitempty"`
+	LifecycleState   LifecycleState  `json:"lifecycle_state,omitempty"`
 	AckedAt          string          `json:"acked_at,omitempty"`
 	DueAt            string          `json:"due_at,omitempty"`
 	FollowUpAt       string          `json:"follow_up_at,omitempty"`
@@ -195,6 +285,83 @@ type teamTask struct {
 	CreatedAt        string          `json:"created_at"`
 	UpdatedAt        string          `json:"updated_at"`
 	CompletedAt      string          `json:"completed_at,omitempty"`
+}
+
+// MarshalJSON preserves the pre-Lane-A wire format (status/review_state/
+// pipeline_stage/blocked as top-level keys) while keeping the underlying
+// fields unexported on the Go struct.
+func (t teamTask) MarshalJSON() ([]byte, error) {
+	return json.Marshal(teamTaskWire{
+		ID:               t.ID,
+		Channel:          t.Channel,
+		Title:            t.Title,
+		Details:          t.Details,
+		Owner:            t.Owner,
+		Status:           t.status,
+		CreatedBy:        t.CreatedBy,
+		ThreadID:         t.ThreadID,
+		TaskType:         t.TaskType,
+		PipelineID:       t.PipelineID,
+		PipelineStage:    t.pipelineStage,
+		ExecutionMode:    t.ExecutionMode,
+		ReviewState:      t.reviewState,
+		SourceSignalID:   t.SourceSignalID,
+		SourceDecisionID: t.SourceDecisionID,
+		WorktreePath:     t.WorktreePath,
+		WorktreeBranch:   t.WorktreeBranch,
+		DependsOn:        t.DependsOn,
+		BlockedOn:        t.BlockedOn,
+		Blocked:          t.blocked,
+		LifecycleState:   t.LifecycleState,
+		AckedAt:          t.AckedAt,
+		DueAt:            t.DueAt,
+		FollowUpAt:       t.FollowUpAt,
+		ReminderAt:       t.ReminderAt,
+		RecheckAt:        t.RecheckAt,
+		MemoryWorkflow:   t.MemoryWorkflow,
+		CreatedAt:        t.CreatedAt,
+		UpdatedAt:        t.UpdatedAt,
+		CompletedAt:      t.CompletedAt,
+	})
+}
+
+// UnmarshalJSON inverts MarshalJSON.
+func (t *teamTask) UnmarshalJSON(data []byte) error {
+	var w teamTaskWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	t.ID = w.ID
+	t.Channel = w.Channel
+	t.Title = w.Title
+	t.Details = w.Details
+	t.Owner = w.Owner
+	t.status = w.Status
+	t.CreatedBy = w.CreatedBy
+	t.ThreadID = w.ThreadID
+	t.TaskType = w.TaskType
+	t.PipelineID = w.PipelineID
+	t.pipelineStage = w.PipelineStage
+	t.ExecutionMode = w.ExecutionMode
+	t.reviewState = w.ReviewState
+	t.SourceSignalID = w.SourceSignalID
+	t.SourceDecisionID = w.SourceDecisionID
+	t.WorktreePath = w.WorktreePath
+	t.WorktreeBranch = w.WorktreeBranch
+	t.DependsOn = w.DependsOn
+	t.BlockedOn = w.BlockedOn
+	t.blocked = w.Blocked
+	t.LifecycleState = w.LifecycleState
+	t.AckedAt = w.AckedAt
+	t.DueAt = w.DueAt
+	t.FollowUpAt = w.FollowUpAt
+	t.ReminderAt = w.ReminderAt
+	t.RecheckAt = w.RecheckAt
+	t.MemoryWorkflow = w.MemoryWorkflow
+	t.CreatedAt = w.CreatedAt
+	t.UpdatedAt = w.UpdatedAt
+	t.CompletedAt = w.CompletedAt
+	return nil
 }
 
 type channelSurface struct {

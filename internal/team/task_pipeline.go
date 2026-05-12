@@ -79,7 +79,7 @@ func taskDefaultExecutionMode(owner, taskType, title, details string) string {
 
 func taskStageForStatus(task *teamTask) string {
 	template := pipelineTemplate(task.TaskType)
-	switch strings.TrimSpace(task.Status) {
+	switch strings.TrimSpace(task.status) {
 	case "in_progress":
 		return template.ActiveStage
 	case "review":
@@ -104,21 +104,21 @@ func normalizeTaskPlan(task *teamTask) {
 	if strings.TrimSpace(task.ExecutionMode) == "" {
 		task.ExecutionMode = taskDefaultExecutionMode(task.Owner, task.TaskType, task.Title, task.Details)
 	}
-	if strings.TrimSpace(task.ReviewState) == "" {
+	if strings.TrimSpace(task.reviewState) == "" {
 		if taskNeedsStructuredReview(task) {
-			task.ReviewState = "pending_review"
+			task.reviewState = "pending_review"
 		} else {
-			task.ReviewState = "not_required"
+			task.reviewState = "not_required"
 		}
 	}
-	if strings.TrimSpace(task.Status) == "review" {
-		task.ReviewState = "ready_for_review"
+	if strings.TrimSpace(task.status) == "review" {
+		task.reviewState = "ready_for_review"
 	}
-	if strings.TrimSpace(task.Status) == "done" &&
-		(task.ReviewState == "pending_review" || task.ReviewState == "ready_for_review") {
-		task.ReviewState = "approved"
+	if strings.TrimSpace(task.status) == "done" &&
+		(task.reviewState == "pending_review" || task.reviewState == "ready_for_review") {
+		task.reviewState = "approved"
 	}
-	task.PipelineStage = taskStageForStatus(task)
+	task.pipelineStage = taskStageForStatus(task)
 }
 
 func requestIsResolvedLocked(requests []humanInterview, requestID string) bool {

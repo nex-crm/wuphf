@@ -16,7 +16,7 @@ func taskNeedsLocalWorktree(task *teamTask) bool {
 	if strings.TrimSpace(task.Owner) == "" {
 		return false
 	}
-	switch strings.TrimSpace(task.Status) {
+	switch strings.TrimSpace(task.status) {
 	case "", "open":
 		return false
 	case "done":
@@ -110,7 +110,7 @@ func (b *Broker) syncTaskWorktreeLocked(task *teamTask) error {
 	}
 	// Automatically assign local_worktree mode when a coding agent claims a task.
 	if task.ExecutionMode == "" && codingAgentSlugs[strings.TrimSpace(task.Owner)] {
-		switch strings.TrimSpace(task.Status) {
+		switch strings.TrimSpace(task.status) {
 		case "", "open", "done":
 			// not yet in-progress; leave mode unset
 		default:
@@ -178,8 +178,8 @@ func (b *Broker) reusableDependencyWorktreeLocked(task *teamTask) (string, strin
 			if path == "" || branch == "" {
 				continue
 			}
-			status := strings.ToLower(strings.TrimSpace(dep.Status))
-			review := strings.ToLower(strings.TrimSpace(dep.ReviewState))
+			status := strings.ToLower(strings.TrimSpace(dep.status))
+			review := strings.ToLower(strings.TrimSpace(dep.reviewState))
 			if status != "review" && status != "done" && review != "ready_for_review" && review != "approved" {
 				continue
 			}
@@ -212,7 +212,7 @@ func (b *Broker) activeExclusiveOwnerTaskLocked(owner, excludeTaskID string) *te
 		if !taskRequiresExclusiveOwnerTurn(task) {
 			continue
 		}
-		if !taskStatusConsumesExclusiveOwnerTurn(task.Status) {
+		if !taskStatusConsumesExclusiveOwnerTurn(task.status) {
 			continue
 		}
 		return task
@@ -227,7 +227,7 @@ func (b *Broker) queueTaskBehindActiveOwnerLaneLocked(task *teamTask) {
 	if !taskRequiresExclusiveOwnerTurn(task) {
 		return
 	}
-	if !taskStatusConsumesExclusiveOwnerTurn(task.Status) {
+	if !taskStatusConsumesExclusiveOwnerTurn(task.status) {
 		return
 	}
 	active := b.activeExclusiveOwnerTaskLocked(task.Owner, task.ID)
@@ -237,8 +237,7 @@ func (b *Broker) queueTaskBehindActiveOwnerLaneLocked(task *teamTask) {
 	if !stringSliceContainsFold(task.DependsOn, active.ID) {
 		task.DependsOn = append(task.DependsOn, active.ID)
 	}
-	task.Blocked = true
-	task.Status = "open"
+	b.markTaskQueuedBehindActiveOwnerLocked(task)
 	queueNote := fmt.Sprintf("Queued behind %s so @%s only carries one active %s lane at a time.", active.ID, strings.TrimSpace(task.Owner), strings.TrimSpace(task.ExecutionMode))
 	switch existing := strings.TrimSpace(task.Details); {
 	case existing == "":

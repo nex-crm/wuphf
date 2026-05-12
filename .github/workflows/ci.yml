@@ -98,6 +98,65 @@ jobs:
         working-directory: packages/protocol/testdata
         run: go run verifier-reference.go
 
+  broker:
+    # @wuphf/broker is the loopback HTTP/SSE/WebSocket boundary between
+    # the renderer and the broker process — DNS-rebinding guard, bearer
+    # auth, durable receipt store, cursor-paginated thread list. Local
+    # lefthook covers typecheck/test/invariants but a PR can still bypass
+    # them; this job is the CI floor. Path-gated to keep PRs that don't
+    # touch the broker fast. `packages/protocol` is in the gate because
+    # broker depends on it — a protocol type/wire change can break the
+    # broker compile while the broker tree looks "unchanged."
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.3.13"
+      - name: Detect broker changes
+        id: broker-changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
+            changed="$(git ls-files packages/broker packages/protocol package.json bun.lock)"
+          else
+            changed="$(git diff --name-only "${BASE_SHA}"...HEAD -- packages/broker packages/protocol package.json bun.lock || true)"
+          fi
+
+          if [[ -n "${changed}" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Skip broker job when broker inputs are unchanged
+        if: ${{ steps.broker-changes.outputs.changed != 'true' }}
+        run: echo "No packages/broker, packages/protocol, root package.json, or bun.lock changes detected."
+      - name: Install workspace deps
+        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
+        working-directory: packages/broker
+        run: bun run typecheck
+      - name: Biome (lint + format check)
+        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
+        working-directory: packages/broker
+        run: bun run check
+      - name: Vitest
+        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
+        working-directory: packages/broker
+        run: bun run test
+      - name: Broker invariant checks
+        # No non-loopback bind constants, no electron imports, all
+        # @wuphf/protocol imports go through the package root, etc.
+        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
+        working-directory: packages/broker
+        run: bun run check:invariants
+
   desktop:
     runs-on: ubuntu-latest
     steps:
@@ -169,6 +228,20 @@ jobs:
         if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
         working-directory: apps/desktop
         run: bun run build
+      - name: Build-output externalization invariants
+        # Audits `out/{main,preload}/**.js` for two regressions a green
+        # build + green tests cannot catch:
+        # 1. workspace packages (`@wuphf/*`) leaking into the build as
+        #    runtime externals — their `exports` map to raw `./src/*.ts`,
+        #    which Node 22 strip-only TS would crash on at runtime
+        #    (e.g. parameter properties on `SqliteReceiptStore`'s private
+        #    constructor).
+        # 2. `better-sqlite3` getting inlined — its `bindings()` loader
+        #    needs the JS wrapper at its npm location to find the `.node`
+        #    sibling.
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        working-directory: apps/desktop
+        run: bun run check:build-externals
 
   web:
     runs-on: ubuntu-latest

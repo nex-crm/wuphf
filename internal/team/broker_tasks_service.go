@@ -54,10 +54,10 @@ func (b *Broker) ListTasks(req TaskListRequest) (TaskListResponse, error) {
 		if !channelAllowed(taskChannel) {
 			continue
 		}
-		if task.Status == "done" && !includeDone && statusFilter == "" {
+		if task.status == "done" && !includeDone && statusFilter == "" {
 			continue
 		}
-		if statusFilter != "" && task.Status != statusFilter {
+		if statusFilter != "" && task.status != statusFilter {
 			continue
 		}
 		if mySlug != "" && task.Owner != "" && task.Owner != mySlug {

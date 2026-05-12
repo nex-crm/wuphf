@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { createPackage } from "@electron/asar";
 
-const scriptPath = path.resolve(__dirname, "check-packaged-runtime-deps.js");
-const asarApi = require("@electron/asar");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const scriptPath = path.resolve(__dirname, "check-packaged-runtime-deps.mjs");
 
 function runCheck(distDir, env = {}) {
   return spawnSync(process.execPath, [scriptPath, distDir], {
@@ -100,7 +102,7 @@ async function makeFakeBundle(rootDir, layout) {
       );
     }
     fs.writeFileSync(path.join(stagingDir, "package.json"), JSON.stringify({ name: "stub" }));
-    await asarApi.createPackage(stagingDir, path.join(resourcesDir, "app.asar"));
+    await createPackage(stagingDir, path.join(resourcesDir, "app.asar"));
   }
 
   if (Array.isArray(layout.unpackedDeps)) {

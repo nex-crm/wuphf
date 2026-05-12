@@ -260,7 +260,14 @@ export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{1,128}$/;
 // — consumers that need to enumerate the supported providers (forms, picker
 // UI, exhaustive switches) read this tuple. It is the single source of truth;
 // keep the order stable so any UI sort that relies on it doesn't churn.
-export const PROVIDER_KIND_VALUES = ["anthropic", "openai", "openai-compat", "openclaw"] as const;
+export const PROVIDER_KIND_VALUES = [
+  "anthropic",
+  "openai",
+  "openai-compat",
+  "openclaw",
+  "hermes-agent",
+  "openclaw-http",
+] as const;
 const PROVIDER_KIND_SET: ReadonlySet<string> = new Set(PROVIDER_KIND_VALUES);
 
 export function asReceiptId(s: string): ReceiptId {

@@ -235,12 +235,12 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 		default:
 			owner = "@" + owner
 		}
-		status := strings.TrimSpace(task.Status)
+		status := strings.TrimSpace(task.status)
 		if status == "" {
 			status = "open"
 		}
 		meta := owner + ", " + status
-		if task.Blocked {
+		if task.blocked {
 			meta += ", blocked"
 		}
 		if len(task.DependsOn) > 0 {
@@ -267,7 +267,7 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 		if len(lines) >= limit {
 			return
 		}
-		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			return
 		}
 		if _, ok := seen[task.ID]; ok {
@@ -299,10 +299,10 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 	if slug == lead {
 		reviewCount := 0
 		for _, task := range tasks {
-			if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+			if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 				continue
 			}
-			if strings.EqualFold(strings.TrimSpace(task.Status), "review") || strings.EqualFold(strings.TrimSpace(task.ReviewState), "ready_for_review") {
+			if strings.EqualFold(strings.TrimSpace(task.status), "review") || strings.EqualFold(strings.TrimSpace(task.reviewState), "ready_for_review") {
 				reviewCount++
 			}
 		}
@@ -335,7 +335,7 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 	var domainOwned teamTask
 	bestOwnedScore := 0.0
 	for _, task := range b.allTasks() {
-		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			continue
 		}
 		if strings.TrimSpace(task.Owner) != slug {
@@ -437,7 +437,7 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 		lines = append(lines, "- Trigger: you were explicitly tagged")
 	}
 	if task, ok := b.RelevantTaskForTarget(msg, slug); ok {
-		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, 96), strings.TrimSpace(task.Status)))
+		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, 96), strings.TrimSpace(task.status)))
 		if details := strings.TrimSpace(task.Details); details != "" {
 			lines = append(lines, fmt.Sprintf("- Task details: %s", truncate(details, 512)))
 		}
@@ -499,7 +499,7 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 		fmt.Sprintf("[Task update from @%s]", action.Actor),
 		"Work packet:",
 		fmt.Sprintf("- Task: #%s %s", task.ID, truncate(task.Title, 120)),
-		fmt.Sprintf("- Status: %s", strings.TrimSpace(task.Status)),
+		fmt.Sprintf("- Status: %s", strings.TrimSpace(task.status)),
 		fmt.Sprintf("- Owner: @%s", slug),
 	}
 	if details := strings.TrimSpace(task.Details); details != "" {
@@ -575,7 +575,7 @@ func (b *notificationContextBuilder) TaskNotificationContent(action officeAction
 	} else {
 		owner = "@" + owner
 	}
-	status := strings.TrimSpace(task.Status)
+	status := strings.TrimSpace(task.status)
 	if status == "" {
 		status = "open"
 	}
@@ -584,12 +584,12 @@ func (b *notificationContextBuilder) TaskNotificationContent(action officeAction
 		details = " — " + truncate(details, 120)
 	}
 	pipeline := ""
-	if strings.TrimSpace(task.PipelineStage) != "" {
-		pipeline = ", stage " + task.PipelineStage
+	if strings.TrimSpace(task.pipelineStage) != "" {
+		pipeline = ", stage " + task.pipelineStage
 	}
 	review := ""
-	if strings.TrimSpace(task.ReviewState) != "" && task.ReviewState != "not_required" {
-		review = ", review " + task.ReviewState
+	if strings.TrimSpace(task.reviewState) != "" && task.reviewState != "not_required" {
+		review = ", review " + task.reviewState
 	}
 	execMode := ""
 	if strings.TrimSpace(task.ExecutionMode) != "" {

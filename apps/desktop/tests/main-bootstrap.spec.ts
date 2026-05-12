@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const RENDERER_URL_ENV_KEY = "ELECTRON_RENDERER_URL";
+const RECEIPT_STORE_PATH_ENV = "WUPHF_RECEIPT_STORE_PATH";
 
 interface MockBrowserWindowInstance {
   readonly loadURL: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>;
@@ -96,6 +97,11 @@ const electronMock = vi.hoisted(() => {
       on: vi.fn<(event: string, handler: (...args: readonly unknown[]) => void) => void>(),
       quit: vi.fn<() => void>(),
       exit: vi.fn<(code: number) => void>(),
+      // `main/index.ts` calls `app.getPath("userData")` inside
+      // `whenReady` to plumb the SQLite event-log path through to the
+      // broker utility process. Tests don't exercise the durable store;
+      // a fake path is sufficient because broker-entry.ts is mocked.
+      getPath: vi.fn<(name: string) => string>(() => "/tmp/wuphf-test-userData"),
     },
     BrowserWindow,
     browserWindowConstructorSpy,
@@ -223,6 +229,7 @@ const initialUnhandledRejectionListeners = new Set<ProcessListener>(
 
 describe("main bootstrap", () => {
   const previousRendererUrl = process.env[RENDERER_URL_ENV_KEY];
+  const previousReceiptStorePath = process.env[RECEIPT_STORE_PATH_ENV];
 
   beforeEach(() => {
     vi.resetModules();
@@ -234,6 +241,7 @@ describe("main bootstrap", () => {
     electronMock.app.on.mockClear();
     electronMock.app.quit.mockClear();
     electronMock.app.exit.mockClear();
+    electronMock.app.getPath.mockClear();
     electronMock.showErrorBox.mockClear();
     electronMock.handle.mockClear();
     electronMock.fork.mockClear();
@@ -244,15 +252,21 @@ describe("main bootstrap", () => {
     loggerMock.createLogger.mockClear();
     cleanupProcessListeners();
     delete process.env[RENDERER_URL_ENV_KEY];
+    delete process.env[RECEIPT_STORE_PATH_ENV];
   });
 
   afterEach(() => {
     cleanupProcessListeners();
     if (previousRendererUrl === undefined) {
       delete process.env[RENDERER_URL_ENV_KEY];
-      return;
+    } else {
+      process.env[RENDERER_URL_ENV_KEY] = previousRendererUrl;
     }
-    process.env[RENDERER_URL_ENV_KEY] = previousRendererUrl;
+    if (previousReceiptStorePath === undefined) {
+      delete process.env[RECEIPT_STORE_PATH_ENV];
+    } else {
+      process.env[RECEIPT_STORE_PATH_ENV] = previousReceiptStorePath;
+    }
   });
 
   it("loads the broker URL when packaged and the broker has reported {ready}", async () => {
@@ -269,6 +283,23 @@ describe("main bootstrap", () => {
     const window = getOnlyWindow();
     expect(window.loadURL).toHaveBeenCalledWith("http://127.0.0.1:54321/");
     expect(window.loadFile).not.toHaveBeenCalled();
+  });
+
+  it("plumbs WUPHF_RECEIPT_STORE_PATH to <userData>/event-log.sqlite inside whenReady", async () => {
+    // The broker utility process opens `SqliteReceiptStore` when this
+    // env var is set; main MUST set it unconditionally inside
+    // `whenReady` so receipts persist across restarts. Without this
+    // assertion, a regression that drops the env-var line could
+    // silently fall back to in-memory storage in packaged builds.
+    // `beforeEach` already deletes RECEIPT_STORE_PATH_ENV, so we
+    // assert main's `whenReady` is the one that sets it.
+    electronMock.app.isPackaged = true;
+    brokerMock.setBrokerUrl("http://127.0.0.1:54321");
+
+    await importMainBootstrap();
+
+    expect(process.env[RECEIPT_STORE_PATH_ENV]).toBe("/tmp/wuphf-test-userData/event-log.sqlite");
+    expect(electronMock.app.getPath).toHaveBeenCalledWith("userData");
   });
 
   it("falls back to file:// in packaged mode only when the broker URL is unavailable", async () => {

@@ -336,14 +336,14 @@ func (b *Broker) normalizeLoadedStateLocked() {
 func (b *Broker) reconcileOrphanedBlockedTasksLocked() {
 	for i := range b.tasks {
 		t := &b.tasks[i]
-		if !t.Blocked || t.Status != "blocked" {
+		if !t.blocked || t.status != "blocked" {
 			continue
 		}
 		if b.hasUnresolvedDepsLocked(t) {
 			continue
 		}
-		t.Blocked = false
-		t.Status = "in_progress"
+		t.blocked = false
+		t.status = "in_progress"
 		t.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		b.appendActionLocked("task_unblocked", "office", t.Channel, "system",
 			truncateSummary("Reconciled: parent dep terminated while task was blocked", 140), t.ID)

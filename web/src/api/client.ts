@@ -486,7 +486,7 @@ export function createChannel(slug: string, name: string, description: string) {
 }
 
 export function generateChannel(prompt: string) {
-  return post<Channel>("/channels/generate", { prompt });
+  return postWithTimeout<Channel>("/channels/generate", { prompt }, 65_000);
 }
 
 export function createDM(agentSlug: string) {
@@ -962,8 +962,9 @@ export type LLMProvider =
   | "codex"
   | "opencode"
   | "mlx-lm"
-  | "ollama"
-  | "exo";
+  | "exo"
+  | "hermes-agent"
+  | "openclaw-http";
 export type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
 export type ActionProvider = "auto" | "one" | "composio" | "";
 

@@ -158,28 +158,28 @@ func BuildSessionMemorySnapshotFromOfficeState(sessionMode, directAgent string, 
 			ID:             strings.TrimSpace(task.ID),
 			Title:          strings.TrimSpace(task.Title),
 			Owner:          strings.TrimSpace(task.Owner),
-			Status:         strings.TrimSpace(task.Status),
-			PipelineStage:  strings.TrimSpace(task.PipelineStage),
-			ReviewState:    strings.TrimSpace(task.ReviewState),
+			Status:         strings.TrimSpace(task.status),
+			PipelineStage:  strings.TrimSpace(task.pipelineStage),
+			ReviewState:    strings.TrimSpace(task.reviewState),
 			ExecutionMode:  strings.TrimSpace(task.ExecutionMode),
 			WorktreePath:   strings.TrimSpace(task.WorktreePath),
 			WorktreeBranch: strings.TrimSpace(task.WorktreeBranch),
-			Blocked:        task.Blocked,
+			Blocked:        task.blocked,
 		})
 		taskSummaries = append(taskSummaries, SessionMemoryTaskSummary{
 			ID:             strings.TrimSpace(task.ID),
 			Title:          strings.TrimSpace(task.Title),
 			Owner:          strings.TrimSpace(task.Owner),
-			Status:         strings.TrimSpace(task.Status),
-			PipelineStage:  strings.TrimSpace(task.PipelineStage),
-			ReviewState:    strings.TrimSpace(task.ReviewState),
+			Status:         strings.TrimSpace(task.status),
+			PipelineStage:  strings.TrimSpace(task.pipelineStage),
+			ReviewState:    strings.TrimSpace(task.reviewState),
 			ExecutionMode:  strings.TrimSpace(task.ExecutionMode),
 			WorktreePath:   strings.TrimSpace(task.WorktreePath),
 			WorktreeBranch: strings.TrimSpace(task.WorktreeBranch),
 			ThreadID:       strings.TrimSpace(task.ThreadID),
-			Blocked:        task.Blocked,
+			Blocked:        task.blocked,
 			DependsOn:      append([]string(nil), task.DependsOn...),
-			Summary:        summarizeTask(RuntimeTask{ID: task.ID, Title: task.Title, Owner: task.Owner, Status: task.Status, PipelineStage: task.PipelineStage, ReviewState: task.ReviewState, ExecutionMode: task.ExecutionMode, WorktreePath: task.WorktreePath, WorktreeBranch: task.WorktreeBranch, Blocked: task.Blocked}),
+			Summary:        summarizeTask(RuntimeTask{ID: task.ID, Title: task.Title, Owner: task.Owner, Status: task.status, PipelineStage: task.pipelineStage, ReviewState: task.reviewState, ExecutionMode: task.ExecutionMode, WorktreePath: task.WorktreePath, WorktreeBranch: task.WorktreeBranch, Blocked: task.blocked}),
 		})
 	}
 
@@ -288,8 +288,8 @@ func (s SessionMemorySnapshot) RestorationContext() SessionRestoreContext {
 }
 
 func sessionMemoryTaskRelevant(task teamTask) bool {
-	status := strings.ToLower(strings.TrimSpace(task.Status))
-	if task.Blocked {
+	status := strings.ToLower(strings.TrimSpace(task.status))
+	if task.blocked {
 		return true
 	}
 	return status == "" || status == "open" || status == "in_progress" || status == "review"

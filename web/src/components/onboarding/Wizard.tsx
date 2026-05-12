@@ -534,7 +534,7 @@ export function Wizard({ onComplete }: WizardProps) {
     // The primary label can resolve to either a cloud-CLI RUNTIMES
     // entry or a local-provider LOCAL_PROVIDER_LABELS entry; the
     // checks below cover both. Pre-fix this block only looked at
-    // RUNTIMES, so picking MLX-LM/Ollama/Exo as primary made the
+    // RUNTIMES, so picking MLX-LM/Ollama/Exo/Hermes/OpenClaw as primary made the
     // summary report a missing LLM right before /config persisted a
     // perfectly valid local provider.
     const [primaryLabel] = runtimePriority;
@@ -631,7 +631,7 @@ export function Wizard({ onComplete }: WizardProps) {
       try {
         // Translate UI labels to the provider ids the broker validates.
         // Cloud CLI labels resolve via RUNTIMES; local labels (MLX-LM,
-        // Ollama, Exo) resolve via LOCAL_PROVIDER_LABELS so users can
+        // Ollama, Exo, Hermes, OpenClaw) resolve via LOCAL_PROVIDER_LABELS so users can
         // mix-and-match in the fallback chain — e.g. "Claude Code,
         // then if I'm out of credits, my local Qwen". Aspirational
         // runtimes (Cursor, Windsurf) map to null and are dropped.

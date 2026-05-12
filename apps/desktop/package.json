@@ -19,12 +19,13 @@
     "dev": "bun run electron:install && electron-vite dev",
     "preview": "bun run electron:install && electron-vite preview",
     "check:ipc-allowlist": "bash scripts/check-ipc-allowlist.sh",
-    "check:invariants": "bash scripts/check-invariants.sh"
+    "check:invariants": "bash scripts/check-invariants.sh",
+    "check:build-externals": "bash scripts/check-build-externals.sh"
   },
   "dependencies": {
     "@wuphf/broker": "workspace:*",
     "@wuphf/protocol": "workspace:*",
-    "ws": "8.18.0"
+    "ws": "8.20.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
@@ -33,7 +34,7 @@
     "electron": "42.0.1",
     "electron-vite": "6.0.0-beta.1",
     "typescript": "6.0.3",
-    "vite": "8.0.11",
+    "vite": "8.0.12",
     "vitest": "4.1.5"
   }
 }

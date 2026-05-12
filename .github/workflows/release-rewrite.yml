@@ -101,7 +101,7 @@ jobs:
           # lives inside each platform build job (post-build, pre-sign);
           # this self-test catches regressions in the check's logic without
           # waiting for a 5-minute platform build to fail.
-          node apps/installer-stub/scripts/check-packaged-runtime-deps.test.js
+          node apps/installer-stub/scripts/check-packaged-runtime-deps.test.mjs
 
   build-mac:
     needs:
@@ -192,7 +192,7 @@ jobs:
         # it was a devDep" failure mode that the existing artifact-existence
         # checks did not.
         working-directory: apps/installer-stub
-        run: node scripts/check-packaged-runtime-deps.js dist
+        run: node scripts/check-packaged-runtime-deps.mjs dist
       - name: Staple and validate macOS DMG
         if: needs.detect-secrets.outputs.is_release == 'true'
         working-directory: apps/installer-stub
@@ -416,7 +416,7 @@ jobs:
         id: windows_runtime_deps
         continue-on-error: ${{ needs.detect-secrets.outputs.is_release != 'true' }}
         working-directory: apps/installer-stub
-        run: node scripts/check-packaged-runtime-deps.js dist
+        run: node scripts/check-packaged-runtime-deps.mjs dist
       # Post-build "Sign Windows artifacts (attempt 1/2/3)" + retry sleeps
       # + diagnostics upload were removed in #772: signing now happens
       # DURING the electron-builder packaging step above via
@@ -589,7 +589,7 @@ jobs:
         # job. Both PR and release Linux builds produce dist/linux-unpacked/,
         # so the gate runs unconditionally after either build path.
         working-directory: apps/installer-stub
-        run: node scripts/check-packaged-runtime-deps.js dist
+        run: node scripts/check-packaged-runtime-deps.mjs dist
       - name: Assert Linux artifacts
         working-directory: apps/installer-stub
         run: |

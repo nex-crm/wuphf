@@ -1,4 +1,14 @@
-# Audit Event Golden Vectors
+# Protocol Testdata
+
+## Broker URL conformance vectors
+
+`broker-url-vectors.json` is the canonical fixture for the `BrokerUrl` bare
+loopback-origin contract. The protocol package, the desktop renderer, and the
+broker-internal classifier all validate this shape independently, so each
+consumer should load the fixture and assert its local validator accepts every
+`accepted` vector and rejects every `rejected` vector.
+
+## Audit Event Golden Vectors
 
 `audit-event-vectors.json` is the cross-language fixture for WUPHF audit-chain
 serialization and hashing. Implementers in Go, Rust, Python, or other runtimes

@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { parseBootstrap } from "../src/renderer/bootstrap.ts";
+import type { GetBrokerStatusResponse, WuphfDesktopApi } from "../src/shared/api-contract.ts";
 
 interface MockBrowserWindowInstance {
   readonly options: unknown;
@@ -62,6 +65,119 @@ vi.mock("electron", () => ({
     openExternal: electronMock.openExternal,
   },
 }));
+
+const VALID_BOOTSTRAP_TOKEN = "A".repeat(16);
+const VALID_BOOTSTRAP_URL = "http://127.0.0.1:54321";
+
+describe("parseBootstrap", () => {
+  it("rejects accessor and inherited bootstrap properties", () => {
+    expect(() =>
+      parseBootstrap({
+        get token() {
+          return "anything";
+        },
+        broker_url: VALID_BOOTSTRAP_URL,
+      }),
+    ).toThrow("api-token response: token: must be a data property");
+
+    expect(() =>
+      parseBootstrap({
+        token: VALID_BOOTSTRAP_TOKEN,
+        get broker_url() {
+          return VALID_BOOTSTRAP_URL;
+        },
+      }),
+    ).toThrow("api-token response: broker_url: must be a data property");
+
+    const proto = { token: "x", broker_url: "y" };
+    const obj: object = Object.create(proto) as object;
+
+    expect(() => parseBootstrap(obj)).toThrow("api-token response: token: is required");
+  });
+
+  it("rejects descriptor traps that make bootstrap values unreachable", () => {
+    const throwingRecord = new Proxy(
+      { token: VALID_BOOTSTRAP_TOKEN, broker_url: VALID_BOOTSTRAP_URL },
+      {
+        getOwnPropertyDescriptor(target, property) {
+          if (property === "token") {
+            throw new Error("token descriptor unreachable");
+          }
+          return Reflect.getOwnPropertyDescriptor(target, property);
+        },
+      },
+    );
+
+    expect(() => parseBootstrap(throwingRecord)).toThrow("token descriptor unreachable");
+  });
+
+  it("rejects array-shaped bootstrap records", () => {
+    const arrayBootstrap = Object.assign([], {
+      token: VALID_BOOTSTRAP_TOKEN,
+      broker_url: VALID_BOOTSTRAP_URL,
+    });
+
+    expect(() => parseBootstrap(arrayBootstrap)).toThrow("api-token response is not an object");
+  });
+});
+
+describe("renderer broker bootstrap probe", () => {
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("probes again after a broker restart publishes a new URL", async () => {
+    const firstBrokerUrl = "http://127.0.0.1:54321";
+    const secondBrokerUrl = "http://127.0.0.1:54322";
+    let brokerUrl: string | null = firstBrokerUrl;
+    let restartCount = 0;
+    const getBrokerStatus = vi.fn<WuphfDesktopApi["getBrokerStatus"]>(() =>
+      Promise.resolve(createBrokerStatus(brokerUrl, restartCount)),
+    );
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = String(input);
+      if (url.endsWith("/api-token")) {
+        const responseBrokerUrl = url.slice(0, -"/api-token".length);
+        return Promise.resolve(
+          jsonResponse({
+            token: VALID_BOOTSTRAP_TOKEN,
+            broker_url: responseBrokerUrl,
+          }),
+        );
+      }
+      if (url.endsWith("/api/health")) {
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      return Promise.reject(new Error(`unexpected fetch ${url}`));
+    });
+    const { module } = await importRendererHarness({
+      api: { getBrokerStatus },
+      fetch: fetchMock,
+    });
+
+    await flushRendererTasks();
+    expect(fetchMock).toHaveBeenCalledWith(`${firstBrokerUrl}/api-token`);
+
+    fetchMock.mockClear();
+    brokerUrl = null;
+    restartCount = 1;
+    await module.refreshBrokerStatus();
+    await flushRendererTasks();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    brokerUrl = secondBrokerUrl;
+    restartCount = 2;
+    await module.refreshBrokerStatus();
+    await flushRendererTasks();
+
+    expect(fetchMock).toHaveBeenCalledWith(`${secondBrokerUrl}/api-token`);
+    expect(fetchMock).toHaveBeenCalledWith(`${secondBrokerUrl}/api/health`, {
+      headers: { Authorization: `Bearer ${VALID_BOOTSTRAP_TOKEN}` },
+    });
+  });
+});
 
 describe("createSecureWindow", () => {
   beforeEach(() => {
@@ -285,6 +401,53 @@ describe("createSecureWindow", () => {
     ).toThrow("Refusing to load non-local ELECTRON_RENDERER_URL: http://192.168.0.10:5173/");
   });
 
+  it("rejects a brokerUrl that parses but is not a loopback http URL", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    // Parses cleanly via `new URL`, fails `isBrokerUrl` because the
+    // hostname is not 127.0.0.1/localhost. This shape is the threat the
+    // broker-URL gate exists to refuse: a supervisor that learned the
+    // wrong origin would otherwise load `https://attacker.example.com/...`
+    // into the privileged WebView.
+    expect(() =>
+      createSecureWindow({
+        preloadPath: "/tmp/preload.js",
+        rendererIndexPath: "/tmp/index.html",
+        allowDevServerUrl: false,
+        brokerUrl: "http://example.com:8080/",
+      }),
+    ).toThrow("Refusing to load non-loopback broker URL: http://example.com:8080/");
+  });
+
+  it("rejects a loopback brokerUrl with userinfo, non-root path, query, or fragment", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    // Pass-3 triangulation (types lens MEDIUM): `isLocalHttpRendererUrl`
+    // accepts these shapes because protocol+host+port pass. The full
+    // BrokerUrl brand (`@wuphf/protocol#isBrokerUrl`) rejects them so
+    // `${"u"}:${"p"}@127.0.0.1:54321`, `/api-token`, encoded dot segments,
+    // `?x=1`, and `#frag` can't be smuggled past the broker-URL gate into
+    // `loadURL`.
+    const cases = [
+      `http://${"u"}:${"p"}@127.0.0.1:54321/`,
+      "http://127.0.0.1:54321/", // pass-5 tightening: bare canonical form is sole accepted shape
+      "http://127.0.0.1:54321/api-token",
+      "http://127.0.0.1:54321/%2e%2e",
+      "http://127.0.0.1:54321?x=1",
+      "http://127.0.0.1:54321#frag",
+    ];
+    for (const brokerUrl of cases) {
+      expect(() =>
+        createSecureWindow({
+          preloadPath: "/tmp/preload.js",
+          rendererIndexPath: "/tmp/index.html",
+          allowDevServerUrl: false,
+          brokerUrl,
+        }),
+      ).toThrow(`Refusing to load non-loopback broker URL: ${brokerUrl}`);
+    }
+  });
+
   it("blocks will-redirect to a different origin while allowing same-renderer redirects", async () => {
     const { createSecureWindow } = await import("../src/main/window.ts");
 
@@ -387,4 +550,115 @@ function getWillFrameNavigateHandler(
   // signature mismatch — the runtime callable stored by vi.fn is the
   // exact handler that window.ts registered.
   return call[1] as unknown as WillFrameNavigateHandler;
+}
+
+interface RendererElementStub {
+  className: string;
+  textContent: string;
+  type: string;
+  readonly append: ReturnType<typeof vi.fn<(...children: RendererElementStub[]) => void>>;
+  readonly addEventListener: ReturnType<typeof vi.fn<(event: string, handler: () => void) => void>>;
+}
+
+interface RendererDocumentStub {
+  title: string;
+  readonly querySelector: ReturnType<
+    typeof vi.fn<(selector: string) => RendererElementStub | null>
+  >;
+  readonly createElement: ReturnType<typeof vi.fn<(tagName: string) => RendererElementStub>>;
+}
+
+type RendererMainModule = typeof import("../src/renderer/main.ts");
+type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
+
+interface RendererImportOptions {
+  readonly api?: Partial<WuphfDesktopApi>;
+  readonly fetch?: FetchMock;
+}
+
+interface RendererHarness {
+  readonly module: RendererMainModule;
+  readonly api: WuphfDesktopApi;
+  readonly fetchMock: FetchMock;
+}
+
+async function importRendererHarness(
+  options: RendererImportOptions = {},
+): Promise<RendererHarness> {
+  vi.resetModules();
+  vi.useFakeTimers();
+  const root = createRendererElementStub();
+  const documentStub: RendererDocumentStub = {
+    title: "",
+    querySelector: vi.fn<(selector: string) => RendererElementStub | null>(() => root),
+    createElement: vi.fn<(tagName: string) => RendererElementStub>(() =>
+      createRendererElementStub(),
+    ),
+  };
+  const defaultApi: WuphfDesktopApi = {
+    openExternal: vi.fn<WuphfDesktopApi["openExternal"]>(() => Promise.resolve({ ok: true })),
+    showItemInFolder: vi.fn<WuphfDesktopApi["showItemInFolder"]>(() =>
+      Promise.resolve({ ok: true }),
+    ),
+    getAppVersion: vi.fn<WuphfDesktopApi["getAppVersion"]>(() =>
+      Promise.resolve({ version: "test" }),
+    ),
+    getPlatform: vi.fn<WuphfDesktopApi["getPlatform"]>(() =>
+      Promise.resolve({ platform: "linux", arch: "x64" }),
+    ),
+    getBrokerStatus: vi.fn<WuphfDesktopApi["getBrokerStatus"]>(() =>
+      Promise.resolve({ status: "dead", pid: null, restartCount: 0, brokerUrl: null }),
+    ),
+  };
+  const api: WuphfDesktopApi = { ...defaultApi, ...options.api };
+  const fetchMock = options.fetch ?? vi.fn<typeof fetch>();
+
+  vi.stubGlobal("document", documentStub);
+  vi.stubGlobal("window", {
+    wuphf: api,
+    location: { origin: "http://localhost:5173" },
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  return {
+    module: await import("../src/renderer/main.ts"),
+    api,
+    fetchMock,
+  };
+}
+
+function createRendererElementStub(): RendererElementStub {
+  return {
+    className: "",
+    textContent: "",
+    type: "",
+    append: vi.fn<(...children: RendererElementStub[]) => void>(),
+    addEventListener: vi.fn<(event: string, handler: () => void) => void>(),
+  };
+}
+
+function createBrokerStatus(
+  brokerUrl: string | null,
+  restartCount: number,
+): GetBrokerStatusResponse {
+  return {
+    status: brokerUrl === null ? "dead" : "alive",
+    pid: brokerUrl === null ? null : 1234,
+    restartCount,
+    brokerUrl,
+  };
+}
+
+function jsonResponse(value: unknown): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve(value),
+  } as Response;
+}
+
+async function flushRendererTasks(): Promise<void> {
+  for (let index = 0; index < 10; index += 1) {
+    await Promise.resolve();
+  }
 }
