@@ -165,6 +165,7 @@ export {
   isThreadSpecRevisionId,
   isToolCallId,
   isWriteId,
+  MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND,
   PROVIDER_KIND_VALUES,
 } from "./receipt-types.ts";
 export { isReceiptSnapshot, validateReceipt } from "./receipt-validator.ts";

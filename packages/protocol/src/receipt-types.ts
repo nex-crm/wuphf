@@ -256,6 +256,17 @@ const AGENT_SLUG_RE = new RegExp(`^[a-z0-9][a-z0-9_-]{0,${MAX_AGENT_SLUG_BYTES -
 const LOCAL_ID_RE = new RegExp(`^[A-Za-z0-9][A-Za-z0-9._-]{0,${MAX_LOCAL_ID_BYTES - 1}}$`);
 export const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
+/**
+ * Protocol compatibility floor for readers that process cost_event.providerKind.
+ *
+ * Cost-event producers must not emit anthropic, openai, openai-compat, ollama,
+ * opencode, or opencodego values until every consumer has deployed protocol code
+ * at or beyond this floor. Older readers keep ProviderKind closed and reject
+ * those literals at decode time. The Go reference verifier accepts the same cost
+ * payload bodies at this floor and sets the Go-side compatibility baseline.
+ */
+export const MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND = "cost-provider-kind-v1" as const;
+
 // Exported because ProviderKind is `Brand<(typeof PROVIDER_KIND_VALUES)[number], …>`
 // — consumers that need to enumerate the supported providers (forms, picker
 // UI, exhaustive switches) read this tuple. It is the single source of truth;
@@ -268,11 +279,8 @@ export const PROVIDER_KIND_VALUES = [
   "openclaw",
   "hermes-agent",
   "openclaw-http",
-  // PR B.5: opencode + opencodego support. Both run in two topologies —
-  // a local CLI subprocess and a hosted HTTP endpoint — but share one
-  // audit identity per implementation. The TypeScript opencode and Go
-  // port opencodego are billed and audited separately so the cost
-  // ledger can distinguish them.
+  // opencode and opencodego each support local CLI and hosted HTTP topologies,
+  // but the TypeScript and Go implementations are billed and audited separately.
   "opencode",
   "opencodego",
 ] as const;

@@ -279,6 +279,11 @@ export type CostAuditPayload =
   | BudgetSetAuditPayload
   | BudgetThresholdCrossedAuditPayload;
 
+type CostAuditPayloadForKindArgs =
+  | [kind: "cost_event", payload: CostEventAuditPayload]
+  | [kind: "budget_set", payload: BudgetSetAuditPayload]
+  | [kind: "budget_threshold_crossed", payload: BudgetThresholdCrossedAuditPayload];
+
 // ────────────────────────────────────────────────────────────────────────────
 // Validation
 // ────────────────────────────────────────────────────────────────────────────
@@ -574,54 +579,48 @@ function unknownCostAuditEventKindMessage(kind: unknown): string {
 const TEXT_ENCODER = new TextEncoder();
 
 export function costAuditPayloadToJsonValue(
-  kind: CostAuditEventKind,
-  payload: CostAuditPayload,
+  kind: "cost_event",
+  payload: CostEventAuditPayload,
+): Record<string, unknown>;
+export function costAuditPayloadToJsonValue(
+  kind: "budget_set",
+  payload: BudgetSetAuditPayload,
+): Record<string, unknown>;
+export function costAuditPayloadToJsonValue(
+  kind: "budget_threshold_crossed",
+  payload: BudgetThresholdCrossedAuditPayload,
+): Record<string, unknown>;
+export function costAuditPayloadToJsonValue(
+  ...[kind, payload]: CostAuditPayloadForKindArgs
 ): Record<string, unknown> {
   if (kind === "cost_event") {
-    const cost = payload as CostEventAuditPayload;
-    return omitUndefined({
-      receiptId: cost.receiptId,
-      agentSlug: cost.agentSlug,
-      taskId: cost.taskId,
-      providerKind: cost.providerKind,
-      model: cost.model,
-      amountMicroUsd: cost.amountMicroUsd as number,
-      units: {
-        inputTokens: cost.units.inputTokens,
-        outputTokens: cost.units.outputTokens,
-        cacheReadTokens: cost.units.cacheReadTokens,
-        cacheCreationTokens: cost.units.cacheCreationTokens,
-      },
-      occurredAt: cost.occurredAt.toISOString(),
-    });
+    return costEventAuditPayloadToJsonValue(payload);
   }
   if (kind === "budget_set") {
-    const budget = payload as BudgetSetAuditPayload;
-    return omitUndefined({
-      budgetId: budget.budgetId,
-      scope: budget.scope,
-      subjectId: budget.subjectId,
-      limitMicroUsd: budget.limitMicroUsd as number,
-      thresholdsBps: budget.thresholdsBps,
-      setBy: budget.setBy,
-      setAt: budget.setAt.toISOString(),
-    });
+    return budgetSetAuditPayloadToJsonValue(payload);
   }
   if (kind === "budget_threshold_crossed") {
-    const cross = payload as BudgetThresholdCrossedAuditPayload;
-    return {
-      budgetId: cross.budgetId,
-      budgetSetLsn: cross.budgetSetLsn,
-      thresholdBps: cross.thresholdBps,
-      observedMicroUsd: cross.observedMicroUsd as number,
-      limitMicroUsd: cross.limitMicroUsd as number,
-      crossedAtLsn: cross.crossedAtLsn,
-      crossedAt: cross.crossedAt.toISOString(),
-    };
+    return budgetThresholdCrossedAuditPayloadToJsonValue(payload);
   }
   throw new Error(unknownCostAuditEventKindMessage(kind));
 }
 
+export function costAuditPayloadFromJsonValue(
+  kind: "cost_event",
+  value: unknown,
+): CostEventAuditPayload;
+export function costAuditPayloadFromJsonValue(
+  kind: "budget_set",
+  value: unknown,
+): BudgetSetAuditPayload;
+export function costAuditPayloadFromJsonValue(
+  kind: "budget_threshold_crossed",
+  value: unknown,
+): BudgetThresholdCrossedAuditPayload;
+export function costAuditPayloadFromJsonValue(
+  kind: CostAuditEventKind,
+  value: unknown,
+): CostAuditPayload;
 export function costAuditPayloadFromJsonValue(
   kind: CostAuditEventKind,
   value: unknown,
@@ -635,14 +634,80 @@ export function costAuditPayloadFromJsonValue(
 }
 
 export function costAuditPayloadToBytes(
-  kind: CostAuditEventKind,
-  payload: CostAuditPayload,
+  kind: "cost_event",
+  payload: CostEventAuditPayload,
+): Uint8Array;
+export function costAuditPayloadToBytes(
+  kind: "budget_set",
+  payload: BudgetSetAuditPayload,
+): Uint8Array;
+export function costAuditPayloadToBytes(
+  kind: "budget_threshold_crossed",
+  payload: BudgetThresholdCrossedAuditPayload,
+): Uint8Array;
+export function costAuditPayloadToBytes(
+  ...[kind, payload]: CostAuditPayloadForKindArgs
 ): Uint8Array {
   const validation = validateCostAuditPayloadForKind(kind, payload);
   if (!validation.ok) {
     throw new Error(formatValidationErrors(validation.errors));
   }
-  return TEXT_ENCODER.encode(canonicalJSON(costAuditPayloadToJsonValue(kind, payload)));
+  if (kind === "cost_event") {
+    return TEXT_ENCODER.encode(canonicalJSON(costEventAuditPayloadToJsonValue(payload)));
+  }
+  if (kind === "budget_set") {
+    return TEXT_ENCODER.encode(canonicalJSON(budgetSetAuditPayloadToJsonValue(payload)));
+  }
+  if (kind === "budget_threshold_crossed") {
+    return TEXT_ENCODER.encode(
+      canonicalJSON(budgetThresholdCrossedAuditPayloadToJsonValue(payload)),
+    );
+  }
+  throw new Error(unknownCostAuditEventKindMessage(kind));
+}
+
+function costEventAuditPayloadToJsonValue(payload: CostEventAuditPayload): Record<string, unknown> {
+  return omitUndefined({
+    receiptId: payload.receiptId,
+    agentSlug: payload.agentSlug,
+    taskId: payload.taskId,
+    providerKind: payload.providerKind,
+    model: payload.model,
+    amountMicroUsd: payload.amountMicroUsd as number,
+    units: {
+      inputTokens: payload.units.inputTokens,
+      outputTokens: payload.units.outputTokens,
+      cacheReadTokens: payload.units.cacheReadTokens,
+      cacheCreationTokens: payload.units.cacheCreationTokens,
+    },
+    occurredAt: payload.occurredAt.toISOString(),
+  });
+}
+
+function budgetSetAuditPayloadToJsonValue(payload: BudgetSetAuditPayload): Record<string, unknown> {
+  return omitUndefined({
+    budgetId: payload.budgetId,
+    scope: payload.scope,
+    subjectId: payload.subjectId,
+    limitMicroUsd: payload.limitMicroUsd as number,
+    thresholdsBps: payload.thresholdsBps,
+    setBy: payload.setBy,
+    setAt: payload.setAt.toISOString(),
+  });
+}
+
+function budgetThresholdCrossedAuditPayloadToJsonValue(
+  payload: BudgetThresholdCrossedAuditPayload,
+): Record<string, unknown> {
+  return {
+    budgetId: payload.budgetId,
+    budgetSetLsn: payload.budgetSetLsn,
+    thresholdBps: payload.thresholdBps,
+    observedMicroUsd: payload.observedMicroUsd as number,
+    limitMicroUsd: payload.limitMicroUsd as number,
+    crossedAtLsn: payload.crossedAtLsn,
+    crossedAt: payload.crossedAt.toISOString(),
+  };
 }
 
 function costEventAuditPayloadFromJsonValue(value: unknown): CostEventAuditPayload {
@@ -726,6 +791,11 @@ function parseIsoDate(value: unknown, path: string): Date {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) {
     throw new Error(`${path}: not a valid ISO-8601 date: ${JSON.stringify(value)}`);
+  }
+  if (d.toISOString() !== value) {
+    throw new Error(
+      `${path}: must be canonical ISO-8601 UTC with millisecond precision: ${JSON.stringify(value)}`,
+    );
   }
   return d;
 }

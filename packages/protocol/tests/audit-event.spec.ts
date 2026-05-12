@@ -41,7 +41,9 @@ import {
   asTaskId,
   asThreadId,
   asThreadSpecRevisionId,
+  costAuditPayloadFromJsonValue,
   costAuditPayloadToBytes,
+  costAuditPayloadToJsonValue,
   threadAuditPayloadToBytes,
   threadSpecContentHash,
 } from "../src/index.ts";
@@ -1147,6 +1149,77 @@ describe("audit-event chain verification", () => {
       ).toBe(false);
     });
   });
+
+  describe("cost audit payload ISO date vectors", () => {
+    const canonicalTimestamp = "2026-05-08T18:03:00.000Z";
+    const occurredAtKey = "occurredAt";
+    const setAtKey = "setAt";
+    const crossedAtKey = "crossedAt";
+
+    it("accepts and re-emits canonical UTC timestamps with milliseconds", () => {
+      const costEvent = costAuditPayloadFromJsonValue(
+        "cost_event",
+        costEventJson(canonicalTimestamp),
+      );
+      expect(costEvent.occurredAt.toISOString()).toBe(canonicalTimestamp);
+      expect(costAuditPayloadToJsonValue("cost_event", costEvent)[occurredAtKey]).toBe(
+        canonicalTimestamp,
+      );
+
+      const budgetSet = costAuditPayloadFromJsonValue(
+        "budget_set",
+        budgetSetJson(canonicalTimestamp),
+      );
+      expect(budgetSet.setAt.toISOString()).toBe(canonicalTimestamp);
+      expect(costAuditPayloadToJsonValue("budget_set", budgetSet)[setAtKey]).toBe(
+        canonicalTimestamp,
+      );
+
+      const crossing = costAuditPayloadFromJsonValue(
+        "budget_threshold_crossed",
+        budgetThresholdCrossedJson(canonicalTimestamp),
+      );
+      expect(crossing.crossedAt.toISOString()).toBe(canonicalTimestamp);
+      expect(costAuditPayloadToJsonValue("budget_threshold_crossed", crossing)[crossedAtKey]).toBe(
+        canonicalTimestamp,
+      );
+    });
+
+    const rejectedDateVectors = [
+      {
+        label: "missing milliseconds",
+        value: "2026-05-08T18:03:00Z",
+        expected: /canonical ISO-8601 UTC with millisecond precision/,
+      },
+      {
+        label: "offset form",
+        value: "2026-05-08T18:03:00.000+00:00",
+        expected: /canonical ISO-8601 UTC with millisecond precision/,
+      },
+      {
+        label: "malformed date",
+        value: "not-a-date",
+        expected: /not a valid ISO-8601 date/,
+      },
+    ] as const;
+
+    for (const vector of rejectedDateVectors) {
+      it(`rejects ${vector.label} date strings`, () => {
+        expect(() =>
+          costAuditPayloadFromJsonValue("cost_event", costEventJson(vector.value)),
+        ).toThrow(vector.expected);
+        expect(() =>
+          costAuditPayloadFromJsonValue("budget_set", budgetSetJson(vector.value)),
+        ).toThrow(vector.expected);
+        expect(() =>
+          costAuditPayloadFromJsonValue(
+            "budget_threshold_crossed",
+            budgetThresholdCrossedJson(vector.value),
+          ),
+        ).toThrow(vector.expected);
+      });
+    }
+  });
 });
 
 const INVALID_PAYLOAD_KIND_DESCRIPTION_CASES = [
@@ -1322,6 +1395,47 @@ function legacySerializeAuditEventRecord(record: AuditEventRecord): Uint8Array {
       },
     }),
   );
+}
+
+function costEventJson(occurredAt: string): Record<string, unknown> {
+  return {
+    receiptId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    agentSlug: "eng-a",
+    taskId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    providerKind: "anthropic",
+    model: "claude-opus-4-7",
+    amountMicroUsd: 1_234,
+    units: {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    },
+    occurredAt,
+  };
+}
+
+function budgetSetJson(setAt: string): Record<string, unknown> {
+  return {
+    budgetId: "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+    scope: "global",
+    limitMicroUsd: 5_000_000,
+    thresholdsBps: [5_000, 8_000, 10_000],
+    setBy: "fran@example.com",
+    setAt,
+  };
+}
+
+function budgetThresholdCrossedJson(crossedAt: string): Record<string, unknown> {
+  return {
+    budgetId: "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+    budgetSetLsn: "v1:7",
+    thresholdBps: 5_000,
+    observedMicroUsd: 2_500_000,
+    limitMicroUsd: 5_000_000,
+    crossedAtLsn: "v1:42",
+    crossedAt,
+  };
 }
 
 function bodyForAuditKind(kind: AuditEventKind, index: number): Uint8Array {

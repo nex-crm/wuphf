@@ -63,6 +63,7 @@ import {
   MAX_COST_MODEL_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
   MAX_WEBAUTHN_ASSERTION_BYTES,
+  MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND,
   type ReceiptSnapshot,
   receiptFromJson,
   receiptToJson,
@@ -988,6 +989,11 @@ expectEqual("BUDGET_SCOPE_VALUES is the closed scope tuple", Array.from(BUDGET_S
   "agent",
   "task",
 ]);
+expectEqual(
+  "ProviderKind compatibility floor is public",
+  MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND,
+  "cost-provider-kind-v1",
+);
 expectEqual("isCostAuditEventKind accepts cost_event", isCostAuditEventKind("cost_event"), true);
 expectEqual("isCostAuditEventKind rejects unknown", isCostAuditEventKind("budget_unset"), false);
 expectEqual(

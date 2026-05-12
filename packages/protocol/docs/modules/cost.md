@@ -45,6 +45,7 @@ Constants:
 | `MAX_BUDGET_THRESHOLDS` | `src/budgets.ts` | 8 thresholds per budget. Bounds reactor work per budget. |
 | `MAX_COST_EVENT_AMOUNT_MICRO_USD` | `src/budgets.ts` | 100,000,000 micro-USD (= $100/call). 10x lets a single rogue call dominate a budget; 0.1x rejects legitimate long-context turns. |
 | `MAX_COST_MODEL_BYTES` | `src/budgets.ts` | 128 UTF-8 bytes for `cost_event.model`. Bounds projection key sizes. |
+| `MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND` | `src/receipt-types.ts` | Symbolic compatibility floor for ProviderKind values emitted in `cost_event` payloads. |
 
 Functions:
 
@@ -108,10 +109,33 @@ Functions:
     (RFC 8785 JCS). The audit-event chain hashes these bytes; any byte-level
     drift between TS and the cross-language verifier
     (`testdata/verifier-reference.go`) is a hash break.
+12. `cost_event.providerKind` uses the closed `ProviderKind` tuple from
+    `receipt-types.ts`. Cost-event producers MUST NOT emit the cost-ledger
+    provider values gated by `MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND` until
+    every reader that decodes cost events has deployed that floor or later.
+
+### 3.1 ProviderKind rolling upgrade
+
+`ProviderKind` is a closed enum, so older TypeScript, Go, Rust, or other readers
+reject provider literals they do not know. During a rolling upgrade, cost-event
+producers must continue emitting only values accepted by the oldest deployed
+consumer. They may emit `anthropic`, `openai`, `openai-compat`, `ollama`,
+`opencode`, and `opencodego` only after all cost-event readers have updated past
+the merge commit or package version that contains
+`MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND` (`cost-provider-kind-v1`).
+
+The Go reference verifier in `packages/protocol/testdata/verifier-reference.go`
+accepts canonical cost payload bodies at that floor. Treat it as the Go-side
+compatibility baseline: if a Go reader cannot parse the bundled verifier inputs,
+it is not ready to consume cost events using the widened provider tuple.
 
 ## 4. Diagrams
 
 ### 4.1 Cost event flow
+
+Invariant: `Gateway.complete()` does not resolve until the broker has committed
+the `cost_event` row; the provider response is held until row-before-response is
+satisfied.
 
 ```mermaid
 sequenceDiagram
@@ -121,10 +145,12 @@ sequenceDiagram
   participant Reactor as ThresholdReactor
   participant Audit
   Agent->>Gateway: provider call
-  Gateway-->>Agent: response + usage
   Gateway->>Broker: POST /api/v1/cost/events (idempotencyKey)
   Broker->>Audit: cost_event payload
+  Audit-->>Broker: cost_event committed
   Broker->>Broker: cost_by_agent, cost_by_task projections
+  Broker-->>Gateway: cost_event commit acknowledged
+  Gateway-->>Agent: response + usage (Gateway.complete resolves)
   Reactor->>Broker: scan budgets vs cumulative spend
   alt threshold crossed (new under budgetSetLsn)
     Reactor->>Audit: budget_threshold_crossed payload
