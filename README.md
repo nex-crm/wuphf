@@ -375,3 +375,13 @@ The joke still fits. Except this WUPHF ships.
 > — Michael Scott
 
 Michael: still waiting on that quarter. We are not.
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=nex-crm%2Fwuphf&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=nex-crm/wuphf&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=nex-crm/wuphf&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=nex-crm/wuphf&type=date&legend=top-left" />
+ </picture>
+</a>
