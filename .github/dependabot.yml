@@ -21,10 +21,10 @@ updates:
     registries:
       - nex-crm-github
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: "monthly"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 21
     groups:
       github-actions:
         patterns: ["*"]
@@ -35,10 +35,10 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: "monthly"
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 21
     groups:
       all-dependencies:
         patterns: ["*"]
@@ -50,10 +50,10 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: "monthly"
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 21
     groups:
       all-dependencies:
         patterns: ["*"]
@@ -67,10 +67,10 @@ updates:
   - package-ecosystem: "npm"
     directory: "/web"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: "monthly"
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 21
     groups:
       web-dependencies:
         patterns: ["*"]
@@ -83,10 +83,10 @@ updates:
   - package-ecosystem: "npm"
     directory: "/apps/desktop"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: "monthly"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 21
     groups:
       desktop-electron-stack:
         patterns:
@@ -106,10 +106,10 @@ updates:
   - package-ecosystem: "npm"
     directory: "/web/e2e"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: "monthly"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 21
     groups:
       e2e-dependencies:
         patterns: ["*"]
@@ -123,10 +123,10 @@ updates:
   - package-ecosystem: "npm"
     directory: "/npm"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: "monthly"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 21
     groups:
       npm-wrapper-dependencies:
         patterns: ["*"]
@@ -140,10 +140,10 @@ updates:
   - package-ecosystem: "npm"
     directory: "/apps/installer-stub"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      interval: "monthly"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 21
     groups:
       installer-electron-stack:
         patterns:
