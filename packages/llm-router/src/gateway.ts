@@ -18,18 +18,11 @@
 // completion. That's the type-system enforcement.
 
 import type { CostLedger } from "@wuphf/broker";
-import {
-  asProviderKind,
-  type CostEventAuditPayload,
-  type CostUnits,
-  type MicroUsd,
-  type ProviderKind,
-} from "@wuphf/protocol";
+import type { CostEventAuditPayload, CostUnits, MicroUsd, ProviderKind } from "@wuphf/protocol";
 
 import { Caps, type CapsConfig, DEFAULT_CAPS_CONFIG } from "./caps.ts";
 import { DEFAULT_DEDUPE_CONFIG, DedupeCache, type DedupeConfig } from "./dedupe.ts";
 import { ProviderError, UnknownModelError } from "./errors.ts";
-import { isStubModel } from "./providers/stub.ts";
 import type {
   Gateway,
   GatewayCompletionResult,
@@ -107,6 +100,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
       const payload: CostEventAuditPayload = buildCostEventPayload(
         ctx,
         req,
+        provider.kind,
         providerResponse.usage,
         costMicroUsd,
         deps.nowMs(),
@@ -148,15 +142,18 @@ export function createGateway(deps: GatewayDeps): Gateway {
 function buildCostEventPayload(
   ctx: SupervisorContext,
   req: ProviderRequest,
+  providerKind: ProviderKind,
   usage: CostUnits,
   costMicroUsd: MicroUsd,
   nowMs: number,
 ): CostEventAuditPayload {
   // Pull only the fields cost.ts validates; payload keys not listed in
   // COST_EVENT_KEYS are rejected by the validator (see protocol cost.ts).
+  // `providerKind` comes from the resolved provider so the audit row
+  // records who actually fulfilled the request — no hard-coded mapping.
   const base: CostEventAuditPayload = {
     agentSlug: ctx.agentSlug,
-    providerKind: providerKindFor(req.model),
+    providerKind,
     model: req.model,
     amountMicroUsd: costMicroUsd,
     units: usage,
@@ -197,22 +194,6 @@ function indexProvidersByModel(providers: readonly Provider[]): Map<string, Prov
     }
   }
   return out;
-}
-
-/**
- * Map an internal model name to its `ProviderKind`. The closed enum
- * lives in `@wuphf/protocol/receipt-types.ts`; adding a new kind is a
- * wire-shape change.
- */
-function providerKindFor(model: string): ProviderKind {
-  if (isStubModel(model)) {
-    // Stubs masquerade as openai-compat so the audit payload's
-    // providerKind stays inside the closed enum.
-    return asProviderKind("openai-compat");
-  }
-  // PR B.2 will add prefix routing here; for PR B the stub is the only
-  // working path and we fail loud on unknown models.
-  throw new UnknownModelError(model);
 }
 
 // Re-export for callers that compose their own deps without pulling each

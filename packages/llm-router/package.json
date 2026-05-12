@@ -6,7 +6,8 @@
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./anthropic": "./src/providers/anthropic.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -20,6 +21,7 @@
     "burn:nightly": "tsx scripts/ci-burn-nightly.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.71.0",
     "@wuphf/broker": "workspace:*",
     "@wuphf/protocol": "workspace:*",
     "better-sqlite3": "12.9.0"
