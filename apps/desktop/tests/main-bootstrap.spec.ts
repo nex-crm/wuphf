@@ -289,9 +289,7 @@ describe("main bootstrap", () => {
 
     await importMainBootstrap();
 
-    expect(process.env[RECEIPT_STORE_PATH_ENV]).toBe(
-      "/tmp/wuphf-test-userData/event-log.sqlite",
-    );
+    expect(process.env[RECEIPT_STORE_PATH_ENV]).toBe("/tmp/wuphf-test-userData/event-log.sqlite");
     expect(electronMock.app.getPath).toHaveBeenCalledWith("userData");
   });
 

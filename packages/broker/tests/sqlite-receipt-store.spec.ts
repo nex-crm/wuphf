@@ -16,12 +16,13 @@ import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDatabase, runMigrations } from "../src/event-log/index.ts";
+import { constructSqliteReceiptStoreForTesting } from "../src/internal/sqlite-receipt-store-testing.ts";
 import {
   InvalidListCursorError,
   InvalidListLimitError,
   ReceiptStoreFullError,
 } from "../src/receipt-store.ts";
-import { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
+import type { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
 
 const TASK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const THREAD_A = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
@@ -77,7 +78,7 @@ function minimalReceiptV2(id: string, threadIdStr: string): ReceiptSnapshot {
 function openStore(): { readonly db: Database.Database; readonly store: SqliteReceiptStore } {
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
-  return { db, store: SqliteReceiptStore.forTesting(db) };
+  return { db, store: constructSqliteReceiptStoreForTesting(db) };
 }
 
 function tempDbPath(): string {
@@ -277,14 +278,14 @@ describe("SqliteReceiptStore", () => {
     const path = tempDbPath();
     const firstDb = openDatabase({ path });
     runMigrations(firstDb);
-    const firstStore = SqliteReceiptStore.forTesting(firstDb);
+    const firstStore = constructSqliteReceiptStoreForTesting(firstDb);
     const first = minimalReceiptV2(receiptIdAt(1), THREAD_A);
     await firstStore.put(first);
     firstStore.close();
 
     const secondDb = openDatabase({ path });
     runMigrations(secondDb);
-    const secondStore = SqliteReceiptStore.forTesting(secondDb);
+    const secondStore = constructSqliteReceiptStoreForTesting(secondDb);
     try {
       const second = minimalReceiptV2(receiptIdAt(2), THREAD_A);
 
@@ -324,7 +325,7 @@ describe("SqliteReceiptStore", () => {
   it("throws ReceiptStoreFullError when maxReceipts is exceeded", async () => {
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
-    const store = SqliteReceiptStore.forTesting(db, undefined, 2);
+    const store = constructSqliteReceiptStoreForTesting(db, undefined, 2);
     try {
       await store.put(minimalReceiptV2(receiptIdAt(1), THREAD_A));
       await store.put(minimalReceiptV2(receiptIdAt(2), THREAD_A));
@@ -345,7 +346,7 @@ describe("SqliteReceiptStore", () => {
     // receipt at capacity returns 409 not 507.
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
-    const store = SqliteReceiptStore.forTesting(db, undefined, 1);
+    const store = constructSqliteReceiptStoreForTesting(db, undefined, 1);
     try {
       const r = minimalReceiptV1(receiptIdAt(1));
       await store.put(r);
@@ -359,9 +360,15 @@ describe("SqliteReceiptStore", () => {
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
     try {
-      expect(() => SqliteReceiptStore.forTesting(db, undefined, 0)).toThrow(/positive integer/);
-      expect(() => SqliteReceiptStore.forTesting(db, undefined, -1)).toThrow(/positive integer/);
-      expect(() => SqliteReceiptStore.forTesting(db, undefined, 1.5)).toThrow(/positive integer/);
+      expect(() => constructSqliteReceiptStoreForTesting(db, undefined, 0)).toThrow(
+        /positive integer/,
+      );
+      expect(() => constructSqliteReceiptStoreForTesting(db, undefined, -1)).toThrow(
+        /positive integer/,
+      );
+      expect(() => constructSqliteReceiptStoreForTesting(db, undefined, 1.5)).toThrow(
+        /positive integer/,
+      );
     } finally {
       db.close();
     }

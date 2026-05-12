@@ -104,7 +104,9 @@ jobs:
     # auth, durable receipt store, cursor-paginated thread list. Local
     # lefthook covers typecheck/test/invariants but a PR can still bypass
     # them; this job is the CI floor. Path-gated to keep PRs that don't
-    # touch the broker fast.
+    # touch the broker fast. `packages/protocol` is in the gate because
+    # broker depends on it — a protocol type/wire change can break the
+    # broker compile while the broker tree looks "unchanged."
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -120,9 +122,9 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
-            changed="$(git ls-files packages/broker package.json bun.lock)"
+            changed="$(git ls-files packages/broker packages/protocol package.json bun.lock)"
           else
-            changed="$(git diff --name-only "${BASE_SHA}"...HEAD -- packages/broker package.json bun.lock || true)"
+            changed="$(git diff --name-only "${BASE_SHA}"...HEAD -- packages/broker packages/protocol package.json bun.lock || true)"
           fi
 
           if [[ -n "${changed}" ]]; then
@@ -132,7 +134,7 @@ jobs:
           fi
       - name: Skip broker job when broker inputs are unchanged
         if: ${{ steps.broker-changes.outputs.changed != 'true' }}
-        run: echo "No packages/broker, root package.json, or bun.lock changes detected."
+        run: echo "No packages/broker, packages/protocol, root package.json, or bun.lock changes detected."
       - name: Install workspace deps
         if: ${{ steps.broker-changes.outputs.changed == 'true' }}
         run: bun install --frozen-lockfile

@@ -81,20 +81,6 @@ export class SqliteReceiptStore implements ReceiptStore {
     }
   }
 
-  /**
-   * Test-only factory that constructs a store against a caller-supplied
-   * `Database` handle, skipping migrations. Tests use this to inject a
-   * pre-migrated `:memory:` DB or to stub the event log. Production
-   * callers MUST use `static open()` so migrations always run.
-   */
-  static forTesting(
-    db: Database.Database,
-    eventLog?: EventLog,
-    maxReceipts?: number,
-  ): SqliteReceiptStore {
-    return new SqliteReceiptStore(db, eventLog, maxReceipts);
-  }
-
   private constructor(
     private readonly db: Database.Database,
     eventLog: EventLog = createEventLog(db),

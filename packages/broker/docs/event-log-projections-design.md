@@ -45,7 +45,7 @@ packages/broker/
 -- monotonically increasing rowids on append-only inserts without the
 -- `sqlite_sequence` write that AUTOINCREMENT requires. We never delete
 -- events, so the "never reuse after delete" guarantee AUTOINCREMENT
--- provides isn't load-bearing here. (perf triangulation T4.)
+-- provides isn't load-bearing here.
 CREATE TABLE event_log (
   lsn        INTEGER PRIMARY KEY,                  -- ordered append-only sequence
   ts_ms      INTEGER NOT NULL,                     -- ms since epoch at append time
@@ -79,7 +79,7 @@ PRAGMA foreign_keys = ON;             -- enforce projection→event_log integrit
 PRAGMA busy_timeout = 5000;           -- 5s wait on SQLITE_BUSY
 ```
 
-Durability choice (distsys triangulation T3): the HTTP `201` on `POST
+Durability choice: the HTTP `201` on `POST
 /api/receipts` is returned **after** the store's `put` resolves; callers
 race the 201 against follow-up reads. `synchronous=NORMAL` would lose
 recently committed transactions on power/OS failure even though the
@@ -89,14 +89,30 @@ that's one fsync per agent-run, well below the dominant LLM latency.
 
 ## Package surface
 
-Branch 6 exposes ONE public class from `@wuphf/broker`: `SqliteReceiptStore`
-(plus `SqliteReceiptStoreConfig`, the cursor error classes, and limit
-constants — all re-exported from `src/index.ts`). The event-log module
-under `src/event-log/` is **internal**: callers MUST use
-`SqliteReceiptStore` rather than touching `openDatabase` / `createEventLog`
-/ `runMigrations` directly. This keeps the append-plus-projection
-invariant inside one owner and prevents orphan event_log rows (distsys
-triangulation R2-A3 + T10).
+The broker package exposes two import paths:
+
+- `@wuphf/broker` (the root) — `createBroker`, `ReceiptStore`,
+  `InMemoryReceiptStore`, `ListFilter`/`ListPage` types, cursor + limit
+  helpers and error classes, and the broker config types. No native
+  binding is loaded by importing the root.
+- `@wuphf/broker/sqlite` — `SqliteReceiptStore` and
+  `SqliteReceiptStoreConfig`. Importing this subpath evaluates
+  `better-sqlite3`'s native binding, so hosts that don't need the
+  durable store skip the cost by not importing it.
+
+`SqliteReceiptStore`'s constructor is `private`; the only supported
+construction path is `SqliteReceiptStore.open(config)` so
+`openDatabase` + `runMigrations` always run together. Tests reach a
+private-constructor seam through
+`src/internal/sqlite-receipt-store-testing.ts`, which is not exposed
+in `package.json` `exports` and therefore not reachable by any package
+consumer.
+
+The event-log module under `src/event-log/` is internal: callers MUST
+go through `SqliteReceiptStore` rather than touching `openDatabase` /
+`createEventLog` / `runMigrations` directly. This keeps the
+append-plus-projection invariant inside one owner and prevents orphan
+event_log rows.
 
 The cross-language stability surface is the **SQLite schema** in
 `001_initial.sql` plus the canonical receipt JSON payload defined by
@@ -194,7 +210,7 @@ export class SqliteReceiptStore implements ReceiptStore {
 }
 ```
 
-### Interface evolution: `ReceiptStore.list` (owned by Worker B)
+### Interface evolution: `ReceiptStore.list`
 
 The branch-5 signature is:
 
@@ -222,9 +238,9 @@ export interface ListPage {
 list(filter?: ListFilter): Promise<ListPage>;
 ```
 
-**Cursor wire shape** (api/security triangulation T5, T15): cursors are **RFC 4648 §5 base64url, unpadded**, of ASCII `lsn:<decimal>`. The decimal MUST be a positive `Number.isSafeInteger` (no leading zeros, no `+`, no whitespace, no scientific notation). Callers MUST treat the cursor as opaque — there is no stability guarantee on the inner encoding — but the shape is pinned so Go/Rust implementers can produce byte-identical tokens for the same logical LSN.
+**Cursor wire shape**: cursors are **RFC 4648 §5 base64url, unpadded**, of ASCII `lsn:<decimal>`. The decimal MUST be a positive `Number.isSafeInteger` (no leading zeros, no `+`, no whitespace, no scientific notation). Callers MUST treat the cursor as opaque — there is no stability guarantee on the inner encoding — but the shape is pinned so Go/Rust implementers can produce byte-identical tokens for the same logical LSN.
 
-**Cursor scope** (api/architecture/distsys triangulation T1): cursors are **global LSN seek positions**. They are NOT thread-bound. A cursor produced by listing thread A and replayed against thread B will simply skip everything at LSN ≤ that value in thread B — there is no "wrong thread → 400" rejection, and exposing the LSN this way is intentional (the LSN is a global monotonic position and is not a secret). If you later add cross-thread isolation guarantees (e.g. tenant boundaries), revisit this — for branch 6, single-process single-tenant means global LSN seek is fine.
+**Cursor scope**: cursors are **global LSN seek positions**. They are NOT thread-bound. A cursor produced by listing thread A and replayed against thread B will simply skip everything at LSN ≤ that value in thread B — there is no "wrong thread → 400" rejection, and exposing the LSN this way is intentional (the LSN is a global monotonic position and is not a secret). If a future change adds cross-thread isolation guarantees (e.g. tenant boundaries), revisit this — for single-process single-tenant, global LSN seek is fine.
 
 **Ordering**: LSN ascending. For the in-memory store, LSN is replaced by insertion order (1-indexed). Same wire shape.
 
@@ -237,7 +253,7 @@ list(filter?: ListFilter): Promise<ListPage>;
 | `cursor` | string | — | Opaque base64url token from prior response's `Link: rel="next"`. Absent or empty → no cursor. |
 | `limit` | integer | **`MAX_LIST_LIMIT` (1000)** | Clamped to [1, 1000]. Invalid → 400. The route's default matches the branch-5 ceiling so existing clients that ignore `Link` continue to see the same page they did before. |
 
-The default-limit choice (api/architecture triangulation T2): the store's `DEFAULT_LIST_LIMIT = 100` only applies to direct programmatic callers. The HTTP route MUST pass `limit: MAX_LIST_LIMIT` explicitly when the caller didn't supply one. Otherwise clients ignoring `Link` silently lose receipts 101–1000 that branch 5 returned in one shot.
+The default-limit choice: the store's `DEFAULT_LIST_LIMIT = 100` only applies to direct programmatic callers. The HTTP route MUST pass `limit: MAX_LIST_LIMIT` explicitly when the caller didn't supply one. Otherwise clients ignoring `Link` silently lose receipts 101–1000 that the pre-pagination route returned in one shot.
 
 ### Response
 
