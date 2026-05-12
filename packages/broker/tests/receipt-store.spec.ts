@@ -185,8 +185,8 @@ describe("InMemoryReceiptStore", () => {
       store.list({ cursor: Buffer.from("foo:1", "utf8").toString("base64url") }),
     ).rejects.toBeInstanceOf(InvalidListCursorError);
     // Non-canonical base64url: `bHNuOjE!` decodes to `lsn:1` via Node's
-    // permissive `Buffer.from(_, "base64url")`. Strict alphabet validation
-    // rejects this (triangulation T5).
+    // permissive `Buffer.from(_, "base64url")`. Strict alphabet
+    // validation rejects this.
     await expect(store.list({ cursor: "bHNuOjE!" })).rejects.toBeInstanceOf(InvalidListCursorError);
     // Trailing padding (`=`) is not part of canonical unpadded base64url.
     const padded = `${Buffer.from("lsn:1", "utf8").toString("base64url")}=`;
@@ -206,7 +206,7 @@ describe("InMemoryReceiptStore", () => {
       store.list({ cursor: Buffer.from(`lsn:${unsafe}`, "utf8").toString("base64url") }),
     ).rejects.toBeInstanceOf(InvalidListCursorError);
     // Non-canonical base64url aliases that decode to `lsn:1` via Node's
-    // permissive decoder but fail strict round-trip (R2-A1). The
+    // permissive decoder but fail strict round-trip. The
     // canonical cursor for LSN 1 is `bHNuOjE`; these are aliases that
     // a strict Go/Rust raw_url decoder would reject.
     for (const alias of ["bHNuOjF", "bHNuOjG", "bHNuOjH"]) {

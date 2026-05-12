@@ -1,51 +1,40 @@
-# Event log + projections — design contract (branch 6)
-
-**Branch**: `feat/event-log-projections`
-**Status**: implementation contract — both parallel workers MUST agree on the shapes here.
-**Last updated**: 2026-05-11
+# Event log + projections — design
 
 ## Goal
 
-Replace the in-memory `ReceiptStore` with a durable, event-log-backed implementation while preserving the branch-5 wire and interface contracts. Add cursor pagination to the thread-list endpoint so the 1000-item truncation can go away.
+Replace the in-memory `ReceiptStore` with a durable, event-log-backed implementation while preserving the prior wire and interface contracts. Add cursor pagination to the thread-list endpoint so the historical 1000-item truncation goes away.
 
 ## Non-goals (deferred)
 
-- Idempotency keys (same id + byte-identical payload → 200 no-op). Branch 6 still returns 409 on id collision regardless of payload identity.
-- Hash-chained audit (per-install signed Merkle root) — separate downstream branch.
-- Multi-process writers. SQLite handle is owned by the broker process; renderer never opens the DB.
+- Idempotency keys (same id + byte-identical payload → 200 no-op). Today the store returns 409 on id collision regardless of payload identity.
+- Hash-chained audit (per-install signed Merkle root) — separate downstream work.
+- Multi-process writers. The SQLite handle is owned by the broker process; the renderer never opens the DB.
 
-## Files (final layout — both workers respect this)
+## Files
 
 ```text
 packages/broker/
-├── package.json                              # +better-sqlite3 dep (Worker A)
+├── package.json                              # better-sqlite3 dep
 ├── src/
-│   ├── event-log/                            # Worker A
-│   │   ├── index.ts                          # re-exports
+│   ├── event-log/                            # internal — append, replay, migrations
+│   │   ├── index.ts                          # internal re-exports
 │   │   ├── event-log.ts                      # append, readFromLsn, openDatabase
 │   │   ├── migrations.ts                     # forward-only migration runner
 │   │   └── 001_initial.sql                   # schema
-│   ├── sqlite-receipt-store.ts               # Worker A — implements ReceiptStore
-│   ├── receipt-store.ts                      # Worker B extends interface (list signature change)
-│   ├── receipts.ts                           # Worker B — cursor handling on /api/threads/:tid/receipts
-│   ├── listener.ts                           # untouched (route shape unchanged)
-│   ├── index.ts                              # Worker A adds SqliteReceiptStore export
-│   └── ...
+│   ├── sqlite-receipt-store.ts               # public via `@wuphf/broker/sqlite` subpath
+│   ├── receipt-store.ts                      # ReceiptStore interface + InMemory impl + cursor helpers
+│   ├── receipts.ts                           # cursor handling on /api/threads/:tid/receipts
+│   ├── listener.ts                           # routes
+│   └── index.ts                              # `@wuphf/broker` root surface (does NOT re-export SqliteReceiptStore)
 ├── tests/
-│   ├── event-log.spec.ts                     # Worker A
-│   ├── sqlite-receipt-store.spec.ts          # Worker A
-│   ├── receipt-store-parity.spec.ts          # Worker A — runs the same suite against both stores
-│   └── receipts.spec.ts                      # Worker B — adds cursor pagination tests
+│   ├── event-log.spec.ts
+│   ├── sqlite-receipt-store.spec.ts
+│   ├── receipt-store-parity.spec.ts          # same suite against both stores
+│   └── receipts.spec.ts
 ├── docs/
 │   └── event-log-projections-design.md       # this file
-└── README.md                                 # Worker B updates route table
+└── README.md
 ```
-
-**Hard rule**: Worker A and Worker B do NOT overlap on file changes except for:
-- `packages/broker/src/receipt-store.ts` — Worker B owns the interface change (new `list` signature). Worker A consumes it.
-- `packages/broker/src/index.ts` — Worker A adds the `SqliteReceiptStore` export. Worker B does not touch.
-
-If a file is in both columns, escalate to the integration step — do not race the edit.
 
 ## Event log schema (SQLite, `STRICT` mode, WAL)
 
@@ -239,7 +228,7 @@ list(filter?: ListFilter): Promise<ListPage>;
 
 **Ordering**: LSN ascending. For the in-memory store, LSN is replaced by insertion order (1-indexed). Same wire shape.
 
-## HTTP wire change — `GET /api/threads/:tid/receipts` (owned by Worker B)
+## HTTP wire change — `GET /api/threads/:tid/receipts`
 
 ### Query parameters
 
@@ -276,66 +265,16 @@ The default-limit choice (api/architecture triangulation T2): the store's `DEFAU
 - Standardized: RFC 8288 is the boring-tech default; both `fetch` and any HTTP library can pluck the header.
 - The bare-array body keeps the JSON-by-default ergonomics from branch 5.
 
-## Storage location (Worker A)
+## Storage location
 
-- Default path: `<app.getPath("userData")>/event-log.sqlite`
-- For `createBroker` callers that don't supply a `receiptStore`, the broker still defaults to `InMemoryReceiptStore` (unchanged). The durable store is opt-in via host wiring — the Electron main process is responsible for constructing it. Branch 6 does NOT change the default.
-- Wiring to `apps/desktop/src/main/` is OUT OF SCOPE for the parallel workers and lands in the integration commit.
+- Default path: `<app.getPath("userData")>/event-log.sqlite`.
+- For `createBroker` callers that don't supply a `receiptStore`, the broker defaults to `InMemoryReceiptStore`. The durable store is opt-in via host wiring — the Electron main process plumbs the path through `WUPHF_RECEIPT_STORE_PATH` and the utility process dynamic-imports `SqliteReceiptStore` from `@wuphf/broker/sqlite` (so the native binding is only loaded when actually used).
 
-## Test plan
+## Test coverage
 
-### Worker A — sqlite-receipt-store.spec.ts
+The implementation covers:
 
-1. `put` returns `{existed: false}`, then `get` round-trips the receipt.
-2. Duplicate `put` returns `{existed: true}`; event_log row count stays at 1.
-3. `list({ threadId })` returns receipts for that thread only, in LSN order.
-4. `list({ threadId, limit: 5 })` returns ≤5 items and a `nextCursor` when more exist.
-5. `list({ threadId, cursor: <from prior call> })` skips already-seen items.
-6. `list({ limit: 9999 })` clamps to 1000.
-7. `list({ limit: 0 })` rejects with a thrown error (the HTTP layer surfaces 400).
-8. `list({ cursor: "not-base64-!@#" })` rejects (HTTP → 400).
-9. `close()` is idempotent.
-10. After restart (open + close + open the same file): receipts persist, LSN sequence continues from highest+1.
-11. WAL rollback safety: a `put` that fails mid-transaction (force-thrown after event_log insert, before projection insert) MUST leave both tables empty. Use a transaction-instrumented mock.
-
-### Worker A — event-log.spec.ts
-
-1. `append` assigns monotonically increasing LSNs.
-2. `readFromLsn(0, 10)` returns first 10 events; `readFromLsn(5, 10)` skips lsn ≤ 5.
-3. `readFromLsn(huge, 10)` returns `[]`.
-4. `highestLsn()` matches the last appended LSN.
-5. Migrations run idempotently — open the same file twice; second open is a no-op.
-
-### Worker A — receipt-store-parity.spec.ts
-
-Reusable test suite that takes a `ReceiptStore` factory and runs the same 8–10 contract tests against both `InMemoryReceiptStore` and `SqliteReceiptStore`. Confirms interface parity.
-
-### Worker B — receipts.spec.ts additions
-
-1. First page: `GET /api/threads/<tid>/receipts?limit=2` with 5 receipts → 200, body has 2, `Link` header present.
-2. Last page: follow the `Link` cursor twice → 200, body has 1, no `Link` header.
-3. Default limit: with 150 receipts, no `limit` query → returns 100, has `Link`.
-4. Invalid limit: `?limit=0` → 400 with `{ "error": "invalid_limit" }`.
-5. Invalid cursor: `?cursor=not%21base64` → 400.
-6. Empty thread: `?cursor=` (absent) → 200, empty array, no `Link`.
-
-## Verification commands (both workers MUST run before commit)
-
-```bash
-cd packages/broker && bunx tsc --noEmit
-cd packages/broker && bun run test
-cd packages/broker && bunx biome check src/ tests/
-bunx secretlint
-```
-
-## Disposition reporting
-
-Each worker ends its run with:
-
-```markdown
-| # | Finding | Status | Notes |
-|---|---------|--------|-------|
-| 1 | <short> | FIXED   | commit <sha> |
-| 2 | <short> | SKIPPED | <reason> |
-| 3 | <short> | DEFERRED | <issue / next branch> |
-```
+- `sqlite-receipt-store.spec.ts`: put + get round-trip, duplicate → existed:true with event_log row count unchanged, threadId filtering in LSN order, cursor pagination correctness, limit clamping (>1000 → 1000), limit/cursor validation errors, idempotent `close()`, persistence + LSN-continuation across open/close cycles, WAL rollback safety, `maxReceipts` cap.
+- `event-log.spec.ts`: monotonic LSN assignment, `readFromLsn` skip + limit semantics, `readFromLsn(huge)` returns `[]`, `highestLsn` correctness, idempotent migrations.
+- `receipt-store-parity.spec.ts`: a shared contract suite runs against both `InMemoryReceiptStore` and `SqliteReceiptStore` to prove interface parity.
+- `receipts.spec.ts`: first-page emits `Link`, last-page omits it, route default returns up to `MAX_LIST_LIMIT`, `?limit=0` → 400, malformed `?cursor=` → 400, empty `?cursor=` normalizes to "no cursor", `?limit=9999` clamps to 1000 in the next-page `Link` URL, 503 `store_busy`/`storage_error` mappings.

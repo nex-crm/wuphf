@@ -11,12 +11,14 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-import {
-  type BrokerHandle,
-  type BrokerLogger,
-  createBroker,
-  SqliteReceiptStore,
-} from "@wuphf/broker";
+import { type BrokerHandle, type BrokerLogger, createBroker } from "@wuphf/broker";
+// `SqliteReceiptStore` and its native `better-sqlite3` binding are loaded
+// lazily via the `@wuphf/broker/sqlite` subpath so the utility process
+// doesn't evaluate the native addon when the durable store isn't wired
+// (e.g. headless smoke tests, or future hosts that bring their own
+// ReceiptStore). Type-only import keeps the field type narrow without
+// triggering runtime evaluation.
+import type { SqliteReceiptStore } from "@wuphf/broker/sqlite";
 
 const parentPort = process.parentPort;
 if (!parentPort) {
@@ -36,9 +38,9 @@ const RECEIPT_STORE_PATH_ENV = "WUPHF_RECEIPT_STORE_PATH";
 let aliveInterval: NodeJS.Timeout | null = null;
 let broker: BrokerHandle | null = null;
 // Module-scoped so `shutdown()` can close the SQLite handle after
-// `broker.stop()`. distsys triangulation R2-D2: relying on process
-// teardown to release the DB skips an explicit checkpoint and leaves
-// WAL recovery work for the next launch.
+// `broker.stop()`. Relying on process teardown to release the DB
+// skips an explicit WAL checkpoint and leaves recovery work for the
+// next launch.
 let receiptStore: SqliteReceiptStore | null = null;
 let shuttingDown = false;
 
@@ -112,10 +114,13 @@ async function main(): Promise<void> {
   const trustedOrigins =
     typeof devOrigin === "string" && devOrigin.length > 0 ? [devOrigin] : undefined;
 
-  // Branch 6: open the durable, SQLite event-log-backed ReceiptStore at
-  // the path main/index.ts plumbed through. If the env var is absent we
-  // fall through to createBroker's default (an in-memory store) — useful
-  // for tests and the headless smoke path.
+  // Open the durable, SQLite event-log-backed ReceiptStore at the path
+  // `main/index.ts` plumbed through. If the env var is absent we fall
+  // through to `createBroker`'s default (the in-memory store) — useful
+  // for tests and the headless smoke path. The `SqliteReceiptStore`
+  // module is loaded via dynamic import here so the native
+  // `better-sqlite3` binding is only evaluated when the durable store
+  // is actually wired.
   const receiptStorePath = process.env[RECEIPT_STORE_PATH_ENV];
   if (typeof receiptStorePath === "string" && receiptStorePath.length > 0) {
     const storeDir = dirname(receiptStorePath);
@@ -123,14 +128,15 @@ async function main(): Promise<void> {
     // Electron on first launch; this guards against the host having
     // deleted it (rare but recoverable).
     mkdirSync(storeDir, { recursive: true });
-    // Security triangulation R2-S2: lock down the receipt store directory
-    // and DB sidecar permissions on POSIX. Receipts can contain local
-    // metadata (worktree paths, source reads, model details, error text);
-    // on shared systems the default umask may leave the DB world-readable.
-    // Windows uses ACLs and ignores chmod, so we no-op there.
+    // POSIX: lock down the receipt store directory and DB sidecar
+    // permissions. Receipts can contain local metadata (worktree paths,
+    // source reads, model details, error text); on shared systems the
+    // default umask may leave the DB world-readable. Windows uses ACLs
+    // and ignores `chmod`, so we no-op there.
     if (process.platform !== "win32") {
       tightenStorePermissions(storeDir, receiptStorePath);
     }
+    const { SqliteReceiptStore } = await import("@wuphf/broker/sqlite");
     receiptStore = SqliteReceiptStore.open({ path: receiptStorePath });
     // Tighten again after open — better-sqlite3 creates the DB + WAL/SHM
     // sidecars with the process umask, so the post-open pass catches

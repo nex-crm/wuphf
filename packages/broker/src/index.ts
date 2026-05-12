@@ -20,8 +20,12 @@ export {
   ReceiptStoreFullError,
   ReceiptStoreUnavailableError,
 } from "./receipt-store.ts";
-export type { SqliteReceiptStoreConfig } from "./sqlite-receipt-store.ts";
-export { SqliteReceiptStore } from "./sqlite-receipt-store.ts";
+// `SqliteReceiptStore` is intentionally NOT re-exported from the root.
+// It pulls in the native `better-sqlite3` binding via static import,
+// which evaluates at module load. Hosts that want the durable store
+// import it from the `@wuphf/broker/sqlite` subpath so consumers that
+// only need the listener + in-memory store don't pay the native-load
+// cost. See `docs/event-log-projections-design.md` § "Package surface".
 export { generateApiToken } from "./token.ts";
 export type {
   BrokerConfig,

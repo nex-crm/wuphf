@@ -31,8 +31,9 @@ const THREAD_ID_B = "01ARZ3NDEKTSV4RRFFQ69G5FB0";
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 // Builds a minimal valid Receipt v1 (no thread). Receipt validation is
-// strict; every required field must be present. Branch 5 covers the wire
-// path, not receipt content semantics — so this stays small and reusable.
+// strict; every required field must be present. These tests cover the
+// wire path, not receipt content semantics — so this stays small and
+// reusable.
 function minimalReceiptV1(idStr: string): ReceiptSnapshot {
   const id = asReceiptId(idStr);
   return {
@@ -549,11 +550,11 @@ describe("receipts API", () => {
     });
 
     it("empty `?cursor=` is treated as no cursor (T9)", async () => {
-      // Architecture triangulation T9: an empty `?cursor=` query value is
-      // ergonomically indistinguishable from "no cursor" at the HTTP
-      // boundary; clients should not have to omit the param entirely
-      // just to start at the beginning. The store still rejects `""`
-      // for direct programmatic callers.
+      // An empty `?cursor=` query value is ergonomically
+      // indistinguishable from "no cursor" at the HTTP boundary;
+      // clients should not have to omit the param entirely just to
+      // start at the beginning. The store still rejects `""` for
+      // direct programmatic callers.
       const store = new InMemoryReceiptStore();
       await seedThreadReceipts(store, 3);
       broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
@@ -592,7 +593,7 @@ describe("receipts API", () => {
       expect(await res.json()).toEqual({ error: "invalid_cursor" });
     });
 
-    it("clamps oversized ?limit= in the Link header (R2-A2)", async () => {
+    it("clamps oversized ?limit= in the Link header", async () => {
       // The store already clamps internally, but the route must echo
       // the CLAMPED value in the next-page Link URL — not the caller's
       // raw `?limit=9999`. Otherwise the route's public contract
@@ -624,7 +625,7 @@ describe("receipts API", () => {
       expect(linkPath).not.toContain("limit=9999");
     });
 
-    it("maps ReceiptStoreBusyError to 503 + Retry-After (R2-SRE2)", async () => {
+    it("maps ReceiptStoreBusyError to 503 + Retry-After", async () => {
       // Stub a ReceiptStore that throws the new error class on put.
       // The route should classify it as transient and emit Retry-After.
       const store: ReceiptStore = {
@@ -650,7 +651,7 @@ describe("receipts API", () => {
       expect(await res.json()).toEqual({ error: "store_busy" });
     });
 
-    it("maps ReceiptStoreUnavailableError to 503 without Retry-After (R2-SRE2)", async () => {
+    it("maps ReceiptStoreUnavailableError to 503 without Retry-After", async () => {
       const store: ReceiptStore = {
         async put() {
           throw new ReceiptStoreUnavailableError("test readonly");
@@ -744,7 +745,7 @@ describe("receipts API", () => {
     });
   });
 
-  describe("triangulation pass-1 follow-ups", () => {
+  describe("hardened paths (POST 503 mappings + edge cases)", () => {
     it("returns 415 for application/jsonp (not a JSON-prefix collision)", async () => {
       broker = await createBroker({ port: 0, token: FIXED_TOKEN });
       const res = await postReceipt(broker.url, "{}", {

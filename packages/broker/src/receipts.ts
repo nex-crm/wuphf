@@ -148,11 +148,11 @@ export async function handleReceiptCreate(
       writeJsonResponse(res, 507, JSON.stringify({ error: "store_full" }));
       return;
     }
-    // sre triangulation R2-SRE2: classify storage failures so on-call
-    // sees a structured reason instead of a generic 500. Busy → 503 +
-    // `Retry-After: 1` (retry will likely succeed once write lock
-    // clears). Unavailable → 503 with no `Retry-After` (operator
-    // intervention needed for readonly/IOERR/corruption).
+    // Classify storage failures so on-call sees a structured reason
+    // instead of a generic 500. Busy → 503 + `Retry-After: 1` (retry
+    // will likely succeed once the write lock clears). Unavailable →
+    // 503 with no `Retry-After` (operator intervention needed for
+    // readonly/IOERR/corruption).
     if (err instanceof ReceiptStoreBusyError) {
       deps.logger.warn("receipt_post_rejected", { reason: "store_busy" });
       writeJsonResponse(res, 503, JSON.stringify({ error: "store_busy" }), {
@@ -257,26 +257,26 @@ export async function handleThreadReceiptsList(
   }
 
   // The route's default `limit` (when the caller didn't supply one) is
-  // `MAX_LIST_LIMIT`, NOT the store's `DEFAULT_LIST_LIMIT`. Branch 5
-  // returned up to 1000 receipts in a single call without a continuation
-  // token; clients that ignore `Link` still see the same first-page count
-  // they did before, so the pagination roll-out doesn't silently lose
-  // receipts 101-1000 (api/architecture triangulation T2).
+  // `MAX_LIST_LIMIT`, NOT the store's `DEFAULT_LIST_LIMIT`. The pre-
+  // pagination route returned up to 1000 receipts in a single call
+  // without a continuation token; clients that ignore `Link` still
+  // see the same first-page count they did before, so the pagination
+  // roll-out doesn't silently lose receipts 101-1000.
   //
-  // Canonicalize the effective limit before passing it to the store and
-  // before emitting `Link` (api triangulation R2-A2). The store already
-  // clamps internally, but the public route contract says `limit` is
-  // 1–1000; echoing `?limit=9999` back in a `Link` URL diverges from
-  // that contract and confuses Go/Rust client generators.
+  // Canonicalize the effective limit before passing it to the store
+  // and before emitting `Link`. The store already clamps internally,
+  // but the public route contract says `limit` is 1–1000; echoing
+  // `?limit=9999` back in a `Link` URL diverges from that contract
+  // and confuses Go/Rust client generators.
   const effectiveLimit =
     limitParam !== undefined ? Math.min(limitParam.value, MAX_LIST_LIMIT) : MAX_LIST_LIMIT;
 
-  // Empty `?cursor=` is normalized to "no cursor" (architecture
-  // triangulation T9). The store throws `InvalidListCursorError` for `""`
-  // which is the right semantic for a programmatic caller, but at the
-  // HTTP boundary `?cursor=` (a present-but-blank query value) is
-  // ergonomically indistinguishable from "no cursor" and clients should
-  // not have to omit the param entirely just to start at the beginning.
+  // Empty `?cursor=` is normalized to "no cursor". The store throws
+  // `InvalidListCursorError` for `""` which is the right semantic for
+  // a programmatic caller, but at the HTTP boundary `?cursor=` (a
+  // present-but-blank query value) is ergonomically indistinguishable
+  // from "no cursor" and clients should not have to omit the param
+  // entirely just to start at the beginning.
   const cursorRaw = url.searchParams.get("cursor");
   const cursor = cursorRaw !== null && cursorRaw.length > 0 ? cursorRaw : undefined;
 
@@ -302,8 +302,8 @@ export async function handleThreadReceiptsList(
   const body = `[${page.items.map((r) => receiptToJson(r)).join(",")}]`;
   // Emit the clamped effective limit in the next-page `Link` URL, not
   // the caller's raw value, so an over-cap `?limit=9999` doesn't echo
-  // back as a contract-violating cursor (R2-A2). If the caller didn't
-  // supply `limit`, omit it from the URL so the next call inherits the
+  // back as a contract-violating cursor. If the caller didn't supply
+  // `limit`, omit it from the URL so the next call inherits the
   // route's default.
   const linkLimit = limitParam !== undefined ? String(effectiveLimit) : undefined;
   const headers =

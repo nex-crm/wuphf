@@ -4,7 +4,7 @@ PRAGMA foreign_keys = ON;
 -- monotonically increasing rowids without the `sqlite_sequence` table
 -- write that AUTOINCREMENT requires. We never delete events, so the
 -- "never reuse after delete" guarantee AUTOINCREMENT provides isn't
--- load-bearing here. (perf triangulation T4.)
+-- load-bearing here.
 CREATE TABLE event_log (
   lsn        INTEGER PRIMARY KEY,
   ts_ms      INTEGER NOT NULL,

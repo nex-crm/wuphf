@@ -43,13 +43,13 @@ interface HighestLsnRow {
 export function openDatabase(args: OpenDatabaseArgs): Database.Database {
   const db = new BetterSqlite3(args.path);
   db.pragma("journal_mode = WAL");
-  // `synchronous = FULL` (distsys triangulation T3): the broker returns
-  // HTTP 201 on POST /api/receipts AFTER `store.put` resolves; the client
-  // races the 201 against follow-up reads. `synchronous = NORMAL` would
-  // lose recently committed transactions on power/OS failure even though
-  // the client believed the write was durable. FULL pays one fsync per
-  // commit — on the receipt-write hot path that's one fsync per agent
-  // run, well below the dominant LLM latency.
+  // `synchronous = FULL` because the broker returns HTTP 201 on
+  // POST /api/receipts AFTER `store.put` resolves; the client races
+  // the 201 against follow-up reads. `synchronous = NORMAL` would
+  // lose recently committed transactions on power/OS failure even
+  // though the client believed the write was durable. FULL pays one
+  // fsync per commit — on the receipt-write hot path that's one
+  // fsync per agent run, well below the dominant LLM latency.
   db.pragma("synchronous = FULL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");

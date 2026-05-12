@@ -24,8 +24,8 @@ import {
 // Default receipt count cap for the durable store. Sized 10x the
 // `InMemoryReceiptStore` default to reflect the additional headroom of
 // disk-backed storage, while still bounding an authenticated hostile
-// client's disk-fill DoS (security triangulation R2-S1). Hosts can raise
-// or lower via `SqliteReceiptStore.open({ path, maxReceipts })`.
+// client's disk-fill DoS. Hosts can raise or lower via
+// `SqliteReceiptStore.open({ path, maxReceipts })`.
 const DEFAULT_SQLITE_MAX_RECEIPTS = 100_000;
 
 export interface SqliteReceiptStoreConfig {
@@ -81,7 +81,21 @@ export class SqliteReceiptStore implements ReceiptStore {
     }
   }
 
-  constructor(
+  /**
+   * Test-only factory that constructs a store against a caller-supplied
+   * `Database` handle, skipping migrations. Tests use this to inject a
+   * pre-migrated `:memory:` DB or to stub the event log. Production
+   * callers MUST use `static open()` so migrations always run.
+   */
+  static forTesting(
+    db: Database.Database,
+    eventLog?: EventLog,
+    maxReceipts?: number,
+  ): SqliteReceiptStore {
+    return new SqliteReceiptStore(db, eventLog, maxReceipts);
+  }
+
+  private constructor(
     private readonly db: Database.Database,
     eventLog: EventLog = createEventLog(db),
     maxReceipts: number | undefined = undefined,
@@ -115,8 +129,8 @@ export class SqliteReceiptStore implements ReceiptStore {
         return { existed: true };
       }
       // Cap check runs AFTER the existence check (mirrors the in-memory
-      // store, T12 + R2-S1): a duplicate POST against a store at capacity
-      // still returns 409, not 507. The count query inside the
+      // store): a duplicate POST against a store at capacity still
+      // returns 409, not 507. The count query inside the
       // `BEGIN IMMEDIATE` transaction is serialized against concurrent
       // writers, so the check + insert are atomic.
       const countRow = this.countStmt.get();
@@ -146,16 +160,15 @@ export class SqliteReceiptStore implements ReceiptStore {
       }
       // SQLITE_FULL = filesystem out of space (or page-cache limit hit).
       // Surface as `ReceiptStoreFullError` so the HTTP route reuses the
-      // same 507 path the in-memory store uses for its byte-count cap
-      // (security triangulation T12).
+      // same 507 path the in-memory store uses for its byte-count cap.
       if (isSqliteFullError(err)) {
         throw new ReceiptStoreFullError("SqliteReceiptStore: database full (SQLITE_FULL)");
       }
-      // sre triangulation R2-SRE2: classify the remaining SQLite error
-      // codes so the route can map them to 503 (busy = retryable;
-      // readonly/IOERR = persistent) instead of a generic 500. The
-      // operator's on-call view goes from "internal_error" to a
-      // structured reason that tells them whether a retry will help.
+      // Classify the remaining SQLite error codes so the route can map
+      // them to 503 (busy = retryable; readonly/IOERR = persistent)
+      // instead of a generic 500. The operator's on-call view goes
+      // from "internal_error" to a structured reason that tells them
+      // whether a retry will help.
       if (isSqliteBusyError(err)) {
         throw new ReceiptStoreBusyError("SqliteReceiptStore: database busy (SQLITE_BUSY/LOCKED)");
       }

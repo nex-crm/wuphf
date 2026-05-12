@@ -102,11 +102,11 @@ app
       return;
     }
 
-    // Branch 6: the broker utility process opens a durable, SQLite
-    // event-log-backed ReceiptStore at `<userData>/event-log.sqlite`
-    // when this env var is set; without it the broker falls back to
-    // the in-memory store. We set it unconditionally for the
-    // packaged + dev paths so receipts persist across restarts.
+    // The broker utility process opens a durable, SQLite event-log-
+    // backed ReceiptStore at `<userData>/event-log.sqlite` when this
+    // env var is set; without it the broker falls back to the in-
+    // memory store. We set it unconditionally for the packaged + dev
+    // paths so receipts persist across restarts.
     // `app.getPath("userData")` is safe inside `whenReady`.
     process.env[RECEIPT_STORE_PATH_ENV] = join(app.getPath("userData"), "event-log.sqlite");
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const RENDERER_URL_ENV_KEY = "ELECTRON_RENDERER_URL";
+const RECEIPT_STORE_PATH_ENV = "WUPHF_RECEIPT_STORE_PATH";
 
 interface MockBrowserWindowInstance {
   readonly loadURL: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>;
@@ -96,7 +97,7 @@ const electronMock = vi.hoisted(() => {
       on: vi.fn<(event: string, handler: (...args: readonly unknown[]) => void) => void>(),
       quit: vi.fn<() => void>(),
       exit: vi.fn<(code: number) => void>(),
-      // Branch 6: `main/index.ts` calls `app.getPath("userData")` inside
+      // `main/index.ts` calls `app.getPath("userData")` inside
       // `whenReady` to plumb the SQLite event-log path through to the
       // broker utility process. Tests don't exercise the durable store;
       // a fake path is sufficient because broker-entry.ts is mocked.
@@ -274,6 +275,24 @@ describe("main bootstrap", () => {
     const window = getOnlyWindow();
     expect(window.loadURL).toHaveBeenCalledWith("http://127.0.0.1:54321/");
     expect(window.loadFile).not.toHaveBeenCalled();
+  });
+
+  it("plumbs WUPHF_RECEIPT_STORE_PATH to <userData>/event-log.sqlite inside whenReady", async () => {
+    // The broker utility process opens `SqliteReceiptStore` when this
+    // env var is set; main MUST set it unconditionally inside
+    // `whenReady` so receipts persist across restarts. Without this
+    // assertion, a regression that drops the env-var line could
+    // silently fall back to in-memory storage in packaged builds.
+    delete process.env[RECEIPT_STORE_PATH_ENV];
+    electronMock.app.isPackaged = true;
+    brokerMock.setBrokerUrl("http://127.0.0.1:54321");
+
+    await importMainBootstrap();
+
+    expect(process.env[RECEIPT_STORE_PATH_ENV]).toBe(
+      "/tmp/wuphf-test-userData/event-log.sqlite",
+    );
+    expect(electronMock.app.getPath).toHaveBeenCalledWith("userData");
   });
 
   it("falls back to file:// in packaged mode only when the broker URL is unavailable", async () => {

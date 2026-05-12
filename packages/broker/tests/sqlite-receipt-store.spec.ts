@@ -77,7 +77,7 @@ function minimalReceiptV2(id: string, threadIdStr: string): ReceiptSnapshot {
 function openStore(): { readonly db: Database.Database; readonly store: SqliteReceiptStore } {
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
-  return { db, store: new SqliteReceiptStore(db) };
+  return { db, store: SqliteReceiptStore.forTesting(db) };
 }
 
 function tempDbPath(): string {
@@ -277,14 +277,14 @@ describe("SqliteReceiptStore", () => {
     const path = tempDbPath();
     const firstDb = openDatabase({ path });
     runMigrations(firstDb);
-    const firstStore = new SqliteReceiptStore(firstDb);
+    const firstStore = SqliteReceiptStore.forTesting(firstDb);
     const first = minimalReceiptV2(receiptIdAt(1), THREAD_A);
     await firstStore.put(first);
     firstStore.close();
 
     const secondDb = openDatabase({ path });
     runMigrations(secondDb);
-    const secondStore = new SqliteReceiptStore(secondDb);
+    const secondStore = SqliteReceiptStore.forTesting(secondDb);
     try {
       const second = minimalReceiptV2(receiptIdAt(2), THREAD_A);
 
@@ -321,10 +321,10 @@ describe("SqliteReceiptStore", () => {
     }
   });
 
-  it("throws ReceiptStoreFullError when maxReceipts is exceeded (R2-S1 quota)", async () => {
+  it("throws ReceiptStoreFullError when maxReceipts is exceeded", async () => {
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
-    const store = new SqliteReceiptStore(db, undefined, 2);
+    const store = SqliteReceiptStore.forTesting(db, undefined, 2);
     try {
       await store.put(minimalReceiptV2(receiptIdAt(1), THREAD_A));
       await store.put(minimalReceiptV2(receiptIdAt(2), THREAD_A));
@@ -339,13 +339,13 @@ describe("SqliteReceiptStore", () => {
     }
   });
 
-  it("returns existed:true (not 507) when a duplicate hits at capacity (R2-S1)", async () => {
+  it("returns existed:true (not 507) when a duplicate hits at capacity", async () => {
     // Mirror the in-memory cap-vs-collision invariant: the existence
     // check runs BEFORE the count check, so a retry of an already-stored
     // receipt at capacity returns 409 not 507.
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
-    const store = new SqliteReceiptStore(db, undefined, 1);
+    const store = SqliteReceiptStore.forTesting(db, undefined, 1);
     try {
       const r = minimalReceiptV1(receiptIdAt(1));
       await store.put(r);
@@ -355,13 +355,13 @@ describe("SqliteReceiptStore", () => {
     }
   });
 
-  it("rejects non-positive or non-integer maxReceipts at construction (R2-S1)", () => {
+  it("rejects non-positive or non-integer maxReceipts at construction", () => {
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
     try {
-      expect(() => new SqliteReceiptStore(db, undefined, 0)).toThrow(/positive integer/);
-      expect(() => new SqliteReceiptStore(db, undefined, -1)).toThrow(/positive integer/);
-      expect(() => new SqliteReceiptStore(db, undefined, 1.5)).toThrow(/positive integer/);
+      expect(() => SqliteReceiptStore.forTesting(db, undefined, 0)).toThrow(/positive integer/);
+      expect(() => SqliteReceiptStore.forTesting(db, undefined, -1)).toThrow(/positive integer/);
+      expect(() => SqliteReceiptStore.forTesting(db, undefined, 1.5)).toThrow(/positive integer/);
     } finally {
       db.close();
     }

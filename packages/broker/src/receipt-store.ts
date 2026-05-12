@@ -1,13 +1,17 @@
 // In-process receipt storage interface.
 //
-// Branch 5 shipped an in-memory implementation only; branch 6
-// (`feat/event-log-projections`) adds a durable, SQLite event-log-backed
-// `SqliteReceiptStore` behind this same interface. The `list` method
-// evolved in branch 6 to return a paginated `ListPage` with an opaque
-// cursor — see `docs/event-log-projections-design.md` for the contract
-// both implementations satisfy. Idempotency-key semantics (byte-identical
-// retry returns 200 no-op) are still deferred to a later branch; the
-// current `{ existed: boolean }` return is unchanged.
+// Two implementations satisfy this contract:
+//   - `InMemoryReceiptStore` — process-local, lost across restarts.
+//     Default when `createBroker` is called without a `receiptStore`.
+//   - `SqliteReceiptStore` (in `@wuphf/broker/sqlite`) — durable,
+//     event-log-backed. Loaded lazily so consumers that only need the
+//     in-memory store don't pay the native-binding cost.
+//
+// `list` returns a paginated `ListPage` with an opaque cursor; see
+// `docs/event-log-projections-design.md` for the wire contract.
+// Idempotency-key semantics (byte-identical retry returns 200 no-op)
+// are deferred — `put`'s current `{ existed: boolean }` return is the
+// established shape.
 //
 // Idempotency note: `put` is "insert if absent" — the same id with a
 // different payload returns `existed:true` and the stored value is NOT
@@ -114,8 +118,6 @@ export class ReceiptStoreFullError extends Error {
  * busy timeout, or other transient contention). Routes catch this and
  * respond with `503 Service Unavailable` + `Retry-After: 1`. The
  * distinction from `ReceiptStoreUnavailableError` is retryability.
- *
- * sre triangulation R2-SRE2.
  */
 export class ReceiptStoreBusyError extends Error {
   override readonly name = "ReceiptStoreBusyError";
@@ -126,7 +128,7 @@ export class ReceiptStoreBusyError extends Error {
  * client cannot recover from with a retry (SQLITE_READONLY,
  * SQLITE_IOERR_*, schema mismatch). Routes catch this and respond with
  * `503 Service Unavailable` (no `Retry-After`); the operator must
- * intervene. sre triangulation R2-SRE2.
+ * intervene.
  */
 export class ReceiptStoreUnavailableError extends Error {
   override readonly name = "ReceiptStoreUnavailableError";
@@ -137,7 +139,7 @@ export class ReceiptStoreUnavailableError extends Error {
  * (malformed base64url or doesn't decode to the expected `lsn:<n>` shape).
  * The HTTP route catches and responds 400. Intentionally carries NO
  * attacker-controlled content — the raw cursor is hostile input and
- * MUST NOT be echoed into log payloads (see security triangulation T6).
+ * MUST NOT be echoed into log payloads.
  */
 export class InvalidListCursorError extends Error {
   override readonly name = "InvalidListCursorError";
@@ -157,11 +159,11 @@ export class InvalidListLimitError extends Error {
   }
 }
 
-// RFC 4648 §5 base64url alphabet, unpadded — the only canonical form this
-// package accepts for cursors. Node's `Buffer.from(_, "base64url")` is
-// permissive and accepts trailing junk + non-canonical aliases (e.g.
-// `bHNuOjE!` decodes to `lsn:1`); we pre-validate the alphabet first
-// (security triangulation T5).
+// RFC 4648 §5 base64url alphabet, unpadded — the only canonical form
+// this package accepts for cursors. Node's `Buffer.from(_, "base64url")`
+// is permissive and accepts trailing junk + non-canonical aliases
+// (e.g. `bHNuOjE!` decodes to `lsn:1`); pre-validate the alphabet first
+// so a strict Go/Rust decoder doesn't diverge from us.
 const CURSOR_WIRE_PATTERN = /^[A-Za-z0-9_-]+$/;
 const CURSOR_LSN_TAIL_PATTERN = /^[1-9][0-9]*$/;
 
@@ -187,8 +189,7 @@ export function encodeListCursor(lsn: number): string {
 
 /**
  * Decode an opaque cursor to its LSN, or throw `InvalidListCursorError`
- * on malformed input. Strict validation rules (api/security triangulation
- * T5, T7):
+ * on malformed input. Strict validation rules:
  *
  * - Empty string is rejected (HTTP `?cursor=` is normalized to "no
  *   cursor" by the route handler; an empty cursor reaching the store
@@ -225,14 +226,13 @@ export function decodeListCursor(cursor: string): number {
   if (!Number.isSafeInteger(lsn) || lsn <= 0) {
     throw new InvalidListCursorError();
   }
-  // Canonical round-trip check (api triangulation R2-A1). Node's
-  // base64url decoder accepts non-canonical inputs that share a
-  // prefix's bit pattern: e.g. `bHNuOjE` is canonical for `lsn:1`,
-  // but `bHNuOjF`, `bHNuOjG`, `bHNuOjH` all decode to the same bytes.
-  // A strict Go/Rust implementer using raw_url decoding rejects those;
-  // we must too, or the same logical LSN has multiple equally-valid
-  // wire forms and Go/JS implementations disagree on the validation
-  // surface.
+  // Canonical round-trip check. Node's base64url decoder accepts
+  // non-canonical inputs that share a prefix's bit pattern: e.g.
+  // `bHNuOjE` is canonical for `lsn:1`, but `bHNuOjF`, `bHNuOjG`,
+  // `bHNuOjH` all decode to the same bytes. A strict Go/Rust decoder
+  // using raw_url alphabet rules rejects those; we must too, or the
+  // same logical LSN has multiple equally-valid wire forms and
+  // cross-language implementations disagree on the validation surface.
   if (Buffer.from(decoded, "utf8").toString("base64url") !== cursor) {
     throw new InvalidListCursorError();
   }
@@ -332,9 +332,8 @@ export class InMemoryReceiptStore implements ReceiptStore {
 
     // Iterate the underlying Map/Set directly — no `Array.from` snapshot —
     // so the per-call work is O(skipped + page). Maps preserve insertion
-    // order in V8, and our `byThread` Set is populated in lockstep with
-    // the LSN assignment in `put`, so iteration order is the LSN order.
-    // (perf triangulation T8.)
+    // order in V8, and the `byThread` Set is populated in lockstep with
+    // the LSN assignment in `put`, so iteration order matches LSN order.
     const out: ReceiptSnapshot[] = [];
     let lastLsn = 0;
     let hasMore = false;
