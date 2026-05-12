@@ -229,6 +229,7 @@ const initialUnhandledRejectionListeners = new Set<ProcessListener>(
 
 describe("main bootstrap", () => {
   const previousRendererUrl = process.env[RENDERER_URL_ENV_KEY];
+  const previousReceiptStorePath = process.env[RECEIPT_STORE_PATH_ENV];
 
   beforeEach(() => {
     vi.resetModules();
@@ -240,6 +241,7 @@ describe("main bootstrap", () => {
     electronMock.app.on.mockClear();
     electronMock.app.quit.mockClear();
     electronMock.app.exit.mockClear();
+    electronMock.app.getPath.mockClear();
     electronMock.showErrorBox.mockClear();
     electronMock.handle.mockClear();
     electronMock.fork.mockClear();
@@ -250,15 +252,21 @@ describe("main bootstrap", () => {
     loggerMock.createLogger.mockClear();
     cleanupProcessListeners();
     delete process.env[RENDERER_URL_ENV_KEY];
+    delete process.env[RECEIPT_STORE_PATH_ENV];
   });
 
   afterEach(() => {
     cleanupProcessListeners();
     if (previousRendererUrl === undefined) {
       delete process.env[RENDERER_URL_ENV_KEY];
-      return;
+    } else {
+      process.env[RENDERER_URL_ENV_KEY] = previousRendererUrl;
     }
-    process.env[RENDERER_URL_ENV_KEY] = previousRendererUrl;
+    if (previousReceiptStorePath === undefined) {
+      delete process.env[RECEIPT_STORE_PATH_ENV];
+    } else {
+      process.env[RECEIPT_STORE_PATH_ENV] = previousReceiptStorePath;
+    }
   });
 
   it("loads the broker URL when packaged and the broker has reported {ready}", async () => {
@@ -283,7 +291,8 @@ describe("main bootstrap", () => {
     // `whenReady` so receipts persist across restarts. Without this
     // assertion, a regression that drops the env-var line could
     // silently fall back to in-memory storage in packaged builds.
-    delete process.env[RECEIPT_STORE_PATH_ENV];
+    // `beforeEach` already deletes RECEIPT_STORE_PATH_ENV, so we
+    // assert main's `whenReady` is the one that sets it.
     electronMock.app.isPackaged = true;
     brokerMock.setBrokerUrl("http://127.0.0.1:54321");
 

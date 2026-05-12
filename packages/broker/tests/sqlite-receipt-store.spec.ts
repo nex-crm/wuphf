@@ -280,8 +280,11 @@ describe("SqliteReceiptStore", () => {
     runMigrations(firstDb);
     const firstStore = constructSqliteReceiptStoreForTesting(firstDb);
     const first = minimalReceiptV2(receiptIdAt(1), THREAD_A);
-    await firstStore.put(first);
-    firstStore.close();
+    try {
+      await firstStore.put(first);
+    } finally {
+      firstStore.close();
+    }
 
     const secondDb = openDatabase({ path });
     runMigrations(secondDb);
