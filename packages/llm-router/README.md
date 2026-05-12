@@ -66,10 +66,10 @@ runners — there is no parallel call path to an LLM in this codebase.
 
 ```ts
 import { createGateway, createStubProvider } from "@wuphf/llm-router";
-import { createCostLedger } from "@wuphf/broker";
+import { createCostLedger } from "@wuphf/broker/cost-ledger";
 
 const gateway = createGateway({
-  ledger,                             // from @wuphf/broker
+  ledger,                             // from @wuphf/broker/cost-ledger
   providers: [createStubProvider()],
   nowMs: () => Date.now(),
 });
@@ -355,7 +355,7 @@ Runs 10 wakes/minute × 60 minutes against `stub-fixed-cost`. Asserts:
 
 - Final spend is **$5.00 ± $0.05** (read-only ceiling held)
 - Per-agent wake cap throttles **before** the office-daily cap
-- Circuit breaker fires within **3 consecutive failures**
+- Circuit breaker opens after **2 errors within a 10-minute window** (per the gateway's default `breakerErrorThreshold`)
 
 Per RFC §10.4 these assertions are CI-blocking.
 

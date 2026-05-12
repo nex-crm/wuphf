@@ -185,7 +185,7 @@ export function createAnthropicCostEstimator(pricing: AnthropicPricingTable): Co
 /**
  * Validate a pricing table at provider construction. Throws on any
  * invalid entry so the gateway never tries to bill a malformed rate.
- * 
+ *
  */
 export function validateAnthropicPricingTable(table: AnthropicPricingTable): void {
   const models = Object.keys(table);

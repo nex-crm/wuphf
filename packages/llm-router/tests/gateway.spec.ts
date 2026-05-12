@@ -521,8 +521,7 @@ describe("gateway rejects runaway cost estimate before ledger append (#824)", ()
     // estimate uses maxOutputTokens=8 as the hypothetical input/output,
     // which the estimator stubs to 0 for those shapes.
     const estimator: CostEstimator = {
-      estimate: (_model, usage) =>
-        ((usage.outputTokens === 1 ? 200_000_000 : 0) as unknown) as never,
+      estimate: (_model, usage) => (usage.outputTokens === 1 ? 200_000_000 : 0) as unknown as never,
     };
     const provider: Provider = {
       kind,
@@ -572,9 +571,7 @@ describe("concurrent-call coalescing + reservation atomicity (PR #834 round-1 BL
     const eventLog = createEventLog(db);
     const ledger = createCostLedger(db, eventLog);
     let callCount = 0;
-    let resolveProvider: (
-      v: ProviderResponseLike,
-    ) => void = () => {
+    let resolveProvider: (v: ProviderResponseLike) => void = () => {
       // assigned in the provider call below
     };
     const providerCallPromise = new Promise<ProviderResponseLike>((r) => {

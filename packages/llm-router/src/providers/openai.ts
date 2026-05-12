@@ -184,7 +184,7 @@ export function createOpenAIProvider(args: CreateOpenAIProviderArgs): Provider {
  *   1. `req.requestKey` — gateway-computed `hashRequest(ctx, req)`.
  *      This is context-scoped so two different agents sending the
  *      same prompt do NOT collide on the server-side dedup window.
- *      
+ *
  *   2. Content-only fallback for callers that build a request outside
  *      the gateway path (direct tests, manual smoke calls). NOT used
  *      in production.
@@ -323,12 +323,20 @@ function readHeader(headers: unknown, name: string): string | undefined {
  * not an unclassified `TypeError`.
  */
 function buildProviderResponse(raw: OpenAIChatCompletion): ProviderResponse {
-  const first = raw.choices[0];
   if (raw.usage === undefined) {
     throw new ProviderError(OPENAI_PROVIDER_KIND, new Error("openai_usage_missing"));
   }
+  // Empty choices array is a provider post-condition violation: the SDK
+  // shapes `choices` as a non-streaming array of completions, and a zero-
+  // length response (no message at all, but usage billed) would otherwise
+  // silently return text="" with the cost row written. Throw a typed
+  // error so the breaker reacts and the caller doesn't pay for nothing.
+  if (raw.choices.length === 0) {
+    throw new ProviderError(OPENAI_PROVIDER_KIND, new Error("openai_choices_empty"));
+  }
   validateUsageCounters(raw.usage);
 
+  const first = raw.choices[0];
   const refusal = first?.message.refusal ?? null;
   const content = first?.message.content ?? "";
   const finishReason = first?.finish_reason ?? null;

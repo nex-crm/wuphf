@@ -75,7 +75,7 @@ interface SdkErrorLike {
  * We pass `headers` directly (NOT `options.idempotencyKey`) — the SDK
  * only forwards the shorthand when its internal `idempotencyHeader`
  * is configured, which the default client leaves undefined. Same bug
- * the OpenAI adapter had; same fix. 
+ * the OpenAI adapter had; same fix.
  */
 export interface AnthropicMessageCreateParams {
   readonly model: string;
@@ -224,7 +224,7 @@ function deriveIdempotencyKey(req: ProviderRequest): string {
   // Prefer the gateway-computed `requestKey` (context-scoped) so two
   // agents with the same prompt don't share a server-side dedup
   // window. Fall back to content-only when constructed outside the
-  // gateway path. 
+  // gateway path.
   if (typeof req.requestKey === "string" && req.requestKey.length > 0) {
     return `wuphf-${req.requestKey}`;
   }

@@ -298,10 +298,13 @@ function parseThresholds(row: BudgetRow): readonly number[] {
  * micro-USD. Operand bounds (per `packages/protocol/src/budgets.ts`):
  *   observed <= MAX_BUDGET_LIMIT_MICRO_USD = 1e12
  *   threshold_bps <= 10_000
- * Their product fits in 2^53 (Number.MAX_SAFE_INTEGER ≈ 9.007e15), so the
- * multiplication is safe in IEEE 754 doubles.
+ * Their product can reach 1e16, which exceeds Number.MAX_SAFE_INTEGER
+ * (≈ 9.007e15) and starts losing integer precision in IEEE 754 doubles.
+ * Use BigInt for the multiplication so the comparison is exact across
+ * the full documented range — the cost over plain Number is one
+ * coercion per threshold per cost event, negligible.
  */
 function crossesThreshold(observed: number, limit: number, thresholdBps: number): boolean {
   if (limit === 0) return false;
-  return observed * 10_000 >= limit * thresholdBps;
+  return BigInt(observed) * 10_000n >= BigInt(limit) * BigInt(thresholdBps);
 }

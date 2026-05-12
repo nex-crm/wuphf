@@ -239,7 +239,7 @@ function buildProviderResponse(
   // Refusal-routing mirrors the OpenAI/Anthropic adapters: refusal
   // prose goes into the separate `refusal` field, `text` is empty so
   // a caller that ignores `refusal` can't treat refusal prose as a
-  // normal completion. 
+  // normal completion.
   const isRefusal = typeof raw.refusal === "string" && raw.refusal.length > 0;
   return {
     text: isRefusal ? "" : raw.text,

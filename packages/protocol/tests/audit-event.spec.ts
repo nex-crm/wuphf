@@ -1498,11 +1498,11 @@ function bodyForAuditKind(kind: AuditEventKind, index: number): Uint8Array {
   if (kind === "budget_threshold_crossed") {
     return costAuditPayloadToBytes(kind, {
       budgetId: asBudgetId("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
-      budgetSetLsn: "v1:7" as EventLsn,
+      budgetSetLsn: lsnFromV1Number(7),
       thresholdBps: 5_000,
       observedMicroUsd: asMicroUsd(2_500_000),
       limitMicroUsd: asMicroUsd(5_000_000),
-      crossedAtLsn: "v1:42" as EventLsn,
+      crossedAtLsn: lsnFromV1Number(42),
       crossedAt: new Date("2026-05-08T18:00:00.000Z"),
     });
   }

@@ -30,6 +30,20 @@ External writes carry `writeId`. A token with `claims.writeId` authorizes only t
 
 Protocol-level resource caps live in `src/budgets.ts` and are exported from `src/index.ts` so downstream consumers can enforce the same contract. The receipt cap is 10 MiB serialized; per-blob caps are 1 MiB for `FrozenArgs` canonical JSON, `SanitizedString` UTF-8 text, and each audit event body before base64/JCS serialization; `EventLsn` strings are capped at 256 bytes before format parsing. Receipt arrays are bounded (`toolCalls` 1,024; `filesChanged`, `sourceReads`, `notebookWrites`, and `wikiWrites` 10,000; `commits` 1,024; `writes` 256; `approvals` 64). Approval tokens are capped at a 30-minute lifetime, approval signatures at 4 KiB, and WebAuthn assertions at 16 KiB. These numbers keep normal large tasks viable while preventing runaway receipts, blobs, event bodies, approval submissions, and stale capabilities from exhausting verifier memory.
 
+### Cost-event + budget caps (wire-contract)
+
+The cost-ledger surface adds five caps that are part of the wire contract — wire payloads that violate these are rejected by `costAuditPayloadToBytes` / `receiptFromJson` BEFORE any storage or signing path runs. Downstream verifiers (TS, Go, Rust) must enforce the same numbers:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `MAX_COST_EVENT_AMOUNT_MICRO_USD` | `100_000_000` ($100) | Per-event spend cap; the gateway validates estimator output against this before `appendCostEvent`. |
+| `MAX_BUDGET_LIMIT_MICRO_USD` | `1_000_000_000_000` ($1M) | Per-budget ceiling; covers the upper bound for office/team/agent budgets. |
+| `MAX_BUDGET_THRESHOLD_BPS` | `10_000` | Threshold basis-points are in `(0, 10_000]`; 10_000 bps = 100% of the budget limit. |
+| `MAX_BUDGET_THRESHOLDS` | `8` | At most 8 threshold-crossed events per budget (e.g. 50/75/90/100%). |
+| `MAX_COST_MODEL_BYTES` | `128` | `cost_event.model` string length cap (covers dated snapshots like `claude-haiku-4-5-20251001`). |
+
+These are first-class wire constants: producers must validate before emit, and consumers must reject before deserialize. Crossing the per-event cap is the primary defense against a runaway estimator billing the office budget in one call.
+
 `receiptFromJson` rejects oversized serialized input before parsing, then checks collection budgets before decoding fields. `receiptToJson` runs the typed budget validator before semantic validation and canonicalization.
 
 ## Merkle root checkpoint wire shape

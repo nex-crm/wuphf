@@ -194,14 +194,21 @@ export function createOllamaProvider(args: CreateOllamaProviderArgs): Provider {
  * protocol `CostUnits` invariant (non-negative integer) holds.
  */
 function usageToCostUnits(raw: OllamaChatResponse): CostUnits {
-  const promptEval = typeof raw.prompt_eval_count === "number" ? raw.prompt_eval_count : 0;
-  const evalCount = typeof raw.eval_count === "number" ? raw.eval_count : 0;
+  // Coerce missing/non-safe-integer counters to 0. NaN, Infinity, floats,
+  // and negative values would otherwise reach the cost_event codec (which
+  // rejects), AFTER the provider has already executed. CostUnits requires
+  // non-negative safe integers.
   return {
-    inputTokens: Math.max(0, promptEval),
-    outputTokens: Math.max(0, evalCount),
+    inputTokens: clampSafeNonNegativeInteger(raw.prompt_eval_count),
+    outputTokens: clampSafeNonNegativeInteger(raw.eval_count),
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
   };
+}
+
+function clampSafeNonNegativeInteger(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return 0;
+  return value;
 }
 
 // Re-export pricing surface so hosts using the subpath get one import line:
