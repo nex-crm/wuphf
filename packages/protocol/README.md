@@ -10,6 +10,7 @@ This package is the moat. It defines the type-system invariants that make tamper
 - **`ReceiptSnapshot`** — append-only audit detail. Every approved tool call produces one.
 - **Audit event** — hash-chained CBOR-line records on disk; the chain hash is computed over a JCS projection (see `serializeAuditEventRecordForHash`) using the formula `eventHash = sha256(asciiLowerHex(prevHash) || jcsBytes(record))`. The ASCII-hex form of `prevHash` is intentional — it keeps debug dumps readable but is non-standard, so cross-language verifiers MUST mix the 64-byte ASCII string, not the 32 raw bytes. `GENESIS_PREV_HASH = sha256("wuphf:audit:genesis:v1")`. Test vectors live in `tests/audit-event.spec.ts` (golden serialization + golden eventHash). Periodic Merkle roots signed by per-install non-exportable key.
 - **IPC envelopes** — renderer ↔ broker over loopback HTTP/SSE/WebSocket. NOT Electron `contextBridge` for app data.
+- **Cost ledger types** — integer `MicroUsd` brand (no float drift), `BudgetId` ULID, closed `BudgetScope`, and three audit payloads (`cost_event`, `budget_set`, `budget_threshold_crossed`) that drive the AI-gateway spend chokepoint. See `docs/modules/cost.md`.
 
 ## No I/O
 

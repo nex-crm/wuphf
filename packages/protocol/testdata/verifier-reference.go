@@ -26,6 +26,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -169,6 +170,39 @@ func canonicalMerkleRoot(rec merkleRootInput) ([]byte, error) {
 	return canonicalize(projection)
 }
 
+// costPayloadKindSet identifies bodyB64 kinds whose payload itself is
+// expected to be canonical JSON (RFC 8785 JCS). The TS writer guarantees
+// `costAuditPayloadToBytes` emits canonical bytes; this verifier
+// independently decodes, re-parses, and re-canonicalizes the body to
+// confirm a non-TS implementation produces the same bytes. Other kinds
+// (boot_marker, thread_*) carry kind-specific bodies — this verifier
+// does not yet decode them.
+var costPayloadKindSet = map[string]bool{
+	"cost_event":               true,
+	"budget_set":               true,
+	"budget_threshold_crossed": true,
+}
+
+// canonicalizeBodyBytes decodes a base64 body, parses it as JSON, and
+// re-canonicalizes via the minimal JCS implementation. Used to confirm
+// the TS writer's canonical body bytes are reproducible from an
+// independent canonicalizer.
+func canonicalizeBodyBytes(bodyB64 string) ([]byte, []byte, error) {
+	decoded, err := base64.StdEncoding.DecodeString(bodyB64)
+	if err != nil {
+		return nil, nil, fmt.Errorf("base64 decode: %w", err)
+	}
+	var parsed interface{}
+	if err := json.Unmarshal(decoded, &parsed); err != nil {
+		return decoded, nil, fmt.Errorf("body is not JSON: %w", err)
+	}
+	canonical, err := canonicalize(parsed)
+	if err != nil {
+		return decoded, nil, fmt.Errorf("canonicalize: %w", err)
+	}
+	return decoded, canonical, nil
+}
+
 func canonicalApprovalClaims(rec approvalClaimsInput) ([]byte, error) {
 	projection := map[string]interface{}{
 		"signerIdentity": rec.SignerIdentity,
@@ -253,6 +287,26 @@ func main() {
 			fmt.Printf("    actual:   %s\n", actualHash)
 			failed++
 			continue
+		}
+		// For cost-payload kinds, also confirm the bodyB64 itself is canonical
+		// JSON: an independent canonicalizer must reproduce identical bytes.
+		// This locks the body-bytes contract that the audit chain relies on.
+		if costPayloadKindSet[vec.Input.Payload.Kind] {
+			decoded, canonical, err := canonicalizeBodyBytes(vec.Input.Payload.BodyB64)
+			if err != nil {
+				fmt.Printf("  %sFAIL%s %s: body canonicalize error: %v\n",
+					colorRed, colorReset, vec.Name, err)
+				failed++
+				continue
+			}
+			if !bytes.Equal(decoded, canonical) {
+				fmt.Printf("  %sFAIL%s %s: body bytes are not canonical JCS\n",
+					colorRed, colorReset, vec.Name)
+				fmt.Printf("    decoded:   %s\n", string(decoded))
+				fmt.Printf("    canonical: %s\n", string(canonical))
+				failed++
+				continue
+			}
 		}
 		fmt.Printf("  %sPASS%s audit-event/%s eventHash=%s%s%s\n",
 			colorGreen, colorReset, vec.Name, colorDim, actualHash[:16]+"…", colorReset)
