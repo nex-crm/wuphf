@@ -72,11 +72,13 @@ export interface Win {
 
 /** One item in the "what didn't work" dead-ends list. */
 export interface DeadEnd {
-  // The doc says NO strikethrough on description. The "discard" tag does
-  // the work. The tag is rendered from `delta` ("discard") rather than
-  // a separate boolean, matching the Karpathy autoresearch shape.
-  delta: string;
-  description: string;
+  // Mirrors the Go wire shape on the broker side (DeadEnd in
+  // internal/team/broker_decision_packet_types.go): `tried` is the
+  // approach the agent attempted, `reason` is the recorded rationale
+  // for abandoning it. The renderer wraps this in the "discard" tag —
+  // there is no separate boolean.
+  tried: string;
+  reason: string;
 }
 
 /** Owner agent's self-authored session report. */
@@ -90,9 +92,15 @@ export interface SessionReport {
 /** Per-file diff summary for the Decision Packet. */
 export interface DiffSummary {
   path: string;
+  // Mirrors the Go wire shape (DiffSummary in
+  // internal/team/broker_decision_packet_types.go) — `status` is the
+  // file-mode tag ("A"/"M"/"D"/"R"…); `renamedFrom` is set when status
+  // is "R". Both are omitempty on the Go side, so the wire payload may
+  // omit them entirely.
+  status?: string;
   additions: number;
   deletions: number;
-  isNew: boolean;
+  renamedFrom?: string;
 }
 
 /** One reviewer's grade on the artifact. */

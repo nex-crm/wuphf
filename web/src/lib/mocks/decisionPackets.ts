@@ -245,14 +245,13 @@ export const POPULATED_PACKET: DecisionPacket = {
     ],
     deadEnds: [
       {
-        delta: "discard",
-        description:
-          "Tried a single-watermark model — couldn't express the holding-but-arrived case",
+        tried: "Single-watermark model",
+        reason:
+          "Couldn't express the holding-but-arrived case with one watermark",
       },
       {
-        delta: "discard",
-        description:
-          "Tried debouncing event arrivals at 100ms — broke the new-event halo trigger",
+        tried: "Debounce event arrivals at 100ms",
+        reason: "Broke the new-event halo trigger",
       },
     ],
     metadata: {
@@ -264,27 +263,27 @@ export const POPULATED_PACKET: DecisionPacket = {
   changedFiles: [
     {
       path: "internal/team/broker_actor.go",
+      status: "M",
       additions: 126,
       deletions: 287,
-      isNew: false,
     },
     {
       path: "internal/team/broker_actor_test.go",
+      status: "A",
       additions: 183,
       deletions: 0,
-      isNew: true,
     },
     {
       path: "internal/team/broker_types.go",
+      status: "M",
       additions: 18,
       deletions: 0,
-      isNew: false,
     },
     {
       path: "web/src/styles/agents.css",
+      status: "M",
       additions: 85,
       deletions: 0,
-      isNew: false,
     },
   ],
   reviewerGrades: [

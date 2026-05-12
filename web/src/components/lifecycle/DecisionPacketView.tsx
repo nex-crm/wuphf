@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import type {
   DecisionPacket,
+  DiffSummary,
   LifecycleState,
   PacketBanner,
 } from "../../lib/types/lifecycle";
@@ -64,8 +65,18 @@ export function DecisionPacketView({
         return;
       }
       if (isStreaming) return;
+      // Ignore auto-repeat keydowns so holding a key cannot fire merge /
+      // request-changes / block / open-in-worktree multiple times in a
+      // row. Each destructive action should require one deliberate press.
+      if (e.repeat) return;
       const action = actionMap[e.key.toLowerCase()];
-      if (action) action();
+      if (action) {
+        // Suppress the default browser handling once we've claimed the
+        // key so e.g. "/" doesn't trigger quick-find and "b" doesn't
+        // type into a focused-but-shouldIgnoreShortcut-missed surface.
+        e.preventDefault();
+        action();
+      }
     }
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -166,9 +177,12 @@ export function DecisionPacketView({
               <h4>What I tried that didn't work (dead ends)</h4>
               <ul>
                 {packet.sessionReport.deadEnds.map((d) => (
-                  <li key={`${d.delta}-${d.description}`} className="dead-end">
-                    <span className="delta">{d.delta}</span>
-                    <span>{d.description}</span>
+                  <li key={`${d.tried}-${d.reason}`} className="dead-end">
+                    <span className="delta">discard</span>
+                    <span>
+                      {d.tried}
+                      {d.reason ? ` — ${d.reason}` : ""}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -180,7 +194,11 @@ export function DecisionPacketView({
                 <span className="stat-pos">+{f.additions}</span>
                 <span className="stat-neg">−{f.deletions}</span>
                 <span className="file-path">{f.path}</span>
-                {f.isNew ? <span className="file-tag">new</span> : <span />}
+                {diffStatusLabel(f) ? (
+                  <span className="file-tag">{diffStatusLabel(f)}</span>
+                ) : (
+                  <span />
+                )}
               </div>
             ))}
           </div>
@@ -353,9 +371,31 @@ function stateLabel(state: LifecycleState): string {
   return state.replace(/_/g, " ");
 }
 
+/**
+ * Render a short tag for the diff row's file-mode column. Mirrors the
+ * Go wire shape: `status` is the single-letter git diff mode tag
+ * (A/M/D/R…) and may be omitted entirely. Returns the empty string for
+ * modified files (the default mode), which suppresses the tag column.
+ */
+function diffStatusLabel(file: DiffSummary): string {
+  const status = (file.status ?? "").trim().toUpperCase();
+  switch (status) {
+    case "A":
+      return "new";
+    case "D":
+      return "deleted";
+    case "R":
+      return file.renamedFrom ? `renamed from ${file.renamedFrom}` : "renamed";
+    default:
+      return "";
+  }
+}
+
 /** True when the keydown event came from a text input or carries a modifier. */
 function shouldIgnoreShortcut(e: KeyboardEvent): boolean {
-  if (e.metaKey || e.ctrlKey || e.altKey) return true;
+  // Treat Shift as a disqualifying modifier alongside Meta / Ctrl / Alt
+  // so combos like Shift+M (capital M) don't fire the merge shortcut.
+  if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return true;
   const target = e.target as HTMLElement | null;
   if (!target) return false;
   return (

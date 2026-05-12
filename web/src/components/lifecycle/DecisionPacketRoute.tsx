@@ -140,7 +140,14 @@ function PacketSkeleton({ onClose }: { onClose: () => void }) {
       data-testid="decision-packet-loading"
       aria-busy="true"
     >
-      <aside className="packet-left" aria-hidden="true">
+      {/*
+        The left column carries the skeleton placeholders (decorative —
+        marked aria-hidden) plus the "Back to inbox" navigation control
+        (interactive — MUST remain visible to assistive tech). Keep the
+        button outside the aria-hidden wrapper so screen-reader users
+        can find the only available action on the loading screen.
+      */}
+      <aside className="packet-left">
         <div className="crumb">
           <button
             type="button"
