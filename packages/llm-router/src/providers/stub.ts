@@ -74,8 +74,12 @@ class StubCostEstimator implements CostEstimator {
  */
 export class StubProvider implements Provider {
   // ProviderKind doesn't have "stub"; "openai-compat" is the catch-all
-  // (see protocol PROVIDER_KIND_VALUES).
+  // for audit-event attribution (see protocol PROVIDER_KIND_VALUES).
+  // The gateway routes by `models`, NOT by `kind`, so this stub can
+  // share `kind` with a future real openai-compat provider without
+  // colliding on model registration.
   readonly kind: ProviderKind = STUB_PROVIDER_KIND;
+  readonly models: readonly string[] = [STUB_MODEL_FIXED_COST, STUB_MODEL_ERROR];
   readonly costEstimator: CostEstimator = new StubCostEstimator();
 
   async complete(req: ProviderRequest): Promise<ProviderResponse> {

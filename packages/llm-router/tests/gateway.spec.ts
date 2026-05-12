@@ -1,14 +1,16 @@
 import { createCostLedger, createEventLog, openDatabase, runMigrations } from "@wuphf/broker";
-import { asAgentSlug, asReceiptId, asTaskId } from "@wuphf/protocol";
+import { asAgentSlug, asProviderKind, asReceiptId, asTaskId } from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   CapExceededError,
   CircuitBreakerOpenError,
+  type CostEstimator,
   createGateway,
   createStubProvider,
   type Gateway,
   IdleModeError,
+  type Provider,
   type ProviderRequest,
   STUB_FIXED_COST_MICRO_USD,
   STUB_MODEL_ERROR,
@@ -130,6 +132,50 @@ describe("dedupe", () => {
       fix.db.close();
     }
   });
+
+  it("dedupe does NOT replay across agents — context is part of the key (B3)", async () => {
+    const fix = setup();
+    try {
+      const ctxA: SupervisorContext = { agentSlug: asAgentSlug("agent_a") };
+      const ctxB: SupervisorContext = { agentSlug: asAgentSlug("agent_b") };
+      // Same prompt, different agents. Each must produce a fresh
+      // cost_event LSN; the second call must NOT replay the first.
+      const r1 = await fix.gateway.complete(ctxA, REQ);
+      const r2 = await fix.gateway.complete(ctxB, REQ);
+      expect(r1.dedupeReplay).toBe(false);
+      expect(r2.dedupeReplay).toBe(false);
+      expect(r2.costEventLsn).not.toBe(r1.costEventLsn);
+      // Both agents have a row in cost_by_agent.
+      expect(fix.ledger.getAgentSpend("agent_a", "2026-05-12")?.totalMicroUsd as number).toBe(
+        STUB_FIXED_COST_MICRO_USD,
+      );
+      expect(fix.ledger.getAgentSpend("agent_b", "2026-05-12")?.totalMicroUsd as number).toBe(
+        STUB_FIXED_COST_MICRO_USD,
+      );
+    } finally {
+      fix.db.close();
+    }
+  });
+
+  it("dedupe does NOT replay across tasks — taskId is part of the key (B3)", async () => {
+    const fix = setup();
+    try {
+      const ctxTask1: SupervisorContext = {
+        agentSlug: asAgentSlug("primary"),
+        taskId: asTaskId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
+      };
+      const ctxTask2: SupervisorContext = {
+        agentSlug: asAgentSlug("primary"),
+        taskId: asTaskId("01BRZ3NDEKTSV4RRFFQ69G5FA1"),
+      };
+      const r1 = await fix.gateway.complete(ctxTask1, REQ);
+      const r2 = await fix.gateway.complete(ctxTask2, REQ);
+      expect(r2.dedupeReplay).toBe(false);
+      expect(r2.costEventLsn).not.toBe(r1.costEventLsn);
+    } finally {
+      fix.db.close();
+    }
+  });
 });
 
 describe("daily cap", () => {
@@ -218,6 +264,66 @@ describe("wake cap", () => {
 });
 
 describe("circuit breaker", () => {
+  it("post-provider failures also record breaker errors (H5)", async () => {
+    // Custom provider whose .complete() succeeds (so the
+    // pre-existing provider-error catch does NOT fire), but whose
+    // estimator throws — exercising the new post-provider catch
+    // around estimate + appendCostEvent. Two failures must open the
+    // breaker.
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const clock: Clock = { now: new Date("2026-05-12T10:00:00.000Z").getTime() };
+    const throwingEstimator: CostEstimator = {
+      estimate() {
+        throw new Error("estimator_unavailable");
+      },
+    };
+    const failingProvider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["test-throwing-model"],
+      costEstimator: throwingEstimator,
+      async complete() {
+        return Promise.resolve({
+          text: "ok",
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        });
+      },
+    };
+    const gateway = createGateway({
+      ledger,
+      providers: [failingProvider],
+      nowMs: () => clock.now,
+    });
+    try {
+      await expect(
+        gateway.complete(CTX, {
+          model: "test-throwing-model",
+          prompt: "p1",
+          maxOutputTokens: 8,
+        }),
+      ).rejects.toThrow(/estimator_unavailable/);
+      await expect(
+        gateway.complete(CTX, {
+          model: "test-throwing-model",
+          prompt: "p2",
+          maxOutputTokens: 8,
+        }),
+      ).rejects.toThrow(/estimator_unavailable/);
+      const inspection = gateway.inspect();
+      const agent = inspection.perAgent.get("primary");
+      expect(agent?.breaker.status).toBe("open");
+    } finally {
+      db.close();
+    }
+  });
+
   it("opens after 2 errors in the window and rejects further calls until cooldown", async () => {
     const fix = setup();
     try {

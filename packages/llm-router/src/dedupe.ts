@@ -12,7 +12,7 @@
 
 import { canonicalJSON, type Sha256Hex, sha256Hex } from "@wuphf/protocol";
 
-import type { GatewayCompletionResult, ProviderRequest } from "./types.ts";
+import type { GatewayCompletionResult, ProviderRequest, SupervisorContext } from "./types.ts";
 
 export interface DedupeConfig {
   /** Sliding window. RFC §7.5 default: 60_000 (60s). */
@@ -47,9 +47,14 @@ export class DedupeCache {
    * Look up a cached response. Returns the cached `GatewayCompletionResult`
    * with `dedupeReplay: true`, or `null` if no live entry exists.
    * Side effect: prunes expired entries it encounters.
+   *
+   * The key includes `SupervisorContext` so two different agents (or two
+   * tasks under one agent) with the same prompt do NOT share an LSN.
+   * Without the context, replay leaks cost attribution and bypasses the
+   * second caller's wake-cap accounting.
    */
-  lookup(req: ProviderRequest): GatewayCompletionResult | null {
-    const key = hashRequest(req);
+  lookup(ctx: SupervisorContext, req: ProviderRequest): GatewayCompletionResult | null {
+    const key = hashRequest(ctx, req);
     const entry = this.entries.get(key);
     if (entry === undefined) return null;
     const now = this.nowMs();
@@ -65,8 +70,8 @@ export class DedupeCache {
    * (with `dedupeReplay: false`). The cache stores the result as-is and
    * flips the flag on lookup.
    */
-  store(req: ProviderRequest, result: GatewayCompletionResult): void {
-    const key = hashRequest(req);
+  store(ctx: SupervisorContext, req: ProviderRequest, result: GatewayCompletionResult): void {
+    const key = hashRequest(ctx, req);
     this.entries.set(key, {
       result,
       expiresAtMs: this.nowMs() + this.windowMs,
@@ -92,12 +97,24 @@ export class DedupeCache {
 }
 
 /**
- * SHA-256 of the request's canonical-JSON projection. `canonicalJSON`
- * is RFC 8785 — key order is deterministic. The same logical request
- * with different key insertion orders hashes identically.
+ * SHA-256 of the (context, request) canonical-JSON projection.
+ * `canonicalJSON` is RFC 8785 — key order is deterministic.
+ *
+ * The context fields (`agentSlug`, `taskId`, `receiptId`) are part of
+ * the key so dedupe stays scoped to one caller. Without them the same
+ * prompt from a different agent would replay the original caller's
+ * `costEventLsn` — leaking cost attribution AND bypassing wake-cap
+ * accounting for the second caller. See triangulation finding B3.
+ *
+ * `null` is used for absent optional fields so the canonical JSON shape
+ * stays stable across callers; `omitUndefined` would shift key ordering
+ * between presence/absence callers.
  */
-export function hashRequest(req: ProviderRequest): Sha256Hex {
+export function hashRequest(ctx: SupervisorContext, req: ProviderRequest): Sha256Hex {
   const canonical = canonicalJSON({
+    agentSlug: ctx.agentSlug as string,
+    taskId: (ctx.taskId as string | undefined) ?? null,
+    receiptId: (ctx.receiptId as string | undefined) ?? null,
     model: req.model,
     prompt: req.prompt,
     maxOutputTokens: req.maxOutputTokens,
