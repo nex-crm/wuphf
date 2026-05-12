@@ -32,6 +32,22 @@ export type {
 export { createCostLedger } from "./cost-ledger/index.ts";
 export type { ReplayCheckReport, ReplayDiscrepancy } from "./cost-ledger/replay-check.ts";
 export { runReplayCheck } from "./cost-ledger/replay-check.ts";
+// Event log primitives. Hosts constructing a cost ledger need these to
+// open the database, apply migrations, and instantiate the event log
+// the ledger writes through.
+export type {
+  AppendArgs,
+  EventLog,
+  EventLogRecord,
+  EventType,
+  OpenDatabaseArgs,
+} from "./event-log/index.ts";
+export {
+  CURRENT_SCHEMA_VERSION,
+  createEventLog,
+  openDatabase,
+  runMigrations,
+} from "./event-log/index.ts";
 export { createBroker } from "./listener.ts";
 export type {
   InMemoryReceiptStoreConfig,
