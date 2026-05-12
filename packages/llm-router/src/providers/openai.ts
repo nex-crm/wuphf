@@ -81,12 +81,16 @@ export interface OpenAIChatCompletionCreateParams {
   }>;
 }
 
+/**
+ * SDK request options we use. We pass `headers` directly (NOT the
+ * `idempotencyKey` shorthand) because the SDK only forwards
+ * `options.idempotencyKey` when its internal `idempotencyHeader`
+ * field is configured, and the default `OpenAI` client leaves it
+ * undefined — so the shorthand is a silent no-op.
+ * See triangulation #3 finding B3-1 (5-lens BLOCK/HIGH).
+ */
 export interface OpenAIRequestOptions {
-  /**
-   * Stable string the SDK forwards as the `idempotency-key` header.
-   * OpenAI's server deduplicates same-key requests within a window.
-   */
-  readonly idempotencyKey?: string;
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface OpenAIUsage {
@@ -101,7 +105,10 @@ export interface OpenAIChatCompletion {
     readonly message: { readonly content: string | null; readonly refusal: string | null };
     readonly finish_reason: string | null;
   }>;
-  readonly usage: OpenAIUsage;
+  // SDK marks `usage` optional. Adapter validates presence before
+  // billing rather than throwing an unclassified TypeError.
+  // See triangulation #3 finding B3-5.
+  readonly usage?: OpenAIUsage;
 }
 
 export interface OpenAIClient {
@@ -144,17 +151,30 @@ export function createOpenAIProvider(args: CreateOpenAIProviderArgs): Provider {
       if (!Number.isSafeInteger(req.maxOutputTokens) || req.maxOutputTokens <= 0) {
         throw new BadRequestError(OPENAI_PROVIDER_KIND, new Error("maxOutputTokens_invalid"));
       }
-      const params: OpenAIChatCompletionCreateParams = {
-        model: req.model,
-        // Pass both: SDK accepts max_completion_tokens for GPT-5 family,
-        // max_tokens for legacy models. OpenAI's API ignores the unused
-        // one. Sending both is cheaper than sniffing model generation.
-        max_tokens: req.maxOutputTokens,
-        max_completion_tokens: req.maxOutputTokens,
-        messages: [{ role: "user", content: req.prompt }],
-      };
+      // B3-4: model-aware token field. GPT-5 and reasoning models
+      // (o1, o3, o4) deprecated `max_tokens` and require
+      // `max_completion_tokens`. Legacy GPT-4.1 and earlier use
+      // `max_tokens`. Sending both can yield a 400 on reasoning models.
+      const params: OpenAIChatCompletionCreateParams = isReasoningOrGpt5(req.model)
+        ? {
+            model: req.model,
+            max_completion_tokens: req.maxOutputTokens,
+            messages: [{ role: "user", content: req.prompt }],
+          }
+        : {
+            model: req.model,
+            max_tokens: req.maxOutputTokens,
+            messages: [{ role: "user", content: req.prompt }],
+          };
+      // B3-1: pass an explicit Idempotency-Key header, NOT
+      // `options.idempotencyKey`. The SDK's `idempotencyKey` shorthand
+      // is only forwarded when its internal `idempotencyHeader` field
+      // is set, which the default client leaves undefined.
+      // B3-2: derive the key from req.requestKey (gateway-computed,
+      // includes ctx) so two agents with the same prompt don't share
+      // a server-side dedup window.
       const options: OpenAIRequestOptions = {
-        idempotencyKey: deriveIdempotencyKey(req),
+        headers: { "Idempotency-Key": deriveIdempotencyKey(req) },
       };
       let raw: OpenAIChatCompletion;
       try {
@@ -162,25 +182,44 @@ export function createOpenAIProvider(args: CreateOpenAIProviderArgs): Provider {
       } catch (err) {
         throw classifySdkError(err);
       }
-      return {
-        text: extractText(raw),
-        usage: usageToCostUnits(raw.usage),
-      };
+      return buildProviderResponse(raw);
     },
   };
 }
 
 /**
- * Derive a stable idempotency key from the request payload. Same logical
- * request → same key → OpenAI dedupes server-side.
+ * Derive a stable idempotency key. Preference order:
+ *
+ *   1. `req.requestKey` — gateway-computed `hashRequest(ctx, req)`.
+ *      This is context-scoped so two different agents sending the
+ *      same prompt do NOT collide on the server-side dedup window.
+ *      See triangulation #3 finding B3-2.
+ *   2. Content-only fallback for callers that build a request outside
+ *      the gateway path (direct tests, manual smoke calls). NOT used
+ *      in production.
+ *
+ * Either way the key is prefixed with `wuphf-` so the request is
+ * identifiable in Anthropic / OpenAI-side support traces.
  */
 function deriveIdempotencyKey(req: ProviderRequest): string {
+  if (typeof req.requestKey === "string" && req.requestKey.length > 0) {
+    return `wuphf-${req.requestKey}`;
+  }
   const projection = canonicalJSON({
     model: req.model,
     prompt: req.prompt,
     maxOutputTokens: req.maxOutputTokens,
   });
   return `wuphf-${sha256Hex(projection)}`;
+}
+
+/**
+ * GPT-5 family and reasoning models (`o1`, `o3`, `o4`) deprecated
+ * `max_tokens` and require `max_completion_tokens`. Sending the
+ * legacy field can yield 400. Other models accept `max_tokens`.
+ */
+function isReasoningOrGpt5(model: string): boolean {
+  return model.startsWith("gpt-5") || /^o[1-9]/.test(model);
 }
 
 function classifySdkError(err: unknown): BadRequestError | ProviderError {
@@ -230,11 +269,22 @@ function extractSdkErrorMetadata(err: unknown): ExtractedSdkMetadata {
     }
   }
   if (typeof e.headers === "object" && e.headers !== null) {
-    const retryAfter = readHeader(e.headers, "retry-after");
-    if (retryAfter !== undefined) {
-      const seconds = Number(retryAfter);
-      if (Number.isFinite(seconds) && seconds >= 0) {
-        out.retryAfterMs = Math.round(seconds * 1000);
+    // B3-7: prefer `retry-after-ms` (millisecond precision) over
+    // `retry-after` (seconds). The OpenAI SDK reads both for its
+    // internal retry logic; we mirror that order.
+    const retryAfterMs = readHeader(e.headers, "retry-after-ms");
+    if (retryAfterMs !== undefined) {
+      const ms = Number(retryAfterMs);
+      if (Number.isFinite(ms) && ms >= 0) {
+        out.retryAfterMs = Math.round(ms);
+      }
+    } else {
+      const retryAfter = readHeader(e.headers, "retry-after");
+      if (retryAfter !== undefined) {
+        const seconds = Number(retryAfter);
+        if (Number.isFinite(seconds) && seconds >= 0) {
+          out.retryAfterMs = Math.round(seconds * 1000);
+        }
       }
     }
   }
@@ -261,45 +311,75 @@ function readHeader(headers: unknown, name: string): string | undefined {
 }
 
 /**
- * Extract response text from the first choice. A refusal lands in a
- * separate `refusal` field (model declined to answer) — we surface
- * that as text too, so the caller can see WHAT the refusal said. Tool
- * calls / function calls are dropped for PR B.3 (no tool-use plumbing
- * yet in the gateway response shape).
+ * Build the `ProviderResponse` from an OpenAI chat completion.
+ *
+ * Surfaces:
+ *   - `text`: `message.content` for normal completions, `""` when
+ *     content is null and there's no refusal. Refusals are NOT folded
+ *     into `text` — they go into the separate `refusal` field so a
+ *     caller can implement policy gates without parsing prose. See
+ *     triangulation #3 finding B3-3.
+ *   - `refusal`: `message.refusal` when present.
+ *   - `finishReason`: passed through from the SDK so callers can
+ *     distinguish `stop` from `length` (truncation), `content_filter`,
+ *     `tool_calls`, etc.
+ *   - `usage`: validated for presence and non-negative-integer shape;
+ *     `cached_tokens` is clamped to `prompt_tokens` so a malformed
+ *     provider response can't overstate cached billing.
+ *     See triangulation #3 findings B3-5, B3-6.
+ *
+ * Throws `ProviderError` if usage is missing — that's a provider
+ * post-condition violation and the caller deserves a typed error,
+ * not an unclassified `TypeError`.
  */
-function extractText(raw: OpenAIChatCompletion): string {
+function buildProviderResponse(raw: OpenAIChatCompletion): ProviderResponse {
   const first = raw.choices[0];
-  if (first === undefined) return "";
-  if (first.message.refusal !== null) {
-    return first.message.refusal;
+  if (raw.usage === undefined) {
+    throw new ProviderError(OPENAI_PROVIDER_KIND, new Error("openai_usage_missing"));
   }
-  return first.message.content ?? "";
-}
+  validateUsageCounters(raw.usage);
 
-/**
- * Translate OpenAI's `CompletionUsage` to our `CostUnits` shape.
- *
- * Key subtlety: OpenAI's `prompt_tokens` INCLUDES `cached_tokens`. To
- * apply the discounted cached-input rate correctly, we split them:
- *
- *   inputTokens (fresh)  = prompt_tokens - cached_tokens
- *   cacheReadTokens      = cached_tokens
- *   cacheCreationTokens  = 0   (OpenAI caches automatically; no
- *                              separate creation line)
- *
- * If the SDK omits `prompt_tokens_details` (older models that don't
- * surface caching), `cached_tokens` defaults to 0 and all input bills
- * at the fresh rate.
- */
-function usageToCostUnits(usage: OpenAIUsage): CostUnits {
-  const cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? 0;
-  const freshInput = Math.max(0, usage.prompt_tokens - cachedTokens);
-  return {
+  const refusal = first?.message.refusal ?? null;
+  const content = first?.message.content ?? "";
+  const finishReason = first?.finish_reason ?? null;
+
+  // Compute cost units: prompt_tokens INCLUDES cached_tokens; the
+  // discounted cached-input rate applies to the cached subset, the
+  // full rate to the remainder. Clamp cached to prompt so a malformed
+  // response can't double-bill.
+  const cachedTokensRaw = raw.usage.prompt_tokens_details?.cached_tokens ?? 0;
+  const cachedTokens = Math.min(Math.max(0, cachedTokensRaw), raw.usage.prompt_tokens);
+  const freshInput = Math.max(0, raw.usage.prompt_tokens - cachedTokens);
+  const usage: CostUnits = {
     inputTokens: freshInput,
-    outputTokens: usage.completion_tokens,
+    outputTokens: raw.usage.completion_tokens,
     cacheReadTokens: cachedTokens,
     cacheCreationTokens: 0,
   };
+
+  return {
+    text: refusal === null ? content : "",
+    usage,
+    ...(finishReason !== null ? { finishReason } : {}),
+    ...(refusal !== null ? { refusal } : {}),
+  };
+}
+
+function validateUsageCounters(usage: OpenAIUsage): void {
+  const fields: ReadonlyArray<[string, number | undefined]> = [
+    ["prompt_tokens", usage.prompt_tokens],
+    ["completion_tokens", usage.completion_tokens],
+    ["prompt_tokens_details.cached_tokens", usage.prompt_tokens_details?.cached_tokens],
+  ];
+  for (const [name, value] of fields) {
+    if (value === undefined) continue; // optional
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+      throw new ProviderError(
+        OPENAI_PROVIDER_KIND,
+        new Error(`openai_usage_${name}_invalid: ${String(value)}`),
+      );
+    }
+  }
 }
 
 export type { OpenAIModelPricing, OpenAIPricingTable } from "./openai-pricing.ts";
