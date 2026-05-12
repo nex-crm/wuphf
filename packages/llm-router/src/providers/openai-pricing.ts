@@ -92,39 +92,42 @@ export type OpenAIPricingTable = Readonly<Record<string, OpenAIModelPricing>>;
  * to `createOpenAIProvider`. The model registry derives from the
  * passed table's keys.
  */
+// Deep-freeze each nested rate object — same rationale as DEFAULT_ANTHROPIC_PRICING:
+// `readonly` is compile-time only, so without per-entry Object.freeze a runtime
+// assignment could silently corrupt billing for every consumer of this table.
 export const DEFAULT_OPENAI_PRICING: OpenAIPricingTable = Object.freeze({
   // GPT-5 family ($1.25 / $10 / $0.125 per MTok)
-  "gpt-5": {
+  "gpt-5": Object.freeze({
     inputMicroUsdPerMTok: 1_250_000,
     outputMicroUsdPerMTok: 10_000_000,
     cachedInputMicroUsdPerMTok: 125_000,
-  },
-  "gpt-5-mini": {
+  }),
+  "gpt-5-mini": Object.freeze({
     inputMicroUsdPerMTok: 250_000,
     outputMicroUsdPerMTok: 2_000_000,
     cachedInputMicroUsdPerMTok: 25_000,
-  },
-  "gpt-5-nano": {
+  }),
+  "gpt-5-nano": Object.freeze({
     inputMicroUsdPerMTok: 50_000,
     outputMicroUsdPerMTok: 400_000,
     cachedInputMicroUsdPerMTok: 5_000,
-  },
+  }),
   // GPT-4.1 family ($2 / $8 / $0.50 per MTok)
-  "gpt-4.1": {
+  "gpt-4.1": Object.freeze({
     inputMicroUsdPerMTok: 2_000_000,
     outputMicroUsdPerMTok: 8_000_000,
     cachedInputMicroUsdPerMTok: 500_000,
-  },
-  "gpt-4.1-mini": {
+  }),
+  "gpt-4.1-mini": Object.freeze({
     inputMicroUsdPerMTok: 400_000,
     outputMicroUsdPerMTok: 1_600_000,
     cachedInputMicroUsdPerMTok: 100_000,
-  },
-  "gpt-4.1-nano": {
+  }),
+  "gpt-4.1-nano": Object.freeze({
     inputMicroUsdPerMTok: 100_000,
     outputMicroUsdPerMTok: 400_000,
     cachedInputMicroUsdPerMTok: 25_000,
-  },
+  }),
 });
 
 const ONE_MILLION = 1_000_000;

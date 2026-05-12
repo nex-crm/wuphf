@@ -86,53 +86,58 @@ export type AnthropicPricingTable = Readonly<Record<string, AnthropicModelPricin
  * to `createAnthropicProvider`. The model registry derives from the
  * passed table's keys, so adding a model is one config change.
  */
+// Each nested rate object is frozen individually so a stray runtime
+// assignment (e.g. `DEFAULT_ANTHROPIC_PRICING["claude-opus-4-1"].inputMicroUsdPerMTok = 0`)
+// throws in strict mode rather than corrupting billing for every caller
+// that reads from this table. `readonly` on the type catches it at compile
+// time; `Object.freeze` is the matching runtime guard.
 export const DEFAULT_ANTHROPIC_PRICING: AnthropicPricingTable = Object.freeze({
   // Opus 4.1 (legacy generation): $15 / $75 / $1.50 / $18.75 per MTok
-  "claude-opus-4-1": {
+  "claude-opus-4-1": Object.freeze({
     inputMicroUsdPerMTok: 15_000_000,
     outputMicroUsdPerMTok: 75_000_000,
     cacheReadMicroUsdPerMTok: 1_500_000,
     cacheCreationMicroUsdPerMTok: 18_750_000,
-  },
+  }),
   // Opus 4.5 / 4.6 / 4.7 generation: $5 / $25 / $0.50 / $6.25 per MTok
-  "claude-opus-4-5": {
+  "claude-opus-4-5": Object.freeze({
     inputMicroUsdPerMTok: 5_000_000,
     outputMicroUsdPerMTok: 25_000_000,
     cacheReadMicroUsdPerMTok: 500_000,
     cacheCreationMicroUsdPerMTok: 6_250_000,
-  },
-  "claude-opus-4-6": {
+  }),
+  "claude-opus-4-6": Object.freeze({
     inputMicroUsdPerMTok: 5_000_000,
     outputMicroUsdPerMTok: 25_000_000,
     cacheReadMicroUsdPerMTok: 500_000,
     cacheCreationMicroUsdPerMTok: 6_250_000,
-  },
-  "claude-opus-4-7": {
+  }),
+  "claude-opus-4-7": Object.freeze({
     inputMicroUsdPerMTok: 5_000_000,
     outputMicroUsdPerMTok: 25_000_000,
     cacheReadMicroUsdPerMTok: 500_000,
     cacheCreationMicroUsdPerMTok: 6_250_000,
-  },
+  }),
   // Sonnet 4.x family ($3 / $15 / $0.30 / $3.75 per MTok)
-  "claude-sonnet-4-5": {
+  "claude-sonnet-4-5": Object.freeze({
     inputMicroUsdPerMTok: 3_000_000,
     outputMicroUsdPerMTok: 15_000_000,
     cacheReadMicroUsdPerMTok: 300_000,
     cacheCreationMicroUsdPerMTok: 3_750_000,
-  },
-  "claude-sonnet-4-6": {
+  }),
+  "claude-sonnet-4-6": Object.freeze({
     inputMicroUsdPerMTok: 3_000_000,
     outputMicroUsdPerMTok: 15_000_000,
     cacheReadMicroUsdPerMTok: 300_000,
     cacheCreationMicroUsdPerMTok: 3_750_000,
-  },
+  }),
   // Haiku 4.5 ($1 / $5 / $0.10 / $1.25 per MTok)
-  "claude-haiku-4-5": {
+  "claude-haiku-4-5": Object.freeze({
     inputMicroUsdPerMTok: 1_000_000,
     outputMicroUsdPerMTok: 5_000_000,
     cacheReadMicroUsdPerMTok: 100_000,
     cacheCreationMicroUsdPerMTok: 1_250_000,
-  },
+  }),
 });
 
 const ONE_MILLION = 1_000_000;

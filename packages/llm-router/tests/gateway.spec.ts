@@ -4,7 +4,7 @@ import {
   openDatabase,
   runMigrations,
 } from "@wuphf/broker/cost-ledger";
-import { asAgentSlug, asProviderKind, asReceiptId, asTaskId } from "@wuphf/protocol";
+import { asAgentSlug, asProviderKind, asReceiptId, asTaskId, type MicroUsd } from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -833,6 +833,172 @@ describe("reservation accounts for prompt input tokens (round-2 BLOCK/HIGH)", ()
       await expect(
         gateway.complete(ctx, { model: "pricey", prompt: bigPrompt, maxOutputTokens: 4 }),
       ).rejects.toBeInstanceOf(CapExceededError);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("gateway fails closed on pessimistic reservation estimator failure (CR round-2 critical)", () => {
+  it("throws ProviderError when the estimator returns a non-integer (silent 0 bypass prevented)", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    // Estimator that returns garbage (NaN) — used to silently produce a
+    // 0-reservation that slipped past reserveAndPreflight. Must now surface
+    // as ProviderError before the paid provider call.
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["nan-model"],
+      costEstimator: { estimate: () => Number.NaN as unknown as MicroUsd },
+      complete: async () => {
+        throw new Error("provider must NOT be called when reservation estimate is invalid");
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "nan-model", prompt: "p", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/non-negative safe integer/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("throws ProviderError when the estimator returns a negative integer", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["neg-model"],
+      costEstimator: { estimate: () => -1 as unknown as MicroUsd },
+      complete: async () => {
+        throw new Error("provider must NOT be called when reservation estimate is invalid");
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "neg-model", prompt: "p", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/non-negative safe integer/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records a breaker error so sustained estimator faults open the circuit", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["bad-model"],
+      costEstimator: {
+        estimate: () => {
+          throw new Error("rate_book_missing");
+        },
+      },
+      complete: async () => {
+        throw new Error("provider must NOT be called");
+      },
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      // Two failures must open the breaker, same shape as the existing
+      // post-provider estimator test.
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "bad-model", prompt: "p1", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/rate_book_missing/);
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "bad-model", prompt: "p2", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/rate_book_missing/);
+      const agent = gateway.inspect().perAgent.get("a");
+      expect(agent?.breaker.status).toBe("open");
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("gateway post-provider validators reject forged MicroUsd / model id", () => {
+  it("rejects a NaN cost estimate AFTER the provider call (post-provider validateCostEstimate)", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    // First call: reservation estimator returns a sane 0. Second
+    // estimator call (post-provider, on real usage) returns NaN — must
+    // fail closed via validateCostEstimate before the ledger appends.
+    let calls = 0;
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["forged-model"],
+      costEstimator: {
+        estimate: () => {
+          calls += 1;
+          if (calls === 1) return 0 as unknown as MicroUsd; // reservation
+          return Number.NaN as unknown as MicroUsd; // post-provider forgery
+        },
+      },
+      complete: async () => ({
+        text: "ok",
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      }),
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "forged-model", prompt: "p", maxOutputTokens: 4 },
+        ),
+      ).rejects.toThrow(/non-negative safe integer/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects an empty audit-model id (validateAuditModel empty branch)", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    // Provider echoes back model="" — validateAuditModel must reject the
+    // empty string before any ledger append.
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["m1"],
+      costEstimator: { estimate: () => 0 as unknown as MicroUsd },
+      complete: async () => ({
+        text: "ok",
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        model: "", // forged empty served model
+      }),
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: "m1", prompt: "p", maxOutputTokens: 1 },
+        ),
+      ).rejects.toThrow(/invalid audit model id/);
     } finally {
       db.close();
     }

@@ -106,7 +106,18 @@ export function createGateway(deps: GatewayDeps): Gateway {
     // provider's own estimator handles the per-model rate so the
     // reservation reflects the model's pricing. The actual cost from
     // the response usage is what gets billed.
-    const reservationEstimate = pessimisticReservationMicroUsd(provider, req);
+    //
+    // A sustained estimator fault is breaker-worthy: if the adapter's
+    // pricing math is broken, we can't reserve correctly and shouldn't
+    // keep retrying forever. Same treatment as a post-provider estimator
+    // failure (see doProviderCallAndLedger below).
+    let reservationEstimate: number;
+    try {
+      reservationEstimate = pessimisticReservationMicroUsd(provider, req);
+    } catch (err) {
+      caps.recordError(ctx.agentSlug);
+      throw err;
+    }
     const reservation = caps.reserveAndPreflight(ctx.agentSlug, reservationEstimate);
 
     // Run the provider call and ledger append inside a promise that we
@@ -405,23 +416,32 @@ function pessimisticReservationMicroUsd(provider: Provider, req: ProviderRequest
   // Use the provider's own estimator so each adapter's pricing applies.
   // Cache fields are zeroed — a fresh-input worst case bills at the
   // higher (non-cached) rate.
+  //
+  // Fail closed on estimator failure: if the estimator throws or returns a
+  // garbage value, the reservation cannot enforce the daily cap — a buggy
+  // adapter that always returns 0 would let unbounded paid calls slip past
+  // reserveAndPreflight. Surface as a ProviderError so the call is rejected
+  // before any provider charge can occur.
+  let estimate: unknown;
   try {
-    const estimate = provider.costEstimator.estimate(req.model, {
+    estimate = provider.costEstimator.estimate(req.model, {
       inputTokens,
       outputTokens,
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
-    }) as unknown as number;
-    if (typeof estimate !== "number" || !Number.isSafeInteger(estimate) || estimate < 0) {
-      return 0;
-    }
-    return Math.min(estimate, MAX_COST_EVENT_AMOUNT_MICRO_USD);
-  } catch {
-    // Estimator threw (unknown model already filtered upstream, but
-    // belt-and-suspenders). Use 0 — the real check still runs after
-    // the provider call.
-    return 0;
+    });
+  } catch (err) {
+    throw new ProviderError(provider.kind, err);
   }
+  if (typeof estimate !== "number" || !Number.isSafeInteger(estimate) || estimate < 0) {
+    throw new ProviderError(
+      provider.kind,
+      new Error(
+        `pessimistic reservation estimate is not a non-negative safe integer for model ${req.model}: ${String(estimate)}`,
+      ),
+    );
+  }
+  return Math.min(estimate, MAX_COST_EVENT_AMOUNT_MICRO_USD);
 }
 
 // Re-export for callers that compose their own deps without pulling each
