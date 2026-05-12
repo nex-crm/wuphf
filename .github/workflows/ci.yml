@@ -228,6 +228,20 @@ jobs:
         if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
         working-directory: apps/desktop
         run: bun run build
+      - name: Build-output externalization invariants
+        # Audits `out/{main,preload}/**.js` for two regressions a green
+        # build + green tests cannot catch:
+        # 1. workspace packages (`@wuphf/*`) leaking into the build as
+        #    runtime externals — their `exports` map to raw `./src/*.ts`,
+        #    which Node 22 strip-only TS would crash on at runtime
+        #    (e.g. parameter properties on `SqliteReceiptStore`'s private
+        #    constructor).
+        # 2. `better-sqlite3` getting inlined — its `bindings()` loader
+        #    needs the JS wrapper at its npm location to find the `.node`
+        #    sibling.
+        if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
+        working-directory: apps/desktop
+        run: bun run check:build-externals
 
   web:
     runs-on: ubuntu-latest
