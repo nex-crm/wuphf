@@ -88,6 +88,7 @@ type Broker struct {
 	watchdogs               []watchdogAlert
 	scheduler               []schedulerJob
 	skills                  []teamSkill
+	skillDescEmbeddings     map[string][]float32         // slug → description embedding vector; guarded by mu
 	sharedMemory            map[string]map[string]string // namespace → key → value
 	lastTaggedAt            map[string]time.Time         // when each agent was last @mentioned
 	lastPaneSnapshot        map[string]string            // last captured pane content per agent (for change detection)
@@ -422,6 +423,11 @@ func (b *Broker) Start() error {
 	if shouldSeed {
 		go b.runCompanySeedJob(seedCfg)
 	}
+	// One-time migration: auto-consolidate overlapping skills.
+	b.mu.Lock()
+	b.autoConsolidateSkillsIfNeeded()
+	b.mu.Unlock()
+
 	b.ensureWikiSectionsCache()
 	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()

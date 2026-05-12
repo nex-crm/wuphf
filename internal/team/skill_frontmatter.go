@@ -184,6 +184,7 @@ func teamSkillToFrontmatter(sk teamSkill) SkillFrontmatter {
 				Status:             sk.Status,
 				DisabledFromStatus: sk.DisabledFromStatus,
 				Tags:               append([]string(nil), sk.Tags...),
+				RelatedSkills:      append([]string(nil), sk.RelatedSkills...),
 				WorkflowProvider:   sk.WorkflowProvider,
 				WorkflowKey:        sk.WorkflowKey,
 				WorkflowDefinition: sk.WorkflowDefinition,

@@ -30,7 +30,7 @@ func newBlockingProvider() *blockingProvider {
 	return &blockingProvider{gate: make(chan struct{})}
 }
 
-func (p *blockingProvider) AskIsSkill(ctx context.Context, articlePath, articleContent string) (bool, SkillFrontmatter, string, error) {
+func (p *blockingProvider) AskIsSkill(ctx context.Context, _, _, _ string) (bool, SkillFrontmatter, string, string, error) {
 	p.callsMu.Lock()
 	p.calls++
 	p.callsMu.Unlock()
@@ -38,7 +38,7 @@ func (p *blockingProvider) AskIsSkill(ctx context.Context, articlePath, articleC
 	case <-p.gate:
 	case <-ctx.Done():
 	}
-	return false, SkillFrontmatter{}, "", nil
+	return false, SkillFrontmatter{}, "", "", nil
 }
 
 func (p *blockingProvider) release() { close(p.gate) }
@@ -47,8 +47,8 @@ func (p *blockingProvider) release() { close(p.gate) }
 // Used when we want compileWikiSkills to return immediately.
 type instantProvider struct{}
 
-func (p *instantProvider) AskIsSkill(_ context.Context, _, _ string) (bool, SkillFrontmatter, string, error) {
-	return false, SkillFrontmatter{}, "", nil
+func (p *instantProvider) AskIsSkill(_ context.Context, _, _, _ string) (bool, SkillFrontmatter, string, string, error) {
+	return false, SkillFrontmatter{}, "", "", nil
 }
 
 // withScannedTestBroker returns a broker with the skill scanner pre-injected
@@ -221,7 +221,7 @@ func TestSkillCompileEnv_DefaultsAndOverrides(t *testing.T) {
 // exercise Stage A's proposal write path without an LLM round-trip.
 type fixedSkillProvider struct{}
 
-func (p *fixedSkillProvider) AskIsSkill(_ context.Context, articlePath, _ string) (bool, SkillFrontmatter, string, error) {
+func (p *fixedSkillProvider) AskIsSkill(_ context.Context, articlePath, _, _ string) (bool, SkillFrontmatter, string, string, error) {
 	base := strings.TrimSuffix(filepath.Base(articlePath), ".md")
 	fm := SkillFrontmatter{
 		Name:        base,
@@ -229,12 +229,12 @@ func (p *fixedSkillProvider) AskIsSkill(_ context.Context, articlePath, _ string
 		Version:     "1.0.0",
 		License:     "MIT",
 	}
-	return true, fm, "## Steps\n\n1. Do the thing.\n", nil
+	return true, fm, "## Steps\n\n1. Do the thing.\n", "", nil
 }
 
 type statusSpoofingSkillProvider struct{}
 
-func (p *statusSpoofingSkillProvider) AskIsSkill(_ context.Context, articlePath, _ string) (bool, SkillFrontmatter, string, error) {
+func (p *statusSpoofingSkillProvider) AskIsSkill(_ context.Context, articlePath, _, _ string) (bool, SkillFrontmatter, string, string, error) {
 	base := strings.TrimSuffix(filepath.Base(articlePath), ".md")
 	fm := SkillFrontmatter{
 		Name:        base,
@@ -248,7 +248,7 @@ func (p *statusSpoofingSkillProvider) AskIsSkill(_ context.Context, articlePath,
 			},
 		},
 	}
-	return true, fm, "## Steps\n\n1. Do the thing.\n", nil
+	return true, fm, "## Steps\n\n1. Do the thing.\n", "", nil
 }
 
 func TestSkillScannerScopePathValidation(t *testing.T) {

@@ -73,6 +73,11 @@ func (b *Broker) handleSkillsCRUDSubpath(w http.ResponseWriter, r *http.Request)
 		b.handleSkillRejectUndo(w, r)
 		return true
 	}
+	// /skills/consolidate — detect and merge overlapping skills.
+	if rest == "consolidate" {
+		b.handleSkillConsolidate(w, r)
+		return true
+	}
 
 	// Split into {name}/{verb}.
 	parts := strings.SplitN(rest, "/", 2)
