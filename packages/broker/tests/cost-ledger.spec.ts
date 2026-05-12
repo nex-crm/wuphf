@@ -11,8 +11,8 @@ import {
   lsnFromV1Number,
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
+import { createCostLedger, parseIdempotencyKey, runReplayCheck } from "../src/cost-ledger/index.ts";
 import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
-import { createCostLedger, parseIdempotencyKey, runReplayCheck } from "../src/index.ts";
 
 function setup() {
   const db = openDatabase({ path: ":memory:" });
@@ -438,5 +438,35 @@ describe("replay-check", () => {
     const report = runReplayCheck(db);
     expect(report.ok).toBe(true);
     expect(report.discrepancies).toEqual([]);
+  });
+
+  it("surfaces unparseable cost event payload as structured discrepancy (#822)", () => {
+    const { db, ledger } = setup();
+    // One good event so the projection has something to compare against,
+    // then tamper a later row to be unparseable.
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 100_000 }));
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 250_000 }));
+    // Overwrite the second cost.event payload with garbage JSON so the
+    // codec rejects it. (We pick the highest cost.event LSN.)
+    const tamperedLsn = db
+      .prepare<[], { readonly lsn: number }>(
+        "SELECT MAX(lsn) AS lsn FROM event_log WHERE type = 'cost.event'",
+      )
+      .get();
+    if (tamperedLsn === undefined) throw new Error("no cost.event row to tamper");
+    db.prepare<[Buffer, number]>("UPDATE event_log SET payload = ? WHERE lsn = ?").run(
+      Buffer.from('{"not":"a valid cost event"}', "utf8"),
+      tamperedLsn.lsn,
+    );
+
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(false);
+    const parseFail = report.discrepancies.find((d) => d.kind === "event_payload_unparseable");
+    expect(parseFail).toBeDefined();
+    if (parseFail?.kind === "event_payload_unparseable") {
+      expect(parseFail.type).toBe("cost.event");
+      expect(typeof parseFail.reason).toBe("string");
+      expect(parseFail.reason.length).toBeGreaterThan(0);
+    }
   });
 });

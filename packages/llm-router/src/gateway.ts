@@ -17,8 +17,15 @@
 // `costEventLsn` to put in the result. No other code path returns a
 // completion. That's the type-system enforcement.
 
-import type { CostLedger } from "@wuphf/broker";
-import type { CostEventAuditPayload, CostUnits, MicroUsd, ProviderKind } from "@wuphf/protocol";
+import type { CostLedger } from "@wuphf/broker/cost-ledger";
+import {
+  type CostEventAuditPayload,
+  type CostUnits,
+  isProviderKind,
+  MAX_COST_EVENT_AMOUNT_MICRO_USD,
+  type MicroUsd,
+  type ProviderKind,
+} from "@wuphf/protocol";
 
 import { Caps, type CapsConfig, DEFAULT_CAPS_CONFIG } from "./caps.ts";
 import { DEFAULT_DEDUPE_CONFIG, DedupeCache, type DedupeConfig, hashRequest } from "./dedupe.ts";
@@ -107,6 +114,16 @@ export function createGateway(deps: GatewayDeps): Gateway {
     let appended: ReturnType<CostLedger["appendCostEvent"]>;
     try {
       costMicroUsd = provider.costEstimator.estimate(req.model, providerResponse.usage);
+      // Defense-in-depth (#824): MicroUsd allows up to $1M (budget limit
+      // ceiling), but a single cost_event is capped at $100. Catch the
+      // out-of-range case here so the breaker reacts to a runaway
+      // estimator instead of letting the codec reject AFTER the paid
+      // provider call has already happened.
+      if ((costMicroUsd as number) > MAX_COST_EVENT_AMOUNT_MICRO_USD) {
+        throw new Error(
+          `cost estimate ${String(costMicroUsd)} exceeds per-event cap ${MAX_COST_EVENT_AMOUNT_MICRO_USD}`,
+        );
+      }
 
       // The "row before response" point: appendCostEvent is the only
       // place an EventLsn for this completion is produced. If this
@@ -114,7 +131,11 @@ export function createGateway(deps: GatewayDeps): Gateway {
       // completion without a matching ledger row.
       const payload: CostEventAuditPayload = buildCostEventPayload(
         ctx,
-        req,
+        // Audit-stable model id (#827): prefer the served snapshot the
+        // SDK echoed back (e.g. claude-haiku-4-5-20251001) over the
+        // request alias (claude-haiku-4-5). Adapters that don't expose
+        // it fall back to req.model so the gateway path stays uniform.
+        providerResponse.model ?? req.model,
         provider.kind,
         providerResponse.usage,
         costMicroUsd,
@@ -160,7 +181,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
 
 function buildCostEventPayload(
   ctx: SupervisorContext,
-  req: ProviderRequest,
+  model: string,
   providerKind: ProviderKind,
   usage: CostUnits,
   costMicroUsd: MicroUsd,
@@ -173,7 +194,7 @@ function buildCostEventPayload(
   const base: CostEventAuditPayload = {
     agentSlug: ctx.agentSlug,
     providerKind,
-    model: req.model,
+    model,
     amountMicroUsd: costMicroUsd,
     units: usage,
     occurredAt: new Date(nowMs),
@@ -202,6 +223,15 @@ function buildCostEventPayload(
 function indexProvidersByModel(providers: readonly Provider[]): Map<string, Provider> {
   const out = new Map<string, Provider>();
   for (const provider of providers) {
+    // Defense-in-depth (#828): Provider.kind is a brand, but a custom
+    // provider can forge it with `as ProviderKind`. Verify at construction
+    // so a bad kind cannot reach a billable provider.complete() call —
+    // the ledger codec would otherwise reject AFTER the paid call.
+    if (!isProviderKind(provider.kind)) {
+      throw new Error(
+        `invalid Provider.kind: ${JSON.stringify(provider.kind)} is not a registered ProviderKind`,
+      );
+    }
     for (const model of provider.models) {
       const existing = out.get(model);
       if (existing !== undefined && existing !== provider) {

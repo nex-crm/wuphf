@@ -22,7 +22,7 @@
 //
 // Exits 0 on all assertions passing; 1 on any failure.
 
-import { createCostLedger, createEventLog, openDatabase, runMigrations } from "@wuphf/broker";
+import { createCostLedger, createEventLog, openDatabase, runMigrations } from "@wuphf/broker/cost-ledger";
 import { asAgentSlug } from "@wuphf/protocol";
 
 import {

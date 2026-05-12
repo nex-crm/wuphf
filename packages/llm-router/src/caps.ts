@@ -12,7 +12,7 @@
 // `noteHumanActivity` to reset the clock. Agent-initiated activity does NOT
 // reset the clock; otherwise an agent loop would keep itself awake.
 
-import type { CostLedger } from "@wuphf/broker";
+import type { CostLedger } from "@wuphf/broker/cost-ledger";
 
 import { CapExceededError, CircuitBreakerOpenError, IdleModeError } from "./errors.ts";
 import type { AgentInspection, BreakerState, GatewayInspection } from "./types.ts";

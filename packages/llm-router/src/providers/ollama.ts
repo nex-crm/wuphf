@@ -173,6 +173,10 @@ export function createOllamaProvider(args: CreateOllamaProviderArgs): Provider {
       return {
         text: raw.message?.content ?? "",
         usage: usageToCostUnits(raw),
+        // #827: Ollama echoes the served model back; surface it so the
+        // audit row records the exact served identifier (host-side
+        // model pulls can pin to a digest).
+        ...(typeof raw.model === "string" && raw.model.length > 0 ? { model: raw.model } : {}),
       };
     },
   };
