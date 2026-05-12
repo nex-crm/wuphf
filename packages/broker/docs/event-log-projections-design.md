@@ -16,7 +16,7 @@ Replace the in-memory `ReceiptStore` with a durable, event-log-backed implementa
 
 ## Files (final layout — both workers respect this)
 
-```
+```text
 packages/broker/
 ├── package.json                              # +better-sqlite3 dep (Worker A)
 ├── src/
@@ -83,7 +83,7 @@ PRAGMA user_version = 1;
 
 ### PRAGMAs at open time
 
-```
+```sql
 PRAGMA journal_mode = WAL;            -- concurrent reader during writes
 PRAGMA synchronous = FULL;            -- fsync every commit; the 201 ack must outlive a power-cut
 PRAGMA foreign_keys = ON;             -- enforce projection→event_log integrity
@@ -255,7 +255,7 @@ The default-limit choice (api/architecture triangulation T2): the store's `DEFAU
 - **Body unchanged**: same bare JSON array of receipts, in LSN order.
 - **`Link` header added** when more pages exist:
 
-  ```
+  ```http
   Link: </api/threads/<tid>/receipts?cursor=<base64url>&limit=<n>>; rel="next"
   ```
 

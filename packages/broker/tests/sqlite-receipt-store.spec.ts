@@ -86,12 +86,23 @@ function tempDbPath(): string {
   return join(dir, "event-log.sqlite");
 }
 
-function countRows(db: Database.Database, tableName: "event_log" | "receipts_projection"): number {
+// SQL interpolation guard: route the table name through an allowlist
+// map so the prepared statement never sees an unbounded string, even
+// though the TypeScript union already constrains the call sites. Belt-
+// and-braces — if a future change widens the parameter type, the
+// allowlist still rejects unknown values at compile time.
+const COUNT_ROWS_TABLES = {
+  event_log: "event_log",
+  receipts_projection: "receipts_projection",
+} as const;
+
+function countRows(db: Database.Database, tableName: keyof typeof COUNT_ROWS_TABLES): number {
+  const safeTable = COUNT_ROWS_TABLES[tableName];
   const row = db
-    .prepare<[], { readonly count: number }>(`SELECT COUNT(*) AS count FROM ${tableName}`)
+    .prepare<[], { readonly count: number }>(`SELECT COUNT(*) AS count FROM ${safeTable}`)
     .get();
   if (row === undefined) {
-    throw new Error(`count query returned no row for ${tableName}`);
+    throw new Error(`count query returned no row for ${safeTable}`);
   }
   return row.count;
 }
