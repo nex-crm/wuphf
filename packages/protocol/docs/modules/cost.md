@@ -61,10 +61,15 @@ Functions:
 ## 3. Behavior contract
 
 1. `MicroUsd` MUST stay a non-negative safe-integer brand. Float-USD anywhere
-   in the ledger compounds across thousands of events and breaks the §15.A
-   sum invariant `sum(cost_events) == sum(by_agent) == sum(by_task)`. Adding
-   a `MAX_BUDGET_LIMIT_MICRO_USD` per-budget cap is what keeps the
-   long-lived ledger total inside `Number.MAX_SAFE_INTEGER`.
+   in the ledger compounds across thousands of events and breaks §15.A's
+   two decidable invariants:
+   - **I1**: `sum(cost_events in event_log) == sum(cost_by_agent across all days)`
+   - **I2**: `sum(task-attributed cost_events) == sum(cost_by_task)`
+   `cost_event.taskId` is optional (see §2.`CostEventAuditPayload`); taskless
+   events skip the task projection, so I2 is scoped to the task-attributed
+   subset. The replay-check drift detector enforces both invariants byte for
+   byte. Adding a `MAX_BUDGET_LIMIT_MICRO_USD` per-budget cap is what keeps
+   the long-lived ledger total inside `Number.MAX_SAFE_INTEGER`.
 2. `BudgetId` MUST be ULID-shaped (Crockford base32, 26 chars). It is minted
    by the broker, not by the protocol package; the protocol package only
    validates shape.
@@ -191,7 +196,7 @@ classDiagram
 
 | Input | Expected error message | Why this matters |
 |---|---|---|
-| `amountMicroUsd: 1.5` | `/amountMicroUsd must be a non-negative safe integer` | Float drift breaks the §15.A sum invariant. |
+| `amountMicroUsd: 1.5` | `/amountMicroUsd must be a non-negative safe integer` | Float drift breaks §15.A invariants I1/I2. |
 | `amountMicroUsd: -1` | `/amountMicroUsd must be a non-negative safe integer` | Cost events can never refund; negatives indicate a caller bug. |
 | `amountMicroUsd > MAX_COST_EVENT_AMOUNT_MICRO_USD` | `/amountMicroUsd must be at most 100000000` | One adversarial call can otherwise dominate any per-day cap. |
 | `scope: "global"` with `subjectId` present | `/subjectId must be absent when scope is global` | Projection key drift between scopes. |

@@ -21,10 +21,6 @@
 // when the command produced an event so the operator can correlate retries
 // to ledger writes.
 
-import type Database from "better-sqlite3";
-
-import type { EventLog } from "../event-log/index.ts";
-
 export type CostCommand = "cost.event" | "cost.budget.set" | "cost.budget.tombstone";
 
 export const COST_COMMAND_VALUES: readonly CostCommand[] = [
@@ -91,129 +87,10 @@ export function parseIdempotencyKey(
   return { ok: true, key: { raw, command: command as CostCommand, ulid } };
 }
 
-export interface StoredResponse {
-  readonly statusCode: number;
-  readonly payload: Buffer;
-  readonly createdAtLsn: number | null;
-  readonly createdAtMs: number;
-}
-
-export interface CommandIdempotencyStore {
-  /**
-   * Replay the stored response if a key has been seen before; returns
-   * `null` otherwise. Read-only — does not allocate or insert.
-   */
-  lookup(key: ParsedIdempotencyKey): StoredResponse | null;
-
-  /**
-   * Record a freshly-produced command response. Throws on duplicate; the
-   * caller is expected to have called `lookup` first (the route helper
-   * `runIdempotent` below enforces this). `createdAtLsn` may be null if
-   * the command was rejected before appending to event_log (e.g. a 4xx
-   * validation failure).
-   */
-  store(
-    key: ParsedIdempotencyKey,
-    response: { readonly statusCode: number; readonly payload: Buffer },
-    createdAtLsn: number | null,
-    createdAtMs: number,
-  ): void;
-}
-
-interface StoredResponseDbRow {
-  readonly statusCode: number;
-  readonly responsePayload: Buffer;
-  readonly createdAtLsn: number | null;
-  readonly createdAtMs: number;
-}
-
-export function createCommandIdempotencyStore(db: Database.Database): CommandIdempotencyStore {
-  const lookupStmt = db.prepare<[string, string], StoredResponseDbRow>(
-    `SELECT status_code AS statusCode, response_payload AS responsePayload,
-            created_at_lsn AS createdAtLsn, created_at_ms AS createdAtMs
-     FROM command_idempotency
-     WHERE idempotency_key = ? AND command = ?`,
-  );
-  const insertStmt = db.prepare<[string, string, number, Buffer, number | null, number]>(
-    `INSERT INTO command_idempotency
-       (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  );
-
-  return {
-    lookup(key: ParsedIdempotencyKey): StoredResponse | null {
-      const row = lookupStmt.get(key.raw, key.command);
-      if (row === undefined) return null;
-      return {
-        statusCode: row.statusCode,
-        payload: Buffer.from(row.responsePayload),
-        createdAtLsn: row.createdAtLsn,
-        createdAtMs: row.createdAtMs,
-      };
-    },
-    store(
-      key: ParsedIdempotencyKey,
-      response: { readonly statusCode: number; readonly payload: Buffer },
-      createdAtLsn: number | null,
-      createdAtMs: number,
-    ): void {
-      insertStmt.run(
-        key.raw,
-        key.command,
-        response.statusCode,
-        response.payload,
-        createdAtLsn,
-        createdAtMs,
-      );
-    },
-  };
-}
-
-export interface IdempotentResult {
-  readonly replayed: boolean;
-  readonly statusCode: number;
-  readonly payload: Buffer;
-}
-
-/**
- * Wraps a command execution with idempotency. If the key has been seen
- * before, returns the stored response (replayed: true). Otherwise runs
- * `produce`, stores its result, and returns it (replayed: false).
- *
- * `produce` MUST be deterministic given the request body — re-running it
- * after a crash must produce the same response. The cost-event and
- * budget-set commands satisfy this because the event_log + projection
- * append are wrapped in one SQLite transaction; if the transaction commits
- * before we store the response, on the duplicate retry we'll see the
- * command already applied (PRIMARY KEY collisions or no-op upserts) and
- * the `produce` function should re-derive the same response from the
- * current projection state.
- */
-export function runIdempotent(
-  store: CommandIdempotencyStore,
-  key: ParsedIdempotencyKey,
-  nowMs: number,
-  produce: () => {
-    readonly statusCode: number;
-    readonly payload: Buffer;
-    readonly createdAtLsn: number | null;
-  },
-): IdempotentResult {
-  const cached = store.lookup(key);
-  if (cached !== null) {
-    return { replayed: true, statusCode: cached.statusCode, payload: cached.payload };
-  }
-  const fresh = produce();
-  store.store(
-    key,
-    { statusCode: fresh.statusCode, payload: fresh.payload },
-    fresh.createdAtLsn,
-    nowMs,
-  );
-  return { replayed: false, statusCode: fresh.statusCode, payload: fresh.payload };
-}
-
-// `EventLog` is unused inside this file but consumers depend on the
-// import surface; re-export type only to keep the cost-ledger module's
-// surface coherent.
-export type { EventLog };
+// The idempotency-row storage and atomic replay are now owned by
+// `CostLedger.appendCostEventIdempotent` and `appendBudgetSetIdempotent`
+// (see `projections.ts`). The earlier `runIdempotent` / `CommandIdempotencyStore`
+// pair was removed in the B1 fix because they ran lookup/append/store as
+// three separate operations, opening a crash window between the ledger
+// commit and the idempotency-row insert. This module now only exposes
+// the key parser the routes use to validate the `Idempotency-Key` header.

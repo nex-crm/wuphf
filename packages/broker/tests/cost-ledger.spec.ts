@@ -12,20 +12,14 @@ import {
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
-import {
-  createCommandIdempotencyStore,
-  createCostLedger,
-  parseIdempotencyKey,
-  runReplayCheck,
-} from "../src/index.ts";
+import { createCostLedger, parseIdempotencyKey, runReplayCheck } from "../src/index.ts";
 
 function setup() {
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
   const eventLog = createEventLog(db);
   const ledger = createCostLedger(db, eventLog);
-  const idempotency = createCommandIdempotencyStore(db);
-  return { db, eventLog, ledger, idempotency };
+  return { db, eventLog, ledger };
 }
 
 function buildCostEvent(opts: {
@@ -106,7 +100,7 @@ describe("cost ledger projections", () => {
     expect(ledger.getAgentSpend("primary", "2026-05-09")?.totalMicroUsd as number).toBe(1_500_000);
   });
 
-  it("§15.A sum invariant: sum(events) == sum(by_agent) == sum(by_task)", () => {
+  it("§15.A I1 + I2 hold when every event is task-attributed (baseline)", () => {
     const { db, ledger } = setup();
     for (let i = 0; i < 20; i += 1) {
       const opts: { amountMicroUsd: number; taskId?: string } = {
@@ -279,20 +273,55 @@ describe("idempotency", () => {
     );
   });
 
-  it("stores response on first call and replays on duplicate", () => {
-    const { idempotency } = setup();
+  it("appendCostEventIdempotent: lookup+append+store atomic (B1)", () => {
+    const { db, ledger } = setup();
     const parsed = parseIdempotencyKey("cmd_cost.event_01ARZ3NDEKTSV4RRFFQ69G5FAV", "cost.event");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    idempotency.store(
-      parsed.key,
-      { statusCode: 201, payload: Buffer.from('{"lsn":"v1:1"}') },
-      1,
-      1700000000000,
+
+    const r1 = ledger.appendCostEventIdempotent({
+      payload: buildCostEvent({ amountMicroUsd: 1_000_000 }),
+      idempotency: parsed.key,
+      nowMs: 1700000000000,
+      render: (applied) => ({
+        statusCode: 201,
+        payload: Buffer.from(JSON.stringify({ lsn: applied.lsn }), "utf8"),
+      }),
+    });
+    expect(r1.replayed).toBe(false);
+    expect(r1.statusCode).toBe(201);
+
+    // Same key: must replay byte-for-byte WITHOUT appending another event.
+    const r2 = ledger.appendCostEventIdempotent({
+      payload: buildCostEvent({ amountMicroUsd: 9_999_999 }), // payload ignored on replay
+      idempotency: parsed.key,
+      nowMs: 1700000000999,
+      render: () => {
+        throw new Error("render must not be called on replay");
+      },
+    });
+    expect(r2.replayed).toBe(true);
+    expect(r2.payload.toString()).toBe(r1.payload.toString());
+    expect(r2.statusCode).toBe(r1.statusCode);
+
+    // Only one event_log row.
+    const count = db
+      .prepare<[], { readonly n: number }>(
+        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+      )
+      .get();
+    expect(count?.n).toBe(1);
+
+    // Idempotency row exists with the response bytes.
+    const idemRow = db
+      .prepare<[string], { readonly statusCode: number; readonly responsePayload: Buffer }>(
+        "SELECT status_code AS statusCode, response_payload AS responsePayload FROM command_idempotency WHERE idempotency_key = ?",
+      )
+      .get(parsed.key.raw);
+    expect(idemRow?.statusCode).toBe(201);
+    expect(Buffer.from(idemRow?.responsePayload ?? Buffer.alloc(0)).toString()).toBe(
+      r1.payload.toString(),
     );
-    const cached = idempotency.lookup(parsed.key);
-    expect(cached?.statusCode).toBe(201);
-    expect(cached?.payload.toString()).toBe('{"lsn":"v1:1"}');
   });
 });
 
@@ -327,5 +356,87 @@ describe("replay-check", () => {
     expect(report.ok).toBe(false);
     const mismatch = report.discrepancies.find((d) => d.kind === "budget_state_mismatch");
     expect(mismatch).toBeDefined();
+  });
+
+  it("replay-check detects missing threshold crossing rows (H1)", () => {
+    const { db, ledger } = setup();
+    ledger.appendBudgetSet(buildBudgetSet({ limitMicroUsd: 5_000_000, thresholdsBps: [5_000] }));
+    // Crosses 50% — produces one threshold-crossed event AND projection row.
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 2_500_000 }));
+    // Tamper: delete the projection row but leave the event in event_log.
+    db.exec("DELETE FROM cost_threshold_crossings");
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(false);
+    const missing = report.discrepancies.find((d) => d.kind === "threshold_crossing_missing");
+    expect(missing).toBeDefined();
+  });
+
+  it("replay-check detects ghost threshold crossing rows (H1)", () => {
+    const { db, ledger } = setup();
+    const setResult = ledger.appendBudgetSet(
+      buildBudgetSet({ limitMicroUsd: 5_000_000, thresholdsBps: [5_000] }),
+    );
+    const budgetSetLsnInt = Number(setResult.lsn.slice(3)); // "v1:N" → N
+    // Inject a stray crossing row that points to the existing budget_set
+    // event LSN (so the FK is satisfied), but with a threshold the
+    // event_log has no matching `cost.budget.threshold.crossed` for.
+    db.prepare<[string, number, number, number, number, number]>(
+      `INSERT INTO cost_threshold_crossings
+         (budget_id, budget_set_lsn, threshold_bps, crossed_at_lsn, observed_micro_usd, limit_micro_usd)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("01ARZ3NDEKTSV4RRFFQ69G5FAZ", budgetSetLsnInt, 5_000, budgetSetLsnInt, 100, 5_000_000);
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(false);
+    const ghost = report.discrepancies.find((d) => d.kind === "threshold_crossing_ghost");
+    expect(ghost).toBeDefined();
+  });
+
+  it("replay-check detects threshold crossing field mismatch (H1)", () => {
+    const { db, ledger } = setup();
+    ledger.appendBudgetSet(buildBudgetSet({ limitMicroUsd: 5_000_000, thresholdsBps: [5_000] }));
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 2_500_000 }));
+    // Tamper the observed amount.
+    db.exec("UPDATE cost_threshold_crossings SET observed_micro_usd = 99 WHERE 1=1");
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(false);
+    const fieldMismatch = report.discrepancies.find(
+      (d) => d.kind === "threshold_crossing_field_mismatch",
+    );
+    expect(fieldMismatch).toBeDefined();
+    if (fieldMismatch?.kind === "threshold_crossing_field_mismatch") {
+      expect(fieldMismatch.field).toBe("observedMicroUsd");
+    }
+  });
+
+  it("§15.A I1 + I2 hold even when some cost_events are taskless (B2)", () => {
+    const { db, ledger } = setup();
+    // Mix of task-attributed and taskless events. Per the B2 wording,
+    // I1 covers both (agent projection always updates); I2 covers only
+    // the task-attributed subset.
+    ledger.appendCostEvent(
+      buildCostEvent({ amountMicroUsd: 100_000, taskId: "01BRZ3NDEKTSV4RRFFQ69G5FA0" }),
+    );
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 250_000 })); // taskless
+    ledger.appendCostEvent(
+      buildCostEvent({ amountMicroUsd: 50_000, taskId: "01BRZ3NDEKTSV4RRFFQ69G5FA0" }),
+    );
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 25_000 })); // taskless
+
+    // I1: total in event_log == total in cost_by_agent.
+    const eventTotal = 100_000 + 250_000 + 50_000 + 25_000;
+    const agentTotal = ledger
+      .listAgentSpend()
+      .reduce((acc, r) => acc + (r.totalMicroUsd as number), 0);
+    expect(agentTotal).toBe(eventTotal);
+
+    // I2: sum of task-attributed events == cost_by_task.total.
+    const taskAttributedTotal = 100_000 + 50_000;
+    const taskRow = ledger.getTaskSpend("01BRZ3NDEKTSV4RRFFQ69G5FA0");
+    expect(taskRow?.totalMicroUsd as number).toBe(taskAttributedTotal);
+
+    // Replay-check is ok — taskless events don't break it.
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(true);
+    expect(report.discrepancies).toEqual([]);
   });
 });

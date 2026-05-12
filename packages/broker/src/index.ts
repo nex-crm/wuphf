@@ -3,15 +3,17 @@
 // auth. Hosts (Electron utility process, future `wuphf serve --headless`)
 // import `createBroker` and ignore the rest of the module graph.
 
+// Idempotency parsing primitives. The atomic-append paths
+// (`CostLedger.appendCostEventIdempotent` etc.) take a `ParsedIdempotencyKey`
+// and do the lookup/store inside the same SQLite transaction, so consumers
+// no longer compose their own `CommandIdempotencyStore` — the parser is the
+// only piece they need.
 export type {
-  CommandIdempotencyStore,
   CostCommand,
   ParsedIdempotencyKey,
-  StoredResponse,
 } from "./cost-ledger/idempotency.ts";
 export {
   COST_COMMAND_VALUES,
-  createCommandIdempotencyStore,
   parseIdempotencyKey,
 } from "./cost-ledger/idempotency.ts";
 export type {
@@ -20,6 +22,9 @@ export type {
   BudgetSetAppendResult,
   CostEventAppendResult,
   CostLedger,
+  IdempotentAppendResult,
+  IdempotentBudgetSetArgs,
+  IdempotentCostEventArgs,
   TaskSpendRow,
   ThresholdCrossedAppendResult,
   ThresholdCrossingRow,

@@ -13,8 +13,8 @@ import {
 } from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
-import type { BrokerHandle, CommandIdempotencyStore, CostLedger } from "../src/index.ts";
-import { createBroker, createCommandIdempotencyStore, createCostLedger } from "../src/index.ts";
+import type { BrokerHandle, CostLedger } from "../src/index.ts";
+import { createBroker, createCostLedger } from "../src/index.ts";
 
 const FIXED_TOKEN = asApiToken("test-token-with-enough-entropy-AAAAAAAAA");
 const BUDGET_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
@@ -50,7 +50,6 @@ function budgetSetJson(limit: number, thresholds: readonly number[] = [5_000, 10
 interface Fixture {
   readonly broker: BrokerHandle;
   readonly ledger: CostLedger;
-  readonly idempotency: CommandIdempotencyStore;
   readonly db: ReturnType<typeof openDatabase>;
 }
 
@@ -59,13 +58,12 @@ async function buildFixture(): Promise<Fixture> {
   runMigrations(db);
   const eventLog = createEventLog(db);
   const ledger = createCostLedger(db, eventLog);
-  const idempotency = createCommandIdempotencyStore(db);
   const broker = await createBroker({
     port: 0,
     token: FIXED_TOKEN,
-    cost: { ledger, idempotency, db },
+    cost: { ledger, db },
   });
-  return { broker, ledger, idempotency, db };
+  return { broker, ledger, db };
 }
 
 async function teardown(fix: Fixture | null): Promise<void> {

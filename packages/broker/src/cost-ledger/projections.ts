@@ -4,14 +4,22 @@
 //   1. canonicalizes the typed payload via `costAuditPayloadToBytes` so the
 //      bytes in `event_log` match the audit-event chain exactly,
 //   2. inserts the event_log row and captures its LSN,
-//   3. applies the projection update keyed by that LSN.
+//   3. applies the projection update keyed by that LSN,
+//   4. (idempotent variants only) inserts the `command_idempotency` row
+//      with the rendered response — same tx, so a crash between the
+//      ledger write and the idempotency row is impossible.
 //
-// The §15.A sum invariant
-//   sum(cost_events) == sum(cost_by_agent) == sum(cost_by_task)
-// is decidable because (a) amounts are integers throughout, (b) projection
-// updates run in the same transaction as the event-log insert, and (c) the
-// `last_lsn` column in each projection ties the aggregate back to a specific
-// event-log LSN.
+// The §15.A invariants this slice guarantees, both decidable:
+//   I1. sum(cost_events in event_log) == sum(cost_by_agent across all days)
+//   I2. sum(task-attributed cost_events) == sum(cost_by_task)
+//
+// Cost events with no `taskId` skip the task projection entirely (see
+// `cost.ts:CostEventAuditPayload.taskId?`); I2 holds only for the
+// task-attributed subset. The earlier "grand-sum" wording was unfalsifiable
+// because `replay-check` mirrors the same skip. See triangulation finding B2.
+//
+// Integer math throughout (amounts, projections) keeps both invariants
+// decidable across a long-lived ledger.
 
 import {
   asMicroUsd,
@@ -30,6 +38,7 @@ import {
 import type Database from "better-sqlite3";
 
 import type { EventLog } from "../event-log/index.ts";
+import type { ParsedIdempotencyKey } from "./idempotency.ts";
 import { type NewCrossing, processCostEventForCrossings } from "./reactor.ts";
 
 export interface CostEventAppendResult {
@@ -81,10 +90,52 @@ export interface ThresholdCrossingRow {
   readonly limitMicroUsd: MicroUsd;
 }
 
+export interface IdempotentAppendResult {
+  /** True iff the response was replayed from `command_idempotency`. */
+  readonly replayed: boolean;
+  readonly statusCode: number;
+  /** Pre-rendered response bytes — the route writes these verbatim. */
+  readonly payload: Buffer;
+}
+
+export interface IdempotentCostEventArgs {
+  readonly payload: CostEventAuditPayload;
+  readonly idempotency: ParsedIdempotencyKey;
+  readonly nowMs: number;
+  readonly render: (applied: CostEventAppendResult) => {
+    readonly statusCode: number;
+    readonly payload: Buffer;
+  };
+}
+
+export interface IdempotentBudgetSetArgs {
+  readonly payload: BudgetSetAuditPayload;
+  readonly idempotency: ParsedIdempotencyKey;
+  readonly nowMs: number;
+  readonly render: (applied: BudgetSetAppendResult) => {
+    readonly statusCode: number;
+    readonly payload: Buffer;
+  };
+}
+
 export interface CostLedger {
   appendCostEvent(payload: CostEventAuditPayload): CostEventAppendResult;
   appendBudgetSet(payload: BudgetSetAuditPayload): BudgetSetAppendResult;
   appendThresholdCrossed(payload: BudgetThresholdCrossedAuditPayload): ThresholdCrossedAppendResult;
+
+  /**
+   * Atomic equivalent of `appendCostEvent` with built-in idempotency.
+   * Runs the lookup, the append, and the idempotency-row insert in ONE
+   * SQLite transaction so a crash between any two steps cannot lose the
+   * replay record. The route hands in a `render` function that produces
+   * the response bytes given the applied result; those bytes are what
+   * subsequent replays return byte-for-byte.
+   *
+   * Replaces the pre-existing `runIdempotent + appendCostEvent` two-step
+   * (see triangulation finding B1).
+   */
+  appendCostEventIdempotent(args: IdempotentCostEventArgs): IdempotentAppendResult;
+  appendBudgetSetIdempotent(args: IdempotentBudgetSetArgs): IdempotentAppendResult;
 
   getAgentSpend(agentSlug: string, dayUtc: string): AgentSpendRow | null;
   listAgentSpend(filter?: { dayUtc?: string }): readonly AgentSpendRow[];
@@ -204,58 +255,138 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
      ORDER BY budget_set_lsn ASC, threshold_bps ASC`,
   );
 
-  const appendCostEventTransaction = db.transaction(
-    (payload: CostEventAuditPayload): CostEventAppendResult => {
-      const bytes = costAuditPayloadToBytes("cost_event", payload);
-      const lsn = eventLog.append({ type: "cost.event", payload: Buffer.from(bytes) });
-      const dayUtc = isoDateUtc(payload.occurredAt);
-      upsertAgentSpend.run(payload.agentSlug, dayUtc, payload.amountMicroUsd as number, lsn);
-      const agentRow = selectAgentSpend.get(payload.agentSlug, dayUtc);
-      if (agentRow === undefined) {
-        throw new Error("cost_by_agent upsert produced no row (concurrent delete?)");
+  // Idempotency-row statements (B1 fix). Lookup + insert run inside the
+  // SAME transaction as the append so a crash between the two is
+  // impossible — a retry sees either both committed or both rolled back.
+  const idempotencyLookupStmt = db.prepare<
+    [string, string],
+    {
+      readonly statusCode: number;
+      readonly responsePayload: Buffer;
+    }
+  >(
+    `SELECT status_code AS statusCode, response_payload AS responsePayload
+     FROM command_idempotency
+     WHERE idempotency_key = ? AND command = ?`,
+  );
+  const idempotencyInsertStmt = db.prepare<[string, string, number, Buffer, number | null, number]>(
+    `INSERT INTO command_idempotency
+       (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+
+  // Inner (non-transactional) append helpers. The public `appendX`
+  // methods wrap these in their own transactions. The `appendXIdempotent`
+  // methods wrap them along with the idempotency-row insert in one
+  // bigger transaction.
+  const appendCostEventInner = (payload: CostEventAuditPayload): CostEventAppendResult => {
+    const bytes = costAuditPayloadToBytes("cost_event", payload);
+    const lsn = eventLog.append({ type: "cost.event", payload: Buffer.from(bytes) });
+    const dayUtc = isoDateUtc(payload.occurredAt);
+    upsertAgentSpend.run(payload.agentSlug, dayUtc, payload.amountMicroUsd as number, lsn);
+    const agentRow = selectAgentSpend.get(payload.agentSlug, dayUtc);
+    if (agentRow === undefined) {
+      throw new Error("cost_by_agent upsert produced no row (concurrent delete?)");
+    }
+    let taskTotal: MicroUsd | null = null;
+    if (payload.taskId !== undefined) {
+      upsertTaskSpend.run(payload.taskId, payload.amountMicroUsd as number, lsn);
+      const taskRow = selectTaskSpend.get(payload.taskId);
+      if (taskRow === undefined) {
+        throw new Error("cost_by_task upsert produced no row (concurrent delete?)");
       }
-      let taskTotal: MicroUsd | null = null;
-      if (payload.taskId !== undefined) {
-        upsertTaskSpend.run(payload.taskId, payload.amountMicroUsd as number, lsn);
-        const taskRow = selectTaskSpend.get(payload.taskId);
-        if (taskRow === undefined) {
-          throw new Error("cost_by_task upsert produced no row (concurrent delete?)");
-        }
-        taskTotal = asMicroUsd(taskRow.totalMicroUsd);
+      taskTotal = asMicroUsd(taskRow.totalMicroUsd);
+    }
+    // Threshold reactor runs in the same transaction so the §15.A
+    // invariants hold at every commit: a cost_event and its derivative
+    // threshold crossings either both land or both roll back.
+    const newCrossings = processCostEventForCrossings(db, eventLog, {
+      costEventLsn: lsn,
+      agentSlug: payload.agentSlug,
+      taskId: payload.taskId,
+      occurredAt: payload.occurredAt,
+    });
+    return {
+      lsn: lsnFromV1Number(lsn),
+      agentDayTotal: asMicroUsd(agentRow.totalMicroUsd),
+      taskTotal,
+      newCrossings,
+    };
+  };
+
+  const appendBudgetSetInner = (payload: BudgetSetAuditPayload): BudgetSetAppendResult => {
+    const bytes = costAuditPayloadToBytes("budget_set", payload);
+    const lsn = eventLog.append({ type: "cost.budget.set", payload: Buffer.from(bytes) });
+    const tombstoned = (payload.limitMicroUsd as number) === 0;
+    upsertBudget.run(
+      payload.budgetId,
+      payload.scope,
+      payload.subjectId ?? null,
+      payload.limitMicroUsd as number,
+      canonicalJSON(payload.thresholdsBps),
+      lsn,
+      tombstoned ? 1 : 0,
+    );
+    return { lsn: lsnFromV1Number(lsn), tombstoned };
+  };
+
+  const appendCostEventTransaction = db.transaction(appendCostEventInner);
+  const appendBudgetSetTransaction = db.transaction(appendBudgetSetInner);
+
+  const appendCostEventIdempotentTransaction = db.transaction(
+    (args: IdempotentCostEventArgs): IdempotentAppendResult => {
+      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
+      if (cached !== undefined) {
+        return {
+          replayed: true,
+          statusCode: cached.statusCode,
+          payload: Buffer.from(cached.responsePayload),
+        };
       }
-      // Threshold reactor runs in the same transaction so the §15.A sum
-      // invariant holds at every commit: a cost_event and its derivative
-      // threshold crossings either both land or both roll back.
-      const newCrossings = processCostEventForCrossings(db, eventLog, {
-        costEventLsn: lsn,
-        agentSlug: payload.agentSlug,
-        taskId: payload.taskId,
-        occurredAt: payload.occurredAt,
-      });
+      const applied = appendCostEventInner(args.payload);
+      const rendered = args.render(applied);
+      idempotencyInsertStmt.run(
+        args.idempotency.raw,
+        args.idempotency.command,
+        rendered.statusCode,
+        rendered.payload,
+        // applied.lsn is "v1:N" — extract the integer for the column.
+        parseLsn(applied.lsn).localLsn,
+        args.nowMs,
+      );
       return {
-        lsn: lsnFromV1Number(lsn),
-        agentDayTotal: asMicroUsd(agentRow.totalMicroUsd),
-        taskTotal,
-        newCrossings,
+        replayed: false,
+        statusCode: rendered.statusCode,
+        payload: rendered.payload,
       };
     },
   );
 
-  const appendBudgetSetTransaction = db.transaction(
-    (payload: BudgetSetAuditPayload): BudgetSetAppendResult => {
-      const bytes = costAuditPayloadToBytes("budget_set", payload);
-      const lsn = eventLog.append({ type: "cost.budget.set", payload: Buffer.from(bytes) });
-      const tombstoned = (payload.limitMicroUsd as number) === 0;
-      upsertBudget.run(
-        payload.budgetId,
-        payload.scope,
-        payload.subjectId ?? null,
-        payload.limitMicroUsd as number,
-        canonicalJSON(payload.thresholdsBps),
-        lsn,
-        tombstoned ? 1 : 0,
+  const appendBudgetSetIdempotentTransaction = db.transaction(
+    (args: IdempotentBudgetSetArgs): IdempotentAppendResult => {
+      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
+      if (cached !== undefined) {
+        return {
+          replayed: true,
+          statusCode: cached.statusCode,
+          payload: Buffer.from(cached.responsePayload),
+        };
+      }
+      const applied = appendBudgetSetInner(args.payload);
+      const rendered = args.render(applied);
+      idempotencyInsertStmt.run(
+        args.idempotency.raw,
+        args.idempotency.command,
+        rendered.statusCode,
+        rendered.payload,
+        parseLsn(applied.lsn).localLsn,
+        args.nowMs,
       );
-      return { lsn: lsnFromV1Number(lsn), tombstoned };
+      return {
+        replayed: false,
+        statusCode: rendered.statusCode,
+        payload: rendered.payload,
+      };
     },
   );
 
@@ -291,6 +422,12 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
       payload: BudgetThresholdCrossedAuditPayload,
     ): ThresholdCrossedAppendResult {
       return appendThresholdCrossedTransaction.immediate(payload);
+    },
+    appendCostEventIdempotent(args: IdempotentCostEventArgs): IdempotentAppendResult {
+      return appendCostEventIdempotentTransaction.immediate(args);
+    },
+    appendBudgetSetIdempotent(args: IdempotentBudgetSetArgs): IdempotentAppendResult {
+      return appendBudgetSetIdempotentTransaction.immediate(args);
     },
     getAgentSpend(agentSlug: string, dayUtc: string): AgentSpendRow | null {
       const row = selectAgentSpend.get(agentSlug, dayUtc);

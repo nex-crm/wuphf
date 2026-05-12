@@ -7,9 +7,13 @@
 // event log (replayed sum != stored sum, missing budget, ghost crossing,
 // etc.), the report enumerates each discrepancy.
 //
-// §15.A's promise — `sum(cost_events) == sum(by_agent) == sum(by_task)` —
-// is verifiable in production by this single read-only call. PR B will
-// wire it as a GET /api/v1/cost/replay-check and a daily SRE alert.
+// §15.A's two decidable invariants are verifiable in production by this
+// single read-only call:
+//   I1. sum(cost_events) == sum(cost_by_agent across all days)
+//   I2. sum(task-attributed cost_events) == sum(cost_by_task)
+// PR B wires it as a GET /api/v1/cost/replay-check and a daily SRE alert.
+// Taskless cost events skip the task projection (see triangulation B2);
+// I2 is scoped to the task-attributed subset.
 //
 // Read-only: this function never writes. It is safe to call on a live
 // broker; SQLite's WAL gives it a consistent snapshot.
@@ -18,11 +22,13 @@ import {
   type AuditEventKind,
   type BudgetId,
   type BudgetSetAuditPayload,
+  type BudgetThresholdCrossedAuditPayload,
   type CostEventAuditPayload,
   costAuditPayloadFromJsonValue,
   type EventLsn,
   lsnFromV1Number,
   type MicroUsd,
+  parseLsn,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
 
@@ -91,6 +97,27 @@ export type ReplayDiscrepancy =
   | {
       readonly kind: "budget_row_ghost";
       readonly budgetId: BudgetId;
+    }
+  | {
+      readonly kind: "threshold_crossing_missing";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+    }
+  | {
+      readonly kind: "threshold_crossing_ghost";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+    }
+  | {
+      readonly kind: "threshold_crossing_field_mismatch";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly field: "crossedAtLsn" | "observedMicroUsd" | "limitMicroUsd";
+      readonly replayed: number;
+      readonly stored: number;
     };
 
 interface CostEventBatchRow {
@@ -155,10 +182,17 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
             set_at_lsn AS setAtLsn, tombstoned
      FROM cost_budgets`,
   );
+  const listCrossingsStmt = db.prepare<[], ThresholdCrossingDbRow>(
+    `SELECT budget_id AS budgetId, budget_set_lsn AS budgetSetLsn,
+            threshold_bps AS thresholdBps, crossed_at_lsn AS crossedAtLsn,
+            observed_micro_usd AS observedMicroUsd, limit_micro_usd AS limitMicroUsd
+     FROM cost_threshold_crossings`,
+  );
 
   const replayedAgentDays = new Map<string, number>();
   const replayedTasks = new Map<string, number>();
   const replayedBudgets = new Map<string, ReplayedBudget>();
+  const replayedCrossings = new Map<string, ReplayedCrossing>();
 
   let cursor = 0;
   let scanned = 0;
@@ -197,10 +231,27 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
           setAtLsn: row.lsn,
           tombstoned: (parsed.limitMicroUsd as number) === 0,
         });
+      } else if (kind === "budget_threshold_crossed") {
+        // H1 fix: replay every threshold-crossed event into an expected
+        // (budget_id, budget_set_lsn, threshold_bps) → row map. The
+        // comparison below catches missing, ghost, and field-mismatch
+        // drift against cost_threshold_crossings.
+        const parsed = costAuditPayloadFromJsonValue(
+          kind,
+          JSON.parse(row.payload.toString("utf8")),
+        ) as BudgetThresholdCrossedAuditPayload;
+        const budgetSetLsnInt = parseLsn(parsed.budgetSetLsn).localLsn;
+        const crossedAtLsnInt = parseLsn(parsed.crossedAtLsn).localLsn;
+        const key = crossingKey(parsed.budgetId, budgetSetLsnInt, parsed.thresholdBps);
+        replayedCrossings.set(key, {
+          budgetId: parsed.budgetId,
+          budgetSetLsn: budgetSetLsnInt,
+          thresholdBps: parsed.thresholdBps,
+          crossedAtLsn: crossedAtLsnInt,
+          observedMicroUsd: parsed.observedMicroUsd as number,
+          limitMicroUsd: parsed.limitMicroUsd as number,
+        });
       }
-      // budget_threshold_crossed has no projection-aggregate effect; the
-      // PK on cost_threshold_crossings is what serves as its projection,
-      // and we cross-check that via the crossings comparison below.
       scanned += 1;
     }
     cursor = rows[rows.length - 1]?.lsn ?? cursor;
@@ -226,6 +277,12 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   }
   compareBudgets(replayedBudgets, storedBudgets, discrepancies);
 
+  const storedCrossings = new Map<string, ThresholdCrossingDbRow>();
+  for (const row of listCrossingsStmt.all()) {
+    storedCrossings.set(crossingKey(row.budgetId, row.budgetSetLsn, row.thresholdBps), row);
+  }
+  compareCrossings(replayedCrossings, storedCrossings, discrepancies);
+
   const highest = highestLsnStmt.get()?.lsn ?? 0;
   return {
     ok: discrepancies.length === 0,
@@ -233,6 +290,90 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     eventsScanned: scanned,
     discrepancies,
   };
+}
+
+interface ThresholdCrossingDbRow {
+  readonly budgetId: string;
+  readonly budgetSetLsn: number;
+  readonly thresholdBps: number;
+  readonly crossedAtLsn: number;
+  readonly observedMicroUsd: number;
+  readonly limitMicroUsd: number;
+}
+
+interface ReplayedCrossing {
+  readonly budgetId: string;
+  readonly budgetSetLsn: number;
+  readonly thresholdBps: number;
+  readonly crossedAtLsn: number;
+  readonly observedMicroUsd: number;
+  readonly limitMicroUsd: number;
+}
+
+function crossingKey(budgetId: string, budgetSetLsn: number, thresholdBps: number): string {
+  return `${budgetId}|${budgetSetLsn}|${thresholdBps}`;
+}
+
+function compareCrossings(
+  replayed: ReadonlyMap<string, ReplayedCrossing>,
+  stored: ReadonlyMap<string, ThresholdCrossingDbRow>,
+  out: ReplayDiscrepancy[],
+): void {
+  for (const [key, expected] of replayed.entries()) {
+    const actual = stored.get(key);
+    if (actual === undefined) {
+      out.push({
+        kind: "threshold_crossing_missing",
+        budgetId: expected.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(expected.budgetSetLsn),
+        thresholdBps: expected.thresholdBps,
+      });
+      continue;
+    }
+    if (actual.crossedAtLsn !== expected.crossedAtLsn) {
+      out.push({
+        kind: "threshold_crossing_field_mismatch",
+        budgetId: expected.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(expected.budgetSetLsn),
+        thresholdBps: expected.thresholdBps,
+        field: "crossedAtLsn",
+        replayed: expected.crossedAtLsn,
+        stored: actual.crossedAtLsn,
+      });
+    }
+    if (actual.observedMicroUsd !== expected.observedMicroUsd) {
+      out.push({
+        kind: "threshold_crossing_field_mismatch",
+        budgetId: expected.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(expected.budgetSetLsn),
+        thresholdBps: expected.thresholdBps,
+        field: "observedMicroUsd",
+        replayed: expected.observedMicroUsd,
+        stored: actual.observedMicroUsd,
+      });
+    }
+    if (actual.limitMicroUsd !== expected.limitMicroUsd) {
+      out.push({
+        kind: "threshold_crossing_field_mismatch",
+        budgetId: expected.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(expected.budgetSetLsn),
+        thresholdBps: expected.thresholdBps,
+        field: "limitMicroUsd",
+        replayed: expected.limitMicroUsd,
+        stored: actual.limitMicroUsd,
+      });
+    }
+  }
+  for (const [key, actual] of stored.entries()) {
+    if (!replayed.has(key)) {
+      out.push({
+        kind: "threshold_crossing_ghost",
+        budgetId: actual.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(actual.budgetSetLsn),
+        thresholdBps: actual.thresholdBps,
+      });
+    }
+  }
 }
 
 interface ReplayedBudget {
