@@ -431,7 +431,7 @@ function emptyResponse(): OllamaChatResponse {
 }
 
 describe("Ollama missing message post-condition (PR #834 CR round-2)", () => {
-  it("throws ProviderError when raw.message is missing (silent text=\"\" prevented)", async () => {
+  it('throws ProviderError when raw.message is missing (silent text="" prevented)', async () => {
     const { client } = fakeClient(
       () =>
         ({
