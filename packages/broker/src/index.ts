@@ -4,9 +4,9 @@
 // import `createBroker` and ignore the rest of the module graph.
 //
 // Cost-ledger and event-log primitives live on the `@wuphf/broker/cost-ledger`
-// subpath (#820) so consumers that only need the listener don't pull in
-// the storage internals. `SqliteReceiptStore` is on `@wuphf/broker/sqlite`
-// for the same reason (native binding load cost).
+// subpath so consumers that only need the listener don't pull in the storage
+// internals. `SqliteReceiptStore` is on `@wuphf/broker/sqlite` for the same
+// reason (native binding load cost).
 
 export { createBroker } from "./listener.ts";
 export type {

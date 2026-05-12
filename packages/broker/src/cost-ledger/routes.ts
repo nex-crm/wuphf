@@ -15,11 +15,15 @@
 //
 // Every state-changing route requires an `Idempotency-Key` header in the
 // shape `cmd_<command>_<26-char-ULID>`. On duplicate the broker replays
-// the originally-stored response byte for byte.
+// the originally-stored response byte for byte. Mutations also require
+// `X-Operator-Capability` when the host configures `cost.operatorToken`,
+// plus `X-Operator-Identity` so server-minted budget audit fields identify
+// the acting operator.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
+  type ApiToken,
   asBudgetId,
   asMicroUsd,
   asSignerIdentity,
@@ -32,6 +36,7 @@ import {
   type SignerIdentity,
 } from "@wuphf/protocol";
 
+import { tokenMatches } from "../auth.ts";
 import type { BrokerLogger } from "../types.ts";
 import {
   type CostCommand,
@@ -51,6 +56,7 @@ export interface CostRouteDeps {
   readonly ledger: CostLedger;
   readonly logger: BrokerLogger;
   readonly db: import("better-sqlite3").Database;
+  readonly operatorToken: ApiToken | null;
   readonly nowMs: () => number;
 }
 
@@ -125,6 +131,9 @@ async function handleCostEventPost(
   res: ServerResponse,
   deps: CostRouteDeps,
 ): Promise<void> {
+  const operator = requireOperator(req, res, deps);
+  if (!operator.ok) return;
+
   const idemKey = parseIdempotencyKey(req.headers["idempotency-key"]?.toString(), "cost.event");
   if (!idemKey.ok) {
     writeIdempotencyError(res, idemKey.error, deps.logger, "cost_event");
@@ -150,12 +159,11 @@ async function handleCostEventPost(
     return;
   }
 
-  // Atomic with the ledger transaction: lookup + append + idempotency
-  // insert all in one SQLite commit. See triangulation finding B1.
+  const nowMs = deps.nowMs();
   const result = deps.ledger.appendCostEventIdempotent({
     payload,
     idempotency: idemKey.key,
-    nowMs: deps.nowMs(),
+    nowMs,
     render: (applied) => {
       const responseBody = JSON.stringify({
         lsn: applied.lsn,
@@ -181,6 +189,9 @@ async function handleBudgetSetPost(
   res: ServerResponse,
   deps: CostRouteDeps,
 ): Promise<void> {
+  const operator = requireOperator(req, res, deps);
+  if (!operator.ok) return;
+
   const idemKey = parseIdempotencyKey(
     req.headers["idempotency-key"]?.toString(),
     "cost.budget.set",
@@ -198,10 +209,10 @@ async function handleBudgetSetPost(
     return;
   }
 
+  const nowMs = deps.nowMs();
   let payload: BudgetSetAuditPayload;
   try {
-    const parsed = JSON.parse(body) as unknown;
-    payload = costAuditPayloadFromJsonValue("budget_set", parsed) as BudgetSetAuditPayload;
+    payload = budgetSetPayloadFromRequest(body, operator.identity, nowMs);
   } catch (err) {
     const reason = err instanceof Error ? err.message : "validation_failed";
     deps.logger.warn("budget_set_rejected", { reason: "invalid_payload" });
@@ -221,7 +232,7 @@ async function handleBudgetSetPost(
   const result = deps.ledger.appendBudgetSetIdempotent({
     payload,
     idempotency: idemKey.key,
-    nowMs: deps.nowMs(),
+    nowMs,
     render: (applied) => ({
       statusCode: 201,
       payload: Buffer.from(
@@ -239,6 +250,9 @@ async function handleBudgetDelete(
   deps: CostRouteDeps,
   rawId: string,
 ): Promise<void> {
+  const operator = requireOperator(req, res, deps);
+  if (!operator.ok) return;
+
   const idemKey = parseIdempotencyKey(
     req.headers["idempotency-key"]?.toString(),
     "cost.budget.tombstone",
@@ -247,23 +261,6 @@ async function handleBudgetDelete(
     writeIdempotencyError(res, idemKey.error, deps.logger, "budget_tombstone");
     return;
   }
-  // The operator's identity is required so the audit row records *who*
-  // tombstoned the budget. PR B's supervisor will mint this header from
-  // the authenticated operator; PR A's clients pass it directly.
-  let operatorIdentity: SignerIdentity;
-  try {
-    const raw = req.headers["x-operator-identity"];
-    if (typeof raw !== "string" || raw.length === 0) {
-      writeJson(res, 400, { error: "operator_identity_required" });
-      return;
-    }
-    operatorIdentity = asSignerIdentity(raw);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : "invalid";
-    writeJson(res, 400, { error: "operator_identity_invalid", reason });
-    return;
-  }
-
   let budgetId: BudgetId;
   try {
     budgetId = asBudgetId(decodeURIComponent(rawId));
@@ -277,6 +274,7 @@ async function handleBudgetDelete(
     return;
   }
 
+  const nowMs = deps.nowMs();
   // Tombstone = budget_set with limitMicroUsd === 0. The projection's
   // `tombstoned` flag flips to 1; the reactor treats thresholds against
   // tombstoned budgets as unreachable; the event row stays in event_log
@@ -287,14 +285,14 @@ async function handleBudgetDelete(
     ...(existing.subjectId === null ? {} : { subjectId: existing.subjectId }),
     limitMicroUsd: asMicroUsd(0),
     thresholdsBps: existing.thresholdsBps,
-    setBy: operatorIdentity,
-    setAt: new Date(deps.nowMs()),
+    setBy: operator.identity,
+    setAt: new Date(nowMs),
   };
 
   const result = deps.ledger.appendBudgetSetIdempotent({
     payload: tombstonePayload,
     idempotency: idemKey.key,
-    nowMs: deps.nowMs(),
+    nowMs,
     render: (applied) => ({
       statusCode: 200,
       payload: Buffer.from(JSON.stringify({ lsn: applied.lsn, tombstoned: true }), "utf8"),
@@ -382,6 +380,69 @@ function handleReplayCheck(res: ServerResponse, deps: CostRouteDeps): void {
 // ─────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────
+
+type OperatorAuthResult =
+  | { readonly ok: true; readonly identity: SignerIdentity }
+  | { readonly ok: false };
+
+function requireOperator(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: CostRouteDeps,
+): OperatorAuthResult {
+  if (deps.operatorToken !== null) {
+    const presented = headerString(req.headers["x-operator-capability"]) ?? null;
+    if (!tokenMatches(presented, deps.operatorToken)) {
+      deps.logger.warn("cost_operator_auth_rejected", {
+        reason: presented === null ? "missing_operator_capability" : "invalid_operator_capability",
+      });
+      writeJson(res, 403, {
+        error: presented === null ? "operator_capability_required" : "operator_capability_invalid",
+      });
+      return { ok: false };
+    }
+  }
+
+  const rawIdentity = headerString(req.headers["x-operator-identity"]);
+  if (rawIdentity === undefined || rawIdentity.length === 0) {
+    writeJson(res, 400, { error: "operator_identity_required" });
+    return { ok: false };
+  }
+  try {
+    return { ok: true, identity: asSignerIdentity(rawIdentity) };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "invalid";
+    writeJson(res, 400, { error: "operator_identity_invalid", reason });
+    return { ok: false };
+  }
+}
+
+function budgetSetPayloadFromRequest(
+  body: string,
+  operatorIdentity: SignerIdentity,
+  nowMs: number,
+): BudgetSetAuditPayload {
+  const parsed = JSON.parse(body) as unknown;
+  if (!isJsonRecord(parsed)) {
+    throw new Error("budget_set request body must be a JSON object");
+  }
+  const serverStamped: Record<string, unknown> = {
+    ...parsed,
+    setBy: operatorIdentity,
+    setAt: new Date(nowMs).toISOString(),
+  };
+  return costAuditPayloadFromJsonValue("budget_set", serverStamped) as BudgetSetAuditPayload;
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function headerString(value: string | string[] | undefined): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return undefined;
+}
 
 function writeIdempotencyError(
   res: ServerResponse,

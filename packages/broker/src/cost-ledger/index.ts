@@ -1,7 +1,7 @@
 // Public surface of `@wuphf/broker/cost-ledger` — everything a host
 // needs to build, drive, and audit the cost ledger from outside the
-// broker package. Split off the broker root export (#820) so the root
-// stays scoped to `createBroker` per `packages/broker/AGENTS.md:3`.
+// broker package. The broker root stays scoped to `createBroker` per
+// `packages/broker/AGENTS.md:3`.
 
 // Event log primitives. Hosts constructing a cost ledger need these to
 // open the database, apply migrations, and instantiate the event log

@@ -87,6 +87,11 @@ export interface BrokerConfig {
   readonly cost?: {
     readonly ledger: CostLedger;
     readonly db: Database.Database;
+    /**
+     * Additional bearer-like capability required for cost-ledger mutation
+     * routes. Read routes continue to use the broker bearer only.
+     */
+    readonly operatorToken?: ApiToken;
   };
 }
 

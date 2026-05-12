@@ -16,7 +16,7 @@
 // Cost events with no `taskId` skip the task projection entirely (see
 // `cost.ts:CostEventAuditPayload.taskId?`); I2 holds only for the
 // task-attributed subset. The earlier "grand-sum" wording was unfalsifiable
-// because `replay-check` mirrors the same skip. See triangulation finding B2.
+// because `replay-check` mirrors the same skip.
 //
 // Integer math throughout (amounts, projections) keeps both invariants
 // decidable across a long-lived ledger.
@@ -130,9 +130,6 @@ export interface CostLedger {
    * replay record. The route hands in a `render` function that produces
    * the response bytes given the applied result; those bytes are what
    * subsequent replays return byte-for-byte.
-   *
-   * Replaces the pre-existing `runIdempotent + appendCostEvent` two-step
-   * (see triangulation finding B1).
    */
   appendCostEventIdempotent(args: IdempotentCostEventArgs): IdempotentAppendResult;
   appendBudgetSetIdempotent(args: IdempotentBudgetSetArgs): IdempotentAppendResult;

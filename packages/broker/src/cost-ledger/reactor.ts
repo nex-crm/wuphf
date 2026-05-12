@@ -28,7 +28,7 @@
 //   - global / agent: `cost_by_agent` aggregated across days for the agent
 //     (or globally) — for the architecture-proof slice we use lifetime sum
 //     across all days; the calendar-day cap reset is enforced separately in
-//     the PR B supervisor by querying `cost_by_agent` with the day key.
+//     the budget supervisor by querying `cost_by_agent` with the day key.
 //   - task: `cost_by_task.total_micro_usd` for the matching taskId.
 //
 // The crossing fires when `observed * 10_000 >= threshold_bps * limit`. We

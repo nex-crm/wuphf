@@ -11,9 +11,9 @@
 // single read-only call:
 //   I1. sum(cost_events) == sum(cost_by_agent across all days)
 //   I2. sum(task-attributed cost_events) == sum(cost_by_task)
-// PR B wires it as a GET /api/v1/cost/replay-check and a daily SRE alert.
-// Taskless cost events skip the task projection (see triangulation B2);
-// I2 is scoped to the task-attributed subset.
+// The HTTP surface wires it as GET /api/v1/cost/replay-check; taskless
+// cost events skip the task projection, so I2 is scoped to the
+// task-attributed subset.
 //
 // Read-only: this function never writes. It is safe to call on a live
 // broker; SQLite's WAL gives it a consistent snapshot.
@@ -120,11 +120,9 @@ export type ReplayDiscrepancy =
       readonly stored: number;
     }
   | {
-      // #822: surface unparseable event-log rows distinctly so on-call
-      // sees the failing LSN, event type, and parse reason instead of
-      // a bare `internal_error` from the route. The route returns
-      // 200 with `ok: false` so this is observable in the same shape
-      // as any other drift discrepancy.
+      // Surface unparseable event-log rows distinctly so on-call sees the
+      // failing LSN, event type, and parse reason instead of a bare
+      // `internal_error` from the route.
       readonly kind: "event_payload_unparseable";
       readonly lsn: EventLsn;
       readonly type: string;
@@ -204,9 +202,8 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   const replayedTasks = new Map<string, number>();
   const replayedBudgets = new Map<string, ReplayedBudget>();
   const replayedCrossings = new Map<string, ReplayedCrossing>();
-  // #822: collect per-row parse failures as structured discrepancies
-  // instead of throwing out of the loop. On-call sees the failing LSN
-  // + event type + reason without grepping the listener log.
+  // Collect per-row parse failures as structured discrepancies instead
+  // of throwing out of the loop.
   const parseFailures: ReplayDiscrepancy[] = [];
 
   let cursor = 0;

@@ -8,6 +8,13 @@
 //                                           201 on insert, 409 on id collision.
 //   GET  /api/receipts/:id                — bearer required. 200 on hit, 404 on miss.
 //   GET  /api/threads/:tid/receipts       — bearer required. List receipts in a thread.
+//   GET  /api/v1/cost/summary             — bearer required. Current cost projection.
+//   GET  /api/v1/cost/budgets             — bearer required. List budgets.
+//   GET  /api/v1/cost/budgets/:id         — bearer required. Fetch one budget.
+//   GET  /api/v1/cost/replay-check        — bearer required. Projection drift report.
+//   POST /api/v1/cost/events              — bearer + operator capability required.
+//   POST /api/v1/cost/budgets             — bearer + operator capability required.
+//   DELETE /api/v1/cost/budgets/:id       — bearer + operator capability required.
 //   GET  /                                — static (renderer bundle) or 404 if disabled.
 //   GET  /index.html                      — static or 404.
 //   GET  /assets/*                        — static or 404.
@@ -59,9 +66,17 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       : ({
           ledger: config.cost.ledger,
           db: config.cost.db,
+          operatorToken: config.cost.operatorToken ?? null,
           logger,
           nowMs: () => Date.now(),
         } satisfies CostRouteDeps);
+  if (config.cost !== undefined && config.cost.operatorToken === undefined) {
+    // TODO(security): require operatorToken once every host has a separate
+    // operator capability minting path.
+    logger.warn("cost_operator_token_unconfigured", {
+      mode: "bearer_plus_operator_identity",
+    });
+  }
   const server = createServer((req, res) => {
     routeRequest(req, res, {
       token,
@@ -404,6 +419,7 @@ function classifyApiRoute(pathname: string): string {
   if (pathname.startsWith("/api/threads/") && pathname.endsWith("/receipts")) {
     return "thread_receipts";
   }
+  if (pathname.startsWith("/api/v1/cost/")) return "cost";
   return "unknown";
 }
 
