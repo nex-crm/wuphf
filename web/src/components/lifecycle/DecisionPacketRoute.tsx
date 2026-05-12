@@ -15,7 +15,6 @@ interface DecisionPacketRouteProps {
     | "error"
     | "missing_packet"
     | "populated"
-    | "reviewer_timeout"
     | "persistence_error";
   onClose?: () => void;
 }
@@ -23,8 +22,9 @@ interface DecisionPacketRouteProps {
 /**
  * `/task/:id` route container. Owns:
  *  - Fetch loop (mocked until Lane C lands the real persistence path).
- *  - All 7 interaction states (loading / streaming / error /
- *    missing-packet / populated / reviewer-timeout / persistence-error).
+ *  - The 6 interaction states wired in this lane (loading / streaming /
+ *    error / missing-packet / populated / persistence-error).
+ *    Reviewer-timeout joins once Lane D wires the convergence event.
  *  - Decision actions: stub callbacks that POST to the broker once
  *    Lane A merges. Toast confirmations are deferred to the same lane.
  */
@@ -120,7 +120,7 @@ function PacketSkeleton({ onClose }: { onClose: () => void }) {
       data-testid="decision-packet-loading"
       aria-busy="true"
     >
-      <aside className="packet-left" aria-hidden="true">
+      <aside className="packet-left">
         <div className="crumb">
           <button
             type="button"
