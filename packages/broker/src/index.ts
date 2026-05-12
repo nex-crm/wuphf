@@ -3,6 +3,30 @@
 // auth. Hosts (Electron utility process, future `wuphf serve --headless`)
 // import `createBroker` and ignore the rest of the module graph.
 
+export type {
+  CommandIdempotencyStore,
+  CostCommand,
+  ParsedIdempotencyKey,
+  StoredResponse,
+} from "./cost-ledger/idempotency.ts";
+export {
+  COST_COMMAND_VALUES,
+  createCommandIdempotencyStore,
+  parseIdempotencyKey,
+} from "./cost-ledger/idempotency.ts";
+export type {
+  AgentSpendRow,
+  BudgetRow,
+  BudgetSetAppendResult,
+  CostEventAppendResult,
+  CostLedger,
+  TaskSpendRow,
+  ThresholdCrossedAppendResult,
+  ThresholdCrossingRow,
+} from "./cost-ledger/index.ts";
+export { createCostLedger } from "./cost-ledger/index.ts";
+export type { ReplayCheckReport, ReplayDiscrepancy } from "./cost-ledger/replay-check.ts";
+export { runReplayCheck } from "./cost-ledger/replay-check.ts";
 export { createBroker } from "./listener.ts";
 export type {
   InMemoryReceiptStoreConfig,
