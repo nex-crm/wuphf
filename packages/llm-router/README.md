@@ -46,6 +46,19 @@ runners — there is no parallel call path to an LLM in this codebase.
   uniformity (Hard rule #1). Hosts that want to model GPU/electricity
   cost override the pricing table with non-zero rates. SDK is an
   **optional peer dependency**.
+- **`opencode` + `opencodego` — agent-runtime adapters (PR B.5).** Subpath
+  import: `import { createOpenCodeProvider, createOpenCodeGoProvider }
+  from "@wuphf/llm-router/opencode"`. `opencode` (TypeScript) and
+  `opencodego` (Go port) are agent runners that wrap an underlying LLM
+  provider; the gateway treats them as providers in their own right so
+  the cost row, cap, breaker, and dedupe all run. **Two factory variants
+  surface as separate `ProviderKind` values** (`"opencode"` vs
+  `"opencodego"`) so the cost ledger can distinguish them. **Mixed
+  topology** — both factories accept a structural `OpenCodeClient`; the
+  package ships a subprocess transport (CLI over stdio) and an HTTP
+  transport (POST to `/chat`). **Default pricing is zero** because cost
+  depends on the configured backing model; hosts override the table to
+  reflect real upstream spend. No new peer dependency.
 
 ## Usage
 
@@ -244,6 +257,93 @@ documented server-side dedupe contract, and a "retry against the same
 local process" doesn't incur double billing because billing is $0.
 The gateway's content-hash dedupe (60s sliding window) still applies
 upstream.
+
+### OpenCode + OpenCodeGo (mixed local-CLI / remote-HTTP topology)
+
+`opencode` (TypeScript) and `opencodego` (Go) are agent runners.
+Some hosts spawn them as **local CLI subprocesses** and talk over
+stdio; others hit a **hosted HTTP endpoint**. The adapter accepts a
+structural client so either transport works, and exposes two factory
+variants so the cost ledger records each runner under its own
+`ProviderKind`.
+
+Subprocess transport (local CLI):
+
+```ts
+import { createGateway } from "@wuphf/llm-router";
+import {
+  createOpenCodeProvider,
+  createOpenCodeSubprocessClient,
+} from "@wuphf/llm-router/opencode";
+
+const client = await createOpenCodeSubprocessClient({
+  binary: "opencode", // or absolute path; defaults to PATH lookup
+  // Optional: args, env override
+});
+
+const gateway = createGateway({
+  ledger,
+  providers: [
+    createOpenCodeProvider({
+      client,
+      // Required if the host wants real cost accounting — defaults to
+      // zero across the board.
+      pricing: {
+        "opencode-sonnet": {
+          inputMicroUsdPerMTok: 3_000_000,   // $3/MTok
+          outputMicroUsdPerMTok: 15_000_000, // $15/MTok
+          cachedInputMicroUsdPerMTok: 300_000,
+        },
+      },
+    }),
+  ],
+  nowMs: () => Date.now(),
+});
+
+const result = await gateway.complete(
+  { agentSlug: asAgentSlug("primary") },
+  { model: "opencode-sonnet", prompt: "go", maxOutputTokens: 1024 },
+);
+```
+
+HTTP transport (hosted endpoint):
+
+```ts
+import {
+  createOpenCodeGoProvider,
+  createOpenCodeHttpClient,
+} from "@wuphf/llm-router/opencode";
+
+const client = createOpenCodeHttpClient({
+  baseUrl: "http://opencodego.internal:9100",
+  headers: { authorization: "Bearer <token>" },
+});
+
+const provider = createOpenCodeGoProvider({ client });
+// Audit row will carry providerKind: "opencodego".
+```
+
+For tests, inject a fake client matching the `OpenCodeClient`
+interface (no transport setup needed):
+
+```ts
+import { createOpenCodeProvider } from "@wuphf/llm-router/opencode";
+
+const provider = createOpenCodeProvider({
+  client: {
+    chat: async (req, options) => ({
+      text: "ok",
+      usage: { inputTokens: 100, outputTokens: 50 },
+      finishReason: "stop",
+    }),
+  },
+});
+```
+
+The adapter **does** mint an `Idempotency-Key` header (subprocess
+transports ignore headers; HTTP transports may use them for
+server-side dedupe). The key is derived from `ProviderRequest.requestKey`
+when present, otherwise from a sha256 of the canonical request bytes.
 
 ## §10.4 nightly burn-down
 

@@ -268,6 +268,13 @@ export const PROVIDER_KIND_VALUES = [
   "openclaw",
   "hermes-agent",
   "openclaw-http",
+  // PR B.5: opencode + opencodego support. Both run in two topologies —
+  // a local CLI subprocess and a hosted HTTP endpoint — but share one
+  // audit identity per implementation. The TypeScript opencode and Go
+  // port opencodego are billed and audited separately so the cost
+  // ledger can distinguish them.
+  "opencode",
+  "opencodego",
 ] as const;
 const PROVIDER_KIND_SET: ReadonlySet<string> = new Set(PROVIDER_KIND_VALUES);
 

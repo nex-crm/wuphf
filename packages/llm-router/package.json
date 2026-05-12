@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./anthropic": "./src/providers/anthropic.ts",
     "./openai": "./src/providers/openai.ts",
-    "./ollama": "./src/providers/ollama.ts"
+    "./ollama": "./src/providers/ollama.ts",
+    "./opencode": "./src/providers/opencode.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
