@@ -25,9 +25,11 @@ runners — there is no parallel call path to an LLM in this codebase.
   and returns a canned response (or throws, for `stub-error`).
 - **`anthropic` — `@anthropic-ai/sdk` adapter (PR B.2).** Subpath import:
   `import { createAnthropicProvider } from "@wuphf/llm-router/anthropic"`.
-  Covers `claude-opus-4-*`, `claude-sonnet-4-*`, `claude-haiku-4-*` with
-  built-in integer-μUSD pricing; hosts may override the pricing table
-  for negotiated rates.
+  Covers `claude-opus-4-1`, `claude-opus-4-{5,6,7}`, `claude-sonnet-4-{5,6}`,
+  `claude-haiku-4-5` with built-in integer-μUSD pricing; hosts may
+  override the pricing table for negotiated rates. The SDK is an
+  **optional peer dependency** — hosts using only the stub do not
+  install it.
 - `openai` / `ollama` — future PRs.
 
 ## Usage
@@ -50,15 +52,31 @@ const result = await gateway.complete(ctx, request);
 
 ### Anthropic (production)
 
+First install the SDK alongside the router (it's an optional peer dep):
+
+```bash
+bun add @anthropic-ai/sdk @wuphf/llm-router
+```
+
+Then wire it:
+
 ```ts
 import { createGateway } from "@wuphf/llm-router";
 import { createAnthropicProviderWithKey } from "@wuphf/llm-router/anthropic";
 
+// Read the key from your secret store. The constructor rejects an
+// empty/non-string value; do NOT rely on `!` non-null assertions —
+// they don't run at runtime.
+const apiKey = process.env.ANTHROPIC_API_KEY;
+if (typeof apiKey !== "string" || apiKey.length === 0) {
+  throw new Error("ANTHROPIC_API_KEY is required");
+}
+
 const gateway = createGateway({
   ledger,
   providers: [
-    createAnthropicProviderWithKey({
-      apiKey: process.env.ANTHROPIC_API_KEY!,
+    await createAnthropicProviderWithKey({
+      apiKey,
       // Optional: override pricing for negotiated rates.
       // pricing: { ... }
     }),
@@ -72,7 +90,12 @@ const result = await gateway.complete(
 );
 ```
 
-For tests, inject a fake client matching the `AnthropicClient` interface:
+`createAnthropicProviderWithKey` is `async` because the SDK module is
+loaded lazily via dynamic import — hosts that never call this function
+never pay the SDK's parse/load cost.
+
+For tests, inject a fake client matching the `AnthropicClient`
+interface (no SDK install needed):
 
 ```ts
 import { createAnthropicProvider } from "@wuphf/llm-router/anthropic";
@@ -80,14 +103,11 @@ import { createAnthropicProvider } from "@wuphf/llm-router/anthropic";
 const provider = createAnthropicProvider({
   client: {
     messages: {
-      create: async (params) => ({ content: [...], usage: { ... } }),
+      create: async (params, options) => ({ content: [...], usage: { ... } }),
     },
   },
 });
 ```
-
-The subpath import keeps the `@anthropic-ai/sdk` install cost off any
-host that only uses the stub.
 
 ## §10.4 nightly burn-down
 

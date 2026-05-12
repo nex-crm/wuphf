@@ -1,30 +1,52 @@
-// Anthropic per-model pricing, expressed as integer micro-USD per token.
+// Anthropic per-model pricing, stored as integer micro-USD per million
+// tokens (μUSD/MTok).
 //
-// Why integer-per-token (not the public-facing $/MTok rate):
-//   - The cost ledger is integer micro-USD throughout (see §15.A I1/I2 in
-//     `@wuphf/broker` cost-ledger). Storing the rate the same way means
-//     `tokens * rate` produces an integer micro-USD value directly, with no
-//     intermediate float and no rounding ambiguity.
-//   - Public rates are quoted in $/million-tokens; we just divide by 1 (mtok)
-//     and multiply by 1_000_000 (μUSD/USD): rate_per_token_micro_usd =
-//     public_rate_per_mtok_usd. A $3/MTok rate becomes exactly 3 μUSD/tok.
+// Why this unit and not μUSD/tok?
 //
-// Source: https://www.anthropic.com/pricing (verified against the published
-// table as of 2026-01). Hosts may override any field via the
-// `AnthropicPricingTable` config injected at construction time, so a price
-// change does not require a code release.
+//   Anthropic publishes rates in $/MTok (e.g. "$3/MTok input"). Storing
+//   the rate at the same scale Anthropic publishes lets us copy public
+//   prices in exact, then accumulate per call in μUSD-million-tokens
+//   space and divide once at the end. That preserves sub-μUSD/tok
+//   precision (cache reads at $0.30/MTok = 300 μUSD/MTok) instead of
+//   floor-rounding to zero per token.
 //
-// What's covered:
-//   - input_tokens                → `inputMicroUsdPerToken`
-//   - output_tokens               → `outputMicroUsdPerToken`
-//   - cache_read_input_tokens     → `cacheReadMicroUsdPerToken`
-//   - cache_creation_input_tokens → `cacheCreationMicroUsdPerToken`
+//   Earlier draft (PR B.2 round 1, commit 0e5c8c4b) stored rates as
+//   μUSD/tok. Sonnet/Haiku cache-read rates at $0.30/$0.10 per MTok
+//   rounded to 0 μUSD/tok, so a cache-heavy workload could spend
+//   real money while `cost_event.amountMicroUsd` recorded 0 — bypassing
+//   the daily cap. See triangulation #2 finding B2-2 (security BLOCK,
+//   api/sre HIGH).
+//
+// All rates are integer μUSD per million tokens:
+//
+//   public price → integer rate
+//   ─────────────────────────────
+//   $15.00/MTok  → 15_000_000
+//   $3.00/MTok   →  3_000_000
+//   $1.00/MTok   →  1_000_000
+//   $0.30/MTok   →    300_000
+//   $0.10/MTok   →    100_000
+//   $0.50/MTok   →    500_000
+//   $6.25/MTok   →  6_250_000
+//   $18.75/MTok  → 18_750_000
+//
+// Per-call cost is:
+//
+//   sum_micro_million = sum(tokens_i * rate_i)
+//   amountMicroUsd    = (sum_micro_million + 500_000) / 1_000_000  (integer)
+//
+// The +500_000 / 1_000_000 is round-half-up; deterministic, matches
+// the §15.A integer-math invariant, and never produces a sub-μUSD
+// rounding loss greater than 0.5 μUSD per total call.
+//
+// Pricing source: https://www.anthropic.com/pricing (verified 2026-05-12
+// against the public table). Hosts override any rate via the
+// `AnthropicPricingTable` config injected at construction time — price
+// changes never require a code release.
 //
 // Out of scope (deferred):
-//   - 1h extended TTL cache pricing (`ephemeral_1h_input_tokens`) — premium
-//     tier with separate rate; PR B.2 only covers the 5m default tier.
-//   - Server-tool-use pricing (web search, code execution) — separate billable
-//     line items, not part of message-level usage.
+//   - 1h extended TTL cache pricing (`ephemeral_1h_input_tokens`)
+//   - Server-tool-use pricing (web search, code execution)
 
 import { asMicroUsd, type CostUnits, type MicroUsd } from "@wuphf/protocol";
 
@@ -32,124 +54,104 @@ import { UnknownModelError } from "../errors.ts";
 import type { CostEstimator } from "../types.ts";
 
 /**
- * Per-token integer micro-USD rates for one model. Cache fields are the
- * 5-minute-TTL ephemeral cache; 1h extended TTL is out of scope for PR B.2.
+ * Per-model rates in integer micro-USD per million tokens (μUSD/MTok).
+ * All four fields MUST be non-negative safe integers; validation is
+ * enforced at provider construction (`createAnthropicProvider`).
+ *
+ * Cache fields are the 5-minute-TTL ephemeral cache. 1h extended TTL
+ * is out of scope.
  */
 export interface AnthropicModelPricing {
-  readonly inputMicroUsdPerToken: number;
-  readonly outputMicroUsdPerToken: number;
-  readonly cacheReadMicroUsdPerToken: number;
-  readonly cacheCreationMicroUsdPerToken: number;
+  readonly inputMicroUsdPerMTok: number;
+  readonly outputMicroUsdPerMTok: number;
+  readonly cacheReadMicroUsdPerMTok: number;
+  readonly cacheCreationMicroUsdPerMTok: number;
 }
 
 export type AnthropicPricingTable = Readonly<Record<string, AnthropicModelPricing>>;
 
 /**
- * Built-in pricing for the Claude 4.x family as of 2026-01. Each rate is
- * the public $/MTok price expressed as integer μUSD/tok.
+ * Built-in pricing for the Claude 4.x family, current as of 2026-05.
  *
- *   Opus 4.x:    $15 input / $75 output / $1.50 cache-read / $18.75 cache-write
- *   Sonnet 4.x:  $3  input / $15 output / $0.30 cache-read / $3.75  cache-write
- *   Haiku 4.x:   $1  input / $5  output / $0.10 cache-read / $1.25  cache-write
+ *   Opus 4.5 / 4.6 / 4.7:  $5  / $25 / $0.50 / $6.25  per MTok
+ *   Opus 4.1 (legacy):     $15 / $75 / $1.50 / $18.75 per MTok
+ *   Sonnet 4.5 / 4.6:      $3  / $15 / $0.30 / $3.75  per MTok
+ *   Haiku 4.5:             $1  / $5  / $0.10 / $1.25  per MTok
  *
- * Cache-read is 10% of input cost; cache-creation is 1.25x input cost. This
- * is Anthropic's standard ratio across the family — if a future model
- * publishes a different ratio, override via the config.
+ * Opus 4.5+ dropped 3x from the 4.1 generation per Anthropic's
+ * 2025-11 announcement. The previous draft of this table used 4.1
+ * rates for 4.5/4.7, which over-billed by 3x and would have caused
+ * false daily-cap trips — see triangulation #2 finding B2-1.
  *
- * The fractional cache rates ($1.50, $18.75, $3.75) round to non-integer
- * μUSD/tok — we use the precise published rate, not a rounded approximation.
- * To keep integer arithmetic exact, rates are micro-USD per 100 tokens
- * (i.e. centi-micro-USD per token, or 10⁻⁸ USD/tok). At runtime the cost
- * estimator divides by 100 with floor — exact for the published rate steps.
- *
- * No: the simpler design is to keep rates as μUSD per million-tokens
- * (effectively, since $1/MTok = 1 μUSD/tok), and use `Math.round(tokens *
- * rateNumerator / rateDenominator)` to handle fractional cents. Let's do
- * that:
- *
- *   Each pricing entry stores a per-token rate in fixed-point with implicit
- *   scale 1 (i.e. integer μUSD/tok), and we use Math.round for cache rates
- *   that have a fractional cent component. We accept a 1 μUSD/MTok rounding
- *   "error" on cache lines; for the §15.A invariant this is acceptable
- *   because the rounding is deterministic and the rate ranges are clamped.
- *
- * Actually, the cleanest approach: store cache rates as
- * "micro-USD per 1000 tokens" so the integer arithmetic is exact at the
- * granularity Anthropic actually charges:
- *
- *   $1.50/MTok = 1500 μUSD/MTok = 1.5 μUSD/Ktok = 1500 nanoUSD/tok.
- *
- * Since our ledger is μUSD-integer, we use μUSD-per-1000-tokens and divide
- * by 1000 at billing time. This is exactly how the broker projection-side
- * pricing works for receipt cost displays.
- *
- * For PR B.2 simplicity: store all rates in `microUsdPer1000Tokens` units
- * and divide at estimation time. Documented precisely in
- * `estimateAnthropicCostMicroUsd` below.
+ * Hosts that want negotiated rates pass a full `AnthropicPricingTable`
+ * to `createAnthropicProvider`. The model registry derives from the
+ * passed table's keys, so adding a model is one config change.
  */
 export const DEFAULT_ANTHROPIC_PRICING: AnthropicPricingTable = Object.freeze({
-  // Claude Opus 4.x family ($15 / $75 / $1.50 / $18.75 per MTok)
-  "claude-opus-4-5": {
-    inputMicroUsdPerToken: 15,
-    outputMicroUsdPerToken: 75,
-    cacheReadMicroUsdPerToken: 1, // 1.5 rounded down — see "rounding policy" below
-    cacheCreationMicroUsdPerToken: 19, // 18.75 rounded up
-  },
+  // Opus 4.1 (legacy generation): $15 / $75 / $1.50 / $18.75 per MTok
   "claude-opus-4-1": {
-    inputMicroUsdPerToken: 15,
-    outputMicroUsdPerToken: 75,
-    cacheReadMicroUsdPerToken: 1,
-    cacheCreationMicroUsdPerToken: 19,
+    inputMicroUsdPerMTok: 15_000_000,
+    outputMicroUsdPerMTok: 75_000_000,
+    cacheReadMicroUsdPerMTok: 1_500_000,
+    cacheCreationMicroUsdPerMTok: 18_750_000,
+  },
+  // Opus 4.5 / 4.6 / 4.7 generation: $5 / $25 / $0.50 / $6.25 per MTok
+  "claude-opus-4-5": {
+    inputMicroUsdPerMTok: 5_000_000,
+    outputMicroUsdPerMTok: 25_000_000,
+    cacheReadMicroUsdPerMTok: 500_000,
+    cacheCreationMicroUsdPerMTok: 6_250_000,
+  },
+  "claude-opus-4-6": {
+    inputMicroUsdPerMTok: 5_000_000,
+    outputMicroUsdPerMTok: 25_000_000,
+    cacheReadMicroUsdPerMTok: 500_000,
+    cacheCreationMicroUsdPerMTok: 6_250_000,
   },
   "claude-opus-4-7": {
-    inputMicroUsdPerToken: 15,
-    outputMicroUsdPerToken: 75,
-    cacheReadMicroUsdPerToken: 1,
-    cacheCreationMicroUsdPerToken: 19,
+    inputMicroUsdPerMTok: 5_000_000,
+    outputMicroUsdPerMTok: 25_000_000,
+    cacheReadMicroUsdPerMTok: 500_000,
+    cacheCreationMicroUsdPerMTok: 6_250_000,
   },
-  // Claude Sonnet 4.x family ($3 / $15 / $0.30 / $3.75 per MTok)
+  // Sonnet 4.x family ($3 / $15 / $0.30 / $3.75 per MTok)
   "claude-sonnet-4-5": {
-    inputMicroUsdPerToken: 3,
-    outputMicroUsdPerToken: 15,
-    cacheReadMicroUsdPerToken: 0, // 0.30 rounds to 0 at integer-per-tok granularity
-    cacheCreationMicroUsdPerToken: 4, // 3.75 rounded up
+    inputMicroUsdPerMTok: 3_000_000,
+    outputMicroUsdPerMTok: 15_000_000,
+    cacheReadMicroUsdPerMTok: 300_000,
+    cacheCreationMicroUsdPerMTok: 3_750_000,
   },
   "claude-sonnet-4-6": {
-    inputMicroUsdPerToken: 3,
-    outputMicroUsdPerToken: 15,
-    cacheReadMicroUsdPerToken: 0,
-    cacheCreationMicroUsdPerToken: 4,
+    inputMicroUsdPerMTok: 3_000_000,
+    outputMicroUsdPerMTok: 15_000_000,
+    cacheReadMicroUsdPerMTok: 300_000,
+    cacheCreationMicroUsdPerMTok: 3_750_000,
   },
-  // Claude Haiku 4.x family ($1 / $5 / $0.10 / $1.25 per MTok)
+  // Haiku 4.5 ($1 / $5 / $0.10 / $1.25 per MTok)
   "claude-haiku-4-5": {
-    inputMicroUsdPerToken: 1,
-    outputMicroUsdPerToken: 5,
-    cacheReadMicroUsdPerToken: 0, // 0.10 rounds to 0
-    cacheCreationMicroUsdPerToken: 1, // 1.25 rounded down
+    inputMicroUsdPerMTok: 1_000_000,
+    outputMicroUsdPerMTok: 5_000_000,
+    cacheReadMicroUsdPerMTok: 100_000,
+    cacheCreationMicroUsdPerMTok: 1_250_000,
   },
 });
 
-/**
- * Rounding policy (PR B.2): per-token rates are stored as integer μUSD/tok.
- * Rates with sub-μUSD/tok precision (e.g. $0.30/MTok cache-read on Sonnet =
- * 0.3 μUSD/tok) round to the nearest integer. The §15.A invariant is
- * preserved because the rounding is deterministic, and the ledger still
- * holds the rounded integer.
- *
- * Trade-off: a cache-read-heavy run on Sonnet under-bills slightly (0.30
- * rounds down to 0). Hosts that need exact sub-μUSD precision should
- * override the pricing table with their own fixed-point representation, OR
- * wait for a PR that switches to fractional rates. PR B.2 keeps the
- * floor-to-integer behavior because:
- *   - It matches what the broker's `cost_event.amountMicroUsd` field can
- *     hold (integer μUSD).
- *   - Under-billing the cache line is the safe-by-default direction; the
- *     observed total still respects the §10.4 ±$0.05 burn-down tolerance.
- *   - The cap-enforcement story (per-office daily) sees the same integer
- *     amount that's written to the ledger, so the cap behavior tracks the
- *     stored value.
- */
+const ONE_MILLION = 1_000_000;
+const ROUND_HALF_UP = ONE_MILLION / 2;
 
+/**
+ * Compute the integer μUSD cost of one Anthropic call. Accumulates in
+ * μUSD-million-tokens space (no precision loss for sub-μUSD/tok rates
+ * like $0.30/MTok cache-reads), then round-half-up to integer μUSD.
+ *
+ * The §15.A invariant holds because the final value is a non-negative
+ * safe integer; intermediate fixed-point accumulation never leaves
+ * integer arithmetic.
+ *
+ * Overflow safety: max plausible per-call sum is
+ *   input_tokens (1e6) * input_rate (15e6 μUSD/MTok)
+ *   = 1.5e13, well inside Number.MAX_SAFE_INTEGER (~9e15).
+ */
 export function estimateAnthropicCostMicroUsd(
   pricing: AnthropicPricingTable,
   model: string,
@@ -159,12 +161,13 @@ export function estimateAnthropicCostMicroUsd(
   if (rate === undefined) {
     throw new UnknownModelError(model);
   }
-  const total =
-    rate.inputMicroUsdPerToken * units.inputTokens +
-    rate.outputMicroUsdPerToken * units.outputTokens +
-    rate.cacheReadMicroUsdPerToken * units.cacheReadTokens +
-    rate.cacheCreationMicroUsdPerToken * units.cacheCreationTokens;
-  return asMicroUsd(total);
+  const accum =
+    rate.inputMicroUsdPerMTok * units.inputTokens +
+    rate.outputMicroUsdPerMTok * units.outputTokens +
+    rate.cacheReadMicroUsdPerMTok * units.cacheReadTokens +
+    rate.cacheCreationMicroUsdPerMTok * units.cacheCreationTokens;
+  const rounded = Math.floor((accum + ROUND_HALF_UP) / ONE_MILLION);
+  return asMicroUsd(rounded);
 }
 
 /**
@@ -181,8 +184,44 @@ export function createAnthropicCostEstimator(pricing: AnthropicPricingTable): Co
 }
 
 /**
- * The set of model IDs the default pricing table knows about. Used by the
- * provider to declare its `models[]` for gateway routing.
+ * Validate a pricing table at provider construction. Throws on any
+ * invalid entry so the gateway never tries to bill a malformed rate.
+ * See triangulation #2 finding B2-6.
+ */
+export function validateAnthropicPricingTable(table: AnthropicPricingTable): void {
+  const models = Object.keys(table);
+  if (models.length === 0) {
+    throw new Error("AnthropicPricingTable must register at least one model");
+  }
+  for (const model of models) {
+    if (model.length === 0) {
+      throw new Error("AnthropicPricingTable model id must be a non-empty string");
+    }
+    const rate = table[model];
+    if (rate === undefined) {
+      // Shouldn't happen given Object.keys, but the guard keeps the
+      // type narrowing honest for the loop body.
+      throw new Error(`AnthropicPricingTable: missing rate for model ${JSON.stringify(model)}`);
+    }
+    const fields: Array<[string, number]> = [
+      ["inputMicroUsdPerMTok", rate.inputMicroUsdPerMTok],
+      ["outputMicroUsdPerMTok", rate.outputMicroUsdPerMTok],
+      ["cacheReadMicroUsdPerMTok", rate.cacheReadMicroUsdPerMTok],
+      ["cacheCreationMicroUsdPerMTok", rate.cacheCreationMicroUsdPerMTok],
+    ];
+    for (const [field, value] of fields) {
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw new Error(
+          `AnthropicPricingTable[${JSON.stringify(model)}].${field} must be a non-negative safe integer, got ${String(value)}`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * The set of model IDs the default pricing table knows about. Used by
+ * the provider to declare its `models[]` for gateway routing.
  */
 export const DEFAULT_ANTHROPIC_MODELS: readonly string[] = Object.freeze(
   Object.keys(DEFAULT_ANTHROPIC_PRICING),

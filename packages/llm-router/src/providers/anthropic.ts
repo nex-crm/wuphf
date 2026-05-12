@@ -1,56 +1,88 @@
 // Anthropic SDK adapter for `Gateway.complete()`.
 //
 // Subpath import: hosts use `import { createAnthropicProvider } from
-// "@wuphf/llm-router/anthropic"`. The root `@wuphf/llm-router` does NOT
-// pull `@anthropic-ai/sdk` into the import graph, mirroring the
-// `@wuphf/broker/sqlite` precedent. Hosts that only use the stub
-// (e.g. tests, §10.4 burn-down) pay zero install cost for the SDK.
+// "@wuphf/llm-router/anthropic"`. `@anthropic-ai/sdk` is a peer
+// dependency — hosts that only use the stub do not install it. The
+// convenience constructor `createAnthropicProviderWithKey` uses a
+// dynamic import so the SDK module is loaded only when the host
+// explicitly asks for it; the structural-client path
+// (`createAnthropicProvider`) never touches the SDK.
 //
-// The adapter wires four things:
+// The adapter wires five things:
 //
 //   1. Provider routing: `models[]` is bound to the pricing-table model
 //      IDs, so the gateway's exact-match registration (post-H4 fix) puts
 //      `claude-*` requests on this provider. A host that adds a new
-//      pricing entry MUST also expand `models[]` — `createAnthropicProvider`
-//      handles this automatically when given the pricing table.
+//      pricing entry MUST also expand `models[]` —
+//      `createAnthropicProvider` handles this automatically when given
+//      the pricing table.
 //
-//   2. Cost estimation: integer-μUSD pricing (`anthropic-pricing.ts`). The
-//      §15.A invariant is preserved because we never leave integer math
-//      between provider response and `appendCostEvent`.
+//   2. Cost estimation: integer-μUSD pricing (`anthropic-pricing.ts`).
+//      The §15.A invariant is preserved because we never leave integer
+//      math between provider response and `appendCostEvent`.
 //
 //   3. Request translation: `ProviderRequest` carries a single string
 //      prompt today (the simplest shape the gateway needs); we translate
 //      to a single user message and lift `maxOutputTokens` directly into
 //      Anthropic's `max_tokens` field.
 //
-//   4. Error mapping: every SDK error class collapses to `ProviderError`
-//      with the original error attached as `cause`. The breaker sees one
-//      consistent failure surface regardless of HTTP status. We do NOT
-//      try to distinguish 429 / 5xx here — the breaker treats every
-//      failure as a strike, and the in-flight reservation issue (#819)
-//      is where rate-limit-specific behavior belongs.
+//   4. Error mapping: structured triage of SDK errors. 400/413/422
+//      (caller-input errors) → `BadRequestError`, which the gateway does
+//      NOT count as a breaker strike (triangulation B2-7). 401/403/429/
+//      5xx/network → `ProviderError` with structured metadata (status,
+//      requestId, errorType, retryAfterMs) preserved for on-call
+//      (triangulation B2-5).
+//
+//   5. Idempotency-key threading: every call mints a deterministic key
+//      from the request bytes and passes it to `messages.create` so SDK
+//      retries (which are on by default) don't double-charge after a
+//      lost response (triangulation B2-4). The key is content-derived,
+//      so a logical retry from the same caller reuses it.
 
-import Anthropic from "@anthropic-ai/sdk";
-import { asProviderKind, type CostUnits, type ProviderKind } from "@wuphf/protocol";
+import {
+  asProviderKind,
+  type CostUnits,
+  canonicalJSON,
+  type ProviderKind,
+  sha256Hex,
+} from "@wuphf/protocol";
 
-import { ProviderError, UnknownModelError } from "../errors.ts";
+import { BadRequestError, ProviderError, UnknownModelError } from "../errors.ts";
 import type { CostEstimator, Provider, ProviderRequest, ProviderResponse } from "../types.ts";
 import {
   type AnthropicPricingTable,
   createAnthropicCostEstimator,
   DEFAULT_ANTHROPIC_MODELS,
   DEFAULT_ANTHROPIC_PRICING,
+  validateAnthropicPricingTable,
 } from "./anthropic-pricing.ts";
 
 const ANTHROPIC_PROVIDER_KIND: ProviderKind = asProviderKind("anthropic");
 
+// HTTP status set the gateway treats as caller-input (NOT breaker strikes).
+// 400 = bad request, 413 = payload too large, 422 = unprocessable entity.
+// 401 (auth), 403 (permission), 429 (rate limit), and 5xx stay as
+// ProviderError so the breaker can react to real provider failures.
+const CALLER_INPUT_STATUSES = new Set<number>([400, 413, 422]);
+
+// Loose-typed accessor for SDK error metadata. The SDK's `APIError`
+// class declares `status`, `headers`, and `error`; we read defensively
+// so a future SDK version that renames a field degrades gracefully
+// rather than throwing inside the catch handler.
+interface SdkErrorLike {
+  readonly status?: unknown;
+  readonly headers?: unknown;
+  readonly error?: unknown;
+  readonly requestID?: unknown;
+}
+
 /**
- * Minimal slice of the Anthropic SDK surface we depend on, so tests can
- * inject a fake client without pulling the whole SDK type tree.
+ * Minimal slice of the Anthropic SDK surface we depend on. Tests inject
+ * a fake; the real `Anthropic` client matches.
  *
- * The shape mirrors `client.messages.create(MessageCreateParamsNonStreaming,
- * options) → APIPromise<Message>`. Streaming is out of scope for PR B.2 —
- * see "out of scope" in the package README.
+ * The signature mirrors `client.messages.create(params, options)`. We
+ * only use `options.idempotencyKey` — the SDK accepts arbitrary
+ * RequestOptions but we don't depend on the rest.
  */
 export interface AnthropicMessageCreateParams {
   readonly model: string;
@@ -59,6 +91,16 @@ export interface AnthropicMessageCreateParams {
     readonly role: "user" | "assistant";
     readonly content: string;
   }>;
+}
+
+export interface AnthropicRequestOptions {
+  /**
+   * Stable string the SDK forwards as the `idempotency-key` header.
+   * Anthropic's server deduplicates same-key requests within a window,
+   * which prevents double-charges after lost responses and during SDK
+   * internal retries.
+   */
+  readonly idempotencyKey?: string;
 }
 
 export interface AnthropicMessageUsage {
@@ -73,38 +115,37 @@ export interface AnthropicMessage {
   readonly usage: AnthropicMessageUsage;
 }
 
-/**
- * Anything that exposes `messages.create(params) → Promise<AnthropicMessage>`
- * satisfies this. The real `Anthropic` client matches; tests pass a fake.
- */
 export interface AnthropicClient {
   readonly messages: {
-    create(params: AnthropicMessageCreateParams): Promise<AnthropicMessage>;
+    create(
+      params: AnthropicMessageCreateParams,
+      options?: AnthropicRequestOptions,
+    ): Promise<AnthropicMessage>;
   };
 }
 
 export interface CreateAnthropicProviderArgs {
   /**
-   * Anthropic SDK client. Production: `new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })`.
-   * Tests: inject a fake matching `AnthropicClient`.
-   *
-   * Optional in this signature so a host that only wants pricing/model
-   * registration (e.g. a smoke test that doesn't actually call the API)
-   * can pass `undefined` — but `complete()` will throw if called.
+   * Anthropic SDK client (production) or a fake matching `AnthropicClient`
+   * (tests). The structural-client path does NOT pull in `@anthropic-ai/sdk`.
    */
   readonly client: AnthropicClient;
   /**
    * Pricing table override. Defaults to `DEFAULT_ANTHROPIC_PRICING`.
-   * The provider's `models[]` is derived from the table's keys, so
-   * overriding extends model registration in one place.
+   * Validated at construction; throws on missing/invalid entries.
    */
   readonly pricing?: AnthropicPricingTable;
 }
 
 export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Provider {
   const pricing = args.pricing ?? DEFAULT_ANTHROPIC_PRICING;
+  // B2-6: validate pricing at construction so a bad config never reaches
+  // a billable call. The default table is also validated — cheap and
+  // catches future drift if someone edits a rate to NaN.
+  validateAnthropicPricingTable(pricing);
   const models: readonly string[] =
     args.pricing === undefined ? DEFAULT_ANTHROPIC_MODELS : Object.keys(pricing);
+  const modelSet = new Set<string>(models);
   const costEstimator: CostEstimator = createAnthropicCostEstimator(pricing);
 
   return {
@@ -112,7 +153,7 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
     models,
     costEstimator,
     async complete(req: ProviderRequest): Promise<ProviderResponse> {
-      if (!models.includes(req.model)) {
+      if (!modelSet.has(req.model)) {
         // Defensive: the gateway already routed by exact-match, so this
         // shouldn't fire in practice. If it does, the host built two
         // providers claiming overlapping models and the gateway delivered
@@ -120,19 +161,26 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
         // gets a stable error type instead of an SDK-level 4xx.
         throw new UnknownModelError(req.model);
       }
+      // B2-7: pre-validate caller input. max_tokens must be > 0; the
+      // server rejects 0 with 400 anyway, but pre-rejecting locally
+      // means we don't burn a network round-trip OR send an idempotency
+      // key that the server would reuse for a real retry.
+      if (!Number.isSafeInteger(req.maxOutputTokens) || req.maxOutputTokens <= 0) {
+        throw new BadRequestError(ANTHROPIC_PROVIDER_KIND, new Error("maxOutputTokens_invalid"));
+      }
+      const params: AnthropicMessageCreateParams = {
+        model: req.model,
+        max_tokens: req.maxOutputTokens,
+        messages: [{ role: "user", content: req.prompt }],
+      };
+      const options: AnthropicRequestOptions = {
+        idempotencyKey: deriveIdempotencyKey(req),
+      };
       let raw: AnthropicMessage;
       try {
-        raw = await args.client.messages.create({
-          model: req.model,
-          max_tokens: req.maxOutputTokens,
-          messages: [{ role: "user", content: req.prompt }],
-        });
+        raw = await args.client.messages.create(params, options);
       } catch (err) {
-        // Every SDK error (auth, rate-limit, 5xx, network, abort) collapses
-        // to ProviderError. The breaker treats them all as strikes; the
-        // in-flight reservation work (issue #819) is where rate-limit-
-        // specific retry / cool-down semantics belong.
-        throw new ProviderError(ANTHROPIC_PROVIDER_KIND, err);
+        throw classifySdkError(err);
       }
       return {
         text: extractText(raw.content),
@@ -143,21 +191,127 @@ export function createAnthropicProvider(args: CreateAnthropicProviderArgs): Prov
 }
 
 /**
+ * Derive a stable idempotency key from the request payload. Same logical
+ * request → same key → Anthropic dedupes server-side. Different agents
+ * issuing the same prompt get DIFFERENT keys upstream, because the
+ * gateway's dedupe already short-circuits same-(ctx, request) repeats
+ * before they reach the provider. (See B3 fix in PR B; dedupe key is
+ * (agentSlug, taskId, receiptId, request).)
+ *
+ * The key prefix `wuphf-` makes it identifiable in Anthropic-side logs
+ * if support needs to trace one.
+ */
+function deriveIdempotencyKey(req: ProviderRequest): string {
+  const projection = canonicalJSON({
+    model: req.model,
+    prompt: req.prompt,
+    maxOutputTokens: req.maxOutputTokens,
+  });
+  // Idempotency keys are documented as ≤ 256 chars; SHA-256 hex is 64,
+  // well inside the budget, and deterministic across processes.
+  return `wuphf-${sha256Hex(projection)}`;
+}
+
+/**
+ * Map an SDK error to the right typed gateway error. Caller-input
+ * statuses (400/413/422) → `BadRequestError` (NOT a breaker strike);
+ * everything else → `ProviderError` with structured metadata so on-call
+ * sees status/requestId/retry-after instead of opaque "provider_error".
+ */
+function classifySdkError(err: unknown): BadRequestError | ProviderError {
+  const meta = extractSdkErrorMetadata(err);
+  if (meta.status !== undefined && CALLER_INPUT_STATUSES.has(meta.status)) {
+    return new BadRequestError(ANTHROPIC_PROVIDER_KIND, err, {
+      ...(meta.status !== undefined ? { status: meta.status } : {}),
+      ...(meta.requestId !== undefined ? { requestId: meta.requestId } : {}),
+      ...(meta.errorType !== undefined ? { errorType: meta.errorType } : {}),
+    });
+  }
+  return new ProviderError(ANTHROPIC_PROVIDER_KIND, err, {
+    ...(meta.status !== undefined ? { status: meta.status } : {}),
+    ...(meta.requestId !== undefined ? { requestId: meta.requestId } : {}),
+    ...(meta.errorType !== undefined ? { errorType: meta.errorType } : {}),
+    ...(meta.retryAfterMs !== undefined ? { retryAfterMs: meta.retryAfterMs } : {}),
+  });
+}
+
+interface ExtractedSdkMetadata {
+  readonly status?: number;
+  readonly requestId?: string;
+  readonly errorType?: string;
+  readonly retryAfterMs?: number;
+}
+
+function extractSdkErrorMetadata(err: unknown): ExtractedSdkMetadata {
+  if (typeof err !== "object" || err === null) return {};
+  const e = err as SdkErrorLike;
+  const out: { -readonly [K in keyof ExtractedSdkMetadata]: ExtractedSdkMetadata[K] } = {};
+  if (typeof e.status === "number") {
+    out.status = e.status;
+  }
+  if (typeof e.requestID === "string") {
+    out.requestId = e.requestID;
+  }
+  if (typeof e.error === "object" && e.error !== null) {
+    const errBody = e.error as { readonly error?: { readonly type?: unknown } };
+    if (typeof errBody.error?.type === "string") {
+      out.errorType = errBody.error.type;
+    }
+  }
+  if (typeof e.headers === "object" && e.headers !== null) {
+    // SDK's `headers` is a Headers-like; try both .get() (Headers
+    // instance) and indexer (plain object).
+    const retryAfter = readHeader(e.headers, "retry-after");
+    if (retryAfter !== undefined) {
+      const seconds = Number(retryAfter);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        out.retryAfterMs = Math.round(seconds * 1000);
+      }
+    }
+  }
+  return out;
+}
+
+function readHeader(headers: unknown, name: string): string | undefined {
+  // Headers instance
+  if (typeof headers === "object" && headers !== null && "get" in headers) {
+    const getter = (headers as { readonly get?: (n: string) => string | null }).get;
+    if (typeof getter === "function") {
+      const v = getter.call(headers, name);
+      if (typeof v === "string") return v;
+    }
+  }
+  // Plain object indexer
+  if (typeof headers === "object" && headers !== null) {
+    const lower = name.toLowerCase();
+    for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
+      if (k.toLowerCase() === lower && typeof v === "string") {
+        return v;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
  * Flatten Anthropic's content-block array to a single text response.
  * For PR B.2 we only handle `type === "text"` blocks (the standard
  * non-streaming, non-tool-use path). Tool-use blocks and thinking blocks
  * are ignored on text extraction; their token usage is still in `usage`
  * so the cost line is correct. PR B.3+ will plumb tool_use through to
  * the gateway response shape.
+ *
+ * Uses array-join instead of `+=` so allocation is O(total text) rather
+ * than O(blocks²) for large multi-block responses.
  */
 function extractText(content: AnthropicMessage["content"]): string {
-  let out = "";
+  const parts: string[] = [];
   for (const block of content) {
     if (block.type === "text" && typeof block.text === "string") {
-      out += block.text;
+      parts.push(block.text);
     }
   }
-  return out;
+  return parts.join("");
 }
 
 /**
@@ -187,21 +341,38 @@ export {
   DEFAULT_ANTHROPIC_MODELS,
   DEFAULT_ANTHROPIC_PRICING,
   estimateAnthropicCostMicroUsd,
+  validateAnthropicPricingTable,
 } from "./anthropic-pricing.ts";
 
-// Convenience constructor for the real SDK client. Hosts that don't want
-// to import `@anthropic-ai/sdk` directly can call this with their API key
-// and get a ready-to-use Provider.
-//
-// Reads the key from the argument, NOT from process.env, so the secret
-// boundary stays at the host — per protocol AGENTS.md, "Always source
-// credentials from .env files. Never pass API tokens inline on the
-// command line."
-export function createAnthropicProviderWithKey(args: {
+/**
+ * Convenience constructor for the real SDK client. The SDK is a peer
+ * dependency; this function uses a dynamic import so a host that only
+ * uses the structural-client path (e.g. tests) never loads the SDK
+ * module. Triangulation #2 finding perf-1 / B2-3.
+ *
+ * Reads the key from the argument, NOT from process.env, so the secret
+ * boundary stays at the host — per protocol AGENTS.md, "Always source
+ * credentials from .env files. Never pass API tokens inline on the
+ * command line."
+ *
+ * Runtime validation: `apiKey` must be a non-empty string. The README's
+ * `process.env.ANTHROPIC_API_KEY!` non-null assertion can forge "key
+ * exists" from JS or misconfigured TS; this rejects it explicitly.
+ */
+export async function createAnthropicProviderWithKey(args: {
   readonly apiKey: string;
   readonly pricing?: AnthropicPricingTable;
-}): Provider {
-  const client = new Anthropic({ apiKey: args.apiKey });
+}): Promise<Provider> {
+  if (typeof args.apiKey !== "string" || args.apiKey.length === 0) {
+    throw new Error(
+      "createAnthropicProviderWithKey: apiKey must be a non-empty string (got " +
+        typeof args.apiKey +
+        ")",
+    );
+  }
+  const sdk = await import("@anthropic-ai/sdk");
+  const AnthropicCtor = sdk.default;
+  const client = new AnthropicCtor({ apiKey: args.apiKey });
   return createAnthropicProvider({
     client: client as unknown as AnthropicClient,
     ...(args.pricing !== undefined ? { pricing: args.pricing } : {}),

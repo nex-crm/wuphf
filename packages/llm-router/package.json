@@ -21,12 +21,18 @@
     "burn:nightly": "tsx scripts/ci-burn-nightly.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.71.0",
     "@wuphf/broker": "workspace:*",
     "@wuphf/protocol": "workspace:*",
     "better-sqlite3": "12.9.0"
   },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": "^0.71.0"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": { "optional": true }
+  },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.71.0",
     "@biomejs/biome": "2.4.15",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "^22.10.0",
