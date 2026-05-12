@@ -447,6 +447,51 @@ function emptyMessage(): AnthropicMessage {
   };
 }
 
+describe("Anthropic present-invalid usage counters (PR #834 round-2 MED)", () => {
+  it("rejects negative input_tokens with ProviderError", async () => {
+    const provider = createAnthropicProvider({
+      client: {
+        messages: {
+          create: async () => ({
+            content: [{ type: "text", text: "ok" }],
+            usage: {
+              input_tokens: -1,
+              output_tokens: 1,
+              cache_read_input_tokens: null,
+              cache_creation_input_tokens: null,
+            },
+          }),
+        },
+      },
+    });
+    await expect(
+      provider.complete({ model: "claude-haiku-4-5", prompt: "p", maxOutputTokens: 8 }),
+    ).rejects.toBeInstanceOf(ProviderError);
+  });
+
+  it("rejects NaN output_tokens with ProviderError", async () => {
+    const provider = createAnthropicProvider({
+      client: {
+        messages: {
+          create: async () =>
+            ({
+              content: [{ type: "text", text: "ok" }],
+              usage: {
+                input_tokens: 1,
+                output_tokens: Number.NaN,
+                cache_read_input_tokens: null,
+                cache_creation_input_tokens: null,
+              },
+            }) as never,
+        },
+      },
+    });
+    await expect(
+      provider.complete({ model: "claude-haiku-4-5", prompt: "p", maxOutputTokens: 8 }),
+    ).rejects.toBeInstanceOf(ProviderError);
+  });
+});
+
 // Keep this around so the `vi` import isn't flagged when the file is
 // trimmed in future refactors.
 void asMicroUsd;

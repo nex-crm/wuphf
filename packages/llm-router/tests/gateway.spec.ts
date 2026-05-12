@@ -788,3 +788,84 @@ interface ProviderResponseLike {
     readonly cacheCreationTokens: number;
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// PR #834 round-2 codex sweep — adversarial + types findings
+// ─────────────────────────────────────────────────────────────────────
+
+describe("reservation accounts for prompt input tokens (round-2 BLOCK/HIGH)", () => {
+  it("a huge prompt with small maxOutputTokens reserves against input cost too", async () => {
+    // Round-1 reserved using maxOutputTokens for both input AND output.
+    // A 30k-char prompt (~10k input tokens) with maxOutputTokens=4 would
+    // therefore reserve as if it were tiny. Concurrent distinct prompts
+    // could then all pass reserveAndPreflight despite blowing the cap.
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: ["pricey"],
+      // $3/MTok input, $15/MTok output (claude-sonnet rates).
+      costEstimator: {
+        estimate: (_m, u) =>
+          Math.floor(
+            (u.inputTokens * 3_000_000 + u.outputTokens * 15_000_000) / 1_000_000,
+          ) as unknown as never,
+      },
+      complete: async () => ({
+        text: "tiny",
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      }),
+    };
+    // Daily cap = $0.02 = 20_000 μUSD. A single 30k-char prompt's
+    // pessimistic reservation is (~10k input * $3/MTok) ≈ $0.03 = 30_000,
+    // which exceeds the cap — reservation must reject it.
+    const gateway = createGateway({
+      ledger,
+      providers: [provider],
+      nowMs: () => Date.now(),
+      config: { caps: { dailyMicroUsd: 20_000 } },
+    });
+    try {
+      const ctx: SupervisorContext = { agentSlug: asAgentSlug("a") };
+      const bigPrompt = "x".repeat(30_000);
+      await expect(
+        gateway.complete(ctx, { model: "pricey", prompt: bigPrompt, maxOutputTokens: 4 }),
+      ).rejects.toBeInstanceOf(CapExceededError);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("gateway model length uses UTF-8 byte cap (round-2 LOW)", () => {
+  it("rejects a 129-byte model id even though it's under the old 256-char bound", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const ledger = createCostLedger(db, eventLog);
+    const longModel = "m".repeat(129); // 129 ASCII bytes
+    const provider: Provider = {
+      kind: asProviderKind("openai-compat"),
+      models: [longModel],
+      costEstimator: { estimate: () => 0 as never },
+      complete: async () => ({
+        text: "",
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+        model: longModel, // adapter echoes the served snapshot
+      }),
+    };
+    const gateway = createGateway({ ledger, providers: [provider], nowMs: () => Date.now() });
+    try {
+      await expect(
+        gateway.complete(
+          { agentSlug: asAgentSlug("a") },
+          { model: longModel, prompt: "p", maxOutputTokens: 1 },
+        ),
+      ).rejects.toThrow(/exceeds MAX_COST_MODEL_BYTES/);
+    } finally {
+      db.close();
+    }
+  });
+});

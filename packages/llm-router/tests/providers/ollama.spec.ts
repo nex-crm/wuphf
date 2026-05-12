@@ -384,6 +384,42 @@ describe("OllamaProvider → Gateway → CostLedger end-to-end (mocked SDK)", ()
   });
 });
 
+describe("Ollama present-invalid usage counters (PR #834 round-2 MED)", () => {
+  it("rejects negative eval_count with ProviderError, not silent zero", async () => {
+    // Round-1 clampSafeNonNegativeInteger silently zeroed invalid values.
+    // A host with non-zero Ollama pricing would underbill instead of
+    // tripping the breaker. Now: missing → 0; present-invalid → throw.
+    const { client } = fakeClient(() => ({
+      model: "llama3.3",
+      message: { role: "assistant", content: "ok" },
+      done: true,
+      prompt_eval_count: 100,
+      eval_count: -1,
+    }));
+    const provider = createOllamaProvider({ client });
+    await expect(
+      provider.complete({ model: "llama3.3", prompt: "p", maxOutputTokens: 8 }),
+    ).rejects.toBeInstanceOf(ProviderError);
+  });
+
+  it("rejects NaN eval_count with ProviderError", async () => {
+    const { client } = fakeClient(
+      () =>
+        ({
+          model: "llama3.3",
+          message: { role: "assistant", content: "ok" },
+          done: true,
+          prompt_eval_count: 100,
+          eval_count: Number.NaN,
+        }) as unknown as OllamaChatResponse,
+    );
+    const provider = createOllamaProvider({ client });
+    await expect(
+      provider.complete({ model: "llama3.3", prompt: "p", maxOutputTokens: 8 }),
+    ).rejects.toBeInstanceOf(ProviderError);
+  });
+});
+
 function emptyResponse(): OllamaChatResponse {
   return {
     model: "llama3.3",

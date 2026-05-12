@@ -350,15 +350,46 @@ function extractText(content: AnthropicMessage["content"]): string {
  * Translate Anthropic's Usage to our CostUnits shape. SDK can return
  * `null` for cache fields (when the request didn't use prompt caching) —
  * coerce to 0 so the protocol CostUnits invariant (non-negative integer)
- * holds.
+ * holds. Validate each counter explicitly so SDK drift (NaN, fractional,
+ * negative, Infinity) becomes a ProviderError before the audit codec
+ * has to reject — mirrors the OpenAI/opencode adapter pattern.
  */
 function usageToCostUnits(usage: AnthropicMessageUsage): CostUnits {
+  validateAnthropicUsageCounters(usage);
   return {
     inputTokens: usage.input_tokens,
     outputTokens: usage.output_tokens,
     cacheReadTokens: usage.cache_read_input_tokens ?? 0,
     cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
   };
+}
+
+function validateAnthropicUsageCounters(usage: AnthropicMessageUsage): void {
+  const required: ReadonlyArray<[string, number]> = [
+    ["input_tokens", usage.input_tokens],
+    ["output_tokens", usage.output_tokens],
+  ];
+  for (const [name, value] of required) {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+      throw new ProviderError(
+        ANTHROPIC_PROVIDER_KIND,
+        new Error(`anthropic_usage_${name}_invalid: ${String(value)}`),
+      );
+    }
+  }
+  const optional: ReadonlyArray<[string, number | null | undefined]> = [
+    ["cache_read_input_tokens", usage.cache_read_input_tokens],
+    ["cache_creation_input_tokens", usage.cache_creation_input_tokens],
+  ];
+  for (const [name, value] of optional) {
+    if (value === null || value === undefined) continue;
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+      throw new ProviderError(
+        ANTHROPIC_PROVIDER_KIND,
+        new Error(`anthropic_usage_${name}_invalid: ${String(value)}`),
+      );
+    }
+  }
 }
 
 // Re-export pricing surface so hosts using the subpath get one import line:

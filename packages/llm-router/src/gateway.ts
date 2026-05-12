@@ -31,6 +31,7 @@ import {
   isReceiptId,
   isTaskId,
   MAX_COST_EVENT_AMOUNT_MICRO_USD,
+  MAX_COST_MODEL_BYTES,
   type MicroUsd,
   type ProviderKind,
 } from "@wuphf/protocol";
@@ -336,34 +337,70 @@ function validateCostEstimate(value: MicroUsd): void {
   }
 }
 
-/** Model id length bound. The protocol codec validates separately, but a wildly oversized string here would already have done its damage by then. */
-const MAX_MODEL_ID_LEN = 256;
+/**
+ * Model id byte length bound. Mirrors the protocol's
+ * `MAX_COST_MODEL_BYTES` (128 UTF-8 bytes) so the gateway rejects
+ * oversized model ids BEFORE the audit payload is built. Round-2 fix:
+ * the round-1 implementation used `model.length` (JS chars) bounded
+ * at 256 — a 129-char ASCII model would pass the gateway and then fail
+ * codec encoding. Use UTF-8 byte length and the protocol-exported cap.
+ */
+const MODEL_BYTE_ENCODER = new TextEncoder();
 
 function validateAuditModel(model: string): void {
-  if (typeof model !== "string" || model.length === 0 || model.length > MAX_MODEL_ID_LEN) {
+  if (typeof model !== "string" || model.length === 0) {
     throw new Error(
-      `invalid audit model id: ${typeof model === "string" ? `length=${model.length}` : typeof model}`,
+      `invalid audit model id: ${typeof model === "string" ? "empty" : typeof model}`,
+    );
+  }
+  const byteLen = MODEL_BYTE_ENCODER.encode(model).length;
+  if (byteLen > MAX_COST_MODEL_BYTES) {
+    throw new Error(
+      `invalid audit model id: ${byteLen} UTF-8 bytes exceeds MAX_COST_MODEL_BYTES (${MAX_COST_MODEL_BYTES})`,
     );
   }
 }
 
 /**
+ * Conservative character-to-token ratio for the input estimate. Real
+ * tokenization (Anthropic, GPT) sits in the 3-4 chars/token range for
+ * English prose and lower for code; we use 3 to stay on the side of
+ * over-reservation rather than under-reservation. This is only used to
+ * bound the cap reservation — actual billing comes from the provider's
+ * response usage.
+ */
+const CHARS_PER_INPUT_TOKEN_ESTIMATE = 3;
+
+/**
  * Pessimistic worst-case cost estimate for a request, used to reserve
- * cap headroom before the provider call. Models the request as if every
- * token were both an input and output token at the model's rate. Real
- * cost from the provider's response usage is what gets billed; the
+ * cap headroom before the provider call. Round-2 fix: the round-1
+ * implementation used `maxOutputTokens` for BOTH input and output token
+ * estimates, which silently underreserves when the prompt is large and
+ * `maxOutputTokens` is small. A request with a 100k-character prompt
+ * (~33k tokens) and `maxOutputTokens=64` would reserve as if input were
+ * only 64 tokens — concurrent distinct large-prompt calls can then all
+ * pass `reserveAndPreflight` and overshoot the daily cap.
+ *
+ * Now: input tokens are estimated from `prompt.length` using a
+ * conservative chars-per-token ratio (`CHARS_PER_INPUT_TOKEN_ESTIMATE`).
+ * Output tokens are still bounded by `maxOutputTokens`. The estimator
+ * gets called with the larger of the two as a defensive ceiling.
+ *
+ * Real cost from the provider's response usage is what gets billed; the
  * reservation just ensures concurrent calls can't all pass a stale
  * snapshot of `cost_by_agent`.
  */
 function pessimisticReservationMicroUsd(provider: Provider, req: ProviderRequest): number {
-  const maxTokens = Math.max(0, Math.floor(req.maxOutputTokens));
+  const outputTokens = Math.max(0, Math.floor(req.maxOutputTokens));
+  const promptLen = typeof req.prompt === "string" ? req.prompt.length : 0;
+  const inputTokens = Math.ceil(promptLen / CHARS_PER_INPUT_TOKEN_ESTIMATE);
   // Use the provider's own estimator so each adapter's pricing applies.
   // Cache fields are zeroed — a fresh-input worst case bills at the
   // higher (non-cached) rate.
   try {
     const estimate = provider.costEstimator.estimate(req.model, {
-      inputTokens: maxTokens,
-      outputTokens: maxTokens,
+      inputTokens,
+      outputTokens,
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
     }) as unknown as number;

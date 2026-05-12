@@ -194,20 +194,28 @@ export function createOllamaProvider(args: CreateOllamaProviderArgs): Provider {
  * protocol `CostUnits` invariant (non-negative integer) holds.
  */
 function usageToCostUnits(raw: OllamaChatResponse): CostUnits {
-  // Coerce missing/non-safe-integer counters to 0. NaN, Infinity, floats,
-  // and negative values would otherwise reach the cost_event codec (which
-  // rejects), AFTER the provider has already executed. CostUnits requires
-  // non-negative safe integers.
+  // Missing counters are coerced to 0 (older Ollama responses sometimes
+  // omit them on done=true). Present-but-invalid counters (NaN, floats,
+  // negatives, Infinity) are a provider post-condition violation: they
+  // would silently underbill a host that's wired in non-zero pricing,
+  // and the cost_event codec would otherwise reject AFTER the provider
+  // has already executed. Throw ProviderError so the breaker reacts.
   return {
-    inputTokens: clampSafeNonNegativeInteger(raw.prompt_eval_count),
-    outputTokens: clampSafeNonNegativeInteger(raw.eval_count),
+    inputTokens: requireSafeNonNegativeIntegerOrZero(raw.prompt_eval_count, "prompt_eval_count"),
+    outputTokens: requireSafeNonNegativeIntegerOrZero(raw.eval_count, "eval_count"),
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
   };
 }
 
-function clampSafeNonNegativeInteger(value: unknown): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return 0;
+function requireSafeNonNegativeIntegerOrZero(value: unknown, fieldName: string): number {
+  if (value === undefined || value === null) return 0;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new ProviderError(
+      OLLAMA_PROVIDER_KIND,
+      new Error(`ollama_usage_${fieldName}_invalid: ${String(value)}`),
+    );
+  }
   return value;
 }
 
