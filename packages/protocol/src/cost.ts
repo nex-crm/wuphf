@@ -254,7 +254,8 @@ export interface BudgetThresholdCrossedAuditPayload {
   /**
    * LSN of the triggering `cost_event`. Reactor MUST derive the crossing's
    * time from this LSN (or the triggering event's payload `occurredAt`), not
-   * from `Date.now()` — replay must reproduce identical crossings.
+   * from the wall clock — replay must reproduce identical crossings byte for
+   * byte. See AGENTS.md rule #14 (no system-time reads in protocol code).
    */
   readonly crossedAtLsn: EventLsn;
   readonly crossedAt: Date;

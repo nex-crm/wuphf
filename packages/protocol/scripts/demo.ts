@@ -33,6 +33,7 @@ import {
   asThreadSpecRevisionId,
   asToolCallId,
   asWriteId,
+  BUDGET_SCOPE_VALUES,
   type BudgetSetAuditPayload,
   type BudgetThresholdCrossedAuditPayload,
   type CostEventAuditPayload,
@@ -40,19 +41,26 @@ import {
   computeAuditEventHash,
   costAuditPayloadFromJsonValue,
   costAuditPayloadToBytes,
+  costAuditPayloadToJsonValue,
   type EventLsn,
   FrozenArgs,
   GENESIS_PREV_HASH,
   INITIAL_VERIFIER_STATE,
   isAllowedLoopbackHost,
+  isBudgetId,
+  isBudgetScope,
+  isCostAuditEventKind,
   isLoopbackRemoteAddress,
+  isMicroUsd,
   isStreamEventKind,
   isWsFrameType,
   lsnFromV1Number,
   MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
+  MAX_BUDGET_THRESHOLD_BPS,
   MAX_BUDGET_THRESHOLDS,
   MAX_COST_EVENT_AMOUNT_MICRO_USD,
+  MAX_COST_MODEL_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
   MAX_WEBAUTHN_ASSERTION_BYTES,
   type ReceiptSnapshot,
@@ -71,6 +79,7 @@ import {
   validateApprovalSubmitRequest,
   validateBudgetSetAuditPayload,
   validateBudgetThresholdCrossedAuditPayload,
+  validateCostAuditPayloadForKind,
   validateCostEventAuditPayload,
   validateMerkleRootRecord,
   validateReceiptBudget,
@@ -961,6 +970,53 @@ expectEqual(
   "crossing canonical bytes parseable as canonical JSON",
   canonicalJSON(JSON.parse(textDecoder.decode(crossingBytes))),
   textDecoder.decode(crossingBytes),
+);
+
+header(28, "Cost ledger surface guards: brand guards, kind dispatch, closed enums");
+// ──────────────────────────────────────────────────────────────────────────
+// Public exports must each be exercised — these guards and dispatchers are
+// the public boundary; if any rot, downstream packages silently break.
+expectEqual("isMicroUsd accepts a valid MicroUsd", isMicroUsd(asMicroUsd(1_000)), true);
+expectEqual("isMicroUsd rejects 1.5", isMicroUsd(1.5), false);
+expectEqual("isMicroUsd rejects -1", isMicroUsd(-1), false);
+expectEqual("isBudgetId accepts ULID-shaped id", isBudgetId("01ARZ3NDEKTSV4RRFFQ69G5FAZ"), true);
+expectEqual("isBudgetId rejects lowercase", isBudgetId("01arz3ndektsv4rrffq69g5faz"), false);
+expectEqual("isBudgetScope accepts global|agent|task", isBudgetScope("agent"), true);
+expectEqual("isBudgetScope rejects bogus", isBudgetScope("user"), false);
+expectEqual("BUDGET_SCOPE_VALUES is the closed scope tuple", Array.from(BUDGET_SCOPE_VALUES), [
+  "global",
+  "agent",
+  "task",
+]);
+expectEqual("isCostAuditEventKind accepts cost_event", isCostAuditEventKind("cost_event"), true);
+expectEqual("isCostAuditEventKind rejects unknown", isCostAuditEventKind("budget_unset"), false);
+expectEqual(
+  "validateCostAuditPayloadForKind dispatches by kind",
+  validateCostAuditPayloadForKind("cost_event", costEvent),
+  { ok: true },
+);
+expectEqual(
+  "MAX_BUDGET_THRESHOLD_BPS bounds threshold space at 10000 (= 100%)",
+  MAX_BUDGET_THRESHOLD_BPS,
+  10_000,
+);
+expectEqual(
+  "MAX_COST_MODEL_BYTES bounds cost_event.model at 128 UTF-8 bytes",
+  MAX_COST_MODEL_BYTES,
+  128,
+);
+// costAuditPayloadToJsonValue is the plain-JSON projection used before
+// canonicalJSON encodes for the wire. Object identity-shape is locked here.
+const costJson = costAuditPayloadToJsonValue("cost_event", costEvent);
+expectEqual(
+  "costAuditPayloadToJsonValue projects amount as plain number",
+  typeof (costJson as Record<string, unknown>).amountMicroUsd,
+  "number",
+);
+expectEqual(
+  "costAuditPayloadToJsonValue projects occurredAt as ISO string",
+  (costJson as Record<string, unknown>).occurredAt,
+  "2026-05-08T18:03:00.000Z",
 );
 
 // ──────────────────────────────────────────────────────────────────────────
