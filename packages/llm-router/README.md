@@ -20,37 +20,74 @@ runners — there is no parallel call path to an LLM in this codebase.
 
 ## Providers
 
-- `stub-fixed-cost` — deterministic test target for the §10.4 nightly
-  burn-down. Every call costs 10000 micro-USD (= $0.01) and returns a
-  canned response.
-- `anthropic` (PR B.2 follow-up) — `@anthropic-ai/sdk` adapter.
-- `openai` (PR B.3 follow-up) — `openai` SDK adapter.
-- `ollama` (PR B.3 follow-up) — local model adapter.
+- `stub-fixed-cost` / `stub-error` — deterministic test targets for the
+  §10.4 nightly burn-down. Every call costs 10000 micro-USD (= $0.01)
+  and returns a canned response (or throws, for `stub-error`).
+- **`anthropic` — `@anthropic-ai/sdk` adapter (PR B.2).** Subpath import:
+  `import { createAnthropicProvider } from "@wuphf/llm-router/anthropic"`.
+  Covers `claude-opus-4-*`, `claude-sonnet-4-*`, `claude-haiku-4-*` with
+  built-in integer-μUSD pricing; hosts may override the pricing table
+  for negotiated rates.
+- `openai` / `ollama` — future PRs.
 
 ## Usage
 
+### Stub (tests, §10.4 burn-down)
+
 ```ts
-import { createGateway } from "@wuphf/llm-router";
-import { createCostLedger, createCommandIdempotencyStore } from "@wuphf/broker";
+import { createGateway, createStubProvider } from "@wuphf/llm-router";
+import { createCostLedger } from "@wuphf/broker";
 
 const gateway = createGateway({
   ledger,                             // from @wuphf/broker
   providers: [createStubProvider()],
-  caps: {
-    dailyMicroUsd: 5_000_000,         // $5/day per RFC §8
-    wakeCapPerHour: 12,
-    breakerErrorThreshold: 2,
-    breakerWindowMs: 10 * 60 * 1000,
-    breakerCooldownMs: 5 * 60 * 1000,
-    idleThresholdMs: 5 * 60 * 1000,
-    dedupeWindowMs: 60 * 1000,
-  },
   nowMs: () => Date.now(),
 });
 
 const result = await gateway.complete(ctx, request);
 // result.costEventLsn is the proof the cost row was written.
 ```
+
+### Anthropic (production)
+
+```ts
+import { createGateway } from "@wuphf/llm-router";
+import { createAnthropicProviderWithKey } from "@wuphf/llm-router/anthropic";
+
+const gateway = createGateway({
+  ledger,
+  providers: [
+    createAnthropicProviderWithKey({
+      apiKey: process.env.ANTHROPIC_API_KEY!,
+      // Optional: override pricing for negotiated rates.
+      // pricing: { ... }
+    }),
+  ],
+  nowMs: () => Date.now(),
+});
+
+const result = await gateway.complete(
+  { agentSlug: asAgentSlug("primary") },
+  { model: "claude-opus-4-7", prompt: "go", maxOutputTokens: 1024 },
+);
+```
+
+For tests, inject a fake client matching the `AnthropicClient` interface:
+
+```ts
+import { createAnthropicProvider } from "@wuphf/llm-router/anthropic";
+
+const provider = createAnthropicProvider({
+  client: {
+    messages: {
+      create: async (params) => ({ content: [...], usage: { ... } }),
+    },
+  },
+});
+```
+
+The subpath import keeps the `@anthropic-ai/sdk` install cost off any
+host that only uses the stub.
 
 ## §10.4 nightly burn-down
 
