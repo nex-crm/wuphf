@@ -37,7 +37,15 @@ runners — there is no parallel call path to an LLM in this codebase.
   `prompt_tokens` so the discounted cached-input rate applies correctly.
   SDK is an **optional peer dependency** — only installed if the host
   wants it.
-- `ollama` — future PR.
+- **`ollama` — `ollama` SDK adapter (PR B.4).** Subpath import:
+  `import { createOllamaProvider } from "@wuphf/llm-router/ollama"`.
+  Covers `llama3.3`, `llama3.2`, `llama3.1`, `qwen2.5`, `gemma2`,
+  `mistral-small3.1`. **All default pricing is zero** — Ollama runs
+  locally on the host's hardware, so there is no per-token provider
+  charge. The `cost_event` row is still written for accounting
+  uniformity (Hard rule #1). Hosts that want to model GPU/electricity
+  cost override the pricing table with non-zero rates. SDK is an
+  **optional peer dependency**.
 
 ## Usage
 
@@ -150,6 +158,92 @@ const result = await gateway.complete(
 The adapter splits OpenAI's `prompt_tokens_details.cached_tokens` out
 of `prompt_tokens` so the discounted cached-input rate applies to the
 cached subset (typically 10% of input cost on GPT-5 family).
+
+### Ollama (local execution)
+
+Ollama runs models on the host's own hardware. There is no API key, no
+remote endpoint, and **no per-token provider charge** — default
+pricing is zero across the board. The gateway still writes one
+`cost_event` per call (amount 0) so `cost_by_agent` and the §10.4
+projection stay uniform across providers.
+
+Install the SDK alongside the router (optional peer dep):
+
+```bash
+bun add ollama @wuphf/llm-router
+```
+
+```ts
+import { createGateway } from "@wuphf/llm-router";
+import { createOllamaProviderWithUrl } from "@wuphf/llm-router/ollama";
+
+const gateway = createGateway({
+  ledger,
+  providers: [
+    // baseUrl defaults to http://localhost:11434.
+    await createOllamaProviderWithUrl(),
+  ],
+  nowMs: () => Date.now(),
+});
+
+const result = await gateway.complete(
+  { agentSlug: asAgentSlug("primary") },
+  { model: "llama3.3", prompt: "go", maxOutputTokens: 1024 },
+);
+// result.costMicroUsd === 0 (local execution), but the cost_event row
+// was written and `result.costEventLsn` is its LSN.
+```
+
+For a remote Ollama (LAN, SSH tunnel) pass an explicit URL:
+
+```ts
+await createOllamaProviderWithUrl({ baseUrl: "http://10.0.0.5:11434" });
+```
+
+Hosts that want to model local GPU / electricity cost can override the
+pricing table; the integer-μUSD/MTok shape is identical to the other
+adapters:
+
+```ts
+import { createOllamaProviderWithUrl } from "@wuphf/llm-router/ollama";
+
+await createOllamaProviderWithUrl({
+  pricing: {
+    "llama3.3": {
+      inputMicroUsdPerMTok: 100_000,  // $0.10/MTok GPU cost
+      outputMicroUsdPerMTok: 200_000, // $0.20/MTok
+      cacheReadMicroUsdPerMTok: 0,
+      cacheCreationMicroUsdPerMTok: 0,
+    },
+  },
+});
+```
+
+For tests, inject a fake client matching the `OllamaClient` interface
+(no SDK install needed):
+
+```ts
+import { createOllamaProvider } from "@wuphf/llm-router/ollama";
+
+const provider = createOllamaProvider({
+  client: {
+    chat: async (request) => ({
+      model: "llama3.3",
+      message: { role: "assistant", content: "ok" },
+      done: true,
+      prompt_eval_count: 100,
+      eval_count: 50,
+    }),
+  },
+});
+```
+
+Unlike the Anthropic/OpenAI adapters, the Ollama adapter does **not**
+mint an idempotency key. Ollama is a local HTTP server with no
+documented server-side dedupe contract, and a "retry against the same
+local process" doesn't incur double billing because billing is $0.
+The gateway's content-hash dedupe (60s sliding window) still applies
+upstream.
 
 ## §10.4 nightly burn-down
 
