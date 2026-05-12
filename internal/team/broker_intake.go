@@ -819,10 +819,12 @@ func (b *Broker) persistIntakeSpecAndAdvance(taskID string, spec Spec) error {
 		return fmt.Errorf("intake: transition intake -> ready: %w", err)
 	}
 	if err := b.saveLocked(); err != nil {
-		// Best-effort rollback of the in-memory map; the task itself has
-		// already moved to ready, but the on-disk state failed to persist.
-		// Lane C's persistence retry path will reconcile.
-		log.Printf("intake: saveLocked after spec persist: %v", err)
+		// Don't report success when the spec wasn't durably persisted.
+		// Roll back the in-memory map so a subsequent retry sees a clean
+		// state. The task already moved to ready, but the caller now sees
+		// the persistence failure and can decide how to recover.
+		delete(b.intakeSpecs, taskID)
+		return fmt.Errorf("intake: persist accepted spec: %w", err)
 	}
 	return nil
 }

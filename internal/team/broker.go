@@ -1005,6 +1005,9 @@ func (b *Broker) Purge() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.tasks = nil
+	// Specs are keyed by taskID; orphan entries after Purge would return
+	// stale specs to a future task that gets the same id.
+	b.intakeSpecs = nil
 	if err := b.saveLocked(); err != nil {
 		log.Printf("broker: Purge: save failed: %v", err)
 	}
@@ -1021,6 +1024,10 @@ func (b *Broker) Reset() {
 	b.sessionMode = mode
 	b.oneOnOneAgent = agent
 	b.tasks = []teamTask{}
+	// Reset() reuses task IDs (task-1, task-2, ...). Clearing intakeSpecs
+	// prevents the next task with a recycled id from inheriting a stale
+	// spec from the prior session.
+	b.intakeSpecs = nil
 	b.requests = nil
 	b.humanInvites = nil
 	b.humanSessions = nil
