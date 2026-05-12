@@ -62,6 +62,12 @@ export interface BrokerConfig {
    * `@wuphf/broker/sqlite`. The interface is intentionally minimal:
    * idempotency-key semantics (byte-identical retry returns 200 no-op)
    * are deferred to a future widening of `put`'s return shape.
+   *
+   * Ownership: when a host supplies its own `receiptStore`, the host
+   * owns its lifecycle. `broker.stop()` closes the HTTP/WebSocket
+   * surface and the WS server but does NOT close the injected store —
+   * call `store.close()` (or equivalent) after `broker.stop()` to
+   * release any underlying handle.
    */
   readonly receiptStore?: ReceiptStore;
 }

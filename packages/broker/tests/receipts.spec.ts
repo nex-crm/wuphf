@@ -675,6 +675,84 @@ describe("receipts API", () => {
       expect(await res.json()).toEqual({ error: "storage_error" });
     });
 
+    it("GET /api/receipts/:id maps ReceiptStoreBusyError to 503 + Retry-After", async () => {
+      const store: ReceiptStore = {
+        async put() {
+          return { existed: false };
+        },
+        async get() {
+          throw new ReceiptStoreBusyError("test busy");
+        },
+        async list() {
+          return { items: [], nextCursor: null };
+        },
+        size() {
+          return 0;
+        },
+      };
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await fetch(`${broker.url}/api/receipts/${RECEIPT_ID_A}`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get("retry-after")).toBe("1");
+      expect(await res.json()).toEqual({ error: "store_busy" });
+    });
+
+    it("GET /api/receipts/:id maps ReceiptStoreUnavailableError to 503 storage_error", async () => {
+      const store: ReceiptStore = {
+        async put() {
+          return { existed: false };
+        },
+        async get() {
+          throw new ReceiptStoreUnavailableError("test readonly");
+        },
+        async list() {
+          return { items: [], nextCursor: null };
+        },
+        size() {
+          return 0;
+        },
+      };
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await fetch(`${broker.url}/api/receipts/${RECEIPT_ID_A}`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get("retry-after")).toBeNull();
+      expect(await res.json()).toEqual({ error: "storage_error" });
+    });
+
+    it("GET /api/threads/:tid/receipts maps storage errors to 503", async () => {
+      const store: ReceiptStore = {
+        async put() {
+          return { existed: false };
+        },
+        async get() {
+          return null;
+        },
+        async list() {
+          throw new ReceiptStoreBusyError("test busy");
+        },
+        size() {
+          return 0;
+        },
+      };
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await fetch(`${broker.url}/api/threads/${THREAD_ID_A}/receipts`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get("retry-after")).toBe("1");
+      expect(await res.json()).toEqual({ error: "store_busy" });
+    });
+
     it("excludes V1 receipts (which have no threadId)", async () => {
       broker = await createBroker({ port: 0, token: FIXED_TOKEN });
       // V1 has no threadId; the secondary index never sees it. Storing

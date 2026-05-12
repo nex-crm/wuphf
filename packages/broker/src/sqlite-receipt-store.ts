@@ -170,7 +170,12 @@ export class SqliteReceiptStore implements ReceiptStore {
   }
 
   async get(id: ReceiptId): Promise<ReceiptSnapshot | null> {
-    const row = this.getPayloadStmt.get(id);
+    let row: ProjectionPayloadRow | undefined;
+    try {
+      row = this.getPayloadStmt.get(id);
+    } catch (err) {
+      throw classifySqliteReadError(err);
+    }
     if (row === undefined) {
       return null;
     }
@@ -180,10 +185,15 @@ export class SqliteReceiptStore implements ReceiptStore {
   async list(filter?: ListFilter): Promise<ListPage> {
     const limit = resolveListLimit(filter?.limit);
     const afterLsn = filter?.cursor !== undefined ? decodeListCursor(filter.cursor) : 0;
-    const rows =
-      filter?.threadId === undefined
-        ? this.listAllStmt.all(afterLsn, limit + 1)
-        : this.listThreadStmt.all(filter.threadId, afterLsn, limit + 1);
+    let rows: ProjectionPayloadRow[];
+    try {
+      rows =
+        filter?.threadId === undefined
+          ? this.listAllStmt.all(afterLsn, limit + 1)
+          : this.listThreadStmt.all(filter.threadId, afterLsn, limit + 1);
+    } catch (err) {
+      throw classifySqliteReadError(err);
+    }
     const visibleRows = rows.slice(0, limit);
     const items = visibleRows.map((row) => receiptFromJson(row.payload.toString("utf8")));
     const lastRow = visibleRows.at(-1);
@@ -196,7 +206,12 @@ export class SqliteReceiptStore implements ReceiptStore {
   }
 
   size(): number {
-    const row = this.countStmt.get();
+    let row: CountRow | undefined;
+    try {
+      row = this.countStmt.get();
+    } catch (err) {
+      throw classifySqliteReadError(err);
+    }
     if (row === undefined) {
       throw new Error("receipts_projection count query returned no row");
     }
@@ -210,6 +225,26 @@ export class SqliteReceiptStore implements ReceiptStore {
     this.db.close();
     this.closed = true;
   }
+}
+
+// Map SQLite errors raised by read-path statements (`get`/`list`/`size`)
+// into the same classified error hierarchy `put` uses. Without this,
+// transient `SQLITE_BUSY` on a read returns a generic 500 from the
+// route — clients can't distinguish "retry will help" from "DB is
+// corrupt". `SQLITE_FULL` is not handled here because reads don't
+// allocate pages.
+function classifySqliteReadError(err: unknown): Error {
+  if (isSqliteBusyError(err)) {
+    return new ReceiptStoreBusyError("SqliteReceiptStore: database busy (SQLITE_BUSY/LOCKED)");
+  }
+  if (isSqliteUnavailableError(err)) {
+    return new ReceiptStoreUnavailableError(
+      `SqliteReceiptStore: storage error (${
+        err instanceof BetterSqlite3.SqliteError ? err.code : "unknown"
+      })`,
+    );
+  }
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 function projectionThreadId(receipt: ReceiptSnapshot): ThreadId | null {

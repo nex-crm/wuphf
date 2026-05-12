@@ -148,21 +148,7 @@ export async function handleReceiptCreate(
       writeJsonResponse(res, 507, JSON.stringify({ error: "store_full" }));
       return;
     }
-    // Classify storage failures so on-call sees a structured reason
-    // instead of a generic 500. Busy → 503 + `Retry-After: 1` (retry
-    // will likely succeed once the write lock clears). Unavailable →
-    // 503 with no `Retry-After` (operator intervention needed for
-    // readonly/IOERR/corruption).
-    if (err instanceof ReceiptStoreBusyError) {
-      deps.logger.warn("receipt_post_rejected", { reason: "store_busy" });
-      writeJsonResponse(res, 503, JSON.stringify({ error: "store_busy" }), {
-        "Retry-After": "1",
-      });
-      return;
-    }
-    if (err instanceof ReceiptStoreUnavailableError) {
-      deps.logger.error("receipt_post_rejected", { reason: "storage_error" });
-      writeJsonResponse(res, 503, JSON.stringify({ error: "storage_error" }));
+    if (writeStorageErrorResponse(res, err, deps.logger, "receipt_post_rejected")) {
       return;
     }
     throw err;
@@ -182,7 +168,7 @@ export async function handleReceiptCreate(
 export async function handleReceiptGet(
   pathname: string,
   res: ServerResponse,
-  deps: { readonly receiptStore: ReceiptStore },
+  deps: ReceiptRouteDeps,
 ): Promise<void> {
   const idSegment = pathname.slice("/api/receipts/".length);
   if (idSegment.length === 0 || idSegment.includes("/")) {
@@ -206,7 +192,15 @@ export async function handleReceiptGet(
     return;
   }
 
-  const receipt = await deps.receiptStore.get(id);
+  let receipt: ReceiptSnapshot | null;
+  try {
+    receipt = await deps.receiptStore.get(id);
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps.logger, "receipt_get_rejected")) {
+      return;
+    }
+    throw err;
+  }
   if (receipt === null) {
     notFoundJson(res);
     return;
@@ -217,7 +211,7 @@ export async function handleReceiptGet(
 export async function handleThreadReceiptsList(
   req: IncomingMessage,
   res: ServerResponse,
-  deps: { readonly receiptStore: ReceiptStore },
+  deps: ReceiptRouteDeps,
 ): Promise<void> {
   // /api/threads/:tid/receipts — extract :tid and require an exact match.
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -296,6 +290,9 @@ export async function handleThreadReceiptsList(
       writeJsonResponse(res, 400, JSON.stringify({ error: "invalid_limit" }));
       return;
     }
+    if (writeStorageErrorResponse(res, err, deps.logger, "receipt_list_rejected")) {
+      return;
+    }
     throw err;
   }
 
@@ -342,6 +339,34 @@ function buildThreadReceiptsNextLink(
 
 function notFoundJson(res: ServerResponse): void {
   writeJsonResponse(res, 404, JSON.stringify({ error: "not_found" }));
+}
+
+// Shared storage-error → HTTP response mapper used by every receipt
+// route. Returns `true` when the error was classified + handled (the
+// response is now written); returns `false` if the error wasn't a
+// storage-error class (caller should `throw` to surface a 500).
+// Busy → 503 + `Retry-After: 1` (retry will likely succeed once the
+// write lock clears). Unavailable → 503 with no `Retry-After`
+// (operator intervention needed for readonly/IOERR/corruption).
+function writeStorageErrorResponse(
+  res: ServerResponse,
+  err: unknown,
+  logger: BrokerLogger,
+  rejectedEvent: string,
+): boolean {
+  if (err instanceof ReceiptStoreBusyError) {
+    logger.warn(rejectedEvent, { reason: "store_busy" });
+    writeJsonResponse(res, 503, JSON.stringify({ error: "store_busy" }), {
+      "Retry-After": "1",
+    });
+    return true;
+  }
+  if (err instanceof ReceiptStoreUnavailableError) {
+    logger.error(rejectedEvent, { reason: "storage_error" });
+    writeJsonResponse(res, 503, JSON.stringify({ error: "storage_error" }));
+    return true;
+  }
+  return false;
 }
 
 // Shared JSON response helper. Sets `Content-Type: application/json;
