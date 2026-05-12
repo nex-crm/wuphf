@@ -289,8 +289,9 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription str
 	origDescription := sk.Description
 	origUpdatedAt := sk.UpdatedAt
 
-	// Update the skill's content with the merged body.
-	sk.Content = newContent
+	// Merge the new content into the existing body rather than replacing it.
+	// This preserves the original instructions while absorbing new details.
+	sk.Content = mergeSkillContent(sk.Content, newContent, "enhanced")
 	// Update description if the new one is longer (more specific).
 	if newDescription != "" && len(newDescription) > len(sk.Description) {
 		sk.Description = newDescription

@@ -73,16 +73,34 @@ func (b *Broker) handleSkillConsolidate(w http.ResponseWriter, r *http.Request) 
 	// Merge mode: archive cluster members into the target.
 	b.mu.Lock()
 	merged, archived, mergeErr := b.mergeSkillClusterLocked(mergeTarget, clusters)
-	var saveErr error
-	if mergeErr == nil {
-		saveErr = b.saveLocked()
-	}
-	b.mu.Unlock()
-
 	if mergeErr != nil {
+		b.mu.Unlock()
 		http.Error(w, mergeErr.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Re-render the target skill's wiki markdown after merge.
+	if target := b.findSkillByNameLocked(mergeTarget); target != nil {
+		slug := skillSlug(mergeTarget)
+		fm := teamSkillToFrontmatter(*target)
+		if mdBytes, renderErr := RenderSkillMarkdown(fm, target.Content); renderErr == nil {
+			wikiWorker := b.wikiWorker
+			if wikiWorker != nil {
+				wikiPath := "team/skills/" + slug + ".md"
+				b.mu.Unlock()
+				_, _, _ = wikiWorker.Enqueue(
+					context.Background(), slug, wikiPath,
+					string(mdBytes), "replace",
+					"archivist: consolidate skill "+slug,
+				)
+				b.mu.Lock()
+			}
+		}
+	}
+
+	saveErr := b.saveLocked()
+	b.mu.Unlock()
+
 	if saveErr != nil {
 		http.Error(w, "merge succeeded in memory but failed to persist: "+saveErr.Error(), http.StatusInternalServerError)
 		return
@@ -297,6 +315,7 @@ func (b *Broker) autoConsolidateSkillsIfNeeded() {
 
 	totalMerged := 0
 	totalArchived := 0
+	wikiWriteFailed := false
 
 	for _, cluster := range clusters {
 		// Pick the representative as the merge target (it's the first
@@ -318,22 +337,27 @@ func (b *Broker) autoConsolidateSkillsIfNeeded() {
 				slug := skillSlug(target)
 				fm := teamSkillToFrontmatter(*sk)
 				mdBytes, renderErr := RenderSkillMarkdown(fm, sk.Content)
-				if renderErr == nil {
-					wikiPath := "team/skills/" + slug + ".md"
-					b.mu.Unlock()
-					_, _, enqErr := wikiWorker.Enqueue(
-						context.Background(),
-						slug,
-						wikiPath,
-						string(mdBytes),
-						"replace",
-						"archivist: auto-consolidate skill "+slug,
-					)
-					b.mu.Lock()
-					if enqErr != nil {
-						slog.Warn("skill_consolidation_migration: wiki write failed",
-							"slug", slug, "err", enqErr)
-					}
+				if renderErr != nil {
+					slog.Warn("skill_consolidation_migration: render failed, aborting",
+						"slug", slug, "err", renderErr)
+					wikiWriteFailed = true
+					continue
+				}
+				wikiPath := "team/skills/" + slug + ".md"
+				b.mu.Unlock()
+				_, _, enqErr := wikiWorker.Enqueue(
+					context.Background(),
+					slug,
+					wikiPath,
+					string(mdBytes),
+					"replace",
+					"archivist: auto-consolidate skill "+slug,
+				)
+				b.mu.Lock()
+				if enqErr != nil {
+					slog.Warn("skill_consolidation_migration: wiki write failed, aborting",
+						"slug", slug, "err", enqErr)
+					wikiWriteFailed = true
 				}
 			}
 		}
@@ -342,6 +366,11 @@ func (b *Broker) autoConsolidateSkillsIfNeeded() {
 	if err := b.saveLocked(); err != nil {
 		slog.Warn("skill_consolidation_migration: saveLocked failed, skipping sentinel", "err", err)
 		// Do NOT write sentinel — next startup should retry.
+		return
+	}
+
+	if wikiWriteFailed {
+		slog.Warn("skill_consolidation_migration: wiki write(s) failed, skipping sentinel for retry")
 		return
 	}
 
