@@ -28,7 +28,6 @@ import { describe, expect, it } from "vitest";
 import {
   createGateway,
   createStubProvider,
-  STUB_FIXED_COST_MICRO_USD,
   STUB_MODEL_FIXED_COST,
   type SupervisorContext,
 } from "../src/index.ts";

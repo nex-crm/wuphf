@@ -1,7 +1,8 @@
-// §10.4 nightly burn-down. CI-blocking when wired into the
-// nightly.yml workflow (PR C). Contract from RFC §10.4:
+// Section 10.4 nightly burn-down. The scheduled workflow runs this
+// long-form simulation separately from pull-request CI. Contract from RFC
+// Section 10.4:
 //
-//   ci:burn:nightly --wakes-per-minute 10 --minutes 60 --model stub-fixed-cost
+//   bun run --cwd packages/llm-router burn:nightly
 //
 // Asserts:
 //   1. Read-only at $5.00 ± $0.05 — total office spend lands inside that
@@ -12,17 +13,22 @@
 //      full minute-by-minute throughput.)
 //   3. Circuit breaker fires within 3 consecutive failures.
 //
-// The §10.4 assertion of "cost tile updates every 30s" is a renderer-side
-// SLO (PR C). We approximate it here by calling `gateway.inspect()` every
+// The Section 10.4 assertion of "cost tile updates every 30s" is a renderer-side
+// SLO. We approximate it here by calling `gateway.inspect()` every
 // 30s and confirming the call is constant-time and reflects current state;
-// the real wire emission is PR C's responsibility.
+// the real wire emission belongs to renderer integration.
 //
 // Running:
 //   bun run packages/llm-router/scripts/ci-burn-nightly.ts
 //
 // Exits 0 on all assertions passing; 1 on any failure.
 
-import { createCostLedger, createEventLog, openDatabase, runMigrations } from "@wuphf/broker/cost-ledger";
+import {
+  createCostLedger,
+  createEventLog,
+  openDatabase,
+  runMigrations,
+} from "@wuphf/broker/cost-ledger";
 import { asAgentSlug } from "@wuphf/protocol";
 
 import {
@@ -64,11 +70,8 @@ const results: BurnResult[] = [];
 
 function record(name: string, passed: boolean, observed: string, expected: string): void {
   results.push({ name, passed, observed, expected });
-  // eslint-disable-next-line no-console
   console.log(`${passed ? "PASS" : "FAIL"} ${name}`);
-  // eslint-disable-next-line no-console
   console.log(`     observed: ${observed}`);
-  // eslint-disable-next-line no-console
   console.log(`     expected: ${expected}`);
 }
 
@@ -243,7 +246,6 @@ async function assertion3BreakerWithinThreeFailures(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // eslint-disable-next-line no-console
   console.log(
     `@wuphf/llm-router — §10.4 burn-down\n` +
       `--wakes-per-minute ${CONFIG.wakesPerMinute} ` +
@@ -256,7 +258,6 @@ async function main(): Promise<void> {
   await assertion3BreakerWithinThreeFailures();
 
   const failed = results.filter((r) => !r.passed).length;
-  // eslint-disable-next-line no-console
   console.log(`\n${results.length - failed}/${results.length} assertions passed`);
   process.exit(failed === 0 ? 0 : 1);
 }

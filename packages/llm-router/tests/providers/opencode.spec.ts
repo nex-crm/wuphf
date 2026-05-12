@@ -1,4 +1,9 @@
-import { createCostLedger, createEventLog, openDatabase, runMigrations } from "@wuphf/broker/cost-ledger";
+import {
+  createCostLedger,
+  createEventLog,
+  openDatabase,
+  runMigrations,
+} from "@wuphf/broker/cost-ledger";
 import { asAgentSlug } from "@wuphf/protocol";
 import { describe, expect, it, vi } from "vitest";
 
@@ -347,8 +352,12 @@ describe("createOpenCodeHttpClient", () => {
     expect(captured).not.toBeNull();
     const ref = captured as unknown as { url: string; init: RequestInit };
     expect(ref.url).toBe("http://localhost:9100/chat");
-    const headers = ref.init.headers as Record<string, string>;
-    expect(headers["authorization"]).toBe("Bearer test");
+    const headers = ref.init.headers as {
+      readonly authorization?: string;
+      readonly "Idempotency-Key"?: string;
+      readonly "Content-Type"?: string;
+    };
+    expect(headers.authorization).toBe("Bearer test");
     expect(headers["Idempotency-Key"]).toBe("wuphf-abc");
     expect(headers["Content-Type"]).toBe("application/json");
   });

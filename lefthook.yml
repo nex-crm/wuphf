@@ -253,6 +253,12 @@ pre-push:
       run: |
         cd packages/broker
         bun run test
+    llm-router-test:
+      files: bash scripts/changed-files-since-base.sh
+      glob: "packages/llm-router/**/*.{ts,json}"
+      run: |
+        cd packages/llm-router
+        bunx vitest run
     broker-invariants:
       # Custom invariant checks for broker-grade rules Biome cannot express:
       # bind host is loopback only, bearer comparison goes through

@@ -103,6 +103,20 @@ export interface OpenCodeChatResponse {
   readonly refusal?: string;
 }
 
+interface OpenCodeSubprocessResponseShape {
+  readonly text?: unknown;
+  readonly usage?: unknown;
+  readonly finishReason?: unknown;
+  readonly refusal?: unknown;
+  readonly model?: unknown;
+}
+
+interface OpenCodeSubprocessUsageShape {
+  readonly inputTokens?: unknown;
+  readonly outputTokens?: unknown;
+  readonly cachedInputTokens?: unknown;
+}
+
 export interface OpenCodeRequestOptions {
   readonly headers?: Readonly<Record<string, string>>;
 }
@@ -364,25 +378,20 @@ function parseSubprocessResponse(raw: unknown): OpenCodeChatResponse {
   if (typeof raw !== "object" || raw === null) {
     throw new Error("opencode subprocess: response is not an object");
   }
-  const obj = raw as Record<string, unknown>;
-  const text = typeof obj["text"] === "string" ? (obj["text"] as string) : "";
-  const usageRaw = obj["usage"];
+  const obj = raw as OpenCodeSubprocessResponseShape;
+  const text = typeof obj.text === "string" ? obj.text : "";
+  const usageRaw = obj.usage;
   if (typeof usageRaw !== "object" || usageRaw === null) {
     throw new Error("opencode subprocess: response missing usage");
   }
-  const usage = usageRaw as Record<string, unknown>;
-  const inputTokens =
-    typeof usage["inputTokens"] === "number" ? (usage["inputTokens"] as number) : 0;
-  const outputTokens =
-    typeof usage["outputTokens"] === "number" ? (usage["outputTokens"] as number) : 0;
+  const usage = usageRaw as OpenCodeSubprocessUsageShape;
+  const inputTokens = typeof usage.inputTokens === "number" ? usage.inputTokens : 0;
+  const outputTokens = typeof usage.outputTokens === "number" ? usage.outputTokens : 0;
   const cachedInputTokens =
-    typeof usage["cachedInputTokens"] === "number"
-      ? (usage["cachedInputTokens"] as number)
-      : undefined;
-  const finishReason =
-    typeof obj["finishReason"] === "string" ? (obj["finishReason"] as string) : undefined;
-  const refusal = typeof obj["refusal"] === "string" ? (obj["refusal"] as string) : undefined;
-  const model = typeof obj["model"] === "string" ? (obj["model"] as string) : undefined;
+    typeof usage.cachedInputTokens === "number" ? usage.cachedInputTokens : undefined;
+  const finishReason = typeof obj.finishReason === "string" ? obj.finishReason : undefined;
+  const refusal = typeof obj.refusal === "string" ? obj.refusal : undefined;
+  const model = typeof obj.model === "string" ? obj.model : undefined;
   return {
     text,
     usage: {

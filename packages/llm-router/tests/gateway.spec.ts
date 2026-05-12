@@ -1,4 +1,9 @@
-import { createCostLedger, createEventLog, openDatabase, runMigrations } from "@wuphf/broker/cost-ledger";
+import {
+  createCostLedger,
+  createEventLog,
+  openDatabase,
+  runMigrations,
+} from "@wuphf/broker/cost-ledger";
 import { asAgentSlug, asProviderKind, asReceiptId, asTaskId } from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -429,9 +434,9 @@ describe("gateway construction-time validation (#828)", () => {
       complete: stub.complete.bind(stub),
     };
     try {
-      expect(() =>
-        createGateway({ ledger, providers: [forged], nowMs: () => Date.now() }),
-      ).toThrow(/not a registered ProviderKind/);
+      expect(() => createGateway({ ledger, providers: [forged], nowMs: () => Date.now() })).toThrow(
+        /not a registered ProviderKind/,
+      );
     } finally {
       db.close();
     }
