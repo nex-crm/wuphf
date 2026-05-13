@@ -695,6 +695,22 @@ describe("replay-check oracle (#836)", () => {
     // oracle should agree.
     const report = runReplayCheck(db);
     expect(report.ok).toBe(true);
+    // Stronger assertion: verify BOTH epochs produced a logged threshold
+    // event. A future regression that skipped the second epoch would
+    // still pass `ok === true` if no spurious entry fires.
+    const crossingCount = db
+      .prepare<[], { readonly n: number }>(
+        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.budget.threshold.crossed'",
+      )
+      .get();
+    expect(crossingCount?.n).toBe(2);
+    const projectionRows = db
+      .prepare<[], { readonly budgetSetLsn: number }>(
+        "SELECT budget_set_lsn AS budgetSetLsn FROM cost_threshold_crossings ORDER BY budget_set_lsn ASC",
+      )
+      .all();
+    expect(projectionRows.length).toBe(2);
+    expect(projectionRows[0]?.budgetSetLsn).not.toBe(projectionRows[1]?.budgetSetLsn);
   });
 
   it("oracle covers global + agent + task budgets independently", () => {

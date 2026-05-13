@@ -16,7 +16,10 @@
 // task-attributed subset.
 //
 // Read-only: this function never writes. It is safe to call on a live
-// broker; SQLite's WAL gives it a consistent snapshot.
+// broker; the entire check runs inside a single `BEGIN DEFERRED`
+// transaction so concurrent writers can commit but won't be observed
+// mid-check (better-sqlite3's WAL does NOT give per-statement
+// snapshots on its own — round-2 review caught a stale claim here).
 
 import {
   type AuditEventKind,
@@ -31,8 +34,6 @@ import {
   parseLsn,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
-
-import type { EventLogRecord } from "../event-log/index.ts";
 
 export interface ReplayCheckReport {
   readonly ok: boolean;
@@ -287,12 +288,6 @@ interface BudgetDbRow {
 interface HighestLsnRow {
   readonly lsn: number;
 }
-
-const _COST_EVENT_TYPES = new Set<string>([
-  "cost.event",
-  "cost.budget.set",
-  "cost.budget.threshold.crossed",
-]);
 
 const BATCH_SIZE = 1_000;
 
@@ -1169,8 +1164,3 @@ function compareExpectedAndLoggedCrossings(
     });
   }
 }
-
-// Used only inside the batch loop; importing the type without using it
-// trips the lint. Re-exporting keeps the surface coherent for callers
-// that want to depend on the batch iterator.
-export type { EventLogRecord };
