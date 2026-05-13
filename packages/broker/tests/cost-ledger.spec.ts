@@ -14,7 +14,13 @@ import {
   parseLsn,
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
-import { createCostLedger, parseIdempotencyKey, runReplayCheck } from "../src/cost-ledger/index.ts";
+import {
+  createCostLedger,
+  parseIdempotencyKey,
+  type ReplayDiscrepancy,
+  runReplayCheck,
+} from "../src/cost-ledger/index.ts";
+import { __replayCheckTesting } from "../src/cost-ledger/replay-check.ts";
 import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
 
 function setup() {
@@ -1251,5 +1257,81 @@ describe("replay-check oracle round-3 fixes (PR #841 r3)", () => {
       expect(typeof stored.unparseable).toBe("string");
       expect(stored.unparseable).toContain("invalid entry");
     }
+  });
+});
+
+describe("replay-check oracle unsafe-lifetime (#843)", () => {
+  // Direct unit tests against the internal helper. An end-to-end test
+  // through `runReplayCheck` is blocked by the protocol per-event cap
+  // (`MAX_COST_EVENT_AMOUNT_MICRO_USD = 1e8`), which would require
+  // ~9e7 events to push an accumulator past `Number.MAX_SAFE_INTEGER`
+  // (≈ 9e15 microUsd ≈ $9B cumulative spend). See the comment on
+  // `__replayCheckTesting` in `replay-check.ts` for the rationale.
+  const { flagUnsafeAccumulator, MAX_SAFE_INTEGER_BIG, crossesThresholdBigInt } =
+    __replayCheckTesting;
+
+  it("flagUnsafeAccumulator: no discrepancy emitted when post is at the safe-integer boundary", () => {
+    const out: ReplayDiscrepancy[] = [];
+    const flagged = new Set<string>();
+    flagUnsafeAccumulator("global", null, MAX_SAFE_INTEGER_BIG, 42, flagged, out);
+    expect(out).toHaveLength(0);
+    expect(flagged.size).toBe(0);
+  });
+
+  it("flagUnsafeAccumulator: emits unsafe_lifetime_accumulator once when post first crosses the boundary", () => {
+    const out: ReplayDiscrepancy[] = [];
+    const flagged = new Set<string>();
+    const post = MAX_SAFE_INTEGER_BIG + 1n;
+    flagUnsafeAccumulator("global", null, post, 42, flagged, out);
+    expect(out).toHaveLength(1);
+    const d = out[0] as {
+      kind: string;
+      scope: string;
+      subjectId: string | null;
+      accumulatedMicroUsd: string;
+    };
+    expect(d.kind).toBe("unsafe_lifetime_accumulator");
+    expect(d.scope).toBe("global");
+    expect(d.subjectId).toBeNull();
+    expect(d.accumulatedMicroUsd).toBe(post.toString());
+    expect(flagged.size).toBe(1);
+
+    // Second call with the same key — no second emission.
+    flagUnsafeAccumulator("global", null, post + 100n, 43, flagged, out);
+    expect(out).toHaveLength(1);
+    expect(flagged.size).toBe(1);
+  });
+
+  it("flagUnsafeAccumulator: agent and task scopes track distinct keys", () => {
+    const out: ReplayDiscrepancy[] = [];
+    const flagged = new Set<string>();
+    const post = MAX_SAFE_INTEGER_BIG + 1n;
+    flagUnsafeAccumulator("agent", "primary", post, 1, flagged, out);
+    flagUnsafeAccumulator("agent", "secondary", post, 2, flagged, out);
+    flagUnsafeAccumulator("task", "primary", post, 3, flagged, out);
+    flagUnsafeAccumulator("global", null, post, 4, flagged, out);
+    expect(out).toHaveLength(4);
+    expect(flagged.size).toBe(4);
+
+    // Re-emit on each key — still 4 discrepancies.
+    flagUnsafeAccumulator("agent", "primary", post + 1n, 5, flagged, out);
+    flagUnsafeAccumulator("task", "primary", post + 1n, 6, flagged, out);
+    flagUnsafeAccumulator("global", null, post + 1n, 7, flagged, out);
+    expect(out).toHaveLength(4);
+  });
+
+  it("crossesThresholdBigInt: stays exact past Number.MAX_SAFE_INTEGER for observed", () => {
+    // Observed = 2^53 + 100 (1 microUsd past the safe-integer boundary
+    // by a margin that rounds when converted via `Number`).
+    // Limit = 1e10 microUsd ($10k), threshold = 5000 bps (50%).
+    // 2^53 + 100 ≥ 1e10 * 5000 / 10000 = 5e9 → true.
+    const observed = MAX_SAFE_INTEGER_BIG + 100n;
+    expect(crossesThresholdBigInt(observed, 10_000_000_000, 5_000)).toBe(true);
+  });
+
+  it("crossesThresholdBigInt: returns false when limit is zero (tombstoned)", () => {
+    // Preserves the prior contract: tombstoned budgets (limit=0) never
+    // cross any threshold, regardless of observed.
+    expect(crossesThresholdBigInt(1_000_000_000n, 0, 5_000)).toBe(false);
   });
 });

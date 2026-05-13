@@ -249,6 +249,30 @@ export type ReplayDiscrepancy =
       readonly actualBudgetId?: BudgetId;
     }
   | {
+      // Oracle: one of the lifetime accumulators (`oracleGlobalLifetime`,
+      // `oracleAgentLifetime[slug]`, `oracleTaskLifetime[taskId]`) just
+      // crossed `Number.MAX_SAFE_INTEGER` (≈ $9B cumulative spend in
+      // microUsd). Before this fix the accumulators were plain `number`,
+      // and `BigInt(number)` past the safe-integer boundary silently
+      // preserves the rounded value, so threshold comparisons could
+      // disagree with the reactor. The accumulators are now `bigint`
+      // internally, so the math itself stays precise. This discrepancy
+      // is the structured Option-B diagnostic: surface the boundary
+      // crossing once per (scope, subjectId) so on-call has a concrete
+      // signal that subsequent `observedMicroUsd` emissions
+      // (which still flow through `Number(...)` to honor the `MicroUsd`
+      // brand) lose precision past 2^53 microUsd. Fires once per
+      // accumulator-key per replay-check run.
+      readonly kind: "unsafe_lifetime_accumulator";
+      readonly scope: "global" | "agent" | "task";
+      /** `null` for global; agentSlug or taskId for the other two scopes. */
+      readonly subjectId: string | null;
+      /** Cost event whose append pushed the accumulator past the safe-integer boundary. */
+      readonly costEventLsn: EventLsn;
+      /** Accumulated total as a decimal string. Bigint, JSON-safe. */
+      readonly accumulatedMicroUsd: string;
+    }
+  | {
       // Surface unparseable event-log rows distinctly so on-call sees the
       // failing LSN, event type, and parse reason instead of a bare
       // `internal_error` from the route.
@@ -358,12 +382,25 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     // `expectedCrossings` and `replayedCrossings` surface reactor bugs
     // (under-emission, spurious, field drift, duplicate, causal order)
     // that the event-log-as-oracle replay can't detect.
-    let oracleGlobalLifetime = 0;
-    const oracleAgentLifetime = new Map<string, number>();
-    const oracleTaskLifetime = new Map<string, number>();
+    //
+    // Lifetime accumulators are `bigint` so the cumulative integer sum
+    // stays exact past `Number.MAX_SAFE_INTEGER` (≈ 9e15 microUsd ≈
+    // $9B). With `number` accumulators the post-update value rounds at
+    // the safe-integer boundary; `BigInt(number)` then carries the
+    // rounded value forward, so the BigInt threshold math agrees with
+    // a corrupted observed total. See discrepancy
+    // `unsafe_lifetime_accumulator` for the structured diagnostic.
+    let oracleGlobalLifetime = 0n;
+    const oracleAgentLifetime = new Map<string, bigint>();
+    const oracleTaskLifetime = new Map<string, bigint>();
+    // Track which (scope, subjectId) accumulator keys have already been
+    // flagged unsafe so the discrepancy fires once per key per run.
+    const unsafeAccumulatorFlagged = new Set<string>();
     const expectedCrossings = new Map<string, ExpectedCrossing>();
-    // Collect per-row parse failures as structured discrepancies
-    // instead of throwing out of the loop.
+    // Collect discrepancies surfaced inline during the scan loop
+    // (parse failures, oracle-state warnings such as
+    // `unsafe_lifetime_accumulator`). Merged into the final
+    // `discrepancies` list at the end of the replay.
     const parseFailures: ReplayDiscrepancy[] = [];
 
     let cursor = 0;
@@ -391,16 +428,39 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
             // Oracle update: mirror the reactor's post-update lifetime
             // read. The reactor runs after `cost_by_agent` /
             // `cost_by_task` have been updated for the current event,
-            // so `observed` includes the event's own amount.
-            oracleGlobalLifetime += amount;
-            oracleAgentLifetime.set(
+            // so `observed` includes the event's own amount. Increments
+            // run in BigInt so cumulative spend stays exact past
+            // `Number.MAX_SAFE_INTEGER`.
+            const amountBig = BigInt(amount);
+            oracleGlobalLifetime += amountBig;
+            flagUnsafeAccumulator(
+              "global",
+              null,
+              oracleGlobalLifetime,
+              row.lsn,
+              unsafeAccumulatorFlagged,
+              parseFailures,
+            );
+            const agentPost = (oracleAgentLifetime.get(parsed.agentSlug) ?? 0n) + amountBig;
+            oracleAgentLifetime.set(parsed.agentSlug, agentPost);
+            flagUnsafeAccumulator(
+              "agent",
               parsed.agentSlug,
-              (oracleAgentLifetime.get(parsed.agentSlug) ?? 0) + amount,
+              agentPost,
+              row.lsn,
+              unsafeAccumulatorFlagged,
+              parseFailures,
             );
             if (parsed.taskId !== undefined) {
-              oracleTaskLifetime.set(
+              const taskPost = (oracleTaskLifetime.get(parsed.taskId) ?? 0n) + amountBig;
+              oracleTaskLifetime.set(parsed.taskId, taskPost);
+              flagUnsafeAccumulator(
+                "task",
                 parsed.taskId,
-                (oracleTaskLifetime.get(parsed.taskId) ?? 0) + amount,
+                taskPost,
+                row.lsn,
+                unsafeAccumulatorFlagged,
+                parseFailures,
               );
             }
             computeExpectedCrossings({
@@ -551,6 +611,54 @@ interface ReplayedCrossing {
 function crossingKey(budgetId: string, budgetSetLsn: number, thresholdBps: number): string {
   return `${budgetId}|${budgetSetLsn}|${thresholdBps}`;
 }
+
+// 2^53 - 1, the largest exact integer representable as a JS `number`.
+// Past this point, the oracle's `Number(bigint)` cast (used for the
+// `observedMicroUsd` field on emitted discrepancies) becomes lossy.
+// Exported as `__MAX_SAFE_INTEGER_BIG` below for the test seam.
+const MAX_SAFE_INTEGER_BIG = BigInt(Number.MAX_SAFE_INTEGER);
+
+// Records the first cost.event LSN at which an accumulator
+// (`global`, `agent[slug]`, or `task[id]`) crosses the safe-integer
+// boundary. The increment math itself stays exact (bigint), but
+// downstream emission to `MicroUsd`-typed fields rounds, so on-call
+// gets a structured signal that subsequent observed values are
+// suspect. Fires once per (scope, subjectId) per run.
+function flagUnsafeAccumulator(
+  scope: "global" | "agent" | "task",
+  subjectId: string | null,
+  post: bigint,
+  costEventLsn: number,
+  flagged: Set<string>,
+  out: ReplayDiscrepancy[],
+): void {
+  if (post <= MAX_SAFE_INTEGER_BIG) return;
+  const key = `${scope}|${subjectId ?? ""}`;
+  if (flagged.has(key)) return;
+  flagged.add(key);
+  out.push({
+    kind: "unsafe_lifetime_accumulator",
+    scope,
+    subjectId,
+    costEventLsn: lsnFromV1Number(costEventLsn),
+    accumulatedMicroUsd: post.toString(),
+  });
+}
+
+// Internal test seam. The end-to-end path that exercises
+// `unsafe_lifetime_accumulator` requires pushing an oracle accumulator
+// past 2^53 microUsd (≈ $9B cumulative spend). Per-event amounts are
+// capped at `MAX_COST_EVENT_AMOUNT_MICRO_USD` (1e8) by the protocol
+// validator, so reaching the boundary through `runReplayCheck` would
+// need ~9e7 cost.events — infeasible in a unit test. These exports
+// let tests assert the helper's emission logic directly. NOT part of
+// `@wuphf/broker/cost-ledger`'s public surface (the index re-exports
+// only `ReplayCheckReport`, `ReplayDiscrepancy`, and `runReplayCheck`).
+export const __replayCheckTesting = {
+  flagUnsafeAccumulator,
+  MAX_SAFE_INTEGER_BIG,
+  crossesThresholdBigInt,
+};
 
 function compareCrossings(
   replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
@@ -1018,9 +1126,10 @@ interface ComputeExpectedCrossingsArgs {
   readonly agentSlug: string;
   readonly taskId: string | undefined;
   readonly budgets: ReadonlyMap<string, ReplayedBudget>;
-  readonly globalLifetime: number;
-  readonly agentLifetime: ReadonlyMap<string, number>;
-  readonly taskLifetime: ReadonlyMap<string, number>;
+  /** BigInt accumulators preserve precision past `Number.MAX_SAFE_INTEGER`. */
+  readonly globalLifetime: bigint;
+  readonly agentLifetime: ReadonlyMap<string, bigint>;
+  readonly taskLifetime: ReadonlyMap<string, bigint>;
   readonly out: Map<string, ExpectedCrossing>;
 }
 
@@ -1035,7 +1144,7 @@ function computeExpectedCrossings(args: ComputeExpectedCrossingsArgs): void {
     if (budget.tombstoned) continue;
     if (!isOracleApplicable(budget, args.agentSlug, args.taskId)) continue;
     const observed = oracleObservedFor(budget, args);
-    if (observed === 0 && budget.limitMicroUsd === 0) continue;
+    if (observed === 0n && budget.limitMicroUsd === 0) continue;
     for (const thresholdBps of budget.thresholdsBps) {
       const key = crossingKey(budgetId, budget.setAtLsn, thresholdBps);
       if (args.out.has(key)) continue;
@@ -1045,7 +1154,13 @@ function computeExpectedCrossings(args: ComputeExpectedCrossingsArgs): void {
         budgetSetLsn: budget.setAtLsn,
         thresholdBps,
         crossedAtLsn: args.costEventLsn,
-        observedMicroUsd: observed,
+        // Cast bigint → number for `ExpectedCrossing.observedMicroUsd`.
+        // Lossy only past `Number.MAX_SAFE_INTEGER` (≈ $9B cumulative),
+        // and that boundary fires a structured
+        // `unsafe_lifetime_accumulator` discrepancy at the time the
+        // accumulator first crossed it, so on-call already has the
+        // precision-loss signal before reading this field.
+        observedMicroUsd: Number(observed),
         limitMicroUsd: budget.limitMicroUsd,
         crossedAtMs: args.costEventOccurredAtMs,
       });
@@ -1064,12 +1179,12 @@ function isOracleApplicable(
   return false;
 }
 
-function oracleObservedFor(budget: ReplayedBudget, args: ComputeExpectedCrossingsArgs): number {
+function oracleObservedFor(budget: ReplayedBudget, args: ComputeExpectedCrossingsArgs): bigint {
   if (budget.scope === "global") return args.globalLifetime;
-  if (budget.scope === "agent") return args.agentLifetime.get(args.agentSlug) ?? 0;
+  if (budget.scope === "agent") return args.agentLifetime.get(args.agentSlug) ?? 0n;
   // task scope — caller already gated on taskId !== undefined.
-  if (args.taskId === undefined) return 0;
-  return args.taskLifetime.get(args.taskId) ?? 0;
+  if (args.taskId === undefined) return 0n;
+  return args.taskLifetime.get(args.taskId) ?? 0n;
 }
 
 /**
@@ -1077,12 +1192,15 @@ function oracleObservedFor(budget: ReplayedBudget, args: ComputeExpectedCrossing
  * `crossesThreshold` (see reactor.ts:313). The operand bounds make the
  * intermediate product reach 1e16, above Number.MAX_SAFE_INTEGER, so
  * Number-multiplication would silently truncate; BigInt is exact across
- * the full documented range. If you change the reactor's math, change
- * this too — otherwise the oracle becomes a tautology.
+ * the full documented range. `observed` is a bigint accumulator (see
+ * `unsafe_lifetime_accumulator` for the precision rationale); `limit`
+ * is the per-budget cap and stays well within safe-integer range, so
+ * widening it inside the function is safe. If you change the reactor's
+ * math, change this too — otherwise the oracle becomes a tautology.
  */
-function crossesThresholdBigInt(observed: number, limit: number, thresholdBps: number): boolean {
+function crossesThresholdBigInt(observed: bigint, limit: number, thresholdBps: number): boolean {
   if (limit === 0) return false;
-  return BigInt(observed) * 10_000n >= BigInt(limit) * BigInt(thresholdBps);
+  return observed * 10_000n >= BigInt(limit) * BigInt(thresholdBps);
 }
 
 function compareExpectedAndLoggedCrossings(
