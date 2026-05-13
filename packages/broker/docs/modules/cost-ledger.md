@@ -31,6 +31,7 @@ bearer plus operator identity.
 | POST | `/api/v1/cost/events` | bearer + operator capability | [`CostEventAuditPayload`](../../../protocol/src/cost.ts) JSON | `{ lsn, agentDayTotal, taskTotal, newCrossings }` | Required: `cmd_cost.event_<ULID>` | Required |
 | POST | `/api/v1/cost/budgets` | bearer + operator capability | [`BudgetSetAuditPayload`](../../../protocol/src/cost.ts) JSON without trusted `setBy`/`setAt`; the server overwrites both from headers and clock | `{ lsn, tombstoned }` | Required: `cmd_cost.budget.set_<ULID>` | Required |
 | DELETE | `/api/v1/cost/budgets/:id` | bearer + operator capability | none | `{ lsn, tombstoned: true }` | Required: `cmd_cost.budget.tombstone_<ULID>` | Required |
+| POST | `/api/v1/cost/idempotency/prune` | bearer + operator capability | optional `?olderThanMs=<positive-ms>` query; defaults to 24h | `{ pruned, olderThanMs, cutoffMs }` | none | Required |
 | GET | `/api/v1/cost/budgets` | bearer | none | `{ budgets: BudgetRow[] }` | none | none |
 | GET | `/api/v1/cost/budgets/:id` | bearer | none | `BudgetRow` | none | none |
 | GET | `/api/v1/cost/summary` | bearer | none | `{ agentSpend, budgets, thresholdCrossings }` | none | none |
@@ -41,6 +42,12 @@ standard renderer bearer is enough for read routes but not for mutation routes.
 `X-Operator-Identity` is parsed as a protocol `SignerIdentity` and becomes the
 server-minted `setBy` on `budget_set` audit payloads; budget timestamps are
 minted from the broker clock.
+
+Cost-ledger startup runs the same idempotency prune once with the default 24h
+TTL. The startup prune is best-effort: failures are logged as
+`cost_idempotency_prune_failed`, but the listener still starts. The prune only
+deletes `command_idempotency` rows; `event_log`, `cost_by_agent`,
+`cost_by_task`, `cost_budgets`, and `cost_threshold_crossings` are retained.
 
 ## Invariants
 
@@ -77,7 +84,6 @@ losing the rest of the replay report.
 | Area | Exports |
 |---|---|
 | Event log | `openDatabase`, `runMigrations`, `createEventLog`, `CURRENT_SCHEMA_VERSION`, `EventLog`, `EventLogRecord`, `EventType`, `AppendArgs`, `OpenDatabaseArgs` |
-| Idempotency | `parseIdempotencyKey`, `COST_COMMAND_VALUES`, `CostCommand`, `ParsedIdempotencyKey` |
+| Idempotency | `parseIdempotencyKey`, `DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS`, `COST_COMMAND_VALUES`, `CostCommand`, `ParsedIdempotencyKey` |
 | Projection writer | `createCostLedger`, `CostLedger`, append result types, row types, idempotent append argument/result types |
 | Replay check | `runReplayCheck`, `ReplayCheckReport`, `ReplayDiscrepancy` |
-

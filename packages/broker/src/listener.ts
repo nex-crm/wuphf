@@ -15,6 +15,7 @@
 //   POST /api/v1/cost/events              — bearer + operator capability required.
 //   POST /api/v1/cost/budgets             — bearer + operator capability required.
 //   DELETE /api/v1/cost/budgets/:id       — bearer + operator capability required.
+//   POST /api/v1/cost/idempotency/prune   — bearer + operator capability required.
 //   GET  /                                — static (renderer bundle) or 404 if disabled.
 //   GET  /index.html                      — static or 404.
 //   GET  /assets/*                        — static or 404.
@@ -39,6 +40,7 @@ import {
 import { WebSocketServer } from "ws";
 
 import { extractBearerFromHeader, tokenMatches } from "./auth.ts";
+import { DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS } from "./cost-ledger/idempotency.ts";
 import { type CostRouteDeps, handleCostRoute } from "./cost-ledger/routes.ts";
 import { checkLoopbackRequest } from "./dns-rebinding-guard.ts";
 import { InMemoryReceiptStore, type ReceiptStore } from "./receipt-store.ts";
@@ -76,6 +78,9 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
     logger.warn("cost_operator_token_unconfigured", {
       mode: "bearer_plus_operator_identity",
     });
+  }
+  if (cost !== null) {
+    pruneCostIdempotencyOnStartup(cost, logger);
   }
   const server = createServer((req, res) => {
     routeRequest(req, res, {
@@ -402,6 +407,19 @@ function authorize(
     return false;
   }
   return true;
+}
+
+function pruneCostIdempotencyOnStartup(cost: CostRouteDeps, logger: BrokerLogger): void {
+  try {
+    const olderThanMs = DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS;
+    const cutoffMs = cost.nowMs() - olderThanMs;
+    const pruned = cost.ledger.pruneIdempotencyOlderThan(cutoffMs);
+    logger.info("cost_idempotency_pruned", { pruned, olderThanMs, cutoffMs });
+  } catch (err) {
+    logger.warn("cost_idempotency_prune_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 // Bucket an `/api/...` pathname into a fixed enum of known route families.

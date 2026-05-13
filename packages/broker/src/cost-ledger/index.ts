@@ -25,7 +25,11 @@ export {
 // (`CostLedger.appendCostEventIdempotent` etc.) take a `ParsedIdempotencyKey`
 // and do the lookup/store inside the same SQLite transaction.
 export type { CostCommand, ParsedIdempotencyKey } from "./idempotency.ts";
-export { COST_COMMAND_VALUES, parseIdempotencyKey } from "./idempotency.ts";
+export {
+  COST_COMMAND_VALUES,
+  DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS,
+  parseIdempotencyKey,
+} from "./idempotency.ts";
 // Projection store + ledger writer.
 export type {
   AgentSpendRow,

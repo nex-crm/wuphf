@@ -326,6 +326,68 @@ describe("idempotency", () => {
       r1.payload.toString(),
     );
   });
+
+  it("pruneIdempotencyOlderThan removes only expired replay rows", () => {
+    const { db, ledger } = setup();
+    const oldKey = parseIdempotencyKey("cmd_cost.event_01ARZ3NDEKTSV4RRFFQ69G5FAV", "cost.event");
+    const freshKey = parseIdempotencyKey("cmd_cost.event_01ARZ3NDEKTSV4RRFFQ69G5FAW", "cost.event");
+    expect(oldKey.ok).toBe(true);
+    expect(freshKey.ok).toBe(true);
+    if (!oldKey.ok || !freshKey.ok) return;
+
+    ledger.appendCostEventIdempotent({
+      payload: buildCostEvent({ amountMicroUsd: 1_000_000 }),
+      idempotency: oldKey.key,
+      nowMs: 1_000,
+      render: (applied) => ({
+        statusCode: 201,
+        payload: Buffer.from(JSON.stringify({ lsn: applied.lsn }), "utf8"),
+      }),
+    });
+    ledger.appendCostEventIdempotent({
+      payload: buildCostEvent({ amountMicroUsd: 2_000_000 }),
+      idempotency: freshKey.key,
+      nowMs: 5_000,
+      render: (applied) => ({
+        statusCode: 201,
+        payload: Buffer.from(JSON.stringify({ lsn: applied.lsn }), "utf8"),
+      }),
+    });
+
+    expect(ledger.pruneIdempotencyOlderThan(3_000)).toBe(1);
+
+    const idempotencyRows = db
+      .prepare<[], { readonly idempotencyKey: string }>(
+        "SELECT idempotency_key AS idempotencyKey FROM command_idempotency ORDER BY idempotency_key ASC",
+      )
+      .all();
+    expect(idempotencyRows).toEqual([{ idempotencyKey: freshKey.key.raw }]);
+
+    const eventCountAfterPrune = db
+      .prepare<[], { readonly n: number }>(
+        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+      )
+      .get();
+    expect(eventCountAfterPrune?.n).toBe(2);
+    expect(ledger.getAgentSpend("primary", "2026-05-08")?.totalMicroUsd as number).toBe(3_000_000);
+
+    const reapplied = ledger.appendCostEventIdempotent({
+      payload: buildCostEvent({ amountMicroUsd: 4_000_000 }),
+      idempotency: oldKey.key,
+      nowMs: 6_000,
+      render: (applied) => ({
+        statusCode: 201,
+        payload: Buffer.from(JSON.stringify({ lsn: applied.lsn }), "utf8"),
+      }),
+    });
+    expect(reapplied.replayed).toBe(false);
+    const eventCountAfterReapply = db
+      .prepare<[], { readonly n: number }>(
+        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
+      )
+      .get();
+    expect(eventCountAfterReapply?.n).toBe(3);
+  });
 });
 
 describe("replay-check", () => {

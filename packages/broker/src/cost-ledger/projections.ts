@@ -122,6 +122,7 @@ export interface CostLedger {
   appendCostEvent(payload: CostEventAuditPayload): CostEventAppendResult;
   appendBudgetSet(payload: BudgetSetAuditPayload): BudgetSetAppendResult;
   appendThresholdCrossed(payload: BudgetThresholdCrossedAuditPayload): ThresholdCrossedAppendResult;
+  pruneIdempotencyOlderThan(cutoffMs: number): number;
 
   /**
    * Atomic equivalent of `appendCostEvent` with built-in idempotency.
@@ -271,6 +272,9 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
        (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
+  const pruneIdempotencyStmt = db.prepare<[number]>(
+    `DELETE FROM command_idempotency WHERE created_at_ms < ?`,
+  );
 
   // Inner (non-transactional) append helpers. The public `appendX`
   // methods wrap these in their own transactions. The `appendXIdempotent`
@@ -419,6 +423,12 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
       payload: BudgetThresholdCrossedAuditPayload,
     ): ThresholdCrossedAppendResult {
       return appendThresholdCrossedTransaction.immediate(payload);
+    },
+    pruneIdempotencyOlderThan(cutoffMs: number): number {
+      if (!Number.isSafeInteger(cutoffMs)) {
+        throw new Error("pruneIdempotencyOlderThan: cutoffMs must be a safe integer");
+      }
+      return pruneIdempotencyStmt.run(cutoffMs).changes;
     },
     appendCostEventIdempotent(args: IdempotentCostEventArgs): IdempotentAppendResult {
       return appendCostEventIdempotentTransaction.immediate(args);
