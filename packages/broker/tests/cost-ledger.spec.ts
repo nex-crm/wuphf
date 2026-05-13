@@ -908,3 +908,108 @@ describe("replay-check oracle round-2 fixes (#841)", () => {
     }
   });
 });
+
+describe("replay-check oracle round-2 fixes (PR #841 r2)", () => {
+  it("flags threshold_crossing_dangling_reference when crossedAtLsn names a non-cost-event row", () => {
+    // Tamper the threshold-crossed event payload so crossedAtLsn points
+    // at the budget_set LSN (LSN 1) — a real event_log row, but not a
+    // cost.event. The numeric causal-order check passes because the
+    // event row LSN (3) > crossedAtLsn (1); only the per-entry reference
+    // validator can see this.
+    const { db, ledger } = setup();
+    ledger.appendBudgetSet(buildBudgetSet({ limitMicroUsd: 5_000_000, thresholdsBps: [5_000] }));
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 2_500_000 }));
+
+    const tamperedPayload: BudgetThresholdCrossedAuditPayload = {
+      budgetId: asBudgetId("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
+      budgetSetLsn: lsnFromV1Number(1),
+      thresholdBps: 5_000,
+      observedMicroUsd: asMicroUsd(2_500_000),
+      limitMicroUsd: asMicroUsd(5_000_000),
+      crossedAtLsn: lsnFromV1Number(1), // tampered: LSN 1 is the budget_set, not a cost.event
+      crossedAt: new Date("2026-05-08T10:00:00.000Z"),
+    };
+    const tamperedBytes = costAuditPayloadToBytes("budget_threshold_crossed", tamperedPayload);
+    db.prepare<[Buffer, string]>("UPDATE event_log SET payload = ? WHERE type = ?").run(
+      Buffer.from(tamperedBytes),
+      "cost.budget.threshold.crossed",
+    );
+
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(false);
+    const dangling = report.discrepancies.find(
+      (d) => d.kind === "threshold_crossing_dangling_reference",
+    );
+    expect(dangling).toBeDefined();
+    if (dangling?.kind === "threshold_crossing_dangling_reference") {
+      expect(dangling.eventLsn).toBe(lsnFromV1Number(3));
+      expect(dangling.crossedAtLsn).toBe(lsnFromV1Number(1));
+    }
+  });
+
+  it("survives unparseable thresholds_bps projection cell without crashing the diagnostic", () => {
+    // Round-2 finding (security MED): `parseStoredThresholds` used to
+    // bare `JSON.parse` the projection cell — a corrupted DB row would
+    // throw out of `runReplayCheck` and blind the diagnostic. Now the
+    // bad cell surfaces as a structured discrepancy.
+    const { db, ledger } = setup();
+    ledger.appendBudgetSet(buildBudgetSet({ limitMicroUsd: 5_000_000, thresholdsBps: [5_000] }));
+    // Corrupt the stored thresholds JSON.
+    db.exec("UPDATE cost_budgets SET thresholds_bps = '{invalid json' WHERE 1=1");
+
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(false);
+    const mismatch = report.discrepancies.find(
+      (d): d is Extract<typeof d, { kind: "budget_state_mismatch" }> =>
+        d.kind === "budget_state_mismatch" && d.field === "thresholdsBps",
+    );
+    expect(mismatch).toBeDefined();
+    if (mismatch !== undefined) {
+      const stored = mismatch.stored as { unparseable?: string; raw?: string };
+      expect(typeof stored.unparseable).toBe("string");
+      expect(stored.raw).toBe("{invalid json");
+    }
+  });
+
+  it("per-entry validation catches duplicate with divergent crossedAt", () => {
+    // Two threshold events for the same key. The first agrees with the
+    // oracle's expected timestamp; the second tampers `crossedAt`. The
+    // existing `_oracle_field_mismatch` check only looks at the first
+    // entry, but per-entry validation should still flag the second.
+    const { db, eventLog, ledger } = setup();
+    const setResult = ledger.appendBudgetSet(
+      buildBudgetSet({ limitMicroUsd: 5_000_000, thresholdsBps: [5_000] }),
+    );
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 2_500_000 }));
+
+    const tamperedDuplicate: BudgetThresholdCrossedAuditPayload = {
+      budgetId: asBudgetId("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
+      budgetSetLsn: setResult.lsn,
+      thresholdBps: 5_000,
+      observedMicroUsd: asMicroUsd(2_500_000),
+      limitMicroUsd: asMicroUsd(5_000_000),
+      crossedAtLsn: lsnFromV1Number(2),
+      crossedAt: new Date("2099-12-31T00:00:00.000Z"), // forged
+    };
+    const dupBytes = costAuditPayloadToBytes("budget_threshold_crossed", tamperedDuplicate);
+    const dupLsn = eventLog.append({
+      type: "cost.budget.threshold.crossed",
+      payload: Buffer.from(dupBytes),
+    });
+
+    const report = runReplayCheck(db);
+    // Both the duplicate and a per-entry crossedAt mismatch should fire.
+    const dupes = report.discrepancies.find((d) => d.kind === "threshold_crossing_duplicate_event");
+    expect(dupes).toBeDefined();
+    const crossedAtMismatches = report.discrepancies.filter(
+      (d): d is Extract<typeof d, { kind: "threshold_crossing_oracle_field_mismatch" }> =>
+        d.kind === "threshold_crossing_oracle_field_mismatch" && d.field === "crossedAtMs",
+    );
+    // The duplicate's eventLsn should appear in a crossedAtMs mismatch.
+    const dupEntry = crossedAtMismatches.find((d) => d.eventLsn === lsnFromV1Number(dupLsn));
+    expect(dupEntry).toBeDefined();
+    if (dupEntry !== undefined) {
+      expect(dupEntry.logged).toBe(new Date("2099-12-31T00:00:00.000Z").getTime());
+    }
+  });
+});

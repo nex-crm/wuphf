@@ -200,6 +200,20 @@ export type ReplayDiscrepancy =
       readonly crossedAtLsn: EventLsn;
     }
   | {
+      // Oracle: a `cost.budget.threshold.crossed` event names a
+      // `crossedAtLsn` that has no corresponding `cost.event` in
+      // event_log. Catches forged references that name an unrelated
+      // LSN (e.g. a `cost.budget.set` row) — the existing causal-order
+      // check only validates the numeric ordering, not that the
+      // referenced row is actually a cost event.
+      readonly kind: "threshold_crossing_dangling_reference";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly eventLsn: EventLsn;
+      readonly crossedAtLsn: EventLsn;
+    }
+  | {
       // Surface unparseable event-log rows distinctly so on-call sees the
       // failing LSN, event type, and parse reason instead of a bare
       // `internal_error` from the route.
@@ -454,6 +468,12 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     // most actionable findings at the top of the list.
     detectDuplicateLoggedCrossings(replayedCrossings, discrepancies);
     detectCausalOrderViolations(replayedCrossings, discrepancies);
+    // Per-entry reference validation: every logged threshold event
+    // names a `crossedAtLsn`; this checks each one against the actual
+    // cost-event LSN→occurredAt map. Catches forged dangling refs
+    // (LSN not a cost.event) and per-duplicate `crossedAt` drift that
+    // the first-entry-only oracle comparator can't see.
+    validateLoggedCrossingReferences(replayedCrossings, costEventOccurredAtMs, discrepancies);
     compareExpectedAndLoggedCrossings(expectedCrossings, replayedCrossings, discrepancies);
 
     const highest = highestLsnStmt.get()?.lsn ?? 0;
@@ -603,6 +623,49 @@ function detectCausalOrderViolations(
   }
 }
 
+function validateLoggedCrossingReferences(
+  replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
+  costEventOccurredAtMs: ReadonlyMap<number, number>,
+  out: ReplayDiscrepancy[],
+): void {
+  for (const entries of replayed.values()) {
+    for (const entry of entries) {
+      const referencedMs = costEventOccurredAtMs.get(entry.crossedAtLsn);
+      if (referencedMs === undefined) {
+        // The named trigger LSN doesn't correspond to any cost.event
+        // we replayed. Either the threshold event names a non-cost
+        // row (e.g. a `cost.budget.set` LSN) or an LSN that doesn't
+        // exist in event_log.
+        out.push({
+          kind: "threshold_crossing_dangling_reference",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+          crossedAtLsn: lsnFromV1Number(entry.crossedAtLsn),
+        });
+        continue;
+      }
+      if (referencedMs !== entry.crossedAtMs) {
+        // The threshold event's payload `crossedAt` doesn't match the
+        // cost.event it names as trigger. Catches forged timestamps
+        // (key matches but timestamp drifts) AND per-duplicate
+        // divergence the first-entry-only oracle comparator misses.
+        out.push({
+          kind: "threshold_crossing_oracle_field_mismatch",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          field: "crossedAtMs",
+          expected: referencedMs,
+          logged: entry.crossedAtMs,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+        });
+      }
+    }
+  }
+}
+
 interface ReplayedBudget {
   readonly scope: "global" | "agent" | "task";
   readonly subjectId: string | null;
@@ -718,7 +781,20 @@ function compareBudgets(
       });
     }
     const storedThresholds = parseStoredThresholds(storedRow.thresholdsBps);
-    if (!arraysEqual(storedThresholds, replayedRow.thresholdsBps)) {
+    if ("error" in storedThresholds) {
+      // Corrupted/unparseable `thresholds_bps` projection cell. A bare
+      // `JSON.parse` here used to throw out of `runReplayCheck`,
+      // blinding the diagnostic; surface a structured discrepancy so
+      // on-call sees the exact budget + reason and the rest of the
+      // check still runs.
+      out.push({
+        kind: "budget_state_mismatch",
+        budgetId: budgetId as BudgetId,
+        field: "thresholdsBps",
+        replayed: replayedRow.thresholdsBps,
+        stored: { unparseable: storedThresholds.error, raw: storedRow.thresholdsBps },
+      });
+    } else if (!arraysEqual(storedThresholds, replayedRow.thresholdsBps)) {
       out.push({
         kind: "budget_state_mismatch",
         budgetId: budgetId as BudgetId,
@@ -769,10 +845,18 @@ function splitAgentDayKey(key: string): { readonly agentSlug: string; readonly d
   return { agentSlug: key.slice(0, idx), dayUtc: key.slice(idx + 1) };
 }
 
-function parseStoredThresholds(raw: string): readonly number[] {
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed) || parsed.some((n) => typeof n !== "number")) {
-    return [];
+function parseStoredThresholds(raw: string): readonly number[] | { readonly error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  if (!Array.isArray(parsed)) {
+    return { error: "thresholds_bps is not an array" };
+  }
+  if (parsed.some((n) => typeof n !== "number")) {
+    return { error: "thresholds_bps contains non-number entries" };
   }
   return parsed as readonly number[];
 }
@@ -935,21 +1019,9 @@ function compareExpectedAndLoggedCrossings(
         eventLsn: lsnFromV1Number(log.eventLsn),
       });
     }
-    if (log.crossedAtMs !== exp.crossedAtMs) {
-      // Reactor sets `crossedAt` from the triggering cost event's
-      // `occurredAt`. Drift here means the audit timestamp was forged
-      // or the reactor desynced from the cost-event payload.
-      out.push({
-        kind: "threshold_crossing_oracle_field_mismatch",
-        budgetId: exp.budgetId as BudgetId,
-        budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
-        thresholdBps: exp.thresholdBps,
-        field: "crossedAtMs",
-        expected: exp.crossedAtMs,
-        logged: log.crossedAtMs,
-        eventLsn: lsnFromV1Number(log.eventLsn),
-      });
-    }
+    // `crossedAtMs` is validated per-entry against the cost-event LSN
+    // map in `validateLoggedCrossingReferences`, which also covers
+    // duplicates and spurious entries that this comparator skips.
   }
   for (const [key, entries] of logged.entries()) {
     if (expected.has(key)) continue;
