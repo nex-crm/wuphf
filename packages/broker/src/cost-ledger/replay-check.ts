@@ -35,6 +35,13 @@ import {
   parseLsn,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
+import {
+  addBudgetToIndex,
+  type BudgetCandidateIndexes,
+  createBudgetCandidateIndexes,
+  removeBudgetFromIndex,
+  replaceBudgetInIndex,
+} from "./budget-candidate-index.ts";
 
 export interface ReplayCheckReport {
   readonly ok: boolean;
@@ -1024,7 +1031,7 @@ function validateLoggedCrossingReferences(
   }
 }
 
-interface ReplayedBudget {
+export interface ReplayedBudget {
   readonly scope: "global" | "agent" | "task";
   readonly subjectId: string | null;
   readonly limitMicroUsd: number;
@@ -1033,109 +1040,13 @@ interface ReplayedBudget {
   readonly tombstoned: boolean;
 }
 
-interface BudgetCandidateIndexes {
-  readonly globalBudgetIds: Set<string>;
-  readonly agentBudgetIds: Map<string, Set<string>>;
-  readonly taskBudgetIds: Map<string, Set<string>>;
-}
-
-function createBudgetCandidateIndexes(): BudgetCandidateIndexes {
-  return {
-    globalBudgetIds: new Set<string>(),
-    agentBudgetIds: new Map<string, Set<string>>(),
-    taskBudgetIds: new Map<string, Set<string>>(),
-  };
-}
-
-function addBudgetToIndex(
-  indexes: BudgetCandidateIndexes,
-  budgetId: string,
-  budget: ReplayedBudget,
-): void {
-  if (budget.scope === "global") {
-    indexes.globalBudgetIds.add(budgetId);
-    return;
-  }
-  if (budget.subjectId === null) return;
-  addBudgetToSubjectIndex(
-    budget.scope === "agent" ? indexes.agentBudgetIds : indexes.taskBudgetIds,
-    budget.subjectId,
-    budgetId,
-  );
-}
-
-function removeBudgetFromIndex(
-  indexes: BudgetCandidateIndexes,
-  budgetId: string,
-  budget: ReplayedBudget,
-): void {
-  if (budget.scope === "global") {
-    indexes.globalBudgetIds.delete(budgetId);
-    return;
-  }
-  if (budget.subjectId === null) return;
-  removeBudgetFromSubjectIndex(
-    budget.scope === "agent" ? indexes.agentBudgetIds : indexes.taskBudgetIds,
-    budget.subjectId,
-    budgetId,
-  );
-}
-
-// Single-call lifecycle transition for the budget candidate indexes. The
-// replay loop calls this on every `budget_set` event so a budget moves
-// between scopes/subjects/tombstone-states without ever existing in two
-// scope sets simultaneously. The disjointness invariant is what lets
-// `computeExpectedCrossings` iterate the three scope indexes without
-// dedupe. Tombstones (`next.tombstoned === true`) remove without re-adding;
-// the post-condition is "exactly the placement implied by `next`".
-function replaceBudgetInIndex(
-  indexes: BudgetCandidateIndexes,
-  budgetId: string,
-  previous: ReplayedBudget | undefined,
-  next: ReplayedBudget,
-): void {
-  if (previous !== undefined) {
-    removeBudgetFromIndex(indexes, budgetId, previous);
-  }
-  if (next.tombstoned) return;
-  addBudgetToIndex(indexes, budgetId, next);
-}
-
-function addBudgetToSubjectIndex(
-  index: Map<string, Set<string>>,
-  subjectId: string,
-  budgetId: string,
-): void {
-  const existing = index.get(subjectId);
-  if (existing !== undefined) {
-    existing.add(budgetId);
-    return;
-  }
-  index.set(subjectId, new Set<string>([budgetId]));
-}
-
-function removeBudgetFromSubjectIndex(
-  index: Map<string, Set<string>>,
-  subjectId: string,
-  budgetId: string,
-): void {
-  const existing = index.get(subjectId);
-  if (existing === undefined) return;
-  existing.delete(budgetId);
-  if (existing.size === 0) {
-    index.delete(subjectId);
-  }
-}
-
-// Internal test seam. Round-2 fix for PR #846's perf-test gap (the
-// existing test only asserted `eventsScanned > 1_000`, which a revert
-// to the O(events × budgets) iteration would still satisfy). Exports
-// a constructor so tests can directly assert the candidate-set shape
-// after a sequence of `cost.budget.set` events. NOT part of
-// `@wuphf/broker/cost-ledger`'s public surface.
-export function __createBudgetCandidateIndexesForTesting(): BudgetCandidateIndexes {
-  return createBudgetCandidateIndexes();
-}
+// BudgetCandidateIndexes + helpers live in their own module so this
+// file stays under the 1500-LOC limit. The test-only constructor is
+// re-exported via that module; the rest of the helpers are used here.
+export {
+  __createBudgetCandidateIndexesForTesting,
+  type BudgetCandidateIndexes,
+} from "./budget-candidate-index.ts";
 
 // Compare functions accept and emit bigint cumulative totals. The
 // discrepancy wire shape is a decimal-string form to preserve exact
