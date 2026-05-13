@@ -429,11 +429,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     const replayedAgentDays = new Map<string, bigint>();
     const replayedTasks = new Map<string, bigint>();
     const replayedBudgets = new Map<string, ReplayedBudget>();
-    const budgetIndexes: BudgetCandidateIndexes = {
-      globalBudgetIds: new Set<string>(),
-      agentBudgetIds: new Map<string, Set<string>>(),
-      taskBudgetIds: new Map<string, Set<string>>(),
-    };
+    const budgetIndexes = createBudgetCandidateIndexes();
     // Logged crossings: one entry per (budgetId, budgetSetLsn,
     // thresholdBps) key, BUT each entry carries every event_log row
     // that claimed the key. The projection PK suppresses duplicate
@@ -1050,6 +1046,14 @@ interface BudgetCandidateIndexes {
   readonly taskBudgetIds: Map<string, Set<string>>;
 }
 
+function createBudgetCandidateIndexes(): BudgetCandidateIndexes {
+  return {
+    globalBudgetIds: new Set<string>(),
+    agentBudgetIds: new Map<string, Set<string>>(),
+    taskBudgetIds: new Map<string, Set<string>>(),
+  };
+}
+
 function addBudgetToIndex(
   indexes: BudgetCandidateIndexes,
   budgetId: string,
@@ -1117,11 +1121,7 @@ function removeBudgetFromSubjectIndex(
 // after a sequence of `cost.budget.set` events. NOT part of
 // `@wuphf/broker/cost-ledger`'s public surface.
 export function __createBudgetCandidateIndexesForTesting(): BudgetCandidateIndexes {
-  return {
-    globalBudgetIds: new Set<string>(),
-    agentBudgetIds: new Map<string, Set<string>>(),
-    taskBudgetIds: new Map<string, Set<string>>(),
-  };
+  return createBudgetCandidateIndexes();
 }
 
 // Compare functions accept and emit bigint cumulative totals. The
