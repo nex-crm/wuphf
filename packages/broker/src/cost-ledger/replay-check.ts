@@ -16,7 +16,10 @@
 // task-attributed subset.
 //
 // Read-only: this function never writes. It is safe to call on a live
-// broker; SQLite's WAL gives it a consistent snapshot.
+// broker; the entire check runs inside a single `BEGIN DEFERRED`
+// transaction so concurrent writers can commit but won't be observed
+// mid-check (better-sqlite3's WAL does NOT give per-statement
+// snapshots on its own — round-2 review caught a stale claim here).
 
 import {
   type AuditEventKind,
@@ -31,8 +34,6 @@ import {
   parseLsn,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
-
-import type { EventLogRecord } from "../event-log/index.ts";
 
 export interface ReplayCheckReport {
   readonly ok: boolean;
@@ -120,6 +121,134 @@ export type ReplayDiscrepancy =
       readonly stored: number;
     }
   | {
+      // Oracle: the independent threshold replay says this crossing
+      // should have fired, but no `cost.budget.threshold.crossed` event
+      // exists for it. Catches reactor under-emission bugs (e.g. a
+      // regression in `crossesThreshold`'s integer math) that the
+      // event-log-as-oracle replay can't see, because the missing event
+      // is missing in BOTH the log and the projection.
+      readonly kind: "threshold_crossing_unemitted";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly observedMicroUsd: MicroUsd;
+      readonly limitMicroUsd: MicroUsd;
+      readonly crossedAtLsn: EventLsn;
+    }
+  | {
+      // Oracle: a `cost.budget.threshold.crossed` event exists, but the
+      // independent threshold replay says it shouldn't fire. Distinct
+      // from `threshold_crossing_ghost` — that variant is projection-row
+      // drift from event log. This variant is event-log drift from the
+      // oracle's view of cost events + budgets.
+      //
+      // `eventLsn` is the `event_log.lsn` of the offending threshold
+      // audit row so on-call can locate and surgically inspect it.
+      readonly kind: "threshold_crossing_spurious";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly observedMicroUsd: MicroUsd;
+      readonly limitMicroUsd: MicroUsd;
+      readonly crossedAtLsn: EventLsn;
+      readonly eventLsn: EventLsn;
+    }
+  | {
+      // Oracle: same (budget, epoch, threshold) exists in both the event
+      // log and the oracle, but one of the recorded fields disagrees.
+      // Most likely cause: the reactor and oracle diverged on which
+      // cost_event was the trigger or what cumulative sum was observed.
+      //
+      // `crossedAtMs` is the `crossedAt` timestamp converted to ms-since-
+      // epoch so all four fields share a `number` shape; on-call who
+      // wants the human-readable timestamp can `new Date(value)`.
+      readonly kind: "threshold_crossing_oracle_field_mismatch";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly field: "crossedAtLsn" | "observedMicroUsd" | "limitMicroUsd" | "crossedAtMs";
+      readonly expected: number;
+      readonly logged: number;
+      readonly eventLsn: EventLsn;
+    }
+  | {
+      // Oracle: more than one `cost.budget.threshold.crossed` event in
+      // event_log shares the same `(budgetId, budgetSetLsn, thresholdBps)`
+      // key. The projection PK suppresses duplicate rows
+      // (`cost_threshold_crossings`) and `replayedCrossings` keys would
+      // collapse duplicates into one entry, so the prior comparator
+      // couldn't see this. A reactor over-emission bug or a forged
+      // duplicate audit event surfaces here.
+      readonly kind: "threshold_crossing_duplicate_event";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly eventLsns: readonly EventLsn[];
+    }
+  | {
+      // Oracle: the reactor invariant is that a `cost.budget.threshold.crossed`
+      // event is appended AFTER its triggering `cost.event` in the same
+      // SQLite transaction, so `eventLsn > crossedAtLsn` must hold. A
+      // payload claiming a later cost-event LSN than its own
+      // event_log row LSN means either a forgery or a reactor regression
+      // that violates the §15.A "every commit reproduces state at every
+      // LSN" invariant.
+      readonly kind: "threshold_crossing_causal_order_violation";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly eventLsn: EventLsn;
+      readonly crossedAtLsn: EventLsn;
+    }
+  | {
+      // Oracle: a `cost.budget.threshold.crossed` event names a
+      // `crossedAtLsn` that has no corresponding `cost.event` in
+      // event_log. Catches forged references that name an unrelated
+      // LSN (e.g. a `cost.budget.set` row) — the existing causal-order
+      // check only validates the numeric ordering, not that the
+      // referenced row is actually a cost event.
+      readonly kind: "threshold_crossing_dangling_reference";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly eventLsn: EventLsn;
+      readonly crossedAtLsn: EventLsn;
+    }
+  | {
+      // Oracle: the reactor's strongest invariant is that threshold
+      // events are appended SYNCHRONOUSLY immediately after their
+      // triggering `cost.event`, all inside the same SQLite
+      // transaction. So for a cost.event at LSN X with K legitimate
+      // crossings, the threshold-event LSNs MUST be {X+1, …, X+K}.
+      // A forged or delayed event appended much later (after a
+      // tombstone, budget reset, or arbitrary gap) would otherwise
+      // pass causal-order + reference + field checks. This variant
+      // catches the gap.
+      readonly kind: "threshold_crossing_delayed_emission";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly eventLsn: EventLsn;
+      readonly crossedAtLsn: EventLsn;
+      readonly expectedWindowMinLsn: EventLsn;
+      readonly expectedWindowMaxLsn: EventLsn;
+    }
+  | {
+      // Oracle: a `cost.budget.threshold.crossed` event names a
+      // `budgetSetLsn` that has no corresponding `cost.budget.set` in
+      // event_log. Sibling of `dangling_reference` for the budget
+      // side. Catches forgeries that point at an unrelated row OR
+      // at a budgetSet for a different budgetId.
+      readonly kind: "threshold_crossing_invalid_budget_set_reference";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly eventLsn: EventLsn;
+      readonly reason: "lsn_not_a_budget_set" | "budget_id_mismatch";
+      /** When `reason === "budget_id_mismatch"`, the actual budgetId at the named LSN. */
+      readonly actualBudgetId?: BudgetId;
+    }
+  | {
       // Surface unparseable event-log rows distinctly so on-call sees the
       // failing LSN, event type, and parse reason instead of a bare
       // `internal_error` from the route.
@@ -160,12 +289,6 @@ interface HighestLsnRow {
   readonly lsn: number;
 }
 
-const _COST_EVENT_TYPES = new Set<string>([
-  "cost.event",
-  "cost.budget.set",
-  "cost.budget.threshold.crossed",
-]);
-
 const BATCH_SIZE = 1_000;
 
 export function runReplayCheck(db: Database.Database): ReplayCheckReport {
@@ -198,123 +321,209 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
      FROM cost_threshold_crossings`,
   );
 
-  const replayedAgentDays = new Map<string, number>();
-  const replayedTasks = new Map<string, number>();
-  const replayedBudgets = new Map<string, ReplayedBudget>();
-  const replayedCrossings = new Map<string, ReplayedCrossing>();
-  // Collect per-row parse failures as structured discrepancies instead
-  // of throwing out of the loop.
-  const parseFailures: ReplayDiscrepancy[] = [];
+  // Round-2 fix: run all reads inside a single SQLite snapshot. The
+  // file header used to claim WAL gave us this for free; it doesn't —
+  // better-sqlite3 only snapshots within an explicit transaction.
+  // `.deferred()` acquires a SHARED lock on first read and holds it
+  // through the rest of the function; concurrent writers can still
+  // commit but this function won't observe them, so replay-vs-stored
+  // can't mix snapshots.
+  const txn = db.transaction((): ReplayCheckReport => {
+    const replayedAgentDays = new Map<string, number>();
+    const replayedTasks = new Map<string, number>();
+    const replayedBudgets = new Map<string, ReplayedBudget>();
+    // Logged crossings: one entry per (budgetId, budgetSetLsn,
+    // thresholdBps) key, BUT each entry carries every event_log row
+    // that claimed the key. The projection PK suppresses duplicate
+    // rows, so a duplicate threshold-crossed event would silently
+    // collapse — without this we'd miss reactor over-emission and
+    // forged duplicates. `compareCrossings` continues to compare on
+    // the first entry per key for log-vs-projection drift; the new
+    // duplicate check fires when `length > 1`.
+    const replayedCrossings = new Map<string, ReplayedCrossing[]>();
+    // Cost-event triggering timestamps, keyed by cost-event LSN, so
+    // `crossedAt` can be validated against the actual triggering event
+    // (the reactor sets it from `input.occurredAt`). Stored as ms-
+    // since-epoch for cheap comparison.
+    const costEventOccurredAtMs = new Map<number, number>();
+    // Budget-set LSN → budgetId map for validating logged threshold
+    // events' `budgetSetLsn` references — sibling to the
+    // `costEventOccurredAtMs` check for `crossedAtLsn`.
+    const budgetSetLsnToBudgetId = new Map<number, string>();
+    // Oracle: independent threshold replay. Tracks the same lifetime
+    // sums the reactor reads (`lifetimeFor` in reactor.ts), then
+    // re-runs the same integer/BigInt crossing math against current
+    // `replayedBudgets` to derive an expected crossing set without
+    // consulting the event log. Discrepancies between
+    // `expectedCrossings` and `replayedCrossings` surface reactor bugs
+    // (under-emission, spurious, field drift, duplicate, causal order)
+    // that the event-log-as-oracle replay can't detect.
+    let oracleGlobalLifetime = 0;
+    const oracleAgentLifetime = new Map<string, number>();
+    const oracleTaskLifetime = new Map<string, number>();
+    const expectedCrossings = new Map<string, ExpectedCrossing>();
+    // Collect per-row parse failures as structured discrepancies
+    // instead of throwing out of the loop.
+    const parseFailures: ReplayDiscrepancy[] = [];
 
-  let cursor = 0;
-  let scanned = 0;
-  for (;;) {
-    const rows = readBatchStmt.all(cursor, BATCH_SIZE);
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      const kind = eventTypeToKind(row.type);
-      try {
-        if (kind === "cost_event") {
-          const parsed = costAuditPayloadFromJsonValue(
-            kind,
-            JSON.parse(row.payload.toString("utf8")),
-          ) as CostEventAuditPayload;
-          const dayUtc = parsed.occurredAt.toISOString().slice(0, 10);
-          const agentKey = agentDayKey(parsed.agentSlug, dayUtc);
-          replayedAgentDays.set(
-            agentKey,
-            (replayedAgentDays.get(agentKey) ?? 0) + (parsed.amountMicroUsd as number),
-          );
-          if (parsed.taskId !== undefined) {
-            replayedTasks.set(
-              parsed.taskId,
-              (replayedTasks.get(parsed.taskId) ?? 0) + (parsed.amountMicroUsd as number),
+    let cursor = 0;
+    let scanned = 0;
+    for (;;) {
+      const rows = readBatchStmt.all(cursor, BATCH_SIZE);
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        const kind = eventTypeToKind(row.type);
+        try {
+          if (kind === "cost_event") {
+            const parsed = costAuditPayloadFromJsonValue(
+              kind,
+              JSON.parse(row.payload.toString("utf8")),
+            ) as CostEventAuditPayload;
+            const occurredAtMs = parsed.occurredAt.getTime();
+            costEventOccurredAtMs.set(row.lsn, occurredAtMs);
+            const dayUtc = parsed.occurredAt.toISOString().slice(0, 10);
+            const agentKey = agentDayKey(parsed.agentSlug, dayUtc);
+            const amount = parsed.amountMicroUsd as number;
+            replayedAgentDays.set(agentKey, (replayedAgentDays.get(agentKey) ?? 0) + amount);
+            if (parsed.taskId !== undefined) {
+              replayedTasks.set(parsed.taskId, (replayedTasks.get(parsed.taskId) ?? 0) + amount);
+            }
+            // Oracle update: mirror the reactor's post-update lifetime
+            // read. The reactor runs after `cost_by_agent` /
+            // `cost_by_task` have been updated for the current event,
+            // so `observed` includes the event's own amount.
+            oracleGlobalLifetime += amount;
+            oracleAgentLifetime.set(
+              parsed.agentSlug,
+              (oracleAgentLifetime.get(parsed.agentSlug) ?? 0) + amount,
             );
+            if (parsed.taskId !== undefined) {
+              oracleTaskLifetime.set(
+                parsed.taskId,
+                (oracleTaskLifetime.get(parsed.taskId) ?? 0) + amount,
+              );
+            }
+            computeExpectedCrossings({
+              costEventLsn: row.lsn,
+              costEventOccurredAtMs: occurredAtMs,
+              agentSlug: parsed.agentSlug,
+              taskId: parsed.taskId,
+              budgets: replayedBudgets,
+              globalLifetime: oracleGlobalLifetime,
+              agentLifetime: oracleAgentLifetime,
+              taskLifetime: oracleTaskLifetime,
+              out: expectedCrossings,
+            });
+          } else if (kind === "budget_set") {
+            const parsed = costAuditPayloadFromJsonValue(
+              kind,
+              JSON.parse(row.payload.toString("utf8")),
+            ) as BudgetSetAuditPayload;
+            replayedBudgets.set(parsed.budgetId, {
+              scope: parsed.scope,
+              subjectId: parsed.subjectId ?? null,
+              limitMicroUsd: parsed.limitMicroUsd as number,
+              thresholdsBps: [...parsed.thresholdsBps],
+              setAtLsn: row.lsn,
+              tombstoned: (parsed.limitMicroUsd as number) === 0,
+            });
+            budgetSetLsnToBudgetId.set(row.lsn, parsed.budgetId);
+          } else if (kind === "budget_threshold_crossed") {
+            const parsed = costAuditPayloadFromJsonValue(
+              kind,
+              JSON.parse(row.payload.toString("utf8")),
+            ) as BudgetThresholdCrossedAuditPayload;
+            const budgetSetLsnInt = parseLsn(parsed.budgetSetLsn).localLsn;
+            const crossedAtLsnInt = parseLsn(parsed.crossedAtLsn).localLsn;
+            const key = crossingKey(parsed.budgetId, budgetSetLsnInt, parsed.thresholdBps);
+            const entry: ReplayedCrossing = {
+              budgetId: parsed.budgetId,
+              budgetSetLsn: budgetSetLsnInt,
+              thresholdBps: parsed.thresholdBps,
+              crossedAtLsn: crossedAtLsnInt,
+              observedMicroUsd: parsed.observedMicroUsd as number,
+              limitMicroUsd: parsed.limitMicroUsd as number,
+              crossedAtMs: parsed.crossedAt.getTime(),
+              eventLsn: row.lsn,
+            };
+            const existing = replayedCrossings.get(key);
+            if (existing === undefined) {
+              replayedCrossings.set(key, [entry]);
+            } else {
+              existing.push(entry);
+            }
           }
-        } else if (kind === "budget_set") {
-          const parsed = costAuditPayloadFromJsonValue(
-            kind,
-            JSON.parse(row.payload.toString("utf8")),
-          ) as BudgetSetAuditPayload;
-          replayedBudgets.set(parsed.budgetId, {
-            scope: parsed.scope,
-            subjectId: parsed.subjectId ?? null,
-            limitMicroUsd: parsed.limitMicroUsd as number,
-            thresholdsBps: [...parsed.thresholdsBps],
-            setAtLsn: row.lsn,
-            tombstoned: (parsed.limitMicroUsd as number) === 0,
-          });
-        } else if (kind === "budget_threshold_crossed") {
-          // H1 fix: replay every threshold-crossed event into an expected
-          // (budget_id, budget_set_lsn, threshold_bps) → row map. The
-          // comparison below catches missing, ghost, and field-mismatch
-          // drift against cost_threshold_crossings.
-          const parsed = costAuditPayloadFromJsonValue(
-            kind,
-            JSON.parse(row.payload.toString("utf8")),
-          ) as BudgetThresholdCrossedAuditPayload;
-          const budgetSetLsnInt = parseLsn(parsed.budgetSetLsn).localLsn;
-          const crossedAtLsnInt = parseLsn(parsed.crossedAtLsn).localLsn;
-          const key = crossingKey(parsed.budgetId, budgetSetLsnInt, parsed.thresholdBps);
-          replayedCrossings.set(key, {
-            budgetId: parsed.budgetId,
-            budgetSetLsn: budgetSetLsnInt,
-            thresholdBps: parsed.thresholdBps,
-            crossedAtLsn: crossedAtLsnInt,
-            observedMicroUsd: parsed.observedMicroUsd as number,
-            limitMicroUsd: parsed.limitMicroUsd as number,
+        } catch (err) {
+          parseFailures.push({
+            kind: "event_payload_unparseable",
+            lsn: lsnFromV1Number(row.lsn),
+            type: row.type,
+            reason: err instanceof Error ? err.message : String(err),
           });
         }
-      } catch (err) {
-        parseFailures.push({
-          kind: "event_payload_unparseable",
-          lsn: lsnFromV1Number(row.lsn),
-          type: row.type,
-          reason: err instanceof Error ? err.message : String(err),
-        });
+        scanned += 1;
       }
-      scanned += 1;
+      cursor = rows[rows.length - 1]?.lsn ?? cursor;
     }
-    cursor = rows[rows.length - 1]?.lsn ?? cursor;
-  }
 
-  // Surface per-row parse failures first so on-call sees them at the top
-  // of the discrepancies list; downstream comparators may emit
-  // sum-mismatch discrepancies for the same rows but the parse-failure
-  // is the root cause.
-  const discrepancies: ReplayDiscrepancy[] = [...parseFailures];
+    // Surface per-row parse failures first so on-call sees them at the
+    // top of the discrepancies list; downstream comparators may emit
+    // sum-mismatch discrepancies for the same rows but the
+    // parse-failure is the root cause.
+    const discrepancies: ReplayDiscrepancy[] = [...parseFailures];
 
-  const storedAgentDays = new Map<string, number>();
-  for (const row of listAgentDaysStmt.all()) {
-    storedAgentDays.set(agentDayKey(row.agentSlug, row.dayUtc), row.totalMicroUsd);
-  }
-  compareAgentDays(replayedAgentDays, storedAgentDays, discrepancies);
+    const storedAgentDays = new Map<string, number>();
+    for (const row of listAgentDaysStmt.all()) {
+      storedAgentDays.set(agentDayKey(row.agentSlug, row.dayUtc), row.totalMicroUsd);
+    }
+    compareAgentDays(replayedAgentDays, storedAgentDays, discrepancies);
 
-  const storedTasks = new Map<string, number>();
-  for (const row of listTasksStmt.all()) {
-    storedTasks.set(row.taskId, row.totalMicroUsd);
-  }
-  compareTasks(replayedTasks, storedTasks, discrepancies);
+    const storedTasks = new Map<string, number>();
+    for (const row of listTasksStmt.all()) {
+      storedTasks.set(row.taskId, row.totalMicroUsd);
+    }
+    compareTasks(replayedTasks, storedTasks, discrepancies);
 
-  const storedBudgets = new Map<string, BudgetDbRow>();
-  for (const row of listBudgetsStmt.all()) {
-    storedBudgets.set(row.budgetId, row);
-  }
-  compareBudgets(replayedBudgets, storedBudgets, discrepancies);
+    const storedBudgets = new Map<string, BudgetDbRow>();
+    for (const row of listBudgetsStmt.all()) {
+      storedBudgets.set(row.budgetId, row);
+    }
+    compareBudgets(replayedBudgets, storedBudgets, discrepancies);
 
-  const storedCrossings = new Map<string, ThresholdCrossingDbRow>();
-  for (const row of listCrossingsStmt.all()) {
-    storedCrossings.set(crossingKey(row.budgetId, row.budgetSetLsn, row.thresholdBps), row);
-  }
-  compareCrossings(replayedCrossings, storedCrossings, discrepancies);
+    const storedCrossings = new Map<string, ThresholdCrossingDbRow>();
+    for (const row of listCrossingsStmt.all()) {
+      storedCrossings.set(crossingKey(row.budgetId, row.budgetSetLsn, row.thresholdBps), row);
+    }
+    compareCrossings(replayedCrossings, storedCrossings, discrepancies);
+    // Oracle checks: duplicates, causal-ordering, then the
+    // expected-vs-logged comparison. Order matters for on-call: a
+    // duplicate or causal-order violation is a more pointed signal
+    // than an oracle mismatch, so surfacing those first keeps the
+    // most actionable findings at the top of the list.
+    detectDuplicateLoggedCrossings(replayedCrossings, discrepancies);
+    detectCausalOrderViolations(replayedCrossings, discrepancies);
+    // Per-entry reference validation: every logged threshold event
+    // names a `crossedAtLsn`; this checks each one against the actual
+    // cost-event LSN→occurredAt map. Catches forged dangling refs
+    // (LSN not a cost.event) and per-duplicate `crossedAt` drift that
+    // the first-entry-only oracle comparator can't see.
+    validateLoggedCrossingReferences(replayedCrossings, costEventOccurredAtMs, discrepancies);
+    validateBudgetSetReferences(replayedCrossings, budgetSetLsnToBudgetId, discrepancies);
+    // Contiguous-emission window check: enforces the reactor's
+    // same-transaction invariant. Catches forgeries that pass every
+    // other check by being appended much later than the cost.event.
+    detectDelayedEmissions(replayedCrossings, expectedCrossings, discrepancies);
+    compareExpectedAndLoggedCrossings(expectedCrossings, replayedCrossings, discrepancies);
 
-  const highest = highestLsnStmt.get()?.lsn ?? 0;
-  return {
-    ok: discrepancies.length === 0,
-    highestLsn: lsnFromV1Number(highest),
-    eventsScanned: scanned,
-    discrepancies,
-  };
+    const highest = highestLsnStmt.get()?.lsn ?? 0;
+    return {
+      ok: discrepancies.length === 0,
+      highestLsn: lsnFromV1Number(highest),
+      eventsScanned: scanned,
+      discrepancies,
+    };
+  });
+  return txn.deferred();
 }
 
 interface ThresholdCrossingDbRow {
@@ -333,6 +542,10 @@ interface ReplayedCrossing {
   readonly crossedAtLsn: number;
   readonly observedMicroUsd: number;
   readonly limitMicroUsd: number;
+  /** `crossedAt` from the audit payload, as ms-since-epoch. */
+  readonly crossedAtMs: number;
+  /** The `event_log.lsn` of this threshold-crossed audit row itself. */
+  readonly eventLsn: number;
 }
 
 function crossingKey(budgetId: string, budgetSetLsn: number, thresholdBps: number): string {
@@ -340,11 +553,17 @@ function crossingKey(budgetId: string, budgetSetLsn: number, thresholdBps: numbe
 }
 
 function compareCrossings(
-  replayed: ReadonlyMap<string, ReplayedCrossing>,
+  replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
   stored: ReadonlyMap<string, ThresholdCrossingDbRow>,
   out: ReplayDiscrepancy[],
 ): void {
-  for (const [key, expected] of replayed.entries()) {
+  for (const [key, entries] of replayed.entries()) {
+    // The projection PK collapses duplicate audit events into one row,
+    // so log-vs-projection comparison uses the first event seen. The
+    // duplicate case is surfaced separately by
+    // `detectDuplicateLoggedCrossings`.
+    const expected = entries[0];
+    if (expected === undefined) continue; // unreachable: map only holds non-empty arrays
     const actual = stored.get(key);
     if (actual === undefined) {
       out.push({
@@ -397,6 +616,167 @@ function compareCrossings(
         budgetSetLsn: lsnFromV1Number(actual.budgetSetLsn),
         thresholdBps: actual.thresholdBps,
       });
+    }
+  }
+}
+
+function detectDuplicateLoggedCrossings(
+  replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
+  out: ReplayDiscrepancy[],
+): void {
+  for (const entries of replayed.values()) {
+    if (entries.length <= 1) continue;
+    const first = entries[0];
+    if (first === undefined) continue; // unreachable
+    out.push({
+      kind: "threshold_crossing_duplicate_event",
+      budgetId: first.budgetId as BudgetId,
+      budgetSetLsn: lsnFromV1Number(first.budgetSetLsn),
+      thresholdBps: first.thresholdBps,
+      eventLsns: entries.map((e) => lsnFromV1Number(e.eventLsn)),
+    });
+  }
+}
+
+function detectCausalOrderViolations(
+  replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
+  out: ReplayDiscrepancy[],
+): void {
+  for (const entries of replayed.values()) {
+    for (const entry of entries) {
+      // The reactor appends `cost.budget.threshold.crossed` AFTER its
+      // triggering `cost.event` in the same SQLite transaction, so the
+      // threshold event's own LSN must strictly exceed the LSN it
+      // names as the trigger.
+      if (entry.eventLsn <= entry.crossedAtLsn) {
+        out.push({
+          kind: "threshold_crossing_causal_order_violation",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+          crossedAtLsn: lsnFromV1Number(entry.crossedAtLsn),
+        });
+      }
+    }
+  }
+}
+
+function validateBudgetSetReferences(
+  replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
+  budgetSetLsnToBudgetId: ReadonlyMap<number, string>,
+  out: ReplayDiscrepancy[],
+): void {
+  for (const entries of replayed.values()) {
+    for (const entry of entries) {
+      const actualBudgetId = budgetSetLsnToBudgetId.get(entry.budgetSetLsn);
+      if (actualBudgetId === undefined) {
+        out.push({
+          kind: "threshold_crossing_invalid_budget_set_reference",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+          reason: "lsn_not_a_budget_set",
+        });
+        continue;
+      }
+      if (actualBudgetId !== entry.budgetId) {
+        out.push({
+          kind: "threshold_crossing_invalid_budget_set_reference",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+          reason: "budget_id_mismatch",
+          actualBudgetId: actualBudgetId as BudgetId,
+        });
+      }
+    }
+  }
+}
+
+function detectDelayedEmissions(
+  replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
+  expected: ReadonlyMap<string, ExpectedCrossing>,
+  out: ReplayDiscrepancy[],
+): void {
+  // Count expected crossings per triggering cost-event LSN. That count
+  // IS the size of the contiguous emission window the reactor would
+  // produce in the same SQLite transaction as the cost.event.
+  const expectedCountByCostEventLsn = new Map<number, number>();
+  for (const exp of expected.values()) {
+    expectedCountByCostEventLsn.set(
+      exp.crossedAtLsn,
+      (expectedCountByCostEventLsn.get(exp.crossedAtLsn) ?? 0) + 1,
+    );
+  }
+  for (const entries of replayed.values()) {
+    for (const entry of entries) {
+      // Spurious entries (no expected crossing for this key) are
+      // surfaced by `compareExpectedAndLoggedCrossings`; skip them
+      // here to avoid double-noise.
+      const key = crossingKey(entry.budgetId, entry.budgetSetLsn, entry.thresholdBps);
+      if (!expected.has(key)) continue;
+      const expectedCount = expectedCountByCostEventLsn.get(entry.crossedAtLsn) ?? 0;
+      if (expectedCount === 0) continue; // unreachable: expected.has(key) implies the count is ≥1
+      const minLsn = entry.crossedAtLsn + 1;
+      const maxLsn = entry.crossedAtLsn + expectedCount;
+      if (entry.eventLsn < minLsn || entry.eventLsn > maxLsn) {
+        out.push({
+          kind: "threshold_crossing_delayed_emission",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+          crossedAtLsn: lsnFromV1Number(entry.crossedAtLsn),
+          expectedWindowMinLsn: lsnFromV1Number(minLsn),
+          expectedWindowMaxLsn: lsnFromV1Number(maxLsn),
+        });
+      }
+    }
+  }
+}
+
+function validateLoggedCrossingReferences(
+  replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
+  costEventOccurredAtMs: ReadonlyMap<number, number>,
+  out: ReplayDiscrepancy[],
+): void {
+  for (const entries of replayed.values()) {
+    for (const entry of entries) {
+      const referencedMs = costEventOccurredAtMs.get(entry.crossedAtLsn);
+      if (referencedMs === undefined) {
+        // The named trigger LSN doesn't correspond to any cost.event
+        // we replayed. Either the threshold event names a non-cost
+        // row (e.g. a `cost.budget.set` LSN) or an LSN that doesn't
+        // exist in event_log.
+        out.push({
+          kind: "threshold_crossing_dangling_reference",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+          crossedAtLsn: lsnFromV1Number(entry.crossedAtLsn),
+        });
+        continue;
+      }
+      if (referencedMs !== entry.crossedAtMs) {
+        // The threshold event's payload `crossedAt` doesn't match the
+        // cost.event it names as trigger. Catches forged timestamps
+        // (key matches but timestamp drifts) AND per-duplicate
+        // divergence the first-entry-only oracle comparator misses.
+        out.push({
+          kind: "threshold_crossing_oracle_field_mismatch",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          field: "crossedAtMs",
+          expected: referencedMs,
+          logged: entry.crossedAtMs,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+        });
+      }
     }
   }
 }
@@ -516,7 +896,20 @@ function compareBudgets(
       });
     }
     const storedThresholds = parseStoredThresholds(storedRow.thresholdsBps);
-    if (!arraysEqual(storedThresholds, replayedRow.thresholdsBps)) {
+    if ("error" in storedThresholds) {
+      // Corrupted/unparseable `thresholds_bps` projection cell. A bare
+      // `JSON.parse` here used to throw out of `runReplayCheck`,
+      // blinding the diagnostic; surface a structured discrepancy so
+      // on-call sees the exact budget + reason and the rest of the
+      // check still runs.
+      out.push({
+        kind: "budget_state_mismatch",
+        budgetId: budgetId as BudgetId,
+        field: "thresholdsBps",
+        replayed: replayedRow.thresholdsBps,
+        stored: { unparseable: storedThresholds.error, raw: storedRow.thresholdsBps },
+      });
+    } else if (!arraysEqual(storedThresholds, replayedRow.thresholdsBps)) {
       out.push({
         kind: "budget_state_mismatch",
         budgetId: budgetId as BudgetId,
@@ -567,10 +960,28 @@ function splitAgentDayKey(key: string): { readonly agentSlug: string; readonly d
   return { agentSlug: key.slice(0, idx), dayUtc: key.slice(idx + 1) };
 }
 
-function parseStoredThresholds(raw: string): readonly number[] {
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed) || parsed.some((n) => typeof n !== "number")) {
-    return [];
+function parseStoredThresholds(raw: string): readonly number[] | { readonly error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  if (!Array.isArray(parsed)) {
+    return { error: "thresholds_bps is not an array" };
+  }
+  // Mirror the protocol's `BudgetSetAuditPayload.thresholdsBps`
+  // validation: each entry must be a positive safe-integer ≤ 10_000.
+  // Round-3 hardening: a bare `typeof === "number"` check accepted
+  // `Infinity` (from `JSON.parse("[1e999]")`), which would later JSON-
+  // serialize as `null` and lose the corruption signal. Round-3 fix:
+  // explicit `Number.isSafeInteger` + bounds.
+  for (const n of parsed) {
+    if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0 || n > 10_000) {
+      return {
+        error: `thresholds_bps contains invalid entry ${String(n)} (expected positive safe integer ≤ 10000)`,
+      };
+    }
   }
   return parsed as readonly number[];
 }
@@ -590,7 +1001,166 @@ function eventTypeToKind(type: string): AuditEventKind | "other" {
   return "other";
 }
 
-// Used only inside the batch loop; importing the type without using it
-// trips the lint. Re-exporting keeps the surface coherent for callers
-// that want to depend on the batch iterator.
-export type { EventLogRecord };
+interface ExpectedCrossing {
+  readonly budgetId: string;
+  readonly budgetSetLsn: number;
+  readonly thresholdBps: number;
+  readonly crossedAtLsn: number;
+  readonly observedMicroUsd: number;
+  readonly limitMicroUsd: number;
+  /** `crossedAt` derived from the triggering cost event, as ms-since-epoch. */
+  readonly crossedAtMs: number;
+}
+
+interface ComputeExpectedCrossingsArgs {
+  readonly costEventLsn: number;
+  readonly costEventOccurredAtMs: number;
+  readonly agentSlug: string;
+  readonly taskId: string | undefined;
+  readonly budgets: ReadonlyMap<string, ReplayedBudget>;
+  readonly globalLifetime: number;
+  readonly agentLifetime: ReadonlyMap<string, number>;
+  readonly taskLifetime: ReadonlyMap<string, number>;
+  readonly out: Map<string, ExpectedCrossing>;
+}
+
+// Independent threshold-crossing oracle for a single cost_event. Mirrors
+// the reactor's logic (`processCostEventForCrossings` in reactor.ts) but
+// derives `observed` from oracle-maintained lifetime trackers rather than
+// reading `cost_by_agent` / `cost_by_task` from disk. The crossing math
+// (`crossesThresholdBigInt`) MUST stay byte-identical with the reactor's
+// `crossesThreshold`; if they diverge, this oracle becomes a tautology.
+function computeExpectedCrossings(args: ComputeExpectedCrossingsArgs): void {
+  for (const [budgetId, budget] of args.budgets.entries()) {
+    if (budget.tombstoned) continue;
+    if (!isOracleApplicable(budget, args.agentSlug, args.taskId)) continue;
+    const observed = oracleObservedFor(budget, args);
+    if (observed === 0 && budget.limitMicroUsd === 0) continue;
+    for (const thresholdBps of budget.thresholdsBps) {
+      const key = crossingKey(budgetId, budget.setAtLsn, thresholdBps);
+      if (args.out.has(key)) continue;
+      if (!crossesThresholdBigInt(observed, budget.limitMicroUsd, thresholdBps)) continue;
+      args.out.set(key, {
+        budgetId,
+        budgetSetLsn: budget.setAtLsn,
+        thresholdBps,
+        crossedAtLsn: args.costEventLsn,
+        observedMicroUsd: observed,
+        limitMicroUsd: budget.limitMicroUsd,
+        crossedAtMs: args.costEventOccurredAtMs,
+      });
+    }
+  }
+}
+
+function isOracleApplicable(
+  budget: ReplayedBudget,
+  agentSlug: string,
+  taskId: string | undefined,
+): boolean {
+  if (budget.scope === "global") return true;
+  if (budget.scope === "agent") return budget.subjectId === agentSlug;
+  if (budget.scope === "task") return taskId !== undefined && budget.subjectId === taskId;
+  return false;
+}
+
+function oracleObservedFor(budget: ReplayedBudget, args: ComputeExpectedCrossingsArgs): number {
+  if (budget.scope === "global") return args.globalLifetime;
+  if (budget.scope === "agent") return args.agentLifetime.get(args.agentSlug) ?? 0;
+  // task scope — caller already gated on taskId !== undefined.
+  if (args.taskId === undefined) return 0;
+  return args.taskLifetime.get(args.taskId) ?? 0;
+}
+
+/**
+ * Integer threshold test in BigInt — byte-identical to the reactor's
+ * `crossesThreshold` (see reactor.ts:313). The operand bounds make the
+ * intermediate product reach 1e16, above Number.MAX_SAFE_INTEGER, so
+ * Number-multiplication would silently truncate; BigInt is exact across
+ * the full documented range. If you change the reactor's math, change
+ * this too — otherwise the oracle becomes a tautology.
+ */
+function crossesThresholdBigInt(observed: number, limit: number, thresholdBps: number): boolean {
+  if (limit === 0) return false;
+  return BigInt(observed) * 10_000n >= BigInt(limit) * BigInt(thresholdBps);
+}
+
+function compareExpectedAndLoggedCrossings(
+  expected: ReadonlyMap<string, ExpectedCrossing>,
+  logged: ReadonlyMap<string, readonly ReplayedCrossing[]>,
+  out: ReplayDiscrepancy[],
+): void {
+  for (const [key, exp] of expected.entries()) {
+    const entries = logged.get(key);
+    // Compare against the first logged event per key. Duplicates are
+    // surfaced by `detectDuplicateLoggedCrossings` so the
+    // oracle-vs-log comparator focuses on shape drift.
+    const log = entries?.[0];
+    if (log === undefined) {
+      out.push({
+        kind: "threshold_crossing_unemitted",
+        budgetId: exp.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
+        thresholdBps: exp.thresholdBps,
+        observedMicroUsd: exp.observedMicroUsd as MicroUsd,
+        limitMicroUsd: exp.limitMicroUsd as MicroUsd,
+        crossedAtLsn: lsnFromV1Number(exp.crossedAtLsn),
+      });
+      continue;
+    }
+    if (log.crossedAtLsn !== exp.crossedAtLsn) {
+      out.push({
+        kind: "threshold_crossing_oracle_field_mismatch",
+        budgetId: exp.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
+        thresholdBps: exp.thresholdBps,
+        field: "crossedAtLsn",
+        expected: exp.crossedAtLsn,
+        logged: log.crossedAtLsn,
+        eventLsn: lsnFromV1Number(log.eventLsn),
+      });
+    }
+    if (log.observedMicroUsd !== exp.observedMicroUsd) {
+      out.push({
+        kind: "threshold_crossing_oracle_field_mismatch",
+        budgetId: exp.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
+        thresholdBps: exp.thresholdBps,
+        field: "observedMicroUsd",
+        expected: exp.observedMicroUsd,
+        logged: log.observedMicroUsd,
+        eventLsn: lsnFromV1Number(log.eventLsn),
+      });
+    }
+    if (log.limitMicroUsd !== exp.limitMicroUsd) {
+      out.push({
+        kind: "threshold_crossing_oracle_field_mismatch",
+        budgetId: exp.budgetId as BudgetId,
+        budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
+        thresholdBps: exp.thresholdBps,
+        field: "limitMicroUsd",
+        expected: exp.limitMicroUsd,
+        logged: log.limitMicroUsd,
+        eventLsn: lsnFromV1Number(log.eventLsn),
+      });
+    }
+    // `crossedAtMs` is validated per-entry against the cost-event LSN
+    // map in `validateLoggedCrossingReferences`, which also covers
+    // duplicates and spurious entries that this comparator skips.
+  }
+  for (const [key, entries] of logged.entries()) {
+    if (expected.has(key)) continue;
+    const log = entries[0];
+    if (log === undefined) continue; // unreachable
+    out.push({
+      kind: "threshold_crossing_spurious",
+      budgetId: log.budgetId as BudgetId,
+      budgetSetLsn: lsnFromV1Number(log.budgetSetLsn),
+      thresholdBps: log.thresholdBps,
+      observedMicroUsd: log.observedMicroUsd as MicroUsd,
+      limitMicroUsd: log.limitMicroUsd as MicroUsd,
+      crossedAtLsn: lsnFromV1Number(log.crossedAtLsn),
+      eventLsn: lsnFromV1Number(log.eventLsn),
+    });
+  }
+}
