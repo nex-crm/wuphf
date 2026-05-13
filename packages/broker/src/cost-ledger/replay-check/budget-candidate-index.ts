@@ -17,7 +17,7 @@
 //
 // Extracted from replay-check.ts so that file stays under the
 // 1500-LOC file-size limit (see scripts/file-size-allowlist.txt).
-import type { ReplayedBudget } from "../replay-check.ts";
+import type { ReplayedBudget } from "./discrepancy.ts";
 
 export interface BudgetCandidateIndexes {
   readonly globalBudgetIds: Set<string>;

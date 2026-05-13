@@ -21,7 +21,7 @@
 // Extracted from replay-check.ts so that file stays under the
 // 1500-LOC limit (see scripts/file-size-allowlist.txt).
 import { lsnFromV1Number, MAX_BUDGET_LIMIT_MICRO_USD } from "@wuphf/protocol";
-import type { ReplayDiscrepancy } from "../replay-check.ts";
+import type { ReplayDiscrepancy } from "./discrepancy.ts";
 
 // `MicroUsd` brand ceiling as a bigint. Cumulative oracle accumulators
 // past this no longer fit the `MicroUsd` contract; emit a decimal

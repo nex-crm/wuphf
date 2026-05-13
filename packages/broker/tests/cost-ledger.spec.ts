@@ -23,7 +23,7 @@ import {
 import {
   __createBudgetCandidateIndexesForTesting,
   __replayCheckTesting,
-} from "../src/cost-ledger/replay-check.ts";
+} from "../src/cost-ledger/replay-check/testing.ts";
 import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
 
 function setup() {

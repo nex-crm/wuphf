@@ -23,28 +23,17 @@
 // the consistent read view.
 
 import {
-  type AuditEventKind,
-  type BudgetId,
   type BudgetSetAuditPayload,
   type BudgetThresholdCrossedAuditPayload,
   type CostEventAuditPayload,
   costAuditPayloadFromJsonValue,
-  type EventLsn,
   lsnFromV1Number,
-  MAX_BUDGET_LIMIT_MICRO_USD,
-  type MicroUsd,
   parseLsn,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
-import { compareAgentDays, compareTasks } from "./replay-check/aggregate-comparators.ts";
-import {
-  addBudgetToIndex,
-  type BudgetCandidateIndexes,
-  createBudgetCandidateIndexes,
-  removeBudgetFromIndex,
-  replaceBudgetInIndex,
-} from "./replay-check/budget-candidate-index.ts";
-import { compareBudgets } from "./replay-check/budget-comparator.ts";
+import { compareAgentDays, compareTasks } from "./aggregate-comparators.ts";
+import { createBudgetCandidateIndexes, replaceBudgetInIndex } from "./budget-candidate-index.ts";
+import { compareBudgets } from "./budget-comparator.ts";
 import {
   compareCrossings,
   compareExpectedAndLoggedCrossings,
@@ -53,45 +42,33 @@ import {
   detectDuplicateLoggedCrossings,
   validateBudgetSetReferences,
   validateLoggedCrossingReferences,
-} from "./replay-check/crossing-comparators.ts";
+} from "./crossing-comparators.ts";
 import type {
   ReplayCheckReport,
   ReplayDiscrepancy,
   ReplayedBudget,
   ReplayedCrossing,
-} from "./replay-check/discrepancy.ts";
+} from "./discrepancy.ts";
 import {
   type AgentDayDbRow,
   agentDayKey,
-  arraysEqual,
   BATCH_SIZE,
   type BudgetDbRow,
   type CostEventBatchRow,
   crossingKey,
   eventTypeToKind,
   type HighestLsnRow,
-  parseStoredThresholds,
-  splitAgentDayKey,
   type TaskDbRow,
   type ThresholdCrossingDbRow,
-} from "./replay-check/internal.ts";
-import {
-  type ComputeExpectedCrossingsArgs,
-  computeExpectedCrossings,
-  crossesThresholdBigInt,
-  type ExpectedCrossing,
-} from "./replay-check/threshold-oracle.ts";
-import {
-  flagUnsafeAccumulator,
-  MAX_BUDGET_LIMIT_MICRO_USD_BIG,
-  MAX_SAFE_INTEGER_BIG,
-} from "./replay-check/unsafe-lifetime-accumulator.ts";
+} from "./internal.ts";
+import { computeExpectedCrossings, type ExpectedCrossing } from "./threshold-oracle.ts";
+import { flagUnsafeAccumulator } from "./unsafe-lifetime-accumulator.ts";
 
 export type {
   ReplayCheckReport,
   ReplayDiscrepancy,
   ReplayedBudget,
-} from "./replay-check/discrepancy.ts";
+} from "./discrepancy.ts";
 
 export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   const readBatchStmt = db.prepare<[number, number], CostEventBatchRow>(
@@ -399,50 +376,11 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   return txn.deferred();
 }
 
-// Internal test seam. The end-to-end path that exercises
-// `unsafe_lifetime_accumulator` requires pushing an oracle accumulator
-// past 2^53 microUsd (≈ $9B cumulative spend). Per-event amounts are
-// capped at `MAX_COST_EVENT_AMOUNT_MICRO_USD` (1e8) by the protocol
-// validator, so reaching the boundary through `runReplayCheck` would
-// need ~9e7 cost.events — infeasible in a unit test. These exports
-// let tests assert the helper's emission logic directly. NOT part of
-// `@wuphf/broker/cost-ledger`'s public surface (the index re-exports
-// only `ReplayCheckReport`, `ReplayDiscrepancy`, and `runReplayCheck`).
-// Frozen so a test cannot mutate the seam and pollute subsequent
-// imports (modules are singletons).
-export const __replayCheckTesting = Object.freeze({
-  flagUnsafeAccumulator,
-  MAX_SAFE_INTEGER_BIG,
-  MAX_BUDGET_LIMIT_MICRO_USD_BIG,
-  crossesThresholdBigInt,
-  // Budget-candidate-index helpers exposed for direct assertion:
-  // the existing `eventsScanned > 1_000` regression test would still
-  // satisfy a revert to the O(events × budgets) iteration, so tests
-  // need to inspect the index shape directly. `computeExpectedCrossings`
-  // is exposed so the hot path can be tested with a hostile Proxy
-  // that blocks universe iteration. `replaceBudgetInIndex` is
-  // exposed so the lifecycle-invariant tests can exercise the
-  // remove-then-add semantics directly without going through the
-  // full replay loop.
-  addBudgetToIndex,
-  removeBudgetFromIndex,
-  replaceBudgetInIndex,
-  computeExpectedCrossings,
-  // Aggregate compare functions exposed so tests can drive them with
-  // synthetic bigint maps past `MAX_BUDGET_LIMIT_MICRO_USD` and
-  // `Number.MAX_SAFE_INTEGER`. End-to-end coverage past 2^53 is
-  // blocked by the protocol per-event cap
-  // (`MAX_COST_EVENT_AMOUNT_MICRO_USD = 1e8`), so a direct seam is
-  // the only way to assert the boundary emission shape.
-  compareAgentDays,
-  compareTasks,
-});
-
-// re-exported via that module; the rest of the helpers are used here.
-export {
-  __createBudgetCandidateIndexesForTesting,
-  type BudgetCandidateIndexes,
-} from "./replay-check/budget-candidate-index.ts";
+// `BudgetCandidateIndexes` is re-exported because the orchestrator's
+// `runReplayCheck` builds one and the type leaks into a few callers'
+// type inference. The test seam (`__replayCheckTesting` +
+// `__createBudgetCandidateIndexesForTesting`) lives in `./testing.ts`.
+export type { BudgetCandidateIndexes } from "./budget-candidate-index.ts";
 
 // Compare functions accept and emit bigint cumulative totals. The
 // discrepancy wire shape is a decimal-string form to preserve exact
