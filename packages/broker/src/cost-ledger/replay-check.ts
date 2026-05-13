@@ -42,12 +42,12 @@ import {
   createBudgetCandidateIndexes,
   removeBudgetFromIndex,
   replaceBudgetInIndex,
-} from "./budget-candidate-index.ts";
+} from "./replay-check/budget-candidate-index.ts";
 import {
   flagUnsafeAccumulator,
   MAX_BUDGET_LIMIT_MICRO_USD_BIG,
   MAX_SAFE_INTEGER_BIG,
-} from "./unsafe-lifetime-accumulator.ts";
+} from "./replay-check/unsafe-lifetime-accumulator.ts";
 
 export interface ReplayCheckReport {
   readonly ok: boolean;
@@ -1033,7 +1033,7 @@ export interface ReplayedBudget {
 export {
   __createBudgetCandidateIndexesForTesting,
   type BudgetCandidateIndexes,
-} from "./budget-candidate-index.ts";
+} from "./replay-check/budget-candidate-index.ts";
 
 // Compare functions accept and emit bigint cumulative totals. The
 // discrepancy wire shape is a decimal-string form to preserve exact
