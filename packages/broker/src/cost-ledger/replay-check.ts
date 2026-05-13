@@ -214,6 +214,40 @@ export type ReplayDiscrepancy =
       readonly crossedAtLsn: EventLsn;
     }
   | {
+      // Oracle: the reactor's strongest invariant is that threshold
+      // events are appended SYNCHRONOUSLY immediately after their
+      // triggering `cost.event`, all inside the same SQLite
+      // transaction. So for a cost.event at LSN X with K legitimate
+      // crossings, the threshold-event LSNs MUST be {X+1, …, X+K}.
+      // A forged or delayed event appended much later (after a
+      // tombstone, budget reset, or arbitrary gap) would otherwise
+      // pass causal-order + reference + field checks. This variant
+      // catches the gap.
+      readonly kind: "threshold_crossing_delayed_emission";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly eventLsn: EventLsn;
+      readonly crossedAtLsn: EventLsn;
+      readonly expectedWindowMinLsn: EventLsn;
+      readonly expectedWindowMaxLsn: EventLsn;
+    }
+  | {
+      // Oracle: a `cost.budget.threshold.crossed` event names a
+      // `budgetSetLsn` that has no corresponding `cost.budget.set` in
+      // event_log. Sibling of `dangling_reference` for the budget
+      // side. Catches forgeries that point at an unrelated row OR
+      // at a budgetSet for a different budgetId.
+      readonly kind: "threshold_crossing_invalid_budget_set_reference";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly eventLsn: EventLsn;
+      readonly reason: "lsn_not_a_budget_set" | "budget_id_mismatch";
+      /** When `reason === "budget_id_mismatch"`, the actual budgetId at the named LSN. */
+      readonly actualBudgetId?: BudgetId;
+    }
+  | {
       // Surface unparseable event-log rows distinctly so on-call sees the
       // failing LSN, event type, and parse reason instead of a bare
       // `internal_error` from the route.
@@ -317,6 +351,10 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     // (the reactor sets it from `input.occurredAt`). Stored as ms-
     // since-epoch for cheap comparison.
     const costEventOccurredAtMs = new Map<number, number>();
+    // Budget-set LSN → budgetId map for validating logged threshold
+    // events' `budgetSetLsn` references — sibling to the
+    // `costEventOccurredAtMs` check for `crossedAtLsn`.
+    const budgetSetLsnToBudgetId = new Map<number, string>();
     // Oracle: independent threshold replay. Tracks the same lifetime
     // sums the reactor reads (`lifetimeFor` in reactor.ts), then
     // re-runs the same integer/BigInt crossing math against current
@@ -394,6 +432,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
               setAtLsn: row.lsn,
               tombstoned: (parsed.limitMicroUsd as number) === 0,
             });
+            budgetSetLsnToBudgetId.set(row.lsn, parsed.budgetId);
           } else if (kind === "budget_threshold_crossed") {
             const parsed = costAuditPayloadFromJsonValue(
               kind,
@@ -474,6 +513,11 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     // (LSN not a cost.event) and per-duplicate `crossedAt` drift that
     // the first-entry-only oracle comparator can't see.
     validateLoggedCrossingReferences(replayedCrossings, costEventOccurredAtMs, discrepancies);
+    validateBudgetSetReferences(replayedCrossings, budgetSetLsnToBudgetId, discrepancies);
+    // Contiguous-emission window check: enforces the reactor's
+    // same-transaction invariant. Catches forgeries that pass every
+    // other check by being appended much later than the cost.event.
+    detectDelayedEmissions(replayedCrossings, expectedCrossings, discrepancies);
     compareExpectedAndLoggedCrossings(expectedCrossings, replayedCrossings, discrepancies);
 
     const highest = highestLsnStmt.get()?.lsn ?? 0;
@@ -617,6 +661,82 @@ function detectCausalOrderViolations(
           thresholdBps: entry.thresholdBps,
           eventLsn: lsnFromV1Number(entry.eventLsn),
           crossedAtLsn: lsnFromV1Number(entry.crossedAtLsn),
+        });
+      }
+    }
+  }
+}
+
+function validateBudgetSetReferences(
+  replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
+  budgetSetLsnToBudgetId: ReadonlyMap<number, string>,
+  out: ReplayDiscrepancy[],
+): void {
+  for (const entries of replayed.values()) {
+    for (const entry of entries) {
+      const actualBudgetId = budgetSetLsnToBudgetId.get(entry.budgetSetLsn);
+      if (actualBudgetId === undefined) {
+        out.push({
+          kind: "threshold_crossing_invalid_budget_set_reference",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+          reason: "lsn_not_a_budget_set",
+        });
+        continue;
+      }
+      if (actualBudgetId !== entry.budgetId) {
+        out.push({
+          kind: "threshold_crossing_invalid_budget_set_reference",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+          reason: "budget_id_mismatch",
+          actualBudgetId: actualBudgetId as BudgetId,
+        });
+      }
+    }
+  }
+}
+
+function detectDelayedEmissions(
+  replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,
+  expected: ReadonlyMap<string, ExpectedCrossing>,
+  out: ReplayDiscrepancy[],
+): void {
+  // Count expected crossings per triggering cost-event LSN. That count
+  // IS the size of the contiguous emission window the reactor would
+  // produce in the same SQLite transaction as the cost.event.
+  const expectedCountByCostEventLsn = new Map<number, number>();
+  for (const exp of expected.values()) {
+    expectedCountByCostEventLsn.set(
+      exp.crossedAtLsn,
+      (expectedCountByCostEventLsn.get(exp.crossedAtLsn) ?? 0) + 1,
+    );
+  }
+  for (const entries of replayed.values()) {
+    for (const entry of entries) {
+      // Spurious entries (no expected crossing for this key) are
+      // surfaced by `compareExpectedAndLoggedCrossings`; skip them
+      // here to avoid double-noise.
+      const key = crossingKey(entry.budgetId, entry.budgetSetLsn, entry.thresholdBps);
+      if (!expected.has(key)) continue;
+      const expectedCount = expectedCountByCostEventLsn.get(entry.crossedAtLsn) ?? 0;
+      if (expectedCount === 0) continue; // unreachable: expected.has(key) implies the count is ≥1
+      const minLsn = entry.crossedAtLsn + 1;
+      const maxLsn = entry.crossedAtLsn + expectedCount;
+      if (entry.eventLsn < minLsn || entry.eventLsn > maxLsn) {
+        out.push({
+          kind: "threshold_crossing_delayed_emission",
+          budgetId: entry.budgetId as BudgetId,
+          budgetSetLsn: lsnFromV1Number(entry.budgetSetLsn),
+          thresholdBps: entry.thresholdBps,
+          eventLsn: lsnFromV1Number(entry.eventLsn),
+          crossedAtLsn: lsnFromV1Number(entry.crossedAtLsn),
+          expectedWindowMinLsn: lsnFromV1Number(minLsn),
+          expectedWindowMaxLsn: lsnFromV1Number(maxLsn),
         });
       }
     }
@@ -855,8 +975,18 @@ function parseStoredThresholds(raw: string): readonly number[] | { readonly erro
   if (!Array.isArray(parsed)) {
     return { error: "thresholds_bps is not an array" };
   }
-  if (parsed.some((n) => typeof n !== "number")) {
-    return { error: "thresholds_bps contains non-number entries" };
+  // Mirror the protocol's `BudgetSetAuditPayload.thresholdsBps`
+  // validation: each entry must be a positive safe-integer ≤ 10_000.
+  // Round-3 hardening: a bare `typeof === "number"` check accepted
+  // `Infinity` (from `JSON.parse("[1e999]")`), which would later JSON-
+  // serialize as `null` and lose the corruption signal. Round-3 fix:
+  // explicit `Number.isSafeInteger` + bounds.
+  for (const n of parsed) {
+    if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0 || n > 10_000) {
+      return {
+        error: `thresholds_bps contains invalid entry ${String(n)} (expected positive safe integer ≤ 10000)`,
+      };
+    }
   }
   return parsed as readonly number[];
 }
