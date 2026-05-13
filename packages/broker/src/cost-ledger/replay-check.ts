@@ -789,6 +789,11 @@ export const __replayCheckTesting = Object.freeze({
   MAX_SAFE_INTEGER_BIG,
   MAX_BUDGET_LIMIT_MICRO_USD_BIG,
   crossesThresholdBigInt,
+  // PR #842 budget-candidate-index helpers exposed for direct
+  // assertion (the `eventsScanned > 1_000` regression test wouldn't
+  // catch a revert to the O(events × budgets) iteration).
+  addBudgetToIndex,
+  removeBudgetFromIndex,
   // Round-4 exposure (PR #845 round-4 codex api + security 2-of-2):
   // the aggregate compare functions are exposed so tests can drive
   // them with synthetic bigint maps past `MAX_BUDGET_LIMIT_MICRO_USD`
@@ -1102,6 +1107,20 @@ function removeBudgetFromSubjectIndex(
   }
 }
 
+// Internal test seam. Round-2 fix for PR #846's perf-test gap (the
+// existing test only asserted `eventsScanned > 1_000`, which a revert
+// to the O(events × budgets) iteration would still satisfy). Exports
+// a constructor so tests can directly assert the candidate-set shape
+// after a sequence of `cost.budget.set` events. NOT part of
+// `@wuphf/broker/cost-ledger`'s public surface.
+export function __createBudgetCandidateIndexesForTesting(): BudgetCandidateIndexes {
+  return {
+    globalBudgetIds: new Set<string>(),
+    agentBudgetIds: new Map<string, Set<string>>(),
+    taskBudgetIds: new Map<string, Set<string>>(),
+  };
+}
+
 // Compare functions accept and emit bigint cumulative totals. The
 // discrepancy wire shape is a decimal-string form to preserve exact
 // values past the `MicroUsd` brand bound or the safe-integer boundary.
@@ -1365,46 +1384,64 @@ interface ComputeExpectedCrossingsArgs {
 // (`crossesThresholdBigInt`) MUST stay byte-identical with the reactor's
 // `crossesThreshold`; if they diverge, this oracle becomes a tautology.
 function computeExpectedCrossings(args: ComputeExpectedCrossingsArgs): void {
-  const candidateBudgetIds = new Set<string>(args.globalBudgetIds);
-  const agentBudgetIds = args.agentBudgetIds.get(args.agentSlug);
-  if (agentBudgetIds !== undefined) {
-    for (const budgetId of agentBudgetIds) {
-      candidateBudgetIds.add(budgetId);
-    }
-  }
+  // Round-2 fix (PR #846 triangulation perf + adversarial, 2-of-2 MEDIUM):
+  // visit each scope index directly instead of allocating a transient
+  // `Set<string>` per cost.event. The index lifecycle guarantees a
+  // budget is placed in exactly one scope index at a time
+  // (`addBudgetToIndex` removes from the prior scope before adding to
+  // the new one), so the three iterations are disjoint — no dedupe
+  // required. This drops 1 short-lived Set per cost event and
+  // O(events × globalBudgetIds.size) hash inserts.
+  visitCandidates(args, args.globalBudgetIds, evalBudget);
+  visitCandidates(args, args.agentBudgetIds.get(args.agentSlug), evalBudget);
   if (args.taskId !== undefined) {
-    const taskBudgetIds = args.taskBudgetIds.get(args.taskId);
-    if (taskBudgetIds !== undefined) {
-      for (const budgetId of taskBudgetIds) {
-        candidateBudgetIds.add(budgetId);
-      }
-    }
+    visitCandidates(args, args.taskBudgetIds.get(args.taskId), evalBudget);
   }
+}
 
-  for (const budgetId of candidateBudgetIds) {
+function visitCandidates(
+  args: ComputeExpectedCrossingsArgs,
+  budgetIds: ReadonlySet<string> | undefined,
+  visit: (args: ComputeExpectedCrossingsArgs, budgetId: string, budget: ReplayedBudget) => void,
+): void {
+  if (budgetIds === undefined) return;
+  for (const budgetId of budgetIds) {
     const budget = args.budgets.get(budgetId);
     if (budget === undefined) continue;
-    if (budget.tombstoned) continue;
-    if (!isOracleApplicable(budget, args.agentSlug, args.taskId)) continue;
-    const observed = oracleObservedFor(budget, args);
-    if (observed === 0n && budget.limitMicroUsd === 0) continue;
-    for (const thresholdBps of budget.thresholdsBps) {
-      const key = crossingKey(budgetId, budget.setAtLsn, thresholdBps);
-      if (args.out.has(key)) continue;
-      if (!crossesThresholdBigInt(observed, budget.limitMicroUsd, thresholdBps)) continue;
-      args.out.set(key, {
-        budgetId,
-        budgetSetLsn: budget.setAtLsn,
-        thresholdBps,
-        crossedAtLsn: args.costEventLsn,
-        // Keep cumulative `observed` as bigint internally. Discrepancy
-        // emission below stringifies via `.toString()` to honor the
-        // `MicroUsd` brand contract on the wire.
-        observedMicroUsd: observed,
-        limitMicroUsd: budget.limitMicroUsd,
-        crossedAtMs: args.costEventOccurredAtMs,
-      });
-    }
+    visit(args, budgetId, budget);
+  }
+}
+
+function evalBudget(
+  args: ComputeExpectedCrossingsArgs,
+  budgetId: string,
+  budget: ReplayedBudget,
+): void {
+  // Defensive guards retained from the original pre-#842 oracle. The
+  // index lifecycle should keep tombstones out of the scope sets and
+  // `isOracleApplicable` should always return true on a candidate
+  // pulled from its own scope index — but these checks are cheap and
+  // catch any future drift between the index and `replayedBudgets`.
+  if (budget.tombstoned) return;
+  if (!isOracleApplicable(budget, args.agentSlug, args.taskId)) return;
+  const observed = oracleObservedFor(budget, args);
+  if (observed === 0n && budget.limitMicroUsd === 0) return;
+  for (const thresholdBps of budget.thresholdsBps) {
+    const key = crossingKey(budgetId, budget.setAtLsn, thresholdBps);
+    if (args.out.has(key)) continue;
+    if (!crossesThresholdBigInt(observed, budget.limitMicroUsd, thresholdBps)) continue;
+    args.out.set(key, {
+      budgetId,
+      budgetSetLsn: budget.setAtLsn,
+      thresholdBps,
+      // Keep cumulative `observed` as bigint internally. Discrepancy
+      // emission stringifies via `.toString()` to honor the
+      // `MicroUsd` brand contract on the wire.
+      crossedAtLsn: args.costEventLsn,
+      observedMicroUsd: observed,
+      limitMicroUsd: budget.limitMicroUsd,
+      crossedAtMs: args.costEventOccurredAtMs,
+    });
   }
 }
 
