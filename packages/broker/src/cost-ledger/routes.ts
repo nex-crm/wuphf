@@ -46,7 +46,7 @@ import {
   parseIdempotencyKey,
 } from "./idempotency.ts";
 import type { CostLedger } from "./projections.ts";
-import { runReplayCheck } from "./replay-check.ts";
+import { runReplayCheck } from "./replay-check/index.ts";
 
 // 256 KiB body cap. Cost payloads are tiny (<1 KiB typical); 256 KiB
 // gives 1000x headroom while still pre-aborting any caller that streams

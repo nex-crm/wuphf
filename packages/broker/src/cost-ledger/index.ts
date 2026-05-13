@@ -47,5 +47,5 @@ export type {
 export { createCostLedger } from "./projections.ts";
 // Replay-check, used by the cost-ledger health route + nightly drift
 // checks. The report shape is the authoritative discrepancy surface.
-export type { ReplayCheckReport, ReplayDiscrepancy } from "./replay-check.ts";
-export { runReplayCheck } from "./replay-check.ts";
+export type { ReplayCheckReport, ReplayDiscrepancy } from "./replay-check/index.ts";
+export { runReplayCheck } from "./replay-check/index.ts";
