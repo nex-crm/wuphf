@@ -560,7 +560,7 @@ describe("replay-check oracle (#836)", () => {
     expect(unemitted).toBeDefined();
     if (unemitted?.kind === "threshold_crossing_unemitted") {
       expect(unemitted.thresholdBps).toBe(5_000);
-      expect(unemitted.observedMicroUsd as number).toBe(2_500_000);
+      expect(unemitted.observedMicroUsdString).toBe("2500000");
       expect(unemitted.limitMicroUsd as number).toBe(5_000_000);
     }
     // The existing event-log replay sees nothing wrong (both projection
@@ -645,13 +645,12 @@ describe("replay-check oracle (#836)", () => {
     const report = runReplayCheck(db);
     expect(report.ok).toBe(false);
     const mismatch = report.discrepancies.find(
-      (d) => d.kind === "threshold_crossing_oracle_field_mismatch",
+      (d) => d.kind === "threshold_crossing_oracle_observed_mismatch",
     );
     expect(mismatch).toBeDefined();
-    if (mismatch?.kind === "threshold_crossing_oracle_field_mismatch") {
-      expect(mismatch.field).toBe("observedMicroUsd");
-      expect(mismatch.expected).toBe(2_500_000);
-      expect(mismatch.logged).toBe(2_500_001);
+    if (mismatch?.kind === "threshold_crossing_oracle_observed_mismatch") {
+      expect(mismatch.expectedMicroUsdString).toBe("2500000");
+      expect(mismatch.loggedMicroUsdString).toBe("2500001");
     }
   });
 
@@ -1267,57 +1266,81 @@ describe("replay-check oracle unsafe-lifetime (#843)", () => {
   // ~9e7 events to push an accumulator past `Number.MAX_SAFE_INTEGER`
   // (≈ 9e15 microUsd ≈ $9B cumulative spend). See the comment on
   // `__replayCheckTesting` in `replay-check.ts` for the rationale.
-  const { flagUnsafeAccumulator, MAX_SAFE_INTEGER_BIG, crossesThresholdBigInt } =
-    __replayCheckTesting;
+  const {
+    flagUnsafeAccumulator,
+    MAX_SAFE_INTEGER_BIG,
+    MAX_BUDGET_LIMIT_MICRO_USD_BIG,
+    crossesThresholdBigInt,
+  } = __replayCheckTesting;
 
-  it("flagUnsafeAccumulator: no discrepancy emitted when post is at the safe-integer boundary", () => {
+  it("flagUnsafeAccumulator: silent at or below the MicroUsd brand ceiling", () => {
     const out: ReplayDiscrepancy[] = [];
     const flagged = new Set<string>();
-    flagUnsafeAccumulator("global", null, MAX_SAFE_INTEGER_BIG, 42, flagged, out);
+    // 1e12 — exactly at MAX_BUDGET_LIMIT_MICRO_USD. Strict `>` so no fire.
+    flagUnsafeAccumulator("global", null, MAX_BUDGET_LIMIT_MICRO_USD_BIG, 42, flagged, out);
     expect(out).toHaveLength(0);
     expect(flagged.size).toBe(0);
   });
 
-  it("flagUnsafeAccumulator: emits unsafe_lifetime_accumulator once when post first crosses the boundary", () => {
+  it("flagUnsafeAccumulator: fires exceeds_micro_usd_brand at 1e12+1 but not exceeds_safe_integer yet", () => {
     const out: ReplayDiscrepancy[] = [];
     const flagged = new Set<string>();
-    const post = MAX_SAFE_INTEGER_BIG + 1n;
+    const post = MAX_BUDGET_LIMIT_MICRO_USD_BIG + 1n;
     flagUnsafeAccumulator("global", null, post, 42, flagged, out);
     expect(out).toHaveLength(1);
-    const d = out[0] as {
-      kind: string;
-      scope: string;
-      subjectId: string | null;
-      accumulatedMicroUsd: string;
-    };
-    expect(d.kind).toBe("unsafe_lifetime_accumulator");
+    const d = out[0];
+    if (d === undefined || d.kind !== "unsafe_lifetime_accumulator") {
+      throw new Error("expected unsafe_lifetime_accumulator");
+    }
+    expect(d.reason).toBe("exceeds_micro_usd_brand");
     expect(d.scope).toBe("global");
     expect(d.subjectId).toBeNull();
     expect(d.accumulatedMicroUsd).toBe(post.toString());
     expect(flagged.size).toBe(1);
 
-    // Second call with the same key — no second emission.
-    flagUnsafeAccumulator("global", null, post + 100n, 43, flagged, out);
+    // Second call past the same boundary but still safe-integer-safe —
+    // no second brand emission (already flagged).
+    flagUnsafeAccumulator("global", null, post + 1_000_000_000n, 43, flagged, out);
     expect(out).toHaveLength(1);
     expect(flagged.size).toBe(1);
   });
 
-  it("flagUnsafeAccumulator: agent and task scopes track distinct keys", () => {
+  it("flagUnsafeAccumulator: fires exceeds_safe_integer separately at 2^53+1", () => {
     const out: ReplayDiscrepancy[] = [];
     const flagged = new Set<string>();
+    // Past both boundaries → both reasons fire on the first call.
+    const post = MAX_SAFE_INTEGER_BIG + 1n;
+    flagUnsafeAccumulator("global", null, post, 42, flagged, out);
+    expect(out).toHaveLength(2);
+    const reasons = out
+      .filter((d) => d.kind === "unsafe_lifetime_accumulator")
+      .map((d) => (d.kind === "unsafe_lifetime_accumulator" ? d.reason : ""))
+      .sort();
+    expect(reasons).toEqual(["exceeds_micro_usd_brand", "exceeds_safe_integer"]);
+    expect(flagged.size).toBe(2);
+
+    // Repeat — no more emissions.
+    flagUnsafeAccumulator("global", null, post + 100n, 43, flagged, out);
+    expect(out).toHaveLength(2);
+  });
+
+  it("flagUnsafeAccumulator: agent and task scopes track distinct (scope, subjectId, reason) keys", () => {
+    const out: ReplayDiscrepancy[] = [];
+    const flagged = new Set<string>();
+    // Past both boundaries → each call emits 2 (one per reason).
     const post = MAX_SAFE_INTEGER_BIG + 1n;
     flagUnsafeAccumulator("agent", "primary", post, 1, flagged, out);
     flagUnsafeAccumulator("agent", "secondary", post, 2, flagged, out);
     flagUnsafeAccumulator("task", "primary", post, 3, flagged, out);
     flagUnsafeAccumulator("global", null, post, 4, flagged, out);
-    expect(out).toHaveLength(4);
-    expect(flagged.size).toBe(4);
+    expect(out).toHaveLength(8); // 4 keys × 2 reasons
+    expect(flagged.size).toBe(8);
 
-    // Re-emit on each key — still 4 discrepancies.
+    // Re-emit on each key — no new discrepancies.
     flagUnsafeAccumulator("agent", "primary", post + 1n, 5, flagged, out);
     flagUnsafeAccumulator("task", "primary", post + 1n, 6, flagged, out);
     flagUnsafeAccumulator("global", null, post + 1n, 7, flagged, out);
-    expect(out).toHaveLength(4);
+    expect(out).toHaveLength(8);
   });
 
   it("crossesThresholdBigInt: stays exact past Number.MAX_SAFE_INTEGER for observed", () => {
@@ -1333,5 +1356,26 @@ describe("replay-check oracle unsafe-lifetime (#843)", () => {
     // Preserves the prior contract: tombstoned budgets (limit=0) never
     // cross any threshold, regardless of observed.
     expect(crossesThresholdBigInt(1_000_000_000n, 0, 5_000)).toBe(false);
+  });
+
+  it("threshold_crossing_unemitted emits observedMicroUsdString (no MicroUsd brand forgery)", () => {
+    // Reactor under-emits: oracle says crossing should fire, but no
+    // threshold-crossed event exists. The discrepancy must surface the
+    // observed value via the decimal-string field rather than casting
+    // an unbounded bigint into a `MicroUsd` brand.
+    const { db, ledger } = setup();
+    ledger.appendBudgetSet(buildBudgetSet({ limitMicroUsd: 5_000_000, thresholdsBps: [5_000] }));
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 2_500_000 }));
+    db.exec("DELETE FROM event_log WHERE type = 'cost.budget.threshold.crossed'");
+    db.exec("DELETE FROM cost_threshold_crossings");
+
+    const report = runReplayCheck(db);
+    const unemitted = report.discrepancies.find((d) => d.kind === "threshold_crossing_unemitted");
+    expect(unemitted).toBeDefined();
+    if (unemitted?.kind === "threshold_crossing_unemitted") {
+      expect(unemitted.observedMicroUsdString).toBe("2500000");
+      // Field is a plain `string`, not a branded number — no forgery risk.
+      expect(typeof unemitted.observedMicroUsdString).toBe("string");
+    }
   });
 });

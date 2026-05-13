@@ -131,7 +131,11 @@ export type ReplayDiscrepancy =
       readonly budgetId: BudgetId;
       readonly budgetSetLsn: EventLsn;
       readonly thresholdBps: number;
-      readonly observedMicroUsd: MicroUsd;
+      // Decimal-string form of the oracle's bigint cumulative `observed`.
+      // Cumulative lifetime spend is unbounded; `MicroUsd` is bounded at
+      // `MAX_BUDGET_LIMIT_MICRO_USD` and would forge the brand here.
+      // Pair with `unsafe_lifetime_accumulator` for boundary signals.
+      readonly observedMicroUsdString: string;
       readonly limitMicroUsd: MicroUsd;
       readonly crossedAtLsn: EventLsn;
     }
@@ -148,7 +152,13 @@ export type ReplayDiscrepancy =
       readonly budgetId: BudgetId;
       readonly budgetSetLsn: EventLsn;
       readonly thresholdBps: number;
-      readonly observedMicroUsd: MicroUsd;
+      // Decimal-string form of the logged audit's `observedMicroUsd`.
+      // The protocol bounds the per-event value at
+      // `MAX_BUDGET_LIMIT_MICRO_USD`, but emitting via a string keeps
+      // the field shape consistent with `threshold_crossing_unemitted`
+      // and avoids brand drift if an adversary forges a value past
+      // brand range that the decoder accepts.
+      readonly observedMicroUsdString: string;
       readonly limitMicroUsd: MicroUsd;
       readonly crossedAtLsn: EventLsn;
       readonly eventLsn: EventLsn;
@@ -166,9 +176,30 @@ export type ReplayDiscrepancy =
       readonly budgetId: BudgetId;
       readonly budgetSetLsn: EventLsn;
       readonly thresholdBps: number;
-      readonly field: "crossedAtLsn" | "observedMicroUsd" | "limitMicroUsd" | "crossedAtMs";
+      // `observedMicroUsd` is now handled by the sibling
+      // `threshold_crossing_oracle_observed_mismatch` variant so it can
+      // carry unbounded bigint values without forging the `MicroUsd`
+      // brand. The fields kept here are bounded by their wire shape:
+      // crossedAtLsn ≤ event_log.lsn (safe integer in practice),
+      // limitMicroUsd ≤ `MAX_BUDGET_LIMIT_MICRO_USD`, crossedAtMs ≤ JS
+      // `Date.now()` range.
+      readonly field: "crossedAtLsn" | "limitMicroUsd" | "crossedAtMs";
       readonly expected: number;
       readonly logged: number;
+      readonly eventLsn: EventLsn;
+    }
+  | {
+      // Oracle: like `threshold_crossing_oracle_field_mismatch` but for
+      // `observedMicroUsd`. Cumulative lifetime spend is unbounded, so
+      // expected/logged are decimal-string form of the bigint values.
+      // Split out so the bounded-field variant can keep `number` and
+      // the brand contract on its emitted fields.
+      readonly kind: "threshold_crossing_oracle_observed_mismatch";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly expectedMicroUsdString: string;
+      readonly loggedMicroUsdString: string;
       readonly eventLsn: EventLsn;
     }
   | {
@@ -251,23 +282,35 @@ export type ReplayDiscrepancy =
   | {
       // Oracle: one of the lifetime accumulators (`oracleGlobalLifetime`,
       // `oracleAgentLifetime[slug]`, `oracleTaskLifetime[taskId]`) just
-      // crossed `Number.MAX_SAFE_INTEGER` (≈ $9B cumulative spend in
-      // microUsd). Before this fix the accumulators were plain `number`,
-      // and `BigInt(number)` past the safe-integer boundary silently
-      // preserves the rounded value, so threshold comparisons could
-      // disagree with the reactor. The accumulators are now `bigint`
-      // internally, so the math itself stays precise. This discrepancy
-      // is the structured Option-B diagnostic: surface the boundary
-      // crossing once per (scope, subjectId) so on-call has a concrete
-      // signal that subsequent `observedMicroUsd` emissions
-      // (which still flow through `Number(...)` to honor the `MicroUsd`
-      // brand) lose precision past 2^53 microUsd. Fires once per
-      // accumulator-key per replay-check run.
+      // crossed a representability boundary. Fires once per
+      // (scope, subjectId, reason) per replay-check run.
+      //
+      // Two boundaries fire independently:
+      //
+      // - `exceeds_micro_usd_brand`: post > `MAX_BUDGET_LIMIT_MICRO_USD`
+      //   (1e12). The accumulator has surpassed the documented
+      //   `MicroUsd` brand ceiling. Downstream consumers that re-validate
+      //   `MicroUsd` payloads should not accept values past this point.
+      //   Oracle discrepancies that carry cumulative observed totals
+      //   (`threshold_crossing_unemitted`,
+      //   `threshold_crossing_spurious`,
+      //   `threshold_crossing_oracle_observed_mismatch`) emit decimal
+      //   strings instead of branded `MicroUsd` to avoid forging the
+      //   brand past this boundary.
+      //
+      // - `exceeds_safe_integer`: post > `Number.MAX_SAFE_INTEGER`
+      //   (≈ 9e15). The accumulator has surpassed the JS-`number`
+      //   precision boundary. The internal math is now bigint, but any
+      //   `Number(observed)` conversion would lose precision past this
+      //   point. The decimal-string emission keeps the wire shape
+      //   exact, but on-call should still treat any number-typed
+      //   derivative as suspect once this fires.
       readonly kind: "unsafe_lifetime_accumulator";
+      readonly reason: "exceeds_micro_usd_brand" | "exceeds_safe_integer";
       readonly scope: "global" | "agent" | "task";
       /** `null` for global; agentSlug or taskId for the other two scopes. */
       readonly subjectId: string | null;
-      /** Cost event whose append pushed the accumulator past the safe-integer boundary. */
+      /** Cost event whose append pushed the accumulator past the boundary. */
       readonly costEventLsn: EventLsn;
       /** Accumulated total as a decimal string. Bigint, JSON-safe. */
       readonly accumulatedMicroUsd: string;
@@ -612,18 +655,30 @@ function crossingKey(budgetId: string, budgetSetLsn: number, thresholdBps: numbe
   return `${budgetId}|${budgetSetLsn}|${thresholdBps}`;
 }
 
+// `MAX_BUDGET_LIMIT_MICRO_USD` from `packages/protocol/src/budgets.ts`:
+// the documented `MicroUsd` brand ceiling. Cumulative oracle
+// accumulators that cross this no longer fit the `MicroUsd` contract;
+// emit a decimal-string form in any discrepancy that carries them.
+const MAX_BUDGET_LIMIT_MICRO_USD_BIG = 1_000_000_000_000n;
+
 // 2^53 - 1, the largest exact integer representable as a JS `number`.
-// Past this point, the oracle's `Number(bigint)` cast (used for the
-// `observedMicroUsd` field on emitted discrepancies) becomes lossy.
-// Exported as `__MAX_SAFE_INTEGER_BIG` below for the test seam.
+// Past this point any `Number(bigint)` cast rounds. The internal math
+// is now bigint and the cumulative-observed wire shape is a decimal
+// string, so this is purely a "values past here are number-typed-
+// suspect" signal for on-call dashboards.
 const MAX_SAFE_INTEGER_BIG = BigInt(Number.MAX_SAFE_INTEGER);
 
 // Records the first cost.event LSN at which an accumulator
-// (`global`, `agent[slug]`, or `task[id]`) crosses the safe-integer
-// boundary. The increment math itself stays exact (bigint), but
-// downstream emission to `MicroUsd`-typed fields rounds, so on-call
-// gets a structured signal that subsequent observed values are
-// suspect. Fires once per (scope, subjectId) per run.
+// (`global`, `agent[slug]`, or `task[id]`) crosses each
+// representability boundary. Fires once per (scope, subjectId, reason)
+// per replay-check run. The reasons fire independently:
+//
+// - `exceeds_micro_usd_brand` (`MAX_BUDGET_LIMIT_MICRO_USD`, 1e12):
+//   downstream consumers that re-validate `MicroUsd` payloads will
+//   reject values past here; oracle discrepancies switch to decimal
+//   strings.
+// - `exceeds_safe_integer` (`Number.MAX_SAFE_INTEGER`, ≈ 9e15): any
+//   number-typed derivative loses precision past here.
 function flagUnsafeAccumulator(
   scope: "global" | "agent" | "task",
   subjectId: string | null,
@@ -632,12 +687,29 @@ function flagUnsafeAccumulator(
   flagged: Set<string>,
   out: ReplayDiscrepancy[],
 ): void {
-  if (post <= MAX_SAFE_INTEGER_BIG) return;
-  const key = `${scope}|${subjectId ?? ""}`;
+  if (post > MAX_BUDGET_LIMIT_MICRO_USD_BIG) {
+    pushUnsafeIfNew("exceeds_micro_usd_brand", scope, subjectId, post, costEventLsn, flagged, out);
+  }
+  if (post > MAX_SAFE_INTEGER_BIG) {
+    pushUnsafeIfNew("exceeds_safe_integer", scope, subjectId, post, costEventLsn, flagged, out);
+  }
+}
+
+function pushUnsafeIfNew(
+  reason: "exceeds_micro_usd_brand" | "exceeds_safe_integer",
+  scope: "global" | "agent" | "task",
+  subjectId: string | null,
+  post: bigint,
+  costEventLsn: number,
+  flagged: Set<string>,
+  out: ReplayDiscrepancy[],
+): void {
+  const key = `${scope}|${subjectId ?? ""}|${reason}`;
   if (flagged.has(key)) return;
   flagged.add(key);
   out.push({
     kind: "unsafe_lifetime_accumulator",
+    reason,
     scope,
     subjectId,
     costEventLsn: lsnFromV1Number(costEventLsn),
@@ -657,6 +729,7 @@ function flagUnsafeAccumulator(
 export const __replayCheckTesting = {
   flagUnsafeAccumulator,
   MAX_SAFE_INTEGER_BIG,
+  MAX_BUDGET_LIMIT_MICRO_USD_BIG,
   crossesThresholdBigInt,
 };
 
@@ -1114,7 +1187,14 @@ interface ExpectedCrossing {
   readonly budgetSetLsn: number;
   readonly thresholdBps: number;
   readonly crossedAtLsn: number;
-  readonly observedMicroUsd: number;
+  /**
+   * Cumulative oracle-observed spend, as `bigint` to preserve precision
+   * across the unbounded accumulator range. Emitted to discrepancies
+   * via `.toString()` (decimal) to honor the `MicroUsd` brand: cumulative
+   * lifetime can exceed `MAX_BUDGET_LIMIT_MICRO_USD` and would forge the
+   * brand if cast back to `number`.
+   */
+  readonly observedMicroUsd: bigint;
   readonly limitMicroUsd: number;
   /** `crossedAt` derived from the triggering cost event, as ms-since-epoch. */
   readonly crossedAtMs: number;
@@ -1154,13 +1234,10 @@ function computeExpectedCrossings(args: ComputeExpectedCrossingsArgs): void {
         budgetSetLsn: budget.setAtLsn,
         thresholdBps,
         crossedAtLsn: args.costEventLsn,
-        // Cast bigint → number for `ExpectedCrossing.observedMicroUsd`.
-        // Lossy only past `Number.MAX_SAFE_INTEGER` (≈ $9B cumulative),
-        // and that boundary fires a structured
-        // `unsafe_lifetime_accumulator` discrepancy at the time the
-        // accumulator first crossed it, so on-call already has the
-        // precision-loss signal before reading this field.
-        observedMicroUsd: Number(observed),
+        // Keep cumulative `observed` as bigint internally. Discrepancy
+        // emission below stringifies via `.toString()` to honor the
+        // `MicroUsd` brand contract on the wire.
+        observedMicroUsd: observed,
         limitMicroUsd: budget.limitMicroUsd,
         crossedAtMs: args.costEventOccurredAtMs,
       });
@@ -1220,7 +1297,7 @@ function compareExpectedAndLoggedCrossings(
         budgetId: exp.budgetId as BudgetId,
         budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
         thresholdBps: exp.thresholdBps,
-        observedMicroUsd: exp.observedMicroUsd as MicroUsd,
+        observedMicroUsdString: exp.observedMicroUsd.toString(),
         limitMicroUsd: exp.limitMicroUsd as MicroUsd,
         crossedAtLsn: lsnFromV1Number(exp.crossedAtLsn),
       });
@@ -1238,15 +1315,19 @@ function compareExpectedAndLoggedCrossings(
         eventLsn: lsnFromV1Number(log.eventLsn),
       });
     }
-    if (log.observedMicroUsd !== exp.observedMicroUsd) {
+    // Compare cumulative observed in bigint to preserve precision past
+    // the safe-integer boundary. Logged is the protocol-validated audit
+    // value (number, ≤ MAX_BUDGET_LIMIT_MICRO_USD); widen to bigint for
+    // an exact compare against the oracle's unbounded accumulator.
+    const loggedObservedBig = BigInt(log.observedMicroUsd);
+    if (loggedObservedBig !== exp.observedMicroUsd) {
       out.push({
-        kind: "threshold_crossing_oracle_field_mismatch",
+        kind: "threshold_crossing_oracle_observed_mismatch",
         budgetId: exp.budgetId as BudgetId,
         budgetSetLsn: lsnFromV1Number(exp.budgetSetLsn),
         thresholdBps: exp.thresholdBps,
-        field: "observedMicroUsd",
-        expected: exp.observedMicroUsd,
-        logged: log.observedMicroUsd,
+        expectedMicroUsdString: exp.observedMicroUsd.toString(),
+        loggedMicroUsdString: loggedObservedBig.toString(),
         eventLsn: lsnFromV1Number(log.eventLsn),
       });
     }
@@ -1275,7 +1356,7 @@ function compareExpectedAndLoggedCrossings(
       budgetId: log.budgetId as BudgetId,
       budgetSetLsn: lsnFromV1Number(log.budgetSetLsn),
       thresholdBps: log.thresholdBps,
-      observedMicroUsd: log.observedMicroUsd as MicroUsd,
+      observedMicroUsdString: log.observedMicroUsd.toString(),
       limitMicroUsd: log.limitMicroUsd as MicroUsd,
       crossedAtLsn: lsnFromV1Number(log.crossedAtLsn),
       eventLsn: lsnFromV1Number(log.eventLsn),
