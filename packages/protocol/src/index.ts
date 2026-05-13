@@ -109,6 +109,24 @@ export {
   validateCostAuditPayloadForKind,
   validateCostEventAuditPayload,
 } from "./cost.ts";
+export type {
+  AgentId,
+  CredentialHandle,
+  CredentialHandleId,
+  CredentialHandleJson,
+  CredentialScope,
+} from "./credential-handle.ts";
+export {
+  asAgentId,
+  asCredentialHandleId,
+  asCredentialScope,
+  CREDENTIAL_SCOPE_VALUES,
+  createCredentialHandle,
+  isAgentId,
+  isCredentialHandle,
+  isCredentialHandleId,
+  isCredentialScope,
+} from "./credential-handle.ts";
 export type { EventLsn, ParsedLsn } from "./event-lsn.ts";
 export {
   compareLsn,
