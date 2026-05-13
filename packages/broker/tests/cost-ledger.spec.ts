@@ -15,6 +15,10 @@ import {
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 import { createCostLedger, parseIdempotencyKey, runReplayCheck } from "../src/cost-ledger/index.ts";
+import {
+  __createBudgetCandidateIndexesForTesting,
+  __replayCheckTesting,
+} from "../src/cost-ledger/replay-check.ts";
 import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
 
 function setup() {
@@ -1330,5 +1334,93 @@ describe("replay-check oracle round-3 fixes (PR #841 r3)", () => {
       expect(typeof stored.unparseable).toBe("string");
       expect(stored.unparseable).toContain("invalid entry");
     }
+  });
+});
+
+describe("BudgetCandidateIndexes (#846 round-2)", () => {
+  // Round-2 fix for the perf-test gap flagged 2-of-2 by triangulation
+  // (perf + adversarial, LOW): the existing #842 regression test only
+  // asserts `eventsScanned > 1_000`, which a revert to the
+  // O(events × budgets) iteration would still satisfy. These tests
+  // exercise the index helpers directly so a regression of the
+  // candidate filter is caught structurally.
+  const { addBudgetToIndex, removeBudgetFromIndex } = __replayCheckTesting;
+
+  function makeReplayedBudget(opts: {
+    scope: "global" | "agent" | "task";
+    subjectId?: string;
+    tombstoned?: boolean;
+  }) {
+    return {
+      scope: opts.scope,
+      subjectId: opts.subjectId ?? null,
+      limitMicroUsd: opts.tombstoned ? 0 : 1_000_000,
+      thresholdsBps: [5_000],
+      setAtLsn: 1,
+      tombstoned: opts.tombstoned ?? false,
+    } as const;
+  }
+
+  it("adds and removes a global budget", () => {
+    const indexes = __createBudgetCandidateIndexesForTesting();
+    const budget = makeReplayedBudget({ scope: "global" });
+    addBudgetToIndex(indexes, "B1", budget);
+    expect(indexes.globalBudgetIds.has("B1")).toBe(true);
+    removeBudgetFromIndex(indexes, "B1", budget);
+    expect(indexes.globalBudgetIds.has("B1")).toBe(false);
+  });
+
+  it("adds and removes an agent-scoped budget under its slug", () => {
+    const indexes = __createBudgetCandidateIndexesForTesting();
+    const budget = makeReplayedBudget({ scope: "agent", subjectId: "primary" });
+    addBudgetToIndex(indexes, "B2", budget);
+    expect(indexes.agentBudgetIds.get("primary")?.has("B2")).toBe(true);
+    removeBudgetFromIndex(indexes, "B2", budget);
+    // Empty subject set is cleaned up (Map.delete fires when set size hits 0).
+    expect(indexes.agentBudgetIds.has("primary")).toBe(false);
+  });
+
+  it("isolates agent budgets across different slugs", () => {
+    const indexes = __createBudgetCandidateIndexesForTesting();
+    addBudgetToIndex(indexes, "B3", makeReplayedBudget({ scope: "agent", subjectId: "primary" }));
+    addBudgetToIndex(indexes, "B4", makeReplayedBudget({ scope: "agent", subjectId: "secondary" }));
+    expect(indexes.agentBudgetIds.get("primary")?.has("B3")).toBe(true);
+    expect(indexes.agentBudgetIds.get("secondary")?.has("B4")).toBe(true);
+    expect(indexes.agentBudgetIds.get("primary")?.has("B4")).toBe(false);
+    expect(indexes.agentBudgetIds.get("secondary")?.has("B3")).toBe(false);
+  });
+
+  it("handles agent → global scope transitions symmetrically", () => {
+    // The replay loop removes-then-adds on every budget_set, so the
+    // helper must move a budget cleanly between scope indexes.
+    const indexes = __createBudgetCandidateIndexesForTesting();
+    const agentForm = makeReplayedBudget({ scope: "agent", subjectId: "primary" });
+    const globalForm = makeReplayedBudget({ scope: "global" });
+    addBudgetToIndex(indexes, "B5", agentForm);
+    removeBudgetFromIndex(indexes, "B5", agentForm);
+    addBudgetToIndex(indexes, "B5", globalForm);
+    expect(indexes.agentBudgetIds.has("primary")).toBe(false);
+    expect(indexes.globalBudgetIds.has("B5")).toBe(true);
+  });
+
+  it("noise budgets (tombstoned) leave the index empty after the lifecycle", () => {
+    // Validates the reviewer's specific perf concern: with 1000
+    // tombstoned budgets, the candidate index has 0 entries — no
+    // matter how many cost events scan it.
+    const indexes = __createBudgetCandidateIndexesForTesting();
+    for (let i = 0; i < 1_000; i += 1) {
+      const id = `B${i}`;
+      const live = makeReplayedBudget({ scope: "agent", subjectId: `slug-${i}` });
+      const tombstoned = makeReplayedBudget({
+        scope: "agent",
+        subjectId: `slug-${i}`,
+        tombstoned: true,
+      });
+      addBudgetToIndex(indexes, id, live);
+      removeBudgetFromIndex(indexes, id, tombstoned);
+    }
+    expect(indexes.globalBudgetIds.size).toBe(0);
+    expect(indexes.agentBudgetIds.size).toBe(0);
+    expect(indexes.taskBudgetIds.size).toBe(0);
   });
 });
