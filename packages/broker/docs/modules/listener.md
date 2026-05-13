@@ -59,6 +59,7 @@ unknown authenticated API routes and return 404.
 | POST | `/api/v1/cost/events` | bearer + operator capability | Append a `cost_event`; requires `Idempotency-Key`, `X-Operator-Identity`, and configured `X-Operator-Capability`. |
 | POST | `/api/v1/cost/budgets` | bearer + operator capability | Set/update a budget; broker overwrites `setBy` and `setAt` server-side. |
 | DELETE | `/api/v1/cost/budgets/:id` | bearer + operator capability | Tombstone a budget by appending a `budget_set` with `limitMicroUsd: 0`. |
+| POST | `/api/v1/cost/idempotency/prune` | bearer + operator capability | Prune expired `command_idempotency` replay rows without deleting ledger events or projections. |
 | GET | `/api/v1/cost/budgets` | bearer | List projected budget rows. |
 | GET | `/api/v1/cost/budgets/:id` | bearer | Fetch one projected budget row. |
 | GET | `/api/v1/cost/summary` | bearer | Return aggregate spend, budgets, and threshold crossings. |

@@ -12,9 +12,10 @@
 //   GET    /api/v1/cost/budgets/:id             — fetch one budget
 //   GET    /api/v1/cost/summary                 — current aggregate state
 //   GET    /api/v1/cost/replay-check            — drift detector
+//   POST   /api/v1/cost/idempotency/prune       — prune expired replay rows
 //
-// Every state-changing route requires an `Idempotency-Key` header in the
-// shape `cmd_<command>_<26-char-ULID>`. On duplicate the broker replays
+// State-changing cost-command routes require an `Idempotency-Key` header in
+// the shape `cmd_<command>_<26-char-ULID>`. On duplicate the broker replays
 // the originally-stored response byte for byte. Mutations also require
 // `X-Operator-Capability` when the host configures `cost.operatorToken`,
 // plus `X-Operator-Identity` so server-minted budget audit fields identify
@@ -40,6 +41,7 @@ import { tokenMatches } from "../auth.ts";
 import type { BrokerLogger } from "../types.ts";
 import {
   type CostCommand,
+  DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS,
   type IdempotencyParseError,
   parseIdempotencyKey,
 } from "./idempotency.ts";
@@ -51,6 +53,7 @@ import { runReplayCheck } from "./replay-check.ts";
 // a runaway body. Distinct from MAX_RECEIPT_BODY_BYTES because cost
 // commands carry strictly smaller payloads.
 const MAX_COST_BODY_BYTES = 256 * 1_024;
+const DECIMAL_INTEGER_RE = /^(0|[1-9]\d*)$/;
 
 export interface CostRouteDeps {
   readonly ledger: CostLedger;
@@ -121,6 +124,14 @@ export async function handleCostRoute(
       return true;
     }
     handleReplayCheck(res, deps);
+    return true;
+  }
+  if (pathname === "/api/v1/cost/idempotency/prune") {
+    if (req.method !== "POST") {
+      methodNotAllowed(res, "POST");
+      return true;
+    }
+    handleIdempotencyPrune(req, res, deps);
     return true;
   }
   return false;
@@ -377,6 +388,23 @@ function handleReplayCheck(res: ServerResponse, deps: CostRouteDeps): void {
   });
 }
 
+function handleIdempotencyPrune(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: CostRouteDeps,
+): void {
+  if (!requireOperator(req, res, deps).ok) return;
+
+  const ttl = parseOlderThanMs(req);
+  if (!ttl.ok) {
+    writeJson(res, 400, { error: "invalid_older_than_ms", reason: ttl.reason });
+    return;
+  }
+  const cutoffMs = deps.nowMs() - ttl.olderThanMs;
+  const pruned = deps.ledger.pruneIdempotencyOlderThan(cutoffMs);
+  writeJson(res, 200, { pruned, olderThanMs: ttl.olderThanMs, cutoffMs });
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────
@@ -384,6 +412,10 @@ function handleReplayCheck(res: ServerResponse, deps: CostRouteDeps): void {
 type OperatorAuthResult =
   | { readonly ok: true; readonly identity: SignerIdentity }
   | { readonly ok: false };
+
+type OlderThanMsParseResult =
+  | { readonly ok: true; readonly olderThanMs: number }
+  | { readonly ok: false; readonly reason: string };
 
 function requireOperator(
   req: IncomingMessage,
@@ -436,6 +468,26 @@ function budgetSetPayloadFromRequest(
 
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseOlderThanMs(req: IncomingMessage): OlderThanMsParseResult {
+  const url = new URL(req.url ?? "", "http://127.0.0.1");
+  const values = url.searchParams.getAll("olderThanMs");
+  if (values.length === 0) {
+    return { ok: true, olderThanMs: DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS };
+  }
+  if (values.length > 1) {
+    return { ok: false, reason: "olderThanMs may appear only once" };
+  }
+  const raw = values[0] ?? "";
+  if (!DECIMAL_INTEGER_RE.test(raw)) {
+    return { ok: false, reason: "olderThanMs must be a positive integer millisecond value" };
+  }
+  const olderThanMs = Number(raw);
+  if (!Number.isSafeInteger(olderThanMs) || olderThanMs <= 0) {
+    return { ok: false, reason: "olderThanMs must be a positive safe integer" };
+  }
+  return { ok: true, olderThanMs };
 }
 
 function headerString(value: string | string[] | undefined): string | undefined {

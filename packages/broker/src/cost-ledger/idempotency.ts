@@ -19,9 +19,12 @@
 // Persistence: `command_idempotency` table (see 002_cost_ledger.sql). The
 // status code and response payload are stored; we record `created_at_lsn`
 // when the command produced an event so the operator can correlate retries
-// to ledger writes.
+// to ledger writes. Rows are eligible for prune after the default TTL below;
+// pruning only disables replay for expired keys and never deletes ledger rows.
 
 export type CostCommand = "cost.event" | "cost.budget.set" | "cost.budget.tombstone";
+
+export const DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const COST_COMMAND_VALUES: readonly CostCommand[] = [
   "cost.event",
