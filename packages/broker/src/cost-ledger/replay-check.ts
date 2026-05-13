@@ -30,6 +30,7 @@ import {
   costAuditPayloadFromJsonValue,
   type EventLsn,
   lsnFromV1Number,
+  MAX_BUDGET_LIMIT_MICRO_USD,
   type MicroUsd,
   parseLsn,
 } from "@wuphf/protocol";
@@ -655,11 +656,12 @@ function crossingKey(budgetId: string, budgetSetLsn: number, thresholdBps: numbe
   return `${budgetId}|${budgetSetLsn}|${thresholdBps}`;
 }
 
-// `MAX_BUDGET_LIMIT_MICRO_USD` from `packages/protocol/src/budgets.ts`:
-// the documented `MicroUsd` brand ceiling. Cumulative oracle
-// accumulators that cross this no longer fit the `MicroUsd` contract;
-// emit a decimal-string form in any discrepancy that carries them.
-const MAX_BUDGET_LIMIT_MICRO_USD_BIG = 1_000_000_000_000n;
+// `MicroUsd` brand ceiling as a bigint. Cumulative oracle accumulators
+// that cross this no longer fit the `MicroUsd` contract; emit a
+// decimal-string form in any discrepancy that carries them. Derived
+// from the protocol constant so a future change to the brand bound
+// can't silently drift the oracle.
+const MAX_BUDGET_LIMIT_MICRO_USD_BIG = BigInt(MAX_BUDGET_LIMIT_MICRO_USD);
 
 // 2^53 - 1, the largest exact integer representable as a JS `number`.
 // Past this point any `Number(bigint)` cast rounds. The internal math
@@ -726,12 +728,14 @@ function pushUnsafeIfNew(
 // let tests assert the helper's emission logic directly. NOT part of
 // `@wuphf/broker/cost-ledger`'s public surface (the index re-exports
 // only `ReplayCheckReport`, `ReplayDiscrepancy`, and `runReplayCheck`).
-export const __replayCheckTesting = {
+// Frozen so a test cannot mutate the seam and pollute subsequent
+// imports (modules are singletons).
+export const __replayCheckTesting = Object.freeze({
   flagUnsafeAccumulator,
   MAX_SAFE_INTEGER_BIG,
   MAX_BUDGET_LIMIT_MICRO_USD_BIG,
   crossesThresholdBigInt,
-};
+});
 
 function compareCrossings(
   replayed: ReadonlyMap<string, readonly ReplayedCrossing[]>,

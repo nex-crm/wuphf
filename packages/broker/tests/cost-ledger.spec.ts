@@ -613,7 +613,7 @@ describe("replay-check oracle (#836)", () => {
     }
   });
 
-  it("flags threshold_crossing_oracle_field_mismatch when observed disagrees", () => {
+  it("flags threshold_crossing_oracle_observed_mismatch when observed disagrees", () => {
     // Reactor emits a crossing, but the recorded observedMicroUsd is
     // tampered to a different value. The oracle's independent computation
     // should disagree even though the keys match.
