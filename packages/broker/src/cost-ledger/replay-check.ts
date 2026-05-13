@@ -791,9 +791,12 @@ export const __replayCheckTesting = Object.freeze({
   crossesThresholdBigInt,
   // PR #842 budget-candidate-index helpers exposed for direct
   // assertion (the `eventsScanned > 1_000` regression test wouldn't
-  // catch a revert to the O(events × budgets) iteration).
+  // catch a revert to the O(events × budgets) iteration). Round-3
+  // exposed computeExpectedCrossings so the hot path can be tested
+  // with a hostile Proxy that blocks universe iteration.
   addBudgetToIndex,
   removeBudgetFromIndex,
+  computeExpectedCrossings,
   // Round-4 exposure (PR #845 round-4 codex api + security 2-of-2):
   // the aggregate compare functions are exposed so tests can drive
   // them with synthetic bigint maps past `MAX_BUDGET_LIMIT_MICRO_USD`
