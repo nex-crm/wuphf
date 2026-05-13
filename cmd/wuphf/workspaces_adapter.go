@@ -398,7 +398,7 @@ func translateDoctorReport(rep workspaces.DoctorReport) DoctorReport {
 	return out
 }
 
-// listTrashEntries scans ~/.wuphf-spaces/.trash/ and returns one entry per
+// listTrashEntries scans ~/.wuphf-spaces/.backups/ and returns one entry per
 // directory. Lane B doesn't expose this listing yet; we reach into the
 // well-known path directly.
 //
@@ -410,7 +410,7 @@ func listTrashEntries() ([]TrashEntry, error) {
 	if err != nil || home == "" {
 		return nil, fmt.Errorf("resolve home dir: %w", err)
 	}
-	trashDir := filepath.Join(home, ".wuphf-spaces", ".trash")
+	trashDir := filepath.Join(home, ".wuphf-spaces", ".backups")
 	entries, err := os.ReadDir(trashDir)
 	if err != nil {
 		if os.IsNotExist(err) {

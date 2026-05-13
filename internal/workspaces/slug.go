@@ -24,7 +24,7 @@ var ReservedSlugs = func() []string {
 		"main", // auto-assigned to the migrated primary workspace
 		"prod",
 		"tokens", // collides with ~/.wuphf-spaces/tokens/ directory
-		"trash",  // collides with ~/.wuphf-spaces/.trash/ directory
+		"trash",  // reserved (historical name for shred backups; see ~/.wuphf-spaces/.backups/)
 	}
 	sort.Strings(names)
 	return names

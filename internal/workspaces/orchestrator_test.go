@@ -318,7 +318,7 @@ func TestRestoreFromTrash(t *testing.T) {
 	withOrchestratorHome(t)
 
 	sd, _ := spacesDir()
-	trashDir := filepath.Join(sd, trashDirName)
+	trashDir := filepath.Join(sd, backupsDirName)
 	trashID := fmt.Sprintf("demo-%d", time.Now().Unix())
 	trashEntry := filepath.Join(trashDir, trashID)
 	if err := os.MkdirAll(filepath.Join(trashEntry, ".wuphf"), 0o700); err != nil {
@@ -366,7 +366,7 @@ func TestRestoreFromTrash(t *testing.T) {
 func TestTrashListsValidEntriesAndSkipsJunk(t *testing.T) {
 	withOrchestratorHome(t)
 	sd, _ := spacesDir()
-	trashDir := filepath.Join(sd, trashDirName)
+	trashDir := filepath.Join(sd, backupsDirName)
 	if err := os.MkdirAll(trashDir, 0o700); err != nil {
 		t.Fatalf("mkdir trash: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestShredMovesToTrashByDefault(t *testing.T) {
 	}
 
 	// Trash dir should contain the entry.
-	trashDir := filepath.Join(sd, trashDirName)
+	trashDir := filepath.Join(sd, backupsDirName)
 	entries, _ := os.ReadDir(trashDir)
 	found := false
 	for _, e := range entries {
@@ -983,7 +983,7 @@ func TestRestoreReturnsErrForAlreadyExistingWorkspace(t *testing.T) {
 	withOrchestratorHome(t)
 
 	sd, _ := spacesDir()
-	trashDir := filepath.Join(sd, trashDirName)
+	trashDir := filepath.Join(sd, backupsDirName)
 	trashID := fmt.Sprintf("main-%d", time.Now().Unix())
 	trashEntry := filepath.Join(trashDir, trashID)
 	if err := os.MkdirAll(trashEntry, 0o700); err != nil {
@@ -1014,7 +1014,7 @@ func TestRestoreReturnsErrForMalformedTrashID(t *testing.T) {
 	withOrchestratorHome(t)
 
 	sd, _ := spacesDir()
-	trashDir := filepath.Join(sd, trashDirName)
+	trashDir := filepath.Join(sd, backupsDirName)
 	// TrashID with no unix suffix — cannot infer original name.
 	trashID := "nodash"
 	trashEntry := filepath.Join(trashDir, trashID)

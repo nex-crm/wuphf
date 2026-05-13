@@ -59,7 +59,7 @@ describe("<ShredConfirmModal>", () => {
     expect(onConfirm).toHaveBeenCalledWith({ permanent: false });
   });
 
-  it("toggling 'Skip trash' yields a permanent confirm", () => {
+  it("toggling 'Skip backup' yields a permanent confirm", () => {
     const onConfirm = vi.fn();
     render(
       <ShredConfirmModal

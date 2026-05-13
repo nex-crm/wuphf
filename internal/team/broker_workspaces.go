@@ -661,10 +661,11 @@ func (b *Broker) handleWorkspacesOnboarding(w http.ResponseWriter, r *http.Reque
 
 // handleWorkspacesTrash — GET /workspaces/trash.
 //
-// Returns: {"trash": [...]}. Lists the contents of ~/.wuphf-spaces/.trash/
+// Returns: {"trash": [...]}. Lists the contents of ~/.wuphf-spaces/.backups/
 // without requiring the caller to also fetch /workspaces/list — useful when
 // the SPA wants to render the Restore UI without paying for a full
-// workspace listing.
+// workspace listing. The "trash" JSON key is preserved for HTTP API
+// stability; the underlying storage is the categorized backup tree.
 func (b *Broker) handleWorkspacesTrash(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return

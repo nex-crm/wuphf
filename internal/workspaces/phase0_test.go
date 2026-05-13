@@ -55,15 +55,15 @@ var allowedFiles = map[string]string{
 	"cmd/wuphf-oc-probe/main.go": "OpenClaw identity is device-bound credentials, not workspace state",
 
 	// Cross-workspace registry root — ~/.wuphf-spaces/ is the SHARED orchestration
-	// directory (registry.json, tokens/, <name>/.wuphf/, .trash/). It must live at
-	// the user's REAL home, not under any single workspace's WUPHF_RUNTIME_HOME,
+	// directory (registry.json, tokens/, <name>/.wuphf/, .backups/). It must live
+	// at the user's REAL home, not under any single workspace's WUPHF_RUNTIME_HOME,
 	// or sibling brokers cannot find each other.
 	"internal/workspaces/registry.go":    "spacesDir — ~/.wuphf-spaces is shared cross-workspace, lives at real HOME",
 	"internal/workspaces/migration.go":   "MigrateToSymmetric operates on legacy ~/.wuphf at real HOME, not WUPHF_RUNTIME_HOME",
 	"internal/workspaces/doctor_fix.go":  "symlinkPaths — ~/.wuphf compatibility symlink lives at real HOME",
 	"internal/workspaces/paths.go":       "realHomeDir — cross-workspace token + symlink paths must live at real HOME",
 	"internal/team/broker_workspaces.go": "workspaceTokenDir — same shared spaces directory rationale",
-	"cmd/wuphf/workspaces_adapter.go":    "listTrashEntries — ~/.wuphf-spaces/.trash, shared cross-workspace root",
+	"cmd/wuphf/workspaces_adapter.go":    "listTrashEntries — ~/.wuphf-spaces/.backups, shared cross-workspace root",
 	"cmd/wuphf/main.go":                  "WUPHF_GLOBAL_HOME captures real HOME before any WUPHF_RUNTIME_HOME override",
 }
 

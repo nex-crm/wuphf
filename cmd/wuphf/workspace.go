@@ -57,9 +57,9 @@ type Workspace struct {
 	CostUSD float64 `json:"cost_usd,omitempty"`
 }
 
-// TrashEntry represents a shredded workspace held in ~/.wuphf-spaces/.trash/.
-// `TrashID` is the directory name (`<name>-<unix-timestamp>`) that `restore`
-// takes as its argument.
+// TrashEntry represents a shredded workspace's categorized backup held in
+// ~/.wuphf-spaces/.backups/. `TrashID` is the directory name
+// (`<name>-<unix-timestamp>`) that `restore` takes as its argument.
 type TrashEntry struct {
 	TrashID     string    `json:"trash_id"`
 	Name        string    `json:"name"`

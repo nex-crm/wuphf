@@ -1,10 +1,12 @@
 package main
 
-// `wuphf workspace shred <name>` — move workspace tree to trash.
+// `wuphf workspace shred <name>` — back up and wipe a workspace.
 //
-// Default: confirm dialog (type the name to confirm), then orchestrator moves
-// `~/.wuphf-spaces/<name>/` to `~/.wuphf-spaces/.trash/<name>-<unix>/` for
-// 30-day retention. `--permanent` skips trash (truly irreversible — the
+// Default: confirm dialog (type the name to confirm), then the orchestrator
+// splits `~/.wuphf-spaces/<name>/.wuphf/` into a categorized backup at
+// `~/.wuphf-spaces/.backups/<name>-<unix>/{wiki,skills,chats,context}/` and
+// deletes the runtime tree. The backup is restorable for 30 days.
+// `--permanent` skips the backup entirely (truly irreversible — the
 // orchestrator does NOT keep a hidden copy).
 //
 // Special handling for `main`:
@@ -25,18 +27,18 @@ import (
 
 func runWorkspaceShred(args []string) {
 	fs := flag.NewFlagSet("workspace shred", flag.ContinueOnError)
-	permanent := fs.Bool("permanent", false, "Skip trash — delete the workspace tree immediately and irreversibly")
+	permanent := fs.Bool("permanent", false, "Skip backup — delete the workspace tree immediately and irreversibly")
 	yes := fs.Bool("yes", false, "Skip the interactive confirm prompt (use only for scripted teardown)")
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "wuphf workspace shred — burn a workspace down")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
-		fmt.Fprintln(os.Stderr, "  wuphf workspace shred <name>             Move to trash (30-day retention)")
-		fmt.Fprintln(os.Stderr, "  wuphf workspace shred <name> --permanent  Skip trash (irreversible)")
+		fmt.Fprintln(os.Stderr, "  wuphf workspace shred <name>             Back up wiki/skills/chats/context (30-day retention)")
+		fmt.Fprintln(os.Stderr, "  wuphf workspace shred <name> --permanent  Skip backup (irreversible)")
 		fmt.Fprintln(os.Stderr, "  wuphf workspace shred <name> --yes        Skip the confirm prompt (scripts only)")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Restorable for 30 days unless --permanent. List trashed workspaces with")
+		fmt.Fprintln(os.Stderr, "Restorable for 30 days unless --permanent. List shredded workspaces with")
 		fmt.Fprintln(os.Stderr, "`wuphf workspace list --trash` and bring one back with `wuphf workspace restore`.")
 	}
 	if err := fs.Parse(args); err != nil {
@@ -79,7 +81,7 @@ func runWorkspaceShred(args []string) {
 		_, _ = fmt.Fprintf(os.Stdout, "Permanently shredded %q. No restore available.\n", name)
 		return
 	}
-	_, _ = fmt.Fprintf(os.Stdout, "Shredded %q to trash. Restorable for 30 days via `wuphf workspace restore`.\n", name)
+	_, _ = fmt.Fprintf(os.Stdout, "Shredded %q. Wiki, skills, chats, and context backed up; restorable for 30 days via `wuphf workspace restore`.\n", name)
 }
 
 // shredConfirmFromReader prompts the user to type the workspace name to
@@ -97,10 +99,10 @@ func shredConfirmFromReader(in io.Reader, out io.Writer, name string, permanent 
 	}
 	if permanent {
 		_, _ = fmt.Fprintf(out, "PERMANENT SHRED — workspace %q will be deleted immediately and CANNOT be restored.\n", name)
-		_, _ = fmt.Fprintln(out, "Trash retention is BYPASSED with --permanent.")
+		_, _ = fmt.Fprintln(out, "Backup retention is BYPASSED with --permanent.")
 		_, _ = fmt.Fprintln(out, "")
 	} else {
-		_, _ = fmt.Fprintf(out, "Shredding workspace %q. The tree moves to trash and is restorable for 30 days.\n", name)
+		_, _ = fmt.Fprintf(out, "Shredding workspace %q. Wiki, skills, chats, and context are backed up; restorable for 30 days.\n", name)
 		_, _ = fmt.Fprintln(out, "")
 	}
 	_, _ = fmt.Fprintf(out, "Type the workspace name (`%s`) to confirm, or anything else to cancel: ", name)

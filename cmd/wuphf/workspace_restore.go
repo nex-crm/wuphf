@@ -2,11 +2,12 @@ package main
 
 // `wuphf workspace restore <trash-id>` — bring a shredded workspace back.
 //
-// The trash ID is the directory name under `~/.wuphf-spaces/.trash/` —
+// The trash ID is the directory name under `~/.wuphf-spaces/.backups/` —
 // `<name>-<unix-timestamp>`. Users get this from `wuphf workspace list --trash`.
-// Restore allocates a FRESH port pair (the original ports may have been
-// recycled) and the orchestrator may rename if a workspace with the original
-// name already exists.
+// The orchestrator reconstructs a fresh wuphfHome from the categorized backup
+// (wiki/skills/chats/context) and allocates a FRESH port pair (the original
+// ports may have been recycled). Restore fails if a workspace with the
+// original name already exists.
 
 import (
 	"errors"

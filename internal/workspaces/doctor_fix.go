@@ -210,9 +210,11 @@ func fixOrphanTreeRegister(treePath string) error {
 	return nil
 }
 
-// fixOrphanTreeDelete moves the orphan tree to ~/.wuphf-spaces/.trash/. It
-// does NOT touch the registry (the tree was orphaned because it wasn't there
-// in the first place). Idempotent: returns nil if the tree is already gone.
+// fixOrphanTreeDelete moves the orphan tree to ~/.wuphf-spaces/.backups/ as
+// a flat (non-categorized) entry. It does NOT touch the registry (the tree
+// was orphaned because it wasn't there in the first place). Restore() falls
+// back to renaming a flat entry into place when no manifest.json is present.
+// Idempotent: returns nil if the tree is already gone.
 func fixOrphanTreeDelete(treePath string) error {
 	if treePath == "" {
 		return fmt.Errorf("orphan_tree:delete: missing path")
@@ -230,7 +232,7 @@ func fixOrphanTreeDelete(treePath string) error {
 	if !pathInsideDir(treePath, sd) {
 		return fmt.Errorf("orphan_tree:delete: %s is not inside %s", treePath, sd)
 	}
-	trashDir := filepath.Join(sd, trashDirName)
+	trashDir := filepath.Join(sd, backupsDirName)
 	if err := os.MkdirAll(trashDir, 0o700); err != nil {
 		return fmt.Errorf("orphan_tree:delete: mkdir trash: %w", err)
 	}
