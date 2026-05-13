@@ -45,39 +45,50 @@ export interface ReplayCheckReport {
 
 export type ReplayDiscrepancy =
   | {
+      // Aggregate accumulators (`cost_by_agent.total_micro_usd`,
+      // `cost_by_task.total_micro_usd`) are cumulative across the
+      // lifetime of the ledger. The `MicroUsd` brand is bounded at
+      // `MAX_BUDGET_LIMIT_MICRO_USD` (1e12), but these aggregates can
+      // legitimately exceed that bound (a busy agent can spend more
+      // than $1M micro-USD = 1e12 µUSD over time), and a hostile
+      // projection row can carry arbitrary integer bytes. Emit as
+      // decimal strings so the brand contract is preserved on the
+      // wire and the diagnostic preserves exact integer values even
+      // past `Number.MAX_SAFE_INTEGER`. See PR #845 for the parallel
+      // fix on the threshold-oracle path.
       readonly kind: "agent_day_total_mismatch";
       readonly agentSlug: string;
       readonly dayUtc: string;
-      readonly replayed: MicroUsd;
-      readonly stored: MicroUsd;
+      readonly replayedMicroUsdString: string;
+      readonly storedMicroUsdString: string;
     }
   | {
       readonly kind: "task_total_mismatch";
       readonly taskId: string;
-      readonly replayed: MicroUsd;
-      readonly stored: MicroUsd;
+      readonly replayedMicroUsdString: string;
+      readonly storedMicroUsdString: string;
     }
   | {
       readonly kind: "agent_day_row_missing";
       readonly agentSlug: string;
       readonly dayUtc: string;
-      readonly replayed: MicroUsd;
+      readonly replayedMicroUsdString: string;
     }
   | {
       readonly kind: "agent_day_row_ghost";
       readonly agentSlug: string;
       readonly dayUtc: string;
-      readonly stored: MicroUsd;
+      readonly storedMicroUsdString: string;
     }
   | {
       readonly kind: "task_row_missing";
       readonly taskId: string;
-      readonly replayed: MicroUsd;
+      readonly replayedMicroUsdString: string;
     }
   | {
       readonly kind: "task_row_ghost";
       readonly taskId: string;
-      readonly stored: MicroUsd;
+      readonly storedMicroUsdString: string;
     }
   | {
       readonly kind: "budget_state_mismatch";
@@ -335,12 +346,16 @@ interface CostEventBatchRow {
 interface AgentDayDbRow {
   readonly agentSlug: string;
   readonly dayUtc: string;
-  readonly totalMicroUsd: number;
+  // Aggregate totals are read with `.safeIntegers(true)` so a hostile
+  // INTEGER value in the projection (past `Number.MAX_SAFE_INTEGER`)
+  // doesn't silently round in the diagnostic — the "diagnostic of last
+  // resort" preserves exact bytes from the row.
+  readonly totalMicroUsd: bigint;
 }
 
 interface TaskDbRow {
   readonly taskId: string;
-  readonly totalMicroUsd: number;
+  readonly totalMicroUsd: bigint;
 }
 
 interface BudgetDbRow {
@@ -369,13 +384,23 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   const highestLsnStmt = db.prepare<[], HighestLsnRow>(
     "SELECT COALESCE(MAX(lsn), 0) AS lsn FROM event_log",
   );
-  const listAgentDaysStmt = db.prepare<[], AgentDayDbRow>(
-    `SELECT agent_slug AS agentSlug, day_utc AS dayUtc, total_micro_usd AS totalMicroUsd
+  // `safeIntegers(true)` makes better-sqlite3 return INTEGER columns
+  // as bigint instead of JS number. Required for the aggregate-totals
+  // path: cumulative spend past `Number.MAX_SAFE_INTEGER` (or a hostile
+  // projection row past that boundary) would silently round and the
+  // diagnostic would report the rounded value instead of the bytes
+  // actually in the row.
+  const listAgentDaysStmt = db
+    .prepare<[], AgentDayDbRow>(
+      `SELECT agent_slug AS agentSlug, day_utc AS dayUtc, total_micro_usd AS totalMicroUsd
      FROM cost_by_agent`,
-  );
-  const listTasksStmt = db.prepare<[], TaskDbRow>(
-    `SELECT task_id AS taskId, total_micro_usd AS totalMicroUsd FROM cost_by_task`,
-  );
+    )
+    .safeIntegers(true);
+  const listTasksStmt = db
+    .prepare<[], TaskDbRow>(
+      `SELECT task_id AS taskId, total_micro_usd AS totalMicroUsd FROM cost_by_task`,
+    )
+    .safeIntegers(true);
   const listBudgetsStmt = db.prepare<[], BudgetDbRow>(
     `SELECT budget_id AS budgetId, scope, subject_id AS subjectId,
             limit_micro_usd AS limitMicroUsd, thresholds_bps AS thresholdsBps,
@@ -397,8 +422,12 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   // commit but this function won't observe them, so replay-vs-stored
   // can't mix snapshots.
   const txn = db.transaction((): ReplayCheckReport => {
-    const replayedAgentDays = new Map<string, number>();
-    const replayedTasks = new Map<string, number>();
+    // Aggregate accumulators run in bigint to mirror the lifetime-oracle
+    // fix. `total_micro_usd` is cumulative; past `Number.MAX_SAFE_INTEGER`
+    // a `number` accumulator silently rounds, and the diagnostic (which
+    // emits these totals on the wire) would carry the rounded value.
+    const replayedAgentDays = new Map<string, bigint>();
+    const replayedTasks = new Map<string, bigint>();
     const replayedBudgets = new Map<string, ReplayedBudget>();
     // Logged crossings: one entry per (budgetId, budgetSetLsn,
     // thresholdBps) key, BUT each entry carries every event_log row
@@ -465,17 +494,21 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
             const dayUtc = parsed.occurredAt.toISOString().slice(0, 10);
             const agentKey = agentDayKey(parsed.agentSlug, dayUtc);
             const amount = parsed.amountMicroUsd as number;
-            replayedAgentDays.set(agentKey, (replayedAgentDays.get(agentKey) ?? 0) + amount);
+            const amountBig = BigInt(amount);
+            replayedAgentDays.set(agentKey, (replayedAgentDays.get(agentKey) ?? 0n) + amountBig);
             if (parsed.taskId !== undefined) {
-              replayedTasks.set(parsed.taskId, (replayedTasks.get(parsed.taskId) ?? 0) + amount);
+              replayedTasks.set(
+                parsed.taskId,
+                (replayedTasks.get(parsed.taskId) ?? 0n) + amountBig,
+              );
             }
             // Oracle update: mirror the reactor's post-update lifetime
             // read. The reactor runs after `cost_by_agent` /
             // `cost_by_task` have been updated for the current event,
             // so `observed` includes the event's own amount. Increments
             // run in BigInt so cumulative spend stays exact past
-            // `Number.MAX_SAFE_INTEGER`.
-            const amountBig = BigInt(amount);
+            // `Number.MAX_SAFE_INTEGER` (`amountBig` declared above for
+            // the aggregate accumulators is reused here).
             oracleGlobalLifetime += amountBig;
             flagUnsafeAccumulator(
               "global",
@@ -576,13 +609,13 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     // parse-failure is the root cause.
     const discrepancies: ReplayDiscrepancy[] = [...parseFailures];
 
-    const storedAgentDays = new Map<string, number>();
+    const storedAgentDays = new Map<string, bigint>();
     for (const row of listAgentDaysStmt.all()) {
       storedAgentDays.set(agentDayKey(row.agentSlug, row.dayUtc), row.totalMicroUsd);
     }
     compareAgentDays(replayedAgentDays, storedAgentDays, discrepancies);
 
-    const storedTasks = new Map<string, number>();
+    const storedTasks = new Map<string, bigint>();
     for (const row of listTasksStmt.all()) {
       storedTasks.set(row.taskId, row.totalMicroUsd);
     }
@@ -735,6 +768,13 @@ export const __replayCheckTesting = Object.freeze({
   MAX_SAFE_INTEGER_BIG,
   MAX_BUDGET_LIMIT_MICRO_USD_BIG,
   crossesThresholdBigInt,
+  // Round-4 exposure (PR #845 round-4 codex api + security 2-of-2):
+  // the aggregate compare functions are exposed so tests can drive
+  // them with synthetic bigint maps past `MAX_BUDGET_LIMIT_MICRO_USD`
+  // and `Number.MAX_SAFE_INTEGER`. End-to-end is blocked by the same
+  // protocol per-event cap as the threshold-oracle path.
+  compareAgentDays,
+  compareTasks,
 });
 
 function compareCrossings(
@@ -975,9 +1015,12 @@ interface ReplayedBudget {
   readonly tombstoned: boolean;
 }
 
+// Compare functions accept and emit bigint cumulative totals. The
+// discrepancy wire shape is a decimal-string form to preserve exact
+// values past the `MicroUsd` brand bound or the safe-integer boundary.
 function compareAgentDays(
-  replayed: ReadonlyMap<string, number>,
-  stored: ReadonlyMap<string, number>,
+  replayed: ReadonlyMap<string, bigint>,
+  stored: ReadonlyMap<string, bigint>,
   out: ReplayDiscrepancy[],
 ): void {
   for (const [key, replayedTotal] of replayed.entries()) {
@@ -988,7 +1031,7 @@ function compareAgentDays(
         kind: "agent_day_row_missing",
         agentSlug,
         dayUtc,
-        replayed: replayedTotal as MicroUsd,
+        replayedMicroUsdString: replayedTotal.toString(),
       });
       continue;
     }
@@ -997,8 +1040,8 @@ function compareAgentDays(
         kind: "agent_day_total_mismatch",
         agentSlug,
         dayUtc,
-        replayed: replayedTotal as MicroUsd,
-        stored: storedTotal as MicroUsd,
+        replayedMicroUsdString: replayedTotal.toString(),
+        storedMicroUsdString: storedTotal.toString(),
       });
     }
   }
@@ -1009,35 +1052,43 @@ function compareAgentDays(
         kind: "agent_day_row_ghost",
         agentSlug,
         dayUtc,
-        stored: storedTotal as MicroUsd,
+        storedMicroUsdString: storedTotal.toString(),
       });
     }
   }
 }
 
 function compareTasks(
-  replayed: ReadonlyMap<string, number>,
-  stored: ReadonlyMap<string, number>,
+  replayed: ReadonlyMap<string, bigint>,
+  stored: ReadonlyMap<string, bigint>,
   out: ReplayDiscrepancy[],
 ): void {
   for (const [taskId, replayedTotal] of replayed.entries()) {
     const storedTotal = stored.get(taskId);
     if (storedTotal === undefined) {
-      out.push({ kind: "task_row_missing", taskId, replayed: replayedTotal as MicroUsd });
+      out.push({
+        kind: "task_row_missing",
+        taskId,
+        replayedMicroUsdString: replayedTotal.toString(),
+      });
       continue;
     }
     if (storedTotal !== replayedTotal) {
       out.push({
         kind: "task_total_mismatch",
         taskId,
-        replayed: replayedTotal as MicroUsd,
-        stored: storedTotal as MicroUsd,
+        replayedMicroUsdString: replayedTotal.toString(),
+        storedMicroUsdString: storedTotal.toString(),
       });
     }
   }
   for (const [taskId, storedTotal] of stored.entries()) {
     if (!replayed.has(taskId)) {
-      out.push({ kind: "task_row_ghost", taskId, stored: storedTotal as MicroUsd });
+      out.push({
+        kind: "task_row_ghost",
+        taskId,
+        storedMicroUsdString: storedTotal.toString(),
+      });
     }
   }
 }

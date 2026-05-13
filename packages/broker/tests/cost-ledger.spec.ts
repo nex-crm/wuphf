@@ -610,6 +610,13 @@ describe("replay-check oracle (#836)", () => {
     expect(spurious).toBeDefined();
     if (spurious?.kind === "threshold_crossing_spurious") {
       expect(spurious.thresholdBps).toBe(5_000);
+      // Round-4 wire-shape assertion (PR #845 round-4 codex api lens
+      // finding 3): a regression that re-emits `observedMicroUsd:
+      // MicroUsd` (forging the brand on a cumulative value) must fail
+      // this. The shipping shape is a decimal-string field.
+      expect(typeof spurious.observedMicroUsdString).toBe("string");
+      expect(spurious.observedMicroUsdString).toBe("2500000");
+      expect((spurious as { observedMicroUsd?: unknown }).observedMicroUsd).toBeUndefined();
     }
   });
 
@@ -1376,6 +1383,157 @@ describe("replay-check oracle unsafe-lifetime (#843)", () => {
       expect(unemitted.observedMicroUsdString).toBe("2500000");
       // Field is a plain `string`, not a branded number — no forgery risk.
       expect(typeof unemitted.observedMicroUsdString).toBe("string");
+    }
+  });
+});
+
+describe("replay-check aggregate paths round-4 (PR #845 r4 triangulation)", () => {
+  // Round-4 fix for the api+security 2-of-2 convergent finding: the
+  // aggregate-totals path (`compareAgentDays`, `compareTasks`) used to
+  // accumulate as JS `number` and emit `replayed`/`stored` as branded
+  // `MicroUsd`. Cumulative spend is unbounded — past
+  // `MAX_BUDGET_LIMIT_MICRO_USD` it forges the brand; past
+  // `Number.MAX_SAFE_INTEGER` (or a hostile projection row at that
+  // boundary) it silently rounds. The accumulators are now bigint, the
+  // SQLite reads use `.safeIntegers(true)`, and the discrepancies emit
+  // decimal strings.
+  //
+  // End-to-end coverage past 2^53 is blocked by the protocol per-event
+  // cap (same rationale as the threshold-oracle path). These tests
+  // drive the compare helpers directly with synthetic bigint maps.
+  const { compareAgentDays, compareTasks, MAX_SAFE_INTEGER_BIG, MAX_BUDGET_LIMIT_MICRO_USD_BIG } =
+    __replayCheckTesting;
+
+  it("agent_day_total_mismatch emits decimal-string fields past MAX_SAFE_INTEGER", () => {
+    const replayed = new Map<string, bigint>([
+      ["primary|2026-05-08", MAX_SAFE_INTEGER_BIG + 12_345n],
+    ]);
+    const stored = new Map<string, bigint>([
+      ["primary|2026-05-08", MAX_SAFE_INTEGER_BIG + 67_890n],
+    ]);
+    const out: ReplayDiscrepancy[] = [];
+    compareAgentDays(replayed, stored, out);
+    expect(out).toHaveLength(1);
+    const d = out[0];
+    if (d === undefined || d.kind !== "agent_day_total_mismatch") {
+      throw new Error("expected agent_day_total_mismatch");
+    }
+    expect(d.replayedMicroUsdString).toBe((MAX_SAFE_INTEGER_BIG + 12_345n).toString());
+    expect(d.storedMicroUsdString).toBe((MAX_SAFE_INTEGER_BIG + 67_890n).toString());
+    // No brand forgery: fields are plain strings, no `replayed`/`stored`
+    // number leaks.
+    expect(typeof d.replayedMicroUsdString).toBe("string");
+    expect(typeof d.storedMicroUsdString).toBe("string");
+    expect((d as { replayed?: unknown }).replayed).toBeUndefined();
+    expect((d as { stored?: unknown }).stored).toBeUndefined();
+  });
+
+  it("task_total_mismatch emits decimal-string fields past MAX_BUDGET_LIMIT_MICRO_USD", () => {
+    // Past the brand bound but still within safe-integer range.
+    const replayed = new Map<string, bigint>([["task-A", MAX_BUDGET_LIMIT_MICRO_USD_BIG + 1n]]);
+    const stored = new Map<string, bigint>([["task-A", MAX_BUDGET_LIMIT_MICRO_USD_BIG + 2n]]);
+    const out: ReplayDiscrepancy[] = [];
+    compareTasks(replayed, stored, out);
+    expect(out).toHaveLength(1);
+    const d = out[0];
+    if (d === undefined || d.kind !== "task_total_mismatch") {
+      throw new Error("expected task_total_mismatch");
+    }
+    expect(d.replayedMicroUsdString).toBe((MAX_BUDGET_LIMIT_MICRO_USD_BIG + 1n).toString());
+    expect(d.storedMicroUsdString).toBe((MAX_BUDGET_LIMIT_MICRO_USD_BIG + 2n).toString());
+    expect((d as { replayed?: unknown }).replayed).toBeUndefined();
+    expect((d as { stored?: unknown }).stored).toBeUndefined();
+  });
+
+  it("agent_day_row_missing and _ghost emit decimal-string single fields", () => {
+    const replayed = new Map<string, bigint>([["alpha|2026-05-08", 1_500_000_000n]]);
+    const stored = new Map<string, bigint>([["beta|2026-05-08", 2_500_000_000n]]);
+    const out: ReplayDiscrepancy[] = [];
+    compareAgentDays(replayed, stored, out);
+    expect(out).toHaveLength(2);
+
+    const missing = out.find((d) => d.kind === "agent_day_row_missing");
+    const ghost = out.find((d) => d.kind === "agent_day_row_ghost");
+    if (missing?.kind !== "agent_day_row_missing") throw new Error("expected missing");
+    if (ghost?.kind !== "agent_day_row_ghost") throw new Error("expected ghost");
+
+    expect(missing.replayedMicroUsdString).toBe("1500000000");
+    expect(typeof missing.replayedMicroUsdString).toBe("string");
+    expect((missing as { replayed?: unknown }).replayed).toBeUndefined();
+
+    expect(ghost.storedMicroUsdString).toBe("2500000000");
+    expect(typeof ghost.storedMicroUsdString).toBe("string");
+    expect((ghost as { stored?: unknown }).stored).toBeUndefined();
+  });
+
+  it("task_row_missing and _ghost emit decimal-string single fields", () => {
+    const replayed = new Map<string, bigint>([["task-A", 7_777_777n]]);
+    const stored = new Map<string, bigint>([["task-B", 8_888_888n]]);
+    const out: ReplayDiscrepancy[] = [];
+    compareTasks(replayed, stored, out);
+    expect(out).toHaveLength(2);
+
+    const missing = out.find((d) => d.kind === "task_row_missing");
+    const ghost = out.find((d) => d.kind === "task_row_ghost");
+    if (missing?.kind !== "task_row_missing") throw new Error("expected missing");
+    if (ghost?.kind !== "task_row_ghost") throw new Error("expected ghost");
+
+    expect(missing.replayedMicroUsdString).toBe("7777777");
+    expect(ghost.storedMicroUsdString).toBe("8888888");
+    expect((missing as { replayed?: unknown }).replayed).toBeUndefined();
+    expect((ghost as { stored?: unknown }).stored).toBeUndefined();
+  });
+
+  it("compare functions silent when replayed equals stored at huge bigint values", () => {
+    // Exact integer equality past 2^53 — a `number` accumulator would
+    // round both sides and could either spuriously pass or spuriously
+    // disagree. With bigint compare, equality is byte-exact.
+    const huge = MAX_SAFE_INTEGER_BIG * 4n + 999_999_999n;
+    const replayed = new Map<string, bigint>([["agent-X|2026-05-08", huge]]);
+    const stored = new Map<string, bigint>([["agent-X|2026-05-08", huge]]);
+    const out: ReplayDiscrepancy[] = [];
+    compareAgentDays(replayed, stored, out);
+    expect(out).toHaveLength(0);
+  });
+
+  it("end-to-end: agent_day_row_missing carries decimal-string from real cost event", () => {
+    // Validates the wire shape end-to-end through `runReplayCheck`,
+    // not just the helper. Drop the projection row to force a
+    // missing-row discrepancy and confirm the field name + type.
+    const { db, ledger } = setup();
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 1_000_000 }));
+    db.exec("DELETE FROM cost_by_agent");
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(false);
+    const missing = report.discrepancies.find((d) => d.kind === "agent_day_row_missing");
+    expect(missing).toBeDefined();
+    if (missing?.kind === "agent_day_row_missing") {
+      expect(typeof missing.replayedMicroUsdString).toBe("string");
+      expect(missing.replayedMicroUsdString).toBe("1000000");
+      expect((missing as { replayed?: unknown }).replayed).toBeUndefined();
+    }
+  });
+
+  it("end-to-end: hostile projection row past MAX_SAFE_INTEGER reports exact bigint via string", () => {
+    // The security lens's specific concern: stored projection rows are
+    // hostile input. A row past 2^53 used to round through JS number
+    // and the diagnostic would carry the rounded value. With
+    // `.safeIntegers(true)` the bigint flows straight to the string
+    // emission. Use 2^53 + 17 — outside JS-number exact range.
+    const { db, ledger } = setup();
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 1_000_000 }));
+    // Tamper the projection row to a hostile huge value. SQLite accepts
+    // values up to 9_223_372_036_854_775_807 (signed 64-bit).
+    const hostile = "9007199254741009"; // 2^53 + 17, exact decimal.
+    db.exec(`UPDATE cost_by_agent SET total_micro_usd = ${hostile}`);
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(false);
+    const mismatch = report.discrepancies.find((d) => d.kind === "agent_day_total_mismatch");
+    expect(mismatch).toBeDefined();
+    if (mismatch?.kind === "agent_day_total_mismatch") {
+      expect(mismatch.storedMicroUsdString).toBe(hostile);
+      // Replayed side is 1_000_000 from the single cost event.
+      expect(mismatch.replayedMicroUsdString).toBe("1000000");
     }
   });
 });
