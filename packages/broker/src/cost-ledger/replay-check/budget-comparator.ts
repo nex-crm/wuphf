@@ -10,7 +10,46 @@
 // of throwing out of `runReplayCheck` and blinding the diagnostic.
 import type { BudgetId } from "@wuphf/protocol";
 import type { ReplayDiscrepancy, ReplayedBudget } from "./discrepancy.ts";
-import { arraysEqual, type BudgetDbRow, parseStoredThresholds } from "./internal.ts";
+import type { BudgetDbRow } from "./internal.ts";
+
+// Strict equality across two integer arrays. Only the budget
+// comparator round-trips `thresholdsBps` against the stored JSON,
+// so the helper lives next to its caller.
+function arraysEqual(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+// Bounded parser for the `thresholds_bps` projection cell. Mirrors
+// the protocol's `BudgetSetAuditPayload.thresholdsBps` validation:
+// each entry must be a positive safe-integer ≤ 10_000. Explicit
+// `Number.isSafeInteger` + bounds rather than `typeof === "number"`
+// so values like `Infinity` (which `JSON.parse` can produce from
+// `"[1e999]"`) are rejected here — they would later JSON-serialize
+// as `null` and the corruption signal would be lost by the time it
+// reaches on-call.
+function parseStoredThresholds(raw: string): readonly number[] | { readonly error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  if (!Array.isArray(parsed)) {
+    return { error: "thresholds_bps is not an array" };
+  }
+  for (const n of parsed) {
+    if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0 || n > 10_000) {
+      return {
+        error: `thresholds_bps contains invalid entry ${String(n)} (expected positive safe integer ≤ 10000)`,
+      };
+    }
+  }
+  return parsed as readonly number[];
+}
 
 export function compareBudgets(
   replayed: ReadonlyMap<string, ReplayedBudget>,

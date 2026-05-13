@@ -20,6 +20,8 @@
 import { compareAgentDays, compareTasks } from "./aggregate-comparators.ts";
 import {
   addBudgetToIndex,
+  type BudgetCandidateIndexes,
+  createBudgetCandidateIndexes,
   removeBudgetFromIndex,
   replaceBudgetInIndex,
 } from "./budget-candidate-index.ts";
@@ -31,7 +33,13 @@ import {
 } from "./unsafe-lifetime-accumulator.ts";
 
 export type { BudgetCandidateIndexes } from "./budget-candidate-index.ts";
-export { __createBudgetCandidateIndexesForTesting } from "./budget-candidate-index.ts";
+
+// Test helper: thin wrapper around `createBudgetCandidateIndexes` so
+// the test seam owns its own constructor surface and the production
+// module's exports stay free of `__ForTesting` aliases.
+export function __createBudgetCandidateIndexesForTesting(): BudgetCandidateIndexes {
+  return createBudgetCandidateIndexes();
+}
 
 export const __replayCheckTesting = Object.freeze({
   flagUnsafeAccumulator,

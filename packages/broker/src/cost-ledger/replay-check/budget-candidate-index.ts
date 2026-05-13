@@ -1,9 +1,9 @@
 // Budget candidate indexes for the replay-check threshold oracle.
 //
-// `computeExpectedCrossings` (in replay-check.ts) used to iterate every
-// replayed budget per cost event — O(events × budgets) on long-lived
-// ledgers with many tombstoned budgets. These indexes keep three
-// scope-keyed candidate sets in sync with `replayedBudgets`:
+// `computeExpectedCrossings` (in `threshold-oracle.ts`) iterates only
+// budgets that could plausibly fire for a given cost event, rather
+// than scanning the entire universe of replayed budgets every event.
+// Three scope-keyed candidate sets stay in sync with `replayedBudgets`:
 //
 //   - globalBudgetIds: all live `scope === "global"` budgets
 //   - agentBudgetIds[slug]: live `scope === "agent"` budgets per slug
@@ -14,9 +14,6 @@
 // a budget is never in two scope sets at once. The disjointness
 // invariant is what lets the hot path iterate the three matching sets
 // without dedupe.
-//
-// Extracted from replay-check.ts so that file stays under the
-// 1500-LOC file-size limit (see scripts/file-size-allowlist.txt).
 import type { ReplayedBudget } from "./discrepancy.ts";
 
 export interface BudgetCandidateIndexes {
@@ -109,15 +106,4 @@ function removeBudgetFromSubjectIndex(
   if (existing.size === 0) {
     index.delete(subjectId);
   }
-}
-
-// Internal test seam. Tests directly assert the candidate-set shape
-// after a sequence of `cost.budget.set` events; the existing #842
-// regression test only asserted `eventsScanned > 1_000`, which a
-// revert to the O(events × budgets) iteration would still satisfy.
-// NOT part of `@wuphf/broker/cost-ledger`'s public surface (the index
-// re-exports only `ReplayCheckReport`, `ReplayDiscrepancy`, and
-// `runReplayCheck`).
-export function __createBudgetCandidateIndexesForTesting(): BudgetCandidateIndexes {
-  return createBudgetCandidateIndexes();
 }

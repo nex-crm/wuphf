@@ -23,6 +23,7 @@
 // the consistent read view.
 
 import {
+  type AuditEventKind,
   type BudgetSetAuditPayload,
   type BudgetThresholdCrossedAuditPayload,
   type CostEventAuditPayload,
@@ -49,26 +50,63 @@ import type {
   ReplayedBudget,
   ReplayedCrossing,
 } from "./discrepancy.ts";
-import {
-  type AgentDayDbRow,
-  agentDayKey,
-  BATCH_SIZE,
-  type BudgetDbRow,
-  type CostEventBatchRow,
-  crossingKey,
-  eventTypeToKind,
-  type HighestLsnRow,
-  type TaskDbRow,
-  type ThresholdCrossingDbRow,
-} from "./internal.ts";
+import { type BudgetDbRow, crossingKey, type ThresholdCrossingDbRow } from "./internal.ts";
 import { computeExpectedCrossings, type ExpectedCrossing } from "./threshold-oracle.ts";
 import { flagUnsafeAccumulator } from "./unsafe-lifetime-accumulator.ts";
 
-export type {
-  ReplayCheckReport,
-  ReplayDiscrepancy,
-  ReplayedBudget,
-} from "./discrepancy.ts";
+// Public surface for the `cost-ledger/replay-check` subsystem. The
+// package barrel (`cost-ledger/index.ts`) narrows further to just
+// these three symbols on the `@wuphf/broker/cost-ledger` subpath.
+// Internal state types (`ReplayedBudget`, `ReplayedCrossing`,
+// `BudgetCandidateIndexes`, the DB row shapes, the threshold-oracle
+// inputs) stay internal; tests reach them via `./testing.ts`.
+export type { ReplayCheckReport, ReplayDiscrepancy } from "./discrepancy.ts";
+
+// Orchestrator-private types and helpers. The prepared statements
+// below own the DB row shapes; the per-batch read size and the
+// agent-day key encoder are only used during the scan loop.
+
+const BATCH_SIZE = 1_000;
+
+interface CostEventBatchRow {
+  readonly lsn: number;
+  readonly type: string;
+  readonly payload: Buffer;
+}
+
+interface AgentDayDbRow {
+  readonly agentSlug: string;
+  readonly dayUtc: string;
+  // Aggregate totals are read with `.safeIntegers(true)` so a hostile
+  // INTEGER value in the projection (past `Number.MAX_SAFE_INTEGER`)
+  // doesn't silently round in the diagnostic — the "diagnostic of last
+  // resort" preserves exact bytes from the row.
+  readonly totalMicroUsd: bigint;
+}
+
+interface TaskDbRow {
+  readonly taskId: string;
+  readonly totalMicroUsd: bigint;
+}
+
+interface HighestLsnRow {
+  readonly lsn: number;
+}
+
+function agentDayKey(agentSlug: string, dayUtc: string): string {
+  // Pipe separator: agentSlug is constrained by `AgentSlug` brand
+  // (lowercase alnum + underscore) and dayUtc is `YYYY-MM-DD`; neither
+  // contains `|`, so a key-collision attack via the agent_slug field is
+  // structurally impossible.
+  return `${agentSlug}|${dayUtc}`;
+}
+
+function eventTypeToKind(type: string): AuditEventKind | "other" {
+  if (type === "cost.event") return "cost_event";
+  if (type === "cost.budget.set") return "budget_set";
+  if (type === "cost.budget.threshold.crossed") return "budget_threshold_crossed";
+  return "other";
+}
 
 export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   const readBatchStmt = db.prepare<[number, number], CostEventBatchRow>(
@@ -375,12 +413,6 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   });
   return txn.deferred();
 }
-
-// `BudgetCandidateIndexes` is re-exported because the orchestrator's
-// `runReplayCheck` builds one and the type leaks into a few callers'
-// type inference. The test seam (`__replayCheckTesting` +
-// `__createBudgetCandidateIndexesForTesting`) lives in `./testing.ts`.
-export type { BudgetCandidateIndexes } from "./budget-candidate-index.ts";
 
 // Compare functions accept and emit bigint cumulative totals. The
 // discrepancy wire shape is a decimal-string form to preserve exact
