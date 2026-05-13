@@ -1626,8 +1626,11 @@ describe("BudgetCandidateIndexes (#846 round-2)", () => {
   // asserts `eventsScanned > 1_000`, which a revert to the
   // O(events × budgets) iteration would still satisfy. These tests
   // exercise the index helpers directly so a regression of the
-  // candidate filter is caught structurally.
-  const { addBudgetToIndex, removeBudgetFromIndex } = __replayCheckTesting;
+  // candidate filter is caught structurally. Round-3 (staff review)
+  // adds direct coverage of `computeExpectedCrossings` (the hot path)
+  // plus positive task-scope coverage.
+  const { addBudgetToIndex, removeBudgetFromIndex, computeExpectedCrossings } =
+    __replayCheckTesting;
 
   function makeReplayedBudget(opts: {
     scope: "global" | "agent" | "task";
@@ -1705,5 +1708,161 @@ describe("BudgetCandidateIndexes (#846 round-2)", () => {
     expect(indexes.globalBudgetIds.size).toBe(0);
     expect(indexes.agentBudgetIds.size).toBe(0);
     expect(indexes.taskBudgetIds.size).toBe(0);
+  });
+
+  // Task-scope positive coverage (round-3 staff finding 2). Round-2
+  // only exercised global and agent scopes directly; a typo swapping
+  // `taskBudgetIds`/`agentBudgetIds` in either helper would have left
+  // the suite green.
+  it("adds and removes a task-scoped budget under its task id", () => {
+    const indexes = __createBudgetCandidateIndexesForTesting();
+    const budget = makeReplayedBudget({ scope: "task", subjectId: "task-A" });
+    addBudgetToIndex(indexes, "B6", budget);
+    expect(indexes.taskBudgetIds.get("task-A")?.has("B6")).toBe(true);
+    expect(indexes.agentBudgetIds.has("task-A")).toBe(false);
+    removeBudgetFromIndex(indexes, "B6", budget);
+    expect(indexes.taskBudgetIds.has("task-A")).toBe(false);
+  });
+
+  it("isolates task budgets across different task ids", () => {
+    const indexes = __createBudgetCandidateIndexesForTesting();
+    addBudgetToIndex(indexes, "B7", makeReplayedBudget({ scope: "task", subjectId: "task-A" }));
+    addBudgetToIndex(indexes, "B8", makeReplayedBudget({ scope: "task", subjectId: "task-B" }));
+    expect(indexes.taskBudgetIds.get("task-A")?.has("B7")).toBe(true);
+    expect(indexes.taskBudgetIds.get("task-B")?.has("B8")).toBe(true);
+    expect(indexes.taskBudgetIds.get("task-A")?.has("B8")).toBe(false);
+    expect(indexes.taskBudgetIds.get("task-B")?.has("B7")).toBe(false);
+  });
+
+  it("handles agent → task scope transitions symmetrically", () => {
+    const indexes = __createBudgetCandidateIndexesForTesting();
+    const agentForm = makeReplayedBudget({ scope: "agent", subjectId: "primary" });
+    const taskForm = makeReplayedBudget({ scope: "task", subjectId: "task-A" });
+    addBudgetToIndex(indexes, "B9", agentForm);
+    removeBudgetFromIndex(indexes, "B9", agentForm);
+    addBudgetToIndex(indexes, "B9", taskForm);
+    expect(indexes.agentBudgetIds.has("primary")).toBe(false);
+    expect(indexes.taskBudgetIds.get("task-A")?.has("B9")).toBe(true);
+  });
+
+  // Round-3 staff finding 1: direct coverage of `computeExpectedCrossings`,
+  // the actual hot path. The five helper tests above test the index
+  // shape; they would not catch a regression that re-introduces
+  // `new Set(globalBudgetIds)` + merge in the hot path or, worse, a
+  // regression that iterates the full `args.budgets` universe.
+  // This test wraps `args.budgets` in a Proxy that throws on any
+  // access other than `.get(id)` and `.has(id)`, proving the
+  // implementation never iterates the universe; it also records every
+  // `.get()` to assert only scope-matched ids are visited.
+  describe("computeExpectedCrossings (hot path)", () => {
+    type ReplayedBudgetShape = ReturnType<typeof makeReplayedBudget>;
+    type ComputeExpectedCrossingsArgs = Parameters<typeof computeExpectedCrossings>[0];
+
+    function makeHostileBudgets(entries: ReadonlyArray<[string, ReplayedBudgetShape]>) {
+      const underlying = new Map(entries);
+      const getCalls: string[] = [];
+      const proxy = new Proxy(underlying, {
+        get(_target, prop) {
+          if (prop === "get") {
+            return (key: string) => {
+              getCalls.push(key);
+              return underlying.get(key);
+            };
+          }
+          if (prop === "has") return (key: string) => underlying.has(key);
+          if (prop === "size") return underlying.size;
+          throw new Error(
+            `computeExpectedCrossings must access args.budgets only via .get(id); attempted .${String(prop)}`,
+          );
+        },
+      });
+      return { budgets: proxy as unknown as ReadonlyMap<string, ReplayedBudgetShape>, getCalls };
+    }
+
+    it("visits only scope-matched candidates, never iterates the universe", () => {
+      // 100 noise budgets under agent "OTHER_AGENT" + 1 candidate
+      // under "MY_AGENT" + 1 global + 1 under task "MY_TASK" + 5
+      // noise budgets under task "OTHER_TASK". Call with
+      // agentSlug="MY_AGENT", taskId="MY_TASK": expected 3 visits.
+      const indexes = __createBudgetCandidateIndexesForTesting();
+      const allBudgets: Array<[string, ReplayedBudgetShape]> = [];
+
+      const myAgentBudget = makeReplayedBudget({ scope: "agent", subjectId: "MY_AGENT" });
+      const globalBudget = makeReplayedBudget({ scope: "global" });
+      const myTaskBudget = makeReplayedBudget({ scope: "task", subjectId: "MY_TASK" });
+      addBudgetToIndex(indexes, "MY", myAgentBudget);
+      addBudgetToIndex(indexes, "GLOBAL", globalBudget);
+      addBudgetToIndex(indexes, "TASK_MY", myTaskBudget);
+      allBudgets.push(["MY", myAgentBudget], ["GLOBAL", globalBudget], ["TASK_MY", myTaskBudget]);
+
+      for (let i = 0; i < 100; i += 1) {
+        const id = `OTHER_AGENT_${i}`;
+        const noise = makeReplayedBudget({ scope: "agent", subjectId: "OTHER_AGENT" });
+        addBudgetToIndex(indexes, id, noise);
+        allBudgets.push([id, noise]);
+      }
+      for (let i = 0; i < 5; i += 1) {
+        const id = `OTHER_TASK_${i}`;
+        const noise = makeReplayedBudget({ scope: "task", subjectId: "OTHER_TASK" });
+        addBudgetToIndex(indexes, id, noise);
+        allBudgets.push([id, noise]);
+      }
+
+      const { budgets, getCalls } = makeHostileBudgets(allBudgets);
+      const out: ComputeExpectedCrossingsArgs["out"] = new Map();
+      // limitMicroUsd = 1_000_000 with threshold 5000bps fires when
+      // observed >= 500_000. globalLifetime = 600_000 forces a
+      // crossing on the visited candidates.
+      computeExpectedCrossings({
+        costEventLsn: 42,
+        costEventOccurredAtMs: 1_700_000_000_000,
+        agentSlug: "MY_AGENT",
+        taskId: "MY_TASK",
+        budgets,
+        globalBudgetIds: indexes.globalBudgetIds,
+        agentBudgetIds: indexes.agentBudgetIds,
+        taskBudgetIds: indexes.taskBudgetIds,
+        globalLifetime: 600_000n,
+        agentLifetime: new Map([["MY_AGENT", 600_000n]]),
+        taskLifetime: new Map([["MY_TASK", 600_000n]]),
+        out,
+      });
+
+      // Three .get() calls — one per scope-matched candidate. If the
+      // Proxy didn't trigger an iteration error AND the call count is
+      // exactly 3, no universe walk and no transient merge-Set
+      // construction visiting noise IDs.
+      expect(getCalls.sort()).toEqual(["GLOBAL", "MY", "TASK_MY"]);
+      expect(out.size).toBe(3);
+    });
+
+    it("handles missing agent index entry without iteration", () => {
+      // No agent budget at all under `agentSlug`. visitCandidates
+      // must early-return on undefined; the Proxy is not even
+      // touched for the agent branch.
+      const indexes = __createBudgetCandidateIndexesForTesting();
+      const globalBudget = makeReplayedBudget({ scope: "global" });
+      addBudgetToIndex(indexes, "G", globalBudget);
+
+      const { budgets, getCalls } = makeHostileBudgets([["G", globalBudget]]);
+      const out: ComputeExpectedCrossingsArgs["out"] = new Map();
+      computeExpectedCrossings({
+        costEventLsn: 7,
+        costEventOccurredAtMs: 1_700_000_000_000,
+        agentSlug: "UNKNOWN_AGENT",
+        taskId: undefined,
+        budgets,
+        globalBudgetIds: indexes.globalBudgetIds,
+        agentBudgetIds: indexes.agentBudgetIds,
+        taskBudgetIds: indexes.taskBudgetIds,
+        globalLifetime: 600_000n,
+        agentLifetime: new Map(),
+        taskLifetime: new Map(),
+        out,
+      });
+
+      expect(getCalls).toEqual(["G"]);
+      expect(out.size).toBe(1);
+    });
   });
 });
