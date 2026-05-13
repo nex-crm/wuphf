@@ -890,10 +890,13 @@ export function __createBudgetCandidateIndexesForTesting(): BudgetCandidateIndex
     taskBudgetIds: new Map<string, Set<string>>(),
   };
 }
-export const __replayCheckTesting = {
+// Frozen so a test cannot mutate the seam and pollute subsequent
+// imports (modules are singletons).
+export const __replayCheckTesting = Object.freeze({
   addBudgetToIndex,
   removeBudgetFromIndex,
-};
+  computeExpectedCrossings,
+});
 
 function compareAgentDays(
   replayed: ReadonlyMap<string, number>,
