@@ -64,6 +64,20 @@
         "vitest": "^2.1.0",
       },
     },
+    "packages/credentials": {
+      "name": "@wuphf/credentials",
+      "version": "0.0.0",
+      "dependencies": {
+        "@wuphf/protocol": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "2.4.15",
+        "@types/node": "^22.10.0",
+        "@vitest/coverage-v8": "2.1.9",
+        "typescript": "^5.6.0",
+        "vitest": "^2.1.0",
+      },
+    },
     "packages/llm-router": {
       "name": "@wuphf/llm-router",
       "version": "0.0.0",
@@ -511,6 +525,8 @@
     "@vitest/utils": ["@vitest/utils@2.1.9", "", { "dependencies": { "@vitest/pretty-format": "2.1.9", "loupe": "^3.1.2", "tinyrainbow": "^1.2.0" } }, "sha512-v0psaMSkNJ3A2NMrUEHFRzJtDPFn+/VWZ5WxImB21T9fjucJRmS7xCS3ppEnARb9y11OAzaD+P2Ps+b+BGX5iQ=="],
 
     "@wuphf/broker": ["@wuphf/broker@workspace:packages/broker"],
+
+    "@wuphf/credentials": ["@wuphf/credentials@workspace:packages/credentials"],
 
     "@wuphf/desktop": ["@wuphf/desktop@workspace:apps/desktop"],
 

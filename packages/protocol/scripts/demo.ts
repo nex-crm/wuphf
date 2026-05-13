@@ -12,16 +12,21 @@
 // laid out as a narrative so a reviewer doesn't have to read fast-check
 // arbitraries to be convinced the moat fires on the right inputs.
 
+import { inspect } from "node:util";
+
 import {
   type AuditEventRecord,
   apiBootstrapFromJson,
   apiBootstrapToJson,
   approvalClaimsToSigningBytes,
   approvalSubmitRequestFromJson,
+  asAgentId,
   asAgentSlug,
   asApiToken,
   asApprovalId,
   asBudgetId,
+  asCredentialHandleId,
+  asCredentialScope,
   asIdempotencyKey,
   asMerkleRootHex,
   asMicroUsd,
@@ -42,6 +47,7 @@ import {
   costAuditPayloadFromJsonValue,
   costAuditPayloadToBytes,
   costAuditPayloadToJsonValue,
+  createCredentialHandle,
   type EventLsn,
   FrozenArgs,
   GENESIS_PREV_HASH,
@@ -1023,6 +1029,37 @@ expectEqual(
   "costAuditPayloadToJsonValue projects occurredAt as ISO string",
   (costJson as Record<string, unknown>).occurredAt,
   "2026-05-08T18:03:00.000Z",
+);
+
+// ──────────────────────────────────────────────────────────────────────────
+header(29, "CredentialHandle is opaque and redacted");
+// ──────────────────────────────────────────────────────────────────────────
+const credentialHandle = createCredentialHandle({
+  id: asCredentialHandleId("cred_0123456789ABCDEFGHIJKLMNOPQRSTUV"),
+  agentId: asAgentId("agent_alpha"),
+  scope: asCredentialScope("openai"),
+});
+const credentialFixtureSecret = "fixture-secret-value-do-not-use-0000";
+const credentialJson = JSON.stringify(credentialHandle);
+expectEqual(
+  "CredentialHandle JSON carries only id",
+  credentialJson,
+  '{"id":"cred_0123456789ABCDEFGHIJKLMNOPQRSTUV"}',
+);
+expectEqual(
+  "CredentialHandle JSON omits secret",
+  credentialJson.includes(credentialFixtureSecret),
+  false,
+);
+expectEqual(
+  "CredentialHandle toString is redacted",
+  String(credentialHandle),
+  "CredentialHandle(<redacted>)",
+);
+expectEqual(
+  "CredentialHandle inspect is redacted",
+  inspect(credentialHandle),
+  "CredentialHandle { id: <redacted> }",
 );
 
 // ──────────────────────────────────────────────────────────────────────────
