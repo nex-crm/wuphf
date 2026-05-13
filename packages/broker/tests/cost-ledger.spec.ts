@@ -469,20 +469,49 @@ describe("replay-check", () => {
     expect(ghost).toBeDefined();
   });
 
-  it("replay-check detects threshold crossing field mismatch (H1)", () => {
+  it("replay-check detects threshold crossing observed mismatch (H1)", () => {
+    // Projection-side `observed_micro_usd` lives on its own sibling
+    // variant (`threshold_crossing_observed_mismatch`) so it can carry
+    // decimal-string values — the projection is hostile DB input and
+    // can be tampered to integers past `Number.MAX_SAFE_INTEGER`.
     const { db, ledger } = setup();
     ledger.appendBudgetSet(buildBudgetSet({ limitMicroUsd: 5_000_000, thresholdsBps: [5_000] }));
     ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 2_500_000 }));
-    // Tamper the observed amount.
     db.exec("UPDATE cost_threshold_crossings SET observed_micro_usd = 99 WHERE 1=1");
     const report = runReplayCheck(db);
     expect(report.ok).toBe(false);
-    const fieldMismatch = report.discrepancies.find(
-      (d) => d.kind === "threshold_crossing_field_mismatch",
+    const mismatch = report.discrepancies.find(
+      (d) => d.kind === "threshold_crossing_observed_mismatch",
     );
-    expect(fieldMismatch).toBeDefined();
-    if (fieldMismatch?.kind === "threshold_crossing_field_mismatch") {
-      expect(fieldMismatch.field).toBe("observedMicroUsd");
+    expect(mismatch).toBeDefined();
+    if (mismatch?.kind === "threshold_crossing_observed_mismatch") {
+      expect(mismatch.replayedMicroUsdString).toBe("2500000");
+      expect(mismatch.storedMicroUsdString).toBe("99");
+      expect(typeof mismatch.replayedMicroUsdString).toBe("string");
+      expect(typeof mismatch.storedMicroUsdString).toBe("string");
+    }
+  });
+
+  it("threshold_crossing_observed_mismatch carries hostile projection row past 2^53 exactly", () => {
+    // Validates the security finding: a tampered projection row past
+    // `Number.MAX_SAFE_INTEGER` (~9e15) used to round through JS
+    // `number` and the diagnostic carried the rounded value. The
+    // `CAST(... AS TEXT)` read + decimal-string emission preserves
+    // exact bytes.
+    const { db, ledger } = setup();
+    ledger.appendBudgetSet(buildBudgetSet({ limitMicroUsd: 5_000_000, thresholdsBps: [5_000] }));
+    ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 2_500_000 }));
+    const hostile = "9007199254741009"; // 2^53 + 17, exact decimal.
+    db.exec(`UPDATE cost_threshold_crossings SET observed_micro_usd = ${hostile}`);
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(false);
+    const mismatch = report.discrepancies.find(
+      (d) => d.kind === "threshold_crossing_observed_mismatch",
+    );
+    expect(mismatch).toBeDefined();
+    if (mismatch?.kind === "threshold_crossing_observed_mismatch") {
+      expect(mismatch.storedMicroUsdString).toBe(hostile);
+      expect(mismatch.replayedMicroUsdString).toBe("2500000");
     }
   });
 
@@ -1384,7 +1413,7 @@ describe("replay-check oracle unsafe-lifetime (#843)", () => {
     expect(d.reason).toBe("exceeds_micro_usd_brand");
     expect(d.scope).toBe("global");
     expect(d.subjectId).toBeNull();
-    expect(d.accumulatedMicroUsd).toBe(post.toString());
+    expect(d.accumulatedMicroUsdString).toBe(post.toString());
     expect(flagged.size).toBe(1);
 
     // Second call past the same boundary but still safe-integer-safe —
