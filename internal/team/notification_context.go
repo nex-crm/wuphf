@@ -20,6 +20,30 @@ import (
 	"github.com/nex-crm/wuphf/internal/channel"
 )
 
+// recipientHasTaskVisibility reports whether the given recipient slug
+// is authorized to see in-flight messages from `task`. Used by the
+// pre-review-message filter in NotificationContext. The owner of the
+// task sees their own work; each reviewer slug sees the task they're
+// reviewing; anyone else has to wait for the merge-broadcast system
+// message in the channel + the canonical wiki entry.
+func recipientHasTaskVisibility(recipient string, task *teamTask) bool {
+	if task == nil {
+		return false
+	}
+	if recipient == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(task.Owner), recipient) {
+		return true
+	}
+	for _, r := range task.Reviewers {
+		if strings.EqualFold(strings.TrimSpace(r), recipient) {
+			return true
+		}
+	}
+	return false
+}
+
 // notificationContextBuilder assembles the strings (notification context,
 // work packets, response instructions, task content) that get typed into
 // agent panes or sent through the headless dispatch queue. Constructed
@@ -46,6 +70,12 @@ type notificationContextBuilder struct {
 	// it as opaque. The except parameter is the slug being notified —
 	// the lead must not list itself as "already active".
 	activeHeadlessAgents func(except string) map[string]struct{}
+
+	// taskByID returns the task with the given ID (or nil). Used by the
+	// pre-review filter to decide whether a message tagged with
+	// SourceTaskID is visible to a given recipient. Nil callback means
+	// no filtering — every message passes.
+	taskByID func(taskID string) *teamTask
 }
 
 // NotificationContext returns the recent-messages context block for the
@@ -53,7 +83,16 @@ type notificationContextBuilder struct {
 // system messages, demo_seed posts, and STATUS chatter. Thread-scoped
 // when threadRoot is non-empty (anchors at root + most-recent thread
 // activity); recent-channel fallback otherwise.
-func (b *notificationContextBuilder) NotificationContext(channel, triggerMsgID, threadRootID string, limit int) string {
+//
+// recipientSlug is the agent the context is being built for. When set,
+// the builder additionally suppresses messages whose source task is in
+// a pre-merge lifecycle state and the recipient is NOT the task owner
+// or one of its reviewers. This prevents Agent B from picking up Agent
+// A's in-stream pre-review commentary as if it were canonical output —
+// agents subscribed to merged-state results read the wiki, not the
+// channel scrollback. Pass empty recipient for backwards-compatible
+// "no filter" semantics.
+func (b *notificationContextBuilder) NotificationContext(recipientSlug, channel, triggerMsgID, threadRootID string, limit int) string {
 	if b == nil || b.channelMessages == nil {
 		return ""
 	}
@@ -69,6 +108,7 @@ func (b *notificationContextBuilder) NotificationContext(channel, triggerMsgID, 
 		return ""
 	}
 
+	recipient := normalizeActorSlug(recipientSlug)
 	baseFilter := func(m channelMessage) bool {
 		if m.From == "system" {
 			return false
@@ -81,6 +121,18 @@ func (b *notificationContextBuilder) NotificationContext(channel, triggerMsgID, 
 		}
 		if strings.HasPrefix(strings.TrimSpace(m.Content), "[STATUS]") {
 			return false
+		}
+		// Pre-review-message filter: hide pre-merge chatter from
+		// agents who aren't authoritatively involved in the source
+		// task. System and merged-decision broadcasts pass through
+		// because SourceTaskID is either empty or the task is no
+		// longer pre-merge.
+		if recipient != "" && b.taskByID != nil && strings.TrimSpace(m.SourceTaskID) != "" {
+			if t := b.taskByID(m.SourceTaskID); t != nil && lifecycleStateIsPreMerge(t.LifecycleState) {
+				if !recipientHasTaskVisibility(recipient, t) {
+					return false
+				}
+			}
 		}
 		return true
 	}
@@ -446,7 +498,7 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 		}
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, msg.ReplyTo)
-	if ctx := b.NotificationContext(channelSlug, msg.ID, threadRoot, 4); ctx != "" {
+	if ctx := b.NotificationContext(slug, channelSlug, msg.ID, threadRoot, 4); ctx != "" {
 		lines = append(lines, ctx)
 	}
 	if slug == b.targeter.LeadSlug() {
@@ -541,7 +593,7 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 		lines = append(lines, "Task hygiene rule: if this lane drifts into a proof packet, review bundle, blueprint-derived scaffold, rubric, or other internal artifact shell, rewrite it immediately into either the next real deliverable step or the exact capability-enablement task that will unlock that deliverable.")
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, task.ThreadID)
-	if ctx := b.NotificationContext(channelSlug, "", threadRoot, 3); ctx != "" {
+	if ctx := b.NotificationContext(slug, channelSlug, "", threadRoot, 3); ctx != "" {
 		lines = append(lines, ctx)
 	}
 	lines = append(lines, fmt.Sprintf("If you deliver the substantive result for #%s in this turn, you MUST call team_task complete or review-ready for \"%s\" before any completion post and before you stop. A channel reply alone does not unblock dependent work, and a completion post without the task mutation is a failure.", task.ID, task.ID))

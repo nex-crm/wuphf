@@ -56,6 +56,14 @@ type channelMessage struct {
 	Timestamp        string            `json:"timestamp"`
 	Usage            *messageUsage     `json:"usage,omitempty"`
 	Reactions        []messageReaction `json:"reactions,omitempty"`
+	// SourceTaskID is the lifecycle-tracked task the sender was
+	// actively working on when this message was posted. Empty for
+	// free conversation, system messages, and human posts. Used by
+	// the agent-context builder to suppress pre-review chatter from
+	// agents who are NOT the task's owner or a reviewer — this is
+	// what prevents Agent B from working off Agent A's unreviewed
+	// in-stream commentary.
+	SourceTaskID string `json:"source_task_id,omitempty"`
 }
 
 type agentIssueRecord struct {
@@ -204,16 +212,43 @@ type teamTask struct {
 	// transition layer (b.transitionLifecycleLocked / b.TransitionLifecycle)
 	// so derived fields, the indexed lookup, and self-heal gating all stay
 	// in sync.
-	LifecycleState LifecycleState  `json:"lifecycle_state,omitempty"`
-	AckedAt        string          `json:"acked_at,omitempty"`
-	DueAt          string          `json:"due_at,omitempty"`
-	FollowUpAt     string          `json:"follow_up_at,omitempty"`
-	ReminderAt     string          `json:"reminder_at,omitempty"`
-	RecheckAt      string          `json:"recheck_at,omitempty"`
-	MemoryWorkflow *MemoryWorkflow `json:"memory_workflow,omitempty"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-	CompletedAt    string          `json:"completed_at,omitempty"`
+	LifecycleState LifecycleState `json:"lifecycle_state,omitempty"`
+	// Reviewers is the auto-assigned agent slug list resolved by Lane D's
+	// reviewer-routing logic at the running → review transition. The CLI
+	// (`wuphf task review --invite <slug>`) appends tunnel-human slugs to
+	// this same list as additional reviewers. Convergence rule fires
+	// when every slug here has emitted a graded review.submitted event.
+	// Lane E (indexed inbox + REST handlers) also reads this for auth
+	// filtering on /tasks/inbox and /tasks/{id}: human sessions whose
+	// slug is not in Reviewers see the task hidden from the inbox and
+	// 403 on the packet view. Owner/broker token bypasses the filter.
+	Reviewers []string `json:"reviewers,omitempty"`
+	// Tags carries spec-level domain tags (e.g. "frontend", "billing")
+	// matched against officeMember.Watching.TaskTags during reviewer
+	// routing. Lane B's Spec is the authoritative source once it lands;
+	// for v1 the task carries its own copy so the routing logic does not
+	// need a Lane-B dependency.
+	Tags []string `json:"tags,omitempty"`
+	// ReviewStartedAt is the RFC3339 timestamp at which the task entered
+	// the review state. The convergence sweeper compares this against
+	// ReviewTimeoutSeconds (or the package-level default) to decide
+	// whether the timeout has elapsed. Empty for tasks not currently in
+	// review.
+	ReviewStartedAt string `json:"review_started_at,omitempty"`
+	// ReviewTimeoutSeconds optionally overrides
+	// reviewConvergenceDefaultTimeoutSeconds for this task. Zero or
+	// negative means "use the package default". This is the
+	// task.review_timeout_seconds knob from the design doc.
+	ReviewTimeoutSeconds int             `json:"review_timeout_seconds,omitempty"`
+	AckedAt              string          `json:"acked_at,omitempty"`
+	DueAt                string          `json:"due_at,omitempty"`
+	FollowUpAt           string          `json:"follow_up_at,omitempty"`
+	ReminderAt           string          `json:"reminder_at,omitempty"`
+	RecheckAt            string          `json:"recheck_at,omitempty"`
+	MemoryWorkflow       *MemoryWorkflow `json:"memory_workflow,omitempty"`
+	CreatedAt            string          `json:"created_at"`
+	UpdatedAt            string          `json:"updated_at"`
+	CompletedAt          string          `json:"completed_at,omitempty"`
 }
 
 // Status returns the persisted status string. Read accessor for callers
@@ -255,36 +290,40 @@ func (t *teamTask) Blocked() bool {
 // the on-disk and HTTP wire formats. teamTask.MarshalJSON / UnmarshalJSON
 // route through this shadow type.
 type teamTaskWire struct {
-	ID               string          `json:"id"`
-	Channel          string          `json:"channel,omitempty"`
-	Title            string          `json:"title"`
-	Details          string          `json:"details,omitempty"`
-	Owner            string          `json:"owner,omitempty"`
-	Status           string          `json:"status"`
-	CreatedBy        string          `json:"created_by"`
-	ThreadID         string          `json:"thread_id,omitempty"`
-	TaskType         string          `json:"task_type,omitempty"`
-	PipelineID       string          `json:"pipeline_id,omitempty"`
-	PipelineStage    string          `json:"pipeline_stage,omitempty"`
-	ExecutionMode    string          `json:"execution_mode,omitempty"`
-	ReviewState      string          `json:"review_state,omitempty"`
-	SourceSignalID   string          `json:"source_signal_id,omitempty"`
-	SourceDecisionID string          `json:"source_decision_id,omitempty"`
-	WorktreePath     string          `json:"worktree_path,omitempty"`
-	WorktreeBranch   string          `json:"worktree_branch,omitempty"`
-	DependsOn        []string        `json:"depends_on,omitempty"`
-	BlockedOn        []string        `json:"blocked_on,omitempty"`
-	Blocked          bool            `json:"blocked,omitempty"`
-	LifecycleState   LifecycleState  `json:"lifecycle_state,omitempty"`
-	AckedAt          string          `json:"acked_at,omitempty"`
-	DueAt            string          `json:"due_at,omitempty"`
-	FollowUpAt       string          `json:"follow_up_at,omitempty"`
-	ReminderAt       string          `json:"reminder_at,omitempty"`
-	RecheckAt        string          `json:"recheck_at,omitempty"`
-	MemoryWorkflow   *MemoryWorkflow `json:"memory_workflow,omitempty"`
-	CreatedAt        string          `json:"created_at"`
-	UpdatedAt        string          `json:"updated_at"`
-	CompletedAt      string          `json:"completed_at,omitempty"`
+	ID                   string          `json:"id"`
+	Channel              string          `json:"channel,omitempty"`
+	Title                string          `json:"title"`
+	Details              string          `json:"details,omitempty"`
+	Owner                string          `json:"owner,omitempty"`
+	Status               string          `json:"status"`
+	CreatedBy            string          `json:"created_by"`
+	ThreadID             string          `json:"thread_id,omitempty"`
+	TaskType             string          `json:"task_type,omitempty"`
+	PipelineID           string          `json:"pipeline_id,omitempty"`
+	PipelineStage        string          `json:"pipeline_stage,omitempty"`
+	ExecutionMode        string          `json:"execution_mode,omitempty"`
+	ReviewState          string          `json:"review_state,omitempty"`
+	SourceSignalID       string          `json:"source_signal_id,omitempty"`
+	SourceDecisionID     string          `json:"source_decision_id,omitempty"`
+	WorktreePath         string          `json:"worktree_path,omitempty"`
+	WorktreeBranch       string          `json:"worktree_branch,omitempty"`
+	DependsOn            []string        `json:"depends_on,omitempty"`
+	BlockedOn            []string        `json:"blocked_on,omitempty"`
+	Blocked              bool            `json:"blocked,omitempty"`
+	LifecycleState       LifecycleState  `json:"lifecycle_state,omitempty"`
+	Reviewers            []string        `json:"reviewers,omitempty"`
+	Tags                 []string        `json:"tags,omitempty"`
+	ReviewStartedAt      string          `json:"review_started_at,omitempty"`
+	ReviewTimeoutSeconds int             `json:"review_timeout_seconds,omitempty"`
+	AckedAt              string          `json:"acked_at,omitempty"`
+	DueAt                string          `json:"due_at,omitempty"`
+	FollowUpAt           string          `json:"follow_up_at,omitempty"`
+	ReminderAt           string          `json:"reminder_at,omitempty"`
+	RecheckAt            string          `json:"recheck_at,omitempty"`
+	MemoryWorkflow       *MemoryWorkflow `json:"memory_workflow,omitempty"`
+	CreatedAt            string          `json:"created_at"`
+	UpdatedAt            string          `json:"updated_at"`
+	CompletedAt          string          `json:"completed_at,omitempty"`
 }
 
 // MarshalJSON preserves the pre-Lane-A wire format (status/review_state/
@@ -292,36 +331,40 @@ type teamTaskWire struct {
 // fields unexported on the Go struct.
 func (t teamTask) MarshalJSON() ([]byte, error) {
 	return json.Marshal(teamTaskWire{
-		ID:               t.ID,
-		Channel:          t.Channel,
-		Title:            t.Title,
-		Details:          t.Details,
-		Owner:            t.Owner,
-		Status:           t.status,
-		CreatedBy:        t.CreatedBy,
-		ThreadID:         t.ThreadID,
-		TaskType:         t.TaskType,
-		PipelineID:       t.PipelineID,
-		PipelineStage:    t.pipelineStage,
-		ExecutionMode:    t.ExecutionMode,
-		ReviewState:      t.reviewState,
-		SourceSignalID:   t.SourceSignalID,
-		SourceDecisionID: t.SourceDecisionID,
-		WorktreePath:     t.WorktreePath,
-		WorktreeBranch:   t.WorktreeBranch,
-		DependsOn:        t.DependsOn,
-		BlockedOn:        t.BlockedOn,
-		Blocked:          t.blocked,
-		LifecycleState:   t.LifecycleState,
-		AckedAt:          t.AckedAt,
-		DueAt:            t.DueAt,
-		FollowUpAt:       t.FollowUpAt,
-		ReminderAt:       t.ReminderAt,
-		RecheckAt:        t.RecheckAt,
-		MemoryWorkflow:   t.MemoryWorkflow,
-		CreatedAt:        t.CreatedAt,
-		UpdatedAt:        t.UpdatedAt,
-		CompletedAt:      t.CompletedAt,
+		ID:                   t.ID,
+		Channel:              t.Channel,
+		Title:                t.Title,
+		Details:              t.Details,
+		Owner:                t.Owner,
+		Status:               t.status,
+		CreatedBy:            t.CreatedBy,
+		ThreadID:             t.ThreadID,
+		TaskType:             t.TaskType,
+		PipelineID:           t.PipelineID,
+		PipelineStage:        t.pipelineStage,
+		ExecutionMode:        t.ExecutionMode,
+		ReviewState:          t.reviewState,
+		SourceSignalID:       t.SourceSignalID,
+		SourceDecisionID:     t.SourceDecisionID,
+		WorktreePath:         t.WorktreePath,
+		WorktreeBranch:       t.WorktreeBranch,
+		DependsOn:            t.DependsOn,
+		BlockedOn:            t.BlockedOn,
+		Blocked:              t.blocked,
+		LifecycleState:       t.LifecycleState,
+		Reviewers:            t.Reviewers,
+		Tags:                 t.Tags,
+		ReviewStartedAt:      t.ReviewStartedAt,
+		ReviewTimeoutSeconds: t.ReviewTimeoutSeconds,
+		AckedAt:              t.AckedAt,
+		DueAt:                t.DueAt,
+		FollowUpAt:           t.FollowUpAt,
+		ReminderAt:           t.ReminderAt,
+		RecheckAt:            t.RecheckAt,
+		MemoryWorkflow:       t.MemoryWorkflow,
+		CreatedAt:            t.CreatedAt,
+		UpdatedAt:            t.UpdatedAt,
+		CompletedAt:          t.CompletedAt,
 	})
 }
 
@@ -350,8 +393,12 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.WorktreeBranch = w.WorktreeBranch
 	t.DependsOn = w.DependsOn
 	t.BlockedOn = w.BlockedOn
+	t.Reviewers = w.Reviewers
 	t.blocked = w.Blocked
 	t.LifecycleState = w.LifecycleState
+	t.Tags = w.Tags
+	t.ReviewStartedAt = w.ReviewStartedAt
+	t.ReviewTimeoutSeconds = w.ReviewTimeoutSeconds
 	t.AckedAt = w.AckedAt
 	t.DueAt = w.DueAt
 	t.FollowUpAt = w.FollowUpAt
@@ -398,6 +445,13 @@ type officeMember struct {
 	CreatedAt      string                   `json:"created_at,omitempty"`
 	BuiltIn        bool                     `json:"built_in,omitempty"`
 	Provider       provider.ProviderBinding `json:"provider,omitempty"`
+	// Watching declares the file-glob, wiki-glob, tool-name, and task-tag
+	// categories this agent should be auto-assigned as a reviewer for when
+	// a task enters review. See broker_reviewer_routing.go (Lane D) for
+	// the intersection logic. omitempty keeps existing brokers' wire
+	// format unchanged on disk for agents that have not been configured
+	// with a watching set.
+	Watching Watching `json:"watching,omitempty"`
 }
 
 type officeActionLog struct {

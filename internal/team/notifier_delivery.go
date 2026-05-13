@@ -192,8 +192,8 @@ func (l *Launcher) activeHeadlessSlugs(except string) map[string]struct{} {
 	return out
 }
 
-func (l *Launcher) buildNotificationContext(channelSlug, triggerMsgID, threadRootID string, limit int) string {
-	return l.notifyCtx().NotificationContext(channelSlug, triggerMsgID, threadRootID, limit)
+func (l *Launcher) buildNotificationContext(recipientSlug, channelSlug, triggerMsgID, threadRootID string, limit int) string {
+	return l.notifyCtx().NotificationContext(recipientSlug, channelSlug, triggerMsgID, threadRootID, limit)
 }
 
 func (l *Launcher) ultimateThreadRoot(channelSlug, startID string) string {

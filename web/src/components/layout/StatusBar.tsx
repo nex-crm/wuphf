@@ -104,6 +104,10 @@ export function StatusBar() {
         return "Notebooks";
       case "reviews":
         return "Reviews";
+      case "inbox":
+        return "Decision Inbox";
+      case "task-decision":
+        return `Task ${route.taskId}`;
       case "unknown":
         return "";
       default: {

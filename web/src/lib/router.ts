@@ -120,6 +120,18 @@ export const reviewsRoute = createRoute({
   path: ROUTE_PATHS.reviews,
 });
 
+// /inbox — Decision Inbox (Lane G, multi-agent control loop)
+export const inboxRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.inbox,
+});
+
+// /task/$taskId — Decision Packet view
+export const taskDecisionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.taskDecision,
+});
+
 // / — index route. Always redirects to /channels/general at the route
 // level so the root never has to render an empty body. Uses redirect()
 // from beforeLoad: this fires before the route mounts, so URL→store
@@ -152,6 +164,8 @@ export const routeTree = rootRoute.addChildren([
     notebookAgentRoute.addChildren([notebookEntryRoute]),
   ]),
   reviewsRoute,
+  inboxRoute,
+  taskDecisionRoute,
 ]);
 
 export function createAppRouter(history: RouterHistory = createHashHistory()) {

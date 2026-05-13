@@ -277,7 +277,15 @@ func runGit(dir string, args ...string) error {
 }
 
 func runGitOutput(dir string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	return runGitOutputWithTimeout(dir, 60*time.Second, args...)
+}
+
+// runGitOutputWithTimeout is the same as runGitOutput but takes a
+// caller-supplied timeout. Used by reviewer routing on the lifecycle
+// hot path where a 60s git stall would pin b.mu and block every other
+// broker mutator.
+func runGitOutputWithTimeout(dir string, timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir

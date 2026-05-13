@@ -13,6 +13,10 @@ export function navigateToSidebarApp(appId: string): void {
     void router.navigate({ to: "/wiki" });
     return;
   }
+  if (appId === "inbox") {
+    void router.navigate({ to: "/inbox" });
+    return;
+  }
   void router.navigate({
     to: "/apps/$appId",
     params: { appId },

@@ -31,6 +31,24 @@ func (b *Broker) AllTasks() []teamTask {
 	return out
 }
 
+// TaskByID returns a copy of the task with the given ID, or nil when
+// no such task exists. Used by the notification-context filter to
+// resolve a message's SourceTaskID into the task's current lifecycle
+// state + reviewer roster.
+func (b *Broker) TaskByID(id string) *teamTask {
+	id = strings.TrimSpace(id)
+	if b == nil || id == "" {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if t := b.findTaskByIDLocked(id); t != nil {
+		cp := *t
+		return &cp
+	}
+	return nil
+}
+
 // InFlightTasks returns tasks that have an assigned owner and a non-terminal
 // status (anything except "done", "completed", "canceled", or "cancelled").
 func (b *Broker) InFlightTasks() []teamTask {

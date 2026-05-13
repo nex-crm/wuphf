@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 
+import { useChannels } from "../../hooks/useChannels";
 import { deriveBreadcrumbs } from "../../hooks/useObjectBreadcrumb";
 import { useRecordRecentObject } from "../../hooks/useRecentObjects";
-import { useChannels } from "../../hooks/useChannels";
 import { appTitle } from "../../lib/constants";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
@@ -38,6 +38,10 @@ function headerTitleAndDesc(
       return { title: "Notebooks", desc: "" };
     case "reviews":
       return { title: "Reviews", desc: "" };
+    case "inbox":
+      return { title: "Decision Inbox", desc: "" };
+    case "task-decision":
+      return { title: `Task ${route.taskId}`, desc: "" };
     case "unknown":
       return { title: "", desc: "" };
     default: {
@@ -73,17 +77,23 @@ function routeToObjectRef(
         route.appId === "workspace" ||
         route.appId === "skills"
       ) {
-        return { kind: "settings-section", section: route.appId as "providers" | "team" | "workspace" | "skills" };
+        return {
+          kind: "settings-section",
+          section: route.appId as "providers" | "team" | "workspace" | "skills",
+        };
       }
       return null;
     case "notebook-entry":
       return null; // notebook entries are draft surfaces, not canonical objects
+    case "task-decision":
+      return { kind: "task", id: route.taskId };
     case "task-board":
     case "wiki":
     case "wiki-lookup":
     case "notebook-catalog":
     case "notebook-agent":
     case "reviews":
+    case "inbox":
     case "channel":
     case "unknown":
       return null;
@@ -114,7 +124,15 @@ export function ChannelHeader() {
 
   return (
     <div className="channel-header">
-      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          minWidth: 0,
+          flex: 1,
+        }}
+      >
         {breadcrumbItems.length > 0 ? (
           <Breadcrumb items={breadcrumbItems} />
         ) : (
