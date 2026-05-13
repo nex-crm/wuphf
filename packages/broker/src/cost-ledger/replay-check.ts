@@ -424,9 +424,6 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
               JSON.parse(row.payload.toString("utf8")),
             ) as BudgetSetAuditPayload;
             const previous = replayedBudgets.get(parsed.budgetId);
-            if (previous !== undefined) {
-              removeBudgetFromIndex(budgetIndexes, parsed.budgetId, previous);
-            }
             const replayedBudget: ReplayedBudget = {
               scope: parsed.scope,
               subjectId: parsed.subjectId ?? null,
@@ -436,14 +433,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
               tombstoned: (parsed.limitMicroUsd as number) === 0,
             };
             replayedBudgets.set(parsed.budgetId, replayedBudget);
-            // Re-set events may move a budget between scopes/subjects. Remove
-            // the old placement before adding the new one; tombstones add
-            // nothing back, so the transition is symmetric.
-            if (replayedBudget.tombstoned) {
-              removeBudgetFromIndex(budgetIndexes, parsed.budgetId, replayedBudget);
-            } else {
-              addBudgetToIndex(budgetIndexes, parsed.budgetId, replayedBudget);
-            }
+            replaceBudgetInIndex(budgetIndexes, parsed.budgetId, previous, replayedBudget);
             budgetSetLsnToBudgetId.set(row.lsn, parsed.budgetId);
           } else if (kind === "budget_threshold_crossed") {
             const parsed = costAuditPayloadFromJsonValue(
@@ -855,6 +845,26 @@ function removeBudgetFromIndex(
   );
 }
 
+// Single-call lifecycle transition for the budget candidate indexes. The
+// replay loop calls this on every `budget_set` event so a budget moves
+// between scopes/subjects/tombstone-states without ever existing in two
+// scope sets simultaneously. The disjointness invariant is what lets
+// `computeExpectedCrossings` iterate the three scope indexes without
+// dedupe. Tombstones (`next.tombstoned === true`) remove without re-adding;
+// the post-condition is "exactly the placement implied by `next`".
+function replaceBudgetInIndex(
+  indexes: BudgetCandidateIndexes,
+  budgetId: string,
+  previous: ReplayedBudget | undefined,
+  next: ReplayedBudget,
+): void {
+  if (previous !== undefined) {
+    removeBudgetFromIndex(indexes, budgetId, previous);
+  }
+  if (next.tombstoned) return;
+  addBudgetToIndex(indexes, budgetId, next);
+}
+
 function addBudgetToSubjectIndex(
   index: Map<string, Set<string>>,
   subjectId: string,
@@ -895,6 +905,7 @@ export function __createBudgetCandidateIndexesForTesting(): BudgetCandidateIndex
 export const __replayCheckTesting = Object.freeze({
   addBudgetToIndex,
   removeBudgetFromIndex,
+  replaceBudgetInIndex,
   computeExpectedCrossings,
 });
 
@@ -1142,14 +1153,16 @@ interface ComputeExpectedCrossingsArgs {
 // (`crossesThresholdBigInt`) MUST stay byte-identical with the reactor's
 // `crossesThreshold`; if they diverge, this oracle becomes a tautology.
 function computeExpectedCrossings(args: ComputeExpectedCrossingsArgs): void {
-  // Round-2 fix (PR #846 triangulation perf + adversarial, 2-of-2 MEDIUM):
-  // visit each scope index directly instead of allocating a transient
-  // `Set<string>` per cost.event. The index lifecycle guarantees a
-  // budget is placed in exactly one scope index at a time
-  // (`addBudgetToIndex` removes from the prior scope before adding to
-  // the new one), so the three iterations are disjoint — no dedupe
-  // required. This drops 1 short-lived Set per cost event and
-  // O(events × globalBudgetIds.size) hash inserts.
+  // Visit each scope index directly. The replay loop's
+  // `replaceBudgetInIndex` keeps a budget in exactly one scope/subject
+  // bucket at a time, so the three iterations below are disjoint and
+  // no dedupe is required. This avoids one transient Set allocation
+  // and O(events × globalBudgetIds.size) hash inserts per cost event.
+  // The disjointness invariant is asserted by the perf-regression test
+  // in cost-ledger.spec.ts: a hostile Proxy on `args.budgets` blocks
+  // universe iteration, and hostile Proxies on the agent/task scope
+  // maps block `.entries()`/`.values()` regressions that would scan
+  // subjects rather than `.get(slug)` directly.
   visitCandidates(args, args.globalBudgetIds, evalBudget);
   visitCandidates(args, args.agentBudgetIds.get(args.agentSlug), evalBudget);
   if (args.taskId !== undefined) {
@@ -1176,10 +1189,13 @@ function evalBudget(
   budget: ReplayedBudget,
 ): void {
   // Defensive guards retained from the original pre-#842 oracle. The
-  // index lifecycle should keep tombstones out of the scope sets and
-  // `isOracleApplicable` should always return true on a candidate
-  // pulled from its own scope index — but these checks are cheap and
-  // catch any future drift between the index and `replayedBudgets`.
+  // index lifecycle (replaceBudgetInIndex) keeps tombstones out of the
+  // scope sets and `isOracleApplicable` should always be true on a
+  // candidate pulled from its own scope index. Note: these guards only
+  // catch STALE/EXTRA entries — they cannot catch the more dangerous
+  // failure mode where a live, applicable budget is missing from all
+  // candidate indexes (an under-emission, masked here as silent).
+  // The lifecycle tests cover that path directly.
   if (budget.tombstoned) return;
   if (!isOracleApplicable(budget, args.agentSlug, args.taskId)) return;
   const observed = oracleObservedFor(budget, args);

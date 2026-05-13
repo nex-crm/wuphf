@@ -1346,8 +1346,12 @@ describe("BudgetCandidateIndexes (#846 round-2)", () => {
   // candidate filter is caught structurally. Round-3 (staff review)
   // adds direct coverage of `computeExpectedCrossings` (the hot path)
   // plus positive task-scope coverage.
-  const { addBudgetToIndex, removeBudgetFromIndex, computeExpectedCrossings } =
-    __replayCheckTesting;
+  const {
+    addBudgetToIndex,
+    removeBudgetFromIndex,
+    replaceBudgetInIndex,
+    computeExpectedCrossings,
+  } = __replayCheckTesting;
 
   function makeReplayedBudget(opts: {
     scope: "global" | "agent" | "task";
@@ -1580,6 +1584,199 @@ describe("BudgetCandidateIndexes (#846 round-2)", () => {
 
       expect(getCalls).toEqual(["G"]);
       expect(out.size).toBe(1);
+    });
+
+    // Round-4 fix (PR #846 triangulation adversarial #1 MEDIUM): the
+    // hostile-budgets Proxy above only protects `args.budgets`. A
+    // future refactor that scans `agentBudgetIds.entries()` /
+    // `taskBudgetIds.entries()` to find a matching subject would still
+    // call `budgets.get()` only for matched candidates and pass the
+    // test, while reintroducing O(events × subjects) behavior. These
+    // tests additionally wrap the agent/task scope maps in proxies
+    // that allow `.get(slug)` but throw on `.entries()`, `.values()`,
+    // `.keys()`, `.forEach(...)`, and iteration — locking in the
+    // direct-lookup invariant.
+    describe("with hostile index maps", () => {
+      function makeHostileSubjectIndex(
+        underlying: Map<string, Set<string>>,
+      ): ReadonlyMap<string, ReadonlySet<string>> {
+        return new Proxy(underlying, {
+          get(_target, prop) {
+            if (prop === "get") return (key: string) => underlying.get(key);
+            if (prop === "has") return (key: string) => underlying.has(key);
+            if (prop === "size") return underlying.size;
+            throw new Error(
+              `computeExpectedCrossings must access scope index only via .get(subjectId); attempted .${String(prop)}`,
+            );
+          },
+        }) as unknown as ReadonlyMap<string, ReadonlySet<string>>;
+      }
+
+      it("hostile agentBudgetIds: only .get(slug) reaches the underlying map", () => {
+        const indexes = __createBudgetCandidateIndexesForTesting();
+        const myAgentBudget = makeReplayedBudget({ scope: "agent", subjectId: "MY_AGENT" });
+        addBudgetToIndex(indexes, "MY", myAgentBudget);
+        for (let i = 0; i < 50; i += 1) {
+          addBudgetToIndex(
+            indexes,
+            `OTHER_${i}`,
+            makeReplayedBudget({ scope: "agent", subjectId: `OTHER_${i}` }),
+          );
+        }
+        const allEntries: Array<[string, ReplayedBudgetShape]> = Array.from(
+          indexes.agentBudgetIds.entries(),
+        ).flatMap(([subjectId, ids]) =>
+          Array.from(ids).map((id): [string, ReplayedBudgetShape] => [
+            id,
+            makeReplayedBudget({ scope: "agent", subjectId }),
+          ]),
+        );
+
+        const { budgets } = makeHostileBudgets(allEntries);
+        const out: ComputeExpectedCrossingsArgs["out"] = new Map();
+        computeExpectedCrossings({
+          costEventLsn: 11,
+          costEventOccurredAtMs: 1_700_000_000_000,
+          agentSlug: "MY_AGENT",
+          taskId: undefined,
+          budgets,
+          globalBudgetIds: indexes.globalBudgetIds,
+          agentBudgetIds: makeHostileSubjectIndex(indexes.agentBudgetIds),
+          taskBudgetIds: makeHostileSubjectIndex(indexes.taskBudgetIds),
+          globalLifetime: 600_000,
+          agentLifetime: new Map([["MY_AGENT", 600_000]]),
+          taskLifetime: new Map(),
+          out,
+        });
+        expect(out.size).toBe(1);
+        expect(out.has("MY|1|5000")).toBe(true);
+      });
+
+      it("hostile taskBudgetIds: only .get(taskId) reaches the underlying map", () => {
+        const indexes = __createBudgetCandidateIndexesForTesting();
+        addBudgetToIndex(
+          indexes,
+          "MY",
+          makeReplayedBudget({ scope: "task", subjectId: "MY_TASK" }),
+        );
+        for (let i = 0; i < 50; i += 1) {
+          addBudgetToIndex(
+            indexes,
+            `OTHER_${i}`,
+            makeReplayedBudget({ scope: "task", subjectId: `OTHER_${i}` }),
+          );
+        }
+        const allEntries: Array<[string, ReplayedBudgetShape]> = Array.from(
+          indexes.taskBudgetIds.entries(),
+        ).flatMap(([subjectId, ids]) =>
+          Array.from(ids).map((id): [string, ReplayedBudgetShape] => [
+            id,
+            makeReplayedBudget({ scope: "task", subjectId }),
+          ]),
+        );
+
+        const { budgets } = makeHostileBudgets(allEntries);
+        const out: ComputeExpectedCrossingsArgs["out"] = new Map();
+        computeExpectedCrossings({
+          costEventLsn: 13,
+          costEventOccurredAtMs: 1_700_000_000_000,
+          agentSlug: "ANY",
+          taskId: "MY_TASK",
+          budgets,
+          globalBudgetIds: indexes.globalBudgetIds,
+          agentBudgetIds: makeHostileSubjectIndex(indexes.agentBudgetIds),
+          taskBudgetIds: makeHostileSubjectIndex(indexes.taskBudgetIds),
+          globalLifetime: 0,
+          agentLifetime: new Map(),
+          taskLifetime: new Map([["MY_TASK", 600_000]]),
+          out,
+        });
+        expect(out.size).toBe(1);
+        expect(out.has("MY|1|5000")).toBe(true);
+      });
+    });
+  });
+
+  // Round-4 fix (PR #846 triangulation perf+architecture 2-of-3 MEDIUM
+  // / 3-of-3 LOW): the original lifecycle tests cover scope transitions
+  // and the noise-budget perf path, but miss the same-scope subject
+  // moves (agent A→B / task A→B), tombstone→live reactivation, and
+  // tombstone-with-changed-scope. A regression that left stale subject
+  // entries behind would be masked by `evalBudget`'s defensive
+  // `isOracleApplicable` filter while degrading the hot path. These
+  // tests pin `replaceBudgetInIndex` to the exact post-condition.
+  describe("replaceBudgetInIndex (lifecycle invariant)", () => {
+    it("agent → agent: same scope, different subject — moves the entry", () => {
+      const indexes = __createBudgetCandidateIndexesForTesting();
+      const a = makeReplayedBudget({ scope: "agent", subjectId: "agent-A" });
+      const b = makeReplayedBudget({ scope: "agent", subjectId: "agent-B" });
+      replaceBudgetInIndex(indexes, "B1", undefined, a);
+      replaceBudgetInIndex(indexes, "B1", a, b);
+      expect(indexes.agentBudgetIds.has("agent-A")).toBe(false);
+      expect(indexes.agentBudgetIds.get("agent-B")?.has("B1")).toBe(true);
+      expect(indexes.agentBudgetIds.size).toBe(1);
+    });
+
+    it("task → task: same scope, different subject — moves the entry", () => {
+      const indexes = __createBudgetCandidateIndexesForTesting();
+      const a = makeReplayedBudget({ scope: "task", subjectId: "task-A" });
+      const b = makeReplayedBudget({ scope: "task", subjectId: "task-B" });
+      replaceBudgetInIndex(indexes, "B2", undefined, a);
+      replaceBudgetInIndex(indexes, "B2", a, b);
+      expect(indexes.taskBudgetIds.has("task-A")).toBe(false);
+      expect(indexes.taskBudgetIds.get("task-B")?.has("B2")).toBe(true);
+      expect(indexes.taskBudgetIds.size).toBe(1);
+    });
+
+    it("live → tombstone → live: reactivation returns to the index cleanly", () => {
+      const indexes = __createBudgetCandidateIndexesForTesting();
+      const live = makeReplayedBudget({ scope: "agent", subjectId: "primary" });
+      const tombstoned = makeReplayedBudget({
+        scope: "agent",
+        subjectId: "primary",
+        tombstoned: true,
+      });
+      const reactivated = makeReplayedBudget({ scope: "agent", subjectId: "primary" });
+      replaceBudgetInIndex(indexes, "B3", undefined, live);
+      replaceBudgetInIndex(indexes, "B3", live, tombstoned);
+      expect(indexes.agentBudgetIds.has("primary")).toBe(false);
+      replaceBudgetInIndex(indexes, "B3", tombstoned, reactivated);
+      expect(indexes.agentBudgetIds.get("primary")?.has("B3")).toBe(true);
+    });
+
+    it("live agent → tombstone global: removed from agent, never added to global", () => {
+      const indexes = __createBudgetCandidateIndexesForTesting();
+      const liveAgent = makeReplayedBudget({ scope: "agent", subjectId: "primary" });
+      const tombstonedGlobal = makeReplayedBudget({ scope: "global", tombstoned: true });
+      replaceBudgetInIndex(indexes, "B4", undefined, liveAgent);
+      replaceBudgetInIndex(indexes, "B4", liveAgent, tombstonedGlobal);
+      expect(indexes.agentBudgetIds.has("primary")).toBe(false);
+      expect(indexes.globalBudgetIds.has("B4")).toBe(false);
+      expect(indexes.taskBudgetIds.size).toBe(0);
+    });
+
+    it("scope move on a tombstoned record: remove-then-no-add (single index, no leak)", () => {
+      const indexes = __createBudgetCandidateIndexesForTesting();
+      const liveTask = makeReplayedBudget({ scope: "task", subjectId: "task-A" });
+      const tombstonedTask = makeReplayedBudget({
+        scope: "task",
+        subjectId: "task-A",
+        tombstoned: true,
+      });
+      const tombstonedAgent = makeReplayedBudget({
+        scope: "agent",
+        subjectId: "primary",
+        tombstoned: true,
+      });
+      replaceBudgetInIndex(indexes, "B5", undefined, liveTask);
+      replaceBudgetInIndex(indexes, "B5", liveTask, tombstonedTask);
+      // A subsequent scope-move tombstone must not re-add anywhere
+      // (the prior placement is already empty, but the helper still
+      // needs to not panic on an undefined-subject lookup).
+      replaceBudgetInIndex(indexes, "B5", tombstonedTask, tombstonedAgent);
+      expect(indexes.globalBudgetIds.size).toBe(0);
+      expect(indexes.agentBudgetIds.size).toBe(0);
+      expect(indexes.taskBudgetIds.size).toBe(0);
     });
   });
 });
