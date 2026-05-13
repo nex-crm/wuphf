@@ -18,8 +18,9 @@
 // Read-only: this function never writes. It is safe to call on a live
 // broker; the entire check runs inside a single `BEGIN DEFERRED`
 // transaction so concurrent writers can commit but won't be observed
-// mid-check (better-sqlite3's WAL does NOT give per-statement
-// snapshots on its own — round-2 review caught a stale claim here).
+// mid-check. better-sqlite3's WAL does NOT give per-statement
+// snapshots on its own — the explicit transaction is what produces
+// the consistent read view.
 
 import {
   type AuditEventKind,
@@ -42,6 +43,11 @@ import {
   removeBudgetFromIndex,
   replaceBudgetInIndex,
 } from "./budget-candidate-index.ts";
+import {
+  flagUnsafeAccumulator,
+  MAX_BUDGET_LIMIT_MICRO_USD_BIG,
+  MAX_SAFE_INTEGER_BIG,
+} from "./unsafe-lifetime-accumulator.ts";
 
 export interface ReplayCheckReport {
   readonly ok: boolean;
@@ -61,8 +67,10 @@ export type ReplayDiscrepancy =
       // projection row can carry arbitrary integer bytes. Emit as
       // decimal strings so the brand contract is preserved on the
       // wire and the diagnostic preserves exact integer values even
-      // past `Number.MAX_SAFE_INTEGER`. See PR #845 for the parallel
-      // fix on the threshold-oracle path.
+      // past `Number.MAX_SAFE_INTEGER`. The threshold-oracle path
+      // (`threshold_crossing_unemitted` / `_spurious` /
+      // `_oracle_observed_mismatch` / `_observed_mismatch`) carries
+      // the same shape for the same reason.
       readonly kind: "agent_day_total_mismatch";
       readonly agentSlug: string;
       readonly dayUtc: string;
@@ -131,13 +139,36 @@ export type ReplayDiscrepancy =
       readonly thresholdBps: number;
     }
   | {
+      // `observedMicroUsd` lives on the sibling
+      // `threshold_crossing_observed_mismatch` variant below so it
+      // can carry decimal-string values. Cumulative oracle-observed
+      // spend in the projection row is unbounded (a hostile or
+      // tampered row can exceed `Number.MAX_SAFE_INTEGER`), so this
+      // variant only carries safe-integer-bounded fields.
       readonly kind: "threshold_crossing_field_mismatch";
       readonly budgetId: BudgetId;
       readonly budgetSetLsn: EventLsn;
       readonly thresholdBps: number;
-      readonly field: "crossedAtLsn" | "observedMicroUsd" | "limitMicroUsd";
+      readonly field: "crossedAtLsn" | "limitMicroUsd";
       readonly replayed: number;
       readonly stored: number;
+    }
+  | {
+      // Projection drift on the cumulative `observedMicroUsd` field.
+      // The replayed side comes from the protocol-validated event_log
+      // audit (bounded number); the stored side comes from
+      // `cost_threshold_crossings.observed_micro_usd`, which is
+      // hostile DB input and can exceed both the `MicroUsd` brand
+      // ceiling and `Number.MAX_SAFE_INTEGER`. Both fields are
+      // decimal-string form to preserve exact bytes — the SQL read
+      // uses `CAST(observed_micro_usd AS TEXT)` so a tampered row
+      // past 2^53 flows through without rounding.
+      readonly kind: "threshold_crossing_observed_mismatch";
+      readonly budgetId: BudgetId;
+      readonly budgetSetLsn: EventLsn;
+      readonly thresholdBps: number;
+      readonly replayedMicroUsdString: string;
+      readonly storedMicroUsdString: string;
     }
   | {
       // Oracle: the independent threshold replay says this crossing
@@ -332,7 +363,7 @@ export type ReplayDiscrepancy =
       /** Cost event whose append pushed the accumulator past the boundary. */
       readonly costEventLsn: EventLsn;
       /** Accumulated total as a decimal string. Bigint, JSON-safe. */
-      readonly accumulatedMicroUsd: string;
+      readonly accumulatedMicroUsdString: string;
     }
   | {
       // Surface unparseable event-log rows distinctly so on-call sees the
@@ -414,18 +445,25 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
             set_at_lsn AS setAtLsn, tombstoned
      FROM cost_budgets`,
   );
+  // `observed_micro_usd` is CAST to TEXT so a hostile projection row
+  // past `Number.MAX_SAFE_INTEGER` flows through as exact decimal
+  // bytes instead of silently rounding through JS `number`. The other
+  // INTEGER columns are bounded (LSNs, thresholdBps, limitMicroUsd ≤
+  // MicroUsd brand) and stay as `number` for ergonomic compares.
   const listCrossingsStmt = db.prepare<[], ThresholdCrossingDbRow>(
     `SELECT budget_id AS budgetId, budget_set_lsn AS budgetSetLsn,
             threshold_bps AS thresholdBps, crossed_at_lsn AS crossedAtLsn,
-            observed_micro_usd AS observedMicroUsd, limit_micro_usd AS limitMicroUsd
+            CAST(observed_micro_usd AS TEXT) AS observedMicroUsd,
+            limit_micro_usd AS limitMicroUsd
      FROM cost_threshold_crossings`,
   );
 
-  // Round-2 fix: run all reads inside a single SQLite snapshot. The
-  // file header used to claim WAL gave us this for free; it doesn't —
-  // better-sqlite3 only snapshots within an explicit transaction.
-  // `.deferred()` acquires a SHARED lock on first read and holds it
-  // through the rest of the function; concurrent writers can still
+  // Run all reads inside a single SQLite snapshot so concurrent
+  // writers can't shift state mid-check. better-sqlite3's WAL does
+  // not give per-statement snapshots; only an explicit transaction
+  // does. `.deferred()` acquires a SHARED lock on first read and
+  // holds it through the rest of the function; concurrent writers
+  // can still
   // commit but this function won't observe them, so replay-vs-stored
   // can't mix snapshots.
   const txn = db.transaction((): ReplayCheckReport => {
@@ -478,11 +516,13 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     // flagged unsafe so the discrepancy fires once per key per run.
     const unsafeAccumulatorFlagged = new Set<string>();
     const expectedCrossings = new Map<string, ExpectedCrossing>();
-    // Collect discrepancies surfaced inline during the scan loop
-    // (parse failures, oracle-state warnings such as
-    // `unsafe_lifetime_accumulator`). Merged into the final
-    // `discrepancies` list at the end of the replay.
-    const parseFailures: ReplayDiscrepancy[] = [];
+    // Discrepancies surfaced inline as the scan loop walks event_log:
+    // per-row parse failures and oracle-state boundary signals
+    // (`unsafe_lifetime_accumulator`). Merged into the final
+    // `discrepancies` list before the downstream comparators run so
+    // on-call sees root-cause inline failures ahead of any
+    // sum-mismatch discrepancies they may transitively trigger.
+    const inlineDiscrepancies: ReplayDiscrepancy[] = [];
 
     let cursor = 0;
     let scanned = 0;
@@ -524,7 +564,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
               oracleGlobalLifetime,
               row.lsn,
               unsafeAccumulatorFlagged,
-              parseFailures,
+              inlineDiscrepancies,
             );
             const agentPost = (oracleAgentLifetime.get(parsed.agentSlug) ?? 0n) + amountBig;
             oracleAgentLifetime.set(parsed.agentSlug, agentPost);
@@ -534,7 +574,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
               agentPost,
               row.lsn,
               unsafeAccumulatorFlagged,
-              parseFailures,
+              inlineDiscrepancies,
             );
             if (parsed.taskId !== undefined) {
               const taskPost = (oracleTaskLifetime.get(parsed.taskId) ?? 0n) + amountBig;
@@ -545,7 +585,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
                 taskPost,
                 row.lsn,
                 unsafeAccumulatorFlagged,
-                parseFailures,
+                inlineDiscrepancies,
               );
             }
             computeExpectedCrossings({
@@ -605,7 +645,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
             }
           }
         } catch (err) {
-          parseFailures.push({
+          inlineDiscrepancies.push({
             kind: "event_payload_unparseable",
             lsn: lsnFromV1Number(row.lsn),
             type: row.type,
@@ -617,11 +657,12 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
       cursor = rows[rows.length - 1]?.lsn ?? cursor;
     }
 
-    // Surface per-row parse failures first so on-call sees them at the
-    // top of the discrepancies list; downstream comparators may emit
-    // sum-mismatch discrepancies for the same rows but the
-    // parse-failure is the root cause.
-    const discrepancies: ReplayDiscrepancy[] = [...parseFailures];
+    // Inline scan-loop discrepancies (parse failures, accumulator
+    // boundary signals) are surfaced first so on-call sees root-cause
+    // failures at the top of the list, ahead of any downstream
+    // sum-mismatch comparators that may have been triggered by the
+    // same underlying corruption.
+    const discrepancies: ReplayDiscrepancy[] = [...inlineDiscrepancies];
 
     const storedAgentDays = new Map<string, bigint>();
     for (const row of listAgentDaysStmt.all()) {
@@ -682,7 +723,10 @@ interface ThresholdCrossingDbRow {
   readonly budgetSetLsn: number;
   readonly thresholdBps: number;
   readonly crossedAtLsn: number;
-  readonly observedMicroUsd: number;
+  // Decimal-string form — see the `CAST(observed_micro_usd AS TEXT)`
+  // comment on listCrossingsStmt. Compare via bigint widening or
+  // string equality; never `Number(...)`.
+  readonly observedMicroUsd: string;
   readonly limitMicroUsd: number;
 }
 
@@ -703,69 +747,6 @@ function crossingKey(budgetId: string, budgetSetLsn: number, thresholdBps: numbe
   return `${budgetId}|${budgetSetLsn}|${thresholdBps}`;
 }
 
-// `MicroUsd` brand ceiling as a bigint. Cumulative oracle accumulators
-// that cross this no longer fit the `MicroUsd` contract; emit a
-// decimal-string form in any discrepancy that carries them. Derived
-// from the protocol constant so a future change to the brand bound
-// can't silently drift the oracle.
-const MAX_BUDGET_LIMIT_MICRO_USD_BIG = BigInt(MAX_BUDGET_LIMIT_MICRO_USD);
-
-// 2^53 - 1, the largest exact integer representable as a JS `number`.
-// Past this point any `Number(bigint)` cast rounds. The internal math
-// is now bigint and the cumulative-observed wire shape is a decimal
-// string, so this is purely a "values past here are number-typed-
-// suspect" signal for on-call dashboards.
-const MAX_SAFE_INTEGER_BIG = BigInt(Number.MAX_SAFE_INTEGER);
-
-// Records the first cost.event LSN at which an accumulator
-// (`global`, `agent[slug]`, or `task[id]`) crosses each
-// representability boundary. Fires once per (scope, subjectId, reason)
-// per replay-check run. The reasons fire independently:
-//
-// - `exceeds_micro_usd_brand` (`MAX_BUDGET_LIMIT_MICRO_USD`, 1e12):
-//   downstream consumers that re-validate `MicroUsd` payloads will
-//   reject values past here; oracle discrepancies switch to decimal
-//   strings.
-// - `exceeds_safe_integer` (`Number.MAX_SAFE_INTEGER`, ≈ 9e15): any
-//   number-typed derivative loses precision past here.
-function flagUnsafeAccumulator(
-  scope: "global" | "agent" | "task",
-  subjectId: string | null,
-  post: bigint,
-  costEventLsn: number,
-  flagged: Set<string>,
-  out: ReplayDiscrepancy[],
-): void {
-  if (post > MAX_BUDGET_LIMIT_MICRO_USD_BIG) {
-    pushUnsafeIfNew("exceeds_micro_usd_brand", scope, subjectId, post, costEventLsn, flagged, out);
-  }
-  if (post > MAX_SAFE_INTEGER_BIG) {
-    pushUnsafeIfNew("exceeds_safe_integer", scope, subjectId, post, costEventLsn, flagged, out);
-  }
-}
-
-function pushUnsafeIfNew(
-  reason: "exceeds_micro_usd_brand" | "exceeds_safe_integer",
-  scope: "global" | "agent" | "task",
-  subjectId: string | null,
-  post: bigint,
-  costEventLsn: number,
-  flagged: Set<string>,
-  out: ReplayDiscrepancy[],
-): void {
-  const key = `${scope}|${subjectId ?? ""}|${reason}`;
-  if (flagged.has(key)) return;
-  flagged.add(key);
-  out.push({
-    kind: "unsafe_lifetime_accumulator",
-    reason,
-    scope,
-    subjectId,
-    costEventLsn: lsnFromV1Number(costEventLsn),
-    accumulatedMicroUsd: post.toString(),
-  });
-}
-
 // Internal test seam. The end-to-end path that exercises
 // `unsafe_lifetime_accumulator` requires pushing an oracle accumulator
 // past 2^53 microUsd (≈ $9B cumulative spend). Per-event amounts are
@@ -782,22 +763,25 @@ export const __replayCheckTesting = Object.freeze({
   MAX_SAFE_INTEGER_BIG,
   MAX_BUDGET_LIMIT_MICRO_USD_BIG,
   crossesThresholdBigInt,
-  // PR #842 budget-candidate-index helpers exposed for direct
-  // assertion (the `eventsScanned > 1_000` regression test wouldn't
-  // catch a revert to the O(events × budgets) iteration). Round-3
-  // exposed computeExpectedCrossings so the hot path can be tested
-  // with a hostile Proxy that blocks universe iteration. Round-4
-  // added replaceBudgetInIndex so the lifecycle-invariant tests can
-  // exercise the helper directly.
+  // Budget-candidate-index helpers exposed for direct assertion:
+  // the existing `eventsScanned > 1_000` regression test would still
+  // satisfy a revert to the O(events × budgets) iteration, so tests
+  // need to inspect the index shape directly. `computeExpectedCrossings`
+  // is exposed so the hot path can be tested with a hostile Proxy
+  // that blocks universe iteration. `replaceBudgetInIndex` is
+  // exposed so the lifecycle-invariant tests can exercise the
+  // remove-then-add semantics directly without going through the
+  // full replay loop.
   addBudgetToIndex,
   removeBudgetFromIndex,
   replaceBudgetInIndex,
   computeExpectedCrossings,
-  // Round-4 exposure (PR #845 round-4 codex api + security 2-of-2):
-  // the aggregate compare functions are exposed so tests can drive
-  // them with synthetic bigint maps past `MAX_BUDGET_LIMIT_MICRO_USD`
-  // and `Number.MAX_SAFE_INTEGER`. End-to-end is blocked by the same
-  // protocol per-event cap as the threshold-oracle path.
+  // Aggregate compare functions exposed so tests can drive them with
+  // synthetic bigint maps past `MAX_BUDGET_LIMIT_MICRO_USD` and
+  // `Number.MAX_SAFE_INTEGER`. End-to-end coverage past 2^53 is
+  // blocked by the protocol per-event cap
+  // (`MAX_COST_EVENT_AMOUNT_MICRO_USD = 1e8`), so a direct seam is
+  // the only way to assert the boundary emission shape.
   compareAgentDays,
   compareTasks,
 });
@@ -835,15 +819,18 @@ function compareCrossings(
         stored: actual.crossedAtLsn,
       });
     }
-    if (actual.observedMicroUsd !== expected.observedMicroUsd) {
+    // Stored side is a decimal string from `CAST(...)`; widen the
+    // protocol-bounded replayed side via `String(...)` for byte-exact
+    // comparison. Equal-on-bytes implies equal-as-integers.
+    const expectedObservedString = String(expected.observedMicroUsd);
+    if (actual.observedMicroUsd !== expectedObservedString) {
       out.push({
-        kind: "threshold_crossing_field_mismatch",
+        kind: "threshold_crossing_observed_mismatch",
         budgetId: expected.budgetId as BudgetId,
         budgetSetLsn: lsnFromV1Number(expected.budgetSetLsn),
         thresholdBps: expected.thresholdBps,
-        field: "observedMicroUsd",
-        replayed: expected.observedMicroUsd,
-        stored: actual.observedMicroUsd,
+        replayedMicroUsdString: expectedObservedString,
+        storedMicroUsdString: actual.observedMicroUsd,
       });
     }
     if (actual.limitMicroUsd !== expected.limitMicroUsd) {
@@ -1241,10 +1228,11 @@ function parseStoredThresholds(raw: string): readonly number[] | { readonly erro
   }
   // Mirror the protocol's `BudgetSetAuditPayload.thresholdsBps`
   // validation: each entry must be a positive safe-integer ≤ 10_000.
-  // Round-3 hardening: a bare `typeof === "number"` check accepted
-  // `Infinity` (from `JSON.parse("[1e999]")`), which would later JSON-
-  // serialize as `null` and lose the corruption signal. Round-3 fix:
-  // explicit `Number.isSafeInteger` + bounds.
+  // Explicit `Number.isSafeInteger` + bounds rather than `typeof
+  // === "number"` so values like `Infinity` (which `JSON.parse` can
+  // produce from `"[1e999]"`) are rejected here — they would later
+  // JSON-serialize as `null` and the corruption signal would be
+  // lost by the time it reaches on-call.
   for (const n of parsed) {
     if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0 || n > 10_000) {
       return {
