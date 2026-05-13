@@ -61,6 +61,10 @@ function buildBudgetSet(opts: {
   };
 }
 
+function budgetIdFromNumber(n: number): string {
+  return `01${String(n).padStart(24, "0")}`;
+}
+
 describe("cost ledger projections", () => {
   it("appendCostEvent inserts event_log row and projection rows atomically", () => {
     const { db, ledger } = setup();
@@ -813,6 +817,81 @@ describe("replay-check oracle (#836)", () => {
 
     const report = runReplayCheck(db);
     expect(report.ok).toBe(true);
+    expect(
+      report.discrepancies.filter(
+        (d) =>
+          d.kind === "threshold_crossing_unemitted" ||
+          d.kind === "threshold_crossing_spurious" ||
+          d.kind === "threshold_crossing_oracle_field_mismatch",
+      ),
+    ).toEqual([]);
+  });
+
+  it("oracle filters candidates across tombstones and scope transitions (#842)", () => {
+    const { db, ledger } = setup();
+    for (let i = 1; i <= 1_000; i += 1) {
+      const budgetId = budgetIdFromNumber(i);
+      const subjectId = `noise-${i}`;
+      ledger.appendBudgetSet(
+        buildBudgetSet({
+          budgetId,
+          scope: "agent",
+          subjectId,
+          limitMicroUsd: 1_000_000,
+          thresholdsBps: [5_000],
+        }),
+      );
+      ledger.appendBudgetSet(
+        buildBudgetSet({
+          budgetId,
+          scope: "agent",
+          subjectId,
+          limitMicroUsd: 0,
+          thresholdsBps: [5_000],
+        }),
+      );
+    }
+
+    const transitioningBudgetId = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
+    ledger.appendBudgetSet(
+      buildBudgetSet({
+        budgetId: transitioningBudgetId,
+        scope: "agent",
+        subjectId: "legacy",
+        limitMicroUsd: 10_000_000,
+        thresholdsBps: [5_000],
+      }),
+    );
+    ledger.appendBudgetSet(
+      buildBudgetSet({
+        budgetId: transitioningBudgetId,
+        scope: "global",
+        limitMicroUsd: 1_000_000,
+        thresholdsBps: [5_000],
+      }),
+    );
+
+    const crossed = ledger.appendCostEvent(
+      buildCostEvent({ agentSlug: "primary", amountMicroUsd: 600_000 }),
+    );
+    expect(crossed.newCrossings.length).toBe(1);
+
+    ledger.appendBudgetSet(
+      buildBudgetSet({
+        budgetId: transitioningBudgetId,
+        scope: "global",
+        limitMicroUsd: 0,
+        thresholdsBps: [5_000],
+      }),
+    );
+    const afterTombstone = ledger.appendCostEvent(
+      buildCostEvent({ agentSlug: "primary", amountMicroUsd: 600_000 }),
+    );
+    expect(afterTombstone.newCrossings).toEqual([]);
+
+    const report = runReplayCheck(db);
+    expect(report.ok).toBe(true);
+    expect(report.eventsScanned).toBeGreaterThan(1_000);
     expect(
       report.discrepancies.filter(
         (d) =>

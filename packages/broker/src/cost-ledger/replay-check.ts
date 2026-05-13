@@ -332,6 +332,11 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     const replayedAgentDays = new Map<string, number>();
     const replayedTasks = new Map<string, number>();
     const replayedBudgets = new Map<string, ReplayedBudget>();
+    const budgetIndexes: BudgetCandidateIndexes = {
+      globalBudgetIds: new Set<string>(),
+      agentBudgetIds: new Map<string, Set<string>>(),
+      taskBudgetIds: new Map<string, Set<string>>(),
+    };
     // Logged crossings: one entry per (budgetId, budgetSetLsn,
     // thresholdBps) key, BUT each entry carries every event_log row
     // that claimed the key. The projection PK suppresses duplicate
@@ -409,6 +414,9 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
               agentSlug: parsed.agentSlug,
               taskId: parsed.taskId,
               budgets: replayedBudgets,
+              globalBudgetIds: budgetIndexes.globalBudgetIds,
+              agentBudgetIds: budgetIndexes.agentBudgetIds,
+              taskBudgetIds: budgetIndexes.taskBudgetIds,
               globalLifetime: oracleGlobalLifetime,
               agentLifetime: oracleAgentLifetime,
               taskLifetime: oracleTaskLifetime,
@@ -419,14 +427,27 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
               kind,
               JSON.parse(row.payload.toString("utf8")),
             ) as BudgetSetAuditPayload;
-            replayedBudgets.set(parsed.budgetId, {
+            const previous = replayedBudgets.get(parsed.budgetId);
+            if (previous !== undefined) {
+              removeBudgetFromIndex(budgetIndexes, parsed.budgetId, previous);
+            }
+            const replayedBudget: ReplayedBudget = {
               scope: parsed.scope,
               subjectId: parsed.subjectId ?? null,
               limitMicroUsd: parsed.limitMicroUsd as number,
               thresholdsBps: [...parsed.thresholdsBps],
               setAtLsn: row.lsn,
               tombstoned: (parsed.limitMicroUsd as number) === 0,
-            });
+            };
+            replayedBudgets.set(parsed.budgetId, replayedBudget);
+            // Re-set events may move a budget between scopes/subjects. Remove
+            // the old placement before adding the new one; tombstones add
+            // nothing back, so the transition is symmetric.
+            if (replayedBudget.tombstoned) {
+              removeBudgetFromIndex(budgetIndexes, parsed.budgetId, replayedBudget);
+            } else {
+              addBudgetToIndex(budgetIndexes, parsed.budgetId, replayedBudget);
+            }
             budgetSetLsnToBudgetId.set(row.lsn, parsed.budgetId);
           } else if (kind === "budget_threshold_crossed") {
             const parsed = costAuditPayloadFromJsonValue(
@@ -790,6 +811,72 @@ interface ReplayedBudget {
   readonly tombstoned: boolean;
 }
 
+interface BudgetCandidateIndexes {
+  readonly globalBudgetIds: Set<string>;
+  readonly agentBudgetIds: Map<string, Set<string>>;
+  readonly taskBudgetIds: Map<string, Set<string>>;
+}
+
+function addBudgetToIndex(
+  indexes: BudgetCandidateIndexes,
+  budgetId: string,
+  budget: ReplayedBudget,
+): void {
+  if (budget.scope === "global") {
+    indexes.globalBudgetIds.add(budgetId);
+    return;
+  }
+  if (budget.subjectId === null) return;
+  addBudgetToSubjectIndex(
+    budget.scope === "agent" ? indexes.agentBudgetIds : indexes.taskBudgetIds,
+    budget.subjectId,
+    budgetId,
+  );
+}
+
+function removeBudgetFromIndex(
+  indexes: BudgetCandidateIndexes,
+  budgetId: string,
+  budget: ReplayedBudget,
+): void {
+  if (budget.scope === "global") {
+    indexes.globalBudgetIds.delete(budgetId);
+    return;
+  }
+  if (budget.subjectId === null) return;
+  removeBudgetFromSubjectIndex(
+    budget.scope === "agent" ? indexes.agentBudgetIds : indexes.taskBudgetIds,
+    budget.subjectId,
+    budgetId,
+  );
+}
+
+function addBudgetToSubjectIndex(
+  index: Map<string, Set<string>>,
+  subjectId: string,
+  budgetId: string,
+): void {
+  const existing = index.get(subjectId);
+  if (existing !== undefined) {
+    existing.add(budgetId);
+    return;
+  }
+  index.set(subjectId, new Set<string>([budgetId]));
+}
+
+function removeBudgetFromSubjectIndex(
+  index: Map<string, Set<string>>,
+  subjectId: string,
+  budgetId: string,
+): void {
+  const existing = index.get(subjectId);
+  if (existing === undefined) return;
+  existing.delete(budgetId);
+  if (existing.size === 0) {
+    index.delete(subjectId);
+  }
+}
+
 function compareAgentDays(
   replayed: ReadonlyMap<string, number>,
   stored: ReadonlyMap<string, number>,
@@ -1018,6 +1105,9 @@ interface ComputeExpectedCrossingsArgs {
   readonly agentSlug: string;
   readonly taskId: string | undefined;
   readonly budgets: ReadonlyMap<string, ReplayedBudget>;
+  readonly globalBudgetIds: ReadonlySet<string>;
+  readonly agentBudgetIds: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly taskBudgetIds: ReadonlyMap<string, ReadonlySet<string>>;
   readonly globalLifetime: number;
   readonly agentLifetime: ReadonlyMap<string, number>;
   readonly taskLifetime: ReadonlyMap<string, number>;
@@ -1031,7 +1121,25 @@ interface ComputeExpectedCrossingsArgs {
 // (`crossesThresholdBigInt`) MUST stay byte-identical with the reactor's
 // `crossesThreshold`; if they diverge, this oracle becomes a tautology.
 function computeExpectedCrossings(args: ComputeExpectedCrossingsArgs): void {
-  for (const [budgetId, budget] of args.budgets.entries()) {
+  const candidateBudgetIds = new Set<string>(args.globalBudgetIds);
+  const agentBudgetIds = args.agentBudgetIds.get(args.agentSlug);
+  if (agentBudgetIds !== undefined) {
+    for (const budgetId of agentBudgetIds) {
+      candidateBudgetIds.add(budgetId);
+    }
+  }
+  if (args.taskId !== undefined) {
+    const taskBudgetIds = args.taskBudgetIds.get(args.taskId);
+    if (taskBudgetIds !== undefined) {
+      for (const budgetId of taskBudgetIds) {
+        candidateBudgetIds.add(budgetId);
+      }
+    }
+  }
+
+  for (const budgetId of candidateBudgetIds) {
+    const budget = args.budgets.get(budgetId);
+    if (budget === undefined) continue;
     if (budget.tombstoned) continue;
     if (!isOracleApplicable(budget, args.agentSlug, args.taskId)) continue;
     const observed = oracleObservedFor(budget, args);
