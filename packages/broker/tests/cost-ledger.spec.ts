@@ -1382,8 +1382,9 @@ describe("replay-check oracle unsafe-lifetime (#843)", () => {
   // through `runReplayCheck` is blocked by the protocol per-event cap
   // (`MAX_COST_EVENT_AMOUNT_MICRO_USD = 1e8`), which would require
   // ~9e7 events to push an accumulator past `Number.MAX_SAFE_INTEGER`
-  // (≈ 9e15 microUsd ≈ $9B cumulative spend). See the comment on
-  // `__replayCheckTesting` in `replay-check.ts` for the rationale.
+  // (≈ 9e15 microUsd ≈ $9B cumulative spend). See
+  // `replay-check/testing.ts` for the test seam these unit tests
+  // import from.
   const {
     flagUnsafeAccumulator,
     MAX_SAFE_INTEGER_BIG,

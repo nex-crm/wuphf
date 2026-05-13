@@ -17,9 +17,6 @@
 //     forging the brand.
 //   - `exceeds_safe_integer` (Number.MAX_SAFE_INTEGER, ~9e15): any
 //     number-typed derivative loses precision past here.
-//
-// Extracted from replay-check.ts so that file stays under the
-// 1500-LOC limit (see scripts/file-size-allowlist.txt).
 import { lsnFromV1Number, MAX_BUDGET_LIMIT_MICRO_USD } from "@wuphf/protocol";
 import type { ReplayDiscrepancy } from "./discrepancy.ts";
 
