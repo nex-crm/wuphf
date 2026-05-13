@@ -76,6 +76,7 @@ func TestSignalWeight_Mapping(t *testing.T) {
 func TestDemandScoring_CrossAgentSearch(t *testing.T) {
 	idx := newDemandIndex(t)
 	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	idx.SetClockForTest(func() time.Time { return now })
 	path := "agents/pm/notebook/2026-05-06-retro.md"
 
 	// Two distinct agents searching the same entry → score = 2.0.
@@ -133,6 +134,7 @@ func TestDemandScoring_CrossAgentSearch(t *testing.T) {
 func TestDemandScoring_DifferentDays(t *testing.T) {
 	idx := newDemandIndex(t)
 	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	idx.SetClockForTest(func() time.Time { return now })
 	path := "agents/pm/notebook/entry.md"
 
 	// Same agent, different days → both events count.
@@ -162,6 +164,7 @@ func TestDemandScoring_DifferentDays(t *testing.T) {
 func TestDemandScoring_RejectionCooldown(t *testing.T) {
 	idx := newDemandIndex(t)
 	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	idx.SetClockForTest(func() time.Time { return now })
 	path := "agents/pm/notebook/entry.md"
 
 	// Build score above threshold (3 distinct searchers).
@@ -342,13 +345,17 @@ func TestNotebookDemandIndex_ReloadFromJSONL(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "events.jsonl")
 	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
 	path := "agents/pm/notebook/entry.md"
 
-	idx1, err := NewNotebookDemandIndex(logPath)
+	// Use the test constructor so the initial replay() uses the fake clock
+	// instead of `time.Now`. Without this, events recorded at `now` would
+	// be filtered out during reload once real wall-clock time advances
+	// past `now + 7d`.
+	idx1, err := NewNotebookDemandIndexForTest(logPath, clock)
 	if err != nil {
 		t.Fatalf("init1: %v", err)
 	}
-	idx1.SetClockForTest(func() time.Time { return now })
 	for _, slug := range []string{"eng", "design"} {
 		if err := idx1.Record(PromotionDemandEvent{
 			EntryPath:    path,
@@ -365,11 +372,10 @@ func TestNotebookDemandIndex_ReloadFromJSONL(t *testing.T) {
 	}
 
 	// Reopen the index against the same JSONL — events must replay.
-	idx2, err := NewNotebookDemandIndex(logPath)
+	idx2, err := NewNotebookDemandIndexForTest(logPath, clock)
 	if err != nil {
 		t.Fatalf("init2: %v", err)
 	}
-	idx2.SetClockForTest(func() time.Time { return now })
 	if got := idx2.Score(path); got != 2.0 {
 		t.Fatalf("idx2 score after reload = %v, want 2.0", got)
 	}

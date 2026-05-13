@@ -192,13 +192,33 @@ type NotebookDemandIndex struct {
 // and threshold honour env overrides; invalid env values fall back to the
 // defaults with a warn log.
 func NewNotebookDemandIndex(logPath string) (*NotebookDemandIndex, error) {
+	return newNotebookDemandIndex(logPath, time.Now)
+}
+
+// NewNotebookDemandIndexForTest mirrors NewNotebookDemandIndex but lets the
+// caller inject a clock used during the initial replay. SetClockForTest can
+// only override the clock AFTER construction, but replay() uses the clock to
+// compute the window cutoff and runs inside the constructor — so a test that
+// records events at a fixed past date and then reloads the index needs the
+// fake clock from the start. Production code uses NewNotebookDemandIndex.
+func NewNotebookDemandIndexForTest(
+	logPath string,
+	clock func() time.Time,
+) (*NotebookDemandIndex, error) {
+	if clock == nil {
+		clock = time.Now
+	}
+	return newNotebookDemandIndex(logPath, clock)
+}
+
+func newNotebookDemandIndex(logPath string, clock func() time.Time) (*NotebookDemandIndex, error) {
 	idx := &NotebookDemandIndex{
 		logPath:    logPath,
 		windowDays: resolveWindowDays(),
 		threshold:  resolveThreshold(),
 		events:     make(map[string]map[demandRecordKey]demandRecord),
 		escalated:  make(map[string]struct{}),
-		clock:      time.Now,
+		clock:      clock,
 	}
 	idx.progressCond = sync.NewCond(&idx.progressMu)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
