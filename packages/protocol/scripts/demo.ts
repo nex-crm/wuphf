@@ -1102,6 +1102,10 @@ const runnerSpawnJson = {
     credentialScope: "anthropic",
     providerKind: "anthropic",
   },
+  options: {
+    kind: "claude-cli",
+    extraArgs: ["--max-turns", "3"],
+  },
   prompt: "Summarize the task state.",
   model: "claude-sonnet-4-7",
   taskId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
@@ -1120,6 +1124,32 @@ expectThrows(
 expectThrows(
   () => runnerSpawnRequestFromJson({ ...runnerSpawnJson, schemaVersion: 999 }),
   /unsupported schemaVersion/,
+);
+const openAICompatSpawnJson = {
+  schemaVersion: 1,
+  kind: "openai-compat",
+  agentId: "agent_alpha",
+  credential: { version: 1, id: "cred_runner0123456789ABCDEFGHIJKLMN" },
+  options: {
+    kind: "openai-compat",
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    headers: { "OpenAI-Beta": "assistants=v2" },
+    timeoutMs: 60_000,
+  },
+  prompt: "Summarize the task state.",
+};
+expectEqual(
+  "openai-compatible runner options round-trip through the wire shape",
+  runnerSpawnRequestToJsonValue(runnerSpawnRequestFromJson(openAICompatSpawnJson)),
+  openAICompatSpawnJson,
+);
+expectThrows(
+  () =>
+    runnerSpawnRequestFromJson({
+      ...openAICompatSpawnJson,
+      options: { kind: "openai-compat" },
+    }),
+  /runnerSpawnRequest.options.endpoint: is required/,
 );
 const runnerCostEvent = runnerEventFromJson({
   schemaVersion: 1,
@@ -1176,12 +1206,12 @@ expectThrows(
 );
 expectEqual(
   "runner failure code registry exposes stable machine codes",
-  RUNNER_FAILURE_CODE_VALUES.includes("cost_ceiling_exceeded"),
+  RUNNER_FAILURE_CODE_VALUES.includes("runner_input_buffer_overflow"),
   true,
 );
 expectEqual(
   "runner failure code guard accepts stable machine codes",
-  isRunnerFailureCode("cost_ceiling_exceeded"),
+  isRunnerFailureCode("runner_input_buffer_overflow"),
   true,
 );
 expectEqual(

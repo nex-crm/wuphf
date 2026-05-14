@@ -13,6 +13,7 @@ import {
   type CredentialScope,
   credentialHandleFromJson,
   type RunnerEvent,
+  type RunnerSpawnRequest,
 } from "@wuphf/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -22,7 +23,6 @@ import {
   OPENAI_COMPAT_DEFAULT_TIMEOUT_MS,
   type OpenAICompatFetch,
   type OpenAICompatRunnerOptions,
-  type OpenAICompatRunnerSpawnRequest,
 } from "../../src/adapters/openai-compat.ts";
 import type { Receipt, RunnerSpawnDeps } from "../../src/runner.ts";
 
@@ -140,8 +140,8 @@ function credentialForScope(scope: CredentialScope): CredentialHandle {
 }
 
 function spawnRequest(
-  options: OpenAICompatRunnerOptions = { endpoint },
-): OpenAICompatRunnerSpawnRequest {
+  options: OpenAICompatRunnerOptions = { kind: "openai-compat", endpoint },
+): RunnerSpawnRequest {
   return {
     kind: "openai-compat",
     agentId,
@@ -151,6 +151,10 @@ function spawnRequest(
     taskId,
     options,
   };
+}
+
+function redactionFixture(): string {
+  return ["redact safe", "fixture value", "token!"].join(" ");
 }
 
 function createSpawner(fetchFn: OpenAICompatFetch) {
@@ -243,7 +247,7 @@ describe("createOpenAICompatRunner", () => {
     const spawnRunner = createSpawner(fetchFn);
 
     const runner = await spawnRunner(
-      spawnRequest({ endpoint, headers: { "X-Trace-Id": "trace-1" } }),
+      spawnRequest({ kind: "openai-compat", endpoint, headers: { "X-Trace-Id": "trace-1" } }),
       harness.deps,
     );
     const eventsPromise = collectAll(runner.events());
@@ -544,6 +548,76 @@ describe("createOpenAICompatRunner", () => {
     const failedEvents = await collectAll(failedRunner.events());
     expect(JSON.stringify(failedEvents)).not.toContain(credentialFixture.slice(0, 12));
     expect(JSON.stringify(failedEvents)).toContain("<redacted>");
+  });
+
+  it("redacts secrets split across SSE events without masking near misses", async () => {
+    const credentialFixture = redactionFixture();
+    const harness = makeHarness({ secret: credentialFixture });
+    const stream = new ControlledSseStream();
+    const fetchFn: OpenAICompatFetch = async () =>
+      new Response(stream.body, {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      });
+    const runner = await createSpawner(fetchFn)(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+
+    for (const chunk of credentialFixture.match(/.{1,2}/g) ?? []) {
+      stream.enqueue(sseData({ choices: [{ delta: { content: chunk } }] }));
+    }
+    stream.enqueue(sseData({ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0 } }));
+    stream.enqueue(doneData());
+    const events = await eventsPromise;
+    const serialized = JSON.stringify(events);
+
+    expect(serialized).not.toContain(credentialFixture);
+    expect(serialized).toContain("<redacted>");
+    expect(harness.receipts[0]?.finalMessage?.toString()).toBe("<redacted>");
+
+    const nearMiss = `${credentialFixture.slice(0, 12)}X${credentialFixture.slice(13)}`;
+    const nearMissHarness = makeHarness({ secret: credentialFixture });
+    const nearMissStream = new ControlledSseStream();
+    const nearMissFetch: OpenAICompatFetch = async () =>
+      new Response(nearMissStream.body, {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      });
+    const nearMissRunner = await createSpawner(nearMissFetch)(spawnRequest(), nearMissHarness.deps);
+    const nearMissEventsPromise = collectAll(nearMissRunner.events());
+    for (const chunk of nearMiss.match(/.{1,2}/g) ?? []) {
+      nearMissStream.enqueue(sseData({ choices: [{ delta: { content: chunk } }] }));
+    }
+    nearMissStream.enqueue(
+      sseData({ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0 } }),
+    );
+    nearMissStream.enqueue(doneData());
+    const nearMissEvents = await nearMissEventsPromise;
+
+    expect(nearMissHarness.receipts[0]?.finalMessage?.toString()).toBe(nearMiss);
+    expect(JSON.stringify(nearMissEvents)).not.toContain("<redacted>");
+  });
+
+  it("fails closed on oversized SSE events before writing receipts", async () => {
+    const harness = makeHarness();
+    const stream = new ControlledSseStream();
+    const fetchFn: OpenAICompatFetch = async () =>
+      new Response(stream.body, {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      });
+    const runner = await createSpawner(fetchFn)(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+
+    stream.enqueue(`data: ${"x".repeat(17 * 1024 * 1024)}`);
+    const events = await eventsPromise;
+
+    expect(
+      events.some(
+        (event) => event.kind === "failed" && event.code === "runner_input_buffer_overflow",
+      ),
+    ).toBe(true);
+    expect(harness.receipts).toHaveLength(0);
+    expect(harness.costs).toHaveLength(0);
   });
 
   it("rejects negative usage and cost ceiling overflows", async () => {

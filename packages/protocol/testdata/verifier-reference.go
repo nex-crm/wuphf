@@ -287,6 +287,7 @@ var runnerFailureCodeSet = map[string]bool{
 	"network_failed":                 true,
 	"provider_returned_error":        true,
 	"unrecognized_provider_response": true,
+	"runner_input_buffer_overflow":   true,
 }
 
 func loadRunnerFixture() (runnerFixture, error) {
@@ -324,6 +325,7 @@ func validateRunnerSpawnRequest(record map[string]interface{}) error {
 		"agentId":             true,
 		"credential":          true,
 		"providerRoute":       true,
+		"options":             true,
 		"prompt":              true,
 		"model":               true,
 		"cwd":                 true,
@@ -379,6 +381,15 @@ func validateRunnerSpawnRequest(record map[string]interface{}) error {
 			return err
 		}
 	}
+	if optionsValue, ok := record["options"]; ok {
+		options, ok := optionsValue.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("runnerSpawnRequest.options: must be an object")
+		}
+		if err := validateRunnerSpawnOptions(options, kind); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -402,6 +413,87 @@ func validateProviderRoute(record map[string]interface{}) error {
 	}
 	if !providerKindSet[providerKind] {
 		return fmt.Errorf("runnerSpawnRequest.providerRoute.providerKind: unsupported ProviderKind")
+	}
+	return nil
+}
+
+func validateRunnerSpawnOptions(record map[string]interface{}, requestKind string) error {
+	kind, err := requiredStringValue(record, "kind", "runnerSpawnRequest.options.kind")
+	if err != nil {
+		return err
+	}
+	if !runnerKindSet[kind] {
+		return fmt.Errorf("runnerSpawnRequest.options.kind: unsupported RunnerKind")
+	}
+	if kind != requestKind {
+		return fmt.Errorf("runnerSpawnRequest.options.kind: must match runnerSpawnRequest.kind")
+	}
+	switch kind {
+	case "claude-cli":
+		if err := knownKeys(record, "runnerSpawnRequest.options", map[string]bool{
+			"kind":      true,
+			"extraArgs": true,
+		}); err != nil {
+			return err
+		}
+		if extraArgs, ok := record["extraArgs"]; ok {
+			items, ok := extraArgs.([]interface{})
+			if !ok {
+				return fmt.Errorf("runnerSpawnRequest.options.extraArgs: must be an array")
+			}
+			for index, item := range items {
+				if _, ok := item.(string); !ok {
+					return fmt.Errorf("runnerSpawnRequest.options.extraArgs/%d: must be a string", index)
+				}
+			}
+		}
+	case "codex-cli":
+		if err := knownKeys(record, "runnerSpawnRequest.options", map[string]bool{
+			"kind":    true,
+			"sandbox": true,
+			"profile": true,
+		}); err != nil {
+			return err
+		}
+		if sandbox, ok, err := optionalString(record, "sandbox", "runnerSpawnRequest.options.sandbox"); err != nil {
+			return err
+		} else if ok && sandbox != "read-only" && sandbox != "workspace-write" {
+			return fmt.Errorf("runnerSpawnRequest.options.sandbox: unsupported codex sandbox")
+		}
+		if err := optionalStringValue(record, "profile", "runnerSpawnRequest.options.profile"); err != nil {
+			return err
+		}
+	case "openai-compat":
+		if err := knownKeys(record, "runnerSpawnRequest.options", map[string]bool{
+			"kind":      true,
+			"endpoint":  true,
+			"headers":   true,
+			"timeoutMs": true,
+		}); err != nil {
+			return err
+		}
+		if _, err := requiredStringValue(record, "endpoint", "runnerSpawnRequest.options.endpoint"); err != nil {
+			return err
+		}
+		if headersValue, ok := record["headers"]; ok {
+			headers, ok := headersValue.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("runnerSpawnRequest.options.headers: must be an object")
+			}
+			for key, value := range headers {
+				if _, ok := value.(string); !ok {
+					return fmt.Errorf("runnerSpawnRequest.options.headers/%s: must be a string", key)
+				}
+			}
+		}
+		if timeoutMs, ok := record["timeoutMs"]; ok {
+			number, ok := timeoutMs.(float64)
+			if !ok || number != float64(int(number)) || number <= 0 {
+				return fmt.Errorf("runnerSpawnRequest.options.timeoutMs: must be a positive safe integer")
+			}
+		}
+	default:
+		return fmt.Errorf("runnerSpawnRequest.options.kind: unsupported RunnerKind")
 	}
 	return nil
 }

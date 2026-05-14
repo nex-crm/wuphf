@@ -288,6 +288,35 @@ export const MAX_RUNNER_MODEL_BYTES = MAX_COST_MODEL_BYTES;
 export const MAX_RUNNER_CWD_BYTES = 4 * 1024;
 
 /**
+ * Runner CLI adapter extra arguments are configuration, not payload transport.
+ * 64 entries at 1 KiB each covers current Claude CLI option needs while
+ * preventing one spawn request from becoming an unbounded argv blob.
+ */
+export const MAX_RUNNER_EXTRA_ARGS = 64;
+export const MAX_RUNNER_EXTRA_ARG_BYTES = 1024;
+
+/**
+ * Runner profile labels are local config selectors. Keep them aligned with
+ * model label scale instead of allowing arbitrary config blobs in the field.
+ */
+export const MAX_RUNNER_PROFILE_BYTES = MAX_RUNNER_MODEL_BYTES;
+
+/**
+ * OpenAI-compatible endpoints are URLs, not request bodies. 2 KiB covers long
+ * Azure deployment paths and query-free provider URLs while bounding parser
+ * work at the protocol boundary.
+ */
+export const MAX_RUNNER_ENDPOINT_BYTES = 2 * 1024;
+
+/**
+ * Custom provider headers are metadata. These caps prevent a spawn request
+ * from becoming a second unbounded HTTP message before broker policy runs.
+ */
+export const MAX_RUNNER_OPTION_HEADERS = 64;
+export const MAX_RUNNER_OPTION_HEADER_NAME_BYTES = 256;
+export const MAX_RUNNER_OPTION_HEADER_VALUE_BYTES = 8 * 1024;
+
+/**
  * Runner stdout/stderr chunks are streamed; each event remains bounded so
  * slow consumers cannot force one unbounded JSON object through the broker.
  */

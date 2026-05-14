@@ -50,3 +50,23 @@ export class RunnerSpawnFailed extends AgentRunnerError {
     super(message, "runner_spawn_failed", options);
   }
 }
+
+export class RunnerOptionsRequired extends AgentRunnerError {
+  override readonly name = "RunnerOptionsRequired";
+
+  constructor(message = "runner options are required", options?: ErrorOptions) {
+    super(message, "runner_options_required", options);
+  }
+}
+
+export class EndpointNotAllowed extends AgentRunnerError {
+  override readonly name = "EndpointNotAllowed";
+
+  constructor(
+    readonly endpoint: string,
+    readonly allowedOrigins: readonly string[],
+    options?: ErrorOptions,
+  ) {
+    super(`endpoint is not allowed: ${endpoint}`, "endpoint_not_allowed", options);
+  }
+}

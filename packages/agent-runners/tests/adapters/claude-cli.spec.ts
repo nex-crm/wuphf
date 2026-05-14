@@ -150,6 +150,10 @@ function spawnRequest() {
   };
 }
 
+function redactionFixture(): string {
+  return ["redact safe", "fixture value", "token!"].join(" ");
+}
+
 async function collectAll(stream: ReadableStream<RunnerEvent>): Promise<RunnerEvent[]> {
   const reader = stream.getReader();
   const events: RunnerEvent[] = [];
@@ -220,6 +224,7 @@ describe("createClaudeCliRunner", () => {
       "--print",
       "--output-format",
       "stream-json",
+      "--",
       "Say hello",
     ]);
     const { ANTHROPIC_API_KEY, LC_ALL, PATH } = harness.calls[0]?.options.env ?? {};
@@ -248,6 +253,37 @@ describe("createClaudeCliRunner", () => {
     expect(harness.receipts[0]?.taskId).toBe(taskId);
     expect(harness.receipts[0]?.inputTokens).toBe(10);
     expect(harness.receipts[0]?.outputTokens).toBe(5);
+  });
+
+  it.each([
+    "--no-receipt foo bar",
+    "-h",
+    "",
+  ])("passes prompt after an argv separator: %j", async (prompt) => {
+    const harness = makeHarness();
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+    });
+
+    const runner = await spawnRunner({ ...spawnRequest(), prompt }, harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.exit(0);
+    await eventsPromise;
+
+    expect(harness.calls[0]?.args).toEqual([
+      "--print",
+      "--output-format",
+      "stream-json",
+      "--",
+      prompt,
+    ]);
   });
 
   it("fails the runner when receipt put fails", async () => {
@@ -383,6 +419,62 @@ describe("createClaudeCliRunner", () => {
     expect(serialized).not.toContain(credentialFixture.slice(0, 12));
     expect(serialized).toContain("<redacted>");
     expect(harness.receipts[0]?.finalMessage?.toString()).toBe("stdout <redacted>");
+  });
+
+  it("redacts a secret split across stdout events", async () => {
+    const credentialFixture = redactionFixture();
+    const harness = makeHarness({ secret: credentialFixture });
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      receiptIdFactory: () => receiptId,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+    });
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    for (const chunk of credentialFixture.match(/.{1,2}/g) ?? []) {
+      harness.child.writeStdout(assistantLine(chunk));
+    }
+    harness.child.exit(0);
+    const events = await eventsPromise;
+    const serialized = JSON.stringify(events);
+
+    expect(serialized).not.toContain(credentialFixture);
+    expect(serialized).toContain("<redacted>");
+    expect(harness.receipts[0]?.finalMessage?.toString()).toBe("<redacted>");
+  });
+
+  it("fails closed and terminates the subprocess on oversized stdout lines", async () => {
+    const harness = makeHarness();
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+    });
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout("x".repeat(17 * 1024 * 1024));
+    const events = await eventsPromise;
+
+    expect(
+      events.some(
+        (event) => event.kind === "failed" && event.code === "runner_input_buffer_overflow",
+      ),
+    ).toBe(true);
+    expect(harness.child.signals).toEqual(["SIGTERM"]);
+    expect(harness.receipts).toHaveLength(0);
   });
 
   it("fails negative usage and cost ceiling overflows before recording cost", async () => {

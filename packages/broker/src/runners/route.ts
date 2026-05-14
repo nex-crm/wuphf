@@ -3,8 +3,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { ReadableStream } from "node:stream/web";
-
 import type { AgentRunner, RunnerEventRecord } from "@wuphf/agent-runners";
+import { EndpointNotAllowed, RunnerOptionsRequired } from "@wuphf/agent-runners";
 import type { AgentId, ApiToken, BrokerIdentity, RunnerEvent, RunnerId } from "@wuphf/protocol";
 import { asRunnerId, runnerEventToJsonValue, runnerSpawnRequestFromJson } from "@wuphf/protocol";
 
@@ -125,11 +125,26 @@ async function handleSpawn(
     cwdOutOfWorkspace(res, error instanceof Error ? error.message : String(error));
     return;
   }
-  const runner = await createAgentRunnerForBroker(
-    { ...request, cwd: brokerResolvedCwd },
-    deps.brokerIdentityForAgent(callerAgentId),
-    deps,
-  );
+  let runner: AgentRunner;
+  try {
+    runner = await createAgentRunnerForBroker(
+      { ...request, cwd: brokerResolvedCwd },
+      deps.brokerIdentityForAgent(callerAgentId),
+      deps,
+    );
+  } catch (error) {
+    if (error instanceof EndpointNotAllowed) {
+      deps.logger.warn("runner_spawn_rejected", { reason: "endpoint_not_allowed" });
+      endpointNotAllowed(res, error);
+      return;
+    }
+    if (error instanceof RunnerOptionsRequired) {
+      deps.logger.warn("runner_spawn_rejected", { reason: "runner_options_required" });
+      runnerOptionsRequired(res, error.message);
+      return;
+    }
+    throw error;
+  }
   runners.set(runner.id, { runner, retentionTimer: null });
   monitorRunner(runners, runner, options.retentionTtlMs, deps.logger);
   writeJson(res, 201, { runnerId: runner.id });
@@ -385,6 +400,18 @@ function runnerCapacityExhausted(res: ServerResponse, maxRunners: number): void 
 
 function cwdOutOfWorkspace(res: ServerResponse, reason: string): void {
   writeJson(res, 400, { error: "cwd_out_of_workspace", reason });
+}
+
+function endpointNotAllowed(res: ServerResponse, error: EndpointNotAllowed): void {
+  writeJson(res, 403, {
+    error: "endpoint_not_allowed",
+    endpoint: error.endpoint,
+    allowedOrigins: error.allowedOrigins,
+  });
+}
+
+function runnerOptionsRequired(res: ServerResponse, reason: string): void {
+  writeJson(res, 400, { error: "runner_options_required", reason });
 }
 
 function forbidden(res: ServerResponse, reason: string): void {

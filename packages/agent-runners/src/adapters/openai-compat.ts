@@ -16,14 +16,20 @@ import {
   type RunnerEvent,
   type RunnerFailureCode,
   type RunnerId,
+  type RunnerSpawnOptions,
   type RunnerSpawnRequest,
   SanitizedString,
   sha256Hex,
   type TaskId,
 } from "@wuphf/protocol";
 
-import { ReceiptWriteFailed, RunnerSpawnFailed } from "../errors.ts";
-import { chunkStdio } from "../internal/chunk.ts";
+import { ReceiptWriteFailed, RunnerOptionsRequired, RunnerSpawnFailed } from "../errors.ts";
+import {
+  BoundedLineBuffer,
+  chunkStdio,
+  DEFAULT_MAX_RUNNER_INPUT_BUFFER_BYTES,
+  RunnerInputBufferOverflow,
+} from "../internal/chunk.ts";
 import {
   errorMessage,
   RunnerFailure,
@@ -33,19 +39,14 @@ import {
 } from "../internal/cleanup.ts";
 import { trustedCostModel, validatedCostEntry } from "../internal/cost.ts";
 import { DEFAULT_MAX_EVENT_HISTORY, RunnerEventHub } from "../internal/event-hub.ts";
-import { createSecretRedactor, type SecretRedactor } from "../internal/redact.ts";
+import { createSecretStreamingRedactor, type StreamingRedactor } from "../internal/redact.ts";
 import { LifecycleStateMachine } from "../lifecycle.ts";
 import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
 
-export interface OpenAICompatRunnerOptions {
-  readonly endpoint: string;
-  readonly headers?: Readonly<Record<string, string>> | undefined;
-  readonly timeoutMs?: number | undefined;
-}
-
-export type OpenAICompatRunnerSpawnRequest = RunnerSpawnRequest & {
-  readonly options?: OpenAICompatRunnerOptions | undefined;
-};
+export type OpenAICompatRunnerOptions = Extract<
+  RunnerSpawnOptions,
+  { readonly kind: "openai-compat" }
+>;
 
 export type OpenAICompatFetch = (
   input: string | URL | Request,
@@ -125,7 +126,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
   readonly #now: () => Date;
   readonly #providerKind: ProviderKind;
   readonly #receiptId: ReceiptId;
-  readonly #redact: SecretRedactor;
+  readonly #redactor: StreamingRedactor;
   readonly #request: RunnerSpawnRequest;
   readonly #runnerOptions: OpenAICompatRunnerOptions;
   readonly #secret: string;
@@ -135,6 +136,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
   #failed = false;
   #finalText = "";
   #lastUsage: OpenAICompatUsage | null = null;
+  #redactionTarget: "stdout" | "stderr" | null = null;
   #runSettled: Promise<void> | null = null;
   #startedAt: Date;
   #terminatePromise: Promise<void> | null = null;
@@ -161,7 +163,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
     this.#now = args.now;
     this.#providerKind = providerKindForScope(CredentialHandle.scope(args.deps.credential));
     this.#receiptId = args.receiptIdFactory();
-    this.#redact = createSecretRedactor(args.secret);
+    this.#redactor = createSecretStreamingRedactor(args.secret);
     this.#request = args.request;
     this.#runnerOptions = args.runnerOptions;
     this.#secret = args.secret;
@@ -218,7 +220,11 @@ class OpenAICompatAgentRunner implements AgentRunner {
         signal,
       );
       if (!response.ok) {
-        const body = await safeResponseText(response, signal);
+        const body = await safeResponseText(
+          response,
+          signal,
+          DEFAULT_MAX_RUNNER_INPUT_BUFFER_BYTES,
+        );
         const message = failureMessage("openai_compat_http_error", {
           body,
           exitCode: 1,
@@ -229,12 +235,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
       }
       await this.#emit({ kind: "started", runnerId: this.id, at: this.#isoNow() });
       if (auth.warning !== undefined) {
-        await this.#emit({
-          kind: "stderr",
-          runnerId: this.id,
-          chunk: auth.warning,
-          at: this.#isoNow(),
-        });
+        await this.#emitText("stderr", auth.warning);
       }
       const sawDone = await this.#consumeSse(response.body, signal);
       if (!sawDone) {
@@ -300,46 +301,37 @@ class OpenAICompatAgentRunner implements AgentRunner {
     }
     const reader = body.getReader();
     const decoder = new TextDecoder();
-    let buffered = "";
+    const buffer = new BoundedLineBuffer(DEFAULT_MAX_RUNNER_INPUT_BUFFER_BYTES);
     try {
       while (true) {
         const next = await withAbort(reader.read(), signal);
         if (next.done) break;
-        buffered += decoder.decode(next.value, { stream: true });
-        const done = await this.#drainBufferedSseLines(buffered, (remaining) => {
-          buffered = remaining;
-        });
-        if (done) {
+        if (await this.#handleSseLines(buffer.push(decoder.decode(next.value, { stream: true })))) {
           await reader.cancel();
           return true;
         }
       }
-      buffered += decoder.decode();
-      if (buffered.length > 0) {
-        return await this.#handleSseLine(stripTrailingCarriageReturn(buffered));
+      if (await this.#handleSseLines(buffer.push(decoder.decode()))) {
+        return true;
       }
-      return false;
+      return await this.#handleSseLines(buffer.flush());
+    } catch (error) {
+      if (error instanceof RunnerInputBufferOverflow) {
+        throw new RunnerFailure(error.message, "runner_input_buffer_overflow", { cause: error });
+      }
+      throw error;
     } finally {
       reader.releaseLock();
     }
   }
 
-  async #drainBufferedSseLines(
-    buffered: string,
-    setRemaining: (remaining: string) => void,
-  ): Promise<boolean> {
-    let remaining = buffered;
-    let newline = remaining.indexOf("\n");
-    while (newline >= 0) {
-      const line = stripTrailingCarriageReturn(remaining.slice(0, newline));
-      remaining = remaining.slice(newline + 1);
+  async #handleSseLines(lines: readonly string[]): Promise<boolean> {
+    for (const rawLine of lines) {
+      const line = stripTrailingCarriageReturn(rawLine);
       if (await this.#handleSseLine(line)) {
-        setRemaining(remaining);
         return true;
       }
-      newline = remaining.indexOf("\n");
     }
-    setRemaining(remaining);
     return false;
   }
 
@@ -402,7 +394,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
   }
 
   async #emitStdout(text: string): Promise<void> {
-    const redacted = this.#redact(text);
+    const redacted = await this.#redactForTarget("stdout", text);
     for (const chunk of chunkStdio(redacted)) {
       await this.#emit({ kind: "stdout", runnerId: this.id, chunk, at: this.#isoNow() });
       this.#finalText += chunk;
@@ -418,6 +410,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
   }
 
   async #writeReceiptAndFinish(exitCode: number): Promise<void> {
+    await this.#flushRedactorCarry();
     const receipt = this.#buildReceipt();
     try {
       const stored = await this.#deps.receiptStore.put(receipt);
@@ -477,14 +470,13 @@ class OpenAICompatAgentRunner implements AgentRunner {
   }
 
   async #emit(event: RunnerEvent): Promise<void> {
-    const redacted = redactEvent(event, this.#redact);
     let lsn: number;
     try {
-      lsn = await this.#deps.eventLog.append(redacted);
+      lsn = await this.#deps.eventLog.append(event);
     } catch (error) {
       throw new RunnerFailure(errorMessage(error), "event_log_write_failed", { cause: error });
     }
-    this.#hub.publish(redacted, lsn);
+    this.#hub.publish(event, lsn);
   }
 
   async #cleanupWithFailure(
@@ -494,9 +486,11 @@ class OpenAICompatAgentRunner implements AgentRunner {
     waitForDone = false,
   ): Promise<void> {
     const failure = runnerFailureFromError(error, fallbackCode);
-    const message = this.#redact(failure.message);
     if (this.#failed) return;
     this.#failed = true;
+    await this.#flushRedactorCarry();
+    const message = `${this.#redactor.redact(failure.message)}${this.#redactor.flush()}`;
+    this.#redactionTarget = null;
     const event: RunnerEvent = {
       kind: "failed",
       runnerId: this.id,
@@ -566,66 +560,45 @@ class OpenAICompatAgentRunner implements AgentRunner {
       },
     };
   }
+
+  async #emitText(target: "stdout" | "stderr", text: string): Promise<void> {
+    const redacted = await this.#redactForTarget(target, text);
+    for (const chunk of chunkStdio(redacted)) {
+      await this.#emit({ kind: target, runnerId: this.id, chunk, at: this.#isoNow() });
+      if (target === "stdout") {
+        this.#finalText += chunk;
+      }
+    }
+  }
+
+  async #redactForTarget(target: "stdout" | "stderr", text: string): Promise<string> {
+    if (this.#redactionTarget !== null && this.#redactionTarget !== target) {
+      await this.#flushRedactorCarry();
+    }
+    this.#redactionTarget = target;
+    return this.#redactor.redact(text);
+  }
+
+  async #flushRedactorCarry(): Promise<void> {
+    const target = this.#redactionTarget;
+    const carry = this.#redactor.flush();
+    this.#redactionTarget = null;
+    if (target === null || carry.length === 0) return;
+    for (const chunk of chunkStdio(carry)) {
+      await this.#emit({ kind: target, runnerId: this.id, chunk, at: this.#isoNow() });
+      if (target === "stdout") {
+        this.#finalText += chunk;
+      }
+    }
+  }
 }
 
 function parseRunnerOptions(request: RunnerSpawnRequest): OpenAICompatRunnerOptions {
-  const rawOptions = (request as { readonly options?: unknown }).options;
-  if (!isRecord(rawOptions)) {
-    throw new RunnerSpawnFailed("OpenAI-compatible runner requires options.endpoint");
+  const options = request.options;
+  if (options?.kind !== "openai-compat") {
+    throw new RunnerOptionsRequired("OpenAI-compatible runner requires options.kind=openai-compat");
   }
-  const endpoint = recordString(rawOptions, "endpoint");
-  if (endpoint === null || endpoint.length === 0) {
-    throw new RunnerSpawnFailed("OpenAI-compatible runner requires options.endpoint");
-  }
-  validateHttpEndpoint(endpoint);
-  const headers = optionalHeaders(rawOptions);
-  const timeoutMs = optionalTimeoutMs(rawOptions);
-  return {
-    endpoint,
-    ...(headers === undefined ? {} : { headers }),
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-  };
-}
-
-function validateHttpEndpoint(endpoint: string): void {
-  try {
-    const url = new URL(endpoint);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new RunnerSpawnFailed("OpenAI-compatible endpoint must use http or https");
-    }
-  } catch (error) {
-    if (error instanceof RunnerSpawnFailed) throw error;
-    throw new RunnerSpawnFailed("OpenAI-compatible endpoint must be a valid URL", {
-      cause: error,
-    });
-  }
-}
-
-function optionalHeaders(
-  record: Readonly<Record<string, unknown>>,
-): Record<string, string> | undefined {
-  const raw = recordValue(record, "headers");
-  if (raw === undefined) return undefined;
-  if (!isRecord(raw)) {
-    throw new RunnerSpawnFailed("OpenAI-compatible options.headers must be an object");
-  }
-  const headers: Record<string, string> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (typeof value !== "string") {
-      throw new RunnerSpawnFailed("OpenAI-compatible options.headers values must be strings");
-    }
-    headers[key] = value;
-  }
-  return headers;
-}
-
-function optionalTimeoutMs(record: Readonly<Record<string, unknown>>): number | undefined {
-  const raw = recordValue(record, "timeoutMs");
-  if (raw === undefined) return undefined;
-  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw <= 0) {
-    throw new RunnerSpawnFailed("OpenAI-compatible options.timeoutMs must be a positive integer");
-  }
-  return raw;
+  return options;
 }
 
 function providerKindForScope(scope: CredentialScope): ProviderKind {
@@ -636,13 +609,42 @@ function providerKindForScope(scope: CredentialScope): ProviderKind {
   }
 }
 
-async function safeResponseText(response: Response, signal: AbortSignal): Promise<string> {
+async function safeResponseText(
+  response: Response,
+  signal: AbortSignal,
+  maxBytes: number,
+): Promise<string> {
+  const body = response.body;
+  if (body === null) return "";
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = "";
   try {
-    return truncateUtf8(await withAbort(response.text(), signal), SAFE_HTTP_ERROR_BODY_BYTES);
+    while (true) {
+      const next = await withAbort(reader.read(), signal);
+      if (next.done) break;
+      totalBytes += next.value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new RunnerFailure(
+          `OpenAI-compatible HTTP error body exceeded ${maxBytes} bytes`,
+          "runner_input_buffer_overflow",
+        );
+      }
+      if (Buffer.byteLength(text, "utf8") <= SAFE_HTTP_ERROR_BODY_BYTES) {
+        text += decoder.decode(next.value, { stream: true });
+      }
+    }
+    text += decoder.decode();
+    return truncateUtf8(text, SAFE_HTTP_ERROR_BODY_BYTES);
   } catch (error) {
+    if (error instanceof RunnerFailure) throw error;
     return failureMessage("openai_compat_error_body_unavailable", {
       cause: failureCause(error),
     });
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -809,18 +811,6 @@ function recordValue(record: Readonly<Record<string, unknown>>, key: string): un
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function redactEvent(event: RunnerEvent, redact: SecretRedactor): RunnerEvent {
-  switch (event.kind) {
-    case "stdout":
-    case "stderr":
-      return { ...event, chunk: redact(event.chunk) };
-    case "failed":
-      return { ...event, error: redact(event.error) };
-    default:
-      return event;
-  }
 }
 
 function randomRunnerId(): RunnerId {

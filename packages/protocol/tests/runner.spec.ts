@@ -68,6 +68,7 @@ describe("RunnerId and RunnerKind", () => {
   it("accepts the frozen runner kinds and branded ids", () => {
     expect(RUNNER_KIND_VALUES).toEqual(["claude-cli", "codex-cli", "openai-compat"]);
     expect(RUNNER_FAILURE_CODE_VALUES).toContain("event_log_write_failed");
+    expect(RUNNER_FAILURE_CODE_VALUES).toContain("runner_input_buffer_overflow");
     expect(isRunnerKind("claude-cli")).toBe(true);
     expect(isRunnerKind("bogus")).toBe(false);
     expect(asRunnerId(runnerId)).toBe(runnerId);
@@ -88,6 +89,10 @@ describe("RunnerSpawnRequest codec", () => {
       credentialScope: asCredentialScope("anthropic"),
       providerKind: asProviderKind("anthropic"),
     });
+    expect(request.options).toEqual({
+      kind: "claude-cli",
+      extraArgs: ["--max-turns", "3"],
+    });
     expect(request.costCeilingMicroUsd).toBe(asMicroUsd(2_500_000));
     expect(runnerSpawnRequestToJsonValue(request)).toEqual(vector("claude-cli spawn request").json);
   });
@@ -99,6 +104,19 @@ describe("RunnerSpawnRequest codec", () => {
     expect(request.providerRoute).toBeUndefined();
     expect(runnerSpawnRequestToJsonValue(request)).toEqual(
       withDefaultSchemaVersion(vector("legacy claude-cli spawn request").json),
+    );
+  });
+
+  it.each([
+    "claude-cli spawn request",
+    "codex-cli spawn request with options",
+    "codex-cli spawn request without options",
+    "openai-compat spawn request with options",
+    "legacy claude-cli spawn request",
+  ])("round-trips spawn vector: %s", (name) => {
+    const json = vector(name).json;
+    expect(runnerSpawnRequestToJsonValue(runnerSpawnRequestFromJson(json))).toEqual(
+      withDefaultSchemaVersion(json),
     );
   });
 
@@ -157,6 +175,29 @@ describe("RunnerSpawnRequest codec", () => {
         providerRoute: { credentialScope: "anthropic", providerKind: "bogus" },
       },
       /providerRoute.providerKind: not a supported ProviderKind/,
+    ],
+    [
+      "options kind mismatch",
+      {
+        ...vector("claude-cli spawn request").json,
+        options: { kind: "codex-cli", sandbox: "read-only" },
+      },
+      /runnerSpawnRequest.options.kind: must match runnerSpawnRequest.kind/,
+    ],
+    [
+      "claude options malformed",
+      rejectVector("claude-cli malformed options").json,
+      /runnerSpawnRequest.options.extraArgs: must be an array/,
+    ],
+    [
+      "codex options malformed",
+      rejectVector("codex-cli malformed options").json,
+      /runnerSpawnRequest.options.sandbox: unsupported codex sandbox/,
+    ],
+    [
+      "openai options malformed",
+      rejectVector("openai-compat malformed options").json,
+      /runnerSpawnRequest.options.endpoint: is required/,
     ],
     [
       "accessor prompt",

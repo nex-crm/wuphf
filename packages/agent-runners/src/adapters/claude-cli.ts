@@ -25,7 +25,12 @@ import {
 } from "@wuphf/protocol";
 
 import { ClaudeCliNotAvailable, ReceiptWriteFailed, RunnerSpawnFailed } from "../errors.ts";
-import { chunkStdio } from "../internal/chunk.ts";
+import {
+  BoundedLineBuffer,
+  chunkStdio,
+  DEFAULT_MAX_RUNNER_INPUT_BUFFER_BYTES,
+  RunnerInputBufferOverflow,
+} from "../internal/chunk.ts";
 import {
   errorMessage,
   RunnerFailure,
@@ -35,7 +40,7 @@ import {
 } from "../internal/cleanup.ts";
 import { trustedCostModel, validatedCostEntry } from "../internal/cost.ts";
 import { DEFAULT_MAX_EVENT_HISTORY, RunnerEventHub } from "../internal/event-hub.ts";
-import { createSecretRedactor, type SecretRedactor } from "../internal/redact.ts";
+import { createSecretStreamingRedactor, type StreamingRedactor } from "../internal/redact.ts";
 import { LifecycleStateMachine } from "../lifecycle.ts";
 import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
 
@@ -128,7 +133,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
   readonly #lifecycle: LifecycleStateMachine;
   readonly #now: () => Date;
   readonly #receiptId: ReceiptId;
-  readonly #redact: SecretRedactor;
+  readonly #redactor: StreamingRedactor;
   readonly #request: RunnerSpawnRequest;
   readonly #secret: string;
   readonly #spawner: ClaudeCliSpawner;
@@ -145,6 +150,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
   };
+  #redactionTarget: "stdout" | "stderr" | null = null;
   #terminatePromise: Promise<void> | null = null;
 
   constructor(args: {
@@ -167,7 +173,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
     this.#lifecycle = new LifecycleStateMachine(args.runnerId);
     this.#now = args.now;
     this.#receiptId = args.receiptIdFactory();
-    this.#redact = createSecretRedactor(args.secret);
+    this.#redactor = createSecretStreamingRedactor(args.secret);
     this.#request = args.request;
     this.#secret = args.secret;
     this.#spawner = args.spawner;
@@ -201,9 +207,11 @@ class ClaudeCliAgentRunner implements AgentRunner {
     try {
       this.#lifecycle.markRunning();
       const env = sanitizedClaudeEnv(this.#commandPath, this.#secret);
+      const extraArgs =
+        this.#request.options?.kind === "claude-cli" ? (this.#request.options.extraArgs ?? []) : [];
       this.#child = this.#spawner(
         this.#commandPath,
-        ["--print", "--output-format", "stream-json", this.#request.prompt],
+        ["--print", "--output-format", "stream-json", ...extraArgs, "--", this.#request.prompt],
         { env, cwd: this.#request.cwd },
       );
       this.#childExited = false;
@@ -246,35 +254,27 @@ class ClaudeCliAgentRunner implements AgentRunner {
   }
 
   async #consumeStdout(stream: Readable): Promise<void> {
-    let buffered = "";
-    for await (const chunk of stream) {
-      buffered += chunkToString(chunk);
-      let newline = buffered.indexOf("\n");
-      while (newline >= 0) {
-        const line = buffered.slice(0, newline);
-        buffered = buffered.slice(newline + 1);
-        await this.#handleClaudeLine(line);
-        newline = buffered.indexOf("\n");
+    const buffer = new BoundedLineBuffer(DEFAULT_MAX_RUNNER_INPUT_BUFFER_BYTES);
+    try {
+      for await (const chunk of stream) {
+        for (const line of buffer.push(chunkToString(chunk))) {
+          await this.#handleClaudeLine(line);
+        }
       }
-    }
-    if (buffered.length > 0) {
-      await this.#handleClaudeLine(buffered);
+      for (const line of buffer.flush()) {
+        await this.#handleClaudeLine(line);
+      }
+    } catch (error) {
+      if (error instanceof RunnerInputBufferOverflow) {
+        throw new RunnerFailure(error.message, "runner_input_buffer_overflow", { cause: error });
+      }
+      throw error;
     }
   }
 
   async #consumeStderr(stream: Readable): Promise<void> {
     for await (const chunk of stream) {
-      const text = this.#redact(chunkToString(chunk));
-      if (text.length > 0) {
-        for (const stdioChunk of chunkStdio(text)) {
-          await this.#emit({
-            kind: "stderr",
-            runnerId: this.id,
-            chunk: stdioChunk,
-            at: this.#isoNow(),
-          });
-        }
-      }
+      await this.#emitText("stderr", chunkToString(chunk));
     }
   }
 
@@ -318,7 +318,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
   }
 
   async #emitStdout(text: string): Promise<void> {
-    const redacted = this.#redact(text);
+    const redacted = await this.#redactForTarget("stdout", text);
     for (const chunk of chunkStdio(redacted)) {
       await this.#emit({ kind: "stdout", runnerId: this.id, chunk, at: this.#isoNow() });
       this.#finalText += chunk;
@@ -334,6 +334,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
   }
 
   async #writeReceiptAndFinish(exitCode: number): Promise<void> {
+    await this.#flushRedactorCarry();
     const receipt = this.#buildReceipt();
     try {
       const stored = await this.#deps.receiptStore.put(receipt);
@@ -415,14 +416,13 @@ class ClaudeCliAgentRunner implements AgentRunner {
   }
 
   async #emit(event: RunnerEvent): Promise<void> {
-    const redacted = redactEvent(event, this.#redact);
     let lsn: number;
     try {
-      lsn = await this.#deps.eventLog.append(redacted);
+      lsn = await this.#deps.eventLog.append(event);
     } catch (error) {
       throw new RunnerFailure(errorMessage(error), "event_log_write_failed", { cause: error });
     }
-    this.#hub.publish(redacted, lsn);
+    this.#hub.publish(event, lsn);
   }
 
   async #cleanupWithFailure(
@@ -432,9 +432,11 @@ class ClaudeCliAgentRunner implements AgentRunner {
     gracePeriodMs?: number | undefined,
   ): Promise<void> {
     const failure = runnerFailureFromError(error, fallbackCode);
-    const message = this.#redact(failure.message);
     if (this.#failed) return;
     this.#failed = true;
+    await this.#flushRedactorCarry();
+    const message = `${this.#redactor.redact(failure.message)}${this.#redactor.flush()}`;
+    this.#redactionTarget = null;
     const event: RunnerEvent = {
       kind: "failed",
       runnerId: this.id,
@@ -473,6 +475,37 @@ class ClaudeCliAgentRunner implements AgentRunner {
         },
       },
     };
+  }
+
+  async #emitText(target: "stdout" | "stderr", text: string): Promise<void> {
+    const redacted = await this.#redactForTarget(target, text);
+    for (const chunk of chunkStdio(redacted)) {
+      await this.#emit({ kind: target, runnerId: this.id, chunk, at: this.#isoNow() });
+      if (target === "stdout") {
+        this.#finalText += chunk;
+      }
+    }
+  }
+
+  async #redactForTarget(target: "stdout" | "stderr", text: string): Promise<string> {
+    if (this.#redactionTarget !== null && this.#redactionTarget !== target) {
+      await this.#flushRedactorCarry();
+    }
+    this.#redactionTarget = target;
+    return this.#redactor.redact(text);
+  }
+
+  async #flushRedactorCarry(): Promise<void> {
+    const target = this.#redactionTarget;
+    const carry = this.#redactor.flush();
+    this.#redactionTarget = null;
+    if (target === null || carry.length === 0) return;
+    for (const chunk of chunkStdio(carry)) {
+      await this.#emit({ kind: target, runnerId: this.id, chunk, at: this.#isoNow() });
+      if (target === "stdout") {
+        this.#finalText += chunk;
+      }
+    }
   }
 }
 
@@ -625,18 +658,6 @@ function recordValue(record: Readonly<Record<string, unknown>>, key: string): un
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function redactEvent(event: RunnerEvent, redact: SecretRedactor): RunnerEvent {
-  switch (event.kind) {
-    case "stdout":
-    case "stderr":
-      return { ...event, chunk: redact(event.chunk) };
-    case "failed":
-      return { ...event, error: redact(event.error) };
-    default:
-      return event;
-  }
 }
 
 function randomRunnerId(): RunnerId {
