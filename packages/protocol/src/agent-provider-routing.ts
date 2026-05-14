@@ -205,6 +205,12 @@ export function agentProviderRoutingWriteResponseFromJson(
   return { applied };
 }
 
+export function agentProviderRoutingWriteResponseToJsonValue(
+  value: AgentProviderRoutingWriteResponse,
+): unknown {
+  return { applied: value.applied };
+}
+
 function parseRoutesArray(value: unknown, path: string): readonly AgentProviderRoutingEntry[] {
   if (!Array.isArray(value)) {
     throw new Error(`${path}: must be an array`);

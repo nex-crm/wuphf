@@ -9,6 +9,7 @@ import {
   agentProviderRoutingToJsonValue,
   agentProviderRoutingWriteRequestFromJson,
   agentProviderRoutingWriteResponseFromJson,
+  agentProviderRoutingWriteResponseToJsonValue,
   asAgentId,
   asCredentialScope,
   asProviderKind,
@@ -170,5 +171,14 @@ describe("agentProviderRoutingWriteResponseFromJson", () => {
     expect(() => agentProviderRoutingWriteResponseFromJson({ applied: false })).toThrow(
       /applied: must be true/,
     );
+  });
+});
+
+describe("agentProviderRoutingWriteResponseToJsonValue", () => {
+  it("round-trips through FromJson byte-identically", () => {
+    const value = { applied: true } as const;
+    const wire = agentProviderRoutingWriteResponseToJsonValue(value);
+    expect(wire).toEqual({ applied: true });
+    expect(agentProviderRoutingWriteResponseFromJson(wire)).toEqual(value);
   });
 });

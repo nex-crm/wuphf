@@ -14,6 +14,7 @@ export {
   agentProviderRoutingToJsonValue,
   agentProviderRoutingWriteRequestFromJson,
   agentProviderRoutingWriteResponseFromJson,
+  agentProviderRoutingWriteResponseToJsonValue,
   MAX_AGENT_PROVIDER_ROUTES,
 } from "./agent-provider-routing.ts";
 export type {

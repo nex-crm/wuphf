@@ -5,7 +5,7 @@ import {
   type ApiToken,
   agentProviderRoutingToJsonValue,
   agentProviderRoutingWriteRequestFromJson,
-  agentProviderRoutingWriteResponseFromJson,
+  agentProviderRoutingWriteResponseToJsonValue,
 } from "@wuphf/protocol";
 
 import { agentIdForBearer } from "../auth.ts";
@@ -93,7 +93,7 @@ async function handlePut(
     routeCount: request.routes.length,
     kinds: request.routes.map((entry) => entry.kind),
   });
-  writeJson(res, 200, agentProviderRoutingWriteResponseFromJson({ applied: true }));
+  writeJson(res, 200, agentProviderRoutingWriteResponseToJsonValue({ applied: true }));
 }
 
 async function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
