@@ -207,6 +207,13 @@ function macosComment(stdout: string): string {
   const raw = match?.[1];
   if (raw === undefined) return "";
   try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed === "string") return parsed;
+    if (parsed !== null && typeof parsed === "object") return raw;
+  } catch {
+    // fall through to quoted-parse fallback for legacy escaped values
+  }
+  try {
     const parsed: unknown = JSON.parse(`"${raw}"`);
     return typeof parsed === "string" ? parsed : raw;
   } catch {

@@ -188,6 +188,7 @@ class CodexCliAgentRunner implements AgentRunner {
   };
   #redactionTarget: "stdout" | "stderr" | null = null;
   #redactionFinalMessage = false;
+  #startedAt: Date | null = null;
   #terminatePromise: Promise<void> | null = null;
   #unrecognizedLineCount = 0;
 
@@ -256,6 +257,7 @@ class CodexCliAgentRunner implements AgentRunner {
     let exit: ExitResult = { code: 1, signal: null };
     try {
       this.#lifecycle.markRunning();
+      this.#startedAt = this.#now();
       const env = sanitizedCodexEnv(this.#commandPath, this.#secretEnvVar, this.#secret);
       this.#child = this.#spawner(this.#commandPath, this.#codexArgs(), {
         env,
@@ -469,7 +471,7 @@ class CodexCliAgentRunner implements AgentRunner {
   }
 
   #buildReceipt(): ReceiptSnapshot {
-    const startedAt = this.#now();
+    const startedAt = this.#startedAt ?? this.#now();
     const finishedAt = this.#now();
     return {
       id: this.#receiptId,
@@ -504,7 +506,7 @@ class CodexCliAgentRunner implements AgentRunner {
   }
 
   #buildFailureReceipt(message: string): ReceiptSnapshot {
-    const startedAt = this.#now();
+    const startedAt = this.#startedAt ?? this.#now();
     const finishedAt = this.#now();
     return {
       id: this.#receiptId,

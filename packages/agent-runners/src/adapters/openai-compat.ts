@@ -675,12 +675,19 @@ async function safeResponseText(
     return truncateUtf8(text, SAFE_HTTP_ERROR_BODY_BYTES);
   } catch (error) {
     if (error instanceof RunnerFailure) throw error;
+    if (isAbortLikeError(error)) throw error;
     return failureMessage("openai_compat_error_body_unavailable", {
       cause: failureCause(error),
     });
   } finally {
     reader.releaseLock();
   }
+}
+
+function isAbortLikeError(error: unknown): boolean {
+  if (error instanceof DOMException) return error.name === "AbortError";
+  if (error instanceof Error && error.name === "AbortError") return true;
+  return false;
 }
 
 function extractDeltaContent(record: Readonly<Record<string, unknown>>): string {

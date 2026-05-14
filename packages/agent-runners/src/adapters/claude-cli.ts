@@ -155,6 +155,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
     cacheCreationTokens: 0,
   };
   #redactionTarget: "stdout" | "stderr" | null = null;
+  #startedAt: Date | null = null;
   #terminatePromise: Promise<void> | null = null;
 
   constructor(args: {
@@ -212,6 +213,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
     let exit: ExitResult = { code: 1, signal: null };
     try {
       this.#lifecycle.markRunning();
+      this.#startedAt = this.#now();
       const env = sanitizedClaudeEnv(this.#commandPath, this.#secret);
       const extraArgs =
         this.#request.options?.kind === "claude-cli" ? (this.#request.options.extraArgs ?? []) : [];
@@ -368,7 +370,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
 
   #buildReceipt(): ReceiptSnapshot {
     const usage = this.#lastUsage;
-    const startedAt = this.#now();
+    const startedAt = this.#startedAt ?? this.#now();
     const finishedAt = this.#now();
     const amount =
       usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
@@ -406,7 +408,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
 
   #buildFailureReceipt(message: string): ReceiptSnapshot {
     const usage = this.#lastUsage;
-    const startedAt = this.#now();
+    const startedAt = this.#startedAt ?? this.#now();
     const finishedAt = this.#now();
     const amount =
       usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
