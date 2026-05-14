@@ -19,6 +19,14 @@ export class ClaudeCliNotAvailable extends AgentRunnerError {
   }
 }
 
+export class CodexCliNotAvailable extends AgentRunnerError {
+  override readonly name = "CodexCliNotAvailable";
+
+  constructor(message = "Codex CLI is not available", options?: ErrorOptions) {
+    super(message, "codex_cli_not_available", options);
+  }
+}
+
 export class RunnerLifecycleError extends AgentRunnerError {
   override readonly name = "RunnerLifecycleError";
 
