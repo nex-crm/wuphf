@@ -1,10 +1,13 @@
+import { forBrokerTests } from "@wuphf/credentials/testing";
 import { asAgentId, asCredentialScope } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 
 import { WindowsCredentialStore } from "../../src/adapters/windows.ts";
-import type { Spawner } from "../../src/index.ts";
+import type { Spawner } from "../../src/store.ts";
 
 const describeOnWindows = process.platform === "win32" ? describe : describe.skip;
+const agentId = asAgentId("agent_alpha");
+const broker = forBrokerTests({ agentId });
 
 describeOnWindows("WindowsCredentialStore", () => {
   it("uses PowerShell Credential Manager APIs without putting the secret in args", async () => {
@@ -20,7 +23,8 @@ describeOnWindows("WindowsCredentialStore", () => {
     });
 
     await store.write({
-      agentId: asAgentId("agent_alpha"),
+      broker,
+      agentId,
       scope: asCredentialScope("openai"),
       secret: "fixture-secret-value-do-not-use-0000",
     });
@@ -30,7 +34,10 @@ describeOnWindows("WindowsCredentialStore", () => {
     expect(call?.args.join(" ")).not.toContain("fixture-secret-value-do-not-use-0000");
     expect(call?.input).toBe("fixture-secret-value-do-not-use-0000");
     expect(decodePowerShellScript(call?.args ?? [])).toContain(
-      "$target = 'wuphf.credentials.test:agent:agent_alpha:scope:openai'",
+      "$target = 'wuphf.credentials.test:cred_",
+    );
+    expect(decodePowerShellScript(call?.args ?? [])).toContain(
+      '$comment = \'{"agentId":"agent_alpha","scope":"openai"}\'',
     );
   });
 });

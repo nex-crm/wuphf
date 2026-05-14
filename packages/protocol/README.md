@@ -20,6 +20,16 @@ This package is pure types and pure-data classes. SQLite, filesystem, network, k
 
 Spec: `business-musings/wuphf-greenfield-rewrite-rfc-2026-05.md` §6 (Receipt schema), §7.3 (IPC discipline).
 
+## Credential handle wire shape
+
+`CredentialHandle` is a runtime capability wrapper with private `id`, `agentId`,
+and `scope` slots. Its JSON wire shape is only `{ version: 1, id }`; the handle
+id is the capability, while `agentId` and scope are trusted broker context used
+by `credentialHandleFromJson`. Object spread, `Object.assign`, and
+`Object.keys` expose no handle fields. `structuredClone(handle)` produces an
+empty plain object, not a `CredentialHandle`, so clones cannot be used to
+dereference secrets.
+
 ## Approval token wire shape
 
 `SignedApprovalToken` is an envelope: `{ claims, algorithm: "ed25519", signerKeyId, signature }`. `signature` is base64 for an Ed25519 detached signature over `approvalClaimsToSigningBytes(claims)`, which canonicalizes the claim projection with `issuedAt` and `expiresAt` encoded as ISO 8601 strings. Broker verification output is not client-controlled token data; receipts carry it separately as `ApprovalEvent.tokenVerdict`.

@@ -1,19 +1,28 @@
 import { inspect } from "node:util";
-
-import { asAgentId, asCredentialScope } from "@wuphf/protocol";
+import { forBrokerTests } from "@wuphf/credentials/testing";
+import {
+  asAgentId,
+  asCredentialHandleId,
+  asCredentialScope,
+  credentialHandleFromJson,
+  credentialHandleToJson,
+} from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 
 import { LinuxCredentialStore } from "../src/adapters/linux.ts";
 import { MacOSCredentialStore } from "../src/adapters/macos.ts";
 import { WindowsCredentialStore } from "../src/adapters/windows.ts";
-import { AdapterNotSupported, NotFound } from "../src/errors.ts";
-import { credentialHandleFromParts, open, type Spawner } from "../src/index.ts";
+import { AdapterNotSupported, BrokerIdentityRequired, NotFound } from "../src/errors.ts";
+import { open } from "../src/index.ts";
+import type { CredentialReadRequest, Spawner } from "../src/store.ts";
 
 const serviceName = "wuphf.credentials.test";
 const agentA = asAgentId("agent_alpha");
 const agentB = asAgentId("agent_beta");
 const scope = asCredentialScope("openai");
 const fixtureSecret = "fixture-secret-value-do-not-use-0000";
+const brokerA = forBrokerTests({ agentId: agentA });
+const brokerB = forBrokerTests({ agentId: agentB });
 
 describe("CredentialStore contract", () => {
   const cases = [
@@ -52,29 +61,92 @@ describe("CredentialStore contract", () => {
   for (const testCase of cases) {
     it(`${testCase.name} keeps handles opaque and reads via the adapter each time`, async () => {
       const { fake, store } = testCase.makeHarness();
-      const handle = await store.write({ agentId: agentA, scope, secret: fixtureSecret });
+      const handle = await store.write({
+        broker: brokerA,
+        agentId: agentA,
+        scope,
+        secret: fixtureSecret,
+      });
+      const handleId = credentialHandleToJson(handle).id;
 
       expect(JSON.stringify(handle)).not.toContain(fixtureSecret);
       expect(String(handle)).not.toContain(fixtureSecret);
       expect(inspect(handle)).not.toContain(fixtureSecret);
 
-      await expect(store.read(handle)).resolves.toBe(fixtureSecret);
-      await expect(store.read(handle)).resolves.toBe(fixtureSecret);
+      await expect(store.read({ broker: brokerA, handleId, agentId: agentA })).resolves.toBe(
+        fixtureSecret,
+      );
+      await expect(store.read({ broker: brokerA, handleId, agentId: agentA })).resolves.toBe(
+        fixtureSecret,
+      );
       expect(fake.readCount).toBe(2);
     });
 
-    it(`${testCase.name} scopes credentials by agent id`, async () => {
+    it(`${testCase.name} returns NotFound for a wrong id with the correct agent`, async () => {
       const { store } = testCase.makeHarness();
-      const handle = await store.write({ agentId: agentA, scope, secret: fixtureSecret });
-      const otherAgentHandle = credentialHandleFromParts({
-        id: handle.id,
-        agentId: agentB,
-        scope: handle.scope,
-      });
+      await store.write({ broker: brokerA, agentId: agentA, scope, secret: fixtureSecret });
 
-      await expect(store.read(otherAgentHandle)).rejects.toBeInstanceOf(NotFound);
+      await expect(
+        store.read({
+          broker: brokerA,
+          handleId: asCredentialHandleId("cred_wrongidcorrectagent000000"),
+          agentId: agentA,
+        }),
+      ).rejects.toBeInstanceOf(NotFound);
+    });
+
+    it(`${testCase.name} rejects reads without broker identity`, async () => {
+      const { store } = testCase.makeHarness();
+      const handle = await store.write({
+        broker: brokerA,
+        agentId: agentA,
+        scope,
+        secret: fixtureSecret,
+      });
+      const handleId = credentialHandleToJson(handle).id;
+
+      await expect(
+        store.read({ handleId, agentId: agentA } as unknown as CredentialReadRequest),
+      ).rejects.toBeInstanceOf(BrokerIdentityRequired);
+    });
+
+    it(`${testCase.name} rejects stale handles after delete`, async () => {
+      const { store } = testCase.makeHarness();
+      const handle = await store.write({
+        broker: brokerA,
+        agentId: agentA,
+        scope,
+        secret: fixtureSecret,
+      });
+      const handleId = credentialHandleToJson(handle).id;
+
+      await store.delete({ broker: brokerA, handleId, agentId: agentA });
+
+      await expect(
+        store.read({ broker: brokerA, handleId, agentId: agentA }),
+      ).rejects.toBeInstanceOf(NotFound);
     });
   }
+
+  it("rehydrates JSON handles only under a matching broker identity", async () => {
+    const { store } = cases[0].makeHarness();
+    const handle = await store.write({
+      broker: brokerA,
+      agentId: agentA,
+      scope,
+      secret: fixtureSecret,
+    });
+    const json = credentialHandleToJson(handle);
+
+    expect(
+      credentialHandleToJson(
+        credentialHandleFromJson(json, { broker: brokerA, agentId: agentA, scope }),
+      ),
+    ).toEqual(json);
+    expect(() =>
+      credentialHandleFromJson(json, { broker: brokerB, agentId: agentA, scope }),
+    ).toThrow(/agentId mismatch/);
+  });
 
   it("selects a platform adapter without creating a singleton", () => {
     const fake: Spawner = async () => ({ stdout: "", stderr: "", code: 0 });

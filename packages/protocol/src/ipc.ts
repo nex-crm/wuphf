@@ -60,7 +60,27 @@ export type BrokerPort = Brand<number, "BrokerPort">;
 export type ApiToken = Brand<string, "ApiToken">;
 export type BrokerUrl = Brand<string, "BrokerUrl">;
 export type RequestId = Brand<string, "RequestId">;
+// LEGACY: desktop contextBridge keychain handles predate CredentialHandle.
+// Broker-mediated credential IPC uses CredentialHandleId and { version: 1, id }
+// handles instead; keep KeychainHandleId only for the old OS bridge until the
+// desktop migration removes getKeychainHandle.
 export type KeychainHandleId = Brand<string, "KeychainHandleId">;
+export type {
+  CredentialDeleteRequest,
+  CredentialDeleteResponse,
+  CredentialReadRequest,
+  CredentialReadResponse,
+  CredentialWriteRequest,
+  CredentialWriteResponse,
+} from "./credential-ipc.ts";
+export {
+  credentialDeleteRequestFromJson,
+  credentialDeleteResponseFromJson,
+  credentialReadRequestFromJson,
+  credentialReadResponseFromJson,
+  credentialWriteRequestFromJson,
+  credentialWriteResponseFromJson,
+} from "./credential-ipc.ts";
 
 // ---------- IPC brand constructors ----------
 //
