@@ -5,6 +5,16 @@ export type {
   ClaudeCliSpawnOptions,
 } from "./adapters/claude-cli.ts";
 export { createClaudeCliRunner } from "./adapters/claude-cli.ts";
+export type {
+  OpenAICompatAdapterOptions,
+  OpenAICompatFetch,
+  OpenAICompatRunnerOptions,
+  OpenAICompatRunnerSpawnRequest,
+} from "./adapters/openai-compat.ts";
+export {
+  createOpenAICompatRunner,
+  OPENAI_COMPAT_DEFAULT_TIMEOUT_MS,
+} from "./adapters/openai-compat.ts";
 export {
   AgentRunnerError,
   ClaudeCliNotAvailable,
