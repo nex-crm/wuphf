@@ -4,6 +4,8 @@ import { CredentialOwnershipMismatch } from "@wuphf/credentials";
 import { forBrokerTests } from "@wuphf/credentials/testing";
 import {
   type AgentId,
+  type AgentProviderRouting,
+  type AgentProviderRoutingEntry,
   asAgentId,
   asCredentialHandleId,
   asCredentialScope,
@@ -11,10 +13,12 @@ import {
   type CredentialScope,
   createCredentialHandle,
   credentialHandleToJson,
+  type RunnerProviderRoute,
   type RunnerSpawnRequest,
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 
+import type { AgentProviderRoutingStore } from "../../src/agent-provider-routing/types.ts";
 import { InMemoryReceiptStore } from "../../src/receipt-store.ts";
 import {
   type AgentRunnerFactoryDeps,
@@ -126,12 +130,149 @@ describe("createAgentRunnerForBroker", () => {
   });
 
   it("uses providerRoute credential scope when present", async () => {
+    // codex-cli legitimately supports both openai and anthropic scopes
+    // (see secretEnvVarForScope in codex-cli.ts). Pick anthropic to prove
+    // the override is consulted — the codex-cli default scope is openai.
+    const anthropicCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("anthropic"),
+    });
+    const routedRequest: RunnerSpawnRequest = {
+      ...request,
+      kind: "codex-cli",
+      credential: credentialHandleToJson(anthropicCredential),
+      providerRoute: {
+        credentialScope: asCredentialScope("anthropic"),
+        providerKind: asProviderKind("anthropic"),
+      },
+    };
+    const runner = await createAgentRunnerForBroker(routedRequest, forBrokerTests({ agentId }), {
+      ...depsForOwnership({
+        actualAgentId: agentId,
+        actualScope: asCredentialScope("anthropic"),
+        actualSecret: "anthropic-secret",
+        expectedProviderKind: asProviderKind("anthropic"),
+      }),
+    });
+
+    expect(runner.agentId).toBe(agentId);
+  });
+
+  it("uses the per-agent routing store when no inline providerRoute is present", async () => {
+    const anthropicCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("anthropic"),
+    });
+    const storedRoute = {
+      credentialScope: asCredentialScope("anthropic"),
+      providerKind: asProviderKind("anthropic"),
+    };
+    const runner = await createAgentRunnerForBroker(
+      {
+        ...request,
+        kind: "codex-cli",
+        credential: credentialHandleToJson(anthropicCredential),
+      },
+      forBrokerTests({ agentId }),
+      {
+        ...depsForOwnership({
+          actualAgentId: agentId,
+          actualScope: asCredentialScope("anthropic"),
+          actualSecret: "anthropic-secret",
+          expectedProviderKind: asProviderKind("anthropic"),
+          expectedRequestProviderRoute: storedRoute,
+        }),
+        agentProviderRoutingStore: fakeRoutingStore([
+          {
+            kind: "codex-cli",
+            ...storedRoute,
+          },
+        ]),
+      },
+    );
+
+    expect(runner.agentId).toBe(agentId);
+  });
+
+  it("does not consult the per-agent routing store when providerRoute is inline", async () => {
+    const anthropicCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("anthropic"),
+    });
+    const routedRequest: RunnerSpawnRequest = {
+      ...request,
+      kind: "codex-cli",
+      credential: credentialHandleToJson(anthropicCredential),
+      providerRoute: {
+        credentialScope: asCredentialScope("anthropic"),
+        providerKind: asProviderKind("anthropic"),
+      },
+    };
+    const runner = await createAgentRunnerForBroker(routedRequest, forBrokerTests({ agentId }), {
+      ...depsForOwnership({
+        actualAgentId: agentId,
+        actualScope: asCredentialScope("anthropic"),
+        actualSecret: "anthropic-secret",
+        expectedProviderKind: asProviderKind("anthropic"),
+      }),
+      agentProviderRoutingStore: {
+        ...fakeRoutingStore(),
+        getEntry: async () => {
+          throw new Error("inline providerRoute should skip store lookup");
+        },
+      },
+    });
+
+    expect(runner.agentId).toBe(agentId);
+  });
+
+  it("rejects provider kind mismatches loaded from the per-agent routing store", async () => {
     const openAiCredential = createCredentialHandle({
       id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
       agentId,
       scope: asCredentialScope("openai"),
     });
-    const routedRequest: RunnerSpawnRequest = {
+
+    await expect(
+      createAgentRunnerForBroker(
+        {
+          ...request,
+          credential: credentialHandleToJson(openAiCredential),
+        },
+        forBrokerTests({ agentId }),
+        {
+          ...depsForOwnership({
+            actualAgentId: agentId,
+            actualScope: asCredentialScope("openai"),
+            actualSecret: "openai-secret",
+          }),
+          agentProviderRoutingStore: fakeRoutingStore([
+            {
+              kind: "claude-cli",
+              credentialScope: asCredentialScope("openai"),
+              providerKind: asProviderKind("anthropic"),
+            },
+          ]),
+        },
+      ),
+    ).rejects.toBeInstanceOf(ProviderKindMismatch);
+  });
+
+  it("rejects an inline providerRoute whose scope is valid but incompatible with the runner kind", async () => {
+    // Defense in depth: even if the PUT-time check is bypassed (e.g. inline
+    // route on POST /api/runners), the factory must still reject a
+    // claude-cli runner pointed at an openai-scoped credential. The
+    // adapter would otherwise hand the OpenAI secret to claude-cli as
+    // ANTHROPIC_API_KEY.
+    const openAiCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("openai"),
+    });
+    const incompatibleRequest: RunnerSpawnRequest = {
       ...request,
       credential: credentialHandleToJson(openAiCredential),
       providerRoute: {
@@ -139,16 +280,16 @@ describe("createAgentRunnerForBroker", () => {
         providerKind: asProviderKind("openai"),
       },
     };
-    const runner = await createAgentRunnerForBroker(routedRequest, forBrokerTests({ agentId }), {
-      ...depsForOwnership({
-        actualAgentId: agentId,
-        actualScope: asCredentialScope("openai"),
-        actualSecret: "openai-secret",
-        expectedProviderKind: asProviderKind("openai"),
-      }),
-    });
 
-    expect(runner.agentId).toBe(agentId);
+    await expect(
+      createAgentRunnerForBroker(incompatibleRequest, forBrokerTests({ agentId }), {
+        ...depsForOwnership({
+          actualAgentId: agentId,
+          actualScope: asCredentialScope("openai"),
+          actualSecret: "openai-secret",
+        }),
+      }),
+    ).rejects.toBeInstanceOf(ProviderKindMismatch);
   });
 
   it("rejects providerRoute providerKind that does not match the credential scope", async () => {
@@ -241,6 +382,7 @@ function depsForOwnership(input: {
   readonly actualScope: CredentialScope;
   readonly actualSecret: string;
   readonly expectedProviderKind?: ReturnType<typeof asProviderKind> | undefined;
+  readonly expectedRequestProviderRoute?: RunnerProviderRoute | undefined;
 }): AgentRunnerFactoryDeps {
   return {
     credentialStore: {
@@ -270,11 +412,39 @@ function depsForOwnership(input: {
       expect(deps.resolvedProviderKind).toBe(
         input.expectedProviderKind ?? asProviderKind("anthropic"),
       );
+      if (input.expectedRequestProviderRoute !== undefined) {
+        expect(_request.providerRoute).toEqual(input.expectedRequestProviderRoute);
+      }
       await deps.secretReader(deps.credential);
       return createFakeAgentRunner({
         kind: _request.kind,
         agentId: _request.agentId,
       });
     },
+  };
+}
+
+function fakeRoutingStore(
+  initial: readonly AgentProviderRoutingEntry[] = [],
+): AgentProviderRoutingStore {
+  const byAgent = new Map<AgentId, AgentProviderRouting>();
+  if (initial.length > 0) {
+    byAgent.set(agentId, { agentId, routes: initial });
+  }
+  return {
+    get: async (id) => byAgent.get(id) ?? { agentId: id, routes: [] },
+    getEntry: async (id, kind) => {
+      const config = byAgent.get(id);
+      const entry = config?.routes.find((route) => route.kind === kind);
+      if (entry === undefined) return null;
+      return {
+        credentialScope: entry.credentialScope,
+        providerKind: entry.providerKind,
+      };
+    },
+    put: async (config) => {
+      byAgent.set(config.agentId, { agentId: config.agentId, routes: [...config.routes] });
+    },
+    close: () => undefined,
   };
 }

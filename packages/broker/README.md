@@ -77,6 +77,8 @@ store.close();
 | GET | `/api/v1/cost/budgets/:id` | bearer | Returns one projected budget, or 404 on malformed/missing id. |
 | GET | `/api/v1/cost/summary` | bearer | Returns current cost projections: agent spend, budgets, and threshold crossings. |
 | GET | `/api/v1/cost/replay-check` | bearer | Replays cost events and compares projections. 200 when `ok: true`; 500 with structured discrepancies when drift or unparseable cost payloads are found. |
+| GET | `/api/agents/:agentId/provider-routing` | bearer | Returns the per-agent provider-routing config via `agentProviderRoutingToJsonValue`. Mounted when `createBroker({ runners: { agentProviderRoutingStore } })` is supplied. |
+| PUT | `/api/agents/:agentId/provider-routing` | bearer | Replaces all routes for the agent. Body parses through `agentProviderRoutingWriteRequestFromJson`; the body `agentId` must match the path `agentId`. |
 | POST | `/api/runners` | bearer + runner agent map | Body: `RunnerSpawnRequest`. The bearer maps to one `agentId`; mismatches return 403. The broker mints/injects `BrokerIdentity`, resolves the `CredentialHandle`, and returns `{ runnerId }`. Mounted only when `createBroker({ runners })` is supplied. |
 | GET | `/api/runners/:id/events` | bearer + runner agent map | SSE stream of `RunnerEvent` values. The caller's bearer-mapped `agentId` must match the runner owner. |
 | GET | `/`, `/index.html` | none (loopback) | Renderer bundle (404 if `renderer: null`). |
@@ -116,6 +118,8 @@ GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
    tokens to `AgentId`, injects the `BrokerIdentity`, and passes runners only a
    `secretReader` closure. Runner processes never receive or construct broker
    identity.
+9. **Provider-routing writes are path-bound.** The URL `agentId` and request
+   body `agentId` must match before the broker writes routing state.
 
 ## Spec anchors
 

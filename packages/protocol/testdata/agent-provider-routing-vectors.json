@@ -1,0 +1,311 @@
+{
+  "schemaVersion": 1,
+  "comment": "AgentProviderRouting conformance vectors. Accepted vectors must parse, normalize route order by RUNNER_KIND_VALUES, and serialize to expected.canonicalSerialization. Rejected vectors must fail with an error that references expectedError.",
+  "accepted": [
+    {
+      "name": "empty routes",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": []
+      },
+      "expected": {
+        "canonicalSerialization": "{\"agentId\":\"agent_alpha\",\"routes\":[]}"
+      }
+    },
+    {
+      "name": "single claude-cli route",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          }
+        ]
+      },
+      "expected": {
+        "canonicalSerialization": "{\"agentId\":\"agent_alpha\",\"routes\":[{\"kind\":\"claude-cli\",\"credentialScope\":\"anthropic\",\"providerKind\":\"anthropic\"}]}"
+      }
+    },
+    {
+      "name": "multi-entry route already canonical",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "codex-cli",
+            "credentialScope": "openai",
+            "providerKind": "openai"
+          },
+          {
+            "kind": "openai-compat",
+            "credentialScope": "openai-compat",
+            "providerKind": "openai-compat"
+          }
+        ]
+      },
+      "expected": {
+        "canonicalSerialization": "{\"agentId\":\"agent_alpha\",\"routes\":[{\"kind\":\"claude-cli\",\"credentialScope\":\"anthropic\",\"providerKind\":\"anthropic\"},{\"kind\":\"codex-cli\",\"credentialScope\":\"openai\",\"providerKind\":\"openai\"},{\"kind\":\"openai-compat\",\"credentialScope\":\"openai-compat\",\"providerKind\":\"openai-compat\"}]}"
+      }
+    },
+    {
+      "name": "multi-entry route sorted on input",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "openai-compat",
+            "credentialScope": "openai-compat",
+            "providerKind": "openai-compat"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "codex-cli",
+            "credentialScope": "openai",
+            "providerKind": "openai"
+          }
+        ]
+      },
+      "expected": {
+        "canonicalSerialization": "{\"agentId\":\"agent_alpha\",\"routes\":[{\"kind\":\"claude-cli\",\"credentialScope\":\"anthropic\",\"providerKind\":\"anthropic\"},{\"kind\":\"codex-cli\",\"credentialScope\":\"openai\",\"providerKind\":\"openai\"},{\"kind\":\"openai-compat\",\"credentialScope\":\"openai-compat\",\"providerKind\":\"openai-compat\"}]}"
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "name": "unknown top-level key",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [],
+        "extra": 1
+      },
+      "expectedError": "agentProviderRouting/extra"
+    },
+    {
+      "name": "unknown entry key",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic",
+            "extra": 1
+          }
+        ]
+      },
+      "expectedError": "agentProviderRouting.routes/0/extra"
+    },
+    {
+      "name": "duplicate kind entries",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "openai",
+            "providerKind": "openai"
+          }
+        ]
+      },
+      "expectedError": "agentProviderRouting.routes/1.kind"
+    },
+    {
+      "name": "more than sixteen entries",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          },
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          }
+        ]
+      },
+      "expectedError": "agentProviderRouting.routes"
+    },
+    {
+      "name": "unknown runner kind value",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "not-a-runner",
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          }
+        ]
+      },
+      "expectedError": "agentProviderRouting.routes/0.kind"
+    },
+    {
+      "name": "unknown credential scope value",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "claude-cli",
+            "credentialScope": "not-a-scope",
+            "providerKind": "anthropic"
+          }
+        ]
+      },
+      "expectedError": "agentProviderRouting.routes/0.credentialScope"
+    },
+    {
+      "name": "unknown provider kind value",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic",
+            "providerKind": "not-a-provider"
+          }
+        ]
+      },
+      "expectedError": "agentProviderRouting.routes/0.providerKind"
+    },
+    {
+      "name": "missing entry kind",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "credentialScope": "anthropic",
+            "providerKind": "anthropic"
+          }
+        ]
+      },
+      "expectedError": "agentProviderRouting.routes/0.kind"
+    },
+    {
+      "name": "missing entry credentialScope",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "claude-cli",
+            "providerKind": "anthropic"
+          }
+        ]
+      },
+      "expectedError": "agentProviderRouting.routes/0.credentialScope"
+    },
+    {
+      "name": "missing entry providerKind",
+      "input": {
+        "agentId": "agent_alpha",
+        "routes": [
+          {
+            "kind": "claude-cli",
+            "credentialScope": "anthropic"
+          }
+        ]
+      },
+      "expectedError": "agentProviderRouting.routes/0.providerKind"
+    },
+    {
+      "name": "missing envelope agentId",
+      "input": {
+        "routes": []
+      },
+      "expectedError": "agentProviderRouting.agentId"
+    }
+  ]
+}

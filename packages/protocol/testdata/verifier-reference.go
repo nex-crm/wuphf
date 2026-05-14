@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -122,6 +123,51 @@ type runnerFixture struct {
 	SchemaVersion int            `json:"schemaVersion"`
 	Vectors       []runnerVector `json:"vectors"`
 	RejectVectors []runnerVector `json:"rejectVectors"`
+}
+
+type agentProviderRoutingExpected struct {
+	CanonicalSerialization string `json:"canonicalSerialization"`
+}
+
+type agentProviderRoutingAcceptedVector struct {
+	Name     string                       `json:"name"`
+	Input    json.RawMessage              `json:"input"`
+	Expected agentProviderRoutingExpected `json:"expected"`
+}
+
+type agentProviderRoutingRejectedVector struct {
+	Name          string          `json:"name"`
+	Input         json.RawMessage `json:"input"`
+	ExpectedError string          `json:"expectedError"`
+}
+
+type agentProviderRoutingFixture struct {
+	SchemaVersion int                                  `json:"schemaVersion"`
+	Comment       string                               `json:"comment"`
+	Accepted      []agentProviderRoutingAcceptedVector `json:"accepted"`
+	Rejected      []agentProviderRoutingRejectedVector `json:"rejected"`
+}
+
+type agentProviderRoutingEnvelope struct {
+	AgentID string                      `json:"agentId"`
+	Routes  []agentProviderRoutingEntry `json:"routes"`
+}
+
+type agentProviderRoutingEntry struct {
+	Kind            string `json:"kind"`
+	CredentialScope string `json:"credentialScope"`
+	ProviderKind    string `json:"providerKind"`
+}
+
+type agentProviderRoutingRawEnvelope struct {
+	AgentID json.RawMessage `json:"agentId"`
+	Routes  json.RawMessage `json:"routes"`
+}
+
+type agentProviderRoutingRawEntry struct {
+	Kind            json.RawMessage `json:"kind"`
+	CredentialScope json.RawMessage `json:"credentialScope"`
+	ProviderKind    json.RawMessage `json:"providerKind"`
 }
 
 // canonicalize is a *minimal* JCS implementation sufficient for the bundled
@@ -252,6 +298,12 @@ var runnerKindSet = map[string]bool{
 	"openai-compat": true,
 }
 
+var runnerKindOrder = map[string]int{
+	"claude-cli":    0,
+	"codex-cli":     1,
+	"openai-compat": 2,
+}
+
 var credentialScopeSet = map[string]bool{
 	"anthropic":     true,
 	"openai":        true,
@@ -314,6 +366,7 @@ const (
 	maxCostModelBytes               = 128
 	maxCostEventAmountMicroUsd      = 100_000_000
 	maxSafeInteger                  = 9_007_199_254_740_991
+	maxAgentProviderRoutes          = 16
 )
 
 func loadRunnerFixture() (runnerFixture, error) {
@@ -331,6 +384,133 @@ func loadRunnerFixture() (runnerFixture, error) {
 		return runnerFixture{}, fmt.Errorf("unsupported runner fixture schemaVersion: %d", fx.SchemaVersion)
 	}
 	return fx, nil
+}
+
+func loadAgentProviderRoutingFixture() (agentProviderRoutingFixture, error) {
+	fixtureBytes, err := os.ReadFile("agent-provider-routing-vectors.json")
+	if err != nil {
+		return agentProviderRoutingFixture{}, err
+	}
+	var fx agentProviderRoutingFixture
+	decoder := json.NewDecoder(bytes.NewReader(fixtureBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fx); err != nil {
+		return agentProviderRoutingFixture{}, err
+	}
+	if fx.SchemaVersion != 1 {
+		return agentProviderRoutingFixture{}, fmt.Errorf("unsupported agent-provider-routing fixture schemaVersion: %d", fx.SchemaVersion)
+	}
+	return fx, nil
+}
+
+func parseAgentProviderRouting(raw json.RawMessage) (agentProviderRoutingEnvelope, error) {
+	var rawEnvelope agentProviderRoutingRawEnvelope
+	if err := decodeStrictJSON(raw, "agentProviderRouting", &rawEnvelope); err != nil {
+		return agentProviderRoutingEnvelope{}, err
+	}
+	agentID, err := requiredRawString(rawEnvelope.AgentID, "agentProviderRouting.agentId")
+	if err != nil {
+		return agentProviderRoutingEnvelope{}, err
+	}
+	if err := validateUtf8Budget(agentID, maxAgentIDBytes, "agentProviderRouting.agentId"); err != nil {
+		return agentProviderRoutingEnvelope{}, err
+	}
+	if !agentIDRE.MatchString(agentID) {
+		return agentProviderRoutingEnvelope{}, fmt.Errorf("agentProviderRouting.agentId: not an AgentId")
+	}
+	rawRoutes, err := requiredRawArray(rawEnvelope.Routes, "agentProviderRouting.routes")
+	if err != nil {
+		return agentProviderRoutingEnvelope{}, err
+	}
+	if len(rawRoutes) > maxAgentProviderRoutes {
+		return agentProviderRoutingEnvelope{}, fmt.Errorf("agentProviderRouting.routes: exceeds %d entries (got %d)", maxAgentProviderRoutes, len(rawRoutes))
+	}
+	seenKinds := map[string]bool{}
+	entries := make([]agentProviderRoutingEntry, 0, len(rawRoutes))
+	for index, rawEntry := range rawRoutes {
+		path := fmt.Sprintf("agentProviderRouting.routes/%d", index)
+		entry, err := parseAgentProviderRoutingEntry(rawEntry, path)
+		if err != nil {
+			return agentProviderRoutingEnvelope{}, err
+		}
+		if seenKinds[entry.Kind] {
+			return agentProviderRoutingEnvelope{}, fmt.Errorf("%s.kind: duplicate route for kind %q", path, entry.Kind)
+		}
+		seenKinds[entry.Kind] = true
+		entries = append(entries, entry)
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return runnerKindOrder[entries[i].Kind] < runnerKindOrder[entries[j].Kind]
+	})
+	return agentProviderRoutingEnvelope{
+		AgentID: agentID,
+		Routes:  entries,
+	}, nil
+}
+
+func parseAgentProviderRoutingEntry(raw json.RawMessage, path string) (agentProviderRoutingEntry, error) {
+	var rawEntry agentProviderRoutingRawEntry
+	if err := decodeStrictJSON(raw, path, &rawEntry); err != nil {
+		return agentProviderRoutingEntry{}, err
+	}
+	kind, err := requiredRawString(rawEntry.Kind, path+".kind")
+	if err != nil {
+		return agentProviderRoutingEntry{}, err
+	}
+	if !runnerKindSet[kind] {
+		return agentProviderRoutingEntry{}, fmt.Errorf("%s.kind: not a supported RunnerKind", path)
+	}
+	credentialScope, err := requiredRawString(rawEntry.CredentialScope, path+".credentialScope")
+	if err != nil {
+		return agentProviderRoutingEntry{}, err
+	}
+	if err := validateUtf8Budget(credentialScope, maxCredentialScopeBytes, path+".credentialScope"); err != nil {
+		return agentProviderRoutingEntry{}, err
+	}
+	if !credentialScopeSet[credentialScope] {
+		return agentProviderRoutingEntry{}, fmt.Errorf("%s.credentialScope: not a supported CredentialScope", path)
+	}
+	providerKind, err := requiredRawString(rawEntry.ProviderKind, path+".providerKind")
+	if err != nil {
+		return agentProviderRoutingEntry{}, err
+	}
+	if err := validateUtf8Budget(providerKind, maxCredentialScopeBytes, path+".providerKind"); err != nil {
+		return agentProviderRoutingEntry{}, err
+	}
+	if !providerKindSet[providerKind] {
+		return agentProviderRoutingEntry{}, fmt.Errorf("%s.providerKind: not a supported ProviderKind", path)
+	}
+	return agentProviderRoutingEntry{
+		Kind:            kind,
+		CredentialScope: credentialScope,
+		ProviderKind:    providerKind,
+	}, nil
+}
+
+func validateAgentProviderRoutingAccepted(vec agentProviderRoutingAcceptedVector) error {
+	parsed, err := parseAgentProviderRouting(vec.Input)
+	if err != nil {
+		return err
+	}
+	serialized, err := json.Marshal(parsed)
+	if err != nil {
+		return err
+	}
+	if string(serialized) != vec.Expected.CanonicalSerialization {
+		return fmt.Errorf("canonicalSerialization mismatch: expected %s, got %s", vec.Expected.CanonicalSerialization, string(serialized))
+	}
+	return nil
+}
+
+func validateAgentProviderRoutingRejected(vec agentProviderRoutingRejectedVector) error {
+	_, err := parseAgentProviderRouting(vec.Input)
+	if err == nil {
+		return fmt.Errorf("expected reject, got accept")
+	}
+	if vec.ExpectedError != "" && !strings.Contains(err.Error(), vec.ExpectedError) {
+		return fmt.Errorf("expected error containing %q, got %q", vec.ExpectedError, err.Error())
+	}
+	return nil
 }
 
 func validateRunnerVector(vec runnerVector) error {
@@ -801,6 +981,60 @@ func knownKeys(record map[string]interface{}, path string, allowed map[string]bo
 	return nil
 }
 
+func decodeStrictJSON(raw json.RawMessage, path string, out interface{}) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(out); err != nil {
+		if field, ok := unknownJSONField(err); ok {
+			return fmt.Errorf("%s/%s: is not allowed", path, field)
+		}
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
+}
+
+func unknownJSONField(err error) (string, bool) {
+	message := err.Error()
+	const prefix = "json: unknown field "
+	if !strings.HasPrefix(message, prefix) {
+		return "", false
+	}
+	field := strings.TrimPrefix(message, prefix)
+	field = strings.Trim(field, `"`)
+	if field == "" {
+		return "", false
+	}
+	return field, true
+}
+
+func requiredRawString(raw json.RawMessage, path string) (string, error) {
+	if len(raw) == 0 {
+		return "", fmt.Errorf("%s: is required", path)
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("%s: must be a string", path)
+	}
+	return value, nil
+}
+
+func requiredRawArray(raw json.RawMessage, path string) ([]json.RawMessage, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("%s: is required", path)
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, fmt.Errorf("%s: must be an array", path)
+	}
+	var value []json.RawMessage
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, fmt.Errorf("%s: must be an array", path)
+	}
+	if value == nil {
+		return nil, fmt.Errorf("%s: must be an array", path)
+	}
+	return value, nil
+}
+
 func requiredStringValue(record map[string]interface{}, key string, path string) (string, error) {
 	value, ok := record[key]
 	if !ok {
@@ -942,10 +1176,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "could not load runner fixture: %v\n", err)
 		os.Exit(2)
 	}
+	agentProviderRoutingFx, err := loadAgentProviderRoutingFixture()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not load agent-provider-routing fixture: %v\n", err)
+		os.Exit(2)
+	}
 
 	fmt.Printf("%s@wuphf/protocol — Go reference verifier%s\n", colorBold, colorReset)
-	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d approval-claims vectors, %d runner accept vectors, %d runner reject vectors%s\n\n",
-		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(fx.ApprovalClaimsVectors), len(runnerFx.Vectors), len(runnerFx.RejectVectors), colorReset)
+	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d approval-claims vectors, %d runner accept vectors, %d runner reject vectors, %d agent-provider-routing accept vectors, %d agent-provider-routing reject vectors%s\n\n",
+		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(fx.ApprovalClaimsVectors), len(runnerFx.Vectors), len(runnerFx.RejectVectors), len(agentProviderRoutingFx.Accepted), len(agentProviderRoutingFx.Rejected), colorReset)
 
 	failed := 0
 
@@ -1064,10 +1303,28 @@ func main() {
 		fmt.Printf("  %sPASS%s runner/%s rejected\n", colorGreen, colorReset, vec.Name)
 	}
 
+	for _, vec := range agentProviderRoutingFx.Accepted {
+		if err := validateAgentProviderRoutingAccepted(vec); err != nil {
+			fmt.Printf("  %sFAIL%s agent-provider-routing/%s: expected accept, got %v\n", colorRed, colorReset, vec.Name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s agent-provider-routing/%s accepted\n", colorGreen, colorReset, vec.Name)
+	}
+
+	for _, vec := range agentProviderRoutingFx.Rejected {
+		if err := validateAgentProviderRoutingRejected(vec); err != nil {
+			fmt.Printf("  %sFAIL%s agent-provider-routing/%s: %v\n", colorRed, colorReset, vec.Name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s agent-provider-routing/%s rejected\n", colorGreen, colorReset, vec.Name)
+	}
+
 	fmt.Println()
 	if failed == 0 {
 		fmt.Printf("%s%sAll %d vectors match — wire contract is cross-language portable.%s\n",
-			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(fx.ApprovalClaimsVectors)+len(runnerFx.Vectors)+len(runnerFx.RejectVectors), colorReset)
+			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(fx.ApprovalClaimsVectors)+len(runnerFx.Vectors)+len(runnerFx.RejectVectors)+len(agentProviderRoutingFx.Accepted)+len(agentProviderRoutingFx.Rejected), colorReset)
 		os.Exit(0)
 	}
 	fmt.Printf("%s%s%d vector(s) failed — TypeScript writer and Go reference disagree.%s\n",

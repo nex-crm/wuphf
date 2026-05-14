@@ -1,4 +1,23 @@
 export type {
+  AgentProviderRouting,
+  AgentProviderRoutingEntry,
+  AgentProviderRoutingReadRequest,
+  AgentProviderRoutingReadResponse,
+  AgentProviderRoutingWriteRequest,
+  AgentProviderRoutingWriteResponse,
+} from "./agent-provider-routing.ts";
+export {
+  agentProviderRoutingEntryFromJson,
+  agentProviderRoutingEntryToJsonValue,
+  agentProviderRoutingFromJson,
+  agentProviderRoutingReadRequestFromJson,
+  agentProviderRoutingToJsonValue,
+  agentProviderRoutingWriteRequestFromJson,
+  agentProviderRoutingWriteResponseFromJson,
+  agentProviderRoutingWriteResponseToJsonValue,
+  MAX_AGENT_PROVIDER_ROUTES,
+} from "./agent-provider-routing.ts";
+export type {
   AuditEventKind,
   AuditEventPayload,
   AuditEventPayloadKindMetadata,
