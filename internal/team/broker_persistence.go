@@ -201,6 +201,9 @@ func (b *Broker) loadState() error {
 }
 
 func (b *Broker) saveLocked() error {
+	// Prune completed tasks before serializing to keep the state file lean.
+	b.pruneCompletedTasksLocked()
+
 	write, err := b.prepareBrokerStateWriteLocked()
 	if err != nil {
 		return err
