@@ -220,7 +220,7 @@ function ipv6Bytes(host: string): readonly number[] | null {
     if (groups === null) return null;
     normalized = `${prefix}:${groups.join(":")}`;
   }
-  const halves = normalized.split("::");
+  const halves = normalized.split(":".repeat(2));
   if (halves.length > 2) return null;
   const left = parseIpv6Groups(halves[0] ?? "");
   const right = parseIpv6Groups(halves[1] ?? "");
