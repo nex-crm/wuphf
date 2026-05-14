@@ -1,4 +1,4 @@
-import type { RunnerId } from "@wuphf/protocol";
+import type { RunnerFailureCode, RunnerId } from "@wuphf/protocol";
 
 import { RunnerLifecycleError } from "./errors.ts";
 
@@ -7,6 +7,7 @@ export type LifecyclePhase = "pending" | "running" | "stopping" | "stopped";
 export interface LifecycleSnapshot {
   readonly runnerId: RunnerId;
   readonly phase: LifecyclePhase;
+  readonly terminalClaim?: RunnerFailureCode | "finished" | undefined;
   readonly exitCode?: number | undefined;
   readonly error?: string | undefined;
 }
@@ -24,6 +25,7 @@ export interface LifecycleSnapshot {
 export class LifecycleStateMachine {
   readonly #runnerId: RunnerId;
   #phase: LifecyclePhase = "pending";
+  #terminalClaim: RunnerFailureCode | "finished" | undefined;
   #exitCode: number | undefined;
   #error: string | undefined;
   #stoppedResolve: (() => void) | null = null;
@@ -40,6 +42,7 @@ export class LifecycleStateMachine {
     return {
       runnerId: this.#runnerId,
       phase: this.#phase,
+      ...(this.#terminalClaim === undefined ? {} : { terminalClaim: this.#terminalClaim }),
       ...(this.#exitCode === undefined ? {} : { exitCode: this.#exitCode }),
       ...(this.#error === undefined ? {} : { error: this.#error }),
     };
@@ -60,6 +63,13 @@ export class LifecycleStateMachine {
     if (this.#phase === "stopped") return false;
     if (this.#phase === "stopping") return false;
     this.#phase = "stopping";
+    return true;
+  }
+
+  tryTerminate(code: RunnerFailureCode | "finished"): boolean {
+    if (this.#phase !== "running") return false;
+    this.#phase = "stopping";
+    this.#terminalClaim = code;
     return true;
   }
 

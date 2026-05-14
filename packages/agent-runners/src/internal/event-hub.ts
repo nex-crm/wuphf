@@ -19,6 +19,14 @@ export interface RunnerEventStreamOptions {
   readonly afterLsn?: number | undefined;
 }
 
+export class RunnerResumeWindowExpired extends Error {
+  override readonly name = "RunnerResumeWindowExpired";
+
+  constructor(readonly oldestAvailableLsn: number) {
+    super(`runner resume window expired before LSN ${oldestAvailableLsn}`);
+  }
+}
+
 export class RunnerEventHub {
   readonly #history: RunnerEventRecord[] = [];
   readonly #subscribers = new Map<
@@ -55,6 +63,14 @@ export class RunnerEventHub {
   }
 
   eventRecords(options: RunnerEventStreamOptions = {}): ReadableStream<RunnerEventRecord> {
+    const oldestAvailableLsn = this.oldestAvailableLsn();
+    if (
+      options.afterLsn !== undefined &&
+      oldestAvailableLsn !== undefined &&
+      options.afterLsn < oldestAvailableLsn - 1
+    ) {
+      throw new RunnerResumeWindowExpired(oldestAvailableLsn);
+    }
     let activeController: ReadableStreamDefaultController<RunnerEventRecord> | null = null;
     return new ReadableStream<RunnerEventRecord>({
       start: (controller) => {
@@ -123,6 +139,49 @@ export class RunnerEventHub {
     }
     this.#subscribers.clear();
   }
+
+  oldestAvailableLsn(): number | undefined {
+    for (const record of this.#history) {
+      if (record.lsn !== undefined) return record.lsn;
+    }
+    return undefined;
+  }
+}
+
+export interface SerializedEmitterDeps {
+  readonly eventLog: {
+    readonly append: (event: RunnerEvent) => Promise<number>;
+  };
+  readonly eventHub: RunnerEventHub;
+}
+
+export class SerializedEmitter {
+  readonly #eventLog: SerializedEmitterDeps["eventLog"];
+  readonly #eventHub: RunnerEventHub;
+  #closed = false;
+  #tail: Promise<void> = Promise.resolve();
+
+  constructor(deps: SerializedEmitterDeps) {
+    this.#eventLog = deps.eventLog;
+    this.#eventHub = deps.eventHub;
+  }
+
+  emit(event: RunnerEvent): Promise<void> {
+    if (this.#closed) {
+      return Promise.reject(new Error("serialized emitter is closed"));
+    }
+    const job = this.#tail.then(async () => {
+      const lsn = await this.#eventLog.append(event);
+      this.#eventHub.publish(event, lsn);
+    });
+    this.#tail = job.catch(() => undefined);
+    return job;
+  }
+
+  async close(): Promise<void> {
+    this.#closed = true;
+    await this.#tail;
+  }
 }
 
 function disconnectEvent(source: RunnerEvent, maxBacklog: number): RunnerEvent {
@@ -130,6 +189,7 @@ function disconnectEvent(source: RunnerEvent, maxBacklog: number): RunnerEvent {
     kind: "failed",
     runnerId: source.runnerId,
     error: JSON.stringify({ reason: "subscriber_backpressure_exceeded", maxBacklog }),
+    code: "subscriber_backpressure_exceeded",
     at: source.at,
   };
 }

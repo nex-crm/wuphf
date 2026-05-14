@@ -7,11 +7,13 @@ import {
   asCredentialHandleId,
   asCredentialScope,
   asMicroUsd,
+  asProviderKind,
   asReceiptId,
   asRunnerId,
   asTaskId,
   type CredentialHandle,
   createCredentialHandle,
+  type ProviderKind,
   type RunnerEvent,
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
@@ -22,6 +24,7 @@ import {
   createClaudeCliRunner,
 } from "../../src/adapters/claude-cli.ts";
 import { ClaudeCliNotAvailable } from "../../src/errors.ts";
+import type { RunnerEventRecord } from "../../src/internal/event-hub.ts";
 import type { Receipt, RunnerSpawnDeps } from "../../src/runner.ts";
 
 const agentId = asAgentId("agent_alpha");
@@ -96,6 +99,7 @@ interface Harness {
 function makeHarness(
   args: {
     readonly receiptPut?: ((receipt: Receipt) => Promise<{ readonly stored: boolean }>) | undefined;
+    readonly resolvedProviderKind?: ProviderKind | undefined;
     readonly secret?: string | undefined;
   } = {},
 ): Harness {
@@ -119,6 +123,7 @@ function makeHarness(
     secretReads,
     deps: {
       credential,
+      resolvedProviderKind: args.resolvedProviderKind ?? asProviderKind("anthropic"),
       secretReader: async (handle) => {
         secretReads.push(handle);
         return args.secret ?? "sk-ant-こんにちは";
@@ -158,6 +163,43 @@ async function collectAll(stream: ReadableStream<RunnerEvent>): Promise<RunnerEv
     if (next.done) return events;
     events.push(next.value);
   }
+}
+
+async function collectRecords(
+  stream: ReadableStream<RunnerEventRecord>,
+): Promise<RunnerEventRecord[]> {
+  const reader = stream.getReader();
+  const records: RunnerEventRecord[] = [];
+  while (true) {
+    const next = await reader.read();
+    if (next.done) return records;
+    records.push(next.value);
+  }
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T | PromiseLike<T>) => void;
+} {
+  let resolveFn: ((value: T | PromiseLike<T>) => void) | null = null;
+  const promise = new Promise<T>((resolve) => {
+    resolveFn = resolve;
+  });
+  return {
+    promise,
+    resolve(value) {
+      if (resolveFn === null) throw new Error("deferred resolve not initialized");
+      resolveFn(value);
+    },
+  };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("timed out waiting for condition");
 }
 
 function assistantLine(text: string): string {
@@ -242,12 +284,72 @@ describe("createClaudeCliRunner", () => {
     if (cost?.kind === "cost") {
       expect(cost.entry.receiptId).toBe(receiptId);
       expect(cost.entry.taskId).toBe(taskId);
+      expect(cost.entry.providerKind).toBe(asProviderKind("anthropic"));
     }
     expect(harness.receipts).toHaveLength(1);
     expect(harness.receipts[0]?.id).toBe(receiptId);
     expect(harness.receipts[0]?.taskId).toBe(taskId);
+    expect(harness.receipts[0]?.providerKind).toBe(asProviderKind("anthropic"));
     expect(harness.receipts[0]?.inputTokens).toBe(10);
     expect(harness.receipts[0]?.outputTokens).toBe(5);
+  });
+
+  it("starts the durable event stream before buffered stdout and stderr", async () => {
+    const harness = makeHarness();
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      receiptIdFactory: () => receiptId,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+      taskIdFactory: () => taskId,
+    });
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const recordsPromise = collectRecords(runner.eventRecords());
+    for (let index = 0; index < 100; index += 1) {
+      harness.child.writeStdout(assistantLine(`out-${index}`));
+      harness.child.writeStderr(`err-${index}\n`);
+    }
+    harness.child.exit(0);
+    const records = await recordsPromise;
+
+    expect(records[0]?.event.kind).toBe("started");
+    const lsns = records.map((record) => record.lsn);
+    expect(lsns).toEqual(Array.from({ length: records.length }, (_value, index) => index + 1));
+  });
+
+  it("uses broker-resolved provider kind for cost and receipt attribution", async () => {
+    const harness = makeHarness({ resolvedProviderKind: asProviderKind("openclaw") });
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      receiptIdFactory: () => receiptId,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+      taskIdFactory: () => taskId,
+    });
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout(assistantLine("hello"));
+    harness.child.exit(0);
+    const events = await eventsPromise;
+    const cost = events.find((event) => event.kind === "cost");
+
+    expect(cost?.kind).toBe("cost");
+    if (cost?.kind === "cost") {
+      expect(cost.entry.providerKind).toBe(asProviderKind("openclaw"));
+    }
+    expect(harness.receipts[0]?.providerKind).toBe(asProviderKind("openclaw"));
   });
 
   it("fails the runner when receipt put fails", async () => {
@@ -281,12 +383,64 @@ describe("createClaudeCliRunner", () => {
     expect(events.some((event) => event.kind === "finished")).toBe(false);
   });
 
+  it("emits one terminal event when terminate wins a pending receipt write", async () => {
+    const successReceiptRelease = deferred<{ readonly stored: boolean }>();
+    const firstReceiptStarted = deferred<void>();
+    let putCount = 0;
+    const harness = makeHarness({
+      receiptPut: async (receipt) => {
+        harness.receipts.push(receipt);
+        putCount += 1;
+        if (putCount === 1) {
+          firstReceiptStarted.resolve();
+          return await successReceiptRelease.promise;
+        }
+        return { stored: true };
+      },
+    });
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      receiptIdFactory: () => receiptId,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+      taskIdFactory: () => taskId,
+    });
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout(assistantLine("hello"));
+    harness.child.exit(0);
+    await firstReceiptStarted.promise;
+    const terminatePromise = runner.terminate({ gracePeriodMs: 50 });
+    await waitFor(() => harness.receipts.length === 2);
+    successReceiptRelease.resolve({ stored: true });
+    await terminatePromise;
+    const events = await eventsPromise;
+
+    const terminalEvents = events.filter(
+      (event) => event.kind === "failed" || event.kind === "finished",
+    );
+    expect(terminalEvents.map((event) => event.kind)).toEqual(["failed"]);
+    expect(events.some((event) => event.kind === "receipt")).toBe(false);
+    expect(harness.receipts[1]).toMatchObject({
+      id: receiptId,
+      providerKind: asProviderKind("anthropic"),
+      status: "error",
+    });
+  });
+
   it("emits failed on subprocess crash mid-stream", async () => {
     const harness = makeHarness();
     const spawnRunner = createClaudeCliRunner({
       binaryPath: "/usr/bin/claude",
       enforceTrustedCommand: false,
       now: () => fixedDate,
+      receiptIdFactory: () => receiptId,
       runnerIdFactory: () => runnerId,
       spawner: (command, args, options) => {
         harness.calls.push({ command, args, options });
@@ -306,6 +460,11 @@ describe("createClaudeCliRunner", () => {
       true,
     );
     expect(events.some((event) => event.kind === "finished")).toBe(false);
+    expect(harness.receipts[0]).toMatchObject({
+      id: receiptId,
+      status: "error",
+      providerKind: asProviderKind("anthropic"),
+    });
   });
 
   it("terminates during streaming with SIGTERM and waits for process exit", async () => {

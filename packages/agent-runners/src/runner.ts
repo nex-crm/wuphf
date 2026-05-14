@@ -4,6 +4,7 @@ import type {
   AgentId,
   CostLedgerEntry,
   CredentialHandle,
+  ProviderKind,
   ReceiptSnapshot,
   RunnerEvent,
   RunnerId,
@@ -23,7 +24,7 @@ export interface AgentRunner {
   events(options?: RunnerEventStreamOptions): ReadableStream<RunnerEvent>;
 
   /** Returns events with durable event-log metadata for broker SSE framing. */
-  eventRecords?(options?: RunnerEventStreamOptions): ReadableStream<RunnerEventRecord>;
+  eventRecords(options?: RunnerEventStreamOptions): ReadableStream<RunnerEventRecord>;
 
   /**
    * Terminates the runner. Idempotent. Returns when the subprocess or request
@@ -38,6 +39,8 @@ export interface AgentRunner {
 
 export interface RunnerSpawnDeps {
   readonly credential: CredentialHandle;
+  /** Broker-resolved authoritative provider for cost and receipt attribution. */
+  readonly resolvedProviderKind: ProviderKind;
   readonly secretReader: (h: CredentialHandle) => Promise<string>;
   readonly costLedger: { readonly record: (entry: CostLedgerEntry) => Promise<void> };
   readonly receiptStore: {

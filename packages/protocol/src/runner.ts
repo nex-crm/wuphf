@@ -54,6 +54,7 @@ export const RUNNER_FAILURE_CODE_VALUES = [
   "network_failed",
   "provider_returned_error",
   "unrecognized_provider_response",
+  "subscriber_backpressure_exceeded",
 ] as const;
 
 export interface RunnerProviderRoute {

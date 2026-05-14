@@ -68,6 +68,7 @@ describe("RunnerId and RunnerKind", () => {
   it("accepts the frozen runner kinds and branded ids", () => {
     expect(RUNNER_KIND_VALUES).toEqual(["claude-cli", "codex-cli", "openai-compat"]);
     expect(RUNNER_FAILURE_CODE_VALUES).toContain("event_log_write_failed");
+    expect(RUNNER_FAILURE_CODE_VALUES).toContain("subscriber_backpressure_exceeded");
     expect(isRunnerKind("claude-cli")).toBe(true);
     expect(isRunnerKind("bogus")).toBe(false);
     expect(asRunnerId(runnerId)).toBe(runnerId);
@@ -228,6 +229,17 @@ describe("RunnerEvent codec", () => {
       const event = runnerEventFromJson(item.json);
       expect(event.schemaVersion, item.name).toBe(RUNNER_SCHEMA_VERSION);
       expect(runnerEventToJsonValue(event), item.name).toEqual(withDefaultSchemaVersion(item.json));
+    }
+  });
+
+  it("rejects every golden reject vector", () => {
+    for (const item of runnerVectors.rejectVectors) {
+      const parse =
+        item.kind === "spawnRequest"
+          ? () => runnerSpawnRequestFromJson(item.json)
+          : () => runnerEventFromJson(item.json);
+      expect(parse, item.name).toThrow();
+      expect(item.error_category, item.name).toMatch(/^[a-z_]+$/);
     }
   });
 

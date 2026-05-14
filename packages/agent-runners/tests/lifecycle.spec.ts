@@ -33,6 +33,19 @@ describe("LifecycleStateMachine", () => {
     expect(lifecycle.snapshot()).toEqual({ runnerId, phase: "stopped", exitCode: 0 });
   });
 
+  it("atomically claims terminal emission from running only once", () => {
+    const lifecycle = new LifecycleStateMachine(runnerId);
+    lifecycle.markRunning();
+
+    expect(lifecycle.tryTerminate("finished")).toBe(true);
+    expect(lifecycle.tryTerminate("terminated_by_request")).toBe(false);
+    expect(lifecycle.snapshot()).toEqual({
+      runnerId,
+      phase: "stopping",
+      terminalClaim: "finished",
+    });
+  });
+
   it("supports terminate during spawn before running is marked", async () => {
     const lifecycle = new LifecycleStateMachine(runnerId);
 

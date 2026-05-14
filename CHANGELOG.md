@@ -73,6 +73,15 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Fixed
 
+- **Agent runner correctness across provider routing, event ordering, terminal
+  races, resume expiry, and receipt reconciliation.** Broker-resolved
+  `providerKind` now flows into runner cost and receipt attribution, runner
+  events append through a serialized durable-emission queue, terminal success
+  and failure paths are CAS-gated to emit exactly one terminal event, expired
+  runner SSE resumes return structured `410 runner_resume_window_expired`
+  responses, failed runs write best-effort error receipts at the pre-minted
+  receipt id, and the Go protocol verifier now rejects runner wire drift with
+  TypeScript-parity vectors.
 - **Public tunnel start now retries through transient `trycloudflare.com` failures instead of bouncing straight to the user.** When Cloudflare's free QuickTunnel API returns a 5xx or HTML body (the `error code: 1101` / "Error unmarshaling QuickTunnel response" / "failed to unmarshal quick Tunnel" chain), `cloudflared` exits in under a second before publishing a URL. Previously, that surfaced as a hard failure on the first click. The tunnel controller now respawns `cloudflared` up to 3 times with a 1.5s/3s backoff on a recognized transient signature (5xx + QuickTunnel unmarshal errors), keeping the loopback listener and share server stable across attempts so only the subprocess cycles. Non-transient failures (timeout, missing binary, context cancel, pipe error) skip the retry path so the user is not waiting through pointless respawns. If every attempt fails, the surfaced error gains a hint that `trycloudflare.com` itself looks unhealthy.
 - **First-run agent nudge now reads as a high-contrast retro speech bubble instead of black text on the purple sidebar.** The "→ tag @&lt;agent&gt; in #general" line that points new users at the office chat had no CSS rule attached, so it inherited the body text color and rendered at roughly 3:1 contrast on the Nex sidebar. It now ships as an NES-style pixel dialog box: olive-yellow fill, near-black mono text (≈16:1 contrast, WCAG AAA), four zero-blur stacked `box-shadow` strokes for a sharp pixel border, a soft drop-shadow underneath for CRT depth, and a chunky 4×4 pixel tail that steps up-left from the bubble toward the agent avatar. A 1.6s `translateY` bob draws the eye without moving any layout-bound properties; `prefers-reduced-motion: reduce` falls back to a static bubble. Matches the existing PixelAvatar aesthetic in the agent rail.
 - **Workspace endpoints are wired before the web broker starts serving.** Creating a workspace from the web UI no longer hits `503 {"error":"workspaces not configured"}` because `/workspaces/*` routes now receive the orchestrator during broker construction instead of after `LaunchWeb` blocks forever.
