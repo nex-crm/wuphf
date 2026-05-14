@@ -297,7 +297,9 @@ describe("RunnerEvent codec", () => {
           ? () => runnerSpawnRequestFromJson(item.json)
           : () => runnerEventFromJson(item.json);
       expect(parse, item.name).toThrow();
-      expect(item.error_category, item.name).toMatch(/^[a-z_]+$/);
+      const category = item.error_category;
+      expect(category, item.name).toBeTypeOf("string");
+      expect(category, item.name).toMatch(/^[a-z_]+$/);
     }
   });
 

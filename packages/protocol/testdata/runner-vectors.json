@@ -223,6 +223,7 @@
     {
       "name": "claude-cli malformed options",
       "kind": "spawnRequest",
+      "error_category": "validation",
       "json": {
         "schemaVersion": 1,
         "kind": "claude-cli",
@@ -241,6 +242,7 @@
     {
       "name": "codex-cli malformed options",
       "kind": "spawnRequest",
+      "error_category": "validation",
       "json": {
         "schemaVersion": 1,
         "kind": "codex-cli",
@@ -259,6 +261,7 @@
     {
       "name": "openai-compat malformed options",
       "kind": "spawnRequest",
+      "error_category": "validation",
       "json": {
         "schemaVersion": 1,
         "kind": "openai-compat",
