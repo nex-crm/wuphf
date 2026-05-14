@@ -101,7 +101,10 @@ func handleTeamNotebookVisualArtifactCreate(ctx context.Context, _ *mcp.CallTool
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	payload, _ := json.Marshal(result)
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return toolError(fmt.Errorf("marshal visual artifact create response: %w", err)), nil, nil
+	}
 	return textResult(string(payload)), nil, nil
 }
 
@@ -135,7 +138,10 @@ func handleTeamNotebookVisualArtifactList(ctx context.Context, _ *mcp.CallToolRe
 	if result.Artifacts == nil {
 		result.Artifacts = []map[string]any{}
 	}
-	payload, _ := json.Marshal(result.Artifacts)
+	payload, err := json.Marshal(result.Artifacts)
+	if err != nil {
+		return toolError(fmt.Errorf("marshal visual artifact list response: %w", err)), nil, nil
+	}
 	return textResult(string(payload)), nil, nil
 }
 
@@ -148,7 +154,10 @@ func handleTeamNotebookVisualArtifactRead(ctx context.Context, _ *mcp.CallToolRe
 	if err := brokerGetJSON(ctx, "/notebook/visual-artifacts/"+url.PathEscape(id), &result); err != nil {
 		return toolError(err), nil, nil
 	}
-	payload, _ := json.Marshal(result)
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return toolError(fmt.Errorf("marshal visual artifact read response: %w", err)), nil, nil
+	}
 	return textResult(string(payload)), nil, nil
 }
 
@@ -193,7 +202,10 @@ func handleTeamNotebookVisualArtifactPromote(ctx context.Context, _ *mcp.CallToo
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	payload, _ := json.Marshal(result)
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return toolError(fmt.Errorf("marshal visual artifact promote response: %w", err)), nil, nil
+	}
 	return textResult(string(payload)), nil, nil
 }
 

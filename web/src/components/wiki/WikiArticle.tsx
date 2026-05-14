@@ -272,14 +272,19 @@ export default function WikiArticle({
       setTab("article");
     }
     setVisualArtifact(null);
-    fetchWikiVisualArtifact(path).then((detail) => {
-      if (cancelled) return;
-      setVisualArtifact(detail);
-      if (detail && visualDefaultedPathRef.current !== path) {
-        visualDefaultedPathRef.current = path;
-        setTab((current) => (current === "article" ? "visual" : current));
-      }
-    });
+    fetchWikiVisualArtifact(path)
+      .then((detail) => {
+        if (cancelled) return;
+        setVisualArtifact(detail);
+        if (detail && visualDefaultedPathRef.current !== path) {
+          visualDefaultedPathRef.current = path;
+          setTab((current) => (current === "article" ? "visual" : current));
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setVisualArtifact(null);
+      });
     return () => {
       cancelled = true;
     };

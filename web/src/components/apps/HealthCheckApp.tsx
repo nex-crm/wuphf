@@ -738,7 +738,7 @@ function ProviderCliStatusList({
         ? items.map((item) => (
             <StatusRow
               key={item.name}
-              active={Boolean(item.found)}
+              active={Boolean(item.found && item.ok !== false)}
               label={PROVIDER_CLI_LABELS[item.name]}
               value={
                 item.found

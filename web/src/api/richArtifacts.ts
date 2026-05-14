@@ -112,7 +112,12 @@ export async function fetchWikiVisualArtifact(
 ): Promise<RichArtifactDetail | null> {
   try {
     return await get<RichArtifactDetail>("/wiki/visual", { path });
-  } catch {
-    return null;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/404|not found/i.test(message)) {
+      return null;
+    }
+    console.warn("Failed to fetch wiki visual artifact", err);
+    throw err;
   }
 }

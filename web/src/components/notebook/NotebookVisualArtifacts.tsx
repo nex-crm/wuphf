@@ -38,9 +38,9 @@ export default function NotebookVisualArtifacts({
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    setArtifacts([]);
     setInlineDetail(null);
     if (!canonicalSourcePath) {
-      setArtifacts([]);
       return () => {
         cancelled = true;
       };
@@ -94,6 +94,7 @@ export default function NotebookVisualArtifacts({
       const promoted = await promoteRichArtifact(activeArtifact.id, {
         targetWikiPath: defaultTarget,
         markdownSummary: `# ${activeArtifact.title}\n\n${activeArtifact.summary || "Promoted visual artifact."}\n`,
+        mode: "replace",
       });
       setArtifacts((items) =>
         items.map((item) => (item.id === promoted.id ? promoted : item)),

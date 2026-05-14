@@ -47,6 +47,9 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 			return
 		}
+		if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
+			body.Slug = humanIdentityFromActor(actor).Slug
+		}
 		artifact, html, err := newRichArtifact(body, time.Now())
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -192,28 +195,5 @@ func writeRichArtifactError(w http.ResponseWriter, err error) {
 }
 
 func isRichArtifactCallerError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	markers := []string{
-		"visual artifact: invalid id",
-		"visual artifact: title is required",
-		"visual artifact: html",
-		"visual artifact: content hash mismatch",
-		"visual artifact: unsupported",
-		"visual artifact: createdBy is required",
-		"visual artifact: timestamps are required",
-		"visual artifact: actor slug is required",
-		"visual artifact: markdown_summary is required",
-		"notebook:",
-		"wiki: article",
-		"wiki: unknown write mode",
-	}
-	for _, marker := range markers {
-		if strings.Contains(msg, marker) {
-			return true
-		}
-	}
-	return false
+	return errors.Is(err, errRichArtifactCaller)
 }

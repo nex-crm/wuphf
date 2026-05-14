@@ -135,6 +135,47 @@ describe("<NotebookEntryView>", () => {
     );
   });
 
+  it("re-promotes visual artifacts by replacing the default wiki target", async () => {
+    const user = userEvent.setup();
+    const artifact = {
+      id: "ra_0123456789abcdef",
+      kind: "notebook_html" as const,
+      title: "Visual plan",
+      summary: "A richer plan.",
+      trustLevel: "draft" as const,
+      representation: "html" as const,
+      htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
+      sourceMarkdownPath: DRAFT_ENTRY.file_path,
+      createdBy: "pm",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      contentHash: "hash",
+      sanitizerVersion: "sandbox-v2",
+    };
+    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([artifact]);
+    const promoteSpy = vi
+      .spyOn(richApi, "promoteRichArtifact")
+      .mockResolvedValue({
+        ...artifact,
+        kind: "wiki_visual",
+        trustLevel: "promoted",
+        promotedWikiPath: "team/drafts/pm-customer-acme-rough-notes-visual.md",
+      });
+
+    render(<NotebookEntryView entry={DRAFT_ENTRY} />);
+
+    await screen.findByRole("heading", { name: "Visual artifacts" });
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    await user.click(await screen.findByRole("button", { name: "Promote" }));
+
+    await waitFor(() =>
+      expect(promoteSpy).toHaveBeenCalledWith(
+        "ra_0123456789abcdef",
+        expect.objectContaining({ mode: "replace" }),
+      ),
+    );
+  });
+
   it("transitions to pending-pill state after Promote click", async () => {
     const promoteSpy = vi.spyOn(api, "promoteEntry").mockResolvedValue({
       id: "mock",

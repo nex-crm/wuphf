@@ -280,6 +280,104 @@ func TestBrokerNotebookVisualArtifactCreateReadPromote(t *testing.T) {
 	}
 }
 
+func TestBrokerNotebookVisualArtifactHumanCreateUsesSessionSlug(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	createBody, _ := json.Marshal(map[string]any{
+		"slug":    "pm",
+		"title":   "Human visual plan",
+		"summary": "Created from a team-member session.",
+		"html":    "<!doctype html><html><body><h1>Human visual</h1></body></html>",
+	})
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create visual artifact as human: %v", err)
+	}
+	var created struct {
+		Artifact RichArtifact `json:"artifact"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d artifact=%+v", res.StatusCode, created.Artifact)
+	}
+	if created.Artifact.CreatedBy != "mira" {
+		t.Fatalf("CreatedBy = %q, want authenticated human slug mira", created.Artifact.CreatedBy)
+	}
+}
+
+func TestBrokerNotebookVisualArtifactRejectsUnsafeInput(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+		want string
+	}{
+		{
+			name: "title NUL",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "Bad\x00Title",
+				"html":  "<!doctype html><html><body><h1>Bad</h1></body></html>",
+			},
+			want: "title must not contain NUL",
+		},
+		{
+			name: "external script",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "External script",
+				"html":  `<!doctype html><html><body><script src="https://example.com/app.js"></script></body></html>`,
+			},
+			want: "external script src is not allowed",
+		},
+		{
+			name: "css import",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "CSS import",
+				"html":  `<!doctype html><html><head><style>@import url("https://example.com/style.css");</style></head><body></body></html>`,
+			},
+			want: "css @import is not allowed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(tc.body)
+			req, _ := authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(raw), token)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("post: %v", err)
+			}
+			data, _ := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status=%d want 400 body=%s", res.StatusCode, string(data))
+			}
+			if !strings.Contains(string(data), tc.want) {
+				t.Fatalf("body %q missing %q", string(data), tc.want)
+			}
+		})
+	}
+}
+
 func TestBrokerNotebookWriteAuthRequired(t *testing.T) {
 	srv, _, teardown := newNotebookTestServer(t)
 	defer teardown()
