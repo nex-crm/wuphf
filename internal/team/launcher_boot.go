@@ -157,13 +157,13 @@ func (l *Launcher) Launch() error {
 	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
 	l.resumeInFlightWork()
 
-	go l.watchChannelPaneLoop(channelCmd)
-	go l.notifyAgentsLoop()
+	go func() { defer recoverPanicTo("watchChannelPaneLoop", ""); l.watchChannelPaneLoop(channelCmd) }()
+	go func() { defer recoverPanicTo("notifyAgentsLoop", ""); l.notifyAgentsLoop() }()
 	if !l.isOneOnOne() {
-		go l.notifyTaskActionsLoop()
-		go l.notifyOfficeChangesLoop()
-		go l.pollNexNotificationsLoop()
-		go l.watchdogSchedulerLoop()
+		go func() { defer recoverPanicTo("notifyTaskActionsLoop", ""); l.notifyTaskActionsLoop() }()
+		go func() { defer recoverPanicTo("notifyOfficeChangesLoop", ""); l.notifyOfficeChangesLoop() }()
+		go func() { defer recoverPanicTo("pollNexNotificationsLoop", ""); l.pollNexNotificationsLoop() }()
+		go func() { defer recoverPanicTo("watchdogSchedulerLoop", ""); l.watchdogSchedulerLoop() }()
 	}
 
 	return nil

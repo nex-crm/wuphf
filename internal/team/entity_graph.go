@@ -214,12 +214,14 @@ func (g *EntityGraph) RecordFactRefs(ctx context.Context, fact Fact) ([]EntityRe
 		return nil, nil
 	}
 
-	// Build the new file contents under the lock — a concurrent RecordFactRefs
-	// must see this write as atomic for the read-then-append contract to hold.
-	// Release the lock BEFORE enqueuing, so a read path that takes g.mu in the
-	// future (or a full write queue) can never deadlock waiting on a worker
-	// that is waiting on us.
+	// Build the new file contents under the lock and enqueue atomically.
+	// Holding g.mu through the enqueue prevents concurrent RecordFactRefs
+	// calls from reading stale existing content and losing each other's
+	// edges. This is safe because the wiki worker never calls back into
+	// EntityGraph (no circular lock dependency).
 	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	existing := g.readExistingLocked()
 	var buf strings.Builder
 	buf.Write(existing)
@@ -237,14 +239,12 @@ func (g *EntityGraph) RecordFactRefs(ctx context.Context, fact Fact) ([]EntityRe
 		}
 		line, err := json.Marshal(edge)
 		if err != nil {
-			g.mu.Unlock()
 			return nil, fmt.Errorf("entity graph: marshal: %w", err)
 		}
 		buf.Write(line)
 		buf.WriteString("\n")
 	}
 	content := buf.String()
-	g.mu.Unlock()
 
 	msg := fmt.Sprintf("graph: %s/%s → %d ref(s)", fact.Kind, fact.Slug, len(refs))
 	if _, _, err := g.worker.EnqueueEntityGraph(ctx, ArchivistAuthor, content, msg); err != nil {
