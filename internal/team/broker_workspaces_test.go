@@ -1033,6 +1033,7 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/wiki/article",
 		"/wiki/catalog",
 		"/wiki/audit",
+		"/wiki/visual",
 		"/wiki/sections",
 		"/wiki/lint/run",
 		"/wiki/lint/resolve",
@@ -1045,6 +1046,8 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/notebook/catalog",
 		"/notebook/search",
 		"/notebook/promote",
+		"/notebook/visual-artifacts",
+		"/notebook/visual-artifacts/ra_0123456789abcdef",
 		// review
 		"/review/list",
 		"/review/anything", // /review/ subpath wildcard

@@ -121,11 +121,11 @@ type wikiWriteRequest struct {
 	// wiki/facts/**/*.jsonl. Used by the extractor to close the substrate
 	// guarantee (§7.4): every successfully-submitted fact lands in markdown
 	// so a wipe + reconcile rebuilds to a logically-identical index.
-	IsFactLogAppend bool
-	// IsArtifact routes the request to Repo.CommitArtifact — writes the raw
-	// source artifact under wiki/artifacts/{kind}/{sha}.md. Never regens the
-	// catalog; triggers the extractor hook on success.
-	IsArtifact bool
+	IsFactLogAppend         bool
+	IsArtifact              bool
+	IsRichArtifact          bool
+	IsRichArtifactPromotion bool
+	RichArtifact            wikiRichArtifactWork
 	// IsIndexMutation is a non-git job: the worker applies the carried facts
 	// and entities directly to the WikiIndex (store + text index). Preserves
 	// the single-writer invariant required by the extractor (§11.5).
@@ -162,6 +162,7 @@ type wikiWriteResult struct {
 	SHA          string
 	BytesWritten int
 	SweepResult  SweepResult
+	RichArtifact RichArtifact
 	Err          error
 }
 
@@ -363,6 +364,8 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.CommitHuman(writeCtx, req.Path, req.Content, req.ExpectedSHA, req.CommitMsg, req.HumanIdentity)
 	} else if req.IsArtifact {
 		sha, n, err = w.repo.CommitArtifact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsRichArtifact || req.IsRichArtifactPromotion {
+		req.RichArtifact.Artifact, sha, n, err = w.processRichArtifactRequest(writeCtx, req)
 	} else if req.IsEntityFact {
 		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsEntityGraph {
@@ -397,7 +400,7 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		// SHA alongside the error so callers can surface 409 bodies
 		// without a second round trip. For all other errors `sha` is
 		// empty and carrying it is a harmless no-op.
-		req.ReplyCh <- wikiWriteResult{SHA: sha, Err: err}
+		req.ReplyCh <- wikiWriteResult{SHA: sha, RichArtifact: req.RichArtifact.Artifact, Err: err}
 		return
 	}
 	// Reply is sent at the end of process() so every sideGoroutines.Add(1)
@@ -407,7 +410,7 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	// mirror goroutine could still be spawning while t.TempDir() cleanup
 	// races it.
 	defer func() {
-		req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n}
+		req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n, RichArtifact: req.RichArtifact.Artifact}
 	}()
 
 	ts := time.Now().UTC().Format(time.RFC3339)
@@ -417,9 +420,7 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		// Artifact commits fire the extractor hook asynchronously. Every
 		// failure lands in the DLQ — the commit itself is already durable.
 		w.maybeRunExtractor(ctx, req.Path)
-	case req.IsEntityFact:
-		// Entity fact writes have their own SSE event (entity:fact_recorded)
-		// published by the broker handler, not by the worker. No-op here.
+	case req.IsRichArtifact, req.IsEntityFact:
 	case req.IsEntityGraph:
 		// Graph log appends are internal bookkeeping triggered by fact
 		// writes — no dedicated SSE event. Subscribers that care hear

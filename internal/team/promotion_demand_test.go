@@ -56,6 +56,11 @@ func newDemandIndex(t *testing.T) *NotebookDemandIndex {
 	return idx
 }
 
+func demandTestNow() time.Time {
+	now := time.Now().UTC()
+	return time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+}
+
 func TestSignalWeight_Mapping(t *testing.T) {
 	cases := []struct {
 		signal PromotionDemandSignal
@@ -75,7 +80,7 @@ func TestSignalWeight_Mapping(t *testing.T) {
 
 func TestDemandScoring_CrossAgentSearch(t *testing.T) {
 	idx := newDemandIndex(t)
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	idx.SetClockForTest(func() time.Time { return now })
 	path := "agents/pm/notebook/2026-05-06-retro.md"
 
@@ -133,7 +138,7 @@ func TestDemandScoring_CrossAgentSearch(t *testing.T) {
 
 func TestDemandScoring_DifferentDays(t *testing.T) {
 	idx := newDemandIndex(t)
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	idx.SetClockForTest(func() time.Time { return now })
 	path := "agents/pm/notebook/entry.md"
 
@@ -163,7 +168,7 @@ func TestDemandScoring_DifferentDays(t *testing.T) {
 
 func TestDemandScoring_RejectionCooldown(t *testing.T) {
 	idx := newDemandIndex(t)
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	idx.SetClockForTest(func() time.Time { return now })
 	path := "agents/pm/notebook/entry.md"
 
@@ -199,7 +204,7 @@ func TestDemandScoring_RejectionCooldown(t *testing.T) {
 
 func TestDemandScoring_WindowExpiry(t *testing.T) {
 	idx := newDemandIndex(t)
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	path := "agents/pm/notebook/old.md"
 
 	// Event 8 days ago → outside default 7d window.
@@ -230,7 +235,7 @@ func TestDemandScoring_WindowExpiry(t *testing.T) {
 
 func TestAutoEscalate_ThresholdBreach(t *testing.T) {
 	idx := newDemandIndex(t)
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	idx.SetClockForTest(func() time.Time { return now })
 
 	path := "agents/pm/notebook/onboarding.md"
@@ -273,7 +278,7 @@ func TestAutoEscalate_ThresholdBreach(t *testing.T) {
 
 func TestAutoEscalate_Idempotent(t *testing.T) {
 	idx := newDemandIndex(t)
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	idx.SetClockForTest(func() time.Time { return now })
 
 	path := "agents/pm/notebook/onboarding.md"
@@ -312,7 +317,7 @@ func TestAutoEscalate_Idempotent(t *testing.T) {
 
 func TestAutoEscalate_MissingEntry(t *testing.T) {
 	idx := newDemandIndex(t)
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	idx.SetClockForTest(func() time.Time { return now })
 
 	path := "agents/pm/notebook/nonexistent.md"
@@ -344,7 +349,7 @@ func TestAutoEscalate_MissingEntry(t *testing.T) {
 func TestNotebookDemandIndex_ReloadFromJSONL(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "events.jsonl")
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	clock := func() time.Time { return now }
 	path := "agents/pm/notebook/entry.md"
 
@@ -384,7 +389,7 @@ func TestNotebookDemandIndex_ReloadFromJSONL(t *testing.T) {
 func TestNotebookDemandIndex_ReloadDropsExpired(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "events.jsonl")
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	path := "agents/pm/notebook/entry.md"
 
 	idx1, err := NewNotebookDemandIndex(logPath)
@@ -415,7 +420,7 @@ func TestNotebookDemandIndex_ReloadDropsExpired(t *testing.T) {
 
 func TestTopCandidates_SortedDescending(t *testing.T) {
 	idx := newDemandIndex(t)
-	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	now := demandTestNow()
 	idx.SetClockForTest(func() time.Time { return now })
 
 	// path A: 3 hits

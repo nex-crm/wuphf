@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { NotebookEntry } from "../../api/notebook";
 import * as api from "../../api/notebook";
+import * as richApi from "../../api/richArtifacts";
 import NotebookEntryView from "./NotebookEntry";
 
 const DRAFT_ENTRY: NotebookEntry = {
@@ -28,6 +29,25 @@ const PROMOTED_ENTRY: NotebookEntry = {
 describe("<NotebookEntryView>", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([]);
+    vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue({
+      artifact: {
+        id: "ra_0123456789abcdef",
+        kind: "notebook_html",
+        title: "Visual plan",
+        summary: "A richer plan.",
+        trustLevel: "draft",
+        representation: "html",
+        htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
+        sourceMarkdownPath: DRAFT_ENTRY.file_path,
+        createdBy: "pm",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        contentHash: "hash",
+        sanitizerVersion: "sandbox-v1",
+      },
+      html: "<h1>Inline visual</h1>",
+    });
   });
 
   it("renders title, subtitle, and DRAFT stamp for a draft entry", () => {
@@ -79,6 +99,40 @@ describe("<NotebookEntryView>", () => {
     };
     render(<NotebookEntryView entry={withBack} />);
     expect(screen.getByText("onboarding gotchas")).toBeInTheDocument();
+  });
+
+  it("renders visual artifact cards attached to the notebook entry", async () => {
+    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([
+      {
+        id: "ra_0123456789abcdef",
+        kind: "notebook_html",
+        title: "Visual plan",
+        summary: "A richer plan.",
+        trustLevel: "draft",
+        representation: "html",
+        htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
+        sourceMarkdownPath: DRAFT_ENTRY.file_path,
+        createdBy: "pm",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        contentHash: "hash",
+        sanitizerVersion: "sandbox-v1",
+      },
+    ]);
+
+    render(<NotebookEntryView entry={DRAFT_ENTRY} />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Visual artifacts" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Visual plan").length).toBeGreaterThan(0);
+    expect(
+      await screen.findByTestId("nb-visual-artifact-inline"),
+    ).toBeInTheDocument();
+    expect(screen.getByTitle("Visual plan")).toHaveAttribute(
+      "srcdoc",
+      expect.stringContaining("Inline visual"),
+    );
   });
 
   it("transitions to pending-pill state after Promote click", async () => {

@@ -38,6 +38,10 @@ func newNotebookTestServer(t *testing.T) (*httptest.Server, *Broker, func()) {
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
 	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
 	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
+	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
+	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
+	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
+	mux.HandleFunc("/wiki/visual", b.requireAuth(b.handleWikiVisualArtifact))
 	srv := httptest.NewServer(mux)
 
 	return srv, b, func() {
@@ -131,6 +135,148 @@ func TestBrokerNotebookHandlersEndToEnd(t *testing.T) {
 	res.Body.Close()
 	if len(searchRes.Hits) == 0 {
 		t.Fatal("expected at least one search hit")
+	}
+}
+
+func TestBrokerNotebookVisualArtifactCreateReadPromote(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	writeBody, _ := json.Marshal(map[string]any{
+		"slug":           "pm",
+		"path":           "agents/pm/notebook/retro.md",
+		"content":        "# Retro\n\nDraft source.\n",
+		"mode":           "create",
+		"commit_message": "draft retro",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/notebook/write", bytes.NewReader(writeBody), token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("notebook write: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("notebook write status=%d", res.StatusCode)
+	}
+
+	createBody, _ := json.Marshal(map[string]any{
+		"slug":                 "pm",
+		"title":                "Retro visual plan",
+		"summary":              "A visual review of the retro plan.",
+		"html":                 "<!doctype html><html><body><h1>Retro visual</h1><button>Approve</button></body></html>",
+		"source_markdown_path": "agents/pm/notebook/retro.md",
+		"related_receipt_ids":  []string{"rcpt-1", "rcpt-1", "rcpt-2"},
+	})
+	req, _ = authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody), token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create visual artifact: %v", err)
+	}
+	var created struct {
+		Artifact  RichArtifact `json:"artifact"`
+		CommitSHA string       `json:"commit_sha"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d", res.StatusCode)
+	}
+	if created.Artifact.ID == "" || created.Artifact.TrustLevel != richArtifactTrustDraft || created.CommitSHA == "" {
+		t.Fatalf("unexpected artifact response: %+v", created)
+	}
+	if len(created.Artifact.RelatedReceiptIDs) != 2 {
+		t.Fatalf("receipt ids should be deduped: %+v", created.Artifact.RelatedReceiptIDs)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/notebook/visual-artifacts?source_path=agents/pm/notebook/retro.md", nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("list visual artifacts: %v", err)
+	}
+	var list struct {
+		Artifacts []RichArtifact `json:"artifacts"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	_ = res.Body.Close()
+	if len(list.Artifacts) != 1 || list.Artifacts[0].ID != created.Artifact.ID {
+		t.Fatalf("expected created artifact in list, got %+v", list.Artifacts)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/notebook/visual-artifacts/"+created.Artifact.ID, nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("read visual artifact: %v", err)
+	}
+	var detail struct {
+		Artifact RichArtifact `json:"artifact"`
+		HTML     string       `json:"html"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	_ = res.Body.Close()
+	if !strings.Contains(detail.HTML, "Retro visual") {
+		t.Fatalf("expected html body, got %q", detail.HTML)
+	}
+
+	promoteBody, _ := json.Marshal(map[string]any{
+		"target_wiki_path": "team/drafts/retro-visual.md",
+		"markdown_summary": "# Retro visual plan\n\nA reviewed summary.\n",
+	})
+	req, _ = authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts/"+created.Artifact.ID+"/promote", bytes.NewReader(promoteBody), token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("promote visual artifact: %v", err)
+	}
+	var promoted struct {
+		Artifact  RichArtifact `json:"artifact"`
+		CommitSHA string       `json:"commit_sha"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&promoted); err != nil {
+		t.Fatalf("decode promote: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("promote status=%d", res.StatusCode)
+	}
+	if promoted.Artifact.TrustLevel != richArtifactTrustPromoted || promoted.Artifact.PromotedWikiPath != "team/drafts/retro-visual.md" {
+		t.Fatalf("unexpected promoted artifact: %+v", promoted.Artifact)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/wiki/article?path=team/drafts/retro-visual.md", nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("read promoted wiki article: %v", err)
+	}
+	var article ArticleMeta
+	if err := json.NewDecoder(res.Body).Decode(&article); err != nil {
+		t.Fatalf("decode article: %v", err)
+	}
+	_ = res.Body.Close()
+	if !strings.Contains(article.Content, created.Artifact.ID) || !strings.Contains(article.Content, "Visual Artifact Provenance") {
+		t.Fatalf("promoted article missing provenance: %s", article.Content)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/wiki/visual?path=team/drafts/retro-visual.md", nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("read wiki visual: %v", err)
+	}
+	var visual struct {
+		Artifact RichArtifact `json:"artifact"`
+		HTML     string       `json:"html"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&visual); err != nil {
+		t.Fatalf("decode wiki visual: %v", err)
+	}
+	_ = res.Body.Close()
+	if visual.Artifact.ID != created.Artifact.ID || !strings.Contains(visual.HTML, "Retro visual") {
+		t.Fatalf("unexpected wiki visual response: %+v html=%q", visual.Artifact, visual.HTML)
 	}
 }
 
@@ -650,6 +796,9 @@ func TestBrokerNotebookServiceUnavailable(t *testing.T) {
 	mux.HandleFunc("/notebook/list", b.handleNotebookList)
 	mux.HandleFunc("/notebook/catalog", b.handleNotebookCatalog)
 	mux.HandleFunc("/notebook/search", b.handleNotebookSearch)
+	mux.HandleFunc("/notebook/visual-artifacts", b.handleNotebookVisualArtifacts)
+	mux.HandleFunc("/notebook/visual-artifacts/", b.handleNotebookVisualArtifactSubpath)
+	mux.HandleFunc("/wiki/visual", b.handleWikiVisualArtifact)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -662,6 +811,9 @@ func TestBrokerNotebookServiceUnavailable(t *testing.T) {
 		{http.MethodGet, "/notebook/list?slug=pm"},
 		{http.MethodGet, "/notebook/catalog"},
 		{http.MethodGet, "/notebook/search?slug=pm&q=x"},
+		{http.MethodGet, "/notebook/visual-artifacts"},
+		{http.MethodGet, "/notebook/visual-artifacts/ra_0123456789abcdef"},
+		{http.MethodGet, "/wiki/visual?path=team/drafts/x.md"},
 	}
 	for _, tc := range cases {
 		req, _ := http.NewRequest(tc.method, srv.URL+tc.url, nil)

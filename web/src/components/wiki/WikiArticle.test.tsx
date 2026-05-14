@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as richApi from "../../api/richArtifacts";
 import * as api from "../../api/wiki";
 import WikiArticle from "./WikiArticle";
 
@@ -31,6 +32,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   // Default history stub — individual tests override as needed.
   vi.spyOn(api, "fetchHistory").mockResolvedValue({ commits: [] });
+  vi.spyOn(richApi, "fetchWikiVisualArtifact").mockResolvedValue(null);
 });
 
 describe("<WikiArticle content>", () => {
@@ -98,6 +100,56 @@ describe("<WikiArticle content>", () => {
     await waitFor(() => expect(getByText(/## Heading A/)).toBeInTheDocument());
     getByRole("button", { name: "History" }).click();
     await waitFor(() => expect(getByText(/streams from/)).toBeInTheDocument());
+  });
+
+  it("shows promoted visual views in the Visual tab", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "team/drafts/visual-plan.md",
+      title: "Visual Plan",
+      content: "# Visual Plan\n\nSummary.",
+      last_edited_by: "pm",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["pm"],
+      backlinks: [],
+      word_count: 5,
+      categories: [],
+    });
+    vi.spyOn(richApi, "fetchWikiVisualArtifact").mockResolvedValue({
+      artifact: {
+        id: "ra_0123456789abcdef",
+        kind: "wiki_visual",
+        title: "Visual Plan",
+        summary: "A richer plan.",
+        trustLevel: "promoted",
+        representation: "html",
+        htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
+        promotedWikiPath: "team/drafts/visual-plan.md",
+        createdBy: "pm",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        contentHash: "hash",
+        sanitizerVersion: "sandbox-v1",
+      },
+      html: "<h1>Visual artifact</h1>",
+    });
+
+    render(
+      <WikiArticle
+        path="team/drafts/visual-plan.md"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const visualTab = await screen.findByRole("button", { name: "Visual" });
+    await waitFor(() => expect(visualTab).not.toBeDisabled());
+
+    expect(await screen.findByTestId("wk-visual-artifact")).toBeInTheDocument();
+    expect(screen.getByTitle("Visual Plan")).toHaveAttribute(
+      "srcdoc",
+      expect.stringContaining("Visual artifact"),
+    );
   });
 
   it("renders an error state when fetchArticle rejects", async () => {

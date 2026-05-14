@@ -6,6 +6,10 @@ import type { PluggableList } from "unified";
 import type { EntityKind } from "../../api/entity";
 import { detectPlaybook } from "../../api/playbook";
 import {
+  fetchWikiVisualArtifact,
+  type RichArtifactDetail,
+} from "../../api/richArtifacts";
+import {
   compressArticle,
   fetchArticle,
   fetchHistory,
@@ -24,6 +28,7 @@ import {
   buildRehypePlugins,
   buildRemarkPlugins,
 } from "../../lib/wikiMarkdownConfig";
+import RichArtifactFrame from "../rich-artifacts/RichArtifactFrame";
 import ArticleStatusBanner from "./ArticleStatusBanner";
 import ArticleTitle from "./ArticleTitle";
 import Byline from "./Byline";
@@ -211,6 +216,9 @@ export default function WikiArticle({
   const [liveAgent, setLiveAgent] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [humans, setHumans] = useState<HumanIdentity[]>([]);
+  const [visualArtifact, setVisualArtifact] =
+    useState<RichArtifactDetail | null>(null);
+  const visualDefaultedPathRef = useRef<string | null>(null);
 
   // Fetch the human registry once per mount. The list is small (a handful
   // of team members) and changes rarely, so we skip refetching on every
@@ -250,6 +258,28 @@ export default function WikiArticle({
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [path, externalRefreshNonce, refreshNonce]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void externalRefreshNonce;
+    void refreshNonce;
+    if (visualDefaultedPathRef.current !== path) {
+      visualDefaultedPathRef.current = null;
+      setTab("article");
+    }
+    setVisualArtifact(null);
+    fetchWikiVisualArtifact(path).then((detail) => {
+      if (cancelled) return;
+      setVisualArtifact(detail);
+      if (detail && visualDefaultedPathRef.current !== path) {
+        visualDefaultedPathRef.current = path;
+        setTab((current) => (current === "article" ? "visual" : current));
+      }
+    });
     return () => {
       cancelled = true;
     };
@@ -373,6 +403,7 @@ export default function WikiArticle({
           active={tab}
           onChange={setTab}
           rightRail={context ? [context] : undefined}
+          disabledTabs={visualArtifact ? ["talk"] : ["visual", "talk"]}
         />
         <ArticleBreadcrumb
           article={article}
@@ -393,6 +424,7 @@ export default function WikiArticle({
           remarkPlugins={remarkPlugins}
           rehypePlugins={rehypePlugins}
           markdownComponents={markdownComponents}
+          visualArtifact={visualArtifact}
           onEditorSaved={handleEditorSaved}
           onEditorCancel={handleEditorCancel}
         />
@@ -539,6 +571,7 @@ function ArticleTabPanels({
   remarkPlugins,
   rehypePlugins,
   markdownComponents,
+  visualArtifact,
   onEditorSaved,
   onEditorCancel,
 }: {
@@ -548,6 +581,7 @@ function ArticleTabPanels({
   remarkPlugins: PluggableList;
   rehypePlugins: PluggableList;
   markdownComponents: MarkdownComponents;
+  visualArtifact: RichArtifactDetail | null;
   onEditorSaved: (newSha: string) => void;
   onEditorCancel: () => void;
 }) {
@@ -563,6 +597,24 @@ function ArticleTabPanels({
             {article.content}
           </ReactMarkdown>
         </div>
+      );
+    case "visual":
+      return visualArtifact ? (
+        <div className="wk-visual-artifact" data-testid="wk-visual-artifact">
+          <div className="wk-visual-artifact-head">
+            <h2>{visualArtifact.artifact.title}</h2>
+            <div className="rich-artifact-meta">
+              <span>{visualArtifact.artifact.trustLevel}</span>
+              <span>{visualArtifact.artifact.htmlPath}</span>
+            </div>
+          </div>
+          <RichArtifactFrame
+            title={visualArtifact.artifact.title}
+            html={visualArtifact.html}
+          />
+        </div>
+      ) : (
+        <div className="wk-loading">No visual view for this article.</div>
       );
     case "edit":
       return (

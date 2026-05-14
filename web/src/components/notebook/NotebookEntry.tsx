@@ -11,6 +11,7 @@ import ByLineStrip from "./ByLineStrip";
 import DraftStamp from "./DraftStamp";
 import EntryBody from "./EntryBody";
 import InlineReviewThread from "./InlineReviewThread";
+import NotebookVisualArtifacts from "./NotebookVisualArtifacts";
 import PosterityLine from "./PosterityLine";
 import PromoteButton from "./PromoteButton";
 import PromotedBackCallout from "./PromotedBackCallout";
@@ -130,6 +131,13 @@ export default function NotebookEntryView({
       />
 
       <EntryBody markdown={entry.body_md} onWikiNavigate={onNavigateWiki} />
+
+      <NotebookVisualArtifacts
+        agentSlug={entry.agent_slug}
+        entrySlug={entry.entry_slug}
+        sourcePath={entry.file_path}
+        onNavigateWiki={onNavigateWiki}
+      />
 
       {entry.promoted_back ? (
         <PromotedBackCallout

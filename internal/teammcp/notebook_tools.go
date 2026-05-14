@@ -67,7 +67,7 @@ type TeamNotebookPromoteArgs struct {
 	ReviewerSlug   string `json:"reviewer_slug,omitempty" jsonschema:"Optional reviewer override. When omitted, the blueprint's reviewer_paths decides."`
 }
 
-// registerNotebookTools attaches the 4 notebook tools to the MCP server.
+// registerNotebookTools attaches notebook tools to the MCP server.
 // Caller (configureServerTools, markdown branch) is responsible for gating on
 // WUPHF_MEMORY_BACKEND; this function does not re-check the env.
 func registerNotebookTools(server *mcp.Server) {
@@ -91,6 +91,7 @@ func registerNotebookTools(server *mcp.Server) {
 		"notebook_promote",
 		"Submit a notebook entry for reviewer approval + promotion to the team wiki. Copy-not-move: once approved the source entry is retained with a back-link frontmatter block. Pass task_id when this is the promotion decision for a task with a required memory workflow. Target path must start with team/ and end in .md.",
 	), handleTeamNotebookPromote)
+	registerNotebookVisualArtifactTools(server)
 }
 
 func handleTeamNotebookWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamNotebookWriteArgs) (*mcp.CallToolResult, any, error) {
