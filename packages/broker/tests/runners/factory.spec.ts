@@ -184,26 +184,23 @@ describe("createAgentRunnerForBroker", () => {
       "https://eastus.openai.azure.com/openai/deployments/demo/chat/completions",
       ["https://*.openai.azure.com"],
     ],
-  ])(
-    "allows openai-compatible endpoints that match the %s allowlist",
-    async (_name, endpoint, endpointAllowlist) => {
-      const runner = await createAgentRunnerForBroker(
-        openAICompatRequest(endpoint),
-        forBrokerTests({ agentId }),
-        {
-          ...depsForOwnership({
-            actualAgentId: agentId,
-            actualScope: asCredentialScope("openai-compat"),
-            actualSecret: "openai-compatible-secret",
-            expectedProviderKind: asProviderKind("openai-compat"),
-          }),
-          endpointAllowlist,
-        },
-      );
+  ])("allows openai-compatible endpoints that match the %s allowlist", async (_name, endpoint, endpointAllowlist) => {
+    const runner = await createAgentRunnerForBroker(
+      openAICompatRequest(endpoint),
+      forBrokerTests({ agentId }),
+      {
+        ...depsForOwnership({
+          actualAgentId: agentId,
+          actualScope: asCredentialScope("openai-compat"),
+          actualSecret: "openai-compatible-secret",
+          expectedProviderKind: asProviderKind("openai-compat"),
+        }),
+        endpointAllowlist,
+      },
+    );
 
-      expect(runner.agentId).toBe(agentId);
-    },
-  );
+    expect(runner.agentId).toBe(agentId);
+  });
 
   it.each([
     ["not allowlisted", "https://evil.test/v1/chat/completions", ["https://api.openai.com"]],
