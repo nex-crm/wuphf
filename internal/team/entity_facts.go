@@ -18,6 +18,7 @@ package team
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -174,8 +175,9 @@ func (l *FactLog) Append(ctx context.Context, kind EntityKind, slug, text, sourc
 	// Dedup: skip append if a fact with the same ID already exists in the
 	// file. This prevents duplicate entries when the same observation is
 	// recorded multiple times (e.g. re-extraction, retry after timeout).
-	if factExistsInJSONL(existing, factID) {
-		return fact, nil
+	// Return the persisted fact so callers see the original CreatedAt.
+	if existingFact, found := findFactInJSONL(existing, factID); found {
+		return existingFact, nil
 	}
 	buf := make([]byte, 0, len(existing)+len(line)+1)
 	if len(existing) > 0 {
@@ -335,7 +337,7 @@ func (l *FactLog) commitTimestamp(ctx context.Context, sha string) (time.Time, e
 // the expected fact counts per entity (hundreds, not millions).
 func deterministicFactID(kind EntityKind, slug, text, recordedBy string) string {
 	h := sha256.New()
-	h.Write([]byte(string(kind)))
+	h.Write([]byte(kind))
 	h.Write([]byte{0}) // separator
 	h.Write([]byte(slug))
 	h.Write([]byte{0})
@@ -345,31 +347,29 @@ func deterministicFactID(kind EntityKind, slug, text, recordedBy string) string 
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// factExistsInJSONL scans existing JSONL bytes for a fact with the given ID.
-// Returns true if found, enabling dedup on the append path.
-func factExistsInJSONL(existing []byte, factID string) bool {
+// findFactInJSONL scans existing JSONL bytes for a fact with the given ID.
+// Returns the full Fact and true if found, so callers get the original
+// CreatedAt rather than a freshly minted timestamp.
+func findFactInJSONL(existing []byte, factID string) (Fact, bool) {
 	if len(existing) == 0 || factID == "" {
-		return false
+		return Fact{}, false
 	}
 	// Fast path: search for the ID string in the raw bytes before parsing.
 	// This avoids JSON decoding when the ID is clearly absent.
-	if !strings.Contains(string(existing), factID) {
-		return false
+	if !bytes.Contains(existing, []byte(factID)) {
+		return Fact{}, false
 	}
-	// Slow path: confirm it's actually an "id" field match, not a substring
-	// of some other field.
-	scanner := bufio.NewScanner(strings.NewReader(string(existing)))
+	// Slow path: decode each line to confirm it's an "id" field match.
+	scanner := bufio.NewScanner(bytes.NewReader(existing))
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
 			continue
 		}
-		var partial struct {
-			ID string `json:"id"`
-		}
-		if json.Unmarshal([]byte(line), &partial) == nil && partial.ID == factID {
-			return true
+		var f Fact
+		if json.Unmarshal(line, &f) == nil && f.ID == factID {
+			return f, true
 		}
 	}
-	return false
+	return Fact{}, false
 }
