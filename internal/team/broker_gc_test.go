@@ -1,6 +1,7 @@
 package team
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,16 +14,25 @@ func TestAppendMessageLocked_CapsAtMax(t *testing.T) {
 	b.mu.Lock()
 	for i := 0; i < 25; i++ {
 		b.appendMessageLocked(channelMessage{
-			ID:      "msg-" + time.Now().Format("150405.000000") + "-" + string(rune('a'+i%26)),
-			Content: "hello",
+			ID:      fmt.Sprintf("msg-%03d", i),
+			Content: fmt.Sprintf("hello-%d", i),
 			Channel: "general",
 		})
 	}
 	count := len(b.messages)
+	// Verify the newest 10 messages are retained (msg-015 through msg-024).
+	firstID := b.messages[0].ID
+	lastID := b.messages[count-1].ID
 	b.mu.Unlock()
 
 	if count != 10 {
 		t.Errorf("expected 10 messages after cap, got %d", count)
+	}
+	if firstID != "msg-015" {
+		t.Errorf("expected oldest retained message to be msg-015, got %q", firstID)
+	}
+	if lastID != "msg-024" {
+		t.Errorf("expected newest retained message to be msg-024, got %q", lastID)
 	}
 }
 
