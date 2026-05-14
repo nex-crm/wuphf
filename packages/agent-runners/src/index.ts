@@ -14,6 +14,16 @@ export type {
   CodexCliSpawnOptions,
 } from "./adapters/codex-cli.ts";
 export { createCodexCliRunner } from "./adapters/codex-cli.ts";
+export type {
+  OpenAICompatAdapterOptions,
+  OpenAICompatFetch,
+  OpenAICompatRunnerOptions,
+  OpenAICompatRunnerSpawnRequest,
+} from "./adapters/openai-compat.ts";
+export {
+  createOpenAICompatRunner,
+  OPENAI_COMPAT_DEFAULT_TIMEOUT_MS,
+} from "./adapters/openai-compat.ts";
 export {
   AgentRunnerError,
   ClaudeCliNotAvailable,

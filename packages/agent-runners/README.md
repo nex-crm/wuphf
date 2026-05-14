@@ -1,6 +1,6 @@
 # @wuphf/agent-runners
 
-Subprocess-backed agent runners for WUPHF v1.
+Agent runners for WUPHF v1.
 
 The package freezes the `AgentRunner` interface and ships concrete Claude CLI
 and Codex CLI adapters. OpenAI-compatible adapters plug into the same
@@ -15,9 +15,9 @@ the secret once at spawn time, injects it as `ANTHROPIC_API_KEY`, and then only
 emits `RunnerEvent` values from `@wuphf/protocol`.
 
 Receipt writes are authoritative. If `receiptStore.put` throws or reports that
-the receipt was not stored, the run emits `failed` and does not emit
-`finished`. This is the v1 guard against the v0 `appendTaskLogEntry`
-best-effort receipt anti-pattern.
+the receipt was not stored, the run emits `failed` and does not emit `finished`.
+This is the v1 guard against the v0 `appendTaskLogEntry` best-effort receipt
+anti-pattern.
 
 Lifecycle state is owned by the runner fiber. Output consumers subscribe to a
 `ReadableStream<RunnerEvent>` but cannot mutate state, and `terminate()` waits
@@ -64,3 +64,44 @@ Credential injection follows the broker-owned handle scope: `openai` and
 `openai-compat` use `OPENAI_API_KEY`; `anthropic` uses `ANTHROPIC_API_KEY`.
 The environment allowlist mirrors the Claude adapter: provider secret, `LC_ALL`,
 `PATH`, and user home/name values needed by the CLI.
+## OpenAI-Compatible HTTP Adapter
+
+`createOpenAICompatRunner()` drives chat-completions endpoints that implement
+OpenAI-style streaming SSE. It does not spawn a subprocess; the runner is the
+in-flight HTTP request, and `terminate()` aborts through `AbortController`.
+
+The wire-frozen `RunnerSpawnRequest` has no provider-options field, so this
+adapter exposes a typed local extension:
+
+```ts
+import {
+  createOpenAICompatRunner,
+  type OpenAICompatRunnerSpawnRequest,
+} from "@wuphf/agent-runners";
+
+const request: OpenAICompatRunnerSpawnRequest = {
+  kind: "openai-compat",
+  agentId,
+  credential,
+  prompt: "Summarize the change",
+  model: "gpt-5-mini",
+  options: {
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    headers: { "OpenAI-Organization": "org_..." },
+    timeoutMs: 60_000,
+  },
+};
+```
+
+The broker-provided secret is read once at spawn time. Scope `openai` and
+`openai-compat` use `Authorization: Bearer <secret>`; scope `anthropic` uses
+`x-api-key: <secret>`. Other scopes fall back to bearer auth and emit a
+structured `stderr` event documenting the assumption.
+
+SSE `delta.content` chunks become `stdout` events. A provider-reported `usage`
+object becomes a cost ledger entry and `cost` event; if the provider omits
+usage, the adapter records a zero-cost entry and marks the emitted cost event
+with `note: "provider_did_not_report_usage"` for operational visibility.
+
+Retries are intentionally not implemented in the adapter. TODO(#NEW): add a
+cost-ledger-aware, idempotency-aware retry middleware above concrete adapters.
