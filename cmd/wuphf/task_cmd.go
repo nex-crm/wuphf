@@ -349,7 +349,7 @@ func runTaskReview(args []string) {
 		os.Exit(2)
 	}
 	url := brokerBaseURL() + "#/task/" + id
-	if err := openBrowser(url); err != nil {
+	if err := openBrowser(context.Background(), url); err != nil {
 		fmt.Fprintf(os.Stderr, "task review: open %s: %v\n", url, err)
 		fmt.Fprintln(os.Stderr, "  Open it manually in your browser instead.")
 		os.Exit(1)
@@ -377,15 +377,15 @@ func isSafeTaskID(id string) bool {
 	return true
 }
 
-func openBrowser(url string) error {
+func openBrowser(ctx context.Context, url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.CommandContext(ctx, "open", url)
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		cmd = exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", url)
 	default:
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.CommandContext(ctx, "xdg-open", url)
 	}
 	return cmd.Start()
 }
