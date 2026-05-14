@@ -1,6 +1,6 @@
 import type { CredentialHandle } from "@wuphf/protocol";
 
-import { KeychainCommandFailed, NotFound } from "../errors.ts";
+import { NotFound } from "../errors.ts";
 import {
   type CredentialHandleParts,
   credentialAccount,
@@ -10,28 +10,47 @@ import {
 } from "../internal/handle.ts";
 import {
   assertBrokerIdentityForAgent,
+  assertValidCredentialPayload,
   type CredentialDeleteRequest,
   type CredentialReadRequest,
   type CredentialStore,
   type CredentialWriteRequest,
+  keychainCommandFailure,
+  operationTimeoutMs,
+  resolveTrustedCommand,
+  runKeychainCommand,
   type Spawner,
+  type TrustedCommand,
 } from "../store.ts";
 
 export interface MacOSCredentialStoreOptions {
   readonly serviceName: string;
   readonly spawner: Spawner;
+  readonly enforceTrustedCommand?: boolean | undefined;
   readonly timeoutMs?: number | undefined;
 }
 
 export class MacOSCredentialStore implements CredentialStore {
-  constructor(private readonly options: MacOSCredentialStoreOptions) {}
+  private readonly security: TrustedCommand;
+
+  constructor(private readonly options: MacOSCredentialStoreOptions) {
+    this.security = resolveTrustedCommand({
+      candidates: ["/usr/bin/security"],
+      commandName: "security",
+      enforce: options.enforceTrustedCommand ?? true,
+      platform: "darwin",
+      recoveryHint: "Ensure /usr/bin/security exists and the login keychain is unlocked",
+    });
+  }
 
   async write(input: CredentialWriteRequest): Promise<CredentialHandle> {
     assertBrokerIdentityForAgent(input.broker, input.agentId);
+    assertValidCredentialPayload(input.secret);
     const handle = newCredentialHandle(input);
     const parts = credentialHandleParts(handle, input);
-    const result = await this.options.spawner(
-      "security",
+    const result = await runKeychainCommand(
+      this.options.spawner,
+      this.security,
       [
         "add-generic-password",
         "-U",
@@ -45,19 +64,29 @@ export class MacOSCredentialStore implements CredentialStore {
         credentialMetadata(parts),
         "-w",
       ],
-      { input: input.secret, timeoutMs: this.options.timeoutMs },
+      {
+        action: "write",
+        commandName: "security add-generic-password",
+        input: input.secret,
+        platform: "darwin",
+        timeoutMs: operationTimeoutMs(this.options.timeoutMs),
+      },
     );
 
     if (result.code !== 0) {
-      throw new KeychainCommandFailed("security add-generic-password", result.code, result.stderr);
+      throw keychainCommandFailure("security add-generic-password", result, {
+        action: "write",
+        platform: "darwin",
+      });
     }
     return handle;
   }
 
   async read(input: CredentialReadRequest): Promise<string> {
     assertBrokerIdentityForAgent(input.broker, input.agentId);
-    const result = await this.options.spawner(
-      "security",
+    const result = await runKeychainCommand(
+      this.options.spawner,
+      this.security,
       [
         "find-generic-password",
         "-a",
@@ -66,20 +95,29 @@ export class MacOSCredentialStore implements CredentialStore {
         this.options.serviceName,
         "-w",
       ],
-      { timeoutMs: this.options.timeoutMs },
+      {
+        action: "read",
+        commandName: "security find-generic-password",
+        platform: "darwin",
+        timeoutMs: operationTimeoutMs(this.options.timeoutMs),
+      },
     );
 
     if (result.code !== 0) {
       if (isSecurityNotFound(result.stderr)) throw new NotFound();
-      throw new KeychainCommandFailed("security find-generic-password", result.code, result.stderr);
+      throw keychainCommandFailure("security find-generic-password", result, {
+        action: "read",
+        platform: "darwin",
+      });
     }
     return stripOneTrailingNewline(result.stdout);
   }
 
   async delete(input: CredentialDeleteRequest): Promise<void> {
     assertBrokerIdentityForAgent(input.broker, input.agentId);
-    const result = await this.options.spawner(
-      "security",
+    const result = await runKeychainCommand(
+      this.options.spawner,
+      this.security,
       [
         "delete-generic-password",
         "-a",
@@ -87,15 +125,19 @@ export class MacOSCredentialStore implements CredentialStore {
         "-s",
         this.options.serviceName,
       ],
-      { timeoutMs: this.options.timeoutMs },
+      {
+        action: "delete",
+        commandName: "security delete-generic-password",
+        platform: "darwin",
+        timeoutMs: operationTimeoutMs(this.options.timeoutMs),
+      },
     );
 
     if (result.code !== 0 && !isSecurityNotFound(result.stderr)) {
-      throw new KeychainCommandFailed(
-        "security delete-generic-password",
-        result.code,
-        result.stderr,
-      );
+      throw keychainCommandFailure("security delete-generic-password", result, {
+        action: "delete",
+        platform: "darwin",
+      });
     }
   }
 }

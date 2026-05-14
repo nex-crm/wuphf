@@ -5,8 +5,10 @@ export {
   BrokerIdentityRequired,
   type CredentialErrorCode,
   CredentialStoreError,
+  InvalidCredentialPayload,
   InvalidHandle,
   KeychainCommandFailed,
+  KeychainCommandTimedOut,
   NoKeyringAvailable,
   NotFound,
 } from "./errors.ts";
