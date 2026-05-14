@@ -2,9 +2,9 @@
 
 Subprocess-backed agent runners for WUPHF v1.
 
-The package freezes the `AgentRunner` interface and ships the first concrete
-adapter, Claude CLI in `--print` streaming JSON mode. Codex CLI and
-OpenAI-compatible adapters plug into the same `SpawnAgentRunner` function.
+The package freezes the `AgentRunner` interface and ships concrete Claude CLI
+and Codex CLI adapters. OpenAI-compatible adapters plug into the same
+`SpawnAgentRunner` function.
 
 ## Threat Model
 
@@ -39,3 +39,28 @@ live consumers rely on `ReadableStream` backpressure.
 
 Real CLI smoke coverage is deferred until a gated
 `WUPHF_REAL_CLAUDE_CLI=1` test lands in a follow-up.
+
+## Codex CLI Adapter
+
+`createCodexCliRunner()` resolves an absolute Codex CLI path, realpaths it, and
+rejects group/world-writable binaries or resolved parent directories before
+spawning `codex exec`. Tests use the injectable `Spawner` seam and do not
+require a real Codex installation.
+
+The adapter passes `--sandbox workspace-write`, `--profile auto`,
+`--output-last-message`, `--color never`, and `--cd <cwd>` when the frozen
+`RunnerSpawnRequest` includes a working directory. The current protocol request
+shape does not carry sandbox or profile overrides; those remain adapter options
+so the wire surface and golden vectors stay unchanged.
+
+Codex text output is parsed block-by-block. Tool execution markers emit
+`stderr` events, `tokens used: <n>` emits a `cost` event, hook lines are ignored,
+and the final block after the last `--------` delimiter is emitted as `stdout`
+chunks capped around 256 bytes. Unknown non-final lines are still forwarded to
+`stdout`, and each run emits one parser summary on `stderr` when such lines are
+seen.
+
+Credential injection follows the broker-owned handle scope: `openai` and
+`openai-compat` use `OPENAI_API_KEY`; `anthropic` uses `ANTHROPIC_API_KEY`.
+The environment allowlist mirrors the Claude adapter: provider secret, `LC_ALL`,
+`PATH`, and user home/name values needed by the CLI.
