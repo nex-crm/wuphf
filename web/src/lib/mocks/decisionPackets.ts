@@ -393,5 +393,8 @@ export async function getDecisionPacketMock(
   // Default to the canonical populated packet so deep-link demos still
   // render a coherent task view; the route layer will swap for real
   // broker fetch + 404 handling once Lane C lands.
-  return Promise.resolve({ ...POPULATED_PACKET, taskId });
+  // structuredClone so nested arrays/objects don't share references with
+  // POPULATED_PACKET — prevents mutation-based contamination across deep-
+  // link demo invocations.
+  return Promise.resolve({ ...structuredClone(POPULATED_PACKET), taskId });
 }
