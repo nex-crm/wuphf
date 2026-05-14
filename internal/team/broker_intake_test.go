@@ -247,11 +247,10 @@ func TestIntake_AutoAssignCountdownInterrupted(t *testing.T) {
 	// the keypress before the timer elapses.
 	cd := newAutoAssignCountdownWithDuration(2 * time.Second)
 
-	// Mock the keypress: cancel immediately on a goroutine.
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cd.Cancel()
-	}()
+	// Mock the keypress: cancel after a brief delay via AfterFunc so
+	// Wait() has entered its select block before Cancel fires.
+	cancelTimer := time.AfterFunc(20*time.Millisecond, cd.Cancel)
+	defer cancelTimer.Stop()
 
 	start := time.Now()
 	completed := cd.Wait(context.Background())
@@ -288,10 +287,8 @@ func TestIntake_AutoAssignCountdownHonorsContext(t *testing.T) {
 	t.Parallel()
 	cd := newAutoAssignCountdownWithDuration(2 * time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
-	}()
+	cancelTimer := time.AfterFunc(20*time.Millisecond, cancel)
+	defer cancelTimer.Stop()
 	completed := cd.Wait(ctx)
 	if completed {
 		t.Fatal("Wait should return false when context cancels before timer elapses")

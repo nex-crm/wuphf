@@ -134,10 +134,8 @@ func TestRunTaskCmdHelp(t *testing.T) {
 // countdown cancels the auto-confirm and falls back to manual y/n.
 func TestAutoAssignCountdownInterrupt(t *testing.T) {
 	c := team.NewAutoAssignCountdown()
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		c.Cancel()
-	}()
+	timer := time.AfterFunc(10*time.Millisecond, c.Cancel)
+	defer timer.Stop()
 	if c.Wait(context.Background()) {
 		t.Errorf("expected Wait to return false on Cancel, got true")
 	}

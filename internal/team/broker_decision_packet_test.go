@@ -36,7 +36,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 // fakeDecisionPacketStore is the test double for decisionPacketStore.
@@ -521,23 +520,14 @@ func TestDecisionPacketWikiPromotionOnMerged(t *testing.T) {
 		t.Fatalf("RecordTaskDecision: %v", err)
 	}
 
-	// Wiki write is enqueued in a goroutine; poll for the article.
+	// Wiki write is enqueued in a goroutine; deterministically drain
+	// the worker so the in-flight process() finishes its file write
+	// before we read. Stop + Done is idempotent; t.Cleanup repeats it
+	// safely.
 	relPath := wikiPromotionPath(taskID)
 	expectedPath := filepath.Join(wikiRoot, relPath)
-	// Drain the wiki worker queue before reading the article so the
-	// git commit finishes cleanly and t.Cleanup doesn't race with the
-	// in-flight commit (which would log a noisy "signal: killed").
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if worker.QueueLength() == 0 {
-			worker.WaitForIdle()
-			// Tiny additional settle for the in-flight process()
-			// to finish writing the file.
-			time.Sleep(50 * time.Millisecond)
-			break
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
+	worker.Stop()
+	<-worker.Done()
 	body, err := os.ReadFile(expectedPath)
 	if err != nil {
 		t.Fatalf("wiki promotion article %q never landed: %v", expectedPath, err)
