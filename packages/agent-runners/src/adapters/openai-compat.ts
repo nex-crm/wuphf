@@ -3,14 +3,11 @@ import { randomBytes } from "node:crypto";
 import {
   type AgentId,
   asAgentSlug,
-  asProviderKind,
   asReceiptId,
   asRunnerId,
   asTaskId,
   type CostLedgerEntry,
   CredentialHandle,
-  type CredentialScope,
-  type ProviderKind,
   type ReceiptId,
   type ReceiptSnapshot,
   type RunnerEvent,
@@ -32,7 +29,11 @@ import {
   terminalCleanup,
 } from "../internal/cleanup.ts";
 import { trustedCostModel, validatedCostEntry } from "../internal/cost.ts";
-import { DEFAULT_MAX_EVENT_HISTORY, RunnerEventHub } from "../internal/event-hub.ts";
+import {
+  DEFAULT_MAX_EVENT_HISTORY,
+  RunnerEventHub,
+  SerializedEmitter,
+} from "../internal/event-hub.ts";
 import { createSecretRedactor, type SecretRedactor } from "../internal/redact.ts";
 import { LifecycleStateMachine } from "../lifecycle.ts";
 import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
@@ -119,11 +120,11 @@ class OpenAICompatAgentRunner implements AgentRunner {
 
   readonly #abortController = new AbortController();
   readonly #deps: RunnerSpawnDeps;
+  readonly #emitter: SerializedEmitter;
   readonly #fetchFn: OpenAICompatFetch;
   readonly #hub: RunnerEventHub;
   readonly #lifecycle: LifecycleStateMachine;
   readonly #now: () => Date;
-  readonly #providerKind: ProviderKind;
   readonly #receiptId: ReceiptId;
   readonly #redact: SecretRedactor;
   readonly #request: RunnerSpawnRequest;
@@ -157,9 +158,9 @@ class OpenAICompatAgentRunner implements AgentRunner {
     this.#deps = args.deps;
     this.#fetchFn = args.fetchFn;
     this.#hub = new RunnerEventHub(args.maxEventHistory);
+    this.#emitter = new SerializedEmitter({ eventLog: args.deps.eventLog, eventHub: this.#hub });
     this.#lifecycle = new LifecycleStateMachine(args.runnerId);
     this.#now = args.now;
-    this.#providerKind = providerKindForScope(CredentialHandle.scope(args.deps.credential));
     this.#receiptId = args.receiptIdFactory();
     this.#redact = createSecretRedactor(args.secret);
     this.#request = args.request;
@@ -183,6 +184,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
     this.#runSettled = runSettled;
     this.#done = runSettled.finally(async () => {
       await this.#lifecycle.stopped().catch(() => undefined);
+      await this.#emitter.close();
       this.#hub.close();
     });
   }
@@ -247,7 +249,6 @@ class OpenAICompatAgentRunner implements AgentRunner {
         await this.#emitCost(zeroUsage(), "provider_did_not_report_usage");
       }
       await this.#writeReceiptAndFinish(0);
-      this.#lifecycle.markStopped({ exitCode: 0 });
     } catch (error) {
       const failure = this.#failureForCaughtError(error, timeoutSignal);
       await this.#cleanupWithFailure(failure, "network_failed", 1);
@@ -385,7 +386,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
       usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
     return validatedCostEntry({
       request: this.#request,
-      providerKind: this.#providerKind,
+      providerKind: this.#deps.resolvedProviderKind,
       defaultModel: DEFAULT_MODEL,
       reportedModel: usage.model,
       amountMicroUsd: amount,
@@ -430,13 +431,18 @@ class OpenAICompatAgentRunner implements AgentRunner {
         cause: new ReceiptWriteFailed(this.id, message, { cause: error }),
       });
     }
-    await this.#emit({
-      kind: "receipt",
-      runnerId: this.id,
-      receiptId: receipt.id,
-      at: this.#isoNow(),
-    });
-    await this.#emit({ kind: "finished", runnerId: this.id, exitCode, at: this.#isoNow() });
+    if (!this.#lifecycle.tryTerminate("finished")) return;
+    try {
+      await this.#emit({
+        kind: "receipt",
+        runnerId: this.id,
+        receiptId: receipt.id,
+        at: this.#isoNow(),
+      });
+      await this.#emit({ kind: "finished", runnerId: this.id, exitCode, at: this.#isoNow() });
+    } finally {
+      this.#lifecycle.markStopped({ exitCode });
+    }
   }
 
   #buildReceipt(): ReceiptSnapshot {
@@ -453,7 +459,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
       startedAt: this.#startedAt,
       finishedAt,
       status: "ok",
-      providerKind: this.#providerKind,
+      providerKind: this.#deps.resolvedProviderKind,
       model: trustedCostModel({ request: this.#request, defaultModel: DEFAULT_MODEL }),
       promptHash: sha256Hex(this.#request.prompt),
       toolManifest: sha256Hex("openai-compat-http:v1"),
@@ -476,15 +482,50 @@ class OpenAICompatAgentRunner implements AgentRunner {
     };
   }
 
+  #buildFailureReceipt(message: string): ReceiptSnapshot {
+    const usage = this.#lastUsage ?? zeroUsage();
+    const amount =
+      usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+    const finishedAt = this.#now();
+    return {
+      id: this.#receiptId,
+      agentSlug: asAgentSlug(this.agentId),
+      taskId: this.#taskId,
+      triggerKind: "human_message",
+      triggerRef: this.id,
+      startedAt: this.#startedAt,
+      finishedAt,
+      status: "error",
+      providerKind: this.#deps.resolvedProviderKind,
+      model: trustedCostModel({ request: this.#request, defaultModel: DEFAULT_MODEL }),
+      promptHash: sha256Hex(this.#request.prompt),
+      toolManifest: sha256Hex("openai-compat-http:v1"),
+      toolCalls: [],
+      approvals: [],
+      filesChanged: [],
+      commits: [],
+      sourceReads: [],
+      writes: [],
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+      costUsd: amount / 1_000_000,
+      finalMessage: SanitizedString.fromUnknown(this.#finalText),
+      error: SanitizedString.fromUnknown(message),
+      notebookWrites: [],
+      wikiWrites: [],
+      schemaVersion: 2,
+    };
+  }
+
   async #emit(event: RunnerEvent): Promise<void> {
     const redacted = redactEvent(event, this.#redact);
-    let lsn: number;
     try {
-      lsn = await this.#deps.eventLog.append(redacted);
+      await this.#emitter.emit(redacted);
     } catch (error) {
       throw new RunnerFailure(errorMessage(error), "event_log_write_failed", { cause: error });
     }
-    this.#hub.publish(redacted, lsn);
   }
 
   async #cleanupWithFailure(
@@ -507,8 +548,10 @@ class OpenAICompatAgentRunner implements AgentRunner {
     await terminalCleanup({
       lifecycle: this.#lifecycle,
       target: this.#cleanupTarget(failure.code === "terminated_by_request", waitForDone),
-      eventLog: this.#deps.eventLog,
-      eventHub: this.#hub,
+      emitter: this.#emitter,
+      receiptStore: this.#deps.receiptStore,
+      failureReceipt: this.#buildFailureReceipt(event.error),
+      failureCode: failure.code,
       failureEvent: event,
       stopped: { exitCode, error: event.error },
     });
@@ -626,14 +669,6 @@ function optionalTimeoutMs(record: Readonly<Record<string, unknown>>): number | 
     throw new RunnerSpawnFailed("OpenAI-compatible options.timeoutMs must be a positive integer");
   }
   return raw;
-}
-
-function providerKindForScope(scope: CredentialScope): ProviderKind {
-  try {
-    return asProviderKind(String(scope));
-  } catch {
-    return asProviderKind("openai-compat");
-  }
 }
 
 async function safeResponseText(response: Response, signal: AbortSignal): Promise<string> {

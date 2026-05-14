@@ -1,15 +1,18 @@
 import type { AgentRunner, Receipt, SpawnAgentRunner } from "@wuphf/agent-runners";
+import { ProviderKindMismatch } from "@wuphf/agent-runners";
 import { CredentialOwnershipMismatch, type CredentialStore } from "@wuphf/credentials";
 import type {
   BrokerIdentity,
   CostLedgerEntry,
   CredentialScope,
+  ProviderKind,
   RunnerEvent,
   RunnerKind,
   RunnerSpawnRequest,
 } from "@wuphf/protocol";
 import {
   asCredentialScope,
+  asProviderKind,
   credentialHandleFromJson,
   credentialHandleToJson,
 } from "@wuphf/protocol";
@@ -39,6 +42,16 @@ export async function createAgentRunnerForBroker(
 ): Promise<AgentRunner> {
   const credentialScope =
     request.providerRoute?.credentialScope ?? credentialScopeForRunnerKind(request.kind);
+  const resolvedProviderKind =
+    request.providerRoute?.providerKind ?? runnerKindToProviderKind(request.kind);
+  if (
+    request.providerRoute?.providerKind !== undefined &&
+    !providerKindMatchesCredentialScope(credentialScope, resolvedProviderKind)
+  ) {
+    throw new ProviderKindMismatch(
+      `providerKind ${resolvedProviderKind} does not match credential scope ${credentialScope}`,
+    );
+  }
   const credential = credentialHandleFromJson(request.credential, {
     broker: brokerIdentity,
     agentId: request.agentId,
@@ -47,6 +60,7 @@ export async function createAgentRunnerForBroker(
 
   return deps.spawnRunner(request, {
     credential,
+    resolvedProviderKind,
     secretReader: async (handle) => {
       const resolved = await deps.credentialStore.readWithOwnership({
         broker: brokerIdentity,
@@ -79,4 +93,22 @@ function credentialScopeForRunnerKind(kind: RunnerKind): CredentialScope {
     case "openai-compat":
       return asCredentialScope("openai-compat");
   }
+}
+
+function runnerKindToProviderKind(kind: RunnerKind): ProviderKind {
+  switch (kind) {
+    case "claude-cli":
+      return asProviderKind("anthropic");
+    case "codex-cli":
+      return asProviderKind("openai");
+    case "openai-compat":
+      return asProviderKind("openai-compat");
+  }
+}
+
+function providerKindMatchesCredentialScope(
+  credentialScope: CredentialScope,
+  providerKind: ProviderKind,
+): boolean {
+  return String(credentialScope) === String(providerKind);
 }

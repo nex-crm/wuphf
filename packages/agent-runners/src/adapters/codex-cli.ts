@@ -9,7 +9,6 @@ import {
   type AgentId,
   asAgentSlug,
   asMicroUsd,
-  asProviderKind,
   asReceiptId,
   asRunnerId,
   asTaskId,
@@ -40,7 +39,11 @@ import {
   terminalCleanup,
 } from "../internal/cleanup.ts";
 import { trustedCostModel, validatedCostEntry } from "../internal/cost.ts";
-import { DEFAULT_MAX_EVENT_HISTORY, RunnerEventHub } from "../internal/event-hub.ts";
+import {
+  DEFAULT_MAX_EVENT_HISTORY,
+  RunnerEventHub,
+  SerializedEmitter,
+} from "../internal/event-hub.ts";
 import { createSecretRedactor, type SecretRedactor } from "../internal/redact.ts";
 import { LifecycleStateMachine } from "../lifecycle.ts";
 import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
@@ -117,7 +120,6 @@ export function createCodexCliRunner(options: CodexCliAdapterOptions = {}): Spaw
     }
     const scope = CredentialHandle.scope(deps.credential);
     const secretEnvVar = secretEnvVarForScope(scope);
-    const providerKind = providerKindForScope(scope);
     const secret = await deps.secretReader(deps.credential);
     const runnerId = options.runnerIdFactory?.() ?? randomRunnerId();
     const runner = new CodexCliAgentRunner({
@@ -128,7 +130,6 @@ export function createCodexCliRunner(options: CodexCliAdapterOptions = {}): Spaw
       now: options.now ?? (() => new Date()),
       outputLastMessagePath: outputLastMessagePath(options.outputLastMessagePath, runnerId),
       profile: options.profile ?? DEFAULT_PROFILE,
-      providerKind,
       receiptIdFactory: options.receiptIdFactory ?? randomReceiptId,
       request,
       runnerId,
@@ -151,12 +152,12 @@ class CodexCliAgentRunner implements AgentRunner {
   readonly #commandPath: string;
   readonly #costEstimator: CodexCliAdapterOptions["costEstimator"];
   readonly #deps: RunnerSpawnDeps;
+  readonly #emitter: SerializedEmitter;
   readonly #hub: RunnerEventHub;
   readonly #lifecycle: LifecycleStateMachine;
   readonly #now: () => Date;
   readonly #outputLastMessagePath: string;
   readonly #profile: string;
-  readonly #providerKind: ProviderKind;
   readonly #receiptId: ReceiptId;
   readonly #redact: SecretRedactor;
   readonly #request: RunnerSpawnRequest;
@@ -189,7 +190,6 @@ class CodexCliAgentRunner implements AgentRunner {
     readonly now: () => Date;
     readonly outputLastMessagePath: string;
     readonly profile: string;
-    readonly providerKind: ProviderKind;
     readonly receiptIdFactory: () => ReceiptId;
     readonly request: RunnerSpawnRequest;
     readonly runnerId: RunnerId;
@@ -205,11 +205,11 @@ class CodexCliAgentRunner implements AgentRunner {
     this.#costEstimator = args.costEstimator;
     this.#deps = args.deps;
     this.#hub = new RunnerEventHub(args.maxEventHistory);
+    this.#emitter = new SerializedEmitter({ eventLog: args.deps.eventLog, eventHub: this.#hub });
     this.#lifecycle = new LifecycleStateMachine(args.runnerId);
     this.#now = args.now;
     this.#outputLastMessagePath = args.outputLastMessagePath;
     this.#profile = args.profile;
-    this.#providerKind = args.providerKind;
     this.#receiptId = args.receiptIdFactory();
     this.#redact = createSecretRedactor(args.secret);
     this.#request = args.request;
@@ -230,7 +230,8 @@ class CodexCliAgentRunner implements AgentRunner {
 
   start(): void {
     if (this.#done !== null) return;
-    this.#done = this.#run().finally(() => {
+    this.#done = this.#run().finally(async () => {
+      await this.#emitter.close();
       this.#hub.close();
     });
   }
@@ -256,9 +257,9 @@ class CodexCliAgentRunner implements AgentRunner {
         this.#childExited = true;
         return result;
       });
+      await this.#emit({ kind: "started", runnerId: this.id, at: this.#isoNow() });
       const stdout = this.#consumeStdout(this.#child.stdout);
       const stderr = this.#consumeStderr(this.#child.stderr);
-      await this.#emit({ kind: "started", runnerId: this.id, at: this.#isoNow() });
       [exit] = await Promise.all([this.#exitPromise, stdout, stderr]);
       await this.#emitUnrecognizedSummary();
       if (exit.error !== undefined) {
@@ -274,11 +275,10 @@ class CodexCliAgentRunner implements AgentRunner {
         throw new RunnerFailure(message, code);
       }
       if (this.#failed) {
-        this.#lifecycle.markStopped({ exitCode: 1, error: "runner failed" });
+        await this.#lifecycle.stopped().catch(() => undefined);
         return;
       }
       await this.#writeReceiptAndFinish(exit.code);
-      this.#lifecycle.markStopped({ exitCode: exit.code });
     } catch (error) {
       const fallbackCode = this.#child === null ? "spawn_failed" : "subprocess_crashed";
       await this.#cleanupWithFailure(error, fallbackCode, exit.code);
@@ -383,7 +383,7 @@ class CodexCliAgentRunner implements AgentRunner {
     const amountMicroUsd = this.#estimateCostMicroUsd(model, totalTokens, units);
     const entry = validatedCostEntry({
       request: this.#request,
-      providerKind: this.#providerKind,
+      providerKind: this.#deps.resolvedProviderKind,
       defaultModel: "codex-cli",
       amountMicroUsd,
       units,
@@ -400,7 +400,7 @@ class CodexCliAgentRunner implements AgentRunner {
     try {
       const estimate = this.#costEstimator?.({
         model,
-        providerKind: this.#providerKind,
+        providerKind: this.#deps.resolvedProviderKind,
         totalTokens,
         units,
       });
@@ -452,13 +452,18 @@ class CodexCliAgentRunner implements AgentRunner {
         cause: new ReceiptWriteFailed(this.id, message, { cause: error }),
       });
     }
-    await this.#emit({
-      kind: "receipt",
-      runnerId: this.id,
-      receiptId: receipt.id,
-      at: this.#isoNow(),
-    });
-    await this.#emit({ kind: "finished", runnerId: this.id, exitCode, at: this.#isoNow() });
+    if (!this.#lifecycle.tryTerminate("finished")) return;
+    try {
+      await this.#emit({
+        kind: "receipt",
+        runnerId: this.id,
+        receiptId: receipt.id,
+        at: this.#isoNow(),
+      });
+      await this.#emit({ kind: "finished", runnerId: this.id, exitCode, at: this.#isoNow() });
+    } finally {
+      this.#lifecycle.markStopped({ exitCode });
+    }
   }
 
   #buildReceipt(): ReceiptSnapshot {
@@ -473,7 +478,7 @@ class CodexCliAgentRunner implements AgentRunner {
       startedAt,
       finishedAt,
       status: "ok",
-      providerKind: this.#providerKind,
+      providerKind: this.#deps.resolvedProviderKind,
       model: trustedCostModel({ request: this.#request, defaultModel: "codex-cli" }),
       promptHash: sha256Hex(this.#request.prompt),
       toolManifest: sha256Hex("codex-cli:v1"),
@@ -490,6 +495,41 @@ class CodexCliAgentRunner implements AgentRunner {
       costUsd: this.#lastCostMicroUsd / 1_000_000,
       finalMessage: SanitizedString.fromUnknown(this.#finalText),
       error: SanitizedString.fromUnknown(""),
+      notebookWrites: [],
+      wikiWrites: [],
+      schemaVersion: 2,
+    };
+  }
+
+  #buildFailureReceipt(message: string): ReceiptSnapshot {
+    const startedAt = this.#now();
+    const finishedAt = this.#now();
+    return {
+      id: this.#receiptId,
+      agentSlug: asAgentSlug(this.agentId),
+      taskId: this.#taskId,
+      triggerKind: "human_message",
+      triggerRef: this.id,
+      startedAt,
+      finishedAt,
+      status: "error",
+      providerKind: this.#deps.resolvedProviderKind,
+      model: trustedCostModel({ request: this.#request, defaultModel: "codex-cli" }),
+      promptHash: sha256Hex(this.#request.prompt),
+      toolManifest: sha256Hex("codex-cli:v1"),
+      toolCalls: [],
+      approvals: [],
+      filesChanged: [],
+      commits: [],
+      sourceReads: [],
+      writes: [],
+      inputTokens: this.#lastUsage.inputTokens,
+      outputTokens: this.#lastUsage.outputTokens,
+      cacheReadTokens: this.#lastUsage.cacheReadTokens,
+      cacheCreationTokens: this.#lastUsage.cacheCreationTokens,
+      costUsd: this.#lastCostMicroUsd / 1_000_000,
+      finalMessage: SanitizedString.fromUnknown(this.#finalText),
+      error: SanitizedString.fromUnknown(message),
       notebookWrites: [],
       wikiWrites: [],
       schemaVersion: 2,
@@ -520,13 +560,11 @@ class CodexCliAgentRunner implements AgentRunner {
 
   async #emit(event: RunnerEvent): Promise<void> {
     const redacted = redactEvent(event, this.#redact);
-    let lsn: number;
     try {
-      lsn = await this.#deps.eventLog.append(redacted);
+      await this.#emitter.emit(redacted);
     } catch (error) {
       throw new RunnerFailure(errorMessage(error), "event_log_write_failed", { cause: error });
     }
-    this.#hub.publish(redacted, lsn);
   }
 
   async #cleanupWithFailure(
@@ -549,8 +587,10 @@ class CodexCliAgentRunner implements AgentRunner {
     await terminalCleanup({
       lifecycle: this.#lifecycle,
       target: this.#cleanupTarget(),
-      eventLog: this.#deps.eventLog,
-      eventHub: this.#hub,
+      emitter: this.#emitter,
+      receiptStore: this.#deps.receiptStore,
+      failureReceipt: this.#buildFailureReceipt(message),
+      failureCode: failure.code,
       failureEvent: event,
       gracePeriodMs,
       stopped: { exitCode, error: message },
@@ -701,19 +741,6 @@ function secretEnvVarForScope(scope: CredentialScope): "ANTHROPIC_API_KEY" | "OP
       return "OPENAI_API_KEY";
     default:
       throw new RunnerSpawnFailed(`Codex CLI cannot use ${scope} credentials`);
-  }
-}
-
-function providerKindForScope(scope: CredentialScope): ProviderKind {
-  switch (scope) {
-    case "anthropic":
-      return asProviderKind("anthropic");
-    case "openai":
-      return asProviderKind("openai");
-    case "openai-compat":
-      return asProviderKind("openai-compat");
-    default:
-      throw new RunnerSpawnFailed(`Codex CLI cannot record ${scope} costs`);
   }
 }
 

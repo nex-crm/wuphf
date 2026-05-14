@@ -34,6 +34,10 @@ authority.
    same-user boundary is the guarantee branch 8's per-agent ACLs depend on.
    Every emitted `stdout`, `stderr`, `failed` message, and receipt body must
    pass through the shared secret redactor.
+7. **Cost/receipt/event-log writes are best-effort outbox semantics in WUPHF
+   v1.** Failure cleanup writes an error receipt before the terminal `failed`
+   event when it can, but full transactional atomicity across the cost ledger,
+   receipt store, and runner event log is future work.
 
 ## Validation
 

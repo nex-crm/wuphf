@@ -1,7 +1,7 @@
 import type { RunnerEvent, RunnerFailureCode } from "@wuphf/protocol";
 import type { LifecycleStateMachine } from "../lifecycle.ts";
-import type { RunnerEventLog } from "../runner.ts";
-import type { RunnerEventHub } from "./event-hub.ts";
+import type { Receipt } from "../runner.ts";
+import type { SerializedEmitter } from "./event-hub.ts";
 
 export const DEFAULT_TERMINAL_CLEANUP_GRACE_MS = 5_000;
 
@@ -33,8 +33,10 @@ export type TerminalCleanupTarget =
 export interface TerminalCleanupArgs {
   readonly lifecycle: LifecycleStateMachine;
   readonly target?: TerminalCleanupTarget | undefined;
-  readonly eventLog: RunnerEventLog;
-  readonly eventHub: RunnerEventHub;
+  readonly emitter: SerializedEmitter;
+  readonly receiptStore?: { readonly put: (receipt: Receipt) => Promise<unknown> } | undefined;
+  readonly failureReceipt?: Receipt | undefined;
+  readonly failureCode: RunnerFailureCode;
   readonly failureEvent?: RunnerEvent | undefined;
   readonly failureAlreadyPublished?: boolean | undefined;
   readonly gracePeriodMs?: number | undefined;
@@ -45,14 +47,18 @@ export interface TerminalCleanupArgs {
 }
 
 export async function terminalCleanup(args: TerminalCleanupArgs): Promise<void> {
+  const terminalClaimed = args.lifecycle.tryTerminate(args.failureCode);
+  if (!terminalClaimed) return;
   const gracePeriodMs = args.gracePeriodMs ?? DEFAULT_TERMINAL_CLEANUP_GRACE_MS;
-  args.lifecycle.beginStopping();
   try {
     await stopTarget(args.target, gracePeriodMs);
   } finally {
     try {
+      if (args.failureReceipt !== undefined) {
+        await writeFailureReceiptBestEffort(args.receiptStore, args.failureReceipt);
+      }
       if (args.failureEvent !== undefined && args.failureAlreadyPublished !== true) {
-        await publishFailureBestEffort(args.eventLog, args.eventHub, args.failureEvent);
+        await args.emitter.emit(args.failureEvent).catch(() => undefined);
       }
     } finally {
       args.lifecycle.markStopped(args.stopped);
@@ -84,19 +90,15 @@ async function stopTarget(
   }
 }
 
-async function publishFailureBestEffort(
-  eventLog: RunnerEventLog,
-  eventHub: RunnerEventHub,
-  event: RunnerEvent,
+async function writeFailureReceiptBestEffort(
+  receiptStore: { readonly put: (receipt: Receipt) => Promise<unknown> } | undefined,
+  receipt: Receipt,
 ): Promise<void> {
-  let lsn: number | undefined;
+  if (receiptStore === undefined) return;
   try {
-    lsn = await eventLog.append(event);
+    await receiptStore.put(receipt);
   } catch {
-    // The cleanup event is best-effort; event-log failures still need to
-    // surface to live subscribers so callers do not wait forever.
-  } finally {
-    eventHub.publish(event, lsn);
+    // Cleanup must not poison the terminal failed event.
   }
 }
 

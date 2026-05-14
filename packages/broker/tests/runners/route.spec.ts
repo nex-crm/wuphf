@@ -8,6 +8,8 @@ import {
   asAgentId,
   asApiToken,
   asCredentialHandleId,
+  asCredentialScope,
+  asProviderKind,
   asRunnerId,
   type RunnerSpawnRequest,
   runnerSpawnRequestToJsonValue,
@@ -316,6 +318,31 @@ describe("runner routes", () => {
     await expect(second.json()).resolves.toMatchObject({ error: "runner_capacity_exhausted" });
   });
 
+  it("maps provider kind mismatches to structured 400 responses", async () => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot);
+    const res = await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(
+        runnerSpawnRequestToJsonValue({
+          ...spawnRequest(),
+          providerRoute: {
+            credentialScope: asCredentialScope("openai"),
+            providerKind: asProviderKind("anthropic"),
+          },
+        }),
+      ),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: "provider_kind_mismatch" });
+    expect(runner).toBeNull();
+  });
+
   it("resumes runner SSE after Last-Event-ID", async () => {
     const workspaceRoot = await makeWorkspaceRoot();
     const handle = await startBroker(workspaceRoot);
@@ -353,6 +380,60 @@ describe("runner routes", () => {
     expect(text).not.toContain("event: started");
     expect(text).toContain("id: 2");
     expect(text).toContain("event: finished");
+  });
+
+  it("returns structured 410 after retained runner events expire", async () => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot, { retentionTtlMs: 5 });
+    await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(runnerSpawnRequestToJsonValue(spawnRequest())),
+    });
+    if (runner === null) throw new Error("runner was not created");
+    await runner.emit({
+      kind: "started",
+      runnerId,
+      at: "2026-05-08T18:00:00.000Z",
+    });
+    await runner.emit({
+      kind: "finished",
+      runnerId,
+      exitCode: 0,
+      at: "2026-05-08T18:00:01.000Z",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const res = await fetch(`${handle.url}/api/runners/${encodeURIComponent(runnerId)}/events`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Last-Event-ID": "1",
+      },
+    });
+
+    expect(res.status).toBe(410);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "runner_resume_window_expired",
+      oldest_available_lsn: 1,
+    });
+  });
+
+  it("returns structured 404 for Last-Event-ID resume on a runner that never existed", async () => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot);
+
+    const res = await fetch(`${handle.url}/api/runners/${encodeURIComponent(runnerId)}/events`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Last-Event-ID": "1",
+      },
+    });
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ error: "runner_not_found" });
   });
 
   async function makeWorkspaceRoot(): Promise<string> {

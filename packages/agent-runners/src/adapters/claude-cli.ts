@@ -7,7 +7,6 @@ import type { Readable } from "node:stream";
 import {
   type AgentId,
   asAgentSlug,
-  asProviderKind,
   asReceiptId,
   asRunnerId,
   asTaskId,
@@ -34,7 +33,11 @@ import {
   terminalCleanup,
 } from "../internal/cleanup.ts";
 import { trustedCostModel, validatedCostEntry } from "../internal/cost.ts";
-import { DEFAULT_MAX_EVENT_HISTORY, RunnerEventHub } from "../internal/event-hub.ts";
+import {
+  DEFAULT_MAX_EVENT_HISTORY,
+  RunnerEventHub,
+  SerializedEmitter,
+} from "../internal/event-hub.ts";
 import { createSecretRedactor, type SecretRedactor } from "../internal/redact.ts";
 import { LifecycleStateMachine } from "../lifecycle.ts";
 import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
@@ -124,6 +127,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
 
   readonly #commandPath: string;
   readonly #deps: RunnerSpawnDeps;
+  readonly #emitter: SerializedEmitter;
   readonly #hub: RunnerEventHub;
   readonly #lifecycle: LifecycleStateMachine;
   readonly #now: () => Date;
@@ -164,6 +168,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
     this.#commandPath = args.commandPath;
     this.#deps = args.deps;
     this.#hub = new RunnerEventHub(args.maxEventHistory);
+    this.#emitter = new SerializedEmitter({ eventLog: args.deps.eventLog, eventHub: this.#hub });
     this.#lifecycle = new LifecycleStateMachine(args.runnerId);
     this.#now = args.now;
     this.#receiptId = args.receiptIdFactory();
@@ -184,7 +189,8 @@ class ClaudeCliAgentRunner implements AgentRunner {
 
   start(): void {
     if (this.#done !== null) return;
-    this.#done = this.#run().finally(() => {
+    this.#done = this.#run().finally(async () => {
+      await this.#emitter.close();
       this.#hub.close();
     });
   }
@@ -211,9 +217,9 @@ class ClaudeCliAgentRunner implements AgentRunner {
         this.#childExited = true;
         return result;
       });
+      await this.#emit({ kind: "started", runnerId: this.id, at: this.#isoNow() });
       const stdout = this.#consumeStdout(this.#child.stdout);
       const stderr = this.#consumeStderr(this.#child.stderr);
-      await this.#emit({ kind: "started", runnerId: this.id, at: this.#isoNow() });
       [exit] = await Promise.all([this.#exitPromise, stdout, stderr]);
       if (exit.error !== undefined) {
         throw new RunnerFailure(exit.error.message, "spawn_failed", { cause: exit.error });
@@ -228,11 +234,10 @@ class ClaudeCliAgentRunner implements AgentRunner {
         throw new RunnerFailure(message, code);
       }
       if (this.#failed) {
-        this.#lifecycle.markStopped({ exitCode: 1, error: "runner failed" });
+        await this.#lifecycle.stopped().catch(() => undefined);
         return;
       }
       await this.#writeReceiptAndFinish(exit.code);
-      this.#lifecycle.markStopped({ exitCode: exit.code });
     } catch (error) {
       const fallbackCode = this.#child === null ? "spawn_failed" : "subprocess_crashed";
       await this.#cleanupWithFailure(error, fallbackCode, exit.code);
@@ -346,13 +351,18 @@ class ClaudeCliAgentRunner implements AgentRunner {
         cause: new ReceiptWriteFailed(this.id, message, { cause: error }),
       });
     }
-    await this.#emit({
-      kind: "receipt",
-      runnerId: this.id,
-      receiptId: receipt.id,
-      at: this.#isoNow(),
-    });
-    await this.#emit({ kind: "finished", runnerId: this.id, exitCode, at: this.#isoNow() });
+    if (!this.#lifecycle.tryTerminate("finished")) return;
+    try {
+      await this.#emit({
+        kind: "receipt",
+        runnerId: this.id,
+        receiptId: receipt.id,
+        at: this.#isoNow(),
+      });
+      await this.#emit({ kind: "finished", runnerId: this.id, exitCode, at: this.#isoNow() });
+    } finally {
+      this.#lifecycle.markStopped({ exitCode });
+    }
   }
 
   #buildReceipt(): ReceiptSnapshot {
@@ -370,7 +380,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
       startedAt,
       finishedAt,
       status: "ok",
-      providerKind: asProviderKind("anthropic"),
+      providerKind: this.#deps.resolvedProviderKind,
       model: trustedCostModel({ request: this.#request, defaultModel: "claude-cli" }),
       promptHash: sha256Hex(this.#request.prompt),
       toolManifest: sha256Hex("claude-cli:v1"),
@@ -393,12 +403,50 @@ class ClaudeCliAgentRunner implements AgentRunner {
     };
   }
 
+  #buildFailureReceipt(message: string): ReceiptSnapshot {
+    const usage = this.#lastUsage;
+    const startedAt = this.#now();
+    const finishedAt = this.#now();
+    const amount =
+      usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+    return {
+      id: this.#receiptId,
+      agentSlug: asAgentSlug(this.agentId),
+      taskId: this.#taskId,
+      triggerKind: "human_message",
+      triggerRef: this.id,
+      startedAt,
+      finishedAt,
+      status: "error",
+      providerKind: this.#deps.resolvedProviderKind,
+      model: trustedCostModel({ request: this.#request, defaultModel: "claude-cli" }),
+      promptHash: sha256Hex(this.#request.prompt),
+      toolManifest: sha256Hex("claude-cli:v1"),
+      toolCalls: [],
+      approvals: [],
+      filesChanged: [],
+      commits: [],
+      sourceReads: [],
+      writes: [],
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+      costUsd: amount / 1_000_000,
+      finalMessage: SanitizedString.fromUnknown(this.#finalText),
+      error: SanitizedString.fromUnknown(message),
+      notebookWrites: [],
+      wikiWrites: [],
+      schemaVersion: 2,
+    };
+  }
+
   #costEntry(usage: Usage): CostLedgerEntry {
     const amount =
       usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
     return validatedCostEntry({
       request: this.#request,
-      providerKind: asProviderKind("anthropic"),
+      providerKind: this.#deps.resolvedProviderKind,
       defaultModel: "claude-cli",
       reportedModel: usage.model,
       amountMicroUsd: amount,
@@ -416,13 +464,11 @@ class ClaudeCliAgentRunner implements AgentRunner {
 
   async #emit(event: RunnerEvent): Promise<void> {
     const redacted = redactEvent(event, this.#redact);
-    let lsn: number;
     try {
-      lsn = await this.#deps.eventLog.append(redacted);
+      await this.#emitter.emit(redacted);
     } catch (error) {
       throw new RunnerFailure(errorMessage(error), "event_log_write_failed", { cause: error });
     }
-    this.#hub.publish(redacted, lsn);
   }
 
   async #cleanupWithFailure(
@@ -445,8 +491,10 @@ class ClaudeCliAgentRunner implements AgentRunner {
     await terminalCleanup({
       lifecycle: this.#lifecycle,
       target: this.#cleanupTarget(),
-      eventLog: this.#deps.eventLog,
-      eventHub: this.#hub,
+      emitter: this.#emitter,
+      receiptStore: this.#deps.receiptStore,
+      failureReceipt: this.#buildFailureReceipt(message),
+      failureCode: failure.code,
       failureEvent: event,
       gracePeriodMs,
       stopped: { exitCode, error: message },

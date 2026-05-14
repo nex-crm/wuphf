@@ -14,6 +14,7 @@ import {
   type CostLedgerEntry,
   type CredentialHandle,
   createCredentialHandle,
+  type ProviderKind,
   type RunnerEvent,
 } from "@wuphf/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -94,6 +95,7 @@ interface Harness {
 function makeHarness(
   args: {
     readonly receiptPut?: ((receipt: Receipt) => Promise<{ readonly stored: boolean }>) | undefined;
+    readonly resolvedProviderKind?: ProviderKind | undefined;
     readonly secret?: string | undefined;
   } = {},
 ): Harness {
@@ -119,6 +121,7 @@ function makeHarness(
     secretReads,
     deps: {
       credential,
+      resolvedProviderKind: args.resolvedProviderKind ?? asProviderKind("openai"),
       secretReader: async (handle) => {
         secretReads.push(handle);
         return args.secret ?? "fixture-openai-secret-do-not-use";

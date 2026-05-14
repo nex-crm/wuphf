@@ -5,6 +5,7 @@ import {
   asCredentialHandleId,
   asCredentialScope,
   asMicroUsd,
+  asProviderKind,
   asReceiptId,
   asRunnerId,
   asTaskId,
@@ -12,6 +13,7 @@ import {
   type CredentialHandle,
   type CredentialScope,
   credentialHandleFromJson,
+  type ProviderKind,
   type RunnerEvent,
 } from "@wuphf/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -83,11 +85,13 @@ class ControlledSseStream {
 function makeHarness(
   args: {
     readonly receiptPut?: ((receipt: Receipt) => Promise<{ readonly stored: boolean }>) | undefined;
+    readonly resolvedProviderKind?: ProviderKind | undefined;
     readonly scope?: CredentialScope | undefined;
     readonly secret?: string | undefined;
   } = {},
 ): Harness {
-  const credential = credentialForScope(args.scope ?? asCredentialScope("openai"));
+  const scope = args.scope ?? asCredentialScope("openai");
+  const credential = credentialForScope(scope);
   const costs: CostLedgerEntry[] = [];
   const events: RunnerEvent[] = [];
   const receipts: Receipt[] = [];
@@ -107,6 +111,9 @@ function makeHarness(
     secretReads,
     deps: {
       credential,
+      resolvedProviderKind:
+        args.resolvedProviderKind ??
+        asProviderKind(scope === "github" ? "openai-compat" : String(scope)),
       secretReader: async (handle) => {
         secretReads.push(handle);
         return args.secret ?? "sk-test-secret";

@@ -1,3 +1,4 @@
+import { ProviderKindMismatch } from "@wuphf/agent-runners";
 import { createFakeAgentRunner } from "@wuphf/agent-runners/testing";
 import { CredentialOwnershipMismatch } from "@wuphf/credentials";
 import { forBrokerTests } from "@wuphf/credentials/testing";
@@ -61,6 +62,7 @@ describe("createAgentRunnerForBroker", () => {
       receiptStore: new InMemoryReceiptStore(),
       eventLog: { append: async () => 1 },
       spawnRunner: async (_request, deps) => {
+        expect(deps.resolvedProviderKind).toBe(asProviderKind("anthropic"));
         await expect(deps.secretReader(deps.credential)).resolves.toBe("secret");
         return createFakeAgentRunner({
           kind: _request.kind,
@@ -142,10 +144,37 @@ describe("createAgentRunnerForBroker", () => {
         actualAgentId: agentId,
         actualScope: asCredentialScope("openai"),
         actualSecret: "openai-secret",
+        expectedProviderKind: asProviderKind("openai"),
       }),
     });
 
     expect(runner.agentId).toBe(agentId);
+  });
+
+  it("rejects providerRoute providerKind that does not match the credential scope", async () => {
+    const openAiCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("openai"),
+    });
+    const mismatchedRequest: RunnerSpawnRequest = {
+      ...request,
+      credential: credentialHandleToJson(openAiCredential),
+      providerRoute: {
+        credentialScope: asCredentialScope("openai"),
+        providerKind: asProviderKind("anthropic"),
+      },
+    };
+
+    await expect(
+      createAgentRunnerForBroker(mismatchedRequest, forBrokerTests({ agentId }), {
+        ...depsForOwnership({
+          actualAgentId: agentId,
+          actualScope: asCredentialScope("openai"),
+          actualSecret: "openai-secret",
+        }),
+      }),
+    ).rejects.toBeInstanceOf(ProviderKindMismatch);
   });
 });
 
@@ -153,6 +182,7 @@ function depsForOwnership(input: {
   readonly actualAgentId: AgentId;
   readonly actualScope: CredentialScope;
   readonly actualSecret: string;
+  readonly expectedProviderKind?: ReturnType<typeof asProviderKind> | undefined;
 }): AgentRunnerFactoryDeps {
   return {
     credentialStore: {
@@ -179,6 +209,9 @@ function depsForOwnership(input: {
     receiptStore: new InMemoryReceiptStore(),
     eventLog: { append: async () => 1 },
     spawnRunner: async (_request: RunnerSpawnRequest, deps) => {
+      expect(deps.resolvedProviderKind).toBe(
+        input.expectedProviderKind ?? asProviderKind("anthropic"),
+      );
       await deps.secretReader(deps.credential);
       return createFakeAgentRunner({
         kind: _request.kind,
