@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 interface Migration {
   readonly version: number;
@@ -17,6 +17,10 @@ const MIGRATIONS: readonly Migration[] = [
   {
     version: 2,
     sql: readFileSync(new URL("./002_cost_ledger.sql", import.meta.url), "utf8"),
+  },
+  {
+    version: 3,
+    sql: readFileSync(new URL("./003_agent_provider_routing.sql", import.meta.url), "utf8"),
   },
 ];
 
