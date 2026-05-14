@@ -25,6 +25,22 @@ includes both schema-versioned vectors and legacy unversioned vectors; parsers
 must treat an absent `schemaVersion` as `1`, serialize `1`, and reject future
 versions greater than they support.
 
+## Agent Provider Routing Vectors
+
+`agent-provider-routing-vectors.json` pins the branch-10
+`AgentProviderRouting` wire shape. Accepted vectors must parse, normalize
+`routes` by `RUNNER_KIND_VALUES` order, and serialize to the listed
+`expected.canonicalSerialization` bytes. Rejected vectors must fail and include
+the listed `expectedError` validation path, covering strict unknown-key
+rejection, the 16-route cap, duplicate `kind` rejection, closed enum values,
+and missing required fields.
+
+Verify the fixture from this directory:
+
+```bash
+go run verifier-reference.go
+```
+
 ## Audit Event Golden Vectors
 
 `audit-event-vectors.json` is the cross-language fixture for WUPHF audit-chain
@@ -47,10 +63,11 @@ this fixture and verifies the package serializer and hash function against it.
 ## Cross-language verification
 
 `verifier-reference.go` is a stdlib-only Go reference implementation of the
-audit-chain and runner wire contracts. It loads `audit-event-vectors.json` and
-`runner-vectors.json`, recomputes each canonical serialization and eventHash,
-and verifies runner accept/reject behavior against the bundled vectors. Run it
-from this directory:
+audit-chain, runner, and agent-provider-routing wire contracts. It loads
+`audit-event-vectors.json`, `runner-vectors.json`, and
+`agent-provider-routing-vectors.json`, recomputes each canonical serialization
+and eventHash, and verifies accept/reject behavior against the bundled vectors.
+Run it from this directory:
 
 ```bash
 cd packages/protocol/testdata
