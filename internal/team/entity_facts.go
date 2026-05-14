@@ -19,6 +19,8 @@ package team
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,8 +32,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // EntityKind is the narrow set of wiki subtrees we treat as "entities" for
@@ -142,8 +142,13 @@ func (l *FactLog) Append(ctx context.Context, kind EntityKind, slug, text, sourc
 		return Fact{}, err
 	}
 
+	// Deterministic ID: hash of immutable content fields so the same fact
+	// recorded twice produces the same ID. This enables dedup at both the
+	// JSONL append layer (below) and the SQLite UpsertFact layer.
+	factID := deterministicFactID(kind, slug, text, recordedBy)
+
 	fact := Fact{
-		ID:         uuid.NewString(),
+		ID:         factID,
 		Kind:       kind,
 		Slug:       slug,
 		Text:       text,
@@ -165,6 +170,13 @@ func (l *FactLog) Append(ctx context.Context, kind EntityKind, slug, text, sourc
 	defer l.mu.Unlock()
 
 	existing := l.readExistingLocked(relPath)
+
+	// Dedup: skip append if a fact with the same ID already exists in the
+	// file. This prevents duplicate entries when the same observation is
+	// recorded multiple times (e.g. re-extraction, retry after timeout).
+	if factExistsInJSONL(existing, factID) {
+		return fact, nil
+	}
 	buf := make([]byte, 0, len(existing)+len(line)+1)
 	if len(existing) > 0 {
 		buf = append(buf, existing...)
@@ -314,4 +326,50 @@ func (l *FactLog) commitTimestamp(ctx context.Context, sha string) (time.Time, e
 		return time.Time{}, fmt.Errorf("entity facts: parse timestamp %q: %w", line, err)
 	}
 	return ts.UTC(), nil
+}
+
+// deterministicFactID computes a stable ID from the immutable content fields.
+// The same observation recorded twice produces the same ID, enabling dedup at
+// both the JSONL append layer and the SQLite UpsertFact layer. The ID is a
+// 16-character hex prefix of SHA-256 — collision probability is negligible for
+// the expected fact counts per entity (hundreds, not millions).
+func deterministicFactID(kind EntityKind, slug, text, recordedBy string) string {
+	h := sha256.New()
+	h.Write([]byte(string(kind)))
+	h.Write([]byte{0}) // separator
+	h.Write([]byte(slug))
+	h.Write([]byte{0})
+	h.Write([]byte(text))
+	h.Write([]byte{0})
+	h.Write([]byte(recordedBy))
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// factExistsInJSONL scans existing JSONL bytes for a fact with the given ID.
+// Returns true if found, enabling dedup on the append path.
+func factExistsInJSONL(existing []byte, factID string) bool {
+	if len(existing) == 0 || factID == "" {
+		return false
+	}
+	// Fast path: search for the ID string in the raw bytes before parsing.
+	// This avoids JSON decoding when the ID is clearly absent.
+	if !strings.Contains(string(existing), factID) {
+		return false
+	}
+	// Slow path: confirm it's actually an "id" field match, not a substring
+	// of some other field.
+	scanner := bufio.NewScanner(strings.NewReader(string(existing)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var partial struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal([]byte(line), &partial) == nil && partial.ID == factID {
+			return true
+		}
+	}
+	return false
 }
