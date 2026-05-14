@@ -165,7 +165,12 @@ func (d *DLQ) ensureDir() error {
 // is coerced to DLQValidationMaxRetries when ErrorCategory is "validation".
 // Callers should set FirstFailedAt and NextRetryNotBefore; if zero they are
 // defaulted to now and now+base_backoff respectively.
-func (d *DLQ) Enqueue(_ context.Context, e DLQEntry) error {
+func (d *DLQ) Enqueue(ctx context.Context, e DLQEntry) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("dlq: enqueue: %w", err)
+		}
+	}
 	now := time.Now().UTC()
 	e = coerceDLQEntry(e, now)
 
@@ -187,7 +192,12 @@ func (d *DLQ) Enqueue(_ context.Context, e DLQEntry) error {
 // updated backoff window rather than an old eligible row.
 //
 // Read-only: holds the read lock so concurrent Inspect calls do not block.
-func (d *DLQ) ReadyForReplay(_ context.Context, now time.Time) ([]DLQEntry, error) {
+func (d *DLQ) ReadyForReplay(ctx context.Context, now time.Time) ([]DLQEntry, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("dlq: ready for replay: %w", err)
+		}
+	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -216,7 +226,12 @@ func (d *DLQ) ReadyForReplay(_ context.Context, now time.Time) ([]DLQEntry, erro
 // next_retry_not_before, and appends the updated state. If the bump crosses
 // max_retries, the entry is promoted to permanent-failures. cat is the
 // error category of the new attempt.
-func (d *DLQ) RecordAttempt(_ context.Context, artifactSHA string, attemptErr error, cat string) error {
+func (d *DLQ) RecordAttempt(ctx context.Context, artifactSHA string, attemptErr error, cat string) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("dlq: record attempt: %w", err)
+		}
+	}
 	now := time.Now().UTC()
 
 	d.mu.Lock()
@@ -283,7 +298,12 @@ type Snapshot struct {
 //
 // Uses the read lock so multiple operator dashboards polling GET /wiki/dlq
 // do not serialise on each other.
-func (d *DLQ) Inspect(_ context.Context) (Snapshot, error) {
+func (d *DLQ) Inspect(ctx context.Context) (Snapshot, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return Snapshot{}, fmt.Errorf("dlq: inspect: %w", err)
+		}
+	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -386,7 +406,12 @@ func sortEntriesByFirstFailedAt(entries []DLQEntry) {
 
 // MarkResolved appends a resolved_at tombstone. ReadyForReplay will skip this
 // artifact_sha from now on.
-func (d *DLQ) MarkResolved(_ context.Context, artifactSHA string) error {
+func (d *DLQ) MarkResolved(ctx context.Context, artifactSHA string) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("dlq: mark resolved: %w", err)
+		}
+	}
 	now := time.Now().UTC()
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -477,8 +502,13 @@ func appendLine(path string, v any) error {
 	}
 	defer func() { _ = f.Close() }()
 	line = append(line, '\n')
-	_, werr := f.Write(line)
-	return werr
+	if _, err = f.Write(line); err != nil {
+		return fmt.Errorf("dlq: write %s: %w", filepath.Base(path), err)
+	}
+	if err = f.Sync(); err != nil {
+		return fmt.Errorf("dlq: sync %s: %w", filepath.Base(path), err)
+	}
+	return nil
 }
 
 // coerceDLQEntry normalises defaults and applies policy constraints.
