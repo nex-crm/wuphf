@@ -750,6 +750,7 @@ func (a recordDecisionAction) IsCanonical() bool {
 // records a free-form officeDecisionRecord). This entry point is the
 // human's resolution of one Decision Packet; ledger.RecordDecision is
 // the broker-wide audit log.
+
 // ErrUnknownDecisionAction is returned when rawAction does not map to
 // a canonical recordDecisionAction value. Wraps the HTTP layer that
 // surfaces it as 400 to distinguish from internal failures (500).
