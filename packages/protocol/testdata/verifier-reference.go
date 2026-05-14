@@ -31,6 +31,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
+	"time"
 )
 
 type auditPayloadInput struct {
@@ -106,6 +109,19 @@ type fixture struct {
 	Vectors               []auditEventVector     `json:"vectors"`
 	MerkleRootVectors     []merkleRootVector     `json:"merkleRootVectors"`
 	ApprovalClaimsVectors []approvalClaimsVector `json:"approvalClaimsVectors"`
+}
+
+type runnerVector struct {
+	Name          string                 `json:"name"`
+	Kind          string                 `json:"kind"`
+	ErrorCategory string                 `json:"error_category,omitempty"`
+	JSON          map[string]interface{} `json:"json"`
+}
+
+type runnerFixture struct {
+	SchemaVersion int            `json:"schemaVersion"`
+	Vectors       []runnerVector `json:"vectors"`
+	RejectVectors []runnerVector `json:"rejectVectors"`
 }
 
 // canonicalize is a *minimal* JCS implementation sufficient for the bundled
@@ -222,6 +238,678 @@ func canonicalApprovalClaims(rec approvalClaimsInput) ([]byte, error) {
 	return canonicalize(projection)
 }
 
+var (
+	agentIDRE          = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,127}$`)
+	credentialHandleRE = regexp.MustCompile(`^cred_[A-Za-z0-9_-]{22,128}$`)
+	runnerIDRE         = regexp.MustCompile(`^run_[A-Za-z0-9_-]{22,128}$`)
+	ulidRE             = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
+	isoUtcRE           = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$`)
+)
+
+var runnerKindSet = map[string]bool{
+	"claude-cli":    true,
+	"codex-cli":     true,
+	"openai-compat": true,
+}
+
+var credentialScopeSet = map[string]bool{
+	"anthropic":     true,
+	"openai":        true,
+	"openai-compat": true,
+	"ollama":        true,
+	"openclaw":      true,
+	"hermes-agent":  true,
+	"openclaw-http": true,
+	"opencode":      true,
+	"opencodego":    true,
+	"github":        true,
+}
+
+var providerKindSet = map[string]bool{
+	"anthropic":     true,
+	"openai":        true,
+	"openai-compat": true,
+	"ollama":        true,
+	"openclaw":      true,
+	"hermes-agent":  true,
+	"openclaw-http": true,
+	"opencode":      true,
+	"opencodego":    true,
+}
+
+var runnerFailureCodeSet = map[string]bool{
+	"spawn_failed":                     true,
+	"receipt_write_failed":             true,
+	"event_log_write_failed":           true,
+	"cost_ledger_write_failed":         true,
+	"cost_ceiling_exceeded":            true,
+	"credential_ownership_mismatch":    true,
+	"subprocess_crashed":               true,
+	"subprocess_timed_out":             true,
+	"terminated_by_request":            true,
+	"network_failed":                   true,
+	"provider_returned_error":          true,
+	"unrecognized_provider_response":   true,
+	"subscriber_backpressure_exceeded": true,
+	"runner_input_buffer_overflow":     true,
+}
+
+const (
+	maxRunnerPromptBytes            = 64 * 1024
+	maxRunnerModelBytes             = 128
+	maxRunnerCwdBytes               = 4 * 1024
+	maxRunnerStdioChunkBytes        = 64 * 1024
+	maxRunnerErrorBytes             = 8 * 1024
+	maxRunnerExtraArgs              = 64
+	maxRunnerExtraArgBytes          = 1024
+	maxRunnerProfileBytes           = 128
+	maxRunnerEndpointBytes          = 2 * 1024
+	maxRunnerOptionHeaders          = 64
+	maxRunnerOptionHeaderNameBytes  = 256
+	maxRunnerOptionHeaderValueBytes = 8 * 1024
+	maxAgentIDBytes                 = 128
+	maxCredentialHandleBytes        = 128
+	maxCredentialScopeBytes         = 128
+	maxRunnerIDBytes                = 128
+	maxCostModelBytes               = 128
+	maxCostEventAmountMicroUsd      = 100_000_000
+	maxSafeInteger                  = 9_007_199_254_740_991
+)
+
+func loadRunnerFixture() (runnerFixture, error) {
+	fixtureBytes, err := os.ReadFile("runner-vectors.json")
+	if err != nil {
+		return runnerFixture{}, err
+	}
+	var fx runnerFixture
+	decoder := json.NewDecoder(bytes.NewReader(fixtureBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fx); err != nil {
+		return runnerFixture{}, err
+	}
+	if fx.SchemaVersion != 1 {
+		return runnerFixture{}, fmt.Errorf("unsupported runner fixture schemaVersion: %d", fx.SchemaVersion)
+	}
+	return fx, nil
+}
+
+func validateRunnerVector(vec runnerVector) error {
+	switch vec.Kind {
+	case "spawnRequest":
+		return validateRunnerSpawnRequest(vec.JSON)
+	case "event":
+		return validateRunnerEvent(vec.JSON)
+	default:
+		return fmt.Errorf("unsupported runner vector kind %q", vec.Kind)
+	}
+}
+
+func validateRunnerSpawnRequest(record map[string]interface{}) error {
+	if err := knownKeys(record, "runnerSpawnRequest", map[string]bool{
+		"schemaVersion":       true,
+		"kind":                true,
+		"agentId":             true,
+		"credential":          true,
+		"providerRoute":       true,
+		"options":             true,
+		"prompt":              true,
+		"model":               true,
+		"cwd":                 true,
+		"taskId":              true,
+		"costCeilingMicroUsd": true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalSchemaVersion(record, "runnerSpawnRequest.schemaVersion"); err != nil {
+		return err
+	}
+	kind, err := requiredStringValue(record, "kind", "runnerSpawnRequest.kind")
+	if err != nil {
+		return err
+	}
+	if !runnerKindSet[kind] {
+		return fmt.Errorf("runnerSpawnRequest.kind: unsupported RunnerKind")
+	}
+	agentID, err := requiredStringValue(record, "agentId", "runnerSpawnRequest.agentId")
+	if err != nil {
+		return err
+	}
+	if err := validateUtf8Budget(agentID, maxAgentIDBytes, "runnerSpawnRequest.agentId"); err != nil {
+		return err
+	}
+	if !agentIDRE.MatchString(agentID) {
+		return fmt.Errorf("runnerSpawnRequest.agentId: not an AgentId")
+	}
+	credential, err := requiredObjectValue(record, "credential", "runnerSpawnRequest.credential")
+	if err != nil {
+		return err
+	}
+	if err := validateCredentialHandle(credential); err != nil {
+		return err
+	}
+	prompt, err := requiredStringValue(record, "prompt", "runnerSpawnRequest.prompt")
+	if err != nil {
+		return err
+	}
+	if err := validateUtf8Budget(prompt, maxRunnerPromptBytes, "runnerSpawnRequest.prompt"); err != nil {
+		return err
+	}
+	if model, ok, err := optionalString(record, "model", "runnerSpawnRequest.model"); err != nil {
+		return err
+	} else if ok {
+		if err := validateUtf8Budget(model, maxRunnerModelBytes, "runnerSpawnRequest.model"); err != nil {
+			return err
+		}
+	}
+	if cwd, ok, err := optionalString(record, "cwd", "runnerSpawnRequest.cwd"); err != nil {
+		return err
+	} else if ok {
+		if err := validateUtf8Budget(cwd, maxRunnerCwdBytes, "runnerSpawnRequest.cwd"); err != nil {
+			return err
+		}
+	}
+	if err := optionalMicroUsd(record, "costCeilingMicroUsd", "runnerSpawnRequest.costCeilingMicroUsd", maxSafeInteger); err != nil {
+		return err
+	}
+	if taskID, ok, err := optionalString(record, "taskId", "runnerSpawnRequest.taskId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(taskID) {
+		return fmt.Errorf("runnerSpawnRequest.taskId: not a TaskId")
+	}
+	if routeValue, ok := record["providerRoute"]; ok {
+		route, ok := routeValue.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("runnerSpawnRequest.providerRoute: must be an object")
+		}
+		if err := validateProviderRoute(route); err != nil {
+			return err
+		}
+	}
+	if optionsValue, ok := record["options"]; ok {
+		options, ok := optionsValue.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("runnerSpawnRequest.options: must be an object")
+		}
+		if err := validateRunnerSpawnOptions(options, kind); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateProviderRoute(record map[string]interface{}) error {
+	if err := knownKeys(record, "runnerSpawnRequest.providerRoute", map[string]bool{
+		"credentialScope": true,
+		"providerKind":    true,
+	}); err != nil {
+		return err
+	}
+	scope, err := requiredStringValue(record, "credentialScope", "runnerSpawnRequest.providerRoute.credentialScope")
+	if err != nil {
+		return err
+	}
+	if err := validateUtf8Budget(scope, maxCredentialScopeBytes, "runnerSpawnRequest.providerRoute.credentialScope"); err != nil {
+		return err
+	}
+	if !credentialScopeSet[scope] {
+		return fmt.Errorf("runnerSpawnRequest.providerRoute.credentialScope: unsupported CredentialScope")
+	}
+	providerKind, err := requiredStringValue(record, "providerKind", "runnerSpawnRequest.providerRoute.providerKind")
+	if err != nil {
+		return err
+	}
+	if err := validateUtf8Budget(providerKind, maxCredentialScopeBytes, "runnerSpawnRequest.providerRoute.providerKind"); err != nil {
+		return err
+	}
+	if !providerKindSet[providerKind] {
+		return fmt.Errorf("runnerSpawnRequest.providerRoute.providerKind: unsupported ProviderKind")
+	}
+	return nil
+}
+
+func validateRunnerSpawnOptions(record map[string]interface{}, requestKind string) error {
+	kind, err := requiredStringValue(record, "kind", "runnerSpawnRequest.options.kind")
+	if err != nil {
+		return err
+	}
+	if !runnerKindSet[kind] {
+		return fmt.Errorf("runnerSpawnRequest.options.kind: unsupported RunnerKind")
+	}
+	if kind != requestKind {
+		return fmt.Errorf("runnerSpawnRequest.options.kind: must match runnerSpawnRequest.kind")
+	}
+	switch kind {
+	case "claude-cli":
+		if err := knownKeys(record, "runnerSpawnRequest.options", map[string]bool{
+			"kind":      true,
+			"extraArgs": true,
+		}); err != nil {
+			return err
+		}
+		if extraArgs, ok := record["extraArgs"]; ok {
+			items, ok := extraArgs.([]interface{})
+			if !ok {
+				return fmt.Errorf("runnerSpawnRequest.options.extraArgs: must be an array")
+			}
+			if len(items) > maxRunnerExtraArgs {
+				return fmt.Errorf("runnerSpawnRequest.options.extraArgs: exceeds %d entries", maxRunnerExtraArgs)
+			}
+			for index, item := range items {
+				arg, ok := item.(string)
+				if !ok {
+					return fmt.Errorf("runnerSpawnRequest.options.extraArgs/%d: must be a string", index)
+				}
+				if err := validateUtf8Budget(arg, maxRunnerExtraArgBytes, fmt.Sprintf("runnerSpawnRequest.options.extraArgs/%d", index)); err != nil {
+					return err
+				}
+			}
+		}
+	case "codex-cli":
+		if err := knownKeys(record, "runnerSpawnRequest.options", map[string]bool{
+			"kind":    true,
+			"sandbox": true,
+			"profile": true,
+		}); err != nil {
+			return err
+		}
+		if sandbox, ok, err := optionalString(record, "sandbox", "runnerSpawnRequest.options.sandbox"); err != nil {
+			return err
+		} else if ok && sandbox != "read-only" && sandbox != "workspace-write" {
+			return fmt.Errorf("runnerSpawnRequest.options.sandbox: unsupported codex sandbox")
+		}
+		if profile, ok, err := optionalString(record, "profile", "runnerSpawnRequest.options.profile"); err != nil {
+			return err
+		} else if ok {
+			if err := validateUtf8Budget(profile, maxRunnerProfileBytes, "runnerSpawnRequest.options.profile"); err != nil {
+				return err
+			}
+		}
+	case "openai-compat":
+		if err := knownKeys(record, "runnerSpawnRequest.options", map[string]bool{
+			"kind":      true,
+			"endpoint":  true,
+			"headers":   true,
+			"timeoutMs": true,
+		}); err != nil {
+			return err
+		}
+		endpoint, err := requiredStringValue(record, "endpoint", "runnerSpawnRequest.options.endpoint")
+		if err != nil {
+			return err
+		}
+		if err := validateUtf8Budget(endpoint, maxRunnerEndpointBytes, "runnerSpawnRequest.options.endpoint"); err != nil {
+			return err
+		}
+		if headersValue, ok := record["headers"]; ok {
+			headers, ok := headersValue.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("runnerSpawnRequest.options.headers: must be an object")
+			}
+			if len(headers) > maxRunnerOptionHeaders {
+				return fmt.Errorf("runnerSpawnRequest.options.headers: exceeds %d headers", maxRunnerOptionHeaders)
+			}
+			for key, value := range headers {
+				if err := validateUtf8Budget(key, maxRunnerOptionHeaderNameBytes, fmt.Sprintf("runnerSpawnRequest.options.headers/%s name", key)); err != nil {
+					return err
+				}
+				headerValue, ok := value.(string)
+				if !ok {
+					return fmt.Errorf("runnerSpawnRequest.options.headers/%s: must be a string", key)
+				}
+				if err := validateUtf8Budget(headerValue, maxRunnerOptionHeaderValueBytes, fmt.Sprintf("runnerSpawnRequest.options.headers/%s value", key)); err != nil {
+					return err
+				}
+			}
+		}
+		if timeoutMs, ok := record["timeoutMs"]; ok {
+			number, ok := timeoutMs.(float64)
+			if !ok || number != float64(int(number)) || number <= 0 {
+				return fmt.Errorf("runnerSpawnRequest.options.timeoutMs: must be a positive safe integer")
+			}
+		}
+	default:
+		return fmt.Errorf("runnerSpawnRequest.options.kind: unsupported RunnerKind")
+	}
+	return nil
+}
+
+func validateRunnerEvent(record map[string]interface{}) error {
+	kind, err := requiredStringValue(record, "kind", "runnerEvent.kind")
+	if err != nil {
+		return err
+	}
+	keys := map[string]bool{
+		"schemaVersion": true,
+		"kind":          true,
+		"runnerId":      true,
+		"at":            true,
+	}
+	switch kind {
+	case "started":
+	case "stdout", "stderr":
+		keys["chunk"] = true
+	case "cost":
+		keys["entry"] = true
+	case "receipt":
+		keys["receiptId"] = true
+	case "finished":
+		keys["exitCode"] = true
+	case "failed":
+		keys["error"] = true
+		keys["code"] = true
+	default:
+		return fmt.Errorf("runnerEvent.kind: unsupported RunnerEvent kind")
+	}
+	if err := knownKeys(record, "runnerEvent", keys); err != nil {
+		return err
+	}
+	if err := validateOptionalSchemaVersion(record, "runnerEvent.schemaVersion"); err != nil {
+		return err
+	}
+	runnerID, err := requiredStringValue(record, "runnerId", "runnerEvent.runnerId")
+	if err != nil {
+		return err
+	}
+	if err := validateUtf8Budget(runnerID, maxRunnerIDBytes, "runnerEvent.runnerId"); err != nil {
+		return err
+	}
+	if !runnerIDRE.MatchString(runnerID) {
+		return fmt.Errorf("runnerEvent.runnerId: not a RunnerId")
+	}
+	at, err := requiredStringValue(record, "at", "runnerEvent.at")
+	if err != nil {
+		return err
+	}
+	if err := validateCanonicalTimestamp(at, "runnerEvent.at"); err != nil {
+		return err
+	}
+	switch kind {
+	case "stdout", "stderr":
+		chunk, err := requiredStringValue(record, "chunk", "runnerEvent.chunk")
+		if err != nil {
+			return err
+		}
+		return validateUtf8Budget(chunk, maxRunnerStdioChunkBytes, "runnerEvent.chunk")
+	case "cost":
+		entry, err := requiredObjectValue(record, "entry", "runnerEvent.entry")
+		if err != nil {
+			return err
+		}
+		return validateCostEventEntry(entry)
+	case "receipt":
+		receiptID, err := requiredStringValue(record, "receiptId", "runnerEvent.receiptId")
+		if err != nil {
+			return err
+		}
+		if !ulidRE.MatchString(receiptID) {
+			return fmt.Errorf("runnerEvent.receiptId: not a ReceiptId")
+		}
+	case "finished":
+		exitCode, ok := record["exitCode"].(float64)
+		if !ok || exitCode != float64(int(exitCode)) || exitCode < 0 || exitCode > 255 {
+			return fmt.Errorf("runnerEvent.exitCode: must be an integer from 0 to 255")
+		}
+	case "failed":
+		errorMessage, err := requiredStringValue(record, "error", "runnerEvent.error")
+		if err != nil {
+			return err
+		}
+		if err := validateUtf8Budget(errorMessage, maxRunnerErrorBytes, "runnerEvent.error"); err != nil {
+			return err
+		}
+		if code, ok, err := optionalString(record, "code", "runnerEvent.code"); err != nil {
+			return err
+		} else if ok && !runnerFailureCodeSet[code] {
+			return fmt.Errorf("runnerEvent.code: unsupported RunnerFailureCode")
+		}
+	}
+	return nil
+}
+
+func validateCredentialHandle(record map[string]interface{}) error {
+	if err := knownKeys(record, "credentialHandle", map[string]bool{
+		"version": true,
+		"id":      true,
+	}); err != nil {
+		return err
+	}
+	version, ok := record["version"].(float64)
+	if !ok || version != 1 {
+		return fmt.Errorf("credentialHandle.version: must be 1")
+	}
+	id, err := requiredStringValue(record, "id", "credentialHandle.id")
+	if err != nil {
+		return err
+	}
+	if err := validateUtf8Budget(id, maxCredentialHandleBytes, "credentialHandle.id"); err != nil {
+		return err
+	}
+	if !credentialHandleRE.MatchString(id) {
+		return fmt.Errorf("credentialHandle.id: not a CredentialHandleId")
+	}
+	return nil
+}
+
+func validateCostEventEntry(record map[string]interface{}) error {
+	if err := knownKeys(record, "runnerEvent.entry", map[string]bool{
+		"receiptId":      true,
+		"agentSlug":      true,
+		"taskId":         true,
+		"providerKind":   true,
+		"model":          true,
+		"amountMicroUsd": true,
+		"units":          true,
+		"occurredAt":     true,
+	}); err != nil {
+		return err
+	}
+	if receiptID, ok, err := optionalString(record, "receiptId", "runnerEvent.entry.receiptId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(receiptID) {
+		return fmt.Errorf("runnerEvent.entry.receiptId: not a ReceiptId")
+	}
+	agentSlug, err := requiredStringValue(record, "agentSlug", "runnerEvent.entry.agentSlug")
+	if err != nil {
+		return err
+	}
+	if err := validateUtf8Budget(agentSlug, maxAgentIDBytes, "runnerEvent.entry.agentSlug"); err != nil {
+		return err
+	}
+	if !agentIDRE.MatchString(agentSlug) {
+		return fmt.Errorf("runnerEvent.entry.agentSlug: not an AgentSlug")
+	}
+	if taskID, ok, err := optionalString(record, "taskId", "runnerEvent.entry.taskId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(taskID) {
+		return fmt.Errorf("runnerEvent.entry.taskId: not a TaskId")
+	}
+	providerKind, err := requiredStringValue(record, "providerKind", "runnerEvent.entry.providerKind")
+	if err != nil {
+		return err
+	}
+	if !providerKindSet[providerKind] {
+		return fmt.Errorf("runnerEvent.entry.providerKind: unsupported ProviderKind")
+	}
+	model, err := requiredStringValue(record, "model", "runnerEvent.entry.model")
+	if err != nil {
+		return err
+	}
+	if len(model) == 0 {
+		return fmt.Errorf("runnerEvent.entry.model: must be a non-empty string")
+	}
+	if err := validateUtf8Budget(model, maxCostModelBytes, "runnerEvent.entry.model"); err != nil {
+		return err
+	}
+	if err := requiredNonNegativeInteger(record, "amountMicroUsd", "runnerEvent.entry.amountMicroUsd", maxCostEventAmountMicroUsd); err != nil {
+		return err
+	}
+	units, err := requiredObjectValue(record, "units", "runnerEvent.entry.units")
+	if err != nil {
+		return err
+	}
+	if err := validateCostUnits(units); err != nil {
+		return err
+	}
+	occurredAt, err := requiredStringValue(record, "occurredAt", "runnerEvent.entry.occurredAt")
+	if err != nil {
+		return err
+	}
+	return validateCanonicalTimestamp(occurredAt, "runnerEvent.entry.occurredAt")
+}
+
+func validateCostUnits(record map[string]interface{}) error {
+	if err := knownKeys(record, "runnerEvent.entry.units", map[string]bool{
+		"inputTokens":         true,
+		"outputTokens":        true,
+		"cacheReadTokens":     true,
+		"cacheCreationTokens": true,
+	}); err != nil {
+		return err
+	}
+	for _, key := range []string{"inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens"} {
+		if err := requiredNonNegativeInteger(record, key, "runnerEvent.entry.units."+key, maxSafeInteger); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOptionalSchemaVersion(record map[string]interface{}, path string) error {
+	value, ok := record["schemaVersion"]
+	if !ok {
+		return nil
+	}
+	version, ok := value.(float64)
+	if !ok || version != float64(int(version)) {
+		return fmt.Errorf("%s: must be an integer", path)
+	}
+	if version > 1 {
+		return fmt.Errorf("%s: unsupported schemaVersion", path)
+	}
+	if version != 1 {
+		return fmt.Errorf("%s: must be 1", path)
+	}
+	return nil
+}
+
+func knownKeys(record map[string]interface{}, path string, allowed map[string]bool) error {
+	for key := range record {
+		if !allowed[key] {
+			return fmt.Errorf("%s/%s: is not allowed", path, key)
+		}
+	}
+	return nil
+}
+
+func requiredStringValue(record map[string]interface{}, key string, path string) (string, error) {
+	value, ok := record[key]
+	if !ok {
+		return "", fmt.Errorf("%s: is required", path)
+	}
+	stringValue, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("%s: must be a string", path)
+	}
+	return stringValue, nil
+}
+
+func optionalString(record map[string]interface{}, key string, path string) (string, bool, error) {
+	value, ok := record[key]
+	if !ok {
+		return "", false, nil
+	}
+	stringValue, ok := value.(string)
+	if !ok {
+		return "", false, fmt.Errorf("%s: must be a string", path)
+	}
+	return stringValue, true, nil
+}
+
+func optionalStringValue(record map[string]interface{}, key string, path string) error {
+	_, _, err := optionalString(record, key, path)
+	return err
+}
+
+func optionalMicroUsd(record map[string]interface{}, key string, path string, max float64) error {
+	if _, ok := record[key]; !ok {
+		return nil
+	}
+	if err := requiredNonNegativeInteger(record, key, path, max); err != nil {
+		return fmt.Errorf("%s: not a MicroUsd: %w", path, err)
+	}
+	return nil
+}
+
+func requiredNonNegativeInteger(record map[string]interface{}, key string, path string, max float64) error {
+	value, ok := record[key]
+	if !ok {
+		return fmt.Errorf("%s: is required", path)
+	}
+	numberValue, ok := value.(float64)
+	if !ok || numberValue != float64(int64(numberValue)) || numberValue < 0 || numberValue > maxSafeInteger {
+		return fmt.Errorf("%s: must be a non-negative safe integer", path)
+	}
+	if numberValue > max {
+		return fmt.Errorf("%s: exceeds maximum %0.f", path, max)
+	}
+	return nil
+}
+
+func requiredObjectValue(record map[string]interface{}, key string, path string) (map[string]interface{}, error) {
+	value, ok := record[key]
+	if !ok {
+		return nil, fmt.Errorf("%s: is required", path)
+	}
+	objectValue, ok := value.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("%s: must be an object", path)
+	}
+	return objectValue, nil
+}
+
+func validateUtf8Budget(value string, maxBytes int, path string) error {
+	if len([]byte(value)) > maxBytes {
+		return fmt.Errorf("%s: exceeds %d UTF-8 bytes", path, maxBytes)
+	}
+	return nil
+}
+
+func validateCanonicalTimestamp(value string, path string) error {
+	if !isoUtcRE.MatchString(value) {
+		return fmt.Errorf("%s: must be an ISO8601 UTC millisecond timestamp", path)
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return fmt.Errorf("%s: must be a valid ISO8601 UTC millisecond timestamp", path)
+	}
+	if parsed.UTC().Format("2006-01-02T15:04:05.000Z") != value {
+		return fmt.Errorf("%s: must be a valid ISO8601 UTC millisecond timestamp", path)
+	}
+	return nil
+}
+
+func errorCategory(err error) string {
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "schemaVersion"):
+		return "schema_version"
+	case strings.Contains(message, "is not allowed"):
+		return "unknown_key"
+	case strings.Contains(message, "exceeds"):
+		return "budget"
+	case strings.Contains(message, "ISO8601"):
+		return "timestamp"
+	case strings.Contains(message, "costCeilingMicroUsd"):
+		return "micro_usd"
+	case strings.Contains(message, "RunnerFailureCode"):
+		return "failure_code"
+	case strings.Contains(message, "runnerEvent.entry"):
+		return "cost_entry"
+	default:
+		return "validation"
+	}
+}
+
 const (
 	colorReset = "\x1b[0m"
 	colorGreen = "\x1b[32m"
@@ -249,10 +937,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unsupported fixture schemaVersion: %d\n", fx.SchemaVersion)
 		os.Exit(2)
 	}
+	runnerFx, err := loadRunnerFixture()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not load runner fixture: %v\n", err)
+		os.Exit(2)
+	}
 
 	fmt.Printf("%s@wuphf/protocol — Go reference verifier%s\n", colorBold, colorReset)
-	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d approval-claims vectors%s\n\n",
-		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(fx.ApprovalClaimsVectors), colorReset)
+	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d approval-claims vectors, %d runner accept vectors, %d runner reject vectors%s\n\n",
+		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(fx.ApprovalClaimsVectors), len(runnerFx.Vectors), len(runnerFx.RejectVectors), colorReset)
 
 	failed := 0
 
@@ -348,10 +1041,33 @@ func main() {
 			colorGreen, colorReset, vec.Name, len(canonical), colorReset)
 	}
 
+	for _, vec := range runnerFx.Vectors {
+		if err := validateRunnerVector(vec); err != nil {
+			fmt.Printf("  %sFAIL%s runner/%s: expected accept, got %v\n", colorRed, colorReset, vec.Name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s runner/%s accepted\n", colorGreen, colorReset, vec.Name)
+	}
+
+	for _, vec := range runnerFx.RejectVectors {
+		if err := validateRunnerVector(vec); err == nil {
+			fmt.Printf("  %sFAIL%s runner/%s: expected reject, got accept\n", colorRed, colorReset, vec.Name)
+			failed++
+			continue
+		} else if vec.ErrorCategory != "" && errorCategory(err) != vec.ErrorCategory {
+			fmt.Printf("  %sFAIL%s runner/%s: expected error_category=%s, got %s (%v)\n",
+				colorRed, colorReset, vec.Name, vec.ErrorCategory, errorCategory(err), err)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s runner/%s rejected\n", colorGreen, colorReset, vec.Name)
+	}
+
 	fmt.Println()
 	if failed == 0 {
 		fmt.Printf("%s%sAll %d vectors match — wire contract is cross-language portable.%s\n",
-			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(fx.ApprovalClaimsVectors), colorReset)
+			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(fx.ApprovalClaimsVectors)+len(runnerFx.Vectors)+len(runnerFx.RejectVectors), colorReset)
 		os.Exit(0)
 	}
 	fmt.Printf("%s%s%d vector(s) failed — TypeScript writer and Go reference disagree.%s\n",

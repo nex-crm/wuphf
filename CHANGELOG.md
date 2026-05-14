@@ -6,6 +6,35 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Added
 
+- **`@wuphf/credentials` per-agent OS keychain substrate.** New v1 package for
+  opaque credential handles backed by macOS Keychain, Linux libsecret, and
+  Windows Credential Manager adapters. Handles serialize only an opaque
+  versioned id, use that id as the keychain account capability, reject Linux
+  plaintext `basic_text` collections, and keep broker construction explicit
+  instead of a global singleton.
+- **Broker-mediated credential handles.** `@wuphf/credentials` now treats the
+  handle id as the keychain account capability and requires a `BrokerIdentity`
+  token for read/write/delete calls. `CredentialHandle` uses private runtime
+  slots, serializes as `{version:1,id}`, and can be rehydrated only with
+  broker-trusted `agentId`/scope context.
+- **`@wuphf/agent-runners` core and Claude CLI adapter.** New v1 runner package
+  freezes `RunnerSpawnRequest`, `RunnerEvent`, and `AgentRunner`, streams Claude
+  CLI `--print` JSON lines into broker-journaled events, records cost usage,
+  writes authoritative receipts, and fails the run when receipt storage fails.
+  Broker runner routes add `POST /api/runners` plus
+  `GET /api/runners/:id/events` SSE with bearer-to-agent gating.
+- **Codex CLI adapter for `@wuphf/agent-runners`.** The runner package now ships
+  `createCodexCliRunner()` for `codex exec`, with trusted absolute binary
+  resolution, minimal locale-stable credential injection, graceful-then-hard
+  termination, token usage events, receipt-write failure handling, and a single
+  parser summary when Codex output includes unrecognized non-final lines.
+- **OpenAI-compatible HTTP agent runner adapter.** `@wuphf/agent-runners` now
+  includes `createOpenAICompatRunner()` for streaming chat-completions endpoints
+  that speak OpenAI-style SSE. The adapter uses `AbortController` for
+  termination and timeouts, selects bearer vs `x-api-key` auth from
+  `CredentialScope`, writes authoritative receipts, records provider usage as
+  cost events, and emits a zero-cost usage-missing note when providers omit
+  usage data.
 - **Channel participant rail for conversations.** Channel views now include a Slack-like participants list that shows which agents are part of the current channel, opens an agent panel from each row, filters out human seats, and keeps lead agents pinned. The rail supports adding available office agents, disabling or enabling specific channel participants, removing agents from only the current channel, and undoing a remove from the toast within five seconds.
 - **Skills app reskinned as pixel-art trading cards.** Every entry in the Skills tab is now a TCG-style card with a procedurally-generated 144px pixel-art portrait (using the existing `drawPixelAvatar` system), status-driven type palette (active = electric, proposed = psychic with "NEEDS REVIEW" stamp, disabled = dark, archived = steel), and a 3D card flip (700ms, ease-out-expo, respects `prefers-reduced-motion`).
   - **Front face:** Title + creator byline, procedural portrait, status/owner stat strip, promoted "Triggers on" row, and scrollable flavor-text description.
@@ -33,7 +62,16 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Security
 
+- **Closed PR #850 round-2 security gaps in agent runners.** Runner spawn
+  options are now part of the protocol wire shape, OpenAI-compatible endpoints
+  require an explicit broker allowlist before credentials are attached, CLI
+  prompts are separated from flags with `--`, runner output redaction is
+  streaming across event chunks, and adapter input buffers fail closed before
+  unbounded line/SSE/error-body accumulation.
+- **Agent runner spawn boundaries now prove credential ownership and constrain cwd.** Runner credential reads use a new ownership-aware keychain read that verifies stored `agentId` and scope before returning a secret, and broker runner routes resolve `cwd` under `<workspaceRoot>/<agentId>/` with symlink-aware `realpath` checks. `RunnerSpawnRequest` and `RunnerEvent` now serialize `schemaVersion: 1`, accept legacy unversioned JSON as v1, and expose an optional `providerRoute` slot for branch 10 routing without changing current adapter policy.
+- **Hardened agent-runner adapters and broker SSE against forged output and stuck consumers.** Claude CLI, Codex CLI, and OpenAI-compatible runners now validate provider-reported cost before forwarding it, redact full and partial secrets from output, chunk stdio at the protocol byte budget, and use shared terminal cleanup for sink failures. Broker runner shutdown now terminates active runners, retains terminal streams only briefly for reconnects, caps runner capacity, emits event-log LSNs as SSE ids, honors `Last-Event-ID`, and disconnects overfilled SSE consumers with a structured reason.
 - **Closed a confused-deputy bypass in the human approval gate.** Agent-controlled fields (`Summary`, `ConnectionKey`, `ActionID`) now flow through `sanitizeContextValue` before they enter the approval card's context string. Without this, a prompt-injected agent could craft a `Summary` containing fake `What this will do:` / `Action:` / `Channel:` sections at line starts; the web parser's first-match-wins regexes would surface the FORGED structure to the human, hiding the real action. The sanitizer collapses every newline variant (LF, CRLF, U+2028, U+2029) to a space and replaces the bullet glyph U+2022 with the middle dot U+00B7, so forged section headers cannot land at a line start where the parser's `^Section:` regexes match. The forged tokens still appear as inline text inside the rendered Why — visible to the human as a long run-on sentence that looks suspicious by construction. Adversarial regression tests (`TestBuildActionApprovalSpecRejectsForgedSummary`, `TestBuildActionApprovalSpecRejectsForgedConnectionKey`) pin the defense.
+- **Hardened `@wuphf/credentials` OS keychain adapters.** Keychain subprocesses now resolve trusted absolute command paths, run with a minimal locale-stable environment, and have bounded timeouts. Linux libsecret writes require a positive encrypted Secret Service collection check, inspect `basic_text` warnings on every probe/readback path, and clear entries if post-write verification sees a plaintext backend. Windows Credential Manager I/O now treats secrets as UTF-8 explicitly, and command failures preserve system causes and recovery hints instead of collapsing to generic empty-stderr errors.
 
 ### Deprecated
 
@@ -41,6 +79,15 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Fixed
 
+- **Agent runner correctness across provider routing, event ordering, terminal
+  races, resume expiry, and receipt reconciliation.** Broker-resolved
+  `providerKind` now flows into runner cost and receipt attribution, runner
+  events append through a serialized durable-emission queue, terminal success
+  and failure paths are CAS-gated to emit exactly one terminal event, expired
+  runner SSE resumes return structured `410 runner_resume_window_expired`
+  responses, failed runs write best-effort error receipts at the pre-minted
+  receipt id, and the Go protocol verifier now rejects runner wire drift with
+  TypeScript-parity vectors.
 - **Public tunnel start now retries through transient `trycloudflare.com` failures instead of bouncing straight to the user.** When Cloudflare's free QuickTunnel API returns a 5xx or HTML body (the `error code: 1101` / "Error unmarshaling QuickTunnel response" / "failed to unmarshal quick Tunnel" chain), `cloudflared` exits in under a second before publishing a URL. Previously, that surfaced as a hard failure on the first click. The tunnel controller now respawns `cloudflared` up to 3 times with a 1.5s/3s backoff on a recognized transient signature (5xx + QuickTunnel unmarshal errors), keeping the loopback listener and share server stable across attempts so only the subprocess cycles. Non-transient failures (timeout, missing binary, context cancel, pipe error) skip the retry path so the user is not waiting through pointless respawns. If every attempt fails, the surfaced error gains a hint that `trycloudflare.com` itself looks unhealthy.
 - **First-run agent nudge now reads as a high-contrast retro speech bubble instead of black text on the purple sidebar.** The "→ tag @&lt;agent&gt; in #general" line that points new users at the office chat had no CSS rule attached, so it inherited the body text color and rendered at roughly 3:1 contrast on the Nex sidebar. It now ships as an NES-style pixel dialog box: olive-yellow fill, near-black mono text (≈16:1 contrast, WCAG AAA), four zero-blur stacked `box-shadow` strokes for a sharp pixel border, a soft drop-shadow underneath for CRT depth, and a chunky 4×4 pixel tail that steps up-left from the bubble toward the agent avatar. A 1.6s `translateY` bob draws the eye without moving any layout-bound properties; `prefers-reduced-motion: reduce` falls back to a static bubble. Matches the existing PixelAvatar aesthetic in the agent rail.
 - **Workspace endpoints are wired before the web broker starts serving.** Creating a workspace from the web UI no longer hits `503 {"error":"workspaces not configured"}` because `/workspaces/*` routes now receive the orchestrator during broker construction instead of after `LaunchWeb` blocks forever.

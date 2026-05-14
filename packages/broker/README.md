@@ -77,6 +77,8 @@ store.close();
 | GET | `/api/v1/cost/budgets/:id` | bearer | Returns one projected budget, or 404 on malformed/missing id. |
 | GET | `/api/v1/cost/summary` | bearer | Returns current cost projections: agent spend, budgets, and threshold crossings. |
 | GET | `/api/v1/cost/replay-check` | bearer | Replays cost events and compares projections. 200 when `ok: true`; 500 with structured discrepancies when drift or unparseable cost payloads are found. |
+| POST | `/api/runners` | bearer + runner agent map | Body: `RunnerSpawnRequest`. The bearer maps to one `agentId`; mismatches return 403. The broker mints/injects `BrokerIdentity`, resolves the `CredentialHandle`, and returns `{ runnerId }`. Mounted only when `createBroker({ runners })` is supplied. |
+| GET | `/api/runners/:id/events` | bearer + runner agent map | SSE stream of `RunnerEvent` values. The caller's bearer-mapped `agentId` must match the runner owner. |
 | GET | `/`, `/index.html` | none (loopback) | Renderer bundle (404 if `renderer: null`). |
 | GET | `/assets/*` | none (loopback) | Static assets under the renderer dir. |
 | WS | `/terminal/agents/:slug?token=` | token + loopback origin | Currently closes with `1011 not_implemented`; the agent stdio bridge replaces this in a later branch. |
@@ -110,6 +112,10 @@ GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
    validator (boundary budget, frozen-args canonicalization, shape, branded
    ids) before the broker even touches the store. There is no fast-path that
    skips validation.
+8. **Runner credentials stay broker-mediated.** The broker route maps bearer
+   tokens to `AgentId`, injects the `BrokerIdentity`, and passes runners only a
+   `secretReader` closure. Runner processes never receive or construct broker
+   identity.
 
 ## Spec anchors
 

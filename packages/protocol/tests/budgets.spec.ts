@@ -26,6 +26,7 @@ import {
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_AUDIT_EVENT_BODY_BYTES,
+  MAX_CREDENTIAL_SECRET_BYTES,
   MAX_FROZEN_ARGS_BYTES,
   MAX_RECEIPT_APPROVALS,
   MAX_RECEIPT_BYTES,
@@ -56,6 +57,7 @@ import {
   type ToolCall,
   validateApprovalTokenLifetime,
   validateAuditEventBodyBudget,
+  validateCredentialSecretBudget,
   validateFrozenArgsBudget,
   validateReceipt,
   validateReceiptBudget,
@@ -250,6 +252,14 @@ describe("resource budgets", () => {
     expectBudgetRejection(
       validateSignerIdentityBudget("x".repeat(MAX_SIGNER_IDENTITY_BYTES + 1)),
       /SignerIdentity bytes/,
+    );
+
+    expect(validateCredentialSecretBudget("x".repeat(MAX_CREDENTIAL_SECRET_BYTES))).toEqual({
+      ok: true,
+    });
+    expectBudgetRejection(
+      validateCredentialSecretBudget("x".repeat(MAX_CREDENTIAL_SECRET_BYTES + 1)),
+      /credential secret bytes/,
     );
   });
 

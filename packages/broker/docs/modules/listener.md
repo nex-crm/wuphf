@@ -27,6 +27,7 @@ flowchart LR
   dispatch -- "GET /api/receipts/:id" --> read["ReceiptStore.get<br/>200 / 404"]
   dispatch -- "GET /api/threads/:tid/receipts" --> list["ReceiptStore.list({threadId, cursor?, limit?})<br/>200 JSON array (+ Link rel=next when more pages)<br/>400 on invalid cursor/limit"]
   dispatch -- "/api/v1/cost/*" --> cost["cost ledger routes<br/>read: bearer<br/>mutate: bearer + operator capability"]
+  dispatch -- "/api/runners*" --> runners["runner routes<br/>POST spawn · GET events SSE<br/>bearer maps to AgentId"]
   dispatch -- "unknown /api/*" --> apinotfound["404"]
   dispatch -- "/, /index.html, /assets/*" --> static["GET/HEAD only · RendererBundleSource"]
   dispatch -- "other" --> notfound["404"]
@@ -67,6 +68,22 @@ unknown authenticated API routes and return 404.
 
 See [cost-ledger.md](./cost-ledger.md) for the full route table, idempotency
 keys, replay-check discrepancy contract, and public subpath exports.
+
+### Runner routes
+
+When `createBroker({ runners })` is supplied, the listener mounts runner
+control under `/api/runners`. Without runner config, those paths behave like
+unknown authenticated API routes and return 404.
+
+| Method | Path | Auth | Contract |
+|---|---|---|---|
+| POST | `/api/runners` | bearer + runner agent map | Accepts a `RunnerSpawnRequest`, verifies `request.agentId` matches the bearer-mapped agent, injects broker-scoped credential access through the factory, and returns `{ runnerId }`. |
+| GET | `/api/runners/:id/events` | bearer + runner agent map | Streams `RunnerEvent` values over SSE. The bearer-mapped agent must own the runner. |
+
+The broker route never hands a `BrokerIdentity` to the runner. The factory
+rehydrates the `CredentialHandle` with broker-trusted context and passes the
+runner a `secretReader` closure. Receipt write failure remains runner-fatal;
+the route only transports events.
 
 ### Receipt write-path status codes
 
