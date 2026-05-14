@@ -360,7 +360,9 @@ func findFactInJSONL(existing []byte, factID string) (Fact, bool) {
 		return Fact{}, false
 	}
 	// Slow path: decode each line to confirm it's an "id" field match.
+	// Match List()'s buffer size so long fact lines don't cause false negatives.
 	scanner := bufio.NewScanner(bytes.NewReader(existing))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
 		if len(line) == 0 {
@@ -370,6 +372,9 @@ func findFactInJSONL(existing []byte, factID string) (Fact, bool) {
 		if json.Unmarshal(line, &f) == nil && f.ID == factID {
 			return f, true
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("entity facts: findFactInJSONL scanner error: %v", err)
 	}
 	return Fact{}, false
 }
