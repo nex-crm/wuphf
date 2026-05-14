@@ -266,16 +266,16 @@ func (s *EntitySynthesizer) EnqueueSynthesis(kind EntityKind, slug, requestBy st
 		EnqueuedAt: time.Now().UTC(),
 		ID:         id,
 	}
-	s.queued[key] = true
-	s.mu.Unlock()
-
+	// Hold s.mu across the non-blocking send so the check, send, and
+	// queued-state update are atomic. The select uses default, so the
+	// send cannot block — holding the lock here is safe (drain receives
+	// from s.jobs without holding s.mu).
 	select {
 	case s.jobs <- job:
+		s.queued[key] = true
+		s.mu.Unlock()
 		return id, nil
 	default:
-		// Queue saturated — undo the reservation so future calls can retry.
-		s.mu.Lock()
-		delete(s.queued, key)
 		s.mu.Unlock()
 		return 0, ErrSynthesisQueueSaturated
 	}
