@@ -275,6 +275,11 @@ type Snapshot struct {
 	// were promoted to permanent-failures.jsonl. Append-only; callers
 	// should treat the order as oldest-first (file order).
 	PermanentFailures []DLQEntry `json:"permanent_failures"`
+	// CorruptLines is the running count of malformed JSONL rows skipped
+	// in extractions.jsonl. Non-zero means the queue file has corruption.
+	CorruptLines uint64 `json:"corrupt_lines"`
+	// CorruptLinesPerm is the same counter for permanent-failures.jsonl.
+	CorruptLinesPerm uint64 `json:"corrupt_lines_permanent"`
 }
 
 // Inspect returns a Snapshot of the current DLQ state. Read-only: does not
@@ -307,9 +312,12 @@ func (d *DLQ) Inspect(_ context.Context) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("dlq: read permanent: %w", err)
 	}
 
+	corruptExt, corruptPerm := d.CorruptLineCounts()
 	return Snapshot{
 		Pending:           pending,
 		PermanentFailures: permanent,
+		CorruptLines:      corruptExt,
+		CorruptLinesPerm:  corruptPerm,
 	}, nil
 }
 
