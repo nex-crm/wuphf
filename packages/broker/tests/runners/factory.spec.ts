@@ -4,6 +4,8 @@ import { CredentialOwnershipMismatch } from "@wuphf/credentials";
 import { forBrokerTests } from "@wuphf/credentials/testing";
 import {
   type AgentId,
+  type AgentProviderRouting,
+  type AgentProviderRoutingEntry,
   asAgentId,
   asCredentialHandleId,
   asCredentialScope,
@@ -11,10 +13,12 @@ import {
   type CredentialScope,
   createCredentialHandle,
   credentialHandleToJson,
+  type RunnerProviderRoute,
   type RunnerSpawnRequest,
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 
+import type { AgentProviderRoutingStore } from "../../src/agent-provider-routing/types.ts";
 import { InMemoryReceiptStore } from "../../src/receipt-store.ts";
 import {
   type AgentRunnerFactoryDeps,
@@ -151,6 +155,106 @@ describe("createAgentRunnerForBroker", () => {
     expect(runner.agentId).toBe(agentId);
   });
 
+  it("uses the per-agent routing store when no inline providerRoute is present", async () => {
+    const openAiCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("openai"),
+    });
+    const storedRoute = {
+      credentialScope: asCredentialScope("openai"),
+      providerKind: asProviderKind("openai"),
+    };
+    const runner = await createAgentRunnerForBroker(
+      {
+        ...request,
+        credential: credentialHandleToJson(openAiCredential),
+      },
+      forBrokerTests({ agentId }),
+      {
+        ...depsForOwnership({
+          actualAgentId: agentId,
+          actualScope: asCredentialScope("openai"),
+          actualSecret: "openai-secret",
+          expectedProviderKind: asProviderKind("openai"),
+          expectedRequestProviderRoute: storedRoute,
+        }),
+        agentProviderRoutingStore: fakeRoutingStore([
+          {
+            kind: "claude-cli",
+            ...storedRoute,
+          },
+        ]),
+      },
+    );
+
+    expect(runner.agentId).toBe(agentId);
+  });
+
+  it("does not consult the per-agent routing store when providerRoute is inline", async () => {
+    const openAiCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("openai"),
+    });
+    const routedRequest: RunnerSpawnRequest = {
+      ...request,
+      credential: credentialHandleToJson(openAiCredential),
+      providerRoute: {
+        credentialScope: asCredentialScope("openai"),
+        providerKind: asProviderKind("openai"),
+      },
+    };
+    const runner = await createAgentRunnerForBroker(routedRequest, forBrokerTests({ agentId }), {
+      ...depsForOwnership({
+        actualAgentId: agentId,
+        actualScope: asCredentialScope("openai"),
+        actualSecret: "openai-secret",
+        expectedProviderKind: asProviderKind("openai"),
+      }),
+      agentProviderRoutingStore: {
+        ...fakeRoutingStore(),
+        getEntry: async () => {
+          throw new Error("inline providerRoute should skip store lookup");
+        },
+      },
+    });
+
+    expect(runner.agentId).toBe(agentId);
+  });
+
+  it("rejects provider kind mismatches loaded from the per-agent routing store", async () => {
+    const openAiCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("openai"),
+    });
+
+    await expect(
+      createAgentRunnerForBroker(
+        {
+          ...request,
+          credential: credentialHandleToJson(openAiCredential),
+        },
+        forBrokerTests({ agentId }),
+        {
+          ...depsForOwnership({
+            actualAgentId: agentId,
+            actualScope: asCredentialScope("openai"),
+            actualSecret: "openai-secret",
+          }),
+          agentProviderRoutingStore: fakeRoutingStore([
+            {
+              kind: "claude-cli",
+              credentialScope: asCredentialScope("openai"),
+              providerKind: asProviderKind("anthropic"),
+            },
+          ]),
+        },
+      ),
+    ).rejects.toBeInstanceOf(ProviderKindMismatch);
+  });
+
   it("rejects providerRoute providerKind that does not match the credential scope", async () => {
     const openAiCredential = createCredentialHandle({
       id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
@@ -241,6 +345,7 @@ function depsForOwnership(input: {
   readonly actualScope: CredentialScope;
   readonly actualSecret: string;
   readonly expectedProviderKind?: ReturnType<typeof asProviderKind> | undefined;
+  readonly expectedRequestProviderRoute?: RunnerProviderRoute | undefined;
 }): AgentRunnerFactoryDeps {
   return {
     credentialStore: {
@@ -270,11 +375,39 @@ function depsForOwnership(input: {
       expect(deps.resolvedProviderKind).toBe(
         input.expectedProviderKind ?? asProviderKind("anthropic"),
       );
+      if (input.expectedRequestProviderRoute !== undefined) {
+        expect(_request.providerRoute).toEqual(input.expectedRequestProviderRoute);
+      }
       await deps.secretReader(deps.credential);
       return createFakeAgentRunner({
         kind: _request.kind,
         agentId: _request.agentId,
       });
     },
+  };
+}
+
+function fakeRoutingStore(
+  initial: readonly AgentProviderRoutingEntry[] = [],
+): AgentProviderRoutingStore {
+  const byAgent = new Map<AgentId, AgentProviderRouting>();
+  if (initial.length > 0) {
+    byAgent.set(agentId, { agentId, routes: initial });
+  }
+  return {
+    get: async (id) => byAgent.get(id) ?? { agentId: id, routes: [] },
+    getEntry: async (id, kind) => {
+      const config = byAgent.get(id);
+      const entry = config?.routes.find((route) => route.kind === kind);
+      if (entry === undefined) return null;
+      return {
+        credentialScope: entry.credentialScope,
+        providerKind: entry.providerKind,
+      };
+    },
+    put: async (config) => {
+      byAgent.set(config.agentId, { agentId: config.agentId, routes: [...config.routes] });
+    },
+    close: () => undefined,
   };
 }

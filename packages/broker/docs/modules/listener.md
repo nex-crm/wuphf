@@ -27,6 +27,7 @@ flowchart LR
   dispatch -- "GET /api/receipts/:id" --> read["ReceiptStore.get<br/>200 / 404"]
   dispatch -- "GET /api/threads/:tid/receipts" --> list["ReceiptStore.list({threadId, cursor?, limit?})<br/>200 JSON array (+ Link rel=next when more pages)<br/>400 on invalid cursor/limit"]
   dispatch -- "/api/v1/cost/*" --> cost["cost ledger routes<br/>read: bearer<br/>mutate: bearer + operator capability"]
+  dispatch -- "/api/agents/:id/provider-routing" --> routing["provider-routing routes<br/>GET read · PUT replace"]
   dispatch -- "/api/runners*" --> runners["runner routes<br/>POST spawn · GET events SSE<br/>bearer maps to AgentId"]
   dispatch -- "unknown /api/*" --> apinotfound["404"]
   dispatch -- "/, /index.html, /assets/*" --> static["GET/HEAD only · RendererBundleSource"]
@@ -68,6 +69,18 @@ unknown authenticated API routes and return 404.
 
 See [cost-ledger.md](./cost-ledger.md) for the full route table, idempotency
 keys, replay-check discrepancy contract, and public subpath exports.
+
+### Agent provider-routing routes
+
+When `createBroker({ runners: { agentProviderRoutingStore } })` is supplied,
+the listener mounts per-agent provider-routing under
+`/api/agents/:agentId/provider-routing`. Without a routing store, those paths
+behave like unknown authenticated API routes and return 404.
+
+| Method | Path | Auth | Contract |
+|---|---|---|---|
+| GET | `/api/agents/:agentId/provider-routing` | bearer | Returns `agentProviderRoutingToJsonValue(await store.get(agentId))`. |
+| PUT | `/api/agents/:agentId/provider-routing` | bearer | Parses the body through `agentProviderRoutingWriteRequestFromJson`, rejects body/path `agentId` mismatches with 400, atomically replaces the routes via `store.put`, and returns `{ applied: true }`. |
 
 ### Runner routes
 

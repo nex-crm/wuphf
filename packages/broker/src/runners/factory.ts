@@ -16,6 +16,7 @@ import type {
   ProviderKind,
   RunnerEvent,
   RunnerKind,
+  RunnerProviderRoute,
   RunnerSpawnRequest,
 } from "@wuphf/protocol";
 import {
@@ -25,6 +26,7 @@ import {
   credentialHandleToJson,
 } from "@wuphf/protocol";
 
+import type { AgentProviderRoutingStore } from "../agent-provider-routing/types.ts";
 import type { ReceiptStore } from "../receipt-store.ts";
 
 export interface RunnerCostLedger {
@@ -42,6 +44,7 @@ export interface AgentRunnerFactoryDeps {
   readonly eventLog: RunnerEventLog;
   readonly spawnRunner: SpawnAgentRunner;
   readonly endpointAllowlist?: readonly string[] | undefined;
+  readonly agentProviderRoutingStore?: AgentProviderRoutingStore | undefined;
 }
 
 export async function createAgentRunnerForBroker(
@@ -51,15 +54,19 @@ export async function createAgentRunnerForBroker(
 ): Promise<AgentRunner> {
   // 1. Validate endpoint policy before invoking an OpenAI-compatible runner.
   validateOpenAICompatEndpointForBroker(request, deps.endpointAllowlist ?? []);
+  const effectiveProviderRoute =
+    request.providerRoute ??
+    (await providerRouteFromStore(request, deps.agentProviderRoutingStore));
+  const effectiveRequest =
+    request.providerRoute === undefined && effectiveProviderRoute !== undefined
+      ? { ...request, providerRoute: effectiveProviderRoute }
+      : request;
   const credentialScope =
-    request.providerRoute?.credentialScope ?? credentialScopeForRunnerKind(request.kind);
+    effectiveProviderRoute?.credentialScope ?? credentialScopeForRunnerKind(request.kind);
   const resolvedProviderKind =
-    request.providerRoute?.providerKind ?? runnerKindToProviderKind(request.kind);
+    effectiveProviderRoute?.providerKind ?? runnerKindToProviderKind(request.kind);
   // 2. Validate provider kind against the credential scope resolved for this spawn.
-  if (
-    request.providerRoute?.providerKind !== undefined &&
-    !providerKindMatchesCredentialScope(credentialScope, resolvedProviderKind)
-  ) {
+  if (!providerKindMatchesCredentialScope(credentialScope, resolvedProviderKind)) {
     throw new ProviderKindMismatch(
       `providerKind ${resolvedProviderKind} does not match credential scope ${credentialScope}`,
     );
@@ -70,7 +77,7 @@ export async function createAgentRunnerForBroker(
     scope: credentialScope,
   });
 
-  return deps.spawnRunner(request, {
+  return deps.spawnRunner(effectiveRequest, {
     credential,
     resolvedProviderKind,
     // 3. Validate credential ownership immediately before exposing secret material.
@@ -95,6 +102,19 @@ export async function createAgentRunnerForBroker(
     },
     eventLog: deps.eventLog,
   });
+}
+
+async function providerRouteFromStore(
+  request: RunnerSpawnRequest,
+  store: AgentProviderRoutingStore | undefined,
+): Promise<RunnerProviderRoute | undefined> {
+  if (store === undefined) return undefined;
+  const entry = await store.getEntry(request.agentId, request.kind);
+  if (entry === null) return undefined;
+  return {
+    credentialScope: entry.credentialScope,
+    providerKind: entry.providerKind,
+  };
 }
 
 function validateOpenAICompatEndpointForBroker(

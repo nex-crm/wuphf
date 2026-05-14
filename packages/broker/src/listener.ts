@@ -16,6 +16,8 @@
 //   POST /api/v1/cost/budgets             — bearer + operator capability required.
 //   DELETE /api/v1/cost/budgets/:id       — bearer + operator capability required.
 //   POST /api/v1/cost/idempotency/prune   — bearer + operator capability required.
+//   GET  /api/agents/:id/provider-routing — bearer required. Per-agent provider routes.
+//   PUT  /api/agents/:id/provider-routing — bearer required. Replace provider routes.
 //   POST /api/runners                     — bearer + runner agent map required.
 //   GET  /api/runners/:id/events          — bearer + runner agent map required. SSE.
 //   GET  /                                — static (renderer bundle) or 404 if disabled.
@@ -32,15 +34,19 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 
 import {
+  type AgentId,
   type ApiBootstrap,
   type ApiToken,
   apiBootstrapToJson,
+  asAgentId,
   asBrokerPort,
   asBrokerUrl,
   type BrokerPort,
 } from "@wuphf/protocol";
 import { WebSocketServer } from "ws";
 
+import { handleAgentProviderRoutingRoute } from "./agent-provider-routing/route.ts";
+import type { AgentProviderRoutingStore } from "./agent-provider-routing/types.ts";
 import { extractBearerFromHeader, tokenMatches } from "./auth.ts";
 import { DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS } from "./cost-ledger/idempotency.ts";
 import { type CostRouteDeps, handleCostRoute } from "./cost-ledger/routes.ts";
@@ -65,6 +71,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   // 6 hosts will pass a durable event-log-backed store; this default keeps
   // the package self-contained for tests and dev runs.
   const receiptStore: ReceiptStore = config.receiptStore ?? new InMemoryReceiptStore();
+  const agentProviderRoutingStore = config.runners?.agentProviderRoutingStore ?? null;
   const cost =
     config.cost === undefined
       ? null
@@ -103,6 +110,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       receiptStore,
       cost,
       runnerRoutes,
+      agentProviderRoutingStore,
     }).catch((err: unknown) => {
       logger.error("listener_route_failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -150,6 +158,7 @@ interface RouteDeps {
   readonly receiptStore: ReceiptStore;
   readonly cost: CostRouteDeps | null;
   readonly runnerRoutes: RunnerRouteState | null;
+  readonly agentProviderRoutingStore: AgentProviderRoutingStore | null;
 }
 
 async function routeRequest(
@@ -282,6 +291,13 @@ async function routeRequest(
   if (deps.cost !== null && pathname.startsWith("/api/v1/cost/")) {
     const handled = await handleCostRoute(req, res, pathname, deps.cost);
     if (handled) return;
+  }
+  if (deps.agentProviderRoutingStore !== null) {
+    const agentId = agentProviderRoutingAgentIdFromPathname(pathname);
+    if (agentId !== null) {
+      await handleAgentProviderRoutingRoute(req, res, agentId, deps.agentProviderRoutingStore);
+      return;
+    }
   }
   if (deps.runnerRoutes !== null && pathname.startsWith("/api/runners")) {
     const handled = await deps.runnerRoutes.handle(req, res, pathname);
@@ -456,8 +472,24 @@ function classifyApiRoute(pathname: string): string {
     return "thread_receipts";
   }
   if (pathname.startsWith("/api/v1/cost/")) return "cost";
+  if (pathname.startsWith("/api/agents/") && pathname.endsWith("/provider-routing")) {
+    return "agent_provider_routing";
+  }
   if (pathname.startsWith("/api/runners")) return "runners";
   return "unknown";
+}
+
+function agentProviderRoutingAgentIdFromPathname(pathname: string): AgentId | null {
+  const prefix = "/api/agents/";
+  const suffix = "/provider-routing";
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null;
+  const encoded = pathname.slice(prefix.length, pathname.length - suffix.length);
+  if (encoded.length === 0 || encoded.includes("/")) return null;
+  try {
+    return asAgentId(decodeURIComponent(encoded));
+  } catch {
+    return null;
+  }
 }
 
 async function listen(server: Server, port: number): Promise<number> {
