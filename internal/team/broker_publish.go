@@ -18,9 +18,19 @@ import "strings"
 // All entries require the caller to hold b.mu — the *Locked suffix
 // is the contract.
 
+// maxMessages is the rolling cap on in-memory channel messages. Oldest
+// messages are dropped when the cap is exceeded. 500 is enough for the
+// web UI's scroll-back while keeping the state file under ~1MB for this
+// slice. Configurable via WUPHF_MAX_MESSAGES env var.
+const defaultMaxMessages = 500
+
 func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
 	msg = sanitizeChannelMessageSecrets(msg)
 	b.messages = append(b.messages, msg)
+	cap := maxMessagesFromEnv()
+	if len(b.messages) > cap {
+		b.messages = append([]channelMessage(nil), b.messages[len(b.messages)-cap:]...)
+	}
 	b.publishMessageLocked(msg)
 	// First-run nudge dismissal: track the very first human-authored message
 	// so the office sidebar can drop the "→ tag @<agent> in #general" hint.
