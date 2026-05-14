@@ -9,6 +9,7 @@ import {
   asCredentialScope,
   asProviderKind,
 } from "@wuphf/protocol";
+import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -44,6 +45,35 @@ function tempDbPath(): string {
 const agentA = asAgentId("agent_a");
 const agentB = asAgentId("agent_b");
 
+type RawRoute = [
+  agentId: string,
+  runnerKind: string,
+  credentialScope: string,
+  providerKind: string,
+];
+
+const rawInsertCheckCases: readonly {
+  readonly column: string;
+  readonly route: RawRoute;
+  readonly constraint: string;
+}[] = [
+  {
+    column: "runner_kind",
+    route: ["agent_a", "not-a-real-kind", "anthropic", "anthropic"],
+    constraint: "agent_provider_routing_runner_kind_check",
+  },
+  {
+    column: "credential_scope",
+    route: ["agent_a", "claude-cli", "not-a-real-scope", "anthropic"],
+    constraint: "agent_provider_routing_credential_scope_check",
+  },
+  {
+    column: "provider_kind",
+    route: ["agent_a", "claude-cli", "anthropic", "not-a-real-provider"],
+    constraint: "agent_provider_routing_provider_kind_check",
+  },
+];
+
 function route(
   kind: AgentProviderRoutingEntry["kind"],
   credentialScope: string,
@@ -54,6 +84,24 @@ function route(
     credentialScope: asCredentialScope(credentialScope),
     providerKind: asProviderKind(providerKind),
   };
+}
+
+function insertRawRoute(db: Database.Database, rawRoute: RawRoute): void {
+  db.prepare<RawRoute>(
+    `INSERT INTO agent_provider_routing
+       (agent_id, runner_kind, credential_scope, provider_kind)
+     VALUES (?, ?, ?, ?)`,
+  ).run(...rawRoute);
+}
+
+function expectRawRouteCheckFailure(rawRoute: RawRoute, constraint: string): void {
+  const db = openDatabase({ path: ":memory:" });
+  try {
+    runMigrations(db);
+    expect(() => insertRawRoute(db, rawRoute)).toThrow(`CHECK constraint failed: ${constraint}`);
+  } finally {
+    db.close();
+  }
 }
 
 describe("SqliteAgentProviderRoutingStore", () => {
@@ -215,6 +263,12 @@ describe("SqliteAgentProviderRoutingStore", () => {
       db.close();
     }
   });
+
+  for (const checkCase of rawInsertCheckCases) {
+    it(`rejects raw rows with out-of-enum ${checkCase.column}`, () => {
+      expectRawRouteCheckFailure(checkCase.route, checkCase.constraint);
+    });
+  }
 
   it("does not re-run the agent provider routing migration for an already-v3 database", () => {
     const path = tempDbPath();
