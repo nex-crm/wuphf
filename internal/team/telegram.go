@@ -23,6 +23,12 @@ const (
 	telegramPollTimeout = 30 // seconds for long-poll
 )
 
+// telegramClient is a shared HTTP client for standalone Telegram API functions
+// (VerifyBot, SendTypingAction, etc.) that don't have access to the transport's
+// per-instance client. Using a shared client with a timeout instead of
+// http.DefaultClient ensures connections are reused and timeouts are enforced.
+var telegramClient = &http.Client{Timeout: 60 * time.Second}
+
 // telegramUpdate represents a single update from the Telegram Bot API.
 type telegramUpdate struct {
 	UpdateID int64        `json:"update_id"`
@@ -637,7 +643,7 @@ func SendTypingAction(ctx context.Context, token string, chatID int64) error {
 		return fmt.Errorf("telegram typing: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telegramClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram typing: %w", err)
 	}
@@ -678,7 +684,7 @@ func VerifyBot(token string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("telegram getMe: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telegramClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("telegram getMe: %w", err)
 	}
@@ -723,7 +729,7 @@ func DiscoverGroups(token string) ([]TelegramGroup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("telegram getUpdates: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telegramClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("telegram getUpdates: %w", err)
 	}
@@ -787,7 +793,7 @@ func SendTelegramMessage(token string, chatID int64, text string) error {
 		return fmt.Errorf("telegram send: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telegramClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram send: %w", err)
 	}
@@ -817,7 +823,7 @@ func VerifyChat(token string, chatID int64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("telegram getChat: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telegramClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("telegram getChat: %w", err)
 	}
