@@ -65,10 +65,14 @@ export async function createAgentRunnerForBroker(
     effectiveProviderRoute?.credentialScope ?? credentialScopeForRunnerKind(request.kind);
   const resolvedProviderKind =
     effectiveProviderRoute?.providerKind ?? runnerKindToProviderKind(request.kind);
-  // 2. Validate provider kind against the credential scope resolved for this spawn.
-  if (!providerKindMatchesCredentialScope(credentialScope, resolvedProviderKind)) {
+  // 2. Validate provider kind against the credential scope resolved for this spawn,
+  // AND that the runner kind itself can use that scope. The second check
+  // prevents a confused-deputy where, for example, a `claude-cli → openai/openai`
+  // route passes the equality check and the claude-cli adapter then exports
+  // the OpenAI secret as `ANTHROPIC_API_KEY`.
+  if (!isCompatibleRunnerProviderRoute(request.kind, credentialScope, resolvedProviderKind)) {
     throw new ProviderKindMismatch(
-      `providerKind ${resolvedProviderKind} does not match credential scope ${credentialScope}`,
+      `providerKind ${resolvedProviderKind} / scope ${credentialScope} not compatible with runner kind ${request.kind}`,
     );
   }
   const credential = credentialHandleFromJson(request.credential, {
@@ -329,6 +333,29 @@ function runnerKindToProviderKind(kind: RunnerKind): ProviderKind {
     case "openai-compat":
       return asProviderKind("openai-compat");
   }
+}
+
+// Kind → set of credential scopes the adapter actually knows how to use.
+// Without this allowlist, `providerKindMatchesCredentialScope` would happily
+// accept any (kind, scope, scope) — e.g. `claude-cli → openai/openai` — and
+// the claude-cli adapter would unconditionally export the secret as
+// `ANTHROPIC_API_KEY` (see packages/agent-runners/src/adapters/claude-cli.ts).
+// That misroutes the OpenAI key to Anthropic's endpoint. The matrix mirrors
+// each adapter's own env-var dispatch (e.g. codex-cli's `secretEnvVarForScope`).
+const SUPPORTED_SCOPES_BY_KIND: Readonly<Record<RunnerKind, readonly string[]>> = {
+  "claude-cli": ["anthropic"],
+  "codex-cli": ["openai", "openai-compat", "anthropic"],
+  "openai-compat": ["openai-compat"],
+};
+
+export function isCompatibleRunnerProviderRoute(
+  kind: RunnerKind,
+  credentialScope: CredentialScope,
+  providerKind: ProviderKind,
+): boolean {
+  if (!providerKindMatchesCredentialScope(credentialScope, providerKind)) return false;
+  const supported = SUPPORTED_SCOPES_BY_KIND[kind];
+  return supported.includes(String(credentialScope));
 }
 
 function providerKindMatchesCredentialScope(

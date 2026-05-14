@@ -89,6 +89,62 @@ describe("agent provider routing routes", () => {
     await expect(store.get(agentId)).resolves.toEqual({ agentId, routes: [] });
   });
 
+  it("rejects a caller whose bearer is bound to a different agent", async () => {
+    // tokenAgentIds binds the test bearer to agent_alpha; the URL path
+    // targets agent_beta. The global /api/* bearer gate succeeds, but the
+    // route's binding check must still reject because confused-deputy is
+    // also possible across agents — not just inside one request body.
+    const store = fakeStore();
+    const handle = await createBroker({
+      token,
+      runners: {
+        tokenAgentIds: new Map([[token, otherAgentId]]),
+        brokerIdentityForAgent: (id) => forBrokerTests({ agentId: id }),
+        credentialStore: {
+          write: async () => {
+            throw new Error("not used");
+          },
+          read: async () => {
+            throw new Error("not used");
+          },
+          readWithOwnership: async (input) => ({
+            secret: "secret",
+            agentId: input.expectedAgentId,
+            scope: input.expectedScope,
+          }),
+          delete: async () => undefined,
+        },
+        costLedger: { record: async () => undefined },
+        eventLog: { append: async () => 1 },
+        spawnRunner: async () => {
+          throw new Error("not used");
+        },
+        agentProviderRoutingStore: store,
+      },
+    });
+    broker = handle;
+
+    const get = await fetch(`${handle.url}${routePath}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const put = await fetch(`${handle.url}${routePath}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ agentId, routes: [] }),
+    });
+
+    expect(get.status).toBe(403);
+    await expect(get.json()).resolves.toEqual({
+      error: "agent_provider_routing_not_authorized",
+    });
+    expect(put.status).toBe(403);
+    // Store remains untouched — the PUT short-circuits before store.put().
+    await expect(store.get(agentId)).resolves.toEqual({ agentId, routes: [] });
+  });
+
   it("requires bearer auth for GET and PUT", async () => {
     const handle = await startBroker(fakeStore());
 
@@ -127,6 +183,32 @@ describe("agent provider routing routes", () => {
     expect(res.status).toBe(405);
     expect(res.headers.get("allow")).toBe("GET, PUT");
     expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("rejects a PUT that persists an incompatible kind→scope/provider route", async () => {
+    // claude-cli → openai/openai passes the protocol-level shape check
+    // (both are valid enum values, scope === providerKind) but the
+    // claude-cli adapter only knows how to use anthropic secrets. Without
+    // this PUT-time guard, the bad config would persist, return 200, and
+    // every claude-cli spawn for this agent would later fail.
+    const store = fakeStore();
+    const handle = await startBroker(store);
+    const res = await fetch(`${handle.url}${routePath}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agentId,
+        routes: [routeEntry("claude-cli", "openai", "openai")],
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("incompatible_provider_route");
+    await expect(store.get(agentId)).resolves.toEqual({ agentId, routes: [] });
   });
 
   it("returns codec validation errors for malformed PUT bodies", async () => {

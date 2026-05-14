@@ -15,7 +15,7 @@ import { CredentialOwnershipMismatch } from "@wuphf/credentials";
 import type { AgentId, ApiToken, BrokerIdentity, RunnerId } from "@wuphf/protocol";
 import { asRunnerId, runnerEventToJsonValue, runnerSpawnRequestFromJson } from "@wuphf/protocol";
 
-import { extractBearerFromHeader, tokenMatches } from "../auth.ts";
+import { agentIdForBearer } from "../auth.ts";
 import type { BrokerLogger } from "../types.ts";
 import { type AgentRunnerFactoryDeps, createAgentRunnerForBroker } from "./factory.ts";
 
@@ -353,17 +353,6 @@ function delay(ms: number): Promise<void> {
     const timeout = setTimeout(resolve, ms);
     timeout.unref();
   });
-}
-
-function agentIdForBearer(
-  req: IncomingMessage,
-  tokenAgentIds: ReadonlyMap<ApiToken, AgentId>,
-): AgentId | null {
-  const presented = extractBearerFromHeader(headerString(req.headers.authorization));
-  for (const [token, agentId] of tokenAgentIds) {
-    if (tokenMatches(presented, token)) return agentId;
-  }
-  return null;
 }
 
 function runnerIdFromEventsPath(pathname: string): RunnerId | null {

@@ -130,25 +130,29 @@ describe("createAgentRunnerForBroker", () => {
   });
 
   it("uses providerRoute credential scope when present", async () => {
-    const openAiCredential = createCredentialHandle({
+    // codex-cli legitimately supports both openai and anthropic scopes
+    // (see secretEnvVarForScope in codex-cli.ts). Pick anthropic to prove
+    // the override is consulted — the codex-cli default scope is openai.
+    const anthropicCredential = createCredentialHandle({
       id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
       agentId,
-      scope: asCredentialScope("openai"),
+      scope: asCredentialScope("anthropic"),
     });
     const routedRequest: RunnerSpawnRequest = {
       ...request,
-      credential: credentialHandleToJson(openAiCredential),
+      kind: "codex-cli",
+      credential: credentialHandleToJson(anthropicCredential),
       providerRoute: {
-        credentialScope: asCredentialScope("openai"),
-        providerKind: asProviderKind("openai"),
+        credentialScope: asCredentialScope("anthropic"),
+        providerKind: asProviderKind("anthropic"),
       },
     };
     const runner = await createAgentRunnerForBroker(routedRequest, forBrokerTests({ agentId }), {
       ...depsForOwnership({
         actualAgentId: agentId,
-        actualScope: asCredentialScope("openai"),
-        actualSecret: "openai-secret",
-        expectedProviderKind: asProviderKind("openai"),
+        actualScope: asCredentialScope("anthropic"),
+        actualSecret: "anthropic-secret",
+        expectedProviderKind: asProviderKind("anthropic"),
       }),
     });
 
@@ -156,32 +160,33 @@ describe("createAgentRunnerForBroker", () => {
   });
 
   it("uses the per-agent routing store when no inline providerRoute is present", async () => {
-    const openAiCredential = createCredentialHandle({
+    const anthropicCredential = createCredentialHandle({
       id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
       agentId,
-      scope: asCredentialScope("openai"),
+      scope: asCredentialScope("anthropic"),
     });
     const storedRoute = {
-      credentialScope: asCredentialScope("openai"),
-      providerKind: asProviderKind("openai"),
+      credentialScope: asCredentialScope("anthropic"),
+      providerKind: asProviderKind("anthropic"),
     };
     const runner = await createAgentRunnerForBroker(
       {
         ...request,
-        credential: credentialHandleToJson(openAiCredential),
+        kind: "codex-cli",
+        credential: credentialHandleToJson(anthropicCredential),
       },
       forBrokerTests({ agentId }),
       {
         ...depsForOwnership({
           actualAgentId: agentId,
-          actualScope: asCredentialScope("openai"),
-          actualSecret: "openai-secret",
-          expectedProviderKind: asProviderKind("openai"),
+          actualScope: asCredentialScope("anthropic"),
+          actualSecret: "anthropic-secret",
+          expectedProviderKind: asProviderKind("anthropic"),
           expectedRequestProviderRoute: storedRoute,
         }),
         agentProviderRoutingStore: fakeRoutingStore([
           {
-            kind: "claude-cli",
+            kind: "codex-cli",
             ...storedRoute,
           },
         ]),
@@ -192,25 +197,26 @@ describe("createAgentRunnerForBroker", () => {
   });
 
   it("does not consult the per-agent routing store when providerRoute is inline", async () => {
-    const openAiCredential = createCredentialHandle({
+    const anthropicCredential = createCredentialHandle({
       id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
       agentId,
-      scope: asCredentialScope("openai"),
+      scope: asCredentialScope("anthropic"),
     });
     const routedRequest: RunnerSpawnRequest = {
       ...request,
-      credential: credentialHandleToJson(openAiCredential),
+      kind: "codex-cli",
+      credential: credentialHandleToJson(anthropicCredential),
       providerRoute: {
-        credentialScope: asCredentialScope("openai"),
-        providerKind: asProviderKind("openai"),
+        credentialScope: asCredentialScope("anthropic"),
+        providerKind: asProviderKind("anthropic"),
       },
     };
     const runner = await createAgentRunnerForBroker(routedRequest, forBrokerTests({ agentId }), {
       ...depsForOwnership({
         actualAgentId: agentId,
-        actualScope: asCredentialScope("openai"),
-        actualSecret: "openai-secret",
-        expectedProviderKind: asProviderKind("openai"),
+        actualScope: asCredentialScope("anthropic"),
+        actualSecret: "anthropic-secret",
+        expectedProviderKind: asProviderKind("anthropic"),
       }),
       agentProviderRoutingStore: {
         ...fakeRoutingStore(),
@@ -252,6 +258,37 @@ describe("createAgentRunnerForBroker", () => {
           ]),
         },
       ),
+    ).rejects.toBeInstanceOf(ProviderKindMismatch);
+  });
+
+  it("rejects an inline providerRoute whose scope is valid but incompatible with the runner kind", async () => {
+    // Defense in depth: even if the PUT-time check is bypassed (e.g. inline
+    // route on POST /api/runners), the factory must still reject a
+    // claude-cli runner pointed at an openai-scoped credential. The
+    // adapter would otherwise hand the OpenAI secret to claude-cli as
+    // ANTHROPIC_API_KEY.
+    const openAiCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("openai"),
+    });
+    const incompatibleRequest: RunnerSpawnRequest = {
+      ...request,
+      credential: credentialHandleToJson(openAiCredential),
+      providerRoute: {
+        credentialScope: asCredentialScope("openai"),
+        providerKind: asProviderKind("openai"),
+      },
+    };
+
+    await expect(
+      createAgentRunnerForBroker(incompatibleRequest, forBrokerTests({ agentId }), {
+        ...depsForOwnership({
+          actualAgentId: agentId,
+          actualScope: asCredentialScope("openai"),
+          actualSecret: "openai-secret",
+        }),
+      }),
     ).rejects.toBeInstanceOf(ProviderKindMismatch);
   });
 

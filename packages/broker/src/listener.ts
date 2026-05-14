@@ -72,6 +72,9 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   // the package self-contained for tests and dev runs.
   const receiptStore: ReceiptStore = config.receiptStore ?? new InMemoryReceiptStore();
   const agentProviderRoutingStore = config.runners?.agentProviderRoutingStore ?? null;
+  // Reuse the same bearer→agent binding map that runner spawn uses so a
+  // bearer pinned to agent_alpha cannot read or PUT agent_beta's routing.
+  const tokenAgentIds = config.runners?.tokenAgentIds ?? null;
   const cost =
     config.cost === undefined
       ? null
@@ -111,6 +114,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       cost,
       runnerRoutes,
       agentProviderRoutingStore,
+      tokenAgentIds,
     }).catch((err: unknown) => {
       logger.error("listener_route_failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -159,6 +163,7 @@ interface RouteDeps {
   readonly cost: CostRouteDeps | null;
   readonly runnerRoutes: RunnerRouteState | null;
   readonly agentProviderRoutingStore: AgentProviderRoutingStore | null;
+  readonly tokenAgentIds: ReadonlyMap<ApiToken, AgentId> | null;
 }
 
 async function routeRequest(
@@ -292,10 +297,14 @@ async function routeRequest(
     const handled = await handleCostRoute(req, res, pathname, deps.cost);
     if (handled) return;
   }
-  if (deps.agentProviderRoutingStore !== null) {
+  if (deps.agentProviderRoutingStore !== null && deps.tokenAgentIds !== null) {
     const agentId = agentProviderRoutingAgentIdFromPathname(pathname);
     if (agentId !== null) {
-      await handleAgentProviderRoutingRoute(req, res, agentId, deps.agentProviderRoutingStore);
+      await handleAgentProviderRoutingRoute(req, res, agentId, {
+        store: deps.agentProviderRoutingStore,
+        tokenAgentIds: deps.tokenAgentIds,
+        logger: deps.logger,
+      });
       return;
     }
   }

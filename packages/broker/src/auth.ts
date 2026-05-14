@@ -11,8 +11,9 @@
 // reached `127.0.0.1`) cannot recover the token byte-by-byte.
 
 import { timingSafeEqual } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 
-import type { ApiToken } from "@wuphf/protocol";
+import type { AgentId, ApiToken } from "@wuphf/protocol";
 
 const BEARER_PREFIX = "Bearer ";
 
@@ -29,4 +30,23 @@ export function tokenMatches(presented: string | null, expected: ApiToken): bool
   const b = Buffer.from(expected, "utf8");
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+// Resolve the AgentId bound to the bearer on the request, or null when no
+// match. Used by agent-scoped routes (runner spawn, provider routing) to
+// enforce that the caller can only act on their own agent's state — even
+// when the URL path embeds a different agentId.
+export function agentIdForBearer(
+  req: IncomingMessage,
+  tokenAgentIds: ReadonlyMap<ApiToken, AgentId>,
+): AgentId | null {
+  const presented = extractBearerFromHeader(headerString(req.headers.authorization));
+  for (const [token, agentId] of tokenAgentIds) {
+    if (tokenMatches(presented, token)) return agentId;
+  }
+  return null;
+}
+
+function headerString(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
