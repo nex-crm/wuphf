@@ -210,7 +210,12 @@ export class LinuxCredentialStore implements CredentialStore {
   }
 
   private async assertDefaultCollectionProperties(): Promise<void> {
-    if (this.gdbus === null) throw new BasicTextRejected();
+    if (this.gdbus === null) {
+      throw new NoKeyringAvailable(
+        "gdbus is unavailable; cannot verify default Secret Service collection encryption",
+        { recoveryHint: "install glib2-tools (provides gdbus) to enable libsecret verification" },
+      );
+    }
 
     const result = await runKeychainCommand(
       this.options.spawner,

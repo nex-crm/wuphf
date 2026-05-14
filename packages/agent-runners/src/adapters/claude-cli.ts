@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import type { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 
 import {
   type AgentId,
@@ -261,10 +262,17 @@ class ClaudeCliAgentRunner implements AgentRunner {
   }
 
   async #consumeStdout(stream: Readable): Promise<void> {
+    const decoder = new StringDecoder("utf8");
     const buffer = new BoundedLineBuffer(DEFAULT_MAX_RUNNER_INPUT_BUFFER_BYTES);
     try {
       for await (const chunk of stream) {
-        for (const line of buffer.push(chunkToString(chunk))) {
+        for (const line of buffer.push(decodeChunk(decoder, chunk))) {
+          await this.#handleClaudeLine(line);
+        }
+      }
+      const tail = decoder.end();
+      if (tail.length > 0) {
+        for (const line of buffer.push(tail)) {
           await this.#handleClaudeLine(line);
         }
       }
@@ -280,8 +288,16 @@ class ClaudeCliAgentRunner implements AgentRunner {
   }
 
   async #consumeStderr(stream: Readable): Promise<void> {
+    const decoder = new StringDecoder("utf8");
     for await (const chunk of stream) {
-      await this.#emitText("stderr", chunkToString(chunk));
+      const text = decodeChunk(decoder, chunk);
+      if (text.length > 0) {
+        await this.#emitText("stderr", text);
+      }
+    }
+    const tail = decoder.end();
+    if (tail.length > 0) {
+      await this.#emitText("stderr", tail);
     }
   }
 
@@ -690,9 +706,9 @@ function optionalUsageInteger(record: Readonly<Record<string, unknown>>, key: st
   throw new RunnerFailure(`${key} must be a non-negative safe integer`, "provider_returned_error");
 }
 
-function chunkToString(chunk: unknown): string {
+function decodeChunk(decoder: StringDecoder, chunk: unknown): string {
+  if (Buffer.isBuffer(chunk)) return decoder.write(chunk);
   if (typeof chunk === "string") return chunk;
-  if (Buffer.isBuffer(chunk)) return chunk.toString("utf8");
   return String(chunk);
 }
 

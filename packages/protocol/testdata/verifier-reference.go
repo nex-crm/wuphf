@@ -295,18 +295,25 @@ var runnerFailureCodeSet = map[string]bool{
 }
 
 const (
-	maxRunnerPromptBytes       = 64 * 1024
-	maxRunnerModelBytes        = 128
-	maxRunnerCwdBytes          = 4 * 1024
-	maxRunnerStdioChunkBytes   = 64 * 1024
-	maxRunnerErrorBytes        = 8 * 1024
-	maxAgentIDBytes            = 128
-	maxCredentialHandleBytes   = 128
-	maxCredentialScopeBytes    = 128
-	maxRunnerIDBytes           = 128
-	maxCostModelBytes          = 128
-	maxCostEventAmountMicroUsd = 100_000_000
-	maxSafeInteger             = 9_007_199_254_740_991
+	maxRunnerPromptBytes            = 64 * 1024
+	maxRunnerModelBytes             = 128
+	maxRunnerCwdBytes               = 4 * 1024
+	maxRunnerStdioChunkBytes        = 64 * 1024
+	maxRunnerErrorBytes             = 8 * 1024
+	maxRunnerExtraArgs              = 64
+	maxRunnerExtraArgBytes          = 1024
+	maxRunnerProfileBytes           = 128
+	maxRunnerEndpointBytes          = 2 * 1024
+	maxRunnerOptionHeaders          = 64
+	maxRunnerOptionHeaderNameBytes  = 256
+	maxRunnerOptionHeaderValueBytes = 8 * 1024
+	maxAgentIDBytes                 = 128
+	maxCredentialHandleBytes        = 128
+	maxCredentialScopeBytes         = 128
+	maxRunnerIDBytes                = 128
+	maxCostModelBytes               = 128
+	maxCostEventAmountMicroUsd      = 100_000_000
+	maxSafeInteger                  = 9_007_199_254_740_991
 )
 
 func loadRunnerFixture() (runnerFixture, error) {
@@ -484,9 +491,16 @@ func validateRunnerSpawnOptions(record map[string]interface{}, requestKind strin
 			if !ok {
 				return fmt.Errorf("runnerSpawnRequest.options.extraArgs: must be an array")
 			}
+			if len(items) > maxRunnerExtraArgs {
+				return fmt.Errorf("runnerSpawnRequest.options.extraArgs: exceeds %d entries", maxRunnerExtraArgs)
+			}
 			for index, item := range items {
-				if _, ok := item.(string); !ok {
+				arg, ok := item.(string)
+				if !ok {
 					return fmt.Errorf("runnerSpawnRequest.options.extraArgs/%d: must be a string", index)
+				}
+				if err := validateUtf8Budget(arg, maxRunnerExtraArgBytes, fmt.Sprintf("runnerSpawnRequest.options.extraArgs/%d", index)); err != nil {
+					return err
 				}
 			}
 		}
@@ -503,8 +517,12 @@ func validateRunnerSpawnOptions(record map[string]interface{}, requestKind strin
 		} else if ok && sandbox != "read-only" && sandbox != "workspace-write" {
 			return fmt.Errorf("runnerSpawnRequest.options.sandbox: unsupported codex sandbox")
 		}
-		if err := optionalStringValue(record, "profile", "runnerSpawnRequest.options.profile"); err != nil {
+		if profile, ok, err := optionalString(record, "profile", "runnerSpawnRequest.options.profile"); err != nil {
 			return err
+		} else if ok {
+			if err := validateUtf8Budget(profile, maxRunnerProfileBytes, "runnerSpawnRequest.options.profile"); err != nil {
+				return err
+			}
 		}
 	case "openai-compat":
 		if err := knownKeys(record, "runnerSpawnRequest.options", map[string]bool{
@@ -515,7 +533,11 @@ func validateRunnerSpawnOptions(record map[string]interface{}, requestKind strin
 		}); err != nil {
 			return err
 		}
-		if _, err := requiredStringValue(record, "endpoint", "runnerSpawnRequest.options.endpoint"); err != nil {
+		endpoint, err := requiredStringValue(record, "endpoint", "runnerSpawnRequest.options.endpoint")
+		if err != nil {
+			return err
+		}
+		if err := validateUtf8Budget(endpoint, maxRunnerEndpointBytes, "runnerSpawnRequest.options.endpoint"); err != nil {
 			return err
 		}
 		if headersValue, ok := record["headers"]; ok {
@@ -523,9 +545,19 @@ func validateRunnerSpawnOptions(record map[string]interface{}, requestKind strin
 			if !ok {
 				return fmt.Errorf("runnerSpawnRequest.options.headers: must be an object")
 			}
+			if len(headers) > maxRunnerOptionHeaders {
+				return fmt.Errorf("runnerSpawnRequest.options.headers: exceeds %d headers", maxRunnerOptionHeaders)
+			}
 			for key, value := range headers {
-				if _, ok := value.(string); !ok {
+				if err := validateUtf8Budget(key, maxRunnerOptionHeaderNameBytes, fmt.Sprintf("runnerSpawnRequest.options.headers/%s name", key)); err != nil {
+					return err
+				}
+				headerValue, ok := value.(string)
+				if !ok {
 					return fmt.Errorf("runnerSpawnRequest.options.headers/%s: must be a string", key)
+				}
+				if err := validateUtf8Budget(headerValue, maxRunnerOptionHeaderValueBytes, fmt.Sprintf("runnerSpawnRequest.options.headers/%s value", key)); err != nil {
+					return err
 				}
 			}
 		}

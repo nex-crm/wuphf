@@ -1,6 +1,4 @@
-import type { AgentId, BrokerIdentity } from "@wuphf/protocol";
-
-import { createBrokerIdentityForTesting } from "../../../protocol/src/credential-handle.ts";
+import { type AgentId, type BrokerIdentity, createBrokerIdentityForTesting } from "@wuphf/protocol";
 
 export function forBrokerTests(input: {
   readonly agentId: AgentId;

@@ -54,7 +54,7 @@ export class InvalidCredentialPayload extends CredentialStoreError {
   constructor() {
     super(
       "invalid_credential_payload",
-      "credential secret must be valid UTF-8 text without NUL bytes",
+      "credential secret must be non-empty valid UTF-8 text without NUL bytes",
     );
   }
 }

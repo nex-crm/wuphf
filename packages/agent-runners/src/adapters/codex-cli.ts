@@ -1,9 +1,10 @@
 import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { realpathSync, statSync } from "node:fs";
+import { realpathSync, statSync, unlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 
 import {
   type AgentId,
@@ -241,9 +242,19 @@ class CodexCliAgentRunner implements AgentRunner {
   start(): void {
     if (this.#done !== null) return;
     this.#done = this.#run().finally(async () => {
+      this.#removeLastMessageArtifact();
       await this.#emitter.close();
       this.#hub.close();
     });
+  }
+
+  #removeLastMessageArtifact(): void {
+    try {
+      unlinkSync(this.#outputLastMessagePath);
+    } catch {
+      // The artifact may not exist (early failure) or may already be unlinked
+      // by a previous attempt. Either way, cleanup is best-effort.
+    }
   }
 
   async terminate(opts: { readonly gracePeriodMs?: number } = {}): Promise<void> {
@@ -303,12 +314,24 @@ class CodexCliAgentRunner implements AgentRunner {
   }
 
   async #consumeStdout(stream: Readable): Promise<void> {
+    const decoder = new StringDecoder("utf8");
     const blockLines: string[] = [];
     let sawDelimiter = false;
     const buffer = new BoundedLineBuffer(DEFAULT_MAX_RUNNER_INPUT_BUFFER_BYTES);
     try {
       for await (const chunk of stream) {
-        for (const line of buffer.push(chunkToString(chunk))) {
+        for (const line of buffer.push(decodeChunk(decoder, chunk))) {
+          if (isDelimiterLine(line)) {
+            await this.#processCodexBlock(blockLines.splice(0), false);
+            sawDelimiter = true;
+          } else {
+            pushCodexBlockLine(blockLines, `${line}\n`);
+          }
+        }
+      }
+      const tail = decoder.end();
+      if (tail.length > 0) {
+        for (const line of buffer.push(tail)) {
           if (isDelimiterLine(line)) {
             await this.#processCodexBlock(blockLines.splice(0), false);
             sawDelimiter = true;
@@ -335,8 +358,16 @@ class CodexCliAgentRunner implements AgentRunner {
   }
 
   async #consumeStderr(stream: Readable): Promise<void> {
+    const decoder = new StringDecoder("utf8");
     for await (const chunk of stream) {
-      await this.#emitText("stderr", chunkToString(chunk));
+      const text = decodeChunk(decoder, chunk);
+      if (text.length > 0) {
+        await this.#emitText("stderr", text);
+      }
+    }
+    const tail = decoder.end();
+    if (tail.length > 0) {
+      await this.#emitText("stderr", tail);
     }
   }
 
@@ -352,12 +383,7 @@ class CodexCliAgentRunner implements AgentRunner {
       if (isHookLine(line)) continue;
       const exec = parseExecLine(line);
       if (exec !== null) {
-        await this.#emit({
-          kind: "stderr",
-          runnerId: this.id,
-          chunk: `codex command: ${exec.command} (cwd: ${exec.cwd})\n`,
-          at: this.#isoNow(),
-        });
+        await this.#emitText("stderr", `codex command: ${exec.command} (cwd: ${exec.cwd})\n`);
         continue;
       }
       if (isToolExitLine(line)) continue;
@@ -426,12 +452,10 @@ class CodexCliAgentRunner implements AgentRunner {
 
   async #emitUnrecognizedSummary(): Promise<void> {
     if (this.#unrecognizedLineCount === 0) return;
-    await this.#emit({
-      kind: "stderr",
-      runnerId: this.id,
-      chunk: `codex output parser saw ${this.#unrecognizedLineCount} unrecognized line(s)\n`,
-      at: this.#isoNow(),
-    });
+    await this.#emitText(
+      "stderr",
+      `codex output parser saw ${this.#unrecognizedLineCount} unrecognized line(s)\n`,
+    );
   }
 
   async #recordCost(entry: CostLedgerEntry): Promise<void> {
@@ -706,10 +730,14 @@ function resolveCodexCommand(options: CodexCliAdapterOptions): string {
 
 function defaultCodexCandidates(): readonly string[] {
   const candidates: string[] = [...DEFAULT_CODEX_CANDIDATES];
+  const commandNames =
+    process.platform === "win32" ? ["codex.exe", "codex.cmd", "codex"] : ["codex"];
   const { PATH: pathEnv } = process.env;
   for (const segment of (pathEnv ?? "").split(path.delimiter)) {
     if (path.isAbsolute(segment)) {
-      candidates.push(path.join(segment, "codex"));
+      for (const commandName of commandNames) {
+        candidates.push(path.join(segment, commandName));
+      }
     }
   }
   return [...new Set(candidates)];
@@ -841,9 +869,9 @@ function stripLineEnding(line: string): string {
   return line.replace(/\r?\n$/, "");
 }
 
-function chunkToString(chunk: unknown): string {
+function decodeChunk(decoder: StringDecoder, chunk: unknown): string {
+  if (Buffer.isBuffer(chunk)) return decoder.write(chunk);
   if (typeof chunk === "string") return chunk;
-  if (Buffer.isBuffer(chunk)) return chunk.toString("utf8");
   return String(chunk);
 }
 

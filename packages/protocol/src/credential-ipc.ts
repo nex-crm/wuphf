@@ -1,3 +1,4 @@
+import { validateCredentialSecretBudget } from "./budgets.ts";
 import {
   type AgentId,
   asAgentId,
@@ -9,6 +10,13 @@ import {
   credentialHandleJsonFromJson,
 } from "./credential-handle.ts";
 import { assertKnownKeys, hasOwn, requireRecord } from "./receipt-utils.ts";
+
+function assertSecretWithinBudget(secret: string, label: string): void {
+  const budget = validateCredentialSecretBudget(secret);
+  if (!budget.ok) {
+    throw new Error(`${label}: ${budget.reason}`);
+  }
+}
 
 export interface CredentialReadRequest {
   readonly agentId: AgentId;
@@ -97,14 +105,16 @@ export function credentialReadRequestFromJson(value: unknown): CredentialReadReq
 export function credentialReadResponseFromJson(value: unknown): CredentialReadResponse {
   const record = requireRecord(value, "credentialReadResponse");
   assertKnownKeys(record, "credentialReadResponse", CREDENTIAL_READ_RESPONSE_KEYS);
-  return {
-    secret: requiredStringJsonField(record, "secret", "credentialReadResponse.secret"),
-  };
+  const secret = requiredStringJsonField(record, "secret", "credentialReadResponse.secret");
+  assertSecretWithinBudget(secret, "credentialReadResponse.secret");
+  return { secret };
 }
 
 export function credentialWriteRequestFromJson(value: unknown): CredentialWriteRequest {
   const record = requireRecord(value, "credentialWriteRequest");
   assertKnownKeys(record, "credentialWriteRequest", CREDENTIAL_WRITE_REQUEST_KEYS);
+  const secret = requiredStringJsonField(record, "secret", "credentialWriteRequest.secret");
+  assertSecretWithinBudget(secret, "credentialWriteRequest.secret");
   return {
     agentId: agentIdFromJson(
       requiredStringJsonField(record, "agentId", "credentialWriteRequest.agentId"),
@@ -114,7 +124,7 @@ export function credentialWriteRequestFromJson(value: unknown): CredentialWriteR
       requiredStringJsonField(record, "scope", "credentialWriteRequest.scope"),
       "credentialWriteRequest.scope",
     ),
-    secret: requiredStringJsonField(record, "secret", "credentialWriteRequest.secret"),
+    secret,
   };
 }
 

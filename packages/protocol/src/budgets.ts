@@ -328,6 +328,18 @@ export const MAX_RUNNER_STDIO_CHUNK_BYTES = 64 * 1024;
  */
 export const MAX_RUNNER_ERROR_BYTES = 8 * 1024;
 
+// ────────────────────────────────────────────────────────────────────────────
+// Credential IPC budgets (consumed by packages/protocol/src/credential-ipc.ts)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Credential secrets are bearer tokens, API keys, or OAuth refresh tokens. 64
+ * KiB is far above any sensible per-credential payload (the longest real
+ * tokens are JWTs < 8 KiB) while bounding broker JSON parsing so a hostile
+ * renderer cannot push an unbounded blob through the IPC surface.
+ */
+export const MAX_CREDENTIAL_SECRET_BYTES = 64 * 1024;
+
 export function assertWithinBudget(value: number, budget: number, label: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`${label} must be a non-negative finite number`);
@@ -451,6 +463,10 @@ export function validateThreadExternalRefBudget(ref: string): BudgetValidationRe
 
 export function validateSignerIdentityBudget(identity: string): BudgetValidationResult {
   return validateUtf8StringBudget(identity, MAX_SIGNER_IDENTITY_BYTES, "SignerIdentity bytes");
+}
+
+export function validateCredentialSecretBudget(secret: string): BudgetValidationResult {
+  return validateUtf8StringBudget(secret, MAX_CREDENTIAL_SECRET_BYTES, "credential secret bytes");
 }
 
 export function validateAuditEventBodyBudget(body: Uint8Array): BudgetValidationResult {

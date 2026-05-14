@@ -306,7 +306,7 @@ export function keychainCommandFailure(
 }
 
 export function assertValidCredentialPayload(secret: string): void {
-  if (secret.includes("\0") || hasUnpairedSurrogate(secret)) {
+  if (secret.length === 0 || secret.includes("\0") || hasUnpairedSurrogate(secret)) {
     throw new InvalidCredentialPayload();
   }
 }
@@ -423,10 +423,29 @@ function assertTrustedResolvedPath(resolvedPath: string, spec: TrustedCommandSpe
   }
 
   const stats = statSync(resolvedPath);
+  if (!stats.isFile()) {
+    throw new NoKeyringAvailable(`${spec.commandName} does not resolve to a regular file`, {
+      recoveryHint: spec.recoveryHint,
+    });
+  }
   if ((stats.mode & 0o022) !== 0) {
     throw new NoKeyringAvailable(`${spec.commandName} is writable by non-owner users`, {
       recoveryHint: spec.recoveryHint,
     });
+  }
+
+  // Parent directories must not be group/world-writable, or another user could
+  // swap the executable between this stat() and the eventual spawn().
+  let parent = path.dirname(resolvedPath);
+  while (parent !== path.dirname(parent)) {
+    const parentStats = statSync(parent);
+    if ((parentStats.mode & 0o022) !== 0) {
+      throw new NoKeyringAvailable(
+        `${spec.commandName} parent directory "${parent}" is writable by non-owner users`,
+        { recoveryHint: spec.recoveryHint },
+      );
+    }
+    parent = path.dirname(parent);
   }
 
   if (spec.rejectHomeLocalBin === true && isUnderHomeLocalBin(resolvedPath)) {
@@ -437,15 +456,27 @@ function assertTrustedResolvedPath(resolvedPath: string, spec: TrustedCommandSpe
 }
 
 function assertWindowsAdministratorsOwner(resolvedPath: string, spec: TrustedCommandSpec): void {
+  // icacls prints the DACL (access-control entries), not the owner principal;
+  // matching "BUILTIN\Administrators" in its output is false-positive-prone
+  // because an Administrators ACE can exist even when the owner is someone
+  // else. Use PowerShell `Get-Acl` and read the canonical `.Owner` field.
   const systemRoot = processEnvValue("SystemRoot") ?? "C:\\Windows";
-  const icacls = path.win32.join(systemRoot, "System32", "icacls.exe");
+  const powershell = path.win32.join(
+    systemRoot,
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
   try {
-    const output = execFileSync(icacls, [resolvedPath], {
-      encoding: "utf8",
-      windowsHide: true,
-    });
-    if (!/\bBUILTIN\\Administrators\b/i.test(output)) {
-      throw new Error("missing BUILTIN\\Administrators owner");
+    const escapedPath = resolvedPath.replace(/'/g, "''");
+    const owner = execFileSync(
+      powershell,
+      ["-NoProfile", "-Command", `(Get-Acl -LiteralPath '${escapedPath}').Owner`],
+      { encoding: "utf8", windowsHide: true },
+    ).trim();
+    if (!/^BUILTIN\\Administrators$/i.test(owner)) {
+      throw new Error(`owner is "${owner}", expected "BUILTIN\\Administrators"`);
     }
   } catch (error) {
     throw new NoKeyringAvailable(`${spec.commandName} failed Windows ownership validation`, {

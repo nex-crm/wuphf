@@ -126,18 +126,40 @@ function parseEndpointUrl(endpoint: string, allowedOrigins: readonly string[]): 
   }
 }
 
+// Cap allowlist entries before regex construction. The matcher uses bounded
+// `[^/]*` (not `.*`) so the immediate ReDoS surface is small, but an
+// admin-controlled config containing a wildcard-heavy pattern could still
+// degrade match performance. These caps bound both pattern length and
+// wildcard count so a malformed allowlist entry fails closed.
+const MAX_ALLOWLIST_PATTERN_BYTES = 256;
+const MAX_ALLOWLIST_PATTERN_WILDCARDS = 10;
+
 function allowlistEntryMatches(entry: string, endpointUrl: URL): boolean {
   if (!entry.includes("*")) return exactOriginMatches(entry, endpointUrl);
+  if (!isAllowlistPatternBounded(entry)) return false;
   return globOriginRegExp(entry).test(endpointUrl.origin);
 }
 
 function exactOriginMatches(entry: string, endpointUrl: URL): boolean {
   if (entry.includes("*")) return false;
+  if (entry.length > MAX_ALLOWLIST_PATTERN_BYTES) return false;
   try {
     return new URL(entry).origin === endpointUrl.origin;
   } catch {
     return false;
   }
+}
+
+function isAllowlistPatternBounded(pattern: string): boolean {
+  if (pattern.length > MAX_ALLOWLIST_PATTERN_BYTES) return false;
+  let wildcards = 0;
+  for (const char of pattern) {
+    if (char === "*") {
+      wildcards += 1;
+      if (wildcards > MAX_ALLOWLIST_PATTERN_WILDCARDS) return false;
+    }
+  }
+  return true;
 }
 
 function globOriginRegExp(pattern: string): RegExp {

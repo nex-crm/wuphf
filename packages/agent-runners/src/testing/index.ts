@@ -31,6 +31,7 @@ export function createFakeAgentRunner(options: FakeRunnerOptions): FakeAgentRunn
   const lifecycle = new LifecycleStateMachine(id);
   lifecycle.markRunning();
   let terminatePromise: Promise<void> | null = null;
+  let closed = false;
   let lsn = 0;
   return {
     id,
@@ -48,12 +49,15 @@ export function createFakeAgentRunner(options: FakeRunnerOptions): FakeAgentRunn
         terminatePromise = Promise.resolve().then(() => {
           lifecycle.beginStopping();
           lifecycle.markStopped({ exitCode: 0 });
+          closed = true;
           hub.close();
         });
       }
       return terminatePromise;
     },
     close(result = { exitCode: 0 }) {
+      if (closed) return;
+      closed = true;
       lifecycle.markStopped(result);
       hub.close();
     },
@@ -76,7 +80,13 @@ export function createFakeSpawnAgentRunner(
     });
     queueMicrotask(() => {
       for (const event of args.events ?? []) {
-        runner.emit(event).catch(() => undefined);
+        runner.emit(event).catch((err: unknown) => {
+          // Surface emit failures so flaky test fixtures don't silently mask
+          // real assertions when the hub rejects. Writes to stderr instead of
+          // console.error to stay within the package's no-console policy.
+          const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+          process.stderr.write(`createFakeSpawnAgentRunner: runner.emit() failed: ${message}\n`);
+        });
       }
     });
     return runner;
