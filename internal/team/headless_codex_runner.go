@@ -99,6 +99,12 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		agentStream = l.broker.AgentStream(slug)
 	}
 	pr, pw := io.Pipe()
+	// Ensure the pipe writer is always closed so the drain goroutine below
+	// cannot be orphaned. Normal-path callers still call pw.Close() explicitly
+	// at line 210; the deferred close is a no-op in that case (io.PipeWriter
+	// tolerates double-close). Guards against panics in ReadCodexJSONStream
+	// that would otherwise strand the reader goroutine forever.
+	defer func() { _ = pw.Close() }()
 	teedStdout := io.TeeReader(stdout, pw)
 	// Pipe every raw line from the provider to the web UI's live stream.
 	// No filtering — the user sees everything the agent sees. The reader-
