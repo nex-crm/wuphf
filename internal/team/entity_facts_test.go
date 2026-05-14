@@ -162,13 +162,88 @@ func TestFactLog_ConcurrentAppendsAllLand(t *testing.T) {
 	if len(facts) != N {
 		t.Fatalf("expected %d facts, got %d", N, len(facts))
 	}
-	// All IDs should be unique.
+	// All IDs should be unique (each goroutine records a different text).
 	seen := map[string]bool{}
 	for _, f := range facts {
 		if seen[f.ID] {
 			t.Errorf("duplicate fact id: %s", f.ID)
 		}
 		seen[f.ID] = true
+	}
+}
+
+func TestFactLog_DeterministicID(t *testing.T) {
+	// Same inputs produce the same ID every time.
+	id1 := deterministicFactID(EntityKindPeople, "sarah", "CEO of Acme", "pm")
+	id2 := deterministicFactID(EntityKindPeople, "sarah", "CEO of Acme", "pm")
+	if id1 != id2 {
+		t.Errorf("expected deterministic ID; got %q and %q", id1, id2)
+	}
+	if len(id1) != 16 {
+		t.Errorf("expected 16-char hex ID; got %q (len %d)", id1, len(id1))
+	}
+
+	// Different inputs produce different IDs.
+	id3 := deterministicFactID(EntityKindPeople, "sarah", "CTO of Acme", "pm")
+	if id1 == id3 {
+		t.Error("expected different ID for different text")
+	}
+
+	id4 := deterministicFactID(EntityKindCompanies, "sarah", "CEO of Acme", "pm")
+	if id1 == id4 {
+		t.Error("expected different ID for different kind")
+	}
+}
+
+func TestFactLog_DedupSameFactTwice(t *testing.T) {
+	log, _, teardown := newFactLogFixture(t)
+	defer teardown()
+	ctx := context.Background()
+
+	f1, err := log.Append(ctx, EntityKindPeople, "nazz", "Likes coffee", "", "pm")
+	if err != nil {
+		t.Fatalf("append 1: %v", err)
+	}
+
+	// Append the exact same fact again — should be silently deduped.
+	f2, err := log.Append(ctx, EntityKindPeople, "nazz", "Likes coffee", "", "pm")
+	if err != nil {
+		t.Fatalf("append 2: %v", err)
+	}
+
+	// Same ID returned both times.
+	if f1.ID != f2.ID {
+		t.Errorf("expected same ID on dedup; got %q and %q", f1.ID, f2.ID)
+	}
+
+	// Only one fact in the file.
+	facts, err := log.List(EntityKindPeople, "nazz")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact after dedup, got %d", len(facts))
+	}
+}
+
+func TestFactLog_DifferentTextNotDeduped(t *testing.T) {
+	log, _, teardown := newFactLogFixture(t)
+	defer teardown()
+	ctx := context.Background()
+
+	if _, err := log.Append(ctx, EntityKindPeople, "nazz", "Likes coffee", "", "pm"); err != nil {
+		t.Fatalf("append 1: %v", err)
+	}
+	if _, err := log.Append(ctx, EntityKindPeople, "nazz", "Likes tea", "", "pm"); err != nil {
+		t.Fatalf("append 2: %v", err)
+	}
+
+	facts, err := log.List(EntityKindPeople, "nazz")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(facts) != 2 {
+		t.Fatalf("expected 2 facts for different text, got %d", len(facts))
 	}
 }
 

@@ -42,7 +42,7 @@ const ArchivistAuthor = "archivist"
 // DefaultSynthesisThreshold is the number of new facts that must accumulate
 // before an automatic synthesis is triggered. Configurable per deployment
 // via WUPHF_ENTITY_BRIEF_THRESHOLD.
-const DefaultSynthesisThreshold = 5
+const DefaultSynthesisThreshold = 3
 
 // DefaultSynthesisTimeout bounds a single LLM shell-out. Configurable via
 // WUPHF_ENTITY_BRIEF_TIMEOUT (seconds).
