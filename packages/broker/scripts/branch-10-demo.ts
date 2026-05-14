@@ -57,9 +57,20 @@ const broker = await createBroker({
   },
 });
 
+let cleanupStarted = false;
 const cleanup = async () => {
-  await broker.stop();
-  db.close();
+  if (cleanupStarted) return;
+  cleanupStarted = true;
+  try {
+    await broker.stop();
+  } catch (err) {
+    console.error("[demo] Error stopping broker:", err);
+  }
+  try {
+    db.close();
+  } catch (err) {
+    console.error("[demo] Error closing DB:", err);
+  }
   rmSync(tmp, { recursive: true, force: true });
   process.exit(0);
 };
