@@ -793,6 +793,11 @@ func optionalString(record map[string]interface{}, key string, path string) (str
 	return stringValue, true, nil
 }
 
+func optionalStringValue(record map[string]interface{}, key string, path string) error {
+	_, _, err := optionalString(record, key, path)
+	return err
+}
+
 func optionalMicroUsd(record map[string]interface{}, key string, path string, max float64) error {
 	if _, ok := record[key]; !ok {
 		return nil
