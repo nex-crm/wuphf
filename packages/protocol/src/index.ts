@@ -55,6 +55,18 @@ export {
   MAX_RECEIPT_SOURCE_READS,
   MAX_RECEIPT_WIKI_WRITES,
   MAX_RECEIPT_WRITES,
+  MAX_RUNNER_CWD_BYTES,
+  MAX_RUNNER_ENDPOINT_BYTES,
+  MAX_RUNNER_ERROR_BYTES,
+  MAX_RUNNER_EXTRA_ARG_BYTES,
+  MAX_RUNNER_EXTRA_ARGS,
+  MAX_RUNNER_MODEL_BYTES,
+  MAX_RUNNER_OPTION_HEADER_NAME_BYTES,
+  MAX_RUNNER_OPTION_HEADER_VALUE_BYTES,
+  MAX_RUNNER_OPTION_HEADERS,
+  MAX_RUNNER_PROFILE_BYTES,
+  MAX_RUNNER_PROMPT_BYTES,
+  MAX_RUNNER_STDIO_CHUNK_BYTES,
   MAX_SANITIZED_JSON_NODES,
   MAX_SANITIZED_STRING_BYTES,
   MAX_SIGNER_IDENTITY_BYTES,
@@ -280,6 +292,31 @@ export {
   receiptToJson,
   validateReceipt,
 } from "./receipt.ts";
+export type {
+  CostLedgerEntry,
+  RunnerEvent,
+  RunnerEventJson,
+  RunnerFailureCode,
+  RunnerId,
+  RunnerKind,
+  RunnerProviderRoute,
+  RunnerSchemaVersion,
+  RunnerSpawnOptions,
+  RunnerSpawnRequest,
+} from "./runner.ts";
+export {
+  asRunnerId,
+  isRunnerFailureCode,
+  isRunnerId,
+  isRunnerKind,
+  RUNNER_FAILURE_CODE_VALUES,
+  RUNNER_KIND_VALUES,
+  RUNNER_SCHEMA_VERSION,
+  runnerEventFromJson,
+  runnerEventToJsonValue,
+  runnerSpawnRequestFromJson,
+  runnerSpawnRequestToJsonValue,
+} from "./runner.ts";
 export type { SanitizedStringOptions, SanitizedStringPolicy } from "./sanitized-string.ts";
 export { SanitizedString } from "./sanitized-string.ts";
 export {

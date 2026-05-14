@@ -46,10 +46,26 @@
         "js-yaml": "4.1.1",
       },
     },
+    "packages/agent-runners": {
+      "name": "@wuphf/agent-runners",
+      "version": "0.0.0",
+      "dependencies": {
+        "@wuphf/protocol": "workspace:*",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "2.4.15",
+        "@types/node": "^22.10.0",
+        "@vitest/coverage-v8": "2.1.9",
+        "typescript": "^5.6.0",
+        "vitest": "^2.1.0",
+      },
+    },
     "packages/broker": {
       "name": "@wuphf/broker",
       "version": "0.0.0",
       "dependencies": {
+        "@wuphf/agent-runners": "workspace:*",
+        "@wuphf/credentials": "workspace:*",
         "@wuphf/protocol": "workspace:*",
         "better-sqlite3": "12.9.0",
         "ws": "8.20.0",
@@ -523,6 +539,8 @@
     "@vitest/spy": ["@vitest/spy@2.1.9", "", { "dependencies": { "tinyspy": "^3.0.2" } }, "sha512-E1B35FwzXXTs9FHNK6bDszs7mtydNi5MIfUWpceJ8Xbfb1gBMscAnwLbEu+B44ed6W3XjL9/ehLPHR1fkf1KLQ=="],
 
     "@vitest/utils": ["@vitest/utils@2.1.9", "", { "dependencies": { "@vitest/pretty-format": "2.1.9", "loupe": "^3.1.2", "tinyrainbow": "^1.2.0" } }, "sha512-v0psaMSkNJ3A2NMrUEHFRzJtDPFn+/VWZ5WxImB21T9fjucJRmS7xCS3ppEnARb9y11OAzaD+P2Ps+b+BGX5iQ=="],
+
+    "@wuphf/agent-runners": ["@wuphf/agent-runners@workspace:packages/agent-runners"],
 
     "@wuphf/broker": ["@wuphf/broker@workspace:packages/broker"],
 

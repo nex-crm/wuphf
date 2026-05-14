@@ -9,13 +9,17 @@ import {
 } from "../internal/handle.ts";
 import {
   assertBrokerIdentityForAgent,
+  assertCredentialOwnership,
   assertValidCredentialPayload,
   type CredentialDeleteRequest,
   type CredentialReadRequest,
+  type CredentialReadWithOwnershipRequest,
+  type CredentialReadWithOwnershipResult,
   type CredentialStore,
   type CredentialWriteRequest,
   keychainCommandFailure,
   operationTimeoutMs,
+  parseCredentialOwnershipMetadata,
   resolveTrustedCommand,
   runKeychainCommand,
   type Spawner,
@@ -96,6 +100,39 @@ export class WindowsCredentialStore implements CredentialStore {
     }
     if (result.stdout.length === 0) throw new NotFound();
     return result.stdout;
+  }
+
+  async readWithOwnership(
+    input: CredentialReadWithOwnershipRequest,
+  ): Promise<CredentialReadWithOwnershipResult> {
+    assertBrokerIdentityForAgent(input.broker, input.expectedAgentId);
+    const target = credentialTarget(this.options.serviceName, { handleId: input.handleId });
+    const result = await runKeychainCommand(
+      this.options.spawner,
+      this.powershell,
+      powerShellArgs(readWithMetadataScript(target)),
+      {
+        action: "read-with-ownership",
+        commandName: "powershell CredRead",
+        platform: "win32",
+        timeoutMs: operationTimeoutMs(this.options.timeoutMs),
+      },
+    );
+
+    if (result.code !== 0) {
+      if (isWindowsNotFound(result.stderr)) throw new NotFound();
+      throw keychainCommandFailure("powershell CredRead", result, {
+        action: "read-with-ownership",
+        platform: "win32",
+      });
+    }
+    const payload = parseWindowsCredentialReadPayload(result.stdout);
+    const ownership = parseCredentialOwnershipMetadata(payload.comment);
+    assertCredentialOwnership(ownership, {
+      agentId: input.expectedAgentId,
+      scope: input.expectedScope,
+    });
+    return { secret: payload.secret, ...ownership };
   }
 
   async delete(input: CredentialDeleteRequest): Promise<void> {
@@ -210,6 +247,33 @@ try {
 }`;
 }
 
+function readWithMetadataScript(target: string): string {
+  return `${credentialManagerPrelude()}
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$target = ${psQuote(target)}
+$ptr = [IntPtr]::Zero
+if (-not [CredMan]::CredRead($target, [CredMan]::CRED_TYPE_GENERIC, 0, [ref] $ptr)) {
+  $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  [Console]::Error.Write("CredRead failed: $code")
+  exit 2
+}
+try {
+  $credential = [Runtime.InteropServices.Marshal]::PtrToStructure($ptr, [type] [CredMan+CREDENTIAL])
+  $bytes = New-Object byte[] $credential.CredentialBlobSize
+  if ($bytes.Length -gt 0) {
+    [Runtime.InteropServices.Marshal]::Copy($credential.CredentialBlob, $bytes, 0, $bytes.Length)
+  }
+  $payload = @{
+    secretB64 = [Convert]::ToBase64String($bytes)
+    comment = $credential.Comment
+  } | ConvertTo-Json -Compress
+  $out = [Text.Encoding]::UTF8.GetBytes($payload)
+  [Console]::OpenStandardOutput().Write($out, 0, $out.Length)
+} finally {
+  [CredMan]::CredFree($ptr)
+}`;
+}
+
 function deleteScript(target: string): string {
   return `${credentialManagerPrelude()}
 $target = ${psQuote(target)}
@@ -268,6 +332,32 @@ function psQuote(value: string): string {
 
 function isWindowsNotFound(stderr: string): boolean {
   return /Cred(Read|Delete) failed: 1168|not found|element not found/i.test(stderr);
+}
+
+function parseWindowsCredentialReadPayload(stdout: string): {
+  readonly secret: string;
+  readonly comment: string;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new NotFound();
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new NotFound();
+  }
+  const record = parsed as Readonly<{
+    comment?: unknown;
+    secretB64?: unknown;
+  }>;
+  if (typeof record.secretB64 !== "string" || typeof record.comment !== "string") {
+    throw new NotFound();
+  }
+  return {
+    secret: Buffer.from(record.secretB64, "base64").toString("utf8"),
+    comment: record.comment,
+  };
 }
 
 // TODO(#847): RFC v4's Architectural change moves credentials

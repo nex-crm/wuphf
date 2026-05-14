@@ -25,6 +25,13 @@ export {
   ReceiptStoreFullError,
   ReceiptStoreUnavailableError,
 } from "./receipt-store.ts";
+export type {
+  AgentRunnerFactoryDeps,
+  RunnerCostLedger,
+  RunnerEventLog,
+} from "./runners/factory.ts";
+export { createAgentRunnerForBroker } from "./runners/factory.ts";
+export type { RunnerRouteConfig, RunnerRouteState } from "./runners/route.ts";
 export { generateApiToken } from "./token.ts";
 export type {
   BrokerConfig,

@@ -5,6 +5,8 @@ import { promisify } from "node:util";
 
 import {
   type AgentId,
+  asAgentId,
+  asCredentialScope,
   type BrokerIdentity,
   brokerIdentityAgentId,
   type CredentialHandle,
@@ -19,6 +21,7 @@ import { WindowsCredentialStore } from "./adapters/windows.ts";
 import {
   AdapterNotSupported,
   BrokerIdentityRequired,
+  CredentialOwnershipMismatch,
   InvalidCredentialPayload,
   KeychainCommandFailed,
   KeychainCommandTimedOut,
@@ -67,6 +70,19 @@ export interface CredentialReadRequest {
   readonly agentId: AgentId;
 }
 
+export interface CredentialReadWithOwnershipRequest {
+  readonly broker: BrokerIdentity;
+  readonly handleId: CredentialHandleId;
+  readonly expectedAgentId: AgentId;
+  readonly expectedScope: CredentialScope;
+}
+
+export interface CredentialReadWithOwnershipResult {
+  readonly secret: string;
+  readonly agentId: AgentId;
+  readonly scope: CredentialScope;
+}
+
 export interface CredentialDeleteRequest {
   readonly broker: BrokerIdentity;
   readonly handleId: CredentialHandleId;
@@ -76,6 +92,9 @@ export interface CredentialDeleteRequest {
 export interface CredentialStore {
   write(input: CredentialWriteRequest): Promise<CredentialHandle>;
   read(input: CredentialReadRequest): Promise<string>;
+  readWithOwnership(
+    input: CredentialReadWithOwnershipRequest,
+  ): Promise<CredentialReadWithOwnershipResult>;
   delete(input: CredentialDeleteRequest): Promise<void>;
 }
 
@@ -115,6 +134,55 @@ export function open(options: CredentialStoreOptions = {}): CredentialStore {
 export function assertBrokerIdentityForAgent(broker: unknown, agentId: AgentId): void {
   if (!isBrokerIdentity(broker) || brokerIdentityAgentId(broker) !== agentId) {
     throw new BrokerIdentityRequired();
+  }
+}
+
+export function parseCredentialOwnershipMetadata(value: string): {
+  readonly agentId: AgentId;
+  readonly scope: CredentialScope;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new CredentialOwnershipMismatch();
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new CredentialOwnershipMismatch();
+  }
+  const record = parsed as Readonly<{
+    agentId?: unknown;
+    scope?: unknown;
+  }>;
+  if (
+    Object.keys(record).length !== 2 ||
+    !hasOwn(record, "agentId") ||
+    !hasOwn(record, "scope") ||
+    typeof record.agentId !== "string" ||
+    typeof record.scope !== "string"
+  ) {
+    throw new CredentialOwnershipMismatch();
+  }
+  try {
+    return {
+      agentId: asAgentId(record.agentId),
+      scope: asCredentialScope(record.scope),
+    };
+  } catch {
+    throw new CredentialOwnershipMismatch();
+  }
+}
+
+function hasOwn(record: Readonly<Record<string, unknown>>, key: string): boolean {
+  return Object.hasOwn(record, key);
+}
+
+export function assertCredentialOwnership(
+  actual: { readonly agentId: AgentId; readonly scope: CredentialScope },
+  expected: { readonly agentId: AgentId; readonly scope: CredentialScope },
+): void {
+  if (actual.agentId !== expected.agentId || actual.scope !== expected.scope) {
+    throw new CredentialOwnershipMismatch();
   }
 }
 
