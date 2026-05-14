@@ -403,7 +403,12 @@ describe("createCodexCliRunner", () => {
       ),
     ).toBe(true);
     expect(harness.child.signals).toEqual(["SIGTERM"]);
-    expect(harness.receipts).toHaveLength(0);
+    expect(harness.receipts).toHaveLength(1);
+    expect(harness.receipts[0]).toMatchObject({
+      providerKind: asProviderKind("openai"),
+      status: "error",
+    });
+    expect(harness.receipts[0]?.error?.toString()).toContain("runner input buffer exceeded");
   });
 
   it("fails closed when a codex output block has too many lines", async () => {
@@ -424,7 +429,12 @@ describe("createCodexCliRunner", () => {
         (event) => event.kind === "failed" && event.code === "runner_input_buffer_overflow",
       ),
     ).toBe(true);
-    expect(harness.receipts).toHaveLength(0);
+    expect(harness.receipts).toHaveLength(1);
+    expect(harness.receipts[0]).toMatchObject({
+      providerKind: asProviderKind("openai"),
+      status: "error",
+    });
+    expect(harness.receipts[0]?.error?.toString()).toContain("Codex CLI output block exceeded");
   });
 
   it("rejects negative usage and cost ceiling overflows", async () => {

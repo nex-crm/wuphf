@@ -623,7 +623,12 @@ describe("createOpenAICompatRunner", () => {
         (event) => event.kind === "failed" && event.code === "runner_input_buffer_overflow",
       ),
     ).toBe(true);
-    expect(harness.receipts).toHaveLength(0);
+    expect(harness.receipts).toHaveLength(1);
+    expect(harness.receipts[0]).toMatchObject({
+      providerKind: asProviderKind("openai"),
+      status: "error",
+    });
+    expect(harness.receipts[0]?.error?.toString()).toContain("runner input buffer exceeded");
     expect(harness.costs).toHaveLength(0);
   });
 

@@ -357,35 +357,36 @@ describe("createClaudeCliRunner", () => {
     expect(harness.receipts[0]?.providerKind).toBe(asProviderKind("openclaw"));
   });
 
-  it.each(["--no-receipt foo bar", "-h", ""])(
-    "passes prompt after an argv separator: %j",
-    async (prompt) => {
-      const harness = makeHarness();
-      const spawnRunner = createClaudeCliRunner({
-        binaryPath: "/usr/bin/claude",
-        enforceTrustedCommand: false,
-        now: () => fixedDate,
-        runnerIdFactory: () => runnerId,
-        spawner: (command, args, options) => {
-          harness.calls.push({ command, args, options });
-          return harness.child;
-        },
-      });
+  it.each([
+    "--no-receipt foo bar",
+    "-h",
+    "",
+  ])("passes prompt after an argv separator: %j", async (prompt) => {
+    const harness = makeHarness();
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+    });
 
-      const runner = await spawnRunner({ ...spawnRequest(), prompt }, harness.deps);
-      const eventsPromise = collectAll(runner.events());
-      harness.child.exit(0);
-      await eventsPromise;
+    const runner = await spawnRunner({ ...spawnRequest(), prompt }, harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.exit(0);
+    await eventsPromise;
 
-      expect(harness.calls[0]?.args).toEqual([
-        "--print",
-        "--output-format",
-        "stream-json",
-        "--",
-        prompt,
-      ]);
-    },
-  );
+    expect(harness.calls[0]?.args).toEqual([
+      "--print",
+      "--output-format",
+      "stream-json",
+      "--",
+      prompt,
+    ]);
+  });
 
   it("fails the runner when receipt put fails", async () => {
     const harness = makeHarness({
@@ -632,7 +633,12 @@ describe("createClaudeCliRunner", () => {
       ),
     ).toBe(true);
     expect(harness.child.signals).toEqual(["SIGTERM"]);
-    expect(harness.receipts).toHaveLength(0);
+    expect(harness.receipts).toHaveLength(1);
+    expect(harness.receipts[0]).toMatchObject({
+      providerKind: asProviderKind("anthropic"),
+      status: "error",
+    });
+    expect(harness.receipts[0]?.error?.toString()).toContain("runner input buffer exceeded");
   });
 
   it("fails negative usage and cost ceiling overflows before recording cost", async () => {
