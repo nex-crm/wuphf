@@ -8,6 +8,13 @@ broker-internal classifier all validate this shape independently, so each
 consumer should load the fixture and assert its local validator accepts every
 `accepted` vector and rejects every `rejected` vector.
 
+## Credential Handle Vectors
+
+`credential-handle-vectors.json` pins the v1 credential handle wire shape:
+`{ version: 1, id }`. The handle id is the capability; `agentId` and scope are
+trusted broker-side context used to rehydrate a runtime `CredentialHandle`, not
+serialized handle fields.
+
 ## Audit Event Golden Vectors
 
 `audit-event-vectors.json` is the cross-language fixture for WUPHF audit-chain

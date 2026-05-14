@@ -1,6 +1,8 @@
+export type { BrokerIdentity } from "@wuphf/protocol";
 export {
   AdapterNotSupported,
   BasicTextRejected,
+  BrokerIdentityRequired,
   type CredentialErrorCode,
   CredentialStoreError,
   InvalidHandle,
@@ -8,22 +10,5 @@ export {
   NoKeyringAvailable,
   NotFound,
 } from "./errors.ts";
-export {
-  type CredentialHandleParts,
-  credentialAccount,
-  credentialHandleFromParts,
-  credentialLabel,
-  DEFAULT_CREDENTIAL_SERVICE,
-  newCredentialHandle,
-} from "./handle.ts";
-export {
-  type CredentialStore,
-  type CredentialStoreOptions,
-  type CredentialWriteRequest,
-  execFileSpawner,
-  open,
-  openCredentialStore,
-  type Spawner,
-  type SpawnOptions,
-  type SpawnResult,
-} from "./store.ts";
+export type { CredentialStore } from "./store.ts";
+export { open } from "./store.ts";

@@ -1,6 +1,7 @@
 export type CredentialErrorCode =
   | "adapter_not_supported"
   | "basic_text_rejected"
+  | "broker_identity_required"
   | "invalid_handle"
   | "keychain_command_failed"
   | "no_keyring_available"
@@ -26,6 +27,12 @@ export class AdapterNotSupported extends CredentialStoreError {
 export class BasicTextRejected extends CredentialStoreError {
   constructor() {
     super("basic_text_rejected", "refusing to use an unencrypted libsecret basic_text collection");
+  }
+}
+
+export class BrokerIdentityRequired extends CredentialStoreError {
+  constructor() {
+    super("broker_identity_required", "credential store access requires a broker identity");
   }
 }
 

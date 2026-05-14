@@ -48,6 +48,8 @@ import {
   costAuditPayloadToBytes,
   costAuditPayloadToJsonValue,
   createCredentialHandle,
+  credentialHandleFromJson,
+  credentialHandleToJson,
   type EventLsn,
   FrozenArgs,
   GENESIS_PREV_HASH,
@@ -1042,9 +1044,17 @@ const credentialHandle = createCredentialHandle({
 const credentialFixtureSecret = "fixture-secret-value-do-not-use-0000";
 const credentialJson = JSON.stringify(credentialHandle);
 expectEqual(
-  "CredentialHandle JSON carries only id",
+  "CredentialHandle JSON carries only versioned id",
   credentialJson,
-  '{"id":"cred_0123456789ABCDEFGHIJKLMNOPQRSTUV"}',
+  '{"version":1,"id":"cred_0123456789ABCDEFGHIJKLMNOPQRSTUV"}',
+);
+expectEqual(
+  "credentialHandleToJson returns the wire shape",
+  credentialHandleToJson(credentialHandle),
+  {
+    version: 1,
+    id: asCredentialHandleId("cred_0123456789ABCDEFGHIJKLMNOPQRSTUV"),
+  },
 );
 expectEqual(
   "CredentialHandle JSON omits secret",
@@ -1060,6 +1070,20 @@ expectEqual(
   "CredentialHandle inspect is redacted",
   inspect(credentialHandle),
   "CredentialHandle { id: <redacted> }",
+);
+expectEqual(
+  "structuredClone(CredentialHandle) loses handle capability",
+  structuredClone(credentialHandle),
+  {},
+);
+expectThrows(
+  () =>
+    credentialHandleFromJson(JSON.parse(credentialJson), {
+      broker: {} as never,
+      agentId: asAgentId("agent_alpha"),
+      scope: asCredentialScope("openai"),
+    }),
+  /BrokerIdentity is required/,
 );
 
 // ──────────────────────────────────────────────────────────────────────────

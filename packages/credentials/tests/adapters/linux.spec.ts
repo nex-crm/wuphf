@@ -1,3 +1,4 @@
+import { forBrokerTests } from "@wuphf/credentials/testing";
 import { asAgentId, asCredentialScope } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 
@@ -6,7 +7,10 @@ import {
   LinuxCredentialStore,
 } from "../../src/adapters/linux.ts";
 import { BasicTextRejected, NoKeyringAvailable } from "../../src/errors.ts";
-import type { Spawner } from "../../src/index.ts";
+import type { Spawner } from "../../src/store.ts";
+
+const agentId = asAgentId("agent_alpha");
+const broker = forBrokerTests({ agentId });
 
 describe("LinuxCredentialStore", () => {
   it("rejects libsecret basic_text before storing", async () => {
@@ -26,7 +30,8 @@ describe("LinuxCredentialStore", () => {
 
     await expect(
       store.write({
-        agentId: asAgentId("agent_alpha"),
+        broker,
+        agentId,
         scope: asCredentialScope("openai"),
         secret: "fixture-secret-value-do-not-use-0000",
       }),
@@ -47,7 +52,8 @@ describe("LinuxCredentialStore", () => {
 
     await expect(
       store.write({
-        agentId: asAgentId("agent_alpha"),
+        broker,
+        agentId,
         scope: asCredentialScope("openai"),
         secret: "fixture-secret-value-do-not-use-0000",
       }),
