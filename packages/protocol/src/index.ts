@@ -289,6 +289,7 @@ export type {
   CostLedgerEntry,
   RunnerEvent,
   RunnerEventJson,
+  RunnerFailureCode,
   RunnerId,
   RunnerKind,
   RunnerProviderRoute,
@@ -297,8 +298,10 @@ export type {
 } from "./runner.ts";
 export {
   asRunnerId,
+  isRunnerFailureCode,
   isRunnerId,
   isRunnerKind,
+  RUNNER_FAILURE_CODE_VALUES,
   RUNNER_KIND_VALUES,
   RUNNER_SCHEMA_VERSION,
   runnerEventFromJson,

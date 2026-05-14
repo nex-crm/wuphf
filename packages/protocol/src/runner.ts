@@ -37,9 +37,24 @@ export type RunnerId = Brand<string, "RunnerId">;
 export type RunnerKind = (typeof RUNNER_KIND_VALUES)[number];
 export type CostLedgerEntry = CostEventAuditPayload;
 export type RunnerSchemaVersion = 1;
+export type RunnerFailureCode = (typeof RUNNER_FAILURE_CODE_VALUES)[number];
 
 export const RUNNER_KIND_VALUES = ["claude-cli", "codex-cli", "openai-compat"] as const;
 export const RUNNER_SCHEMA_VERSION = 1 satisfies RunnerSchemaVersion;
+export const RUNNER_FAILURE_CODE_VALUES = [
+  "spawn_failed",
+  "receipt_write_failed",
+  "event_log_write_failed",
+  "cost_ledger_write_failed",
+  "cost_ceiling_exceeded",
+  "credential_ownership_mismatch",
+  "subprocess_crashed",
+  "subprocess_timed_out",
+  "terminated_by_request",
+  "network_failed",
+  "provider_returned_error",
+  "unrecognized_provider_response",
+] as const;
 
 export interface RunnerProviderRoute {
   readonly credentialScope: CredentialScope;
@@ -106,6 +121,7 @@ export type RunnerEvent =
       readonly kind: "failed";
       readonly runnerId: RunnerId;
       readonly error: string;
+      readonly code?: RunnerFailureCode | undefined;
       readonly at: string;
     };
 
@@ -113,6 +129,7 @@ export type RunnerEventJson = ReturnType<typeof runnerEventToJsonValue>;
 
 const RUNNER_ID_RE = /^run_[A-Za-z0-9_-]{22,128}$/;
 const RUNNER_KIND_SET: ReadonlySet<string> = new Set(RUNNER_KIND_VALUES);
+const RUNNER_FAILURE_CODE_SET: ReadonlySet<string> = new Set(RUNNER_FAILURE_CODE_VALUES);
 const ISO_8601_UTC_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 const RUNNER_SPAWN_REQUEST_KEYS_TUPLE = [
@@ -174,6 +191,7 @@ const FAILED_EVENT_KEYS_TUPLE = [
   "kind",
   "runnerId",
   "error",
+  "code",
   "at",
 ] as const satisfies readonly (keyof Extract<RunnerEvent, { kind: "failed" }>)[];
 
@@ -197,6 +215,10 @@ export function isRunnerId(value: unknown): value is RunnerId {
 
 export function isRunnerKind(value: unknown): value is RunnerKind {
   return typeof value === "string" && RUNNER_KIND_SET.has(value);
+}
+
+export function isRunnerFailureCode(value: unknown): value is RunnerFailureCode {
+  return typeof value === "string" && RUNNER_FAILURE_CODE_SET.has(value);
 }
 
 export function runnerSpawnRequestFromJson(value: unknown): RunnerSpawnRequest {
@@ -319,6 +341,7 @@ export function runnerEventFromJson(value: unknown): RunnerEvent {
           "runnerEvent.error",
           MAX_RUNNER_ERROR_BYTES,
         ),
+        ...optionalFailureCode(record, "code", "runnerEvent.code"),
       };
     default:
       throw new Error("runnerEvent.kind: unsupported RunnerEvent kind");
@@ -368,13 +391,14 @@ export function runnerEventToJsonValue(event: RunnerEvent): Readonly<Record<stri
         at: event.at,
       };
     case "failed":
-      return {
+      return omitUndefined({
         schemaVersion: RUNNER_SCHEMA_VERSION,
         kind: event.kind,
         runnerId: event.runnerId,
         error: event.error,
+        code: event.code,
         at: event.at,
-      };
+      });
   }
 }
 
@@ -516,6 +540,19 @@ function optionalMicroUsd(
     throw new Error(`${path}: not a MicroUsd`);
   }
   return value;
+}
+
+function optionalFailureCode(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): { readonly code?: RunnerFailureCode | undefined } {
+  if (!hasOwn(record, key)) return {};
+  const value = requiredString(record, key, path);
+  if (!isRunnerFailureCode(value)) {
+    throw new Error(`${path}: unsupported RunnerFailureCode`);
+  }
+  return { code: value };
 }
 
 function runnerKindFromJson(value: string): RunnerKind {

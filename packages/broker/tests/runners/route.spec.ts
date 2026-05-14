@@ -20,6 +20,8 @@ const token = asApiToken("test-token-with-enough-entropy-AAAAAAAAA");
 const agentId = asAgentId("agent_alpha");
 const otherAgentId = asAgentId("agent_beta");
 const runnerId = asRunnerId("run_0123456789ABCDEFGHIJKLMNOPQRSTUV");
+const runnerId2 = asRunnerId("run_1123456789ABCDEFGHIJKLMNOPQRSTUV");
+const runnerId3 = asRunnerId("run_2123456789ABCDEFGHIJKLMNOPQRSTUV");
 
 function spawnRequest(agent = agentId): RunnerSpawnRequest {
   return {
@@ -33,13 +35,21 @@ function spawnRequest(agent = agentId): RunnerSpawnRequest {
 describe("runner routes", () => {
   let broker: BrokerHandle | null = null;
   let runner: FakeAgentRunner | null = null;
+  let runners: FakeAgentRunner[] = [];
   let spawnedRequest: RunnerSpawnRequest | null = null;
+  let terminateCount = 0;
+  let terminatedRunnerIds = new Set<string>();
   let tempDirs: string[] = [];
 
   afterEach(async () => {
-    runner?.close();
+    for (const item of runners) {
+      item.close();
+    }
     runner = null;
+    runners = [];
     spawnedRequest = null;
+    terminateCount = 0;
+    terminatedRunnerIds = new Set<string>();
     if (broker !== null) {
       await broker.stop();
       broker = null;
@@ -48,12 +58,20 @@ describe("runner routes", () => {
     tempDirs = [];
   });
 
-  async function startBroker(workspaceRoot?: string): Promise<BrokerHandle> {
+  async function startBroker(
+    workspaceRoot?: string,
+    routeOptions: {
+      readonly retentionTtlMs?: number | undefined;
+      readonly maxRunners?: number | undefined;
+      readonly stopGraceMs?: number | undefined;
+    } = {},
+  ): Promise<BrokerHandle> {
     broker = await createBroker({
       token,
       workspaceRoot,
       runners: {
         tokenAgentIds: new Map([[token, agentId]]),
+        ...routeOptions,
         brokerIdentityForAgent: (id) => forBrokerTests({ agentId: id }),
         credentialStore: {
           write: async () => {
@@ -70,14 +88,26 @@ describe("runner routes", () => {
           delete: async () => undefined,
         },
         costLedger: { record: async () => undefined },
-        eventLog: { append: async () => undefined },
+        eventLog: { append: async () => 1 },
         spawnRunner: async (request) => {
           spawnedRequest = request;
-          runner = createFakeAgentRunner({
-            id: runnerId,
+          const fake = createFakeAgentRunner({
+            id: [runnerId, runnerId2, runnerId3][runners.length] ?? runnerId,
             kind: request.kind,
             agentId: request.agentId,
           });
+          const originalTerminate = fake.terminate;
+          let terminated = false;
+          fake.terminate = async (opts) => {
+            if (!terminated) {
+              terminateCount += 1;
+              terminatedRunnerIds.add(fake.id);
+              terminated = true;
+            }
+            await originalTerminate(opts);
+          };
+          runner = fake;
+          runners.push(fake);
           return runner;
         },
       },
@@ -208,6 +238,120 @@ describe("runner routes", () => {
 
     expect(text).toContain("event: started");
     expect(text).toContain('"runnerId":"run_0123456789ABCDEFGHIJKLMNOPQRSTUV"');
+    expect(text).toContain("event: finished");
+  });
+
+  it("terminates all active runners before broker stop closes the listener", async () => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot);
+    for (let index = 0; index < 3; index += 1) {
+      const res = await fetch(`${handle.url}/api/runners`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(runnerSpawnRequestToJsonValue(spawnRequest())),
+      });
+      expect(res.status).toBe(201);
+    }
+
+    await handle.stop();
+    broker = null;
+
+    expect(terminatedRunnerIds).toEqual(new Set([runnerId, runnerId2, runnerId3]));
+    expect(terminateCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it("retains terminal runners briefly and then removes them", async () => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot, { retentionTtlMs: 5 });
+    await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(runnerSpawnRequestToJsonValue(spawnRequest())),
+    });
+    if (runner === null) throw new Error("runner was not created");
+
+    await runner.emit({
+      kind: "finished",
+      runnerId,
+      exitCode: 0,
+      at: "2026-05-08T18:00:01.000Z",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const res = await fetch(`${handle.url}/api/runners/${encodeURIComponent(runnerId)}/events`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns structured 503 when runner capacity is exhausted", async () => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot, { maxRunners: 1 });
+    const first = await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(runnerSpawnRequestToJsonValue(spawnRequest())),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(runnerSpawnRequestToJsonValue(spawnRequest())),
+    });
+
+    expect(second.status).toBe(503);
+    await expect(second.json()).resolves.toMatchObject({ error: "runner_capacity_exhausted" });
+  });
+
+  it("resumes runner SSE after Last-Event-ID", async () => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot);
+    await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(runnerSpawnRequestToJsonValue(spawnRequest())),
+    });
+    if (runner === null) throw new Error("runner was not created");
+    await runner.emit({
+      kind: "started",
+      runnerId,
+      at: "2026-05-08T18:00:00.000Z",
+    });
+    await runner.emit({
+      kind: "finished",
+      runnerId,
+      exitCode: 0,
+      at: "2026-05-08T18:00:01.000Z",
+    });
+    runner.close();
+
+    const res = await fetch(`${handle.url}/api/runners/${encodeURIComponent(runnerId)}/events`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream",
+        "Last-Event-ID": "1",
+      },
+    });
+    const text = await res.text();
+
+    expect(text).not.toContain("event: started");
+    expect(text).toContain("id: 2");
     expect(text).toContain("event: finished");
   });
 

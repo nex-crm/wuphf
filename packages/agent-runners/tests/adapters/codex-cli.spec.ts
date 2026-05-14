@@ -103,6 +103,7 @@ function makeHarness(
   const events: RunnerEvent[] = [];
   const receipts: Receipt[] = [];
   const secretReads: CredentialHandle[] = [];
+  let lsn = 0;
   const receiptPut =
     args.receiptPut ??
     (async (receipt: Receipt) => {
@@ -131,6 +132,8 @@ function makeHarness(
       eventLog: {
         append: async (event) => {
           events.push(event);
+          lsn += 1;
+          return lsn;
         },
       },
     },
@@ -235,6 +238,8 @@ describe("createCodexCliRunner", () => {
       "finished",
     ]);
     expect(harness.costEntries[0]?.amountMicroUsd).toBe(asMicroUsd(246));
+    expect(harness.costEntries[0]?.receiptId).toBe(receiptId);
+    expect(harness.costEntries[0]?.taskId).toBe(taskId);
     expect(harness.costEntries[0]?.units.inputTokens).toBe(123);
     expect(harness.receipts).toHaveLength(1);
     expect(harness.receipts[0]?.providerKind).toBe(asProviderKind("openai"));
@@ -295,10 +300,11 @@ describe("createCodexCliRunner", () => {
       resolved = true;
     });
     await Promise.resolve();
+    await Promise.resolve();
 
-    expect(harness.child.signals).toEqual(["SIGINT"]);
+    expect(harness.child.signals).toEqual(["SIGTERM"]);
     await vi.advanceTimersByTimeAsync(50);
-    expect(harness.child.signals).toEqual(["SIGINT", "SIGKILL"]);
+    expect(harness.child.signals).toEqual(["SIGTERM", "SIGKILL"]);
     expect(resolved).toBe(false);
 
     harness.child.exit(1, "SIGKILL");
@@ -338,6 +344,66 @@ describe("createCodexCliRunner", () => {
     );
     expect(summaries).toHaveLength(1);
     expect(events.some((event) => event.kind === "finished")).toBe(true);
+  });
+
+  it("redacts secret material from stdout, stderr, and receipts", async () => {
+    const credentialFixture = "abcdefghijklmnop";
+    const harness = makeHarness({ secret: credentialFixture });
+    const spawnRunner = makeSpawnRunner(harness);
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout("--------\n");
+    harness.child.writeStdout(`final ${credentialFixture}\n`);
+    harness.child.writeStderr(`stderr ${credentialFixture.slice(0, 12)}`);
+    harness.child.exit(0);
+    const events = await eventsPromise;
+    const serialized = JSON.stringify(events);
+
+    expect(serialized).not.toContain(credentialFixture);
+    expect(serialized).not.toContain(credentialFixture.slice(0, 12));
+    expect(serialized).toContain("<redacted>");
+    expect(harness.receipts[0]?.finalMessage?.toString()).toBe("final <redacted>\n");
+  });
+
+  it("rejects negative usage and cost ceiling overflows", async () => {
+    const negativeHarness = makeHarness();
+    const negativeRunner = await makeSpawnRunner(negativeHarness)(
+      spawnRequest(),
+      negativeHarness.deps,
+    );
+    const negativeEventsPromise = collectAll(negativeRunner.events());
+    negativeHarness.child.writeStdout("tokens used: -1\n");
+    await Promise.resolve();
+    await Promise.resolve();
+    negativeHarness.child.exit(1, "SIGTERM");
+    const negativeEvents = await negativeEventsPromise;
+
+    expect(
+      negativeEvents.some(
+        (event) => event.kind === "failed" && event.code === "provider_returned_error",
+      ),
+    ).toBe(true);
+    expect(negativeEvents.some((event) => event.kind === "cost")).toBe(false);
+
+    const ceilingHarness = makeHarness();
+    const ceilingRunner = await makeSpawnRunner(ceilingHarness)(
+      { ...spawnRequest(), costCeilingMicroUsd: asMicroUsd(1) },
+      ceilingHarness.deps,
+    );
+    const ceilingEventsPromise = collectAll(ceilingRunner.events());
+    ceilingHarness.child.writeStdout("tokens used: 123\n");
+    await Promise.resolve();
+    await Promise.resolve();
+    ceilingHarness.child.exit(1, "SIGTERM");
+    const ceilingEvents = await ceilingEventsPromise;
+
+    expect(
+      ceilingEvents.some(
+        (event) => event.kind === "failed" && event.code === "cost_ceiling_exceeded",
+      ),
+    ).toBe(true);
+    expect(ceilingEvents.some((event) => event.kind === "cost")).toBe(false);
   });
 
   it("rejects unavailable trusted Codex binaries at construction", () => {

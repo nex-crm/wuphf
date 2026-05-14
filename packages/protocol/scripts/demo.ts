@@ -60,6 +60,7 @@ import {
   isCostAuditEventKind,
   isLoopbackRemoteAddress,
   isMicroUsd,
+  isRunnerFailureCode,
   isStreamEventKind,
   isWsFrameType,
   lsnFromV1Number,
@@ -73,6 +74,7 @@ import {
   MAX_WEBAUTHN_ASSERTION_BYTES,
   MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND,
   type ReceiptSnapshot,
+  RUNNER_FAILURE_CODE_VALUES,
   receiptFromJson,
   receiptToJson,
   runnerEventFromJson,
@@ -1171,6 +1173,49 @@ expectThrows(
       at: "2026-05-08T18:00:02Z",
     }),
   /ISO8601 UTC millisecond/,
+);
+expectEqual(
+  "runner failure code registry exposes stable machine codes",
+  RUNNER_FAILURE_CODE_VALUES.includes("cost_ceiling_exceeded"),
+  true,
+);
+expectEqual(
+  "runner failure code guard accepts stable machine codes",
+  isRunnerFailureCode("cost_ceiling_exceeded"),
+  true,
+);
+expectEqual(
+  "runner failure code guard rejects unknown values",
+  isRunnerFailureCode("bogus"),
+  false,
+);
+const runnerFailedEvent = runnerEventFromJson({
+  schemaVersion: 1,
+  kind: "failed",
+  runnerId: "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+  error: "usage exceeded configured cost ceiling",
+  code: "cost_ceiling_exceeded",
+  at: "2026-05-08T18:00:03.000Z",
+});
+expectEqual("runner failed event carries stable code", runnerEventToJsonValue(runnerFailedEvent), {
+  schemaVersion: 1,
+  kind: "failed",
+  runnerId: "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+  error: "usage exceeded configured cost ceiling",
+  code: "cost_ceiling_exceeded",
+  at: "2026-05-08T18:00:03.000Z",
+});
+expectThrows(
+  () =>
+    runnerEventFromJson({
+      schemaVersion: 1,
+      kind: "failed",
+      runnerId: "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+      error: "provider returned a bad response",
+      code: "not_a_stable_code",
+      at: "2026-05-08T18:00:03.000Z",
+    }),
+  /RunnerFailureCode/,
 );
 
 // ──────────────────────────────────────────────────────────────────────────

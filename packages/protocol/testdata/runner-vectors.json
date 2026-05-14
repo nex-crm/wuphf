@@ -123,6 +123,7 @@
         "kind": "failed",
         "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
         "error": "receipt write failed",
+        "code": "receipt_write_failed",
         "at": "2026-05-08T18:00:04.000Z"
       }
     }

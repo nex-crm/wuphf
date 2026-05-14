@@ -3,7 +3,6 @@ import { randomBytes } from "node:crypto";
 import {
   type AgentId,
   asAgentSlug,
-  asMicroUsd,
   asProviderKind,
   asReceiptId,
   asRunnerId,
@@ -15,6 +14,7 @@ import {
   type ReceiptId,
   type ReceiptSnapshot,
   type RunnerEvent,
+  type RunnerFailureCode,
   type RunnerId,
   type RunnerSpawnRequest,
   SanitizedString,
@@ -23,7 +23,17 @@ import {
 } from "@wuphf/protocol";
 
 import { ReceiptWriteFailed, RunnerSpawnFailed } from "../errors.ts";
+import { chunkStdio } from "../internal/chunk.ts";
+import {
+  errorMessage,
+  RunnerFailure,
+  runnerFailureFromError,
+  type TerminalCleanupTarget,
+  terminalCleanup,
+} from "../internal/cleanup.ts";
+import { trustedCostModel, validatedCostEntry } from "../internal/cost.ts";
 import { DEFAULT_MAX_EVENT_HISTORY, RunnerEventHub } from "../internal/event-hub.ts";
+import { createSecretRedactor, type SecretRedactor } from "../internal/redact.ts";
 import { LifecycleStateMachine } from "../lifecycle.ts";
 import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
 
@@ -114,16 +124,18 @@ class OpenAICompatAgentRunner implements AgentRunner {
   readonly #lifecycle: LifecycleStateMachine;
   readonly #now: () => Date;
   readonly #providerKind: ProviderKind;
-  readonly #receiptIdFactory: () => ReceiptId;
+  readonly #receiptId: ReceiptId;
+  readonly #redact: SecretRedactor;
   readonly #request: RunnerSpawnRequest;
   readonly #runnerOptions: OpenAICompatRunnerOptions;
   readonly #secret: string;
-  readonly #taskIdFactory: () => TaskId;
+  readonly #taskId: TaskId;
   #costEmitted = false;
   #done: Promise<void> | null = null;
   #failed = false;
   #finalText = "";
   #lastUsage: OpenAICompatUsage | null = null;
+  #runSettled: Promise<void> | null = null;
   #startedAt: Date;
   #terminatePromise: Promise<void> | null = null;
   #terminateRequested = false;
@@ -148,21 +160,29 @@ class OpenAICompatAgentRunner implements AgentRunner {
     this.#lifecycle = new LifecycleStateMachine(args.runnerId);
     this.#now = args.now;
     this.#providerKind = providerKindForScope(CredentialHandle.scope(args.deps.credential));
-    this.#receiptIdFactory = args.receiptIdFactory;
+    this.#receiptId = args.receiptIdFactory();
+    this.#redact = createSecretRedactor(args.secret);
     this.#request = args.request;
     this.#runnerOptions = args.runnerOptions;
     this.#secret = args.secret;
     this.#startedAt = args.now();
-    this.#taskIdFactory = args.taskIdFactory;
+    this.#taskId = args.request.taskId ?? args.taskIdFactory();
   }
 
-  events() {
-    return this.#hub.events();
+  events(options?: Parameters<RunnerEventHub["events"]>[0]) {
+    return this.#hub.events(options);
+  }
+
+  eventRecords(options?: Parameters<RunnerEventHub["eventRecords"]>[0]) {
+    return this.#hub.eventRecords(options);
   }
 
   start(): void {
     if (this.#done !== null) return;
-    this.#done = this.#run().finally(() => {
+    const runSettled = this.#run();
+    this.#runSettled = runSettled;
+    this.#done = runSettled.finally(async () => {
+      await this.#lifecycle.stopped().catch(() => undefined);
       this.#hub.close();
     });
   }
@@ -170,11 +190,8 @@ class OpenAICompatAgentRunner implements AgentRunner {
   async terminate(): Promise<void> {
     if (this.#terminatePromise === null) {
       this.#terminatePromise = Promise.resolve().then(async () => {
-        const transitioned = this.#lifecycle.beginStopping();
-        if (transitioned) {
-          this.#terminateRequested = true;
-          this.#abortController.abort(new DOMException("terminated", "AbortError"));
-        }
+        const failure = new RunnerFailure("runner terminated by request", "terminated_by_request");
+        await this.#cleanupWithFailure(failure, "terminated_by_request", 1, true);
         await (this.#done ?? this.#lifecycle.stopped());
       });
     }
@@ -208,9 +225,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
           status: response.status,
           statusText: response.statusText,
         });
-        await this.#fail(message);
-        this.#lifecycle.markStopped({ exitCode: 1, error: message });
-        return;
+        throw new RunnerFailure(message, "provider_returned_error");
       }
       await this.#emit({ kind: "started", runnerId: this.id, at: this.#isoNow() });
       if (auth.warning !== undefined) {
@@ -226,9 +241,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
         const message = failureMessage("openai_compat_stream_ended_without_done", {
           exitCode: 1,
         });
-        await this.#fail(message);
-        this.#lifecycle.markStopped({ exitCode: 1, error: message });
-        return;
+        throw new RunnerFailure(message, "unrecognized_provider_response");
       }
       if (!this.#costEmitted) {
         await this.#emitCost(zeroUsage(), "provider_did_not_report_usage");
@@ -236,9 +249,8 @@ class OpenAICompatAgentRunner implements AgentRunner {
       await this.#writeReceiptAndFinish(0);
       this.#lifecycle.markStopped({ exitCode: 0 });
     } catch (error) {
-      const message = this.#failureMessageForCaughtError(error, timeoutSignal);
-      await this.#fail(message);
-      this.#lifecycle.markStopped({ exitCode: 1, error: message });
+      const failure = this.#failureForCaughtError(error, timeoutSignal);
+      await this.#cleanupWithFailure(failure, "network_failed", 1);
     }
   }
 
@@ -339,8 +351,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
     const parsed = parseJsonRecord(payload, "openai_compat_sse_json_invalid");
     const content = extractDeltaContent(parsed);
     if (content.length > 0) {
-      this.#finalText += content;
-      await this.#emit({ kind: "stdout", runnerId: this.id, chunk: content, at: this.#isoNow() });
+      await this.#emitStdout(content);
     }
     const usage = extractUsage(parsed);
     if (usage !== null && !this.#costEmitted) {
@@ -356,7 +367,7 @@ class OpenAICompatAgentRunner implements AgentRunner {
     this.#lastUsage = usage;
     this.#costEmitted = true;
     const ledgerEntry = this.#costEntry(usage);
-    await this.#deps.costLedger.record(ledgerEntry);
+    await this.#recordCost(ledgerEntry);
     const eventEntry =
       note === undefined
         ? ledgerEntry
@@ -372,11 +383,12 @@ class OpenAICompatAgentRunner implements AgentRunner {
   #costEntry(usage: OpenAICompatUsage): CostLedgerEntry {
     const amount =
       usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
-    return {
-      agentSlug: asAgentSlug(this.agentId),
+    return validatedCostEntry({
+      request: this.#request,
       providerKind: this.#providerKind,
-      model: usage.model ?? this.#request.model ?? DEFAULT_MODEL,
-      amountMicroUsd: asMicroUsd(amount),
+      defaultModel: DEFAULT_MODEL,
+      reportedModel: usage.model,
+      amountMicroUsd: amount,
       units: {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
@@ -384,7 +396,25 @@ class OpenAICompatAgentRunner implements AgentRunner {
         cacheCreationTokens: usage.cacheCreationTokens,
       },
       occurredAt: this.#now(),
-    };
+      receiptId: this.#receiptId,
+      taskId: this.#taskId,
+    });
+  }
+
+  async #emitStdout(text: string): Promise<void> {
+    const redacted = this.#redact(text);
+    for (const chunk of chunkStdio(redacted)) {
+      await this.#emit({ kind: "stdout", runnerId: this.id, chunk, at: this.#isoNow() });
+      this.#finalText += chunk;
+    }
+  }
+
+  async #recordCost(entry: CostLedgerEntry): Promise<void> {
+    try {
+      await this.#deps.costLedger.record(entry);
+    } catch (error) {
+      throw new RunnerFailure(errorMessage(error), "cost_ledger_write_failed", { cause: error });
+    }
   }
 
   async #writeReceiptAndFinish(exitCode: number): Promise<void> {
@@ -396,8 +426,9 @@ class OpenAICompatAgentRunner implements AgentRunner {
       }
     } catch (error) {
       const message = errorMessage(error);
-      await this.#fail(message);
-      throw new ReceiptWriteFailed(this.id, message, { cause: error });
+      throw new RunnerFailure(message, "receipt_write_failed", {
+        cause: new ReceiptWriteFailed(this.id, message, { cause: error }),
+      });
     }
     await this.#emit({
       kind: "receipt",
@@ -414,16 +445,16 @@ class OpenAICompatAgentRunner implements AgentRunner {
       usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
     const finishedAt = this.#now();
     return {
-      id: this.#receiptIdFactory(),
+      id: this.#receiptId,
       agentSlug: asAgentSlug(this.agentId),
-      taskId: this.#request.taskId ?? this.#taskIdFactory(),
+      taskId: this.#taskId,
       triggerKind: "human_message",
       triggerRef: this.id,
       startedAt: this.#startedAt,
       finishedAt,
       status: "ok",
       providerKind: this.#providerKind,
-      model: usage.model ?? this.#request.model ?? DEFAULT_MODEL,
+      model: trustedCostModel({ request: this.#request, defaultModel: DEFAULT_MODEL }),
       promptHash: sha256Hex(this.#request.prompt),
       toolManifest: sha256Hex("openai-compat-http:v1"),
       toolCalls: [],
@@ -446,43 +477,94 @@ class OpenAICompatAgentRunner implements AgentRunner {
   }
 
   async #emit(event: RunnerEvent): Promise<void> {
-    await this.#deps.eventLog.append(event);
-    this.#hub.publish(event);
+    const redacted = redactEvent(event, this.#redact);
+    let lsn: number;
+    try {
+      lsn = await this.#deps.eventLog.append(redacted);
+    } catch (error) {
+      throw new RunnerFailure(errorMessage(error), "event_log_write_failed", { cause: error });
+    }
+    this.#hub.publish(redacted, lsn);
   }
 
-  async #fail(message: string): Promise<void> {
+  async #cleanupWithFailure(
+    error: unknown,
+    fallbackCode: RunnerFailureCode,
+    exitCode: number,
+    waitForDone = false,
+  ): Promise<void> {
+    const failure = runnerFailureFromError(error, fallbackCode);
+    const message = this.#redact(failure.message);
     if (this.#failed) return;
     this.#failed = true;
     const event: RunnerEvent = {
       kind: "failed",
       runnerId: this.id,
       error: truncateUtf8(message, SAFE_FAILURE_MESSAGE_BYTES),
+      code: failure.code,
       at: this.#isoNow(),
     };
-    try {
-      await this.#deps.eventLog.append(event);
-    } finally {
-      this.#hub.publish(event);
-    }
+    await terminalCleanup({
+      lifecycle: this.#lifecycle,
+      target: this.#cleanupTarget(failure.code === "terminated_by_request", waitForDone),
+      eventLog: this.#deps.eventLog,
+      eventHub: this.#hub,
+      failureEvent: event,
+      stopped: { exitCode, error: event.error },
+    });
   }
 
-  #failureMessageForCaughtError(error: unknown, timeoutSignal: AbortSignal): string {
+  #failureForCaughtError(error: unknown, timeoutSignal: AbortSignal): RunnerFailure {
+    if (error instanceof RunnerFailure) return error;
     const cause = failureCause(error);
     if (this.#terminateRequested) {
-      return failureMessage("openai_compat_aborted", { cause, exitCode: 1 });
+      return new RunnerFailure(
+        failureMessage("openai_compat_aborted", { cause, exitCode: 1 }),
+        "terminated_by_request",
+        { cause: error },
+      );
     }
     if (timeoutSignal.aborted) {
-      return failureMessage("openai_compat_timeout", {
-        cause,
-        exitCode: 1,
-        timeoutMs: this.#runnerOptions.timeoutMs ?? OPENAI_COMPAT_DEFAULT_TIMEOUT_MS,
-      });
+      return new RunnerFailure(
+        failureMessage("openai_compat_timeout", {
+          cause,
+          exitCode: 1,
+          timeoutMs: this.#runnerOptions.timeoutMs ?? OPENAI_COMPAT_DEFAULT_TIMEOUT_MS,
+        }),
+        "subprocess_timed_out",
+        { cause: error },
+      );
     }
-    return failureMessage("openai_compat_network_error", { cause, exitCode: 1 });
+    return new RunnerFailure(
+      failureMessage("openai_compat_network_error", { cause, exitCode: 1 }),
+      "network_failed",
+      { cause: error },
+    );
   }
 
   #isoNow(): string {
     return this.#now().toISOString();
+  }
+
+  #cleanupTarget(markTerminated: boolean, waitForDone: boolean): TerminalCleanupTarget {
+    return {
+      kind: "abort",
+      abort: {
+        abort: () => {
+          if (markTerminated) {
+            this.#terminateRequested = true;
+          }
+          if (!this.#abortController.signal.aborted) {
+            this.#abortController.abort(new DOMException("terminated", "AbortError"));
+          }
+        },
+        wait: async () => {
+          if (waitForDone) {
+            await (this.#runSettled ?? this.#lifecycle.stopped()).catch(() => undefined);
+          }
+        },
+      },
+    };
   }
 }
 
@@ -640,7 +722,10 @@ function nonNegativeInteger(
   if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
     return value;
   }
-  throw new Error(`${path}: must be a non-negative safe integer`);
+  throw new RunnerFailure(
+    `${path}: must be a non-negative safe integer`,
+    "provider_returned_error",
+  );
 }
 
 function parseJsonRecord(payload: string, code: string): Readonly<Record<string, unknown>> {
@@ -648,10 +733,17 @@ function parseJsonRecord(payload: string, code: string): Readonly<Record<string,
   try {
     parsed = JSON.parse(payload);
   } catch (error) {
-    throw new Error(failureMessage(code, { cause: failureCause(error) }));
+    throw new RunnerFailure(
+      failureMessage(code, { cause: failureCause(error) }),
+      "unrecognized_provider_response",
+      { cause: error },
+    );
   }
   if (!isRecord(parsed)) {
-    throw new Error(failureMessage(code, { cause: { message: "data payload was not an object" } }));
+    throw new RunnerFailure(
+      failureMessage(code, { cause: { message: "data payload was not an object" } }),
+      "unrecognized_provider_response",
+    );
   }
   return parsed;
 }
@@ -694,10 +786,6 @@ function failureCause(error: unknown): FailureCause {
   return { message: String(error) };
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function truncateUtf8(value: string, maxBytes: number): string {
   const encoded = new TextEncoder().encode(value);
   if (encoded.byteLength <= maxBytes) return value;
@@ -721,6 +809,18 @@ function recordValue(record: Readonly<Record<string, unknown>>, key: string): un
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function redactEvent(event: RunnerEvent, redact: SecretRedactor): RunnerEvent {
+  switch (event.kind) {
+    case "stdout":
+    case "stderr":
+      return { ...event, chunk: redact(event.chunk) };
+    case "failed":
+      return { ...event, error: redact(event.error) };
+    default:
+      return event;
+  }
 }
 
 function randomRunnerId(): RunnerId {

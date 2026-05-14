@@ -10,6 +10,7 @@ import type {
   RunnerKind,
   RunnerSpawnRequest,
 } from "@wuphf/protocol";
+import type { RunnerEventRecord, RunnerEventStreamOptions } from "./internal/event-hub.ts";
 
 export type Receipt = ReceiptSnapshot;
 
@@ -19,7 +20,10 @@ export interface AgentRunner {
   readonly agentId: AgentId;
 
   /** Returns a stream of events. Cancellation through .cancel() on the reader. */
-  events(): ReadableStream<RunnerEvent>;
+  events(options?: RunnerEventStreamOptions): ReadableStream<RunnerEvent>;
+
+  /** Returns events with durable event-log metadata for broker SSE framing. */
+  eventRecords?(options?: RunnerEventStreamOptions): ReadableStream<RunnerEventRecord>;
 
   /**
    * Terminates the runner. Idempotent. Returns when the subprocess or request
@@ -40,9 +44,11 @@ export interface RunnerSpawnDeps {
     readonly put: (receipt: Receipt) => Promise<{ readonly stored: boolean }>;
   };
   readonly eventLog: {
-    readonly append: (event: RunnerEvent) => Promise<void>;
+    readonly append: (event: RunnerEvent) => Promise<number>;
   };
 }
+
+export type RunnerEventLog = RunnerSpawnDeps["eventLog"];
 
 export type SpawnAgentRunner = (
   request: RunnerSpawnRequest,

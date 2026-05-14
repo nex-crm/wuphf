@@ -59,7 +59,7 @@ describe("createAgentRunnerForBroker", () => {
       },
       costLedger: { record: async () => undefined },
       receiptStore: new InMemoryReceiptStore(),
-      eventLog: { append: async () => undefined },
+      eventLog: { append: async () => 1 },
       spawnRunner: async (_request, deps) => {
         await expect(deps.secretReader(deps.credential)).resolves.toBe("secret");
         return createFakeAgentRunner({
@@ -177,7 +177,7 @@ function depsForOwnership(input: {
     },
     costLedger: { record: async () => undefined },
     receiptStore: new InMemoryReceiptStore(),
-    eventLog: { append: async () => undefined },
+    eventLog: { append: async () => 1 },
     spawnRunner: async (_request: RunnerSpawnRequest, deps) => {
       await deps.secretReader(deps.credential);
       return createFakeAgentRunner({

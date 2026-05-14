@@ -21,7 +21,7 @@ export interface RunnerCostLedger {
 }
 
 export interface RunnerEventLog {
-  append(event: RunnerEvent): Promise<void>;
+  append(event: RunnerEvent): Promise<number>;
 }
 
 export interface AgentRunnerFactoryDeps {

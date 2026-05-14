@@ -27,6 +27,13 @@ authority.
    `Pending -> Running -> Stopping -> Stopped`. Consumers read the
    `ReadableStream`; they never write state. `terminate()` resolves only after
    the subprocess has actually exited.
+6. **Provider secrets stay broker-scoped.** Adapters may pass the resolved
+   secret to local CLIs through environment variables only when the CLI has no
+   stdin/fd secret path. This is acceptable because process environment
+   inspection is same-user-readable on supported OSes, and the same OS
+   same-user boundary is the guarantee branch 8's per-agent ACLs depend on.
+   Every emitted `stdout`, `stderr`, `failed` message, and receipt body must
+   pass through the shared secret redactor.
 
 ## Validation
 

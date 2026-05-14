@@ -3,47 +3,110 @@ import { ReadableStream } from "node:stream/web";
 import type { RunnerEvent } from "@wuphf/protocol";
 
 export const DEFAULT_MAX_EVENT_HISTORY = 1_000;
+export const DEFAULT_MAX_SUBSCRIBER_BACKLOG = 1_000;
+
+export interface RunnerEventRecord {
+  readonly event: RunnerEvent;
+  readonly lsn?: number | undefined;
+}
+
+interface SubscriberState {
+  readonly controller: ReadableStreamDefaultController<RunnerEventRecord>;
+  backlog: number;
+}
+
+export interface RunnerEventStreamOptions {
+  readonly afterLsn?: number | undefined;
+}
 
 export class RunnerEventHub {
-  readonly #history: RunnerEvent[] = [];
-  readonly #controllers = new Set<ReadableStreamDefaultController<RunnerEvent>>();
+  readonly #history: RunnerEventRecord[] = [];
+  readonly #subscribers = new Map<
+    ReadableStreamDefaultController<RunnerEventRecord>,
+    SubscriberState
+  >();
   #closed = false;
 
-  constructor(readonly maxHistory = DEFAULT_MAX_EVENT_HISTORY) {}
+  constructor(
+    readonly maxHistory = DEFAULT_MAX_EVENT_HISTORY,
+    readonly maxSubscriberBacklog = DEFAULT_MAX_SUBSCRIBER_BACKLOG,
+  ) {}
 
-  events(): ReadableStream<RunnerEvent> {
-    let activeController: ReadableStreamDefaultController<RunnerEvent> | null = null;
+  events(options: RunnerEventStreamOptions = {}): ReadableStream<RunnerEvent> {
+    const records = this.eventRecords(options);
     return new ReadableStream<RunnerEvent>({
+      async start(controller) {
+        const reader = records.getReader();
+        try {
+          while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            controller.enqueue(next.value.event);
+          }
+          controller.close();
+        } catch (error) {
+          controller.error(error);
+        }
+      },
+      cancel() {
+        return records.cancel();
+      },
+    });
+  }
+
+  eventRecords(options: RunnerEventStreamOptions = {}): ReadableStream<RunnerEventRecord> {
+    let activeController: ReadableStreamDefaultController<RunnerEventRecord> | null = null;
+    return new ReadableStream<RunnerEventRecord>({
       start: (controller) => {
         activeController = controller;
-        for (const event of this.#history) {
-          controller.enqueue(event);
+        for (const record of this.#history) {
+          if (
+            options.afterLsn !== undefined &&
+            record.lsn !== undefined &&
+            record.lsn <= options.afterLsn
+          ) {
+            continue;
+          }
+          controller.enqueue(record);
         }
         if (this.#closed) {
           controller.close();
           return;
         }
-        this.#controllers.add(controller);
+        this.#subscribers.set(controller, { controller, backlog: 0 });
       },
       cancel: () => {
         if (activeController !== null) {
-          this.#controllers.delete(activeController);
+          this.#subscribers.delete(activeController);
         }
       },
     });
   }
 
-  publish(event: RunnerEvent): void {
+  publish(event: RunnerEvent, lsn?: number | undefined): void {
     if (this.#closed) return;
-    this.#history.push(event);
+    const record = lsn === undefined ? { event } : { event, lsn };
+    this.#history.push(record);
     if (this.#history.length > this.maxHistory) {
       this.#history.shift();
     }
-    for (const controller of this.#controllers) {
+    for (const state of this.#subscribers.values()) {
+      const controller = state.controller;
       try {
-        controller.enqueue(event);
+        if ((controller.desiredSize ?? 1) <= 0) {
+          state.backlog += 1;
+        } else {
+          state.backlog = 0;
+        }
+        if (state.backlog > this.maxSubscriberBacklog) {
+          controller.enqueue({ event: disconnectEvent(event, this.maxSubscriberBacklog) });
+          controller.close();
+          this.#subscribers.delete(controller);
+          continue;
+        }
+        controller.enqueue(record);
       } catch {
-        this.#controllers.delete(controller);
+        this.#subscribers.delete(controller);
       }
     }
   }
@@ -51,13 +114,22 @@ export class RunnerEventHub {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    for (const controller of this.#controllers) {
+    for (const controller of this.#subscribers.keys()) {
       try {
         controller.close();
       } catch {
         // Already closed by a consumer cancellation.
       }
     }
-    this.#controllers.clear();
+    this.#subscribers.clear();
   }
+}
+
+function disconnectEvent(source: RunnerEvent, maxBacklog: number): RunnerEvent {
+  return {
+    kind: "failed",
+    runnerId: source.runnerId,
+    error: JSON.stringify({ reason: "subscriber_backpressure_exceeded", maxBacklog }),
+    at: source.at,
+  };
 }

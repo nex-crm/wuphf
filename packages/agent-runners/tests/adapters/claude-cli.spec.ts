@@ -6,6 +6,7 @@ import {
   asAgentId,
   asCredentialHandleId,
   asCredentialScope,
+  asMicroUsd,
   asReceiptId,
   asRunnerId,
   asTaskId,
@@ -50,7 +51,7 @@ class FakeClaudeChild extends EventEmitter implements ClaudeCliChildProcess {
 
   kill(signal: NodeJS.Signals = "SIGTERM"): boolean {
     this.signals.push(signal);
-    if (signal === "SIGINT") {
+    if (signal === "SIGTERM" || signal === "SIGKILL") {
       this.stdout.end();
       this.stderr.end();
       queueMicrotask(() => this.emit("exit", 130, signal));
@@ -95,6 +96,7 @@ interface Harness {
 function makeHarness(
   args: {
     readonly receiptPut?: ((receipt: Receipt) => Promise<{ readonly stored: boolean }>) | undefined;
+    readonly secret?: string | undefined;
   } = {},
 ): Harness {
   const child = new FakeClaudeChild();
@@ -102,6 +104,7 @@ function makeHarness(
   const events: RunnerEvent[] = [];
   const receipts: Receipt[] = [];
   const secretReads: CredentialHandle[] = [];
+  let lsn = 0;
   const receiptPut =
     args.receiptPut ??
     (async (receipt: Receipt) => {
@@ -118,13 +121,15 @@ function makeHarness(
       credential,
       secretReader: async (handle) => {
         secretReads.push(handle);
-        return "sk-ant-こんにちは";
+        return args.secret ?? "sk-ant-こんにちは";
       },
       costLedger: { record: async () => undefined },
       receiptStore: { put: receiptPut },
       eventLog: {
         append: async (event) => {
           events.push(event);
+          lsn += 1;
+          return lsn;
         },
       },
     },
@@ -166,6 +171,22 @@ function assistantLine(text: string): string {
         output_tokens: 5,
         cache_read_input_tokens: 2,
         cache_creation_input_tokens: 3,
+      },
+    },
+  })}\n`;
+}
+
+function usageLine(inputTokens: number, model = "claude-sonnet-4-7"): string {
+  return `${JSON.stringify({
+    type: "assistant",
+    message: {
+      model,
+      content: [],
+      usage: {
+        input_tokens: inputTokens,
+        output_tokens: 5,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
       },
     },
   })}\n`;
@@ -216,6 +237,12 @@ describe("createClaudeCliRunner", () => {
       "finished",
     ]);
     expect(harness.events.map((event) => event.kind)).toEqual(events.map((event) => event.kind));
+    const cost = events.find((event) => event.kind === "cost");
+    expect(cost?.kind).toBe("cost");
+    if (cost?.kind === "cost") {
+      expect(cost.entry.receiptId).toBe(receiptId);
+      expect(cost.entry.taskId).toBe(taskId);
+    }
     expect(harness.receipts).toHaveLength(1);
     expect(harness.receipts[0]?.id).toBe(receiptId);
     expect(harness.receipts[0]?.taskId).toBe(taskId);
@@ -281,7 +308,7 @@ describe("createClaudeCliRunner", () => {
     expect(events.some((event) => event.kind === "finished")).toBe(false);
   });
 
-  it("terminates during streaming with SIGINT and waits for process exit", async () => {
+  it("terminates during streaming with SIGTERM and waits for process exit", async () => {
     const harness = makeHarness();
     const spawnRunner = createClaudeCliRunner({
       binaryPath: "/usr/bin/claude",
@@ -300,10 +327,10 @@ describe("createClaudeCliRunner", () => {
     await runner.terminate({ gracePeriodMs: 50 });
     const events = await eventsPromise;
 
-    expect(harness.child.signals).toEqual(["SIGINT"]);
-    expect(events.some((event) => event.kind === "failed" && event.error.includes("SIGINT"))).toBe(
-      true,
-    );
+    expect(harness.child.signals).toEqual(["SIGTERM"]);
+    expect(
+      events.some((event) => event.kind === "failed" && event.code === "terminated_by_request"),
+    ).toBe(true);
   });
 
   it("handles trailing newlines without emitting empty failures", async () => {
@@ -327,6 +354,113 @@ describe("createClaudeCliRunner", () => {
     const events = await eventsPromise;
 
     expect(events.filter((event) => event.kind === "failed")).toHaveLength(0);
+  });
+
+  it("redacts secret material from stdout, stderr, failures, and receipts", async () => {
+    const credentialFixture = "abcdefghijklmnop";
+    const harness = makeHarness({ secret: credentialFixture });
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      receiptIdFactory: () => receiptId,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+    });
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout(assistantLine(`stdout ${credentialFixture}`));
+    harness.child.writeStderr(`stderr ${credentialFixture.slice(0, 12)}`);
+    harness.child.exit(0);
+    const events = await eventsPromise;
+    const serialized = JSON.stringify(events);
+
+    expect(serialized).not.toContain(credentialFixture);
+    expect(serialized).not.toContain(credentialFixture.slice(0, 12));
+    expect(serialized).toContain("<redacted>");
+    expect(harness.receipts[0]?.finalMessage?.toString()).toBe("stdout <redacted>");
+  });
+
+  it("fails negative usage and cost ceiling overflows before recording cost", async () => {
+    const harness = makeHarness();
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+    });
+
+    const runner = await spawnRunner(
+      { ...spawnRequest(), costCeilingMicroUsd: asMicroUsd(1) },
+      harness.deps,
+    );
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout(usageLine(10));
+    const events = await eventsPromise;
+
+    expect(
+      events.some((event) => event.kind === "failed" && event.code === "cost_ceiling_exceeded"),
+    ).toBe(true);
+    expect(events.some((event) => event.kind === "cost")).toBe(false);
+  });
+
+  it("rejects negative provider usage", async () => {
+    const harness = makeHarness();
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+    });
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout(usageLine(-1));
+    const events = await eventsPromise;
+
+    expect(
+      events.some((event) => event.kind === "failed" && event.code === "provider_returned_error"),
+    ).toBe(true);
+    expect(events.some((event) => event.kind === "cost")).toBe(false);
+  });
+
+  it("clamps provider-reported model identifiers to the request model", async () => {
+    const harness = makeHarness();
+    const spawnRunner = createClaudeCliRunner({
+      binaryPath: "/usr/bin/claude",
+      enforceTrustedCommand: false,
+      now: () => fixedDate,
+      receiptIdFactory: () => receiptId,
+      runnerIdFactory: () => runnerId,
+      spawner: (command, args, options) => {
+        harness.calls.push({ command, args, options });
+        return harness.child;
+      },
+    });
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout(usageLine(10, "claude-sonnet-4-7\nid: injected"));
+    harness.child.exit(0);
+    const events = await eventsPromise;
+    const cost = events.find((event) => event.kind === "cost");
+
+    expect(cost?.kind).toBe("cost");
+    if (cost?.kind === "cost") {
+      expect(cost.entry.model).toBe("claude-sonnet-4-7");
+    }
   });
 
   it("rejects unavailable trusted Claude binaries at construction", () => {

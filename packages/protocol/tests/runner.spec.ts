@@ -13,6 +13,7 @@ import {
   MAX_RUNNER_MODEL_BYTES,
   MAX_RUNNER_PROMPT_BYTES,
   MAX_RUNNER_STDIO_CHUNK_BYTES,
+  RUNNER_FAILURE_CODE_VALUES,
   RUNNER_KIND_VALUES,
   RUNNER_SCHEMA_VERSION,
   runnerEventFromJson,
@@ -66,6 +67,7 @@ function recordWithAccessor(
 describe("RunnerId and RunnerKind", () => {
   it("accepts the frozen runner kinds and branded ids", () => {
     expect(RUNNER_KIND_VALUES).toEqual(["claude-cli", "codex-cli", "openai-compat"]);
+    expect(RUNNER_FAILURE_CODE_VALUES).toContain("event_log_write_failed");
     expect(isRunnerKind("claude-cli")).toBe(true);
     expect(isRunnerKind("bogus")).toBe(false);
     expect(asRunnerId(runnerId)).toBe(runnerId);
@@ -266,6 +268,11 @@ describe("RunnerEvent codec", () => {
       { kind: "failed", runnerId, error: "x".repeat(MAX_RUNNER_ERROR_BYTES + 1), at },
       /runnerEvent.error: exceeds/,
     ],
+    [
+      "failed invalid code",
+      { kind: "failed", runnerId, error: "nope", code: "not_a_code", at },
+      /unsupported RunnerFailureCode/,
+    ],
   ])("rejects malformed runner events: %s", (_name, json, error) => {
     expect(() => runnerEventFromJson(json)).toThrow(error);
   });
@@ -282,5 +289,9 @@ describe("RunnerEvent codec", () => {
     const receipt = runnerEventFromJson({ kind: "receipt", runnerId, receiptId, at });
     if (receipt.kind !== "receipt") throw new Error("expected receipt event");
     expect(receipt.receiptId).toBe(receiptId);
+
+    const legacyFailed = runnerEventFromJson({ kind: "failed", runnerId, error: "legacy", at });
+    if (legacyFailed.kind !== "failed") throw new Error("expected failed event");
+    expect(legacyFailed.code).toBeUndefined();
   });
 });

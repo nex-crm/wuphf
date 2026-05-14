@@ -31,14 +31,17 @@ export function createFakeAgentRunner(options: FakeRunnerOptions): FakeAgentRunn
   const lifecycle = new LifecycleStateMachine(id);
   lifecycle.markRunning();
   let terminatePromise: Promise<void> | null = null;
+  let lsn = 0;
   return {
     id,
     kind: options.kind,
     agentId: options.agentId,
-    events: () => hub.events(),
+    events: (streamOptions) => hub.events(streamOptions),
+    eventRecords: (streamOptions) => hub.eventRecords(streamOptions),
     async emit(event) {
       await options.onEvent?.(event);
-      hub.publish(event);
+      lsn += 1;
+      hub.publish(event, lsn);
     },
     async terminate() {
       if (terminatePromise === null) {

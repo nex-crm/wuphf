@@ -32,6 +32,7 @@ export {
   RunnerLifecycleError,
   RunnerSpawnFailed,
 } from "./errors.ts";
+export type { RunnerEventRecord } from "./internal/event-hub.ts";
 export type { LifecyclePhase, LifecycleSnapshot } from "./lifecycle.ts";
 export { LifecycleStateMachine } from "./lifecycle.ts";
 export type { AgentRunner, Receipt, RunnerSpawnDeps, SpawnAgentRunner } from "./runner.ts";

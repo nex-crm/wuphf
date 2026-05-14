@@ -4,6 +4,7 @@ import {
   asAgentId,
   asCredentialHandleId,
   asCredentialScope,
+  asMicroUsd,
   asReceiptId,
   asRunnerId,
   asTaskId,
@@ -83,6 +84,7 @@ function makeHarness(
   args: {
     readonly receiptPut?: ((receipt: Receipt) => Promise<{ readonly stored: boolean }>) | undefined;
     readonly scope?: CredentialScope | undefined;
+    readonly secret?: string | undefined;
   } = {},
 ): Harness {
   const credential = credentialForScope(args.scope ?? asCredentialScope("openai"));
@@ -90,6 +92,7 @@ function makeHarness(
   const events: RunnerEvent[] = [];
   const receipts: Receipt[] = [];
   const secretReads: CredentialHandle[] = [];
+  let lsn = 0;
   const receiptPut =
     args.receiptPut ??
     (async (receipt: Receipt) => {
@@ -106,7 +109,7 @@ function makeHarness(
       credential,
       secretReader: async (handle) => {
         secretReads.push(handle);
-        return "sk-test-secret";
+        return args.secret ?? "sk-test-secret";
       },
       costLedger: {
         record: async (entry) => {
@@ -117,6 +120,8 @@ function makeHarness(
       eventLog: {
         append: async (event) => {
           events.push(event);
+          lsn += 1;
+          return lsn;
         },
       },
     },
@@ -288,8 +293,10 @@ describe("createOpenAICompatRunner", () => {
     expect(harness.costs).toHaveLength(1);
     expect(harness.costs[0]).toMatchObject({
       amountMicroUsd: 15,
-      model: "gpt-5-mini-2026-05-08",
+      model: "gpt-5-mini",
       providerKind: "openai",
+      receiptId,
+      taskId,
       units: {
         inputTokens: 8,
         outputTokens: 5,
@@ -506,6 +513,80 @@ describe("createOpenAICompatRunner", () => {
       ),
     ).toBe(true);
     expect(events.some((event) => event.kind === "finished")).toBe(false);
+  });
+
+  it("redacts secret material from stdout, failed events, and receipts", async () => {
+    const credentialFixture = "abcdefghijklmnop";
+    const harness = makeHarness({ secret: credentialFixture });
+    const stream = new ControlledSseStream();
+    const fetchFn: OpenAICompatFetch = async () =>
+      new Response(stream.body, {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      });
+    const runner = await createSpawner(fetchFn)(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+
+    stream.enqueue(sseData({ choices: [{ delta: { content: `hello ${credentialFixture}` } }] }));
+    stream.enqueue(sseData({ choices: [], usage: { prompt_tokens: 0, completion_tokens: 0 } }));
+    stream.enqueue(doneData());
+    const events = await eventsPromise;
+    const serialized = JSON.stringify(events);
+
+    expect(serialized).not.toContain(credentialFixture);
+    expect(serialized).toContain("<redacted>");
+    expect(harness.receipts[0]?.finalMessage?.toString()).toBe("hello <redacted>");
+
+    const failedHarness = makeHarness({ secret: credentialFixture });
+    const failedFetch: OpenAICompatFetch = async () =>
+      new Response(`upstream ${credentialFixture.slice(0, 12)}`, { status: 503 });
+    const failedRunner = await createSpawner(failedFetch)(spawnRequest(), failedHarness.deps);
+    const failedEvents = await collectAll(failedRunner.events());
+    expect(JSON.stringify(failedEvents)).not.toContain(credentialFixture.slice(0, 12));
+    expect(JSON.stringify(failedEvents)).toContain("<redacted>");
+  });
+
+  it("rejects negative usage and cost ceiling overflows", async () => {
+    const negativeHarness = makeHarness();
+    const negativeStream = new ControlledSseStream();
+    const negativeFetch: OpenAICompatFetch = async () =>
+      new Response(negativeStream.body, {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      });
+    const negativeRunner = await createSpawner(negativeFetch)(spawnRequest(), negativeHarness.deps);
+    const negativeEventsPromise = collectAll(negativeRunner.events());
+    negativeStream.enqueue(sseData({ choices: [], usage: { prompt_tokens: -1 } }));
+    const negativeEvents = await negativeEventsPromise;
+
+    expect(
+      negativeEvents.some(
+        (event) => event.kind === "failed" && event.code === "provider_returned_error",
+      ),
+    ).toBe(true);
+    expect(negativeEvents.some((event) => event.kind === "cost")).toBe(false);
+
+    const ceilingHarness = makeHarness();
+    const ceilingStream = new ControlledSseStream();
+    const ceilingFetch: OpenAICompatFetch = async () =>
+      new Response(ceilingStream.body, {
+        headers: { "Content-Type": "text/event-stream" },
+        status: 200,
+      });
+    const ceilingRunner = await createSpawner(ceilingFetch)(
+      { ...spawnRequest(), costCeilingMicroUsd: asMicroUsd(1) },
+      ceilingHarness.deps,
+    );
+    const ceilingEventsPromise = collectAll(ceilingRunner.events());
+    ceilingStream.enqueue(sseData({ choices: [], usage: { prompt_tokens: 2 } }));
+    const ceilingEvents = await ceilingEventsPromise;
+
+    expect(
+      ceilingEvents.some(
+        (event) => event.kind === "failed" && event.code === "cost_ceiling_exceeded",
+      ),
+    ).toBe(true);
+    expect(ceilingEvents.some((event) => event.kind === "cost")).toBe(false);
   });
 });
 

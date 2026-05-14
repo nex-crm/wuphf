@@ -11,8 +11,15 @@ and Codex CLI adapters. OpenAI-compatible adapters plug into the same
 Runners are untrusted execution clients. They receive a pre-resolved
 `CredentialHandle` plus a broker-injected `secretReader` closure; they never
 hold a `BrokerIdentity` and never import `@wuphf/credentials`. The adapter reads
-the secret once at spawn time, injects it as `ANTHROPIC_API_KEY`, and then only
-emits `RunnerEvent` values from `@wuphf/protocol`.
+the secret once at spawn time and emits only redacted, byte-budgeted
+`RunnerEvent` values from `@wuphf/protocol`.
+
+CLI adapters currently pass provider secrets through environment variables
+because the supported CLIs do not expose stdin or fd-based secret injection.
+That is acceptable only under the local same-user OS boundary: process
+environment inspection is same-user-readable, and branch 8's per-agent ACLs rely
+on that same OS guarantee. Every `stdout`, `stderr`, `failed` message, and
+receipt body passes through the shared redactor before leaving the adapter.
 
 Receipt writes are authoritative. If `receiptStore.put` throws or reports that
 the receipt was not stored, the run emits `failed` and does not emit `finished`.
@@ -31,11 +38,12 @@ construction, rejects group/world-writable binaries, and spawns directly with
 `node:child_process.spawn`. Tests use the injectable `Spawner` seam and do not
 require a real Claude installation.
 
-Claude JSON lines are parsed as they stream. Text deltas emit `stdout` events.
-Usage objects emit `cost` events as they arrive; Claude reports usage at the end
-of each message, so cost placement follows those message boundaries. The event
-queue is capped at 1000 retained events for replay to late subscribers; slow
-live consumers rely on `ReadableStream` backpressure.
+Claude JSON lines are parsed as they stream. Text deltas emit `stdout` events
+split at `MAX_RUNNER_STDIO_CHUNK_BYTES`. Usage objects emit validated `cost`
+events as they arrive; negative usage and per-run cost-ceiling overflow become
+structured `failed` events instead of audit entries. The event queue is capped
+at 1000 retained events for replay to late subscribers; slow live consumers rely
+on bounded `ReadableStream` backpressure.
 
 Real CLI smoke coverage is deferred until a gated
 `WUPHF_REAL_CLAUDE_CLI=1` test lands in a follow-up.
@@ -54,9 +62,9 @@ shape does not carry sandbox or profile overrides; those remain adapter options
 so the wire surface and golden vectors stay unchanged.
 
 Codex text output is parsed block-by-block. Tool execution markers emit
-`stderr` events, `tokens used: <n>` emits a `cost` event, hook lines are ignored,
-and the final block after the last `--------` delimiter is emitted as `stdout`
-chunks capped around 256 bytes. Unknown non-final lines are still forwarded to
+`stderr` events, `tokens used: <n>` emits a validated `cost` event, hook lines
+are ignored, and the final block after the last `--------` delimiter is emitted
+as byte-budgeted `stdout` chunks. Unknown non-final lines are still forwarded to
 `stdout`, and each run emits one parser summary on `stderr` when such lines are
 seen.
 
@@ -64,6 +72,7 @@ Credential injection follows the broker-owned handle scope: `openai` and
 `openai-compat` use `OPENAI_API_KEY`; `anthropic` uses `ANTHROPIC_API_KEY`.
 The environment allowlist mirrors the Claude adapter: provider secret, `LC_ALL`,
 `PATH`, and user home/name values needed by the CLI.
+
 ## OpenAI-Compatible HTTP Adapter
 
 `createOpenAICompatRunner()` drives chat-completions endpoints that implement
@@ -98,10 +107,12 @@ The broker-provided secret is read once at spawn time. Scope `openai` and
 `x-api-key: <secret>`. Other scopes fall back to bearer auth and emit a
 structured `stderr` event documenting the assumption.
 
-SSE `delta.content` chunks become `stdout` events. A provider-reported `usage`
-object becomes a cost ledger entry and `cost` event; if the provider omits
-usage, the adapter records a zero-cost entry and marks the emitted cost event
-with `note: "provider_did_not_report_usage"` for operational visibility.
+SSE `delta.content` chunks become byte-budgeted `stdout` events. A
+provider-reported `usage` object becomes a cost ledger entry and `cost` event;
+if the provider omits usage, the adapter records a zero-cost entry and marks the
+emitted cost event with `note: "provider_did_not_report_usage"` for operational
+visibility. Provider-reported model identifiers are treated as display input;
+cost entries use the trusted request model or the adapter default.
 
 Retries are intentionally not implemented in the adapter. TODO(#NEW): add a
 cost-ledger-aware, idempotency-aware retry middleware above concrete adapters.

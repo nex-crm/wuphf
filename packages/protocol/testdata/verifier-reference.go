@@ -274,6 +274,21 @@ var providerKindSet = map[string]bool{
 	"opencodego":    true,
 }
 
+var runnerFailureCodeSet = map[string]bool{
+	"spawn_failed":                   true,
+	"receipt_write_failed":           true,
+	"event_log_write_failed":         true,
+	"cost_ledger_write_failed":       true,
+	"cost_ceiling_exceeded":          true,
+	"credential_ownership_mismatch":  true,
+	"subprocess_crashed":             true,
+	"subprocess_timed_out":           true,
+	"terminated_by_request":          true,
+	"network_failed":                 true,
+	"provider_returned_error":        true,
+	"unrecognized_provider_response": true,
+}
+
 func loadRunnerFixture() (runnerFixture, error) {
 	fixtureBytes, err := os.ReadFile("runner-vectors.json")
 	if err != nil {
@@ -414,6 +429,7 @@ func validateRunnerEvent(record map[string]interface{}) error {
 		keys["exitCode"] = true
 	case "failed":
 		keys["error"] = true
+		keys["code"] = true
 	default:
 		return fmt.Errorf("runnerEvent.kind: unsupported RunnerEvent kind")
 	}
@@ -458,8 +474,14 @@ func validateRunnerEvent(record map[string]interface{}) error {
 			return fmt.Errorf("runnerEvent.exitCode: must be an integer from 0 to 255")
 		}
 	case "failed":
-		_, err = requiredStringValue(record, "error", "runnerEvent.error")
-		return err
+		if _, err = requiredStringValue(record, "error", "runnerEvent.error"); err != nil {
+			return err
+		}
+		if code, ok, err := optionalString(record, "code", "runnerEvent.code"); err != nil {
+			return err
+		} else if ok && !runnerFailureCodeSet[code] {
+			return fmt.Errorf("runnerEvent.code: unsupported RunnerFailureCode")
+		}
 	}
 	return nil
 }

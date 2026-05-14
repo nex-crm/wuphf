@@ -129,7 +129,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
     // listeners and `wss.close` only run once; subsequent callers wait on
     // the same promise.
     if (stopInflight === null) {
-      stopInflight = doStop(server, wss, logger);
+      stopInflight = doStop(server, wss, logger, runnerRoutes);
     }
     return stopInflight;
   };
@@ -482,7 +482,13 @@ async function listen(server: Server, port: number): Promise<number> {
   });
 }
 
-async function doStop(server: Server, wss: WebSocketServer, logger: BrokerLogger): Promise<void> {
+async function doStop(
+  server: Server,
+  wss: WebSocketServer,
+  logger: BrokerLogger,
+  runnerRoutes: RunnerRouteState | null,
+): Promise<void> {
+  await runnerRoutes?.stop();
   if (!server.listening) {
     logger.info("listener_stop_noop");
     return;

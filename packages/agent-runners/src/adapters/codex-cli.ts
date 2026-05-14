@@ -22,6 +22,7 @@ import {
   type ReceiptId,
   type ReceiptSnapshot,
   type RunnerEvent,
+  type RunnerFailureCode,
   type RunnerId,
   type RunnerSpawnRequest,
   SanitizedString,
@@ -30,7 +31,17 @@ import {
 } from "@wuphf/protocol";
 
 import { CodexCliNotAvailable, ReceiptWriteFailed, RunnerSpawnFailed } from "../errors.ts";
+import { chunkStdio } from "../internal/chunk.ts";
+import {
+  errorMessage,
+  RunnerFailure,
+  runnerFailureFromError,
+  type TerminalCleanupTarget,
+  terminalCleanup,
+} from "../internal/cleanup.ts";
+import { trustedCostModel, validatedCostEntry } from "../internal/cost.ts";
 import { DEFAULT_MAX_EVENT_HISTORY, RunnerEventHub } from "../internal/event-hub.ts";
+import { createSecretRedactor, type SecretRedactor } from "../internal/redact.ts";
 import { LifecycleStateMachine } from "../lifecycle.ts";
 import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
 
@@ -96,7 +107,6 @@ const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const DEFAULT_GRACE_PERIOD_MS = 5_000;
 const DEFAULT_SANDBOX: CodexCliSandboxMode = "workspace-write";
 const DEFAULT_PROFILE = "auto";
-const STDOUT_CHUNK_BYTES = 256;
 
 export function createCodexCliRunner(options: CodexCliAdapterOptions = {}): SpawnAgentRunner {
   const commandPath = resolveCodexCommand(options);
@@ -147,15 +157,18 @@ class CodexCliAgentRunner implements AgentRunner {
   readonly #outputLastMessagePath: string;
   readonly #profile: string;
   readonly #providerKind: ProviderKind;
-  readonly #receiptIdFactory: () => ReceiptId;
+  readonly #receiptId: ReceiptId;
+  readonly #redact: SecretRedactor;
   readonly #request: RunnerSpawnRequest;
   readonly #sandbox: CodexCliSandboxMode;
   readonly #secret: string;
   readonly #secretEnvVar: "ANTHROPIC_API_KEY" | "OPENAI_API_KEY";
   readonly #spawner: CodexCliSpawner;
-  readonly #taskIdFactory: () => TaskId;
+  readonly #taskId: TaskId;
   #child: CodexCliChildProcess | null = null;
+  #childExited = false;
   #done: Promise<void> | null = null;
+  #exitPromise: Promise<ExitResult> | null = null;
   #failed = false;
   #finalText = "";
   #lastCostMicroUsd: MicroUsd = asMicroUsd(0);
@@ -197,17 +210,22 @@ class CodexCliAgentRunner implements AgentRunner {
     this.#outputLastMessagePath = args.outputLastMessagePath;
     this.#profile = args.profile;
     this.#providerKind = args.providerKind;
-    this.#receiptIdFactory = args.receiptIdFactory;
+    this.#receiptId = args.receiptIdFactory();
+    this.#redact = createSecretRedactor(args.secret);
     this.#request = args.request;
     this.#sandbox = args.sandbox;
     this.#secret = args.secret;
     this.#secretEnvVar = args.secretEnvVar;
     this.#spawner = args.spawner;
-    this.#taskIdFactory = args.taskIdFactory;
+    this.#taskId = args.request.taskId ?? args.taskIdFactory();
   }
 
-  events() {
-    return this.#hub.events();
+  events(options?: Parameters<RunnerEventHub["events"]>[0]) {
+    return this.#hub.events(options);
+  }
+
+  eventRecords(options?: Parameters<RunnerEventHub["eventRecords"]>[0]) {
+    return this.#hub.eventRecords(options);
   }
 
   start(): void {
@@ -233,24 +251,27 @@ class CodexCliAgentRunner implements AgentRunner {
         env,
         cwd: this.#request.cwd,
       });
-      const exitPromise = waitForExit(this.#child);
+      this.#childExited = false;
+      this.#exitPromise = waitForExit(this.#child).then((result) => {
+        this.#childExited = true;
+        return result;
+      });
       const stdout = this.#consumeStdout(this.#child.stdout);
       const stderr = this.#consumeStderr(this.#child.stderr);
       await this.#emit({ kind: "started", runnerId: this.id, at: this.#isoNow() });
-      exit = await exitPromise;
-      await Promise.all([stdout, stderr]);
+      [exit] = await Promise.all([this.#exitPromise, stdout, stderr]);
       await this.#emitUnrecognizedSummary();
       if (exit.error !== undefined) {
-        await this.#fail(exit.error.message);
-        this.#lifecycle.markStopped({ exitCode: 1, error: exit.error.message });
-        return;
+        throw new RunnerFailure(exit.error.message, "spawn_failed", { cause: exit.error });
       }
       if (exit.code !== 0) {
         const signalText = exit.signal === null ? "" : ` (${exit.signal})`;
         const message = `Codex CLI exited with code ${exit.code}${signalText}`;
-        await this.#fail(message);
-        this.#lifecycle.markStopped({ exitCode: exit.code, error: message });
-        return;
+        const code =
+          this.#lifecycle.snapshot().phase === "stopping"
+            ? "terminated_by_request"
+            : "subprocess_crashed";
+        throw new RunnerFailure(message, code);
       }
       if (this.#failed) {
         this.#lifecycle.markStopped({ exitCode: 1, error: "runner failed" });
@@ -259,29 +280,15 @@ class CodexCliAgentRunner implements AgentRunner {
       await this.#writeReceiptAndFinish(exit.code);
       this.#lifecycle.markStopped({ exitCode: exit.code });
     } catch (error) {
-      const message = errorMessage(error);
-      await this.#fail(message);
-      this.#lifecycle.markStopped({ exitCode: exit.code, error: message });
+      const fallbackCode = this.#child === null ? "spawn_failed" : "subprocess_crashed";
+      await this.#cleanupWithFailure(error, fallbackCode, exit.code);
     }
   }
 
   async #doTerminate(gracePeriodMs: number): Promise<void> {
-    const transitioned = this.#lifecycle.beginStopping();
-    const child = this.#child;
-    if (transitioned && child !== null) {
-      child.kill("SIGINT");
-      const hardKill = setTimeout(() => {
-        child.kill("SIGKILL");
-      }, gracePeriodMs);
-      hardKill.unref();
-      try {
-        await (this.#done ?? this.#lifecycle.stopped());
-      } finally {
-        clearTimeout(hardKill);
-      }
-      return;
-    }
-    await (this.#done ?? this.#lifecycle.stopped());
+    const failure = new RunnerFailure("runner terminated by request", "terminated_by_request");
+    await this.#cleanupWithFailure(failure, "terminated_by_request", 1, gracePeriodMs);
+    await (this.#done ?? this.#lifecycle.stopped()).catch(() => undefined);
   }
 
   async #consumeStdout(stream: Readable): Promise<void> {
@@ -316,9 +323,16 @@ class CodexCliAgentRunner implements AgentRunner {
 
   async #consumeStderr(stream: Readable): Promise<void> {
     for await (const chunk of stream) {
-      const text = chunkToString(chunk);
+      const text = this.#redact(chunkToString(chunk));
       if (text.length > 0) {
-        await this.#emit({ kind: "stderr", runnerId: this.id, chunk: text, at: this.#isoNow() });
+        for (const stdioChunk of chunkStdio(text)) {
+          await this.#emit({
+            kind: "stderr",
+            runnerId: this.id,
+            chunk: stdioChunk,
+            at: this.#isoNow(),
+          });
+        }
       }
     }
   }
@@ -345,9 +359,12 @@ class CodexCliAgentRunner implements AgentRunner {
       }
       if (isToolExitLine(line)) continue;
       const totalTokens = parseTokensUsedLine(line);
-      if (totalTokens !== null) {
-        await this.#recordTokenUsage(totalTokens);
+      if (totalTokens.kind === "valid") {
+        await this.#recordTokenUsage(totalTokens.value);
         continue;
+      }
+      if (totalTokens.kind === "invalid") {
+        throw new RunnerFailure("Codex CLI emitted invalid token usage", "provider_returned_error");
       }
       this.#unrecognizedLineCount += line.trim().length === 0 ? 0 : 1;
       await this.#emitStdoutText(rawLine, false);
@@ -363,20 +380,23 @@ class CodexCliAgentRunner implements AgentRunner {
     };
     this.#lastUsage = units;
     const model = this.#request.model ?? "codex-cli";
-    const entry: CostLedgerEntry = {
-      agentSlug: asAgentSlug(this.agentId),
+    const amountMicroUsd = this.#estimateCostMicroUsd(model, totalTokens, units);
+    const entry = validatedCostEntry({
+      request: this.#request,
       providerKind: this.#providerKind,
-      model,
-      amountMicroUsd: this.#estimateCostMicroUsd(model, totalTokens, units),
+      defaultModel: "codex-cli",
+      amountMicroUsd,
       units,
       occurredAt: this.#now(),
-    };
+      receiptId: this.#receiptId,
+      taskId: this.#taskId,
+    });
     this.#lastCostMicroUsd = entry.amountMicroUsd;
-    await this.#deps.costLedger.record(entry);
+    await this.#recordCost(entry);
     await this.#emit({ kind: "cost", runnerId: this.id, entry, at: this.#isoNow() });
   }
 
-  #estimateCostMicroUsd(model: string, totalTokens: number, units: CostUnits): MicroUsd {
+  #estimateCostMicroUsd(model: string, totalTokens: number, units: CostUnits): number {
     try {
       const estimate = this.#costEstimator?.({
         model,
@@ -384,19 +404,20 @@ class CodexCliAgentRunner implements AgentRunner {
         totalTokens,
         units,
       });
-      return estimate ?? asMicroUsd(0);
+      return estimate ?? 0;
     } catch {
-      return asMicroUsd(0);
+      return 0;
     }
   }
 
   async #emitStdoutText(text: string, finalMessage: boolean): Promise<void> {
     if (text.length === 0) return;
-    if (finalMessage) {
-      this.#finalText += text;
-    }
-    for (const chunk of chunkText(text, STDOUT_CHUNK_BYTES)) {
+    const redacted = this.#redact(text);
+    for (const chunk of chunkStdio(redacted)) {
       await this.#emit({ kind: "stdout", runnerId: this.id, chunk, at: this.#isoNow() });
+      if (finalMessage) {
+        this.#finalText += chunk;
+      }
     }
   }
 
@@ -410,6 +431,14 @@ class CodexCliAgentRunner implements AgentRunner {
     });
   }
 
+  async #recordCost(entry: CostLedgerEntry): Promise<void> {
+    try {
+      await this.#deps.costLedger.record(entry);
+    } catch (error) {
+      throw new RunnerFailure(errorMessage(error), "cost_ledger_write_failed", { cause: error });
+    }
+  }
+
   async #writeReceiptAndFinish(exitCode: number): Promise<void> {
     const receipt = this.#buildReceipt();
     try {
@@ -419,8 +448,9 @@ class CodexCliAgentRunner implements AgentRunner {
       }
     } catch (error) {
       const message = errorMessage(error);
-      await this.#fail(message);
-      throw new ReceiptWriteFailed(this.id, message, { cause: error });
+      throw new RunnerFailure(message, "receipt_write_failed", {
+        cause: new ReceiptWriteFailed(this.id, message, { cause: error }),
+      });
     }
     await this.#emit({
       kind: "receipt",
@@ -435,16 +465,16 @@ class CodexCliAgentRunner implements AgentRunner {
     const startedAt = this.#now();
     const finishedAt = this.#now();
     return {
-      id: this.#receiptIdFactory(),
+      id: this.#receiptId,
       agentSlug: asAgentSlug(this.agentId),
-      taskId: this.#request.taskId ?? this.#taskIdFactory(),
+      taskId: this.#taskId,
       triggerKind: "human_message",
       triggerRef: this.id,
       startedAt,
       finishedAt,
       status: "ok",
       providerKind: this.#providerKind,
-      model: this.#request.model ?? "codex-cli",
+      model: trustedCostModel({ request: this.#request, defaultModel: "codex-cli" }),
       promptHash: sha256Hex(this.#request.prompt),
       toolManifest: sha256Hex("codex-cli:v1"),
       toolCalls: [],
@@ -489,28 +519,64 @@ class CodexCliAgentRunner implements AgentRunner {
   }
 
   async #emit(event: RunnerEvent): Promise<void> {
-    await this.#deps.eventLog.append(event);
-    this.#hub.publish(event);
+    const redacted = redactEvent(event, this.#redact);
+    let lsn: number;
+    try {
+      lsn = await this.#deps.eventLog.append(redacted);
+    } catch (error) {
+      throw new RunnerFailure(errorMessage(error), "event_log_write_failed", { cause: error });
+    }
+    this.#hub.publish(redacted, lsn);
   }
 
-  async #fail(message: string): Promise<void> {
+  async #cleanupWithFailure(
+    error: unknown,
+    fallbackCode: RunnerFailureCode,
+    exitCode: number,
+    gracePeriodMs?: number | undefined,
+  ): Promise<void> {
+    const failure = runnerFailureFromError(error, fallbackCode);
+    const message = this.#redact(failure.message);
     if (this.#failed) return;
     this.#failed = true;
     const event: RunnerEvent = {
       kind: "failed",
       runnerId: this.id,
       error: message,
+      code: failure.code,
       at: this.#isoNow(),
     };
-    try {
-      await this.#deps.eventLog.append(event);
-    } finally {
-      this.#hub.publish(event);
-    }
+    await terminalCleanup({
+      lifecycle: this.#lifecycle,
+      target: this.#cleanupTarget(),
+      eventLog: this.#deps.eventLog,
+      eventHub: this.#hub,
+      failureEvent: event,
+      gracePeriodMs,
+      stopped: { exitCode, error: message },
+    });
   }
 
   #isoNow(): string {
     return this.#now().toISOString();
+  }
+
+  #cleanupTarget(): TerminalCleanupTarget | undefined {
+    const child = this.#child;
+    const exitPromise = this.#exitPromise;
+    if (child === null || exitPromise === null) return undefined;
+    return {
+      kind: "child",
+      child: {
+        isAlive: () => !this.#childExited,
+        kill: (signal) => {
+          child.kill(signal);
+        },
+        wait: async () => {
+          await exitPromise;
+        },
+      },
+    };
   }
 }
 
@@ -660,12 +726,21 @@ function parseExecLine(line: string): { readonly command: string; readonly cwd: 
   return { command, cwd };
 }
 
-function parseTokensUsedLine(line: string): number | null {
-  const match = /^tokens used:\s*([0-9][0-9_,]*)\b/i.exec(line.trim());
+type TokenUsageParseResult =
+  | { readonly kind: "none" }
+  | { readonly kind: "valid"; readonly value: number }
+  | { readonly kind: "invalid" };
+
+function parseTokensUsedLine(line: string): TokenUsageParseResult {
+  const trimmed = line.trim();
+  if (!/^tokens used:/i.test(trimmed)) return { kind: "none" };
+  const match = /^tokens used:\s*([0-9][0-9_,]*)\b/i.exec(trimmed);
   const raw = match?.[1];
-  if (raw === undefined) return null;
+  if (raw === undefined) return { kind: "invalid" };
   const parsed = Number.parseInt(raw.replaceAll(/[_,]/g, ""), 10);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+  return Number.isSafeInteger(parsed) && parsed >= 0
+    ? { kind: "valid", value: parsed }
+    : { kind: "invalid" };
 }
 
 function isToolExitLine(line: string): boolean {
@@ -684,32 +759,22 @@ function stripLineEnding(line: string): string {
   return line.replace(/\r?\n$/, "");
 }
 
-function chunkText(text: string, maxBytes: number): string[] {
-  const chunks: string[] = [];
-  let current = "";
-  let currentBytes = 0;
-  for (const char of text) {
-    const charBytes = Buffer.byteLength(char, "utf8");
-    if (current.length > 0 && currentBytes + charBytes > maxBytes) {
-      chunks.push(current);
-      current = "";
-      currentBytes = 0;
-    }
-    current += char;
-    currentBytes += charBytes;
-  }
-  if (current.length > 0) chunks.push(current);
-  return chunks;
-}
-
 function chunkToString(chunk: unknown): string {
   if (typeof chunk === "string") return chunk;
   if (Buffer.isBuffer(chunk)) return chunk.toString("utf8");
   return String(chunk);
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function redactEvent(event: RunnerEvent, redact: SecretRedactor): RunnerEvent {
+  switch (event.kind) {
+    case "stdout":
+    case "stderr":
+      return { ...event, chunk: redact(event.chunk) };
+    case "failed":
+      return { ...event, error: redact(event.error) };
+    default:
+      return event;
+  }
 }
 
 function randomRunnerId(): RunnerId {

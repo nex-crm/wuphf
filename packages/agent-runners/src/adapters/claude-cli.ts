@@ -7,15 +7,16 @@ import type { Readable } from "node:stream";
 import {
   type AgentId,
   asAgentSlug,
-  asMicroUsd,
   asProviderKind,
   asReceiptId,
   asRunnerId,
   asTaskId,
   type CostLedgerEntry,
+  type CostUnits,
   type ReceiptId,
   type ReceiptSnapshot,
   type RunnerEvent,
+  type RunnerFailureCode,
   type RunnerId,
   type RunnerSpawnRequest,
   SanitizedString,
@@ -24,7 +25,17 @@ import {
 } from "@wuphf/protocol";
 
 import { ClaudeCliNotAvailable, ReceiptWriteFailed, RunnerSpawnFailed } from "../errors.ts";
+import { chunkStdio } from "../internal/chunk.ts";
+import {
+  errorMessage,
+  RunnerFailure,
+  runnerFailureFromError,
+  type TerminalCleanupTarget,
+  terminalCleanup,
+} from "../internal/cleanup.ts";
+import { trustedCostModel, validatedCostEntry } from "../internal/cost.ts";
 import { DEFAULT_MAX_EVENT_HISTORY, RunnerEventHub } from "../internal/event-hub.ts";
+import { createSecretRedactor, type SecretRedactor } from "../internal/redact.ts";
 import { LifecycleStateMachine } from "../lifecycle.ts";
 import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
 
@@ -116,16 +127,19 @@ class ClaudeCliAgentRunner implements AgentRunner {
   readonly #hub: RunnerEventHub;
   readonly #lifecycle: LifecycleStateMachine;
   readonly #now: () => Date;
-  readonly #receiptIdFactory: () => ReceiptId;
+  readonly #receiptId: ReceiptId;
+  readonly #redact: SecretRedactor;
   readonly #request: RunnerSpawnRequest;
   readonly #secret: string;
   readonly #spawner: ClaudeCliSpawner;
-  readonly #taskIdFactory: () => TaskId;
+  readonly #taskId: TaskId;
   #child: ClaudeCliChildProcess | null = null;
+  #childExited = false;
   #done: Promise<void> | null = null;
+  #exitPromise: Promise<ExitResult> | null = null;
   #failed = false;
   #finalText = "";
-  #lastUsage: Usage = {
+  #lastUsage: CostUnits = {
     inputTokens: 0,
     outputTokens: 0,
     cacheReadTokens: 0,
@@ -152,15 +166,20 @@ class ClaudeCliAgentRunner implements AgentRunner {
     this.#hub = new RunnerEventHub(args.maxEventHistory);
     this.#lifecycle = new LifecycleStateMachine(args.runnerId);
     this.#now = args.now;
-    this.#receiptIdFactory = args.receiptIdFactory;
+    this.#receiptId = args.receiptIdFactory();
+    this.#redact = createSecretRedactor(args.secret);
     this.#request = args.request;
     this.#secret = args.secret;
     this.#spawner = args.spawner;
-    this.#taskIdFactory = args.taskIdFactory;
+    this.#taskId = args.request.taskId ?? args.taskIdFactory();
   }
 
-  events() {
-    return this.#hub.events();
+  events(options?: Parameters<RunnerEventHub["events"]>[0]) {
+    return this.#hub.events(options);
+  }
+
+  eventRecords(options?: Parameters<RunnerEventHub["eventRecords"]>[0]) {
+    return this.#hub.eventRecords(options);
   }
 
   start(): void {
@@ -187,23 +206,26 @@ class ClaudeCliAgentRunner implements AgentRunner {
         ["--print", "--output-format", "stream-json", this.#request.prompt],
         { env, cwd: this.#request.cwd },
       );
-      const exitPromise = waitForExit(this.#child);
+      this.#childExited = false;
+      this.#exitPromise = waitForExit(this.#child).then((result) => {
+        this.#childExited = true;
+        return result;
+      });
       const stdout = this.#consumeStdout(this.#child.stdout);
       const stderr = this.#consumeStderr(this.#child.stderr);
       await this.#emit({ kind: "started", runnerId: this.id, at: this.#isoNow() });
-      exit = await exitPromise;
-      await Promise.all([stdout, stderr]);
+      [exit] = await Promise.all([this.#exitPromise, stdout, stderr]);
       if (exit.error !== undefined) {
-        await this.#fail(exit.error.message);
-        this.#lifecycle.markStopped({ exitCode: 1, error: exit.error.message });
-        return;
+        throw new RunnerFailure(exit.error.message, "spawn_failed", { cause: exit.error });
       }
       if (exit.code !== 0) {
         const signalText = exit.signal === null ? "" : ` (${exit.signal})`;
         const message = `Claude CLI exited with code ${exit.code}${signalText}`;
-        await this.#fail(message);
-        this.#lifecycle.markStopped({ exitCode: exit.code, error: message });
-        return;
+        const code =
+          this.#lifecycle.snapshot().phase === "stopping"
+            ? "terminated_by_request"
+            : "subprocess_crashed";
+        throw new RunnerFailure(message, code);
       }
       if (this.#failed) {
         this.#lifecycle.markStopped({ exitCode: 1, error: "runner failed" });
@@ -212,29 +234,15 @@ class ClaudeCliAgentRunner implements AgentRunner {
       await this.#writeReceiptAndFinish(exit.code);
       this.#lifecycle.markStopped({ exitCode: exit.code });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.#fail(message);
-      this.#lifecycle.markStopped({ exitCode: exit.code, error: message });
+      const fallbackCode = this.#child === null ? "spawn_failed" : "subprocess_crashed";
+      await this.#cleanupWithFailure(error, fallbackCode, exit.code);
     }
   }
 
   async #doTerminate(gracePeriodMs: number): Promise<void> {
-    const transitioned = this.#lifecycle.beginStopping();
-    const child = this.#child;
-    if (transitioned && child !== null) {
-      child.kill("SIGINT");
-      const hardKill = setTimeout(() => {
-        child.kill("SIGKILL");
-      }, gracePeriodMs);
-      hardKill.unref();
-      try {
-        await (this.#done ?? this.#lifecycle.stopped());
-      } finally {
-        clearTimeout(hardKill);
-      }
-      return;
-    }
-    await (this.#done ?? this.#lifecycle.stopped());
+    const failure = new RunnerFailure("runner terminated by request", "terminated_by_request");
+    await this.#cleanupWithFailure(failure, "terminated_by_request", 1, gracePeriodMs);
+    await (this.#done ?? this.#lifecycle.stopped()).catch(() => undefined);
   }
 
   async #consumeStdout(stream: Readable): Promise<void> {
@@ -256,9 +264,16 @@ class ClaudeCliAgentRunner implements AgentRunner {
 
   async #consumeStderr(stream: Readable): Promise<void> {
     for await (const chunk of stream) {
-      const text = chunkToString(chunk);
+      const text = this.#redact(chunkToString(chunk));
       if (text.length > 0) {
-        await this.#emit({ kind: "stderr", runnerId: this.id, chunk: text, at: this.#isoNow() });
+        for (const stdioChunk of chunkStdio(text)) {
+          await this.#emit({
+            kind: "stderr",
+            runnerId: this.id,
+            chunk: stdioChunk,
+            at: this.#isoNow(),
+          });
+        }
       }
     }
   }
@@ -270,29 +285,51 @@ class ClaudeCliAgentRunner implements AgentRunner {
     try {
       parsed = JSON.parse(trimmed);
     } catch (error) {
-      await this.#fail(`Claude CLI emitted malformed JSON: ${errorMessage(error)}`);
-      return;
+      throw new RunnerFailure(
+        `Claude CLI emitted malformed JSON: ${errorMessage(error)}`,
+        "unrecognized_provider_response",
+        { cause: error },
+      );
     }
     if (!isRecord(parsed)) {
-      await this.#fail("Claude CLI emitted a non-object JSON line");
-      return;
+      throw new RunnerFailure(
+        "Claude CLI emitted a non-object JSON line",
+        "unrecognized_provider_response",
+      );
     }
     const type = recordString(parsed, "type");
     if (type === "error") {
-      await this.#fail(recordString(parsed, "message") ?? "Claude CLI emitted an error");
-      return;
+      throw new RunnerFailure(
+        recordString(parsed, "message") ?? "Claude CLI emitted an error",
+        "provider_returned_error",
+      );
     }
     const text = extractText(parsed);
     if (text.length > 0) {
-      this.#finalText += text;
-      await this.#emit({ kind: "stdout", runnerId: this.id, chunk: text, at: this.#isoNow() });
+      await this.#emitStdout(text);
     }
     const usage = extractUsage(parsed);
     if (usage !== null) {
       this.#lastUsage = usage;
       const entry = this.#costEntry(usage);
-      await this.#deps.costLedger.record(entry);
+      await this.#recordCost(entry);
       await this.#emit({ kind: "cost", runnerId: this.id, entry, at: this.#isoNow() });
+    }
+  }
+
+  async #emitStdout(text: string): Promise<void> {
+    const redacted = this.#redact(text);
+    for (const chunk of chunkStdio(redacted)) {
+      await this.#emit({ kind: "stdout", runnerId: this.id, chunk, at: this.#isoNow() });
+      this.#finalText += chunk;
+    }
+  }
+
+  async #recordCost(entry: CostLedgerEntry): Promise<void> {
+    try {
+      await this.#deps.costLedger.record(entry);
+    } catch (error) {
+      throw new RunnerFailure(errorMessage(error), "cost_ledger_write_failed", { cause: error });
     }
   }
 
@@ -305,8 +342,9 @@ class ClaudeCliAgentRunner implements AgentRunner {
       }
     } catch (error) {
       const message = errorMessage(error);
-      await this.#fail(message);
-      throw new ReceiptWriteFailed(this.id, message, { cause: error });
+      throw new RunnerFailure(message, "receipt_write_failed", {
+        cause: new ReceiptWriteFailed(this.id, message, { cause: error }),
+      });
     }
     await this.#emit({
       kind: "receipt",
@@ -319,23 +357,21 @@ class ClaudeCliAgentRunner implements AgentRunner {
 
   #buildReceipt(): ReceiptSnapshot {
     const usage = this.#lastUsage;
-    const model = usage.model ?? this.#request.model ?? "claude-cli";
-    const costMicroUsd = asMicroUsd(
-      usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
-    );
     const startedAt = this.#now();
     const finishedAt = this.#now();
+    const amount =
+      usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
     return {
-      id: this.#receiptIdFactory(),
+      id: this.#receiptId,
       agentSlug: asAgentSlug(this.agentId),
-      taskId: this.#request.taskId ?? this.#taskIdFactory(),
+      taskId: this.#taskId,
       triggerKind: "human_message",
       triggerRef: this.id,
       startedAt,
       finishedAt,
       status: "ok",
       providerKind: asProviderKind("anthropic"),
-      model,
+      model: trustedCostModel({ request: this.#request, defaultModel: "claude-cli" }),
       promptHash: sha256Hex(this.#request.prompt),
       toolManifest: sha256Hex("claude-cli:v1"),
       toolCalls: [],
@@ -348,7 +384,7 @@ class ClaudeCliAgentRunner implements AgentRunner {
       outputTokens: usage.outputTokens,
       cacheReadTokens: usage.cacheReadTokens,
       cacheCreationTokens: usage.cacheCreationTokens,
-      costUsd: costMicroUsd / 1_000_000,
+      costUsd: amount / 1_000_000,
       finalMessage: SanitizedString.fromUnknown(this.#finalText),
       error: SanitizedString.fromUnknown(""),
       notebookWrites: [],
@@ -360,11 +396,12 @@ class ClaudeCliAgentRunner implements AgentRunner {
   #costEntry(usage: Usage): CostLedgerEntry {
     const amount =
       usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
-    return {
-      agentSlug: asAgentSlug(this.agentId),
+    return validatedCostEntry({
+      request: this.#request,
       providerKind: asProviderKind("anthropic"),
-      model: usage.model ?? this.#request.model ?? "claude-cli",
-      amountMicroUsd: asMicroUsd(amount),
+      defaultModel: "claude-cli",
+      reportedModel: usage.model,
+      amountMicroUsd: amount,
       units: {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
@@ -372,32 +409,70 @@ class ClaudeCliAgentRunner implements AgentRunner {
         cacheCreationTokens: usage.cacheCreationTokens,
       },
       occurredAt: this.#now(),
-    };
+      receiptId: this.#receiptId,
+      taskId: this.#taskId,
+    });
   }
 
   async #emit(event: RunnerEvent): Promise<void> {
-    await this.#deps.eventLog.append(event);
-    this.#hub.publish(event);
+    const redacted = redactEvent(event, this.#redact);
+    let lsn: number;
+    try {
+      lsn = await this.#deps.eventLog.append(redacted);
+    } catch (error) {
+      throw new RunnerFailure(errorMessage(error), "event_log_write_failed", { cause: error });
+    }
+    this.#hub.publish(redacted, lsn);
   }
 
-  async #fail(message: string): Promise<void> {
+  async #cleanupWithFailure(
+    error: unknown,
+    fallbackCode: RunnerFailureCode,
+    exitCode: number,
+    gracePeriodMs?: number | undefined,
+  ): Promise<void> {
+    const failure = runnerFailureFromError(error, fallbackCode);
+    const message = this.#redact(failure.message);
     if (this.#failed) return;
     this.#failed = true;
     const event: RunnerEvent = {
       kind: "failed",
       runnerId: this.id,
       error: message,
+      code: failure.code,
       at: this.#isoNow(),
     };
-    try {
-      await this.#deps.eventLog.append(event);
-    } finally {
-      this.#hub.publish(event);
-    }
+    await terminalCleanup({
+      lifecycle: this.#lifecycle,
+      target: this.#cleanupTarget(),
+      eventLog: this.#deps.eventLog,
+      eventHub: this.#hub,
+      failureEvent: event,
+      gracePeriodMs,
+      stopped: { exitCode, error: message },
+    });
   }
 
   #isoNow(): string {
     return this.#now().toISOString();
+  }
+
+  #cleanupTarget(): TerminalCleanupTarget | undefined {
+    const child = this.#child;
+    const exitPromise = this.#exitPromise;
+    if (child === null || exitPromise === null) return undefined;
+    return {
+      kind: "child",
+      child: {
+        isAlive: () => !this.#childExited,
+        kill: (signal) => {
+          child.kill(signal);
+        },
+        wait: async () => {
+          await exitPromise;
+        },
+      },
+    };
   }
 }
 
@@ -515,17 +590,21 @@ function extractUsage(record: Readonly<Record<string, unknown>>): Usage | null {
 function usageRecord(value: unknown, model?: string | null): Usage | null {
   if (!isRecord(value)) return null;
   return {
-    inputTokens: nonNegativeInteger(value, "input_tokens") ?? 0,
-    outputTokens: nonNegativeInteger(value, "output_tokens") ?? 0,
-    cacheReadTokens: nonNegativeInteger(value, "cache_read_input_tokens") ?? 0,
-    cacheCreationTokens: nonNegativeInteger(value, "cache_creation_input_tokens") ?? 0,
+    inputTokens: optionalUsageInteger(value, "input_tokens"),
+    outputTokens: optionalUsageInteger(value, "output_tokens"),
+    cacheReadTokens: optionalUsageInteger(value, "cache_read_input_tokens"),
+    cacheCreationTokens: optionalUsageInteger(value, "cache_creation_input_tokens"),
     ...(model === undefined || model === null ? {} : { model }),
   };
 }
 
-function nonNegativeInteger(record: Readonly<Record<string, unknown>>, key: string): number | null {
+function optionalUsageInteger(record: Readonly<Record<string, unknown>>, key: string): number {
   const value = recordValue(record, key);
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  if (value === undefined) return 0;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+  throw new RunnerFailure(`${key} must be a non-negative safe integer`, "provider_returned_error");
 }
 
 function chunkToString(chunk: unknown): string {
@@ -548,8 +627,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function redactEvent(event: RunnerEvent, redact: SecretRedactor): RunnerEvent {
+  switch (event.kind) {
+    case "stdout":
+    case "stderr":
+      return { ...event, chunk: redact(event.chunk) };
+    case "failed":
+      return { ...event, error: redact(event.error) };
+    default:
+      return event;
+  }
 }
 
 function randomRunnerId(): RunnerId {
