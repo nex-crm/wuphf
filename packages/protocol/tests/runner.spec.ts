@@ -9,8 +9,15 @@ import {
   isRunnerId,
   isRunnerKind,
   MAX_RUNNER_CWD_BYTES,
+  MAX_RUNNER_ENDPOINT_BYTES,
   MAX_RUNNER_ERROR_BYTES,
+  MAX_RUNNER_EXTRA_ARG_BYTES,
+  MAX_RUNNER_EXTRA_ARGS,
   MAX_RUNNER_MODEL_BYTES,
+  MAX_RUNNER_OPTION_HEADER_NAME_BYTES,
+  MAX_RUNNER_OPTION_HEADER_VALUE_BYTES,
+  MAX_RUNNER_OPTION_HEADERS,
+  MAX_RUNNER_PROFILE_BYTES,
   MAX_RUNNER_PROMPT_BYTES,
   MAX_RUNNER_STDIO_CHUNK_BYTES,
   RUNNER_FAILURE_CODE_VALUES,
@@ -80,6 +87,16 @@ describe("RunnerId and RunnerKind", () => {
 });
 
 describe("RunnerSpawnRequest codec", () => {
+  it("exposes runner option budget constants from the public API", () => {
+    expect(MAX_RUNNER_EXTRA_ARGS).toBeGreaterThan(0);
+    expect(MAX_RUNNER_EXTRA_ARG_BYTES).toBeGreaterThan(0);
+    expect(MAX_RUNNER_PROFILE_BYTES).toBeGreaterThan(0);
+    expect(MAX_RUNNER_ENDPOINT_BYTES).toBeGreaterThan(0);
+    expect(MAX_RUNNER_OPTION_HEADERS).toBeGreaterThan(0);
+    expect(MAX_RUNNER_OPTION_HEADER_NAME_BYTES).toBeGreaterThan(0);
+    expect(MAX_RUNNER_OPTION_HEADER_VALUE_BYTES).toBeGreaterThan(0);
+  });
+
   it("round-trips the golden spawn vector", () => {
     const request = runnerSpawnRequestFromJson(vector("claude-cli spawn request").json);
 
