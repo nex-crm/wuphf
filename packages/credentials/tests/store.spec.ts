@@ -1,3 +1,4 @@
+import path from "node:path";
 import { inspect } from "node:util";
 
 import { asAgentId, asCredentialScope } from "@wuphf/protocol";
@@ -6,14 +7,19 @@ import { describe, expect, it } from "vitest";
 import { LinuxCredentialStore } from "../src/adapters/linux.ts";
 import { MacOSCredentialStore } from "../src/adapters/macos.ts";
 import { WindowsCredentialStore } from "../src/adapters/windows.ts";
-import { AdapterNotSupported, NotFound } from "../src/errors.ts";
+import {
+  AdapterNotSupported,
+  KeychainCommandFailed,
+  KeychainCommandTimedOut,
+  NotFound,
+} from "../src/errors.ts";
 import { credentialHandleFromParts, open, type Spawner } from "../src/index.ts";
 
 const serviceName = "wuphf.credentials.test";
 const agentA = asAgentId("agent_alpha");
 const agentB = asAgentId("agent_beta");
 const scope = asCredentialScope("openai");
-const fixtureSecret = "fixture-secret-value-do-not-use-0000";
+const fixtureSecret = "fixture-basic_text-こんにちは-secret\n";
 
 describe("CredentialStore contract", () => {
   const cases = [
@@ -23,7 +29,11 @@ describe("CredentialStore contract", () => {
         const fake = new SecurityFake();
         return {
           fake,
-          store: new MacOSCredentialStore({ serviceName, spawner: fake.spawner }),
+          store: new MacOSCredentialStore({
+            enforceTrustedCommand: false,
+            serviceName,
+            spawner: fake.spawner,
+          }),
         };
       },
     },
@@ -33,7 +43,11 @@ describe("CredentialStore contract", () => {
         const fake = new SecretToolFake();
         return {
           fake,
-          store: new LinuxCredentialStore({ serviceName, spawner: fake.spawner }),
+          store: new LinuxCredentialStore({
+            enforceTrustedCommand: false,
+            serviceName,
+            spawner: fake.spawner,
+          }),
         };
       },
     },
@@ -43,7 +57,11 @@ describe("CredentialStore contract", () => {
         const fake = new PowerShellCredentialFake();
         return {
           fake,
-          store: new WindowsCredentialStore({ serviceName, spawner: fake.spawner }),
+          store: new WindowsCredentialStore({
+            enforceTrustedCommand: false,
+            serviceName,
+            spawner: fake.spawner,
+          }),
         };
       },
     },
@@ -58,9 +76,10 @@ describe("CredentialStore contract", () => {
       expect(String(handle)).not.toContain(fixtureSecret);
       expect(inspect(handle)).not.toContain(fixtureSecret);
 
+      const readCountAfterWrite = fake.readCount;
       await expect(store.read(handle)).resolves.toBe(fixtureSecret);
       await expect(store.read(handle)).resolves.toBe(fixtureSecret);
-      expect(fake.readCount).toBe(2);
+      expect(fake.readCount - readCountAfterWrite).toBe(2);
     });
 
     it(`${testCase.name} scopes credentials by agent id`, async () => {
@@ -73,6 +92,14 @@ describe("CredentialStore contract", () => {
       });
 
       await expect(store.read(otherAgentHandle)).rejects.toBeInstanceOf(NotFound);
+    });
+
+    it(`${testCase.name} rejects NUL secrets before invoking the keychain`, async () => {
+      const { store } = testCase.makeHarness();
+
+      await expect(
+        store.write({ agentId: agentA, scope, secret: "bad\u0000secret" }),
+      ).rejects.toMatchObject({ code: "invalid_credential_payload" });
     });
   }
 
@@ -92,6 +119,89 @@ describe("CredentialStore contract", () => {
       open({ platform: "freebsd" as NodeJS.Platform, serviceName, spawner: fake }),
     ).toThrow(AdapterNotSupported);
   });
+
+  it("passes absolute commands with a sanitized locale-stable environment", async () => {
+    const calls: Array<{
+      readonly cmd: string;
+      readonly env: NodeJS.ProcessEnv | undefined;
+    }> = [];
+    const fake = new SecretToolFake();
+    const spawner: Spawner = async (cmd, args, options) => {
+      calls.push({ cmd, env: options?.env });
+      return fake.spawner(cmd, args, options);
+    };
+    const store = new LinuxCredentialStore({
+      enforceTrustedCommand: false,
+      serviceName,
+      spawner,
+    });
+
+    await store.write({ agentId: agentA, scope, secret: fixtureSecret });
+
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(path.posix.isAbsolute(call.cmd)).toBe(true);
+      expect(envValue(call.env, "LC_ALL")).toBe("C");
+      expect(envValue(call.env, "PATH")).toBe(path.posix.dirname(call.cmd));
+      expect(Object.keys(call.env ?? {}).sort()).toEqual(
+        expect.arrayContaining(["LC_ALL", "PATH"]),
+      );
+      expect(
+        Object.keys(call.env ?? {}).every((key) =>
+          ["HOME", "LC_ALL", "PATH", "USER"].includes(key),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("times out a hung subprocess with a typed error", async () => {
+    const spawner: Spawner = async () => new Promise<never>(() => {});
+    const store = new LinuxCredentialStore({
+      enforceTrustedCommand: false,
+      serviceName,
+      spawner,
+      timeoutMs: 20,
+    });
+    const started = Date.now();
+
+    await expect(
+      store.write({ agentId: agentA, scope, secret: fixtureSecret }),
+    ).rejects.toBeInstanceOf(KeychainCommandTimedOut);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("maps ENOENT spawn failures to NoKeyringAvailable with a recovery hint", async () => {
+    const spawner: Spawner = async () => {
+      const error = new Error("spawn ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    };
+    const store = new LinuxCredentialStore({
+      enforceTrustedCommand: false,
+      serviceName,
+      spawner,
+    });
+
+    await expect(
+      store.write({ agentId: agentA, scope, secret: fixtureSecret }),
+    ).rejects.toMatchObject({
+      code: "no_keyring_available",
+      recoveryHint: "Install libsecret-tools: sudo apt install libsecret-tools",
+    });
+  });
+
+  it("sanitizes terminal control bytes from keychain command errors", () => {
+    const error = new KeychainCommandFailed(
+      "secret-tool lookup",
+      1,
+      "\u001b[31mpermission\u001b[0m\n\u0085denied\u0000",
+    );
+
+    expect(error.message).toContain("permission denied");
+    expect(error.message).not.toContain("\u001b");
+    expect(error.message).not.toContain("\u0085");
+    expect(error.message).not.toContain("\u0000");
+  });
 });
 
 interface FakeHarness {
@@ -104,7 +214,8 @@ class SecurityFake implements FakeHarness {
   readCount = 0;
 
   spawner: Spawner = async (cmd, args, options) => {
-    expect(cmd).toBe("security");
+    expect(cmd).toBe("/usr/bin/security");
+    expect(envValue(options?.env, "LC_ALL")).toBe("C");
     const action = args[0];
     const account = argAfter(args, "-a");
     if (action === "add-generic-password") {
@@ -131,7 +242,9 @@ class SecretToolFake implements FakeHarness {
   readCount = 0;
 
   spawner: Spawner = async (cmd, args, options) => {
-    expect(cmd).toBe("secret-tool");
+    expect(cmd === "/usr/bin/secret-tool" || cmd === "/usr/bin/gdbus").toBe(true);
+    expect(envValue(options?.env, "LC_ALL")).toBe("C");
+    if (cmd === "/usr/bin/gdbus") return { stdout: "@a{sv} {}", stderr: "", code: 0 };
     const action = args[0];
     if (action === "--version") return { stdout: "secret-tool 0.21.4\n", stderr: "", code: 0 };
     if (action === "search") return { stdout: "collection: encrypted\n", stderr: "", code: 0 };
@@ -159,7 +272,9 @@ class PowerShellCredentialFake implements FakeHarness {
   readCount = 0;
 
   spawner: Spawner = async (cmd, args, options) => {
-    expect(cmd).toBe("powershell.exe");
+    expect(path.win32.isAbsolute(cmd)).toBe(true);
+    expect(cmd.toLowerCase()).toMatch(/\\powershell\.exe$/);
+    expect(envValue(options?.env, "LC_ALL")).toBe("C");
     const script = decodePowerShellScript(args);
     const target = powerShellTarget(script);
     if (script.includes("[Console]::In.ReadToEnd()")) {
@@ -210,4 +325,8 @@ function powerShellTarget(script: string): string {
   const match = /\$target = '([^']+)'/.exec(script);
   if (match === null) throw new Error("missing PowerShell target");
   return match[1] ?? "";
+}
+
+function envValue(env: NodeJS.ProcessEnv | undefined, name: string): string | undefined {
+  return env?.[name];
 }

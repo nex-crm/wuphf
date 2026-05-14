@@ -59,4 +59,19 @@ describe("CredentialHandle", () => {
       expect(isCredentialScope(providerKind)).toBe(true);
     }
   });
+
+  // TODO(batch-b): unskip when the redesign moves handles to private slots.
+  it.skip("does not expose agent or scope through object spread clones", () => {
+    const handle = createCredentialHandle({ id, agentId, scope });
+
+    expect({ ...handle }).toEqual({});
+    expect(Object.assign({}, handle)).toEqual({});
+  });
+
+  // TODO(batch-b): unskip when the redesign moves handles to private slots.
+  it.skip("does not expose agent or scope through structuredClone", () => {
+    const handle = createCredentialHandle({ id, agentId, scope });
+
+    expect(structuredClone(handle)).toEqual({});
+  });
 });

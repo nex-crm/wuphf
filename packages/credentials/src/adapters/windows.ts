@@ -1,49 +1,87 @@
 import type { CredentialHandle } from "@wuphf/protocol";
 
-import { KeychainCommandFailed, NotFound } from "../errors.ts";
+import { NotFound } from "../errors.ts";
 import { type CredentialHandleParts, credentialAccount, newCredentialHandle } from "../handle.ts";
-import type { CredentialStore, CredentialWriteRequest, Spawner } from "../store.ts";
+import {
+  assertValidCredentialPayload,
+  type CredentialStore,
+  type CredentialWriteRequest,
+  keychainCommandFailure,
+  operationTimeoutMs,
+  resolveTrustedCommand,
+  runKeychainCommand,
+  type Spawner,
+  type TrustedCommand,
+} from "../store.ts";
 
 export interface WindowsCredentialStoreOptions {
   readonly serviceName: string;
   readonly spawner: Spawner;
+  readonly enforceTrustedCommand?: boolean | undefined;
   readonly timeoutMs?: number | undefined;
 }
 
 export class WindowsCredentialStore implements CredentialStore {
-  constructor(private readonly options: WindowsCredentialStoreOptions) {}
+  private readonly powershell: TrustedCommand;
+
+  constructor(private readonly options: WindowsCredentialStoreOptions) {
+    this.powershell = resolveTrustedCommand({
+      candidates: [windowsPowerShellPath()],
+      commandName: "powershell.exe",
+      enforce: options.enforceTrustedCommand ?? true,
+      platform: "win32",
+      recoveryHint:
+        "Ensure Windows PowerShell exists under %SystemRoot%\\System32\\WindowsPowerShell\\v1.0",
+      requireWindowsAdministratorsOwner: true,
+    });
+  }
 
   async write(input: CredentialWriteRequest): Promise<CredentialHandle> {
+    assertValidCredentialPayload(input.secret);
     const handle = newCredentialHandle(input);
     const target = credentialTarget(this.options.serviceName, handleParts(handle));
-    const result = await this.options.spawner(
-      "powershell.exe",
+    const result = await runKeychainCommand(
+      this.options.spawner,
+      this.powershell,
       powerShellArgs(writeScript(target)),
       {
+        action: "write",
+        commandName: "powershell CredWrite",
         input: input.secret,
-        timeoutMs: this.options.timeoutMs,
+        platform: "win32",
+        timeoutMs: operationTimeoutMs(this.options.timeoutMs),
       },
     );
 
     if (result.code !== 0) {
-      throw new KeychainCommandFailed("powershell CredWrite", result.code, result.stderr);
+      throw keychainCommandFailure("powershell CredWrite", result, {
+        action: "write",
+        platform: "win32",
+      });
     }
     return handle;
   }
 
   async read(handle: CredentialHandle): Promise<string> {
     const target = credentialTarget(this.options.serviceName, handleParts(handle));
-    const result = await this.options.spawner(
-      "powershell.exe",
+    const result = await runKeychainCommand(
+      this.options.spawner,
+      this.powershell,
       powerShellArgs(readScript(target)),
       {
-        timeoutMs: this.options.timeoutMs,
+        action: "read",
+        commandName: "powershell CredRead",
+        platform: "win32",
+        timeoutMs: operationTimeoutMs(this.options.timeoutMs),
       },
     );
 
     if (result.code !== 0) {
       if (isWindowsNotFound(result.stderr)) throw new NotFound();
-      throw new KeychainCommandFailed("powershell CredRead", result.code, result.stderr);
+      throw keychainCommandFailure("powershell CredRead", result, {
+        action: "read",
+        platform: "win32",
+      });
     }
     if (result.stdout.length === 0) throw new NotFound();
     return result.stdout;
@@ -51,18 +89,34 @@ export class WindowsCredentialStore implements CredentialStore {
 
   async delete(handle: CredentialHandle): Promise<void> {
     const target = credentialTarget(this.options.serviceName, handleParts(handle));
-    const result = await this.options.spawner(
-      "powershell.exe",
+    const result = await runKeychainCommand(
+      this.options.spawner,
+      this.powershell,
       powerShellArgs(deleteScript(target)),
       {
-        timeoutMs: this.options.timeoutMs,
+        action: "delete",
+        commandName: "powershell CredDelete",
+        platform: "win32",
+        timeoutMs: operationTimeoutMs(this.options.timeoutMs),
       },
     );
 
     if (result.code !== 0 && !isWindowsNotFound(result.stderr)) {
-      throw new KeychainCommandFailed("powershell CredDelete", result.code, result.stderr);
+      throw keychainCommandFailure("powershell CredDelete", result, {
+        action: "delete",
+        platform: "win32",
+      });
     }
   }
+}
+
+function windowsPowerShellPath(): string {
+  const systemRoot = processEnvValue("SystemRoot") ?? "C:\\Windows";
+  return `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+}
+
+function processEnvValue(name: string): string | undefined {
+  return process.env[name];
 }
 
 function credentialTarget(serviceName: string, parts: CredentialHandleParts): string {
@@ -86,10 +140,14 @@ function powerShellArgs(script: string): string[] {
 
 function writeScript(target: string): string {
   return `${credentialManagerPrelude()}
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 $target = ${psQuote(target)}
-$secret = [Console]::In.ReadToEnd()
-$bytes = [Text.Encoding]::Unicode.GetBytes($secret)
-$blob = [Runtime.InteropServices.Marshal]::StringToCoTaskMemUni($secret)
+$bytes = [Text.Encoding]::UTF8.GetBytes([Console]::In.ReadToEnd())
+$blob = [IntPtr]::Zero
+if ($bytes.Length -gt 0) {
+  $blob = [Runtime.InteropServices.Marshal]::AllocHGlobal($bytes.Length)
+  [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $blob, $bytes.Length)
+}
 try {
   $credential = New-Object CredMan+CREDENTIAL
   $credential.Type = [CredMan]::CRED_TYPE_GENERIC
@@ -103,12 +161,17 @@ try {
     throw "CredWrite failed: $code"
   }
 } finally {
-  [Runtime.InteropServices.Marshal]::ZeroFreeCoTaskMemUnicode($blob)
+  if ($blob -ne [IntPtr]::Zero) {
+    $zero = New-Object byte[] $bytes.Length
+    [Runtime.InteropServices.Marshal]::Copy($zero, 0, $blob, $bytes.Length)
+    [Runtime.InteropServices.Marshal]::FreeHGlobal($blob)
+  }
 }`;
 }
 
 function readScript(target: string): string {
   return `${credentialManagerPrelude()}
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $target = ${psQuote(target)}
 $ptr = [IntPtr]::Zero
 if (-not [CredMan]::CredRead($target, [CredMan]::CRED_TYPE_GENERIC, 0, [ref] $ptr)) {
@@ -118,11 +181,13 @@ if (-not [CredMan]::CredRead($target, [CredMan]::CRED_TYPE_GENERIC, 0, [ref] $pt
 }
 try {
   $credential = [Runtime.InteropServices.Marshal]::PtrToStructure($ptr, [type] [CredMan+CREDENTIAL])
-  $secret = [Runtime.InteropServices.Marshal]::PtrToStringUni(
-    $credential.CredentialBlob,
-    [int] ($credential.CredentialBlobSize / 2)
-  )
-  [Console]::Out.Write($secret)
+  $bytes = New-Object byte[] $credential.CredentialBlobSize
+  if ($bytes.Length -gt 0) {
+    [Runtime.InteropServices.Marshal]::Copy($credential.CredentialBlob, $bytes, 0, $bytes.Length)
+  }
+  $secret = [Text.Encoding]::UTF8.GetString($bytes)
+  $out = [Text.Encoding]::UTF8.GetBytes($secret)
+  [Console]::OpenStandardOutput().Write($out, 0, $out.Length)
 } finally {
   [CredMan]::CredFree($ptr)
 }`;
@@ -188,7 +253,7 @@ function isWindowsNotFound(stderr: string): boolean {
   return /Cred(Read|Delete) failed: 1168|not found|element not found/i.test(stderr);
 }
 
-// TODO(branch-8-followup): RFC v4's Architectural change moves credentials
+// TODO(#847): RFC v4's Architectural change moves credentials
 // from Electron safeStorage into per-agent OS keychain entries. This v1 adapter
 // stores per-agent targets in Windows Credential Manager through PowerShell, but
 // it does not yet add AppContainer-specific ACL hardening for packaged desktop
