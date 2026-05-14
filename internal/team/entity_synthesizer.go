@@ -266,17 +266,17 @@ func (s *EntitySynthesizer) EnqueueSynthesis(kind EntityKind, slug, requestBy st
 		EnqueuedAt: time.Now().UTC(),
 		ID:         id,
 	}
-	s.queued[key] = true
 	s.mu.Unlock()
 
 	select {
 	case s.jobs <- job:
+		// Mark as queued only after successful send so IsInflightOrQueued
+		// never returns true for a job that failed to enter the channel.
+		s.mu.Lock()
+		s.queued[key] = true
+		s.mu.Unlock()
 		return id, nil
 	default:
-		// Queue saturated — undo the reservation so future calls can retry.
-		s.mu.Lock()
-		delete(s.queued, key)
-		s.mu.Unlock()
 		return 0, ErrSynthesisQueueSaturated
 	}
 }
