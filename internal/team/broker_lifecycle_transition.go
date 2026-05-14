@@ -32,7 +32,15 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 )
+
+// lifecycleMigrationOnce ensures migrateLifecycleStatesLocked runs at most
+// once per broker process even if multiple startup hooks call into it.
+// Keyed by *Broker so multiple brokers (typically only in tests) each
+// get their own *sync.Once. Stored as a package-level sync.Map rather
+// than a field on Broker so brokers stay zero-value usable.
+var lifecycleMigrationOnce sync.Map // *Broker -> *sync.Once
 
 // LifecycleState is the typed source of truth for the multi-agent control
 // loop. The canonical values plus LifecycleStateUnknown (migration
@@ -229,7 +237,9 @@ func (b *Broker) MigrateLifecycleStatesOnce() {
 	if b == nil {
 		return
 	}
-	b.lifecycleMigrationOnce.Do(func() {
+	val, _ := lifecycleMigrationOnce.LoadOrStore(b, &sync.Once{})
+	once := val.(*sync.Once)
+	once.Do(func() {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		b.migrateLifecycleStatesLocked()
@@ -382,9 +392,69 @@ func (b *Broker) transitionLifecycleLocked(taskID string, newState LifecycleStat
 			log.Printf("broker: lifecycle transition for task %q recovered from %s -> %s (reason=%q)",
 				taskID, LifecycleStateUnknown, newState, reason)
 		}
+		// Lane C: every transition triggers a Decision Packet flush
+		// when the broker has a packet for the task, plus debounced
+		// running-state durability. The hook is a no-op when no
+		// packet has been seeded for the task.
+		b.onLifecycleTransitionLocked(taskID, prev, newState)
+		// Lane D wire (#9): when a task enters review, auto-resolve
+		// the reviewer set from the watching configuration and stamp
+		// it onto the task. Skip when the task already carries a
+		// manually-assigned reviewer list (caller may have invoked
+		// AssignReviewers explicitly before transitioning) so we do
+		// not stomp explicit human/owner overrides.
+		if newState == LifecycleStateReview && prev != LifecycleStateReview {
+			if len(task.Reviewers) == 0 {
+				// Already under b.mu; pass nil so resolveReviewersLocked
+				// falls back to the in-lock diff path. The unlocked
+				// fast path is only available to the top-level
+				// ResolveReviewers entry point (which can release the
+				// lock before running git).
+				slugs, resolveErr := b.resolveReviewersLocked(taskID, nil)
+				if resolveErr != nil {
+					log.Printf("broker: lifecycle transition %q -> review: resolve reviewers failed: %v", taskID, resolveErr)
+				} else if len(slugs) > 0 {
+					if assignErr := b.assignReviewersLocked(taskID, slugs); assignErr != nil {
+						log.Printf("broker: lifecycle transition %q -> review: assign reviewers failed: %v", taskID, assignErr)
+					}
+				}
+			}
+		}
 		return task, nil
 	}
 	return nil, fmt.Errorf("transition lifecycle: task %q not found", taskID)
+}
+
+// onLifecycleTransitionLocked is the Lane C persistence hook fired by
+// the transition layer on every state change. Persists the current in-
+// memory packet (if any) and arms / cancels the 5-second running-flush
+// timer. Caller holds b.mu.
+//
+// We skip persistence entirely when no packet has been seeded for the
+// task — Lane A tests that never go through the Decision Packet path
+// must not start touching the filesystem just because a lifecycle
+// transition fired. The prev state is currently informational; reserved
+// for the manifest-event payload Lane G will wire up.
+func (b *Broker) onLifecycleTransitionLocked(taskID string, prev, newState LifecycleState) {
+	_ = prev
+	if b == nil || b.decisionPackets == nil {
+		return
+	}
+	state := b.decisionPackets
+	state.mu.Lock()
+	packet, ok := state.packets[taskID]
+	state.mu.Unlock()
+	if !ok || packet == nil {
+		return
+	}
+	b.stampLifecycleStateLocked(packet)
+	b.persistDecisionPacketLocked(taskID, *packet)
+	switch newState {
+	case LifecycleStateRunning:
+		b.scheduleRunningFlushLocked(taskID)
+	default:
+		b.cancelRunningFlushLocked(taskID)
+	}
 }
 
 // TransitionLifecycle is the public entry point that acquires b.mu before

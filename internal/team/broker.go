@@ -76,8 +76,27 @@ type Broker struct {
 	// in state X" are O(1) lookups against this map instead of O(N) scans
 	// of b.tasks. Guarded by b.mu — only the lifecycle transition layer
 	// writes to it, and the snapshot accessor copies under the lock.
-	lifecycleIndex          map[LifecycleState][]string
-	lifecycleMigrationOnce  sync.Once
+	lifecycleIndex map[LifecycleState][]string
+	// intakeSpecs maps task ID to the validated Spec persisted by the
+	// synthetic intake agent (broker_intake.go, Lane B). The map is the
+	// in-memory chokepoint for spec writes. Lane C consumes the Spec from
+	// here when promoting it into the Decision Packet on intake → ready.
+	// Guarded by b.mu.
+	intakeSpecs map[string]Spec
+	// decisionPackets holds the per-task in-memory Decision Packet model
+	// (Lane C). Lazily allocated by ensureDecisionPacketStateLocked so
+	// tests that never touch the harness path pay no cost. Guarded by
+	// b.mu via the public mutators in broker_decision_packet.go. Lane E
+	// reads through findDecisionPacketLocked / GetDecisionPacket for the
+	// inbox row severity rollup and the /tasks/{id} packet view.
+	decisionPackets *decisionPacketState
+	// reviewerGradesByTask is the Lane D routing-side transient store of
+	// ReviewerGrade entries keyed by task ID. Lane D writes here for
+	// convergence/timeout rule evaluation; Lane C's Decision Packet is
+	// the durable source of truth. The two are kept in sync by
+	// AppendReviewerGrade — Lane C mirrors writes to Lane D on each
+	// grade. Guarded by b.mu.
+	reviewerGradesByTask    map[string][]ReviewerGrade
 	requests                []humanInterview
 	humanInvites            []humanInvite
 	humanSessions           []humanSession
@@ -450,6 +469,12 @@ func (b *Broker) Start() error {
 	b.startReviewExpiryLoop(ctx)
 	b.startArchiveSweepLoop(ctx)
 	b.startMemoryWorkflowReconcilerLoop(ctx)
+	// Lane D: reviewer convergence sweeper. Drives the timeout-skipped
+	// filler + the running→review→decision cascade for tasks whose
+	// reviewer slot expires before all grades land. Without this wired
+	// at Start(), reviewer timeouts are dead code in production despite
+	// the test suite calling EvaluateConvergence directly.
+	b.StartReviewConvergenceSweeper(ctx)
 	if err := b.StartOnPort(brokeraddr.ResolvePort()); err != nil {
 		cancel()
 		if b.lifecycleCancel != nil {
@@ -476,6 +501,13 @@ func (b *Broker) StartOnPort(port int) error {
 	mux := http.NewServeMux()
 	b.registerPlatformRoutes(mux)
 	b.registerTaskRoutes(mux)
+	// Lane E (multi-agent control loop): Decision Inbox + per-task
+	// Decision Packet view. /tasks/inbox is registered as an exact
+	// path so it wins over the /tasks/ prefix. /tasks/ fires for
+	// /tasks/{id} only because the existing /tasks/ack and
+	// /tasks/memory-workflow exact paths win for their literals.
+	mux.HandleFunc("/tasks/inbox", b.requireAuth(b.handleTasksInbox))
+	mux.HandleFunc("/tasks/", b.requireAuth(b.handleTaskByID))
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))

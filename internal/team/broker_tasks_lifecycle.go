@@ -10,7 +10,15 @@ import (
 	"time"
 )
 
-func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error) {
+// BlockTask transitions taskID to LifecycleStateBlockedOnPRMerge and
+// records `blockerID` in task.BlockedOn so the unblock cascade fires
+// automatically when the blocker merges.
+//
+// Pass blockerID="" to block without a typed blocker (legacy callers
+// that just want to pause a task without naming the dependency).
+// Multiple BlockedOn entries are supported; this call appends without
+// duplicating an existing entry.
+func (b *Broker) BlockTask(taskID, actor, reason, blockerID string) (teamTask, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -23,6 +31,7 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 		actor = "system"
 	}
 	reason = strings.TrimSpace(reason)
+	blockerID = strings.TrimSpace(blockerID)
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	for i := range b.tasks {
@@ -45,6 +54,25 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 				task.Details = existing + "\n\n" + reason
 			}
 		}
+		// Record the blocker ID before the lifecycle transition so the
+		// indexed inbox query sees a consistent (state, BlockedOn) tuple
+		// the first time it reads. dedup against an existing entry so
+		// re-blocking on the same task doesn't grow the list.
+		if blockerID != "" && blockerID != task.ID {
+			already := false
+			// Rename to `dep` so we don't shadow the broker receiver
+			// `b` and silently break a future maintainer who adds
+			// `b.something(...)` inside this loop.
+			for _, dep := range task.BlockedOn {
+				if dep == blockerID {
+					already = true
+					break
+				}
+			}
+			if !already {
+				task.BlockedOn = append(task.BlockedOn, blockerID)
+			}
+		}
 		// Route the legacy block path through the lifecycle transition
 		// layer so derived fields, the indexed lookup, and the self-heal
 		// gate (build-time gate #1) all stay in sync. The transition
@@ -62,6 +90,13 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 			return teamTask{}, false, err
 		}
 		b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), actor, truncateSummary(task.Title+" ["+task.status+"]", 140), task.ID)
+		// Self-heal gate (build-time gate #1): blocked_on_pr_merge is a
+		// typed legitimate state, not a self-heal trigger. Short-circuit
+		// the call site itself so the unit test can observe absence at
+		// the call boundary, not just the side-effect downstream.
+		if task.LifecycleState != LifecycleStateBlockedOnPRMerge {
+			b.requestCapabilitySelfHealingLocked(task, actor, reason)
+		}
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
@@ -372,7 +407,12 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 	var pending []pendingTaskTransition
 	for i := range b.tasks {
 		task := &b.tasks[i]
-		if !task.blocked {
+		// A task is "currently blocked" if the legacy `blocked` boolean
+		// is set OR the typed LifecycleState reports the block.  Both
+		// are accepted so harness tasks (which set LifecycleState before
+		// the legacy fields settle) and pre-Lane-A tasks (which only
+		// have the legacy flag) cascade the same way.
+		if !task.blocked && task.LifecycleState != LifecycleStateBlockedOnPRMerge {
 			continue
 		}
 		// Sweep both legacy DependsOn and the new typed BlockedOn list so
@@ -395,11 +435,17 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 		if !hasDep {
 			continue
 		}
-		// Remove the resolved entry from BlockedOn before checking
-		// whether anything still blocks the task.
+		// Snapshot BlockedOn so a transition failure below can roll
+		// back the filtered list. Mutating before the transition and
+		// then `continue`ing on error used to leave the task in
+		// LifecycleStateBlockedOnPRMerge with the completed blocker
+		// stripped out — the next merge cascade would skip the task
+		// (it's no longer in DependsOn/BlockedOn) and the task sat
+		// stuck forever.
+		originalBlockedOn := append([]string(nil), task.BlockedOn...)
 		if len(task.BlockedOn) > 0 {
 			filtered := task.BlockedOn[:0]
-			for _, depID := range task.BlockedOn {
+			for _, depID := range originalBlockedOn {
 				if depID == completedTaskID {
 					continue
 				}
@@ -421,6 +467,11 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 		// transition layer stamps every derived field for both paths.
 		if task.LifecycleState == LifecycleStateBlockedOnPRMerge {
 			if _, err := b.transitionLifecycleLocked(task.ID, LifecycleStateReview, "blocker resolved by "+completedTaskID); err != nil {
+				// Restore BlockedOn so the next cascade can retry
+				// this dependent task instead of silently dropping
+				// the unblock signal.
+				task.BlockedOn = originalBlockedOn
+				log.Printf("broker: unblock cascade transition failed for task %q: %v", task.ID, err)
 				continue
 			}
 		} else {
@@ -430,6 +481,11 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTr
 			}
 			transitioned, err := b.transitionLifecycleLocked(task.ID, targetState, "legacy blocker resolved by "+completedTaskID)
 			if err != nil {
+				// Restore BlockedOn so the next cascade can retry
+				// this dependent task instead of silently dropping
+				// the unblock signal.
+				task.BlockedOn = originalBlockedOn
+				log.Printf("broker: unblock cascade legacy transition failed for task %q: %v", task.ID, err)
 				continue
 			}
 			task = transitioned

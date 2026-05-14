@@ -100,6 +100,7 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/channel-members",
 			path == "/members",
 			path == "/tasks",
+			path == "/tasks/inbox",
 			path == "/agent-logs",
 			path == "/requests",
 			path == "/interview",
@@ -136,6 +137,18 @@ func humanRouteAllowed(r *http.Request) bool {
 			return true
 		case strings.HasPrefix(path, "/review/"):
 			return true
+		case isTaskDetailPath(path):
+			// Lane E: human sessions hit /tasks/{id} for the Decision
+			// Packet view. The handler enforces reviewer-membership
+			// authorization on top of this; routing-level access is
+			// granted unconditionally here so the 401 vs 403 vs 200
+			// matrix in the design doc resolves at the handler.
+			//
+			// Scope: only the single-segment /tasks/<id> detail path
+			// is allowed here. Future /tasks/<id>/<sub> routes must
+			// opt in explicitly so we do not grant privilege by
+			// default to every new /tasks/* GET handler.
+			return true
 		}
 		return false
 	}
@@ -153,6 +166,18 @@ func humanRouteAllowed(r *http.Request) bool {
 	}
 
 	return false
+}
+
+// isTaskDetailPath returns true for exactly /tasks/<id> with a single
+// non-empty path segment after the prefix. Used to scope the human
+// routing-level allowlist to the Decision Packet detail handler without
+// granting privilege to every future /tasks/* sub-route.
+func isTaskDetailPath(path string) bool {
+	if !strings.HasPrefix(path, "/tasks/") {
+		return false
+	}
+	rest := strings.TrimPrefix(path, "/tasks/")
+	return rest != "" && !strings.Contains(rest, "/")
 }
 
 // handleWebToken returns the broker token to localhost clients without requiring auth.

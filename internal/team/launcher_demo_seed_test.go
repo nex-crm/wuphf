@@ -114,7 +114,7 @@ func TestBuildNotificationContextExcludesDemoSeed(t *testing.T) {
 	b.mu.Unlock()
 	l := &Launcher{broker: b}
 
-	ctx := l.buildNotificationContext("general", "", "", 5)
+	ctx := l.buildNotificationContext("", "general", "", "", 5)
 	if !strings.Contains(ctx, "Real human message") {
 		t.Fatalf("expected the real human message in context; got %q", ctx)
 	}

@@ -1074,6 +1074,70 @@
   padding: 12px 4px;
 }
 
+/* Timeout-fill bar: sits at the bottom of the card and grows as the card ages. */
+.notebook-surface .nb-review-card-timeout-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--nb-amber) 0%,
+    var(--nb-stamp-red) 100%
+  );
+  border-radius: 0 0 0 8px;
+  transition: width 0.4s ease;
+  pointer-events: none;
+}
+/* Urgent cards pulse their timeout bar to draw attention. */
+@media (prefers-reduced-motion: no-preference) {
+  .notebook-surface
+    .nb-review-card.is-timeout-urgent
+    .nb-review-card-timeout-bar {
+    animation: nb-timeout-pulse 1.8s ease-in-out infinite;
+  }
+}
+@keyframes nb-timeout-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Demand grade chip — shown on waiting/urgent cards only. */
+.notebook-surface .nb-review-card-grade {
+  display: inline-flex;
+  align-items: center;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  align-self: flex-start;
+}
+/*
+ * Grade chips run at 10px so a low-contrast text-on-tint combination
+ * fails WCAG even on sighted users. Use a deeper background with white
+ * text so the chip stays legible at small sizes against either light
+ * or dark notebook surfaces.
+ */
+.notebook-surface .nb-review-card-grade--waiting {
+  background: #7a5b16;
+  color: #ffffff;
+  border: 1px solid #7a5b16;
+}
+.notebook-surface .nb-review-card-grade--urgent {
+  background: #8f2f26;
+  color: #ffffff;
+  border: 1px solid #8f2f26;
+}
+
 /* Review detail drawer */
 @keyframes nb-drawer-backdrop-in {
   from {

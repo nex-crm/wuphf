@@ -127,6 +127,9 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "  wuphf skills install <name> --from <hub>           Pull a skill into your wiki")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Hubs: anthropics, lobehub, github:owner/repo[@branch]")
+	case "task":
+		printTaskHelp()
+		return
 	case "upgrade":
 		fmt.Fprintln(os.Stderr, "wuphf upgrade — check npm for a newer wuphf and show the changelog")
 		fmt.Fprintln(os.Stderr, "")
@@ -446,6 +449,9 @@ func main() {
 			runWorkspace(args[1:])
 		case "skills":
 			runSkillsCmd(args[1:])
+			return
+		case "task":
+			runTaskCmd(args[1:])
 			return
 		}
 	}

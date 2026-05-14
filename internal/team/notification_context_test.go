@@ -97,7 +97,7 @@ func TestNotificationContext_HumanizeNotificationType(t *testing.T) {
 
 func TestNotificationContext_ContextEmptyWhenNoMessages(t *testing.T) {
 	b := newTestNotifyContextBuilder(t)
-	if got := b.NotificationContext("general", "", "", 5); got != "" {
+	if got := b.NotificationContext("", "general", "", "", 5); got != "" {
 		t.Errorf("expected empty context when no messages, got %q", got)
 	}
 }
@@ -113,7 +113,7 @@ func TestNotificationContext_FiltersSystemAndDemoSeedAndStatus(t *testing.T) {
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.channelMessages = func(string) []channelMessage { return msgs }
 	})
-	got := b.NotificationContext("general", "", "", 10)
+	got := b.NotificationContext("", "general", "", "", 10)
 	if !strings.Contains(got, "human says hi") {
 		t.Errorf("expected human msg included; got %q", got)
 	}
@@ -136,7 +136,7 @@ func TestNotificationContext_ExcludesTrigger(t *testing.T) {
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.channelMessages = func(string) []channelMessage { return msgs }
 	})
-	got := b.NotificationContext("general", "trigger", "", 10)
+	got := b.NotificationContext("", "general", "trigger", "", 10)
 	if strings.Contains(got, "the trigger msg") {
 		t.Errorf("trigger msg should be excluded; got %q", got)
 	}
@@ -152,7 +152,7 @@ func TestNotificationContext_ThreadScoped_AnchorsAtRoot(t *testing.T) {
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.channelMessages = func(string) []channelMessage { return msgs }
 	})
-	got := b.NotificationContext("general", "", "ROOT", 10)
+	got := b.NotificationContext("", "general", "", "ROOT", 10)
 	if !strings.Contains(got, "original ask") {
 		t.Errorf("thread-scoped context should anchor at root; got %q", got)
 	}
@@ -172,7 +172,7 @@ func TestNotificationContext_DefaultChannelGeneral(t *testing.T) {
 			return nil
 		}
 	})
-	_ = b.NotificationContext(" ", "", "", 5)
+	_ = b.NotificationContext("", " ", "", "", 5)
 	if captured != "general" {
 		t.Errorf("empty channel should default to general; got %q", captured)
 	}
@@ -528,5 +528,102 @@ func TestLauncher_NotifyContextWiringDelegates(t *testing.T) {
 	got := l.buildTaskNotificationContext("general", "ceo", 5)
 	if !strings.Contains(got, "thing") {
 		t.Errorf("expected ceo task in context: %q", got)
+	}
+}
+
+// TestNotificationContext_PreReviewFilter asserts the fundamental
+// contract from the multi-agent control loop redundancy analysis:
+// a pre-merge channel message stamped with SourceTaskID is HIDDEN
+// from agents who are not the task owner or a reviewer, but VISIBLE
+// to the owner + each reviewer + the broker token (empty recipient).
+// Once the source task merges, the message becomes visible to all.
+func TestNotificationContext_PreReviewFilter(t *testing.T) {
+	t.Parallel()
+	preReviewTask := teamTask{
+		ID:             "task-A",
+		Channel:        "general",
+		Title:          "do thing",
+		Owner:          "tess",
+		Reviewers:      []string{"miles", "nico"},
+		LifecycleState: LifecycleStateReview,
+	}
+	mergedTask := teamTask{
+		ID:             "task-B",
+		Channel:        "general",
+		Title:          "shipped thing",
+		Owner:          "tess",
+		Reviewers:      []string{"miles"},
+		LifecycleState: LifecycleStateMerged,
+	}
+	preMsg := channelMessage{
+		ID:           "m1",
+		From:         "tess",
+		Channel:      "general",
+		Content:      "WIP: just added the new endpoint, will write tests",
+		Timestamp:    "2026-05-11T09:00:00Z",
+		SourceTaskID: "task-A",
+		Tagged:       []string{},
+	}
+	mergedMsg := channelMessage{
+		ID:           "m2",
+		From:         "tess",
+		Channel:      "general",
+		Content:      "Shipped: endpoint deployed",
+		Timestamp:    "2026-05-11T10:00:00Z",
+		SourceTaskID: "task-B",
+		Tagged:       []string{},
+	}
+	bareMsg := channelMessage{
+		ID:        "m3",
+		From:      "tess",
+		Channel:   "general",
+		Content:   "general comment unrelated to any task",
+		Timestamp: "2026-05-11T10:30:00Z",
+		Tagged:    []string{},
+	}
+
+	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
+		b.channelMessages = func(string) []channelMessage {
+			return []channelMessage{preMsg, mergedMsg, bareMsg}
+		}
+		b.taskByID = func(id string) *teamTask {
+			switch id {
+			case "task-A":
+				return &preReviewTask
+			case "task-B":
+				return &mergedTask
+			}
+			return nil
+		}
+	})
+
+	// Recipient "wren" is NOT on task-A; pre-review message must be hidden.
+	got := b.NotificationContext("wren", "general", "", "", 10)
+	if strings.Contains(got, "WIP: just added") {
+		t.Errorf("pre-review message leaked to non-reviewer wren:\n%s", got)
+	}
+	if !strings.Contains(got, "Shipped: endpoint deployed") {
+		t.Errorf("merged-task message hidden from non-reviewer wren:\n%s", got)
+	}
+	if !strings.Contains(got, "general comment unrelated") {
+		t.Errorf("bare message (no SourceTaskID) hidden:\n%s", got)
+	}
+
+	// Recipient "miles" IS a reviewer on task-A; pre-review visible.
+	got = b.NotificationContext("miles", "general", "", "", 10)
+	if !strings.Contains(got, "WIP: just added") {
+		t.Errorf("pre-review message hidden from reviewer miles:\n%s", got)
+	}
+
+	// Recipient "tess" IS the owner; pre-review visible.
+	got = b.NotificationContext("tess", "general", "", "", 10)
+	if !strings.Contains(got, "WIP: just added") {
+		t.Errorf("pre-review message hidden from owner tess:\n%s", got)
+	}
+
+	// Empty recipient (broker/owner token style) bypasses the filter.
+	got = b.NotificationContext("", "general", "", "", 10)
+	if !strings.Contains(got, "WIP: just added") {
+		t.Errorf("empty recipient should bypass filter, message hidden:\n%s", got)
 	}
 }
