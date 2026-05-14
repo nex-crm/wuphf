@@ -1,8 +1,15 @@
 import type { Brand } from "./brand.ts";
 import {
   MAX_RUNNER_CWD_BYTES,
+  MAX_RUNNER_ENDPOINT_BYTES,
   MAX_RUNNER_ERROR_BYTES,
+  MAX_RUNNER_EXTRA_ARG_BYTES,
+  MAX_RUNNER_EXTRA_ARGS,
   MAX_RUNNER_MODEL_BYTES,
+  MAX_RUNNER_OPTION_HEADER_NAME_BYTES,
+  MAX_RUNNER_OPTION_HEADER_VALUE_BYTES,
+  MAX_RUNNER_OPTION_HEADERS,
+  MAX_RUNNER_PROFILE_BYTES,
   MAX_RUNNER_PROMPT_BYTES,
   MAX_RUNNER_STDIO_CHUNK_BYTES,
 } from "./budgets.ts";
@@ -55,6 +62,7 @@ export const RUNNER_FAILURE_CODE_VALUES = [
   "provider_returned_error",
   "unrecognized_provider_response",
   "subscriber_backpressure_exceeded",
+  "runner_input_buffer_overflow",
 ] as const;
 
 export interface RunnerProviderRoute {
@@ -62,12 +70,27 @@ export interface RunnerProviderRoute {
   readonly providerKind: ProviderKind;
 }
 
+export type RunnerSpawnOptions =
+  | { readonly kind: "claude-cli"; readonly extraArgs?: readonly string[] | undefined }
+  | {
+      readonly kind: "codex-cli";
+      readonly sandbox?: "read-only" | "workspace-write" | undefined;
+      readonly profile?: string | undefined;
+    }
+  | {
+      readonly kind: "openai-compat";
+      readonly endpoint: string;
+      readonly headers?: Readonly<Record<string, string>> | undefined;
+      readonly timeoutMs?: number | undefined;
+    };
+
 export interface RunnerSpawnRequest {
   readonly schemaVersion?: RunnerSchemaVersion | undefined;
   readonly kind: RunnerKind;
   readonly agentId: AgentId;
   readonly credential: CredentialHandleJson;
   readonly providerRoute?: RunnerProviderRoute | undefined;
+  readonly options?: RunnerSpawnOptions | undefined;
   readonly prompt: string;
   readonly model?: string | undefined;
   readonly cwd?: string | undefined;
@@ -139,6 +162,7 @@ const RUNNER_SPAWN_REQUEST_KEYS_TUPLE = [
   "agentId",
   "credential",
   "providerRoute",
+  "options",
   "prompt",
   "model",
   "cwd",
@@ -152,6 +176,26 @@ const RUNNER_PROVIDER_ROUTE_KEYS_TUPLE = [
   "providerKind",
 ] as const satisfies readonly (keyof RunnerProviderRoute)[];
 const RUNNER_PROVIDER_ROUTE_KEYS: ReadonlySet<string> = new Set(RUNNER_PROVIDER_ROUTE_KEYS_TUPLE);
+
+const CLAUDE_CLI_OPTIONS_KEYS_TUPLE = [
+  "kind",
+  "extraArgs",
+] as const satisfies readonly (keyof Extract<RunnerSpawnOptions, { kind: "claude-cli" }>)[];
+const CODEX_CLI_OPTIONS_KEYS_TUPLE = [
+  "kind",
+  "sandbox",
+  "profile",
+] as const satisfies readonly (keyof Extract<RunnerSpawnOptions, { kind: "codex-cli" }>)[];
+const OPENAI_COMPAT_OPTIONS_KEYS_TUPLE = [
+  "kind",
+  "endpoint",
+  "headers",
+  "timeoutMs",
+] as const satisfies readonly (keyof Extract<RunnerSpawnOptions, { kind: "openai-compat" }>)[];
+
+const CLAUDE_CLI_OPTIONS_KEYS: ReadonlySet<string> = new Set(CLAUDE_CLI_OPTIONS_KEYS_TUPLE);
+const CODEX_CLI_OPTIONS_KEYS: ReadonlySet<string> = new Set(CODEX_CLI_OPTIONS_KEYS_TUPLE);
+const OPENAI_COMPAT_OPTIONS_KEYS: ReadonlySet<string> = new Set(OPENAI_COMPAT_OPTIONS_KEYS_TUPLE);
 
 const STARTED_EVENT_KEYS_TUPLE = [
   "schemaVersion",
@@ -237,6 +281,7 @@ export function runnerSpawnRequestFromJson(value: unknown): RunnerSpawnRequest {
     "providerRoute",
     "runnerSpawnRequest.providerRoute",
   );
+  const options = optionalRunnerSpawnOptions(record, "options", "runnerSpawnRequest.options", kind);
   const prompt = boundedString(
     requiredString(record, "prompt", "runnerSpawnRequest.prompt"),
     "runnerSpawnRequest.prompt",
@@ -263,6 +308,7 @@ export function runnerSpawnRequestFromJson(value: unknown): RunnerSpawnRequest {
       requiredValue(record, "credential", "runnerSpawnRequest.credential"),
     ),
     ...(providerRoute === undefined ? {} : { providerRoute }),
+    ...(options === undefined ? {} : { options }),
     prompt,
     ...(model === undefined ? {} : { model }),
     ...(cwd === undefined ? {} : { cwd }),
@@ -286,12 +332,39 @@ export function runnerSpawnRequestToJsonValue(
             credentialScope: request.providerRoute.credentialScope,
             providerKind: request.providerRoute.providerKind,
           },
+    options:
+      request.options === undefined ? undefined : runnerSpawnOptionsToJsonValue(request.options),
     prompt: request.prompt,
     model: request.model,
     cwd: request.cwd,
     taskId: request.taskId,
     costCeilingMicroUsd: request.costCeilingMicroUsd,
   });
+}
+
+function runnerSpawnOptionsToJsonValue(
+  options: RunnerSpawnOptions,
+): Readonly<Record<string, unknown>> {
+  switch (options.kind) {
+    case "claude-cli":
+      return omitUndefined({
+        kind: options.kind,
+        extraArgs: options.extraArgs,
+      });
+    case "codex-cli":
+      return omitUndefined({
+        kind: options.kind,
+        sandbox: options.sandbox,
+        profile: options.profile,
+      });
+    case "openai-compat":
+      return omitUndefined({
+        kind: options.kind,
+        endpoint: options.endpoint,
+        headers: options.headers,
+        timeoutMs: options.timeoutMs,
+      });
+  }
 }
 
 export function runnerEventFromJson(value: unknown): RunnerEvent {
@@ -528,6 +601,148 @@ function optionalProviderRoute(
     credentialScope: asCredentialScope(credentialScope),
     providerKind: asProviderKind(providerKind),
   };
+}
+
+function optionalRunnerSpawnOptions(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+  requestKind: RunnerKind,
+): RunnerSpawnOptions | undefined {
+  if (!hasOwn(record, key)) return undefined;
+  const options = requireRecord(requiredValue(record, key, path), path);
+  const kind = requiredString(options, "kind", `${path}.kind`);
+  if (!isRunnerKind(kind)) {
+    throw new Error(`${path}.kind: unsupported RunnerKind`);
+  }
+  if (kind !== requestKind) {
+    throw new Error(`${path}.kind: must match runnerSpawnRequest.kind`);
+  }
+  switch (kind) {
+    case "claude-cli": {
+      assertKnownKeys(options, path, CLAUDE_CLI_OPTIONS_KEYS);
+      const extraArgs = optionalStringArray(
+        options,
+        "extraArgs",
+        `${path}.extraArgs`,
+        MAX_RUNNER_EXTRA_ARGS,
+        MAX_RUNNER_EXTRA_ARG_BYTES,
+      );
+      return {
+        kind,
+        ...(extraArgs === undefined ? {} : { extraArgs }),
+      };
+    }
+    case "codex-cli": {
+      assertKnownKeys(options, path, CODEX_CLI_OPTIONS_KEYS);
+      const sandbox = optionalCodexSandbox(options, "sandbox", `${path}.sandbox`);
+      const profile = optionalBoundedString(
+        options,
+        "profile",
+        `${path}.profile`,
+        MAX_RUNNER_PROFILE_BYTES,
+      );
+      return {
+        kind,
+        ...(sandbox === undefined ? {} : { sandbox }),
+        ...(profile === undefined ? {} : { profile }),
+      };
+    }
+    case "openai-compat": {
+      assertKnownKeys(options, path, OPENAI_COMPAT_OPTIONS_KEYS);
+      const headers = optionalHeaders(options, "headers", `${path}.headers`);
+      const timeoutMs = optionalPositiveInteger(options, "timeoutMs", `${path}.timeoutMs`);
+      return {
+        kind,
+        endpoint: boundedString(
+          requiredString(options, "endpoint", `${path}.endpoint`),
+          `${path}.endpoint`,
+          MAX_RUNNER_ENDPOINT_BYTES,
+        ),
+        ...(headers === undefined ? {} : { headers }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      };
+    }
+  }
+}
+
+function optionalStringArray(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+  maxItems: number,
+  maxItemBytes: number,
+): readonly string[] | undefined {
+  if (!hasOwn(record, key)) return undefined;
+  const value = requiredValue(record, key, path);
+  if (!Array.isArray(value)) {
+    throw new Error(`${path}: must be an array`);
+  }
+  if (value.length > maxItems) {
+    throw new Error(`${path}: exceeds ${maxItems} entries`);
+  }
+  return value.map((item, index) => {
+    if (typeof item !== "string") {
+      throw new Error(`${path}/${index}: must be a string`);
+    }
+    return boundedString(item, `${path}/${index}`, maxItemBytes);
+  });
+}
+
+function optionalCodexSandbox(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): "read-only" | "workspace-write" | undefined {
+  if (!hasOwn(record, key)) return undefined;
+  const value = requiredString(record, key, path);
+  if (value !== "read-only" && value !== "workspace-write") {
+    throw new Error(`${path}: unsupported codex sandbox`);
+  }
+  return value;
+}
+
+function optionalHeaders(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): Readonly<Record<string, string>> | undefined {
+  if (!hasOwn(record, key)) return undefined;
+  const headers = requireRecord(requiredValue(record, key, path), path);
+  const keys = Object.keys(headers);
+  if (keys.length > MAX_RUNNER_OPTION_HEADERS) {
+    throw new Error(`${path}: exceeds ${MAX_RUNNER_OPTION_HEADERS} entries`);
+  }
+  const parsed: Record<string, string> = {};
+  for (const headerName of keys) {
+    boundedString(headerName, `${path}/${headerName}`, MAX_RUNNER_OPTION_HEADER_NAME_BYTES);
+    const descriptor = Object.getOwnPropertyDescriptor(headers, headerName);
+    if (descriptor === undefined || !("value" in descriptor)) {
+      throw new Error(`${path}/${headerName}: must be a data property`);
+    }
+    if (typeof descriptor.value !== "string") {
+      throw new Error(`${path}/${headerName}: must be a string`);
+    }
+    parsed[headerName] = boundedString(
+      descriptor.value,
+      `${path}/${headerName}`,
+      MAX_RUNNER_OPTION_HEADER_VALUE_BYTES,
+    );
+  }
+  return parsed;
+}
+
+function optionalPositiveInteger(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): number | undefined {
+  if (!hasOwn(record, key)) return undefined;
+  const value = requiredValue(record, key, path);
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${path}: must be a positive safe integer`);
+  }
+  return value;
 }
 
 function optionalMicroUsd(

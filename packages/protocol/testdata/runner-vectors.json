@@ -16,6 +16,10 @@
           "credentialScope": "anthropic",
           "providerKind": "anthropic"
         },
+        "options": {
+          "kind": "claude-cli",
+          "extraArgs": ["--max-turns", "3"]
+        },
         "prompt": "Summarize the latest task state.",
         "model": "claude-sonnet-4-7",
         "cwd": "/tmp/wuphf-runner",
@@ -38,6 +42,66 @@
         "cwd": "/tmp/wuphf-runner",
         "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
         "costCeilingMicroUsd": 2500000
+      }
+    },
+    {
+      "name": "codex-cli spawn request with options",
+      "kind": "spawnRequest",
+      "json": {
+        "schemaVersion": 1,
+        "kind": "codex-cli",
+        "agentId": "agent_alpha",
+        "credential": {
+          "version": 1,
+          "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "options": {
+          "kind": "codex-cli",
+          "sandbox": "read-only",
+          "profile": "auto"
+        },
+        "prompt": "Run the focused test suite.",
+        "model": "gpt-5",
+        "cwd": "/tmp/wuphf-runner",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+      }
+    },
+    {
+      "name": "codex-cli spawn request without options",
+      "kind": "spawnRequest",
+      "json": {
+        "schemaVersion": 1,
+        "kind": "codex-cli",
+        "agentId": "agent_alpha",
+        "credential": {
+          "version": 1,
+          "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "prompt": "Run the focused test suite."
+      }
+    },
+    {
+      "name": "openai-compat spawn request with options",
+      "kind": "spawnRequest",
+      "json": {
+        "schemaVersion": 1,
+        "kind": "openai-compat",
+        "agentId": "agent_alpha",
+        "credential": {
+          "version": 1,
+          "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "options": {
+          "kind": "openai-compat",
+          "endpoint": "https://api.openai.com/v1/chat/completions",
+          "headers": {
+            "OpenAI-Beta": "assistants=v2"
+          },
+          "timeoutMs": 60000
+        },
+        "prompt": "Summarize the latest task state.",
+        "model": "gpt-5-mini",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW"
       }
     },
     {
@@ -152,6 +216,59 @@
         "credential": {
           "version": 1,
           "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "prompt": "Summarize the latest task state."
+      }
+    },
+    {
+      "name": "claude-cli malformed options",
+      "kind": "spawnRequest",
+      "json": {
+        "schemaVersion": 1,
+        "kind": "claude-cli",
+        "agentId": "agent_alpha",
+        "credential": {
+          "version": 1,
+          "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "options": {
+          "kind": "claude-cli",
+          "extraArgs": "--max-turns"
+        },
+        "prompt": "Summarize the latest task state."
+      }
+    },
+    {
+      "name": "codex-cli malformed options",
+      "kind": "spawnRequest",
+      "json": {
+        "schemaVersion": 1,
+        "kind": "codex-cli",
+        "agentId": "agent_alpha",
+        "credential": {
+          "version": 1,
+          "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "options": {
+          "kind": "codex-cli",
+          "sandbox": "danger-full-access"
+        },
+        "prompt": "Run the focused test suite."
+      }
+    },
+    {
+      "name": "openai-compat malformed options",
+      "kind": "spawnRequest",
+      "json": {
+        "schemaVersion": 1,
+        "kind": "openai-compat",
+        "agentId": "agent_alpha",
+        "credential": {
+          "version": 1,
+          "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "options": {
+          "kind": "openai-compat"
         },
         "prompt": "Summarize the latest task state."
       }

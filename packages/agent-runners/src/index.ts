@@ -18,7 +18,6 @@ export type {
   OpenAICompatAdapterOptions,
   OpenAICompatFetch,
   OpenAICompatRunnerOptions,
-  OpenAICompatRunnerSpawnRequest,
 } from "./adapters/openai-compat.ts";
 export {
   createOpenAICompatRunner,
@@ -29,10 +28,12 @@ export {
   AgentRunnerError,
   ClaudeCliNotAvailable,
   CodexCliNotAvailable,
+  EndpointNotAllowed,
   isRunnerSpawnError,
   ProviderKindMismatch,
   ReceiptWriteFailed,
   RunnerLifecycleError,
+  RunnerOptionsRequired,
   RunnerSpawnFailed,
 } from "./errors.ts";
 export type { RunnerEventRecord } from "./internal/event-hub.ts";

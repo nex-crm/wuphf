@@ -66,6 +66,7 @@ describe("runner routes", () => {
       readonly retentionTtlMs?: number | undefined;
       readonly maxRunners?: number | undefined;
       readonly stopGraceMs?: number | undefined;
+      readonly endpointAllowlist?: readonly string[] | undefined;
     } = {},
   ): Promise<BrokerHandle> {
     broker = await createBroker({
@@ -135,6 +136,76 @@ describe("runner routes", () => {
     await expect(res.json()).resolves.toEqual({ runnerId });
     expect(runner?.agentId).toBe(agentId);
     expect(spawnedRequest?.cwd).toBe(await realpath(projectDir));
+  });
+
+  it.each([
+    ["exact", "https://api.openai.com/v1/chat/completions", ["https://api.openai.com"]],
+    [
+      "glob",
+      "https://eastus.openai.azure.com/openai/deployments/demo/chat/completions",
+      ["https://*.openai.azure.com"],
+    ],
+  ])("spawns openai-compatible runners through an endpoint allowlist: %s", async (_name, endpoint, endpointAllowlist) => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot, { endpointAllowlist });
+    const res = await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(runnerSpawnRequestToJsonValue(openAICompatSpawnRequest(endpoint))),
+    });
+
+    expect(res.status).toBe(201);
+    await expect(res.json()).resolves.toEqual({ runnerId });
+    expect(spawnedRequest?.kind).toBe("openai-compat");
+  });
+
+  it.each([
+    ["not allowlisted", "https://evil.test/v1/chat/completions", ["https://api.openai.com"]],
+    ["loopback wildcard", "http://127.0.0.1:8080/v1/chat/completions", ["http://*"]],
+    ["file scheme", "file:///etc/passwd", ["file://*"]],
+  ])("rejects openai-compatible runner endpoints: %s", async (_name, endpoint, endpointAllowlist) => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot, { endpointAllowlist });
+    const res = await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(runnerSpawnRequestToJsonValue(openAICompatSpawnRequest(endpoint))),
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "endpoint_not_allowed",
+      endpoint,
+      allowedOrigins: endpointAllowlist,
+    });
+    expect(runner).toBeNull();
+  });
+
+  it("spawns codex-cli with no options field", async () => {
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot);
+    const res = await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(
+        runnerSpawnRequestToJsonValue({
+          ...spawnRequest(),
+          kind: "codex-cli",
+        }),
+      ),
+    });
+
+    expect(res.status).toBe(201);
+    expect(spawnedRequest?.kind).toBe("codex-cli");
   });
 
   it("rejects a spawn request whose agentId does not match the bearer map", async () => {
@@ -443,3 +514,14 @@ describe("runner routes", () => {
     return workspaceRoot;
   }
 });
+
+function openAICompatSpawnRequest(endpoint: string): RunnerSpawnRequest {
+  return {
+    ...spawnRequest(),
+    kind: "openai-compat",
+    options: {
+      kind: "openai-compat",
+      endpoint,
+    },
+  };
+}

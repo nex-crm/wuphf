@@ -1,4 +1,4 @@
-import { ProviderKindMismatch } from "@wuphf/agent-runners";
+import { EndpointNotAllowed, ProviderKindMismatch } from "@wuphf/agent-runners";
 import { createFakeAgentRunner } from "@wuphf/agent-runners/testing";
 import { CredentialOwnershipMismatch } from "@wuphf/credentials";
 import { forBrokerTests } from "@wuphf/credentials/testing";
@@ -176,7 +176,68 @@ describe("createAgentRunnerForBroker", () => {
       }),
     ).rejects.toBeInstanceOf(ProviderKindMismatch);
   });
+
+  it.each([
+    ["exact", "https://api.openai.com/v1/chat/completions", ["https://api.openai.com"]],
+    [
+      "glob",
+      "https://eastus.openai.azure.com/openai/deployments/demo/chat/completions",
+      ["https://*.openai.azure.com"],
+    ],
+  ])(
+    "allows openai-compatible endpoints that match the %s allowlist",
+    async (_name, endpoint, endpointAllowlist) => {
+      const runner = await createAgentRunnerForBroker(
+        openAICompatRequest(endpoint),
+        forBrokerTests({ agentId }),
+        {
+          ...depsForOwnership({
+            actualAgentId: agentId,
+            actualScope: asCredentialScope("openai-compat"),
+            actualSecret: "openai-compatible-secret",
+            expectedProviderKind: asProviderKind("openai-compat"),
+          }),
+          endpointAllowlist,
+        },
+      );
+
+      expect(runner.agentId).toBe(agentId);
+    },
+  );
+
+  it.each([
+    ["not allowlisted", "https://evil.test/v1/chat/completions", ["https://api.openai.com"]],
+    ["loopback wildcard", "http://127.0.0.1:8080/v1/chat/completions", ["http://*"]],
+    ["file scheme", "file:///etc/passwd", ["file://*"]],
+  ])("rejects openai-compatible endpoints: %s", async (_name, endpoint, endpointAllowlist) => {
+    await expect(
+      createAgentRunnerForBroker(openAICompatRequest(endpoint), forBrokerTests({ agentId }), {
+        ...depsForOwnership({
+          actualAgentId: agentId,
+          actualScope: asCredentialScope("openai-compat"),
+          actualSecret: "openai-compatible-secret",
+        }),
+        endpointAllowlist,
+      }),
+    ).rejects.toBeInstanceOf(EndpointNotAllowed);
+  });
 });
+
+function openAICompatRequest(endpoint: string): RunnerSpawnRequest {
+  return {
+    kind: "openai-compat",
+    agentId,
+    credential: {
+      version: 1,
+      id: asCredentialHandleId("cred_openai123456789ABCDEFGHIJKLM"),
+    },
+    options: {
+      kind: "openai-compat",
+      endpoint,
+    },
+    prompt: "run",
+  };
+}
 
 function depsForOwnership(input: {
   readonly actualAgentId: AgentId;

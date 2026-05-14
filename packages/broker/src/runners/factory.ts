@@ -1,5 +1,13 @@
-import type { AgentRunner, Receipt, SpawnAgentRunner } from "@wuphf/agent-runners";
-import { ProviderKindMismatch } from "@wuphf/agent-runners";
+import { isIP } from "node:net";
+
+import {
+  type AgentRunner,
+  EndpointNotAllowed,
+  ProviderKindMismatch,
+  type Receipt,
+  RunnerOptionsRequired,
+  type SpawnAgentRunner,
+} from "@wuphf/agent-runners";
 import { CredentialOwnershipMismatch, type CredentialStore } from "@wuphf/credentials";
 import type {
   BrokerIdentity,
@@ -33,6 +41,7 @@ export interface AgentRunnerFactoryDeps {
   readonly receiptStore: ReceiptStore;
   readonly eventLog: RunnerEventLog;
   readonly spawnRunner: SpawnAgentRunner;
+  readonly endpointAllowlist?: readonly string[] | undefined;
 }
 
 export async function createAgentRunnerForBroker(
@@ -40,10 +49,13 @@ export async function createAgentRunnerForBroker(
   brokerIdentity: BrokerIdentity,
   deps: AgentRunnerFactoryDeps,
 ): Promise<AgentRunner> {
+  // 1. Validate endpoint policy before invoking an OpenAI-compatible runner.
+  validateOpenAICompatEndpointForBroker(request, deps.endpointAllowlist ?? []);
   const credentialScope =
     request.providerRoute?.credentialScope ?? credentialScopeForRunnerKind(request.kind);
   const resolvedProviderKind =
     request.providerRoute?.providerKind ?? runnerKindToProviderKind(request.kind);
+  // 2. Validate provider kind against the credential scope resolved for this spawn.
   if (
     request.providerRoute?.providerKind !== undefined &&
     !providerKindMatchesCredentialScope(credentialScope, resolvedProviderKind)
@@ -61,6 +73,7 @@ export async function createAgentRunnerForBroker(
   return deps.spawnRunner(request, {
     credential,
     resolvedProviderKind,
+    // 3. Validate credential ownership immediately before exposing secret material.
     secretReader: async (handle) => {
       const resolved = await deps.credentialStore.readWithOwnership({
         broker: brokerIdentity,
@@ -82,6 +95,176 @@ export async function createAgentRunnerForBroker(
     },
     eventLog: deps.eventLog,
   });
+}
+
+function validateOpenAICompatEndpointForBroker(
+  request: RunnerSpawnRequest,
+  endpointAllowlist: readonly string[],
+): void {
+  if (request.kind !== "openai-compat") return;
+  if (request.options?.kind !== "openai-compat") {
+    throw new RunnerOptionsRequired("OpenAI-compatible runner requires options.kind=openai-compat");
+  }
+  const endpoint = request.options.endpoint;
+  const endpointUrl = parseEndpointUrl(endpoint, endpointAllowlist);
+  if (endpointUrl.protocol !== "https:" && endpointUrl.protocol !== "http:") {
+    throw new EndpointNotAllowed(endpoint, endpointAllowlist);
+  }
+  const exactAllowed = endpointAllowlist.some((entry) => exactOriginMatches(entry, endpointUrl));
+  const allowed = endpointAllowlist.some((entry) => allowlistEntryMatches(entry, endpointUrl));
+  const dangerous = endpointIsDangerous(endpointUrl);
+  if (!allowed || (dangerous && !exactAllowed)) {
+    throw new EndpointNotAllowed(endpoint, endpointAllowlist);
+  }
+}
+
+function parseEndpointUrl(endpoint: string, allowedOrigins: readonly string[]): URL {
+  try {
+    return new URL(endpoint);
+  } catch (error) {
+    throw new EndpointNotAllowed(endpoint, allowedOrigins, { cause: error });
+  }
+}
+
+function allowlistEntryMatches(entry: string, endpointUrl: URL): boolean {
+  if (!entry.includes("*")) return exactOriginMatches(entry, endpointUrl);
+  return globOriginRegExp(entry).test(endpointUrl.origin);
+}
+
+function exactOriginMatches(entry: string, endpointUrl: URL): boolean {
+  if (entry.includes("*")) return false;
+  try {
+    return new URL(entry).origin === endpointUrl.origin;
+  } catch {
+    return false;
+  }
+}
+
+function globOriginRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", "[^/]*");
+  return new RegExp(`^${escaped}$`, "i");
+}
+
+function endpointIsDangerous(endpointUrl: URL): boolean {
+  if (endpointUrl.protocol !== "https:") return true;
+  const host = normalizedHostname(endpointUrl);
+  return hostIsLoopback(host) || hostIsPrivateOrLinkLocal(host);
+}
+
+function normalizedHostname(endpointUrl: URL): string {
+  return endpointUrl.hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/%.+$/, "");
+}
+
+function hostIsLoopback(host: string): boolean {
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  const family = isIP(host);
+  if (family === 4) {
+    return ipv4Octets(host)?.[0] === 127;
+  }
+  if (family === 6) {
+    const bytes = ipv6Bytes(host);
+    if (bytes === null) return false;
+    return bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1;
+  }
+  return false;
+}
+
+function hostIsPrivateOrLinkLocal(host: string): boolean {
+  const family = isIP(host);
+  if (family === 4) {
+    const octets = ipv4Octets(host);
+    if (octets === null) return false;
+    const [first, second] = octets;
+    return (
+      first === 10 ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 169 && second === 254)
+    );
+  }
+  if (family === 6) {
+    const bytes = ipv6Bytes(host);
+    if (bytes === null) return false;
+    if (isIpv4Mapped(bytes)) {
+      const mapped = bytes.slice(12);
+      return ipv4BytesArePrivateOrLinkLocal(mapped) || mapped[0] === 127;
+    }
+    const first = bytes[0] ?? 0;
+    const second = bytes[1] ?? 0;
+    return (first === 0xfe && (second & 0xc0) === 0x80) || (first & 0xfe) === 0xfc;
+  }
+  return false;
+}
+
+function ipv4Octets(host: string): readonly [number, number, number, number] | null {
+  const parts = host.split(".");
+  if (parts.length !== 4) return null;
+  const octets = parts.map((part) => Number.parseInt(part, 10));
+  if (
+    octets.length !== 4 ||
+    octets.some((octet, index) => String(octet) !== parts[index] || octet < 0 || octet > 255)
+  ) {
+    return null;
+  }
+  return [octets[0] ?? 0, octets[1] ?? 0, octets[2] ?? 0, octets[3] ?? 0];
+}
+
+function ipv4BytesArePrivateOrLinkLocal(bytes: readonly number[]): boolean {
+  const [first, second] = bytes;
+  return (
+    first === 10 ||
+    (first === 172 && second !== undefined && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    (first === 169 && second === 254)
+  );
+}
+
+function ipv6Bytes(host: string): readonly number[] | null {
+  const ipv4Tail = host.match(/(.+):(\d+\.\d+\.\d+\.\d+)$/);
+  let normalized = host;
+  if (ipv4Tail !== null) {
+    const prefix = ipv4Tail[1];
+    const octets = ipv4Octets(ipv4Tail[2] ?? "");
+    if (prefix === undefined || octets === null) return null;
+    const groups = octets
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+      .match(/.{1,4}/g);
+    if (groups === null) return null;
+    normalized = `${prefix}:${groups.join(":")}`;
+  }
+  const halves = normalized.split("::");
+  if (halves.length > 2) return null;
+  const left = parseIpv6Groups(halves[0] ?? "");
+  const right = parseIpv6Groups(halves[1] ?? "");
+  if (left === null || right === null) return null;
+  const missing = 8 - left.length - right.length;
+  if (halves.length === 1 && missing !== 0) return null;
+  if (halves.length === 2 && missing < 1) return null;
+  const groups = [...left, ...Array.from({ length: Math.max(0, missing) }, () => 0), ...right];
+  if (groups.length !== 8) return null;
+  return groups.flatMap((group) => [(group >> 8) & 0xff, group & 0xff]);
+}
+
+function parseIpv6Groups(part: string): readonly number[] | null {
+  if (part.length === 0) return [];
+  const groups = part.split(":").map((group) => Number.parseInt(group, 16));
+  if (groups.some((group) => !Number.isInteger(group) || group < 0 || group > 0xffff)) {
+    return null;
+  }
+  return groups;
+}
+
+function isIpv4Mapped(bytes: readonly number[]): boolean {
+  return (
+    bytes.length === 16 &&
+    bytes.slice(0, 10).every((byte) => byte === 0) &&
+    bytes[10] === 0xff &&
+    bytes[11] === 0xff
+  );
 }
 
 function credentialScopeForRunnerKind(kind: RunnerKind): CredentialScope {

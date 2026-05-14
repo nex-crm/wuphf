@@ -223,6 +223,7 @@ describe("createCodexCliRunner", () => {
       "/workspace/project",
       "--model",
       "gpt-5",
+      "--",
       "Run tests and summarize",
     ]);
     const env = harness.calls[0]?.options.env ?? {};
@@ -249,6 +250,22 @@ describe("createCodexCliRunner", () => {
     expect(harness.receipts[0]?.inputTokens).toBe(123);
     expect(harness.receipts[0]?.costUsd).toBe(0.000246);
     expect(harness.receipts[0]?.finalMessage?.toString()).toBe("Done.\n");
+  });
+
+  it.each([
+    "--no-receipt foo bar",
+    "-h",
+    "",
+  ])("passes prompt after an argv separator: %j", async (prompt) => {
+    const harness = makeHarness();
+    const spawnRunner = makeSpawnRunner(harness);
+
+    const runner = await spawnRunner({ ...spawnRequest(), prompt }, harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.exit(0);
+    await eventsPromise;
+
+    expect(harness.calls[0]?.args.slice(-2)).toEqual(["--", prompt]);
   });
 
   it("fails the runner when receipt put fails", async () => {
@@ -369,6 +386,47 @@ describe("createCodexCliRunner", () => {
     expect(harness.receipts[0]?.finalMessage?.toString()).toBe("final <redacted>\n");
   });
 
+  it("fails closed and terminates the subprocess on oversized stdout lines", async () => {
+    const harness = makeHarness();
+    const spawnRunner = makeSpawnRunner(harness);
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout("x".repeat(17 * 1024 * 1024));
+    await waitForSignal(harness.child);
+    harness.child.exit(1, "SIGTERM");
+    const events = await eventsPromise;
+
+    expect(
+      events.some(
+        (event) => event.kind === "failed" && event.code === "runner_input_buffer_overflow",
+      ),
+    ).toBe(true);
+    expect(harness.child.signals).toEqual(["SIGTERM"]);
+    expect(harness.receipts).toHaveLength(0);
+  });
+
+  it("fails closed when a codex output block has too many lines", async () => {
+    const harness = makeHarness();
+    const spawnRunner = makeSpawnRunner(harness);
+
+    const runner = await spawnRunner(spawnRequest(), harness.deps);
+    const eventsPromise = collectAll(runner.events());
+    harness.child.writeStdout(
+      Array.from({ length: 1025 }, (_, index) => `line ${index}\n`).join(""),
+    );
+    await waitForSignal(harness.child);
+    harness.child.exit(1, "SIGTERM");
+    const events = await eventsPromise;
+
+    expect(
+      events.some(
+        (event) => event.kind === "failed" && event.code === "runner_input_buffer_overflow",
+      ),
+    ).toBe(true);
+    expect(harness.receipts).toHaveLength(0);
+  });
+
   it("rejects negative usage and cost ceiling overflows", async () => {
     const negativeHarness = makeHarness();
     const negativeRunner = await makeSpawnRunner(negativeHarness)(
@@ -427,3 +485,11 @@ const allowedEnvKeys = new Set([
   "HOME",
   "USER",
 ]);
+
+async function waitForSignal(child: FakeCodexChild): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (child.signals.length > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("timed out waiting for subprocess termination signal");
+}

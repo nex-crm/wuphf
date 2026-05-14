@@ -81,6 +81,26 @@ export class ProviderKindMismatch extends AgentRunnerError {
   }
 }
 
+export class RunnerOptionsRequired extends AgentRunnerError {
+  override readonly name = "RunnerOptionsRequired";
+
+  constructor(message = "runner options are required", options?: ErrorOptions) {
+    super(message, "runner_options_required", 400, options);
+  }
+}
+
+export class EndpointNotAllowed extends AgentRunnerError {
+  override readonly name = "EndpointNotAllowed";
+
+  constructor(
+    readonly endpoint: string,
+    readonly allowedOrigins: readonly string[],
+    options?: ErrorOptions,
+  ) {
+    super(`endpoint is not allowed: ${endpoint}`, "endpoint_not_allowed", 403, options);
+  }
+}
+
 export function isRunnerSpawnError(error: unknown): error is Error & RunnerSpawnError {
   if (!(error instanceof Error)) return false;
   const maybe = error as { readonly code?: unknown; readonly httpStatus?: unknown };

@@ -30,7 +30,12 @@ import {
 } from "@wuphf/protocol";
 
 import { CodexCliNotAvailable, ReceiptWriteFailed, RunnerSpawnFailed } from "../errors.ts";
-import { chunkStdio } from "../internal/chunk.ts";
+import {
+  BoundedLineBuffer,
+  chunkStdio,
+  DEFAULT_MAX_RUNNER_INPUT_BUFFER_BYTES,
+  RunnerInputBufferOverflow,
+} from "../internal/chunk.ts";
 import {
   errorMessage,
   RunnerFailure,
@@ -44,7 +49,7 @@ import {
   RunnerEventHub,
   SerializedEmitter,
 } from "../internal/event-hub.ts";
-import { createSecretRedactor, type SecretRedactor } from "../internal/redact.ts";
+import { createSecretStreamingRedactor, type StreamingRedactor } from "../internal/redact.ts";
 import { LifecycleStateMachine } from "../lifecycle.ts";
 import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
 
@@ -110,6 +115,7 @@ const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const DEFAULT_GRACE_PERIOD_MS = 5_000;
 const DEFAULT_SANDBOX: CodexCliSandboxMode = "workspace-write";
 const DEFAULT_PROFILE = "auto";
+const MAX_CODEX_BLOCK_LINES = 1024;
 
 export function createCodexCliRunner(options: CodexCliAdapterOptions = {}): SpawnAgentRunner {
   const commandPath = resolveCodexCommand(options);
@@ -122,6 +128,7 @@ export function createCodexCliRunner(options: CodexCliAdapterOptions = {}): Spaw
     const secretEnvVar = secretEnvVarForScope(scope);
     const secret = await deps.secretReader(deps.credential);
     const runnerId = options.runnerIdFactory?.() ?? randomRunnerId();
+    const requestOptions = request.options?.kind === "codex-cli" ? request.options : undefined;
     const runner = new CodexCliAgentRunner({
       commandPath,
       costEstimator: options.costEstimator,
@@ -129,11 +136,11 @@ export function createCodexCliRunner(options: CodexCliAdapterOptions = {}): Spaw
       maxEventHistory: options.maxEventHistory ?? DEFAULT_MAX_EVENT_HISTORY,
       now: options.now ?? (() => new Date()),
       outputLastMessagePath: outputLastMessagePath(options.outputLastMessagePath, runnerId),
-      profile: options.profile ?? DEFAULT_PROFILE,
+      profile: requestOptions?.profile ?? options.profile ?? DEFAULT_PROFILE,
       receiptIdFactory: options.receiptIdFactory ?? randomReceiptId,
       request,
       runnerId,
-      sandbox: options.sandbox ?? DEFAULT_SANDBOX,
+      sandbox: requestOptions?.sandbox ?? options.sandbox ?? DEFAULT_SANDBOX,
       secret,
       secretEnvVar,
       spawner,
@@ -159,7 +166,7 @@ class CodexCliAgentRunner implements AgentRunner {
   readonly #outputLastMessagePath: string;
   readonly #profile: string;
   readonly #receiptId: ReceiptId;
-  readonly #redact: SecretRedactor;
+  readonly #redactor: StreamingRedactor;
   readonly #request: RunnerSpawnRequest;
   readonly #sandbox: CodexCliSandboxMode;
   readonly #secret: string;
@@ -179,6 +186,8 @@ class CodexCliAgentRunner implements AgentRunner {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
   };
+  #redactionTarget: "stdout" | "stderr" | null = null;
+  #redactionFinalMessage = false;
   #terminatePromise: Promise<void> | null = null;
   #unrecognizedLineCount = 0;
 
@@ -211,7 +220,7 @@ class CodexCliAgentRunner implements AgentRunner {
     this.#outputLastMessagePath = args.outputLastMessagePath;
     this.#profile = args.profile;
     this.#receiptId = args.receiptIdFactory();
-    this.#redact = createSecretRedactor(args.secret);
+    this.#redactor = createSecretStreamingRedactor(args.secret);
     this.#request = args.request;
     this.#sandbox = args.sandbox;
     this.#secret = args.secret;
@@ -293,47 +302,39 @@ class CodexCliAgentRunner implements AgentRunner {
 
   async #consumeStdout(stream: Readable): Promise<void> {
     const blockLines: string[] = [];
-    let buffered = "";
     let sawDelimiter = false;
-    for await (const chunk of stream) {
-      buffered += chunkToString(chunk);
-      let newline = buffered.indexOf("\n");
-      while (newline >= 0) {
-        const line = buffered.slice(0, newline + 1);
-        buffered = buffered.slice(newline + 1);
+    const buffer = new BoundedLineBuffer(DEFAULT_MAX_RUNNER_INPUT_BUFFER_BYTES);
+    try {
+      for await (const chunk of stream) {
+        for (const line of buffer.push(chunkToString(chunk))) {
+          if (isDelimiterLine(line)) {
+            await this.#processCodexBlock(blockLines.splice(0), false);
+            sawDelimiter = true;
+          } else {
+            pushCodexBlockLine(blockLines, `${line}\n`);
+          }
+        }
+      }
+      for (const line of buffer.flush()) {
         if (isDelimiterLine(line)) {
           await this.#processCodexBlock(blockLines.splice(0), false);
           sawDelimiter = true;
         } else {
-          blockLines.push(line);
+          pushCodexBlockLine(blockLines, line);
         }
-        newline = buffered.indexOf("\n");
       }
-    }
-    if (buffered.length > 0) {
-      if (isDelimiterLine(buffered)) {
-        await this.#processCodexBlock(blockLines.splice(0), false);
-        sawDelimiter = true;
-      } else {
-        blockLines.push(buffered);
+    } catch (error) {
+      if (error instanceof RunnerInputBufferOverflow) {
+        throw new RunnerFailure(error.message, "runner_input_buffer_overflow", { cause: error });
       }
+      throw error;
     }
     await this.#processCodexBlock(blockLines, sawDelimiter);
   }
 
   async #consumeStderr(stream: Readable): Promise<void> {
     for await (const chunk of stream) {
-      const text = this.#redact(chunkToString(chunk));
-      if (text.length > 0) {
-        for (const stdioChunk of chunkStdio(text)) {
-          await this.#emit({
-            kind: "stderr",
-            runnerId: this.id,
-            chunk: stdioChunk,
-            at: this.#isoNow(),
-          });
-        }
-      }
+      await this.#emitText("stderr", chunkToString(chunk));
     }
   }
 
@@ -412,7 +413,7 @@ class CodexCliAgentRunner implements AgentRunner {
 
   async #emitStdoutText(text: string, finalMessage: boolean): Promise<void> {
     if (text.length === 0) return;
-    const redacted = this.#redact(text);
+    const redacted = await this.#redactForTarget("stdout", text, finalMessage);
     for (const chunk of chunkStdio(redacted)) {
       await this.#emit({ kind: "stdout", runnerId: this.id, chunk, at: this.#isoNow() });
       if (finalMessage) {
@@ -440,6 +441,7 @@ class CodexCliAgentRunner implements AgentRunner {
   }
 
   async #writeReceiptAndFinish(exitCode: number): Promise<void> {
+    await this.#flushRedactorCarry();
     const receipt = this.#buildReceipt();
     try {
       const stored = await this.#deps.receiptStore.put(receipt);
@@ -554,14 +556,14 @@ class CodexCliAgentRunner implements AgentRunner {
     if (this.#request.model !== undefined) {
       args.push("--model", this.#request.model);
     }
+    args.push("--");
     args.push(this.#request.prompt);
     return args;
   }
 
   async #emit(event: RunnerEvent): Promise<void> {
-    const redacted = redactEvent(event, this.#redact);
     try {
-      await this.#emitter.emit(redacted);
+      await this.#emitter.emit(event);
     } catch (error) {
       throw new RunnerFailure(errorMessage(error), "event_log_write_failed", { cause: error });
     }
@@ -574,9 +576,12 @@ class CodexCliAgentRunner implements AgentRunner {
     gracePeriodMs?: number | undefined,
   ): Promise<void> {
     const failure = runnerFailureFromError(error, fallbackCode);
-    const message = this.#redact(failure.message);
     if (this.#failed) return;
     this.#failed = true;
+    await this.#flushRedactorCarry();
+    const message = `${this.#redactor.redact(failure.message)}${this.#redactor.flush()}`;
+    this.#redactionTarget = null;
+    this.#redactionFinalMessage = false;
     const event: RunnerEvent = {
       kind: "failed",
       runnerId: this.id,
@@ -617,6 +622,44 @@ class CodexCliAgentRunner implements AgentRunner {
         },
       },
     };
+  }
+
+  async #emitText(target: "stdout" | "stderr", text: string): Promise<void> {
+    const redacted = await this.#redactForTarget(target, text, false);
+    for (const chunk of chunkStdio(redacted)) {
+      await this.#emit({ kind: target, runnerId: this.id, chunk, at: this.#isoNow() });
+    }
+  }
+
+  async #redactForTarget(
+    target: "stdout" | "stderr",
+    text: string,
+    finalMessage: boolean,
+  ): Promise<string> {
+    if (
+      this.#redactionTarget !== null &&
+      (this.#redactionTarget !== target || this.#redactionFinalMessage !== finalMessage)
+    ) {
+      await this.#flushRedactorCarry();
+    }
+    this.#redactionTarget = target;
+    this.#redactionFinalMessage = finalMessage;
+    return this.#redactor.redact(text);
+  }
+
+  async #flushRedactorCarry(): Promise<void> {
+    const target = this.#redactionTarget;
+    const finalMessage = this.#redactionFinalMessage;
+    const carry = this.#redactor.flush();
+    this.#redactionTarget = null;
+    this.#redactionFinalMessage = false;
+    if (target === null || carry.length === 0) return;
+    for (const chunk of chunkStdio(carry)) {
+      await this.#emit({ kind: target, runnerId: this.id, chunk, at: this.#isoNow() });
+      if (target === "stdout" && finalMessage) {
+        this.#finalText += chunk;
+      }
+    }
   }
 }
 
@@ -782,6 +825,16 @@ function isDelimiterLine(line: string): boolean {
   return /^-{8,}$/.test(stripLineEnding(line).trim());
 }
 
+function pushCodexBlockLine(lines: string[], line: string): void {
+  lines.push(line);
+  if (lines.length > MAX_CODEX_BLOCK_LINES) {
+    throw new RunnerFailure(
+      `Codex CLI output block exceeded ${MAX_CODEX_BLOCK_LINES} lines`,
+      "runner_input_buffer_overflow",
+    );
+  }
+}
+
 function stripLineEnding(line: string): string {
   return line.replace(/\r?\n$/, "");
 }
@@ -790,18 +843,6 @@ function chunkToString(chunk: unknown): string {
   if (typeof chunk === "string") return chunk;
   if (Buffer.isBuffer(chunk)) return chunk.toString("utf8");
   return String(chunk);
-}
-
-function redactEvent(event: RunnerEvent, redact: SecretRedactor): RunnerEvent {
-  switch (event.kind) {
-    case "stdout":
-    case "stderr":
-      return { ...event, chunk: redact(event.chunk) };
-    case "failed":
-      return { ...event, error: redact(event.error) };
-    default:
-      return event;
-  }
 }
 
 function randomRunnerId(): RunnerId {

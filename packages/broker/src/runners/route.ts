@@ -6,6 +6,7 @@ import type { ReadableStream } from "node:stream/web";
 
 import {
   type AgentRunner,
+  EndpointNotAllowed,
   isRunnerSpawnError,
   type RunnerEventRecord,
   RunnerResumeWindowExpired,
@@ -419,6 +420,10 @@ function spawnError(res: ServerResponse, error: unknown): void {
     writeJson(res, 403, { error: "credential_ownership_mismatch" });
     return;
   }
+  if (error instanceof EndpointNotAllowed) {
+    endpointNotAllowed(res, error);
+    return;
+  }
   if (isRunnerSpawnError(error)) {
     writeJson(res, error.httpStatus, { error: error.code, reason: error.message });
     return;
@@ -438,6 +443,14 @@ function runnerCapacityExhausted(res: ServerResponse, maxRunners: number): void 
 
 function cwdOutOfWorkspace(res: ServerResponse, reason: string): void {
   writeJson(res, 400, { error: "cwd_out_of_workspace", reason });
+}
+
+function endpointNotAllowed(res: ServerResponse, error: EndpointNotAllowed): void {
+  writeJson(res, 403, {
+    error: "endpoint_not_allowed",
+    endpoint: error.endpoint,
+    allowedOrigins: error.allowedOrigins,
+  });
 }
 
 function forbidden(res: ServerResponse, reason: string): void {
