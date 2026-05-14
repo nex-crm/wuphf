@@ -10,13 +10,17 @@ import {
 } from "../internal/handle.ts";
 import {
   assertBrokerIdentityForAgent,
+  assertCredentialOwnership,
   assertValidCredentialPayload,
   type CredentialDeleteRequest,
   type CredentialReadRequest,
+  type CredentialReadWithOwnershipRequest,
+  type CredentialReadWithOwnershipResult,
   type CredentialStore,
   type CredentialWriteRequest,
   keychainCommandFailure,
   operationTimeoutMs,
+  parseCredentialOwnershipMetadata,
   resolveTrustedCommand,
   runKeychainCommand,
   type Spawner,
@@ -113,6 +117,23 @@ export class MacOSCredentialStore implements CredentialStore {
     return stripOneTrailingNewline(result.stdout);
   }
 
+  async readWithOwnership(
+    input: CredentialReadWithOwnershipRequest,
+  ): Promise<CredentialReadWithOwnershipResult> {
+    assertBrokerIdentityForAgent(input.broker, input.expectedAgentId);
+    const ownership = await this.readOwnership(input.handleId);
+    assertCredentialOwnership(ownership, {
+      agentId: input.expectedAgentId,
+      scope: input.expectedScope,
+    });
+    const secret = await this.read({
+      broker: input.broker,
+      handleId: input.handleId,
+      agentId: input.expectedAgentId,
+    });
+    return { secret, ...ownership };
+  }
+
   async delete(input: CredentialDeleteRequest): Promise<void> {
     assertBrokerIdentityForAgent(input.broker, input.agentId);
     const result = await runKeychainCommand(
@@ -140,6 +161,37 @@ export class MacOSCredentialStore implements CredentialStore {
       });
     }
   }
+
+  private async readOwnership(
+    handleId: CredentialReadWithOwnershipRequest["handleId"],
+  ): Promise<Pick<CredentialReadWithOwnershipResult, "agentId" | "scope">> {
+    const result = await runKeychainCommand(
+      this.options.spawner,
+      this.security,
+      [
+        "find-generic-password",
+        "-a",
+        credentialAccount({ handleId }),
+        "-s",
+        this.options.serviceName,
+      ],
+      {
+        action: "read-metadata",
+        commandName: "security find-generic-password",
+        platform: "darwin",
+        timeoutMs: operationTimeoutMs(this.options.timeoutMs),
+      },
+    );
+
+    if (result.code !== 0) {
+      if (isSecurityNotFound(result.stderr)) throw new NotFound();
+      throw keychainCommandFailure("security find-generic-password", result, {
+        action: "read-metadata",
+        platform: "darwin",
+      });
+    }
+    return parseCredentialOwnershipMetadata(macosComment(result.stdout));
+  }
 }
 
 function credentialMetadata(parts: CredentialHandleParts): string {
@@ -148,6 +200,18 @@ function credentialMetadata(parts: CredentialHandleParts): string {
 
 function isSecurityNotFound(stderr: string): boolean {
   return /could not be found|item not found|The specified item could not be found/i.test(stderr);
+}
+
+function macosComment(stdout: string): string {
+  const match = /^\s*"icmt"<blob>="(.*)"$/m.exec(stdout);
+  const raw = match?.[1];
+  if (raw === undefined) return "";
+  try {
+    const parsed: unknown = JSON.parse(`"${raw}"`);
+    return typeof parsed === "string" ? parsed : raw;
+  } catch {
+    return raw;
+  }
 }
 
 function stripOneTrailingNewline(value: string): string {

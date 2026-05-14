@@ -1,5 +1,5 @@
 import type { AgentRunner, Receipt, SpawnAgentRunner } from "@wuphf/agent-runners";
-import type { CredentialStore } from "@wuphf/credentials";
+import { CredentialOwnershipMismatch, type CredentialStore } from "@wuphf/credentials";
 import type {
   BrokerIdentity,
   CostLedgerEntry,
@@ -37,20 +37,28 @@ export async function createAgentRunnerForBroker(
   brokerIdentity: BrokerIdentity,
   deps: AgentRunnerFactoryDeps,
 ): Promise<AgentRunner> {
+  const credentialScope =
+    request.providerRoute?.credentialScope ?? credentialScopeForRunnerKind(request.kind);
   const credential = credentialHandleFromJson(request.credential, {
     broker: brokerIdentity,
     agentId: request.agentId,
-    scope: credentialScopeForRunnerKind(request.kind),
+    scope: credentialScope,
   });
 
   return deps.spawnRunner(request, {
     credential,
-    secretReader: async (handle) =>
-      deps.credentialStore.read({
+    secretReader: async (handle) => {
+      const resolved = await deps.credentialStore.readWithOwnership({
         broker: brokerIdentity,
         handleId: credentialHandleToJson(handle).id,
-        agentId: request.agentId,
-      }),
+        expectedAgentId: request.agentId,
+        expectedScope: credentialScope,
+      });
+      if (resolved.agentId !== request.agentId || resolved.scope !== credentialScope) {
+        throw new CredentialOwnershipMismatch();
+      }
+      return resolved.secret;
+    },
     costLedger: deps.costLedger,
     receiptStore: {
       put: async (receipt: Receipt) => {

@@ -254,6 +254,14 @@ Adding a new schemaVersion is NOT a one-line literal bump. The serializer,
 deserializer, validator, AND every consumer that pattern-matches on
 `schemaVersion` must add a branch in the same change.
 
+### 17. Runner wire schemaVersion migration policy
+
+`RunnerSpawnRequest` and `RunnerEvent` JSON carry optional `schemaVersion`.
+Absence is legacy v1 and MUST be parsed as `1`; serializers MUST emit `1` for
+the current wire. Future versions add fields only — never rename or repurpose
+existing fields. Adding a required field requires bumping `schemaVersion`, and
+every parser MUST reject any `schemaVersion` greater than it supports.
+
 ---
 
 ## Working rules for AI agents

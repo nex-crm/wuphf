@@ -1,4 +1,7 @@
+import { mkdirSync, realpathSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import os from "node:os";
+import path from "node:path";
 
 import type { AgentRunner } from "@wuphf/agent-runners";
 import type { AgentId, ApiToken, BrokerIdentity, RunnerId } from "@wuphf/protocol";
@@ -11,6 +14,7 @@ import { type AgentRunnerFactoryDeps, createAgentRunnerForBroker } from "./facto
 export interface RunnerRouteConfig extends AgentRunnerFactoryDeps {
   readonly tokenAgentIds: ReadonlyMap<ApiToken, AgentId>;
   readonly brokerIdentityForAgent: (agentId: AgentId) => BrokerIdentity;
+  readonly workspaceRoot?: string | undefined;
 }
 
 export interface RunnerRouteState {
@@ -25,10 +29,12 @@ const MAX_RUNNER_REQUEST_BYTES = 256 * 1024;
 
 export function createRunnerRouteState(deps: RunnerRouteDeps): RunnerRouteState {
   const runners = new Map<RunnerId, AgentRunner>();
+  const { WUPHF_WORKSPACE_ROOT: envWorkspaceRoot } = process.env;
+  const workspaceRoot = deps.workspaceRoot ?? envWorkspaceRoot ?? defaultWorkspaceRoot();
   return {
     async handle(req, res, pathname) {
       if (pathname === "/api/runners") {
-        await handleSpawn(req, res, deps, runners);
+        await handleSpawn(req, res, deps, runners, workspaceRoot);
         return true;
       }
       if (pathname.startsWith("/api/runners/") && pathname.endsWith("/events")) {
@@ -45,6 +51,7 @@ async function handleSpawn(
   res: ServerResponse,
   deps: RunnerRouteDeps,
   runners: Map<RunnerId, AgentRunner>,
+  workspaceRoot: string,
 ): Promise<void> {
   if (req.method !== "POST") {
     methodNotAllowed(res, "POST");
@@ -68,8 +75,16 @@ async function handleSpawn(
     forbidden(res, "runner_agent_mismatch");
     return;
   }
+  let brokerResolvedCwd: string;
+  try {
+    brokerResolvedCwd = resolveRunnerCwd(workspaceRoot, callerAgentId, request.cwd);
+  } catch (error) {
+    deps.logger.warn("runner_spawn_rejected", { reason: "cwd_out_of_workspace" });
+    cwdOutOfWorkspace(res, error instanceof Error ? error.message : String(error));
+    return;
+  }
   const runner = await createAgentRunnerForBroker(
-    request,
+    { ...request, cwd: brokerResolvedCwd },
     deps.brokerIdentityForAgent(callerAgentId),
     deps,
   );
@@ -201,6 +216,10 @@ function badRequest(res: ServerResponse, reason: string): void {
   writeJson(res, 400, { error: "invalid_runner_request", reason });
 }
 
+function cwdOutOfWorkspace(res: ServerResponse, reason: string): void {
+  writeJson(res, 400, { error: "cwd_out_of_workspace", reason });
+}
+
 function forbidden(res: ServerResponse, reason: string): void {
   res.statusCode = 403;
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -218,4 +237,40 @@ function methodNotAllowed(res: ServerResponse, allow: string): void {
   res.setHeader("Allow", allow);
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.end("method_not_allowed");
+}
+
+function defaultWorkspaceRoot(): string {
+  return path.join(os.homedir(), ".wuphf", "workspaces");
+}
+
+// Threat model: cwd is broker-resolved against the caller agent's workspace
+// root (`<workspaceRoot>/<agentId>/`); raw client cwd values are never passed
+// to spawn. Branch 10 will populate providerRoute before this route receives
+// the request, but this pass only adds the wire slot and cwd containment.
+function resolveRunnerCwd(
+  workspaceRoot: string,
+  agentId: AgentId,
+  requestedCwd: string | undefined,
+): string {
+  const agentWorkspacePath = path.join(workspaceRoot, agentId);
+  mkdirSync(agentWorkspacePath, { recursive: true });
+  const workspaceRootReal = realpathSync(workspaceRoot);
+  const agentWorkspaceReal = realpathSync(agentWorkspacePath);
+  if (!pathIsInside(workspaceRootReal, agentWorkspaceReal)) {
+    throw new Error("agent workspace root escapes workspaceRoot");
+  }
+  const candidate =
+    requestedCwd === undefined
+      ? agentWorkspaceReal
+      : path.resolve(agentWorkspaceReal, requestedCwd);
+  const candidateReal = realpathSync(candidate);
+  if (!pathIsInside(agentWorkspaceReal, candidateReal)) {
+    throw new Error("cwd resolves outside the agent workspace");
+  }
+  return candidateReal;
+}
+
+function pathIsInside(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }

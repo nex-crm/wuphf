@@ -1,6 +1,11 @@
 import type { CredentialHandle } from "@wuphf/protocol";
 
-import { BasicTextRejected, NoKeyringAvailable, NotFound } from "../errors.ts";
+import {
+  BasicTextRejected,
+  CredentialOwnershipMismatch,
+  NoKeyringAvailable,
+  NotFound,
+} from "../errors.ts";
 import {
   type CredentialHandleParts,
   type CredentialLookupParts,
@@ -14,6 +19,8 @@ import {
   assertValidCredentialPayload,
   type CredentialDeleteRequest,
   type CredentialReadRequest,
+  type CredentialReadWithOwnershipRequest,
+  type CredentialReadWithOwnershipResult,
   type CredentialStore,
   type CredentialWriteRequest,
   keychainCommandFailure,
@@ -115,6 +122,42 @@ export class LinuxCredentialStore implements CredentialStore {
     const secret = stripOneTrailingNewline(result.stdout);
     if (secret.length === 0) throw new NotFound();
     return secret;
+  }
+
+  async readWithOwnership(
+    input: CredentialReadWithOwnershipRequest,
+  ): Promise<CredentialReadWithOwnershipResult> {
+    assertBrokerIdentityForAgent(input.broker, input.expectedAgentId);
+    await this.ensureSecretToolReady();
+    const result = await runKeychainCommand(
+      this.options.spawner,
+      this.secretTool,
+      [
+        "lookup",
+        ...ownershipLookupAttributes(this.options.serviceName, {
+          handleId: input.handleId,
+          agentId: input.expectedAgentId,
+          scope: input.expectedScope,
+        }),
+      ],
+      {
+        action: "read-with-ownership",
+        commandName: "secret-tool lookup",
+        platform: "linux",
+        timeoutMs: operationTimeoutMs(this.options.timeoutMs),
+      },
+    );
+    assertEncryptedLibsecretCollection({ stderr: result.stderr });
+
+    if (result.code !== 0) {
+      if (isNoKeyringMessage(result.stderr)) throw new NoKeyringAvailable(result.stderr);
+      if (isNotFoundMessage(result.stderr)) throw new CredentialOwnershipMismatch();
+      throw commandErrorOrNoKeyring("secret-tool lookup", result, "read-with-ownership");
+    }
+
+    const secret = stripOneTrailingNewline(result.stdout);
+    if (secret.length === 0) throw new NotFound();
+    return { secret, agentId: input.expectedAgentId, scope: input.expectedScope };
   }
 
   async delete(input: CredentialDeleteRequest): Promise<void> {
@@ -259,6 +302,13 @@ function lookupAttributes(serviceName: string, parts: CredentialLookupParts): st
     "wuphf_agent_id",
     parts.agentId,
   ];
+}
+
+function ownershipLookupAttributes(
+  serviceName: string,
+  parts: CredentialLookupParts & { readonly scope: CredentialHandleParts["scope"] },
+): string[] {
+  return [...lookupAttributes(serviceName, parts), "wuphf_scope", parts.scope];
 }
 
 function commandErrorOrNoKeyring(command: string, result: SpawnResult, action: string): Error {

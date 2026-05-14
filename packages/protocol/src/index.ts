@@ -291,6 +291,8 @@ export type {
   RunnerEventJson,
   RunnerId,
   RunnerKind,
+  RunnerProviderRoute,
+  RunnerSchemaVersion,
   RunnerSpawnRequest,
 } from "./runner.ts";
 export {
@@ -298,6 +300,7 @@ export {
   isRunnerId,
   isRunnerKind,
   RUNNER_KIND_VALUES,
+  RUNNER_SCHEMA_VERSION,
   runnerEventFromJson,
   runnerEventToJsonValue,
   runnerSpawnRequestFromJson,

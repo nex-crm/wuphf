@@ -4,6 +4,7 @@ export {
   BasicTextRejected,
   BrokerIdentityRequired,
   type CredentialErrorCode,
+  CredentialOwnershipMismatch,
   CredentialStoreError,
   InvalidCredentialPayload,
   InvalidHandle,
@@ -12,5 +13,9 @@ export {
   NoKeyringAvailable,
   NotFound,
 } from "./errors.ts";
-export type { CredentialStore } from "./store.ts";
+export type {
+  CredentialReadWithOwnershipRequest,
+  CredentialReadWithOwnershipResult,
+  CredentialStore,
+} from "./store.ts";
 export { open } from "./store.ts";

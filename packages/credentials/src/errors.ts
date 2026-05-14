@@ -7,7 +7,8 @@ export type CredentialErrorCode =
   | "keychain_command_failed"
   | "keychain_command_timed_out"
   | "no_keyring_available"
-  | "not_found";
+  | "not_found"
+  | "ownership_mismatch";
 
 export interface CredentialErrorOptions extends ErrorOptions {
   readonly recoveryHint?: string | undefined;
@@ -55,6 +56,12 @@ export class InvalidCredentialPayload extends CredentialStoreError {
       "invalid_credential_payload",
       "credential secret must be valid UTF-8 text without NUL bytes",
     );
+  }
+}
+
+export class CredentialOwnershipMismatch extends CredentialStoreError {
+  constructor() {
+    super("ownership_mismatch", "credential handle ownership does not match requested agent scope");
   }
 }
 

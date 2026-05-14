@@ -18,6 +18,9 @@ authority.
 4. **`RunnerEvent` is the wire surface.** Any change to runner request/event
    shape belongs in `@wuphf/protocol`, must reject unknown keys, and needs
    golden vectors in `packages/protocol/testdata/runner-vectors.json`.
+   `RunnerSpawnRequest.providerRoute` is broker-resolved routing input for
+   branch 10; adapters consume the already-resolved credential closure and must
+   not add provider-routing policy locally.
 5. **Lifecycle state has one writer.** The v0 race at
    `internal/agent/service.go:192-199` was a status-write/event-drain race. v1
    prevents it with one owned `LifecycleStateMachine` per runner:

@@ -1,9 +1,13 @@
 import { createFakeAgentRunner } from "@wuphf/agent-runners/testing";
+import { CredentialOwnershipMismatch } from "@wuphf/credentials";
 import { forBrokerTests } from "@wuphf/credentials/testing";
 import {
+  type AgentId,
   asAgentId,
   asCredentialHandleId,
   asCredentialScope,
+  asProviderKind,
+  type CredentialScope,
   createCredentialHandle,
   credentialHandleToJson,
   type RunnerSpawnRequest,
@@ -11,9 +15,13 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { InMemoryReceiptStore } from "../../src/receipt-store.ts";
-import { createAgentRunnerForBroker } from "../../src/runners/factory.ts";
+import {
+  type AgentRunnerFactoryDeps,
+  createAgentRunnerForBroker,
+} from "../../src/runners/factory.ts";
 
 const agentId = asAgentId("agent_alpha");
+const otherAgentId = asAgentId("agent_beta");
 const credential = createCredentialHandle({
   id: asCredentialHandleId("cred_runner0123456789ABCDEFGHIJKLMN"),
   agentId,
@@ -28,13 +36,24 @@ const request: RunnerSpawnRequest = {
 
 describe("createAgentRunnerForBroker", () => {
   it("injects a broker-scoped secret reader without giving runners BrokerIdentity", async () => {
-    const reads: Array<{ readonly handleId: string; readonly agentId: string }> = [];
+    const reads: Array<{
+      readonly handleId: string;
+      readonly expectedAgentId: string;
+      readonly expectedScope: string;
+    }> = [];
     const runner = await createAgentRunnerForBroker(request, forBrokerTests({ agentId }), {
       credentialStore: {
         write: async () => credential,
-        read: async (input) => {
-          reads.push({ handleId: input.handleId, agentId: input.agentId });
-          return "secret";
+        read: async () => {
+          throw new Error("factory must use readWithOwnership");
+        },
+        readWithOwnership: async (input) => {
+          reads.push({
+            handleId: input.handleId,
+            expectedAgentId: input.expectedAgentId,
+            expectedScope: input.expectedScope,
+          });
+          return { secret: "secret", agentId, scope: asCredentialScope("anthropic") };
         },
         delete: async () => undefined,
       },
@@ -51,6 +70,120 @@ describe("createAgentRunnerForBroker", () => {
     });
 
     expect(runner.agentId).toBe(agentId);
-    expect(reads).toEqual([{ handleId: credentialHandleToJson(credential).id, agentId }]);
+    expect(reads).toEqual([
+      {
+        handleId: credentialHandleToJson(credential).id,
+        expectedAgentId: agentId,
+        expectedScope: "anthropic",
+      },
+    ]);
+  });
+
+  it("rejects a handle minted for another agent before exposing the secret", async () => {
+    const betaCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_beta0123456789ABCDEFGHIJKLMNO"),
+      agentId: otherAgentId,
+      scope: asCredentialScope("anthropic"),
+    });
+    const forgedRequest: RunnerSpawnRequest = {
+      ...request,
+      credential: credentialHandleToJson(betaCredential),
+    };
+
+    await expect(
+      createAgentRunnerForBroker(forgedRequest, forBrokerTests({ agentId }), {
+        ...depsForOwnership({
+          actualAgentId: otherAgentId,
+          actualScope: asCredentialScope("anthropic"),
+          actualSecret: "beta-secret",
+        }),
+      }),
+    ).rejects.toBeInstanceOf(CredentialOwnershipMismatch);
+  });
+
+  it("rejects a handle whose stored scope differs from the resolved runner scope", async () => {
+    const openAiCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_openai123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("openai"),
+    });
+    const wrongScopeRequest: RunnerSpawnRequest = {
+      ...request,
+      credential: credentialHandleToJson(openAiCredential),
+    };
+
+    await expect(
+      createAgentRunnerForBroker(wrongScopeRequest, forBrokerTests({ agentId }), {
+        ...depsForOwnership({
+          actualAgentId: agentId,
+          actualScope: asCredentialScope("openai"),
+          actualSecret: "openai-secret",
+        }),
+      }),
+    ).rejects.toBeInstanceOf(CredentialOwnershipMismatch);
+  });
+
+  it("uses providerRoute credential scope when present", async () => {
+    const openAiCredential = createCredentialHandle({
+      id: asCredentialHandleId("cred_route0123456789ABCDEFGHIJKLM"),
+      agentId,
+      scope: asCredentialScope("openai"),
+    });
+    const routedRequest: RunnerSpawnRequest = {
+      ...request,
+      credential: credentialHandleToJson(openAiCredential),
+      providerRoute: {
+        credentialScope: asCredentialScope("openai"),
+        providerKind: asProviderKind("openai"),
+      },
+    };
+    const runner = await createAgentRunnerForBroker(routedRequest, forBrokerTests({ agentId }), {
+      ...depsForOwnership({
+        actualAgentId: agentId,
+        actualScope: asCredentialScope("openai"),
+        actualSecret: "openai-secret",
+      }),
+    });
+
+    expect(runner.agentId).toBe(agentId);
   });
 });
+
+function depsForOwnership(input: {
+  readonly actualAgentId: AgentId;
+  readonly actualScope: CredentialScope;
+  readonly actualSecret: string;
+}): AgentRunnerFactoryDeps {
+  return {
+    credentialStore: {
+      write: async () => credential,
+      read: async () => {
+        throw new Error("factory must use readWithOwnership");
+      },
+      readWithOwnership: async (requestInput) => {
+        if (
+          requestInput.expectedAgentId !== input.actualAgentId ||
+          requestInput.expectedScope !== input.actualScope
+        ) {
+          throw new CredentialOwnershipMismatch();
+        }
+        return {
+          secret: input.actualSecret,
+          agentId: input.actualAgentId,
+          scope: input.actualScope,
+        };
+      },
+      delete: async () => undefined,
+    },
+    costLedger: { record: async () => undefined },
+    receiptStore: new InMemoryReceiptStore(),
+    eventLog: { append: async () => undefined },
+    spawnRunner: async (_request: RunnerSpawnRequest, deps) => {
+      await deps.secretReader(deps.credential);
+      return createFakeAgentRunner({
+        kind: _request.kind,
+        agentId: _request.agentId,
+      });
+    },
+  };
+}

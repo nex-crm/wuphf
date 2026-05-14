@@ -73,6 +73,14 @@ export interface BrokerConfig {
    */
   readonly receiptStore?: ReceiptStore;
   /**
+   * Root directory for runner working directories. The runner route resolves
+   * every requested cwd under `<workspaceRoot>/<agentId>/` after realpath so
+   * one agent bearer cannot point a subprocess at another agent's workspace.
+   * When omitted, the route uses `WUPHF_WORKSPACE_ROOT` or
+   * `~/.wuphf/workspaces`.
+   */
+  readonly workspaceRoot?: string | undefined;
+  /**
    * Optional cost-ledger feature. When supplied, `/api/v1/cost/*` routes
    * are mounted; when absent, those paths return 404 like any other
    * unknown `/api/*` route. Hosts construct the deps via
@@ -100,7 +108,7 @@ export interface BrokerConfig {
    * authorization and injects a BrokerIdentity through this config; runners
    * never hold broker identity directly.
    */
-  readonly runners?: Omit<RunnerRouteConfig, "receiptStore">;
+  readonly runners?: Omit<RunnerRouteConfig, "receiptStore" | "workspaceRoot">;
 }
 
 export interface BrokerHandle {

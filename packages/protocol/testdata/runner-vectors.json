@@ -1,7 +1,30 @@
 {
+  "schemaVersion": 1,
   "vectors": [
     {
       "name": "claude-cli spawn request",
+      "kind": "spawnRequest",
+      "json": {
+        "schemaVersion": 1,
+        "kind": "claude-cli",
+        "agentId": "agent_alpha",
+        "credential": {
+          "version": 1,
+          "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "providerRoute": {
+          "credentialScope": "anthropic",
+          "providerKind": "anthropic"
+        },
+        "prompt": "Summarize the latest task state.",
+        "model": "claude-sonnet-4-7",
+        "cwd": "/tmp/wuphf-runner",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "costCeilingMicroUsd": 2500000
+      }
+    },
+    {
+      "name": "legacy claude-cli spawn request",
       "kind": "spawnRequest",
       "json": {
         "kind": "claude-cli",
@@ -21,6 +44,16 @@
       "name": "started event",
       "kind": "event",
       "json": {
+        "schemaVersion": 1,
+        "kind": "started",
+        "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+        "at": "2026-05-08T18:00:00.000Z"
+      }
+    },
+    {
+      "name": "legacy started event",
+      "kind": "event",
+      "json": {
         "kind": "started",
         "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
         "at": "2026-05-08T18:00:00.000Z"
@@ -30,6 +63,7 @@
       "name": "stdout event",
       "kind": "event",
       "json": {
+        "schemaVersion": 1,
         "kind": "stdout",
         "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
         "chunk": "Ready.\n",
@@ -40,6 +74,7 @@
       "name": "cost event",
       "kind": "event",
       "json": {
+        "schemaVersion": 1,
         "kind": "cost",
         "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
         "entry": {
@@ -62,6 +97,7 @@
       "name": "receipt event",
       "kind": "event",
       "json": {
+        "schemaVersion": 1,
         "kind": "receipt",
         "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
         "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
@@ -72,6 +108,7 @@
       "name": "finished event",
       "kind": "event",
       "json": {
+        "schemaVersion": 1,
         "kind": "finished",
         "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
         "exitCode": 0,
@@ -82,10 +119,37 @@
       "name": "failed event",
       "kind": "event",
       "json": {
+        "schemaVersion": 1,
         "kind": "failed",
         "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
         "error": "receipt write failed",
         "at": "2026-05-08T18:00:04.000Z"
+      }
+    }
+  ],
+  "rejectVectors": [
+    {
+      "name": "future spawn request schemaVersion",
+      "kind": "spawnRequest",
+      "json": {
+        "schemaVersion": 999,
+        "kind": "claude-cli",
+        "agentId": "agent_alpha",
+        "credential": {
+          "version": 1,
+          "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "prompt": "Summarize the latest task state."
+      }
+    },
+    {
+      "name": "future runner event schemaVersion",
+      "kind": "event",
+      "json": {
+        "schemaVersion": 999,
+        "kind": "started",
+        "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+        "at": "2026-05-08T18:00:00.000Z"
       }
     }
   ]

@@ -17,6 +17,7 @@ import { WindowsCredentialStore } from "../src/adapters/windows.ts";
 import {
   AdapterNotSupported,
   BrokerIdentityRequired,
+  CredentialOwnershipMismatch,
   KeychainCommandFailed,
   KeychainCommandTimedOut,
   NotFound,
@@ -101,6 +102,54 @@ describe("CredentialStore contract", () => {
         fixtureSecret,
       );
       expect(fake.readCount - readCountAfterWrite).toBe(2);
+    });
+
+    it(`${testCase.name} proves ownership and scope before returning a secret`, async () => {
+      const { store } = testCase.makeHarness();
+      const handle = await store.write({
+        broker: brokerA,
+        agentId: agentA,
+        scope,
+        secret: fixtureSecret,
+      });
+      const handleId = credentialHandleToJson(handle).id;
+
+      await expect(
+        store.readWithOwnership({
+          broker: brokerA,
+          handleId,
+          expectedAgentId: agentA,
+          expectedScope: scope,
+        }),
+      ).resolves.toEqual({ secret: fixtureSecret, agentId: agentA, scope });
+    });
+
+    it(`${testCase.name} rejects ownership and scope mismatches with a typed error`, async () => {
+      const { store } = testCase.makeHarness();
+      const handle = await store.write({
+        broker: brokerA,
+        agentId: agentA,
+        scope,
+        secret: fixtureSecret,
+      });
+      const handleId = credentialHandleToJson(handle).id;
+
+      await expect(
+        store.readWithOwnership({
+          broker: brokerB,
+          handleId,
+          expectedAgentId: agentB,
+          expectedScope: scope,
+        }),
+      ).rejects.toBeInstanceOf(CredentialOwnershipMismatch);
+      await expect(
+        store.readWithOwnership({
+          broker: brokerA,
+          handleId,
+          expectedAgentId: agentA,
+          expectedScope: asCredentialScope("anthropic"),
+        }),
+      ).rejects.toBeInstanceOf(CredentialOwnershipMismatch);
     });
 
     it(`${testCase.name} returns NotFound for a wrong id with the correct agent`, async () => {
@@ -303,7 +352,7 @@ interface FakeHarness {
 }
 
 class SecurityFake implements FakeHarness {
-  readonly secrets = new Map<string, string>();
+  readonly secrets = new Map<string, { readonly secret: string; readonly metadata: string }>();
   callCount = 0;
   readCount = 0;
 
@@ -314,15 +363,27 @@ class SecurityFake implements FakeHarness {
     const action = args[0];
     const account = argAfter(args, "-a");
     if (action === "add-generic-password") {
-      this.secrets.set(account, options?.input ?? "");
+      this.secrets.set(account, {
+        secret: options?.input ?? "",
+        metadata: argAfter(args, "-j"),
+      });
       return ok();
     }
     if (action === "find-generic-password") {
       this.readCount++;
-      const secret = this.secrets.get(account);
-      return secret === undefined
+      const entry = this.secrets.get(account);
+      if (args.includes("-w")) {
+        return entry === undefined
+          ? { stdout: "", stderr: "The specified item could not be found", code: 44 }
+          : { stdout: `${entry.secret}\n`, stderr: "", code: 0 };
+      }
+      return entry === undefined
         ? { stdout: "", stderr: "The specified item could not be found", code: 44 }
-        : { stdout: `${secret}\n`, stderr: "", code: 0 };
+        : {
+            stdout: `attributes:\n    "icmt"<blob>="${securityQuoted(entry.metadata)}"\n`,
+            stderr: "",
+            code: 0,
+          };
     }
     if (action === "delete-generic-password") {
       this.secrets.delete(account);
@@ -333,7 +394,10 @@ class SecurityFake implements FakeHarness {
 }
 
 class SecretToolFake implements FakeHarness {
-  readonly secrets = new Map<string, string>();
+  readonly secrets = new Map<
+    string,
+    { readonly secret: string; readonly agentId: string; readonly scope: string }
+  >();
   callCount = 0;
   readCount = 0;
 
@@ -346,15 +410,25 @@ class SecretToolFake implements FakeHarness {
     if (action === "--version") return { stdout: "secret-tool 0.21.4\n", stderr: "", code: 0 };
     if (action === "search") return { stdout: "collection: encrypted\n", stderr: "", code: 0 };
     if (action === "store") {
-      this.secrets.set(secretToolAccount(args), options?.input ?? "");
+      this.secrets.set(secretToolAccount(args), {
+        secret: options?.input ?? "",
+        agentId: secretToolAttribute(args, "wuphf_agent_id"),
+        scope: secretToolAttribute(args, "wuphf_scope"),
+      });
       return ok();
     }
     if (action === "lookup") {
       this.readCount++;
-      const secret = this.secrets.get(secretToolAccount(args));
-      return secret === undefined
+      const entry = this.secrets.get(secretToolAccount(args));
+      const expectedAgentId = optionalSecretToolAttribute(args, "wuphf_agent_id");
+      const expectedScope = optionalSecretToolAttribute(args, "wuphf_scope");
+      const matches =
+        entry !== undefined &&
+        (expectedAgentId === undefined || expectedAgentId === entry.agentId) &&
+        (expectedScope === undefined || expectedScope === entry.scope);
+      return !matches
         ? { stdout: "", stderr: "No such secret", code: 1 }
-        : { stdout: `${secret}\n`, stderr: "", code: 0 };
+        : { stdout: `${entry.secret}\n`, stderr: "", code: 0 };
     }
     if (action === "clear") {
       this.secrets.delete(secretToolAccount(args));
@@ -365,7 +439,7 @@ class SecretToolFake implements FakeHarness {
 }
 
 class PowerShellCredentialFake implements FakeHarness {
-  readonly secrets = new Map<string, string>();
+  readonly secrets = new Map<string, { readonly secret: string; readonly comment: string }>();
   callCount = 0;
   readCount = 0;
 
@@ -377,15 +451,29 @@ class PowerShellCredentialFake implements FakeHarness {
     const script = decodePowerShellScript(args);
     const target = powerShellTarget(script);
     if (script.includes("[Console]::In.ReadToEnd()")) {
-      this.secrets.set(target, options?.input ?? "");
+      this.secrets.set(target, {
+        secret: options?.input ?? "",
+        comment: powerShellComment(script),
+      });
       return ok();
     }
     if (script.includes("CredRead($target")) {
       this.readCount++;
-      const secret = this.secrets.get(target);
-      return secret === undefined
-        ? { stdout: "", stderr: "CredRead failed: 1168", code: 2 }
-        : { stdout: secret, stderr: "", code: 0 };
+      const entry = this.secrets.get(target);
+      if (entry === undefined) {
+        return { stdout: "", stderr: "CredRead failed: 1168", code: 2 };
+      }
+      if (script.includes("secretB64")) {
+        return {
+          stdout: JSON.stringify({
+            secretB64: Buffer.from(entry.secret, "utf8").toString("base64"),
+            comment: entry.comment,
+          }),
+          stderr: "",
+          code: 0,
+        };
+      }
+      return { stdout: entry.secret, stderr: "", code: 0 };
     }
     if (script.includes("CredDelete($target")) {
       this.secrets.delete(target);
@@ -408,10 +496,22 @@ function argAfter(args: readonly string[], flag: string): string {
 }
 
 function secretToolAccount(args: readonly string[]): string {
-  const index = args.indexOf("wuphf_account");
-  if (index < 0) throw new Error("missing wuphf_account");
+  return secretToolAttribute(args, "wuphf_account");
+}
+
+function secretToolAttribute(args: readonly string[], name: string): string {
+  const namedIndex = args.indexOf(name);
+  if (namedIndex < 0) throw new Error(`missing ${name}`);
+  const value = args[namedIndex + 1];
+  if (value === undefined) throw new Error(`missing ${name} value`);
+  return value;
+}
+
+function optionalSecretToolAttribute(args: readonly string[], name: string): string | undefined {
+  const index = args.indexOf(name);
+  if (index < 0) return undefined;
   const value = args[index + 1];
-  if (value === undefined) throw new Error("missing wuphf_account value");
+  if (value === undefined) throw new Error(`missing ${name} value`);
   return value;
 }
 
@@ -424,6 +524,16 @@ function powerShellTarget(script: string): string {
   const match = /\$target = '([^']+)'/.exec(script);
   if (match === null) throw new Error("missing PowerShell target");
   return match[1] ?? "";
+}
+
+function powerShellComment(script: string): string {
+  const match = /\$comment = '([^']+)'/.exec(script);
+  if (match === null) throw new Error("missing PowerShell comment");
+  return match[1] ?? "";
+}
+
+function securityQuoted(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function envValue(env: NodeJS.ProcessEnv | undefined, name: string): string | undefined {

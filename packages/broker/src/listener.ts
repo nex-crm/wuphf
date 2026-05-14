@@ -90,6 +90,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       ? null
       : createRunnerRouteState({
           ...config.runners,
+          workspaceRoot: config.workspaceRoot,
           logger,
           receiptStore,
         });

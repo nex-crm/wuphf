@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   asAgentId,
+  asCredentialScope,
   asMicroUsd,
+  asProviderKind,
   asRunnerId,
   isRunnerId,
   isRunnerKind,
@@ -12,6 +14,7 @@ import {
   MAX_RUNNER_PROMPT_BYTES,
   MAX_RUNNER_STDIO_CHUNK_BYTES,
   RUNNER_KIND_VALUES,
+  RUNNER_SCHEMA_VERSION,
   runnerEventFromJson,
   runnerEventToJsonValue,
   runnerSpawnRequestFromJson,
@@ -20,6 +23,7 @@ import {
 import runnerVectors from "../testdata/runner-vectors.json";
 
 type RunnerVector = (typeof runnerVectors.vectors)[number];
+type RunnerRejectVector = (typeof runnerVectors.rejectVectors)[number];
 
 const runnerId = "run_0123456789ABCDEFGHIJKLMNOPQRSTUV";
 const receiptId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -29,6 +33,20 @@ function vector(name: string): RunnerVector {
   const found = runnerVectors.vectors.find((item) => item.name === name);
   if (found === undefined) throw new Error(`missing runner vector: ${name}`);
   return found;
+}
+
+function rejectVector(name: string): RunnerRejectVector {
+  const found = runnerVectors.rejectVectors.find((item) => item.name === name);
+  if (found === undefined) throw new Error(`missing runner reject vector: ${name}`);
+  return found;
+}
+
+function withDefaultSchemaVersion(
+  json: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return Object.hasOwn(json, "schemaVersion")
+    ? json
+    : { schemaVersion: RUNNER_SCHEMA_VERSION, ...json };
 }
 
 function recordWithAccessor(
@@ -61,10 +79,25 @@ describe("RunnerSpawnRequest codec", () => {
   it("round-trips the golden spawn vector", () => {
     const request = runnerSpawnRequestFromJson(vector("claude-cli spawn request").json);
 
+    expect(request.schemaVersion).toBe(RUNNER_SCHEMA_VERSION);
     expect(request.kind).toBe("claude-cli");
     expect(request.agentId).toBe(asAgentId("agent_alpha"));
+    expect(request.providerRoute).toEqual({
+      credentialScope: asCredentialScope("anthropic"),
+      providerKind: asProviderKind("anthropic"),
+    });
     expect(request.costCeilingMicroUsd).toBe(asMicroUsd(2_500_000));
     expect(runnerSpawnRequestToJsonValue(request)).toEqual(vector("claude-cli spawn request").json);
+  });
+
+  it("accepts legacy unversioned spawn requests as schemaVersion 1", () => {
+    const request = runnerSpawnRequestFromJson(vector("legacy claude-cli spawn request").json);
+
+    expect(request.schemaVersion).toBe(RUNNER_SCHEMA_VERSION);
+    expect(request.providerRoute).toBeUndefined();
+    expect(runnerSpawnRequestToJsonValue(request)).toEqual(
+      withDefaultSchemaVersion(vector("legacy claude-cli spawn request").json),
+    );
   });
 
   it.each([
@@ -73,6 +106,16 @@ describe("RunnerSpawnRequest codec", () => {
       "unknown key",
       { ...vector("claude-cli spawn request").json, extra: true },
       /runnerSpawnRequest\/extra: is not allowed/,
+    ],
+    [
+      "future schemaVersion",
+      rejectVector("future spawn request schemaVersion").json,
+      /runnerSpawnRequest.schemaVersion: unsupported schemaVersion/,
+    ],
+    [
+      "invalid schemaVersion type",
+      { ...vector("claude-cli spawn request").json, schemaVersion: "1" },
+      /runnerSpawnRequest.schemaVersion: must be an integer/,
     ],
     [
       "missing kind",
@@ -88,6 +131,30 @@ describe("RunnerSpawnRequest codec", () => {
       "invalid agent id",
       { ...vector("claude-cli spawn request").json, agentId: "Agent Alpha" },
       /runnerSpawnRequest.agentId: not an AgentId/,
+    ],
+    [
+      "provider route unknown key",
+      {
+        ...vector("claude-cli spawn request").json,
+        providerRoute: { credentialScope: "anthropic", providerKind: "anthropic", extra: true },
+      },
+      /runnerSpawnRequest.providerRoute\/extra: is not allowed/,
+    ],
+    [
+      "provider route invalid credential scope",
+      {
+        ...vector("claude-cli spawn request").json,
+        providerRoute: { credentialScope: "bogus", providerKind: "anthropic" },
+      },
+      /providerRoute.credentialScope: not a supported CredentialScope/,
+    ],
+    [
+      "provider route invalid provider kind",
+      {
+        ...vector("claude-cli spawn request").json,
+        providerRoute: { credentialScope: "anthropic", providerKind: "bogus" },
+      },
+      /providerRoute.providerKind: not a supported ProviderKind/,
     ],
     [
       "accessor prompt",
@@ -144,6 +211,7 @@ describe("RunnerSpawnRequest codec", () => {
     });
 
     expect(runnerSpawnRequestToJsonValue(request)).toEqual({
+      schemaVersion: RUNNER_SCHEMA_VERSION,
       kind: "codex-cli",
       agentId: "agent_alpha",
       credential: { version: 1, id: "cred_runner0123456789ABCDEFGHIJKLMN" },
@@ -156,11 +224,22 @@ describe("RunnerEvent codec", () => {
   it("round-trips every golden event vector", () => {
     for (const item of runnerVectors.vectors.filter((candidate) => candidate.kind === "event")) {
       const event = runnerEventFromJson(item.json);
-      expect(runnerEventToJsonValue(event), item.name).toEqual(item.json);
+      expect(event.schemaVersion, item.name).toBe(RUNNER_SCHEMA_VERSION);
+      expect(runnerEventToJsonValue(event), item.name).toEqual(withDefaultSchemaVersion(item.json));
     }
   });
 
   it.each([
+    [
+      "future schemaVersion",
+      rejectVector("future runner event schemaVersion").json,
+      /runnerEvent.schemaVersion: unsupported schemaVersion/,
+    ],
+    [
+      "invalid schemaVersion type",
+      { kind: "started", runnerId, at, schemaVersion: "1" },
+      /runnerEvent.schemaVersion: must be an integer/,
+    ],
     ["unknown kind", { kind: "other", runnerId, at }, /unsupported RunnerEvent kind/],
     ["bad runner id", { kind: "started", runnerId: "runner_short", at }, /not a RunnerId/],
     [

@@ -1092,9 +1092,14 @@ expectThrows(
 
 header(30, "RunnerSpawnRequest and RunnerEvent reject drift at the broker boundary");
 const runnerSpawnJson = {
+  schemaVersion: 1,
   kind: "claude-cli",
   agentId: "agent_alpha",
   credential: { version: 1, id: "cred_runner0123456789ABCDEFGHIJKLMN" },
+  providerRoute: {
+    credentialScope: "anthropic",
+    providerKind: "anthropic",
+  },
   prompt: "Summarize the task state.",
   model: "claude-sonnet-4-7",
   taskId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
@@ -1110,7 +1115,12 @@ expectThrows(
   () => runnerSpawnRequestFromJson({ ...runnerSpawnJson, extra: true }),
   /runnerSpawnRequest\/extra: is not allowed/,
 );
+expectThrows(
+  () => runnerSpawnRequestFromJson({ ...runnerSpawnJson, schemaVersion: 999 }),
+  /unsupported schemaVersion/,
+);
 const runnerCostEvent = runnerEventFromJson({
+  schemaVersion: 1,
   kind: "cost",
   runnerId: "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
   entry: {
@@ -1132,9 +1142,9 @@ expectEqual(
   "runner cost event emits canonical JSON values",
   runnerEventToJsonValue(runnerCostEvent),
   {
+    schemaVersion: 1,
     kind: "cost",
     runnerId: "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
-    at: "2026-05-08T18:00:02.000Z",
     entry: {
       agentSlug: "agent_alpha",
       providerKind: "anthropic",
@@ -1148,11 +1158,13 @@ expectEqual(
       },
       occurredAt: "2026-05-08T18:00:02.000Z",
     },
+    at: "2026-05-08T18:00:02.000Z",
   },
 );
 expectThrows(
   () =>
     runnerEventFromJson({
+      schemaVersion: 1,
       kind: "stdout",
       runnerId: "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
       chunk: "ok",
