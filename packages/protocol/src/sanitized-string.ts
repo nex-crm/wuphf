@@ -6,7 +6,20 @@ import {
   validateSanitizedJsonNodeBudget,
 } from "./budgets.ts";
 
-export type SanitizedStringPolicy = "strip-zero-width" | "allow-zwj";
+// SanitizedString policies trade off renderer permissiveness vs. moat width:
+//
+// - `strip-zero-width` (default) — denylist of known-weaponized invisible code
+//   points (bidi overrides, ZWSP/ZWNJ/ZWJ, U+E0000 tag block, etc.). Anything
+//   not on the denylist is allowed. Use for general renderer text.
+// - `allow-zwj` — same as `strip-zero-width` but preserves ZWJ (needed for
+//   emoji sequences like 👨‍👩‍👧).
+// - `allowlist` — moat model: reject every Unicode `C*` code point (Cc, Cf,
+//   Cn, Co, Cs) on top of the existing denylist. Closes the broad class of
+//   "unassigned / private-use / control / format" injection vectors at the
+//   cost of rejecting characters legitimate text rarely contains. Use for
+//   high-stakes writes (audit-chain payloads, signed receipts, anything the
+//   v1 cosign path will sign).
+export type SanitizedStringPolicy = "strip-zero-width" | "allow-zwj" | "allowlist";
 
 export interface SanitizedStringOptions {
   readonly policy?: SanitizedStringPolicy | undefined;
@@ -411,6 +424,13 @@ function sanitizeText(input: string, options: SanitizedStringOptions): string {
   return out;
 }
 
+// Pre-compiled to avoid rebuilding on every code point under the allowlist
+// policy. `\p{C}` covers Cc (control), Cf (format), Cn (unassigned), Co
+// (private use), Cs (surrogate) — every Unicode general category whose
+// purpose is non-textual and whose presence in renderer text is almost
+// certainly an injection or homograph attempt.
+const UNICODE_OTHER_CATEGORY_RE = /\p{C}/u;
+
 function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOptions): boolean {
   if (codePoint <= 0x1f && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d) {
     return true;
@@ -430,6 +450,8 @@ function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOption
   }
 
   if (codePoint === 0x200d) {
+    // ZWJ rules: `allow-zwj` keeps it, every other policy strips it. Under
+    // `allowlist` ZWJ is rejected because it's Cf — the broad rule wins.
     return options.policy !== "allow-zwj";
   }
 
@@ -440,6 +462,20 @@ function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOption
   // renderer boundary closes a homograph/spoofing path that the existing ZWSP
   // strip alone leaves open.
   if (codePoint === 0x180e || (codePoint >= 0x2060 && codePoint <= 0x2064)) {
+    return true;
+  }
+
+  // Allowlist (moat) policy: reject the entire Unicode `C*` set. Catches
+  // every unassigned, private-use, and format/control code point that isn't
+  // already on the denylist above — e.g. soft hyphen U+00AD, language tags
+  // U+E0001/U+E007F, the full Cn/Co planes, every bidi/format mark Unicode
+  // adds in the future. The denylist branches above remain in effect for
+  // older policies; this branch only widens the rejection set when the
+  // caller has opted into the stricter contract.
+  if (
+    options.policy === "allowlist" &&
+    UNICODE_OTHER_CATEGORY_RE.test(String.fromCodePoint(codePoint))
+  ) {
     return true;
   }
 
