@@ -1,0 +1,582 @@
+import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { realpathSync, statSync } from "node:fs";
+import path from "node:path";
+import type { Readable } from "node:stream";
+
+import {
+  type AgentId,
+  asAgentSlug,
+  asMicroUsd,
+  asProviderKind,
+  asReceiptId,
+  asRunnerId,
+  asTaskId,
+  type CostLedgerEntry,
+  type ReceiptId,
+  type ReceiptSnapshot,
+  type RunnerEvent,
+  type RunnerId,
+  type RunnerSpawnRequest,
+  SanitizedString,
+  sha256Hex,
+  type TaskId,
+} from "@wuphf/protocol";
+
+import { ClaudeCliNotAvailable, ReceiptWriteFailed, RunnerSpawnFailed } from "../errors.ts";
+import { DEFAULT_MAX_EVENT_HISTORY, RunnerEventHub } from "../internal/event-hub.ts";
+import { LifecycleStateMachine } from "../lifecycle.ts";
+import type { AgentRunner, RunnerSpawnDeps, SpawnAgentRunner } from "../runner.ts";
+
+export interface ClaudeCliSpawnOptions {
+  readonly env: NodeJS.ProcessEnv;
+  readonly cwd?: string | undefined;
+}
+
+export interface ClaudeCliChildProcess {
+  readonly stdout: Readable;
+  readonly stderr: Readable;
+  kill(signal?: NodeJS.Signals): boolean;
+  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  once(event: "error", listener: (error: Error) => void): this;
+}
+
+export type ClaudeCliSpawner = (
+  command: string,
+  args: readonly string[],
+  options: ClaudeCliSpawnOptions,
+) => ClaudeCliChildProcess;
+
+export interface ClaudeCliAdapterOptions {
+  readonly binaryPath?: string | undefined;
+  readonly candidatePaths?: readonly string[] | undefined;
+  readonly enforceTrustedCommand?: boolean | undefined;
+  readonly spawner?: ClaudeCliSpawner | undefined;
+  readonly now?: (() => Date) | undefined;
+  readonly runnerIdFactory?: (() => RunnerId) | undefined;
+  readonly receiptIdFactory?: (() => ReceiptId) | undefined;
+  readonly taskIdFactory?: (() => TaskId) | undefined;
+  readonly maxEventHistory?: number | undefined;
+}
+
+interface ExitResult {
+  readonly code: number;
+  readonly signal: NodeJS.Signals | null;
+  readonly error?: Error | undefined;
+}
+
+interface Usage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheCreationTokens: number;
+  readonly model?: string | undefined;
+}
+
+const DEFAULT_CLAUDE_CANDIDATES = [
+  "/opt/homebrew/bin/claude",
+  "/usr/local/bin/claude",
+  "/usr/bin/claude",
+] as const;
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const DEFAULT_GRACE_PERIOD_MS = 5_000;
+
+export function createClaudeCliRunner(options: ClaudeCliAdapterOptions = {}): SpawnAgentRunner {
+  const commandPath = resolveClaudeCommand(options);
+  const spawner = options.spawner ?? nodeSpawner;
+  return async (request, deps) => {
+    if (request.kind !== "claude-cli") {
+      throw new RunnerSpawnFailed(`Claude CLI adapter cannot run ${request.kind}`);
+    }
+    const secret = await deps.secretReader(deps.credential);
+    const runner = new ClaudeCliAgentRunner({
+      commandPath,
+      deps,
+      maxEventHistory: options.maxEventHistory ?? DEFAULT_MAX_EVENT_HISTORY,
+      now: options.now ?? (() => new Date()),
+      receiptIdFactory: options.receiptIdFactory ?? randomReceiptId,
+      request,
+      runnerId: options.runnerIdFactory?.() ?? randomRunnerId(),
+      secret,
+      spawner,
+      taskIdFactory: options.taskIdFactory ?? randomTaskId,
+    });
+    runner.start();
+    return runner;
+  };
+}
+
+class ClaudeCliAgentRunner implements AgentRunner {
+  readonly id: RunnerId;
+  readonly kind = "claude-cli" as const;
+  readonly agentId: AgentId;
+
+  readonly #commandPath: string;
+  readonly #deps: RunnerSpawnDeps;
+  readonly #hub: RunnerEventHub;
+  readonly #lifecycle: LifecycleStateMachine;
+  readonly #now: () => Date;
+  readonly #receiptIdFactory: () => ReceiptId;
+  readonly #request: RunnerSpawnRequest;
+  readonly #secret: string;
+  readonly #spawner: ClaudeCliSpawner;
+  readonly #taskIdFactory: () => TaskId;
+  #child: ClaudeCliChildProcess | null = null;
+  #done: Promise<void> | null = null;
+  #failed = false;
+  #finalText = "";
+  #lastUsage: Usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+  };
+  #terminatePromise: Promise<void> | null = null;
+
+  constructor(args: {
+    readonly commandPath: string;
+    readonly deps: RunnerSpawnDeps;
+    readonly maxEventHistory: number;
+    readonly now: () => Date;
+    readonly receiptIdFactory: () => ReceiptId;
+    readonly request: RunnerSpawnRequest;
+    readonly runnerId: RunnerId;
+    readonly secret: string;
+    readonly spawner: ClaudeCliSpawner;
+    readonly taskIdFactory: () => TaskId;
+  }) {
+    this.id = args.runnerId;
+    this.agentId = args.request.agentId;
+    this.#commandPath = args.commandPath;
+    this.#deps = args.deps;
+    this.#hub = new RunnerEventHub(args.maxEventHistory);
+    this.#lifecycle = new LifecycleStateMachine(args.runnerId);
+    this.#now = args.now;
+    this.#receiptIdFactory = args.receiptIdFactory;
+    this.#request = args.request;
+    this.#secret = args.secret;
+    this.#spawner = args.spawner;
+    this.#taskIdFactory = args.taskIdFactory;
+  }
+
+  events() {
+    return this.#hub.events();
+  }
+
+  start(): void {
+    if (this.#done !== null) return;
+    this.#done = this.#run().finally(() => {
+      this.#hub.close();
+    });
+  }
+
+  async terminate(opts: { readonly gracePeriodMs?: number } = {}): Promise<void> {
+    if (this.#terminatePromise === null) {
+      this.#terminatePromise = this.#doTerminate(opts.gracePeriodMs ?? DEFAULT_GRACE_PERIOD_MS);
+    }
+    return this.#terminatePromise;
+  }
+
+  async #run(): Promise<void> {
+    let exit: ExitResult = { code: 1, signal: null };
+    try {
+      this.#lifecycle.markRunning();
+      const env = sanitizedClaudeEnv(this.#commandPath, this.#secret);
+      this.#child = this.#spawner(
+        this.#commandPath,
+        ["--print", "--output-format", "stream-json", this.#request.prompt],
+        { env, cwd: this.#request.cwd },
+      );
+      const exitPromise = waitForExit(this.#child);
+      const stdout = this.#consumeStdout(this.#child.stdout);
+      const stderr = this.#consumeStderr(this.#child.stderr);
+      await this.#emit({ kind: "started", runnerId: this.id, at: this.#isoNow() });
+      exit = await exitPromise;
+      await Promise.all([stdout, stderr]);
+      if (exit.error !== undefined) {
+        await this.#fail(exit.error.message);
+        this.#lifecycle.markStopped({ exitCode: 1, error: exit.error.message });
+        return;
+      }
+      if (exit.code !== 0) {
+        const signalText = exit.signal === null ? "" : ` (${exit.signal})`;
+        const message = `Claude CLI exited with code ${exit.code}${signalText}`;
+        await this.#fail(message);
+        this.#lifecycle.markStopped({ exitCode: exit.code, error: message });
+        return;
+      }
+      if (this.#failed) {
+        this.#lifecycle.markStopped({ exitCode: 1, error: "runner failed" });
+        return;
+      }
+      await this.#writeReceiptAndFinish(exit.code);
+      this.#lifecycle.markStopped({ exitCode: exit.code });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.#fail(message);
+      this.#lifecycle.markStopped({ exitCode: exit.code, error: message });
+    }
+  }
+
+  async #doTerminate(gracePeriodMs: number): Promise<void> {
+    const transitioned = this.#lifecycle.beginStopping();
+    const child = this.#child;
+    if (transitioned && child !== null) {
+      child.kill("SIGINT");
+      const hardKill = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, gracePeriodMs);
+      hardKill.unref();
+      try {
+        await (this.#done ?? this.#lifecycle.stopped());
+      } finally {
+        clearTimeout(hardKill);
+      }
+      return;
+    }
+    await (this.#done ?? this.#lifecycle.stopped());
+  }
+
+  async #consumeStdout(stream: Readable): Promise<void> {
+    let buffered = "";
+    for await (const chunk of stream) {
+      buffered += chunkToString(chunk);
+      let newline = buffered.indexOf("\n");
+      while (newline >= 0) {
+        const line = buffered.slice(0, newline);
+        buffered = buffered.slice(newline + 1);
+        await this.#handleClaudeLine(line);
+        newline = buffered.indexOf("\n");
+      }
+    }
+    if (buffered.length > 0) {
+      await this.#handleClaudeLine(buffered);
+    }
+  }
+
+  async #consumeStderr(stream: Readable): Promise<void> {
+    for await (const chunk of stream) {
+      const text = chunkToString(chunk);
+      if (text.length > 0) {
+        await this.#emit({ kind: "stderr", runnerId: this.id, chunk: text, at: this.#isoNow() });
+      }
+    }
+  }
+
+  async #handleClaudeLine(line: string): Promise<void> {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || this.#failed) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (error) {
+      await this.#fail(`Claude CLI emitted malformed JSON: ${errorMessage(error)}`);
+      return;
+    }
+    if (!isRecord(parsed)) {
+      await this.#fail("Claude CLI emitted a non-object JSON line");
+      return;
+    }
+    const type = recordString(parsed, "type");
+    if (type === "error") {
+      await this.#fail(recordString(parsed, "message") ?? "Claude CLI emitted an error");
+      return;
+    }
+    const text = extractText(parsed);
+    if (text.length > 0) {
+      this.#finalText += text;
+      await this.#emit({ kind: "stdout", runnerId: this.id, chunk: text, at: this.#isoNow() });
+    }
+    const usage = extractUsage(parsed);
+    if (usage !== null) {
+      this.#lastUsage = usage;
+      const entry = this.#costEntry(usage);
+      await this.#deps.costLedger.record(entry);
+      await this.#emit({ kind: "cost", runnerId: this.id, entry, at: this.#isoNow() });
+    }
+  }
+
+  async #writeReceiptAndFinish(exitCode: number): Promise<void> {
+    const receipt = this.#buildReceipt();
+    try {
+      const stored = await this.#deps.receiptStore.put(receipt);
+      if (!stored.stored) {
+        throw new ReceiptWriteFailed(this.id, "receipt store reported stored=false");
+      }
+    } catch (error) {
+      const message = errorMessage(error);
+      await this.#fail(message);
+      throw new ReceiptWriteFailed(this.id, message, { cause: error });
+    }
+    await this.#emit({
+      kind: "receipt",
+      runnerId: this.id,
+      receiptId: receipt.id,
+      at: this.#isoNow(),
+    });
+    await this.#emit({ kind: "finished", runnerId: this.id, exitCode, at: this.#isoNow() });
+  }
+
+  #buildReceipt(): ReceiptSnapshot {
+    const usage = this.#lastUsage;
+    const model = usage.model ?? this.#request.model ?? "claude-cli";
+    const costMicroUsd = asMicroUsd(
+      usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
+    );
+    const startedAt = this.#now();
+    const finishedAt = this.#now();
+    return {
+      id: this.#receiptIdFactory(),
+      agentSlug: asAgentSlug(this.agentId),
+      taskId: this.#request.taskId ?? this.#taskIdFactory(),
+      triggerKind: "human_message",
+      triggerRef: this.id,
+      startedAt,
+      finishedAt,
+      status: "ok",
+      providerKind: asProviderKind("anthropic"),
+      model,
+      promptHash: sha256Hex(this.#request.prompt),
+      toolManifest: sha256Hex("claude-cli:v1"),
+      toolCalls: [],
+      approvals: [],
+      filesChanged: [],
+      commits: [],
+      sourceReads: [],
+      writes: [],
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+      costUsd: costMicroUsd / 1_000_000,
+      finalMessage: SanitizedString.fromUnknown(this.#finalText),
+      error: SanitizedString.fromUnknown(""),
+      notebookWrites: [],
+      wikiWrites: [],
+      schemaVersion: 2,
+    };
+  }
+
+  #costEntry(usage: Usage): CostLedgerEntry {
+    const amount =
+      usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+    return {
+      agentSlug: asAgentSlug(this.agentId),
+      providerKind: asProviderKind("anthropic"),
+      model: usage.model ?? this.#request.model ?? "claude-cli",
+      amountMicroUsd: asMicroUsd(amount),
+      units: {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheCreationTokens: usage.cacheCreationTokens,
+      },
+      occurredAt: this.#now(),
+    };
+  }
+
+  async #emit(event: RunnerEvent): Promise<void> {
+    await this.#deps.eventLog.append(event);
+    this.#hub.publish(event);
+  }
+
+  async #fail(message: string): Promise<void> {
+    if (this.#failed) return;
+    this.#failed = true;
+    const event: RunnerEvent = {
+      kind: "failed",
+      runnerId: this.id,
+      error: message,
+      at: this.#isoNow(),
+    };
+    try {
+      await this.#deps.eventLog.append(event);
+    } finally {
+      this.#hub.publish(event);
+    }
+  }
+
+  #isoNow(): string {
+    return this.#now().toISOString();
+  }
+}
+
+function resolveClaudeCommand(options: ClaudeCliAdapterOptions): string {
+  const candidates =
+    options.binaryPath === undefined
+      ? (options.candidatePaths ?? DEFAULT_CLAUDE_CANDIDATES)
+      : [options.binaryPath];
+  const enforce = options.enforceTrustedCommand ?? options.spawner === undefined;
+  const fallback = candidates[0];
+  if (fallback === undefined) {
+    throw new ClaudeCliNotAvailable("Claude CLI has no candidate path");
+  }
+  if (!enforce) {
+    if (!path.isAbsolute(fallback)) {
+      throw new ClaudeCliNotAvailable("Claude CLI path must be absolute");
+    }
+    return fallback;
+  }
+  for (const candidate of candidates) {
+    if (!path.isAbsolute(candidate)) continue;
+    try {
+      const resolved = realpathSync(candidate);
+      const stats = statSync(resolved);
+      if ((stats.mode & 0o022) !== 0) {
+        throw new ClaudeCliNotAvailable("Claude CLI path is writable by non-owner users");
+      }
+      return resolved;
+    } catch (error) {
+      if (error instanceof ClaudeCliNotAvailable) throw error;
+    }
+  }
+  throw new ClaudeCliNotAvailable("Claude CLI was not found at a trusted absolute path");
+}
+
+function sanitizedClaudeEnv(commandPath: string, secret: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ANTHROPIC_API_KEY: secret,
+    LC_ALL: "C",
+    PATH: path.dirname(commandPath),
+  };
+  const { HOME, USERPROFILE, USER, USERNAME } = process.env;
+  const home = HOME ?? USERPROFILE;
+  const user = USER ?? USERNAME;
+  if (home !== undefined && home.length > 0) Object.assign(env, { HOME: home });
+  if (user !== undefined && user.length > 0) Object.assign(env, { USER: user });
+  return env;
+}
+
+function nodeSpawner(
+  command: string,
+  args: readonly string[],
+  options: ClaudeCliSpawnOptions,
+): ClaudeCliChildProcess {
+  const spawnOptions: SpawnOptions = {
+    env: options.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  };
+  if (options.cwd !== undefined) {
+    spawnOptions.cwd = options.cwd;
+  }
+  return spawn(command, [...args], spawnOptions) as ChildProcessWithoutNullStreams;
+}
+
+function waitForExit(child: ClaudeCliChildProcess): Promise<ExitResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      resolve({ code: 1, signal: null, error });
+    });
+    child.once("exit", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      resolve({ code: code ?? 1, signal });
+    });
+  });
+}
+
+function extractText(record: Readonly<Record<string, unknown>>): string {
+  const direct = recordString(record, "text");
+  if (direct !== null) return direct;
+  const result = recordString(record, "result");
+  if (result !== null) return result;
+  const delta = recordValue(record, "delta");
+  if (isRecord(delta)) {
+    const deltaText = recordString(delta, "text");
+    if (deltaText !== null) return deltaText;
+  }
+  const message = recordValue(record, "message");
+  if (!isRecord(message)) return "";
+  const content = recordValue(message, "content");
+  if (!Array.isArray(content)) return "";
+  let output = "";
+  for (const item of content) {
+    if (isRecord(item)) {
+      const text = recordString(item, "text");
+      if (text !== null) output += text;
+    }
+  }
+  return output;
+}
+
+function extractUsage(record: Readonly<Record<string, unknown>>): Usage | null {
+  const usage = usageRecord(recordValue(record, "usage"));
+  if (usage !== null) return usage;
+  const message = recordValue(record, "message");
+  return isRecord(message)
+    ? usageRecord(recordValue(message, "usage"), recordString(message, "model"))
+    : null;
+}
+
+function usageRecord(value: unknown, model?: string | null): Usage | null {
+  if (!isRecord(value)) return null;
+  return {
+    inputTokens: nonNegativeInteger(value, "input_tokens") ?? 0,
+    outputTokens: nonNegativeInteger(value, "output_tokens") ?? 0,
+    cacheReadTokens: nonNegativeInteger(value, "cache_read_input_tokens") ?? 0,
+    cacheCreationTokens: nonNegativeInteger(value, "cache_creation_input_tokens") ?? 0,
+    ...(model === undefined || model === null ? {} : { model }),
+  };
+}
+
+function nonNegativeInteger(record: Readonly<Record<string, unknown>>, key: string): number | null {
+  const value = recordValue(record, key);
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function chunkToString(chunk: unknown): string {
+  if (typeof chunk === "string") return chunk;
+  if (Buffer.isBuffer(chunk)) return chunk.toString("utf8");
+  return String(chunk);
+}
+
+function recordString(record: Readonly<Record<string, unknown>>, key: string): string | null {
+  const value = recordValue(record, key);
+  return typeof value === "string" ? value : null;
+}
+
+function recordValue(record: Readonly<Record<string, unknown>>, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function randomRunnerId(): RunnerId {
+  return asRunnerId(`run_${randomBase32(32)}`);
+}
+
+function randomReceiptId(): ReceiptId {
+  return asReceiptId(randomBase32(26));
+}
+
+function randomTaskId(): TaskId {
+  return asTaskId(randomBase32(26));
+}
+
+function randomBase32(length: number): string {
+  const bytes = randomBytes(length);
+  let out = "";
+  for (let index = 0; index < length; index += 1) {
+    const byte = bytes[index];
+    if (byte === undefined) {
+      throw new Error("random byte missing");
+    }
+    const char = CROCKFORD[byte % CROCKFORD.length];
+    if (char === undefined) {
+      throw new Error("random alphabet lookup failed");
+    }
+    out += char;
+  }
+  return out;
+}

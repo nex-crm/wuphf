@@ -263,6 +263,42 @@ export const MAX_BUDGET_THRESHOLDS = 8;
  */
 export const MAX_COST_MODEL_BYTES = 128;
 
+// ────────────────────────────────────────────────────────────────────────────
+// Runner IPC budgets (consumed by packages/protocol/src/runner.ts)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Runner prompts are inline request payloads, not attachment storage. 64 KiB
+ * covers normal one-turn dispatch while keeping broker JSON parsing and golden
+ * vector verification bounded.
+ */
+export const MAX_RUNNER_PROMPT_BYTES = 64 * 1024;
+
+/**
+ * Runner model labels are audit metadata. Reuse the same practical size as
+ * cost events so cost-ledger and runner events cannot diverge on model caps.
+ */
+export const MAX_RUNNER_MODEL_BYTES = MAX_COST_MODEL_BYTES;
+
+/**
+ * Working directories are local absolute paths supplied by trusted broker
+ * hosts. 4 KiB covers platform path limits while failing accidental log-sized
+ * values before they reach subprocess adapters.
+ */
+export const MAX_RUNNER_CWD_BYTES = 4 * 1024;
+
+/**
+ * Runner stdout/stderr chunks are streamed; each event remains bounded so
+ * slow consumers cannot force one unbounded JSON object through the broker.
+ */
+export const MAX_RUNNER_STDIO_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * Failed runner events carry human-readable diagnostics only. Cap the string
+ * so error surfaces cannot become a second log transport.
+ */
+export const MAX_RUNNER_ERROR_BYTES = 8 * 1024;
+
 export function assertWithinBudget(value: number, budget: number, label: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`${label} must be a non-negative finite number`);

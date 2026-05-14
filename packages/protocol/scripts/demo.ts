@@ -75,6 +75,10 @@ import {
   type ReceiptSnapshot,
   receiptFromJson,
   receiptToJson,
+  runnerEventFromJson,
+  runnerEventToJsonValue,
+  runnerSpawnRequestFromJson,
+  runnerSpawnRequestToJsonValue,
   SanitizedString,
   STREAM_EVENT_KIND_VALUES,
   serializeAuditEventRecordForHash,
@@ -1084,6 +1088,77 @@ expectThrows(
       scope: asCredentialScope("openai"),
     }),
   /BrokerIdentity is required/,
+);
+
+header(30, "RunnerSpawnRequest and RunnerEvent reject drift at the broker boundary");
+const runnerSpawnJson = {
+  kind: "claude-cli",
+  agentId: "agent_alpha",
+  credential: { version: 1, id: "cred_runner0123456789ABCDEFGHIJKLMN" },
+  prompt: "Summarize the task state.",
+  model: "claude-sonnet-4-7",
+  taskId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+  costCeilingMicroUsd: 2_500_000,
+};
+const runnerSpawn = runnerSpawnRequestFromJson(runnerSpawnJson);
+expectEqual(
+  "runner spawn request round-trips",
+  runnerSpawnRequestToJsonValue(runnerSpawn),
+  runnerSpawnJson,
+);
+expectThrows(
+  () => runnerSpawnRequestFromJson({ ...runnerSpawnJson, extra: true }),
+  /runnerSpawnRequest\/extra: is not allowed/,
+);
+const runnerCostEvent = runnerEventFromJson({
+  kind: "cost",
+  runnerId: "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+  entry: {
+    agentSlug: "agent_alpha",
+    providerKind: "anthropic",
+    model: "claude-sonnet-4-7",
+    amountMicroUsd: 2048,
+    units: {
+      inputTokens: 1536,
+      outputTokens: 512,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    },
+    occurredAt: "2026-05-08T18:00:02.000Z",
+  },
+  at: "2026-05-08T18:00:02.000Z",
+});
+expectEqual(
+  "runner cost event emits canonical JSON values",
+  runnerEventToJsonValue(runnerCostEvent),
+  {
+    kind: "cost",
+    runnerId: "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+    at: "2026-05-08T18:00:02.000Z",
+    entry: {
+      agentSlug: "agent_alpha",
+      providerKind: "anthropic",
+      model: "claude-sonnet-4-7",
+      amountMicroUsd: 2048,
+      units: {
+        inputTokens: 1536,
+        outputTokens: 512,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+      occurredAt: "2026-05-08T18:00:02.000Z",
+    },
+  },
+);
+expectThrows(
+  () =>
+    runnerEventFromJson({
+      kind: "stdout",
+      runnerId: "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+      chunk: "ok",
+      at: "2026-05-08T18:00:02Z",
+    }),
+  /ISO8601 UTC millisecond/,
 );
 
 // ──────────────────────────────────────────────────────────────────────────

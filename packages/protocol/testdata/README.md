@@ -15,6 +15,13 @@ consumer should load the fixture and assert its local validator accepts every
 trusted broker-side context used to rehydrate a runtime `CredentialHandle`, not
 serialized handle fields.
 
+## Runner Vectors
+
+`runner-vectors.json` pins the branch-9 runner control and event wire shapes.
+It includes a canonical `RunnerSpawnRequest` plus every `RunnerEvent` variant
+so Go/Rust runner ports can verify strict unknown-key rejection and event
+parsing without depending on TypeScript tests.
+
 ## Audit Event Golden Vectors
 
 `audit-event-vectors.json` is the cross-language fixture for WUPHF audit-chain

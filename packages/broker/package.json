@@ -22,6 +22,8 @@
     "check:invariants": "bash scripts/check-invariants.sh"
   },
   "dependencies": {
+    "@wuphf/agent-runners": "workspace:*",
+    "@wuphf/credentials": "workspace:*",
     "@wuphf/protocol": "workspace:*",
     "better-sqlite3": "12.9.0",
     "ws": "8.20.0"

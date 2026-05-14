@@ -4,6 +4,7 @@ import type { ApiToken, BrokerPort } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
 import type { CostLedger } from "./cost-ledger/index.ts";
 import type { ReceiptStore } from "./receipt-store.ts";
+import type { RunnerRouteConfig } from "./runners/route.ts";
 
 export interface BrokerLogger {
   info(event: string, payload?: Readonly<Record<string, unknown>>): void;
@@ -93,6 +94,13 @@ export interface BrokerConfig {
      */
     readonly operatorToken?: ApiToken;
   };
+  /**
+   * Optional agent runner routes. When supplied, POST /api/runners and
+   * GET /api/runners/:id/events are mounted. The broker owns bearer-to-agent
+   * authorization and injects a BrokerIdentity through this config; runners
+   * never hold broker identity directly.
+   */
+  readonly runners?: Omit<RunnerRouteConfig, "receiptStore">;
 }
 
 export interface BrokerHandle {

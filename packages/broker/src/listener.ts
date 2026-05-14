@@ -16,6 +16,8 @@
 //   POST /api/v1/cost/budgets             — bearer + operator capability required.
 //   DELETE /api/v1/cost/budgets/:id       — bearer + operator capability required.
 //   POST /api/v1/cost/idempotency/prune   — bearer + operator capability required.
+//   POST /api/runners                     — bearer + runner agent map required.
+//   GET  /api/runners/:id/events          — bearer + runner agent map required. SSE.
 //   GET  /                                — static (renderer bundle) or 404 if disabled.
 //   GET  /index.html                      — static or 404.
 //   GET  /assets/*                        — static or 404.
@@ -45,6 +47,7 @@ import { type CostRouteDeps, handleCostRoute } from "./cost-ledger/routes.ts";
 import { checkLoopbackRequest } from "./dns-rebinding-guard.ts";
 import { InMemoryReceiptStore, type ReceiptStore } from "./receipt-store.ts";
 import { handleReceiptCreate, handleReceiptGet, handleThreadReceiptsList } from "./receipts.ts";
+import { createRunnerRouteState, type RunnerRouteState } from "./runners/route.ts";
 import { createStaticHandler, type StaticHandler } from "./serve-static.ts";
 import { startSseSession } from "./sse.ts";
 import { attachTerminalUpgrade } from "./terminal-ws.ts";
@@ -82,6 +85,14 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   if (cost !== null) {
     pruneCostIdempotencyOnStartup(cost, logger);
   }
+  const runnerRoutes =
+    config.runners === undefined
+      ? null
+      : createRunnerRouteState({
+          ...config.runners,
+          logger,
+          receiptStore,
+        });
   const server = createServer((req, res) => {
     routeRequest(req, res, {
       token,
@@ -90,6 +101,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       trustedOrigins,
       receiptStore,
       cost,
+      runnerRoutes,
     }).catch((err: unknown) => {
       logger.error("listener_route_failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -136,6 +148,7 @@ interface RouteDeps {
   readonly trustedOrigins: ReadonlySet<string>;
   readonly receiptStore: ReceiptStore;
   readonly cost: CostRouteDeps | null;
+  readonly runnerRoutes: RunnerRouteState | null;
 }
 
 async function routeRequest(
@@ -267,6 +280,10 @@ async function routeRequest(
   // falls through to the 404 catch-all below.
   if (deps.cost !== null && pathname.startsWith("/api/v1/cost/")) {
     const handled = await handleCostRoute(req, res, pathname, deps.cost);
+    if (handled) return;
+  }
+  if (deps.runnerRoutes !== null && pathname.startsWith("/api/runners")) {
+    const handled = await deps.runnerRoutes.handle(req, res, pathname);
     if (handled) return;
   }
   // Authenticated catch-all for unknown `/api/*` routes. Without this,
@@ -438,6 +455,7 @@ function classifyApiRoute(pathname: string): string {
     return "thread_receipts";
   }
   if (pathname.startsWith("/api/v1/cost/")) return "cost";
+  if (pathname.startsWith("/api/runners")) return "runners";
   return "unknown";
 }
 

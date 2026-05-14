@@ -250,11 +250,11 @@ describe("WebSocket end-to-end", () => {
 
     // The secret must not appear in any logged path.
     for (const call of calls) {
-      const path = call.payload?.["path"];
-      if (typeof path === "string") {
-        expect(path).not.toContain(SECRET);
+      const { path: loggedPath } = call.payload ?? {};
+      if (typeof loggedPath === "string") {
+        expect(loggedPath).not.toContain(SECRET);
         // Fragment must be stripped entirely from the logged path.
-        expect(path).not.toContain("#");
+        expect(loggedPath).not.toContain("#");
       }
     }
   });
@@ -297,7 +297,7 @@ describe("WebSocket end-to-end", () => {
 
     // No logged path should contain the raw bearer.
     for (const call of calls) {
-      const payloadPath = call.payload?.["path"];
+      const { path: payloadPath } = call.payload ?? {};
       if (typeof payloadPath === "string") {
         expect(payloadPath).not.toContain(FIXED_TOKEN);
         if (payloadPath.includes("token=")) {

@@ -1,0 +1,92 @@
+{
+  "vectors": [
+    {
+      "name": "claude-cli spawn request",
+      "kind": "spawnRequest",
+      "json": {
+        "kind": "claude-cli",
+        "agentId": "agent_alpha",
+        "credential": {
+          "version": 1,
+          "id": "cred_runner0123456789ABCDEFGHIJKLMN"
+        },
+        "prompt": "Summarize the latest task state.",
+        "model": "claude-sonnet-4-7",
+        "cwd": "/tmp/wuphf-runner",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "costCeilingMicroUsd": 2500000
+      }
+    },
+    {
+      "name": "started event",
+      "kind": "event",
+      "json": {
+        "kind": "started",
+        "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+        "at": "2026-05-08T18:00:00.000Z"
+      }
+    },
+    {
+      "name": "stdout event",
+      "kind": "event",
+      "json": {
+        "kind": "stdout",
+        "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+        "chunk": "Ready.\n",
+        "at": "2026-05-08T18:00:01.000Z"
+      }
+    },
+    {
+      "name": "cost event",
+      "kind": "event",
+      "json": {
+        "kind": "cost",
+        "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+        "entry": {
+          "agentSlug": "agent_alpha",
+          "providerKind": "anthropic",
+          "model": "claude-sonnet-4-7",
+          "amountMicroUsd": 2048,
+          "units": {
+            "inputTokens": 1536,
+            "outputTokens": 512,
+            "cacheReadTokens": 0,
+            "cacheCreationTokens": 0
+          },
+          "occurredAt": "2026-05-08T18:00:02.000Z"
+        },
+        "at": "2026-05-08T18:00:02.000Z"
+      }
+    },
+    {
+      "name": "receipt event",
+      "kind": "event",
+      "json": {
+        "kind": "receipt",
+        "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "at": "2026-05-08T18:00:03.000Z"
+      }
+    },
+    {
+      "name": "finished event",
+      "kind": "event",
+      "json": {
+        "kind": "finished",
+        "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+        "exitCode": 0,
+        "at": "2026-05-08T18:00:04.000Z"
+      }
+    },
+    {
+      "name": "failed event",
+      "kind": "event",
+      "json": {
+        "kind": "failed",
+        "runnerId": "run_0123456789ABCDEFGHIJKLMNOPQRSTUV",
+        "error": "receipt write failed",
+        "at": "2026-05-08T18:00:04.000Z"
+      }
+    }
+  ]
+}
