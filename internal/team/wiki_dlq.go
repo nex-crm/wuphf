@@ -166,8 +166,10 @@ func (d *DLQ) ensureDir() error {
 // Callers should set FirstFailedAt and NextRetryNotBefore; if zero they are
 // defaulted to now and now+base_backoff respectively.
 func (d *DLQ) Enqueue(ctx context.Context, e DLQEntry) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("dlq: enqueue: %w", err)
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("dlq: enqueue: %w", err)
+		}
 	}
 	now := time.Now().UTC()
 	e = coerceDLQEntry(e, now)
@@ -191,8 +193,10 @@ func (d *DLQ) Enqueue(ctx context.Context, e DLQEntry) error {
 //
 // Read-only: holds the read lock so concurrent Inspect calls do not block.
 func (d *DLQ) ReadyForReplay(ctx context.Context, now time.Time) ([]DLQEntry, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("dlq: ready for replay: %w", err)
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("dlq: ready for replay: %w", err)
+		}
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -223,8 +227,10 @@ func (d *DLQ) ReadyForReplay(ctx context.Context, now time.Time) ([]DLQEntry, er
 // max_retries, the entry is promoted to permanent-failures. cat is the
 // error category of the new attempt.
 func (d *DLQ) RecordAttempt(ctx context.Context, artifactSHA string, attemptErr error, cat string) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("dlq: record attempt: %w", err)
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("dlq: record attempt: %w", err)
+		}
 	}
 	now := time.Now().UTC()
 
@@ -293,8 +299,10 @@ type Snapshot struct {
 // Uses the read lock so multiple operator dashboards polling GET /wiki/dlq
 // do not serialise on each other.
 func (d *DLQ) Inspect(ctx context.Context) (Snapshot, error) {
-	if err := ctx.Err(); err != nil {
-		return Snapshot{}, fmt.Errorf("dlq: inspect: %w", err)
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return Snapshot{}, fmt.Errorf("dlq: inspect: %w", err)
+		}
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -399,8 +407,10 @@ func sortEntriesByFirstFailedAt(entries []DLQEntry) {
 // MarkResolved appends a resolved_at tombstone. ReadyForReplay will skip this
 // artifact_sha from now on.
 func (d *DLQ) MarkResolved(ctx context.Context, artifactSHA string) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("dlq: mark resolved: %w", err)
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("dlq: mark resolved: %w", err)
+		}
 	}
 	now := time.Now().UTC()
 	d.mu.Lock()
