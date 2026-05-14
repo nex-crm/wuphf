@@ -19,7 +19,6 @@ web/src/components/apps/SettingsApp.imageGen.tsx|lint/complexity/noExcessiveCogn
 web/src/components/apps/SettingsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
-web/src/components/apps/SkillsApp.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/apps/SystemSchedulesPanel.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -47,7 +46,6 @@ web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveCom
 web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/onboarding/Wizard.tsx|lint/complexity/noExcessiveCognitiveComplexity|3|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/onboarding/wizard/LocalLLMPicker.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
-web/src/components/onboarding/wizard/Step4Team.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveLinesPerFunction|1|Existing function length is baselined for a focused follow-up refactor.
 web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|1|Existing cognitive complexity is baselined for a focused follow-up refactor.
 web/src/components/search/SearchModal.tsx|lint/complexity/noExcessiveCognitiveComplexity|2|Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -73,3 +71,6 @@ web/src/styles/global.css|lint/complexity/noImportantStyles|1|Responsive panel w
 web/src/styles/global.css|lint/complexity/noImportantStyles|1|Mobile full-width panel override must win over wider breakpoints.
 web/src/styles/global.css|lint/complexity/noImportantStyles|1|Reduced-motion override must beat animation declarations.
 web/src/styles/global.css|lint/complexity/noImportantStyles|1|Reduced-motion override must beat transition declarations.
+web/src/styles/lifecycle.css|lint/complexity/noImportantStyles|1|Reduced-motion override must beat animation declaration.
+web/src/styles/lifecycle.css|lint/complexity/noImportantStyles|2|Reduced-motion override must beat animation declaration.
+web/src/styles/lifecycle.css|lint/complexity/noImportantStyles|3|Reduced-motion override must beat animation declaration.
