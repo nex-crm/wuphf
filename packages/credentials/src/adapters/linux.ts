@@ -8,11 +8,21 @@ import {
 } from "../errors.ts";
 import {
   type CredentialHandleParts,
+  type CredentialLookupParts,
   credentialAccount,
+  credentialHandleParts,
   credentialLabel,
   newCredentialHandle,
-} from "../handle.ts";
-import type { CredentialStore, CredentialWriteRequest, Spawner, SpawnResult } from "../store.ts";
+} from "../internal/handle.ts";
+import {
+  assertBrokerIdentityForAgent,
+  type CredentialDeleteRequest,
+  type CredentialReadRequest,
+  type CredentialStore,
+  type CredentialWriteRequest,
+  type Spawner,
+  type SpawnResult,
+} from "../store.ts";
 
 export interface LinuxCredentialStoreOptions {
   readonly serviceName: string;
@@ -24,9 +34,10 @@ export class LinuxCredentialStore implements CredentialStore {
   constructor(private readonly options: LinuxCredentialStoreOptions) {}
 
   async write(input: CredentialWriteRequest): Promise<CredentialHandle> {
+    assertBrokerIdentityForAgent(input.broker, input.agentId);
     await this.ensureSecretToolReady();
     const handle = newCredentialHandle(input);
-    const parts = handleParts(handle);
+    const parts = credentialHandleParts(handle, input);
     const result = await this.options.spawner(
       "secret-tool",
       ["store", "--label", credentialLabel(parts), ...attributes(this.options.serviceName, parts)],
@@ -39,11 +50,12 @@ export class LinuxCredentialStore implements CredentialStore {
     return handle;
   }
 
-  async read(handle: CredentialHandle): Promise<string> {
+  async read(input: CredentialReadRequest): Promise<string> {
+    assertBrokerIdentityForAgent(input.broker, input.agentId);
     await this.ensureSecretToolReady();
     const result = await this.options.spawner(
       "secret-tool",
-      ["lookup", ...attributes(this.options.serviceName, handleParts(handle))],
+      ["lookup", ...lookupAttributes(this.options.serviceName, input)],
       { timeoutMs: this.options.timeoutMs },
     );
 
@@ -57,11 +69,12 @@ export class LinuxCredentialStore implements CredentialStore {
     return secret;
   }
 
-  async delete(handle: CredentialHandle): Promise<void> {
+  async delete(input: CredentialDeleteRequest): Promise<void> {
+    assertBrokerIdentityForAgent(input.broker, input.agentId);
     await this.ensureSecretToolReady();
     const result = await this.options.spawner(
       "secret-tool",
-      ["clear", ...attributes(this.options.serviceName, handleParts(handle))],
+      ["clear", ...lookupAttributes(this.options.serviceName, input)],
       { timeoutMs: this.options.timeoutMs },
     );
 
@@ -105,7 +118,7 @@ function attributes(serviceName: string, parts: CredentialHandleParts): string[]
     "wuphf_service",
     serviceName,
     "wuphf_account",
-    credentialAccount(parts),
+    credentialAccount({ handleId: parts.id }),
     "wuphf_agent_id",
     parts.agentId,
     "wuphf_scope",
@@ -113,8 +126,15 @@ function attributes(serviceName: string, parts: CredentialHandleParts): string[]
   ];
 }
 
-function handleParts(handle: CredentialHandle): CredentialHandleParts {
-  return { id: handle.id, agentId: handle.agentId, scope: handle.scope };
+function lookupAttributes(serviceName: string, parts: CredentialLookupParts): string[] {
+  return [
+    "wuphf_service",
+    serviceName,
+    "wuphf_account",
+    credentialAccount({ handleId: parts.handleId }),
+    "wuphf_agent_id",
+    parts.agentId,
+  ];
 }
 
 function commandErrorOrNoKeyring(command: string, result: SpawnResult): Error {

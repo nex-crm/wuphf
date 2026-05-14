@@ -1,8 +1,20 @@
 import type { CredentialHandle } from "@wuphf/protocol";
 
 import { KeychainCommandFailed, NotFound } from "../errors.ts";
-import { type CredentialHandleParts, credentialAccount, newCredentialHandle } from "../handle.ts";
-import type { CredentialStore, CredentialWriteRequest, Spawner } from "../store.ts";
+import {
+  type CredentialHandleParts,
+  credentialAccount,
+  credentialHandleParts,
+  newCredentialHandle,
+} from "../internal/handle.ts";
+import {
+  assertBrokerIdentityForAgent,
+  type CredentialDeleteRequest,
+  type CredentialReadRequest,
+  type CredentialStore,
+  type CredentialWriteRequest,
+  type Spawner,
+} from "../store.ts";
 
 export interface WindowsCredentialStoreOptions {
   readonly serviceName: string;
@@ -14,11 +26,13 @@ export class WindowsCredentialStore implements CredentialStore {
   constructor(private readonly options: WindowsCredentialStoreOptions) {}
 
   async write(input: CredentialWriteRequest): Promise<CredentialHandle> {
+    assertBrokerIdentityForAgent(input.broker, input.agentId);
     const handle = newCredentialHandle(input);
-    const target = credentialTarget(this.options.serviceName, handleParts(handle));
+    const parts = credentialHandleParts(handle, input);
+    const target = credentialTarget(this.options.serviceName, { handleId: parts.id });
     const result = await this.options.spawner(
       "powershell.exe",
-      powerShellArgs(writeScript(target)),
+      powerShellArgs(writeScript(target, credentialComment(parts))),
       {
         input: input.secret,
         timeoutMs: this.options.timeoutMs,
@@ -31,8 +45,9 @@ export class WindowsCredentialStore implements CredentialStore {
     return handle;
   }
 
-  async read(handle: CredentialHandle): Promise<string> {
-    const target = credentialTarget(this.options.serviceName, handleParts(handle));
+  async read(input: CredentialReadRequest): Promise<string> {
+    assertBrokerIdentityForAgent(input.broker, input.agentId);
+    const target = credentialTarget(this.options.serviceName, { handleId: input.handleId });
     const result = await this.options.spawner(
       "powershell.exe",
       powerShellArgs(readScript(target)),
@@ -49,8 +64,9 @@ export class WindowsCredentialStore implements CredentialStore {
     return result.stdout;
   }
 
-  async delete(handle: CredentialHandle): Promise<void> {
-    const target = credentialTarget(this.options.serviceName, handleParts(handle));
+  async delete(input: CredentialDeleteRequest): Promise<void> {
+    assertBrokerIdentityForAgent(input.broker, input.agentId);
+    const target = credentialTarget(this.options.serviceName, { handleId: input.handleId });
     const result = await this.options.spawner(
       "powershell.exe",
       powerShellArgs(deleteScript(target)),
@@ -65,12 +81,15 @@ export class WindowsCredentialStore implements CredentialStore {
   }
 }
 
-function credentialTarget(serviceName: string, parts: CredentialHandleParts): string {
+function credentialTarget(
+  serviceName: string,
+  parts: { readonly handleId: CredentialHandleParts["id"] },
+): string {
   return `${serviceName}:${credentialAccount(parts)}`;
 }
 
-function handleParts(handle: CredentialHandle): CredentialHandleParts {
-  return { id: handle.id, agentId: handle.agentId, scope: handle.scope };
+function credentialComment(parts: CredentialHandleParts): string {
+  return JSON.stringify({ agentId: parts.agentId, scope: parts.scope });
 }
 
 function powerShellArgs(script: string): string[] {
@@ -84,9 +103,10 @@ function powerShellArgs(script: string): string[] {
   ];
 }
 
-function writeScript(target: string): string {
+function writeScript(target: string, comment: string): string {
   return `${credentialManagerPrelude()}
 $target = ${psQuote(target)}
+$comment = ${psQuote(comment)}
 $secret = [Console]::In.ReadToEnd()
 $bytes = [Text.Encoding]::Unicode.GetBytes($secret)
 $blob = [Runtime.InteropServices.Marshal]::StringToCoTaskMemUni($secret)
@@ -98,6 +118,7 @@ try {
   $credential.CredentialBlob = $blob
   $credential.Persist = [CredMan]::CRED_PERSIST_LOCAL_MACHINE
   $credential.UserName = "wuphf"
+  $credential.Comment = $comment
   if (-not [CredMan]::CredWrite([ref] $credential, 0)) {
     $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
     throw "CredWrite failed: $code"

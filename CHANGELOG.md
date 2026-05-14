@@ -8,10 +8,15 @@ All notable changes to WUPHF will be documented in this file.
 
 - **`@wuphf/credentials` per-agent OS keychain substrate.** New v1 package for
   opaque credential handles backed by macOS Keychain, Linux libsecret, and
-  Windows Credential Manager adapters. Handles serialize only an opaque id,
-  include `agentId` in the keychain account key, reject Linux plaintext
-  `basic_text` collections, and keep broker construction explicit instead of a
-  global singleton.
+  Windows Credential Manager adapters. Handles serialize only an opaque
+  versioned id, use that id as the keychain account capability, reject Linux
+  plaintext `basic_text` collections, and keep broker construction explicit
+  instead of a global singleton.
+- **Broker-mediated credential handles.** `@wuphf/credentials` now treats the
+  handle id as the keychain account capability and requires a `BrokerIdentity`
+  token for read/write/delete calls. `CredentialHandle` uses private runtime
+  slots, serializes as `{version:1,id}`, and can be rehydrated only with
+  broker-trusted `agentId`/scope context.
 - **Channel participant rail for conversations.** Channel views now include a Slack-like participants list that shows which agents are part of the current channel, opens an agent panel from each row, filters out human seats, and keeps lead agents pinned. The rail supports adding available office agents, disabling or enabling specific channel participants, removing agents from only the current channel, and undoing a remove from the toast within five seconds.
 - **Skills app reskinned as pixel-art trading cards.** Every entry in the Skills tab is now a TCG-style card with a procedurally-generated 144px pixel-art portrait (using the existing `drawPixelAvatar` system), status-driven type palette (active = electric, proposed = psychic with "NEEDS REVIEW" stamp, disabled = dark, archived = steel), and a 3D card flip (700ms, ease-out-expo, respects `prefers-reduced-motion`).
   - **Front face:** Title + creator byline, procedural portrait, status/owner stat strip, promoted "Triggers on" row, and scrollable flavor-text description.

@@ -10,6 +10,9 @@ import {
 import { canonicalJSON } from "../src/canonical-json.ts";
 import { lsnFromV1Number } from "../src/event-lsn.ts";
 import {
+  asAgentId,
+  asCredentialHandleId,
+  asCredentialScope,
   assertJcsValue,
   isAgentSlug,
   isApprovalId,
@@ -33,6 +36,12 @@ import {
   asKeychainHandleId,
   asRequestId,
   type BrokerHttpResponse,
+  credentialDeleteRequestFromJson,
+  credentialDeleteResponseFromJson,
+  credentialReadRequestFromJson,
+  credentialReadResponseFromJson,
+  credentialWriteRequestFromJson,
+  credentialWriteResponseFromJson,
   type ApiBootstrapWire as IpcApiBootstrapWire,
   type ApprovalClaimsWire as IpcApprovalClaimsWire,
   type ApprovalSubmitRequestWire as IpcApprovalSubmitRequestWire,
@@ -380,6 +389,55 @@ describe("IPC brand constructors", () => {
       expect(() => asKeychainHandleId("a".repeat(129))).toThrow();
       expect(() => asKeychainHandleId("kh/abc")).toThrow();
       expect(isKeychainHandleId(undefined)).toBe(false);
+    });
+  });
+
+  describe("credential IPC envelopes", () => {
+    const agentId = asAgentId("agent_alpha");
+    const handleId = asCredentialHandleId("cred_ipc0123456789ABCDEFGHIJKLMNOP");
+    const scope = asCredentialScope("openai");
+
+    it("parses read/write/delete requests and responses", () => {
+      expect(credentialReadRequestFromJson({ agentId, handleId })).toEqual({ agentId, handleId });
+      expect(
+        credentialReadResponseFromJson({ secret: "fixture-secret-value-do-not-use-0000" }),
+      ).toEqual({
+        secret: "fixture-secret-value-do-not-use-0000",
+      });
+      expect(
+        credentialWriteRequestFromJson({
+          agentId,
+          scope,
+          secret: "fixture-secret-value-do-not-use-0000",
+        }),
+      ).toEqual({ agentId, scope, secret: "fixture-secret-value-do-not-use-0000" });
+      expect(credentialWriteResponseFromJson({ handle: { version: 1, id: handleId } })).toEqual({
+        handle: { version: 1, id: handleId },
+      });
+      expect(credentialDeleteRequestFromJson({ agentId, handleId })).toEqual({
+        agentId,
+        handleId,
+      });
+      expect(credentialDeleteResponseFromJson({ deleted: true })).toEqual({ deleted: true });
+    });
+
+    it("rejects unknown keys and invalid credential brands", () => {
+      expect(() => credentialReadRequestFromJson({ agentId, handleId, extra: true })).toThrow(
+        /extra.*not allowed/,
+      );
+      expect(() =>
+        credentialWriteRequestFromJson({
+          agentId,
+          scope: "unsupported",
+          secret: "fixture-secret-value-do-not-use-0000",
+        }),
+      ).toThrow(/not a supported CredentialScope/);
+      expect(() =>
+        credentialWriteResponseFromJson({ handle: { version: 2, id: handleId } }),
+      ).toThrow(/version: must be 1/);
+      expect(() => credentialDeleteResponseFromJson({ deleted: false })).toThrow(
+        /deleted: must be true/,
+      );
     });
   });
 });

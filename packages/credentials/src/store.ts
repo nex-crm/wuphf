@@ -1,13 +1,21 @@
 import { type ExecFileException, execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { AgentId, CredentialHandle, CredentialScope } from "@wuphf/protocol";
+import {
+  type AgentId,
+  type BrokerIdentity,
+  brokerIdentityAgentId,
+  type CredentialHandle,
+  type CredentialHandleId,
+  type CredentialScope,
+  isBrokerIdentity,
+} from "@wuphf/protocol";
 
 import { LinuxCredentialStore } from "./adapters/linux.ts";
 import { MacOSCredentialStore } from "./adapters/macos.ts";
 import { WindowsCredentialStore } from "./adapters/windows.ts";
-import { AdapterNotSupported } from "./errors.ts";
-import { DEFAULT_CREDENTIAL_SERVICE } from "./handle.ts";
+import { AdapterNotSupported, BrokerIdentityRequired } from "./errors.ts";
+import { DEFAULT_CREDENTIAL_SERVICE } from "./internal/handle.ts";
 
 export interface SpawnOptions {
   readonly input?: string | undefined;
@@ -28,15 +36,28 @@ export type Spawner = (
 ) => Promise<SpawnResult>;
 
 export interface CredentialWriteRequest {
+  readonly broker: BrokerIdentity;
   readonly agentId: AgentId;
   readonly scope: CredentialScope;
   readonly secret: string;
 }
 
+export interface CredentialReadRequest {
+  readonly broker: BrokerIdentity;
+  readonly handleId: CredentialHandleId;
+  readonly agentId: AgentId;
+}
+
+export interface CredentialDeleteRequest {
+  readonly broker: BrokerIdentity;
+  readonly handleId: CredentialHandleId;
+  readonly agentId: AgentId;
+}
+
 export interface CredentialStore {
   write(input: CredentialWriteRequest): Promise<CredentialHandle>;
-  read(handle: CredentialHandle): Promise<string>;
-  delete(handle: CredentialHandle): Promise<void>;
+  read(input: CredentialReadRequest): Promise<string>;
+  delete(input: CredentialDeleteRequest): Promise<void>;
 }
 
 export interface CredentialStoreOptions {
@@ -68,7 +89,11 @@ export function open(options: CredentialStoreOptions = {}): CredentialStore {
   }
 }
 
-export const openCredentialStore = open;
+export function assertBrokerIdentityForAgent(broker: unknown, agentId: AgentId): void {
+  if (!isBrokerIdentity(broker) || brokerIdentityAgentId(broker) !== agentId) {
+    throw new BrokerIdentityRequired();
+  }
+}
 
 export async function execFileSpawner(
   cmd: string,

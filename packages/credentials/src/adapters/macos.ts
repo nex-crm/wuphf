@@ -4,10 +4,18 @@ import { KeychainCommandFailed, NotFound } from "../errors.ts";
 import {
   type CredentialHandleParts,
   credentialAccount,
+  credentialHandleParts,
   credentialLabel,
   newCredentialHandle,
-} from "../handle.ts";
-import type { CredentialStore, CredentialWriteRequest, Spawner } from "../store.ts";
+} from "../internal/handle.ts";
+import {
+  assertBrokerIdentityForAgent,
+  type CredentialDeleteRequest,
+  type CredentialReadRequest,
+  type CredentialStore,
+  type CredentialWriteRequest,
+  type Spawner,
+} from "../store.ts";
 
 export interface MacOSCredentialStoreOptions {
   readonly serviceName: string;
@@ -19,19 +27,22 @@ export class MacOSCredentialStore implements CredentialStore {
   constructor(private readonly options: MacOSCredentialStoreOptions) {}
 
   async write(input: CredentialWriteRequest): Promise<CredentialHandle> {
+    assertBrokerIdentityForAgent(input.broker, input.agentId);
     const handle = newCredentialHandle(input);
-    const parts = handleParts(handle);
+    const parts = credentialHandleParts(handle, input);
     const result = await this.options.spawner(
       "security",
       [
         "add-generic-password",
         "-U",
         "-a",
-        credentialAccount(parts),
+        credentialAccount({ handleId: parts.id }),
         "-s",
         this.options.serviceName,
         "-l",
         credentialLabel(parts),
+        "-j",
+        credentialMetadata(parts),
         "-w",
       ],
       { input: input.secret, timeoutMs: this.options.timeoutMs },
@@ -43,14 +54,14 @@ export class MacOSCredentialStore implements CredentialStore {
     return handle;
   }
 
-  async read(handle: CredentialHandle): Promise<string> {
-    const parts = handleParts(handle);
+  async read(input: CredentialReadRequest): Promise<string> {
+    assertBrokerIdentityForAgent(input.broker, input.agentId);
     const result = await this.options.spawner(
       "security",
       [
         "find-generic-password",
         "-a",
-        credentialAccount(parts),
+        credentialAccount({ handleId: input.handleId }),
         "-s",
         this.options.serviceName,
         "-w",
@@ -65,11 +76,17 @@ export class MacOSCredentialStore implements CredentialStore {
     return stripOneTrailingNewline(result.stdout);
   }
 
-  async delete(handle: CredentialHandle): Promise<void> {
-    const parts = handleParts(handle);
+  async delete(input: CredentialDeleteRequest): Promise<void> {
+    assertBrokerIdentityForAgent(input.broker, input.agentId);
     const result = await this.options.spawner(
       "security",
-      ["delete-generic-password", "-a", credentialAccount(parts), "-s", this.options.serviceName],
+      [
+        "delete-generic-password",
+        "-a",
+        credentialAccount({ handleId: input.handleId }),
+        "-s",
+        this.options.serviceName,
+      ],
       { timeoutMs: this.options.timeoutMs },
     );
 
@@ -83,8 +100,8 @@ export class MacOSCredentialStore implements CredentialStore {
   }
 }
 
-function handleParts(handle: CredentialHandle): CredentialHandleParts {
-  return { id: handle.id, agentId: handle.agentId, scope: handle.scope };
+function credentialMetadata(parts: CredentialHandleParts): string {
+  return JSON.stringify({ agentId: parts.agentId, scope: parts.scope });
 }
 
 function isSecurityNotFound(stderr: string): boolean {

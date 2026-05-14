@@ -12,15 +12,19 @@ protocol package is not.
 2. **Linux rejects plaintext keyrings.** If libsecret reports `basic_text`,
    plaintext, or unencrypted storage, throw `BasicTextRejected` before storing
    anything.
-3. **Per-agent scoping is part of the account key.** The keychain lookup key
-   must include both `agentId` and `scope`; a handle for one agent must not read
-   another agent's credential for the same provider.
-4. **Handles are opaque.** A `CredentialHandle` never contains the secret.
+3. **Broker mediation is the isolation boundary.** Adapters MUST NOT be called
+   directly by code outside `@wuphf/credentials` and `@wuphf/broker`. The public
+   API requires a `BrokerIdentity` token that only `@wuphf/broker` can
+   construct. Test code uses the `testing/forBrokerTests` factory.
+4. **Handle id is the account key.** The keychain lookup key is the
+   `CredentialHandle` id. Store `agentId` and `scope` as adapter metadata for
+   broker audit/debug context; do not derive the account key from them.
+5. **Handles are opaque.** A `CredentialHandle` never contains the secret.
    `toJSON`, `toString`, and `util.inspect` output must remain redacted or
    handle-id-only.
-5. **Adapters take an injectable spawner.** Tests stub the subprocess boundary;
+6. **Adapters take an injectable spawner.** Tests stub the subprocess boundary;
    production uses `execFile`. Do not let tests touch the real OS keychain.
-6. **No native dependencies in v1.** Use OS CLIs (`security`, `secret-tool`,
+7. **No native dependencies in v1.** Use OS CLIs (`security`, `secret-tool`,
    PowerShell/Credential Manager APIs). If a platform cannot meet the contract
    that way, ship a throwing adapter instead of a fake success path.
 
