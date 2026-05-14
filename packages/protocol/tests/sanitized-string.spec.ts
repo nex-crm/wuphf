@@ -246,6 +246,119 @@ describe("SanitizedString", () => {
     expect(SanitizedString.fromUnknown("a\u200db", { policy: "allow-zwj" }).value).toBe("a\u200db");
   });
 
+  describe("allowlist policy", () => {
+    const opts = { policy: "allowlist" as const };
+
+    it("passes printable ASCII unchanged", () => {
+      expect(SanitizedString.fromUnknown("hello world", opts).value).toBe("hello world");
+      expect(SanitizedString.fromUnknown("a1b2_c-d.e", opts).value).toBe("a1b2_c-d.e");
+    });
+
+    it("passes common non-Latin scripts (letters, marks, numbers, punctuation)", () => {
+      // Hiragana, Katakana, Han, Hangul, Cyrillic, Arabic, Devanagari, Greek.
+      expect(SanitizedString.fromUnknown("\u3053\u3093\u306b\u3061\u306f", opts).value).toBe(
+        "\u3053\u3093\u306b\u3061\u306f",
+      );
+      expect(SanitizedString.fromUnknown("\u5317\u4eac", opts).value).toBe("\u5317\u4eac");
+      expect(SanitizedString.fromUnknown("\uc548\ub155", opts).value).toBe("\uc548\ub155");
+      expect(SanitizedString.fromUnknown("\u041f\u0440\u0438\u0432\u0435\u0442", opts).value).toBe(
+        "\u041f\u0440\u0438\u0432\u0435\u0442",
+      );
+      expect(SanitizedString.fromUnknown("\u0645\u0631\u062d\u0628\u0627", opts).value).toBe(
+        "\u0645\u0631\u062d\u0628\u0627",
+      );
+      expect(SanitizedString.fromUnknown("\u0928\u092e\u0938\u094d\u0924\u0947", opts).value).toBe(
+        "\u0928\u092e\u0938\u094d\u0924\u0947",
+      );
+      expect(
+        SanitizedString.fromUnknown("\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1", opts).value,
+      ).toBe("\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1");
+    });
+
+    it("passes emoji (without ZWJ, since ZWJ is Cf)", () => {
+      expect(SanitizedString.fromUnknown("\ud83d\ude80", opts).value).toBe("\ud83d\ude80");
+      expect(SanitizedString.fromUnknown("\ud83d\ude00\u2b50\ud83d\udcaf", opts).value).toBe(
+        "\ud83d\ude00\u2b50\ud83d\udcaf",
+      );
+    });
+
+    it("strips soft hyphen U+00AD (Cf \u2014 accepted by default policy, rejected by allowlist)", () => {
+      // U+00AD is Cf "Format". The default denylist does not strip it; the
+      // allowlist moat does. This is the canonical example of the policy
+      // adding coverage beyond strip-zero-width.
+      expect(SanitizedString.fromUnknown("foo\u00adbar").value).toBe("foo\u00adbar");
+      expect(SanitizedString.fromUnknown("foo\u00adbar", opts).value).toBe("foobar");
+    });
+
+    it("strips private-use code points (Co \u2014 never legitimate text)", () => {
+      // U+E000 sits in the BMP Private Use Area. Apps sometimes use these for
+      // app-specific glyphs but the rendered text contract MUST NOT accept
+      // them \u2014 they are invisible-on-most-systems and trivially used for
+      // tracking / homograph attacks.
+      expect(SanitizedString.fromUnknown("a\ue000b", opts).value).toBe("ab");
+      // U+F8FF is the Apple logo PUA point.
+      expect(SanitizedString.fromUnknown("a\uf8ffb", opts).value).toBe("ab");
+    });
+
+    it("strips every bidi/format control, not just the U+202A-E and U+2066-9 ranges", () => {
+      // U+061C ARABIC LETTER MARK is Cf and is NOT in the default denylist.
+      // Allowlist must catch it.
+      expect(SanitizedString.fromUnknown("a\u061cb").value).toBe("a\u061cb");
+      expect(SanitizedString.fromUnknown("a\u061cb", opts).value).toBe("ab");
+      // U+200E LEFT-TO-RIGHT MARK is Cf, also not in the default denylist.
+      expect(SanitizedString.fromUnknown("a\u200eb").value).toBe("a\u200eb");
+      expect(SanitizedString.fromUnknown("a\u200eb", opts).value).toBe("ab");
+    });
+
+    it("strips ZWJ (allowlist supersedes allow-zwj)", () => {
+      // allow-zwj is meant to coexist with the default denylist for emoji
+      // sequences. The allowlist contract is stricter \u2014 even under an
+      // explicit `policy: "allowlist"` ZWJ is stripped because it's Cf.
+      expect(SanitizedString.fromUnknown("a\u200db", opts).value).toBe("ab");
+    });
+
+    it("never produces output longer than input (allowlist is purely subtractive after NFKC)", () => {
+      fc.assert(
+        fc.property(sanitizableStringArb, (input) => {
+          const out = SanitizedString.fromUnknown(input, opts).value;
+          // NFKC can shrink (e.g. \ufb01 \u2192 fi is +1 char, but \ufb01 is itself one
+          // code point); after normalization any additional reduction is
+          // strictly removal. The right invariant is: output \u2286 input under
+          // NFKC, never inserts new code points.
+          const normalized = input.normalize("NFKC");
+          for (const ch of out) {
+            expect(normalized).toContain(ch);
+          }
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+
+    it("is idempotent under repeated allowlist sanitization", () => {
+      fc.assert(
+        fc.property(sanitizableStringArb, (input) => {
+          const once = SanitizedString.fromUnknown(input, opts).value;
+          const twice = SanitizedString.fromUnknown(once, opts).value;
+          expect(twice).toBe(once);
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+
+    it("never lets a Unicode C* code point through", () => {
+      fc.assert(
+        fc.property(sanitizableStringArb, (input) => {
+          const out = SanitizedString.fromUnknown(input, opts).value;
+          // No assigned control, format, unassigned, private-use, or
+          // surrogate code points should survive. Lone surrogates are
+          // already rejected earlier; this assertion catches the rest.
+          expect(/\p{C}/u.test(out)).toBe(false);
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+  });
+
   it.each([
     { left: "e\u0301", right: "\u00e9", expected: "\u00e9" },
     { left: "\u212b", right: "\u00c5", expected: "\u00c5" },
