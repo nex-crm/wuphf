@@ -5,7 +5,7 @@ WUPHF v1 protocol package: branded types, receipt schema, IPC envelopes, audit e
 This package is the moat. It defines the type-system invariants that make tampering and substitution observable:
 
 - **`FrozenArgs`** — args canonicalized (RFC 8785 JCS) and content-addressed by SHA-256 at freeze time. The only type the executor accepts.
-- **`SanitizedString`** — NFKC-normalized, allowlist-filtered, recursively walked. The only string type the renderer accepts.
+- **`SanitizedString`** — NFKC-normalized, control/invisible-character filtered, recursively walked. The only string type the renderer accepts. The `allowlist` policy (the moat) is the strict variant for signed/audited text.
 - **`SignedApprovalToken`** — Ed25519 signed envelope over `ApprovalClaims`, scoped by receipt and optionally by write. Replaces stringly-typed `ApprovedBy`.
 - **`ReceiptSnapshot`** — append-only audit detail. Every approved tool call produces one.
 - **Audit event** — hash-chained CBOR-line records on disk; the chain hash is computed over a JCS projection (see `serializeAuditEventRecordForHash`) using the formula `eventHash = sha256(asciiLowerHex(prevHash) || jcsBytes(record))`. The ASCII-hex form of `prevHash` is intentional — it keeps debug dumps readable but is non-standard, so cross-language verifiers MUST mix the 64-byte ASCII string, not the 32 raw bytes. `GENESIS_PREV_HASH = sha256("wuphf:audit:genesis:v1")`. Test vectors live in `tests/audit-event.spec.ts` (golden serialization + golden eventHash). Periodic Merkle roots signed by per-install non-exportable key.
