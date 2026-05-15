@@ -15,6 +15,7 @@ import {
 } from "../../api/client";
 import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
+import { CredentialRegistrationPanel } from "../cosign";
 import {
   ShredCardSubtitle,
   ShredDeletionsList,
@@ -923,6 +924,11 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
             value={cfg.workspace_slug ?? ""}
           />
         </Field>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <div style={styles.groupTitle}>Approval cosign</div>
+        <CredentialRegistrationPanel />
       </div>
 
       <SaveButton label="Save integration settings" onSave={onSave} />
