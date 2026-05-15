@@ -1,7 +1,11 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { MAX_SANITIZED_JSON_NODES, MAX_SANITIZED_STRING_BYTES } from "../src/budgets.ts";
-import { SanitizedString, type SanitizedStringPolicy } from "../src/sanitized-string.ts";
+import {
+  MOAT_DISALLOWED_RE,
+  SanitizedString,
+  type SanitizedStringPolicy,
+} from "../src/sanitized-string.ts";
 
 type JsonPrimitive = null | boolean | number | string;
 type JsonValue = JsonPrimitive | JsonValue[] | JsonRecord;
@@ -254,6 +258,16 @@ describe("SanitizedString", () => {
       expect(SanitizedString.fromUnknown("a1b2_c-d.e", opts).value).toBe("a1b2_c-d.e");
     });
 
+    it("preserves tab, newline, and carriage return (allowed whitespace, not invisibles)", () => {
+      // U+0009/000A/000D are `Cc` and match `\p{C}`, but the moat must not
+      // strip them — they carry the line structure a signed multi-line
+      // payload depends on. Every other policy keeps them; allowlist must too.
+      expect(SanitizedString.fromUnknown("a\tb\nc\rd", opts).value).toBe("a\tb\nc\rd");
+      expect(SanitizedString.fromUnknown("line one\nline two", opts).value).toBe(
+        "line one\nline two",
+      );
+    });
+
     it("passes common non-Latin scripts (letters, marks, numbers, punctuation)", () => {
       // Hiragana, Katakana, Han, Hangul, Cyrillic, Arabic, Devanagari, Greek.
       expect(SanitizedString.fromUnknown("\u3053\u3093\u306b\u3061\u306f", opts).value).toBe(
@@ -345,14 +359,16 @@ describe("SanitizedString", () => {
       );
     });
 
-    it("never lets a Unicode C* code point through", () => {
+    it("never lets a Unicode C* code point through, except allowed whitespace", () => {
       fc.assert(
         fc.property(sanitizableStringArb, (input) => {
           const out = SanitizedString.fromUnknown(input, opts).value;
-          // No assigned control, format, unassigned, private-use, or
-          // surrogate code points should survive. Lone surrogates are
-          // already rejected earlier; this assertion catches the rest.
-          expect(/\p{C}/u.test(out)).toBe(false);
+          // No assigned format, unassigned, private-use, or surrogate code
+          // points should survive. Tab/newline/carriage return are `Cc` but
+          // intentionally-allowed whitespace, so strip them before asserting.
+          // Lone surrogates are already rejected earlier.
+          const withoutAllowedWhitespace = out.replace(/[\t\n\r]/g, "");
+          expect(/\p{C}/u.test(withoutAllowedWhitespace)).toBe(false);
         }),
         { numRuns: MOAT_NUM_RUNS },
       );
@@ -375,11 +391,14 @@ describe("SanitizedString", () => {
       expect(SanitizedString.fromUnknown(`a${ch}b`, opts).value).toBe("ab");
     });
 
-    it("never lets any default-ignorable code point through", () => {
+    it("never lets any default-ignorable code point through, except allowed whitespace", () => {
       fc.assert(
         fc.property(sanitizableStringArb, (input) => {
           const out = SanitizedString.fromUnknown(input, opts).value;
-          expect(/[\p{C}\p{Default_Ignorable_Code_Point}]/u.test(out)).toBe(false);
+          // Tab/newline/carriage return match `\p{C}` but are intentionally
+          // allowed; strip them before asserting the moat rejected the rest.
+          const withoutAllowedWhitespace = out.replace(/[\t\n\r]/g, "");
+          expect(MOAT_DISALLOWED_RE.test(withoutAllowedWhitespace)).toBe(false);
         }),
         { numRuns: MOAT_NUM_RUNS },
       );
@@ -457,6 +476,20 @@ describe("SanitizedString", () => {
         const result = SanitizedString.fromUnknown(input).value;
         const parsed = JSON.parse(result) as JsonValue;
         const expected = expectedSanitizeJsonValue(projectJson(input));
+
+        expect(typeof result).toBe("string");
+        expect(parsed).toEqual(expected);
+      }),
+      { numRuns: JSON_NUM_RUNS },
+    );
+  });
+
+  it("keeps JSON object output parseable under the allowlist policy", () => {
+    fc.assert(
+      fc.property(jsonObjectArb, (input) => {
+        const result = SanitizedString.fromUnknown(input, { policy: "allowlist" }).value;
+        const parsed = JSON.parse(result) as JsonValue;
+        const expected = expectedSanitizeJsonValue(projectJson(input), "allowlist");
 
         expect(typeof result).toBe("string");
         expect(parsed).toEqual(expected);
@@ -879,11 +912,15 @@ function isExpectedDisallowedCodePoint(codePoint: number, policy: SanitizedStrin
   }
 
   // Mirrors production's `allowlist` (moat) branch: strip every `C*` AND
-  // every Default_Ignorable_Code_Point. Kept in sync with `MOAT_DISALLOWED_RE`
-  // in src/sanitized-string.ts — if that regex changes, this oracle must too.
+  // every Default_Ignorable_Code_Point, except the intentionally-allowed
+  // whitespace controls (tab/newline/carriage return). Imports the production
+  // `MOAT_DISALLOWED_RE` directly so the oracle cannot drift from the impl.
   if (
     policy === "allowlist" &&
-    /[\p{C}\p{Default_Ignorable_Code_Point}]/u.test(String.fromCodePoint(codePoint))
+    codePoint !== 0x09 &&
+    codePoint !== 0x0a &&
+    codePoint !== 0x0d &&
+    MOAT_DISALLOWED_RE.test(String.fromCodePoint(codePoint))
   ) {
     return true;
   }

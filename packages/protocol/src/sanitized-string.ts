@@ -484,7 +484,11 @@ function sanitizeText(input: string, options: SanitizedStringOptions): string {
 // is `Mn` (a mark) — neither is `C*`, yet both are invisible and trivially
 // weaponized for homograph / hidden-payload attacks. A signed write payload
 // must contain neither.
-const MOAT_DISALLOWED_RE = /[\p{C}\p{Default_Ignorable_Code_Point}]/u;
+//
+// Exported (not via `index.ts`, so not public package API) so the test
+// oracle can import the one true pattern instead of hand-copying it — a
+// copied literal can silently drift from this one.
+export const MOAT_DISALLOWED_RE = /[\p{C}\p{Default_Ignorable_Code_Point}]/u;
 
 function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOptions): boolean {
   if (codePoint <= 0x1f && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d) {
@@ -527,7 +531,19 @@ function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOption
   // bidi/format mark Unicode adds in the future. The denylist branches above
   // remain in effect for older policies; this branch only widens the
   // rejection set when the caller has opted into the stricter contract.
-  if (options.policy === "allowlist" && MOAT_DISALLOWED_RE.test(String.fromCodePoint(codePoint))) {
+  //
+  // Tab (U+0009), newline (U+000A), and carriage return (U+000D) are `Cc`
+  // and so match `\p{C}`, but they are intentionally-allowed whitespace:
+  // every other policy keeps them (see the C0 carve-out at the top of this
+  // function). The moat must not silently flatten the line structure of a
+  // signed multi-line payload, so they are carved out of the moat too.
+  if (
+    options.policy === "allowlist" &&
+    codePoint !== 0x09 &&
+    codePoint !== 0x0a &&
+    codePoint !== 0x0d &&
+    MOAT_DISALLOWED_RE.test(String.fromCodePoint(codePoint))
+  ) {
     return true;
   }
 
