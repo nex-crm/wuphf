@@ -367,7 +367,7 @@ describe("main bootstrap", () => {
     expect(getOnlyBrokerSupervisor().stop).toHaveBeenCalledTimes(1);
   });
 
-  it("installs deny-all permission request and check handlers on the default session before windows open", async () => {
+  it("installs closed permission request and check handlers on the default session before windows open", async () => {
     await importMainBootstrap();
 
     expect(electronMock.defaultSession.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
@@ -395,7 +395,12 @@ describe("main bootstrap", () => {
 
     const requestHandler = electronMock.defaultSession.setPermissionRequestHandler.mock
       .calls[0]?.[0] as
-      | ((webContents: unknown, permission: string, callback: (granted: boolean) => void) => void)
+      | ((
+          webContents: unknown,
+          permission: string,
+          callback: (granted: boolean) => void,
+          details?: unknown,
+        ) => void)
       | undefined;
     if (requestHandler === undefined) {
       throw new Error("Expected setPermissionRequestHandler to be invoked");
@@ -403,14 +408,48 @@ describe("main bootstrap", () => {
     const grant = vi.fn<(granted: boolean) => void>();
     requestHandler({}, "media", grant);
     expect(grant).toHaveBeenCalledWith(false);
+    const webAuthnGrant = vi.fn<(granted: boolean) => void>();
+    requestHandler(
+      { getURL: () => "http://127.0.0.1:54321/" },
+      "publickey-credentials-create",
+      webAuthnGrant,
+    );
+    expect(webAuthnGrant).toHaveBeenCalledWith(true);
+    const remoteWebAuthnGrant = vi.fn<(granted: boolean) => void>();
+    requestHandler(
+      { getURL: () => "http://127.0.0.1:54321/" },
+      "publickey-credentials-get",
+      remoteWebAuthnGrant,
+      { requestingUrl: "https://attacker.example.com/" },
+    );
+    expect(remoteWebAuthnGrant).toHaveBeenCalledWith(false);
 
     const checkHandler = electronMock.defaultSession.setPermissionCheckHandler.mock.calls[0]?.[0] as
-      | ((webContents: unknown, permission: string) => boolean)
+      | ((
+          webContents: unknown,
+          permission: string,
+          requestingOrigin: string,
+          details?: unknown,
+        ) => boolean)
       | undefined;
     if (checkHandler === undefined) {
       throw new Error("Expected setPermissionCheckHandler to be invoked");
     }
-    expect(checkHandler({}, "geolocation")).toBe(false);
+    expect(checkHandler({}, "geolocation", "")).toBe(false);
+    expect(
+      checkHandler(
+        { getURL: () => "http://localhost:5173/" },
+        "publickey-credentials-get",
+        "http://localhost:5173",
+      ),
+    ).toBe(true);
+    expect(
+      checkHandler(
+        { getURL: () => "http://localhost:5173/" },
+        "publickey-credentials-get",
+        "https://attacker.example.com",
+      ),
+    ).toBe(false);
 
     expect(loggerMock.calls).toEqual(
       expect.arrayContaining([

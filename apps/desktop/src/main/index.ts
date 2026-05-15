@@ -5,7 +5,7 @@ import { app, BrowserWindow, dialog, session } from "electron";
 import { BrokerSupervisor } from "./broker.ts";
 import { registerIpcHandlers } from "./ipc/register-handlers.ts";
 import { createLogger, type LogPayload } from "./logger.ts";
-import { installSessionPermissionDenyAll } from "./permissions.ts";
+import { installSessionPermissionPolicy } from "./permissions.ts";
 import { selectRendererDevServerUrl } from "./renderer-dev-url.ts";
 import { createSecureWindow } from "./window.ts";
 
@@ -83,11 +83,12 @@ app
   .then(() => {
     logger.info("app_when_ready", { isPackaged: app.isPackaged });
 
-    // Electron approves permission requests by default. Install a deny-all
-    // pair on the default session BEFORE any BrowserWindow is created so
+    // Electron approves permission requests by default. Install a closed
+    // policy on the default session BEFORE any BrowserWindow is created so
     // hostile renderer JS cannot request media/geolocation/notifications/
-    // clipboard/displayCapture outside the IPC allowlist.
-    installSessionPermissionDenyAll(session.defaultSession, { logger });
+    // clipboard/displayCapture outside the IPC allowlist. WebAuthn is allowed
+    // only for loopback renderer origins.
+    installSessionPermissionPolicy(session.defaultSession, { logger });
 
     try {
       registerIpcHandlers(brokerSupervisor, { logger: ipcLogger });
