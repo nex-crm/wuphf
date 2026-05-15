@@ -18,6 +18,10 @@
 //   POST /api/v1/cost/idempotency/prune   — bearer + operator capability required.
 //   GET  /api/agents/:id/provider-routing — bearer required. Per-agent provider routes.
 //   PUT  /api/agents/:id/provider-routing — bearer required. Replace provider routes.
+//   POST /api/webauthn/registration/challenge — bearer + agent map required.
+//   POST /api/webauthn/registration/verify    — bearer + agent map required.
+//   POST /api/webauthn/cosign/challenge       — bearer + agent map required.
+//   POST /api/webauthn/cosign/verify          — bearer + agent map required.
 //   POST /api/runners                     — bearer + runner agent map required.
 //   GET  /api/runners/:id/events          — bearer + runner agent map required. SSE.
 //   GET  /                                — static (renderer bundle) or 404 if disabled.
@@ -59,12 +63,24 @@ import { startSseSession } from "./sse.ts";
 import { attachTerminalUpgrade } from "./terminal-ws.ts";
 import { generateApiToken } from "./token.ts";
 import { type BrokerConfig, type BrokerHandle, type BrokerLogger, NOOP_LOGGER } from "./types.ts";
+import { createSimpleWebAuthnCeremony } from "./webauthn/ceremony.ts";
+import { handleWebAuthnRoute } from "./webauthn/route.ts";
+import {
+  SYSTEM_CLOCK,
+  WEBAUTHN_ALLOWED_ORIGINS,
+  WEBAUTHN_CHALLENGE_TTL_MS,
+  WEBAUTHN_RP_ID,
+  WEBAUTHN_RP_NAME,
+  WEBAUTHN_TRUSTED_APPROVAL_ROLES,
+  type WebAuthnRouteDeps,
+} from "./webauthn/types.ts";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
 export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHandle> {
   const logger: BrokerLogger = config.logger ?? NOOP_LOGGER;
   const token: ApiToken = config.token ?? generateApiToken();
+  const clock = config.clock ?? SYSTEM_CLOCK;
   const staticHandler = createStaticHandler(config.renderer ?? null);
   const trustedOrigins = normalizeTrustedOrigins(config.trustedOrigins);
   // Default to an in-memory store when the host doesn't supply one. Branch
@@ -75,6 +91,25 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   // Reuse the same bearer→agent binding map that runner spawn uses so a
   // bearer pinned to agent_alpha cannot read or PUT agent_beta's routing.
   const tokenAgentIds = config.runners?.tokenAgentIds ?? null;
+  const webauthn =
+    config.webauthn === undefined
+      ? null
+      : ({
+          store: config.webauthn.store,
+          tokenAgentIds: config.webauthn.tokenAgentIds,
+          ceremony: config.webauthn.ceremony ?? createSimpleWebAuthnCeremony(),
+          clock,
+          rpName: config.webauthn.rpName ?? WEBAUTHN_RP_NAME,
+          rpId: config.webauthn.rpId ?? WEBAUTHN_RP_ID,
+          allowedOrigins: [...(config.webauthn.allowedOrigins ?? WEBAUTHN_ALLOWED_ORIGINS)],
+          challengeTtlMs: config.webauthn.challengeTtlMs ?? WEBAUTHN_CHALLENGE_TTL_MS,
+          trustedRoles: [...(config.webauthn.trustedRoles ?? WEBAUTHN_TRUSTED_APPROVAL_ROLES)],
+          defaultThreshold: normalizeThreshold(config.webauthn.defaultThreshold ?? 1),
+          receiptCoSignThreshold: normalizeThreshold(
+            config.webauthn.receiptCoSignThreshold ?? config.webauthn.defaultThreshold ?? 1,
+          ),
+          logger,
+        } satisfies WebAuthnRouteDeps);
   const cost =
     config.cost === undefined
       ? null
@@ -115,6 +150,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       runnerRoutes,
       agentProviderRoutingStore,
       tokenAgentIds,
+      webauthn,
     }).catch((err: unknown) => {
       logger.error("listener_route_failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -164,6 +200,7 @@ interface RouteDeps {
   readonly runnerRoutes: RunnerRouteState | null;
   readonly agentProviderRoutingStore: AgentProviderRoutingStore | null;
   readonly tokenAgentIds: ReadonlyMap<ApiToken, AgentId> | null;
+  readonly webauthn: WebAuthnRouteDeps | null;
 }
 
 async function routeRequest(
@@ -307,6 +344,10 @@ async function routeRequest(
       });
       return;
     }
+  }
+  if (deps.webauthn !== null) {
+    const handled = await handleWebAuthnRoute(req, res, pathname, deps.webauthn);
+    if (handled) return;
   }
   if (deps.runnerRoutes !== null && pathname.startsWith("/api/runners")) {
     const handled = await deps.runnerRoutes.handle(req, res, pathname);
@@ -485,7 +526,15 @@ function classifyApiRoute(pathname: string): string {
     return "agent_provider_routing";
   }
   if (pathname.startsWith("/api/runners")) return "runners";
+  if (pathname.startsWith("/api/webauthn/")) return "webauthn";
   return "unknown";
+}
+
+function normalizeThreshold(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`createBroker: webauthn threshold must be a positive safe integer: ${value}`);
+  }
+  return value;
 }
 
 function agentProviderRoutingAgentIdFromPathname(pathname: string): AgentId | null {
