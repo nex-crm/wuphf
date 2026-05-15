@@ -45,22 +45,40 @@ export interface SanitizedStringOptions {
 }
 
 // `SanitizedStringOptions` is a compile-time type only; an untyped JS caller
-// (or a config/test fixture) can pass `{ policy: "allow-list" }` and — without
-// this guard — silently get the weaker default denylist instead of the moat.
-// For a security boundary that must fail closed, an unknown policy is an
+// (or a config/test fixture) can pass a malformed shape and — without these
+// guards — silently get the weaker default denylist instead of the moat. Two
+// silent-downgrade paths must fail closed, not fall through:
+//  - a non-object second argument (a bare `"allowlist"` string, `[]`, etc.):
+//    `.policy` reads as `undefined`, so the default policy applies;
+//  - a `{ policy: "allow-list" }` typo or a non-string `policy`.
+// For a security boundary that must fail closed, every one of these is an
 // error, not a fall-through. Called once at the `fromUnknown` entry point.
 function resolveSanitizedStringPolicy(options: SanitizedStringOptions): SanitizedStringPolicy {
-  const policy = options.policy ?? "strip-zero-width";
-  if (!SANITIZED_STRING_POLICIES.has(policy)) {
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+    throw new Error("SanitizedString: options must be a plain object");
+  }
+
+  // Typed as `SanitizedStringPolicy | undefined`, but an untyped caller can
+  // smuggle any runtime value in here — widen to `unknown` and re-check.
+  const rawPolicy: unknown = options.policy;
+  if (rawPolicy === undefined) {
+    return "strip-zero-width";
+  }
+  if (typeof rawPolicy !== "string") {
+    throw new Error("SanitizedString: policy must be a string");
+  }
+  if (!SANITIZED_STRING_POLICIES.has(rawPolicy)) {
     throw new Error(
-      `SanitizedString: unknown policy ${JSON.stringify(policy)} (expected one of ${[
+      `SanitizedString: unknown policy ${JSON.stringify(rawPolicy)} (expected one of ${[
         ...SANITIZED_STRING_POLICIES,
       ]
         .map((value) => JSON.stringify(value))
         .join(", ")})`,
     );
   }
-  return policy;
+  // Membership in SANITIZED_STRING_POLICIES verified above; the Set is typed
+  // `ReadonlySet<string>` so `.has` does not narrow `rawPolicy` on its own.
+  return rawPolicy as SanitizedStringPolicy;
 }
 
 const MAX_DEPTH = 64;

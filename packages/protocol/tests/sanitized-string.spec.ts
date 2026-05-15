@@ -4,6 +4,7 @@ import { MAX_SANITIZED_JSON_NODES, MAX_SANITIZED_STRING_BYTES } from "../src/bud
 import {
   MOAT_DISALLOWED_RE,
   SanitizedString,
+  type SanitizedStringOptions,
   type SanitizedStringPolicy,
 } from "../src/sanitized-string.ts";
 
@@ -337,11 +338,18 @@ describe("SanitizedString", () => {
           const out = SanitizedString.fromUnknown(input, opts).value;
           // NFKC can shrink (e.g. \ufb01 \u2192 fi is +1 char, but \ufb01 is itself one
           // code point); after normalization any additional reduction is
-          // strictly removal. The right invariant is: output \u2286 input under
-          // NFKC, never inserts new code points.
-          const normalized = input.normalize("NFKC");
+          // strictly removal. The right invariant is: output is a subsequence
+          // of NFKC(input) \u2014 same order, same multiplicity, never inserts,
+          // reorders, or duplicates. Per-character containment alone would
+          // pass for a sanitizer that emitted "ba" or "aa" from "ab".
+          const normalized = [...input.normalize("NFKC")];
+          let cursor = 0;
           for (const ch of out) {
-            expect(normalized).toContain(ch);
+            while (cursor < normalized.length && normalized[cursor] !== ch) {
+              cursor += 1;
+            }
+            expect(cursor).toBeLessThan(normalized.length);
+            cursor += 1;
           }
         }),
         { numRuns: MOAT_NUM_RUNS },
@@ -418,6 +426,23 @@ describe("SanitizedString", () => {
       ).toThrow(/unknown policy/);
     });
 
+    it("throws on a non-object options argument instead of silently using the default", () => {
+      // An untyped caller that passes the policy positionally (a bare
+      // "allowlist" string, or an array) has `.policy` read as `undefined`
+      // and would silently get the weaker default denylist. Fail closed.
+      for (const malformed of ["allowlist", [], 42, true]) {
+        expect(() =>
+          SanitizedString.fromUnknown("x", malformed as unknown as SanitizedStringOptions),
+        ).toThrow(/options must be a plain object/);
+      }
+    });
+
+    it("throws on a non-string policy instead of silently using the default", () => {
+      expect(() =>
+        SanitizedString.fromUnknown("x", { policy: 1 as unknown as SanitizedStringPolicy }),
+      ).toThrow(/policy must be a string/);
+    });
+
     it("accepts every declared policy without throwing", () => {
       const policies: readonly SanitizedStringPolicy[] = [
         "strip-zero-width",
@@ -486,14 +511,23 @@ describe("SanitizedString", () => {
 
   it("keeps JSON object output parseable under the allowlist policy", () => {
     fc.assert(
-      fc.property(jsonObjectArb, (input) => {
-        const result = SanitizedString.fromUnknown(input, { policy: "allowlist" }).value;
-        const parsed = JSON.parse(result) as JsonValue;
-        const expected = expectedSanitizeJsonValue(projectJson(input), "allowlist");
+      // `jsonObjectArb` is prefiltered with the default policy, so it still
+      // admits objects that only become invalid under allowlist stripping
+      // (e.g. `{ "­": 1, "": 2 }` — both keys sanitize to "" once the
+      // moat strips the soft hyphen, a collision). Re-filter with the same
+      // policy under test so the property only sees inputs the allowlist
+      // contract can actually round-trip.
+      fc.property(
+        jsonObjectArb.filter((input) => canExpectedRoundTripJson(input, "allowlist")),
+        (input) => {
+          const result = SanitizedString.fromUnknown(input, { policy: "allowlist" }).value;
+          const parsed = JSON.parse(result) as JsonValue;
+          const expected = expectedSanitizeJsonValue(projectJson(input), "allowlist");
 
-        expect(typeof result).toBe("string");
-        expect(parsed).toEqual(expected);
-      }),
+          expect(typeof result).toBe("string");
+          expect(parsed).toEqual(expected);
+        },
+      ),
       { numRuns: JSON_NUM_RUNS },
     );
   });
@@ -784,9 +818,12 @@ function canExpectedSanitizeText(input: string): boolean {
   }
 }
 
-function canExpectedRoundTripJson(input: JsonRecord): boolean {
+function canExpectedRoundTripJson(
+  input: JsonRecord,
+  policy: SanitizedStringPolicy = "strip-zero-width",
+): boolean {
   try {
-    expectedSanitizeJsonValue(projectJson(input));
+    expectedSanitizeJsonValue(projectJson(input), policy);
     return true;
   } catch {
     return false;
