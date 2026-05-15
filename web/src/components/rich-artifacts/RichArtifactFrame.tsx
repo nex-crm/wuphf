@@ -13,7 +13,6 @@ const SANDBOX_CSP = [
   "object-src 'none'",
   "form-action 'none'",
   "base-uri 'none'",
-  "navigate-to 'none'",
 ].join("; ");
 
 function withSandboxCsp(html: string): string {

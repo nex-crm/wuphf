@@ -40,6 +40,7 @@ export default function NotebookVisualArtifacts({
     setError(null);
     setArtifacts([]);
     setInlineDetail(null);
+    setDetail(null);
     if (!canonicalSourcePath) {
       return () => {
         cancelled = true;

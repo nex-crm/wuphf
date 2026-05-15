@@ -135,7 +135,7 @@ func newRichArtifact(req RichArtifactCreateRequest, now time.Time) (RichArtifact
 	}
 	createdAt := now.UTC().Format(time.RFC3339)
 	contentHash := richArtifactContentHash(html)
-	id := richArtifactID(slug, title, html, createdAt)
+	id := richArtifactID(slug, title, createdAt, html)
 	artifact := RichArtifact{
 		ID:                 id,
 		Kind:               richArtifactKindNotebookHTML,
@@ -157,7 +157,7 @@ func newRichArtifact(req RichArtifactCreateRequest, now time.Time) (RichArtifact
 	return artifact, html, nil
 }
 
-func richArtifactID(slug, title, html, createdAt string) string {
+func richArtifactID(slug, title, createdAt, html string) string {
 	sum := sha256.Sum256([]byte(slug + "\x00" + title + "\x00" + createdAt + "\x00" + html))
 	return "ra_" + hex.EncodeToString(sum[:])[:16]
 }
@@ -680,7 +680,10 @@ func (w *WikiWorker) CreateRichArtifact(ctx context.Context, artifact RichArtifa
 	if w == nil || w.repo == nil || !w.running.Load() {
 		return "", 0, ErrWorkerStopped
 	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
 	req := wikiWriteRequest{
+		Context:        waitCtx,
 		Slug:           artifact.CreatedBy,
 		IsRichArtifact: true,
 		RichArtifact: wikiRichArtifactWork{
@@ -695,13 +698,11 @@ func (w *WikiWorker) CreateRichArtifact(ctx context.Context, artifact RichArtifa
 	default:
 		return "", 0, ErrQueueSaturated
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
-	defer cancel()
 	select {
 	case result := <-req.ReplyCh:
 		return result.SHA, result.BytesWritten, result.Err
 	case <-waitCtx.Done():
-		return "", 0, fmt.Errorf("visual artifact: write timed out after %s", wikiWriteTimeout)
+		return "", 0, fmt.Errorf("visual artifact: write timed out after %s; operation may still complete", wikiWriteTimeout)
 	}
 }
 
@@ -709,7 +710,10 @@ func (w *WikiWorker) PromoteRichArtifact(ctx context.Context, actorSlug, id, tar
 	if w == nil || w.repo == nil || !w.running.Load() {
 		return RichArtifact{}, "", 0, ErrWorkerStopped
 	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
 	req := wikiWriteRequest{
+		Context:                 waitCtx,
 		Slug:                    actorSlug,
 		Path:                    targetPath,
 		IsRichArtifactPromotion: true,
@@ -727,13 +731,11 @@ func (w *WikiWorker) PromoteRichArtifact(ctx context.Context, actorSlug, id, tar
 	default:
 		return RichArtifact{}, "", 0, ErrQueueSaturated
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
-	defer cancel()
 	select {
 	case result := <-req.ReplyCh:
 		return result.RichArtifact, result.SHA, result.BytesWritten, result.Err
 	case <-waitCtx.Done():
-		return RichArtifact{}, "", 0, fmt.Errorf("visual artifact: promote timed out after %s", wikiWriteTimeout)
+		return RichArtifact{}, "", 0, fmt.Errorf("visual artifact: promote timed out after %s; operation may still complete", wikiWriteTimeout)
 	}
 }
 
@@ -752,6 +754,9 @@ func (w *WikiWorker) ListRichArtifacts(filter RichArtifactFilter) ([]RichArtifac
 }
 
 func (w *WikiWorker) processRichArtifactRequest(ctx context.Context, req wikiWriteRequest) (RichArtifact, string, int, error) {
+	if err := ctx.Err(); err != nil {
+		return RichArtifact{}, "", 0, fmt.Errorf("visual artifact: request cancelled before write: %w", err)
+	}
 	if req.IsRichArtifact {
 		sha, n, err := w.repo.CommitRichArtifact(ctx, req.Slug, req.RichArtifact.Artifact, req.RichArtifact.HTML, req.CommitMsg)
 		return req.RichArtifact.Artifact, sha, n, err
