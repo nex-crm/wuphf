@@ -21,27 +21,18 @@ import {
 import { canonicalJSON } from "./canonical-json.ts";
 import { FrozenArgs } from "./frozen-args.ts";
 import {
-  validateApprovalClaimsLifetimeBudget,
-  validateApprovalSignatureBudget,
-  validateApprovalWebauthnAssertionBudget,
-} from "./ipc-shared.ts";
-import {
   APPROVAL_DECISION_VALUES,
   APPROVAL_ROLE_VALUES,
-  APPROVAL_TOKEN_ALGORITHM_VALUES,
-  BASE64_RE,
   BROKER_TOKEN_VERDICT_STATUS_VALUES,
   FILE_CHANGE_MODE_VALUES,
   MEMORY_STORE_VALUES,
   RECEIPT_STATUS_VALUES,
-  RISK_CLASS_VALUES,
   TOOL_CALL_STATUS_VALUES,
   TRIGGER_KIND_VALUES,
   WRITE_RESULT_VALUES,
 } from "./receipt-literals.ts";
 import {
   type AgentSlug,
-  type ApprovalClaims,
   type ApprovalEvent,
   type ApprovalId,
   asAgentSlug,
@@ -49,7 +40,6 @@ import {
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
-  asSignerIdentity,
   asTaskId,
   asThreadId,
   asToolCallId,
@@ -63,7 +53,6 @@ import {
   type ProviderKind,
   type ReceiptId,
   type ReceiptSnapshot,
-  type SignedApprovalToken,
   type SourceRead,
   type TaskId,
   type ThreadId,
@@ -81,7 +70,6 @@ import {
   requireRecord,
 } from "./receipt-utils.ts";
 import {
-  APPROVAL_CLAIMS_KEYS,
   APPROVAL_EVENT_KEYS,
   BROKER_TOKEN_VERDICT_KEYS,
   COMMIT_REF_KEYS,
@@ -90,7 +78,6 @@ import {
   FROZEN_ARGS_KEYS,
   MEMORY_WRITE_KEYS,
   RECEIPT_KEYS,
-  SIGNED_APPROVAL_TOKEN_KEYS,
   SOURCE_READ_KEYS,
   TOOL_CALL_KEYS,
   validateReceipt,
@@ -99,15 +86,20 @@ import {
 } from "./receipt-validator.ts";
 import { SanitizedString } from "./sanitized-string.ts";
 import { asSha256Hex, type Sha256Hex } from "./sha256.ts";
+import {
+  type SignedApprovalToken,
+  signedApprovalTokenFromJson,
+  signedApprovalTokenToJsonValue,
+} from "./signed-approval-token.ts";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 // Re-exports — public surface stays stable across the file split.
 export type {
   AgentSlug,
-  ApprovalClaims,
   ApprovalEvent,
   ApprovalId,
+  ApprovalRole,
   BrokerTokenVerdict,
   CommitRef,
   ExternalWrite,
@@ -129,7 +121,6 @@ export type {
   ReceiptValidationError,
   ReceiptValidationResult,
   RiskClass,
-  SignedApprovalToken,
   SignerIdentity,
   SourceRead,
   TaskId,
@@ -169,6 +160,44 @@ export {
   PROVIDER_KIND_VALUES,
 } from "./receipt-types.ts";
 export { isReceiptSnapshot, validateReceipt } from "./receipt-validator.ts";
+export type {
+  ApprovalClaim,
+  ApprovalClaimId,
+  ApprovalClaimKind,
+  ApprovalScope,
+  ApprovalTokenId,
+  CostSpikeAcknowledgementClaim,
+  CostSpikeAcknowledgementScope,
+  CredentialGrantToAgentClaim,
+  CredentialGrantToAgentScope,
+  EndpointAllowlistExtensionClaim,
+  EndpointAllowlistExtensionScope,
+  ReceiptCoSignClaim,
+  ReceiptCoSignScope,
+  SignedApprovalToken,
+  TimestampMs,
+  WebAuthnAssertion,
+} from "./signed-approval-token.ts";
+export {
+  APPROVAL_CLAIM_KIND_VALUES,
+  APPROVAL_TOKEN_SCHEMA_VERSION,
+  approvalClaimFromJson,
+  approvalClaimToJsonValue,
+  approvalScopeFromJson,
+  approvalScopeToJsonValue,
+  asApprovalClaimId,
+  asApprovalTokenId,
+  asTimestampMs,
+  isApprovalClaimId,
+  isApprovalTokenId,
+  isReceiptCoSignClaim,
+  isReceiptCoSignScope,
+  isTimestampMs,
+  signedApprovalTokenFromJson,
+  signedApprovalTokenToJsonValue,
+  webAuthnAssertionFromJson,
+  webAuthnAssertionToJsonValue,
+} from "./signed-approval-token.ts";
 
 function asReceiptIdAt(value: string, path: string): ReceiptId {
   return decodeBrandAt(value, path, asReceiptId);
@@ -196,10 +225,6 @@ function asToolCallIdAt(value: string, path: string): ToolCallId {
 
 function asApprovalIdAt(value: string, path: string): ApprovalId {
   return decodeBrandAt(value, path, asApprovalId);
-}
-
-function asSignerIdentityAt(value: string, path: string): ApprovalClaims["signerIdentity"] {
-  return decodeBrandAt(value, path, asSignerIdentity);
 }
 
 function asSha256HexAt(value: string, path: string): Sha256Hex {
@@ -393,29 +418,6 @@ function memoryWriteRefToJsonValue(m: MemoryWriteRef): Record<string, unknown> {
     slug: m.slug,
     hash: m.hash,
     citation: m.citation,
-  };
-}
-
-function approvalClaimsToJsonValue(c: ApprovalClaims): Record<string, unknown> {
-  return omitUndefined({
-    signerIdentity: c.signerIdentity,
-    role: c.role,
-    receiptId: c.receiptId,
-    writeId: c.writeId,
-    frozenArgsHash: c.frozenArgsHash,
-    riskClass: c.riskClass,
-    issuedAt: dateToJson(c.issuedAt),
-    expiresAt: dateToJson(c.expiresAt),
-    webauthnAssertion: c.webauthnAssertion,
-  });
-}
-
-function signedApprovalTokenToJsonValue(t: SignedApprovalToken): Record<string, unknown> {
-  return {
-    claims: approvalClaimsToJsonValue(t.claims),
-    algorithm: t.algorithm,
-    signerKeyId: t.signerKeyId,
-    signature: t.signature,
   };
 }
 
@@ -626,76 +628,6 @@ function memoryWriteRefFromJson(value: unknown, path: string): MemoryWriteRef {
     hash: asSha256HexAt(requiredStringFromJson(record, "hash", path), pointer(path, "hash")),
     citation: requiredStringFromJson(record, "citation", path),
   };
-}
-
-function approvalClaimsFromJson(value: unknown, path: string): ApprovalClaims {
-  const record = requireRecord(value, path);
-  assertKnownKeys(record, path, APPROVAL_CLAIMS_KEYS);
-  const webauthnAssertion = optionalStringFromJson(record, "webauthnAssertion", path);
-  assertApprovalTokenCheck(
-    validateApprovalWebauthnAssertionBudget(webauthnAssertion),
-    pointer(path, "webauthnAssertion"),
-  );
-  const writeId = optionalStringFromJson(record, "writeId", path);
-  const riskClass = requiredLiteralFromJson(record, "riskClass", path, RISK_CLASS_VALUES);
-  if (
-    (riskClass === "high" || riskClass === "critical") &&
-    (typeof webauthnAssertion !== "string" || webauthnAssertion.length === 0)
-  ) {
-    throw new Error(
-      `${pointer(path, "webauthnAssertion")}: must be a non-empty string for high/critical risk`,
-    );
-  }
-  const claims = {
-    signerIdentity: asSignerIdentityAt(
-      requiredStringFromJson(record, "signerIdentity", path),
-      pointer(path, "signerIdentity"),
-    ),
-    role: requiredLiteralFromJson(record, "role", path, APPROVAL_ROLE_VALUES),
-    receiptId: asReceiptIdAt(
-      requiredStringFromJson(record, "receiptId", path),
-      pointer(path, "receiptId"),
-    ),
-    ...(writeId === undefined ? {} : { writeId: asWriteIdAt(writeId, pointer(path, "writeId")) }),
-    frozenArgsHash: asSha256HexAt(
-      requiredStringFromJson(record, "frozenArgsHash", path),
-      pointer(path, "frozenArgsHash"),
-    ),
-    riskClass,
-    issuedAt: requiredDateFromJson(record, "issuedAt", path),
-    expiresAt: requiredDateFromJson(record, "expiresAt", path),
-    ...(webauthnAssertion === undefined ? {} : { webauthnAssertion }),
-  };
-  assertApprovalTokenCheck(validateApprovalClaimsLifetimeBudget(claims), path);
-  return claims;
-}
-
-function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprovalToken {
-  const record = requireRecord(value, path);
-  assertKnownKeys(record, path, SIGNED_APPROVAL_TOKEN_KEYS);
-  const signature = requiredStringFromJson(record, "signature", path);
-  assertApprovalTokenCheck(validateApprovalSignatureBudget(signature), pointer(path, "signature"));
-  if (signature.length === 0 || !BASE64_RE.test(signature)) {
-    throw new Error(`${pointer(path, "signature")}: must be a non-empty base64 string`);
-  }
-  return {
-    claims: approvalClaimsFromJson(
-      requiredFieldFromJson(record, "claims", path),
-      pointer(path, "claims"),
-    ),
-    algorithm: requiredLiteralFromJson(record, "algorithm", path, APPROVAL_TOKEN_ALGORITHM_VALUES),
-    signerKeyId: requiredStringFromJson(record, "signerKeyId", path),
-    signature,
-  };
-}
-
-function assertApprovalTokenCheck(
-  result: ReturnType<typeof validateApprovalSignatureBudget>,
-  path: string,
-): void {
-  if (!result.ok) {
-    throw new Error(`${path}: ${result.reason}`);
-  }
 }
 
 function brokerTokenVerdictFromJson(value: unknown, path: string): BrokerTokenVerdict {

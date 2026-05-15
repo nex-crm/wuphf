@@ -191,7 +191,7 @@ Use `EventLsn` for audit-chain ordering, ULID brands for IDs (the random
 suffix tolerates same-ms collisions), and explicit sequence/counter fields
 for monotonic state. Date values may record when something happened,
 serialize that mark to the wire, or enforce a per-record validity window
-(e.g. `issuedAt < expiresAt` for an approval token). They must NEVER decide
+(e.g. `notBefore < expiresAt` for an approval token). They must NEVER decide
 cross-record order.
 
 `Date.now()`, `Date.parse()`, and `performance.now()` have no legitimate

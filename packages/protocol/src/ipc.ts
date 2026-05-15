@@ -16,36 +16,18 @@
 //      Both checks must pass; the Host check alone is not the full gate.
 
 import type { Brand } from "./brand.ts";
-import { canonicalJSON } from "./canonical-json.ts";
 import { type EventLsn, parseLsn } from "./event-lsn.ts";
 import {
-  APPROVAL_CLAIMS_KEYS,
-  SIGNED_APPROVAL_TOKEN_KEYS,
-  validateApprovalClaimsLifetimeBudget,
-  validateApprovalSignatureBudget,
-  validateApprovalWebauthnAssertionBudget,
-} from "./ipc-shared.ts";
-import {
-  type ApprovalClaims,
-  asSignerIdentity,
   type IdempotencyKey,
   isIdempotencyKey,
   isReceiptId,
   isThreadId,
-  isWriteId,
   type ReceiptId,
   type ReceiptValidationError,
-  type SignedApprovalToken,
   type ThreadId,
   type WriteFailureMetadata,
   type WriteResult,
 } from "./receipt.ts";
-import {
-  APPROVAL_ROLE_VALUES,
-  APPROVAL_TOKEN_ALGORITHM_VALUES,
-  BASE64_RE,
-  RISK_CLASS_VALUES,
-} from "./receipt-literals.ts";
 import {
   addError,
   assertKnownKeys,
@@ -54,7 +36,14 @@ import {
   pointer,
   requireRecord,
 } from "./receipt-utils.ts";
-import { isSha256Hex } from "./sha256.ts";
+import type { SignedApprovalToken } from "./signed-approval-token.ts";
+import {
+  type ApprovalClaimJsonValue,
+  type ApprovalScopeJsonValue,
+  isReceiptCoSignClaim,
+  signedApprovalTokenFromJson,
+  type WebAuthnAssertionJsonValue,
+} from "./signed-approval-token.ts";
 
 export type BrokerPort = Brand<number, "BrokerPort">;
 export type ApiToken = Brand<string, "ApiToken">;
@@ -100,7 +89,6 @@ const API_TOKEN_RE = /^[A-Za-z0-9_-]{16,512}$/;
 const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const KEYCHAIN_HANDLE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const TEXT_ENCODER = new TextEncoder();
 
 export function asBrokerPort(n: number): BrokerPort {
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
@@ -378,21 +366,16 @@ export type ApprovalSubmitRequestWire = Readonly<
     Record<"approval_token", SignedApprovalTokenWire>
 >;
 
-export type SignedApprovalTokenWire = Readonly<
-  Record<"claims", ApprovalClaimsWire> &
-    Record<"algorithm", SignedApprovalToken["algorithm"]> &
-    Record<"signer_key_id" | "signature", string>
->;
-
-export type ApprovalClaimsWire = Readonly<
-  Record<
-    "signer_identity" | "receipt_id" | "frozen_args_hash" | "issued_at" | "expires_at",
-    string
-  > &
-    Record<"role", ApprovalClaims["role"]> &
-    Record<"risk_class", ApprovalClaims["riskClass"]> &
-    Partial<Record<"write_id" | "webauthn_assertion", string>>
->;
+export type SignedApprovalTokenWire = Readonly<{
+  readonly schemaVersion: 1;
+  readonly tokenId: string;
+  readonly claim: ApprovalClaimJsonValue;
+  readonly scope: ApprovalScopeJsonValue;
+  readonly notBefore: number;
+  readonly expiresAt: number;
+  readonly issuedTo: string;
+  readonly signature: WebAuthnAssertionJsonValue;
+}>;
 
 const APPROVAL_SUBMIT_REQUEST_KEYS_TUPLE = [
   "receiptId",
@@ -410,38 +393,6 @@ const APPROVAL_SUBMIT_REQUEST_WIRE_KEYS_TUPLE = [
 const APPROVAL_SUBMIT_REQUEST_WIRE_KEYS: ReadonlySet<string> = new Set(
   APPROVAL_SUBMIT_REQUEST_WIRE_KEYS_TUPLE,
 );
-const SIGNED_APPROVAL_TOKEN_WIRE_KEYS_TUPLE = [
-  "claims",
-  "algorithm",
-  "signer_key_id",
-  "signature",
-] as const satisfies readonly (keyof SignedApprovalTokenWire)[];
-const SIGNED_APPROVAL_TOKEN_WIRE_KEYS: ReadonlySet<string> = new Set(
-  SIGNED_APPROVAL_TOKEN_WIRE_KEYS_TUPLE,
-);
-const APPROVAL_CLAIMS_WIRE_KEYS_TUPLE = [
-  "signer_identity",
-  "role",
-  "receipt_id",
-  "write_id",
-  "frozen_args_hash",
-  "risk_class",
-  "issued_at",
-  "expires_at",
-  "webauthn_assertion",
-] as const satisfies readonly (keyof ApprovalClaimsWire)[];
-const APPROVAL_CLAIMS_WIRE_KEYS: ReadonlySet<string> = new Set(APPROVAL_CLAIMS_WIRE_KEYS_TUPLE);
-
-export function approvalClaimsToSigningBytes(claims: ApprovalClaims): Uint8Array {
-  if (!isRecord(claims)) {
-    throw new Error("approvalClaimsToSigningBytes: claims must be an object");
-  }
-  const shape = validateApprovalClaimsShape(claims);
-  if (!shape.ok) {
-    throw new Error(`approvalClaimsToSigningBytes: ${shape.reason}`);
-  }
-  return TEXT_ENCODER.encode(canonicalJSON(approvalClaimsToSigningProjection(claims)));
-}
 
 export function approvalSubmitRequestFromJson(value: unknown): ApprovalSubmitRequest {
   const record = requireRecord(value, "approvalSubmitRequest");
@@ -494,14 +445,14 @@ export function approvalSubmitRequestFromJson(value: unknown): ApprovalSubmitReq
  * Validate the wire shape of an `ApprovalSubmitRequest`: rejects unknown
  * envelope keys, requires the three fields with the correct branded shapes
  * (ReceiptId, IdempotencyKey, SignedApprovalToken envelope), rejects unknown
- * token and claim keys, requires the token algorithm/signing fields, validates
+ * token and claim keys, requires the WebAuthn assertion fields, validates
  * claim field shapes, and enforces the cross-field binding
- * `req.receiptId === req.approvalToken.claims.receiptId`.
+ * `req.receiptId === req.approvalToken.claim.receiptId`.
  *
  * What this DOES NOT check (broker-side responsibilities):
- *   - Token signature validity (Ed25519 verification against signerKeyId).
- *   - Token expiry (`claims.expiresAt > now`).
- *   - Signer trust (whether the signerKeyId is a recognized approver).
+ *   - WebAuthn assertion validity against the registered credential.
+ *   - Token expiry against the broker's current clock.
+ *   - Credential trust and role authorization for the signed scope.
  *   - writeId / frozenArgsHash binding to a specific external write (those
  *     live on the receipt; the IPC validator can't see the receipt's writes).
  *   - Idempotency-key replay status.
@@ -536,326 +487,31 @@ export function validateApprovalSubmitRequest(
   if (!isRecord(approvalToken)) {
     return { ok: false, reason: "approvalToken must be an object" };
   }
-  const tokenShape = validateApprovalTokenShape(approvalToken);
+  const tokenShape = signedApprovalTokenResult(approvalToken, "approvalToken");
   if (!tokenShape.ok) {
-    return tokenShape;
+    return { ok: false, reason: tokenShape.reason };
   }
-  const claimsField = requiredField(approvalToken, "claims", "approvalToken.claims");
-  if (!claimsField.ok) return claimsField;
-  const claims = claimsField.value;
-  if (!isRecord(claims)) {
-    return { ok: false, reason: "approvalToken.claims must be an object" };
+  if (!isReceiptCoSignClaim(tokenShape.value.claim)) {
+    return { ok: false, reason: "approvalToken.claim.kind must be receipt_co_sign" };
   }
-  const claimsReceiptId = requiredField(claims, "receiptId", "approvalToken.claims.receiptId");
-  if (!claimsReceiptId.ok) return claimsReceiptId;
-  if (receiptId !== claimsReceiptId.value) {
+  if (receiptId !== tokenShape.value.claim.receiptId) {
     return {
       ok: false,
-      reason: "receiptId must match approvalToken.claims.receiptId",
+      reason: "receiptId must match approvalToken.claim.receiptId",
     };
   }
   return { ok: true };
 }
 
-function validateApprovalTokenShape(
-  token: Record<string, unknown>,
-): { ok: true } | { ok: false; reason: string } {
-  const tokenKeys = knownKeysResult(token, "approvalToken", SIGNED_APPROVAL_TOKEN_KEYS);
-  if (!tokenKeys.ok) return tokenKeys;
-
-  const claims = requiredField(token, "claims", "approvalToken.claims");
-  if (!claims.ok) return claims;
-  if (!isRecord(claims.value)) {
-    return { ok: false, reason: "approvalToken.claims must be an object" };
+function signedApprovalTokenResult(
+  value: unknown,
+  path: string,
+): { ok: true; value: SignedApprovalToken } | { ok: false; reason: string } {
+  try {
+    return { ok: true, value: signedApprovalTokenFromJson(value, path) };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
-  const claimsShape = validateApprovalClaimsShape(claims.value);
-  if (!claimsShape.ok) return claimsShape;
-
-  const algorithm = requiredField(token, "algorithm", "approvalToken.algorithm");
-  if (!algorithm.ok) return algorithm;
-  if (!isLiteralValue(algorithm.value, APPROVAL_TOKEN_ALGORITHM_VALUES)) {
-    return { ok: false, reason: "approvalToken.algorithm must be ed25519" };
-  }
-
-  const signerKeyId = requiredField(token, "signerKeyId", "approvalToken.signerKeyId");
-  if (!signerKeyId.ok) return signerKeyId;
-  if (typeof signerKeyId.value !== "string") {
-    return { ok: false, reason: "approvalToken.signerKeyId must be a string" };
-  }
-
-  const signature = requiredField(token, "signature", "approvalToken.signature");
-  if (!signature.ok) return signature;
-  if (typeof signature.value !== "string") {
-    return { ok: false, reason: "approvalToken.signature must be a non-empty base64 string" };
-  }
-  const signatureBudget = validateApprovalSignatureBudget(signature.value);
-  if (!signatureBudget.ok) {
-    return {
-      ok: false,
-      reason: `approvalToken.signature ${signatureBudget.reason}`,
-    };
-  }
-  if (signature.value.length === 0 || !BASE64_RE.test(signature.value)) {
-    return { ok: false, reason: "approvalToken.signature must be a non-empty base64 string" };
-  }
-
-  return { ok: true };
-}
-
-function validateApprovalClaimsShape(
-  claims: Record<string, unknown>,
-): { ok: true } | { ok: false; reason: string } {
-  const claimKeys = knownKeysResult(claims, "approvalToken/claims", APPROVAL_CLAIMS_KEYS);
-  if (!claimKeys.ok) return claimKeys;
-
-  const signerIdentity = requiredField(
-    claims,
-    "signerIdentity",
-    "approvalToken.claims.signerIdentity",
-  );
-  if (!signerIdentity.ok) return signerIdentity;
-  const signerIdentityValue = signerIdentity.value;
-  if (typeof signerIdentityValue !== "string") {
-    return { ok: false, reason: "approvalToken.claims.signerIdentity must be a string" };
-  }
-  const signerIdentityBrand = signerIdentityFromJson(
-    signerIdentityValue,
-    "approvalToken.claims/signerIdentity",
-  );
-  if (!signerIdentityBrand.ok) return signerIdentityBrand;
-
-  const role = requiredField(claims, "role", "approvalToken.claims.role");
-  if (!role.ok) return role;
-  const roleValue = role.value;
-  if (!isLiteralValue(roleValue, APPROVAL_ROLE_VALUES)) {
-    return { ok: false, reason: "approvalToken.claims.role must be a valid approval role" };
-  }
-
-  const receiptId = requiredField(claims, "receiptId", "approvalToken.claims.receiptId");
-  if (!receiptId.ok) return receiptId;
-  const receiptIdValue = receiptId.value;
-  if (!isReceiptId(receiptIdValue)) {
-    return {
-      ok: false,
-      reason: "approvalToken.claims.receiptId must be an uppercase ULID ReceiptId",
-    };
-  }
-
-  const writeId = optionalField(claims, "writeId", "approvalToken.claims.writeId");
-  if (!writeId.ok) return writeId;
-  const writeIdValue = writeId.value;
-  if (writeIdValue !== undefined && !isWriteId(writeIdValue)) {
-    return { ok: false, reason: "approvalToken.claims.writeId must be a valid WriteId" };
-  }
-
-  const frozenArgsHash = requiredField(
-    claims,
-    "frozenArgsHash",
-    "approvalToken.claims.frozenArgsHash",
-  );
-  if (!frozenArgsHash.ok) return frozenArgsHash;
-  const frozenArgsHashValue = frozenArgsHash.value;
-  if (!isSha256Hex(frozenArgsHashValue)) {
-    return { ok: false, reason: "approvalToken.claims.frozenArgsHash must be a sha256 hex digest" };
-  }
-
-  const riskClass = requiredField(claims, "riskClass", "approvalToken.claims.riskClass");
-  if (!riskClass.ok) return riskClass;
-  const riskClassValue = riskClass.value;
-  if (!isLiteralValue(riskClassValue, RISK_CLASS_VALUES)) {
-    return { ok: false, reason: "approvalToken.claims.riskClass must be a valid risk class" };
-  }
-
-  const issuedAtField = requiredField(claims, "issuedAt", "approvalToken.claims.issuedAt");
-  if (!issuedAtField.ok) return issuedAtField;
-  const issuedAt = issuedAtField.value;
-  if (!isValidDate(issuedAt)) {
-    return { ok: false, reason: "approvalToken.claims.issuedAt must be a valid Date" };
-  }
-
-  const expiresAtField = requiredField(claims, "expiresAt", "approvalToken.claims.expiresAt");
-  if (!expiresAtField.ok) return expiresAtField;
-  const expiresAt = expiresAtField.value;
-  if (!isValidDate(expiresAt)) {
-    return { ok: false, reason: "approvalToken.claims.expiresAt must be a valid Date" };
-  }
-
-  const webauthnAssertion = optionalField(
-    claims,
-    "webauthnAssertion",
-    "approvalToken.claims.webauthnAssertion",
-  );
-  if (!webauthnAssertion.ok) return webauthnAssertion;
-  const webauthnAssertionValue = webauthnAssertion.value;
-  if (webauthnAssertionValue !== undefined && typeof webauthnAssertionValue !== "string") {
-    return {
-      ok: false,
-      reason: "approvalToken.claims.webauthnAssertion must be a string",
-    };
-  }
-  const webauthnAssertionBudget = validateApprovalWebauthnAssertionBudget(webauthnAssertionValue);
-  if (!webauthnAssertionBudget.ok) {
-    return {
-      ok: false,
-      reason: `approvalToken.claims.webauthnAssertion ${webauthnAssertionBudget.reason}`,
-    };
-  }
-  if (
-    (riskClassValue === "high" || riskClassValue === "critical") &&
-    (typeof webauthnAssertionValue !== "string" || webauthnAssertionValue.length === 0)
-  ) {
-    return {
-      ok: false,
-      reason:
-        "approvalToken.claims.webauthnAssertion must be a non-empty string for high/critical risk",
-    };
-  }
-
-  if (issuedAt.getTime() >= expiresAt.getTime()) {
-    return {
-      ok: false,
-      reason: "approvalToken.claims.expiresAt must be strictly after issuedAt",
-    };
-  }
-
-  const approvalClaims: ApprovalClaims = {
-    signerIdentity: signerIdentityBrand.value,
-    role: roleValue,
-    receiptId: receiptIdValue,
-    ...(writeIdValue === undefined ? {} : { writeId: writeIdValue }),
-    frozenArgsHash: frozenArgsHashValue,
-    riskClass: riskClassValue,
-    issuedAt,
-    expiresAt,
-    ...(webauthnAssertionValue === undefined ? {} : { webauthnAssertion: webauthnAssertionValue }),
-  };
-  const lifetime = validateApprovalClaimsLifetimeBudget(approvalClaims);
-  if (!lifetime.ok) {
-    return {
-      ok: false,
-      reason: `approvalToken.claims ${lifetime.reason}`,
-    };
-  }
-
-  return { ok: true };
-}
-
-function approvalClaimsToSigningProjection(claims: ApprovalClaims): Record<string, string> {
-  return {
-    signerIdentity: claims.signerIdentity,
-    role: claims.role,
-    receiptId: claims.receiptId,
-    ...(claims.writeId === undefined ? {} : { writeId: claims.writeId }),
-    frozenArgsHash: claims.frozenArgsHash,
-    riskClass: claims.riskClass,
-    issuedAt: claims.issuedAt.toISOString(),
-    expiresAt: claims.expiresAt.toISOString(),
-    ...(claims.webauthnAssertion === undefined
-      ? {}
-      : { webauthnAssertion: claims.webauthnAssertion }),
-  };
-}
-
-function signedApprovalTokenFromJson(value: unknown, path: string): SignedApprovalToken {
-  const record = requireRecord(value, path);
-  const usesSnakeCase = hasOwn(record, "signer_key_id");
-  assertKnownKeys(
-    record,
-    path,
-    usesSnakeCase ? SIGNED_APPROVAL_TOKEN_WIRE_KEYS : SIGNED_APPROVAL_TOKEN_KEYS,
-  );
-  return {
-    claims: approvalClaimsFromJson(requiredJsonField(record, "claims", `${path}.claims`), [
-      path,
-      "claims",
-    ]),
-    algorithm: requiredLiteralJsonField(
-      record,
-      "algorithm",
-      `${path}.algorithm`,
-      APPROVAL_TOKEN_ALGORITHM_VALUES,
-    ),
-    signerKeyId: requiredStringJsonField(
-      record,
-      usesSnakeCase ? "signer_key_id" : "signerKeyId",
-      usesSnakeCase ? `${path}.signer_key_id` : `${path}.signerKeyId`,
-    ),
-    signature: requiredStringJsonField(record, "signature", `${path}.signature`),
-  };
-}
-
-function approvalClaimsFromJson(value: unknown, path: readonly string[]): ApprovalClaims {
-  const pathString = path.join(".");
-  const record = requireRecord(value, pathString);
-  const usesSnakeCase =
-    hasOwn(record, "signer_identity") ||
-    hasOwn(record, "receipt_id") ||
-    hasOwn(record, "issued_at") ||
-    hasOwn(record, "expires_at");
-  assertKnownKeys(
-    record,
-    pathString,
-    usesSnakeCase ? APPROVAL_CLAIMS_WIRE_KEYS : APPROVAL_CLAIMS_KEYS,
-  );
-  const writeId = optionalStringJsonField(
-    record,
-    usesSnakeCase ? "write_id" : "writeId",
-    usesSnakeCase ? `${pathString}.write_id` : `${pathString}.writeId`,
-  );
-  const webauthnAssertion = optionalStringJsonField(
-    record,
-    usesSnakeCase ? "webauthn_assertion" : "webauthnAssertion",
-    usesSnakeCase ? `${pathString}.webauthn_assertion` : `${pathString}.webauthnAssertion`,
-  );
-  return {
-    signerIdentity: signerIdentityFromRequiredJsonField(
-      record,
-      usesSnakeCase ? "signer_identity" : "signerIdentity",
-      usesSnakeCase ? `${pathString}.signer_identity` : pointer(pathString, "signerIdentity"),
-    ),
-    role: requiredLiteralJsonField(record, "role", `${pathString}.role`, APPROVAL_ROLE_VALUES),
-    receiptId: receiptIdFromJson(
-      requiredStringJsonField(
-        record,
-        usesSnakeCase ? "receipt_id" : "receiptId",
-        usesSnakeCase ? `${pathString}.receipt_id` : `${pathString}.receiptId`,
-      ),
-      usesSnakeCase ? `${pathString}.receipt_id` : `${pathString}.receiptId`,
-    ),
-    ...(writeId === undefined
-      ? {}
-      : {
-          writeId: writeIdFromJson(
-            writeId,
-            usesSnakeCase ? `${pathString}.write_id` : `${pathString}.writeId`,
-          ),
-        }),
-    frozenArgsHash: sha256HexFromJson(
-      requiredStringJsonField(
-        record,
-        usesSnakeCase ? "frozen_args_hash" : "frozenArgsHash",
-        usesSnakeCase ? `${pathString}.frozen_args_hash` : `${pathString}.frozenArgsHash`,
-      ),
-      usesSnakeCase ? `${pathString}.frozen_args_hash` : `${pathString}.frozenArgsHash`,
-    ),
-    riskClass: requiredLiteralJsonField(
-      record,
-      usesSnakeCase ? "risk_class" : "riskClass",
-      usesSnakeCase ? `${pathString}.risk_class` : `${pathString}.riskClass`,
-      RISK_CLASS_VALUES,
-    ),
-    issuedAt: requiredIsoDateJsonField(
-      record,
-      usesSnakeCase ? "issued_at" : "issuedAt",
-      usesSnakeCase ? `${pathString}.issued_at` : `${pathString}.issuedAt`,
-    ),
-    expiresAt: requiredIsoDateJsonField(
-      record,
-      usesSnakeCase ? "expires_at" : "expiresAt",
-      usesSnakeCase ? `${pathString}.expires_at` : `${pathString}.expiresAt`,
-    ),
-    ...(webauthnAssertion === undefined ? {} : { webauthnAssertion }),
-  };
 }
 
 function requiredJsonField(record: Record<string, unknown>, key: string, path: string): unknown {
@@ -878,51 +534,6 @@ function requiredStringJsonField(
   return value;
 }
 
-function optionalStringJsonField(
-  record: Record<string, unknown>,
-  key: string,
-  path: string,
-): string | undefined {
-  const result = optionalField(record, key, path);
-  if (!result.ok) {
-    throw new Error(result.reason);
-  }
-  if (result.value === undefined) return undefined;
-  if (typeof result.value !== "string") {
-    throw new Error(`${path}: must be a string`);
-  }
-  return result.value;
-}
-
-function requiredLiteralJsonField<const T extends string>(
-  record: Record<string, unknown>,
-  key: string,
-  path: string,
-  allowed: readonly T[],
-): T {
-  const value = requiredStringJsonField(record, key, path);
-  if (!isLiteralValue(value, allowed)) {
-    throw new Error(`${path}: must be one of ${allowed.join(", ")}`);
-  }
-  return value;
-}
-
-function requiredIsoDateJsonField(
-  record: Record<string, unknown>,
-  key: string,
-  path: string,
-): Date {
-  const value = requiredStringJsonField(record, key, path);
-  if (!ISO_DATE_RE.test(value)) {
-    throw new Error(`${path}: must be an ISO 8601 string`);
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime()) || date.toISOString() !== value) {
-    throw new Error(`${path}: must be a valid ISO 8601 instant`);
-  }
-  return date;
-}
-
 function receiptIdFromJson(value: string, path: string): ReceiptId {
   if (!isReceiptId(value)) {
     throw new Error(`${path}: must be an uppercase ULID ReceiptId`);
@@ -935,60 +546,6 @@ function idempotencyKeyFromJson(value: string, path: string): IdempotencyKey {
     throw new Error(`${path}: must match /^[A-Za-z0-9_-]{1,128}$/`);
   }
   return value;
-}
-
-function writeIdFromJson(value: string, path: string): NonNullable<ApprovalClaims["writeId"]> {
-  if (!isWriteId(value)) {
-    throw new Error(`${path}: must be a valid WriteId`);
-  }
-  return value;
-}
-
-function signerIdentityFromRequiredJsonField(
-  record: Record<string, unknown>,
-  key: string,
-  path: string,
-): ApprovalClaims["signerIdentity"] {
-  return signerIdentityFromString(requiredStringJsonField(record, key, path), path);
-}
-
-function signerIdentityFromString(value: string, path: string): ApprovalClaims["signerIdentity"] {
-  try {
-    return asSignerIdentity(value);
-  } catch (err) {
-    throw new Error(`${path}: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-function signerIdentityFromJson(
-  value: string,
-  path: string,
-): { ok: true; value: ApprovalClaims["signerIdentity"] } | { ok: false; reason: string } {
-  try {
-    return { ok: true, value: asSignerIdentity(value) };
-  } catch (err) {
-    return { ok: false, reason: `${path}: ${err instanceof Error ? err.message : String(err)}` };
-  }
-}
-
-function sha256HexFromJson(value: string, path: string): ApprovalClaims["frozenArgsHash"] {
-  if (!isSha256Hex(value)) {
-    throw new Error(`${path}: must be a sha256 hex digest`);
-  }
-  return value;
-}
-
-function knownKeysResult(
-  record: Record<string, unknown>,
-  path: string,
-  allowed: ReadonlySet<string>,
-): { ok: true } | { ok: false; reason: string } {
-  try {
-    assertKnownKeys(record, path, allowed);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
-  }
 }
 
 function validateThreadInvalidationPayloadValue(
@@ -1092,25 +649,8 @@ function requiredField(
   return { ok: true, value: descriptor.value };
 }
 
-function optionalField(
-  record: Record<string, unknown>,
-  key: string,
-  path: string,
-): { ok: true; value: unknown | undefined } | { ok: false; reason: string } {
-  if (!hasOwn(record, key)) return { ok: true, value: undefined };
-  const descriptor = Object.getOwnPropertyDescriptor(record, key);
-  if (descriptor === undefined || !("value" in descriptor)) {
-    return { ok: false, reason: `${path} must be a data property` };
-  }
-  return { ok: true, value: descriptor.value };
-}
-
 function isLiteralValue<const T extends string>(value: unknown, allowed: readonly T[]): value is T {
   return typeof value === "string" && allowed.includes(value as T);
-}
-
-function isValidDate(value: unknown): value is Date {
-  return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
 /**

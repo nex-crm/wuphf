@@ -27,7 +27,7 @@ interface SignedApprovalToken {
 | `schemaVersion` | Pins the wire contract. | Literal `1`; reject all other values. |
 | `tokenId` | Broker replay tracking and challenge lookup. | ULID-style 26 ASCII bytes; unique per challenge. |
 | `claim` | Human-approved content. | Canonical JSON projection <= 64 KiB; strict known keys; claim-specific brands validated first. |
-| `scope` | Capability bounds. | Canonical JSON projection <= 8 KiB; strict known keys; must match `claim.kind` and target fields. |
+| `scope` | Capability bounds. | Canonical JSON projection <= 8 KiB; strict known keys; carries approver `role`; must match `claim.kind` and target fields. |
 | `notBefore` | Prevents early use. | Caller-supplied integer epoch milliseconds; no `Date.now()` in protocol code. |
 | `expiresAt` | Cleanup and stale-review bound. | Integer epoch milliseconds; `expiresAt > notBefore`; lifetime <= `MAX_APPROVAL_TOKEN_LIFETIME_MS` (30 minutes). |
 | `issuedTo` | Presentation audience. | Existing `AgentId` shape, 128 UTF-8 bytes. |
@@ -63,10 +63,10 @@ v1 should be single-use only. Reusable approvals are attractive for repeated
 low-risk actions, but they make replay accounting and cross-office policy
 harder before the broker has durable token-consumption plumbing. `ApprovalScope`
 therefore carries `mode: "single_use"`, the matching `claimId`, `claimKind`,
-`maxUses: 1`, and the narrow target fields needed by that claim kind. The
-broker consumes `tokenId` atomically after successful verification. Expired,
-already-consumed, wrong-agent, wrong-claim, or wrong-target submissions fail
-closed.
+`role`, `maxUses: 1`, and the narrow target fields needed by that claim kind.
+The broker consumes `tokenId` atomically after successful verification.
+Expired, already-consumed, wrong-agent, wrong-role, wrong-claim, or
+wrong-target submissions fail closed.
 
 ## Threshold Model
 
@@ -77,16 +77,17 @@ flowchart TD
   B -- yes --> D{office policy override?}
   D -- no --> C
   D -- yes --> E[require configured threshold]
-  E --> F{enough valid distinct credentials?}
+  E --> F{enough valid distinct roles?}
   C --> F
   F -- yes --> G[accept]
   F -- no --> H[approval_pending]
 ```
 
 Default threshold is one trusted cosigner. `receipt_co_sign` may be configured
-per office because it is the default high-stakes write surface. Policy belongs
-in broker config backed by the office record; renderer config can only display
-the requirement, not define it.
+per office because it is the default high-stakes write surface. Thresholds
+count distinct approver roles, not credential ids; the broker owns the
+role-to-credential registry. Policy belongs in broker config backed by the
+office record; renderer config can only display the requirement, not define it.
 
 ## WebAuthn Ceremony
 
@@ -161,24 +162,23 @@ stateDiagram-v2
    start registration without a pending high-stakes claim?
 2. Which RP ID and allowed origins apply in dev, packaged desktop, and future
    cloud-backed bridge mode?
-3. Should `receipt_co_sign` thresholds count roles (`approver`, `host`) or only
-   distinct trusted credential ids?
-4. Does branch 12 migrate the existing Ed25519 approval vectors immediately, or
-   ship the WebAuthn token beside them for one protocol version?
-5. Is endpoint allowlisting tied to branch 11's sanitized `"allowlist"` policy,
-   or does the broker own a separate origin-normalization rule?
+3. Resolved: `receipt_co_sign` thresholds count distinct roles (`approver`,
+   `host`), not credential ids. The broker maps roles to credentials.
+4. Resolved: branch 12 replaces the Ed25519 approval shape in one protocol
+   version; there is no dual-verify path.
+5. Resolved for the protocol layer: signed claim/scope text uses branch 11's
+   sanitized `"allowlist"` policy before budget and shape validation.
 
 ## File Plan
 
-- `packages/protocol/src/signed-approval-token.ts`: unexported v1 type stub and
-  TODO codecs.
+- `packages/protocol/src/signed-approval-token.ts`: exported v1 type and codecs.
 - `packages/protocol/src/budgets.ts`: add explicit claim/scope/challenge byte
   caps when codecs land.
 - `packages/protocol/src/receipt-types.ts`, `receipt.ts`,
-  `receipt-validator.ts`, `ipc.ts`, `ipc-shared.ts`: migrate from the current
-  Ed25519 envelope to the WebAuthn token after review.
+  `receipt-validator.ts`, `ipc.ts`, `ipc-shared.ts`: migrate from the old
+  Ed25519 envelope to the WebAuthn token.
 - `packages/protocol/testdata/*` and `verifier-reference.go`: add canonical
-  token vectors before any signed bytes become public.
+  token vectors before the WebAuthn bytes become public.
 - `packages/broker/*`: implement registration, challenge storage, assertion
   verification, threshold policy, and replay consumption.
 - `apps/desktop/*`: implement credential registration and cosign prompts.

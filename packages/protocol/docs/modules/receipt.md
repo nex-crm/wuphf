@@ -15,7 +15,7 @@ Types:
 | `ReceiptId`, `AgentSlug`, `TaskId`, `ProviderKind`, `ToolCallId`, `ApprovalId`, `WriteId`, `IdempotencyKey` | `src/receipt-types.ts:10-23` | Branded identifiers. `ReceiptId` and `TaskId` match `/^[0-9A-HJKMNP-TV-Z]{26}$/`; this is uppercase ULID-shaped Crockford text, not full ULID range validation. |
 | `ReceiptStatus`, `RiskClass`, `WriteResult`, `TriggerKind` | `src/receipt-types.ts:25-46` | Closed string unions shared by codec and validator literals. |
 | `SourceRead`, `ToolCall`, `ApprovalEvent`, `FileChange`, `CommitRef`, `MemoryWriteRef` | `src/receipt-types.ts:48-101` | Evidence subrecords for reads, tool calls, approvals, files, commits, and memory references. |
-| `ApprovalClaims`, `SignedApprovalToken`, `BrokerTokenVerdict` | `src/receipt-types.ts:103-125` | Signed approval envelope plus broker verification projection. |
+| `SignedApprovalToken`, `ApprovalClaim`, `ApprovalScope`, `BrokerTokenVerdict` | `src/signed-approval-token.ts`, `src/receipt-types.ts` | WebAuthn approval envelope plus broker verification projection. |
 | `WriteFailureMetadata`, `ExternalWrite*`, `ExternalWrite` | `src/receipt-types.ts:33-38`, `:133-184` | Discriminated external-write union over `result`, with per-state diff/nullability rules. |
 | `ReceiptCore`, `ReceiptSnapshotV1`, `ReceiptSnapshotV2`, `ReceiptSnapshot`, `ReceiptValidationError`, `ReceiptValidationResult` | `src/receipt-types.ts:186-240` | Top-level receipt union and non-throwing validator result. V1 rejects `threadId`; V2 accepts optional `threadId`. |
 
@@ -26,8 +26,8 @@ Constants:
 | `MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND` | `src/receipt-types.ts:268` | Symbolic rollout floor for cost-event readers that process the widened provider tuple. |
 | `PROVIDER_KIND_VALUES` | `src/receipt-types.ts:274` | Closed provider tuple: `anthropic`, `openai`, `openai-compat`, `ollama`, `openclaw`, `hermes-agent`, `openclaw-http`, `opencode`, `opencodego`. Adding a value is a wire/API change and must update exhaustive consumers. |
 | `IDEMPOTENCY_KEY_RE` | `src/receipt-types.ts:236` | Public regex for 1..128 char write idempotency keys. |
-| `RECEIPT_STATUS_VALUES`, `RISK_CLASS_VALUES`, `WRITE_RESULT_VALUES`, `TRIGGER_KIND_VALUES`, `APPROVAL_ROLE_VALUES`, `APPROVAL_DECISION_VALUES`, `TOOL_CALL_STATUS_VALUES`, `FILE_CHANGE_MODE_VALUES`, `MEMORY_STORE_VALUES`, `APPROVAL_TOKEN_ALGORITHM_VALUES`, `BROKER_TOKEN_VERDICT_STATUS_VALUES`, `BASE64_RE` | `src/receipt-literals.ts:22-93` | Shared literal tuples/regexes. Tuples use `as const satisfies readonly <Union>[]` to prevent codec/validator drift. |
-| `RECEIPT_KEYS`, `SOURCE_READ_KEYS`, `TOOL_CALL_KEYS`, `APPROVAL_EVENT_KEYS`, `BROKER_TOKEN_VERDICT_KEYS`, `FILE_CHANGE_KEYS`, `COMMIT_REF_KEYS`, `MEMORY_WRITE_KEYS`, `FROZEN_ARGS_KEYS`, `WRITE_FAILURE_METADATA_KEYS`, `EXTERNAL_WRITE_KEYS`, `APPROVAL_CLAIMS_KEYS`, `SIGNED_APPROVAL_TOKEN_KEYS` | `src/receipt-validator.ts:51-200` | Unknown-key allowlists tied to interfaces with `satisfies readonly (keyof T)[]`. |
+| `RECEIPT_STATUS_VALUES`, `RISK_CLASS_VALUES`, `WRITE_RESULT_VALUES`, `TRIGGER_KIND_VALUES`, `APPROVAL_ROLE_VALUES`, `APPROVAL_DECISION_VALUES`, `TOOL_CALL_STATUS_VALUES`, `FILE_CHANGE_MODE_VALUES`, `MEMORY_STORE_VALUES`, `BROKER_TOKEN_VERDICT_STATUS_VALUES`, `BASE64_RE` | `src/receipt-literals.ts:22-93` | Shared literal tuples/regexes. Tuples use `as const satisfies readonly <Union>[]` to prevent codec/validator drift. |
+| `RECEIPT_KEYS`, `SOURCE_READ_KEYS`, `TOOL_CALL_KEYS`, `APPROVAL_EVENT_KEYS`, `BROKER_TOKEN_VERDICT_KEYS`, `FILE_CHANGE_KEYS`, `COMMIT_REF_KEYS`, `MEMORY_WRITE_KEYS`, `FROZEN_ARGS_KEYS`, `WRITE_FAILURE_METADATA_KEYS`, `EXTERNAL_WRITE_KEYS`, `SIGNED_APPROVAL_TOKEN_KEYS` | `src/receipt-validator.ts`, `src/signed-approval-token.ts` | Unknown-key allowlists tied to interfaces with `satisfies readonly (keyof T)[]`. |
 
 Functions:
 
@@ -47,7 +47,7 @@ Functions:
 5. Every object boundary MUST reject unknown keys via the matching `*_KEYS` set. Each key tuple MUST use `as const satisfies readonly (keyof T)[]`; reverse drift is guarded by round-trip/property tests and reviewer spot checks.
 6. `ProviderKind` MUST remain a closed enum. Additions go through `PROVIDER_KIND_VALUES`, tests, docs, and every exhaustive switch. Do not widen to `Brand<string, ...>`.
 7. Dates mark time only. They may validate local order windows, but they MUST NOT provide uniqueness, cross-record ordering, or hash identity.
-8. Cross-field invariants MUST be enforced in the validator: approval-token `claims.receiptId` equals the enclosing receipt ID; external-write tokens also bind `claims.frozenArgsHash` to the locally re-derived `proposedDiff` hash; write-scoped tokens bind `claims.writeId` to `ExternalWrite.writeId`; `expiresAt` is strictly after `issuedAt`; and write `approvedAt` is strictly after token `issuedAt`.
+8. Cross-field invariants MUST be enforced in the validator: receipt co-sign token `claim.receiptId` equals the enclosing receipt ID; external-write tokens also bind `claim.frozenArgsHash` to the locally re-derived `proposedDiff` hash; write-scoped tokens bind `claim.writeId` to `ExternalWrite.writeId`; token `scope.role` matches the approval event role; `expiresAt` is strictly after `notBefore`; and write `approvedAt` must not precede token `notBefore`.
 9. `ExternalWrite` result states MUST mirror the discriminated union: `applied` requires non-null `appliedDiff` and `postWriteVerify` and no `failureMetadata`; `rejected` requires both diff fields null; `partial` requires non-null `appliedDiff` and nullable verification; `rollback` requires non-null `appliedDiff` and null verification.
 10. `ReceiptStatus` is the lifecycle summary. Valid transitions are `approval_pending -> ok`, `approval_pending -> rejected`, `approval_pending -> stalled`, running receipt -> `ok`, running receipt -> `error`, running receipt -> `stalled`; terminal `ok`, `error`, and `rejected` MUST NOT transition further except to corrected audit supersession outside this schema. A terminal snapshot MUST agree with evidence: rejected approvals imply `rejected` or `error`, pending approval evidence implies `approval_pending` or `stalled`, and `ok` must not carry rejected approvals or failed required writes.
 
@@ -174,14 +174,14 @@ stateDiagram-v2
 
 ## 6. Invariants the module assumes from callers
 
-Callers constructing runtime receipts directly must use brand constructors, `FrozenArgs.freeze` or `FrozenArgs.fromCanonical`, and `SanitizedString.fromUnknown`, then run `validateReceipt` before persistence or serialization. Hostile JSON must enter only through `receiptFromJson`. Signature cryptography, signer trust, replay checks, current-time expiry, and broker policy are outside this no-I/O package; receipts record the broker's verdicts and bind them to receipt/write evidence.
+Callers constructing runtime receipts directly must use brand constructors, `FrozenArgs.freeze` or `FrozenArgs.fromCanonical`, and `SanitizedString.fromUnknown`, then run `validateReceipt` before persistence or serialization. Hostile JSON must enter only through `receiptFromJson`. WebAuthn cryptography, credential trust, replay checks, current-time expiry, role thresholds, and broker policy are outside this no-I/O package; receipts record the broker's verdicts and bind them to receipt/write evidence.
 
 ## 7. Audit findings (current code vs this spec)
 
 | # | Spec section | File:line | Discrepancy | Severity | Status |
 |---|---|---:|---|---|---|
 | 1 | 3.10 | `src/receipt-validator.ts:241`, `src/receipt-validator.ts:419` | Historical R11 gap: `ReceiptStatus` was only checked as a literal, so inconsistent snapshots could validate. Current code runs `RECEIPT_STATUS_EVIDENCE_RULES` from `validateReceiptStatusEvidence`. | HIGH | RESOLVED in `872f97d3`; regression tests in `1da5ccfa` / `tests/receipt.spec.ts:1353`. |
-| 2 | 3.8 | `src/receipt-validator.ts:960-968` | Historical R11 gap: the write approval ordering check allowed `approvedAt === issuedAt`. Current code passes `allowEqual: false`, so approval must be strictly after issuance. | MEDIUM | RESOLVED in `53a77e87`; equality coverage in `tests/receipt.spec.ts:1074`. |
+| 2 | 3.8 | `src/receipt-validator.ts:960-968` | Historical R11 gap superseded by branch 12: write approval ordering now rejects only `approvedAt < notBefore`, because caller-supplied token timestamps mark validity windows rather than ordering identity. | MEDIUM | RESOLVED by branch 12 receipt-token validation coverage. |
 | 3 | 2, 3.1 | `src/receipt-types.ts:233`, `src/receipt-types.ts:246`, `src/receipt-validator.ts:867` | Error text says ULID, but the regex is ULID-shaped only and allows first characters outside strict ULID timestamp range. | LOW | OPEN: rename messages/docs to ULID-shaped, or tighten the regex to strict ULID range. |
 | 4 | 3.2 | `src/receipt.ts:868-876` | Oversized `SanitizedString` decode errors omit the JSON pointer, unlike sibling type/sanitization failures that use `path`. | LOW | OPEN: prefix the budget error with the provided field path. |
 
@@ -190,7 +190,7 @@ Callers constructing runtime receipts directly must use brand constructors, `Fro
 | # | Spec section | Coverage status | Why it matters | Reference / suggested test |
 |---|---|---|---|---|
 | 1 | 3.1 | Gap: future schema rejection beyond V2. | Locks the versioned migration boundary. | Mutate serialized fixture to `99` and assert `/schemaVersion: must be 1 or 2`. |
-| 2 | 3.8 | Covered: `approvedAt === issuedAt` rejects because authorization ordering is strict-after. | Prevents same-instant approval tokens from authorizing writes. | `tests/receipt.spec.ts:1074`. |
+| 2 | 3.8 | Covered: `approvedAt < notBefore` rejects and `approvedAt === notBefore` is accepted. | Keeps write approval inside the signed token validity window without inventing clock ordering. | `tests/receipt.spec.ts`. |
 | 3 | 3.10 | Covered for core contradictions: `ok` plus rejected approval, `ok` plus failed tool call, `ok` plus non-applied write, pending/stalled with applied writes, and rejected/error without required evidence. | Prevents receipts whose summary contradicts their evidence. | `tests/receipt.spec.ts:1353`, `tests/receipt.spec.ts:1368`, `tests/receipt.spec.ts:1379`, `tests/receipt.spec.ts:1390`. |
 | 4 | 3.6 | Gap: all `PROVIDER_KIND_VALUES` accepted and unknown providers rejected through validator and codec. | Closed enums need runtime and type coverage when values change. | Iterate the tuple and add one unsupported value. |
 | 5 | 2 | Gap: ULID-shaped but not strict-ULID boundary, especially first char `8` or `Z`. | Forces an explicit decision: accept regex-shaped IDs or enforce strict ULID range. | Test the chosen behavior for `ReceiptId` and `TaskId`. |

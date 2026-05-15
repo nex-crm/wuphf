@@ -8,22 +8,12 @@
 import { validateReceiptBudget } from "./budgets.ts";
 import { FrozenArgs } from "./frozen-args.ts";
 import {
-  APPROVAL_CLAIMS_KEYS,
-  SIGNED_APPROVAL_TOKEN_KEYS,
-  validateApprovalClaimsLifetimeBudget,
-  validateApprovalSignatureBudget,
-  validateApprovalWebauthnAssertionBudget,
-} from "./ipc-shared.ts";
-import {
   APPROVAL_DECISION_VALUES,
   APPROVAL_ROLE_VALUES,
-  APPROVAL_TOKEN_ALGORITHM_VALUES,
-  BASE64_RE,
   BROKER_TOKEN_VERDICT_STATUS_VALUES,
   FILE_CHANGE_MODE_VALUES,
   MEMORY_STORE_VALUES,
   RECEIPT_STATUS_VALUES,
-  RISK_CLASS_VALUES,
   TOOL_CALL_STATUS_VALUES,
   TRIGGER_KIND_VALUES,
   WRITE_RESULT_VALUES,
@@ -57,8 +47,13 @@ import {
 import { addError, hasOwn, isRecord, pointer, recordValue } from "./receipt-utils.ts";
 import { SanitizedString } from "./sanitized-string.ts";
 import { isSha256Hex } from "./sha256.ts";
+import {
+  isReceiptCoSignClaim,
+  isReceiptCoSignScope,
+  signedApprovalTokenFromJson,
+} from "./signed-approval-token.ts";
 
-export { APPROVAL_CLAIMS_KEYS, SIGNED_APPROVAL_TOKEN_KEYS } from "./ipc-shared.ts";
+export { SIGNED_APPROVAL_TOKEN_KEYS } from "./signed-approval-token.ts";
 
 type MemoryStore = (typeof MEMORY_STORE_VALUES)[number];
 type ReceiptSnapshotKey = keyof ReceiptCore | keyof ReceiptSnapshotV2;
@@ -453,8 +448,8 @@ function collectReceiptStatusEvidence(
       if (!isRecord(approval) || recordValue(approval, "decision") !== "reject") continue;
       hasRejectedApproval = true;
       const signedToken = recordValue(approval, "signedToken");
-      const claims = isRecord(signedToken) ? recordValue(signedToken, "claims") : undefined;
-      const writeId = isRecord(claims) ? recordValue(claims, "writeId") : undefined;
+      const claim = isRecord(signedToken) ? recordValue(signedToken, "claim") : undefined;
+      const writeId = isRecord(claim) ? recordValue(claim, "writeId") : undefined;
       if (typeof writeId === "string") {
         rejectedApprovalWriteIds.add(writeId);
       }
@@ -671,17 +666,28 @@ function validateApprovalEvent(
 
   // Cross-field invariant: the signed token must reference this receipt.
   const signedToken = recordValue(value, "signedToken");
-  const claims = isRecord(signedToken) ? recordValue(signedToken, "claims") : undefined;
-  if (
-    isRecord(claims) &&
-    typeof receiptId === "string" &&
-    recordValue(claims, "receiptId") !== receiptId
-  ) {
-    addError(
-      errors,
-      pointer(pointer(pointer(path, "signedToken"), "claims"), "receiptId"),
-      "must match enclosing receipt id",
-    );
+  const token = parseSignedApprovalTokenForValidation(
+    signedToken,
+    pointer(path, "signedToken"),
+    errors,
+  );
+  if (token !== undefined) {
+    const tokenPath = pointer(path, "signedToken");
+    if (!isReceiptCoSignClaim(token.claim)) {
+      addError(errors, pointer(pointer(tokenPath, "claim"), "kind"), "must be receipt_co_sign");
+      return;
+    }
+    if (typeof receiptId === "string" && token.claim.receiptId !== receiptId) {
+      addError(
+        errors,
+        pointer(pointer(tokenPath, "claim"), "receiptId"),
+        "must match enclosing receipt id",
+      );
+    }
+    const role = recordValue(value, "role");
+    if (typeof role === "string" && token.scope.role !== role) {
+      addError(errors, pointer(pointer(tokenPath, "scope"), "role"), "must match approval role");
+    }
   }
 }
 
@@ -754,89 +760,12 @@ function validateBrokerTokenVerdict(
   validateRequired(value, "verifiedAt", path, errors, validateDate);
 }
 
-function validateApprovalClaims(
-  value: unknown,
-  path: string,
-  errors: ReceiptValidationError[],
-): void {
-  if (!isRecord(value)) {
-    addError(errors, path, "must be an object");
-    return;
-  }
-  validateKnownKeys(value, path, APPROVAL_CLAIMS_KEYS, errors);
-  validateRequired(value, "signerIdentity", path, errors, validateString);
-  validateRequired(value, "role", path, errors, (v, p, e) =>
-    validateLiteral(v, p, e, APPROVAL_ROLE_VALUES, "must be a valid approval role"),
-  );
-  validateRequired(value, "receiptId", path, errors, validateReceiptIdValue);
-  validateOptional(value, "writeId", path, errors, validateWriteIdValue);
-  validateRequired(value, "frozenArgsHash", path, errors, validateSha256HexValue);
-  validateRequired(value, "riskClass", path, errors, (v, p, e) =>
-    validateLiteral(v, p, e, RISK_CLASS_VALUES, "must be a valid risk class"),
-  );
-  validateRequired(value, "issuedAt", path, errors, validateDate);
-  validateRequired(value, "expiresAt", path, errors, validateDate);
-  validateOptional(value, "webauthnAssertion", path, errors, validateString);
-  const riskClass = recordValue(value, "riskClass");
-  const webauthnAssertion = recordValue(value, "webauthnAssertion");
-  addApprovalTokenCheckError(
-    validateApprovalWebauthnAssertionBudget(webauthnAssertion),
-    pointer(path, "webauthnAssertion"),
-    errors,
-  );
-  if (
-    (riskClass === "high" || riskClass === "critical") &&
-    (typeof webauthnAssertion !== "string" || webauthnAssertion.length === 0)
-  ) {
-    addError(
-      errors,
-      pointer(path, "webauthnAssertion"),
-      "must be a non-empty string for high/critical risk",
-    );
-  }
-  validateTemporalOrdering(
-    recordValue(value, "issuedAt"),
-    "issuedAt",
-    recordValue(value, "expiresAt"),
-    "expiresAt",
-    pointer(path, "expiresAt"),
-    errors,
-    false,
-  );
-  addApprovalTokenCheckError(validateApprovalClaimsLifetimeBudget(value), path, errors);
-}
-
 function validateSignedApprovalToken(
   value: unknown,
   path: string,
   errors: ReceiptValidationError[],
 ): void {
-  if (!isRecord(value)) {
-    addError(errors, path, "must be an object");
-    return;
-  }
-  validateKnownKeys(value, path, SIGNED_APPROVAL_TOKEN_KEYS, errors);
-  validateRequired(value, "claims", path, errors, validateApprovalClaims);
-  validateRequired(value, "algorithm", path, errors, (v, p, e) =>
-    validateLiteral(v, p, e, APPROVAL_TOKEN_ALGORITHM_VALUES, "must be ed25519"),
-  );
-  validateRequired(value, "signerKeyId", path, errors, validateString);
-  validateRequired(value, "signature", path, errors, (v, p, e) => {
-    const signatureBudget = validateApprovalSignatureBudget(v);
-    addApprovalTokenCheckError(signatureBudget, p, e);
-    if (!signatureBudget.ok) return;
-    validateBase64String(v, p, e);
-  });
-}
-
-function addApprovalTokenCheckError(
-  result: ReturnType<typeof validateApprovalSignatureBudget>,
-  path: string,
-  errors: ReceiptValidationError[],
-): void {
-  if (!result.ok) {
-    addError(errors, path, result.reason);
-  }
+  parseSignedApprovalTokenForValidation(value, path, errors);
 }
 
 function validateExternalWrite(
@@ -916,12 +845,19 @@ function validateExternalWrite(
   const approvalToken = recordValue(value, "approvalToken");
   const proposedDiff = recordValue(value, "proposedDiff");
   if (isRecord(approvalToken)) {
+    const token = parseSignedApprovalTokenForValidation(
+      approvalToken,
+      pointer(path, "approvalToken"),
+      errors,
+    );
+    if (token === undefined) return;
     const tokenPath = pointer(path, "approvalToken");
-    const claims = recordValue(approvalToken, "claims");
-    if (isRecord(claims)) {
-      const claimsPath = pointer(tokenPath, "claims");
-      if (typeof receiptId === "string" && recordValue(claims, "receiptId") !== receiptId) {
-        addError(errors, pointer(claimsPath, "receiptId"), "must match enclosing receipt id");
+    if (!isReceiptCoSignClaim(token.claim) || !isReceiptCoSignScope(token.scope)) {
+      addError(errors, pointer(pointer(tokenPath, "claim"), "kind"), "must be receipt_co_sign");
+    } else {
+      const claimPath = pointer(tokenPath, "claim");
+      if (typeof receiptId === "string" && token.claim.receiptId !== receiptId) {
+        addError(errors, pointer(claimPath, "receiptId"), "must match enclosing receipt id");
       }
       // Re-derive the diff hash rather than trusting `proposedDiff.hash` from
       // an `instanceof`-passing object. A forged `proposedDiff`
@@ -939,10 +875,10 @@ function validateExternalWrite(
           );
           if (typeof proposedCanonicalJson === "string") {
             const reFrozen = FrozenArgs.fromCanonical(proposedCanonicalJson);
-            if (recordValue(claims, "frozenArgsHash") !== reFrozen.hash) {
+            if (token.claim.frozenArgsHash !== reFrozen.hash) {
               addError(
                 errors,
-                pointer(claimsPath, "frozenArgsHash"),
+                pointer(claimPath, "frozenArgsHash"),
                 "must match this write's proposedDiff hash",
               );
             }
@@ -953,19 +889,22 @@ function validateExternalWrite(
           // to add and would otherwise collapse all errors into path: "".
         }
       }
-      const tokenWriteId = recordValue(claims, "writeId");
+      const tokenWriteId = token.claim.writeId;
       if (tokenWriteId !== undefined && tokenWriteId !== recordValue(value, "writeId")) {
-        addError(errors, pointer(claimsPath, "writeId"), "must match this write's writeId");
+        addError(errors, pointer(claimPath, "writeId"), "must match this write's writeId");
       }
-      validateTemporalOrdering(
-        recordValue(claims, "issuedAt"),
-        "issuedAt",
-        recordValue(value, "approvedAt"),
-        "approvedAt",
-        pointer(path, "approvedAt"),
-        errors,
-        false,
-      );
+      const approvedAt = recordValue(value, "approvedAt");
+      if (
+        approvedAt instanceof Date &&
+        !Number.isNaN(approvedAt.getTime()) &&
+        approvedAt.getTime() < token.notBefore
+      ) {
+        addError(
+          errors,
+          pointer(path, "approvedAt"),
+          "must be at or after approvalToken.notBefore",
+        );
+      }
     }
   }
 }
@@ -1044,18 +983,27 @@ function validateNullable(
   validator(value, path, errors);
 }
 
-function validateString(value: unknown, path: string, errors: ReceiptValidationError[]): void {
-  if (typeof value !== "string") addError(errors, path, "must be a string");
-}
-
-function validateBase64String(
+function parseSignedApprovalTokenForValidation(
   value: unknown,
   path: string,
   errors: ReceiptValidationError[],
-): void {
-  if (typeof value !== "string" || value.length === 0 || !BASE64_RE.test(value)) {
-    addError(errors, path, "must be a non-empty base64 string");
+): ReturnType<typeof signedApprovalTokenFromJson> | undefined {
+  try {
+    return signedApprovalTokenFromJson(value, path);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const separator = message.indexOf(": ");
+    if (separator > 0) {
+      addError(errors, message.slice(0, separator), message.slice(separator + 2));
+    } else {
+      addError(errors, path, message);
+    }
+    return undefined;
   }
+}
+
+function validateString(value: unknown, path: string, errors: ReceiptValidationError[]): void {
+  if (typeof value !== "string") addError(errors, path, "must be a string");
 }
 
 function validateBoolean(value: unknown, path: string, errors: ReceiptValidationError[]): void {

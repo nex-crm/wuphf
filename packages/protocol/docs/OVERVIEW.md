@@ -171,9 +171,10 @@ sequenceDiagram
   `ThreadExternalRefs`; spec content hashes are re-derived as
   `sha256(canonical(content))`; status folds use audit order, not wall-clock
   time.
-- Approval token signed envelope: `{ claims, algorithm: "ed25519",
-  signerKeyId, signature }`; signatures cover `canonicalJSON(claims)`. Changing
-  claim keys, date rules, or token lifetime changes what brokers sign.
+- Approval token signed envelope: `SignedApprovalToken` binds a discriminated
+  `claim`, role-bearing `scope`, caller-supplied epoch-ms validity window,
+  `issuedTo`, and structured WebAuthn `signature`. Changing claim keys, scope
+  fields, timestamp rules, or token lifetime changes what brokers verify.
 - IPC bootstrap and request/response envelopes: v0 bootstrap translates
   `broker_url` to `brokerUrl`, and the value must pass the `BrokerUrl` bare
   loopback-origin matrix in [ipc](modules/ipc.md#31-brokerurl-bootstrap-matrix).

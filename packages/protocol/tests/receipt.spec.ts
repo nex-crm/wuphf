@@ -3,29 +3,30 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MAX_AGENT_SLUG_BYTES,
   MAX_APPROVAL_ID_BYTES,
-  MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_FROZEN_ARGS_BYTES,
   MAX_LOCAL_ID_BYTES,
   MAX_RECEIPT_BYTES,
   MAX_SANITIZED_STRING_BYTES,
-  MAX_SIGNER_IDENTITY_BYTES,
   MAX_TOOL_CALL_ID_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
-  MAX_WEBAUTHN_ASSERTION_BYTES,
+  MAX_WEBAUTHN_ASSERTION_FIELD_BYTES,
   MAX_WRITE_ID_BYTES,
 } from "../src/budgets.ts";
+import { asAgentId } from "../src/credential-handle.ts";
 import { FrozenArgs } from "../src/frozen-args.ts";
 import { approvalSubmitRequestFromJson } from "../src/ipc.ts";
 import {
   asAgentSlug,
+  asApprovalClaimId,
   asApprovalId,
+  asApprovalTokenId,
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
-  asSignerIdentity,
   asTaskId,
   asThreadId,
+  asTimestampMs,
   asToolCallId,
   asWriteId,
   type ExternalWrite,
@@ -36,13 +37,13 @@ import {
   type ReceiptStatus,
   receiptFromJson,
   receiptToJson,
+  type SignedApprovalToken,
   validateReceipt,
   type WriteResult,
 } from "../src/receipt.ts";
 import { WRITE_RESULT_VALUES } from "../src/receipt-literals.ts";
 import { assertKnownKeys } from "../src/receipt-utils.ts";
 import {
-  APPROVAL_CLAIMS_KEYS,
   APPROVAL_EVENT_KEYS,
   BROKER_TOKEN_VERDICT_KEYS,
   COMMIT_REF_KEYS,
@@ -57,7 +58,12 @@ import {
   WRITE_FAILURE_METADATA_KEYS,
 } from "../src/receipt-validator.ts";
 import { SanitizedString } from "../src/sanitized-string.ts";
-import { sha256Hex } from "../src/sha256.ts";
+import { type Sha256Hex, sha256Hex } from "../src/sha256.ts";
+import {
+  RECEIPT_CO_SIGN_CLAIM_KEYS,
+  RECEIPT_CO_SIGN_SCOPE_KEYS,
+  WEBAUTHN_ASSERTION_KEYS,
+} from "../src/signed-approval-token.ts";
 
 const RECEIPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const TASK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
@@ -103,21 +109,26 @@ const RECORD_BOUNDARIES = [
   { path: "/toolCalls/0/inputs", keys: FROZEN_ARGS_KEYS },
   { path: "/writes/0/failureMetadata", keys: WRITE_FAILURE_METADATA_KEYS },
   { path: "/writes/0", keys: EXTERNAL_WRITE_KEYS },
-  { path: "/approvals/0/signedToken/claims", keys: APPROVAL_CLAIMS_KEYS },
   { path: "/approvals/0/signedToken", keys: SIGNED_APPROVAL_TOKEN_KEYS },
+  { path: "/approvals/0/signedToken/claim", keys: RECEIPT_CO_SIGN_CLAIM_KEYS },
+  { path: "/approvals/0/signedToken/scope", keys: RECEIPT_CO_SIGN_SCOPE_KEYS },
+  { path: "/approvals/0/signedToken/signature", keys: WEBAUTHN_ASSERTION_KEYS },
 ] as const satisfies readonly { path: string; keys: ReadonlySet<string> }[];
 
 interface ApprovalTokenWire extends Record<string, unknown> {
+  tokenId?: unknown;
+  notBefore?: unknown;
+  expiresAt?: unknown;
+  issuedTo?: unknown;
   signature?: unknown;
-  claims?: unknown;
+  claim?: unknown;
+  scope?: unknown;
 }
 
-interface ApprovalClaimsWire extends Record<string, unknown> {
-  signerIdentity?: unknown;
-  webauthnAssertion?: unknown;
-  issuedAt?: unknown;
-  expiresAt?: unknown;
-}
+type ReceiptCoSignToken = SignedApprovalToken & {
+  readonly claim: Extract<SignedApprovalToken["claim"], { readonly kind: "receipt_co_sign" }>;
+  readonly scope: Extract<SignedApprovalToken["scope"], { readonly claimKind: "receipt_co_sign" }>;
+};
 
 describe("receipt schema", () => {
   it("round-trips a valid receipt through canonical JSON", () => {
@@ -479,21 +490,24 @@ describe("receipt schema", () => {
         message: /\/finalMessage: must already be sanitized/,
       },
       {
-        name: "signed token base64",
+        name: "signed token assertion field",
         mutate: (receipt) => {
           const approval = approvalWireAt(receipt, 0);
-          setWireField(approvalWireSignedToken(approval), "signature", "");
-        },
-        message: /\/approvals\/0\/signedToken\/signature: must be a non-empty base64 string/,
-      },
-      {
-        name: "high-risk assertion",
-        mutate: (receipt) => {
-          const approval = approvalWireAt(receipt, 0);
-          setWireField(approvalWireClaims(approval), "webauthnAssertion", "");
+          const signature = wireRecordField(approvalWireSignedToken(approval), "signature");
+          setWireField(signature, "signature", "");
         },
         message:
-          /\/approvals\/0\/signedToken\/claims\/webauthnAssertion: must be a non-empty string/,
+          /\/approvals\/0\/signedToken\/signature\/signature: must be a non-empty base64url string/,
+      },
+      {
+        name: "malformed authenticator data",
+        mutate: (receipt) => {
+          const approval = approvalWireAt(receipt, 0);
+          const signature = wireRecordField(approvalWireSignedToken(approval), "signature");
+          setWireField(signature, "authenticatorData", "");
+        },
+        message:
+          /\/approvals\/0\/signedToken\/signature\/authenticatorData: must be a non-empty base64url string/,
       },
       {
         name: "write result literal",
@@ -544,42 +558,40 @@ describe("receipt schema", () => {
 
   it.each([
     {
-      name: "oversized signer identity",
+      name: "oversized token id",
       mutate: (token: ApprovalTokenWire) => {
-        const claims = approvalClaimsWire(token);
-        claims.signerIdentity = "x".repeat(MAX_SIGNER_IDENTITY_BYTES + 1);
+        token.tokenId = "A".repeat(27);
       },
-      receiptMessage: /\/writes\/0\/approvalToken\/claims\/signerIdentity: not a SignerIdentity/,
-      ipcMessage: /\/signerIdentity: not a SignerIdentity/,
+      receiptMessage: /\/writes\/0\/approvalToken\/tokenId: ApprovalTokenId: ApprovalTokenId bytes/,
+      ipcMessage:
+        /approvalSubmitRequest\.approvalToken\/tokenId: ApprovalTokenId: ApprovalTokenId bytes/,
     },
     {
-      name: "oversized signature",
+      name: "oversized assertion member",
       mutate: (token: ApprovalTokenWire) => {
-        token.signature = "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES + 1);
-      },
-      receiptMessage: /receipt writes\[0\]\.approvalToken: approvalToken\.signature bytes/,
-      ipcMessage: /approvalToken\.signature exceeds MAX_APPROVAL_SIGNATURE_BYTES/,
-    },
-    {
-      name: "oversized WebAuthn assertion",
-      mutate: (token: ApprovalTokenWire) => {
-        const claims = approvalClaimsWire(token);
-        claims.webauthnAssertion = "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES + 1);
+        const signature = wireRecordField(token, "signature");
+        setWireField(signature, "signature", "A".repeat(MAX_WEBAUTHN_ASSERTION_FIELD_BYTES + 1));
       },
       receiptMessage:
-        /receipt writes\[0\]\.approvalToken: approvalToken\.claims\.webauthnAssertion bytes/,
-      ipcMessage: /approvalToken\.claims\.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES/,
+        /receipt writes\[0\]\.approvalToken: approvalToken\.signature\.signature bytes/,
+      ipcMessage:
+        /approvalSubmitRequest\.approvalToken\/signature\/signature: .*signature bytes exceeds budget: 16385 > 16384/,
+    },
+    {
+      name: "malformed issuedTo",
+      mutate: (token: ApprovalTokenWire) => {
+        token.issuedTo = "invalid agent id";
+      },
+      receiptMessage: /\/writes\/0\/approvalToken\/issuedTo: not an AgentId/,
+      ipcMessage: /approvalSubmitRequest\.approvalToken\/issuedTo: not an AgentId/,
     },
     {
       name: "overlong token lifetime",
       mutate: (token: ApprovalTokenWire) => {
-        const claims = approvalClaimsWire(token);
-        claims.expiresAt = new Date(
-          new Date(String(claims.issuedAt)).getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1,
-        ).toISOString();
+        token.expiresAt = Number(token.notBefore) + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1;
       },
-      receiptMessage: /\/writes\/0\/approvalToken\/claims: exceeds MAX_APPROVAL_TOKEN_LIFETIME_MS/,
-      ipcMessage: /approvalToken\.claims exceeds MAX_APPROVAL_TOKEN_LIFETIME_MS/,
+      receiptMessage: /receipt writes\[0\]\.approvalToken: approval token lifetime ms/,
+      ipcMessage: /approvalSubmitRequest\.approvalToken\/expiresAt: approval token lifetime ms/,
     },
   ])("receiptFromJson matches IPC approval-token rejection for $name", ({
     mutate,
@@ -600,13 +612,13 @@ describe("receipt schema", () => {
     expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(receiptMessage);
   });
 
-  it("rejects oversized approval-event signerIdentity while decoding receipt JSON", () => {
+  it("rejects malformed approval-event issuedTo while decoding receipt JSON", () => {
     const receipt = receiptJsonFixture();
     const token = approvalWireSignedToken(approvalWireAt(receipt, 0)) as ApprovalTokenWire;
-    approvalClaimsWire(token).signerIdentity = "x".repeat(MAX_SIGNER_IDENTITY_BYTES + 1);
+    token.issuedTo = "invalid agent id";
 
     expect(() => receiptFromJson(JSON.stringify(receipt))).toThrow(
-      /\/approvals\/0\/signedToken\/claims\/signerIdentity: not a SignerIdentity/,
+      /\/approvals\/0\/signedToken\/issuedTo: not an AgentId/,
     );
   });
 
@@ -744,12 +756,14 @@ describe("receipt schema", () => {
   it("rejects approval token bound to a different receipt id", () => {
     const fixture = validReceiptFixture();
     const firstApproval = nonNull(fixture.approvals[0]);
+    const signedToken = receiptCoSignToken(firstApproval.signedToken);
     const otherReceiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAY");
     const wrongTokenApproval = {
       ...firstApproval,
       signedToken: {
-        ...firstApproval.signedToken,
-        claims: { ...firstApproval.signedToken.claims, receiptId: otherReceiptId },
+        ...signedToken,
+        claim: { ...signedToken.claim, receiptId: otherReceiptId },
+        scope: { ...signedToken.scope, receiptId: otherReceiptId },
       },
     };
     const tampered: ReceiptSnapshot = { ...fixture, approvals: [wrongTokenApproval] };
@@ -759,7 +773,7 @@ describe("receipt schema", () => {
       expect(
         result.errors.some(
           (e) =>
-            e.path === "/approvals/0/signedToken/claims/receiptId" && /must match/.test(e.message),
+            e.path === "/approvals/0/signedToken/claim/receiptId" && /must match/.test(e.message),
         ),
       ).toBe(true);
     }
@@ -768,13 +782,14 @@ describe("receipt schema", () => {
   it("rejects external write whose approval token does not bind the proposedDiff hash", () => {
     const fixture = validReceiptFixture();
     const firstWrite = nonNull(fixture.writes[0]);
-    const approvalToken = nonNull(firstWrite.approvalToken);
+    const approvalToken = receiptCoSignToken(nonNull(firstWrite.approvalToken));
     const otherDiff = FrozenArgs.freeze({ unrelated: "diff" });
     const wrongHashWrite = {
       ...firstWrite,
       approvalToken: {
         ...approvalToken,
-        claims: { ...approvalToken.claims, frozenArgsHash: otherDiff.hash },
+        claim: { ...approvalToken.claim, frozenArgsHash: otherDiff.hash },
+        scope: { ...approvalToken.scope, frozenArgsHash: otherDiff.hash },
       },
     };
     const tampered: ReceiptSnapshot = { ...fixture, writes: [wrongHashWrite] };
@@ -784,7 +799,7 @@ describe("receipt schema", () => {
       expect(
         result.errors.some(
           (e) =>
-            e.path === "/writes/0/approvalToken/claims/frozenArgsHash" &&
+            e.path === "/writes/0/approvalToken/claim/frozenArgsHash" &&
             /proposedDiff hash/.test(e.message),
         ),
       ).toBe(true);
@@ -794,7 +809,7 @@ describe("receipt schema", () => {
   it("rejects external write whose approval token is bound to a different receipt id", () => {
     const fixture = validReceiptFixture();
     const firstWrite = nonNull(fixture.writes[0]);
-    const approvalToken = nonNull(firstWrite.approvalToken);
+    const approvalToken = receiptCoSignToken(nonNull(firstWrite.approvalToken));
     const otherReceiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAY");
     const tampered: ReceiptSnapshot = {
       ...fixture,
@@ -803,7 +818,8 @@ describe("receipt schema", () => {
           ...firstWrite,
           approvalToken: {
             ...approvalToken,
-            claims: { ...approvalToken.claims, receiptId: otherReceiptId },
+            claim: { ...approvalToken.claim, receiptId: otherReceiptId },
+            scope: { ...approvalToken.scope, receiptId: otherReceiptId },
           },
         },
       ],
@@ -811,7 +827,7 @@ describe("receipt schema", () => {
 
     expectReceiptValidationError(
       tampered,
-      "/writes/0/approvalToken/claims/receiptId",
+      "/writes/0/approvalToken/claim/receiptId",
       /must match enclosing receipt id/,
     );
   });
@@ -819,7 +835,7 @@ describe("receipt schema", () => {
   it("rejects forged proposedDiff hash using the locally re-derived hash", () => {
     const fixture = validReceiptFixture();
     const firstWrite = nonNull(fixture.writes[0]);
-    const approvalToken = nonNull(firstWrite.approvalToken);
+    const approvalToken = receiptCoSignToken(nonNull(firstWrite.approvalToken));
     const forgedHash = sha256Hex('{"different":2}');
     const forged = Object.create(FrozenArgs.prototype) as FrozenArgs;
     Object.assign(forged, {
@@ -834,7 +850,8 @@ describe("receipt schema", () => {
           proposedDiff: forged,
           approvalToken: {
             ...approvalToken,
-            claims: { ...approvalToken.claims, frozenArgsHash: forgedHash },
+            claim: { ...approvalToken.claim, frozenArgsHash: forgedHash },
+            scope: { ...approvalToken.scope, frozenArgsHash: forgedHash },
           },
         },
       ],
@@ -842,7 +859,7 @@ describe("receipt schema", () => {
 
     expectReceiptValidationError(
       tampered,
-      "/writes/0/approvalToken/claims/frozenArgsHash",
+      "/writes/0/approvalToken/claim/frozenArgsHash",
       /proposedDiff hash/,
     );
   });
@@ -874,12 +891,13 @@ describe("receipt schema", () => {
   it("rejects external write whose approval token writeId does not match the enclosing write", () => {
     const fixture = validReceiptFixture();
     const firstWrite = nonNull(fixture.writes[0]);
-    const approvalToken = nonNull(firstWrite.approvalToken);
+    const approvalToken = receiptCoSignToken(nonNull(firstWrite.approvalToken));
     const wrongWrite = {
       ...firstWrite,
       approvalToken: {
         ...approvalToken,
-        claims: { ...approvalToken.claims, writeId: asWriteId("write_wrong") },
+        claim: { ...approvalToken.claim, writeId: asWriteId("write_wrong") },
+        scope: { ...approvalToken.scope, writeId: asWriteId("write_wrong") },
       },
     };
     const tampered: ReceiptSnapshot = { ...fixture, writes: [wrongWrite] };
@@ -889,7 +907,7 @@ describe("receipt schema", () => {
       expect(
         result.errors.some(
           (e) =>
-            e.path === "/writes/0/approvalToken/claims/writeId" &&
+            e.path === "/writes/0/approvalToken/claim/writeId" &&
             /must match this write's writeId/.test(e.message),
         ),
       ).toBe(true);
@@ -899,18 +917,39 @@ describe("receipt schema", () => {
   it("allows receipt-scoped approval token without writeId on an external write", () => {
     const fixture = validReceiptFixture();
     const firstWrite = nonNull(fixture.writes[0]);
-    const approvalToken = nonNull(firstWrite.approvalToken);
-    const { writeId: _writeId, ...receiptScopedClaims } = approvalToken.claims;
+    const approvalToken = receiptCoSignToken(nonNull(firstWrite.approvalToken));
+    const { writeId: _writeId, ...receiptScopedClaim } = approvalToken.claim;
+    const { writeId: _scopeWriteId, ...receiptScopedScope } = approvalToken.scope;
     const receiptScopedWrite = {
       ...firstWrite,
-      approvalToken: { ...approvalToken, claims: receiptScopedClaims },
+      approvalToken: { ...approvalToken, claim: receiptScopedClaim, scope: receiptScopedScope },
     };
     const receiptScoped: ReceiptSnapshot = { ...fixture, writes: [receiptScopedWrite] };
 
     expect(validateReceipt(receiptScoped)).toEqual({ ok: true });
   });
 
-  it("rejects empty webauthnAssertion when riskClass is high", () => {
+  it("rejects approval token role that does not match the approval event role", () => {
+    const fixture = validReceiptFixture();
+    const firstApproval = nonNull(fixture.approvals[0]);
+    const signedToken = receiptCoSignToken(firstApproval.signedToken);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      approvals: [
+        {
+          ...firstApproval,
+          signedToken: {
+            ...signedToken,
+            scope: { ...signedToken.scope, role: "host" },
+          },
+        },
+      ],
+    };
+
+    expectReceiptValidationError(tampered, "/approvals/0/signedToken/scope/role", /approval role/);
+  });
+
+  it("rejects approval tokens that expire before they are valid", () => {
     const fixture = validReceiptFixture();
     const firstApproval = nonNull(fixture.approvals[0]);
     const tampered: ReceiptSnapshot = {
@@ -920,101 +959,44 @@ describe("receipt schema", () => {
           ...firstApproval,
           signedToken: {
             ...firstApproval.signedToken,
-            claims: { ...firstApproval.signedToken.claims, webauthnAssertion: "" },
+            expiresAt: asTimestampMs(firstApproval.signedToken.notBefore - 1),
           },
         },
       ],
     };
+
+    expectReceiptValidationError(
+      tampered,
+      "/approvals/0/signedToken/expiresAt",
+      /strictly greater than notBefore/,
+    );
+  });
+
+  it("rejects approval tokens whose lifetime exceeds the cap", () => {
+    const fixture = validReceiptFixture();
+    const firstApproval = nonNull(fixture.approvals[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      approvals: [
+        {
+          ...firstApproval,
+          signedToken: {
+            ...firstApproval.signedToken,
+            expiresAt: asTimestampMs(
+              firstApproval.signedToken.notBefore + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1,
+            ),
+          },
+        },
+      ],
+    };
+
     const result = validateReceipt(tampered);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(
-        result.errors.some(
-          (e) =>
-            e.path.endsWith("/webauthnAssertion") && /non-empty.*high\/critical/.test(e.message),
-        ),
-      ).toBe(true);
+      expect(result.errors.some((error) => /approval token lifetime ms/.test(error.message))).toBe(
+        true,
+      );
     }
-  });
-
-  it("rejects empty webauthnAssertion when riskClass is critical", () => {
-    const fixture = validReceiptFixture();
-    const firstApproval = nonNull(fixture.approvals[0]);
-    const tampered: ReceiptSnapshot = {
-      ...fixture,
-      approvals: [
-        {
-          ...firstApproval,
-          signedToken: {
-            ...firstApproval.signedToken,
-            claims: {
-              ...firstApproval.signedToken.claims,
-              riskClass: "critical",
-              webauthnAssertion: "",
-            },
-          },
-        },
-      ],
-    };
-
-    expectReceiptValidationError(
-      tampered,
-      "/approvals/0/signedToken/claims/webauthnAssertion",
-      /non-empty.*high\/critical/,
-    );
-  });
-
-  it("rejects approval claims that expire before they are issued", () => {
-    const fixture = validReceiptFixture();
-    const firstApproval = nonNull(fixture.approvals[0]);
-    const tampered: ReceiptSnapshot = {
-      ...fixture,
-      approvals: [
-        {
-          ...firstApproval,
-          signedToken: {
-            ...firstApproval.signedToken,
-            claims: {
-              ...firstApproval.signedToken.claims,
-              expiresAt: new Date("2026-05-08T18:00:59.000Z"),
-            },
-          },
-        },
-      ],
-    };
-
-    expectReceiptValidationError(
-      tampered,
-      "/approvals/0/signedToken/claims/expiresAt",
-      /must be after issuedAt/,
-    );
-  });
-
-  it("rejects approval claims that expire exactly when they are issued because expiry is strict-after", () => {
-    const fixture = validReceiptFixture();
-    const firstApproval = nonNull(fixture.approvals[0]);
-    const issuedAt = firstApproval.signedToken.claims.issuedAt;
-    const tampered: ReceiptSnapshot = {
-      ...fixture,
-      approvals: [
-        {
-          ...firstApproval,
-          signedToken: {
-            ...firstApproval.signedToken,
-            claims: {
-              ...firstApproval.signedToken.claims,
-              expiresAt: issuedAt,
-            },
-          },
-        },
-      ],
-    };
-
-    expectReceiptValidationError(
-      tampered,
-      "/approvals/0/signedToken/claims/expiresAt",
-      /must be after issuedAt/,
-    );
   });
 
   it("rejects tool calls that finish before they start", () => {
@@ -1051,15 +1033,16 @@ describe("receipt schema", () => {
     );
   });
 
-  it("rejects external writes approved before their token was issued", () => {
+  it("rejects external writes approved before their token validity window", () => {
     const fixture = validReceiptFixture();
     const firstWrite = nonNull(fixture.writes[0]);
+    const approvalToken = receiptCoSignToken(nonNull(firstWrite.approvalToken));
     const tampered: ReceiptSnapshot = {
       ...fixture,
       writes: [
         {
           ...firstWrite,
-          approvedAt: new Date("2026-05-08T18:00:59.000Z"),
+          approvedAt: new Date(approvalToken.notBefore - 1),
         },
       ],
     };
@@ -1067,25 +1050,25 @@ describe("receipt schema", () => {
     expectReceiptValidationError(
       tampered,
       "/writes/0/approvedAt",
-      /approvedAt=2026-05-08T18:00:59.000Z issuedAt=2026-05-08T18:01:00.000Z/,
+      /at or after approvalToken\.notBefore/,
     );
   });
 
-  it("rejects external writes approved exactly when issued because approval is strict-after", () => {
+  it("allows external writes approved exactly at token notBefore", () => {
     const fixture = validReceiptFixture();
     const firstWrite = nonNull(fixture.writes[0]);
-    const approvalToken = nonNull(firstWrite.approvalToken);
+    const approvalToken = receiptCoSignToken(nonNull(firstWrite.approvalToken));
     const tampered: ReceiptSnapshot = {
       ...fixture,
       writes: [
         {
           ...firstWrite,
-          approvedAt: approvalToken.claims.issuedAt,
+          approvedAt: new Date(approvalToken.notBefore),
         },
       ],
     };
 
-    expectReceiptValidationError(tampered, "/writes/0/approvedAt", /must be after issuedAt/);
+    expect(validateReceipt(tampered)).toEqual({ ok: true });
   });
 
   it("rejects unknown top-level keys", () => {
@@ -1215,13 +1198,13 @@ describe("receipt schema", () => {
         },
       },
       {
-        path: "/approvals/0/signedToken/claims",
+        path: "/approvals/0/signedToken/claim",
         mutate: (receipt) => {
           const firstApproval = nonNull(validReceiptFixture().approvals[0]);
           setWireField(receipt, "approvals", [
             {
               ...firstApproval,
-              signedToken: { ...firstApproval.signedToken, claims: "not-an-object" },
+              signedToken: { ...firstApproval.signedToken, claim: "not-an-object" },
             },
           ]);
         },
@@ -1657,14 +1640,6 @@ function approvalWireSignedToken(approval: Record<string, unknown>): Record<stri
   return signedToken;
 }
 
-function approvalWireClaims(approval: Record<string, unknown>): Record<string, unknown> {
-  const claims = wireField(approvalWireSignedToken(approval), "claims");
-  if (!isWireRecord(claims)) {
-    throw new Error("fixture approval missing claims");
-  }
-  return claims;
-}
-
 function writeWireAt(receipt: Record<string, unknown>, index: number): Record<string, unknown> {
   return wireRecordArrayItem(receipt, "writes", index);
 }
@@ -1674,10 +1649,6 @@ function writeWireApprovalToken(
   index: number,
 ): ApprovalTokenWire {
   return wireRecordField(writeWireAt(receipt, index), "approvalToken") as ApprovalTokenWire;
-}
-
-function approvalClaimsWire(token: ApprovalTokenWire): ApprovalClaimsWire {
-  return wireRecordField(token, "claims") as ApprovalClaimsWire;
 }
 
 function fileChangeWireAt(
@@ -1828,6 +1799,54 @@ function recordWithKnownKeys(keys: ReadonlySet<string>): Record<string, unknown>
   return record;
 }
 
+function receiptCoSignToken(token: SignedApprovalToken): ReceiptCoSignToken {
+  if (token.claim.kind !== "receipt_co_sign" || token.scope.claimKind !== "receipt_co_sign") {
+    throw new Error("fixture token must be receipt_co_sign");
+  }
+  return token as ReceiptCoSignToken;
+}
+
+function signedApprovalTokenFixture(input: {
+  readonly receiptId: ReturnType<typeof asReceiptId>;
+  readonly writeId?: ReturnType<typeof asWriteId> | undefined;
+  readonly frozenArgsHash: Sha256Hex;
+}): SignedApprovalToken {
+  const claimId = asApprovalClaimId("claim_01");
+  return {
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "receipt_co_sign",
+      receiptId: input.receiptId,
+      ...(input.writeId === undefined ? {} : { writeId: input.writeId }),
+      frozenArgsHash: input.frozenArgsHash,
+      riskClass: "high",
+    },
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "receipt_co_sign",
+      role: "approver",
+      maxUses: 1,
+      receiptId: input.receiptId,
+      ...(input.writeId === undefined ? {} : { writeId: input.writeId }),
+      frozenArgsHash: input.frozenArgsHash,
+    },
+    notBefore: asTimestampMs(1_778_262_060_000),
+    expiresAt: asTimestampMs(1_778_263_800_000),
+    issuedTo: asAgentId("agent_alpha"),
+    signature: {
+      credentialId: "Y3JlZGVudGlhbC0wMQ",
+      authenticatorData: "YXV0aGVudGljYXRvci1kYXRh",
+      clientDataJson: "Y2xpZW50LWRhdGE",
+      signature: "YXNzZXJ0aW9uLXNpZ25hdHVyZQ",
+      userHandle: "dXNlci0wMQ",
+    },
+  };
+}
+
 function validReceiptFixture(): ReceiptSnapshot {
   const receiptId = asReceiptId(RECEIPT_ID);
   const taskId = asTaskId(TASK_ID);
@@ -1842,22 +1861,11 @@ function validReceiptFixture(): ReceiptSnapshot {
     stage: { from: "lead", to: "qualified" },
   });
   const postWriteVerify = FrozenArgs.freeze({ amount: 1500, stage: "qualified" });
-  const approvalToken = {
-    claims: {
-      signerIdentity: asSignerIdentity("fran@example.com"),
-      role: "approver" as const,
-      receiptId,
-      writeId,
-      frozenArgsHash: proposedDiff.hash,
-      riskClass: "high" as const,
-      issuedAt: new Date("2026-05-08T18:01:00.000Z"),
-      expiresAt: new Date("2026-05-08T18:30:00.000Z"),
-      webauthnAssertion: "webauthn-assertion",
-    },
-    algorithm: "ed25519" as const,
-    signerKeyId: "key_ed25519_01",
-    signature: "YXBwcm92YWwtdG9rZW4tc2lnbmF0dXJl",
-  };
+  const approvalToken = signedApprovalTokenFixture({
+    receiptId,
+    writeId,
+    frozenArgsHash: proposedDiff.hash,
+  });
 
   return {
     id: receiptId,
@@ -1986,22 +1994,11 @@ function shuffledReceiptFixture(): ReceiptSnapshot {
     amount: { to: 1500, from: 1000 },
   });
   const postWriteVerify = FrozenArgs.freeze({ stage: "qualified", amount: 1500 });
-  const approvalToken = {
-    signature: "YXBwcm92YWwtdG9rZW4tc2lnbmF0dXJl",
-    signerKeyId: "key_ed25519_01",
-    algorithm: "ed25519" as const,
-    claims: {
-      webauthnAssertion: "webauthn-assertion",
-      expiresAt: new Date("2026-05-08T18:30:00.000Z"),
-      issuedAt: new Date("2026-05-08T18:01:00.000Z"),
-      riskClass: "high" as const,
-      frozenArgsHash: proposedDiff.hash,
-      writeId,
-      receiptId,
-      role: "approver" as const,
-      signerIdentity: asSignerIdentity("fran@example.com"),
-    },
-  };
+  const approvalToken = signedApprovalTokenFixture({
+    receiptId,
+    writeId,
+    frozenArgsHash: proposedDiff.hash,
+  });
 
   return {
     schemaVersion: 1,

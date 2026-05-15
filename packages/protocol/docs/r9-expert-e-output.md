@@ -32,7 +32,7 @@ None.
 
 ## Edge-case audit
 
-- Approval token `issuedAt < expiresAt` is used only as a per-token validity window and lifetime budget (`MAX_APPROVAL_TOKEN_LIFETIME_MS`), not to order approvals across tokens.
+- Approval token `notBefore < expiresAt` is used only as a per-token validity window and lifetime budget (`MAX_APPROVAL_TOKEN_LIFETIME_MS`), not to order approvals across tokens.
 - `ReceiptId` is only a branded uppercase ULID regex here. This package does not generate ULIDs, sort them, or require timestamp-prefix uniqueness. Receipt ordering by ULID, if used elsewhere, is outside this package.
 - Audit event creation/verification uses `seqNo` (`EventLsn`) plus `prevHash`/`eventHash` for ordering. `timestamp` is included in canonical bytes to commit when the event was marked, but same-ms events cannot collide solely on time because `seqNo` and `prevHash` also differ.
 - `payload.body` is opaque bytes. `verifyChain` never inspects body timestamps; it verifies `seqNo`, `prevHash`, and `eventHash`.
