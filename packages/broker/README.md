@@ -79,6 +79,10 @@ store.close();
 | GET | `/api/v1/cost/replay-check` | bearer | Replays cost events and compares projections. 200 when `ok: true`; 500 with structured discrepancies when drift or unparseable cost payloads are found. |
 | GET | `/api/agents/:agentId/provider-routing` | bearer | Returns the per-agent provider-routing config via `agentProviderRoutingToJsonValue`. Mounted when `createBroker({ runners: { agentProviderRoutingStore } })` is supplied. |
 | PUT | `/api/agents/:agentId/provider-routing` | bearer | Replaces all routes for the agent. Body parses through `agentProviderRoutingWriteRequestFromJson`; the body `agentId` must match the path `agentId`. |
+| POST | `/api/webauthn/registration/challenge` | bearer + agent map | Broker control-plane route. Body `{ role }`; returns `{ challengeId, options }` where `options` is the W3C `PublicKeyCredentialCreationOptions` JSON from `@simplewebauthn/server`. Mounted when `createBroker({ webauthn })` is supplied. |
+| POST | `/api/webauthn/registration/verify` | bearer + agent map | Broker control-plane route. Body `{ challengeId, attestationResponse }`; verifies attestation with `@simplewebauthn/server`, persists the credential against the bearer-mapped agent and requested role, then returns `{ credentialId, role }`. |
+| POST | `/api/webauthn/cosign/challenge` | bearer + agent map | Broker control-plane route. Body `{ claim, scope }`; parses claim/scope through `@wuphf/protocol`, binds a random WebAuthn challenge to the canonical preimage, and returns `{ challengeId, options }` where `options` is the W3C `PublicKeyCredentialRequestOptions` JSON. |
+| POST | `/api/webauthn/cosign/verify` | bearer + agent map | Verifies assertion origin, RP ID, credential id, role, sign count, and threshold. Pending thresholds return `{ status: "approval_pending", satisfiedRoles, requiredThreshold }`; satisfied thresholds return `signedApprovalTokenToJsonValue(token)`. |
 | POST | `/api/runners` | bearer + runner agent map | Body: `RunnerSpawnRequest`. The bearer maps to one `agentId`; mismatches return 403. The broker mints/injects `BrokerIdentity`, resolves the `CredentialHandle`, and returns `{ runnerId }`. Mounted only when `createBroker({ runners })` is supplied. |
 | GET | `/api/runners/:id/events` | bearer + runner agent map | SSE stream of `RunnerEvent` values. The caller's bearer-mapped `agentId` must match the runner owner. |
 | GET | `/`, `/index.html` | none (loopback) | Renderer bundle (404 if `renderer: null`). |
@@ -120,6 +124,10 @@ GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
    identity.
 9. **Provider-routing writes are path-bound.** The URL `agentId` and request
    body `agentId` must match before the broker writes routing state.
+10. **WebAuthn ceremony objects are broker control-plane shapes.** The
+    creation/request option JSON is the standardized W3C shape emitted by
+    `@simplewebauthn/server`, not a WUPHF protocol wire contract. Final
+    approval tokens still go through `signedApprovalTokenToJsonValue`.
 
 ## Spec anchors
 

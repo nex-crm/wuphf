@@ -158,10 +158,13 @@ stateDiagram-v2
 
 ## Open Questions
 
-1. Is WebAuthn registration broker-initiated only, or may renderer settings
-   start registration without a pending high-stakes claim?
-2. Which RP ID and allowed origins apply in dev, packaged desktop, and future
-   cloud-backed bridge mode?
+1. Resolved for v1: renderer settings may start WebAuthn registration without
+   a pending high-stakes claim. The broker registration routes are standalone
+   and bind the credential to the bearer-mapped agent plus requested role.
+2. Resolved for v1: RP ID and allowed origins are broker config, with dev
+   defaults (`localhost`, `http://localhost:5173`, and
+   `http://127.0.0.1:5173`). Packaged desktop and future cloud-backed bridge
+   values are deferred to their host integration batches.
 3. Resolved: `receipt_co_sign` thresholds count distinct roles (`approver`,
    `host`), not credential ids. The broker maps roles to credentials.
 4. Resolved: branch 12 replaces the Ed25519 approval shape in one protocol

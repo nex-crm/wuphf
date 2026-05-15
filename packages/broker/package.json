@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./agent-provider-routing": "./src/agent-provider-routing/index.ts",
     "./cost-ledger": "./src/cost-ledger/index.ts",
-    "./sqlite": "./src/sqlite-receipt-store.ts"
+    "./sqlite": "./src/sqlite-receipt-store.ts",
+    "./webauthn": "./src/webauthn/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -23,6 +24,7 @@
     "check:invariants": "bash scripts/check-invariants.sh"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.0.0",
     "@wuphf/agent-runners": "workspace:*",
     "@wuphf/credentials": "workspace:*",
     "@wuphf/protocol": "workspace:*",

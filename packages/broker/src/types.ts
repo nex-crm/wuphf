@@ -1,10 +1,11 @@
 // Public broker types. No I/O here — implementations live in sibling modules.
 
-import type { ApiToken, BrokerPort } from "@wuphf/protocol";
+import type { AgentId, ApiToken, BrokerPort } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
 import type { CostLedger } from "./cost-ledger/index.ts";
 import type { ReceiptStore } from "./receipt-store.ts";
 import type { RunnerRouteConfig } from "./runners/route.ts";
+import type { Clock, WebAuthnPolicyConfig, WebAuthnStore } from "./webauthn/types.ts";
 
 export interface BrokerLogger {
   info(event: string, payload?: Readonly<Record<string, unknown>>): void;
@@ -58,6 +59,12 @@ export interface BrokerConfig {
   readonly trustedOrigins?: readonly string[];
   readonly logger?: BrokerLogger;
   /**
+   * Clock used by time-expiring broker control-plane state. Tests pass a fake
+   * clock so expiry assertions are deterministic; production defaults to the
+   * system wall clock.
+   */
+  readonly clock?: Clock;
+  /**
    * Receipt persistence backend. When absent, `createBroker` constructs
    * an in-memory store (`InMemoryReceiptStore`) — process-local, lost
    * across restarts. Durable hosts pass a `SqliteReceiptStore` from
@@ -109,6 +116,16 @@ export interface BrokerConfig {
    * never hold broker identity directly.
    */
   readonly runners?: Omit<RunnerRouteConfig, "receiptStore" | "workspaceRoot">;
+  /**
+   * Optional WebAuthn co-sign routes. When supplied,
+   * `/api/webauthn/{registration,cosign}/*` are mounted. The store owns
+   * credential/challenge/token persistence; the bearer-to-agent map binds
+   * registration and token issuance to one agent.
+   */
+  readonly webauthn?: WebAuthnPolicyConfig & {
+    readonly store: WebAuthnStore;
+    readonly tokenAgentIds: ReadonlyMap<ApiToken, AgentId>;
+  };
 }
 
 export interface BrokerHandle {

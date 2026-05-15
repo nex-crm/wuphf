@@ -107,6 +107,27 @@ describe("event log", () => {
           )
           .get()?.name,
       ).toBe("receipts_projection");
+      expect(
+        second
+          .prepare<[], { readonly name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webauthn_registered_credentials'",
+          )
+          .get()?.name,
+      ).toBe("webauthn_registered_credentials");
+      expect(
+        second
+          .prepare<[], { readonly name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webauthn_challenges'",
+          )
+          .get()?.name,
+      ).toBe("webauthn_challenges");
+      expect(
+        second
+          .prepare<[], { readonly name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webauthn_consumed_tokens'",
+          )
+          .get()?.name,
+      ).toBe("webauthn_consumed_tokens");
     } finally {
       second.close();
     }
