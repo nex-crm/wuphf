@@ -41,6 +41,16 @@ Verify the fixture from this directory:
 go run verifier-reference.go
 ```
 
+## Signed Approval Token Vectors
+
+`signed-approval-token-vectors.json` pins the branch-12
+`SignedApprovalToken` WebAuthn wire shape. Accepted vectors must parse with
+strict known-key rejection at every object boundary, enforce the role-bearing
+approval scope, validate caller-supplied millisecond timestamps and WebAuthn
+assertion budgets, and serialize to the listed canonical JSON bytes. Rejected
+vectors cover unknown keys, missing scope role, claim/scope mismatch, lifetime
+cap enforcement, and malformed assertion bytes.
+
 ## Audit Event Golden Vectors
 
 `audit-event-vectors.json` is the cross-language fixture for WUPHF audit-chain
@@ -63,11 +73,11 @@ this fixture and verifies the package serializer and hash function against it.
 ## Cross-language verification
 
 `verifier-reference.go` is a stdlib-only Go reference implementation of the
-audit-chain, runner, and agent-provider-routing wire contracts. It loads
-`audit-event-vectors.json`, `runner-vectors.json`, and
-`agent-provider-routing-vectors.json`, recomputes each canonical serialization
-and eventHash, and verifies accept/reject behavior against the bundled vectors.
-Run it from this directory:
+audit-chain, runner, agent-provider-routing, and signed-approval-token wire
+contracts. It loads `audit-event-vectors.json`, `runner-vectors.json`,
+`agent-provider-routing-vectors.json`, and `signed-approval-token-vectors.json`,
+recomputes each canonical serialization and eventHash, and verifies
+accept/reject behavior against the bundled vectors. Run it from this directory:
 
 ```bash
 cd packages/protocol/testdata

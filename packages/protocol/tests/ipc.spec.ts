@@ -1,19 +1,20 @@
-import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
-  MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
-  MAX_SIGNER_IDENTITY_BYTES,
   MAX_WEBAUTHN_ASSERTION_BYTES,
+  MAX_WEBAUTHN_ASSERTION_FIELD_BYTES,
 } from "../src/budgets.ts";
-import { canonicalJSON } from "../src/canonical-json.ts";
 import { lsnFromV1Number } from "../src/event-lsn.ts";
 import {
   asAgentId,
+  asApprovalClaimId,
+  asApprovalTokenId,
   asCredentialHandleId,
   asCredentialScope,
   assertJcsValue,
+  asTimestampMs,
+  canonicalJSON,
   isAgentSlug,
   isApprovalId,
   isIdempotencyKey,
@@ -28,7 +29,6 @@ import {
   type ApprovalSubmitResponse,
   apiBootstrapFromJson,
   apiBootstrapToJson,
-  approvalClaimsToSigningBytes,
   approvalSubmitRequestFromJson,
   asApiToken,
   asBrokerPort,
@@ -43,7 +43,6 @@ import {
   credentialWriteRequestFromJson,
   credentialWriteResponseFromJson,
   type ApiBootstrapWire as IpcApiBootstrapWire,
-  type ApprovalClaimsWire as IpcApprovalClaimsWire,
   type ApprovalSubmitRequestWire as IpcApprovalSubmitRequestWire,
   type SignedApprovalTokenWire as IpcSignedApprovalTokenWire,
   isAllowedLoopbackHost,
@@ -66,20 +65,15 @@ import {
   type WsFrame,
 } from "../src/ipc.ts";
 import {
-  type ApprovalClaims,
   asIdempotencyKey,
   asReceiptId,
-  asSignerIdentity,
   asThreadId,
   asWriteId,
   type ReceiptId,
-  type RiskClass,
   type SignedApprovalToken,
 } from "../src/receipt.ts";
-import { asSha256Hex, sha256Hex } from "../src/sha256.ts";
+import { sha256Hex } from "../src/sha256.ts";
 import brokerUrlVectors from "../testdata/broker-url-vectors.json";
-
-const TEXT_DECODER = new TextDecoder();
 
 type WireKeysOf<T> = readonly (keyof T)[];
 
@@ -91,22 +85,15 @@ const VALID_IPC_WIRE_KEY_TUPLES = [
     "idempotency_key",
   ] as const satisfies WireKeysOf<IpcApprovalSubmitRequestWire>,
   [
-    "claims",
-    "algorithm",
-    "signer_key_id",
+    "schemaVersion",
+    "tokenId",
+    "claim",
+    "scope",
+    "notBefore",
+    "expiresAt",
+    "issuedTo",
     "signature",
   ] as const satisfies WireKeysOf<IpcSignedApprovalTokenWire>,
-  [
-    "signer_identity",
-    "role",
-    "receipt_id",
-    "write_id",
-    "frozen_args_hash",
-    "risk_class",
-    "issued_at",
-    "expires_at",
-    "webauthn_assertion",
-  ] as const satisfies WireKeysOf<IpcApprovalClaimsWire>,
 ];
 
 const INVALID_API_BOOTSTRAP_WIRE_KEYS = [
@@ -474,24 +461,46 @@ type MutableApprovalRequest = Record<string, unknown> & {
 };
 
 type MutableApprovalToken = Record<string, unknown> & {
-  claims?: unknown;
-  algorithm?: unknown;
-  signerKeyId?: unknown;
+  schemaVersion?: unknown;
+  tokenId?: unknown;
+  claim?: unknown;
+  scope?: unknown;
+  notBefore?: unknown;
+  expiresAt?: unknown;
+  issuedTo?: unknown;
   signature?: unknown;
   extraTokenField?: unknown;
 };
 
-type MutableApprovalClaims = Record<string, unknown> & {
-  signerIdentity?: unknown;
-  role?: unknown;
+type MutableApprovalClaim = Record<string, unknown> & {
+  schemaVersion?: unknown;
+  claimId?: unknown;
+  kind?: unknown;
   receiptId?: unknown;
   writeId?: unknown;
   frozenArgsHash?: unknown;
   riskClass?: unknown;
-  issuedAt?: unknown;
-  expiresAt?: unknown;
-  webauthnAssertion?: unknown;
   extraClaimField?: unknown;
+};
+
+type MutableApprovalScope = Record<string, unknown> & {
+  mode?: unknown;
+  claimId?: unknown;
+  claimKind?: unknown;
+  role?: unknown;
+  maxUses?: unknown;
+  receiptId?: unknown;
+  writeId?: unknown;
+  frozenArgsHash?: unknown;
+  extraScopeField?: unknown;
+};
+
+type MutableWebAuthnAssertion = Record<string, unknown> & {
+  credentialId?: unknown;
+  authenticatorData?: unknown;
+  clientDataJson?: unknown;
+  signature?: unknown;
+  userHandle?: unknown;
 };
 
 type ApprovalSubmitFailureCase = {
@@ -571,60 +580,166 @@ const APPROVAL_SUBMIT_FAILURE_CASES = [
     reason: /extraTokenField.*not allowed/,
   },
   {
-    name: "rejects missing token claims",
+    name: "rejects missing tokenId",
     mutate: (request) => {
-      Reflect.deleteProperty(tokenOf(request), "claims");
+      Reflect.deleteProperty(tokenOf(request), "tokenId");
       return request;
     },
-    reason: /approvalToken\.claims is required/,
+    reason: /approvalToken\/tokenId: is required/,
   },
   {
-    name: "rejects non-object token claims",
+    name: "rejects invalid tokenId",
     mutate: (request) => {
-      tokenOf(request).claims = "not-claims";
+      tokenOf(request).tokenId = "not-a-ulid";
       return request;
     },
-    reason: /approvalToken\.claims must be an object/,
+    reason: /approvalToken\/tokenId: not an ApprovalTokenId/,
   },
   {
-    name: "rejects missing token algorithm",
+    name: "rejects missing token claim",
     mutate: (request) => {
-      Reflect.deleteProperty(tokenOf(request), "algorithm");
+      Reflect.deleteProperty(tokenOf(request), "claim");
       return request;
     },
-    reason: /approvalToken\.algorithm is required/,
+    reason: /approvalToken\/claim: is required/,
   },
   {
-    name: "rejects undefined token algorithm values",
+    name: "rejects non-object token claim",
     mutate: (request) => {
-      tokenOf(request).algorithm = undefined;
+      tokenOf(request).claim = "not-claim";
       return request;
     },
-    reason: /approvalToken\.algorithm is required/,
+    reason: /approvalToken\/claim: must be an object/,
   },
   {
-    name: "rejects non-ed25519 token algorithms",
+    name: "rejects unknown approval token claim keys",
     mutate: (request) => {
-      tokenOf(request).algorithm = "rsa";
+      claimOf(request).extraClaimField = true;
       return request;
     },
-    reason: /approvalToken\.algorithm must be ed25519/,
+    reason: /extraClaimField.*not allowed/,
   },
   {
-    name: "rejects missing signerKeyId",
+    name: "rejects missing claim receiptId",
     mutate: (request) => {
-      Reflect.deleteProperty(tokenOf(request), "signerKeyId");
+      Reflect.deleteProperty(claimOf(request), "receiptId");
       return request;
     },
-    reason: /approvalToken\.signerKeyId is required/,
+    reason: /approvalToken\/claim\/receiptId: is required/,
   },
   {
-    name: "rejects non-string signerKeyId",
+    name: "rejects invalid claim receiptId",
     mutate: (request) => {
-      tokenOf(request).signerKeyId = 42;
+      claimOf(request).receiptId = "not-a-receipt-id";
       return request;
     },
-    reason: /approvalToken\.signerKeyId must be a string/,
+    reason: /approvalToken\/claim\/receiptId: not a ReceiptId/,
+  },
+  {
+    name: "rejects invalid optional writeId",
+    mutate: (request) => {
+      claimOf(request).writeId = "bad write id";
+      return request;
+    },
+    reason: /approvalToken\/claim\/writeId: not a WriteId/,
+  },
+  {
+    name: "rejects missing frozenArgsHash claims",
+    mutate: (request) => {
+      Reflect.deleteProperty(claimOf(request), "frozenArgsHash");
+      return request;
+    },
+    reason: /approvalToken\/claim\/frozenArgsHash: is required/,
+  },
+  {
+    name: "rejects invalid frozenArgsHash claims",
+    mutate: (request) => {
+      claimOf(request).frozenArgsHash = "not-a-sha";
+      return request;
+    },
+    reason: /approvalToken\/claim\/frozenArgsHash: not a sha256 hex digest/,
+  },
+  {
+    name: "rejects invalid riskClass claims",
+    mutate: (request) => {
+      claimOf(request).riskClass = "severe";
+      return request;
+    },
+    reason: /approvalToken\/claim\/riskClass: must be a valid risk class/,
+  },
+  {
+    name: "rejects missing scope",
+    mutate: (request) => {
+      Reflect.deleteProperty(tokenOf(request), "scope");
+      return request;
+    },
+    reason: /approvalToken\/scope: is required/,
+  },
+  {
+    name: "rejects scope mismatch",
+    mutate: (request) => {
+      scopeOf(request).claimId = "claim_other";
+      return request;
+    },
+    reason: /approvalToken\/scope\/claimId: must match claim\.claimId/,
+  },
+  {
+    name: "rejects missing notBefore",
+    mutate: (request) => {
+      Reflect.deleteProperty(tokenOf(request), "notBefore");
+      return request;
+    },
+    reason: /approvalToken\/notBefore: is required/,
+  },
+  {
+    name: "rejects invalid notBefore",
+    mutate: (request) => {
+      tokenOf(request).notBefore = "2026-05-08T18:00:00.000Z";
+      return request;
+    },
+    reason: /approvalToken\/notBefore: must be a number/,
+  },
+  {
+    name: "rejects missing expiresAt",
+    mutate: (request) => {
+      Reflect.deleteProperty(tokenOf(request), "expiresAt");
+      return request;
+    },
+    reason: /approvalToken\/expiresAt: is required/,
+  },
+  {
+    name: "rejects expiry equal to notBefore",
+    mutate: (request) => {
+      const token = tokenOf(request);
+      token.expiresAt = token.notBefore;
+      return request;
+    },
+    reason: /approvalToken\/expiresAt: must be strictly greater than notBefore/,
+  },
+  {
+    name: "rejects lifetimes over the maximum cap",
+    mutate: (request) => {
+      const token = tokenOf(request);
+      token.expiresAt = Number(token.notBefore) + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1;
+      return request;
+    },
+    reason: /approval token lifetime ms/,
+  },
+  {
+    name: "rejects missing issuedTo",
+    mutate: (request) => {
+      Reflect.deleteProperty(tokenOf(request), "issuedTo");
+      return request;
+    },
+    reason: /approvalToken\/issuedTo: is required/,
+  },
+  {
+    name: "rejects invalid issuedTo",
+    mutate: (request) => {
+      tokenOf(request).issuedTo = "bad agent";
+      return request;
+    },
+    reason: /approvalToken\/issuedTo: not an AgentId/,
   },
   {
     name: "rejects missing signatures",
@@ -632,209 +747,31 @@ const APPROVAL_SUBMIT_FAILURE_CASES = [
       Reflect.deleteProperty(tokenOf(request), "signature");
       return request;
     },
-    reason: /approvalToken\.signature is required/,
+    reason: /approvalToken\/signature: is required/,
   },
   {
-    name: "rejects empty signatures",
+    name: "rejects non-object signatures",
     mutate: (request) => {
-      tokenOf(request).signature = "";
+      tokenOf(request).signature = "not-a-signature";
       return request;
     },
-    reason: /approvalToken\.signature must be a non-empty base64 string/,
+    reason: /approvalToken\/signature: must be an object/,
   },
   {
-    name: "rejects invalid-base64 signatures",
+    name: "rejects invalid-base64url assertion signatures",
     mutate: (request) => {
-      tokenOf(request).signature = "not base64!";
+      assertionOf(request).signature = "not base64!";
       return request;
     },
-    reason: /approvalToken\.signature must be a non-empty base64 string/,
+    reason: /approvalToken\/signature\/signature: must be a non-empty base64url string/,
   },
   {
-    name: "rejects unknown approval token claim keys",
+    name: "rejects oversized assertion signatures",
     mutate: (request) => {
-      claimsOf(request).extraClaimField = true;
+      assertionOf(request).signature = "A".repeat(MAX_WEBAUTHN_ASSERTION_FIELD_BYTES + 1);
       return request;
     },
-    reason: /extraClaimField.*not allowed/,
-  },
-  {
-    name: "rejects missing signerIdentity claims",
-    mutate: (request) => {
-      Reflect.deleteProperty(claimsOf(request), "signerIdentity");
-      return request;
-    },
-    reason: /approvalToken\.claims\.signerIdentity is required/,
-  },
-  {
-    name: "rejects non-string signerIdentity claims",
-    mutate: (request) => {
-      claimsOf(request).signerIdentity = 42;
-      return request;
-    },
-    reason: /approvalToken\.claims\.signerIdentity must be a string/,
-  },
-  {
-    name: "rejects missing role claims",
-    mutate: (request) => {
-      Reflect.deleteProperty(claimsOf(request), "role");
-      return request;
-    },
-    reason: /approvalToken\.claims\.role is required/,
-  },
-  {
-    name: "rejects invalid role claims",
-    mutate: (request) => {
-      claimsOf(request).role = "admin";
-      return request;
-    },
-    reason: /approvalToken\.claims\.role must be a valid approval role/,
-  },
-  {
-    name: "rejects missing claim receiptId",
-    mutate: (request) => {
-      Reflect.deleteProperty(claimsOf(request), "receiptId");
-      return request;
-    },
-    reason: /approvalToken\.claims\.receiptId is required/,
-  },
-  {
-    name: "rejects invalid claim receiptId",
-    mutate: (request) => {
-      claimsOf(request).receiptId = "not-a-receipt-id";
-      return request;
-    },
-    reason: /approvalToken\.claims\.receiptId must be an uppercase ULID ReceiptId/,
-  },
-  {
-    name: "rejects invalid optional writeId",
-    mutate: (request) => {
-      claimsOf(request).writeId = "bad write id";
-      return request;
-    },
-    reason: /approvalToken\.claims\.writeId must be a valid WriteId/,
-  },
-  {
-    name: "rejects missing frozenArgsHash claims",
-    mutate: (request) => {
-      Reflect.deleteProperty(claimsOf(request), "frozenArgsHash");
-      return request;
-    },
-    reason: /approvalToken\.claims\.frozenArgsHash is required/,
-  },
-  {
-    name: "rejects invalid frozenArgsHash claims",
-    mutate: (request) => {
-      claimsOf(request).frozenArgsHash = "not-a-sha";
-      return request;
-    },
-    reason: /approvalToken\.claims\.frozenArgsHash must be a sha256 hex digest/,
-  },
-  {
-    name: "rejects missing riskClass claims",
-    mutate: (request) => {
-      Reflect.deleteProperty(claimsOf(request), "riskClass");
-      return request;
-    },
-    reason: /approvalToken\.claims\.riskClass is required/,
-  },
-  {
-    name: "rejects invalid riskClass claims",
-    mutate: (request) => {
-      claimsOf(request).riskClass = "severe";
-      return request;
-    },
-    reason: /approvalToken\.claims\.riskClass must be a valid risk class/,
-  },
-  {
-    name: "rejects missing issuedAt claims",
-    mutate: (request) => {
-      Reflect.deleteProperty(claimsOf(request), "issuedAt");
-      return request;
-    },
-    reason: /approvalToken\.claims\.issuedAt is required/,
-  },
-  {
-    name: "rejects invalid issuedAt claims",
-    mutate: (request) => {
-      claimsOf(request).issuedAt = "2026-05-08T18:00:00.000Z";
-      return request;
-    },
-    reason: /approvalToken\.claims\.issuedAt must be a valid Date/,
-  },
-  {
-    name: "rejects missing expiresAt claims",
-    mutate: (request) => {
-      Reflect.deleteProperty(claimsOf(request), "expiresAt");
-      return request;
-    },
-    reason: /approvalToken\.claims\.expiresAt is required/,
-  },
-  {
-    name: "rejects invalid expiresAt claims",
-    mutate: (request) => {
-      claimsOf(request).expiresAt = "2026-05-08T18:30:00.000Z";
-      return request;
-    },
-    reason: /approvalToken\.claims\.expiresAt must be a valid Date/,
-  },
-  {
-    name: "rejects non-string optional WebAuthn assertions",
-    mutate: (request) => {
-      claimsOf(request).webauthnAssertion = 42;
-      return request;
-    },
-    reason: /approvalToken\.claims\.webauthnAssertion must be a string/,
-  },
-  {
-    name: "rejects high-risk claims without WebAuthn assertions",
-    mutate: (request) => {
-      claimsOf(request).riskClass = "high";
-      return request;
-    },
-    reason: /webauthnAssertion must be a non-empty string for high\/critical risk/,
-  },
-  {
-    name: "rejects critical-risk claims with empty WebAuthn assertions",
-    mutate: (request) => {
-      const claims = claimsOf(request);
-      claims.riskClass = "critical";
-      claims.webauthnAssertion = "";
-      return request;
-    },
-    reason: /webauthnAssertion must be a non-empty string for high\/critical risk/,
-  },
-  {
-    name: "rejects expiry equal to issuance",
-    mutate: (request) => {
-      const claims = claimsOf(request);
-      const issuedAt = new Date("2026-05-08T18:00:00.000Z");
-      claims.issuedAt = issuedAt;
-      claims.expiresAt = issuedAt;
-      return request;
-    },
-    reason: /expiresAt must be strictly after issuedAt/,
-  },
-  {
-    name: "rejects expiry before issuance",
-    mutate: (request) => {
-      const claims = claimsOf(request);
-      claims.issuedAt = new Date("2026-05-08T18:00:00.000Z");
-      claims.expiresAt = new Date("2026-05-08T17:59:59.999Z");
-      return request;
-    },
-    reason: /expiresAt must be strictly after issuedAt/,
-  },
-  {
-    name: "rejects lifetimes over the maximum cap",
-    mutate: (request) => {
-      const claims = claimsOf(request);
-      const issuedAt = new Date("2026-05-08T18:00:00.000Z");
-      claims.issuedAt = issuedAt;
-      claims.expiresAt = new Date(issuedAt.getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS + 1);
-      return request;
-    },
-    reason: /MAX_APPROVAL_TOKEN_LIFETIME_MS/,
+    reason: /approvalToken\/signature\/signature bytes/,
   },
 ] as const satisfies readonly ApprovalSubmitFailureCase[];
 
@@ -865,12 +802,11 @@ describe("approval submission IPC", () => {
 
   it.each([
     "writeId",
-    "webauthnAssertion",
   ] as const)("rejects optional claim %s accessors without invoking getters", (fieldName) => {
     let getterInvoked = false;
     const request = mutableApprovalRequestFor();
-    const claims = claimsOf(request);
-    Object.defineProperty(claims, fieldName, {
+    const claim = claimOf(request);
+    Object.defineProperty(claim, fieldName, {
       enumerable: true,
       get() {
         getterInvoked = true;
@@ -880,12 +816,12 @@ describe("approval submission IPC", () => {
 
     expectApprovalSubmitRejected(
       request,
-      new RegExp(`approvalToken\\.claims\\.${fieldName}.*data property`),
+      new RegExp(`approvalToken.*claim.*${fieldName}.*data property`),
     );
     expect(getterInvoked).toBe(false);
   });
 
-  it("validates request receiptId against token claims receiptId", () => {
+  it("validates request receiptId against token claim receiptId", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const otherReceiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAY");
     const approvalToken = approvalTokenFor(receiptId);
@@ -905,7 +841,7 @@ describe("approval submission IPC", () => {
       }),
     ).toEqual({
       ok: false,
-      reason: "receiptId must match approvalToken.claims.receiptId",
+      reason: "receiptId must match approvalToken.claim.receiptId",
     });
   });
 
@@ -927,20 +863,15 @@ describe("approval submission IPC", () => {
     }
   });
 
-  it("accepts approval token claims at the maximum lifetime cap", () => {
+  it("accepts approval tokens at the maximum lifetime cap", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const approvalToken = approvalTokenFor(receiptId);
-    const issuedAt = new Date("2026-05-08T18:00:00.000Z");
 
     expect(
       validateApprovalSubmitRequest(
         approvalRequestFor(receiptId, {
           ...approvalToken,
-          claims: {
-            ...approvalToken.claims,
-            issuedAt,
-            expiresAt: new Date(issuedAt.getTime() + MAX_APPROVAL_TOKEN_LIFETIME_MS),
-          },
+          expiresAt: asTimestampMs(approvalToken.notBefore + MAX_APPROVAL_TOKEN_LIFETIME_MS),
         }),
       ),
     ).toEqual({ ok: true });
@@ -948,77 +879,28 @@ describe("approval submission IPC", () => {
 
   it("accepts valid optional writeId claims", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    const approvalToken = approvalTokenFor(receiptId);
+    const approvalToken = approvalTokenFor(receiptId, { writeId: asWriteId("write_01") });
 
-    expect(
-      validateApprovalSubmitRequest(
-        approvalRequestFor(receiptId, {
-          ...approvalToken,
-          claims: {
-            ...approvalToken.claims,
-            writeId: asWriteId("write_01"),
-          },
-        }),
-      ),
-    ).toEqual({ ok: true });
+    expect(validateApprovalSubmitRequest(approvalRequestFor(receiptId, approvalToken))).toEqual({
+      ok: true,
+    });
   });
 
-  it("produces deterministic approval-claims signing bytes over ISO date projections", () => {
-    const baseIssuedAt = new Date("2026-05-08T18:00:00.000Z");
-
-    fc.assert(
-      fc.property(fc.integer({ min: 0, max: 999 }), (issuedMs) => {
-        const issuedAt = new Date(baseIssuedAt.getTime() + issuedMs);
-        const expiresAt = new Date(issuedAt.getTime() + 60_000);
-        const claims: ApprovalClaims = {
-          ...approvalTokenFor(asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV")).claims,
-          issuedAt,
-          expiresAt,
-        };
-        const expected = canonicalJSON({
-          signerIdentity: claims.signerIdentity,
-          role: claims.role,
-          receiptId: claims.receiptId,
-          frozenArgsHash: claims.frozenArgsHash,
-          riskClass: claims.riskClass,
-          issuedAt: issuedAt.toISOString(),
-          expiresAt: expiresAt.toISOString(),
-        });
-
-        expect(signingBytesText(claims)).toBe(expected);
-        expect(signingBytesText(claims)).toBe(signingBytesText(claims));
-      }),
-      { numRuns: 50 },
-    );
-  });
-
-  it("matches the approval-claims golden signing vector", () => {
-    const vector = approvalClaimsVectorNamed("approval_claims_high_write_bound");
-
-    expect(signingBytesText(approvalClaimsFromVector(vector))).toBe(vector.expected.signingBytes);
-  });
-
-  it("decodes approval submit JSON with ISO-string dates into the runtime Date shape", () => {
+  it("decodes approval submit JSON into the runtime numeric timestamp shape", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const token = approvalTokenFor(receiptId);
     const wire = approvalSubmitRequestWireFor(receiptId, token);
 
     const decoded = approvalSubmitRequestFromJson(wire);
 
-    expect(decoded.approvalToken.claims.issuedAt).toStrictEqual(token.claims.issuedAt);
-    expect(decoded.approvalToken.claims.expiresAt).toStrictEqual(token.claims.expiresAt);
+    expect(decoded.approvalToken.notBefore).toBe(token.notBefore);
+    expect(decoded.approvalToken.expiresAt).toBe(token.expiresAt);
+    expect(decoded.approvalToken.claim).toMatchObject({
+      kind: "receipt_co_sign",
+      receiptId,
+      frozenArgsHash: token.claim.frozenArgsHash,
+    });
     expect(validateApprovalSubmitRequest(decoded)).toEqual({ ok: true });
-    expect(signingBytesText(decoded.approvalToken.claims)).toBe(signingBytesText(token.claims));
-  });
-
-  it("rejects oversized signerIdentity claims while decoding approval submit JSON", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    const wire = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
-    wire.approvalToken.claims.signerIdentity = "x".repeat(MAX_SIGNER_IDENTITY_BYTES + 1);
-
-    expect(() => approvalSubmitRequestFromJson(wire)).toThrow(
-      /approvalSubmitRequest\.approvalToken\.claims\/signerIdentity: not a SignerIdentity/,
-    );
   });
 
   it("decodes snake_case approval submit wire JSON into the camelCase runtime shape", () => {
@@ -1033,11 +915,13 @@ describe("approval submission IPC", () => {
       receiptId,
       idempotencyKey: "approval-submit-01",
       approvalToken: {
-        signerKeyId: token.signerKeyId,
-        claims: {
-          signerIdentity: token.claims.signerIdentity,
+        tokenId: token.tokenId,
+        claim: {
+          kind: "receipt_co_sign",
           receiptId,
-          issuedAt: token.claims.issuedAt,
+        },
+        signature: {
+          credentialId: token.signature.credentialId,
         },
       },
     });
@@ -1046,24 +930,17 @@ describe("approval submission IPC", () => {
 
   it("decodes approval submit JSON with optional writeId claims", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    const token = approvalTokenFor(receiptId);
     const writeId = asWriteId("write_01");
-    const wire = approvalSubmitRequestWireFor(receiptId, {
-      ...token,
-      claims: {
-        ...token.claims,
-        writeId,
-      },
-    });
+    const wire = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId, { writeId }));
 
-    expect(approvalSubmitRequestFromJson(wire).approvalToken.claims.writeId).toBe(writeId);
+    expect(approvalSubmitRequestFromJson(wire).approvalToken.claim).toMatchObject({ writeId });
   });
 
   it("rejects approval submit JSON optional claim accessors without invoking getters", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const wire = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
     let getterInvoked = false;
-    Object.defineProperty(wire.approvalToken.claims, "writeId", {
+    Object.defineProperty(wire.approvalToken.claim, "writeId", {
       enumerable: true,
       get() {
         getterInvoked = true;
@@ -1075,17 +952,16 @@ describe("approval submission IPC", () => {
     expect(getterInvoked).toBe(false);
   });
 
-  it("rejects malformed approval submit JSON dates", () => {
+  it("rejects malformed approval submit JSON timestamps and assertions", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const wire = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
-    const token = wire.approvalToken;
-    token.claims.issuedAt = "2026-05-08T18:00:00Z";
+    wire.approvalToken.notBefore = "2026-05-08T18:00:00Z";
 
-    expect(() => approvalSubmitRequestFromJson(wire)).toThrow(/issuedAt.*ISO 8601/);
+    expect(() => approvalSubmitRequestFromJson(wire)).toThrow(/notBefore.*number/);
 
-    const invalidInstant = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
-    invalidInstant.approvalToken.claims.expiresAt = "2026-02-30T18:00:00.000Z";
-    expect(() => approvalSubmitRequestFromJson(invalidInstant)).toThrow(/expiresAt.*valid/);
+    const invalidSignature = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
+    invalidSignature.approvalToken.signature.signature = "not base64!";
+    expect(() => approvalSubmitRequestFromJson(invalidSignature)).toThrow(/signature.*base64url/);
   });
 
   it("rejects missing approval submit JSON fields", () => {
@@ -1094,19 +970,12 @@ describe("approval submission IPC", () => {
     Reflect.deleteProperty(missingReceiptId, "receiptId");
     expect(() => approvalSubmitRequestFromJson(missingReceiptId)).toThrow(/receiptId is required/);
 
-    const missingClaimDate = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
-    Reflect.deleteProperty(missingClaimDate.approvalToken.claims, "issuedAt");
-    expect(() => approvalSubmitRequestFromJson(missingClaimDate)).toThrow(/issuedAt is required/);
+    const missingClaim = approvalSubmitRequestWireFor(receiptId, approvalTokenFor(receiptId));
+    Reflect.deleteProperty(missingClaim.approvalToken, "claim");
+    expect(() => approvalSubmitRequestFromJson(missingClaim)).toThrow(/claim.*required/);
   });
 
   it.each([
-    {
-      name: "invalid token algorithm",
-      mutate: (wire: ApprovalSubmitRequestWire) => {
-        wire.approvalToken.algorithm = "rsa";
-      },
-      reason: /algorithm.*one of/,
-    },
     {
       name: "invalid request receiptId",
       mutate: (wire: ApprovalSubmitRequestWire) => {
@@ -1124,23 +993,30 @@ describe("approval submission IPC", () => {
     {
       name: "invalid optional writeId",
       mutate: (wire: ApprovalSubmitRequestWire) => {
-        wire.approvalToken.claims.writeId = "bad write";
+        wire.approvalToken.claim.writeId = "bad write";
       },
-      reason: /writeId.*valid WriteId/,
+      reason: /writeId.*not a WriteId/,
     },
     {
       name: "invalid frozenArgsHash",
       mutate: (wire: ApprovalSubmitRequestWire) => {
-        wire.approvalToken.claims.frozenArgsHash = "not-a-sha";
+        wire.approvalToken.claim.frozenArgsHash = "not-a-sha";
       },
       reason: /frozenArgsHash.*sha256/,
     },
     {
-      name: "non-string optional WebAuthn assertion",
+      name: "scope mismatch",
       mutate: (wire: ApprovalSubmitRequestWire) => {
-        wire.approvalToken.claims.webauthnAssertion = 42;
+        wire.approvalToken.scope.claimId = "claim_other";
       },
-      reason: /webauthnAssertion.*string/,
+      reason: /scope\/claimId.*claim\.claimId/,
+    },
+    {
+      name: "invalid issuedTo",
+      mutate: (wire: ApprovalSubmitRequestWire) => {
+        wire.approvalToken.issuedTo = "bad agent";
+      },
+      reason: /issuedTo.*AgentId/,
     },
   ])("rejects approval submit JSON with $name", ({ mutate, reason }) => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
@@ -1151,47 +1027,19 @@ describe("approval submission IPC", () => {
     expect(() => approvalSubmitRequestFromJson(wire)).toThrow(reason);
   });
 
-  it("enforces approval signature length before base64 regex validation", () => {
+  it("enforces WebAuthn assertion field length before base64url validation", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const token = approvalTokenFor(receiptId);
+    const assertionOverhead = canonicalJSON({ ...token.signature, signature: "" }).length;
+    const atTotalCapSignature = "A".repeat(MAX_WEBAUTHN_ASSERTION_BYTES - assertionOverhead);
 
     expect(
       validateApprovalSubmitRequest(
         approvalRequestFor(receiptId, {
           ...token,
-          signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES),
-        }),
-      ),
-    ).toEqual({ ok: true });
-
-    expect(
-      validateApprovalSubmitRequest(
-        approvalRequestFor(receiptId, {
-          ...token,
-          signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES + 1),
-        }),
-      ),
-    ).toEqual({
-      ok: false,
-      reason: "approvalToken.signature exceeds MAX_APPROVAL_SIGNATURE_BYTES",
-    });
-  });
-
-  it("enforces WebAuthn assertion length before high-risk non-empty validation", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    const token = approvalTokenFor(receiptId);
-    const highRiskClaims = {
-      ...token.claims,
-      riskClass: "high" as const,
-    };
-
-    expect(
-      validateApprovalSubmitRequest(
-        approvalRequestFor(receiptId, {
-          ...token,
-          claims: {
-            ...highRiskClaims,
-            webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES),
+          signature: {
+            ...token.signature,
+            signature: atTotalCapSignature,
           },
         }),
       ),
@@ -1201,45 +1049,24 @@ describe("approval submission IPC", () => {
       validateApprovalSubmitRequest(
         approvalRequestFor(receiptId, {
           ...token,
-          claims: {
-            ...highRiskClaims,
-            webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES + 1),
+          signature: {
+            ...token.signature,
+            signature: "A".repeat(MAX_WEBAUTHN_ASSERTION_FIELD_BYTES + 1),
           },
         }),
       ),
-    ).toEqual({
-      ok: false,
-      reason: "approvalToken.claims.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES",
-    });
-  });
-
-  it("enforces WebAuthn assertion byte caps for non-ASCII strings", () => {
-    const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    const token = approvalTokenFor(receiptId);
-    const highRiskClaims = {
-      ...token.claims,
-      riskClass: "high" as const,
-    };
-
-    for (const webauthnAssertion of [
-      "é".repeat(MAX_WEBAUTHN_ASSERTION_BYTES / 2 + 1),
-      "😀".repeat(MAX_WEBAUTHN_ASSERTION_BYTES / 4 + 1),
-      "\ud800".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 3) + 1),
-    ]) {
-      expect(
-        validateApprovalSubmitRequest(
-          approvalRequestFor(receiptId, {
-            ...token,
-            claims: {
-              ...highRiskClaims,
-              webauthnAssertion,
-            },
-          }),
-        ),
-      ).toEqual({
-        ok: false,
-        reason: "approvalToken.claims.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES",
-      });
+    ).toMatchObject({ ok: false });
+    const result = validateApprovalSubmitRequest(
+      approvalRequestFor(receiptId, {
+        ...token,
+        signature: {
+          ...token.signature,
+          signature: "A".repeat(MAX_WEBAUTHN_ASSERTION_FIELD_BYTES + 1),
+        },
+      }),
+    );
+    if (!result.ok) {
+      expect(result.reason).toMatch(/approvalToken\/signature\/signature bytes/);
     }
   });
 
@@ -1679,103 +1506,65 @@ function isDocumentedPort(port: string): boolean {
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 65535;
 }
 
-interface ApprovalClaimsVector {
-  readonly name: string;
-  readonly input: {
-    readonly signerIdentity: string;
-    readonly role: ApprovalClaims["role"];
-    readonly receiptId: string;
-    readonly writeId?: string;
-    readonly frozenArgsHash: string;
-    readonly riskClass: RiskClass;
-    readonly issuedAt: string;
-    readonly expiresAt: string;
-    readonly webauthnAssertion?: string;
-  };
-  readonly expected: {
-    readonly signingBytes: string;
-  };
-}
-
-interface ApprovalClaimsVectorFixture {
-  readonly approvalClaimsVectors: readonly ApprovalClaimsVector[];
-}
-
 interface ApprovalSubmitRequestWire {
   receiptId?: string;
   approvalToken: {
-    claims: Record<string, unknown> & {
-      signerIdentity?: unknown;
-      issuedAt?: unknown;
-      expiresAt?: unknown;
+    schemaVersion?: unknown;
+    tokenId?: unknown;
+    claim: Record<string, unknown> & {
+      schemaVersion?: unknown;
+      claimId?: unknown;
+      kind?: unknown;
+      receiptId?: unknown;
       writeId?: unknown;
       frozenArgsHash?: unknown;
-      webauthnAssertion?: unknown;
+      riskClass?: unknown;
     };
-    algorithm: string;
-    signerKeyId: string;
-    signature: string;
+    scope: Record<string, unknown> & {
+      mode?: unknown;
+      claimId?: unknown;
+      claimKind?: unknown;
+      role?: unknown;
+      maxUses?: unknown;
+      receiptId?: unknown;
+      writeId?: unknown;
+      frozenArgsHash?: unknown;
+    };
+    notBefore?: unknown;
+    expiresAt?: unknown;
+    issuedTo?: unknown;
+    signature: Record<string, unknown> & {
+      credentialId?: unknown;
+      authenticatorData?: unknown;
+      clientDataJson?: unknown;
+      signature?: unknown;
+      userHandle?: unknown;
+    };
   };
   idempotencyKey: string;
 }
 
-function signingBytesText(claims: ApprovalClaims): string {
-  return TEXT_DECODER.decode(approvalClaimsToSigningBytes(claims));
-}
-
-function approvalClaimsVectorNamed(name: string): ApprovalClaimsVector {
-  const fixture = JSON.parse(
-    readFileSync(new URL("../testdata/audit-event-vectors.json", import.meta.url), "utf8"),
-  ) as ApprovalClaimsVectorFixture;
-  const vector = fixture.approvalClaimsVectors.find((candidate) => candidate.name === name);
-  if (vector === undefined) {
-    throw new Error(`missing approval claims vector: ${name}`);
-  }
-  return vector;
-}
-
-function approvalClaimsFromVector(vector: ApprovalClaimsVector): ApprovalClaims {
-  const { input } = vector;
-  return {
-    signerIdentity: asSignerIdentity(input.signerIdentity),
-    role: input.role,
-    receiptId: asReceiptId(input.receiptId),
-    ...(input.writeId === undefined ? {} : { writeId: asWriteId(input.writeId) }),
-    frozenArgsHash: asSha256Hex(input.frozenArgsHash),
-    riskClass: input.riskClass,
-    issuedAt: new Date(input.issuedAt),
-    expiresAt: new Date(input.expiresAt),
-    ...(input.webauthnAssertion === undefined
-      ? {}
-      : { webauthnAssertion: input.webauthnAssertion }),
-  };
-}
+type ReceiptCoSignToken = SignedApprovalToken & {
+  readonly claim: Extract<SignedApprovalToken["claim"], { readonly kind: "receipt_co_sign" }>;
+  readonly scope: Extract<SignedApprovalToken["scope"], { readonly claimKind: "receipt_co_sign" }>;
+};
 
 function approvalSubmitRequestWireFor(
   receiptId: ReceiptId,
   approvalToken: SignedApprovalToken,
 ): ApprovalSubmitRequestWire {
-  const { claims } = approvalToken;
   return {
     receiptId,
     idempotencyKey: "approval-submit-01",
     approvalToken: {
-      claims: {
-        signerIdentity: claims.signerIdentity,
-        role: claims.role,
-        receiptId: claims.receiptId,
-        ...(claims.writeId === undefined ? {} : { writeId: claims.writeId }),
-        frozenArgsHash: claims.frozenArgsHash,
-        riskClass: claims.riskClass,
-        issuedAt: claims.issuedAt.toISOString(),
-        expiresAt: claims.expiresAt.toISOString(),
-        ...(claims.webauthnAssertion === undefined
-          ? {}
-          : { webauthnAssertion: claims.webauthnAssertion }),
-      },
-      algorithm: approvalToken.algorithm,
-      signerKeyId: approvalToken.signerKeyId,
-      signature: approvalToken.signature,
+      schemaVersion: approvalToken.schemaVersion,
+      tokenId: approvalToken.tokenId,
+      claim: { ...approvalToken.claim },
+      scope: { ...approvalToken.scope },
+      notBefore: approvalToken.notBefore,
+      expiresAt: approvalToken.expiresAt,
+      issuedTo: approvalToken.issuedTo,
+      signature: { ...approvalToken.signature },
     },
   };
 }
@@ -1784,27 +1573,18 @@ function snakeCaseApprovalSubmitRequestWireFor(
   receiptId: ReceiptId,
   approvalToken: SignedApprovalToken,
 ): Record<string, unknown> {
-  const { claims } = approvalToken;
   return {
     receipt_id: receiptId,
     idempotency_key: "approval-submit-01",
     approval_token: {
-      claims: {
-        signer_identity: claims.signerIdentity,
-        role: claims.role,
-        receipt_id: claims.receiptId,
-        ...(claims.writeId === undefined ? {} : { write_id: claims.writeId }),
-        frozen_args_hash: claims.frozenArgsHash,
-        risk_class: claims.riskClass,
-        issued_at: claims.issuedAt.toISOString(),
-        expires_at: claims.expiresAt.toISOString(),
-        ...(claims.webauthnAssertion === undefined
-          ? {}
-          : { webauthn_assertion: claims.webauthnAssertion }),
-      },
-      algorithm: approvalToken.algorithm,
-      signer_key_id: approvalToken.signerKeyId,
-      signature: approvalToken.signature,
+      schemaVersion: approvalToken.schemaVersion,
+      tokenId: approvalToken.tokenId,
+      claim: { ...approvalToken.claim },
+      scope: { ...approvalToken.scope },
+      notBefore: approvalToken.notBefore,
+      expiresAt: approvalToken.expiresAt,
+      issuedTo: approvalToken.issuedTo,
+      signature: { ...approvalToken.signature },
     },
   };
 }
@@ -1818,8 +1598,14 @@ function mutableApprovalRequestFor(
     idempotencyKey: asIdempotencyKey("approval-submit-01"),
     approvalToken: {
       ...approvalToken,
-      claims: {
-        ...approvalToken.claims,
+      claim: {
+        ...approvalToken.claim,
+      },
+      scope: {
+        ...approvalToken.scope,
+      },
+      signature: {
+        ...approvalToken.signature,
       },
     },
   };
@@ -1832,12 +1618,28 @@ function tokenOf(request: MutableApprovalRequest): MutableApprovalToken {
   return request.approvalToken;
 }
 
-function claimsOf(request: MutableApprovalRequest): MutableApprovalClaims {
-  const claims = tokenOf(request).claims;
-  if (!isMutableRecord(claims)) {
-    throw new Error("test fixture expected approvalToken.claims to be a record");
+function claimOf(request: MutableApprovalRequest): MutableApprovalClaim {
+  const claim = tokenOf(request).claim;
+  if (!isMutableRecord(claim)) {
+    throw new Error("test fixture expected approvalToken.claim to be a record");
   }
-  return claims;
+  return claim;
+}
+
+function scopeOf(request: MutableApprovalRequest): MutableApprovalScope {
+  const scope = tokenOf(request).scope;
+  if (!isMutableRecord(scope)) {
+    throw new Error("test fixture expected approvalToken.scope to be a record");
+  }
+  return scope;
+}
+
+function assertionOf(request: MutableApprovalRequest): MutableWebAuthnAssertion {
+  const signature = tokenOf(request).signature;
+  if (!isMutableRecord(signature)) {
+    throw new Error("test fixture expected approvalToken.signature to be a record");
+  }
+  return signature;
 }
 
 function isMutableRecord(value: unknown): value is Record<string, unknown> {
@@ -1860,19 +1662,43 @@ function expectApprovalSubmitRejected(request: unknown, reason: RegExp): void {
   }
 }
 
-function approvalTokenFor(receiptId: ReceiptId): SignedApprovalToken {
+function approvalTokenFor(
+  receiptId: ReceiptId,
+  options: { readonly writeId?: ReturnType<typeof asWriteId> } = {},
+): ReceiptCoSignToken {
+  const frozenArgsHash = sha256Hex("approval-submit-frozen-args");
+  const claimId = asApprovalClaimId("claim_receipt_cosign_01");
   return {
-    claims: {
-      signerIdentity: asSignerIdentity("fran@example.com"),
-      role: "approver",
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01HX6P2D8T4Y7K9M3N5Q1R6S2V"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "receipt_co_sign",
       receiptId,
-      frozenArgsHash: sha256Hex("approval-submit-frozen-args"),
+      ...(options.writeId === undefined ? {} : { writeId: options.writeId }),
+      frozenArgsHash,
       riskClass: "low",
-      issuedAt: new Date("2026-05-08T18:00:00.000Z"),
-      expiresAt: new Date("2026-05-08T18:30:00.000Z"),
     },
-    algorithm: "ed25519",
-    signerKeyId: "key_ed25519_01",
-    signature: "YXBwcm92YWwtdG9rZW4tc2lnbmF0dXJl",
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "receipt_co_sign",
+      role: "approver",
+      maxUses: 1,
+      receiptId,
+      ...(options.writeId === undefined ? {} : { writeId: options.writeId }),
+      frozenArgsHash,
+    },
+    notBefore: asTimestampMs(Date.UTC(2026, 4, 8, 18, 0, 0, 0)),
+    expiresAt: asTimestampMs(Date.UTC(2026, 4, 8, 18, 30, 0, 0)),
+    issuedTo: asAgentId("agent_alpha"),
+    signature: {
+      credentialId: "Y3JlZGVudGlhbC0wMQ",
+      authenticatorData: "YXV0aGVudGljYXRvci1kYXRh",
+      clientDataJson: "Y2xpZW50LWRhdGEtanNvbg",
+      signature: "c2lnbmF0dXJl",
+      userHandle: "dXNlci0wMQ",
+    },
   };
 }

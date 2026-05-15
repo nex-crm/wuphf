@@ -1,5 +1,4 @@
 import type { FrozenArgs } from "./frozen-args.ts";
-import type { ApprovalClaims } from "./receipt-types.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
 
 export type BudgetValidationResult = { ok: true } | { ok: false; reason: string };
@@ -124,11 +123,57 @@ export const MAX_MERKLE_ROOT_CERT_CHAIN_BYTES = 64 * 1024;
 export const MAX_APPROVAL_TOKEN_LIFETIME_MS = 30 * 60 * 1000;
 
 /**
- * Ed25519 signatures are 64 raw bytes (roughly 88 base64 chars). 4 KiB leaves
- * room for envelope/version metadata while failing attacker-sized strings
- * before regex scans or downstream signature verification.
+ * Approval token ids are ULID-shaped challenge handles: 26 ASCII bytes.
  */
-export const MAX_APPROVAL_SIGNATURE_BYTES = 4 * 1024;
+export const MAX_APPROVAL_TOKEN_ID_BYTES = 26;
+
+/**
+ * Claim ids are broker-local replay/accounting handles, not payload storage.
+ * 128 bytes matches receipt-local ids while keeping signed claim keys compact.
+ */
+export const MAX_APPROVAL_CLAIM_ID_BYTES = 128;
+
+/**
+ * Existing branded ids carried inside approval tokens already have stricter
+ * regex shapes. This cap gives the approval codec a shared UTF-8 byte guard
+ * before brand-specific validation runs.
+ */
+export const MAX_APPROVAL_IDENTIFIER_BYTES = 256;
+
+/**
+ * Approval claim canonical JSON is the human-reviewed and challenge-bound
+ * projection. 64 KiB leaves room for substantial review context while bounding
+ * canonicalization before WebAuthn verification.
+ */
+export const MAX_APPROVAL_CLAIM_CANONICAL_JSON_BYTES = 64 * 1024;
+
+/**
+ * Approval scope canonical JSON is the replay target projection. It should be
+ * narrower than the claim; 8 KiB is enough for endpoint origins, credential
+ * handles, and receipt/write ids without turning scope into payload storage.
+ */
+export const MAX_APPROVAL_SCOPE_CANONICAL_JSON_BYTES = 8 * 1024;
+
+/**
+ * Cost ceiling ids and approval reasons are signed text fields. Keep them
+ * bounded independently so malformed values fail before full claim
+ * canonicalization.
+ */
+export const MAX_APPROVAL_COST_CEILING_ID_BYTES = 128;
+export const MAX_APPROVAL_REASON_BYTES = 8 * 1024;
+
+/**
+ * Endpoint origins are URLs, not request bodies. Reuse the runner endpoint
+ * scale so allowlist approval cannot smuggle large transport metadata.
+ */
+export const MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES = 2 * 1024;
+
+/**
+ * WebAuthn assertion members are base64url strings. The total assertion budget
+ * is the wire contract; the per-field cap exists so each string is budgeted
+ * through this module before regex validation.
+ */
+export const MAX_WEBAUTHN_ASSERTION_FIELD_BYTES = 16 * 1024;
 
 /**
  * WebAuthn assertions are usually a few KiB. 16 KiB gives authenticators room
@@ -494,11 +539,81 @@ export function validateMerkleRootCertChainBudget(certChainPem: string): BudgetV
   );
 }
 
-export function validateApprovalTokenLifetime(claims: ApprovalClaims): BudgetValidationResult {
-  const issuedAt = objectProperty(claims, "issuedAt");
-  const expiresAt = objectProperty(claims, "expiresAt");
-  if (!(issuedAt instanceof Date) || !(expiresAt instanceof Date)) return { ok: true };
-  return validateApprovalTokenLifetimeValues(issuedAt, expiresAt);
+export function validateApprovalTokenIdBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_TOKEN_ID_BYTES, "ApprovalTokenId bytes");
+}
+
+export function validateApprovalClaimIdBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_CLAIM_ID_BYTES, "ApprovalClaimId bytes");
+}
+
+export function validateApprovalIdentifierBudget(
+  value: string,
+  label: string,
+): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_IDENTIFIER_BYTES, label);
+}
+
+export function validateApprovalClaimCanonicalJsonBudget(
+  canonicalJson: string,
+): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    canonicalJson,
+    MAX_APPROVAL_CLAIM_CANONICAL_JSON_BYTES,
+    "ApprovalClaim canonical JSON bytes",
+  );
+}
+
+export function validateApprovalScopeCanonicalJsonBudget(
+  canonicalJson: string,
+): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    canonicalJson,
+    MAX_APPROVAL_SCOPE_CANONICAL_JSON_BYTES,
+    "ApprovalScope canonical JSON bytes",
+  );
+}
+
+export function validateApprovalCostCeilingIdBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    value,
+    MAX_APPROVAL_COST_CEILING_ID_BYTES,
+    "ApprovalClaim.costCeilingId bytes",
+  );
+}
+
+export function validateApprovalEndpointOriginBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    value,
+    MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES,
+    "ApprovalClaim.endpointOrigin bytes",
+  );
+}
+
+export function validateApprovalReasonBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_REASON_BYTES, "ApprovalClaim.reason bytes");
+}
+
+export function validateWebAuthnAssertionFieldBudget(
+  value: string,
+  label: string,
+): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_WEBAUTHN_ASSERTION_FIELD_BYTES, label);
+}
+
+export function validateWebAuthnAssertionBudget(canonicalJson: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    canonicalJson,
+    MAX_WEBAUTHN_ASSERTION_BYTES,
+    "WebAuthnAssertion canonical JSON bytes",
+  );
+}
+
+export function validateApprovalTokenLifetime(value: {
+  readonly notBefore: number;
+  readonly expiresAt: number;
+}): BudgetValidationResult {
+  return validateApprovalTokenLifetimeValues(value.notBefore, value.expiresAt);
 }
 
 function validateReceiptCollectionBudgets(receipt: unknown): BudgetValidationResult {
@@ -673,51 +788,33 @@ function validateMaybeSignedApprovalTokenBudget(
   value: unknown,
   label: string,
 ): BudgetValidationResult {
-  const signature = stringProperty(value, "signature");
+  const signature = objectProperty(value, "signature");
   if (signature !== undefined) {
-    const signatureBudget = validateUtf8StringBudget(
+    const assertionBudget = validateMaybeWebAuthnAssertionBudget(
       signature,
-      MAX_APPROVAL_SIGNATURE_BYTES,
-      "approvalToken.signature bytes",
-    );
-    if (!signatureBudget.ok) return prefixBudgetReason(label, signatureBudget);
-  }
-
-  const claims = objectProperty(value, "claims");
-  if (claims === undefined) return { ok: true };
-
-  const webauthnAssertion = stringProperty(claims, "webauthnAssertion");
-  if (webauthnAssertion !== undefined) {
-    const assertionBudget = validateUtf8StringBudget(
-      webauthnAssertion,
-      MAX_WEBAUTHN_ASSERTION_BYTES,
-      "approvalToken.claims.webauthnAssertion bytes",
+      "approvalToken.signature",
     );
     if (!assertionBudget.ok) return prefixBudgetReason(label, assertionBudget);
   }
 
-  const issuedAt = objectProperty(claims, "issuedAt");
-  const expiresAt = objectProperty(claims, "expiresAt");
-  if (!(issuedAt instanceof Date) || !(expiresAt instanceof Date)) return { ok: true };
-  const result = validateApprovalTokenLifetimeValues(issuedAt, expiresAt);
+  const notBefore = objectProperty(value, "notBefore");
+  const expiresAt = objectProperty(value, "expiresAt");
+  if (typeof notBefore !== "number" || typeof expiresAt !== "number") return { ok: true };
+  const result = validateApprovalTokenLifetimeValues(notBefore, expiresAt);
   return result.ok ? result : prefixBudgetReason(label, result);
 }
 
 export function validateApprovalTokenLifetimeValues(
-  issuedAt: Date,
-  expiresAt: Date,
+  notBefore: number,
+  expiresAt: number,
 ): BudgetValidationResult {
-  const lifetimeMs = expiresAt.getTime() - issuedAt.getTime();
+  const lifetimeMs = expiresAt - notBefore;
   if (!Number.isFinite(lifetimeMs)) {
     return { ok: false, reason: "approval token lifetime must be finite" };
   }
-  // Lower-bound enforcement (strict `expiresAt > issuedAt`) lives in the
-  // per-field validators: `validateApprovalClaims` in receipt-validator.ts
-  // and `validateApprovalClaimsShape` in ipc.ts. Both surface path-anchored
-  // errors at `/approvals/N/signedToken/claims/expiresAt` (or the IPC
-  // equivalent). This budget validator owns only the upper bound — the
-  // 30-minute cap. Duplicating the lower bound here would short-circuit the
-  // per-field error path with a less useful top-level message at path "".
+  // Lower-bound enforcement (strict `expiresAt > notBefore`) lives in the
+  // signed-approval-token codec so it can report the exact field path. This
+  // budget validator owns only the upper bound — the 30-minute cap.
   if (lifetimeMs <= 0) {
     return { ok: true };
   }
@@ -727,6 +824,26 @@ export function validateApprovalTokenLifetimeValues(
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+function validateMaybeWebAuthnAssertionBudget(
+  value: unknown,
+  label: string,
+): BudgetValidationResult {
+  if (typeof value !== "object" || value === null) return { ok: true };
+  for (const field of [
+    "credentialId",
+    "authenticatorData",
+    "clientDataJson",
+    "signature",
+    "userHandle",
+  ]) {
+    const fieldValue = stringProperty(value, field);
+    if (fieldValue === undefined) continue;
+    const result = validateWebAuthnAssertionFieldBudget(fieldValue, `${label}.${field} bytes`);
+    if (!result.ok) return result;
+  }
+  return { ok: true };
 }
 
 function arrayOrEmpty(value: unknown): readonly unknown[] {
