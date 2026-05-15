@@ -357,6 +357,60 @@ describe("SanitizedString", () => {
         { numRuns: MOAT_NUM_RUNS },
       );
     });
+
+    it.each([
+      { label: "U+115F HANGUL CHOSEONG FILLER", codePoint: 0x115f },
+      { label: "U+1160 HANGUL JUNGSEONG FILLER", codePoint: 0x1160 },
+      { label: "U+034F COMBINING GRAPHEME JOINER", codePoint: 0x034f },
+      { label: "U+FE0F VARIATION SELECTOR-16", codePoint: 0xfe0f },
+      { label: "U+E0100 VARIATION SELECTOR-17", codePoint: 0xe0100 },
+      { label: "U+17B4 KHMER VOWEL INHERENT AQ", codePoint: 0x17b4 },
+    ])("strips $label — a default-ignorable the denylist + \\p{C} both miss", ({ codePoint }) => {
+      const ch = String.fromCodePoint(codePoint);
+      // Prove the regex distinction: \p{C} alone would NOT catch this.
+      expect(/\p{C}/u.test(ch)).toBe(false);
+      expect(/\p{Default_Ignorable_Code_Point}/u.test(ch)).toBe(true);
+      // Default policy keeps it; the moat strips it.
+      expect(SanitizedString.fromUnknown(`a${ch}b`).value).toBe(`a${ch}b`);
+      expect(SanitizedString.fromUnknown(`a${ch}b`, opts).value).toBe("ab");
+    });
+
+    it("never lets any default-ignorable code point through", () => {
+      fc.assert(
+        fc.property(sanitizableStringArb, (input) => {
+          const out = SanitizedString.fromUnknown(input, opts).value;
+          expect(/[\p{C}\p{Default_Ignorable_Code_Point}]/u.test(out)).toBe(false);
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+  });
+
+  describe("policy validation", () => {
+    it("throws on an unknown policy string instead of silently using the default", () => {
+      // The security-critical failure mode: an untyped caller passes a typo
+      // ("allow-list") and silently gets the weaker default denylist. The
+      // sanitizer must fail closed.
+      expect(() =>
+        SanitizedString.fromUnknown("x", { policy: "allow-list" as SanitizedStringPolicy }),
+      ).toThrow(/unknown policy "allow-list"/);
+      expect(() =>
+        SanitizedString.fromUnknown("x", { policy: "" as SanitizedStringPolicy }),
+      ).toThrow(/unknown policy/);
+    });
+
+    it("accepts every declared policy without throwing", () => {
+      const policies: readonly SanitizedStringPolicy[] = [
+        "strip-zero-width",
+        "allow-zwj",
+        "allowlist",
+      ];
+      for (const policy of policies) {
+        expect(SanitizedString.fromUnknown("ok", { policy }).value).toBe("ok");
+      }
+      // Absent policy → default, no throw.
+      expect(SanitizedString.fromUnknown("ok").value).toBe("ok");
+    });
   });
 
   it.each([
@@ -821,6 +875,16 @@ function isExpectedDisallowedCodePoint(codePoint: number, policy: SanitizedStrin
 
   // Mirrors production: U+180E + U+2060..U+2064 invisible format chars.
   if (codePoint === 0x180e || (codePoint >= 0x2060 && codePoint <= 0x2064)) {
+    return true;
+  }
+
+  // Mirrors production's `allowlist` (moat) branch: strip every `C*` AND
+  // every Default_Ignorable_Code_Point. Kept in sync with `MOAT_DISALLOWED_RE`
+  // in src/sanitized-string.ts — if that regex changes, this oracle must too.
+  if (
+    policy === "allowlist" &&
+    /[\p{C}\p{Default_Ignorable_Code_Point}]/u.test(String.fromCodePoint(codePoint))
+  ) {
     return true;
   }
 
