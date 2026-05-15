@@ -18,12 +18,13 @@ import {
   type AuditEventRecord,
   apiBootstrapFromJson,
   apiBootstrapToJson,
-  approvalClaimsToSigningBytes,
   approvalSubmitRequestFromJson,
   asAgentId,
   asAgentSlug,
   asApiToken,
+  asApprovalClaimId,
   asApprovalId,
+  asApprovalTokenId,
   asBudgetId,
   asCredentialHandleId,
   asCredentialScope,
@@ -36,6 +37,7 @@ import {
   asTaskId,
   asThreadId,
   asThreadSpecRevisionId,
+  asTimestampMs,
   asToolCallId,
   asWriteId,
   BUDGET_SCOPE_VALUES,
@@ -64,14 +66,13 @@ import {
   isStreamEventKind,
   isWsFrameType,
   lsnFromV1Number,
-  MAX_APPROVAL_SIGNATURE_BYTES,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_BUDGET_THRESHOLD_BPS,
   MAX_BUDGET_THRESHOLDS,
   MAX_COST_EVENT_AMOUNT_MICRO_USD,
   MAX_COST_MODEL_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
-  MAX_WEBAUTHN_ASSERTION_BYTES,
+  MAX_WEBAUTHN_ASSERTION_FIELD_BYTES,
   MINIMUM_PROTOCOL_VERSION_FOR_PROVIDER_KIND,
   type ReceiptSnapshot,
   RUNNER_FAILURE_CODE_VALUES,
@@ -85,6 +86,7 @@ import {
   STREAM_EVENT_KIND_VALUES,
   serializeAuditEventRecordForHash,
   sha256Hex,
+  signedApprovalTokenToJsonValue,
   type ThreadSpecEditedAuditPayload,
   type ThreadStreamEvent,
   threadAuditPayloadToBytes,
@@ -454,9 +456,9 @@ const writeIdMismatch = JSON.parse(receiptToJson(buildValidReceipt())) as {
 };
 const writeWithToken = nonNull(writeIdMismatch.writes[0], "writeIdMismatch.writes[0]");
 const tokenWithWrongWriteId = JSON.parse(JSON.stringify(writeWithToken.approvalToken)) as {
-  claims: Record<string, unknown>;
+  claim: Record<string, unknown>;
 };
-tokenWithWrongWriteId.claims.writeId = "write_wrong_target";
+tokenWithWrongWriteId.claim.writeId = "write_wrong_target";
 writeWithToken.approvalToken = tokenWithWrongWriteId;
 expectThrows(() => receiptFromJson(JSON.stringify(writeIdMismatch)), /writeId.*must match/);
 
@@ -470,15 +472,15 @@ const goodReq = {
   approvalToken: validToken,
   idempotencyKey: asIdempotencyKey("submit-01"),
 };
-expectEqual("matched receiptId/claims", validateApprovalSubmitRequest(goodReq), { ok: true });
+expectEqual("matched receiptId/claim", validateApprovalSubmitRequest(goodReq), { ok: true });
 
 const badReq = {
   ...goodReq,
   receiptId: asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
 };
-expectEqual("mismatched receiptId/claims", validateApprovalSubmitRequest(badReq), {
+expectEqual("mismatched receiptId/claim", validateApprovalSubmitRequest(badReq), {
   ok: false,
-  reason: "receiptId must match approvalToken.claims.receiptId",
+  reason: "receiptId must match approvalToken.claim.receiptId",
 });
 
 const emptyKeyReq = { ...goodReq, idempotencyKey: "" };
@@ -487,21 +489,17 @@ expectEqual("empty idempotencyKey rejected", validateApprovalSubmitRequest(empty
   reason: "idempotencyKey must match /^[A-Za-z0-9_-]{1,128}$/",
 });
 
-const missingAlgorithmReq = {
+const missingTokenIdReq = {
   ...goodReq,
   approvalToken: {
     ...validToken,
-    algorithm: undefined,
+    tokenId: undefined,
   },
 };
-expectEqual(
-  "missing token algorithm rejected",
-  validateApprovalSubmitRequest(missingAlgorithmReq),
-  {
-    ok: false,
-    reason: "approvalToken.algorithm is required",
-  },
-);
+expectEqual("missing tokenId rejected", validateApprovalSubmitRequest(missingTokenIdReq), {
+  ok: false,
+  reason: "approvalToken/tokenId: is required",
+});
 
 // ──────────────────────────────────────────────────────────────────────────
 header(12, "EventLsn safe-integer bound (writer ⟷ verifier round-trip)");
@@ -583,59 +581,55 @@ expectEqual(
 expectEqual("Remote with port rejected", isLoopbackRemoteAddress("127.0.0.1:1234"), false);
 
 // ──────────────────────────────────────────────────────────────────────────
-header(17, "IPC wire codecs pin approval signing bytes and runtime guards");
+header(17, "IPC wire codecs pin WebAuthn approval tokens and runtime guards");
 // ──────────────────────────────────────────────────────────────────────────
-const signingBytes = textDecoder.decode(approvalClaimsToSigningBytes(validToken.claims));
-expectEqual(
-  "approval signing bytes include ISO issuedAt",
-  signingBytes.includes('"issuedAt":"2026-05-08T18:00:00.000Z"'),
-  true,
-);
 const approvalSubmitWire = {
   receiptId: validReceipt.id,
   idempotencyKey: "submit-01",
-  approvalToken: {
-    ...validToken,
-    claims: {
-      ...validToken.claims,
-      issuedAt: validToken.claims.issuedAt.toISOString(),
-      expiresAt: validToken.claims.expiresAt.toISOString(),
-    },
-  },
+  approvalToken: signedApprovalTokenToJsonValue(validToken),
 };
 const decodedSubmit = approvalSubmitRequestFromJson(approvalSubmitWire);
 expectEqual(
-  "approvalSubmitRequestFromJson parses Date claims",
-  decodedSubmit.approvalToken.claims.issuedAt instanceof Date,
-  true,
+  "approvalSubmitRequestFromJson preserves caller-supplied notBefore",
+  decodedSubmit.approvalToken.notBefore,
+  validToken.notBefore,
 );
 expectEqual("decoded submit request validates", validateApprovalSubmitRequest(decodedSubmit), {
   ok: true,
 });
 expectEqual(
-  "oversized signature rejected before regex",
-  validateApprovalSubmitRequest({
-    ...goodReq,
-    approvalToken: { ...validToken, signature: "A".repeat(MAX_APPROVAL_SIGNATURE_BYTES + 1) },
-  }),
-  { ok: false, reason: "approvalToken.signature exceeds MAX_APPROVAL_SIGNATURE_BYTES" },
-);
-expectEqual(
-  "oversized WebAuthn assertion rejected",
+  "oversized assertion signature rejected before regex",
   validateApprovalSubmitRequest({
     ...goodReq,
     approvalToken: {
       ...validToken,
-      claims: {
-        ...validToken.claims,
-        riskClass: "high",
-        webauthnAssertion: "x".repeat(MAX_WEBAUTHN_ASSERTION_BYTES + 1),
+      signature: {
+        ...validToken.signature,
+        signature: "A".repeat(MAX_WEBAUTHN_ASSERTION_FIELD_BYTES + 1),
       },
     },
   }),
   {
     ok: false,
-    reason: "approvalToken.claims.webauthnAssertion exceeds MAX_WEBAUTHN_ASSERTION_BYTES",
+    reason:
+      "approvalToken/signature/signature: approvalToken/signature/signature bytes exceeds budget: 16385 > 16384",
+  },
+);
+expectEqual(
+  "malformed WebAuthn assertion rejected",
+  validateApprovalSubmitRequest({
+    ...goodReq,
+    approvalToken: {
+      ...validToken,
+      signature: {
+        ...validToken.signature,
+        signature: "not base64!",
+      },
+    },
+  }),
+  {
+    ok: false,
+    reason: "approvalToken/signature/signature: must be a non-empty base64url string",
   },
 );
 expectEqual(
@@ -1260,23 +1254,39 @@ function buildValidReceipt(): ReceiptSnapshot {
   const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
   const writeId = asWriteId("write_01");
   const proposedDiff = FrozenArgs.freeze({ amount: { from: 1000, to: 1500 } });
-  const claims = {
-    signerIdentity: asSignerIdentity("fd@example.com"),
-    role: "approver" as const,
-    receiptId,
-    writeId,
-    frozenArgsHash: proposedDiff.hash,
-    riskClass: "high" as const,
-    issuedAt: new Date("2026-05-08T18:00:00.000Z"),
-    expiresAt: new Date("2026-05-08T18:30:00.000Z"),
-    webauthnAssertion: "webauthn-attestation-blob",
-  };
+  const claimId = asApprovalClaimId("claim_demo_receipt_cosign_01");
   const signedToken = {
-    claims,
-    algorithm: "ed25519" as const,
-    signerKeyId: "key-01",
-    // Demo only — real broker would produce a real Ed25519 detached signature.
-    signature: "ZmFrZS1zaWduYXR1cmUtZm9yLWRlbW8tcHVycG9zZXM=",
+    schemaVersion: 1 as const,
+    tokenId: asApprovalTokenId("01HX6P2D8T4Y7K9M3N5Q1R6S2V"),
+    claim: {
+      schemaVersion: 1 as const,
+      claimId,
+      kind: "receipt_co_sign" as const,
+      receiptId,
+      writeId,
+      frozenArgsHash: proposedDiff.hash,
+      riskClass: "high" as const,
+    },
+    scope: {
+      mode: "single_use" as const,
+      claimId,
+      claimKind: "receipt_co_sign" as const,
+      role: "approver" as const,
+      maxUses: 1 as const,
+      receiptId,
+      writeId,
+      frozenArgsHash: proposedDiff.hash,
+    },
+    notBefore: asTimestampMs(Date.UTC(2026, 4, 8, 18, 0, 0, 0)),
+    expiresAt: asTimestampMs(Date.UTC(2026, 4, 8, 18, 30, 0, 0)),
+    issuedTo: asAgentId("agent_alpha"),
+    signature: {
+      credentialId: "Y3JlZGVudGlhbC0wMQ",
+      authenticatorData: "YXV0aGVudGljYXRvci1kYXRh",
+      clientDataJson: "Y2xpZW50LWRhdGEtanNvbg",
+      signature: "ZmFrZS13ZWJhdXRobi1zaWduYXR1cmU",
+      userHandle: "dXNlci0wMQ",
+    },
   };
   return {
     id: receiptId,

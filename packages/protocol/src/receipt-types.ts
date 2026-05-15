@@ -14,6 +14,7 @@ import {
 import type { FrozenArgs } from "./frozen-args.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
 import type { Sha256Hex } from "./sha256.ts";
+import type { SignedApprovalToken } from "./signed-approval-token.ts";
 
 export type ReceiptId = Brand<string, "ReceiptId">;
 export type AgentSlug = Brand<string, "AgentSlug">;
@@ -32,6 +33,7 @@ export type IdempotencyKey = Brand<string, "IdempotencyKey">;
 export type ThreadId = Brand<string, "ThreadId">;
 export type ThreadSpecRevisionId = Brand<string, "ThreadSpecRevisionId">;
 export type SignerIdentity = Brand<string, "SignerIdentity">;
+export type ApprovalRole = "viewer" | "approver" | "host";
 
 export type ReceiptStatus = "ok" | "error" | "stalled" | "approval_pending" | "rejected";
 
@@ -79,7 +81,7 @@ export interface ToolCall {
 
 export interface ApprovalEvent {
   readonly approvalId: ApprovalId;
-  readonly role: "viewer" | "approver" | "host";
+  readonly role: ApprovalRole;
   readonly decision: "approve" | "reject" | "abstain";
   readonly signedToken: SignedApprovalToken;
   readonly tokenVerdict: BrokerTokenVerdict;
@@ -109,25 +111,6 @@ export interface MemoryWriteRef {
   readonly slug: string;
   readonly hash: Sha256Hex;
   readonly citation: string;
-}
-
-export interface ApprovalClaims {
-  readonly signerIdentity: SignerIdentity;
-  readonly role: "viewer" | "approver" | "host";
-  readonly receiptId: ReceiptId;
-  readonly writeId?: WriteId | undefined;
-  readonly frozenArgsHash: Sha256Hex;
-  readonly riskClass: RiskClass;
-  readonly issuedAt: Date;
-  readonly expiresAt: Date;
-  readonly webauthnAssertion?: string | undefined;
-}
-
-export interface SignedApprovalToken {
-  readonly claims: ApprovalClaims;
-  readonly algorithm: "ed25519";
-  readonly signerKeyId: string;
-  readonly signature: string;
 }
 
 export interface BrokerTokenVerdict {
