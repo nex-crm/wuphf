@@ -36,6 +36,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeDecisionPacketStore is the test double for decisionPacketStore.
@@ -520,13 +521,25 @@ func TestDecisionPacketWikiPromotionOnMerged(t *testing.T) {
 		t.Fatalf("RecordTaskDecision: %v", err)
 	}
 
-	// Wiki write is enqueued in a goroutine; deterministically drain
-	// the worker so the in-flight process() finishes its file write
-	// before we read. Stop + Done is idempotent; t.Cleanup repeats it
-	// safely.
+	// Wiki write is enqueued in a background goroutine spawned by
+	// writeWikiPromotionLocked. Poll for the file to appear — once it
+	// exists the goroutine's Enqueue call has completed and it's safe
+	// to stop the worker without racing on the channel.
 	relPath := wikiPromotionPath(taskID)
 	expectedPath := filepath.Join(wikiRoot, relPath)
-	worker.Stop()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(expectedPath); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Cancel the context to signal the worker to drain, then wait for
+	// completion. This avoids the Stop/Enqueue channel race because
+	// cancel signals the worker's drain loop to exit after processing
+	// in-flight requests, while Stop closes the request channel which
+	// can race with a concurrent Enqueue.
+	cancel()
 	<-worker.Done()
 	body, err := os.ReadFile(expectedPath)
 	if err != nil {
