@@ -393,6 +393,28 @@ function HostInviteControls({
           {shareError}
         </div>
       ) : null}
+      <div
+        className="app-card-meta"
+        style={{
+          marginTop: 12,
+          paddingTop: 10,
+          borderTop: "1px solid var(--border)",
+        }}
+      >
+        Want to invite more human teammates?{" "}
+        <a
+          href="https://nex.ai/cloud"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: "var(--blue)",
+            textDecoration: "underline",
+            textUnderlineOffset: 2,
+          }}
+        >
+          Get Nex Cloud
+        </a>
+      </div>
     </>
   );
 }
