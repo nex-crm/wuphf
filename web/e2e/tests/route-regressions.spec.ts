@@ -90,9 +90,9 @@ test.describe("PR #634 review pins", () => {
     // surface — the unified Inbox doesn't fetch by channel.
     const getErrors = collectReactErrors(page);
     await page.goto(`/#/apps/requests`);
-    await expect(page.getByTestId("legacy-redirect-inbox")).toBeVisible({
-      timeout: 5_000,
-    });
+    // The InboxRedirect testid mounts then unmounts as soon as the
+    // useEffect fires, so racing toBeVisible against the redirect is
+    // flaky. URL change is the stable assertion.
     await expect(page).toHaveURL(/#\/inbox$/, { timeout: 5_000 });
     await expectNoReactErrors(page, getErrors, "during legacy requests redirect");
   });
