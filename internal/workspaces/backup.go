@@ -147,15 +147,22 @@ func writeCategorizedBackup(target *Workspace) (backupRootResult string, returnE
 		return nil
 	}
 
-	// wiki -> backup/wiki (full subtree)
+	// wiki -> backup/wiki (full subtree). Only skip when the source is
+	// genuinely missing; any other stat error (permission, I/O) propagates
+	// so we never silently leave wiki out of the backup.
 	wikiSrc := filepath.Join(wuphfDir, "wiki")
 	wikiDst := filepath.Join(backupRoot, backupWikiDir)
 	wikiMoved := false
-	if _, err := os.Stat(wikiSrc); err == nil {
+	switch _, err := os.Stat(wikiSrc); {
+	case err == nil:
 		if err := move(wikiSrc, wikiDst, "wiki"); err != nil {
 			return backupRoot, err
 		}
 		wikiMoved = true
+	case errors.Is(err, os.ErrNotExist):
+		// no wiki to back up
+	default:
+		return backupRoot, fmt.Errorf("workspaces: backup %q: stat wiki: %w", target.Name, err)
 	}
 
 	// skills -> backup/skills (duplicate of wiki/team/skills for quick browsing).
@@ -165,20 +172,33 @@ func writeCategorizedBackup(target *Workspace) (backupRootResult string, returnE
 	if wikiMoved {
 		skillsSrc := filepath.Join(wikiDst, "team", "skills")
 		skillsDst := filepath.Join(backupRoot, backupSkillsDir)
-		if info, err := os.Stat(skillsSrc); err == nil && info.IsDir() {
+		switch info, err := os.Stat(skillsSrc); {
+		case err == nil && info.IsDir():
 			if err := copyDir(skillsSrc, skillsDst); err != nil {
 				return backupRoot, fmt.Errorf("workspaces: backup %q: copy skills: %w", target.Name, err)
 			}
+		case err == nil:
+			// skills path exists but isn't a directory — leave the
+			// categorized skills/ duplicate absent; wiki still has it.
+		case errors.Is(err, os.ErrNotExist):
+			// no skills subtree
+		default:
+			return backupRoot, fmt.Errorf("workspaces: backup %q: stat skills: %w", target.Name, err)
 		}
 	}
 
 	// sessions -> backup/chats
 	sessionsSrc := filepath.Join(wuphfDir, "sessions")
 	chatsDst := filepath.Join(backupRoot, backupChatsDir)
-	if _, err := os.Stat(sessionsSrc); err == nil {
+	switch _, err := os.Stat(sessionsSrc); {
+	case err == nil:
 		if err := move(sessionsSrc, chatsDst, "chats"); err != nil {
 			return backupRoot, err
 		}
+	case errors.Is(err, os.ErrNotExist):
+		// no sessions to back up
+	default:
+		return backupRoot, fmt.Errorf("workspaces: backup %q: stat sessions: %w", target.Name, err)
 	}
 
 	// context -> remaining wuphfDir entries, layout preserved.
@@ -249,25 +269,41 @@ func restoreCategorizedBackup(backupDir, dstRuntimeHome string) error {
 		return fmt.Errorf("workspaces: restore: mkdir wuphf: %w", err)
 	}
 
-	// wiki -> wuphfHome/wiki
-	if _, err := os.Stat(filepath.Join(backupDir, backupWikiDir)); err == nil {
-		if err := os.Rename(filepath.Join(backupDir, backupWikiDir), filepath.Join(dstWuphf, "wiki")); err != nil {
+	// wiki -> wuphfHome/wiki. Treat genuine ENOENT as "nothing to restore";
+	// any other stat error propagates so we don't silently drop a backup
+	// subtree before deleting the source.
+	wikiBackup := filepath.Join(backupDir, backupWikiDir)
+	switch _, err := os.Stat(wikiBackup); {
+	case err == nil:
+		if err := os.Rename(wikiBackup, filepath.Join(dstWuphf, "wiki")); err != nil {
 			return fmt.Errorf("workspaces: restore: move wiki: %w", err)
 		}
+	case errors.Is(err, os.ErrNotExist):
+		// no wiki captured in this backup
+	default:
+		return fmt.Errorf("workspaces: restore: stat wiki: %w", err)
 	}
 
 	// chats -> wuphfHome/sessions
-	if _, err := os.Stat(filepath.Join(backupDir, backupChatsDir)); err == nil {
-		if err := os.Rename(filepath.Join(backupDir, backupChatsDir), filepath.Join(dstWuphf, "sessions")); err != nil {
+	chatsBackup := filepath.Join(backupDir, backupChatsDir)
+	switch _, err := os.Stat(chatsBackup); {
+	case err == nil:
+		if err := os.Rename(chatsBackup, filepath.Join(dstWuphf, "sessions")); err != nil {
 			return fmt.Errorf("workspaces: restore: move chats: %w", err)
 		}
+	case errors.Is(err, os.ErrNotExist):
+		// no chats captured
+	default:
+		return fmt.Errorf("workspaces: restore: stat chats: %w", err)
 	}
 
 	// context/* -> wuphfHome/*. context/ now mirrors the wuphfDir top-level
 	// layout (one entry per non-categorized dir/file), so iterate dynamically
 	// — anything new the backup writer captured restores automatically.
 	contextRoot := filepath.Join(backupDir, backupContextDir)
-	if entries, err := os.ReadDir(contextRoot); err == nil {
+	entries, err := os.ReadDir(contextRoot)
+	switch {
+	case err == nil:
 		for _, entry := range entries {
 			name := entry.Name()
 			src := filepath.Join(contextRoot, name)
@@ -276,6 +312,10 @@ func restoreCategorizedBackup(backupDir, dstRuntimeHome string) error {
 				return fmt.Errorf("workspaces: restore: move %s: %w", name, err)
 			}
 		}
+	case errors.Is(err, os.ErrNotExist):
+		// no context captured
+	default:
+		return fmt.Errorf("workspaces: restore: read context: %w", err)
 	}
 
 	// skills/ is a duplicate of wiki/team/skills/ — already restored via wiki.

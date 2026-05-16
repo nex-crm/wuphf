@@ -299,17 +299,19 @@ func TestShredRollbackOnPartialBackupFailure(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Plant a non-empty directory at the exact path writeCategorizedBackup
-	// will try to rename "wiki" into. The backup writer creates its backup
-	// root with a unix-second-based ID, so we plant entries for the unix
-	// second the test runs at and one second on either side to absorb timing
-	// drift. os.Rename refuses to overwrite a non-empty target, forcing the
-	// wiki move to fail.
+	// Plant a non-empty directory at the path writeCategorizedBackup will
+	// try to rename "sessions" into ("chats/" inside the backup root), AFTER
+	// wiki has already moved. os.Rename refuses to overwrite a non-empty
+	// target, so wiki succeeds first, chats fails second, and the rollback
+	// defer must replay wiki back to its source — that's the path we want
+	// to validate. The backup writer creates its backup root with a
+	// unix-second-based ID; plant for the unix second the test runs at and
+	// one second on either side to absorb timing drift.
 	backupsRoot := filepath.Join(sd, backupsDirName)
 	for delta := -1; delta <= 1; delta++ {
 		blocker := filepath.Join(backupsRoot,
 			fmt.Sprintf("ws-rollback-%d", time.Now().Unix()+int64(delta)),
-			"wiki", "sentinel")
+			"chats", "sentinel")
 		if err := os.MkdirAll(blocker, 0o700); err != nil {
 			t.Fatalf("plant blocker: %v", err)
 		}
