@@ -364,7 +364,7 @@ html[data-theme="noir-gold"] {
   color: var(--text);
   line-height: 1.5;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 /* ─── Inline action cards ────────────────────────────────────── */
@@ -1208,7 +1208,7 @@ html[data-theme="noir-gold"] {
   color: var(--text);
   margin: 0 0 8px;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .inbox-mail-subsection {
@@ -2766,7 +2766,7 @@ html[data-theme="noir-gold"] {
   color: var(--text);
   margin: 0;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 /* The embedded inbox view defines its own .packet-comment rules

@@ -98,10 +98,14 @@ func (b *Broker) inboxThreadsForActor(actor requestActor) (InboxThreadsResponse,
 		byAgent[slug] = append(byAgent[slug], item)
 	}
 
+	// counts come from the caller's auth-filtered items so threads
+	// view never reveals task volume the caller cannot see, matching
+	// the rule applied to handleInboxItems.
+	counts := inboxCountsForItems(items, startOfTodayUTC())
+
 	b.mu.Lock()
 	members := append([]officeMember(nil), b.members...)
 	messages := append([]channelMessage(nil), b.messages...)
-	counts := b.inboxCountsLocked(startOfTodayUTC())
 	b.mu.Unlock()
 
 	memberByCanonicalSlug := map[string]officeMember{}
