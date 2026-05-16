@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -268,6 +269,85 @@ func TestRestoreFromCategorizedBackup(t *testing.T) {
 	}
 	if restored.State != StateNeverStarted {
 		t.Errorf("restored state: want never_started, got %s", restored.State)
+	}
+}
+
+// TestShredRollbackOnPartialBackupFailure verifies the data-loss safeguard:
+// if a rename inside writeCategorizedBackup fails after earlier renames have
+// already succeeded, the function rolls every previous move back to its
+// source so the runtime tree stays intact for a retry. We force the failure
+// by pre-creating a non-empty destination inside the backup root before
+// shred starts — os.Rename on Linux refuses to overwrite a non-empty target,
+// so the second rename attempt fails deterministically.
+func TestShredRollbackOnPartialBackupFailure(t *testing.T) {
+	withOrchestratorHome(t)
+	sd, _ := spacesDir()
+
+	runtimeHome := filepath.Join(sd, "ws-rollback")
+	wuphfHome := seedWorkspaceTree(t, runtimeHome)
+
+	now := time.Now().UTC()
+	if err := Write(&Registry{
+		Version:    Version,
+		CLICurrent: "main",
+		Workspaces: []*Workspace{
+			{Name: "ws-rollback", RuntimeHome: runtimeHome,
+				BrokerPort: 7940, WebPort: 7941,
+				State: StatePaused, CreatedAt: now, LastUsedAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Plant a non-empty directory at the exact path writeCategorizedBackup
+	// will try to rename "wiki" into. The backup writer creates its backup
+	// root with a unix-second-based ID, so we plant entries for the unix
+	// second the test runs at and one second on either side to absorb timing
+	// drift. os.Rename refuses to overwrite a non-empty target, forcing the
+	// wiki move to fail.
+	backupsRoot := filepath.Join(sd, backupsDirName)
+	for delta := -1; delta <= 1; delta++ {
+		blocker := filepath.Join(backupsRoot,
+			fmt.Sprintf("ws-rollback-%d", time.Now().Unix()+int64(delta)),
+			"wiki", "sentinel")
+		if err := os.MkdirAll(blocker, 0o700); err != nil {
+			t.Fatalf("plant blocker: %v", err)
+		}
+	}
+
+	err := Shred(context.Background(), "ws-rollback", false)
+	if err == nil {
+		t.Fatal("expected Shred to fail when backup move collides")
+	}
+
+	// Runtime tree must be intact: the wiki, sessions, and team/ entries
+	// should all still be at their original locations because rollback
+	// reversed every successful move before returning.
+	for _, rel := range []string{
+		"wiki/team/index.md",
+		"wiki/team/skills/copyedit/SKILL.md",
+		"sessions/agent-a/2026-05-13-conversation.jsonl",
+		"team/broker-state.json",
+		"onboarded.json",
+		"office/tasks/task-1/receipt.json",
+	} {
+		if _, err := os.Stat(filepath.Join(wuphfHome, rel)); err != nil {
+			t.Errorf("source %s should be restored after rollback, got: %v", rel, err)
+		}
+	}
+
+	// Workspace must still be registered — Shred only removes from registry
+	// on success.
+	reg, _ := Read()
+	stillRegistered := false
+	for _, ws := range reg.Workspaces {
+		if ws.Name == "ws-rollback" {
+			stillRegistered = true
+			break
+		}
+	}
+	if !stillRegistered {
+		t.Error("ws-rollback should remain in registry after failed shred")
 	}
 }
 

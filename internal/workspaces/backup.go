@@ -67,27 +67,24 @@ const (
 	backupContextDir      = "context"
 )
 
-// contextPaths lists the relative-to-wuphfHome paths that get moved into the
-// categorized "context" subfolder during shred. Anything under wuphfHome that
-// is NOT wiki/ or sessions/ falls into this bucket so a categorized backup is
-// a complete capture of the workspace state. Paths absent from a given
-// workspace are silently skipped.
-//
-// The relative layout is preserved inside context/ so Restore can mirror it
-// back without per-entry remapping (e.g. team/broker-state.json restores to
-// <wuphfHome>/team/broker-state.json).
-var contextPaths = []string{
-	"team/broker-state.json",
-	"team/broker-state.json.last-good",
-	"onboarded.json",
-	"company.json",
-	"calendar.json",
-	"office",
-	"workflows",
-	"logs",
-	"providers",
-	"codex-headless",
-	"wiki.bak",
+// categorySkipNames is the set of top-level wuphfDir entries that get their
+// own categorized subfolder in a backup (wiki/, sessions/→chats/) and so must
+// NOT be re-captured into the context/ catch-all. Anything else under
+// wuphfDir is moved into context/ preserving its relative layout, which keeps
+// the backup forward-compatible with new workspace state files (e.g. a future
+// plugins/ or user-prefs.json) without code edits.
+var categorySkipNames = map[string]struct{}{
+	"wiki":     {},
+	"sessions": {},
+}
+
+// movedPath records a single rename so partial failures inside
+// writeCategorizedBackup can roll the source tree back to its original
+// state. Tracked moves are replayed src↔dst on error before the function
+// returns, leaving the runtime tree intact for a retry.
+type movedPath struct {
+	src string
+	dst string
 }
 
 // writeCategorizedBackup moves the contents of <runtimeHome>/.wuphf/ into a
@@ -96,10 +93,15 @@ var contextPaths = []string{
 // describing what was captured. Returns the backup directory path.
 //
 // Source paths that don't exist in the workspace are silently skipped.
-// Failures during partial moves leave the backup tree in place for forensic
-// recovery; the caller is responsible for deciding whether to abort the
-// subsequent runtime-home removal.
-func writeCategorizedBackup(target *Workspace) (string, error) {
+// Anything under wuphfDir that is not wiki/ or sessions/ is moved into
+// context/, preserving relative paths so Restore can mirror them back.
+//
+// Failure semantics: if any move fails after at least one earlier move has
+// succeeded, every successful move is rolled back (dst → src) so the source
+// tree is restored to its pre-call state; the partial backup directory is
+// then removed. Rollback failures are appended to the returned error so
+// operators can recover manually rather than silently losing state.
+func writeCategorizedBackup(target *Workspace) (backupRootResult string, returnErr error) {
 	if target == nil {
 		return "", errors.New("workspaces: backup: nil workspace")
 	}
@@ -122,20 +124,44 @@ func writeCategorizedBackup(target *Workspace) (string, error) {
 		return "", fmt.Errorf("workspaces: backup %q: mkdir: %w", target.Name, err)
 	}
 
+	var moves []movedPath
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		rollbackErrs := rollbackMoves(moves)
+		_ = os.RemoveAll(backupRoot)
+		if len(rollbackErrs) > 0 {
+			returnErr = fmt.Errorf("%w; rollback also failed: %v", returnErr, rollbackErrs)
+		}
+	}()
+
+	move := func(src, dst, label string) error {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return fmt.Errorf("workspaces: backup %q: mkdir %s: %w", target.Name, filepath.Dir(label), err)
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("workspaces: backup %q: move %s: %w", target.Name, label, err)
+		}
+		moves = append(moves, movedPath{src: src, dst: dst})
+		return nil
+	}
+
 	// wiki -> backup/wiki (full subtree)
 	wikiSrc := filepath.Join(wuphfDir, "wiki")
 	wikiDst := filepath.Join(backupRoot, backupWikiDir)
 	wikiMoved := false
 	if _, err := os.Stat(wikiSrc); err == nil {
-		if err := os.Rename(wikiSrc, wikiDst); err != nil {
-			return backupRoot, fmt.Errorf("workspaces: backup %q: move wiki: %w", target.Name, err)
+		if err := move(wikiSrc, wikiDst, "wiki"); err != nil {
+			return backupRoot, err
 		}
 		wikiMoved = true
 	}
 
 	// skills -> backup/skills (duplicate of wiki/team/skills for quick browsing).
 	// We duplicate rather than move because the skills are also part of the
-	// wiki tree and Restore relies on a complete wiki/ subtree.
+	// wiki tree and Restore relies on a complete wiki/ subtree. Copy failure
+	// here triggers a rollback because the wiki has already moved.
 	if wikiMoved {
 		skillsSrc := filepath.Join(wikiDst, "team", "skills")
 		skillsDst := filepath.Join(backupRoot, backupSkillsDir)
@@ -150,27 +176,33 @@ func writeCategorizedBackup(target *Workspace) (string, error) {
 	sessionsSrc := filepath.Join(wuphfDir, "sessions")
 	chatsDst := filepath.Join(backupRoot, backupChatsDir)
 	if _, err := os.Stat(sessionsSrc); err == nil {
-		if err := os.Rename(sessionsSrc, chatsDst); err != nil {
-			return backupRoot, fmt.Errorf("workspaces: backup %q: move chats: %w", target.Name, err)
+		if err := move(sessionsSrc, chatsDst, "chats"); err != nil {
+			return backupRoot, err
 		}
 	}
 
-	// context -> remaining wuphfHome state, layout preserved
+	// context -> remaining wuphfDir entries, layout preserved.
+	// We enumerate wuphfDir dynamically (rather than hard-coding paths) so the
+	// backup picks up new workspace state files automatically as the runtime
+	// layout evolves. Only the categorized siblings (wiki, sessions) are
+	// skipped here.
 	contextRoot := filepath.Join(backupRoot, backupContextDir)
 	if err := os.MkdirAll(contextRoot, 0o700); err != nil {
 		return backupRoot, fmt.Errorf("workspaces: backup %q: mkdir context: %w", target.Name, err)
 	}
-	for _, rel := range contextPaths {
-		src := filepath.Join(wuphfDir, rel)
-		if _, err := os.Stat(src); err != nil {
+	entries, err := os.ReadDir(wuphfDir)
+	if err != nil {
+		return backupRoot, fmt.Errorf("workspaces: backup %q: read wuphf dir: %w", target.Name, err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if _, skip := categorySkipNames[name]; skip {
 			continue
 		}
-		dst := filepath.Join(contextRoot, rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-			return backupRoot, fmt.Errorf("workspaces: backup %q: mkdir %s: %w", target.Name, filepath.Dir(rel), err)
-		}
-		if err := os.Rename(src, dst); err != nil {
-			return backupRoot, fmt.Errorf("workspaces: backup %q: move %s: %w", target.Name, rel, err)
+		src := filepath.Join(wuphfDir, name)
+		dst := filepath.Join(contextRoot, name)
+		if err := move(src, dst, name); err != nil {
+			return backupRoot, err
 		}
 	}
 
@@ -231,20 +263,17 @@ func restoreCategorizedBackup(backupDir, dstRuntimeHome string) error {
 		}
 	}
 
-	// context/* -> wuphfHome/*, layout preserved
+	// context/* -> wuphfHome/*. context/ now mirrors the wuphfDir top-level
+	// layout (one entry per non-categorized dir/file), so iterate dynamically
+	// — anything new the backup writer captured restores automatically.
 	contextRoot := filepath.Join(backupDir, backupContextDir)
-	if _, err := os.Stat(contextRoot); err == nil {
-		for _, rel := range contextPaths {
-			src := filepath.Join(contextRoot, rel)
-			if _, err := os.Stat(src); err != nil {
-				continue
-			}
-			dst := filepath.Join(dstWuphf, rel)
-			if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-				return fmt.Errorf("workspaces: restore: mkdir %s: %w", filepath.Dir(rel), err)
-			}
+	if entries, err := os.ReadDir(contextRoot); err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			src := filepath.Join(contextRoot, name)
+			dst := filepath.Join(dstWuphf, name)
 			if err := os.Rename(src, dst); err != nil {
-				return fmt.Errorf("workspaces: restore: move %s: %w", rel, err)
+				return fmt.Errorf("workspaces: restore: move %s: %w", name, err)
 			}
 		}
 	}
@@ -256,6 +285,22 @@ func restoreCategorizedBackup(backupDir, dstRuntimeHome string) error {
 		return fmt.Errorf("workspaces: restore: cleanup backup dir: %w", err)
 	}
 	return nil
+}
+
+// rollbackMoves replays each recorded rename in reverse order, returning
+// each rename back to its source. Used when writeCategorizedBackup detects
+// a partial failure: if every reversal succeeds the source tree is restored
+// exactly. Errors are collected (rather than fatal-on-first) so the caller
+// can surface the full picture in a compound error.
+func rollbackMoves(moves []movedPath) []error {
+	var errs []error
+	for i := len(moves) - 1; i >= 0; i-- {
+		m := moves[i]
+		if err := os.Rename(m.dst, m.src); err != nil {
+			errs = append(errs, fmt.Errorf("rollback %s → %s: %w", m.dst, m.src, err))
+		}
+	}
+	return errs
 }
 
 // readBackupManifest loads the manifest from a backup directory. Returns
@@ -312,7 +357,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err

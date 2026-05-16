@@ -191,8 +191,8 @@ func TestFixOrphanTreeDeleteMovesToTrash(t *testing.T) {
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Error("orphan should have been moved out of original location")
 	}
-	trashDir := filepath.Join(sd, backupsDirName)
-	entries, _ := os.ReadDir(trashDir)
+	backupDir := filepath.Join(sd, backupsDirName)
+	entries, _ := os.ReadDir(backupDir)
 	found := false
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "orphan-doomed-") {
