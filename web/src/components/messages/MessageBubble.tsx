@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { type ReactNode, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 
 import type { Message } from "../../api/client";
@@ -12,12 +12,17 @@ import {
   messageMarkdownComponents,
   messageRemarkPlugins,
 } from "../../lib/messageMarkdown";
+import {
+  extractRichArtifactIds,
+  stripStandaloneRichArtifactReferenceLines,
+} from "../../lib/richArtifactReferences";
 import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
+import MessageArtifactReferences from "./MessageArtifactReferences";
 
 interface MessageBubbleProps {
   message: Message;
@@ -86,14 +91,23 @@ export function MessageBubble({
   // HTML. Local-LLM agent content (mlx-lm, ollama, exo) flows through the
   // same path so the XSS posture applies uniformly. Human input takes the
   // safe ReactNode path via renderMentions.
+  const messageText = message.content || "";
+  const richArtifactIds = useMemo(
+    () => extractRichArtifactIds(messageText),
+    [messageText],
+  );
+  const renderedText = useMemo(
+    () => stripStandaloneRichArtifactReferenceLines(messageText),
+    [messageText],
+  );
 
   // Turn human text like "@pm when are you free?" into mention chips for
   // registered agent slugs. Non-agent @-references stay plain text. The
   // memo keys on content + the slug list so rapid renders don't re-parse.
   const knownSlugs = useMemo(() => members.map((m) => m.slug), [members]);
   const humanRendered = useMemo(
-    () => (isHuman ? renderMentions(message.content || "", knownSlugs) : null),
-    [isHuman, message.content, knownSlugs],
+    () => (isHuman ? renderMentions(renderedText, knownSlugs) : null),
+    [isHuman, renderedText, knownSlugs],
   );
 
   // Status messages — compact
@@ -184,19 +198,15 @@ export function MessageBubble({
 
         {/* Text — humans render mention chips via safe ReactNode children;
             agent messages render through ReactMarkdown (no raw HTML). */}
-        {isHuman ? (
-          <div className="message-text">{humanRendered}</div>
-        ) : (
-          <div className="message-text">
-            <ReactMarkdown
-              remarkPlugins={messageRemarkPlugins}
-              components={messageMarkdownComponents}
-              skipHtml={true}
-            >
-              {message.content || ""}
-            </ReactMarkdown>
-          </div>
-        )}
+        <MessageBodyText
+          isHuman={isHuman}
+          renderedText={renderedText}
+          humanRendered={humanRendered}
+        />
+
+        {richArtifactIds.length > 0 ? (
+          <MessageArtifactReferences artifactIds={richArtifactIds} />
+        ) : null}
 
         {/* Reactions */}
         {reactions.length > 0 && (
@@ -332,6 +342,30 @@ export function MessageBubble({
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function MessageBodyText({
+  isHuman,
+  renderedText,
+  humanRendered,
+}: {
+  isHuman: boolean;
+  renderedText: string;
+  humanRendered: ReactNode;
+}) {
+  if (!renderedText) return null;
+  if (isHuman) return <div className="message-text">{humanRendered}</div>;
+  return (
+    <div className="message-text">
+      <ReactMarkdown
+        remarkPlugins={messageRemarkPlugins}
+        components={messageMarkdownComponents}
+        skipHtml={true}
+      >
+        {renderedText}
+      </ReactMarkdown>
     </div>
   );
 }

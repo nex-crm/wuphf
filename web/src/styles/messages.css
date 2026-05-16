@@ -298,6 +298,115 @@
   color: var(--accent-warm);
 }
 
+/* ─── Rich artifact references ─── */
+.message-artifact-references {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.message-artifact-reference {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-secondary);
+}
+
+.message-artifact-reference h4 {
+  margin: 1px 0 3px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.message-artifact-reference p {
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.message-artifact-kicker {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.message-artifact-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.message-artifact-meta span {
+  max-width: min(100%, 360px);
+  overflow-wrap: anywhere;
+}
+
+.message-artifact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.message-artifact-actions button,
+.message-artifact-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-dark);
+  border-radius: 6px;
+  background: var(--bg-warm);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.message-artifact-actions button:hover,
+.message-artifact-actions a:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.message-artifact-error {
+  border-left-color: var(--red, #b3261e);
+}
+
+.message-artifact-modal {
+  z-index: 95;
+}
+
+@media (max-width: 640px) {
+  .message-artifact-reference {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .message-artifact-actions {
+    justify-content: flex-start;
+  }
+}
+
 /* ─── @mention ─── */
 .mention {
   display: inline-block;

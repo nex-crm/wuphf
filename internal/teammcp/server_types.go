@@ -153,7 +153,7 @@ type conversationContext struct {
 
 type TeamBroadcastArgs struct {
 	Channel   string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
-	Content   string   `json:"content" jsonschema:"Message to post to the shared team channel"`
+	Content   string   `json:"content" jsonschema:"Message to post to the shared team channel. If you created an HTML visual artifact, include visual-artifact:ra_0123456789abcdef on its own line so chat renders a compact artifact card."`
 	MySlug    string   `json:"my_slug,omitempty" jsonschema:"Agent slug sending the message. Defaults to WUPHF_AGENT_SLUG."`
 	Tagged    []string `json:"tagged,omitempty" jsonschema:"Optional list of tagged agent slugs who should respond"`
 	ReplyToID string   `json:"reply_to_id,omitempty" jsonschema:"Reply in-thread to a specific message ID when continuing a narrow discussion"`
