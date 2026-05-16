@@ -129,10 +129,19 @@ func writeCategorizedBackup(target *Workspace) (backupRootResult string, returnE
 		if returnErr == nil {
 			return
 		}
+		// Roll back first. If every move reverses cleanly, the source is
+		// whole again and we can safely delete the (now-empty) backup tree.
+		// If rollback fails on any entry, backupRoot may still hold the
+		// only surviving copy of some workspace data — leave it on disk and
+		// surface the path in the error so operators can recover.
 		rollbackErrs := rollbackMoves(moves)
-		_ = os.RemoveAll(backupRoot)
 		if len(rollbackErrs) > 0 {
-			returnErr = fmt.Errorf("%w; rollback also failed: %v", returnErr, rollbackErrs)
+			returnErr = fmt.Errorf("%w; rollback also failed; partial backup left at %s: %v",
+				returnErr, backupRoot, rollbackErrs)
+			return
+		}
+		if err := os.RemoveAll(backupRoot); err != nil {
+			returnErr = fmt.Errorf("%w; cleanup backup root: %w", returnErr, err)
 		}
 	}()
 
@@ -252,8 +261,12 @@ func writeCategorizedBackup(target *Workspace) (backupRootResult string, returnE
 // with a .wuphf/ child" layout that Doctor's orphan-cleanup produces.
 //
 // The backup directory itself is removed on success; on failure the backup is
-// left in place for manual recovery.
-func restoreCategorizedBackup(backupDir, dstRuntimeHome string) error {
+// left in place for manual recovery. Mirrors the partial-failure semantics of
+// writeCategorizedBackup: every successful rename is recorded, and on any
+// later error the moves are replayed in reverse so the backup tree stays
+// complete and the user can retry. Rollback failures preserve dstRuntimeHome
+// and surface its path in the returned error.
+func restoreCategorizedBackup(backupDir, dstRuntimeHome string) (returnErr error) {
 	dstWuphf := filepath.Join(dstRuntimeHome, ".wuphf")
 
 	// Legacy fallback: doctor's orphan-cleanup writes the whole runtime tree
@@ -269,14 +282,34 @@ func restoreCategorizedBackup(backupDir, dstRuntimeHome string) error {
 		return fmt.Errorf("workspaces: restore: mkdir wuphf: %w", err)
 	}
 
+	var moves []movedPath
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		rollbackErrs := rollbackMoves(moves)
+		if len(rollbackErrs) > 0 {
+			returnErr = fmt.Errorf("%w; rollback also failed; partial restore left at %s: %v",
+				returnErr, dstRuntimeHome, rollbackErrs)
+		}
+	}()
+
+	restoreMove := func(src, dst, label string) error {
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("workspaces: restore: move %s: %w", label, err)
+		}
+		moves = append(moves, movedPath{src: src, dst: dst})
+		return nil
+	}
+
 	// wiki -> wuphfHome/wiki. Treat genuine ENOENT as "nothing to restore";
 	// any other stat error propagates so we don't silently drop a backup
 	// subtree before deleting the source.
 	wikiBackup := filepath.Join(backupDir, backupWikiDir)
 	switch _, err := os.Stat(wikiBackup); {
 	case err == nil:
-		if err := os.Rename(wikiBackup, filepath.Join(dstWuphf, "wiki")); err != nil {
-			return fmt.Errorf("workspaces: restore: move wiki: %w", err)
+		if err := restoreMove(wikiBackup, filepath.Join(dstWuphf, "wiki"), "wiki"); err != nil {
+			return err
 		}
 	case errors.Is(err, os.ErrNotExist):
 		// no wiki captured in this backup
@@ -288,8 +321,8 @@ func restoreCategorizedBackup(backupDir, dstRuntimeHome string) error {
 	chatsBackup := filepath.Join(backupDir, backupChatsDir)
 	switch _, err := os.Stat(chatsBackup); {
 	case err == nil:
-		if err := os.Rename(chatsBackup, filepath.Join(dstWuphf, "sessions")); err != nil {
-			return fmt.Errorf("workspaces: restore: move chats: %w", err)
+		if err := restoreMove(chatsBackup, filepath.Join(dstWuphf, "sessions"), "chats"); err != nil {
+			return err
 		}
 	case errors.Is(err, os.ErrNotExist):
 		// no chats captured
@@ -308,8 +341,8 @@ func restoreCategorizedBackup(backupDir, dstRuntimeHome string) error {
 			name := entry.Name()
 			src := filepath.Join(contextRoot, name)
 			dst := filepath.Join(dstWuphf, name)
-			if err := os.Rename(src, dst); err != nil {
-				return fmt.Errorf("workspaces: restore: move %s: %w", name, err)
+			if err := restoreMove(src, dst, name); err != nil {
+				return err
 			}
 		}
 	case errors.Is(err, os.ErrNotExist):
