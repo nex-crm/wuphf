@@ -38,6 +38,10 @@ func newNotebookTestServer(t *testing.T) (*httptest.Server, *Broker, func()) {
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
 	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
 	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
+	mux.HandleFunc("/notebook/visual-artifacts", b.requireAuth(b.handleNotebookVisualArtifacts))
+	mux.HandleFunc("/notebook/visual-artifacts/", b.requireAuth(b.handleNotebookVisualArtifactSubpath))
+	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
+	mux.HandleFunc("/wiki/visual", b.requireAuth(b.handleWikiVisualArtifact))
 	srv := httptest.NewServer(mux)
 
 	return srv, b, func() {
@@ -131,6 +135,329 @@ func TestBrokerNotebookHandlersEndToEnd(t *testing.T) {
 	res.Body.Close()
 	if len(searchRes.Hits) == 0 {
 		t.Fatal("expected at least one search hit")
+	}
+}
+
+func TestBrokerNotebookVisualArtifactCreateReadPromote(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	writeBody, _ := json.Marshal(map[string]any{
+		"slug":           "pm",
+		"path":           "agents/pm/notebook/retro.md",
+		"content":        "# Retro\n\nDraft source.\n",
+		"mode":           "create",
+		"commit_message": "draft retro",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/notebook/write", bytes.NewReader(writeBody), token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("notebook write: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("notebook write status=%d", res.StatusCode)
+	}
+
+	createBody, _ := json.Marshal(map[string]any{
+		"slug":                 "pm",
+		"title":                "Retro visual plan",
+		"summary":              "A visual review of the retro plan.",
+		"html":                 "<!doctype html><html><body><h1>Retro visual</h1><button>Approve</button></body></html>",
+		"source_markdown_path": "agents/pm/notebook/retro.md",
+		"related_receipt_ids":  []string{"rcpt-1", "rcpt-1", "rcpt-2"},
+	})
+	req, _ = authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody), token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create visual artifact: %v", err)
+	}
+	var created struct {
+		Artifact  RichArtifact `json:"artifact"`
+		CommitSHA string       `json:"commit_sha"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d", res.StatusCode)
+	}
+	if created.Artifact.ID == "" || created.Artifact.TrustLevel != richArtifactTrustDraft || created.CommitSHA == "" {
+		t.Fatalf("unexpected artifact response: %+v", created)
+	}
+	if len(created.Artifact.RelatedReceiptIDs) != 2 {
+		t.Fatalf("receipt ids should be deduped: %+v", created.Artifact.RelatedReceiptIDs)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/notebook/visual-artifacts?source_path=agents/pm/notebook/retro.md", nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("list visual artifacts: %v", err)
+	}
+	var list struct {
+		Artifacts []RichArtifact `json:"artifacts"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	_ = res.Body.Close()
+	if len(list.Artifacts) != 1 || list.Artifacts[0].ID != created.Artifact.ID {
+		t.Fatalf("expected created artifact in list, got %+v", list.Artifacts)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/notebook/visual-artifacts/"+created.Artifact.ID, nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("read visual artifact: %v", err)
+	}
+	var detail struct {
+		Artifact RichArtifact `json:"artifact"`
+		HTML     string       `json:"html"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	_ = res.Body.Close()
+	if !strings.Contains(detail.HTML, "Retro visual") {
+		t.Fatalf("expected html body, got %q", detail.HTML)
+	}
+
+	promoteBody, _ := json.Marshal(map[string]any{
+		"target_wiki_path": "team/drafts/retro-visual.md",
+		"markdown_summary": "# Retro visual plan\n\nA reviewed summary.\n",
+	})
+	req, _ = authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts/"+created.Artifact.ID+"/promote", bytes.NewReader(promoteBody), token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("promote visual artifact: %v", err)
+	}
+	var promoted struct {
+		Artifact  RichArtifact `json:"artifact"`
+		CommitSHA string       `json:"commit_sha"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&promoted); err != nil {
+		t.Fatalf("decode promote: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("promote status=%d", res.StatusCode)
+	}
+	if promoted.Artifact.TrustLevel != richArtifactTrustPromoted || promoted.Artifact.PromotedWikiPath != "team/drafts/retro-visual.md" {
+		t.Fatalf("unexpected promoted artifact: %+v", promoted.Artifact)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/wiki/article?path=team/drafts/retro-visual.md", nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("read promoted wiki article: %v", err)
+	}
+	var article ArticleMeta
+	if err := json.NewDecoder(res.Body).Decode(&article); err != nil {
+		t.Fatalf("decode article: %v", err)
+	}
+	_ = res.Body.Close()
+	if !strings.Contains(article.Content, created.Artifact.ID) || !strings.Contains(article.Content, "Visual Artifact Provenance") {
+		t.Fatalf("promoted article missing provenance: %s", article.Content)
+	}
+
+	req, _ = authReq(http.MethodGet, srv.URL+"/wiki/visual?path=team/drafts/retro-visual.md", nil, token)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("read wiki visual: %v", err)
+	}
+	var visual struct {
+		Artifact RichArtifact `json:"artifact"`
+		HTML     string       `json:"html"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&visual); err != nil {
+		t.Fatalf("decode wiki visual: %v", err)
+	}
+	_ = res.Body.Close()
+	if visual.Artifact.ID != created.Artifact.ID || !strings.Contains(visual.HTML, "Retro visual") {
+		t.Fatalf("unexpected wiki visual response: %+v html=%q", visual.Artifact, visual.HTML)
+	}
+}
+
+func TestBrokerNotebookVisualArtifactHumanCreateUsesSessionSlug(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	createBody, _ := json.Marshal(map[string]any{
+		"slug":    "pm",
+		"title":   "Human visual plan",
+		"summary": "Created from a team-member session.",
+		"html":    "<!doctype html><html><body><h1>Human visual</h1></body></html>",
+	})
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create visual artifact as human: %v", err)
+	}
+	var created struct {
+		Artifact RichArtifact `json:"artifact"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d artifact=%+v", res.StatusCode, created.Artifact)
+	}
+	if created.Artifact.CreatedBy != "mira" {
+		t.Fatalf("CreatedBy = %q, want authenticated human slug mira", created.Artifact.CreatedBy)
+	}
+}
+
+func TestBrokerNotebookVisualArtifactAgentHeaderAuthoritative(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	createBody, _ := json.Marshal(map[string]any{
+		"slug":    "ceo",
+		"title":   "Agent visual plan",
+		"summary": "Created by the authenticated agent.",
+		"html":    "<!doctype html><html><body><h1>Agent visual</h1></body></html>",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody), token)
+	req.Header.Set(agentRateLimitHeader, "pm")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create visual artifact with conflicting slug: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("create status=%d, want 403", res.StatusCode)
+	}
+
+	createBody, _ = json.Marshal(map[string]any{
+		"slug":    "pm",
+		"title":   "Agent visual plan",
+		"summary": "Created by the authenticated agent.",
+		"html":    "<!doctype html><html><body><h1>Agent visual</h1></body></html>",
+	})
+	req, _ = authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody), token)
+	req.Header.Set(agentRateLimitHeader, "pm")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create visual artifact: %v", err)
+	}
+	var created struct {
+		Artifact RichArtifact `json:"artifact"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d artifact=%+v", res.StatusCode, created.Artifact)
+	}
+	if created.Artifact.CreatedBy != "pm" {
+		t.Fatalf("CreatedBy = %q, want authenticated agent pm", created.Artifact.CreatedBy)
+	}
+
+	promoteBody, _ := json.Marshal(map[string]any{
+		"actor_slug":       "ceo",
+		"target_wiki_path": "team/drafts/agent-visual.md",
+		"markdown_summary": "# Agent visual\n\nSummary.\n",
+	})
+	req, _ = authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts/"+created.Artifact.ID+"/promote", bytes.NewReader(promoteBody), token)
+	req.Header.Set(agentRateLimitHeader, "pm")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("promote visual artifact with conflicting actor: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("promote status=%d, want 403", res.StatusCode)
+	}
+}
+
+func TestBrokerNotebookVisualArtifactRejectsUnsafeInput(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+		want string
+	}{
+		{
+			name: "title NUL",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "Bad\x00Title",
+				"html":  "<!doctype html><html><body><h1>Bad</h1></body></html>",
+			},
+			want: "title must not contain NUL",
+		},
+		{
+			name: "external script",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "External script",
+				"html":  `<!doctype html><html><body><script src="https://example.com/app.js"></script></body></html>`,
+			},
+			want: "external script src is not allowed",
+		},
+		{
+			name: "css import",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "CSS import",
+				"html":  `<!doctype html><html><head><style>@import url("https://example.com/style.css");</style></head><body></body></html>`,
+			},
+			want: "css @import is not allowed",
+		},
+		{
+			name: "event handler",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "Event handler",
+				"html":  `<!doctype html><html><body><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" onerror="alert(1)"></body></html>`,
+			},
+			want: "html attribute onerror",
+		},
+		{
+			name: "css external url after unicode",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "CSS unicode URL",
+				"html":  `<!doctype html><html><head><style>.x{content:"İ";background:url("https://example.com/bg.png")}</style></head><body></body></html>`,
+			},
+			want: "url() must use a data/blob URL or fragment reference",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(tc.body)
+			req, _ := authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(raw), token)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("post: %v", err)
+			}
+			data, _ := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status=%d want 400 body=%s", res.StatusCode, string(data))
+			}
+			if !strings.Contains(string(data), tc.want) {
+				t.Fatalf("body %q missing %q", string(data), tc.want)
+			}
+		})
 	}
 }
 
@@ -343,6 +670,69 @@ func TestEnsureNotebookDirsForRosterCreatesBlankShelves(t *testing.T) {
 		if _, err := os.Stat(marker); err != nil {
 			t.Fatalf("expected notebook shelf marker for %s: %v", slug, err)
 		}
+	}
+}
+
+func TestNewRichArtifactIDIncludesHighResolutionAndProvenance(t *testing.T) {
+	now := time.Date(2026, 5, 16, 10, 20, 30, 123456789, time.UTC)
+	base := RichArtifactCreateRequest{
+		Slug:               "pm",
+		Title:              "Same visual",
+		HTML:               "<!doctype html><html><body><h1>Same</h1></body></html>",
+		SourceMarkdownPath: "agents/pm/notebook/a.md",
+	}
+	first, _, err := newRichArtifact(base, now)
+	if err != nil {
+		t.Fatalf("newRichArtifact first: %v", err)
+	}
+	base.Summary = "different provenance"
+	base.SourceMarkdownPath = "agents/pm/notebook/b.md"
+	second, _, err := newRichArtifact(base, now)
+	if err != nil {
+		t.Fatalf("newRichArtifact second: %v", err)
+	}
+	if first.CreatedAt != now.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("CreatedAt = %q, want RFC3339Nano", first.CreatedAt)
+	}
+	if first.ID == second.ID {
+		t.Fatalf("artifact IDs collided for distinct provenance: %s", first.ID)
+	}
+}
+
+func TestRepoRichArtifactReadRevalidatesPersistedHTMLPolicy(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+	artifact, html, err := newRichArtifact(RichArtifactCreateRequest{
+		Slug:  "pm",
+		Title: "Tamper visual",
+		HTML:  "<!doctype html><html><body><h1>Safe</h1></body></html>",
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("newRichArtifact: %v", err)
+	}
+	if _, _, err := repo.CommitRichArtifact(context.Background(), "pm", artifact, html, "artifact: create"); err != nil {
+		t.Fatalf("commit rich artifact: %v", err)
+	}
+
+	unsafeHTML := `<!doctype html><html><body><div onclick="alert(1)">Unsafe</div></body></html>`
+	artifact.ContentHash = richArtifactContentHash(unsafeHTML)
+	metaBytes, err := json.MarshalIndent(artifact, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal tampered metadata: %v", err)
+	}
+	metaBytes = append(metaBytes, '\n')
+	if err := os.WriteFile(filepath.Join(root, richArtifactMetaPath(artifact.ID)), metaBytes, 0o600); err != nil {
+		t.Fatalf("write tampered metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, artifact.HTMLPath), []byte(unsafeHTML), 0o600); err != nil {
+		t.Fatalf("write tampered html: %v", err)
+	}
+	if _, _, err := repo.RichArtifact(artifact.ID); err == nil || !strings.Contains(err.Error(), "html attribute onclick") {
+		t.Fatalf("RichArtifact error = %v, want policy validation error", err)
 	}
 }
 
@@ -650,6 +1040,9 @@ func TestBrokerNotebookServiceUnavailable(t *testing.T) {
 	mux.HandleFunc("/notebook/list", b.handleNotebookList)
 	mux.HandleFunc("/notebook/catalog", b.handleNotebookCatalog)
 	mux.HandleFunc("/notebook/search", b.handleNotebookSearch)
+	mux.HandleFunc("/notebook/visual-artifacts", b.handleNotebookVisualArtifacts)
+	mux.HandleFunc("/notebook/visual-artifacts/", b.handleNotebookVisualArtifactSubpath)
+	mux.HandleFunc("/wiki/visual", b.handleWikiVisualArtifact)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -662,6 +1055,9 @@ func TestBrokerNotebookServiceUnavailable(t *testing.T) {
 		{http.MethodGet, "/notebook/list?slug=pm"},
 		{http.MethodGet, "/notebook/catalog"},
 		{http.MethodGet, "/notebook/search?slug=pm&q=x"},
+		{http.MethodGet, "/notebook/visual-artifacts"},
+		{http.MethodGet, "/notebook/visual-artifacts/ra_0123456789abcdef"},
+		{http.MethodGet, "/wiki/visual?path=team/drafts/x.md"},
 	}
 	for _, tc := range cases {
 		req, _ := http.NewRequest(tc.method, srv.URL+tc.url, nil)

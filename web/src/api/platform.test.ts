@@ -54,6 +54,22 @@ describe("platform api client", () => {
     expect(getSpy).toHaveBeenCalledWith("/version");
   });
 
+  it("getRuntimePrereqs calls the onboarding prereq contract", async () => {
+    const response: api.RuntimePrereq[] = [
+      {
+        name: "claude",
+        required: false,
+        found: true,
+        ok: true,
+        version: "2.1.139 (Claude Code)",
+      },
+    ];
+    const getSpy = vi.spyOn(client, "get").mockResolvedValue(response);
+
+    await expect(api.getRuntimePrereqs()).resolves.toEqual(response);
+    expect(getSpy).toHaveBeenCalledWith("/onboarding/prereqs");
+  });
+
   it("getUsage calls the usage contract", async () => {
     const response: api.UsageData = {
       total: {

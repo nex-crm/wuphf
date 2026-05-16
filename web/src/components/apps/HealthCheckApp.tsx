@@ -5,6 +5,7 @@ import {
   getHealth,
   getHumanMe,
   getHumanSessions,
+  getRuntimePrereqs,
   getShareStatus,
   getTunnelStatus,
   type HealthResponse,
@@ -12,6 +13,7 @@ import {
   HUMAN_ME_REFETCH_MS,
   type HumanMe,
   type HumanSession,
+  type RuntimePrereq,
   revokeHumanSession,
   startShare,
   startTunnel,
@@ -56,6 +58,14 @@ type RuntimeItem = {
   label: string;
   value: string;
   active: boolean;
+};
+
+const PROVIDER_CLI_LABELS: Record<string, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  opencode: "Opencode",
+  cursor: "Cursor",
+  windsurf: "Windsurf",
 };
 
 function SectionLabel({ children }: { children: ReactNode }) {
@@ -702,6 +712,46 @@ function RuntimeStatusList({
   );
 }
 
+function ProviderCliStatusList({
+  error,
+  isLoading,
+  prereqs,
+}: {
+  error: unknown;
+  isLoading: boolean;
+  prereqs?: RuntimePrereq[];
+}) {
+  const items = (prereqs ?? []).filter(
+    (item) => item.name in PROVIDER_CLI_LABELS,
+  );
+  return (
+    <>
+      <SectionLabel>Provider CLIs</SectionLabel>
+      {isLoading ? <EmptyCard>Detecting provider CLIs...</EmptyCard> : null}
+      {error ? (
+        <EmptyCard>Could not detect provider CLIs from the broker.</EmptyCard>
+      ) : null}
+      {!(isLoading || error) && items.length === 0 ? (
+        <EmptyCard>No provider CLI checks returned.</EmptyCard>
+      ) : null}
+      {!(isLoading || error)
+        ? items.map((item) => (
+            <StatusRow
+              key={item.name}
+              active={Boolean(item.found && item.ok !== false)}
+              label={PROVIDER_CLI_LABELS[item.name]}
+              value={
+                item.found
+                  ? item.version || "Installed"
+                  : `Not installed${item.install_url ? ` · ${item.install_url}` : ""}`
+              }
+            />
+          ))
+        : null}
+    </>
+  );
+}
+
 function StatusRow({
   active,
   action,
@@ -932,6 +982,16 @@ export function HealthCheckApp() {
     queryFn: () => getHealth(),
     refetchInterval: 10_000,
   });
+  const {
+    data: runtimePrereqs,
+    isLoading: runtimePrereqsLoading,
+    error: runtimePrereqsError,
+  } = useQuery({
+    queryKey: ["runtime-prereqs"],
+    queryFn: () => getRuntimePrereqs(),
+    refetchInterval: 30_000,
+    staleTime: 5_000,
+  });
   const { data: me } = useQuery({
     queryKey: HUMAN_ME_QUERY_KEY,
     queryFn: () => getHumanMe(),
@@ -1103,6 +1163,11 @@ export function HealthCheckApp() {
       />
 
       <BrokerStatusCard isHealthy={isHealthy} status={status} />
+      <ProviderCliStatusList
+        error={runtimePrereqsError}
+        isLoading={runtimePrereqsLoading}
+        prereqs={runtimePrereqs}
+      />
       <TeamMemberSessions
         isHost={isHost}
         isRevokingSession={revokeSessionMutation.isPending}

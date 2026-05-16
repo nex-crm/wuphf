@@ -8,6 +8,7 @@ import {
   getHealth,
   getHumanMe,
   getHumanSessions,
+  getRuntimePrereqs,
   getShareStatus,
   getTunnelStatus,
   revokeHumanSession,
@@ -24,6 +25,7 @@ vi.mock("../../api/platform", () => ({
   getHealth: vi.fn(),
   getHumanMe: vi.fn(),
   getHumanSessions: vi.fn(),
+  getRuntimePrereqs: vi.fn(),
   getShareStatus: vi.fn(),
   getTunnelStatus: vi.fn(),
   revokeHumanSession: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock("../../api/platform", () => ({
 const getHealthMock = vi.mocked(getHealth);
 const getHumanMeMock = vi.mocked(getHumanMe);
 const getHumanSessionsMock = vi.mocked(getHumanSessions);
+const getRuntimePrereqsMock = vi.mocked(getRuntimePrereqs);
 const getShareStatusMock = vi.mocked(getShareStatus);
 const getTunnelStatusMock = vi.mocked(getTunnelStatus);
 const revokeHumanSessionMock = vi.mocked(revokeHumanSession);
@@ -96,6 +99,23 @@ beforeEach(() => {
       },
     ],
   });
+  getRuntimePrereqsMock.mockResolvedValue([
+    {
+      name: "claude",
+      required: false,
+      found: true,
+      ok: true,
+      version: "2.1.139 (Claude Code)",
+    },
+    {
+      name: "codex",
+      required: false,
+      found: true,
+      ok: true,
+      version: "codex-cli 0.130.0",
+    },
+    { name: "opencode", required: false, found: false, ok: false },
+  ]);
   getShareStatusMock.mockResolvedValue({ running: false });
   getTunnelStatusMock.mockResolvedValue({ running: false });
   revokeHumanSessionMock.mockResolvedValue({ ok: true });
@@ -123,6 +143,13 @@ describe("HealthCheckApp access and sharing", () => {
     expect(await screen.findByText("Access & Health")).toBeInTheDocument();
     expect(screen.getByText("Signed in as Maya")).toBeInTheDocument();
     expect(screen.getByText("Live event stream")).toBeInTheDocument();
+    expect(await screen.findByText("Provider CLIs")).toBeInTheDocument();
+    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+    expect(screen.getByText("2.1.139 (Claude Code)")).toBeInTheDocument();
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+    expect(screen.getByText("codex-cli 0.130.0")).toBeInTheDocument();
+    expect(screen.getByText("Opencode")).toBeInTheDocument();
+    expect(screen.getByText("Not installed")).toBeInTheDocument();
     expect(await screen.findByText("Tara")).toBeInTheDocument();
     expect(screen.getByText("Team-member sessions (1)")).toBeInTheDocument();
   });

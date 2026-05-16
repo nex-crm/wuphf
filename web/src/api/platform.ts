@@ -24,6 +24,15 @@ export interface HealthResponse {
   build: VersionInfo;
 }
 
+export interface RuntimePrereq {
+  name: string;
+  required: boolean;
+  found: boolean;
+  ok?: boolean;
+  version?: string;
+  install_url?: string;
+}
+
 export interface UsageTotals {
   input_tokens: number;
   output_tokens: number;
@@ -45,6 +54,10 @@ export interface UsageData {
 
 export function getHealth() {
   return get<HealthResponse>("/health");
+}
+
+export function getRuntimePrereqs() {
+  return get<RuntimePrereq[]>("/onboarding/prereqs");
 }
 
 export interface HumanSession {

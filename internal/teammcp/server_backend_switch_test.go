@@ -37,6 +37,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_wiki_list",
 				"notebook_write",
 				"notebook_promote",
+				"notebook_visual_artifact_create",
 			},
 			mustNotHave: []string{
 				"team_memory_query",
@@ -55,6 +56,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_wiki_list",
 				"notebook_write",
 				"notebook_promote",
+				"notebook_visual_artifact_create",
 			},
 			mustNotHave: []string{
 				"team_memory_query",
@@ -78,6 +80,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_wiki_list",
 				"notebook_write",
 				"notebook_promote",
+				"notebook_visual_artifact_create",
 			},
 			commonPresent: []string{"team_broadcast", "team_poll", "context_lookup", "context_capture", "context_promote", "context_health"},
 		},
@@ -96,6 +99,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_wiki_list",
 				"notebook_write",
 				"notebook_promote",
+				"notebook_visual_artifact_create",
 			},
 			commonPresent: []string{"team_broadcast", "team_poll", "context_lookup", "context_capture", "context_promote", "context_health"},
 		},
@@ -113,6 +117,7 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 				"team_wiki_list",
 				"notebook_write",
 				"notebook_promote",
+				"notebook_visual_artifact_create",
 			},
 			commonPresent: []string{"team_broadcast", "team_poll", "context_lookup", "context_capture", "context_promote", "context_health"},
 		},
@@ -219,4 +224,36 @@ func listRegisteredTools(t *testing.T, channel string, oneOnOne bool) []string {
 		names = append(names, tool.Name)
 	}
 	return names
+}
+
+func listRegisteredToolMap(t *testing.T, channel string, oneOnOne bool) map[string]*mcp.Tool {
+	t.Helper()
+	ctx := context.Background()
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "wuphf-team-test", Version: "0.1.0"}, nil)
+	configureServerTools(server, "workflow-architect", channel, oneOnOne)
+
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer serverSession.Wait()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "client", Version: "0.1.0"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer clientSession.Close()
+
+	tools, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	out := make(map[string]*mcp.Tool, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		out[tool.Name] = tool
+	}
+	return out
 }

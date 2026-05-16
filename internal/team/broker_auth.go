@@ -122,7 +122,9 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/wiki/article",
 			path == "/wiki/catalog",
 			path == "/wiki/audit",
+			path == "/wiki/visual",
 			path == "/wiki/sections",
+			path == "/notebook/visual-artifacts",
 			path == "/review/list",
 			path == "/entity/facts",
 			path == "/entity/briefs",
@@ -149,6 +151,8 @@ func humanRouteAllowed(r *http.Request) bool {
 			// opt in explicitly so we do not grant privilege by
 			// default to every new /tasks/* GET handler.
 			return true
+		case strings.HasPrefix(path, "/notebook/visual-artifacts/"):
+			return true
 		}
 		return false
 	}
@@ -160,7 +164,11 @@ func humanRouteAllowed(r *http.Request) bool {
 			"/actions",
 			"/requests/answer",
 			"/interview/answer",
-			"/wiki/write-human":
+			"/wiki/write-human",
+			"/notebook/visual-artifacts":
+			return true
+		}
+		if strings.HasPrefix(path, "/notebook/visual-artifacts/") {
 			return true
 		}
 	}

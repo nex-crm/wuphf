@@ -23,6 +23,10 @@ func TestNotebookToolsRegisteredOnlyInMarkdownBackend(t *testing.T) {
 		"notebook_list",
 		"notebook_search",
 		"notebook_promote",
+		"notebook_visual_artifact_create",
+		"notebook_visual_artifact_list",
+		"notebook_visual_artifact_read",
+		"notebook_visual_artifact_promote",
 	}
 	cases := []struct {
 		name     string
@@ -55,9 +59,23 @@ func TestNotebookToolsRegisteredOnlyInMarkdownBackend(t *testing.T) {
 func TestNotebookToolsRegisteredInOneOnOne(t *testing.T) {
 	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
 	names := listRegisteredTools(t, "dm-ceo", true)
-	for _, want := range []string{"notebook_write", "notebook_read", "notebook_list", "notebook_search", "notebook_promote"} {
+	for _, want := range []string{"notebook_write", "notebook_read", "notebook_list", "notebook_search", "notebook_promote", "notebook_visual_artifact_create", "notebook_visual_artifact_promote"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("expected %q registered in 1:1; got %v", want, names)
+		}
+	}
+}
+
+func TestNotebookVisualArtifactToolsTeachHTMLGuidance(t *testing.T) {
+	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
+	tools := listRegisteredToolMap(t, "general", false)
+	tool := tools["notebook_visual_artifact_create"]
+	if tool == nil {
+		t.Fatalf("notebook_visual_artifact_create was not registered; tools=%v", tools)
+	}
+	for _, want := range []string{"after notebook_write", "self-contained", "inline CSS/JS", "no network fetches", "interactive tuning surfaces"} {
+		if !strings.Contains(tool.Description, want) {
+			t.Fatalf("description missing %q:\n%s", want, tool.Description)
 		}
 	}
 }
@@ -405,6 +423,167 @@ func TestHandleTeamNotebookPromote_Validations(t *testing.T) {
 				t.Fatalf("expected tool error for %s", tc.name)
 			}
 		})
+	}
+}
+
+func TestHandleTeamNotebookVisualArtifactCreate(t *testing.T) {
+	srv, auth := stubBroker(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"id":                 "ra_0123456789abcdef",
+				"title":              "Visual plan",
+				"sourceMarkdownPath": "agents/pm/notebook/plan.md",
+			},
+			"commit_sha":    "abc1234",
+			"bytes_written": 512,
+		})
+	})
+	defer srv.Close()
+	withBrokerURL(t, srv.URL)
+	t.Setenv("WUPHF_AGENT_SLUG", "pm")
+
+	res, _, err := handleTeamNotebookVisualArtifactCreate(context.Background(), nil, TeamNotebookVisualArtifactCreateArgs{
+		SourcePath: "agents/pm/notebook/plan.md",
+		TaskID:     "task-1",
+		Title:      "Visual plan",
+		Summary:    "Compare the options.",
+		HTML:       "<!doctype html><html><body><h1>Plan</h1></body></html>",
+		CommitMsg:  "artifact: create visual plan",
+	})
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if isToolError(res) {
+		t.Fatalf("tool error: %s", toolErrorText(res))
+	}
+	if auth.lastPath != "/notebook/visual-artifacts" {
+		t.Fatalf("wrong path: %s", auth.lastPath)
+	}
+	for _, want := range []string{
+		`"slug":"pm"`,
+		`"source_markdown_path":"agents/pm/notebook/plan.md"`,
+		`"related_task_id":"task-1"`,
+		`"title":"Visual plan"`,
+	} {
+		if !strings.Contains(auth.lastBody, want) {
+			t.Fatalf("request body missing %s: %s", want, auth.lastBody)
+		}
+	}
+}
+
+func TestHandleTeamNotebookVisualArtifactListReadPromote(t *testing.T) {
+	srv, auth := stubBroker(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/notebook/visual-artifacts":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifacts": []map[string]any{{"id": "ra_0123456789abcdef"}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/notebook/visual-artifacts/ra_0123456789abcdef":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{"id": "ra_0123456789abcdef"},
+				"html":     "<!doctype html><html><body>ok</body></html>",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/notebook/visual-artifacts/ra_0123456789abcdef/promote":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact":   map[string]any{"id": "ra_0123456789abcdef", "trustLevel": "promoted"},
+				"commit_sha": "def5678",
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	})
+	defer srv.Close()
+	withBrokerURL(t, srv.URL)
+	t.Setenv("WUPHF_AGENT_SLUG", "pm")
+
+	res, _, err := handleTeamNotebookVisualArtifactList(context.Background(), nil, TeamNotebookVisualArtifactListArgs{
+		SourcePath: "agents/pm/notebook/plan.md",
+	})
+	if err != nil {
+		t.Fatalf("list handler: %v", err)
+	}
+	if isToolError(res) {
+		t.Fatalf("list tool error: %s", toolErrorText(res))
+	}
+	if auth.lastPath != "/notebook/visual-artifacts" || !strings.Contains(auth.lastRaw, "source_path=agents") {
+		t.Fatalf("unexpected list request path=%s raw=%s", auth.lastPath, auth.lastRaw)
+	}
+
+	res, _, err = handleTeamNotebookVisualArtifactRead(context.Background(), nil, TeamNotebookVisualArtifactReadArgs{
+		ArtifactID: "ra_0123456789abcdef",
+	})
+	if err != nil {
+		t.Fatalf("read handler: %v", err)
+	}
+	if isToolError(res) {
+		t.Fatalf("read tool error: %s", toolErrorText(res))
+	}
+
+	res, _, err = handleTeamNotebookVisualArtifactPromote(context.Background(), nil, TeamNotebookVisualArtifactPromoteArgs{
+		ArtifactID:      "ra_0123456789abcdef",
+		TargetWikiPath:  "team/plans/visual-plan.md",
+		MarkdownSummary: "# Visual plan\n\nSummary.\n",
+		Mode:            "create",
+		CommitMsg:       "artifact: promote visual plan",
+	})
+	if err != nil {
+		t.Fatalf("promote handler: %v", err)
+	}
+	if isToolError(res) {
+		t.Fatalf("promote tool error: %s", toolErrorText(res))
+	}
+	for _, want := range []string{
+		`"actor_slug":"pm"`,
+		`"target_wiki_path":"team/plans/visual-plan.md"`,
+		`"markdown_summary":"# Visual plan\n\nSummary."`,
+		`"mode":"create"`,
+	} {
+		if !strings.Contains(auth.lastBody, want) {
+			t.Fatalf("promote request body missing %s: %s", want, auth.lastBody)
+		}
+	}
+}
+
+func TestHandleTeamNotebookVisualArtifactValidations(t *testing.T) {
+	t.Setenv("WUPHF_AGENT_SLUG", "pm")
+	createCases := []TeamNotebookVisualArtifactCreateArgs{
+		{Title: "x", HTML: "<html></html>"},
+		{SourcePath: "agents/other/notebook/x.md", Title: "x", HTML: "<html></html>"},
+		{SourcePath: "agents/pm/notebook/x.md", HTML: "<html></html>"},
+		{SourcePath: "agents/pm/notebook/x.md", Title: "x"},
+	}
+	for i, args := range createCases {
+		res, _, _ := handleTeamNotebookVisualArtifactCreate(context.Background(), nil, args)
+		if !isToolError(res) {
+			t.Fatalf("create case %d expected tool error", i)
+		}
+	}
+	promoteCases := []TeamNotebookVisualArtifactPromoteArgs{
+		{TargetWikiPath: "team/x.md", MarkdownSummary: "x"},
+		{ArtifactID: "bad", TargetWikiPath: "team/x.md", MarkdownSummary: "x"},
+		{ArtifactID: "ra_0123456789abcdef", TargetWikiPath: "wrong/x.md", MarkdownSummary: "x"},
+		{ArtifactID: "ra_0123456789abcdef", TargetWikiPath: "team/x", MarkdownSummary: "x"},
+		{ArtifactID: "ra_0123456789abcdef", TargetWikiPath: "team/x.md"},
+		{ArtifactID: "ra_0123456789abcdef", TargetWikiPath: "team/x.md", MarkdownSummary: "x", Mode: "bad"},
+	}
+	for i, args := range promoteCases {
+		res, _, _ := handleTeamNotebookVisualArtifactPromote(context.Background(), nil, args)
+		if !isToolError(res) {
+			t.Fatalf("promote case %d expected tool error", i)
+		}
+	}
+}
+
+func TestHandleTeamNotebookVisualArtifactListRequiresScope(t *testing.T) {
+	t.Setenv("WUPHF_AGENT_SLUG", "")
+	t.Setenv("NEX_AGENT_SLUG", "")
+
+	res, _, err := handleTeamNotebookVisualArtifactList(context.Background(), nil, TeamNotebookVisualArtifactListArgs{})
+	if err != nil {
+		t.Fatalf("list handler returned transport error: %v", err)
+	}
+	if !isToolError(res) || !strings.Contains(toolErrorText(res), "target_slug is required") {
+		t.Fatalf("expected target_slug tool error, got %#v text=%q", res, toolErrorText(res))
 	}
 }
 
