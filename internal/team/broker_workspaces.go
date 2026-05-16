@@ -99,7 +99,7 @@ type workspaceOrchestrator interface {
 	Switch(ctx context.Context, name string) error
 	Pause(ctx context.Context, name string) error
 	Resume(ctx context.Context, name string) error
-	Shred(ctx context.Context, name string, permanent bool) error
+	Shred(ctx context.Context, name string, permanent bool) (string, error)
 	Restore(ctx context.Context, trashID string) (Workspace, error)
 	Trash(ctx context.Context) ([]TrashEntry, error)
 	Onboard(ctx context.Context, name string, fields OnboardingFields) error
@@ -544,8 +544,10 @@ func (b *Broker) handleWorkspacesResume(w http.ResponseWriter, r *http.Request) 
 
 // handleWorkspacesShred — POST /workspaces/shred.
 //
-// Body: {name, permanent?}. permanent=false (default) moves the tree to
-// trash for restore-within-30-days. permanent=true skips trash.
+// Body: {name, permanent?}. permanent=false (default) backs up the tree to
+// ~/.wuphf-spaces/.backups/<trash_id>/ for restore-within-30-days and the
+// response includes trash_id so the caller can drive a restore-undo flow.
+// permanent=true skips the backup and the response omits trash_id.
 func (b *Broker) handleWorkspacesShred(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
@@ -567,15 +569,20 @@ func (b *Broker) handleWorkspacesShred(w http.ResponseWriter, r *http.Request) {
 		writeWorkspaceError(w, http.StatusServiceUnavailable, "workspaces not configured")
 		return
 	}
-	if err := o.Shred(r.Context(), req.Name, req.Permanent); err != nil {
+	trashID, err := o.Shred(r.Context(), req.Name, req.Permanent)
+	if err != nil {
 		writeOrchestratorError(w, err)
 		return
 	}
-	writeWorkspaceJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"ok":        true,
 		"name":      req.Name,
 		"permanent": req.Permanent,
-	})
+	}
+	if trashID != "" {
+		resp["trash_id"] = trashID
+	}
+	writeWorkspaceJSON(w, http.StatusOK, resp)
 }
 
 // handleWorkspacesRestore — POST /workspaces/restore.

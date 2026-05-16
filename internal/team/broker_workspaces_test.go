@@ -92,9 +92,15 @@ func (f *fakeOrchestrator) Resume(_ context.Context, name string) error {
 	return f.resumeErr
 }
 
-func (f *fakeOrchestrator) Shred(_ context.Context, name string, permanent bool) error {
+func (f *fakeOrchestrator) Shred(_ context.Context, name string, permanent bool) (string, error) {
 	f.record(fmt.Sprintf("shred:%s:permanent=%v", name, permanent))
-	return f.shredErr
+	if f.shredErr != nil {
+		return "", f.shredErr
+	}
+	if permanent {
+		return "", nil
+	}
+	return name + "-1714305600", nil
 }
 
 func (f *fakeOrchestrator) Restore(_ context.Context, trashID string) (Workspace, error) {
@@ -458,12 +464,13 @@ func TestHandleWorkspacesResume_HappyAndError(t *testing.T) {
 
 func TestHandleWorkspacesShred_RespectsPermanentFlag(t *testing.T) {
 	tests := []struct {
-		name     string
-		body     string
-		wantCall string
+		name        string
+		body        string
+		wantCall    string
+		wantTrashID string // empty means trash_id must be absent
 	}{
-		{"default false", `{"name":"demo"}`, "shred:demo:permanent=false"},
-		{"explicit true", `{"name":"demo","permanent":true}`, "shred:demo:permanent=true"},
+		{"default false", `{"name":"demo"}`, "shred:demo:permanent=false", "demo-1714305600"},
+		{"explicit true", `{"name":"demo","permanent":true}`, "shred:demo:permanent=true", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -478,6 +485,14 @@ func TestHandleWorkspacesShred_RespectsPermanentFlag(t *testing.T) {
 			}
 			if calls := o.callTrace(); len(calls) != 1 || calls[0] != tc.wantCall {
 				t.Fatalf("orchestrator call: want [%q] got %v", tc.wantCall, calls)
+			}
+			var got map[string]any
+			if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			gotTrashID, _ := got["trash_id"].(string)
+			if gotTrashID != tc.wantTrashID {
+				t.Fatalf("trash_id: want %q got %q", tc.wantTrashID, gotTrashID)
 			}
 		})
 	}

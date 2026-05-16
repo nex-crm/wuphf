@@ -72,7 +72,7 @@ func TestShredCreatesCategorizedBackup(t *testing.T) {
 		t.Fatalf("seed registry: %v", err)
 	}
 
-	if err := Shred(context.Background(), "ws-cat", false); err != nil {
+	if _, err := Shred(context.Background(), "ws-cat", false); err != nil {
 		t.Fatalf("Shred: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestShredPermanentSkipsBackup(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if err := Shred(context.Background(), "perm-noback", true); err != nil {
+	if _, err := Shred(context.Background(), "perm-noback", true); err != nil {
 		t.Fatalf("Shred permanent: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestRestoreFromCategorizedBackup(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := Shred(context.Background(), "rt-restore", false); err != nil {
+	if _, err := Shred(context.Background(), "rt-restore", false); err != nil {
 		t.Fatalf("Shred: %v", err)
 	}
 
@@ -317,7 +317,7 @@ func TestShredRollbackOnPartialBackupFailure(t *testing.T) {
 		}
 	}
 
-	err := Shred(context.Background(), "ws-rollback", false)
+	_, err := Shred(context.Background(), "ws-rollback", false)
 	if err == nil {
 		t.Fatal("expected Shred to fail when backup move collides")
 	}
@@ -372,7 +372,7 @@ func TestTrashListSurfaceManifestFields(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := Shred(context.Background(), "ws-list", false); err != nil {
+	if _, err := Shred(context.Background(), "ws-list", false); err != nil {
 		t.Fatalf("Shred: %v", err)
 	}
 

@@ -360,7 +360,9 @@ func Resume(ctx context.Context, name string) error {
 // Default mode (permanent=false): the workspace's wiki, skills, chats, and
 // remaining context are categorized and stored under
 // ~/.wuphf-spaces/.backups/<name>-<unix-ts>/ before the runtime tree is
-// deleted. Restore reconstructs a fresh workspace from that backup.
+// deleted. Restore reconstructs a fresh workspace from that backup. The
+// returned trashID is the basename of that backup directory; callers pass it
+// to Restore. Empty when permanent=true.
 //
 // Permanent mode (permanent=true): the runtime tree is deleted immediately
 // without a backup. The shred is unrecoverable.
@@ -368,10 +370,10 @@ func Resume(ctx context.Context, name string) error {
 // A new workspace created after shred starts with an empty .wuphf/ directory;
 // nothing from a previous shred leaks into it because the backup tree sits
 // outside the runtime path and is only consulted on explicit Restore.
-func Shred(ctx context.Context, name string, permanent bool) error {
+func Shred(ctx context.Context, name string, permanent bool) (string, error) {
 	reg, err := Read()
 	if err != nil {
-		return err
+		return "", err
 	}
 	var target *Workspace
 	for _, ws := range reg.Workspaces {
@@ -381,33 +383,36 @@ func Shred(ctx context.Context, name string, permanent bool) error {
 		}
 	}
 	if target == nil {
-		return ErrWorkspaceNotFound
+		return "", ErrWorkspaceNotFound
 	}
 
 	// Refuse to shred a running workspace. Deleting the runtime tree while the
 	// broker holds open files and sockets leaves a zombie process and can cause
 	// AllocatePortPair to hand the same ports to a new workspace immediately.
 	if target.State == StateRunning || target.State == StateStarting || probePort(target.BrokerPort) {
-		return fmt.Errorf("workspaces: shred %q: workspace is running (port %d); pause it first", name, target.BrokerPort)
+		return "", fmt.Errorf("workspaces: shred %q: workspace is running (port %d); pause it first", name, target.BrokerPort)
 	}
 
 	// Token file and the ~/.wuphf compatibility symlink live at the real user
 	// HOME (shared cross-workspace root), not the per-workspace RuntimeHome.
 	home, err := realHomeDir()
 	if err != nil {
-		return fmt.Errorf("workspaces: shred %q: resolve home: %w", name, err)
+		return "", fmt.Errorf("workspaces: shred %q: resolve home: %w", name, err)
 	}
 	wuphfDir := filepath.Join(target.RuntimeHome, ".wuphf")
 
+	var trashID string
 	if permanent {
 		if _, err := workspace.ShredAt(wuphfDir); err != nil {
-			return fmt.Errorf("workspaces: shred %q: %w", name, err)
+			return "", fmt.Errorf("workspaces: shred %q: %w", name, err)
 		}
 		_ = os.RemoveAll(target.RuntimeHome)
 	} else {
-		if _, err := writeCategorizedBackup(target); err != nil {
-			return fmt.Errorf("workspaces: shred %q: %w", name, err)
+		backupRoot, err := writeCategorizedBackup(target)
+		if err != nil {
+			return "", fmt.Errorf("workspaces: shred %q: %w", name, err)
 		}
+		trashID = filepath.Base(backupRoot)
 		// The backup writer moves wiki/sessions/context out of the runtime
 		// tree, so what remains in target.RuntimeHome is the empty .wuphf
 		// directory plus any preserved siblings (task-worktrees/, openclaw/,
@@ -427,7 +432,10 @@ func Shred(ctx context.Context, name string, permanent bool) error {
 		}
 	}
 
-	return removeFromRegistry(name)
+	if err := removeFromRegistry(name); err != nil {
+		return "", err
+	}
+	return trashID, nil
 }
 
 // Restore reconstructs a workspace from a categorized backup entry under

@@ -73,7 +73,7 @@ func runWorkspaceShred(args []string) {
 	ctx, cancel := workspaceCtxLong()
 	defer cancel()
 
-	if err := orch.Shred(ctx, name, *permanent); err != nil {
+	if _, err := orch.Shred(ctx, name, *permanent); err != nil {
 		printError("shred %q: %v", name, err)
 	}
 

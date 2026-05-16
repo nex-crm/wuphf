@@ -106,7 +106,7 @@ func (cliOrchestratorAdapter) Resume(ctx context.Context, name string) (Workspac
 	return resolveWorkspace(name)
 }
 
-func (cliOrchestratorAdapter) Shred(ctx context.Context, name string, permanent bool) error {
+func (cliOrchestratorAdapter) Shred(ctx context.Context, name string, permanent bool) (string, error) {
 	return workspaces.Shred(ctx, name, permanent)
 }
 
@@ -194,7 +194,7 @@ func (brokerOrchestratorAdapter) Resume(ctx context.Context, name string) error 
 	return workspaces.Resume(ctx, name)
 }
 
-func (brokerOrchestratorAdapter) Shred(ctx context.Context, name string, permanent bool) error {
+func (brokerOrchestratorAdapter) Shred(ctx context.Context, name string, permanent bool) (string, error) {
 	return workspaces.Shred(ctx, name, permanent)
 }
 

@@ -104,12 +104,18 @@ func (f *fakeWorkspaceOrchestrator) Resume(ctx context.Context, name string) (Wo
 	return f.resumeResult, f.resumeErr
 }
 
-func (f *fakeWorkspaceOrchestrator) Shred(ctx context.Context, name string, permanent bool) error {
+func (f *fakeWorkspaceOrchestrator) Shred(ctx context.Context, name string, permanent bool) (string, error) {
 	f.shredCalls = append(f.shredCalls, struct {
 		Name      string
 		Permanent bool
 	}{name, permanent})
-	return f.shredErr
+	if f.shredErr != nil {
+		return "", f.shredErr
+	}
+	if permanent {
+		return "", nil
+	}
+	return name + "-1714305600", nil
 }
 
 func (f *fakeWorkspaceOrchestrator) Restore(ctx context.Context, trashID string) (Workspace, error) {

@@ -154,7 +154,7 @@ type workspaceOrchestrator interface {
 	Switch(ctx context.Context, name string, openBrowser bool) (Workspace, error)
 	Pause(ctx context.Context, name string, force bool) error
 	Resume(ctx context.Context, name string) (Workspace, error)
-	Shred(ctx context.Context, name string, permanent bool) error
+	Shred(ctx context.Context, name string, permanent bool) (string, error)
 	Restore(ctx context.Context, trashID string) (Workspace, error)
 	Doctor(ctx context.Context) (DoctorReport, error)
 	FixDoctorIssue(ctx context.Context, fixID string) error

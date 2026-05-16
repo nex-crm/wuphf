@@ -456,7 +456,7 @@ func TestShredMovesToTrashByDefault(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if err := Shred(context.Background(), "ws-to-shred", false); err != nil {
+	if _, err := Shred(context.Background(), "ws-to-shred", false); err != nil {
 		t.Fatalf("Shred: %v", err)
 	}
 
@@ -955,7 +955,7 @@ func TestShredPermanentDeletesTree(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if err := Shred(context.Background(), "perm-shred", true); err != nil {
+	if _, err := Shred(context.Background(), "perm-shred", true); err != nil {
 		t.Fatalf("Shred permanent: %v", err)
 	}
 
