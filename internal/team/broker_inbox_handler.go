@@ -234,7 +234,11 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 
 // handleTaskDecision serves POST /tasks/{id}/decision. Body shape:
 //
-//	{"action": "merge" | "request_changes" | "defer", "actor": "<slug>"}
+//	{"action": "approve" | "request_changes" | "defer", "actor": "<slug>"}
+//
+// Phase 1 shim: "merge" is also accepted as an alias for "approve"
+// and logs a deprecation warning. The shim drops in Phase 2's first
+// commit.
 //
 // Returns 200 with the recorded decision summary, 400 on invalid
 // action / unknown task, 403 when the human session has no reviewer

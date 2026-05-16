@@ -20,7 +20,7 @@ describe("<LifecycleStatePill>", () => {
     "decision",
     "blocked_on_pr_merge",
     "changes_requested",
-    "merged",
+    "approved",
   ])("renders without crashing for state=%s", (state) => {
     render(<LifecycleStatePill state={state} />);
     expect(screen.getByLabelText(/^state:/i)).toBeInTheDocument();

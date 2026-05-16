@@ -65,7 +65,7 @@ func TestPrintInboxPayloadGroupsByLifecycleState(t *testing.T) {
 			{TaskID: "task-2", Title: "ship the docs", LifecycleState: team.LifecycleStateDecision, ElapsedMs: 120_000},
 			{TaskID: "task-3", Title: "spec the wedge", LifecycleState: team.LifecycleStateRunning, ElapsedMs: 30_000},
 		},
-		Counts:      team.InboxCounts{DecisionRequired: 1, Running: 2, Blocked: 0, MergedToday: 0},
+		Counts:      team.InboxCounts{DecisionRequired: 1, Running: 2, Blocked: 0, ApprovedToday: 0},
 		RefreshedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	out := captureStdout(t, func() { printInboxPayload(payload) })
@@ -77,6 +77,9 @@ func TestPrintInboxPayloadGroupsByLifecycleState(t *testing.T) {
 	}
 	if !strings.Contains(out, "Needs decision: 1") {
 		t.Fatalf("expected counts footer; got:\n%s", out)
+	}
+	if !strings.Contains(out, "Approved today: 0") {
+		t.Fatalf("expected approved-today footer label/count; got:\n%s", out)
 	}
 }
 

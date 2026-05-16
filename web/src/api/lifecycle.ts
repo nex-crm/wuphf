@@ -17,7 +17,7 @@ import {
 import type { DecisionPacket, InboxPayload } from "../lib/types/lifecycle";
 import { get, post } from "./client";
 
-export type DecisionAction = "merge" | "request_changes" | "defer";
+export type DecisionAction = "approve" | "request_changes" | "defer";
 
 const USE_MOCKS = false;
 

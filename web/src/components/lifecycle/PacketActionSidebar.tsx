@@ -4,7 +4,7 @@ interface PacketActionSidebarProps {
   packet: DecisionPacket;
   /** True during streaming/loading — disables decision actions. */
   isDecisionLocked: boolean;
-  onMerge: () => void;
+  onApprove: () => void;
   onRequestChanges: () => void;
   onDefer: () => void;
   onBlock: () => void;
@@ -14,7 +14,7 @@ interface PacketActionSidebarProps {
 /**
  * Sticky right column of the Decision Packet view. Action button
  * hierarchy is locked by /plan-design-review:
- *  - Merge:      primary CTA (cyan accent, key `m`).
+ *  - Approve:    primary CTA (cyan accent, key `a`).
  *  - Request:    secondary (bg-card + strong border, key `r`).
  *  - Defer:      quiet (transparent + border, no keybind).
  *  - Block:      tertiary danger (transparent + red-500 border, key `b`).
@@ -27,7 +27,7 @@ interface PacketActionSidebarProps {
 export function PacketActionSidebar({
   packet,
   isDecisionLocked,
-  onMerge,
+  onApprove,
   onRequestChanges,
   onDefer,
   onBlock,
@@ -53,12 +53,12 @@ export function PacketActionSidebar({
       <div className="packet-actions">
         <button
           type="button"
-          className="packet-action packet-action--merge"
-          onClick={onMerge}
+          className="packet-action packet-action--approve"
+          onClick={onApprove}
           disabled={isDecisionLocked}
           title={lockedTooltip}
         >
-          Merge <span className="kbd">m</span>
+          Approve <span className="kbd">a</span>
         </button>
         <button
           type="button"
@@ -120,7 +120,7 @@ export function PacketActionSidebar({
         <div className="packet-aside-card">
           <div className="label">Blocked on</div>
           <div className="value" style={{ color: "var(--warning-500)" }}>
-            {packet.dependencies.blockedOn.join(", ")} — waiting merge
+            {packet.dependencies.blockedOn.join(", ")} — waiting approval
           </div>
         </div>
       ) : null}

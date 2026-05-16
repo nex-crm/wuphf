@@ -710,7 +710,7 @@ func (b *Broker) OnReviewerConvergence(taskID string, reason string) error {
 type recordDecisionAction string
 
 const (
-	RecordDecisionMerge          recordDecisionAction = "merge"
+	RecordDecisionApprove        recordDecisionAction = "approve"
 	RecordDecisionRequestChanges recordDecisionAction = "request_changes"
 	RecordDecisionBlock          recordDecisionAction = "block"
 	RecordDecisionDefer          recordDecisionAction = "defer"
@@ -719,7 +719,7 @@ const (
 // canonicalRecordDecisionActions enumerates the four valid resolutions.
 func canonicalRecordDecisionActions() []recordDecisionAction {
 	return []recordDecisionAction{
-		RecordDecisionMerge,
+		RecordDecisionApprove,
 		RecordDecisionRequestChanges,
 		RecordDecisionBlock,
 		RecordDecisionDefer,
@@ -741,7 +741,7 @@ func (a recordDecisionAction) IsCanonical() bool {
 // Packet. Emits decision.recorded and routes the underlying state
 // change through the existing lifecycle transition layer.
 //
-// On merge: transitions to LifecycleStateMerged and writes the wiki
+// On merge: transitions to LifecycleStateApproved and writes the wiki
 // promotion article (see writeWikiPromotionLocked). The auto-merge
 // evaluator is deferred to v1.1 (see TODO inline).
 //
@@ -773,6 +773,14 @@ func (b *Broker) RecordTaskDecision(taskID, rawAction, actorSlug string) error {
 		return fmt.Errorf("record decision: task id %q invalid", taskID)
 	}
 	action := recordDecisionAction(strings.TrimSpace(rawAction))
+	// Phase 1 backwards-compat shim: pre-rename callers send "merge";
+	// post-rename callers send "approve". Both must work for one
+	// release. Phase 2's first commit deletes this shim.
+	// TODO(phase-2-first-commit): delete this shim.
+	if action == "merge" {
+		log.Printf("broker: deprecation: decision action %q is deprecated; use %q (Phase 2 will drop this shim)", "merge", "approve")
+		action = RecordDecisionApprove
+	}
 	if !action.IsCanonical() {
 		return fmt.Errorf("%w: %q", ErrUnknownDecisionAction, rawAction)
 	}
@@ -812,7 +820,7 @@ func (b *Broker) RecordTaskDecision(taskID, rawAction, actorSlug string) error {
 			ActorSlug:      actorSlug,
 			Reason:         reason,
 		})
-		if action == RecordDecisionMerge {
+		if action == RecordDecisionApprove {
 			b.writeWikiPromotionLocked(taskID, *packet)
 			b.broadcastDecisionLocked(taskID, *packet)
 		}
@@ -831,8 +839,8 @@ func (b *Broker) RecordTaskDecision(taskID, rawAction, actorSlug string) error {
 // table so the mapping is grep-able.
 func lifecycleStateForDecisionAction(action recordDecisionAction) (LifecycleState, string) {
 	switch action {
-	case RecordDecisionMerge:
-		return LifecycleStateMerged, "human merged decision"
+	case RecordDecisionApprove:
+		return LifecycleStateApproved, "human approved decision"
 	case RecordDecisionRequestChanges:
 		return LifecycleStateChangesRequested, "human requested changes"
 	case RecordDecisionBlock:
@@ -873,7 +881,7 @@ func renderWikiPromotion(packet DecisionPacket) string {
 	sb.WriteString("# " + title + "\n\n")
 	sb.WriteString("Task ID: `" + packet.TaskID + "`\n")
 	if !packet.UpdatedAt.IsZero() {
-		sb.WriteString("Merged at: " + packet.UpdatedAt.UTC().Format(time.RFC3339) + "\n")
+		sb.WriteString("Approved at: " + packet.UpdatedAt.UTC().Format(time.RFC3339) + "\n")
 	}
 	sb.WriteString("\n## Spec\n\n")
 	if outcome := strings.TrimSpace(packet.Spec.TargetOutcome); outcome != "" {
@@ -954,7 +962,7 @@ func renderWikiPromotion(packet DecisionPacket) string {
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("## Decision\n\nMerged via WUPHF Decision Inbox.\n")
+	sb.WriteString("## Decision\n\nApproved via WUPHF Decision Inbox.\n")
 	return sb.String()
 }
 
@@ -985,7 +993,7 @@ func (b *Broker) writeWikiPromotionLocked(taskID string, packet DecisionPacket) 
 		log.Printf("broker: wiki promotion skipped for task %q (invalid id)", taskID)
 		return
 	}
-	commitMsg := fmt.Sprintf("decision: promote %s on merge", taskID)
+	commitMsg := fmt.Sprintf("decision: promote %s on approval", taskID)
 	ctx := b.wikiPromotionContext()
 	// Capture the worker locally so the goroutine doesn't race with
 	// concurrent nil-assignment on b.wikiWorker (e.g. broker shutdown).
@@ -1002,8 +1010,8 @@ func (b *Broker) writeWikiPromotionLocked(taskID string, packet DecisionPacket) 
 }
 
 // broadcastDecisionLocked posts a system message to the task's
-// originating channel announcing the merged decision. This closes the
-// "merging means posting output to everyone in channel and wiki" leg
+// originating channel announcing the approved decision. This closes the
+// "approving means posting output to everyone in channel and wiki" leg
 // of the multi-agent control loop — wiki promotion is the canonical
 // record, this announce is the discovery hook so other agents
 // subscribed to the channel know to read the wiki.
@@ -1034,7 +1042,7 @@ func (b *Broker) broadcastDecisionLocked(taskID string, packet DecisionPacket) {
 		wikiNote = fmt.Sprintf("\nCanonical output: `wiki/%s`", relPath)
 	}
 	content := fmt.Sprintf(
-		"🔔 %s merged: %s. Other agents — read the wiki entry, not pre-merge channel messages.%s",
+		"🔔 %s approved: %s. Other agents — read the wiki entry, not pre-approval channel messages.%s",
 		taskID, headline, wikiNote,
 	)
 	b.counter++
@@ -1042,8 +1050,8 @@ func (b *Broker) broadcastDecisionLocked(taskID string, packet DecisionPacket) {
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      "system",
 		Channel:   channel,
-		Kind:      "decision_merged",
-		Title:     fmt.Sprintf("%s merged", taskID),
+		Kind:      "decision_approved",
+		Title:     fmt.Sprintf("%s approved", taskID),
 		Content:   content,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}

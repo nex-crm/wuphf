@@ -132,7 +132,7 @@ export function DecisionPacketRoute({
       hasPersistenceError={hasPersistenceError}
       hasReviewerTimeout={hasReviewerTimeout}
       onClose={close}
-      onMerge={() => submitDecision("merge")}
+      onApprove={() => submitDecision("approve")}
       onRequestChanges={() => submitDecision("request_changes")}
       onDefer={() => submitDecision("defer")}
       onBlock={() => {

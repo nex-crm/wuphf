@@ -83,13 +83,13 @@ func TestLifecycleMigrationKnownTuplesResolveCanonical(t *testing.T) {
 		{"pipeline review ready", "review", "ready_for_review", "in_progress", false, LifecycleStateReview},
 		{"pipeline blocked on pr merge canonical", "review", "ready_for_review", "blocked", true, LifecycleStateBlockedOnPRMerge},
 		{"pipeline queued behind owner canonical", "triage", "pending_review", "open", true, LifecycleStateQueuedBehindOwner},
-		{"pipeline merged ship", "ship", "approved", "done", false, LifecycleStateMerged},
+		{"pipeline approved ship", "ship", "approved", "done", false, LifecycleStateApproved},
 		{"bare blocked status only", "", "", "blocked", true, LifecycleStateBlockedOnPRMerge},
 		{"bare blocked status, blocked=false (legacy bug fix)", "", "", "blocked", false, LifecycleStateBlockedOnPRMerge},
 		{"bare open", "", "", "open", false, LifecycleStateReady},
 		{"bare open blocked", "", "", "open", true, LifecycleStateQueuedBehindOwner},
-		{"bare done", "", "", "done", false, LifecycleStateMerged},
-		{"bare cancelled", "", "", "cancelled", false, LifecycleStateMerged},
+		{"bare done", "", "", "done", false, LifecycleStateApproved},
+		{"bare cancelled", "", "", "cancelled", false, LifecycleStateApproved},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -146,6 +146,68 @@ func TestLifecycleMigrationUnknownTupleLogsWarning(t *testing.T) {
 	bucket := b.LifecycleIndexSnapshot()[LifecycleStateUnknown]
 	if len(bucket) != 1 || bucket[0] != "task-mystery" {
 		t.Fatalf("expected task-mystery in unknown bucket, got %+v", bucket)
+	}
+}
+
+// TestLifecycleMigrationLegacyMergedToApproved is the mandatory
+// regression test from the Phase 1 vocabulary rename (eng review,
+// section 3). Acceptance: a pre-Phase-1 broker-state.json that
+// stores tasks with `"lifecycle_state":"merged"` must, after
+// Phase 1 boot, load those tasks as LifecycleStateApproved without
+// data loss or surprising side effects. The path is:
+//   - JSON unmarshal sees the legacy string
+//   - normalizeLegacyLifecycleStateName maps "merged" -> "approved"
+//   - the in-memory task.LifecycleState is LifecycleStateApproved
+//   - the indexed inbox bucket reflects the canonical state
+func TestLifecycleMigrationLegacyMergedToApproved(t *testing.T) {
+	// Round-trip a legacy task through Unmarshal -> Marshal and
+	// confirm the on-disk string is the new canonical value.
+	legacy := []byte(`{
+		"id":"t-legacy",
+		"channel":"general",
+		"title":"shipped before the rename",
+		"status":"done",
+		"lifecycle_state":"merged"
+	}`)
+
+	var task teamTask
+	if err := task.UnmarshalJSON(legacy); err != nil {
+		t.Fatalf("UnmarshalJSON legacy state: %v", err)
+	}
+	if task.LifecycleState != LifecycleStateApproved {
+		t.Fatalf("legacy lifecycle_state %q should normalize to LifecycleStateApproved, got %q",
+			"merged", task.LifecycleState)
+	}
+
+	// Confirm the round-trip emits the new canonical value, not the
+	// legacy one. Re-saving the broker state after a Phase 1 load
+	// must produce a file the rest of the codebase reads cleanly.
+	out, err := task.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON after normalization: %v", err)
+	}
+	if !bytes.Contains(out, []byte(`"lifecycle_state":"approved"`)) {
+		t.Fatalf("post-normalization MarshalJSON should write the new state name; got: %s", out)
+	}
+	if bytes.Contains(out, []byte(`"lifecycle_state":"merged"`)) {
+		t.Fatalf("post-normalization MarshalJSON should NOT write the legacy state name; got: %s", out)
+	}
+
+	// Sanity: the canonical state list must include Approved and
+	// must NOT include Merged. If both exist, the rename is
+	// half-applied — fail loud.
+	canonical := CanonicalLifecycleStates()
+	foundApproved := false
+	for _, s := range canonical {
+		if s == LifecycleStateApproved {
+			foundApproved = true
+		}
+		if string(s) == "merged" {
+			t.Fatalf("CanonicalLifecycleStates still includes the legacy %q state; rename incomplete", "merged")
+		}
+	}
+	if !foundApproved {
+		t.Fatalf("CanonicalLifecycleStates is missing LifecycleStateApproved")
 	}
 }
 

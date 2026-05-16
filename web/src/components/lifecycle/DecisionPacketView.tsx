@@ -19,7 +19,7 @@ interface DecisionPacketViewProps {
   hasReviewerTimeout?: boolean;
   /** Callback the route uses to navigate back to /inbox on Esc. */
   onClose: () => void;
-  onMerge: () => void;
+  onApprove: () => void;
   onRequestChanges: () => void;
   onDefer: () => void;
   onBlock: () => void;
@@ -46,16 +46,16 @@ export function DecisionPacketView({
   hasPersistenceError = false,
   hasReviewerTimeout = false,
   onClose,
-  onMerge,
+  onApprove,
   onRequestChanges,
   onDefer,
   onBlock,
   onOpenInWorktree,
 }: DecisionPacketViewProps) {
-  // Keyboard shortcuts — m / r / b / w / Esc per locked v1 design.
+  // Keyboard shortcuts — a / r / b / w / Esc per locked v1 design.
   useEffect(() => {
     const actionMap: Record<string, () => void> = {
-      m: onMerge,
+      a: onApprove,
       r: onRequestChanges,
       b: onBlock,
       w: onOpenInWorktree,
@@ -75,7 +75,7 @@ export function DecisionPacketView({
   }, [
     isStreaming,
     onClose,
-    onMerge,
+    onApprove,
     onRequestChanges,
     onBlock,
     onOpenInWorktree,
@@ -223,7 +223,7 @@ export function DecisionPacketView({
       <PacketActionSidebar
         packet={packet}
         isDecisionLocked={isStreaming}
-        onMerge={onMerge}
+        onApprove={onApprove}
         onRequestChanges={onRequestChanges}
         onDefer={onDefer}
         onBlock={onBlock}
@@ -283,7 +283,7 @@ function PacketLeftColumn({ packet }: { packet: DecisionPacket }) {
             {packet.dependencies.blockedOn.map((id) => (
               <div key={id} className="packet-dep blocked">
                 <span className="dot" aria-hidden="true" />
-                {id} · waiting merge
+                {id} · waiting approval
               </div>
             ))}
           </div>
@@ -341,9 +341,9 @@ function ReviewerTimeoutForcedBanner() {
     <div className="packet-banner warning" role="status">
       <span className="banner-dot" aria-hidden="true" />
       <div>
-        At least one reviewer hit the convergence timeout. The Decision
-        Packet is presented with their grade marked as skipped so a
-        human can still resolve the task.
+        At least one reviewer hit the convergence timeout. The Decision Packet
+        is presented with their grade marked as skipped so a human can still
+        resolve the task.
       </div>
     </div>
   );

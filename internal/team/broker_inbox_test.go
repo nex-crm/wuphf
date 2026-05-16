@@ -353,8 +353,8 @@ func TestInboxFilterMappings(t *testing.T) {
 		"decision-1":     LifecycleStateDecision,
 		"running-1":      LifecycleStateRunning,
 		"blocked-1":      LifecycleStateBlockedOnPRMerge,
-		"merged-today-1": LifecycleStateMerged,
-		"merged-old-1":   LifecycleStateMerged,
+		"merged-today-1": LifecycleStateApproved,
+		"merged-old-1":   LifecycleStateApproved,
 	}
 	for id, state := range transitions {
 		if _, err := b.transitionLifecycleLocked(id, state, "filter test"); err != nil {
@@ -372,7 +372,7 @@ func TestInboxFilterMappings(t *testing.T) {
 		{InboxFilterDecisionRequired, []string{"decision-1"}, 1},
 		{InboxFilterRunning, []string{"running-1"}, 1},
 		{InboxFilterBlocked, []string{"blocked-1"}, 1},
-		{InboxFilterMerged, []string{"merged-today-1"}, 1},
+		{InboxFilterApproved, []string{"merged-today-1"}, 1},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.filter), func(t *testing.T) {
@@ -407,8 +407,8 @@ func TestInboxFilterMappings(t *testing.T) {
 	if payload.Counts.Blocked != 1 {
 		t.Errorf("counts.blocked = %d, want 1", payload.Counts.Blocked)
 	}
-	if payload.Counts.MergedToday != 1 {
-		t.Errorf("counts.mergedToday = %d, want 1", payload.Counts.MergedToday)
+	if payload.Counts.ApprovedToday != 1 {
+		t.Errorf("counts.approvedToday = %d, want 1", payload.Counts.ApprovedToday)
 	}
 }
 

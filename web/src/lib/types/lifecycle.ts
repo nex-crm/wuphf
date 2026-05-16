@@ -22,7 +22,7 @@ export type LifecycleState =
   | "decision"
   | "blocked_on_pr_merge"
   | "changes_requested"
-  | "merged";
+  | "approved";
 
 /** Severity tier on a reviewer grade. CodeRabbit-shaped. */
 export type Severity = "critical" | "major" | "minor" | "nitpick" | "skipped";
@@ -32,7 +32,7 @@ export type InboxFilter =
   | "decision_required"
   | "running"
   | "blocked"
-  | "merged";
+  | "approved";
 
 /**
  * One acceptance-criterion checkbox. Toggled by the owner agent during
@@ -183,7 +183,7 @@ export interface InboxCounts {
   decisionRequired: number;
   running: number;
   blocked: number;
-  mergedToday: number;
+  approvedToday: number;
 }
 
 /** Top-level inbox payload returned by the (mocked, soon-real) API. */
@@ -263,10 +263,10 @@ export const STATE_PILL_TOKENS: Record<
     text: "var(--warning-500)",
     label: "changes requested",
   },
-  merged: {
+  approved: {
     bg: "var(--bg-row-active)",
     text: "var(--text-tertiary)",
-    label: "merged",
+    label: "approved",
   },
 };
 
@@ -353,7 +353,7 @@ export const INBOX_FILTERS: ReadonlyArray<{
   },
   { id: "running", label: "Running", countKey: "running" },
   { id: "blocked", label: "Blocked", countKey: "blocked" },
-  { id: "merged", label: "Merged", countKey: "mergedToday" },
+  { id: "approved", label: "Approved", countKey: "approvedToday" },
 ];
 
 /** Map filter -> states that belong in that bucket. */
@@ -364,5 +364,5 @@ export const FILTER_TO_STATES: Record<
   decision_required: ["decision"],
   running: ["intake", "ready", "running", "review"],
   blocked: ["blocked_on_pr_merge", "changes_requested"],
-  merged: ["merged"],
+  approved: ["approved"],
 };

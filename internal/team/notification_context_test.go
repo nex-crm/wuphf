@@ -553,7 +553,7 @@ func TestNotificationContext_PreReviewFilter(t *testing.T) {
 		Title:          "shipped thing",
 		Owner:          "tess",
 		Reviewers:      []string{"miles"},
-		LifecycleState: LifecycleStateMerged,
+		LifecycleState: LifecycleStateApproved,
 	}
 	preMsg := channelMessage{
 		ID:           "m1",

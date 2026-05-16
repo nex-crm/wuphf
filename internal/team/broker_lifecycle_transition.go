@@ -63,8 +63,25 @@ const (
 	LifecycleStateBlockedOnPRMerge  LifecycleState = "blocked_on_pr_merge"
 	LifecycleStateQueuedBehindOwner LifecycleState = "queued_behind_owner"
 	LifecycleStateChangesRequested  LifecycleState = "changes_requested"
-	LifecycleStateMerged            LifecycleState = "merged"
+	LifecycleStateApproved          LifecycleState = "approved"
 )
+
+// normalizeLegacyLifecycleStateName maps pre-Phase-1 lifecycle state
+// string values to their post-Phase-1 canonical equivalents. The only
+// rename in v1 is "merged" -> "approved" (per the artifact-and-approve
+// vocabulary alignment from /plan-design-review + /plan-eng-review on
+// 2026-05-11). Pass-through for every other input so this stays a
+// targeted shim, not a general migration table.
+//
+// Called from teamTask.UnmarshalJSON so a pre-Phase-1
+// broker-state.json loads cleanly without manual migration. The next
+// save writes the canonical name; the shim has no second turn on disk.
+func normalizeLegacyLifecycleStateName(s LifecycleState) LifecycleState {
+	if strings.EqualFold(strings.TrimSpace(string(s)), "merged") {
+		return LifecycleStateApproved
+	}
+	return s
+}
 
 // CanonicalLifecycleStates returns the valid lifecycle states (excluding
 // the unknown migration fallback) in stable order. Used by tests sweeping
@@ -79,7 +96,7 @@ func CanonicalLifecycleStates() []LifecycleState {
 		LifecycleStateBlockedOnPRMerge,
 		LifecycleStateQueuedBehindOwner,
 		LifecycleStateChangesRequested,
-		LifecycleStateMerged,
+		LifecycleStateApproved,
 	}
 }
 
@@ -120,7 +137,7 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 	LifecycleStateBlockedOnPRMerge:  {PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true},
 	LifecycleStateQueuedBehindOwner: {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: true},
 	LifecycleStateChangesRequested:  {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
-	LifecycleStateMerged:            {PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false},
+	LifecycleStateApproved:          {PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false},
 }
 
 // derivedFieldsFor returns the forward-map row for a state, plus a flag
@@ -157,7 +174,7 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false}:  LifecycleStateReview,
 	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true}:       LifecycleStateBlockedOnPRMerge,
 	{PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: true}:            LifecycleStateQueuedBehindOwner,
-	{PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false}:                   LifecycleStateMerged,
+	{PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false}:                   LifecycleStateApproved,
 
 	// Pre-Lane-A code wrote status="blocked" instead of relying on the
 	// blocked bool. Map every reasonable variant to blocked_on_pr_merge so
@@ -174,14 +191,14 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	{PipelineStage: "", ReviewState: "", Status: "open", Blocked: true}:         LifecycleStateQueuedBehindOwner,
 	{PipelineStage: "", ReviewState: "", Status: "in_progress", Blocked: false}: LifecycleStateRunning,
 	{PipelineStage: "", ReviewState: "", Status: "review", Blocked: false}:      LifecycleStateReview,
-	{PipelineStage: "", ReviewState: "", Status: "done", Blocked: false}:        LifecycleStateMerged,
-	{PipelineStage: "", ReviewState: "", Status: "completed", Blocked: false}:   LifecycleStateMerged,
+	{PipelineStage: "", ReviewState: "", Status: "done", Blocked: false}:        LifecycleStateApproved,
+	{PipelineStage: "", ReviewState: "", Status: "completed", Blocked: false}:   LifecycleStateApproved,
 
-	// Cancelled/canceled — terminal but not "merged". Still mapped to
-	// merged for v1 to avoid an unbounded lifecycle; v1.1 may introduce a
+	// Cancelled/canceled — terminal but not "approved". Still mapped to
+	// approved for v1 to avoid an unbounded lifecycle; v1.1 may introduce a
 	// dedicated cancelled state.
-	{PipelineStage: "", ReviewState: "", Status: "canceled", Blocked: false}:  LifecycleStateMerged,
-	{PipelineStage: "", ReviewState: "", Status: "cancelled", Blocked: false}: LifecycleStateMerged,
+	{PipelineStage: "", ReviewState: "", Status: "canceled", Blocked: false}:  LifecycleStateApproved,
+	{PipelineStage: "", ReviewState: "", Status: "cancelled", Blocked: false}: LifecycleStateApproved,
 }
 
 // deriveLifecycleStateFromLegacy looks the legacy tuple up in the
@@ -256,7 +273,7 @@ func (b *Broker) reindexTaskLifecycleFromLegacyLocked(task *teamTask) {
 		case task.blocked || status == "blocked":
 			derived = LifecycleStateBlockedOnPRMerge
 		case isTerminalTeamTaskStatus(status):
-			derived = LifecycleStateMerged
+			derived = LifecycleStateApproved
 		case status == "review" || strings.EqualFold(strings.TrimSpace(task.reviewState), "ready_for_review"):
 			derived = LifecycleStateReview
 		case status == "in_progress" || strings.TrimSpace(task.Owner) != "":

@@ -7,7 +7,7 @@ import { PacketActionSidebar } from "./PacketActionSidebar";
 describe("<PacketActionSidebar>", () => {
   function setup(isDecisionLocked = false) {
     const handlers = {
-      onMerge: vi.fn(),
+      onApprove: vi.fn(),
       onRequestChanges: vi.fn(),
       onDefer: vi.fn(),
       onBlock: vi.fn(),
@@ -25,7 +25,9 @@ describe("<PacketActionSidebar>", () => {
 
   it("renders all five action buttons in the locked hierarchy", () => {
     setup();
-    expect(screen.getByRole("button", { name: /merge/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /approve/i }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /request changes/i }),
     ).toBeInTheDocument();
@@ -46,7 +48,7 @@ describe("<PacketActionSidebar>", () => {
 
   it("disables decision actions while the owner is still streaming", () => {
     setup(true);
-    expect(screen.getByRole("button", { name: /merge/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /approve/i })).toBeDisabled();
     expect(
       screen.getByRole("button", { name: /request changes/i }),
     ).toBeDisabled();
@@ -57,9 +59,9 @@ describe("<PacketActionSidebar>", () => {
     ).toBeEnabled();
   });
 
-  it("invokes the merge handler when Merge is clicked", () => {
-    const { onMerge } = setup();
-    fireEvent.click(screen.getByRole("button", { name: /merge/i }));
-    expect(onMerge).toHaveBeenCalledTimes(1);
+  it("invokes the approve handler when Approve is clicked", () => {
+    const { onApprove } = setup();
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+    expect(onApprove).toHaveBeenCalledTimes(1);
   });
 });
