@@ -120,7 +120,7 @@ export function PacketActionSidebar({
         <div className="packet-aside-card">
           <div className="label">Blocked on</div>
           <div className="value" style={{ color: "var(--warning-500)" }}>
-            {packet.dependencies.blockedOn.join(", ")} — waiting merge
+            {packet.dependencies.blockedOn.join(", ")} — waiting approval
           </div>
         </div>
       ) : null}

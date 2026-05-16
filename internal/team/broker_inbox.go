@@ -102,9 +102,9 @@ type InboxRow struct {
 // All four counts are O(1) reads of len(b.lifecycleIndex[state]); the
 // inbox query never iterates b.tasks for these.
 //
-// ApprovedToday is the one exception that costs O(merged-bucket-size) to
+// ApprovedToday is the one exception that costs O(approved-bucket-size) to
 // compute because the index does not segment by day. v1 accepts that:
-// the merged bucket is bounded by recent activity and the total broker
+// the approved bucket is bounded by recent activity and the total broker
 // task count is small enough that this stays under the <100ms ceiling.
 type InboxCounts struct {
 	DecisionRequired int `json:"decisionRequired"`
@@ -122,7 +122,7 @@ type InboxPayload struct {
 
 // inboxFilterToStates maps a filter to the lifecycle buckets it consumes.
 // All filters except ApprovedToday and All map to a single bucket. The
-// ApprovedToday filter maps to the merged bucket and the handler then
+// ApprovedToday filter maps to the approved bucket and the handler then
 // post-filters by completion timestamp; the All filter sweeps every
 // canonical state.
 func inboxFilterToStates(filter InboxFilter) ([]LifecycleState, error) {
@@ -232,7 +232,7 @@ func (b *Broker) inboxLocked(states []LifecycleState, include func(taskID string
 				if ts.IsZero() || ts.Before(cutoff) {
 					// ApprovedToday post-filter: skip rows older than
 					// today's UTC midnight. The All filter also walks
-					// the merged bucket, but for All the row stays in;
+					// the approved bucket, but for All the row stays in;
 					// only InboxFilterApproved narrows by date.
 					if len(states) == 1 {
 						continue
@@ -261,7 +261,7 @@ func (b *Broker) estimateBucketSizesLocked(states []LifecycleState) int {
 }
 
 // inboxCountsLocked returns the four header counts. Three are O(1); the
-// ApprovedToday count walks the merged bucket once because the index is
+// ApprovedToday count walks the approved bucket once because the index is
 // not segmented by day. v1 accepts this — see InboxCounts doc above.
 func (b *Broker) inboxCountsLocked(cutoff time.Time) InboxCounts {
 	counts := InboxCounts{
@@ -363,9 +363,9 @@ func countGradedReviewers(grades []ReviewerGrade) int {
 	return len(seen)
 }
 
-// mergedAtTimestamp returns the merge-completion timestamp for a task.
+// mergedAtTimestamp returns the approval-completion timestamp for a task.
 // Prefers task.CompletedAt (set by the existing terminal-status mutator)
-// and falls back to UpdatedAt so freshly-merged tasks still appear in
+// and falls back to UpdatedAt so freshly-approved tasks still appear in
 // ApprovedToday before the legacy mutator paths catch up.
 func mergedAtTimestamp(task *teamTask) time.Time {
 	if task == nil {

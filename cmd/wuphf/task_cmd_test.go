@@ -78,6 +78,9 @@ func TestPrintInboxPayloadGroupsByLifecycleState(t *testing.T) {
 	if !strings.Contains(out, "Needs decision: 1") {
 		t.Fatalf("expected counts footer; got:\n%s", out)
 	}
+	if !strings.Contains(out, "Approved today: 0") {
+		t.Fatalf("expected approved-today footer label/count; got:\n%s", out)
+	}
 }
 
 // TestFormatElapsed sanity-checks the human-readable elapsed-time

@@ -77,7 +77,7 @@ const (
 // broker-state.json loads cleanly without manual migration. The next
 // save writes the canonical name; the shim has no second turn on disk.
 func normalizeLegacyLifecycleStateName(s LifecycleState) LifecycleState {
-	if string(s) == "merged" {
+	if strings.EqualFold(strings.TrimSpace(string(s)), "merged") {
 		return LifecycleStateApproved
 	}
 	return s
@@ -194,8 +194,8 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	{PipelineStage: "", ReviewState: "", Status: "done", Blocked: false}:        LifecycleStateApproved,
 	{PipelineStage: "", ReviewState: "", Status: "completed", Blocked: false}:   LifecycleStateApproved,
 
-	// Cancelled/canceled — terminal but not "merged". Still mapped to
-	// merged for v1 to avoid an unbounded lifecycle; v1.1 may introduce a
+	// Cancelled/canceled — terminal but not "approved". Still mapped to
+	// approved for v1 to avoid an unbounded lifecycle; v1.1 may introduce a
 	// dedicated cancelled state.
 	{PipelineStage: "", ReviewState: "", Status: "canceled", Blocked: false}:  LifecycleStateApproved,
 	{PipelineStage: "", ReviewState: "", Status: "cancelled", Blocked: false}: LifecycleStateApproved,

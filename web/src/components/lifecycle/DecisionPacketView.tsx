@@ -52,7 +52,7 @@ export function DecisionPacketView({
   onBlock,
   onOpenInWorktree,
 }: DecisionPacketViewProps) {
-  // Keyboard shortcuts — m / r / b / w / Esc per locked v1 design.
+  // Keyboard shortcuts — a / r / b / w / Esc per locked v1 design.
   useEffect(() => {
     const actionMap: Record<string, () => void> = {
       a: onApprove,
@@ -283,7 +283,7 @@ function PacketLeftColumn({ packet }: { packet: DecisionPacket }) {
             {packet.dependencies.blockedOn.map((id) => (
               <div key={id} className="packet-dep blocked">
                 <span className="dot" aria-hidden="true" />
-                {id} · waiting merge
+                {id} · waiting approval
               </div>
             ))}
           </div>

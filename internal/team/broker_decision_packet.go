@@ -840,7 +840,7 @@ func (b *Broker) RecordTaskDecision(taskID, rawAction, actorSlug string) error {
 func lifecycleStateForDecisionAction(action recordDecisionAction) (LifecycleState, string) {
 	switch action {
 	case RecordDecisionApprove:
-		return LifecycleStateApproved, "human merged decision"
+		return LifecycleStateApproved, "human approved decision"
 	case RecordDecisionRequestChanges:
 		return LifecycleStateChangesRequested, "human requested changes"
 	case RecordDecisionBlock:
@@ -881,7 +881,7 @@ func renderWikiPromotion(packet DecisionPacket) string {
 	sb.WriteString("# " + title + "\n\n")
 	sb.WriteString("Task ID: `" + packet.TaskID + "`\n")
 	if !packet.UpdatedAt.IsZero() {
-		sb.WriteString("Merged at: " + packet.UpdatedAt.UTC().Format(time.RFC3339) + "\n")
+		sb.WriteString("Approved at: " + packet.UpdatedAt.UTC().Format(time.RFC3339) + "\n")
 	}
 	sb.WriteString("\n## Spec\n\n")
 	if outcome := strings.TrimSpace(packet.Spec.TargetOutcome); outcome != "" {
@@ -962,7 +962,7 @@ func renderWikiPromotion(packet DecisionPacket) string {
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("## Decision\n\nMerged via WUPHF Decision Inbox.\n")
+	sb.WriteString("## Decision\n\nApproved via WUPHF Decision Inbox.\n")
 	return sb.String()
 }
 
@@ -1010,8 +1010,8 @@ func (b *Broker) writeWikiPromotionLocked(taskID string, packet DecisionPacket) 
 }
 
 // broadcastDecisionLocked posts a system message to the task's
-// originating channel announcing the merged decision. This closes the
-// "merging means posting output to everyone in channel and wiki" leg
+// originating channel announcing the approved decision. This closes the
+// "approving means posting output to everyone in channel and wiki" leg
 // of the multi-agent control loop — wiki promotion is the canonical
 // record, this announce is the discovery hook so other agents
 // subscribed to the channel know to read the wiki.

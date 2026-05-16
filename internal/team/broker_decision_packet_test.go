@@ -557,7 +557,7 @@ func TestDecisionPacketWikiPromotionOnMerged(t *testing.T) {
 			continue
 		}
 		if b.tasks[i].LifecycleState != LifecycleStateApproved {
-			t.Errorf("task %q lifecycle: got %s, want merged", taskID, b.tasks[i].LifecycleState)
+			t.Errorf("task %q lifecycle: got %s, want approved", taskID, b.tasks[i].LifecycleState)
 		}
 		break
 	}

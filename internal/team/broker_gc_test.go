@@ -55,7 +55,7 @@ func TestPruneCompletedTasksLocked_RemovesMergedOldTasks(t *testing.T) {
 	b.mu.Unlock()
 
 	if pruned != 1 {
-		t.Errorf("expected 1 pruned (old merged), got %d", pruned)
+		t.Errorf("expected 1 pruned (old approved), got %d", pruned)
 	}
 	if remaining != 3 {
 		t.Errorf("expected 3 remaining, got %d", remaining)
@@ -86,7 +86,7 @@ func TestPruneCompletedTasksLocked_KeepsAllWhenNoneExpired(t *testing.T) {
 
 func TestIsTerminalTask(t *testing.T) {
 	if !isTerminalTask(teamTask{LifecycleState: LifecycleStateApproved}) {
-		t.Error("expected merged task to be terminal")
+		t.Error("expected approved task to be terminal")
 	}
 	if isTerminalTask(teamTask{LifecycleState: LifecycleStateRunning}) {
 		t.Error("expected running task to not be terminal")

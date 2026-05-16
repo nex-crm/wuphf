@@ -319,7 +319,7 @@ func printInboxPayload(payload team.InboxPayload) {
 			fmt.Printf("  %-12s  %s  (%s ago)\n", row.TaskID, row.Title, formatElapsed(elapsed))
 		}
 	}
-	fmt.Printf("\nNeeds decision: %d   Running: %d   Blocked: %d   Merged today: %d\n",
+	fmt.Printf("\nNeeds decision: %d   Running: %d   Blocked: %d   Approved today: %d\n",
 		payload.Counts.DecisionRequired, payload.Counts.Running, payload.Counts.Blocked, payload.Counts.ApprovedToday)
 }
 

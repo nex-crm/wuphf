@@ -366,7 +366,7 @@ function InboxFrame({
             Blocked <span className="inbox-count">{counts.blocked}</span>
           </a>
           <a href="#/inbox?filter=approved">
-            Merged today{" "}
+            Approved today{" "}
             <span className="inbox-count">{counts.approvedToday}</span>
           </a>
         </nav>
