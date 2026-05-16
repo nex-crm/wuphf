@@ -1617,6 +1617,9 @@
       <summary class="faq-q">Can I invite a teammate into the office?</summary>
       <div class="faq-a">
         Yes. Two ways. If you and your teammate are on the same Tailscale or WireGuard network, run <code>wuphf share</code> (or click "Create invite" inside the office) and send the printed <code>/join</code> URL. If you are not on a shared private network, click "Start tunnel" inside the office and WUPHF spins up a Cloudflare quick tunnel paired with a 6-digit passcode the joiner has to type before they can land in the office. <code>cloudflared</code> ships bundled with the npm install. Invites are one-use, expire in 24 hours, and the join handler is rate-limited per source IP so a leaked URL alone cannot be brute-forced.
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--yellow-dark);">
+          Want to invite more human teammates? <a href="https://nex.ai" target="_blank" rel="noopener" style="color:var(--yellow);text-decoration:none;">Get Nex Cloud →</a>
+        </div>
       </div>
     </details>
     <details class="faq-item">
