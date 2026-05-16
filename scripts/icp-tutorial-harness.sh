@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2329
+# (SC2329 — all scenario_* helpers are dispatched indirectly via the
+# ALL_SCENARIOS array; shellcheck can't see the dynamic invocation.)
 # icp-tutorial-harness.sh
 #
 # Runs each of the 10 ICP tutorial scenarios against a freshly booted
