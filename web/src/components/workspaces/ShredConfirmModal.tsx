@@ -133,17 +133,17 @@ export function ShredConfirmModal({
     : "~/.wuphf-spaces/main/.wuphf";
   const introCopy = isMain ? (
     <>
-      You are about to move{" "}
+      You are about to back up and wipe{" "}
       <code style={{ fontFamily: "var(--font-mono)" }}>{mainPath}</code>{" "}
-      (created {formatCreated(workspace.created_at)}) to trash. This is
-      reversible from the trash for 30 days, but agents stop running and
-      sessions are lost on the active broker.
+      (created {formatCreated(workspace.created_at)}). Wiki, skills, chats, and
+      context are stored in a categorized backup that is restorable for 30 days,
+      but agents stop running and sessions are lost on the active broker.
     </>
   ) : (
     <>
-      Shred &lsquo;{workspace.name}&rsquo;? Moves to trash for 30 days. You can
-      restore it from <code>wuphf workspace restore</code> or via the undo toast
-      that appears next.
+      Shred &lsquo;{workspace.name}&rsquo;? Wiki, skills, chats, and context are
+      backed up and restorable for 30 days via{" "}
+      <code>wuphf workspace restore</code> or the undo toast that appears next.
     </>
   );
 
@@ -189,7 +189,7 @@ export function ShredConfirmModal({
             onChange={(e) => setPermanent(e.target.checked)}
             data-testid="shred-permanent-toggle"
           />
-          Skip trash (permanent — cannot be undone)
+          Skip backup (permanent — cannot be undone)
         </label>
 
         <div style={styles.row}>
@@ -212,7 +212,7 @@ export function ShredConfirmModal({
               ? "Shredding..."
               : permanent
                 ? "Shred permanently"
-                : "Move to trash"}
+                : "Back up & shred"}
           </button>
         </div>
       </div>

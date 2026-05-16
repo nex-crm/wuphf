@@ -21,7 +21,11 @@ import (
 
 const (
 	liveProbeTimeout = 200 * time.Millisecond
-	trashDirName     = ".trash"
+	// backupsDirName is the on-disk root for shredded workspaces, sibling to
+	// the per-workspace runtime trees under ~/.wuphf-spaces/. Each entry is a
+	// categorized backup ("<name>-<unix-ts>/{wiki,skills,chats,context}/")
+	// rather than a wholesale copy of the runtime tree.
+	backupsDirName = ".backups"
 )
 
 // Pause escalation timeouts. Declared as vars (not consts) so tests can
@@ -351,12 +355,25 @@ func Resume(ctx context.Context, name string) error {
 	})
 }
 
-// Shred moves the workspace tree to trash and removes it from the registry.
-// If permanent is true the tree is deleted immediately.
-func Shred(ctx context.Context, name string, permanent bool) error {
+// Shred wipes a workspace's runtime tree and removes it from the registry.
+//
+// Default mode (permanent=false): the workspace's wiki, skills, chats, and
+// remaining context are categorized and stored under
+// ~/.wuphf-spaces/.backups/<name>-<unix-ts>/ before the runtime tree is
+// deleted. Restore reconstructs a fresh workspace from that backup. The
+// returned trashID is the basename of that backup directory; callers pass it
+// to Restore. Empty when permanent=true.
+//
+// Permanent mode (permanent=true): the runtime tree is deleted immediately
+// without a backup. The shred is unrecoverable.
+//
+// A new workspace created after shred starts with an empty .wuphf/ directory;
+// nothing from a previous shred leaks into it because the backup tree sits
+// outside the runtime path and is only consulted on explicit Restore.
+func Shred(ctx context.Context, name string, permanent bool) (string, error) {
 	reg, err := Read()
 	if err != nil {
-		return err
+		return "", err
 	}
 	var target *Workspace
 	for _, ws := range reg.Workspaces {
@@ -366,43 +383,42 @@ func Shred(ctx context.Context, name string, permanent bool) error {
 		}
 	}
 	if target == nil {
-		return ErrWorkspaceNotFound
+		return "", ErrWorkspaceNotFound
 	}
 
 	// Refuse to shred a running workspace. Deleting the runtime tree while the
 	// broker holds open files and sockets leaves a zombie process and can cause
 	// AllocatePortPair to hand the same ports to a new workspace immediately.
 	if target.State == StateRunning || target.State == StateStarting || probePort(target.BrokerPort) {
-		return fmt.Errorf("workspaces: shred %q: workspace is running (port %d); pause it first", name, target.BrokerPort)
+		return "", fmt.Errorf("workspaces: shred %q: workspace is running (port %d); pause it first", name, target.BrokerPort)
 	}
 
 	// Token file and the ~/.wuphf compatibility symlink live at the real user
 	// HOME (shared cross-workspace root), not the per-workspace RuntimeHome.
 	home, err := realHomeDir()
 	if err != nil {
-		return fmt.Errorf("workspaces: shred %q: resolve home: %w", name, err)
+		return "", fmt.Errorf("workspaces: shred %q: resolve home: %w", name, err)
 	}
 	wuphfDir := filepath.Join(target.RuntimeHome, ".wuphf")
 
+	var trashID string
 	if permanent {
 		if _, err := workspace.ShredAt(wuphfDir); err != nil {
-			return fmt.Errorf("workspaces: shred %q: %w", name, err)
+			return "", fmt.Errorf("workspaces: shred %q: %w", name, err)
 		}
 		_ = os.RemoveAll(target.RuntimeHome)
 	} else {
-		sd, err := spacesDir()
+		backupRoot, err := writeCategorizedBackup(target)
 		if err != nil {
-			return err
+			return "", fmt.Errorf("workspaces: shred %q: %w", name, err)
 		}
-		trashDir := filepath.Join(sd, trashDirName)
-		if err := os.MkdirAll(trashDir, 0o700); err != nil {
-			return fmt.Errorf("workspaces: shred %q: mkdir trash: %w", name, err)
-		}
-		trashEntry := filepath.Join(trashDir,
-			fmt.Sprintf("%s-%d", name, time.Now().Unix()))
-		if err := os.Rename(target.RuntimeHome, trashEntry); err != nil {
-			return fmt.Errorf("workspaces: shred %q: move to trash: %w", name, err)
-		}
+		trashID = filepath.Base(backupRoot)
+		// The backup writer moves wiki/sessions/context out of the runtime
+		// tree, so what remains in target.RuntimeHome is the empty .wuphf
+		// directory plus any preserved siblings (task-worktrees/, openclaw/,
+		// config.json, codex/config.toml). Remove the whole runtime home so
+		// a same-named create starts from a fresh, empty directory.
+		_ = os.RemoveAll(target.RuntimeHome)
 	}
 
 	// Delete token file.
@@ -416,23 +432,35 @@ func Shred(ctx context.Context, name string, permanent bool) error {
 		}
 	}
 
-	return removeFromRegistry(name)
+	if err := removeFromRegistry(name); err != nil {
+		return "", err
+	}
+	return trashID, nil
 }
 
-// Restore moves a trash entry back to the workspaces directory, assigns a
-// fresh port pair, and registers it.
+// Restore reconstructs a workspace from a categorized backup entry under
+// ~/.wuphf-spaces/.backups/<trashID>/, allocates a fresh port pair, and
+// registers it.
+//
+// The categorized backup's wiki/, chats/, and context/ subtrees are merged
+// into a fresh wuphfHome at ~/.wuphf-spaces/<name>/.wuphf/. skills/ is a
+// duplicate of wiki/team/skills/ and is discarded after restore. The backup
+// directory itself is removed on success.
+//
+// Legacy flat-tree entries (a top-level .wuphf/ directory produced by
+// doctor's orphan-cleanup before this layout existed) are still recognised
+// and restored via a single rename.
 func Restore(ctx context.Context, trashID string) error {
 	sd, err := spacesDir()
 	if err != nil {
 		return err
 	}
 
-	trashDir := filepath.Join(sd, trashDirName)
-	trashEntry := filepath.Join(trashDir, trashID)
+	backupDir := filepath.Join(sd, backupsDirName, trashID)
 
-	if info, err := os.Stat(trashEntry); err != nil || !info.IsDir() {
+	if info, err := os.Stat(backupDir); err != nil || !info.IsDir() {
 		if err != nil {
-			return fmt.Errorf("workspaces: restore: trash entry %q: %w", trashID, err)
+			return fmt.Errorf("workspaces: restore: backup entry %q: %w", trashID, err)
 		}
 		return fmt.Errorf("workspaces: restore: %q is not a directory", trashID)
 	}
@@ -472,8 +500,8 @@ func Restore(ctx context.Context, trashID string) error {
 	}
 
 	dest := filepath.Join(sd, originalName)
-	if err := os.Rename(trashEntry, dest); err != nil {
-		return fmt.Errorf("workspaces: restore: move %s → %s: %w", trashEntry, dest, err)
+	if err := restoreCategorizedBackup(backupDir, dest); err != nil {
+		return fmt.Errorf("workspaces: restore: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -560,7 +588,7 @@ func Doctor(ctx context.Context) (DoctorReport, error) {
 				continue
 			}
 			n := e.Name()
-			if n == trashDirName || strings.HasPrefix(n, ".") {
+			if n == backupsDirName || strings.HasPrefix(n, ".") {
 				continue
 			}
 			if !known[n] {
@@ -732,13 +760,16 @@ func removeFromRegistry(name string) error {
 	return writeUnderLock(reg)
 }
 
-// Trash returns the contents of ~/.wuphf-spaces/.trash/. Each entry encodes
-// the original workspace name and the unix timestamp of when it was
+// Trash returns the contents of ~/.wuphf-spaces/.backups/. Each entry
+// encodes the original workspace name and the unix timestamp of when it was
 // shredded; both are recovered from the directory name (`<name>-<unix-ts>`).
+// When a manifest.json is present (categorized backup), OriginalRuntimeHome
+// is pulled from it; legacy flat-tree entries fall back to the conventional
+// path derived from the original name.
 //
 // Directories that don't match the expected name pattern are skipped rather
-// than surfaced as errors — the trash dir is user-writable and stale junk
-// is normal. A missing trash dir is not an error either; an empty slice is
+// than surfaced as errors — the backups dir is user-writable and stale junk
+// is normal. A missing backups dir is not an error either; an empty slice is
 // returned.
 //
 // ctx is reserved for future cancellation hooks; today the implementation
@@ -750,13 +781,13 @@ func Trash(ctx context.Context) ([]TrashEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	trashDir := filepath.Join(sd, trashDirName)
-	entries, err := os.ReadDir(trashDir)
+	backupsDir := filepath.Join(sd, backupsDirName)
+	entries, err := os.ReadDir(backupsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return []TrashEntry{}, nil
 		}
-		return nil, fmt.Errorf("workspaces: trash: read %s: %w", trashDir, err)
+		return nil, fmt.Errorf("workspaces: trash: read %s: %w", backupsDir, err)
 	}
 	out := make([]TrashEntry, 0, len(entries))
 	for _, e := range entries {
@@ -773,12 +804,22 @@ func Trash(ctx context.Context) ([]TrashEntry, error) {
 		if ts > 0 {
 			shredAt = time.Unix(ts, 0).UTC()
 		}
+		path := filepath.Join(backupsDir, id)
+		originalRuntimeHome := filepath.Join(sd, name)
+		if m, _ := readBackupManifest(path); m != nil {
+			if m.OriginalRuntimeHome != "" {
+				originalRuntimeHome = m.OriginalRuntimeHome
+			}
+			if !m.ShreddedAt.IsZero() {
+				shredAt = m.ShreddedAt
+			}
+		}
 		out = append(out, TrashEntry{
 			Name:                name,
 			TrashID:             id,
-			Path:                filepath.Join(trashDir, id),
+			Path:                path,
 			ShredAt:             shredAt,
-			OriginalRuntimeHome: filepath.Join(sd, name),
+			OriginalRuntimeHome: originalRuntimeHome,
 		})
 	}
 	return out, nil
@@ -866,15 +907,21 @@ func Onboard(ctx context.Context, name string, fields OnboardingFields) error {
 	return nil
 }
 
-// extractTrashTimestamp returns the trailing numeric segment of a trash ID
-// of the form "<name>-<unix-ts>". Returns 0 if no numeric suffix is present.
+// extractTrashTimestamp returns the rightmost dash-separated numeric segment
+// of a backup ID that looks like a Unix-seconds timestamp. Backup IDs are
+// `<name>-<unix-ts>` in the common case but a collision-retry suffix can
+// extend that to `<name>-<unix-ts>-<attempt>`; the attempt counter is small
+// (≤ 1000) so filtering by a 10-digit-or-more minimum (`>= 1e9`, i.e. 2001+)
+// uniquely identifies the timestamp segment. Returns 0 if no segment fits.
 func extractTrashTimestamp(trashID string) int64 {
+	end := len(trashID)
 	for i := len(trashID) - 1; i >= 0; i-- {
 		if trashID[i] == '-' {
-			suffix := trashID[i+1:]
-			if v, err := strconv.ParseInt(suffix, 10, 64); err == nil {
+			segment := trashID[i+1 : end]
+			if v, err := strconv.ParseInt(segment, 10, 64); err == nil && v >= 1_000_000_000 {
 				return v
 			}
+			end = i
 		}
 	}
 	return 0

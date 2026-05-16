@@ -172,7 +172,7 @@ func TestFixOrphanTreeRegisterTreatsMissingPathAsIdempotent(t *testing.T) {
 
 // ---- orphan_tree:delete ----------------------------------------------------
 
-func TestFixOrphanTreeDeleteMovesToTrash(t *testing.T) {
+func TestFixOrphanTreeDeleteMovesToBackups(t *testing.T) {
 	withOrchestratorHome(t)
 
 	sd, _ := spacesDir()
@@ -191,8 +191,8 @@ func TestFixOrphanTreeDeleteMovesToTrash(t *testing.T) {
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Error("orphan should have been moved out of original location")
 	}
-	trashDir := filepath.Join(sd, trashDirName)
-	entries, _ := os.ReadDir(trashDir)
+	backupDir := filepath.Join(sd, backupsDirName)
+	entries, _ := os.ReadDir(backupDir)
 	found := false
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "orphan-doomed-") {
@@ -200,7 +200,7 @@ func TestFixOrphanTreeDeleteMovesToTrash(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("orphan should have been moved to trash with timestamped suffix")
+		t.Error("orphan should have been moved under .backups/ with a timestamped suffix")
 	}
 }
 

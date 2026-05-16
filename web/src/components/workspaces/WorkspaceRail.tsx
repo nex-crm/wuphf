@@ -452,7 +452,7 @@ export function WorkspaceRail({
       if (resp.trash_id) {
         restoreToast.fire(name, resp.trash_id);
       } else {
-        showNotice(`Workspace '${name}' moved to trash.`, "info");
+        showNotice(`Workspace '${name}' backed up and shredded.`, "info");
       }
     },
     onError: (err) =>
