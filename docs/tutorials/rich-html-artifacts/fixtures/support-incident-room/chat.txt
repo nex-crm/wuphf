@@ -1,0 +1,5 @@
+I turned the incident notes into an HTML command-room artifact with impact, timeline, owners, and a copyable customer update.
+
+visual-artifact:ra_fedcba9876543210
+
+Use the artifact for the customer update, then promote the summary to the incident playbook once the postmortem is complete.

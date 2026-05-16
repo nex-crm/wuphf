@@ -1,0 +1,5 @@
+I built the reviewer brief as an HTML artifact so engineering and sales can inspect the diff focus, buyer risk, and review prompt side by side.
+
+visual-artifact:ra_aaaaaaaaaaaaaaaa
+
+Use this in chat for the review handoff, then promote the summary if the pattern becomes reusable.

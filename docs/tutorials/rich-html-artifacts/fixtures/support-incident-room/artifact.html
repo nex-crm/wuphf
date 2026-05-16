@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Support Incident Command Room</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f7f9;
+      color: #17212f;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 1100px; margin: 0 auto; padding: 28px; }
+    header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
+    p { margin: 0; color: #5b6575; line-height: 1.5; }
+    .status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .metric { background: #ffffff; border: 1px solid #dfe5ed; border-radius: 8px; padding: 14px; }
+    .metric span { color: #647084; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .metric strong { display: block; margin-top: 6px; font-size: 22px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+    button { border: 1px solid #ccd5e0; background: #ffffff; color: #17212f; border-radius: 6px; min-height: 36px; padding: 8px 12px; font-weight: 700; cursor: pointer; }
+    button[aria-selected="true"], #copy { background: #245b4f; border-color: #245b4f; color: #ffffff; }
+    section { background: #ffffff; border: 1px solid #dfe5ed; border-radius: 8px; padding: 18px; }
+    h2 { margin: 0 0 14px; font-size: 18px; }
+    .panel { display: none; }
+    .panel.active { display: grid; gap: 14px; }
+    .timeline { display: grid; grid-template-columns: 96px 1fr; gap: 12px; }
+    .time { color: #647084; font-weight: 700; }
+    .event { border-left: 3px solid #245b4f; padding: 0 0 16px 14px; }
+    .event strong { display: block; margin-bottom: 4px; }
+    .impact { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .impact div, .owner { background: #f8fafc; border: 1px solid #e4e9f0; border-radius: 7px; padding: 12px; }
+    .owners { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    textarea { width: 100%; min-height: 136px; resize: vertical; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; font: inherit; line-height: 1.5; }
+    svg { width: 100%; height: auto; display: block; }
+    @media (max-width: 800px) {
+      main { padding: 18px; }
+      header, .status, .impact, .owners { display: grid; grid-template-columns: 1fr; }
+      .timeline { grid-template-columns: 1fr; }
+      .event { border-left: 0; border-top: 3px solid #245b4f; padding: 10px 0 14px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Incident Command Room</h1>
+        <p>A single visual packet for impact, recovery timeline, owners, and the next customer-facing update.</p>
+      </div>
+    </header>
+
+    <div class="status">
+      <div class="metric"><span>State</span><strong>Mitigated</strong></div>
+      <div class="metric"><span>Customers</span><strong>14</strong></div>
+      <div class="metric"><span>Open owners</span><strong>3</strong></div>
+      <div class="metric"><span>Next update</span><strong>30m</strong></div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Incident views">
+      <button type="button" role="tab" aria-selected="true" data-view="impact">Customer impact</button>
+      <button type="button" role="tab" aria-selected="false" data-view="timeline">Timeline</button>
+      <button type="button" role="tab" aria-selected="false" data-view="update">Copy update</button>
+    </div>
+
+    <section>
+      <div id="impact" class="panel active">
+        <h2>Customer impact</h2>
+        <div class="impact">
+          <div><strong>Enterprise</strong><p>Seven accounts saw delayed sync status for 19 minutes.</p></div>
+          <div><strong>Growth</strong><p>Five accounts retried import jobs successfully after mitigation.</p></div>
+          <div><strong>Internal</strong><p>Support triage queue held two manual follow-ups.</p></div>
+        </div>
+        <svg viewBox="0 0 720 150" role="img" aria-label="Impact by segment">
+          <rect x="30" y="28" width="210" height="34" rx="4" fill="#245b4f"></rect>
+          <rect x="30" y="78" width="150" height="34" rx="4" fill="#3b82a0"></rect>
+          <rect x="30" y="122" width="60" height="18" rx="4" fill="#b87932"></rect>
+          <text x="256" y="51" fill="#17212f" font-size="16">Enterprise: 7 affected</text>
+          <text x="196" y="101" fill="#17212f" font-size="16">Growth: 5 affected</text>
+          <text x="104" y="137" fill="#17212f" font-size="14">Internal: 2 follow-ups</text>
+        </svg>
+      </div>
+
+      <div id="timeline" class="panel">
+        <h2>Timeline</h2>
+        <div class="timeline">
+          <div class="time">09:12</div><div class="event"><strong>Detection</strong><p>Support saw repeated import sync questions in the inbox.</p></div>
+          <div class="time">09:19</div><div class="event"><strong>Mitigation</strong><p>Engineering disabled the stale cache path and forced refresh.</p></div>
+          <div class="time">09:31</div><div class="event"><strong>Recovery</strong><p>Retry jobs completed and customer statuses normalized.</p></div>
+        </div>
+      </div>
+
+      <div id="update" class="panel">
+        <h2>Copy update</h2>
+        <textarea id="message">We mitigated the sync delay at 09:19 PT and all retry jobs completed by 09:31 PT. We are reviewing cache invalidation coverage and will send a final postmortem after the owner review.</textarea>
+        <button id="copy" type="button">Copy update</button>
+      </div>
+    </section>
+  </main>
+  <script>
+    const tabs = Array.from(document.querySelectorAll("[data-view]"));
+    const panels = Array.from(document.querySelectorAll(".panel"));
+    for (const tab of tabs) {
+      tab.addEventListener("click", () => {
+        const target = tab.getAttribute("data-view");
+        for (const next of tabs) next.setAttribute("aria-selected", String(next === tab));
+        for (const panel of panels) panel.classList.toggle("active", panel.id === target);
+      });
+    }
+    const copy = document.getElementById("copy");
+    copy.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(document.getElementById("message").value);
+      copy.textContent = "Copied";
+      window.setTimeout(() => { copy.textContent = "Copy update"; }, 1200);
+    });
+  </script>
+</body>
+</html>
