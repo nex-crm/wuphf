@@ -61,4 +61,10 @@ describe("rich artifact references", () => {
 
     expect(stripStandaloneRichArtifactReferenceLines(content)).toBe(content);
   });
+
+  it("preserves non-artifact message whitespace exactly", () => {
+    const content = "  Keep leading space\n\n\nand trailing blanks.  \n";
+
+    expect(stripStandaloneRichArtifactReferenceLines(content)).toBe(content);
+  });
 });

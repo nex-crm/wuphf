@@ -31,6 +31,7 @@ export function stripStandaloneRichArtifactReferenceLines(
 ): string {
   const lines = content.split(/\r?\n/);
   let inFence = false;
+  let removedReferenceLine = false;
   const kept: string[] = [];
   for (const line of lines) {
     if (isFenceBoundary(line)) {
@@ -38,13 +39,14 @@ export function stripStandaloneRichArtifactReferenceLines(
       kept.push(line);
       continue;
     }
-    if (!inFence && isStandaloneReferenceLine(line)) continue;
+    if (!inFence && isStandaloneReferenceLine(line)) {
+      removedReferenceLine = true;
+      continue;
+    }
     kept.push(line);
   }
-  return kept
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  if (!removedReferenceLine) return content;
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function forEachNonFenceLine(
