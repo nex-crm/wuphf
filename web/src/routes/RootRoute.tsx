@@ -104,11 +104,6 @@ const ReceiptsApp = lazy(() =>
     default: m.ReceiptsApp,
   })),
 );
-const RequestsApp = lazy(() =>
-  import("../components/apps/RequestsApp").then((m) => ({
-    default: m.RequestsApp,
-  })),
-);
 const SettingsApp = lazy(() =>
   import("../components/apps/SettingsApp").then((m) => ({
     default: m.SettingsApp,
@@ -125,9 +120,6 @@ const TasksApp = lazy(() =>
   })),
 );
 const Notebook = lazy(() => import("../components/notebook/Notebook"));
-const ReviewQueueKanban = lazy(
-  () => import("../components/review/ReviewQueueKanban"),
-);
 const DecisionInbox = lazy(() =>
   import("../components/lifecycle/DecisionInbox").then((m) => ({
     default: m.DecisionInbox,
@@ -287,7 +279,7 @@ function navigateNotebookEntry(
 
 const APP_PANELS = {
   tasks: TasksApp,
-  requests: RequestsApp,
+  requests: InboxRedirect,
   graph: GraphApp,
   policies: PoliciesApp,
   calendar: CalendarApp,
@@ -362,7 +354,36 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
             onNavigateWiki={(path) => navigateWikiArticle(path || null)}
           />
         )}
-        {current === "reviews" && <ReviewQueueKanban />}
+        {current === "reviews" && <InboxRedirect />}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * InboxRedirect navigates the user from the deprecated /apps/requests
+ * and /reviews surfaces to the unified Inbox. Phase 2 collapsed both
+ * surfaces into one Decision Inbox; Phase 2b deletes the heavy
+ * RequestsApp + ReviewQueueKanban components and routes the deep
+ * links through this stub so existing bookmarks keep working.
+ */
+function InboxRedirect() {
+  useEffect(() => {
+    void router.navigate({ to: "/inbox", replace: true });
+  }, []);
+  return (
+    <div className="app-panel active" data-testid="legacy-redirect-inbox">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flex: 1,
+          color: "var(--text-tertiary)",
+          fontSize: 14,
+        }}
+      >
+        Redirecting to Inbox…
       </div>
     </div>
   );

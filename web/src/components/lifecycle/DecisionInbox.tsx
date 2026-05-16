@@ -23,7 +23,7 @@ import {
 } from "../../api/notebook";
 import type { InboxItem, InboxItemKind } from "../../lib/types/inbox";
 import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
-import { RequestItem } from "../apps/RequestsApp";
+import { RequestItem } from "./RequestItem";
 
 const DecisionPacketRoute = lazy(() =>
   import("./DecisionPacketRoute").then((m) => ({
