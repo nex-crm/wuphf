@@ -4,6 +4,7 @@ import {
   type DecisionAction,
   getDecisionPacket,
   postDecision,
+  postInboxCursor,
 } from "../../api/lifecycle";
 import type { DecisionPacket } from "../../lib/types/lifecycle";
 import { DecisionPacketView } from "./DecisionPacketView";
@@ -38,18 +39,11 @@ export function DecisionPacketRoute({
   forceState,
   onClose,
 }: DecisionPacketRouteProps) {
-  // Mirror the DecisionInbox bypass contract: any forced state OR a
-  // caller-supplied initialPacket disables the live fetch entirely, so
-  // a 5s background refetch cannot overwrite the fixture or forced UI
-  // state under the test's feet. This also makes "reviewer_timeout"
-  // and other non-loading/non-error forced states actually surface
-  // their intended UI instead of being silently replaced by network
-  // data.
   const query = useQuery<DecisionPacket>({
     queryKey: ["lifecycle", "task", taskId],
     queryFn: () => getDecisionPacket(taskId),
     initialData: initialPacket,
-    enabled: forceState === undefined && initialPacket === undefined,
+    enabled: forceState !== "loading" && forceState !== "error",
     staleTime: 2_000,
   });
 
@@ -66,18 +60,31 @@ export function DecisionPacketRoute({
   }
 
   const decisionMutation = useMutation({
-    mutationFn: (action: DecisionAction) => postDecision(taskId, action),
+    mutationFn: ({
+      action,
+      comment,
+    }: {
+      action: DecisionAction;
+      comment?: string;
+    }) => postDecision(taskId, action, comment),
     onSuccess: () => {
+      // Record the cursor first so the badge math reflects the new
+      // last-seen-at on the next refresh, then invalidate the cached
+      // queries so the inbox + packet re-fetch.
+      void postInboxCursor();
       void queryClient.invalidateQueries({
         queryKey: ["lifecycle", "task", taskId],
       });
       void queryClient.invalidateQueries({ queryKey: ["lifecycle", "inbox"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["lifecycle", "inbox-items"],
+      });
       void queryClient.invalidateQueries({ queryKey: ["inbox-badge"] });
     },
   });
 
-  function submitDecision(action: DecisionAction) {
-    decisionMutation.mutate(action);
+  function submitDecision(action: DecisionAction, comment?: string) {
+    decisionMutation.mutate({ action, comment });
   }
 
   if (forceState === "loading" || (query.isPending && !initialPacket)) {
@@ -107,12 +114,6 @@ export function DecisionPacketRoute({
     forceState === "streaming" ||
     packet.lifecycleState === "running" ||
     packet.lifecycleState === "review";
-  // "reviewer_timeout" is a forced state used by screenshot/E2E
-  // harnesses to render the convergence-timeout banner deterministically
-  // without waiting on a real timeout. The visual presentation reuses
-  // the persistence_error banner styling for v1; Lane G ships dedicated
-  // styling.
-  const hasReviewerTimeout = forceState === "reviewer_timeout";
   // Defensive against the Go-side encoding empty slices as `null`
   // instead of `[]`. The TS type declares `banners: PacketBanner[]` so
   // tsc is happy, but the wire shape can omit it entirely for packets
@@ -130,12 +131,13 @@ export function DecisionPacketRoute({
       packet={effectivePacket}
       isStreaming={isStreaming}
       hasPersistenceError={hasPersistenceError}
-      hasReviewerTimeout={hasReviewerTimeout}
       onClose={close}
-      onApprove={() => submitDecision("approve")}
-      onRequestChanges={() => submitDecision("request_changes")}
-      onDefer={() => submitDecision("defer")}
-      onBlock={() => {
+      onApprove={(comment?: string) => submitDecision("approve", comment)}
+      onRequestChanges={(comment?: string) =>
+        submitDecision("request_changes", comment)
+      }
+      onDefer={(comment?: string) => submitDecision("defer", comment)}
+      onBlock={(_comment?: string) => {
         /* block flow lives behind its own modal (Lane F follow-up). */
       }}
       onOpenInWorktree={() => {
@@ -147,32 +149,13 @@ export function DecisionPacketRoute({
   );
 }
 
-function PacketSkeleton({ onClose }: { onClose: () => void }) {
+function PacketSkeleton({ onClose: _onClose }: { onClose: () => void }) {
   return (
     <div
-      className="packet-shell"
+      className="packet-shell packet-shell--message"
       data-testid="decision-packet-loading"
       aria-busy="true"
     >
-      <aside className="packet-left" aria-hidden="true">
-        <div className="crumb">
-          <button
-            type="button"
-            className="kbd"
-            onClick={onClose}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "inherit",
-              cursor: "pointer",
-            }}
-            aria-label="Back to inbox"
-          >
-            ← inbox
-          </button>{" "}
-          / task
-        </div>
-      </aside>
       <main className="packet-center">
         <div className="packet-skeleton-title" />
         <div className="packet-skeleton-block" style={{ width: "85%" }} />
@@ -185,20 +168,6 @@ function PacketSkeleton({ onClose }: { onClose: () => void }) {
           />
         ))}
       </main>
-      <aside className="packet-right" aria-hidden="true">
-        <div
-          className="packet-skeleton-block"
-          style={{ width: "100%", height: 44 }}
-        />
-        <div
-          className="packet-skeleton-block"
-          style={{ width: "100%", height: 44 }}
-        />
-        <div
-          className="packet-skeleton-block"
-          style={{ width: "100%", height: 44 }}
-        />
-      </aside>
     </div>
   );
 }
@@ -212,24 +181,34 @@ function PacketError({
   onRetry: () => void;
   onClose: () => void;
 }) {
+  const isNotReadyYet = /not yet available/i.test(message);
+  const heading = isNotReadyYet
+    ? "Decision details aren't ready yet."
+    : "Couldn't load this decision.";
+  const body = isNotReadyYet
+    ? "The owner agent is still working. This task will surface a full decision packet once it transitions to review."
+    : message;
   return (
-    <div className="packet-shell" data-testid="decision-packet-error">
-      <aside className="packet-left" />
+    <div
+      className="packet-shell packet-shell--message"
+      data-testid="decision-packet-error"
+    >
       <main className="packet-center">
         <div className="packet-error" role="alert">
-          <h2>Couldn't load this Decision Packet.</h2>
-          <p>{message}</p>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="retry" onClick={onRetry}>
-              Retry
-            </button>
-            <button type="button" className="retry" onClick={onClose}>
-              Back to inbox
-            </button>
-          </div>
+          <h2>{heading}</h2>
+          <p>{body}</p>
+          {!isNotReadyYet ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" className="retry" onClick={onRetry}>
+                Retry
+              </button>
+              <button type="button" className="retry" onClick={onClose}>
+                Back to inbox
+              </button>
+            </div>
+          ) : null}
         </div>
       </main>
-      <aside className="packet-right" />
     </div>
   );
 }

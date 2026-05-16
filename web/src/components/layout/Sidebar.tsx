@@ -7,6 +7,7 @@ import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
+import { InboxButton } from "../sidebar/InboxButton";
 import { RecentObjectsPanel } from "../sidebar/RecentObjectsPanel";
 import { SidebarColorPicker } from "../sidebar/SidebarColorPicker";
 import { UsagePanel } from "../sidebar/UsagePanel";
@@ -104,6 +105,10 @@ export function Sidebar() {
                 <SettingsIcon />
               </button>
             </div>
+          </div>
+
+          <div className="sidebar-primary">
+            <InboxButton />
           </div>
 
           <div

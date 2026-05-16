@@ -14,7 +14,17 @@ import {
   getDecisionPacketMock,
   getInboxPayloadMock,
 } from "../lib/mocks/decisionPackets";
-import type { DecisionPacket, InboxPayload } from "../lib/types/lifecycle";
+import type { InboxItem, InboxItemKind } from "../lib/types/inbox";
+import type {
+  InboxThreadDetail,
+  InboxThreadsResponse,
+} from "../lib/types/inboxThread";
+import type {
+  DecisionPacket,
+  InboxCounts,
+  InboxFilter,
+  InboxPayload,
+} from "../lib/types/lifecycle";
 import { get, post } from "./client";
 
 export type DecisionAction = "approve" | "request_changes" | "defer";
@@ -33,14 +43,111 @@ export async function getInboxPayload(): Promise<InboxPayload> {
   if (USE_MOCKS) {
     return getInboxPayloadMock();
   }
-  // The Go broker can serialize an empty slice as `null`, which would
-  // make DecisionInbox.filterRows throw before it reaches the
-  // empty-state branch. Coerce to [] here so the rest of the UI can
-  // treat `rows` as always-array, mirroring normalizeDecisionPacket.
-  const raw = await get<InboxPayload>("/tasks/inbox");
+  return get<InboxPayload>("/tasks/inbox");
+}
+
+/**
+ * Phase 2: fan-out inbox merging tasks + requests + reviews. The
+ * `filter` narrows the task half by lifecycle bucket (same set as
+ * /tasks/inbox); the optional `kind` trims the result to one
+ * artifact kind for per-kind frontend tabs.
+ *
+ * Wire shape:
+ *   { items: InboxItem[]; counts: InboxCounts; refreshedAt: string }
+ *
+ * Items are sorted most-recent-activity first. Counts remain
+ * broker-wide (auth filter applies to items only).
+ */
+export interface UnifiedInboxResponse {
+  items: InboxItem[];
+  counts: InboxCounts;
+  refreshedAt: string;
+}
+
+export async function getInboxItems(
+  filter: InboxFilter | "all" = "all",
+  kind?: InboxItemKind,
+): Promise<UnifiedInboxResponse> {
+  const params = new URLSearchParams({ filter });
+  if (kind) {
+    params.set("kind", kind);
+  }
+  const raw = await get<UnifiedInboxResponse>(
+    `/inbox/items?${params.toString()}`,
+  );
   return {
-    ...raw,
-    rows: raw.rows ?? [],
+    items: (raw.items ?? []).map(normalizeInboxItem),
+    counts: raw.counts,
+    refreshedAt: raw.refreshedAt,
+  };
+}
+
+/**
+ * The Go broker serializes the task row with `lifecycleState` +
+ * `severitySummary` (the InboxRow struct's JSON tags). The TS
+ * InboxRow type uses `state` + `severityCounts`. This is a
+ * pre-existing wire/TS skew that predates Phase 2. We normalize
+ * at the API boundary so every component below this sees the
+ * shape its types promise.
+ */
+function normalizeInboxItem(item: InboxItem): InboxItem {
+  if (item.kind !== "task") return item;
+  const row = item.task as unknown as Record<string, unknown>;
+  if (!row) return item;
+  const lifecycleState = row.lifecycleState ?? row.state;
+  const severitySummary = row.severitySummary as
+    | Record<string, number>
+    | undefined;
+  const severityCounts =
+    row.severityCounts ??
+    (severitySummary
+      ? {
+          critical: severitySummary.critical ?? 0,
+          major: severitySummary.major ?? 0,
+          minor: severitySummary.minor ?? 0,
+          nitpick: severitySummary.nitpick ?? 0,
+          skipped: severitySummary.skipped ?? 0,
+        }
+      : undefined);
+  const normalizedRow = {
+    ...item.task,
+    state: lifecycleState ?? item.task.state,
+    severityCounts: severityCounts ?? item.task.severityCounts,
+  } as InboxItem extends { kind: "task"; task: infer T } ? T : never;
+  return { ...item, task: normalizedRow };
+}
+
+/**
+ * Phase 3: per-agent thread inbox. Groups InboxItems by the agent
+ * who owns/sent/submitted them and enriches each thread with recent
+ * message activity from the agent's DM channel.
+ *
+ * Composes on top of /inbox/items — items are the same shape, just
+ * grouped + decorated with the agent + preview line + DM channel.
+ */
+export async function getInboxThreads(): Promise<InboxThreadsResponse> {
+  const raw = await get<InboxThreadsResponse>("/inbox/threads");
+  return {
+    threads: raw.threads ?? [],
+    counts: raw.counts,
+    refreshedAt: raw.refreshedAt,
+  };
+}
+
+/**
+ * Fetch one thread's interleaved event stream (messages + action
+ * cards in chronological order). Frontend opens this when the user
+ * clicks a thread row.
+ */
+export async function getInboxThreadDetail(
+  agentSlug: string,
+): Promise<InboxThreadDetail> {
+  const raw = await get<InboxThreadDetail>(
+    `/inbox/threads/${encodeURIComponent(agentSlug)}`,
+  );
+  return {
+    thread: raw.thread,
+    events: raw.events ?? [],
   };
 }
 
@@ -92,6 +199,26 @@ function normalizeDecisionPacket(p: DecisionPacket): DecisionPacket {
 }
 
 /**
+ * Mark the inbox as "seen up to now" for the current human session.
+ * Posts the wall-clock time so the broker stores it on
+ * Broker.userInboxCursor[slug]. The frontend calls this after each
+ * decision action so the next inbox refresh can recompute the badge
+ * count against the cursor.
+ *
+ * Fire-and-forget — the call returns void, errors are swallowed so a
+ * cursor-write failure can't block the user's decision flow.
+ */
+export async function postInboxCursor(): Promise<void> {
+  try {
+    await post("/inbox/cursor", {
+      lastSeenAt: new Date().toISOString(),
+    });
+  } catch {
+    // intentional: cursor writes are best-effort.
+  }
+}
+
+/**
  * POST a human decision (merge / request_changes / defer) for one task.
  * The broker transitions the task lifecycle and persists the decision
  * onto the Decision Packet. Returns the broker's confirmation envelope.
@@ -102,9 +229,13 @@ function normalizeDecisionPacket(p: DecisionPacket): DecisionPacket {
 export async function postDecision(
   taskId: string,
   action: DecisionAction,
+  comment?: string,
 ): Promise<{ taskId: string; action: string; status: string }> {
   if (USE_MOCKS) {
     return Promise.resolve({ taskId, action, status: "recorded-mock" });
   }
-  return post(`/tasks/${encodeURIComponent(taskId)}/decision`, { action });
+  const body: { action: DecisionAction; comment?: string } = { action };
+  const trimmed = (comment ?? "").trim();
+  if (trimmed) body.comment = trimmed;
+  return post(`/tasks/${encodeURIComponent(taskId)}/decision`, body);
 }
