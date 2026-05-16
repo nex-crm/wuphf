@@ -143,6 +143,8 @@ type Broker struct {
 	wikiSectionsCache       *wikiSectionsCache
 	reviewLog               *ReviewLog
 	reviewResolver          ReviewerResolver
+	inboxCursorMu           sync.RWMutex
+	userInboxCursors        map[string]InboxCursor
 	factLog                 *FactLog
 	readLog                 *ReadLog
 	entityGraph             *EntityGraph
@@ -361,6 +363,7 @@ func NewBrokerAt(statePath string) *Broker {
 		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
 		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
+		userInboxCursors:    make(map[string]InboxCursor),
 		memberPresence:      make(map[string]memberPresenceRecord),
 		presenceKeyToSlug:   make(map[string]string),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
@@ -508,6 +511,16 @@ func (b *Broker) StartOnPort(port int) error {
 	// /tasks/memory-workflow exact paths win for their literals.
 	mux.HandleFunc("/tasks/inbox", b.requireAuth(b.handleTasksInbox))
 	mux.HandleFunc("/tasks/", b.requireAuth(b.handleTaskByID))
+	// Phase 2 unified inbox: fan-out merge across tasks + requests +
+	// reviews. Additive — the legacy /tasks/inbox stays in place so
+	// the existing frontend keeps working through the transition.
+	mux.HandleFunc("/inbox/items", b.requireAuth(b.handleInboxItems))
+	mux.HandleFunc("/inbox/cursor", b.requireAuth(b.handleInboxCursor))
+	// Phase 3 agent-thread inbox: per-agent thread grouping +
+	// chat-style detail (messages interleaved with action cards).
+	// /inbox/threads composes on top of /inbox/items.
+	mux.HandleFunc("/inbox/threads", b.requireAuth(b.handleInboxThreads))
+	mux.HandleFunc("/inbox/threads/", b.requireAuth(b.handleInboxThreadDetail))
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))

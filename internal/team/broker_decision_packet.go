@@ -756,12 +756,36 @@ func (a recordDecisionAction) IsCanonical() bool {
 // surfaces it as 400 to distinguish from internal failures (500).
 var ErrUnknownDecisionAction = errors.New("record decision: action is not canonical")
 
+// RecordTaskDecisionWithComment is the same as RecordTaskDecision but
+// also appends an optional human-authored comment to the Decision
+// Packet's spec.feedback log. The feedback append, the lifecycle
+// transition, and the persist/emit/broadcast side effects all happen
+// inside the same locked section so downstream readers never observe a
+// decided packet without its comment. Author is the slug of the human
+// who acted (broker token → "owner"; human session → their slug);
+// empty author defaults to "human".
+func (b *Broker) RecordTaskDecisionWithComment(taskID, rawAction, comment, author string) error {
+	actorSlug := strings.TrimSpace(author)
+	if actorSlug == "" {
+		actorSlug = "human"
+	}
+	return b.recordTaskDecisionInternal(taskID, rawAction, actorSlug, comment)
+}
+
 // RecordTaskDecision records a decision attributed to actorSlug. When
 // actorSlug is empty the broker stamps "system" so the audit trail is
 // always populated — the HTTP handler passes the authenticated
 // requestActor.Slug; internal callers (timeout sweeper, tests) can
 // pass "" to opt into the system fallback.
 func (b *Broker) RecordTaskDecision(taskID, rawAction, actorSlug string) error {
+	return b.recordTaskDecisionInternal(taskID, rawAction, actorSlug, "")
+}
+
+// recordTaskDecisionInternal is the shared chokepoint behind
+// RecordTaskDecision and RecordTaskDecisionWithComment. It transitions
+// the lifecycle, stamps the packet, optionally appends a FeedbackItem,
+// then persists / emits / broadcasts — all inside one locked section.
+func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, comment string) error {
 	if b == nil {
 		return fmt.Errorf("record decision: nil broker")
 	}
@@ -788,21 +812,21 @@ func (b *Broker) RecordTaskDecision(taskID, rawAction, actorSlug string) error {
 	if actorSlug == "" {
 		actorSlug = "system"
 	}
+	trimmedComment := strings.TrimSpace(comment)
 	target, reason := lifecycleStateForDecisionAction(action)
 	// TODO(v1.1): auto-merge evaluator — once a safe-class definition
 	// (e.g. wiki-only edits with all green checks and zero
 	// critical/major grades) lands, route merge actions through the
 	// evaluator before falling back to direct lifecycle transition.
 	//
-	// Hold b.mu across the transition + packet stamp + persist so the
-	// running-flush timer / convergence sweeper cannot fire between
-	// transition and stamp and overwrite the just-stamped packet with
-	// a pre-decision copy (code-reviewer H3).
+	// Hold b.mu across the transition + packet stamp + feedback append
+	// + persist so the running-flush timer / convergence sweeper cannot
+	// fire between transition and stamp and overwrite the just-stamped
+	// packet with a pre-decision copy (code-reviewer H3). The feedback
+	// append rides the same critical section so downstream readers
+	// never observe the decided packet without its comment.
 	// Wrap the locked section in an inner function so we can defer the
-	// unlock and stay panic-safe across the five Locked helpers below.
-	// A panic in any of them used to leave b.mu held forever; defer +
-	// IIFE collapses both the early-return unlock site and the trailing
-	// unlock into one path.
+	// unlock and stay panic-safe across the Locked helpers below.
 	if err := func() error {
 		b.mu.Lock()
 		defer b.mu.Unlock()
@@ -811,6 +835,13 @@ func (b *Broker) RecordTaskDecision(taskID, rawAction, actorSlug string) error {
 		}
 		packet := b.getOrInitPacketLocked(taskID)
 		b.stampLifecycleStateLocked(packet)
+		if trimmedComment != "" {
+			packet.Spec.Feedback = append(packet.Spec.Feedback, FeedbackItem{
+				AppendedAt: time.Now().UTC(),
+				Author:     actorSlug,
+				Body:       trimmedComment,
+			})
+		}
 		b.persistDecisionPacketLocked(taskID, *packet)
 		b.emitLifecycleManifestLocked(lifecycleManifestPayload{
 			Subkind:        LifecycleManifestDecisionRecorded,

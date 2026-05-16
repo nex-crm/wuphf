@@ -223,7 +223,11 @@ interface RequestItemProps {
   onAnswer?: (choiceId: string) => void;
 }
 
-function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
+export function RequestItem({
+  request,
+  isPending,
+  onAnswer,
+}: RequestItemProps) {
   // Broker uses `options`; legacy used `choices`. Accept either.
   const options = request.options ?? request.choices ?? [];
   const ts = request.updated_at ?? request.created_at ?? request.timestamp;
