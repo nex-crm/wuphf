@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   fetchRichArtifact,
@@ -8,6 +14,9 @@ import {
   type RichArtifactDetail,
 } from "../../api/richArtifacts";
 import RichArtifactFrame from "../rich-artifacts/RichArtifactFrame";
+
+const MODAL_FOCUSABLE_SELECTOR =
+  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 interface NotebookVisualArtifactsProps {
   agentSlug: string;
@@ -34,6 +43,9 @@ export default function NotebookVisualArtifacts({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [promoting, setPromoting] = useState(false);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,10 +80,26 @@ export default function NotebookVisualArtifacts({
   }, [canonicalSourcePath]);
 
   const activeArtifact = detail?.artifact ?? null;
+  const modalTitleId = activeArtifact
+    ? `nb-visual-artifact-modal-title-${activeArtifact.id}`
+    : undefined;
   const defaultTarget = useMemo(
     () => `team/drafts/${agentSlug}-${entrySlug}-visual.md`,
     [agentSlug, entrySlug],
   );
+
+  useEffect(() => {
+    if (!detail) return;
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    closeButtonRef.current?.focus();
+    return () => {
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    };
+  }, [detail]);
 
   if (artifacts.length === 0 && !error) return null;
 
@@ -105,11 +133,29 @@ export default function NotebookVisualArtifacts({
           ? { ...current, artifact: promoted }
           : current,
       );
+      setInlineDetail((current) =>
+        current && current.artifact.id === promoted.id
+          ? { ...current, artifact: promoted }
+          : current,
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Promotion failed");
     } finally {
       setPromoting(false);
     }
+  }
+
+  function closeModal() {
+    setDetail(null);
+  }
+
+  function handleModalKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeModal();
+      return;
+    }
+    if (event.key === "Tab") trapModalFocus(event, dialogRef.current);
   }
 
   return (
@@ -176,10 +222,17 @@ export default function NotebookVisualArtifacts({
         </p>
       ) : null}
       {detail ? (
-        <div className="rich-artifact-modal" role="dialog" aria-modal="true">
+        <div
+          ref={dialogRef}
+          className="rich-artifact-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={modalTitleId}
+          onKeyDown={handleModalKeyDown}
+        >
           <div className="rich-artifact-modal-bar">
             <div>
-              <h2>{detail.artifact.title}</h2>
+              <h2 id={modalTitleId}>{detail.artifact.title}</h2>
               <div className="rich-artifact-meta">
                 <span>{detail.artifact.trustLevel}</span>
                 <span>{detail.artifact.htmlPath}</span>
@@ -206,7 +259,7 @@ export default function NotebookVisualArtifacts({
                   {promoting ? "Promoting..." : "Promote"}
                 </button>
               )}
-              <button type="button" onClick={() => setDetail(null)}>
+              <button ref={closeButtonRef} type="button" onClick={closeModal}>
                 Close
               </button>
             </div>
@@ -229,4 +282,27 @@ function normalizeNotebookSourcePath(path: string): string | null {
   const trimmed = path.trim();
   const match = trimmed.match(/agents\/[^/]+\/notebook\/[^/]+\.md$/);
   return match?.[0] ?? null;
+}
+
+function trapModalFocus(
+  event: KeyboardEvent<HTMLDivElement>,
+  dialog: HTMLDivElement | null,
+) {
+  const focusables = Array.from(
+    dialog?.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR) ?? [],
+  ).filter((element) => !element.hasAttribute("disabled"));
+  if (focusables.length === 0) {
+    event.preventDefault();
+    return;
+  }
+  const [first] = focusables;
+  const last = focusables.at(-1);
+  if (!(first && last)) return;
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }

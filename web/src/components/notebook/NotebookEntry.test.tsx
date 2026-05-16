@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -173,6 +173,47 @@ describe("<NotebookEntryView>", () => {
         "ra_0123456789abcdef",
         expect.objectContaining({ mode: "replace" }),
       ),
+    );
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId("nb-visual-artifact-inline")).getByText(
+          "promoted",
+        ),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("closes the visual artifact modal with Escape", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([
+      {
+        id: "ra_0123456789abcdef",
+        kind: "notebook_html",
+        title: "Visual plan",
+        summary: "A richer plan.",
+        trustLevel: "draft",
+        representation: "html",
+        htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
+        sourceMarkdownPath: DRAFT_ENTRY.file_path,
+        createdBy: "pm",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        contentHash: "hash",
+        sanitizerVersion: "sandbox-v2",
+      },
+    ]);
+
+    render(<NotebookEntryView entry={DRAFT_ENTRY} />);
+
+    await screen.findByRole("heading", { name: "Visual artifacts" });
+    await user.click(screen.getByRole("button", { name: "Open" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Visual plan" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Visual plan" })).toBeNull(),
     );
   });
 

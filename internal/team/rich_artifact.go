@@ -123,8 +123,8 @@ func newRichArtifact(req RichArtifactCreateRequest, now time.Time) (RichArtifact
 		return RichArtifact{}, "", newRichArtifactCallerError("visual artifact: title must not contain NUL bytes")
 	}
 	summary := strings.TrimSpace(req.Summary)
-	html, err := sanitizeRichArtifactHTML(req.HTML)
-	if err != nil {
+	html := req.HTML
+	if err := validateRichArtifactHTMLPolicy(html); err != nil {
 		return RichArtifact{}, "", err
 	}
 	sourcePath := strings.TrimSpace(req.SourceMarkdownPath)
@@ -189,24 +189,23 @@ func validateRichArtifactID(id string) error {
 }
 
 func validateRichArtifactHTML(html string) error {
-	_, err := sanitizeRichArtifactHTML(html)
-	return err
+	return validateRichArtifactHTMLPolicy(html)
 }
 
-func sanitizeRichArtifactHTML(html string) (string, error) {
+func validateRichArtifactHTMLPolicy(html string) error {
 	if strings.TrimSpace(html) == "" {
-		return "", newRichArtifactCallerError("visual artifact: html is required")
+		return newRichArtifactCallerError("visual artifact: html is required")
 	}
 	if len([]byte(html)) > richArtifactMaxHTMLBytes {
-		return "", newRichArtifactCallerError("visual artifact: html exceeds %d bytes", richArtifactMaxHTMLBytes)
+		return newRichArtifactCallerError("visual artifact: html exceeds %d bytes", richArtifactMaxHTMLBytes)
 	}
 	if strings.ContainsRune(html, '\x00') {
-		return "", newRichArtifactCallerError("visual artifact: html must not contain NUL bytes")
+		return newRichArtifactCallerError("visual artifact: html must not contain NUL bytes")
 	}
 	if err := validateRichArtifactSandboxPolicy(html); err != nil {
-		return "", err
+		return err
 	}
-	return html, nil
+	return nil
 }
 
 func validateRichArtifactSandboxPolicy(raw string) error {
@@ -267,6 +266,9 @@ func validateRichArtifactAttributes(tag string, attrs []html.Attribute) error {
 	for _, attr := range attrs {
 		key := strings.ToLower(strings.TrimSpace(attr.Key))
 		value := strings.TrimSpace(attr.Val)
+		if strings.HasPrefix(key, "on") && len(key) > 2 {
+			return newRichArtifactCallerError("visual artifact: html attribute %s on <%s> is not allowed", key, tag)
+		}
 		switch key {
 		case "srcset":
 			return newRichArtifactCallerError("visual artifact: html attribute %s on <%s> is not allowed", key, tag)
@@ -313,20 +315,19 @@ func validateRichArtifactURL(tag, attr, value string) error {
 }
 
 func validateRichArtifactCSS(css string) error {
-	lower := strings.ToLower(css)
-	if strings.Contains(lower, "@import") {
+	if containsASCIIFold(css, "@import") {
 		return newRichArtifactCallerError("visual artifact: css @import is not allowed")
 	}
-	if strings.Contains(lower, "expression(") {
+	if containsASCIIFold(css, "expression(") {
 		return newRichArtifactCallerError("visual artifact: css expression() is not allowed")
 	}
 	for offset := 0; ; {
-		idx := strings.Index(lower[offset:], "url(")
+		idx := indexASCIIFold(css[offset:], "url(")
 		if idx < 0 {
 			return nil
 		}
 		start := offset + idx + len("url(")
-		endRel := strings.Index(lower[start:], ")")
+		endRel := strings.Index(css[start:], ")")
 		if endRel < 0 {
 			return newRichArtifactCallerError("visual artifact: css url() is malformed")
 		}
@@ -337,6 +338,42 @@ func validateRichArtifactCSS(css string) error {
 		}
 		offset = end + 1
 	}
+}
+
+func containsASCIIFold(s, token string) bool {
+	return indexASCIIFold(s, token) >= 0
+}
+
+func indexASCIIFold(s, token string) int {
+	if token == "" {
+		return 0
+	}
+	if len(token) > len(s) {
+		return -1
+	}
+	for i := 0; i <= len(s)-len(token); i++ {
+		matched := true
+		for j := 0; j < len(token); j++ {
+			if !equalASCIIFold(s[i+j], token[j]) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return i
+		}
+	}
+	return -1
+}
+
+func equalASCIIFold(a, b byte) bool {
+	if 'A' <= a && a <= 'Z' {
+		a += 'a' - 'A'
+	}
+	if 'A' <= b && b <= 'Z' {
+		b += 'a' - 'A'
+	}
+	return a == b
 }
 
 func cleanRichArtifactStringList(in []string) []string {

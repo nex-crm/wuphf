@@ -358,6 +358,24 @@ func TestBrokerNotebookVisualArtifactRejectsUnsafeInput(t *testing.T) {
 			},
 			want: "css @import is not allowed",
 		},
+		{
+			name: "event handler",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "Event handler",
+				"html":  `<!doctype html><html><body><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" onerror="alert(1)"></body></html>`,
+			},
+			want: "html attribute onerror",
+		},
+		{
+			name: "css external url after unicode",
+			body: map[string]any{
+				"slug":  "pm",
+				"title": "CSS unicode URL",
+				"html":  `<!doctype html><html><head><style>.x{content:"İ";background:url("https://example.com/bg.png")}</style></head><body></body></html>`,
+			},
+			want: "url() must use a data/blob URL or fragment reference",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, _ := json.Marshal(tc.body)

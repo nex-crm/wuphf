@@ -17,10 +17,16 @@ const SANDBOX_CSP = [
 
 function withSandboxCsp(html: string): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">`;
-  if (/<head(\s[^>]*)?>/i.test(html)) {
-    return html.replace(/<head(\s[^>]*)?>/i, (match) => `${match}${meta}`);
-  }
   return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
+}
+
+function frameKey(title: string, html: string): string {
+  let hash = 5381;
+  const input = `${title}\u0000${html}`;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash * 33) ^ input.charCodeAt(i);
+  }
+  return `rich-artifact-${hash >>> 0}`;
 }
 
 interface RichArtifactFrameProps {
@@ -34,6 +40,7 @@ export default function RichArtifactFrame({
 }: RichArtifactFrameProps) {
   return (
     <iframe
+      key={frameKey(title, html)}
       className="rich-artifact-frame"
       title={title}
       sandbox="allow-scripts"
