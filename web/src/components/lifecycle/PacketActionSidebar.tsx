@@ -1,13 +1,21 @@
+import { useState } from "react";
+
 import type { DecisionPacket } from "../../lib/types/lifecycle";
 
 interface PacketActionSidebarProps {
   packet: DecisionPacket;
   /** True during streaming/loading — disables decision actions. */
   isDecisionLocked: boolean;
-  onApprove: () => void;
-  onRequestChanges: () => void;
-  onDefer: () => void;
-  onBlock: () => void;
+  /**
+   * Optional human-authored comment to attach to the decision. The
+   * sidebar owns the textarea state and passes the trimmed value
+   * back through these callbacks; the route reads spec.feedback on
+   * the next packet fetch to render the comment in-thread.
+   */
+  onApprove: (comment?: string) => void;
+  onRequestChanges: (comment?: string) => void;
+  onDefer: (comment?: string) => void;
+  onBlock: (comment?: string) => void;
   onOpenInWorktree: () => void;
 }
 
@@ -33,6 +41,12 @@ export function PacketActionSidebar({
   onBlock,
   onOpenInWorktree,
 }: PacketActionSidebarProps) {
+  const [comment, setComment] = useState("");
+  const trimmedComment = comment.trim();
+  const submit = (callback: (comment?: string) => void) => {
+    callback(trimmedComment ? trimmedComment : undefined);
+    setComment("");
+  };
   const lockedTooltip = isDecisionLocked ? "Wait for review state" : undefined;
   const runtime = packet.sessionReport?.metadata?.runtime;
   const toolCalls = packet.sessionReport?.metadata?.tool_calls;
@@ -50,11 +64,28 @@ export function PacketActionSidebar({
   return (
     <aside className="packet-right" aria-label="Decision actions">
       <h3>Decision</h3>
+      <label className="packet-comment-label" htmlFor="packet-comment">
+        Add a comment
+        <span className="packet-comment-optional">optional</span>
+      </label>
+      <textarea
+        id="packet-comment"
+        className="packet-comment"
+        placeholder={
+          trimmedComment.length > 0
+            ? ""
+            : "Why are you approving / requesting changes? The agent reads this."
+        }
+        value={comment}
+        disabled={isDecisionLocked}
+        onChange={(e) => setComment(e.target.value)}
+        rows={3}
+      />
       <div className="packet-actions">
         <button
           type="button"
           className="packet-action packet-action--approve"
-          onClick={onApprove}
+          onClick={() => submit(onApprove)}
           disabled={isDecisionLocked}
           title={lockedTooltip}
         >
@@ -63,7 +94,7 @@ export function PacketActionSidebar({
         <button
           type="button"
           className="packet-action packet-action--secondary"
-          onClick={onRequestChanges}
+          onClick={() => submit(onRequestChanges)}
           disabled={isDecisionLocked}
           title={lockedTooltip}
         >
@@ -72,7 +103,7 @@ export function PacketActionSidebar({
         <button
           type="button"
           className="packet-action packet-action--quiet"
-          onClick={onDefer}
+          onClick={() => submit(onDefer)}
           disabled={isDecisionLocked}
           title={lockedTooltip}
         >
@@ -84,7 +115,7 @@ export function PacketActionSidebar({
         <button
           type="button"
           className="packet-action packet-action--danger"
-          onClick={onBlock}
+          onClick={() => submit(onBlock)}
           disabled={isDecisionLocked}
           title={lockedTooltip}
         >
@@ -120,7 +151,7 @@ export function PacketActionSidebar({
         <div className="packet-aside-card">
           <div className="label">Blocked on</div>
           <div className="value" style={{ color: "var(--warning-500)" }}>
-            {packet.dependencies.blockedOn.join(", ")} — waiting approval
+            {packet.dependencies.blockedOn.join(", ")} — waiting merge
           </div>
         </div>
       ) : null}

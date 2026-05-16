@@ -756,6 +756,38 @@ func (a recordDecisionAction) IsCanonical() bool {
 // surfaces it as 400 to distinguish from internal failures (500).
 var ErrUnknownDecisionAction = errors.New("record decision: action is not canonical")
 
+// RecordTaskDecisionWithComment is the same as RecordTaskDecision but
+// also appends an optional human-authored comment to the Decision
+// Packet's spec.feedback log. The comment becomes part of the packet's
+// durable history and renders inline on the next read. Author is the
+// slug of the human who acted (broker token → "owner"; human session →
+// their slug); empty author defaults to "human". Comment append happens
+// inside the same locked section as the lifecycle transition so the
+// packet write is atomic with the state move.
+func (b *Broker) RecordTaskDecisionWithComment(taskID, rawAction, comment, author string) error {
+	actorSlug := strings.TrimSpace(author)
+	if actorSlug == "" {
+		actorSlug = "human"
+	}
+	if err := b.RecordTaskDecision(taskID, rawAction, actorSlug); err != nil {
+		return err
+	}
+	trimmedComment := strings.TrimSpace(comment)
+	if trimmedComment == "" {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	packet := b.getOrInitPacketLocked(taskID)
+	packet.Spec.Feedback = append(packet.Spec.Feedback, FeedbackItem{
+		AppendedAt: time.Now().UTC(),
+		Author:     actorSlug,
+		Body:       trimmedComment,
+	})
+	b.persistDecisionPacketLocked(taskID, *packet)
+	return nil
+}
+
 // RecordTaskDecision records a decision attributed to actorSlug. When
 // actorSlug is empty the broker stamps "system" so the audit trail is
 // always populated — the HTTP handler passes the authenticated

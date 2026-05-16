@@ -143,6 +143,8 @@ type Broker struct {
 	wikiSectionsCache       *wikiSectionsCache
 	reviewLog               *ReviewLog
 	reviewResolver          ReviewerResolver
+	inboxCursorMu           sync.RWMutex
+	userInboxCursors        map[string]InboxCursor
 	factLog                 *FactLog
 	readLog                 *ReadLog
 	entityGraph             *EntityGraph
@@ -361,6 +363,7 @@ func NewBrokerAt(statePath string) *Broker {
 		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
 		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
+		userInboxCursors:    make(map[string]InboxCursor),
 		memberPresence:      make(map[string]memberPresenceRecord),
 		presenceKeyToSlug:   make(map[string]string),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),

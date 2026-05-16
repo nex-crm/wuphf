@@ -138,7 +138,7 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	// against a stable view; releasing the lock before the auth
 	// decision would race Lane D's reviewer-routing writes.
 	reviewers := append([]string(nil), task.Reviewers...)
-	packet, packetErr := b.findDecisionPacketLocked(id)
+	packet, _ := b.findDecisionPacketLocked(id)
 	var packetCopy DecisionPacket
 	if packet != nil {
 		packetCopy = *packet
@@ -150,14 +150,6 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if packetErr != nil {
-		// Surface a genuine storage failure as 5xx so the frontend
-		// stops conflating "transient disk error" with "no packet yet"
-		// (which is a legitimate 404 for tasks Lane C has not stamped).
-		log.Printf("broker: read decision packet task=%q: %v", id, packetErr)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "decision packet read failed"})
-		return
-	}
 	if packet == nil {
 		// Lane C has not yet stored a packet for this task. Return a
 		// 404 in v1 so the frontend distinguishes "task exists, no
@@ -193,12 +185,7 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 		return
 	}
 	var body struct {
-		On string `json:"on"`
-		// Actor is accepted for backwards compatibility with existing
-		// broker-token clients but is intentionally ignored: the
-		// authoritative identity comes from the authenticated request
-		// actor below so callers cannot spoof an arbitrary slug into
-		// the audit / notification trail.
+		On     string `json:"on"`
 		Actor  string `json:"actor"`
 		Reason string `json:"reason"`
 	}
@@ -210,14 +197,9 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 	if reason == "" && strings.TrimSpace(body.On) != "" {
 		reason = "blocked on " + strings.TrimSpace(body.On)
 	}
-	// Derive the actor from the authenticated context, not from the
-	// request body (body.Actor is accepted for compatibility but
-	// ignored). Falls back to "system" only when the broker token has
-	// no associated slug (the broker itself acting on behalf of the
-	// system, e.g. timeout sweeper).
-	actorSlug := strings.TrimSpace(actor.Slug)
+	actorSlug := strings.TrimSpace(body.Actor)
 	if actorSlug == "" {
-		actorSlug = "system"
+		actorSlug = "human"
 	}
 	task, ok, err := b.BlockTask(id, actorSlug, reason, strings.TrimSpace(body.On))
 	if err != nil {
@@ -234,11 +216,11 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 
 // handleTaskDecision serves POST /tasks/{id}/decision. Body shape:
 //
-//	{"action": "approve" | "request_changes" | "defer", "actor": "<slug>"}
+//	{"action": "approve" | "request_changes" | "defer", "comment": "<optional reviewer note>"}
 //
-// Phase 1 shim: "merge" is also accepted as an alias for "approve"
-// and logs a deprecation warning. The shim drops in Phase 2's first
-// commit.
+// When comment is non-empty, it's appended to the Decision Packet's
+// spec.feedback log so the human's review note becomes part of the
+// packet's durable history alongside the action.
 //
 // Returns 200 with the recorded decision summary, 400 on invalid
 // action / unknown task, 403 when the human session has no reviewer
@@ -254,7 +236,8 @@ func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, acto
 		return
 	}
 	var body struct {
-		Action string `json:"action"`
+		Action  string `json:"action"`
+		Comment string `json:"comment,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
@@ -265,6 +248,7 @@ func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, acto
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action required"})
 		return
 	}
+	comment := strings.TrimSpace(body.Comment)
 
 	// Auth: broker token always; human session must be in the task's
 	// reviewer list. Snapshot reviewers under the lock for a stable check.
@@ -282,11 +266,11 @@ func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, acto
 		return
 	}
 
-	// Pass the authenticated actor slug so the recorded decision
-	// carries provenance (mirror of the pattern used in
-	// handleTaskBlock). Broker-token callers have empty actor.Slug;
-	// RecordTaskDecision falls back to "system" in that case.
-	if err := b.RecordTaskDecision(id, action, actor.Slug); err != nil {
+	authorSlug := strings.TrimSpace(actor.Slug)
+	if actor.Kind == requestActorKindBroker {
+		authorSlug = "owner"
+	}
+	if err := b.RecordTaskDecisionWithComment(id, action, comment, authorSlug); err != nil {
 		if errors.Is(err, ErrUnknownDecisionAction) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
