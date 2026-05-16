@@ -1988,7 +1988,7 @@ html[data-theme="noir-gold"] {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: currentColor;
+  background: currentcolor;
 }
 
 .severity-summary {
@@ -2170,7 +2170,7 @@ html[data-theme="noir-gold"] {
 
 .inbox-error-banner .retry {
   background: transparent;
-  border: 1px solid currentColor;
+  border: 1px solid currentcolor;
   color: inherit;
   padding: 4px 12px;
   border-radius: var(--radius-full);
@@ -2307,7 +2307,7 @@ html[data-theme="noir-gold"] {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: currentColor;
+  background: currentcolor;
   flex-shrink: 0;
 }
 
@@ -2919,7 +2919,7 @@ html[data-theme="noir-gold"] {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: currentColor;
+  background: currentcolor;
   margin-top: 7px;
   flex-shrink: 0;
 }
@@ -2993,7 +2993,7 @@ html[data-theme="noir-gold"] {
 
 .packet-error .retry {
   background: transparent;
-  border: 1px solid currentColor;
+  border: 1px solid currentcolor;
   color: inherit;
   padding: 6px 14px;
   border-radius: var(--radius-full);
