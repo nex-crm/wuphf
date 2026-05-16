@@ -47,9 +47,12 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 			return
 		}
-		if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
-			body.Slug = humanIdentityFromActor(actor).Slug
+		slug, status, err := richArtifactAuthenticatedSlug(r, body.Slug, "slug")
+		if err != nil {
+			writeJSON(w, status, map[string]string{"error": err.Error()})
+			return
 		}
+		body.Slug = slug
 		artifact, html, err := newRichArtifact(body, time.Now())
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -113,12 +116,10 @@ func (b *Broker) handleNotebookVisualArtifactSubpath(w http.ResponseWriter, r *h
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 			return
 		}
-		actorSlug := strings.TrimSpace(body.ActorSlug)
-		if actorSlug == "" {
-			actorSlug = strings.TrimSpace(r.Header.Get(agentRateLimitHeader))
-		}
-		if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
-			actorSlug = humanIdentityFromActor(actor).Slug
+		actorSlug, status, err := richArtifactAuthenticatedSlug(r, body.ActorSlug, "actor_slug")
+		if err != nil {
+			writeJSON(w, status, map[string]string{"error": err.Error()})
+			return
 		}
 		if actorSlug == "" {
 			actorSlug = "human"
@@ -144,6 +145,30 @@ func (b *Broker) handleNotebookVisualArtifactSubpath(w http.ResponseWriter, r *h
 		return
 	}
 	writeJSON(w, http.StatusNotFound, map[string]string{"error": "visual artifact not found"})
+}
+
+func richArtifactAuthenticatedSlug(r *http.Request, bodySlug, fieldName string) (string, int, error) {
+	bodySlug = strings.TrimSpace(bodySlug)
+	agentSlug := strings.TrimSpace(r.Header.Get(agentRateLimitHeader))
+	if agentSlug != "" {
+		if err := validateNotebookSlug(agentSlug); err != nil {
+			return "", http.StatusBadRequest, err
+		}
+		if bodySlug != "" && bodySlug != agentSlug {
+			return "", http.StatusForbidden, errors.New(fieldName + " does not match authenticated agent")
+		}
+		if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
+			humanSlug := humanIdentityFromActor(actor).Slug
+			if humanSlug != "" && humanSlug != agentSlug {
+				return "", http.StatusForbidden, errors.New("session identity does not match authenticated agent")
+			}
+		}
+		return agentSlug, 0, nil
+	}
+	if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
+		return humanIdentityFromActor(actor).Slug, 0, nil
+	}
+	return bodySlug, 0, nil
 }
 
 // handleWikiVisualArtifact returns the promoted visual artifact associated with

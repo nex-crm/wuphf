@@ -574,6 +574,19 @@ func TestHandleTeamNotebookVisualArtifactValidations(t *testing.T) {
 	}
 }
 
+func TestHandleTeamNotebookVisualArtifactListRequiresScope(t *testing.T) {
+	t.Setenv("WUPHF_AGENT_SLUG", "")
+	t.Setenv("NEX_AGENT_SLUG", "")
+
+	res, _, err := handleTeamNotebookVisualArtifactList(context.Background(), nil, TeamNotebookVisualArtifactListArgs{})
+	if err != nil {
+		t.Fatalf("list handler returned transport error: %v", err)
+	}
+	if !isToolError(res) || !strings.Contains(toolErrorText(res), "target_slug is required") {
+		t.Fatalf("expected target_slug tool error, got %#v text=%q", res, toolErrorText(res))
+	}
+}
+
 // Helpers
 
 func isToolError(res *mcp.CallToolResult) bool {

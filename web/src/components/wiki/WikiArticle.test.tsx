@@ -152,6 +152,43 @@ describe("<WikiArticle content>", () => {
     );
   });
 
+  it("keeps the selected tab during same-path refreshes without a visual artifact", async () => {
+    vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
+
+    const { rerender } = render(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+        externalRefreshNonce={0}
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "Customer X" });
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "History" })).toHaveClass(
+        "active",
+      ),
+    );
+
+    rerender(
+      <WikiArticle
+        path="people/customer-x"
+        catalog={[]}
+        onNavigate={() => {}}
+        externalRefreshNonce={1}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(richApi.fetchWikiVisualArtifact).toHaveBeenCalledTimes(2),
+    );
+    expect(screen.getByRole("button", { name: "History" })).toHaveClass(
+      "active",
+    );
+  });
+
   it("renders an error state when fetchArticle rejects", async () => {
     vi.spyOn(api, "fetchArticle").mockRejectedValue(new Error("network down"));
     render(<WikiArticle path="broken" catalog={[]} onNavigate={() => {}} />);

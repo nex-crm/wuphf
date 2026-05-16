@@ -105,20 +105,15 @@ function StalenessIndicator({ article }: { article: WikiArticleT }) {
 const MIN_COMPRESS_WORDS = 200;
 
 interface CompressButtonProps {
-  path: string;
+  articlePath: string;
   wordCount: number;
 }
 
-function CompressButton({ path, wordCount }: CompressButtonProps) {
+function CompressButton({ articlePath, wordCount }: CompressButtonProps) {
   const [status, setStatus] = useState<
     "idle" | "pending" | "queued" | "in_flight" | "error"
   >("idle");
   const [message, setMessage] = useState<string>("");
-
-  useEffect(() => {
-    setStatus("idle");
-    setMessage("");
-  }, [path]);
 
   if (wordCount <= MIN_COMPRESS_WORDS) return null;
 
@@ -126,7 +121,7 @@ function CompressButton({ path, wordCount }: CompressButtonProps) {
     setStatus("pending");
     setMessage("");
     try {
-      const res = await compressArticle(path);
+      const res = await compressArticle(articlePath);
       if (res.queued) {
         setStatus("queued");
         setMessage("Compressing article…");
@@ -218,7 +213,8 @@ export default function WikiArticle({
   const [humans, setHumans] = useState<HumanIdentity[]>([]);
   const [visualArtifact, setVisualArtifact] =
     useState<RichArtifactDetail | null>(null);
-  const visualDefaultedPathRef = useRef<string | null>(null);
+  const visualPathRef = useRef<string | null>(null);
+  const visualAutoOpenedPathRef = useRef<string | null>(null);
 
   // Fetch the human registry once per mount. The list is small (a handful
   // of team members) and changes rarely, so we skip refetching on every
@@ -267,8 +263,9 @@ export default function WikiArticle({
     let cancelled = false;
     void externalRefreshNonce;
     void refreshNonce;
-    if (visualDefaultedPathRef.current !== path) {
-      visualDefaultedPathRef.current = null;
+    if (visualPathRef.current !== path) {
+      visualPathRef.current = path;
+      visualAutoOpenedPathRef.current = null;
       setTab("article");
     }
     setVisualArtifact(null);
@@ -276,8 +273,8 @@ export default function WikiArticle({
       .then((detail) => {
         if (cancelled) return;
         setVisualArtifact(detail);
-        if (detail && visualDefaultedPathRef.current !== path) {
-          visualDefaultedPathRef.current = path;
+        if (detail && visualAutoOpenedPathRef.current !== path) {
+          visualAutoOpenedPathRef.current = path;
           setTab((current) => (current === "article" ? "visual" : current));
         }
       })
@@ -550,7 +547,11 @@ function ArticleBadges({ article }: { article: WikiArticleT }) {
   return (
     <>
       <StalenessIndicator article={article} />
-      <CompressButton path={article.path} wordCount={article.word_count} />
+      <CompressButton
+        key={article.path}
+        articlePath={article.path}
+        wordCount={article.word_count}
+      />
       <SynthesisQueuedBadge queued={article.synthesis_queued} />
     </>
   );

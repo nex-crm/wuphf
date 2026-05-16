@@ -507,7 +507,7 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 // reply to the caller. On error the failure is logged but does NOT propagate
 // — markdown is the source of truth; the index is a rebuildable cache (§7.4).
 func (w *WikiWorker) maybeReconcileIndex(ctx context.Context, relPath string) {
-	if w.index == nil {
+	if w.index == nil || strings.TrimSpace(relPath) == "" {
 		return
 	}
 	w.sideGoroutines.Add(1)

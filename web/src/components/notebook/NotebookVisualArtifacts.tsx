@@ -46,6 +46,7 @@ export default function NotebookVisualArtifacts({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const openRequestSeqRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,14 +105,19 @@ export default function NotebookVisualArtifacts({
   if (artifacts.length === 0 && !error) return null;
 
   async function openArtifact(artifact: RichArtifact) {
+    openRequestSeqRef.current += 1;
+    const requestSeq = openRequestSeqRef.current;
     setLoading(true);
     setError(null);
     try {
-      setDetail(await fetchRichArtifact(artifact.id));
+      const nextDetail = await fetchRichArtifact(artifact.id);
+      if (requestSeq !== openRequestSeqRef.current) return;
+      setDetail(nextDetail);
     } catch (err: unknown) {
+      if (requestSeq !== openRequestSeqRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to open artifact");
     } finally {
-      setLoading(false);
+      if (requestSeq === openRequestSeqRef.current) setLoading(false);
     }
   }
 
@@ -146,6 +152,7 @@ export default function NotebookVisualArtifacts({
   }
 
   function closeModal() {
+    openRequestSeqRef.current += 1;
     setDetail(null);
   }
 

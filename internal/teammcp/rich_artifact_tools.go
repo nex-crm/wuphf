@@ -120,6 +120,9 @@ func handleTeamNotebookVisualArtifactList(ctx context.Context, _ *mcp.CallToolRe
 	target := strings.TrimSpace(args.TargetSlug)
 	if target == "" && sourcePath == "" {
 		target = resolveSlugOptional("")
+		if target == "" {
+			return toolError(fmt.Errorf("target_slug is required (and WUPHF_AGENT_SLUG is not set)")), nil, nil
+		}
 	}
 	if target != "" {
 		q.Set("slug", target)

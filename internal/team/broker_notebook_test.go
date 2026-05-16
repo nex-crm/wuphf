@@ -321,6 +321,71 @@ func TestBrokerNotebookVisualArtifactHumanCreateUsesSessionSlug(t *testing.T) {
 	}
 }
 
+func TestBrokerNotebookVisualArtifactAgentHeaderAuthoritative(t *testing.T) {
+	srv, b, teardown := newNotebookTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	createBody, _ := json.Marshal(map[string]any{
+		"slug":    "ceo",
+		"title":   "Agent visual plan",
+		"summary": "Created by the authenticated agent.",
+		"html":    "<!doctype html><html><body><h1>Agent visual</h1></body></html>",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody), token)
+	req.Header.Set(agentRateLimitHeader, "pm")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create visual artifact with conflicting slug: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("create status=%d, want 403", res.StatusCode)
+	}
+
+	createBody, _ = json.Marshal(map[string]any{
+		"slug":    "pm",
+		"title":   "Agent visual plan",
+		"summary": "Created by the authenticated agent.",
+		"html":    "<!doctype html><html><body><h1>Agent visual</h1></body></html>",
+	})
+	req, _ = authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts", bytes.NewReader(createBody), token)
+	req.Header.Set(agentRateLimitHeader, "pm")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create visual artifact: %v", err)
+	}
+	var created struct {
+		Artifact RichArtifact `json:"artifact"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("create status=%d artifact=%+v", res.StatusCode, created.Artifact)
+	}
+	if created.Artifact.CreatedBy != "pm" {
+		t.Fatalf("CreatedBy = %q, want authenticated agent pm", created.Artifact.CreatedBy)
+	}
+
+	promoteBody, _ := json.Marshal(map[string]any{
+		"actor_slug":       "ceo",
+		"target_wiki_path": "team/drafts/agent-visual.md",
+		"markdown_summary": "# Agent visual\n\nSummary.\n",
+	})
+	req, _ = authReq(http.MethodPost, srv.URL+"/notebook/visual-artifacts/"+created.Artifact.ID+"/promote", bytes.NewReader(promoteBody), token)
+	req.Header.Set(agentRateLimitHeader, "pm")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("promote visual artifact with conflicting actor: %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("promote status=%d, want 403", res.StatusCode)
+	}
+}
+
 func TestBrokerNotebookVisualArtifactRejectsUnsafeInput(t *testing.T) {
 	srv, b, teardown := newNotebookTestServer(t)
 	defer teardown()
@@ -605,6 +670,69 @@ func TestEnsureNotebookDirsForRosterCreatesBlankShelves(t *testing.T) {
 		if _, err := os.Stat(marker); err != nil {
 			t.Fatalf("expected notebook shelf marker for %s: %v", slug, err)
 		}
+	}
+}
+
+func TestNewRichArtifactIDIncludesHighResolutionAndProvenance(t *testing.T) {
+	now := time.Date(2026, 5, 16, 10, 20, 30, 123456789, time.UTC)
+	base := RichArtifactCreateRequest{
+		Slug:               "pm",
+		Title:              "Same visual",
+		HTML:               "<!doctype html><html><body><h1>Same</h1></body></html>",
+		SourceMarkdownPath: "agents/pm/notebook/a.md",
+	}
+	first, _, err := newRichArtifact(base, now)
+	if err != nil {
+		t.Fatalf("newRichArtifact first: %v", err)
+	}
+	base.Summary = "different provenance"
+	base.SourceMarkdownPath = "agents/pm/notebook/b.md"
+	second, _, err := newRichArtifact(base, now)
+	if err != nil {
+		t.Fatalf("newRichArtifact second: %v", err)
+	}
+	if first.CreatedAt != now.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("CreatedAt = %q, want RFC3339Nano", first.CreatedAt)
+	}
+	if first.ID == second.ID {
+		t.Fatalf("artifact IDs collided for distinct provenance: %s", first.ID)
+	}
+}
+
+func TestRepoRichArtifactReadRevalidatesPersistedHTMLPolicy(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+	artifact, html, err := newRichArtifact(RichArtifactCreateRequest{
+		Slug:  "pm",
+		Title: "Tamper visual",
+		HTML:  "<!doctype html><html><body><h1>Safe</h1></body></html>",
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("newRichArtifact: %v", err)
+	}
+	if _, _, err := repo.CommitRichArtifact(context.Background(), "pm", artifact, html, "artifact: create"); err != nil {
+		t.Fatalf("commit rich artifact: %v", err)
+	}
+
+	unsafeHTML := `<!doctype html><html><body><div onclick="alert(1)">Unsafe</div></body></html>`
+	artifact.ContentHash = richArtifactContentHash(unsafeHTML)
+	metaBytes, err := json.MarshalIndent(artifact, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal tampered metadata: %v", err)
+	}
+	metaBytes = append(metaBytes, '\n')
+	if err := os.WriteFile(filepath.Join(root, richArtifactMetaPath(artifact.ID)), metaBytes, 0o600); err != nil {
+		t.Fatalf("write tampered metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, artifact.HTMLPath), []byte(unsafeHTML), 0o600); err != nil {
+		t.Fatalf("write tampered html: %v", err)
+	}
+	if _, _, err := repo.RichArtifact(artifact.ID); err == nil || !strings.Contains(err.Error(), "html attribute onclick") {
+		t.Fatalf("RichArtifact error = %v, want policy validation error", err)
 	}
 }
 

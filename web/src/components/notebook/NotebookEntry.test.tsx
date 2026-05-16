@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,30 +26,30 @@ const PROMOTED_ENTRY: NotebookEntry = {
   promoted_to_path: "playbooks/customer-onboarding",
 };
 
-describe("<NotebookEntryView>", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([]);
-    vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue({
-      artifact: {
-        id: "ra_0123456789abcdef",
-        kind: "notebook_html",
-        title: "Visual plan",
-        summary: "A richer plan.",
-        trustLevel: "draft",
-        representation: "html",
-        htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
-        sourceMarkdownPath: DRAFT_ENTRY.file_path,
-        createdBy: "pm",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        contentHash: "hash",
-        sanitizerVersion: "sandbox-v1",
-      },
-      html: "<h1>Inline visual</h1>",
-    });
+beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([]);
+  vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue({
+    artifact: {
+      id: "ra_0123456789abcdef",
+      kind: "notebook_html",
+      title: "Visual plan",
+      summary: "A richer plan.",
+      trustLevel: "draft",
+      representation: "html",
+      htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
+      sourceMarkdownPath: DRAFT_ENTRY.file_path,
+      createdBy: "pm",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      contentHash: "hash",
+      sanitizerVersion: "sandbox-v1",
+    },
+    html: "<h1>Inline visual</h1>",
   });
+});
 
+describe("<NotebookEntryView content>", () => {
   it("renders title, subtitle, and DRAFT stamp for a draft entry", () => {
     render(<NotebookEntryView entry={DRAFT_ENTRY} />);
     expect(
@@ -100,7 +100,9 @@ describe("<NotebookEntryView>", () => {
     render(<NotebookEntryView entry={withBack} />);
     expect(screen.getByText("onboarding gotchas")).toBeInTheDocument();
   });
+});
 
+describe("<NotebookEntryView visual artifacts>", () => {
   it("renders visual artifact cards attached to the notebook entry", async () => {
     vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([
       {
@@ -133,6 +135,77 @@ describe("<NotebookEntryView>", () => {
       "srcdoc",
       expect.stringContaining("Inline visual"),
     );
+  });
+
+  it("keeps the latest opened visual artifact when requests finish out of order", async () => {
+    const user = userEvent.setup();
+    const first = {
+      id: "ra_aaaaaaaaaaaaaaaa",
+      kind: "notebook_html" as const,
+      title: "First visual",
+      summary: "First plan.",
+      trustLevel: "draft" as const,
+      representation: "html" as const,
+      htmlPath: "wiki/visual-artifacts/ra_aaaaaaaaaaaaaaaa.html",
+      sourceMarkdownPath: DRAFT_ENTRY.file_path,
+      createdBy: "pm",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      contentHash: "hash-a",
+      sanitizerVersion: "sandbox-v2",
+    };
+    const second = {
+      ...first,
+      id: "ra_bbbbbbbbbbbbbbbb",
+      title: "Second visual",
+      summary: "Second plan.",
+      htmlPath: "wiki/visual-artifacts/ra_bbbbbbbbbbbbbbbb.html",
+      contentHash: "hash-b",
+    };
+    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([first, second]);
+    const fetchSpy = vi
+      .spyOn(richApi, "fetchRichArtifact")
+      .mockResolvedValue({ artifact: first, html: "<h1>Inline first</h1>" });
+
+    render(<NotebookEntryView entry={DRAFT_ENTRY} />);
+
+    await screen.findByTestId("nb-visual-artifact-inline");
+
+    let resolveFirst: ((value: richApi.RichArtifactDetail) => void) | null =
+      null;
+    let resolveSecond: ((value: richApi.RichArtifactDetail) => void) | null =
+      null;
+    fetchSpy.mockImplementation((id) => {
+      if (id === first.id) {
+        return new Promise((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return new Promise((resolve) => {
+        resolveSecond = resolve;
+      });
+    });
+
+    const openButtons = screen.getAllByRole("button", { name: "Open" });
+    await user.click(openButtons[0]);
+    await user.click(openButtons[1]);
+
+    await act(async () => {
+      resolveSecond?.({ artifact: second, html: "<h1>Second modal</h1>" });
+    });
+    expect(
+      await screen.findByRole("dialog", { name: "Second visual" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      resolveFirst?.({ artifact: first, html: "<h1>First modal</h1>" });
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("dialog", { name: "Second visual" }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("dialog", { name: "First visual" })).toBeNull();
   });
 
   it("re-promotes visual artifacts by replacing the default wiki target", async () => {

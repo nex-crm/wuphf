@@ -133,9 +133,10 @@ func newRichArtifact(req RichArtifactCreateRequest, now time.Time) (RichArtifact
 			return RichArtifact{}, "", markRichArtifactCallerError(err)
 		}
 	}
-	createdAt := now.UTC().Format(time.RFC3339)
+	relatedReceiptIDs := cleanRichArtifactStringList(req.RelatedReceiptIDs)
+	createdAt := now.UTC().Format(time.RFC3339Nano)
 	contentHash := richArtifactContentHash(html)
-	id := richArtifactID(slug, title, createdAt, html)
+	id := richArtifactID(slug, title, createdAt, html, summary, sourcePath, strings.TrimSpace(req.RelatedTaskID), strings.TrimSpace(req.RelatedMessageID), relatedReceiptIDs)
 	artifact := RichArtifact{
 		ID:                 id,
 		Kind:               richArtifactKindNotebookHTML,
@@ -147,7 +148,7 @@ func newRichArtifact(req RichArtifactCreateRequest, now time.Time) (RichArtifact
 		SourceMarkdownPath: sourcePath,
 		RelatedTaskID:      strings.TrimSpace(req.RelatedTaskID),
 		RelatedMessageID:   strings.TrimSpace(req.RelatedMessageID),
-		RelatedReceiptIDs:  cleanRichArtifactStringList(req.RelatedReceiptIDs),
+		RelatedReceiptIDs:  relatedReceiptIDs,
 		CreatedBy:          slug,
 		CreatedAt:          createdAt,
 		UpdatedAt:          createdAt,
@@ -157,8 +158,18 @@ func newRichArtifact(req RichArtifactCreateRequest, now time.Time) (RichArtifact
 	return artifact, html, nil
 }
 
-func richArtifactID(slug, title, createdAt, html string) string {
-	sum := sha256.Sum256([]byte(slug + "\x00" + title + "\x00" + createdAt + "\x00" + html))
+func richArtifactID(slug, title, createdAt, html, summary, sourcePath, relatedTaskID, relatedMessageID string, relatedReceiptIDs []string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		slug,
+		title,
+		createdAt,
+		html,
+		summary,
+		sourcePath,
+		relatedTaskID,
+		relatedMessageID,
+		strings.Join(relatedReceiptIDs, "\x00"),
+	}, "\x00")))
 	return "ra_" + hex.EncodeToString(sum[:])[:16]
 }
 
@@ -634,8 +645,8 @@ func (r *Repo) readRichArtifactLocked(id string) (RichArtifact, string, error) {
 	if err != nil {
 		return RichArtifact{}, "", fmt.Errorf("visual artifact: read html: %w", err)
 	}
-	if artifact.ContentHash != richArtifactContentHash(string(html)) {
-		return RichArtifact{}, "", fmt.Errorf("visual artifact: content hash mismatch")
+	if err := validateRichArtifactForWrite(artifact, string(html)); err != nil {
+		return RichArtifact{}, "", err
 	}
 	return artifact, string(html), nil
 }
