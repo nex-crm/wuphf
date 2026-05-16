@@ -520,13 +520,16 @@ func TestDecisionPacketWikiPromotionOnMerged(t *testing.T) {
 		t.Fatalf("RecordTaskDecision: %v", err)
 	}
 
-	// Wiki write is enqueued in a goroutine; deterministically drain
-	// the worker so the in-flight process() finishes its file write
-	// before we read. Stop + Done is idempotent; t.Cleanup repeats it
-	// safely.
+	// Wiki write is enqueued in a background goroutine spawned by
+	// writeWikiPromotionLocked. Cancel the context to signal the worker
+	// to drain, then wait for completion. The worker processes all
+	// in-flight requests before signaling Done, so the promotion file
+	// will exist after Done returns. This avoids the Stop/Enqueue
+	// channel race (Stop closes the request channel which can race with
+	// a concurrent Enqueue send).
 	relPath := wikiPromotionPath(taskID)
 	expectedPath := filepath.Join(wikiRoot, relPath)
-	worker.Stop()
+	cancel()
 	<-worker.Done()
 	body, err := os.ReadFile(expectedPath)
 	if err != nil {

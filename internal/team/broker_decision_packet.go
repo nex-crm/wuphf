@@ -987,11 +987,14 @@ func (b *Broker) writeWikiPromotionLocked(taskID string, packet DecisionPacket) 
 	}
 	commitMsg := fmt.Sprintf("decision: promote %s on merge", taskID)
 	ctx := b.wikiPromotionContext()
+	// Capture the worker locally so the goroutine doesn't race with
+	// concurrent nil-assignment on b.wikiWorker (e.g. broker shutdown).
+	worker := b.wikiWorker
 	// Run the wiki write off-lock so a slow git commit cannot block
 	// every other broker mutator. The wiki worker has its own
 	// serialisation queue, so concurrent triggers are safe.
 	go func() {
-		_, _, err := b.wikiWorker.Enqueue(ctx, "system", relPath, body, "create", commitMsg)
+		_, _, err := worker.Enqueue(ctx, "system", relPath, body, "create", commitMsg)
 		if err != nil {
 			log.Printf("broker: wiki promotion for task %q failed: %v", taskID, err)
 		}
