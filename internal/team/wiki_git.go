@@ -854,6 +854,9 @@ func (r *Repo) runGitLockedAs(ctx context.Context, name, email string, args ...s
 		"-c", "advice.defaultBranchName=false",
 		"-c", "init.defaultBranch=main",
 		"-c", "commit.gpgsign=false",
+		// Detached maintenance can outlive a test repo and race t.TempDir cleanup.
+		"-c", "gc.auto=0",
+		"-c", "maintenance.auto=false",
 	}
 	all := append(identity, args...)
 	cmd := exec.CommandContext(ctx, "git", all...)
