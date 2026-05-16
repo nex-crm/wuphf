@@ -128,7 +128,7 @@
       const salesGap = 100 - Number(fields[2].value);
       const score = Math.round((pricing + supportGap + salesGap) / 3);
       dial.textContent = String(score);
-      dial.style.setProperty("--score", score + "%");
+      dial.style.setProperty("--score", `${score}%`);
       if (score >= 67) {
         decisionTitle.textContent = "Hold for mitigation";
         decisionCopy.textContent = "Launch needs an explicit fallback owner before the team commits.";
@@ -139,13 +139,17 @@
         decisionTitle.textContent = "Launch is ready";
         decisionCopy.textContent = "Remaining risk is low enough for the planned launch window.";
       }
-      prompt.textContent = "Launch risk score " + score + ". Assign Finance to close pricing fallback, Support to refresh screenshots, and Sales to prepare the enterprise confidence story.";
+      prompt.textContent = `Launch risk score ${score}. Assign Finance to close pricing fallback, Support to refresh screenshots, and Sales to prepare the enterprise confidence story.`;
     }
 
     for (const field of fields) field.addEventListener("input", render);
     copy.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(prompt.textContent);
-      copy.textContent = "Copied";
+      try {
+        await navigator.clipboard.writeText(prompt.textContent);
+        copy.textContent = "Copied";
+      } catch {
+        copy.textContent = "Clipboard unavailable";
+      }
       window.setTimeout(() => { copy.textContent = "Copy mitigation prompt"; }, 1200);
     });
     render();

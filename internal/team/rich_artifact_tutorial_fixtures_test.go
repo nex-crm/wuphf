@@ -36,8 +36,8 @@ func TestRichArtifactTutorialFixturesExerciseWikiFlow(t *testing.T) {
 	if manifest.Version != 1 {
 		t.Fatalf("manifest version = %d, want 1", manifest.Version)
 	}
-	if len(manifest.Scenarios) < 2 {
-		t.Fatalf("expected at least 2 tutorial scenarios, got %d", len(manifest.Scenarios))
+	if len(manifest.Scenarios) < 3 {
+		t.Fatalf("expected at least 3 tutorial scenarios, got %d", len(manifest.Scenarios))
 	}
 
 	repo := newTestRepo(t)

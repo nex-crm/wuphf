@@ -92,8 +92,12 @@
   <script>
     const copy = document.getElementById("copy");
     copy.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(document.getElementById("prompt").value);
-      copy.textContent = "Copied";
+      try {
+        await navigator.clipboard.writeText(document.getElementById("prompt").value);
+        copy.textContent = "Copied";
+      } catch {
+        copy.textContent = "Clipboard unavailable";
+      }
       window.setTimeout(() => { copy.textContent = "Copy reviewer prompt"; }, 1200);
     });
   </script>

@@ -47,10 +47,14 @@ const manifest = JSON.parse(
   readTutorialFile("scenarios.json"),
 ) as TutorialManifest;
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 describe("rich artifact tutorial fixtures", () => {
   it("ships multiple ICP scenarios", () => {
     expect(manifest.version).toBe(1);
-    expect(manifest.scenarios.length).toBeGreaterThanOrEqual(2);
+    expect(manifest.scenarios.length).toBeGreaterThanOrEqual(3);
   });
 
   for (const scenario of manifest.scenarios) {
@@ -62,7 +66,7 @@ describe("rich artifact tutorial fixtures", () => {
       ]);
       expect(chat).toMatch(
         new RegExp(
-          `^\\s*visual-artifact:${scenario.expectedChatArtifactId}\\s*$`,
+          `^\\s*visual-artifact:${escapeRegExp(scenario.expectedChatArtifactId)}\\s*$`,
           "m",
         ),
       );

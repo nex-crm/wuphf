@@ -62,13 +62,13 @@
     </div>
 
     <div class="tabs" role="tablist" aria-label="Incident views">
-      <button type="button" role="tab" aria-selected="true" data-view="impact">Customer impact</button>
-      <button type="button" role="tab" aria-selected="false" data-view="timeline">Timeline</button>
-      <button type="button" role="tab" aria-selected="false" data-view="update">Copy update</button>
+      <button id="tab-impact" type="button" role="tab" aria-selected="true" aria-controls="impact" data-view="impact">Customer impact</button>
+      <button id="tab-timeline" type="button" role="tab" aria-selected="false" aria-controls="timeline" data-view="timeline">Timeline</button>
+      <button id="tab-update" type="button" role="tab" aria-selected="false" aria-controls="update" data-view="update">Copy update</button>
     </div>
 
     <section>
-      <div id="impact" class="panel active">
+      <div id="impact" class="panel active" role="tabpanel" aria-labelledby="tab-impact">
         <h2>Customer impact</h2>
         <div class="impact">
           <div><strong>Enterprise</strong><p>Seven accounts saw delayed sync status for 19 minutes.</p></div>
@@ -85,7 +85,7 @@
         </svg>
       </div>
 
-      <div id="timeline" class="panel">
+      <div id="timeline" class="panel" role="tabpanel" aria-labelledby="tab-timeline" hidden>
         <h2>Timeline</h2>
         <div class="timeline">
           <div class="time">09:12</div><div class="event"><strong>Detection</strong><p>Support saw repeated import sync questions in the inbox.</p></div>
@@ -94,7 +94,7 @@
         </div>
       </div>
 
-      <div id="update" class="panel">
+      <div id="update" class="panel" role="tabpanel" aria-labelledby="tab-update" hidden>
         <h2>Copy update</h2>
         <textarea id="message">We mitigated the sync delay at 09:19 PT and all retry jobs completed by 09:31 PT. We are reviewing cache invalidation coverage and will send a final postmortem after the owner review.</textarea>
         <button id="copy" type="button">Copy update</button>
@@ -108,13 +108,21 @@
       tab.addEventListener("click", () => {
         const target = tab.getAttribute("data-view");
         for (const next of tabs) next.setAttribute("aria-selected", String(next === tab));
-        for (const panel of panels) panel.classList.toggle("active", panel.id === target);
+        for (const panel of panels) {
+          const selected = panel.id === target;
+          panel.classList.toggle("active", selected);
+          panel.hidden = !selected;
+        }
       });
     }
     const copy = document.getElementById("copy");
     copy.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(document.getElementById("message").value);
-      copy.textContent = "Copied";
+      try {
+        await navigator.clipboard.writeText(document.getElementById("message").value);
+        copy.textContent = "Copied";
+      } catch {
+        copy.textContent = "Clipboard unavailable";
+      }
       window.setTimeout(() => { copy.textContent = "Copy update"; }, 1200);
     });
   </script>
