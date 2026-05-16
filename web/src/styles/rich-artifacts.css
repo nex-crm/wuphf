@@ -57,7 +57,11 @@
 }
 
 .rich-artifact-modal-actions button,
+.rich-artifact-modal-actions a,
 .nb-visual-artifact-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 32px;
   padding: 0 12px;
   border: 1px solid rgba(31, 41, 55, 0.18);
@@ -65,10 +69,12 @@
   background: #fff;
   color: #172033;
   font: inherit;
+  text-decoration: none;
   cursor: pointer;
 }
 
 .rich-artifact-modal-actions button:hover,
+.rich-artifact-modal-actions a:hover,
 .nb-visual-artifact-actions button:hover {
   background: #f5f7fa;
 }

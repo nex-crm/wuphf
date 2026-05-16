@@ -10,7 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const notebookVisualArtifactGuidance = "Use this after notebook_write when the work would be clearer as a rich visual artifact: complex specs, implementation plans, code explainers, PR reviews, comparison grids, diagrams, mockups, reports, or interactive tuning surfaces. HTML must be self-contained: inline CSS/JS only, no network fetches, no external images/scripts/fonts, responsive layout, readable copy, and copy/export controls when the artifact is interactive. The paired markdown notebook entry remains the durable source note; this HTML is the visual companion users review in notebooks and the wiki."
+const notebookVisualArtifactGuidance = "Use this after notebook_write when the work would be clearer as a rich visual artifact: complex specs, implementation plans, code explainers, PR reviews, comparison grids, diagrams, mockups, reports, or interactive tuning surfaces. HTML must be self-contained: inline CSS/JS only, no network fetches, no external images/scripts/fonts, responsive layout, readable copy, and copy/export controls when the artifact is interactive. The paired markdown notebook entry remains the durable source note; this HTML is the visual companion users review in notebooks and the wiki. After creating an artifact, include visual-artifact:ra_0123456789abcdef on its own line in the channel summary so chat renders a compact artifact card."
 
 // TeamNotebookVisualArtifactCreateArgs is the contract for
 // notebook_visual_artifact_create.
