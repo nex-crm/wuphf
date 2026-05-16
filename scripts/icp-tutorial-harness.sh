@@ -85,7 +85,15 @@ record_result() {
 # Build / boot wuphf
 
 build_binary() {
-  if [ -n "$WUPHF_BINARY" ] && [ -x "$WUPHF_BINARY" ]; then
+  if [ -n "$WUPHF_BINARY" ]; then
+    # An explicit --binary path must point at an executable file. Falling
+    # back to a source build here would hide CI misconfiguration: the
+    # harness would silently validate a different artifact than the one
+    # the caller intended.
+    if [ ! -x "$WUPHF_BINARY" ]; then
+      fail "--binary path is not executable: $WUPHF_BINARY"
+      exit 2
+    fi
     log "using provided binary: $WUPHF_BINARY"
     return
   fi
@@ -97,21 +105,44 @@ build_binary() {
 boot_wuphf() {
   RUNTIME_HOME="$REPORT_DIR/runtime"
   mkdir -p "$RUNTIME_HOME"
+  # Refuse to start if something is already listening on the broker
+  # port. Otherwise the health check below would happily return 200
+  # against a stale wuphf and the harness would score scenarios
+  # against the wrong runtime.
+  if lsof -nP -iTCP:"$BROKER_PORT" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
+    fail "port $BROKER_PORT already in use; refusing to boot"
+    exit 1
+  fi
   log "booting wuphf on broker=$BROKER_PORT web=$WEB_PORT runtime=$RUNTIME_HOME"
   WUPHF_RUNTIME_HOME="$RUNTIME_HOME" "$WUPHF_BINARY" \
     --broker-port "$BROKER_PORT" --web-port "$WEB_PORT" --no-open \
     > "$WUPHF_LOG" 2>&1 &
   WUPHF_PID=$!
   echo "$WUPHF_PID" > "$REPORT_DIR/wuphf.pid"
-  # Wait for the broker to start listening.
+  # Wait for the broker to start listening AND verify the listener is
+  # the process we just spawned (defends against port-collision false
+  # positives if another wuphf is already running on $BROKER_PORT).
   for _ in $(seq 1 30); do
-    if curl -fs "http://localhost:${BROKER_PORT}/health" >/dev/null 2>&1; then
-      log "wuphf up (pid=$WUPHF_PID)"
-      return
+    if ! kill -0 "$WUPHF_PID" 2>/dev/null; then
+      fail "wuphf process $WUPHF_PID exited during boot; see $WUPHF_LOG"
+      exit 1
+    fi
+    if curl -fs --connect-timeout 2 --max-time 5 \
+        "http://localhost:${BROKER_PORT}/health" >/dev/null 2>&1; then
+      local listener_pid
+      listener_pid="$(lsof -nP -iTCP:"$BROKER_PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+      if [ "$listener_pid" = "$WUPHF_PID" ]; then
+        log "wuphf up (pid=$WUPHF_PID)"
+        return
+      fi
+      # Health endpoint is up but a different process owns the port —
+      # that's a real misconfiguration we should refuse to run against.
+      fail "port $BROKER_PORT listener pid=$listener_pid != harness wuphf pid=$WUPHF_PID"
+      exit 1
     fi
     sleep 0.5
   done
-  fail "wuphf did not come up within 15s"
+  fail "wuphf did not come up within 15s; see $WUPHF_LOG"
   exit 1
 }
 
@@ -135,15 +166,18 @@ trap teardown EXIT
 token() { cat "/tmp/wuphf-broker-token-${BROKER_PORT}"; }
 
 api() {
+  # --connect-timeout caps the TCP handshake; --max-time caps the whole
+  # request. Without these, a stalled local socket (e.g., the broker
+  # hung mid-write) would hang the harness indefinitely.
   local method="$1" path="$2" body="${3-}"
   local url="http://localhost:${BROKER_PORT}${path}"
   if [ -n "$body" ]; then
-    curl -fsS -X "$method" \
+    curl -fsS --connect-timeout 2 --max-time 30 -X "$method" \
       -H "Authorization: Bearer $(token)" \
       -H "Content-Type: application/json" \
       -d "$body" "$url"
   else
-    curl -fsS -X "$method" \
+    curl -fsS --connect-timeout 2 --max-time 30 -X "$method" \
       -H "Authorization: Bearer $(token)" "$url"
   fi
 }
@@ -218,17 +252,27 @@ scenario_02b_riley_buildflag() {
     return 0
   fi
   log "02b: build-flag goal — clarifying question expected"
-  api POST /messages '{"channel":"general","content":"Add a kill switch for the new pricing experiment. Should default to off in production but be flippable per environment without a deploy."}' >/dev/null
-  # Heuristic: wait for at least one new agent message in #general.
-  local before after
+  # Capture baseline BEFORE the post so a fast agent reply isn't
+  # counted as pre-existing, and poll instead of a single 60s sleep so
+  # a slower reply still scores within the 180s window.
+  local before after deadline now
   before="$(api GET '/messages?channel=general' | jq '.messages | length')"
-  sleep 60
-  after="$(api GET '/messages?channel=general' | jq '.messages | length')"
-  if [ "$after" -le "$before" ]; then
-    record_result "02b" "fail" "no agent reply in #general within 60s"
+  api POST /messages '{"channel":"general","content":"Add a kill switch for the new pricing experiment. Should default to off in production but be flippable per environment without a deploy."}' >/dev/null
+  now="$(date +%s)"
+  deadline=$((now + 180))
+  after="$before"
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    after="$(api GET '/messages?channel=general' | jq '.messages | length')"
+    if [ "$after" -gt "$((before + 1))" ]; then break; fi
+    sleep 5
+  done
+  # Require strictly more than the seed message + baseline so a single
+  # echo doesn't pass — we want a real agent reply on top of the seed.
+  if [ "$after" -le "$((before + 1))" ]; then
+    record_result "02b" "fail" "no agent reply on top of seed in #general within 180s (before=$before after=$after)"
     return 1
   fi
-  record_result "02b" "pass" "$((after - before)) new messages in #general"
+  record_result "02b" "pass" "$((after - before - 1)) new agent message(s) in #general"
 }
 
 scenario_03a_alex_svgblocker() {
@@ -250,16 +294,31 @@ scenario_03b_morgan_pipeline() {
 }
 
 scenario_04a_sam_forkswap() {
-  # 04a: config layer. Harness can verify the agent config files exist
-  # and parse cleanly without restarting the broker.
+  # 04a: config layer. The full Sam-fork-and-swap flow (edit a JSON
+  # file + restart wuphf) is a CLI invocation. The harness can still
+  # cover the half it owns: every default-roster agent is queryable on
+  # /office-members and round-trips a sane JSON envelope. If that
+  # contract holds, the user's swap flow has something to swap.
   log "04a: agent config layer"
-  local agentdir
-  agentdir="$RUNTIME_HOME/.wuphf/team"
-  if [ ! -d "$agentdir" ]; then
-    record_result "04a" "fail" "$agentdir missing"
+  local roster missing
+  roster="$(api GET /office-members \
+    | jq -r '[.members[] | select(.slug != null and .role != null and .name != null) | .slug] | sort | join(",")' \
+    || true)"
+  if [ "$roster" != "ceo,executor,planner,reviewer" ]; then
+    record_result "04a" "fail" "expected 4-agent roster with slug+role+name, got: $roster"
     return 1
   fi
-  record_result "04a" "skipped" "agent JSON edit + restart is a manual CLI flow; harness verified state dir exists at $agentdir"
+  # Catch agents that exist on the wire but failed to materialise their
+  # config envelope (the real swap surface). Each must have a non-empty
+  # role; an empty role is the symptom of a missing/malformed JSON
+  # config the user would otherwise be expected to edit.
+  missing="$(api GET /office-members \
+    | jq -r '[.members[] | select((.role // "") == "") | .slug] | join(",")')"
+  if [ -n "$missing" ]; then
+    record_result "04a" "fail" "agents missing role envelope: $missing"
+    return 1
+  fi
+  record_result "04a" "pass" "4-agent roster round-trips JSON envelope (slug+role+name non-empty)"
 }
 
 scenario_04b_morgan_pack() {
@@ -295,6 +354,27 @@ declare -a ALL_SCENARIOS=(
 
 build_binary
 boot_wuphf
+
+# Build the set of known scenario IDs from the function names so we
+# can validate --scenarios input. A typo previously silently skipped
+# every scenario and exited 0, producing a false-green CI run.
+declare -a KNOWN_IDS=()
+for fn in "${ALL_SCENARIOS[@]}"; do
+  KNOWN_IDS+=("$(echo "$fn" | awk -F'_' '{print $2}')")
+done
+if [ -n "$SCENARIOS" ]; then
+  IFS=',' read -ra REQUESTED <<< "$SCENARIOS"
+  for req in "${REQUESTED[@]}"; do
+    found=0
+    for known in "${KNOWN_IDS[@]}"; do
+      [ "$req" = "$known" ] && { found=1; break; }
+    done
+    if [ "$found" = 0 ]; then
+      fail "--scenarios contained unknown id: $req (known: ${KNOWN_IDS[*]})"
+      exit 2
+    fi
+  done
+fi
 
 FAIL_COUNT=0
 for fn in "${ALL_SCENARIOS[@]}"; do
