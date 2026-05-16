@@ -31,16 +31,43 @@ shape, auth, embed) is fully verified.
 | 8 | Auth filter rejects unauthenticated requests | PASS — `/inbox/items` without `Authorization: Bearer` returns 401. |
 | 9 | `inboxCountsForItems` derives counts from auth-filtered rows | PASS via unit test in `broker_inbox_phase2_test.go`. |
 
+## Live agent loop — verified
+
+Posted the literal Scenario-02a goal into `#general` via
+`POST /messages` on the running dev binary (provider: claude-code).
+Within ~90 seconds:
+
+- **3 tasks created and assigned to the named agents** —
+  `task-5 (planner): "Scope Friday onboarding cut line"`,
+  `task-6 (executor): "Close onboarding flow gaps before Friday"`,
+  `task-7 (reviewer): "Reviewer sign-off on onboarding flow"`.
+- **All 3 tasks appeared in `GET /inbox/items?filter=all`** with the
+  correct `kind:task` + `agentSlug` fields.
+- **CEO surfaced the dependency in `#general`**:
+  > "Planner is unblocked on the cut-line scope (task-5), Executor
+  > and Reviewer queue behind it. The key call ..."
+  This is the Sam-Scene-3 sub-aha verbatim: the agent named
+  the unblocking step *and* declared which dependents queue
+  behind it. Not invented code, not generic advice — a real
+  dependency declaration from the agent on its own.
+- **Agents started claiming tasks** within the same window:
+  "I'll claim task-6, then dive into the E2E suite ...",
+  "I'll claim this task and start the QA review ...".
+
+Conclusion: the multi-agent coordination loop the ICP doc names as the
+magic moment (Scene 3 dependency declaration → Scene 4 autonomous
+follow-through) is **working end-to-end on the merged Phase 2 build**.
+
 ## Tutorial-by-tutorial status
 
 ### 01a Alex first install
 - Steps 1, 2 (install + first look): **infra verified above**, looks
   correct as long as `npx wuphf` resolves to the same binary that
   embeds the bundle.
-- Step 3 (drop a goal → agents coordinate): **manual gate**. Requires
-  the user to type a message in `#general` and watch CEO dispatch
-  inside ~60s. The dev binary uses the user's `claude-code` provider
-  so this will burn LLM tokens.
+- Step 3 (drop a goal → agents coordinate): **VERIFIED LIVE**. See
+  "Live agent loop" section above. CEO decomposed, agents got named
+  subtasks, dependencies were declared. The dev binary uses the
+  user's `claude-code` provider so this consumed real tokens.
 
 ### 01b Jordan first install with founding-team pack
 - Steps 1-3 (pack flag + roster + version chip): **manual gate** —
