@@ -42,4 +42,39 @@ describe("FirstTaskScreen", () => {
     await userEvent.click(screen.getByTestId("first-task-skip"));
     expect(onSkipToOffice).toHaveBeenCalledOnce();
   });
+
+  it("renders a graceful empty state when taskText is empty (PR 3 blocked path)", () => {
+    render(
+      <FirstTaskScreen
+        taskText=""
+        onWatchTask={vi.fn()}
+        onSkipToOffice={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("first-task-preview")).toBeNull();
+    expect(screen.getByTestId("first-task-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("first-task-screen")).toHaveTextContent(
+      "#general",
+    );
+  });
+
+  it("renders a graceful empty state when taskText is omitted", () => {
+    render(
+      <FirstTaskScreen onWatchTask={vi.fn()} onSkipToOffice={vi.fn()} />,
+    );
+    expect(screen.queryByTestId("first-task-preview")).toBeNull();
+    expect(screen.getByTestId("first-task-empty")).toBeInTheDocument();
+  });
+
+  it("renders a graceful empty state when taskText is whitespace-only", () => {
+    render(
+      <FirstTaskScreen
+        taskText="   "
+        onWatchTask={vi.fn()}
+        onSkipToOffice={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("first-task-preview")).toBeNull();
+    expect(screen.getByTestId("first-task-empty")).toBeInTheDocument();
+  });
 });
