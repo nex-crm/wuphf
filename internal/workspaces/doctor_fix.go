@@ -9,7 +9,7 @@ package workspaces
 // FixID prefix grammar:
 //
 //	orphan_tree:<absolute-path>           — register the orphan into the registry
-//	orphan_tree:delete:<absolute-path>    — delete the orphan tree (move to trash)
+//	orphan_tree:delete:<absolute-path>    — move the orphan tree under .backups/
 //	zombie:<name> [(port N unbound)]      — reconcile registry state to paused
 //	port:<port>                           — manual fix required (returned as error)
 //	corrupt:registry                      — force-restore from registry.json.bak
@@ -232,15 +232,29 @@ func fixOrphanTreeDelete(treePath string) error {
 	if !pathInsideDir(treePath, sd) {
 		return fmt.Errorf("orphan_tree:delete: %s is not inside %s", treePath, sd)
 	}
-	trashDir := filepath.Join(sd, backupsDirName)
-	if err := os.MkdirAll(trashDir, 0o700); err != nil {
-		return fmt.Errorf("orphan_tree:delete: mkdir trash: %w", err)
+	backupsRoot := filepath.Join(sd, backupsDirName)
+	if err := os.MkdirAll(backupsRoot, 0o700); err != nil {
+		return fmt.Errorf("orphan_tree:delete: mkdir backups: %w", err)
 	}
-	dest := filepath.Join(trashDir, fmt.Sprintf("%s-%d", filepath.Base(treePath), time.Now().Unix()))
-	if err := os.Rename(treePath, dest); err != nil {
-		return fmt.Errorf("orphan_tree:delete: move to trash: %w", err)
+	// Match writeCategorizedBackup's collision-resistant scheme so two
+	// orphan-tree deletes of identically-named trees in the same second
+	// don't fail or stomp on each other.
+	baseID := fmt.Sprintf("%s-%d", filepath.Base(treePath), time.Now().Unix())
+	dest := filepath.Join(backupsRoot, baseID)
+	const maxAttempts = 1000
+	for attempt := 2; ; attempt++ {
+		err := os.Rename(treePath, dest)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("orphan_tree:delete: move to backups: %w", err)
+		}
+		if attempt > maxAttempts {
+			return fmt.Errorf("orphan_tree:delete: move to backups: exhausted %d collision retries under %s", maxAttempts, backupsRoot)
+		}
+		dest = filepath.Join(backupsRoot, fmt.Sprintf("%s-%d", baseID, attempt))
 	}
-	return nil
 }
 
 func pathInsideDir(path, dir string) bool {

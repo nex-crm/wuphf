@@ -907,15 +907,21 @@ func Onboard(ctx context.Context, name string, fields OnboardingFields) error {
 	return nil
 }
 
-// extractTrashTimestamp returns the trailing numeric segment of a trash ID
-// of the form "<name>-<unix-ts>". Returns 0 if no numeric suffix is present.
+// extractTrashTimestamp returns the rightmost dash-separated numeric segment
+// of a backup ID that looks like a Unix-seconds timestamp. Backup IDs are
+// `<name>-<unix-ts>` in the common case but a collision-retry suffix can
+// extend that to `<name>-<unix-ts>-<attempt>`; the attempt counter is small
+// (≤ 1000) so filtering by a 10-digit-or-more minimum (`>= 1e9`, i.e. 2001+)
+// uniquely identifies the timestamp segment. Returns 0 if no segment fits.
 func extractTrashTimestamp(trashID string) int64 {
+	end := len(trashID)
 	for i := len(trashID) - 1; i >= 0; i-- {
 		if trashID[i] == '-' {
-			suffix := trashID[i+1:]
-			if v, err := strconv.ParseInt(suffix, 10, 64); err == nil {
+			segment := trashID[i+1 : end]
+			if v, err := strconv.ParseInt(segment, 10, 64); err == nil && v >= 1_000_000_000 {
 				return v
 			}
+			end = i
 		}
 	}
 	return 0

@@ -276,9 +276,11 @@ func TestRestoreFromCategorizedBackup(t *testing.T) {
 // if a rename inside writeCategorizedBackup fails after earlier renames have
 // already succeeded, the function rolls every previous move back to its
 // source so the runtime tree stays intact for a retry. We force the failure
-// by pre-creating a non-empty destination inside the backup root before
-// shred starts — os.Rename on Linux refuses to overwrite a non-empty target,
-// so the second rename attempt fails deterministically.
+// via the renameForBackup test seam — the second move call returns an
+// error so wiki succeeds first, sessions/chats fails second, and the
+// rollback defer must replay wiki back to its source. A planted on-disk
+// blocker can't be used here because the collision-resistant backup-root
+// selection in writeCategorizedBackup would relocate past it.
 func TestShredRollbackOnPartialBackupFailure(t *testing.T) {
 	withOrchestratorHome(t)
 	sd, _ := spacesDir()
@@ -299,22 +301,18 @@ func TestShredRollbackOnPartialBackupFailure(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	// Plant a non-empty directory at the path writeCategorizedBackup will
-	// try to rename "sessions" into ("chats/" inside the backup root), AFTER
-	// wiki has already moved. os.Rename refuses to overwrite a non-empty
-	// target, so wiki succeeds first, chats fails second, and the rollback
-	// defer must replay wiki back to its source — that's the path we want
-	// to validate. The backup writer creates its backup root with a
-	// unix-second-based ID; plant for the unix second the test runs at and
-	// one second on either side to absorb timing drift.
-	backupsRoot := filepath.Join(sd, backupsDirName)
-	for delta := -1; delta <= 1; delta++ {
-		blocker := filepath.Join(backupsRoot,
-			fmt.Sprintf("ws-rollback-%d", time.Now().Unix()+int64(delta)),
-			"chats", "sentinel")
-		if err := os.MkdirAll(blocker, 0o700); err != nil {
-			t.Fatalf("plant blocker: %v", err)
+	// Inject a failure on the second rename call. The first call moves wiki
+	// (records it in `moves`); the second is the sessions → chats move, which
+	// we fail unconditionally. The defer must then roll wiki back.
+	originalRename := renameForBackup
+	t.Cleanup(func() { renameForBackup = originalRename })
+	var callCount int
+	renameForBackup = func(oldpath, newpath string) error {
+		callCount++
+		if callCount == 1 {
+			return originalRename(oldpath, newpath)
 		}
+		return fmt.Errorf("injected: second rename fails to trigger rollback")
 	}
 
 	_, err := Shred(context.Background(), "ws-rollback", false)
@@ -392,5 +390,75 @@ func TestTrashListSurfaceManifestFields(t *testing.T) {
 	}
 	if got.ShredAt.IsZero() {
 		t.Errorf("ShredAt should be populated, got zero")
+	}
+}
+
+// TestExtractTrashTimestamp_ToleratesCollisionSuffix asserts the parser
+// returns the Unix-seconds segment for both the plain `<name>-<ts>` form
+// and the collision-retry `<name>-<ts>-<attempt>` form. The attempt
+// counter is small (≤ 1000) so the ≥ 1e9 filter unambiguously selects
+// the timestamp.
+func TestExtractTrashTimestamp_ToleratesCollisionSuffix(t *testing.T) {
+	tests := []struct {
+		id   string
+		want int64
+	}{
+		{"demo-1714305600", 1714305600},
+		{"demo-1714305600-2", 1714305600},
+		{"demo-1714305600-37", 1714305600},
+		{"multi-dash-name-1714305600", 1714305600},
+		{"multi-dash-name-1714305600-9", 1714305600},
+		{"no-timestamp-here", 0},
+		{"", 0},
+	}
+	for _, tc := range tests {
+		if got := extractTrashTimestamp(tc.id); got != tc.want {
+			t.Errorf("extractTrashTimestamp(%q) = %d, want %d", tc.id, got, tc.want)
+		}
+	}
+}
+
+// TestWriteCategorizedBackup_CollidingSameSecondShredsDoNotStomp asserts
+// that two backups produced in the same wall-clock second under the same
+// workspace name end up at distinct backup roots (one plain, one with a
+// `-N` attempt suffix) and that the second's data is intact rather than
+// silently merged with the first.
+func TestWriteCategorizedBackup_CollidingSameSecondShredsDoNotStomp(t *testing.T) {
+	withOrchestratorHome(t)
+
+	sd, _ := spacesDir()
+	backupsRoot := filepath.Join(sd, backupsDirName)
+	if err := os.MkdirAll(backupsRoot, 0o700); err != nil {
+		t.Fatalf("mkdir backups: %v", err)
+	}
+
+	// Pre-plant the directory writeCategorizedBackup will try to use,
+	// forcing the retry path. We can't easily force two real shreds into
+	// the same second from a test, so we simulate the collision directly.
+	preplanted := filepath.Join(backupsRoot, fmt.Sprintf("ws-collide-%d", time.Now().Unix()))
+	if err := os.MkdirAll(preplanted, 0o700); err != nil {
+		t.Fatalf("preplant: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(preplanted, "marker"), []byte("first"), 0o600); err != nil {
+		t.Fatalf("preplant marker: %v", err)
+	}
+
+	runtimeHome := filepath.Join(sd, "ws-collide")
+	seedWorkspaceTree(t, runtimeHome)
+	target := &Workspace{Name: "ws-collide", RuntimeHome: runtimeHome}
+	got, err := writeCategorizedBackup(target)
+	if err != nil {
+		t.Fatalf("writeCategorizedBackup: %v", err)
+	}
+	if got == preplanted {
+		t.Fatalf("backup reused preplanted root %s; same-second collision was not resolved", preplanted)
+	}
+	if _, err := os.Stat(filepath.Join(preplanted, "marker")); err != nil {
+		t.Errorf("preplanted marker should be intact, got %v", err)
+	}
+	// The new backup should carry its own wiki tree (proves data went to
+	// the retry-suffixed root, not the preplanted one).
+	if _, err := os.Stat(filepath.Join(got, "wiki", "team", "index.md")); err != nil {
+		t.Errorf("retry-suffixed backup root missing wiki content: %v", err)
 	}
 }

@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+// renameForBackup is the rename primitive used by writeCategorizedBackup
+// for the wiki/sessions/context moves. It is a package variable so the
+// rollback test can inject a deterministic mid-flight failure (Nth call
+// fails) without depending on a pre-planted on-disk blocker — the
+// collision-resistant backup-root selection in writeCategorizedBackup
+// would otherwise relocate the backup root past any planted blocker.
+var renameForBackup = os.Rename
+
 // TrashEntry is the orchestrator-level shape for a shredded workspace held
 // under ~/.wuphf-spaces/.backups/. The directory name encodes both the
 // original workspace name and the shred-time unix timestamp, of the form
@@ -118,10 +126,31 @@ func writeCategorizedBackup(target *Workspace) (backupRootResult string, returnE
 	}
 
 	now := time.Now()
-	backupID := fmt.Sprintf("%s-%d", target.Name, now.Unix())
-	backupRoot := filepath.Join(sd, backupsDirName, backupID)
-	if err := os.MkdirAll(backupRoot, 0o700); err != nil {
-		return "", fmt.Errorf("workspaces: backup %q: mkdir: %w", target.Name, err)
+	backupsRoot := filepath.Join(sd, backupsDirName)
+	if err := os.MkdirAll(backupsRoot, 0o700); err != nil {
+		return "", fmt.Errorf("workspaces: backup %q: mkdir backups root: %w", target.Name, err)
+	}
+	// Atomic per-shred backup-root creation: same-name same-second shreds
+	// would collide on the default name, so retry with a `-N` attempt
+	// suffix until os.Mkdir succeeds. extractTrashTimestamp tolerates the
+	// extra segment.
+	baseID := fmt.Sprintf("%s-%d", target.Name, now.Unix())
+	backupID := baseID
+	backupRoot := filepath.Join(backupsRoot, backupID)
+	const maxAttempts = 1000
+	for attempt := 2; ; attempt++ {
+		err := os.Mkdir(backupRoot, 0o700)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return "", fmt.Errorf("workspaces: backup %q: mkdir: %w", target.Name, err)
+		}
+		if attempt > maxAttempts {
+			return "", fmt.Errorf("workspaces: backup %q: mkdir: exhausted %d collision retries under %s", target.Name, maxAttempts, backupsRoot)
+		}
+		backupID = fmt.Sprintf("%s-%d", baseID, attempt)
+		backupRoot = filepath.Join(backupsRoot, backupID)
 	}
 
 	var moves []movedPath
@@ -149,7 +178,7 @@ func writeCategorizedBackup(target *Workspace) (backupRootResult string, returnE
 		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 			return fmt.Errorf("workspaces: backup %q: mkdir %s: %w", target.Name, filepath.Dir(label), err)
 		}
-		if err := os.Rename(src, dst); err != nil {
+		if err := renameForBackup(src, dst); err != nil {
 			return fmt.Errorf("workspaces: backup %q: move %s: %w", target.Name, label, err)
 		}
 		moves = append(moves, movedPath{src: src, dst: dst})

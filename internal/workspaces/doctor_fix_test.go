@@ -172,7 +172,7 @@ func TestFixOrphanTreeRegisterTreatsMissingPathAsIdempotent(t *testing.T) {
 
 // ---- orphan_tree:delete ----------------------------------------------------
 
-func TestFixOrphanTreeDeleteMovesToTrash(t *testing.T) {
+func TestFixOrphanTreeDeleteMovesToBackups(t *testing.T) {
 	withOrchestratorHome(t)
 
 	sd, _ := spacesDir()
@@ -200,7 +200,7 @@ func TestFixOrphanTreeDeleteMovesToTrash(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("orphan should have been moved to trash with timestamped suffix")
+		t.Error("orphan should have been moved under .backups/ with a timestamped suffix")
 	}
 }
 
