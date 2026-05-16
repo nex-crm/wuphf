@@ -8,6 +8,8 @@ const EXPLICIT_REFERENCE_PATTERN =
 const REFERENCE_LINE_FILLER_RE =
   /\b(?:visual|rich|html|notebook|wiki|artifact|artifacts|reference|ref|id|open|view|see|link)\b/gi;
 
+type FenceToken = "`" | "~";
+
 function referenceRegex(): RegExp {
   return new RegExp(EXPLICIT_REFERENCE_PATTERN, "gi");
 }
@@ -30,12 +32,17 @@ export function stripStandaloneRichArtifactReferenceLines(
   content: string,
 ): string {
   const lines = content.split(/\r?\n/);
-  let inFence = false;
+  let inFence: FenceToken | null = null;
   let removedReferenceLine = false;
   const kept: string[] = [];
   for (const line of lines) {
-    if (isFenceBoundary(line)) {
-      inFence = !inFence;
+    const token = fenceToken(line);
+    if (token) {
+      if (!inFence) {
+        inFence = token;
+      } else if (inFence === token) {
+        inFence = null;
+      }
       kept.push(line);
       continue;
     }
@@ -53,19 +60,26 @@ function forEachNonFenceLine(
   content: string,
   visit: (line: string) => void,
 ): void {
-  let inFence = false;
+  let inFence: FenceToken | null = null;
   for (const line of content.split(/\r?\n/)) {
-    if (isFenceBoundary(line)) {
-      inFence = !inFence;
+    const token = fenceToken(line);
+    if (token) {
+      if (!inFence) {
+        inFence = token;
+      } else if (inFence === token) {
+        inFence = null;
+      }
       continue;
     }
     if (!inFence) visit(line);
   }
 }
 
-function isFenceBoundary(line: string): boolean {
+function fenceToken(line: string): FenceToken | null {
   const trimmed = line.trimStart();
-  return trimmed.startsWith("```") || trimmed.startsWith("~~~");
+  if (trimmed.startsWith("```")) return "`";
+  if (trimmed.startsWith("~~~")) return "~";
+  return null;
 }
 
 function isStandaloneReferenceLine(line: string): boolean {

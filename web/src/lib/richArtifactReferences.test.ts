@@ -41,6 +41,18 @@ describe("rich artifact references", () => {
     expect(extractRichArtifactIds(content)).toEqual(["ra_bbbbbbbbbbbbbbbb"]);
   });
 
+  it("does not close fences with a mismatched delimiter", () => {
+    const content = [
+      "```",
+      "~~~",
+      "visual-artifact:ra_aaaaaaaaaaaaaaaa",
+      "```",
+      "visual-artifact:ra_bbbbbbbbbbbbbbbb",
+    ].join("\n");
+
+    expect(extractRichArtifactIds(content)).toEqual(["ra_bbbbbbbbbbbbbbbb"]);
+  });
+
   it("strips standalone marker lines but preserves prose", () => {
     const content = [
       "Here is the review.",
@@ -64,6 +76,17 @@ describe("rich artifact references", () => {
 
   it("preserves non-artifact message whitespace exactly", () => {
     const content = "  Keep leading space\n\n\nand trailing blanks.  \n";
+
+    expect(stripStandaloneRichArtifactReferenceLines(content)).toBe(content);
+  });
+
+  it("preserves artifact-looking lines inside mismatched fences", () => {
+    const content = [
+      "~~~",
+      "```",
+      "visual-artifact:ra_0123456789abcdef",
+      "~~~",
+    ].join("\n");
 
     expect(stripStandaloneRichArtifactReferenceLines(content)).toBe(content);
   });
