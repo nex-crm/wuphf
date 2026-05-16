@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2329
-# (SC2329 — all scenario_* helpers are dispatched indirectly via the
-# ALL_SCENARIOS array; shellcheck can't see the dynamic invocation.)
+# shellcheck disable=SC2317,SC2329
+# (SC2317 / SC2329 — every scenario_* helper plus the bodies of
+# record_result, teardown, token and api are dispatched indirectly:
+# the scenarios via the ALL_SCENARIOS array iteration, teardown via
+# the EXIT trap, the helpers from inside those scenarios. Shellcheck
+# can't see any of these and falsely flags whole regions as
+# unreachable. Disable both rules at file scope.)
 # icp-tutorial-harness.sh
 #
 # Runs each of the 10 ICP tutorial scenarios against a freshly booted
