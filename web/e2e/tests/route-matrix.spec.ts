@@ -124,7 +124,9 @@ test.describe("canonical route matrix", () => {
     });
 
     await expectCanonicalRoute(page, "/#/reviews", async (p) => {
-      await expect(p.getByTestId("review-queue-surface")).toBeVisible();
+      // Phase 2b retired the standalone Reviews surface; /#/reviews
+      // now renders InboxRedirect and pushes the user to /#/inbox.
+      await expect(p.getByTestId("legacy-redirect-inbox")).toBeVisible();
     });
   });
 

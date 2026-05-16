@@ -17,12 +17,8 @@ const APP_CASES = [
     label: "Tasks",
     content: /Loading tasks|No tasks yet|Office tasks|Could not load tasks/i,
   },
-  {
-    app: "requests",
-    label: "Requests",
-    content:
-      /Loading requests|No requests right now|Pending|Answered|Failed to load requests/i,
-  },
+  // Phase 2b retired the standalone RequestsApp surface; /apps/requests
+  // now redirects to /inbox. Coverage moved to the unified-inbox E2E.
   {
     app: "graph",
     label: "Graph",
