@@ -14,9 +14,10 @@ package team
 //	           pay the full merge cost.
 //
 // Response is { items: []InboxItem, counts: InboxCounts, refreshedAt }.
-// Counts come from the existing indexed-bucket path (O(1) reads of
-// b.lifecycleIndex) and intentionally remain broker-wide — auth filter
-// applies to items only.
+// Counts are derived from the caller's auth-filtered items so the badge
+// math never reveals task volume the caller cannot see. The kind=<kind>
+// query param trims the items response but NOT the counts — the badge
+// totals stay accurate across tabs.
 
 import (
 	"encoding/json"
@@ -52,6 +53,15 @@ func (b *Broker) handleInboxItems(w http.ResponseWriter, r *http.Request) {
 	if rawFilter == "" {
 		rawFilter = string(InboxFilterAll)
 	}
+	// Always pull the unfiltered union for the caller so counts cover
+	// every visible kind, regardless of the kind=<kind> trim below.
+	allItems, err := b.inboxItemsForActor(actor, InboxFilterAll)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	counts := inboxCountsForItems(allItems, startOfTodayUTC())
+
 	items, err := b.inboxItemsForActor(actor, InboxFilter(rawFilter))
 	if err != nil {
 		if errors.Is(err, ErrInboxFilterUnknown) {
@@ -74,14 +84,6 @@ func (b *Broker) handleInboxItems(w http.ResponseWriter, r *http.Request) {
 		items = filtered
 	}
 
-	// Counts reuse the indexed-bucket path so the badge math stays
-	// O(1). Sums across the three kinds land in v1.1 alongside the
-	// per-user cursor — for now the badge counts decisions only,
-	// matching the existing inbox badge behavior.
-	b.mu.Lock()
-	counts := b.inboxCountsLocked(startOfTodayUTC())
-	b.mu.Unlock()
-
 	writeJSON(w, http.StatusOK, unifiedInboxResponse{
 		Items:       items,
 		Counts:      counts,
@@ -89,11 +91,45 @@ func (b *Broker) handleInboxItems(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// inboxCountsForItems derives the badge counts from the caller's
+// auth-filtered item list. The counts only cover task-kind items —
+// requests and reviews live in their own counters and v1's
+// InboxCounts shape doesn't yet expose them. Critical: this function
+// is the only counts source on /inbox/items, so it must never reveal
+// task volume the caller did not already see in `items`.
+func inboxCountsForItems(items []InboxItem, todayCutoff time.Time) InboxCounts {
+	var counts InboxCounts
+	cutoffMs := todayCutoff.UnixMilli()
+	for _, item := range items {
+		if item.Kind != InboxItemKindTask || item.TaskRow == nil {
+			continue
+		}
+		switch item.TaskRow.LifecycleState {
+		case LifecycleStateDecision:
+			counts.DecisionRequired++
+		case LifecycleStateRunning:
+			counts.Running++
+		case LifecycleStateBlockedOnPRMerge, LifecycleStateQueuedBehindOwner:
+			counts.Blocked++
+		case LifecycleStateApproved:
+			// ElapsedMs measures age, not absolute time, so derive
+			// "today" from the row's createdAt + the cutoff. v1
+			// keeps the InboxRow shape stable; richer "approvedAt"
+			// timestamps are a v1.1 follow-up.
+			if item.TaskRow.ElapsedMs > 0 && time.Now().UTC().UnixMilli()-item.TaskRow.ElapsedMs >= cutoffMs {
+				counts.ApprovedToday++
+			}
+		}
+	}
+	return counts
+}
+
 // handleInboxCursor serves POST /inbox/cursor.
-// Body: { "lastSeenAt": "<RFC3339>" }
+// Body: { "lastSeenAt": "<RFC3339>", "acknowledgedKinds": { "task": "<RFC3339>", ... } }
 // After any decision action (approve / request_changes / defer), the
 // frontend calls this so the badge count recalculates from the new cursor
-// on the next GET /inbox/items.
+// on the next GET /inbox/items. Per-kind acknowledgements stack onto the
+// global lastSeenAt so a tab-specific clear does not reset the others.
 func (b *Broker) handleInboxCursor(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -107,13 +143,21 @@ func (b *Broker) handleInboxCursor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		LastSeenAt time.Time `json:"lastSeenAt"`
+		LastSeenAt        time.Time                   `json:"lastSeenAt"`
+		AcknowledgedKinds map[InboxItemKind]time.Time `json:"acknowledgedKinds"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.LastSeenAt.IsZero() {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lastSeenAt required"})
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if body.LastSeenAt.IsZero() && len(body.AcknowledgedKinds) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lastSeenAt or acknowledgedKinds required"})
 		return
 	}
 
-	b.SetInboxCursor(actor.Slug, InboxCursor{LastSeenAt: body.LastSeenAt})
+	b.SetInboxCursor(actor.Slug, InboxCursor{
+		LastSeenAt:        body.LastSeenAt,
+		AcknowledgedKinds: body.AcknowledgedKinds,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }

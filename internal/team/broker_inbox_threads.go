@@ -22,6 +22,7 @@ package team
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -318,7 +319,15 @@ func (b *Broker) handleInboxThreadDetail(w http.ResponseWriter, r *http.Request)
 	}
 	detail, err := b.inboxThreadDetailForActor(actor, slug)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		// inboxThreadDetailForActor returns one validation error
+		// ("thread agentSlug required", maps to 400) and otherwise
+		// surfaces broker / persistence errors that should land as 500.
+		if strings.Contains(err.Error(), "agentSlug required") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		log.Printf("broker: inbox thread detail slug=%q: %v", slug, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "thread detail failed"})
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)

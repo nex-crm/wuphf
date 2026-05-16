@@ -138,7 +138,7 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	// against a stable view; releasing the lock before the auth
 	// decision would race Lane D's reviewer-routing writes.
 	reviewers := append([]string(nil), task.Reviewers...)
-	packet, _ := b.findDecisionPacketLocked(id)
+	packet, packetErr := b.findDecisionPacketLocked(id)
 	var packetCopy DecisionPacket
 	if packet != nil {
 		packetCopy = *packet
@@ -150,6 +150,16 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if packetErr != nil {
+		// findDecisionPacketLocked returns (nil, nil) for "not yet
+		// stored". A non-nil error means the on-disk store could not
+		// be read — likely corruption or a permissions issue.
+		// Surface that as 500 so the UI shows a real error banner
+		// instead of the benign "not yet available" 404.
+		log.Printf("broker: get decision packet task=%q: %v", id, packetErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "decision packet read failed"})
+		return
+	}
 	if packet == nil {
 		// Lane C has not yet stored a packet for this task. Return a
 		// 404 in v1 so the frontend distinguishes "task exists, no
