@@ -80,49 +80,21 @@ test.describe("PR #634 review pins", () => {
     await expectNoReactErrors(page, getErrors, "during console fallback");
   });
 
-  test("Requests query targets the user's last-visited channel, not #general", async ({
+  test("Legacy /#/apps/requests redirects to the unified Inbox", async ({
     page,
   }) => {
-    // Repro: the broker /requests endpoint is channel-scoped. With the
-    // bare `useChannelSlug() ?? "general"` collapse, opening
-    // /apps/requests from #launch silently fetched general's request
-    // queue and hid the user's actual pending requests. The fix routes
-    // through useFallbackChannelSlug too. We assert against the network
-    // contract (the query string the broker actually sees) since the
-    // surface itself doesn't render the channel name.
+    // Phase 2b retired the standalone RequestsApp; /apps/requests now
+    // renders InboxRedirect which navigates to /inbox. The
+    // last-visited-channel regression that the prior test guarded
+    // (RequestsApp re-fetching general's queue) is gone with the
+    // surface — the unified Inbox doesn't fetch by channel.
     const getErrors = collectReactErrors(page);
-    await seedTestChannel(page);
-    await gotoShell(page, "/");
-    await gotoShell(page, `/#/channels/${TEST_CHANNEL}`);
-
-    const seenChannels = new Set<string>();
-    await page.route("**/api/requests*", async (route) => {
-      const url = new URL(route.request().url());
-      const channel = url.searchParams.get("channel");
-      if (channel) seenChannels.add(channel);
-      await route.continue();
-    });
-
     await page.goto(`/#/apps/requests`);
-    await expect(page.getByTestId("app-page-requests")).toBeVisible({
-      timeout: 10_000,
-    });
-
-    // Wait for at least one channel-scoped fetch to land. RequestsApp
-    // refetches on a 5s interval, but the initial mount fires
-    // synchronously — bound the wait so a regression failure is loud
-    // instead of a flaky timeout.
-    await expect
-      .poll(() => Array.from(seenChannels), { timeout: 10_000 })
-      .toContain(TEST_CHANNEL);
-    expect(
-      seenChannels.has("general"),
-      `Requests should not have queried #general while last-visited was #${TEST_CHANNEL}; saw ${[
-        ...seenChannels,
-      ].join(", ")}`,
-    ).toBe(false);
-
-    await expectNoReactErrors(page, getErrors, "during requests fallback");
+    // The InboxRedirect testid mounts then unmounts as soon as the
+    // useEffect fires, so racing toBeVisible against the redirect is
+    // flaky. URL change is the stable assertion.
+    await expect(page).toHaveURL(/#\/inbox$/, { timeout: 5_000 });
+    await expectNoReactErrors(page, getErrors, "during legacy requests redirect");
   });
 
   test("AgentPanel hides the per-channel toggle when no conversation channel is active", async ({
@@ -286,7 +258,8 @@ test.describe("PR #634 review pins", () => {
       { route: "/#/wiki", label: "Wiki" },
       { route: "/#/wiki/lookup?q=test", label: "Wiki" },
       { route: "/#/notebooks", label: "Notebooks" },
-      { route: "/#/reviews", label: "Reviews" },
+      // /#/reviews was retired in Phase 2b; the route now redirects to
+      // /inbox so it no longer has its own breadcrumb label.
     ];
 
     for (const { route, label } of surfaces) {

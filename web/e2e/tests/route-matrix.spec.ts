@@ -60,6 +60,14 @@ test.describe("canonical route matrix", () => {
 
   test("every registered app panel route mounts", async ({ page }) => {
     for (const appId of APP_PANEL_IDS) {
+      // Phase 2b: /#/apps/requests redirects to /inbox instead of
+      // rendering a dedicated panel. Verify the redirect by URL,
+      // not by panel testid.
+      if (appId === "requests") {
+        await page.goto(`/#/apps/${appId}`);
+        await expect(page).toHaveURL(/#\/inbox$/, { timeout: 10_000 });
+        continue;
+      }
       await expectCanonicalRoute(page, `/#/apps/${appId}`, async (p) => {
         await expect(p.getByTestId(`app-page-${appId}`)).toBeVisible({
           timeout: 10_000,
@@ -123,9 +131,11 @@ test.describe("canonical route matrix", () => {
       await expect(p.getByTestId("notebook-surface")).toBeVisible();
     });
 
-    await expectCanonicalRoute(page, "/#/reviews", async (p) => {
-      await expect(p.getByTestId("review-queue-surface")).toBeVisible();
-    });
+    // Phase 2b: /#/reviews now redirects to /inbox instead of mounting
+    // ReviewQueueKanban. Verify the URL change, not the briefly-mounted
+    // InboxRedirect testid (it unmounts as soon as the redirect fires).
+    await page.goto("/#/reviews");
+    await expect(page).toHaveURL(/#\/inbox$/, { timeout: 10_000 });
   });
 
   test("dropped legacy aliases and unknown routes render not found", async ({
