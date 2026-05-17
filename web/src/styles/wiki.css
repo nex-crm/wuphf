@@ -182,6 +182,12 @@
   position: relative;
 }
 
+.wk-article-col-visual {
+  grid-column: 2 / 4;
+  padding-right: 40px;
+  padding-left: 40px;
+}
+
 /* ─── Status banner ─── */
 .wk-status-banner {
   background: var(--wk-amber-banner);

@@ -1,5 +1,3 @@
-import process from "node:process";
-
 import {
   DEFAULT_BASE,
   flipStore,
@@ -8,6 +6,7 @@ import {
   shotElement,
   shotPage,
 } from "./lib.mjs";
+import process from "node:process";
 
 const OUT = process.env.WUPHF_SCREENSHOTS_OUT;
 if (!OUT) {
@@ -204,11 +203,13 @@ await installCommonMocks(context, {
         }),
       }),
     );
-    await ctx.route("**/api/notebook/visual-artifacts/ra_0123456789abcdef", (r) =>
-      r.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ artifact, html: artifactHtml }),
-      }),
+    await ctx.route(
+      "**/api/notebook/visual-artifacts/ra_0123456789abcdef",
+      (r) =>
+        r.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ artifact, html: artifactHtml }),
+        }),
     );
   },
 });
@@ -217,7 +218,9 @@ await page.goto(`${DEFAULT_BASE}/#/channels/general`, { waitUntil: "load" });
 await page.waitForSelector(".status-bar", { timeout: 15_000 });
 await flipStore(page);
 try {
-  await page.waitForSelector(".message-artifact-reference", { timeout: 10_000 });
+  await page.waitForSelector(".message-artifact-reference", {
+    timeout: 10_000,
+  });
 } catch (err) {
   console.error(await page.locator("body").innerText());
   throw err;
@@ -227,10 +230,10 @@ await shotElement(
   page,
   ".thread-group:has(.message-artifact-reference)",
   OUT,
-  "01-chat-artifact-card",
+  "01-chat-artifact-inline",
 );
 
-await page.getByRole("button", { name: "Open", exact: true }).click();
+await page.getByRole("button", { name: "Expand", exact: true }).click();
 await page
   .getByRole("dialog", { name: "ICP onboarding walkthrough" })
   .waitFor({ timeout: 10_000 });

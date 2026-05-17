@@ -72,7 +72,7 @@ describe("<MessageBubble> rich artifact references", () => {
     vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue(ARTIFACT_DETAIL);
   });
 
-  it("renders a compact artifact card and hides the raw marker line", async () => {
+  it("renders the artifact inline and hides the raw marker line", async () => {
     renderWithQueryClient(<MessageBubble message={MESSAGE} />);
 
     expect(
@@ -84,16 +84,19 @@ describe("<MessageBubble> rich artifact references", () => {
       "Rich artifact: Product strategy map",
     );
     expect(within(card).getByText("Notebook visual")).toBeInTheDocument();
-    expect(within(card).getByText("draft")).toBeInTheDocument();
-    expect(
-      within(card).getByText("agents/pm/notebook/product-strategy.md"),
-    ).toBeInTheDocument();
+    const frame = within(card).getByTitle("Product strategy map");
+    expect(frame).toHaveClass("rich-artifact-frame-inline");
+    expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+    expect(frame).toHaveAttribute(
+      "srcdoc",
+      expect.stringContaining("<h1>Artifact body</h1>"),
+    );
     expect(richApi.fetchRichArtifact).toHaveBeenCalledWith(
       "ra_0123456789abcdef",
     );
   });
 
-  it("opens artifact HTML only inside the sandboxed modal frame", async () => {
+  it("expands artifact HTML into the secondary sandboxed modal frame", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<MessageBubble message={MESSAGE} />);
 
@@ -102,7 +105,7 @@ describe("<MessageBubble> rich artifact references", () => {
     );
     expect(screen.queryByText("Artifact body")).toBeNull();
 
-    await user.click(within(card).getByRole("button", { name: "Open" }));
+    await user.click(within(card).getByRole("button", { name: "Expand" }));
 
     const dialog = screen.getByRole("dialog", {
       name: "Product strategy map",
@@ -122,7 +125,7 @@ describe("<MessageBubble> rich artifact references", () => {
     const card = await screen.findByLabelText(
       "Rich artifact: Product strategy map",
     );
-    await user.click(within(card).getByRole("button", { name: "Open" }));
+    await user.click(within(card).getByRole("button", { name: "Expand" }));
     expect(
       screen.getByRole("dialog", { name: "Product strategy map" }),
     ).toBeInTheDocument();

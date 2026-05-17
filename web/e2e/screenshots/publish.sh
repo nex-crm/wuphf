@@ -84,7 +84,7 @@ trap cleanup EXIT
 if ! curl -sf -m 2 "$base_url/" >/dev/null 2>&1; then
   echo "[publish] starting vite dev (existing server not detected at $base_url)" >&2
   vite_log="$(mktemp)"
-  bun --cwd "$repo_root/web" run dev > "$vite_log" 2>&1 &
+  bun run --cwd "$repo_root/web" dev > "$vite_log" 2>&1 &
   vite_pid="$!"
   for _ in $(seq 1 30); do
     if curl -sf -m 2 "$base_url/" >/dev/null 2>&1; then

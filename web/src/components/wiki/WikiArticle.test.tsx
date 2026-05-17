@@ -145,7 +145,12 @@ describe("<WikiArticle content>", () => {
     const visualTab = await screen.findByRole("button", { name: "Visual" });
     await waitFor(() => expect(visualTab).not.toBeDisabled());
 
-    expect(await screen.findByTestId("wk-visual-artifact")).toBeInTheDocument();
+    const visual = await screen.findByTestId("wk-visual-artifact");
+    expect(visual).toBeInTheDocument();
+    expect(visual.closest(".wk-article-col")).toHaveClass(
+      "wk-article-col-visual",
+    );
+    expect(document.querySelector(".wk-right-sidebar")).toBeNull();
     expect(screen.getByTitle("Visual Plan")).toHaveAttribute(
       "srcdoc",
       expect.stringContaining("Visual artifact"),

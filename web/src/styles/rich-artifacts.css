@@ -1,9 +1,19 @@
 .rich-artifact-frame {
   display: block;
   width: 100%;
-  min-height: min(72vh, 760px);
-  border: 1px solid var(--wk-border, rgba(36, 42, 54, 0.16));
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rich-artifact-frame-inline {
+  min-height: 220px;
+  overflow: hidden;
+}
+
+.rich-artifact-frame-modal {
+  height: 100%;
+  min-height: 0;
   background: #fff;
 }
 
@@ -86,10 +96,7 @@
 
 .nb-visual-artifacts {
   margin: 28px 0;
-  padding: 16px;
-  border: 1px solid rgba(48, 60, 84, 0.16);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
+  padding: 0;
 }
 
 .nb-visual-artifacts-head,
@@ -120,8 +127,8 @@
 
 .rich-artifact-inline {
   display: grid;
-  gap: 12px;
-  margin-top: 14px;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 .rich-artifact-inline-head {
@@ -170,7 +177,7 @@
 
 .wk-visual-artifact {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 @media (max-width: 760px) {

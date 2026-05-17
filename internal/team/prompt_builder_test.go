@@ -51,6 +51,7 @@ func TestMarkdownKnowledgeToolBlock_ListsCanonicalTools(t *testing.T) {
 	block := markdownKnowledgeToolBlock()
 	for _, tool := range []string{
 		"notebook_write", "notebook_promote", "notebook_read",
+		"notebook_visual_artifact_create", "notebook_visual_artifact_promote",
 		"team_wiki_read", "team_wiki_write", "wuphf_wiki_lookup",
 		"team_learning_search", "team_learning_record",
 	} {
@@ -70,6 +71,23 @@ func TestMarkdownKnowledgeMemoryBlock_RequiresPromotionDiscipline(t *testing.T) 
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("markdownKnowledgeMemoryBlock missing %q", want)
+		}
+	}
+}
+
+func TestMarkdownKnowledgeToolBlock_NudgesNaturalHTMLArtifactCreation(t *testing.T) {
+	block := markdownKnowledgeToolBlock()
+	for _, want := range []string{
+		"After notebook_write",
+		"complex specs",
+		"PR reviews",
+		"interactive tuning surfaces",
+		"self-contained HTML companion",
+		"no network fetches",
+		"visual-artifact:ra_...",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("markdownKnowledgeToolBlock missing HTML artifact trigger %q", want)
 		}
 	}
 }
@@ -163,6 +181,33 @@ func TestPromptBuilder_OneOnOneBranch(t *testing.T) {
 	}
 }
 
+func TestPromptBuilder_OneOnOneMarkdownMemoryMentionsHTMLArtifacts(t *testing.T) {
+	pb := &promptBuilder{
+		isOneOnOne:     func() bool { return true },
+		isFocusMode:    func() bool { return false },
+		packName:       func() string { return "1:1 with CEO" },
+		leadSlug:       func() string { return "ceo" },
+		members:        func() []officeMember { return []officeMember{{Slug: "ceo", Name: "CEO", Role: "ceo"}} },
+		policies:       func() []officePolicy { return nil },
+		nameFor:        func(slug string) string { return slug },
+		markdownMemory: true,
+		nexDisabled:    true,
+	}
+
+	got := pb.Build("ceo")
+	for _, want := range []string{
+		"Markdown notebook/wiki memory is active in this 1:1",
+		"notebook_write",
+		"notebook_visual_artifact_create",
+		"diagram, mockup, report, comparison grid, code explainer, PR review, or interactive tuning surface",
+		"visual-artifact:ra_...",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("1:1 markdown prompt missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestPromptBuilder_OneOnOneSkipsLearningLookup(t *testing.T) {
 	pb := &promptBuilder{
 		isOneOnOne:  func() bool { return true },
@@ -199,6 +244,43 @@ func TestPromptBuilder_OneOnOneNexEnabledMentionsContextGraph(t *testing.T) {
 	got := pb.Build("ceo")
 	if !strings.Contains(got, "query_context") {
 		t.Fatalf("Nex-enabled 1:1 prompt should reference query_context")
+	}
+}
+
+func TestPromptBuilder_MarkdownMemoryPromptsNaturalHTMLArtifactsDuringWork(t *testing.T) {
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "WUPHF Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "pm", Name: "Product Manager"},
+			}
+		},
+		policies:       func() []officePolicy { return nil },
+		nameFor:        func(slug string) string { return slug },
+		markdownMemory: true,
+	}
+
+	for _, slug := range []string{"ceo", "pm"} {
+		got := pb.Build(slug)
+		for _, want := range []string{
+			"notebook_visual_artifact_create",
+			"After notebook_write",
+			"complex specs",
+			"implementation plans",
+			"comparison grids",
+			"interactive tuning surfaces",
+			"notebook HTML visual artifact",
+			"long markdown wall",
+			"visual-artifact:ra_...",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%s prompt missing natural HTML artifact guidance %q:\n%s", slug, want, got)
+			}
+		}
 	}
 }
 
