@@ -24,6 +24,7 @@ import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
 import { TypingIndicator } from "../components/messages/TypingIndicator";
+import { PrePickScreen } from "../components/onboarding/PrePickScreen";
 import { SplashScreen } from "../components/onboarding/SplashScreen";
 import { Wizard } from "../components/onboarding/Wizard";
 import { ConfirmHost } from "../components/ui/ConfirmDialog";
@@ -33,6 +34,7 @@ import type { WikiTab } from "../components/wiki/WikiTabs";
 import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { isOnboardingV2Enabled } from "../lib/featureFlags";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
 import { useAppStore } from "../stores/app";
@@ -599,6 +601,9 @@ function RoutedBody() {
 export default function RootRoute() {
   const [apiReady, setApiReady] = useState(false);
   const [showSplash, setShowSplash] = useState(false);
+  // The flag is resolved once at mount. Switching it mid-session would
+  // require a reload anyway — onboarding state is loaded once at boot.
+  const [onboardingV2] = useState<boolean>(() => isOnboardingV2Enabled());
   const theme = useAppStore((s) => s.theme);
   const onboardingComplete = useAppStore((s) => s.onboardingComplete);
   const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
@@ -668,7 +673,16 @@ export default function RootRoute() {
   } else if (showSplash) {
     body = <SplashScreen onDone={() => setShowSplash(false)} />;
   } else if (!onboardingComplete) {
-    body = (
+    body = onboardingV2 ? (
+      <PrePickScreen
+        onComplete={() => {
+          // Phase 1 enters the office immediately. SplashScreen is the
+          // wizard's celebration screen; we skip it for the new flow so
+          // the user lands in the Shell without an intervening modal.
+          setOnboardingComplete(true);
+        }}
+      />
+    ) : (
       <Wizard
         onComplete={() => {
           setShowSplash(true);
