@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import type {
   DecisionPacket,
+  FeedbackItem,
   LifecycleState,
   PacketBanner,
 } from "../../lib/types/lifecycle";
@@ -23,6 +24,8 @@ interface DecisionPacketViewProps {
   onRequestChanges: () => void;
   onDefer: () => void;
   onBlock: () => void;
+  onComment?: (body: string) => void | Promise<void>;
+  onReject?: (body: string) => void | Promise<void>;
   onOpenInWorktree: () => void;
 }
 
@@ -50,6 +53,8 @@ export function DecisionPacketView({
   onRequestChanges,
   onDefer,
   onBlock,
+  onComment,
+  onReject,
   onOpenInWorktree,
 }: DecisionPacketViewProps) {
   // Keyboard shortcuts — a / r / b / w / Esc per locked v1 design.
@@ -219,6 +224,8 @@ export function DecisionPacketView({
             ))}
           </div>
         </section>
+
+        <DiscussionSection feedback={packet.spec.feedback ?? []} />
       </main>
       <PacketActionSidebar
         packet={packet}
@@ -227,6 +234,8 @@ export function DecisionPacketView({
         onRequestChanges={onRequestChanges}
         onDefer={onDefer}
         onBlock={onBlock}
+        onComment={onComment}
+        onReject={onReject}
         onOpenInWorktree={onOpenInWorktree}
       />
     </div>
@@ -400,4 +409,50 @@ function formatHoursAgo(iso: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   return `${days}d ago`;
+}
+
+interface DiscussionSectionProps {
+  feedback: FeedbackItem[];
+}
+
+function DiscussionSection({ feedback }: DiscussionSectionProps) {
+  return (
+    <section
+      className="packet-section packet-discussion"
+      aria-label="Discussion"
+      data-testid="packet-discussion"
+    >
+      <h3>
+        Discussion{" "}
+        <span className="count">
+          {feedback.length} {feedback.length === 1 ? "comment" : "comments"}
+        </span>
+      </h3>
+      {feedback.length === 0 ? (
+        <p className="packet-discussion-empty">
+          No comments yet. Leave one in the sidebar, request changes with
+          inline feedback, or wait for the reviewer to post.
+        </p>
+      ) : (
+        <ol className="packet-discussion-thread">
+          {feedback.map((item, idx) => (
+            <li
+              key={`${item.appendedAt}-${idx}`}
+              className="packet-discussion-item"
+            >
+              <header className="packet-discussion-header">
+                <span className="packet-discussion-author">
+                  @{item.author || "unknown"}
+                </span>
+                <span className="packet-discussion-time">
+                  {formatHoursAgo(item.appendedAt)}
+                </span>
+              </header>
+              <div className="packet-discussion-body">{item.body}</div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
 }

@@ -64,6 +64,12 @@ const (
 	LifecycleStateQueuedBehindOwner LifecycleState = "queued_behind_owner"
 	LifecycleStateChangesRequested  LifecycleState = "changes_requested"
 	LifecycleStateApproved          LifecycleState = "approved"
+	// LifecycleStateRejected marks work that a reviewer rejected
+	// outright as un-landable. Distinct from BlockedOnPRMerge
+	// (recoverable, waiting on upstream) and from ChangesRequested
+	// (non-terminal, owner revises). Dependent tasks STAY blocked
+	// because the work did not land.
+	LifecycleStateRejected LifecycleState = "rejected"
 )
 
 // normalizeLegacyLifecycleStateName maps pre-Phase-1 lifecycle state
@@ -97,6 +103,7 @@ func CanonicalLifecycleStates() []LifecycleState {
 		LifecycleStateQueuedBehindOwner,
 		LifecycleStateChangesRequested,
 		LifecycleStateApproved,
+		LifecycleStateRejected,
 	}
 }
 
@@ -138,6 +145,11 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 	LifecycleStateQueuedBehindOwner: {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: true},
 	LifecycleStateChangesRequested:  {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
 	LifecycleStateApproved:          {PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false},
+	// Rejected keeps Blocked: true so the unblock cascade in
+	// unblockDependentsLocked treats the upstream as unresolved and
+	// downstream tasks STAY blocked permanently. Status="rejected" is
+	// NOT in isTerminalTeamTaskStatus, which is what we want.
+	LifecycleStateRejected: {PipelineStage: "review", ReviewState: "rejected", Status: "rejected", Blocked: true},
 }
 
 // derivedFieldsFor returns the forward-map row for a state, plus a flag
@@ -175,6 +187,12 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "blocked", Blocked: true}:       LifecycleStateBlockedOnPRMerge,
 	{PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: true}:            LifecycleStateQueuedBehindOwner,
 	{PipelineStage: "ship", ReviewState: "approved", Status: "done", Blocked: false}:                   LifecycleStateApproved,
+	{PipelineStage: "review", ReviewState: "rejected", Status: "rejected", Blocked: true}:              LifecycleStateRejected,
+	// changes_requested back-derivation. Same legacy tuple as Running
+	// EXCEPT for the reviewState marker, so the inverse map distinguishes
+	// "this task is iterating because the reviewer asked for changes"
+	// from "this task is just running for the first time."
+	{PipelineStage: "implement", ReviewState: "changes_requested", Status: "in_progress", Blocked: false}: LifecycleStateChangesRequested,
 
 	// Pre-Lane-A code wrote status="blocked" instead of relying on the
 	// blocked bool. Map every reasonable variant to blocked_on_pr_merge so

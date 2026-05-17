@@ -6,6 +6,11 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Added
 
+- **Paper-manual rich HTML artifact guidance and tutorials.** Agents now get
+  default guidance for producing self-contained HTML companions in a warm
+  technical-manual style, including exact Making Software cobalt figure ink,
+  paper-like layouts, mono metadata, copy/export controls, and browser-checkable
+  notebook, wiki, and chat tutorial fixtures.
 - **`@wuphf/credentials` per-agent OS keychain substrate.** New v1 package for
   opaque credential handles backed by macOS Keychain, Linux libsecret, and
   Windows Credential Manager adapters. Handles serialize only an opaque

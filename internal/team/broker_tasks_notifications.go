@@ -163,6 +163,121 @@ func isDMTargetSlug(slug string) bool {
 	return true
 }
 
+// postTaskRequestChangesNotificationsLocked posts the channel announcement
+// plus a DM to the owner whenever a reviewer bounces a task back with
+// "request_changes". This is the PR-review rebound: the reviewer's feedback
+// (passed via the mutation's Details) reaches the owner so they can revise
+// and resubmit. Must be called while b.mu is held for write.
+func (b *Broker) postTaskRequestChangesNotificationsLocked(actor string, task *teamTask, feedback string) {
+	if task == nil {
+		return
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		actor = "system"
+	}
+	owner := strings.TrimSpace(task.Owner)
+	taskChannel := normalizeChannelSlug(task.Channel)
+	if taskChannel == "" {
+		taskChannel = "general"
+	}
+	title := strings.TrimSpace(task.Title)
+	if title == "" {
+		title = task.ID
+	}
+	feedback = strings.TrimSpace(feedback)
+	excerpt := feedback
+	if len(excerpt) > 320 {
+		excerpt = excerpt[:317] + "..."
+	}
+	ownerLabel := "(unassigned)"
+	if owner != "" {
+		ownerLabel = "@" + owner
+	}
+	body := fmt.Sprintf("🔁 Changes requested on %s %q by @%s — bounced back to %s. Revise per feedback, then call team_task action=submit_for_review.",
+		task.ID, title, actor, ownerLabel)
+	if excerpt != "" {
+		body += "\n\nReviewer feedback:\n" + excerpt
+	}
+
+	b.counter++
+	b.appendMessageLocked(channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      actor,
+		Channel:   taskChannel,
+		Kind:      "task_changes_requested",
+		Title:     title,
+		Content:   body,
+		Tagged:    dedupeReassignTags([]string{owner, "ceo"}),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	if isDMTargetSlug(owner) {
+		dmBody := fmt.Sprintf("Reviewer @%s requested changes on %s %q. Read the feedback in #%s, revise, and call team_task action=submit_for_review when ready.",
+			actor, task.ID, title, taskChannel)
+		if excerpt != "" {
+			dmBody += "\n\nFeedback:\n" + excerpt
+		}
+		b.postTaskDMLocked(actor, owner, "task_changes_requested", title, dmBody)
+	}
+}
+
+// postTaskRejectedNotificationsLocked posts a channel announcement and
+// a DM to the owner when a reviewer rejects work outright (terminal,
+// not "fix and resubmit"). Unlike request_changes, downstream tasks
+// stay blocked permanently. Must be called while b.mu is held for write.
+func (b *Broker) postTaskRejectedNotificationsLocked(actor string, task *teamTask, feedback string) {
+	if task == nil {
+		return
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		actor = "system"
+	}
+	owner := strings.TrimSpace(task.Owner)
+	taskChannel := normalizeChannelSlug(task.Channel)
+	if taskChannel == "" {
+		taskChannel = "general"
+	}
+	title := strings.TrimSpace(task.Title)
+	if title == "" {
+		title = task.ID
+	}
+	feedback = strings.TrimSpace(feedback)
+	excerpt := feedback
+	if len(excerpt) > 320 {
+		excerpt = excerpt[:317] + "..."
+	}
+	ownerLabel := "(unassigned)"
+	if owner != "" {
+		ownerLabel = "@" + owner
+	}
+	body := fmt.Sprintf("🚫 %s %q rejected by @%s — terminal. Dependent tasks stay blocked. Owner: %s.",
+		task.ID, title, actor, ownerLabel)
+	if excerpt != "" {
+		body += "\n\nRejection reason:\n" + excerpt
+	}
+
+	b.counter++
+	b.appendMessageLocked(channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      actor,
+		Channel:   taskChannel,
+		Kind:      "task_rejected",
+		Title:     title,
+		Content:   body,
+		Tagged:    dedupeReassignTags([]string{owner, "ceo"}),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	if isDMTargetSlug(owner) {
+		dmBody := fmt.Sprintf("Reviewer @%s rejected %s %q. This is terminal — the work won't land. Read the reason in #%s.",
+			actor, task.ID, title, taskChannel)
+		if excerpt != "" {
+			dmBody += "\n\nReason:\n" + excerpt
+		}
+		b.postTaskDMLocked(actor, owner, "task_rejected", title, dmBody)
+	}
+}
+
 func dedupeReassignTags(tags []string) []string {
 	seen := make(map[string]struct{}, len(tags))
 	out := make([]string, 0, len(tags))

@@ -498,7 +498,14 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 		}
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, msg.ReplyTo)
-	if ctx := b.NotificationContext(slug, channelSlug, msg.ID, threadRoot, 4); ctx != "" {
+	// Lead (CEO) gets a wider context window so it can remember the
+	// active human goal verbatim across noisy multi-agent threads.
+	// Specialists keep the tighter window to stay token-efficient.
+	contextLimit := 4
+	if slug == b.targeter.LeadSlug() {
+		contextLimit = 20
+	}
+	if ctx := b.NotificationContext(slug, channelSlug, msg.ID, threadRoot, contextLimit); ctx != "" {
 		lines = append(lines, ctx)
 	}
 	if slug == b.targeter.LeadSlug() {
