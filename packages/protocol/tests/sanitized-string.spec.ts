@@ -313,6 +313,15 @@ describe("SanitizedString", () => {
       expect(SanitizedString.fromUnknown("a\ue000b", opts).value).toBe("ab");
       // U+F8FF is the Apple logo PUA point.
       expect(SanitizedString.fromUnknown("a\uf8ffb", opts).value).toBe("ab");
+      // Supplementary Private Use Area-A (U+F0000) and -B (U+100000) are
+      // astral Co code points. The moat iterates by code point, so an astral
+      // regression would not be caught by the BMP cases above.
+      expect(SanitizedString.fromUnknown(`a${String.fromCodePoint(0xf0000)}b`, opts).value).toBe(
+        "ab",
+      );
+      expect(SanitizedString.fromUnknown(`a${String.fromCodePoint(0x100000)}b`, opts).value).toBe(
+        "ab",
+      );
     });
 
     it("strips every bidi/format control, not just the U+202A-E and U+2066-9 ranges", () => {
@@ -430,7 +439,9 @@ describe("SanitizedString", () => {
       // An untyped caller that passes the policy positionally (a bare
       // "allowlist" string, or an array) has `.policy` read as `undefined`
       // and would silently get the weaker default denylist. Fail closed.
-      for (const malformed of ["allowlist", [], 42, true]) {
+      // `null` is the easy-to-miss case: `typeof null === "object"`, so a
+      // loose object test would let it through. Keep it in the table.
+      for (const malformed of ["allowlist", [], null, 42, true]) {
         expect(() =>
           SanitizedString.fromUnknown("x", malformed as unknown as SanitizedStringOptions),
         ).toThrow(/options must be a plain object/);
