@@ -24,16 +24,12 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background:
-        linear-gradient(90deg, rgba(34, 92, 255, .06) 1px, transparent 1px),
-        linear-gradient(rgba(34, 92, 255, .06) 1px, transparent 1px),
-        var(--paper);
-      background-size: 18px 18px;
+      background: var(--paper);
     }
     main {
-      max-width: 1180px;
+      max-width: 1200px;
       margin: 0 auto;
-      padding: 30px 28px 42px;
+      padding: 42px 34px 70px;
     }
     .rule {
       height: 10px;
@@ -44,18 +40,19 @@
     header {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
-      gap: 22px;
-      align-items: end;
+      gap: 28px;
+      align-items: start;
     }
     h1 {
-      margin: 0;
-      font-size: 42px;
-      line-height: .95;
+      margin: 58px 0 0;
+      font-size: 34px;
+      line-height: 1.02;
       letter-spacing: 0;
+      max-width: 620px;
     }
     .dek {
       max-width: 650px;
-      margin-top: 12px;
+      margin-top: 14px;
       color: var(--ink);
       font-size: 17px;
       line-height: 1.55;
@@ -66,15 +63,19 @@
     }
     .stamp {
       justify-self: end;
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, .55);
-      padding: 10px 12px;
       font-size: 12px;
       color: var(--muted);
       text-align: right;
       min-width: 210px;
+      line-height: 1.35;
     }
-    .badge { color: var(--blue); font-size: 12px; }
+    .badge {
+      color: var(--blue);
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
     .layout {
       display: grid;
       grid-template-columns: minmax(0, .95fr) minmax(320px, .8fr);
@@ -82,9 +83,8 @@
       align-items: start;
     }
     section {
-      background: rgba(248, 247, 241, .88);
       border-top: 1px solid var(--ink);
-      padding-top: 16px;
+      padding-top: 15px;
     }
     h2 {
       margin: 0 0 14px;
@@ -125,10 +125,10 @@
       min-height: 250px;
       border: 1px dotted var(--line);
       background:
-        linear-gradient(90deg, rgba(34, 92, 255, .08) 1px, transparent 1px),
-        linear-gradient(rgba(34, 92, 255, .08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34, 92, 255, .055) 1px, transparent 1px),
+        linear-gradient(rgba(34, 92, 255, .055) 1px, transparent 1px),
         rgba(255, 255, 255, .28);
-      background-size: 14px 14px;
+      background-size: 8px 8px;
     }
     .fig {
       color: var(--muted);
@@ -234,14 +234,14 @@
   <main>
     <header>
       <div>
-        <div class="badge">FIG_001 / HTML FIRST ARTIFACT</div>
+        <div class="badge">WUPHF ARTIFACT</div>
         <h1>Launch Risk Room</h1>
         <p class="dek">Compare blockers, owner load, and mitigation options before moving the GTM plan from planning into execution.</p>
       </div>
       <div class="stamp">
-        WUPHF MANUAL PAGE<br>
-        SOURCE: agents/revops-agent/notebook<br>
-        TRUST: draft
+        A WUPHF manual artifact for reviewing launch readiness.<br>
+        Source: agents/revops-agent/notebook<br>
+        Trust: draft
       </div>
     </header>
     <div class="rule" aria-hidden="true"></div>

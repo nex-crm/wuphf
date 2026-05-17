@@ -10,8 +10,9 @@ room, review packet, comparison grid, or tuning surface.
 - Near-black serif body copy for dense reading.
 - Monospaced labels for artifact metadata, figure numbers, inputs, outputs, and
   source/trust information.
-- Technical blue line art, inline SVG diagrams, ruler ticks, dotted grids, and
-  small figure captions.
+- Technical blue line art, inline SVG diagrams, ruler ticks, dotted figure
+  grids, and small figure captions. Keep the page background quiet; reserve
+  graph-paper grids for figure plates and instrumentation zones.
 - Flat layouts with hairline borders, dotted separators, and restrained
   controls.
 - Tables and lists should read like reference material: compact, scannable, and

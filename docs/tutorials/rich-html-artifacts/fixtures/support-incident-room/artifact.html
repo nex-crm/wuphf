@@ -20,13 +20,9 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background:
-        linear-gradient(90deg, rgba(34, 92, 255, .055) 1px, transparent 1px),
-        linear-gradient(rgba(34, 92, 255, .055) 1px, transparent 1px),
-        var(--paper);
-      background-size: 18px 18px;
+      background: var(--paper);
     }
-    main { max-width: 1120px; margin: 0 auto; padding: 30px 28px 42px; }
+    main { max-width: 1200px; margin: 0 auto; padding: 42px 34px 70px; }
     .mono, .fig, button, .metric span, .metric strong, textarea {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       letter-spacing: 0;
@@ -34,14 +30,14 @@
     header {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 260px;
-      gap: 24px;
-      align-items: end;
+      gap: 28px;
+      align-items: start;
       margin-bottom: 24px;
     }
     h1 {
-      margin: 0;
-      font-size: 42px;
-      line-height: .96;
+      margin: 58px 0 0;
+      font-size: 34px;
+      line-height: 1.02;
       letter-spacing: 0;
     }
     .dek {
@@ -51,12 +47,17 @@
       line-height: 1.55;
     }
     .plate {
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, .44);
-      padding: 12px;
       color: var(--muted);
       font-size: 12px;
       text-align: right;
+      line-height: 1.35;
+    }
+    .brandline {
+      color: var(--blue);
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
     }
     .rule {
       height: 10px;
@@ -139,10 +140,10 @@
       position: relative;
       border: 1px dotted var(--line);
       background:
-        linear-gradient(90deg, rgba(34, 92, 255, .08) 1px, transparent 1px),
-        linear-gradient(rgba(34, 92, 255, .08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34, 92, 255, .055) 1px, transparent 1px),
+        linear-gradient(rgba(34, 92, 255, .055) 1px, transparent 1px),
         rgba(255, 255, 255, .28);
-      background-size: 14px 14px;
+      background-size: 8px 8px;
       padding: 18px;
       min-height: 180px;
     }
@@ -194,14 +195,14 @@
   <main>
     <header>
       <div>
-        <div class="mono" style="color:#225cff">FIG_003 / INCIDENT COMMAND ROOM</div>
+        <div class="mono brandline">WUPHF ARTIFACT</div>
         <h1>Incident Command Room</h1>
         <p class="dek">A single visual packet for impact, recovery timeline, owners, and the next customer-facing update.</p>
       </div>
       <div class="plate mono">
-        WIKI VISUAL<br>
-        PATH: team/playbooks/support<br>
-        TRUST: promoted
+        A WUPHF manual artifact for incident review.<br>
+        Path: team/playbooks/support<br>
+        Trust: promoted
       </div>
     </header>
     <div class="rule" aria-hidden="true"></div>
