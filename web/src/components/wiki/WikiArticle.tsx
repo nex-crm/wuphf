@@ -391,10 +391,13 @@ export default function WikiArticle({
     setTab("article");
   };
   const handleEditorCancel = () => setTab("article");
+  const isVisualMode = tab === "visual" && visualArtifact !== null;
 
   return (
     <>
-      <main className="wk-article-col">
+      <main
+        className={`wk-article-col${isVisualMode ? " wk-article-col-visual" : ""}`}
+      >
         <LiveEditingBanner liveAgent={liveAgent} article={article} />
         <ArticleSetupPanels
           entity={entity}
@@ -454,12 +457,14 @@ export default function WikiArticle({
           articlePath={article.path}
         />
       </main>
-      <ArticleRightSidebar
-        article={article}
-        toc={toc}
-        onNavigate={onNavigate}
-        onMaintenanceApplied={() => setRefreshNonce((n) => n + 1)}
-      />
+      {isVisualMode ? null : (
+        <ArticleRightSidebar
+          article={article}
+          toc={toc}
+          onNavigate={onNavigate}
+          onMaintenanceApplied={() => setRefreshNonce((n) => n + 1)}
+        />
+      )}
     </>
   );
 }
@@ -611,7 +616,6 @@ function ArticleTabPanels({
             <h2>{visualArtifact.artifact.title}</h2>
             <div className="rich-artifact-meta">
               <span>{visualArtifact.artifact.trustLevel}</span>
-              <span>{visualArtifact.artifact.htmlPath}</span>
             </div>
           </div>
           <RichArtifactFrame

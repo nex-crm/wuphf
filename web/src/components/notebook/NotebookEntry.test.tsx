@@ -186,7 +186,7 @@ describe("<NotebookEntryView visual artifacts>", () => {
       });
     });
 
-    const openButtons = screen.getAllByRole("button", { name: "Open" });
+    const openButtons = screen.getAllByRole("button", { name: "Expand" });
     await user.click(openButtons[0]);
     await user.click(openButtons[1]);
 
@@ -238,7 +238,7 @@ describe("<NotebookEntryView visual artifacts>", () => {
     render(<NotebookEntryView entry={DRAFT_ENTRY} />);
 
     await screen.findByRole("heading", { name: "Visual artifacts" });
-    await user.click(screen.getByRole("button", { name: "Open" }));
+    await user.click(screen.getByRole("button", { name: "Expand" }));
     await user.click(await screen.findByRole("button", { name: "Promote" }));
 
     await waitFor(() =>
@@ -279,7 +279,7 @@ describe("<NotebookEntryView visual artifacts>", () => {
     render(<NotebookEntryView entry={DRAFT_ENTRY} />);
 
     await screen.findByRole("heading", { name: "Visual artifacts" });
-    await user.click(screen.getByRole("button", { name: "Open" }));
+    await user.click(screen.getByRole("button", { name: "Expand" }));
 
     expect(
       await screen.findByRole("dialog", { name: "Visual plan" }),

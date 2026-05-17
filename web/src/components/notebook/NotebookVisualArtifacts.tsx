@@ -199,7 +199,7 @@ export default function NotebookVisualArtifacts({
                   void openArtifact(artifact);
                 }}
               >
-                Open
+                Expand
               </button>
             </div>
           </article>
@@ -214,7 +214,6 @@ export default function NotebookVisualArtifacts({
             <h3>{inlineDetail.artifact.title}</h3>
             <div className="rich-artifact-meta">
               <span>{inlineDetail.artifact.trustLevel}</span>
-              <span>{inlineDetail.artifact.htmlPath}</span>
             </div>
           </div>
           <RichArtifactFrame
@@ -242,7 +241,6 @@ export default function NotebookVisualArtifacts({
               <h2 id={modalTitleId}>{detail.artifact.title}</h2>
               <div className="rich-artifact-meta">
                 <span>{detail.artifact.trustLevel}</span>
-                <span>{detail.artifact.htmlPath}</span>
               </div>
             </div>
             <div className="rich-artifact-modal-actions">
@@ -277,6 +275,7 @@ export default function NotebookVisualArtifacts({
             <RichArtifactFrame
               title={detail.artifact.title}
               html={detail.html}
+              variant="modal"
             />
           )}
         </div>
