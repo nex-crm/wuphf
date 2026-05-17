@@ -64,6 +64,12 @@ type channelMessage struct {
 	// what prevents Agent B from working off Agent A's unreviewed
 	// in-stream commentary.
 	SourceTaskID string `json:"source_task_id,omitempty"`
+	// Payload carries the structured card payload for CEO onboarding message
+	// kinds (ceo_form_field, ceo_chip_row, ceo_checklist, ceo_team_trim,
+	// ceo_scan_chip). Empty for all other kinds. Added in Phase 2.
+	// The frontend's kind-dispatcher routes these kinds to the appropriate
+	// card renderer component.
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 type agentIssueRecord struct {
