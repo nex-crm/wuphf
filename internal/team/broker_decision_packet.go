@@ -1062,11 +1062,18 @@ func (b *Broker) AppendPacketFeedbackLocked(taskID, author, body string) {
 	if b == nil {
 		return
 	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return
 	}
 	packet := b.getOrInitPacketLocked(taskID)
+	if packet == nil {
+		return
+	}
 	packet.Spec.Feedback = append(packet.Spec.Feedback, FeedbackItem{
 		AppendedAt: time.Now().UTC(),
 		Author:     strings.TrimSpace(author),

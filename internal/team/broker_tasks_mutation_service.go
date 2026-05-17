@@ -427,6 +427,15 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// request_changes (revise + resubmit). LifecycleStateRejected
 			// keeps Blocked=true so unblockDependentsLocked treats the
 			// upstream as unresolved and downstream tasks STAY blocked.
+			//
+			// Reject must carry a reason — a terminal "this won't land"
+			// without context is hostile to the agent that has to
+			// pivot. Enforce that contract at the API boundary so the
+			// "@human reviewer rejected without saying why" failure
+			// mode can't happen.
+			if strings.TrimSpace(body.Details) == "" {
+				return TaskResponse{}, taskMutationError(TaskMutationInvalid, "reject reason required", nil)
+			}
 			if err := b.applyLifecycleStateLocked(task, LifecycleStateRejected); err != nil {
 				return TaskResponse{}, taskMutationError(TaskMutationInvalid, err.Error(), err)
 			}

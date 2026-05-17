@@ -86,6 +86,9 @@ export function PacketActionSidebar({
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       if (isDecisionLocked) return;
+      // Don't hijack Cmd/Ctrl/Alt + c / x — those are OS-level copy/cut
+      // shortcuts the user expects to keep working.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
       if (target) {
         const tag = target.tagName;

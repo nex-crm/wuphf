@@ -319,6 +319,33 @@ func TestPRLoop_CommentEndpointResolvesActorFromAuth(t *testing.T) {
 	}
 }
 
+// TestPRLoop_RejectRequiresNonEmptyReason guards the "reject must
+// carry a reason" contract at the broker layer (frontend is best
+// effort; backend is authoritative).
+func TestPRLoop_RejectRequiresNonEmptyReason(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+	b.channels = []teamChannel{{Slug: "general", Members: []string{"reviewer", "executor"}}}
+	b.tasks = []teamTask{{
+		ID: "task-rej-empty-1", Channel: "general", Title: "Blank-reason reject",
+		Owner: "executor", status: "review",
+	}}
+
+	_, err := b.MutateTask(TaskPostRequest{
+		Action:    "reject",
+		ID:        "task-rej-empty-1",
+		Channel:   "general",
+		Details:   "   ",
+		CreatedBy: "reviewer",
+	})
+	if err == nil {
+		t.Fatalf("expected error for empty reject reason, got nil")
+	}
+	if !strings.Contains(err.Error(), "reject reason required") {
+		t.Fatalf("expected 'reject reason required' error, got %v", err)
+	}
+}
+
 // TestPRLoop_CommentEndpointRequiresBody guards against silent empty
 // comments being persisted as feedback noise.
 func TestPRLoop_CommentEndpointRequiresBody(t *testing.T) {
