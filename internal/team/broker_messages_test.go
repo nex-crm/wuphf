@@ -127,6 +127,52 @@ func TestPostMessageAllowsRichArtifactReferenceMarkers(t *testing.T) {
 	if posted.Content != content {
 		t.Fatalf("artifact marker changed:\nwant %q\ngot  %q", content, posted.Content)
 	}
+
+	for name, messages := range map[string][]channelMessage{
+		"Messages":        b.Messages(),
+		"ChannelMessages": b.ChannelMessages("general"),
+		"AllMessages":     b.AllMessages(),
+	} {
+		if len(messages) == 0 {
+			t.Fatalf("%s returned no messages", name)
+		}
+		last := messages[len(messages)-1]
+		if last.ID != posted.ID {
+			t.Fatalf("%s returned last message ID %q, want %q", name, last.ID, posted.ID)
+		}
+		if last.Redacted {
+			t.Fatalf("%s redacted artifact marker: %+v", name, last)
+		}
+		if last.Content != content {
+			t.Fatalf("%s changed artifact marker:\nwant %q\ngot  %q", name, content, last.Content)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/messages?channel=general&viewer_slug=human&limit=10", nil)
+	rec := httptest.NewRecorder()
+	b.handleGetMessages(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /messages status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Messages []channelMessage `json:"messages"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode /messages: %v", err)
+	}
+	if len(body.Messages) == 0 {
+		t.Fatal("GET /messages returned no messages")
+	}
+	got := body.Messages[len(body.Messages)-1]
+	if got.ID != posted.ID {
+		t.Fatalf("GET /messages returned last message ID %q, want %q", got.ID, posted.ID)
+	}
+	if got.Redacted {
+		t.Fatalf("GET /messages redacted artifact marker: %+v", got)
+	}
+	if got.Content != content {
+		t.Fatalf("GET /messages changed artifact marker:\nwant %q\ngot  %q", content, got.Content)
+	}
 }
 
 func TestFormatChannelViewRedactsSecrets(t *testing.T) {

@@ -148,7 +148,7 @@ func richArtifactPrefixOK(prefix string) bool {
 }
 
 func richArtifactSuffixOK(suffix string) bool {
-	return suffix == "" || suffix == ".html" || strings.HasPrefix(suffix, ".html#") || strings.HasPrefix(suffix, ".html?")
+	return suffix == "" || suffix == ".html"
 }
 
 func isHexRun(s string) bool {
