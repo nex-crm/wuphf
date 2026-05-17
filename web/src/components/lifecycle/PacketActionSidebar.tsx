@@ -63,19 +63,34 @@ export function PacketActionSidebar({
     callback(trimmedComment ? trimmedComment : undefined);
     setComment("");
   };
-  // submitComment / submitReject only clear the textarea AFTER the
-  // async handler settles. If the network call fails, the reviewer's
-  // drafted text stays in the box so they can retry without retyping
-  // (CodeRabbit catch on async-clear race).
+  // submitComment / submitReject defer the async call into a microtask
+  // (so any synchronous throw from the caller doesn't escape this
+  // handler), and only clear the textarea on success AND if the user
+  // hasn't typed something new in the meantime. Failure paths log
+  // and leave the draft alone for retry.
   const submitComment = useCallback(() => {
     if (!onComment || trimmedComment.length === 0) return;
     const body = trimmedComment;
-    void Promise.resolve(onComment(body)).then(() => setComment(""));
+    void Promise.resolve()
+      .then(() => onComment(body))
+      .then(() => {
+        setComment((prev) => (prev.trim() === body ? "" : prev));
+      })
+      .catch((err) => {
+        console.error("submitComment failed", err);
+      });
   }, [onComment, trimmedComment]);
   const submitReject = useCallback(() => {
     if (!onReject || trimmedComment.length === 0) return;
     const body = trimmedComment;
-    void Promise.resolve(onReject(body)).then(() => setComment(""));
+    void Promise.resolve()
+      .then(() => onReject(body))
+      .then(() => {
+        setComment((prev) => (prev.trim() === body ? "" : prev));
+      })
+      .catch((err) => {
+        console.error("submitReject failed", err);
+      });
   }, [onReject, trimmedComment]);
   const lockedTooltip = isDecisionLocked ? "Wait for review state" : undefined;
 

@@ -411,8 +411,12 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// (if present) carries the submitted artifact (code,
 			// copy, plan) which we capture below as a FeedbackItem
 			// so it shows up in the unified Inbox Discussion thread.
+			// appendDetails preserves prior task details (planner
+			// spec, earlier submission notes) instead of clobbering
+			// them with each resubmit.
 			task.status = "review"
 			task.reviewState = "ready_for_review"
+			appendDetails = true
 			submitForReviewTriggered = true
 		case "comment":
 			// Append-only comment with no state change. Used by both
