@@ -23,6 +23,9 @@ Each scenario has:
 
 The `scenarios.json` manifest separates intended deployment paths from local fixture files. `sourceMarkdownPath` and `targetWikiPath` describe where the agent-created source note and promoted wiki article should live in a real workspace; `sourcePath`, `wikiPath`, `htmlPath`, and `chatPath` point at fixture files under this tutorial directory for tests and examples.
 
+`ACCEPTANCE.md` turns the three scenarios into browser-checkable acceptance
+criteria for the notebook, wiki, and chat surfaces.
+
 ## Validation
 
 These examples are executable fixtures, not just documentation.
