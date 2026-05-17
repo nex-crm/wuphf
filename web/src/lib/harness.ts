@@ -1,13 +1,24 @@
 import type { OfficeMember } from "../api/client";
 
-export type HarnessKind = "claude-code" | "codex" | "opencode" | "openclaw";
+export type HarnessKind =
+  | "claude-code"
+  | "codex"
+  | "opencode"
+  | "openclaw"
+  | "hermes-agent";
 
+// `openclaw-http` is the OpenAI-compat transport for OpenClaw; treat it as the
+// same harness visually as the WebSocket bridge so users see one OpenClaw
+// identity. Hermes is its own harness.
 const VALID_KINDS: Record<string, HarnessKind> = {
   "claude-code": "claude-code",
   claude: "claude-code",
   codex: "codex",
   opencode: "opencode",
   openclaw: "openclaw",
+  "openclaw-http": "openclaw",
+  "hermes-agent": "hermes-agent",
+  hermes: "hermes-agent",
 };
 
 function normalize(raw: string | undefined | null): HarnessKind | null {
@@ -38,5 +49,7 @@ export function harnessLabel(kind: HarnessKind): string {
       return "Opencode";
     case "openclaw":
       return "OpenClaw";
+    case "hermes-agent":
+      return "Hermes";
   }
 }
