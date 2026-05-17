@@ -1,18 +1,21 @@
-# WUPHF Technical-Manual Artifact Style
+# WUPHF Paper-Manual Artifact Style
 
-Rich HTML artifacts should feel like clear technical manuals, not generic SaaS
-dashboards. Use this style when an agent produces an explainer, plan, incident
-room, review packet, comparison grid, or tuning surface.
+Rich HTML artifacts should feel like old mathematics and physics books printed
+on real paper, not generic SaaS dashboards or digital spec sheets. Use this
+style when an agent produces an explainer, plan, incident room, review packet,
+comparison grid, or tuning surface.
 
 ## Visual Language
 
-- Warm off-white paper background.
+- Warm paper background with subtle grain, like aged textbook stock.
 - Near-black serif body copy for dense reading.
 - Monospaced labels for artifact metadata, figure numbers, inputs, outputs, and
   source/trust information.
-- Technical blue line art, inline SVG diagrams, ruler ticks, dotted figure
-  grids, and small figure captions. Keep the page background quiet; reserve
-  graph-paper grids for figure plates and instrumentation zones.
+- Graphite, sepia, or faded-ink line art. Color is secondary; the feel should
+  come from paper, typesetting, and diagrams.
+- Inline SVG diagrams should feel like textbook figures: construction lines,
+  axis ticks, measured annotations, equations, figure captions, and faint grids
+  inside figure plates.
 - Flat layouts with hairline borders, dotted separators, and restrained
   controls.
 - Tables and lists should read like reference material: compact, scannable, and
@@ -20,8 +23,9 @@ room, review packet, comparison grid, or tuning surface.
 
 ## Interaction Pattern
 
-- Controls should feel like instrumentation: sliders, tabs, editable prompts,
-  small copy/export buttons, and state readouts.
+- Controls should feel like instrumentation printed into the page: rulers,
+  sliders, tabs, editable lab notes, small copy/export buttons, and state
+  readouts.
 - Every interactive artifact should end with a useful handoff control, such as
   `Copy prompt`, `Copy update`, `Copy diff`, or `Export JSON`.
 - Prefer diagrams that clarify the decision or flow over decorative imagery.

@@ -7,16 +7,16 @@
   <style>
     :root {
       color-scheme: light;
-      --paper: #f8f7f1;
-      --paper-deep: #eeece4;
-      --ink: #161410;
-      --muted: #77736b;
-      --blue: #225cff;
-      --blue-soft: #dfe7ff;
-      --line: #cfcac0;
-      --danger: #9c382d;
-      --warn: #8c641c;
-      --ok: #286b48;
+      --paper: #f3ecdc;
+      --paper-deep: #e7dcc8;
+      --ink: #1f1912;
+      --muted: #766b5b;
+      --draw: #493d2d;
+      --draw-soft: #ded2bd;
+      --line: #baad96;
+      --danger: #7b4038;
+      --warn: #755a28;
+      --ok: #3f5e45;
       font-family: Georgia, "Times New Roman", serif;
       background: var(--paper);
       color: var(--ink);
@@ -24,7 +24,12 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: var(--paper);
+      background:
+        radial-gradient(circle at 18% 12%, rgba(76, 58, 35, .055) 0 1px, transparent 1.2px),
+        radial-gradient(circle at 78% 64%, rgba(76, 58, 35, .04) 0 1px, transparent 1.2px),
+        linear-gradient(90deg, rgba(255, 252, 242, .42), transparent 45%, rgba(90, 70, 44, .04)),
+        var(--paper);
+      background-size: 23px 29px, 31px 37px, auto, auto;
     }
     main {
       max-width: 1200px;
@@ -70,7 +75,7 @@
       line-height: 1.35;
     }
     .badge {
-      color: var(--blue);
+      color: var(--draw);
       font-size: 15px;
       font-weight: 800;
       letter-spacing: .08em;
@@ -125,8 +130,8 @@
       min-height: 250px;
       border: 1px dotted var(--line);
       background:
-        linear-gradient(90deg, rgba(34, 92, 255, .055) 1px, transparent 1px),
-        linear-gradient(rgba(34, 92, 255, .055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(73, 61, 45, .09) 1px, transparent 1px),
+        linear-gradient(rgba(73, 61, 45, .09) 1px, transparent 1px),
         rgba(255, 255, 255, .28);
       background-size: 8px 8px;
     }
@@ -137,6 +142,13 @@
       position: absolute;
       top: 16px;
       left: 8px;
+    }
+    .equation {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+      font-style: italic;
+      text-align: right;
     }
     svg {
       display: block;
@@ -158,12 +170,12 @@
     .owner strong { display: block; margin-bottom: 8px; }
     .bar {
       height: 9px;
-      border: 1px solid var(--blue);
+      border: 1px solid var(--draw);
       background: transparent;
       overflow: hidden;
       margin-bottom: 10px;
     }
-    .bar span { display: block; height: 100%; background: var(--blue); }
+    .bar span { display: block; height: 100%; background: var(--draw); }
     .controls { display: grid; gap: 14px; }
     .control { display: grid; gap: 7px; }
     label {
@@ -172,7 +184,7 @@
     }
     input[type="range"] {
       width: 100%;
-      accent-color: var(--blue);
+      accent-color: var(--draw);
     }
     .score {
       display: grid;
@@ -184,31 +196,31 @@
     .dial {
       width: 112px;
       height: 112px;
-      border: 1px solid var(--blue);
+      border: 1px solid var(--draw);
       display: grid;
       place-items: center;
       background:
-        conic-gradient(var(--blue) var(--score, 56%), rgba(34, 92, 255, .12) 0);
-      color: var(--blue);
+        conic-gradient(var(--draw) var(--score, 56%), rgba(73, 61, 45, .16) 0);
+      color: var(--draw);
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 32px;
       font-weight: 800;
     }
     .decision {
-      border-left: 2px solid var(--blue);
+      border-left: 2px solid var(--draw);
       padding-left: 14px;
     }
     .decision strong { display: block; margin-bottom: 6px; }
     button {
-      border: 1px solid var(--blue);
+      border: 1px solid var(--draw);
       background: transparent;
-      color: var(--blue);
+      color: var(--draw);
       min-height: 36px;
       padding: 8px 12px;
       font-weight: 800;
       cursor: pointer;
     }
-    button:hover { background: var(--blue); color: #fff; }
+    button:hover { background: var(--draw); color: var(--paper); }
     pre {
       white-space: pre-wrap;
       border: 1px dotted var(--line);
@@ -278,7 +290,7 @@
         <div class="figure">
           <div class="fig">FIG_002 [ OWNER LOAD MAP ]</div>
           <svg viewBox="0 0 720 260" role="img" aria-label="Owner load map">
-            <g fill="none" stroke="#225cff" stroke-width="2">
+            <g fill="none" stroke="#493d2d" stroke-width="2">
               <rect x="78" y="52" width="155" height="84"></rect>
               <rect x="283" y="82" width="155" height="84"></rect>
               <rect x="488" y="112" width="155" height="84"></rect>
@@ -288,7 +300,7 @@
               <line x1="360" y1="58" x2="360" y2="82"></line>
               <line x1="565" y1="88" x2="565" y2="112"></line>
             </g>
-            <g fill="#225cff" font-family="ui-monospace, monospace" font-size="16">
+            <g fill="#493d2d" font-family="ui-monospace, monospace" font-size="16">
               <text x="105" y="98">FINANCE</text>
               <text x="310" y="128">SUPPORT</text>
               <text x="525" y="158">SALES</text>
@@ -297,6 +309,7 @@
               <text x="506" y="224">buyer proof</text>
             </g>
           </svg>
+          <p class="equation">R = (pricing + support gap + sales gap) / 3</p>
         </div>
 
         <h2>Owner load</h2>

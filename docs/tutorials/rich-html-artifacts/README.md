@@ -26,9 +26,9 @@ The `scenarios.json` manifest separates intended deployment paths from local fix
 `ACCEPTANCE.md` turns the three scenarios into browser-checkable acceptance
 criteria for the notebook, wiki, and chat surfaces.
 
-`STYLE.md` defines the WUPHF technical-manual artifact style agents should use
-by default: warm paper, editorial text, blue line diagrams, dotted grids, mono
-metadata labels, and sparse interactive controls.
+`STYLE.md` defines the WUPHF paper-manual artifact style agents should use by
+default: warm paper, editorial text, graphite/sepia diagrams, faint figure
+construction grids, mono metadata labels, and sparse interactive controls.
 
 ## Validation
 

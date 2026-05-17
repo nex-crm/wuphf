@@ -7,12 +7,12 @@
   <style>
     :root {
       color-scheme: light;
-      --paper: #f8f7f1;
-      --ink: #15130f;
-      --muted: #77736b;
-      --blue: #225cff;
-      --line: #cfcac0;
-      --paper-deep: #ebe8dd;
+      --paper: #f3ecdc;
+      --ink: #1f1912;
+      --muted: #766b5b;
+      --draw: #493d2d;
+      --line: #baad96;
+      --paper-deep: #e7dcc8;
       font-family: Georgia, "Times New Roman", serif;
       background: var(--paper);
       color: var(--ink);
@@ -20,7 +20,12 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: var(--paper);
+      background:
+        radial-gradient(circle at 18% 12%, rgba(76, 58, 35, .055) 0 1px, transparent 1.2px),
+        radial-gradient(circle at 78% 64%, rgba(76, 58, 35, .04) 0 1px, transparent 1.2px),
+        linear-gradient(90deg, rgba(255, 252, 242, .42), transparent 45%, rgba(90, 70, 44, .04)),
+        var(--paper);
+      background-size: 23px 29px, 31px 37px, auto, auto;
     }
     main { max-width: 1200px; margin: 0 auto; padding: 42px 34px 70px; }
     .mono, .fig, button, .metric span, .metric strong, textarea {
@@ -53,7 +58,7 @@
       line-height: 1.35;
     }
     .brandline {
-      color: var(--blue);
+      color: var(--draw);
       font-size: 15px;
       font-weight: 800;
       letter-spacing: .08em;
@@ -82,7 +87,7 @@
       margin-bottom: 6px;
     }
     .metric strong {
-      color: var(--blue);
+      color: var(--draw);
       font-size: 22px;
     }
     .workbench {
@@ -108,9 +113,9 @@
       cursor: pointer;
     }
     button[aria-selected="true"], #copy {
-      border-color: var(--blue);
-      color: var(--blue);
-      background: rgba(34, 92, 255, .08);
+      border-color: var(--draw);
+      color: var(--draw);
+      background: rgba(77, 64, 48, .08);
     }
     section {
       border-top: 1px solid var(--ink);
@@ -140,8 +145,8 @@
       position: relative;
       border: 1px dotted var(--line);
       background:
-        linear-gradient(90deg, rgba(34, 92, 255, .055) 1px, transparent 1px),
-        linear-gradient(rgba(34, 92, 255, .055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(73, 61, 45, .09) 1px, transparent 1px),
+        linear-gradient(rgba(73, 61, 45, .09) 1px, transparent 1px),
         rgba(255, 255, 255, .28);
       background-size: 8px 8px;
       padding: 18px;
@@ -152,6 +157,13 @@
       font-size: 11px;
       margin-bottom: 8px;
     }
+    .equation {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+      font-style: italic;
+      text-align: right;
+    }
     svg { display: block; width: 100%; height: auto; }
     .timeline {
       display: grid;
@@ -159,12 +171,12 @@
       gap: 12px;
     }
     .time {
-      color: var(--blue);
+      color: var(--draw);
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-weight: 800;
     }
     .event {
-      border-left: 1px solid var(--blue);
+      border-left: 1px solid var(--draw);
       padding: 0 0 18px 14px;
     }
     .event strong { display: block; margin-bottom: 4px; }
@@ -186,7 +198,7 @@
       .plate { text-align: left; }
       .tabs { display: flex; flex-wrap: wrap; }
       .timeline { grid-template-columns: 1fr; }
-      .event { border-left: 0; border-top: 1px solid var(--blue); padding: 10px 0 14px; }
+      .event { border-left: 0; border-top: 1px solid var(--draw); padding: 10px 0 14px; }
       h1 { font-size: 34px; }
     }
   </style>
@@ -232,7 +244,7 @@
           <div class="figure">
             <div class="fig">FIG_004 [ IMPACT BY SEGMENT ]</div>
             <svg viewBox="0 0 720 170" role="img" aria-label="Impact by segment">
-              <g fill="none" stroke="#225cff" stroke-width="2">
+              <g fill="none" stroke="#493d2d" stroke-width="2">
                 <rect x="38" y="32" width="228" height="34"></rect>
                 <rect x="38" y="84" width="164" height="34"></rect>
                 <rect x="38" y="132" width="66" height="18"></rect>
@@ -240,12 +252,13 @@
                 <line x1="202" y1="101" x2="410" y2="101"></line>
                 <line x1="104" y1="141" x2="410" y2="141"></line>
               </g>
-              <g fill="#225cff" font-family="ui-monospace, monospace" font-size="15">
+              <g fill="#493d2d" font-family="ui-monospace, monospace" font-size="15">
                 <text x="428" y="54">Enterprise: 7 affected</text>
                 <text x="428" y="106">Growth: 5 affected</text>
                 <text x="428" y="146">Internal: 2 follow-ups</text>
               </g>
             </svg>
+            <p class="equation">impact = affected accounts x elapsed sync delay</p>
           </div>
         </div>
 

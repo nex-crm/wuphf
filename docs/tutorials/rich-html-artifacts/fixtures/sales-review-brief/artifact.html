@@ -7,15 +7,15 @@
   <style>
     :root {
       color-scheme: light;
-      --paper: #f8f7f1;
-      --ink: #15130f;
-      --muted: #77736b;
-      --blue: #225cff;
-      --line: #cfcac0;
-      --paper-deep: #ebe8dd;
-      --danger: #9c382d;
-      --warn: #8c641c;
-      --ok: #286b48;
+      --paper: #f3ecdc;
+      --ink: #1f1912;
+      --muted: #766b5b;
+      --draw: #493d2d;
+      --line: #baad96;
+      --paper-deep: #e7dcc8;
+      --danger: #7b4038;
+      --warn: #755a28;
+      --ok: #3f5e45;
       font-family: Georgia, "Times New Roman", serif;
       background: var(--paper);
       color: var(--ink);
@@ -23,7 +23,12 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: var(--paper);
+      background:
+        radial-gradient(circle at 18% 12%, rgba(76, 58, 35, .055) 0 1px, transparent 1.2px),
+        radial-gradient(circle at 78% 64%, rgba(76, 58, 35, .04) 0 1px, transparent 1.2px),
+        linear-gradient(90deg, rgba(255, 252, 242, .42), transparent 45%, rgba(90, 70, 44, .04)),
+        var(--paper);
+      background-size: 23px 29px, 31px 37px, auto, auto;
     }
     main { max-width: 1200px; margin: 0 auto; padding: 42px 34px 70px; }
     .mono, .fig, button, textarea, pre, .chip, .sev {
@@ -56,7 +61,7 @@
       line-height: 1.35;
     }
     .brandline {
-      color: var(--blue);
+      color: var(--draw);
       font-size: 15px;
       font-weight: 800;
       letter-spacing: .08em;
@@ -91,9 +96,9 @@
       margin: 14px 0 22px;
     }
     .chip {
-      border: 1px solid var(--blue);
-      color: var(--blue);
-      background: rgba(34, 92, 255, .06);
+      border: 1px solid var(--draw);
+      color: var(--draw);
+      background: rgba(77, 64, 48, .06);
       padding: 5px 8px;
       font-size: 12px;
       font-weight: 800;
@@ -127,8 +132,8 @@
       position: relative;
       border: 1px dotted var(--line);
       background:
-        linear-gradient(90deg, rgba(34, 92, 255, .055) 1px, transparent 1px),
-        linear-gradient(rgba(34, 92, 255, .055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(73, 61, 45, .09) 1px, transparent 1px),
+        linear-gradient(rgba(73, 61, 45, .09) 1px, transparent 1px),
         rgba(255, 255, 255, .28);
       background-size: 8px 8px;
       padding: 18px;
@@ -138,6 +143,13 @@
       color: var(--muted);
       font-size: 11px;
       margin-bottom: 8px;
+    }
+    .equation {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+      font-style: italic;
+      text-align: right;
     }
     svg { display: block; width: 100%; height: auto; }
     pre {
@@ -152,7 +164,7 @@
     }
     .add { color: var(--ok); }
     .del { color: var(--danger); }
-    .note { color: var(--blue); }
+    .note { color: var(--draw); }
     textarea {
       width: 100%;
       min-height: 142px;
@@ -166,14 +178,14 @@
     }
     button {
       min-height: 38px;
-      border: 1px solid var(--blue);
+      border: 1px solid var(--draw);
       background: transparent;
-      color: var(--blue);
+      color: var(--draw);
       padding: 8px 12px;
       font-weight: 800;
       cursor: pointer;
     }
-    button:hover { background: var(--blue); color: #fff; }
+    button:hover { background: var(--draw); color: var(--paper); }
     @media (max-width: 860px) {
       main { padding: 20px 16px 32px; }
       header, .layout, .risk { grid-template-columns: 1fr; }
@@ -223,7 +235,7 @@
         <div class="figure">
           <div class="fig">FIG_006 [ CHAT MARKER TO ARTIFACT CARD ]</div>
           <svg viewBox="0 0 720 210" role="img" aria-label="Chat artifact reference flow">
-            <g fill="none" stroke="#225cff" stroke-width="2">
+            <g fill="none" stroke="#493d2d" stroke-width="2">
               <rect x="38" y="44" width="190" height="92"></rect>
               <rect x="492" y="44" width="190" height="92"></rect>
               <path d="M228 90 H492"></path>
@@ -233,13 +245,14 @@
               <line x1="526" y1="74" x2="650" y2="74"></line>
               <line x1="526" y1="98" x2="626" y2="98"></line>
             </g>
-            <g fill="#225cff" font-family="ui-monospace, monospace" font-size="15">
+            <g fill="#493d2d" font-family="ui-monospace, monospace" font-size="15">
               <text x="56" y="166">IN: visual-artifact marker</text>
               <text x="496" y="166">OUT: rich artifact card</text>
               <text x="290" y="82">parse</text>
               <text x="290" y="108">strip raw line</text>
             </g>
           </svg>
+          <p class="equation">card = render(reference) while message = message - marker</p>
         </div>
 
         <h2>Annotated diff focus</h2>
