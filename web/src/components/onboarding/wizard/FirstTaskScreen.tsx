@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowIcon } from "./components";
 
 interface FirstTaskScreenProps {
-  taskText: string;
+  taskText?: string;
   onWatchTask: () => void;
   onSkipToOffice: () => void;
 }
@@ -12,11 +12,12 @@ interface FirstTaskScreenProps {
  * Primary CTA routes to the live task view; secondary drops into the office.
  */
 export function FirstTaskScreen({
-  taskText,
+  taskText = "",
   onWatchTask,
   onSkipToOffice,
 }: FirstTaskScreenProps) {
   const [acted, setActed] = useState(false);
+  const trimmed = taskText.trim();
 
   return (
     <div className="wizard-step" data-testid="first-task-screen">
@@ -25,41 +26,57 @@ export function FirstTaskScreen({
           Office is open
         </h1>
         <p className="wizard-subhead">
-          Your team is live. Your first task is queued.
+          {trimmed
+            ? "Your team is live. Your first task is queued."
+            : "Your team is live. Give them a task from the general channel."}
         </p>
       </div>
 
-      <div
-        className="wizard-panel"
-        style={{ borderLeft: "3px solid var(--accent)" }}
-        data-testid="first-task-preview"
-      >
-        <p
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--text-secondary)",
-            marginBottom: 6,
-          }}
+      {trimmed ? (
+        <div
+          className="wizard-panel"
+          style={{ borderLeft: "3px solid var(--accent)" }}
+          data-testid="first-task-preview"
         >
-          First task
-        </p>
-        <p
-          style={{
-            fontSize: 14,
-            color: "var(--text)",
-            margin: 0,
-            lineHeight: 1.5,
-            display: "-webkit-box",
-            WebkitLineClamp: 3,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-            wordBreak: "break-word",
-          }}
+          <p
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--text-secondary)",
+              marginBottom: 6,
+            }}
+          >
+            First task
+          </p>
+          <p
+            style={{
+              fontSize: 14,
+              color: "var(--text)",
+              margin: 0,
+              lineHeight: 1.5,
+              display: "-webkit-box",
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+              wordBreak: "break-word",
+            }}
+          >
+            {trimmed}
+          </p>
+        </div>
+      ) : (
+        <div
+          className="wizard-panel"
+          data-testid="first-task-empty"
+          style={{ textAlign: "center", padding: "20px 0" }}
         >
-          {taskText}
-        </p>
-      </div>
+          <p style={{ fontSize: 14, color: "var(--text-secondary)", margin: 0 }}>
+            No task queued yet. Head to{" "}
+            <strong style={{ color: "var(--text)" }}>#general</strong> and type
+            your first task — agents pick it up immediately.
+          </p>
+        </div>
+      )}
 
       <div className="wizard-panel" style={{ gap: 8, display: "flex", flexDirection: "column" }}>
         <p
@@ -69,8 +86,9 @@ export function FirstTaskScreen({
             margin: 0,
           }}
         >
-          An agent will pick this up in seconds. Watch the run live, or explore
-          your office and check back.
+          {trimmed
+            ? "An agent will pick this up in seconds. Watch the run live, or explore your office and check back."
+            : "Explore your office, check the wiki, or start chatting with your team."}
         </p>
       </div>
 
