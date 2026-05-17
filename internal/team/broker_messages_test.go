@@ -113,6 +113,22 @@ func TestPostMessageRedactsSecretsBeforeStorageAndReads(t *testing.T) {
 	}
 }
 
+func TestPostMessageAllowsRichArtifactReferenceMarkers(t *testing.T) {
+	b := newTestBroker(t)
+	content := "I made the visual review.\n\nvisual-artifact:ra_8e8ac69a85291409"
+
+	posted, err := b.PostMessage("ceo", "general", content, nil, "")
+	if err != nil {
+		t.Fatalf("PostMessage: %v", err)
+	}
+	if posted.Redacted {
+		t.Fatalf("artifact marker was redacted: %+v", posted)
+	}
+	if posted.Content != content {
+		t.Fatalf("artifact marker changed:\nwant %q\ngot  %q", content, posted.Content)
+	}
+}
+
 func TestFormatChannelViewRedactsSecrets(t *testing.T) {
 	secret := "sk-" + strings.Repeat("B", 24)
 	got := FormatChannelView([]channelMessage{{
