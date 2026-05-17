@@ -19,9 +19,10 @@ export function normalizeStatus(raw: string): string {
  * Returns the display state and label for an active agent.
  * Only call on members that have already passed `isAgentActive`.
  */
-export function classifyMember(
-  member: OfficeMember,
-): { state: "shipping" | "plotting"; label: string } {
+export function classifyMember(member: OfficeMember): {
+  state: "shipping" | "plotting";
+  label: string;
+} {
   if (member.status === "plotting") {
     return { state: "plotting", label: "Plotting" };
   }

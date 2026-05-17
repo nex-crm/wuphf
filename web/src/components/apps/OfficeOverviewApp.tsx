@@ -15,7 +15,11 @@ import {
 } from "../../api/client";
 import { getOfficeTasks, type Task } from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
-import { isAgentActive, normalizeStatus, taskMeta } from "../../lib/officeStatus";
+import {
+  isAgentActive,
+  normalizeStatus,
+  taskMeta,
+} from "../../lib/officeStatus";
 import { router } from "../../lib/router";
 import { ActiveTasksPanel } from "./shared/ActiveTasksPanel";
 import { AgentPulsePanel } from "./shared/AgentPulsePanel";

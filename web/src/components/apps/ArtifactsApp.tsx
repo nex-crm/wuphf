@@ -68,7 +68,6 @@ interface SchedulerJobRaw {
   due_at?: string;
 }
 
-
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function ArtifactsApp() {
   const tasks = useQuery({

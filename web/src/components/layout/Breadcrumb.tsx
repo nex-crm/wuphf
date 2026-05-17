@@ -21,10 +21,7 @@ export function Breadcrumb({ items }: BreadcrumbProps) {
   if (items.length === 0) return null;
 
   return (
-    <nav
-      className="breadcrumb"
-      aria-label="Object breadcrumb"
-    >
+    <nav className="breadcrumb" aria-label="Object breadcrumb">
       {items.map((item, idx) => {
         const isLast = idx === items.length - 1;
         return (

@@ -35,7 +35,12 @@ export function AgentPulsePanel({ agents, limit = 10 }: AgentPulsePanelProps) {
           <div
             key={member.slug}
             className="app-card"
-            style={{ marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}
+            style={{
+              marginBottom: 6,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
           >
             <span className={`status-dot ${state}`} />
             <div style={{ flex: 1, minWidth: 0 }}>

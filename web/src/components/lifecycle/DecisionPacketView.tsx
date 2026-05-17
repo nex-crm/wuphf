@@ -430,8 +430,8 @@ function DiscussionSection({ feedback }: DiscussionSectionProps) {
       </h3>
       {feedback.length === 0 ? (
         <p className="packet-discussion-empty">
-          No comments yet. Leave one in the sidebar, request changes with
-          inline feedback, or wait for the reviewer to post.
+          No comments yet. Leave one in the sidebar, request changes with inline
+          feedback, or wait for the reviewer to post.
         </p>
       ) : (
         <ol className="packet-discussion-thread">

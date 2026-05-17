@@ -22,10 +22,7 @@ import {
   updateReviewState,
 } from "../../api/notebook";
 import type { InboxItem, InboxItemKind } from "../../lib/types/inbox";
-import {
-  SEV_ORDER,
-  SEVERITY_TOKENS,
-} from "../../lib/types/lifecycle";
+import { SEV_ORDER, SEVERITY_TOKENS } from "../../lib/types/lifecycle";
 import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 import { RequestItem } from "./RequestItem";
 

@@ -33,7 +33,9 @@ export function RecentObjectsPanel() {
             title={item.label}
           >
             <RecentObjectIcon kind={item.ref.kind} />
-            <span className="recent-objects-label">{humanLabel(item.label)}</span>
+            <span className="recent-objects-label">
+              {humanLabel(item.label)}
+            </span>
           </a>
         ))}
       </div>

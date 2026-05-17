@@ -1,6 +1,11 @@
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-import { type Theme, THEMES } from "../../lib/themes";
+import { THEMES, type Theme } from "../../lib/themes";
 import { useAppStore } from "../../stores/app";
 
 interface ThemeSwitcherProps {

@@ -5,8 +5,15 @@
  * Phase 5 PR 2 — app navigation refresh.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import { Breadcrumb } from "./Breadcrumb";
 
 afterEach(cleanup);
@@ -57,9 +64,7 @@ describe("Breadcrumb", () => {
 
   it("copy-link button is present on the leaf segment", () => {
     render(
-      <Breadcrumb
-        items={[{ label: "Agent: gaia", href: "#/dm/gaia" }]}
-      />,
+      <Breadcrumb items={[{ label: "Agent: gaia", href: "#/dm/gaia" }]} />,
     );
     const copyBtn = screen.getByRole("button", { name: /copy deep link/i });
     expect(copyBtn).toBeInTheDocument();
@@ -85,7 +90,9 @@ describe("Breadcrumb", () => {
 
   it("renders accessibly with nav landmark and aria-label", () => {
     render(<Breadcrumb items={[{ label: "Tasks", href: "#/tasks" }]} />);
-    expect(screen.getByRole("navigation", { name: /breadcrumb/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: /breadcrumb/i }),
+    ).toBeInTheDocument();
   });
 
   it("copy button writes deep link and shows copied state", async () => {
@@ -95,11 +102,15 @@ describe("Breadcrumb", () => {
       configurable: true,
     });
 
-    render(<Breadcrumb items={[{ label: "Agent: gaia", href: "#/dm/gaia" }]} />);
+    render(
+      <Breadcrumb items={[{ label: "Agent: gaia", href: "#/dm/gaia" }]} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /copy deep link/i }));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /link copied/i })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("button", { name: /link copied/i }),
+      ).toBeInTheDocument(),
     );
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText.mock.calls[0][0]).toContain("#/dm/gaia");
