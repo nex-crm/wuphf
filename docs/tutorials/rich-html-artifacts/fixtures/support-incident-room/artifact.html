@@ -10,7 +10,15 @@
       --paper: #f3ecdc;
       --ink: #1f1912;
       --muted: #766b5b;
-      --draw: #493d2d;
+      --ms-cobalt-950: oklch(21% .034 264.665);
+      --ms-cobalt-700: oklch(48.8% .243 264.376);
+      --ms-cobalt-600: oklch(50.58% .2886 264.84);
+      --ms-cobalt-500: oklch(63.79% .1899 269.89);
+      --ms-cobalt-400: oklch(76.12% .1218 272.4);
+      --ms-cobalt-300: oklch(83.76% .0774 273.32);
+      --ms-cobalt-100: oklch(94.22% .0275 274.66);
+      --ms-cobalt-50: oklch(97.05% .0054 274.97);
+      --draw: var(--ms-cobalt-600);
       --line: #baad96;
       --paper-deep: #e7dcc8;
       font-family: Georgia, "Times New Roman", serif;
@@ -115,7 +123,7 @@
     button[aria-selected="true"], #copy {
       border-color: var(--draw);
       color: var(--draw);
-      background: rgba(77, 64, 48, .08);
+      background: oklch(94.22% .0275 274.66);
     }
     section {
       border-top: 1px solid var(--ink);
@@ -145,9 +153,9 @@
       position: relative;
       border: 1px dotted var(--line);
       background:
-        linear-gradient(90deg, rgba(73, 61, 45, .09) 1px, transparent 1px),
-        linear-gradient(rgba(73, 61, 45, .09) 1px, transparent 1px),
-        rgba(255, 255, 255, .28);
+        linear-gradient(90deg, oklch(50.58% .2886 264.84 / .08) 1px, transparent 1px),
+        linear-gradient(oklch(50.58% .2886 264.84 / .08) 1px, transparent 1px),
+        var(--ms-cobalt-50);
       background-size: 8px 8px;
       padding: 18px;
       min-height: 180px;
@@ -244,7 +252,7 @@
           <div class="figure">
             <div class="fig">FIG_004 [ IMPACT BY SEGMENT ]</div>
             <svg viewBox="0 0 720 170" role="img" aria-label="Impact by segment">
-              <g fill="none" stroke="#493d2d" stroke-width="2">
+              <g fill="none" stroke="oklch(50.58% .2886 264.84)" stroke-width="2">
                 <rect x="38" y="32" width="228" height="34"></rect>
                 <rect x="38" y="84" width="164" height="34"></rect>
                 <rect x="38" y="132" width="66" height="18"></rect>
@@ -252,7 +260,7 @@
                 <line x1="202" y1="101" x2="410" y2="101"></line>
                 <line x1="104" y1="141" x2="410" y2="141"></line>
               </g>
-              <g fill="#493d2d" font-family="ui-monospace, monospace" font-size="15">
+              <g fill="oklch(48.8% .243 264.376)" font-family="ui-monospace, monospace" font-size="15">
                 <text x="428" y="54">Enterprise: 7 affected</text>
                 <text x="428" y="106">Growth: 5 affected</text>
                 <text x="428" y="146">Internal: 2 follow-ups</text>

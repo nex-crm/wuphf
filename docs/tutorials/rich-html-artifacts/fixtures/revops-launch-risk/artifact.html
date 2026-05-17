@@ -11,8 +11,16 @@
       --paper-deep: #e7dcc8;
       --ink: #1f1912;
       --muted: #766b5b;
-      --draw: #493d2d;
-      --draw-soft: #ded2bd;
+      --ms-cobalt-950: oklch(21% .034 264.665);
+      --ms-cobalt-700: oklch(48.8% .243 264.376);
+      --ms-cobalt-600: oklch(50.58% .2886 264.84);
+      --ms-cobalt-500: oklch(63.79% .1899 269.89);
+      --ms-cobalt-400: oklch(76.12% .1218 272.4);
+      --ms-cobalt-300: oklch(83.76% .0774 273.32);
+      --ms-cobalt-100: oklch(94.22% .0275 274.66);
+      --ms-cobalt-50: oklch(97.05% .0054 274.97);
+      --draw: var(--ms-cobalt-600);
+      --draw-soft: var(--ms-cobalt-100);
       --line: #baad96;
       --danger: #7b4038;
       --warn: #755a28;
@@ -130,9 +138,9 @@
       min-height: 250px;
       border: 1px dotted var(--line);
       background:
-        linear-gradient(90deg, rgba(73, 61, 45, .09) 1px, transparent 1px),
-        linear-gradient(rgba(73, 61, 45, .09) 1px, transparent 1px),
-        rgba(255, 255, 255, .28);
+        linear-gradient(90deg, oklch(50.58% .2886 264.84 / .08) 1px, transparent 1px),
+        linear-gradient(oklch(50.58% .2886 264.84 / .08) 1px, transparent 1px),
+        var(--ms-cobalt-50);
       background-size: 8px 8px;
     }
     .fig {
@@ -200,7 +208,7 @@
       display: grid;
       place-items: center;
       background:
-        conic-gradient(var(--draw) var(--score, 56%), rgba(73, 61, 45, .16) 0);
+        conic-gradient(var(--draw) var(--score, 56%), var(--ms-cobalt-100) 0);
       color: var(--draw);
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 32px;
@@ -290,7 +298,7 @@
         <div class="figure">
           <div class="fig">FIG_002 [ OWNER LOAD MAP ]</div>
           <svg viewBox="0 0 720 260" role="img" aria-label="Owner load map">
-            <g fill="none" stroke="#493d2d" stroke-width="2">
+            <g fill="none" stroke="oklch(50.58% .2886 264.84)" stroke-width="2">
               <rect x="78" y="52" width="155" height="84"></rect>
               <rect x="283" y="82" width="155" height="84"></rect>
               <rect x="488" y="112" width="155" height="84"></rect>
@@ -300,7 +308,7 @@
               <line x1="360" y1="58" x2="360" y2="82"></line>
               <line x1="565" y1="88" x2="565" y2="112"></line>
             </g>
-            <g fill="#493d2d" font-family="ui-monospace, monospace" font-size="16">
+            <g fill="oklch(48.8% .243 264.376)" font-family="ui-monospace, monospace" font-size="16">
               <text x="105" y="98">FINANCE</text>
               <text x="310" y="128">SUPPORT</text>
               <text x="525" y="158">SALES</text>

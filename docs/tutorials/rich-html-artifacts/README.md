@@ -27,8 +27,9 @@ The `scenarios.json` manifest separates intended deployment paths from local fix
 criteria for the notebook, wiki, and chat surfaces.
 
 `STYLE.md` defines the WUPHF paper-manual artifact style agents should use by
-default: warm paper, editorial text, graphite/sepia diagrams, faint figure
-construction grids, mono metadata labels, and sparse interactive controls.
+default: warm paper, editorial text, the exact Making Software cobalt family,
+faint figure construction grids, mono metadata labels, muted complementary
+state colors, and sparse interactive controls.
 
 ## Validation
 
