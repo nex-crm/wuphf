@@ -24,6 +24,7 @@ import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
 import { TypingIndicator } from "../components/messages/TypingIndicator";
+import { OnboardingDMRoute } from "../components/onboarding/OnboardingDMRoute";
 import { PrePickScreen } from "../components/onboarding/PrePickScreen";
 import { SplashScreen } from "../components/onboarding/SplashScreen";
 import { Wizard } from "../components/onboarding/Wizard";
@@ -609,6 +610,16 @@ export default function RootRoute() {
   const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
 
+  // Phase 2 state: after PrePickScreen, track whether the backend CEO phase
+  // machine is running. When true, Shell renders OnboardingDMRoute instead of
+  // RoutedBody. Flips false when the onboarding state returns onboarded=true.
+  //
+  // Flow: PrePickScreen → inCeoOnboarding=true → Shell+OnboardingDMRoute
+  //       → broker sets phase="bridge" done → onboarded=true → normal Shell
+  const [inCeoOnboarding, setInCeoOnboarding] = useState(false);
+  // onboarding phase from /onboarding/state — set once on boot if available.
+  const [bootPhase, setBootPhase] = useState<string | undefined>(undefined);
+
   useKeyboardShortcuts();
   useBrokerEvents(apiReady);
 
@@ -634,12 +645,18 @@ export default function RootRoute() {
       .then(() => {
         if (cancelled) return;
         setBrokerConnected(true);
-        return get<{ onboarded?: boolean }>("/onboarding/state");
+        return get<{ onboarded?: boolean; phase?: string }>(
+          "/onboarding/state",
+        );
       })
       .then((s) => {
         if (cancelled || !s) return;
         if (s.onboarded === true) {
           setOnboardingComplete(true);
+        } else if (onboardingV2 && typeof s.phase === "string" && s.phase) {
+          // Resume mid-onboarding: broker already started the CEO phase machine.
+          setBootPhase(s.phase);
+          setInCeoOnboarding(true);
         }
       })
       .catch(() => {
@@ -652,7 +669,7 @@ export default function RootRoute() {
     return () => {
       cancelled = true;
     };
-  }, [setBrokerConnected, setOnboardingComplete]);
+  }, [setBrokerConnected, setOnboardingComplete, onboardingV2]);
 
   let body: ReactNode;
   if (!apiReady) {
@@ -673,22 +690,38 @@ export default function RootRoute() {
   } else if (showSplash) {
     body = <SplashScreen onDone={() => setShowSplash(false)} />;
   } else if (!onboardingComplete) {
-    body = onboardingV2 ? (
-      <PrePickScreen
-        onComplete={() => {
-          // Phase 1 enters the office immediately. SplashScreen is the
-          // wizard's celebration screen; we skip it for the new flow so
-          // the user lands in the Shell without an intervening modal.
-          setOnboardingComplete(true);
-        }}
-      />
-    ) : (
-      <Wizard
-        onComplete={() => {
-          setShowSplash(true);
-        }}
-      />
-    );
+    if (onboardingV2 && (inCeoOnboarding || bootPhase)) {
+      // Phase 2: CEO conversation running — Shell with OnboardingDMRoute.
+      // Already-onboarded users (onboardingComplete === true) skip this
+      // entirely via the branch above.
+      body = (
+        <Shell>
+          <OnboardingDMRoute />
+          <Outlet />
+        </Shell>
+      );
+    } else if (onboardingV2) {
+      // Phase 1: provider picker. No phase set yet — user hasn't picked a
+      // runtime. After they pick, setInCeoOnboarding(true) to enter Phase 2.
+      body = (
+        <PrePickScreen
+          onComplete={() => {
+            // Phase 1 transitions directly to Phase 2: Shell+CEO DM.
+            // The broker sets state.Phase = "greet" after /onboarding/complete.
+            // We enter the in-CEO state here so the Shell renders immediately.
+            setInCeoOnboarding(true);
+          }}
+        />
+      );
+    } else {
+      body = (
+        <Wizard
+          onComplete={() => {
+            setShowSplash(true);
+          }}
+        />
+      );
+    }
   } else {
     body = (
       <Shell>

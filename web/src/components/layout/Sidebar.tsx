@@ -4,6 +4,7 @@ import { router } from "../../lib/router";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
+import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
 import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
@@ -155,6 +156,10 @@ export function Sidebar() {
           >
             <AppList />
           </div>
+
+          {/* Phase 2 onboarding preview overlay — shows staged channels/agents
+              forming as the user answers CEO questions. Hidden once onboarded. */}
+          <SidebarPreviewOverlay />
 
           <RecentObjectsPanel />
           <WorkspaceSummary />
