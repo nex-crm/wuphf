@@ -70,6 +70,19 @@ const (
 	// (non-terminal, owner revises). Dependent tasks STAY blocked
 	// because the work did not land.
 	LifecycleStateRejected LifecycleState = "rejected"
+
+	// LifecycleStateDrafting is the Phase 3 Issue-surface pre-Intake mode.
+	// Agents can post comments on a Drafting issue; they CANNOT dispatch
+	// tool calls or execution work. The broker dispatch gate is enforced
+	// in Phase 4 (broker_lifecycle_dispatch_test.go + isExecutableTeamTaskStatus).
+	// Phase 3 only registers the state value so it round-trips cleanly
+	// through JSON and the lifecycle index.
+	//
+	// PipelineStage choice: "draft" (matches the spec's `draft` phase name
+	// in the CEO state machine and is shorter/clearer than "drafting" at
+	// the data layer; the presentation layer uses "Drafting" for the UI
+	// label via STATE_PILL_TOKENS on the frontend).
+	LifecycleStateDrafting LifecycleState = "drafting"
 )
 
 // normalizeLegacyLifecycleStateName maps pre-Phase-1 lifecycle state
@@ -94,6 +107,7 @@ func normalizeLegacyLifecycleStateName(s LifecycleState) LifecycleState {
 // the forward map.
 func CanonicalLifecycleStates() []LifecycleState {
 	return []LifecycleState{
+		LifecycleStateDrafting,
 		LifecycleStateIntake,
 		LifecycleStateReady,
 		LifecycleStateRunning,
@@ -136,6 +150,13 @@ type lifecycleDerivedFieldsRow struct {
 // once the rest of the harness is in place. The lifecycle index and the
 // LifecycleState field still source-of-truth correctly.
 var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
+	// Drafting: pre-Intake mode where agents comment but cannot dispatch.
+	// PipelineStage="draft" matches the spec's draft phase name. Status="open"
+	// keeps the task visible in the open-tasks view; Blocked=false so it is
+	// not confused with a waiting-on-upstream state. Phase 4 will add a
+	// dispatch guard (isExecutableTeamTaskStatus) that refuses tool calls
+	// for tasks in this state.
+	LifecycleStateDrafting:          {PipelineStage: "draft", ReviewState: "pending_review", Status: "open", Blocked: false},
 	LifecycleStateIntake:            {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
 	LifecycleStateReady:             {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
 	LifecycleStateRunning:           {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
@@ -181,6 +202,7 @@ type lifecycleMigrationKey struct {
 // normalised values via deriveLifecycleStateFromLegacy.
 var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	// Canonical tuples first — direct inverse of lifecycleDerivedFields.
+	{PipelineStage: "draft", ReviewState: "pending_review", Status: "open", Blocked: false}:            LifecycleStateDrafting,
 	{PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false}:           LifecycleStateReady,
 	{PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false}: LifecycleStateRunning,
 	{PipelineStage: "review", ReviewState: "ready_for_review", Status: "in_progress", Blocked: false}:  LifecycleStateReview,
