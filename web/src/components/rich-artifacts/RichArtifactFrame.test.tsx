@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import RichArtifactFrame from "./RichArtifactFrame";
@@ -38,5 +38,60 @@ describe("<RichArtifactFrame>", () => {
     expect(srcdoc).toContain("Content-Security-Policy");
     expect(srcdoc).toContain("wuphf:rich-artifact:resize");
     expect(srcdoc).not.toContain("<body><!doctype html>");
+  });
+
+  it("accepts resize messages only from the matching iframe window", async () => {
+    render(<RichArtifactFrame title="Resizable" html="<h1>Plan</h1>" />);
+
+    const frame = screen.getByTitle("Resizable") as HTMLIFrameElement;
+    const srcdoc = frame.getAttribute("srcdoc") ?? "";
+    const frameId = srcdoc.match(/const id="([^"]+)"/)?.[1];
+
+    expect(frameId).toBeTruthy();
+    expect(frame.contentWindow).toBeTruthy();
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            type: "wuphf:rich-artifact:resize",
+            id: frameId,
+            height: 900,
+          },
+          source: null,
+        }),
+      );
+    });
+    expect(frame.style.height).toBe("");
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            type: "wuphf:rich-artifact:resize",
+            id: frameId,
+            height: 345,
+          },
+          source: frame.contentWindow,
+        }),
+      );
+    });
+
+    await waitFor(() => expect(frame.style.height).toBe("345px"));
+  });
+
+  it("does not inject resize wiring when auto-resize is disabled", () => {
+    render(
+      <RichArtifactFrame
+        title="Modal artifact"
+        html="<h1>Plan</h1>"
+        variant="modal"
+      />,
+    );
+
+    expect(screen.getByTitle("Modal artifact")).not.toHaveAttribute(
+      "srcdoc",
+      expect.stringContaining("wuphf:rich-artifact:resize"),
+    );
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import "../../styles/rich-artifacts.css";
 
@@ -19,9 +19,9 @@ const SANDBOX_CSP = [
   "base-uri 'none'",
 ].join("; ");
 
-function withSandboxCsp(html: string, frameId: string): string {
+function withSandboxCsp(html: string, frameId?: string): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">`;
-  const resizeScript = buildResizeScript(frameId);
+  const resizeScript = frameId ? buildResizeScript(frameId) : "";
   if (/<html[\s>]/i.test(html)) {
     return injectIntoDocument(html, meta, resizeScript);
   }
@@ -85,9 +85,13 @@ export default function RichArtifactFrame({
   maxHeight = 12000,
   autoResize,
 }: RichArtifactFrameProps) {
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
   const frameId = useMemo(() => frameKey(title, html), [title, html]);
-  const srcDoc = useMemo(() => withSandboxCsp(html, frameId), [frameId, html]);
   const shouldAutoResize = autoResize ?? variant === "inline";
+  const srcDoc = useMemo(
+    () => withSandboxCsp(html, shouldAutoResize ? frameId : undefined),
+    [frameId, html, shouldAutoResize],
+  );
   const [heightState, setHeightState] = useState<{
     frameId: string;
     height: number;
@@ -97,6 +101,7 @@ export default function RichArtifactFrame({
   useEffect(() => {
     if (!shouldAutoResize) return undefined;
     function handleMessage(event: MessageEvent) {
+      if (event.source !== frameRef.current?.contentWindow) return;
       if (!isResizeMessage(event.data) || event.data.id !== frameId) return;
       const nextHeight = Math.min(
         Math.max(Math.ceil(event.data.height), minHeight),
@@ -110,6 +115,7 @@ export default function RichArtifactFrame({
 
   return (
     <iframe
+      ref={frameRef}
       key={frameId}
       className={`rich-artifact-frame rich-artifact-frame-${variant}`}
       data-testid="rich-artifact-frame"
