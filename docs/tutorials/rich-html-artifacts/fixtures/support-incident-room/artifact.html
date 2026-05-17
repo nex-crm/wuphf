@@ -18,6 +18,7 @@
       --ms-cobalt-300: oklch(83.76% .0774 273.32);
       --ms-cobalt-100: oklch(94.22% .0275 274.66);
       --ms-cobalt-50: oklch(97.05% .0054 274.97);
+      --ms-cobalt-600-faint: oklch(50.58% .2886 264.84 / .08);
       --draw: var(--ms-cobalt-600);
       --line: #baad96;
       --paper-deep: #e7dcc8;
@@ -123,7 +124,7 @@
     button[aria-selected="true"], #copy {
       border-color: var(--draw);
       color: var(--draw);
-      background: oklch(94.22% .0275 274.66);
+      background: var(--ms-cobalt-100);
     }
     section {
       border-top: 1px solid var(--ink);
@@ -153,8 +154,8 @@
       position: relative;
       border: 1px dotted var(--line);
       background:
-        linear-gradient(90deg, oklch(50.58% .2886 264.84 / .08) 1px, transparent 1px),
-        linear-gradient(oklch(50.58% .2886 264.84 / .08) 1px, transparent 1px),
+        linear-gradient(90deg, var(--ms-cobalt-600-faint) 1px, transparent 1px),
+        linear-gradient(var(--ms-cobalt-600-faint) 1px, transparent 1px),
         var(--ms-cobalt-50);
       background-size: 8px 8px;
       padding: 18px;
@@ -173,6 +174,12 @@
       text-align: right;
     }
     svg { display: block; width: 100%; height: auto; }
+    .impact-strokes { fill: none; stroke: var(--ms-cobalt-600); stroke-width: 2; }
+    .impact-labels {
+      fill: var(--ms-cobalt-700);
+      font-family: ui-monospace, monospace;
+      font-size: 15px;
+    }
     .timeline {
       display: grid;
       grid-template-columns: 84px 1fr;
@@ -252,7 +259,7 @@
           <div class="figure">
             <div class="fig">FIG_004 [ IMPACT BY SEGMENT ]</div>
             <svg viewBox="0 0 720 170" role="img" aria-label="Impact by segment">
-              <g fill="none" stroke="oklch(50.58% .2886 264.84)" stroke-width="2">
+              <g class="impact-strokes">
                 <rect x="38" y="32" width="228" height="34"></rect>
                 <rect x="38" y="84" width="164" height="34"></rect>
                 <rect x="38" y="132" width="66" height="18"></rect>
@@ -260,7 +267,7 @@
                 <line x1="202" y1="101" x2="410" y2="101"></line>
                 <line x1="104" y1="141" x2="410" y2="141"></line>
               </g>
-              <g fill="oklch(48.8% .243 264.376)" font-family="ui-monospace, monospace" font-size="15">
+              <g class="impact-labels">
                 <text x="428" y="54">Enterprise: 7 affected</text>
                 <text x="428" y="106">Growth: 5 affected</text>
                 <text x="428" y="146">Internal: 2 follow-ups</text>
