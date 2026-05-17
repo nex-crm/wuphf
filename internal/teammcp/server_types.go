@@ -240,7 +240,7 @@ type TeamRuntimeStateArgs struct {
 }
 
 type TeamTaskArgs struct {
-	Action        string   `json:"action" jsonschema:"One of: create, claim, assign, submit_for_review, comment, request_changes, reject, complete, block, resume, release. submit_for_review hands an in-progress task to its reviewer. comment leaves a PR-style note with no state change. request_changes (reviewer only) bounces the task back to its owner for revision — non-terminal. reject (reviewer only) marks the work as permanently un-landable; downstream dependents stay blocked. complete is for tasks that do not need structured review."`
+	Action        string   `json:"action" jsonschema:"One of: create, claim, assign, submit_for_review, comment, request_changes, approve, reject, complete, block, resume, release. submit_for_review hands an in-progress task to its reviewer. comment leaves a PR-style note with no state change. request_changes (reviewer only) bounces the task back to its owner for revision — non-terminal. approve marks reviewed work as canonical and unblocks dependents. reject (reviewer only) marks the work as permanently un-landable; downstream dependents stay blocked. complete is for tasks that do not need structured review."`
 	Channel       string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	ID            string   `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
 	Title         string   `json:"title,omitempty" jsonschema:"Task title when creating a task"`

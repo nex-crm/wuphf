@@ -108,12 +108,15 @@ export function DecisionPacketRoute({
   async function submitReject(body: string) {
     try {
       await postTaskReject(taskId, body);
-      // Reject is terminal — refresh both the packet AND the inbox so
-      // the row reflects the new state immediately.
+      // Reject is terminal — refresh the packet, both inbox query keys
+      // (the legacy ["lifecycle","inbox"] and the Phase-2
+      // ["lifecycle","inbox-items"]) plus the badge count so the row
+      // reflects the rejected state immediately.
       void postInboxCursor();
       void queryClient.invalidateQueries({
         queryKey: ["lifecycle", "task", taskId],
       });
+      void queryClient.invalidateQueries({ queryKey: ["lifecycle", "inbox"] });
       void queryClient.invalidateQueries({
         queryKey: ["lifecycle", "inbox-items"],
       });

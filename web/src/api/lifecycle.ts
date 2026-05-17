@@ -285,6 +285,12 @@ export async function postTaskReject(
   comment: string,
 ): Promise<{ taskId: string; action: string; status: string }> {
   const trimmed = comment.trim();
+  if (!trimmed) {
+    // Reject must carry a reason — the broker stores it as feedback and
+    // the channel broadcast quotes it. An empty reason violates the
+    // "reject requires a reason" contract from PacketActionSidebar.
+    throw new Error("reject reason required");
+  }
   if (USE_MOCKS) {
     return Promise.resolve({ taskId, action: "reject", status: "recorded-mock" });
   }

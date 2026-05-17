@@ -3053,5 +3053,5 @@ html[data-theme="noir-gold"] {
   line-height: 1.5;
   color: var(--text-secondary);
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
 }

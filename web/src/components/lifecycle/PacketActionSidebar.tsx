@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { DecisionPacket } from "../../lib/types/lifecycle";
 
@@ -63,20 +63,52 @@ export function PacketActionSidebar({
     callback(trimmedComment ? trimmedComment : undefined);
     setComment("");
   };
-  const submitComment = () => {
+  // submitComment / submitReject only clear the textarea AFTER the
+  // async handler settles. If the network call fails, the reviewer's
+  // drafted text stays in the box so they can retry without retyping
+  // (CodeRabbit catch on async-clear race).
+  const submitComment = useCallback(() => {
     if (!onComment || trimmedComment.length === 0) return;
-    void onComment(trimmedComment);
-    setComment("");
-  };
-  const submitReject = () => {
-    if (!onReject) return;
-    // Reject without a reason is rude — require the textarea to be
-    // non-empty before firing the terminal action.
-    if (trimmedComment.length === 0) return;
-    void onReject(trimmedComment);
-    setComment("");
-  };
+    const body = trimmedComment;
+    void Promise.resolve(onComment(body)).then(() => setComment(""));
+  }, [onComment, trimmedComment]);
+  const submitReject = useCallback(() => {
+    if (!onReject || trimmedComment.length === 0) return;
+    const body = trimmedComment;
+    void Promise.resolve(onReject(body)).then(() => setComment(""));
+  }, [onReject, trimmedComment]);
   const lockedTooltip = isDecisionLocked ? "Wait for review state" : undefined;
+
+  // Keyboard shortcuts for the actions this sidebar owns (Comment + Reject).
+  // Approve/Request changes/Block/Worktree shortcuts are registered by
+  // DecisionPacketView at the page level. Ignore key events that originate
+  // inside form controls so the comment textarea remains typeable.
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (isDecisionLocked) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+      }
+      if (e.key === "c" && onComment) {
+        e.preventDefault();
+        submitComment();
+      } else if (e.key === "x" && onReject) {
+        e.preventDefault();
+        submitReject();
+      }
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isDecisionLocked, onComment, onReject, submitComment, submitReject]);
   const runtime = packet.sessionReport?.metadata?.runtime;
   const toolCalls = packet.sessionReport?.metadata?.tool_calls;
   const ownerSummary = runtime

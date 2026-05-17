@@ -329,6 +329,7 @@ func TestPRLoop_CommentEndpointRequiresBody(t *testing.T) {
 	}
 	defer b.Stop()
 	b.mu.Lock()
+	b.channels = []teamChannel{{Slug: "general", Members: []string{"reviewer"}}}
 	b.tasks = []teamTask{{ID: "task-empty-1", Channel: "general", Title: "x"}}
 	b.mu.Unlock()
 

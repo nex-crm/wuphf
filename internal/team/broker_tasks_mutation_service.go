@@ -529,9 +529,9 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// Capture the submitted artifact (code, copy, plan) into
 			// the Decision Packet's feedback thread so reviewers see
 			// the exact submission inline in the unified Inbox.
-			body := strings.TrimSpace(body.Details)
-			if body != "" {
-				b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, "📤 Submitted for review:\n"+body)
+			artifact := strings.TrimSpace(body.Details)
+			if artifact != "" {
+				b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, "📤 Submitted for review:\n"+artifact)
 			}
 		}
 		if rejectTriggered {

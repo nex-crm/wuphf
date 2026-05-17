@@ -1072,6 +1072,10 @@ func (b *Broker) AppendPacketFeedbackLocked(taskID, author, body string) {
 		Author:     strings.TrimSpace(author),
 		Body:       body,
 	})
+	// Stamp lifecycle metadata so feedback-only writes keep
+	// LifecycleState + UpdatedAt fresh, matching what decision-recording
+	// writes do at their persist site (CodeRabbit catch).
+	b.stampLifecycleStateLocked(packet)
 	b.persistDecisionPacketLocked(taskID, *packet)
 }
 
