@@ -29,11 +29,32 @@ package team
 // (no scheduler is given a no-op closure).
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
 )
+
+// ErrIssueNotApproved is returned by every dispatch entry point when the
+// target task is not in an executable lifecycle state. Callers that surface
+// this to the user should display a human-readable "issue not approved for
+// dispatch" message. The gate is server-side and intentional — see spec
+// "## Eng review decisions → Architecture → Approval gate".
+var ErrIssueNotApproved = errors.New("issue not approved for dispatch")
+
+// isExecutableTeamTaskStatus reports whether a LifecycleState permits
+// dispatch of execution work (tool calls, code execution, file writes).
+// Only Running and Approved are executable; all other states — including
+// Drafting, Intake, Review, and ChangesRequested — must NOT trigger agent
+// execution turns.
+//
+// This is the single chokepoint: every dispatch entry point in the broker
+// must call isExecutableTeamTaskStatus before enqueuing work. Comments are
+// always allowed in any state; only execution is gated.
+func isExecutableTeamTaskStatus(s LifecycleState) bool {
+	return s == LifecycleStateRunning || s == LifecycleStateApproved
+}
 
 // lifecycleMigrationOnce ensures migrateLifecycleStatesLocked runs at most
 // once per broker process even if multiple startup hooks call into it.

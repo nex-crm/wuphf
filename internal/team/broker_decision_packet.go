@@ -827,9 +827,20 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 	// never observe the decided packet without its comment.
 	// Wrap the locked section in an inner function so we can defer the
 	// unlock and stay panic-safe across the Locked helpers below.
+	// wasApprovingFromDrafting is set inside the lock and used after unlock
+	// to decide whether to emit the execution lineup card. Declaring it here
+	// (outside the closure) avoids a variable-capture hazard.
+	var wasApprovingFromDrafting bool
 	if err := func() error {
 		b.mu.Lock()
 		defer b.mu.Unlock()
+		// Phase 4 approval gate: capture whether this approve is from a
+		// Drafting issue so we can emit the execution lineup card below.
+		if action == RecordDecisionApprove {
+			if task := b.findTaskByIDLocked(taskID); task != nil {
+				wasApprovingFromDrafting = task.LifecycleState == LifecycleStateDrafting
+			}
+		}
 		if _, err := b.transitionLifecycleLocked(taskID, target, reason); err != nil {
 			return fmt.Errorf("record decision: transition: %w", err)
 		}
@@ -873,6 +884,18 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 	// OnDecisionRecorded acquires b.mu itself; call it after Unlock
 	// to avoid a self-deadlock through the unblock cascade.
 	b.OnDecisionRecorded(taskID)
+	// Phase 4: after Approve & Start on a Drafting issue, emit the
+	// execution lineup card to the CEO DM channel. Runs post-unlock in a
+	// goroutine so the approve HTTP handler returns without waiting on
+	// the optional LLM call (scratch path agent inference).
+	if wasApprovingFromDrafting {
+		lineupCtx := b.wikiPromotionContext()
+		go func() {
+			b.mu.Lock()
+			b.emitExecutionLineupCardLocked(lineupCtx, taskID)
+			b.mu.Unlock()
+		}()
+	}
 	return nil
 }
 
