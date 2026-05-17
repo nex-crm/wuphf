@@ -7,52 +7,198 @@
   <style>
     :root {
       color-scheme: light;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f6f7fb;
-      color: #141b2d;
+      --paper: #f8f7f1;
+      --ink: #15130f;
+      --muted: #77736b;
+      --blue: #225cff;
+      --line: #cfcac0;
+      --paper-deep: #ebe8dd;
+      --danger: #9c382d;
+      --warn: #8c641c;
+      --ok: #286b48;
+      font-family: Georgia, "Times New Roman", serif;
+      background: var(--paper);
+      color: var(--ink);
     }
     * { box-sizing: border-box; }
-    body { margin: 0; }
-    main { max-width: 1120px; margin: 0 auto; padding: 28px; }
-    header { margin-bottom: 18px; }
-    h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
-    p { margin: 0; color: #5c6576; line-height: 1.5; }
-    .layout { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 16px; }
-    section { background: #ffffff; border: 1px solid #dfe4ed; border-radius: 8px; padding: 18px; }
-    h2 { margin: 0 0 14px; font-size: 18px; }
-    .summary { display: grid; gap: 10px; }
-    .chiprow { display: flex; flex-wrap: wrap; gap: 8px; }
-    .chip { border-radius: 999px; padding: 5px 10px; background: #eef5ff; color: #20549d; font-weight: 700; font-size: 13px; }
-    .risk { display: grid; grid-template-columns: 82px 1fr; gap: 10px; padding: 10px; border: 1px solid #e4e9f1; border-radius: 7px; margin-bottom: 8px; }
-    .sev { display: grid; place-items: center; border-radius: 6px; color: #ffffff; font-weight: 800; }
-    .sev.high { background: #a93f32; }
-    .sev.med { background: #9a6a1f; }
-    .sev.low { background: #2d7551; }
-    pre { margin: 0; overflow: auto; background: #101828; color: #ecf3ff; border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.5; }
-    .add { color: #88dfa5; }
-    .del { color: #ffac9f; }
-    .note { color: #9ec2ff; }
-    button { border: 1px solid #20549d; background: #2364bf; color: #ffffff; border-radius: 6px; min-height: 36px; padding: 8px 12px; font-weight: 700; cursor: pointer; }
-    textarea { width: 100%; min-height: 128px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; font: inherit; line-height: 1.5; margin-bottom: 10px; }
-    details { border: 1px solid #e1e7ef; border-radius: 7px; padding: 10px 12px; background: #fbfcfe; }
-    details + details { margin-top: 8px; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(34, 92, 255, .055) 1px, transparent 1px),
+        linear-gradient(rgba(34, 92, 255, .055) 1px, transparent 1px),
+        var(--paper);
+      background-size: 18px 18px;
+    }
+    main { max-width: 1160px; margin: 0 auto; padding: 30px 28px 44px; }
+    .mono, .fig, button, textarea, pre, .chip, .sev {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      letter-spacing: 0;
+    }
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 42px;
+      line-height: .96;
+      letter-spacing: 0;
+    }
+    .dek {
+      max-width: 720px;
+      margin-top: 12px;
+      font-size: 17px;
+      line-height: 1.55;
+    }
+    .stamp {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .44);
+      color: var(--muted);
+      padding: 12px;
+      font-size: 12px;
+      text-align: right;
+    }
+    .rule {
+      height: 10px;
+      border-top: 1px dotted var(--line);
+      border-bottom: 1px dotted var(--line);
+      margin-bottom: 26px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
+      gap: 28px;
+      align-items: start;
+    }
+    section {
+      border-top: 1px solid var(--ink);
+      padding-top: 15px;
+    }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 21px;
+      letter-spacing: 0;
+    }
+    p { margin: 0; line-height: 1.52; }
+    .chiprow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 14px 0 22px;
+    }
+    .chip {
+      border: 1px solid var(--blue);
+      color: var(--blue);
+      background: rgba(34, 92, 255, .06);
+      padding: 5px 8px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .risk {
+      display: grid;
+      grid-template-columns: 74px 1fr;
+      gap: 12px;
+      border-bottom: 1px dotted var(--line);
+      padding: 11px 0;
+    }
+    .risk:last-child { border-bottom: 0; }
+    .sev {
+      display: grid;
+      place-items: center;
+      min-height: 46px;
+      border: 1px solid currentColor;
+      font-weight: 800;
+    }
+    .sev.high { color: var(--danger); }
+    .sev.med { color: var(--warn); }
+    .sev.low { color: var(--ok); }
+    details {
+      border: 1px dotted var(--line);
+      background: rgba(255, 255, 255, .34);
+      padding: 11px 12px;
+      margin-top: 14px;
+    }
     summary { cursor: pointer; font-weight: 800; }
+    .figure {
+      position: relative;
+      border: 1px dotted var(--line);
+      background:
+        linear-gradient(90deg, rgba(34, 92, 255, .08) 1px, transparent 1px),
+        linear-gradient(rgba(34, 92, 255, .08) 1px, transparent 1px),
+        rgba(255, 255, 255, .28);
+      background-size: 14px 14px;
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+    .fig {
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+    svg { display: block; width: 100%; height: auto; }
+    pre {
+      margin: 0 0 18px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .42);
+      color: var(--ink);
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .add { color: var(--ok); }
+    .del { color: var(--danger); }
+    .note { color: var(--blue); }
+    textarea {
+      width: 100%;
+      min-height: 142px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .42);
+      color: var(--ink);
+      padding: 12px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+    button {
+      min-height: 38px;
+      border: 1px solid var(--blue);
+      background: transparent;
+      color: var(--blue);
+      padding: 8px 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    button:hover { background: var(--blue); color: #fff; }
     @media (max-width: 860px) {
-      main { padding: 18px; }
-      .layout { grid-template-columns: 1fr; }
-      .risk { grid-template-columns: 1fr; }
-      .sev { min-height: 34px; }
+      main { padding: 20px 16px 32px; }
+      header, .layout, .risk { grid-template-columns: 1fr; }
+      .stamp { text-align: left; }
+      h1 { font-size: 34px; }
     }
   </style>
 </head>
 <body>
   <main>
     <header>
-      <h1>Reviewer Brief</h1>
-      <p>Explain a technical change through the reviewer, field, and buyer-risk lenses in one pass.</p>
+      <div>
+        <div class="mono" style="color:#225cff">FIG_005 / REVIEW HANDOFF</div>
+        <h1>Reviewer Brief</h1>
+        <p class="dek">Explain a technical change through the reviewer, field, and buyer-risk lenses in one pass.</p>
+      </div>
+      <div class="stamp mono">
+        CHAT ARTIFACT<br>
+        REF: visual-artifact:ra_aaaaaaaaaaaaaaaa<br>
+        SURFACE: sales engineering
+      </div>
     </header>
+    <div class="rule" aria-hidden="true"></div>
+
     <div class="layout">
-      <section class="summary">
+      <section>
         <h2>Buyer outcome</h2>
         <p>This change makes artifact handoffs easier to inspect in chat, reducing the chance that a customer-facing reviewer misses the visual context behind a recommendation.</p>
         <div class="chiprow">
@@ -73,6 +219,28 @@
       </section>
 
       <section>
+        <div class="figure">
+          <div class="fig">FIG_006 [ CHAT MARKER TO ARTIFACT CARD ]</div>
+          <svg viewBox="0 0 720 210" role="img" aria-label="Chat artifact reference flow">
+            <g fill="none" stroke="#225cff" stroke-width="2">
+              <rect x="38" y="44" width="190" height="92"></rect>
+              <rect x="492" y="44" width="190" height="92"></rect>
+              <path d="M228 90 H492"></path>
+              <path d="M454 76 L492 90 L454 104"></path>
+              <line x1="72" y1="74" x2="194" y2="74"></line>
+              <line x1="72" y1="98" x2="182" y2="98"></line>
+              <line x1="526" y1="74" x2="650" y2="74"></line>
+              <line x1="526" y1="98" x2="626" y2="98"></line>
+            </g>
+            <g fill="#225cff" font-family="ui-monospace, monospace" font-size="15">
+              <text x="56" y="166">IN: visual-artifact marker</text>
+              <text x="496" y="166">OUT: rich artifact card</text>
+              <text x="290" y="82">parse</text>
+              <text x="290" y="108">strip raw line</text>
+            </g>
+          </svg>
+        </div>
+
         <h2>Annotated diff focus</h2>
         <pre><span class="note">web/src/components/messages/MessageBubble.tsx</span>
 <span class="del">- renderMarkdown(content)</span>

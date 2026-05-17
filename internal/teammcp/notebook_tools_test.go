@@ -73,7 +73,7 @@ func TestNotebookVisualArtifactToolsTeachHTMLGuidance(t *testing.T) {
 	if tool == nil {
 		t.Fatalf("notebook_visual_artifact_create was not registered; tools=%v", tools)
 	}
-	for _, want := range []string{"after notebook_write", "self-contained", "inline CSS/JS", "no network fetches", "interactive tuning surfaces", "visual-artifact:ra_0123456789abcdef"} {
+	for _, want := range []string{"after notebook_write", "self-contained", "inline CSS/JS", "no network fetches", "interactive tuning surfaces", "technical-manual artifact style", "FIG_001", "visual-artifact:ra_0123456789abcdef"} {
 		if !strings.Contains(tool.Description, want) {
 			t.Fatalf("description missing %q:\n%s", want, tool.Description)
 		}

@@ -7,46 +7,226 @@
   <style>
     :root {
       color-scheme: light;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f7f8fb;
-      color: #18202f;
+      --paper: #f8f7f1;
+      --paper-deep: #eeece4;
+      --ink: #161410;
+      --muted: #77736b;
+      --blue: #225cff;
+      --blue-soft: #dfe7ff;
+      --line: #cfcac0;
+      --danger: #9c382d;
+      --warn: #8c641c;
+      --ok: #286b48;
+      font-family: Georgia, "Times New Roman", serif;
+      background: var(--paper);
+      color: var(--ink);
     }
     * { box-sizing: border-box; }
-    body { margin: 0; background: #f7f8fb; }
-    main { max-width: 1120px; margin: 0 auto; padding: 28px; }
-    header { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: end; margin-bottom: 22px; }
-    h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
-    p { margin: 0; color: #566176; line-height: 1.5; }
-    .badge { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border-radius: 6px; background: #e6f2ef; color: #1d6b5a; font-weight: 700; font-size: 13px; }
-    .grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 16px; }
-    section { background: #ffffff; border: 1px solid #dfe5ef; border-radius: 8px; padding: 18px; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
-    h2 { margin: 0 0 14px; font-size: 17px; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th { text-align: left; color: #606b80; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #e6ebf2; padding: 8px; }
-    td { border-bottom: 1px solid #eef2f7; padding: 10px 8px; vertical-align: top; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(34, 92, 255, .06) 1px, transparent 1px),
+        linear-gradient(rgba(34, 92, 255, .06) 1px, transparent 1px),
+        var(--paper);
+      background-size: 18px 18px;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 30px 28px 42px;
+    }
+    .rule {
+      height: 10px;
+      margin: 18px 0 28px;
+      border-top: 1px dotted var(--line);
+      border-bottom: 1px dotted var(--line);
+    }
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 22px;
+      align-items: end;
+    }
+    h1 {
+      margin: 0;
+      font-size: 42px;
+      line-height: .95;
+      letter-spacing: 0;
+    }
+    .dek {
+      max-width: 650px;
+      margin-top: 12px;
+      color: var(--ink);
+      font-size: 17px;
+      line-height: 1.55;
+    }
+    .mono, .fig, th, button, label, .metric span, .badge, .stamp {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      letter-spacing: 0;
+    }
+    .stamp {
+      justify-self: end;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .55);
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+      min-width: 210px;
+    }
+    .badge { color: var(--blue); font-size: 12px; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, .95fr) minmax(320px, .8fr);
+      gap: 28px;
+      align-items: start;
+    }
+    section {
+      background: rgba(248, 247, 241, .88);
+      border-top: 1px solid var(--ink);
+      padding-top: 16px;
+    }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 20px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+    p { margin: 0; line-height: 1.52; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      background: rgba(255, 255, 255, .35);
+    }
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      border-bottom: 1px solid var(--ink);
+      padding: 8px 7px;
+    }
+    td {
+      border-bottom: 1px dotted var(--line);
+      padding: 10px 7px;
+      vertical-align: top;
+      line-height: 1.42;
+    }
     tr:last-child td { border-bottom: 0; }
-    .risk { font-weight: 700; }
-    .risk.high { color: #a33a2b; }
-    .risk.med { color: #9a640c; }
-    .risk.low { color: #26724e; }
-    .controls { display: grid; gap: 12px; }
-    .control { display: grid; gap: 6px; }
-    label { font-size: 13px; color: #48556a; }
-    input[type="range"] { width: 100%; accent-color: #2764d8; }
-    .score { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; margin: 16px 0; }
-    .dial { width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(#2764d8 var(--score, 56%), #e8edf5 0); color: #13213b; font-size: 26px; font-weight: 800; }
-    .decision { border-left: 4px solid #2764d8; padding: 10px 12px; background: #f2f6ff; border-radius: 6px; }
-    .owner-load { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
-    .owner { min-height: 86px; border: 1px solid #dfe5ef; border-radius: 7px; padding: 10px; background: #fbfcfe; }
+    .risk { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-weight: 800; }
+    .risk.high { color: var(--danger); }
+    .risk.med { color: var(--warn); }
+    .risk.low { color: var(--ok); }
+    .figure {
+      position: relative;
+      margin: 18px 0;
+      padding: 18px;
+      min-height: 250px;
+      border: 1px dotted var(--line);
+      background:
+        linear-gradient(90deg, rgba(34, 92, 255, .08) 1px, transparent 1px),
+        linear-gradient(rgba(34, 92, 255, .08) 1px, transparent 1px),
+        rgba(255, 255, 255, .28);
+      background-size: 14px 14px;
+    }
+    .fig {
+      color: var(--muted);
+      font-size: 11px;
+      writing-mode: vertical-rl;
+      position: absolute;
+      top: 16px;
+      left: 8px;
+    }
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    .owner-load {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .owner {
+      min-height: 108px;
+      border: 1px dotted var(--line);
+      background: rgba(255, 255, 255, .34);
+      padding: 11px;
+    }
     .owner strong { display: block; margin-bottom: 8px; }
-    .bar { height: 8px; border-radius: 999px; background: #e9edf4; overflow: hidden; }
-    .bar span { display: block; height: 100%; background: #2764d8; }
-    button { border: 1px solid #1f56b3; background: #2764d8; color: white; border-radius: 6px; min-height: 36px; padding: 8px 12px; font-weight: 700; cursor: pointer; }
-    pre { white-space: pre-wrap; background: #101828; color: #eef4ff; border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.45; overflow: auto; }
-    @media (max-width: 820px) {
-      main { padding: 18px; }
-      header, .grid { grid-template-columns: 1fr; }
+    .bar {
+      height: 9px;
+      border: 1px solid var(--blue);
+      background: transparent;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .bar span { display: block; height: 100%; background: var(--blue); }
+    .controls { display: grid; gap: 14px; }
+    .control { display: grid; gap: 7px; }
+    label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--blue);
+    }
+    .score {
+      display: grid;
+      grid-template-columns: 122px 1fr;
+      gap: 16px;
+      align-items: center;
+      margin: 20px 0;
+    }
+    .dial {
+      width: 112px;
+      height: 112px;
+      border: 1px solid var(--blue);
+      display: grid;
+      place-items: center;
+      background:
+        conic-gradient(var(--blue) var(--score, 56%), rgba(34, 92, 255, .12) 0);
+      color: var(--blue);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 32px;
+      font-weight: 800;
+    }
+    .decision {
+      border-left: 2px solid var(--blue);
+      padding-left: 14px;
+    }
+    .decision strong { display: block; margin-bottom: 6px; }
+    button {
+      border: 1px solid var(--blue);
+      background: transparent;
+      color: var(--blue);
+      min-height: 36px;
+      padding: 8px 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    button:hover { background: var(--blue); color: #fff; }
+    pre {
+      white-space: pre-wrap;
+      border: 1px dotted var(--line);
+      background: rgba(255, 255, 255, .42);
+      color: var(--ink);
+      padding: 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.45;
+      overflow: auto;
+    }
+    @media (max-width: 850px) {
+      main { padding: 20px 16px 32px; }
+      header, .layout, .score { grid-template-columns: 1fr; }
+      .stamp { justify-self: start; text-align: left; }
       .owner-load { grid-template-columns: 1fr; }
+      h1 { font-size: 34px; }
+      .fig { writing-mode: horizontal-tb; position: static; margin-bottom: 8px; }
     }
   </style>
 </head>
@@ -54,13 +234,19 @@
   <main>
     <header>
       <div>
+        <div class="badge">FIG_001 / HTML FIRST ARTIFACT</div>
         <h1>Launch Risk Room</h1>
-        <p>Compare blockers, owner load, and mitigation options before moving the GTM plan from planning into execution.</p>
+        <p class="dek">Compare blockers, owner load, and mitigation options before moving the GTM plan from planning into execution.</p>
       </div>
-      <span class="badge">HTML first artifact</span>
+      <div class="stamp">
+        WUPHF MANUAL PAGE<br>
+        SOURCE: agents/revops-agent/notebook<br>
+        TRUST: draft
+      </div>
     </header>
+    <div class="rule" aria-hidden="true"></div>
 
-    <div class="grid">
+    <div class="layout">
       <section>
         <h2>Blocker Matrix</h2>
         <table>
@@ -89,6 +275,31 @@
           </tbody>
         </table>
 
+        <div class="figure">
+          <div class="fig">FIG_002 [ OWNER LOAD MAP ]</div>
+          <svg viewBox="0 0 720 260" role="img" aria-label="Owner load map">
+            <g fill="none" stroke="#225cff" stroke-width="2">
+              <rect x="78" y="52" width="155" height="84"></rect>
+              <rect x="283" y="82" width="155" height="84"></rect>
+              <rect x="488" y="112" width="155" height="84"></rect>
+              <path d="M233 94 C258 94 258 124 283 124"></path>
+              <path d="M438 124 C463 124 463 154 488 154"></path>
+              <line x1="155" y1="28" x2="155" y2="52"></line>
+              <line x1="360" y1="58" x2="360" y2="82"></line>
+              <line x1="565" y1="88" x2="565" y2="112"></line>
+            </g>
+            <g fill="#225cff" font-family="ui-monospace, monospace" font-size="16">
+              <text x="105" y="98">FINANCE</text>
+              <text x="310" y="128">SUPPORT</text>
+              <text x="525" y="158">SALES</text>
+              <text x="112" y="224">approval gate</text>
+              <text x="300" y="224">visual refresh</text>
+              <text x="506" y="224">buyer proof</text>
+            </g>
+          </svg>
+        </div>
+
+        <h2>Owner load</h2>
         <div class="owner-load" aria-label="Owner load">
           <div class="owner"><strong>Finance</strong><div class="bar"><span style="width: 78%"></span></div><p>Approval path is the launch gate.</p></div>
           <div class="owner"><strong>Support</strong><div class="bar"><span style="width: 44%"></span></div><p>Visual refresh is bounded.</p></div>
@@ -100,15 +311,15 @@
         <h2>Risk Tuning</h2>
         <div class="controls">
           <div class="control">
-            <label for="pricing">Pricing severity</label>
+            <label for="pricing">IN: pricing severity</label>
             <input id="pricing" type="range" min="0" max="100" value="82">
           </div>
           <div class="control">
-            <label for="support">Support readiness</label>
+            <label for="support">IN: support readiness</label>
             <input id="support" type="range" min="0" max="100" value="58">
           </div>
           <div class="control">
-            <label for="sales">Sales confidence</label>
+            <label for="sales">IN: sales confidence</label>
             <input id="sales" type="range" min="0" max="100" value="64">
           </div>
         </div>

@@ -15,6 +15,7 @@ share something too dense for plain markdown."
 | Interactivity | HTML artifacts include local controls for tuning, tabbing, copying, or exporting useful follow-up prompts. | All three examples |
 | Safety | HTML is self-contained, iframe-rendered, and unable to fetch network resources from the artifact body. | All three examples plus sandbox tests |
 | Shareability | Markdown keeps the durable source and summary; HTML carries the dense visual explanation users actually review. | All three examples |
+| Visual taste | HTML artifacts use the WUPHF technical-manual style: warm paper, serif reading copy, blue line diagrams, dotted grids, mono metadata, and sparse instrumentation controls. | All three examples |
 
 ## Tutorial 1: RevOps Launch Risk Room
 
