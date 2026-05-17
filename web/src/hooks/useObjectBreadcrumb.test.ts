@@ -6,8 +6,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { deriveBreadcrumbs } from "./useObjectBreadcrumb";
+
 import type { CurrentRoute } from "../routes/useCurrentRoute";
+import { deriveBreadcrumbs } from "./useObjectBreadcrumb";
 
 describe("deriveBreadcrumbs", () => {
   it("returns empty array for channel routes", () => {
