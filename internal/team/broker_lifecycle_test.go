@@ -39,6 +39,10 @@ func TestLifecycleForwardMapAllStates(t *testing.T) {
 		{LifecycleStateQueuedBehindOwner, "triage", "pending_review", "open", true},
 		{LifecycleStateChangesRequested, "implement", "pending_review", "in_progress", false},
 		{LifecycleStateApproved, "ship", "approved", "done", false},
+		// Rejected: terminal, blocked=true so unblockDependentsLocked
+		// treats the upstream as unresolved; reviewState="rejected"
+		// is the durable filter signal in the inbox.
+		{LifecycleStateRejected, "review", "rejected", "rejected", true},
 	}
 
 	// The canonical state list and the forward-map must agree on which

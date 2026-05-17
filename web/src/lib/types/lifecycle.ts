@@ -22,7 +22,8 @@ export type LifecycleState =
   | "decision"
   | "blocked_on_pr_merge"
   | "changes_requested"
-  | "approved";
+  | "approved"
+  | "rejected";
 
 /** Severity tier on a reviewer grade. CodeRabbit-shaped. */
 export type Severity = "critical" | "major" | "minor" | "nitpick" | "skipped";
@@ -268,6 +269,11 @@ export const STATE_PILL_TOKENS: Record<
     text: "var(--text-tertiary)",
     label: "approved",
   },
+  rejected: {
+    bg: "var(--danger-200, var(--warning-200))",
+    text: "var(--danger-500, var(--warning-500))",
+    label: "rejected",
+  },
 };
 
 /**
@@ -363,6 +369,6 @@ export const FILTER_TO_STATES: Record<
 > = {
   decision_required: ["decision"],
   running: ["intake", "ready", "running", "review"],
-  blocked: ["blocked_on_pr_merge", "changes_requested"],
+  blocked: ["blocked_on_pr_merge", "changes_requested", "rejected"],
   approved: ["approved"],
 };
