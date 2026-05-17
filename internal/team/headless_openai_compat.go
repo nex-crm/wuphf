@@ -400,18 +400,23 @@ func openAICompatPromptedToolsPrompt(slug, originalPrompt string, tools []agent.
 	}
 	header.WriteString("Available tools (name, description, JSON schema):\n")
 	for _, t := range tools {
-		schemaBytes, err := json.Marshal(t.Schema)
+		// Tools without schemas get an empty object so the model emits
+		// `"arguments":{}` rather than guessing. Note `json.Marshal(nil)`
+		// returns `[]byte("null"), nil` — checking only `err == nil` would
+		// emit `schema: null` for nil-schema tools, which is confusing to the
+		// model. Detect nil first.
 		schemaStr := "{}"
-		if err == nil && len(schemaBytes) > 0 {
-			schemaStr = string(schemaBytes)
+		if t.Schema != nil {
+			if schemaBytes, err := json.Marshal(t.Schema); err == nil && len(schemaBytes) > 0 {
+				schemaStr = string(schemaBytes)
+			}
 		}
 		desc := strings.TrimSpace(t.Description)
 		if desc == "" {
 			desc = "(no description)"
 		}
 		// Single-line description keeps the prompt compact; schemas are
-		// already JSON. Tools without schemas get an empty object so the
-		// model emits `"arguments":{}` rather than guessing.
+		// already JSON.
 		header.WriteString(fmt.Sprintf("- %s: %s\n  schema: %s\n", t.Name, desc, schemaStr))
 	}
 	header.WriteString("\nExamples:\n")

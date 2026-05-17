@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,35 @@ func TestLooksUnparsedToolCall(t *testing.T) {
 				t.Errorf("looksUnparsedToolCall(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestOpenAICompatPromptedToolsPrompt_NilSchema pins the nil-schema
+// fallback for the schema-in-prompt protocol. json.Marshal(nil) yields
+// `"null"` (4 bytes, no error), so the historic check `err == nil && len > 0`
+// silently emitted `schema: null` for tools that registered no schema —
+// that confused the model and CodeRabbit flagged it. The contract: nil
+// schemas render as `{}`, matching the prompt's stated intent and
+// matching what the parser dispatches when the model leaves arguments
+// off (`"arguments":{}`).
+func TestOpenAICompatPromptedToolsPrompt_NilSchema(t *testing.T) {
+	tools := []agent.AgentTool{
+		{Name: "no_schema_tool", Description: "A tool that has no schema.", Schema: nil},
+		{Name: "with_schema_tool", Description: "A tool with a real schema.", Schema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"x": map[string]any{"type": "string"}},
+		}},
+	}
+	out := openAICompatPromptedToolsPrompt("ceo", "ORIGINAL", tools)
+
+	if !strings.Contains(out, "- no_schema_tool: A tool that has no schema.\n  schema: {}\n") {
+		t.Errorf("nil-schema tool should render `schema: {}`; got:\n%s", out)
+	}
+	if strings.Contains(out, "schema: null") {
+		t.Errorf("prompt must NOT render `schema: null` for nil-schema tools; got:\n%s", out)
+	}
+	if !strings.Contains(out, `"type":"object"`) {
+		t.Errorf("real-schema tool should render its JSON schema verbatim; got:\n%s", out)
 	}
 }
 
