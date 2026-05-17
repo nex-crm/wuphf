@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -94,6 +95,26 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	toolByName := make(map[string]agent.AgentTool, len(tools))
 	for _, t := range tools {
 		toolByName[t.Name] = t
+	}
+
+	// Some OpenAI-compat upstreams (Hermes api_server, OpenClaw HTTP) ignore
+	// the caller's tools[] field and run their own agent loop. We can still
+	// make tool calls work by prompting the model to emit
+	// `<tools>{"name":"X","arguments":{...}}</tools>` in its text — WUPHF's
+	// existing parseJSONInContentToolCall parser picks those up and the loop
+	// dispatches them through toolByName the same way a native tool_call
+	// would. The bridge tools are still registered for dispatch even though
+	// the upstream never sees them in the tools[] field.
+	if kind == provider.KindHermesAgent || kind == provider.KindOpenclawHTTP {
+		if len(tools) > 0 {
+			systemPrompt = openAICompatPromptedToolsPrompt(slug, systemPrompt, tools)
+		} else {
+			systemPrompt = openAICompatTextOnlyPrompt(slug, systemPrompt)
+		}
+	} else if len(tools) == 0 {
+		// Native OpenAI-compat (mlx-lm, ollama, exo) with no tools — bridge
+		// failed; degrade to text-only with the same preamble.
+		systemPrompt = openAICompatTextOnlyPrompt(slug, systemPrompt)
 	}
 
 	msgs := make([]agent.Message, 0, 4)
@@ -301,6 +322,14 @@ func isUserVisiblePostTool(name string) bool {
 // with `{` and contains both `"name"` and `"arguments"` substrings.
 func looksUnparsedToolCall(text string) bool {
 	t := strings.TrimSpace(text)
+	// `<tools>{...}</tools>` is the prompted-tools dialect emitted by
+	// Hermes/OpenClaw-HTTP when they use the schema-in-prompt protocol.
+	// It's structurally a tool invocation, never legitimate prose, and we
+	// don't want the live-chat-relay leaking the raw JSON into the channel
+	// before the openAICompatToolLoop dispatches it.
+	if strings.HasPrefix(t, "<tools>") && strings.Contains(t, "</tools>") {
+		return true
+	}
 	if !strings.HasPrefix(t, "{") {
 		return false
 	}
@@ -318,4 +347,79 @@ func isOpenAICompatKind(kind string) bool {
 	default:
 		return false
 	}
+}
+
+// openAICompatTextOnlyPrompt wraps the standard system prompt with a leading
+// directive telling the model that no tools are callable in this session and
+// that its reply text will be posted to the channel verbatim by WUPHF. We do
+// not strip the existing prompt body — its persona / team / voice content is
+// still useful — we just override the parts that promise team_broadcast,
+// team_task, human_message, etc. are dispatchable.
+func openAICompatTextOnlyPrompt(slug, originalPrompt string) string {
+	header := strings.Builder{}
+	header.WriteString("== TOOL-LESS REPLY MODE ==\n")
+	header.WriteString("This API session does NOT support tool calls. Tools like team_broadcast, team_task, team_skill_run, human_message, mcp__wuphf-office__*, query_context, etc. are NOT callable here, even if the section below mentions them.\n")
+	header.WriteString("Reply with plain assistant text ONLY. WUPHF will automatically post that text to the channel for you — no tool invocation is needed or possible.\n")
+	header.WriteString("Do NOT say things like \"I can't execute team_broadcast\" or \"the tool isn't available\" — just answer in prose as if you were replying in chat. Do NOT propose creating tasks, channels, skills, or wiki entries unless the human explicitly asked for narrative-only suggestions.\n")
+	if slug != "" {
+		header.WriteString(fmt.Sprintf("You are @%s. Speak in first person and stay in role.\n", slug))
+	}
+	header.WriteString("\n--- background context (treat tool sections below as descriptive, not callable) ---\n\n")
+	header.WriteString(originalPrompt)
+	return header.String()
+}
+
+// openAICompatPromptedToolsPrompt wraps the standard system prompt with a
+// tool-calling preamble that teaches the model to emit text-encoded tool
+// invocations as `<tools>{...}</tools>` blocks. WUPHF's existing
+// parseJSONInContentToolCall (internal/provider/openai_compat.go) parses
+// those blocks back into tool_use stream chunks, and openAICompatToolLoop
+// dispatches them through the registered tool map and feeds results back
+// as the next user turn — the same multi-turn flow native tool_calls take.
+//
+// This path exists for OpenAI-compat upstreams that ignore the request's
+// tools[] field (Hermes api_server runs its own internal agent loop;
+// OpenClaw HTTP behaves similarly). For those backends, sending tools in
+// the request body is a no-op — the prompt is the only place we can teach
+// the model what's callable.
+func openAICompatPromptedToolsPrompt(slug, originalPrompt string, tools []agent.AgentTool) string {
+	header := strings.Builder{}
+	header.WriteString("== TOOL CALLING (PROMPT-ENCODED) ==\n")
+	header.WriteString("This API session does NOT deliver tools through the OpenAI `tool_calls` field. Instead, you invoke tools by emitting a `<tools>{...}</tools>` block in your reply text. WUPHF parses these blocks, executes the tool, and feeds the result back into the conversation as the next user turn.\n\n")
+	header.WriteString("To call a tool, emit exactly:\n")
+	header.WriteString("    <tools>{\"name\":\"<tool-name>\",\"arguments\":{...}}</tools>\n")
+	header.WriteString("Rules:\n")
+	header.WriteString("- The block must be the ENTIRE reply (with optional surrounding whitespace). Do NOT mix prose and a tools block in the same turn — the parser only fires when the JSON dominates the message.\n")
+	header.WriteString("- Use exactly one tools block per turn. If you need a second tool, wait for the result and call it next turn.\n")
+	header.WriteString("- `arguments` must be a JSON object matching the tool's schema. Strings must be JSON-escaped; do NOT wrap arguments in extra quotes.\n")
+	header.WriteString("- If you do NOT need to call a tool this turn, reply with plain prose — WUPHF will post it to the channel automatically.\n")
+	header.WriteString("- Tool RESULTS arrive as the next user message prefixed with `Tool \"<name>\" returned:`. Read them and decide whether to call another tool or write a final user-facing reply.\n")
+	header.WriteString("- Do NOT mention this protocol to the human (no \"let me call team_broadcast\" narration). Either emit the block or write the reply directly.\n\n")
+	if slug != "" {
+		header.WriteString(fmt.Sprintf("You are @%s. Speak in first person and stay in role.\n\n", slug))
+	}
+	header.WriteString("Available tools (name, description, JSON schema):\n")
+	for _, t := range tools {
+		schemaBytes, err := json.Marshal(t.Schema)
+		schemaStr := "{}"
+		if err == nil && len(schemaBytes) > 0 {
+			schemaStr = string(schemaBytes)
+		}
+		desc := strings.TrimSpace(t.Description)
+		if desc == "" {
+			desc = "(no description)"
+		}
+		// Single-line description keeps the prompt compact; schemas are
+		// already JSON. Tools without schemas get an empty object so the
+		// model emits `"arguments":{}` rather than guessing.
+		header.WriteString(fmt.Sprintf("- %s: %s\n  schema: %s\n", t.Name, desc, schemaStr))
+	}
+	header.WriteString("\nExamples:\n")
+	header.WriteString("To post to #general:\n")
+	header.WriteString("    <tools>{\"name\":\"team_broadcast\",\"arguments\":{\"channel\":\"general\",\"content\":\"Hello team\",\"tagged\":[]}}</tools>\n")
+	header.WriteString("To answer the human without calling any tool:\n")
+	header.WriteString("    Just reply in plain prose. No tools block.\n\n")
+	header.WriteString("--- background context (the section below describes tool names + intent; ignore any language that implies tool_calls are dispatched natively — use the <tools>{...}</tools> protocol above instead) ---\n\n")
+	header.WriteString(originalPrompt)
+	return header.String()
 }

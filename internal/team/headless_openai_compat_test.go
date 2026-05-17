@@ -71,6 +71,30 @@ func TestLooksUnparsedToolCall(t *testing.T) {
 			in:   "```json\n{\"name\":\"team_broadcast\",\"arguments\":{\"channel\":\"general\"}}\n```",
 			want: false, // doesn't START with { (leads with the fence) — caller already strips fences
 		},
+		// `<tools>...</tools>` is the prompted-tools dialect emitted by
+		// Hermes / OpenClaw-HTTP when the backend ignores the request's
+		// tools[] field. The live-chat-relay must NOT post the raw JSON
+		// to the channel; the openAICompatToolLoop dispatches it instead.
+		{
+			name: "tools-tag basic",
+			in:   `<tools>{"name":"team_broadcast","arguments":{"channel":"general","content":"hi"}}</tools>`,
+			want: true,
+		},
+		{
+			name: "tools-tag with surrounding whitespace",
+			in:   "   <tools>{\"name\":\"x\",\"arguments\":{}}</tools>\n",
+			want: true,
+		},
+		{
+			name: "tools-tag closed but empty body",
+			in:   `<tools></tools>`,
+			want: true, // structurally a tools-block; should not leak to chat
+		},
+		{
+			name: "prose mentioning the tag name without closer",
+			in:   `I would call the <tools> block but won't here.`,
+			want: false, // no </tools> closer; legitimate prose
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
