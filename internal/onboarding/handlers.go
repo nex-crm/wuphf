@@ -45,6 +45,14 @@ type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedA
 // seeds the team and fires the first CEO turn) without the broker token.
 // Pass a nil middleware only in tests — RegisterRoutes substitutes a passthrough.
 //
+// TransitionFunc is the broker callback invoked when the phase advances.
+// The broker uses this to emit the next CEO suggestion card into b.messages
+// on the CEO DM and perform any phase-transition side effects.
+// phase is the new phase the state machine just entered.
+type TransitionFunc func(phase string, s *State) error
+
+// RegisterRoutes wires the onboarding HTTP endpoints onto mux.
+//
 // Routes registered:
 //
 //	GET  /onboarding/state
@@ -57,7 +65,17 @@ type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedA
 //	POST /onboarding/checklist/dismiss
 //	POST /onboarding/scan
 //	POST /onboarding/upload-context
+//	POST /onboarding/transition   (Phase 2)
+//	POST /onboarding/answer       (Phase 2)
+//	POST /onboarding/suggestion/ack (Phase 2)
 func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc, wikiRoot string) {
+	RegisterRoutesWithTransition(mux, completeFn, nil, packSlug, authMiddleware, wikiRoot)
+}
+
+// RegisterRoutesWithTransition is like RegisterRoutes but also accepts a
+// TransitionFunc that the broker supplies to receive phase-transition events.
+// Pass nil transitionFn to skip the broker callback (legacy path / tests).
+func RegisterRoutesWithTransition(mux *http.ServeMux, completeFn CompleteFunc, transitionFn TransitionFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc, wikiRoot string) {
 	if authMiddleware == nil {
 		authMiddleware = func(h http.HandlerFunc) http.HandlerFunc { return h }
 	}
@@ -74,6 +92,10 @@ func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string
 	mux.HandleFunc("/onboarding/checklist/", authMiddleware(HandleChecklistDone))
 	mux.HandleFunc("/onboarding/scan", authMiddleware(makeHandleScan(wikiRoot)))
 	mux.HandleFunc("/onboarding/upload-context", authMiddleware(handleUploadContext))
+	// Phase 2 — deterministic CEO conversation handlers.
+	mux.HandleFunc("/onboarding/transition", authMiddleware(makeHandleTransition(transitionFn)))
+	mux.HandleFunc("/onboarding/answer", authMiddleware(HandleAnswer))
+	mux.HandleFunc("/onboarding/suggestion/ack", authMiddleware(HandleSuggestionAck))
 }
 
 // HandleState handles GET /onboarding/state.
@@ -102,6 +124,14 @@ func HandleState(w http.ResponseWriter, r *http.Request) {
 		"partial":             s.Partial,
 		"checklist":           s.Checklist,
 		"onboarded":           s.Onboarded(),
+		// v2 fields.
+		"phase":                   s.Phase,
+		"ceo_dm_channel_id":       s.CEODMChannelID,
+		"pending_suggestion":      s.PendingSuggestion,
+		"form_answers":            s.FormAnswers,
+		"first_issue_id":          s.FirstIssueID,
+		"first_issue_approved_at": s.FirstIssueApprovedAt,
+		"activated":               s.Activated(),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
@@ -827,6 +857,293 @@ func handleUploadContext(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string][]string{"paths": paths})
+}
+
+// legalPhaseTransitions defines the valid next-phase set for each current phase
+// in the deterministic CEO conversation state machine (Phase 2 scope).
+// LLM phases (draft/approve/kickoff) are included for forward-compat but are
+// not wired in Phase 2.
+var legalPhaseTransitions = map[string]map[string]bool{
+	"": {
+		PhaseGreet: true,
+	},
+	PhaseGreet: {
+		PhaseIdentity: true,
+	},
+	PhaseIdentity: {
+		PhaseScan:      true,
+		PhaseBlueprint: true, // skip scan if no website
+	},
+	PhaseScan: {
+		PhaseBlueprint: true,
+	},
+	PhaseBlueprint: {
+		PhaseTeam: true,
+		PhaseSeed: true, // scratch path skips team
+	},
+	PhaseTeam: {
+		PhaseSeed: true,
+	},
+	PhaseSeed: {
+		PhaseBridge: true,
+	},
+	PhaseBridge: {
+		PhaseDraft:    true, // "start an issue"
+		PhaseComplete: true, // "look around first"
+	},
+	PhaseDraft: {
+		PhaseApprove: true,
+	},
+	PhaseApprove: {
+		PhaseKickoff: true,
+	},
+	PhaseKickoff: {
+		PhaseComplete: true,
+	},
+}
+
+// IsLegalTransition reports whether the transition from currentPhase to
+// nextPhase is allowed by the state machine. Exported so broker_onboarding_phase2.go
+// can validate transitions before accepting them, and for use in tests.
+func IsLegalTransition(currentPhase, nextPhase string) bool {
+	allowed, ok := legalPhaseTransitions[currentPhase]
+	if !ok {
+		return false
+	}
+	return allowed[nextPhase]
+}
+
+// makeHandleTransition returns the POST /onboarding/transition handler.
+func makeHandleTransition(transitionFn TransitionFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handleTransition(w, r, transitionFn)
+	}
+}
+
+// handleTransition handles POST /onboarding/transition.
+// Body: {"phase": string}
+// Validates the requested phase transition, persists the new phase cursor,
+// and invokes the TransitionFunc (when non-nil) so the broker can emit the
+// next CEO suggestion card.
+//
+// Returns 400 for invalid transitions, 500 on persistence errors.
+func handleTransition(w http.ResponseWriter, r *http.Request, transitionFn TransitionFunc) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Phase string `json:"phase"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	next := strings.TrimSpace(body.Phase)
+	if next == "" {
+		http.Error(w, "phase required", http.StatusBadRequest)
+		return
+	}
+
+	s, err := Load()
+	if err != nil {
+		http.Error(w, "failed to load state", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate the requested transition.
+	allowed, ok := legalPhaseTransitions[s.Phase]
+	if !ok || !allowed[next] {
+		http.Error(w, fmt.Sprintf("invalid transition from %q to %q", s.Phase, next), http.StatusBadRequest)
+		return
+	}
+
+	s.Phase = next
+
+	// Setting CompletedAt at the bridge→complete transition path satisfies the
+	// spec rule: "CompletedAt is set at end of bridge phase regardless of
+	// first issue."
+	if next == PhaseComplete && s.CompletedAt == "" {
+		s.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+		s.Version = currentStateVersion
+	}
+
+	if err := Save(s); err != nil {
+		http.Error(w, "failed to save state", http.StatusInternalServerError)
+		return
+	}
+
+	// Notify broker so it can emit the next CEO message on the DM.
+	if transitionFn != nil {
+		if err := transitionFn(next, s); err != nil {
+			// Log server-side; the state is already persisted so this is
+			// best-effort. A transient broker error should not fail the
+			// transition from the client's perspective.
+			log.Printf("onboarding: transition broker callback failed (phase=%s): %v", next, err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":    true,
+		"phase": next,
+	})
+}
+
+// HandleAnswer handles POST /onboarding/answer.
+// Body: {"field": string, "value": any}
+// Commits a single FormAnswers field. String values are sanitized via
+// onboardingSanitizeString. Persists state on each call (~10-12 writes
+// per full onboarding per spec).
+func HandleAnswer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Field string      `json:"field"`
+		Value interface{} `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	field := strings.TrimSpace(body.Field)
+	if field == "" {
+		http.Error(w, "field required", http.StatusBadRequest)
+		return
+	}
+
+	s, err := Load()
+	if err != nil {
+		http.Error(w, "failed to load state", http.StatusInternalServerError)
+		return
+	}
+
+	if err := applyFormAnswer(s, field, body.Value); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := Save(s); err != nil {
+		http.Error(w, "failed to save state", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// applyFormAnswer writes a single field value into s.FormAnswers.
+// String values are sanitized. Unknown fields return an error.
+func applyFormAnswer(s *State, field string, value interface{}) error {
+	sanitizeStr := func(v interface{}) string {
+		str, _ := v.(string)
+		return onboardingSanitizeString(strings.TrimSpace(str))
+	}
+	switch field {
+	case "company_name":
+		s.FormAnswers.CompanyName = sanitizeStr(value)
+		// Mirror to top-level CompanyName for back-compat with v1 callers.
+		s.CompanyName = s.FormAnswers.CompanyName
+	case "description":
+		s.FormAnswers.Description = sanitizeStr(value)
+	case "priority":
+		s.FormAnswers.Priority = sanitizeStr(value)
+	case "website_url":
+		s.FormAnswers.WebsiteURL = sanitizeStr(value)
+	case "owner_name":
+		s.FormAnswers.OwnerName = sanitizeStr(value)
+	case "owner_role":
+		s.FormAnswers.OwnerRole = sanitizeStr(value)
+	case "blueprint_id":
+		s.FormAnswers.BlueprintID = sanitizeStr(value)
+	case "picked_agents":
+		raw, ok := value.([]interface{})
+		if !ok {
+			return fmt.Errorf("picked_agents must be an array")
+		}
+		agents := make([]string, 0, len(raw))
+		for _, v := range raw {
+			if slug := strings.TrimSpace(fmt.Sprintf("%v", v)); slug != "" {
+				agents = append(agents, onboardingSanitizeString(slug))
+			}
+		}
+		s.FormAnswers.PickedAgents = agents
+	case "scan_complete":
+		b, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("scan_complete must be a boolean")
+		}
+		s.FormAnswers.ScanComplete = b
+	default:
+		return fmt.Errorf("unknown field %q", field)
+	}
+	return nil
+}
+
+// onboardingSanitizeString collapses structural delimiters that could be used
+// for confused-deputy injection in CEO suggestion payloads. Mirrors the logic
+// of sanitizeContextValue in internal/teammcp/actions.go (kept in sync;
+// neither is imported by the other to avoid a circular dep — teammcp imports
+// team which imports onboarding).
+func onboardingSanitizeString(s string) string {
+	if s == "" {
+		return s
+	}
+	r := strings.NewReplacer(
+		"\r\n", " ",
+		"\n", " ",
+		"\r", " ",
+		" ", " ", // U+2028 LINE SEPARATOR
+		" ", " ", // U+2029 PARAGRAPH SEPARATOR
+		"•", "·", // U+2022 BULLET → U+00B7 MIDDLE DOT
+	)
+	cleaned := r.Replace(s)
+	return strings.Join(strings.Fields(cleaned), " ")
+}
+
+// HandleSuggestionAck handles POST /onboarding/suggestion/ack.
+// Body: {"suggestion_id": string}
+// Clears PendingSuggestion if the ID matches the current pending suggestion.
+// Idempotent: acking an already-cleared or mismatched ID is a no-op (200).
+func HandleSuggestionAck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		SuggestionID string `json:"suggestion_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	id := strings.TrimSpace(body.SuggestionID)
+	if id == "" {
+		http.Error(w, "suggestion_id required", http.StatusBadRequest)
+		return
+	}
+
+	s, err := Load()
+	if err != nil {
+		http.Error(w, "failed to load state", http.StatusInternalServerError)
+		return
+	}
+
+	if s.PendingSuggestion != nil && s.PendingSuggestion.ID == id {
+		s.PendingSuggestion = nil
+		if err := Save(s); err != nil {
+			http.Error(w, "failed to save state", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // HandleChecklistDismiss handles POST /onboarding/checklist/dismiss.
