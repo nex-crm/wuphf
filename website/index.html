@@ -427,6 +427,20 @@
   .hero-ctas {
     display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: center;
   }
+  .hero-cloud-cta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    margin: 16px 0 0;
+    text-align: center;
+  }
+  .hero-cloud-cta a {
+    color: var(--yellow);
+    text-decoration: none;
+  }
+  .hero-cloud-cta a:hover {
+    text-decoration: underline;
+  }
   .hero-badges {
     display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: center;
     margin-top: 24px;
@@ -1306,6 +1320,8 @@
       </a>
     </div>
 
+    <p class="hero-cloud-cta">Want to invite more human teammates? <a href="https://nex.ai" target="_blank" rel="noopener">Get Nex Cloud →</a></p>
+
     <div class="hero-badges">
       <a href="https://news.ycombinator.com/item?id=47899844" target="_blank" rel="noopener noreferrer" class="hn-badge" aria-label="Hacker News Life of Product Week's #1"><img src="hn-badge.svg" alt="Hacker News Life of Product Week's #1" width="223" height="48"></a>
       <a href="https://www.producthunt.com/products/wuphf-2?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-wuphf-by-nex-ai" target="_blank" rel="noopener noreferrer" class="ph-badge"><img alt="WUPHF by Nex.ai - AI employees who build their own knowledge base | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1132040&amp;theme=neutral&amp;t=1777385299660"></a>
@@ -1617,6 +1633,9 @@
       <summary class="faq-q">Can I invite a teammate into the office?</summary>
       <div class="faq-a">
         Yes. Two ways. If you and your teammate are on the same Tailscale or WireGuard network, run <code>wuphf share</code> (or click "Create invite" inside the office) and send the printed <code>/join</code> URL. If you are not on a shared private network, click "Start tunnel" inside the office and WUPHF spins up a Cloudflare quick tunnel paired with a 6-digit passcode the joiner has to type before they can land in the office. <code>cloudflared</code> ships bundled with the npm install. Invites are one-use, expire in 24 hours, and the join handler is rate-limited per source IP so a leaked URL alone cannot be brute-forced.
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--yellow-dark);">
+          Want to invite more human teammates? <a href="https://nex.ai" target="_blank" rel="noopener" style="color:var(--yellow);text-decoration:none;">Get Nex Cloud →</a>
+        </div>
       </div>
     </details>
     <details class="faq-item">
