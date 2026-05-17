@@ -21,6 +21,8 @@ Each scenario has:
 - `wiki.md`: the markdown summary used when promoting the artifact to the team wiki.
 - `chat.txt`: the agent chat message that should become a rich artifact card in chat.
 
+The `scenarios.json` manifest separates intended deployment paths from local fixture files. `sourceMarkdownPath` and `targetWikiPath` describe where the agent-created source note and promoted wiki article should live in a real workspace; `sourcePath`, `wikiPath`, `htmlPath`, and `chatPath` point at fixture files under this tutorial directory for tests and examples.
+
 ## Validation
 
 These examples are executable fixtures, not just documentation.

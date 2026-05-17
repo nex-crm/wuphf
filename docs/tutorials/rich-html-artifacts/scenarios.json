@@ -1,5 +1,13 @@
 {
   "version": 1,
+  "fieldPurpose": {
+    "sourceMarkdownPath": "Intended notebook path where the agent would write the source note.",
+    "targetWikiPath": "Intended wiki path where the promoted article should live.",
+    "sourcePath": "Local fixture file path for the source notebook note.",
+    "wikiPath": "Local fixture file path for the promoted wiki markdown.",
+    "htmlPath": "Local fixture file path for the HTML artifact.",
+    "chatPath": "Local fixture file path for the chat handoff message."
+  },
   "scenarios": [
     {
       "slug": "revops-launch-risk",
@@ -49,11 +57,7 @@
       "wikiPath": "fixtures/sales-review-brief/wiki.md",
       "chatPath": "fixtures/sales-review-brief/chat.txt",
       "expectedChatArtifactId": "ra_aaaaaaaaaaaaaaaa",
-      "expectedTerms": [
-        "Reviewer Brief",
-        "Diff focus",
-        "Copy reviewer prompt"
-      ]
+      "expectedTerms": ["Reviewer Brief", "Diff focus", "Copy reviewer prompt"]
     }
   ]
 }
