@@ -448,6 +448,48 @@ describe("SanitizedString", () => {
       }
     });
 
+    it("throws on non-plain-object or prototype-smuggled options instead of downgrading", () => {
+      // A Map / class instance / Object.create(...) carrier passes a loose
+      // `typeof === "object"` test but is not a plain object; its `.policy`
+      // reads as undefined (silent default) or is reachable only through the
+      // prototype chain. Require an Object.prototype/null prototype.
+      const mapOptions = new Map([["policy", "allowlist"]]);
+      expect(() =>
+        SanitizedString.fromUnknown("x", mapOptions as unknown as SanitizedStringOptions),
+      ).toThrow(/options must be a plain object/);
+      const inheritedPolicy = Object.create({ policy: "allowlist" }) as SanitizedStringOptions;
+      expect(() => SanitizedString.fromUnknown("x", inheritedPolicy)).toThrow(
+        /options must be a plain object/,
+      );
+    });
+
+    it("throws on an accessor `policy` instead of running caller code", () => {
+      // An accessor `policy` would execute arbitrary caller code before
+      // sanitization runs. Resolve `policy` only as an own data property.
+      const accessorOptions = {} as SanitizedStringOptions;
+      Object.defineProperty(accessorOptions, "policy", {
+        get() {
+          return "allowlist";
+        },
+        enumerable: true,
+        configurable: true,
+      });
+      expect(() => SanitizedString.fromUnknown("x", accessorOptions)).toThrow(
+        /policy must be an own data property/,
+      );
+    });
+
+    it("accepts a null-prototype options object with an own data policy", () => {
+      // A null-prototype plain object has no prototype-smuggling surface, so
+      // it is a valid carrier; an own data `policy` resolves normally.
+      const nullProtoOptions = Object.create(null) as SanitizedStringOptions;
+      Object.defineProperty(nullProtoOptions, "policy", {
+        value: "allowlist",
+        enumerable: true,
+      });
+      expect(SanitizedString.fromUnknown("a\u00adb", nullProtoOptions).value).toBe("ab");
+    });
+
     it("throws on a non-string policy instead of silently using the default", () => {
       expect(() =>
         SanitizedString.fromUnknown("x", { policy: 1 as unknown as SanitizedStringPolicy }),
