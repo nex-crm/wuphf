@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "fieldPurpose": {
+    "sourceMarkdownPath": "Intended notebook path where the agent would write the source note.",
+    "targetWikiPath": "Intended wiki path where the promoted article should live.",
+    "sourcePath": "Local fixture file path for the source notebook note.",
+    "wikiPath": "Local fixture file path for the promoted wiki markdown.",
+    "htmlPath": "Local fixture file path for the HTML artifact.",
+    "chatPath": "Local fixture file path for the chat handoff message."
+  },
+  "scenarios": [
+    {
+      "slug": "revops-launch-risk",
+      "title": "RevOps Launch Risk Room",
+      "summary": "Interactive launch risk room for comparing blockers, owner load, and mitigation tradeoffs.",
+      "actorSlug": "revops-agent",
+      "sourceMarkdownPath": "agents/revops-agent/notebook/revops-launch-risk.md",
+      "targetWikiPath": "team/playbooks/revops-launch-risk-room.md",
+      "htmlPath": "fixtures/revops-launch-risk/artifact.html",
+      "sourcePath": "fixtures/revops-launch-risk/source.md",
+      "wikiPath": "fixtures/revops-launch-risk/wiki.md",
+      "chatPath": "fixtures/revops-launch-risk/chat.txt",
+      "expectedChatArtifactId": "ra_0123456789abcdef",
+      "expectedTerms": [
+        "Launch Risk Room",
+        "Owner load",
+        "Copy mitigation prompt"
+      ]
+    },
+    {
+      "slug": "support-incident-room",
+      "title": "Support Incident Command Room",
+      "summary": "Interactive incident report for customer impact, timeline, owners, and next actions.",
+      "actorSlug": "support-agent",
+      "sourceMarkdownPath": "agents/support-agent/notebook/support-incident-room.md",
+      "targetWikiPath": "team/playbooks/support-incident-command-room.md",
+      "htmlPath": "fixtures/support-incident-room/artifact.html",
+      "sourcePath": "fixtures/support-incident-room/source.md",
+      "wikiPath": "fixtures/support-incident-room/wiki.md",
+      "chatPath": "fixtures/support-incident-room/chat.txt",
+      "expectedChatArtifactId": "ra_fedcba9876543210",
+      "expectedTerms": [
+        "Incident Command Room",
+        "Customer impact",
+        "Copy update"
+      ]
+    },
+    {
+      "slug": "sales-review-brief",
+      "title": "Sales Engineering Review Brief",
+      "summary": "Interactive reviewer brief with annotated diff, buyer-risk lens, and copyable review prompt.",
+      "actorSlug": "saleseng-agent",
+      "sourceMarkdownPath": "agents/saleseng-agent/notebook/sales-review-brief.md",
+      "targetWikiPath": "team/playbooks/sales-engineering-review-brief.md",
+      "htmlPath": "fixtures/sales-review-brief/artifact.html",
+      "sourcePath": "fixtures/sales-review-brief/source.md",
+      "wikiPath": "fixtures/sales-review-brief/wiki.md",
+      "chatPath": "fixtures/sales-review-brief/chat.txt",
+      "expectedChatArtifactId": "ra_aaaaaaaaaaaaaaaa",
+      "expectedTerms": ["Reviewer Brief", "Diff focus", "Copy reviewer prompt"]
+    }
+  ]
+}

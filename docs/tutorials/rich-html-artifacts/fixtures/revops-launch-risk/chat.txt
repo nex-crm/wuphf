@@ -1,0 +1,5 @@
+I created the launch risk room as an HTML artifact so you can compare owner load, blocker severity, and next-step prompts without scanning a long checklist.
+
+visual-artifact:ra_0123456789abcdef
+
+Promote the markdown summary to the wiki once the launch owner agrees with the risk posture.

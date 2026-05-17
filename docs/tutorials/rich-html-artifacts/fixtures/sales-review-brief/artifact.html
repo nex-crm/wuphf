@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sales Engineering Review Brief</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f6f7fb;
+      color: #141b2d;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 1120px; margin: 0 auto; padding: 28px; }
+    header { margin-bottom: 18px; }
+    h1 { margin: 0 0 8px; font-size: 30px; letter-spacing: 0; }
+    p { margin: 0; color: #5c6576; line-height: 1.5; }
+    .layout { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 16px; }
+    section { background: #ffffff; border: 1px solid #dfe4ed; border-radius: 8px; padding: 18px; }
+    h2 { margin: 0 0 14px; font-size: 18px; }
+    .summary { display: grid; gap: 10px; }
+    .chiprow { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip { border-radius: 999px; padding: 5px 10px; background: #eef5ff; color: #20549d; font-weight: 700; font-size: 13px; }
+    .risk { display: grid; grid-template-columns: 82px 1fr; gap: 10px; padding: 10px; border: 1px solid #e4e9f1; border-radius: 7px; margin-bottom: 8px; }
+    .sev { display: grid; place-items: center; border-radius: 6px; color: #ffffff; font-weight: 800; }
+    .sev.high { background: #a93f32; }
+    .sev.med { background: #9a6a1f; }
+    .sev.low { background: #2d7551; }
+    pre { margin: 0; overflow: auto; background: #101828; color: #ecf3ff; border-radius: 8px; padding: 14px; font-size: 13px; line-height: 1.5; }
+    .add { color: #88dfa5; }
+    .del { color: #ffac9f; }
+    .note { color: #9ec2ff; }
+    button { border: 1px solid #20549d; background: #2364bf; color: #ffffff; border-radius: 6px; min-height: 36px; padding: 8px 12px; font-weight: 700; cursor: pointer; }
+    textarea { width: 100%; min-height: 128px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; font: inherit; line-height: 1.5; margin-bottom: 10px; }
+    details { border: 1px solid #e1e7ef; border-radius: 7px; padding: 10px 12px; background: #fbfcfe; }
+    details + details { margin-top: 8px; }
+    summary { cursor: pointer; font-weight: 800; }
+    @media (max-width: 860px) {
+      main { padding: 18px; }
+      .layout { grid-template-columns: 1fr; }
+      .risk { grid-template-columns: 1fr; }
+      .sev { min-height: 34px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Reviewer Brief</h1>
+      <p>Explain a technical change through the reviewer, field, and buyer-risk lenses in one pass.</p>
+    </header>
+    <div class="layout">
+      <section class="summary">
+        <h2>Buyer outcome</h2>
+        <p>This change makes artifact handoffs easier to inspect in chat, reducing the chance that a customer-facing reviewer misses the visual context behind a recommendation.</p>
+        <div class="chiprow">
+          <span class="chip">ICP: sales engineering</span>
+          <span class="chip">Surface: chat</span>
+          <span class="chip">Mode: review</span>
+        </div>
+
+        <h2>Review asks</h2>
+        <div class="risk"><div class="sev high">High</div><div><strong>Trust boundary</strong><p>Confirm sandboxed HTML cannot execute external scripts or navigate the host page.</p></div></div>
+        <div class="risk"><div class="sev med">Med</div><div><strong>Diff focus</strong><p>Verify artifact markers render as cards without stripping useful prose.</p></div></div>
+        <div class="risk"><div class="sev low">Low</div><div><strong>Buyer story</strong><p>Check whether the artifact summary is clear enough for a non-engineer.</p></div></div>
+
+        <details open>
+          <summary>Why HTML here</summary>
+          <p>The diff, buyer story, and reviewer prompts occupy different mental tracks. HTML lets the reader scan all three without expanding a long markdown file.</p>
+        </details>
+      </section>
+
+      <section>
+        <h2>Annotated diff focus</h2>
+        <pre><span class="note">web/src/components/messages/MessageBubble.tsx</span>
+<span class="del">- renderMarkdown(content)</span>
+<span class="add">+ const artifactIds = extractRichArtifactIds(content)</span>
+<span class="add">+ renderArtifactCards(artifactIds)</span>
+
+<span class="note">web/src/lib/richArtifactReferences.ts</span>
+<span class="add">+ strip standalone visual-artifact markers</span>
+<span class="add">+ ignore markers inside fenced code blocks</span></pre>
+
+        <h2>Copy reviewer prompt</h2>
+        <textarea id="prompt" aria-label="Copy reviewer prompt">Review the rich artifact chat rendering. Focus on sandbox trust boundaries, marker parsing, whitespace preservation, and whether a sales engineer can explain the buyer value from the artifact card alone.</textarea>
+        <button id="copy" type="button">Copy reviewer prompt</button>
+      </section>
+    </div>
+  </main>
+  <script>
+    const copy = document.getElementById("copy");
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(document.getElementById("prompt").value);
+        copy.textContent = "Copied";
+      } catch {
+        copy.textContent = "Clipboard unavailable";
+      }
+      window.setTimeout(() => { copy.textContent = "Copy reviewer prompt"; }, 1200);
+    });
+  </script>
+</body>
+</html>
