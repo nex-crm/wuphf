@@ -33,13 +33,12 @@
     .event { border-left: 3px solid #245b4f; padding: 0 0 16px 14px; }
     .event strong { display: block; margin-bottom: 4px; }
     .impact { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .impact div, .owner { background: #f8fafc; border: 1px solid #e4e9f0; border-radius: 7px; padding: 12px; }
-    .owners { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .impact div { background: #f8fafc; border: 1px solid #e4e9f0; border-radius: 7px; padding: 12px; }
     textarea { width: 100%; min-height: 136px; resize: vertical; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; font: inherit; line-height: 1.5; }
     svg { width: 100%; height: auto; display: block; }
     @media (max-width: 800px) {
       main { padding: 18px; }
-      header, .status, .impact, .owners { display: grid; grid-template-columns: 1fr; }
+      header, .status, .impact { display: grid; grid-template-columns: 1fr; }
       .timeline { grid-template-columns: 1fr; }
       .event { border-left: 0; border-top: 3px solid #245b4f; padding: 10px 0 14px; }
     }
