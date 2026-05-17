@@ -1,7 +1,12 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { MAX_SANITIZED_JSON_NODES, MAX_SANITIZED_STRING_BYTES } from "../src/budgets.ts";
-import { SanitizedString, type SanitizedStringPolicy } from "../src/sanitized-string.ts";
+import {
+  MOAT_DISALLOWED_RE,
+  SanitizedString,
+  type SanitizedStringOptions,
+  type SanitizedStringPolicy,
+} from "../src/sanitized-string.ts";
 
 type JsonPrimitive = null | boolean | number | string;
 type JsonValue = JsonPrimitive | JsonValue[] | JsonRecord;
@@ -246,6 +251,265 @@ describe("SanitizedString", () => {
     expect(SanitizedString.fromUnknown("a\u200db", { policy: "allow-zwj" }).value).toBe("a\u200db");
   });
 
+  describe("allowlist policy", () => {
+    const opts = { policy: "allowlist" as const };
+
+    it("passes printable ASCII unchanged", () => {
+      expect(SanitizedString.fromUnknown("hello world", opts).value).toBe("hello world");
+      expect(SanitizedString.fromUnknown("a1b2_c-d.e", opts).value).toBe("a1b2_c-d.e");
+    });
+
+    it("preserves tab, newline, and carriage return (allowed whitespace, not invisibles)", () => {
+      // U+0009/000A/000D are `Cc` and match `\p{C}`, but the moat must not
+      // strip them — they carry the line structure a signed multi-line
+      // payload depends on. Every other policy keeps them; allowlist must too.
+      expect(SanitizedString.fromUnknown("a\tb\nc\rd", opts).value).toBe("a\tb\nc\rd");
+      expect(SanitizedString.fromUnknown("line one\nline two", opts).value).toBe(
+        "line one\nline two",
+      );
+    });
+
+    it("passes common non-Latin scripts (letters, marks, numbers, punctuation)", () => {
+      // Hiragana, Katakana, Han, Hangul, Cyrillic, Arabic, Devanagari, Greek.
+      expect(SanitizedString.fromUnknown("\u3053\u3093\u306b\u3061\u306f", opts).value).toBe(
+        "\u3053\u3093\u306b\u3061\u306f",
+      );
+      expect(SanitizedString.fromUnknown("\u5317\u4eac", opts).value).toBe("\u5317\u4eac");
+      expect(SanitizedString.fromUnknown("\uc548\ub155", opts).value).toBe("\uc548\ub155");
+      expect(SanitizedString.fromUnknown("\u041f\u0440\u0438\u0432\u0435\u0442", opts).value).toBe(
+        "\u041f\u0440\u0438\u0432\u0435\u0442",
+      );
+      expect(SanitizedString.fromUnknown("\u0645\u0631\u062d\u0628\u0627", opts).value).toBe(
+        "\u0645\u0631\u062d\u0628\u0627",
+      );
+      expect(SanitizedString.fromUnknown("\u0928\u092e\u0938\u094d\u0924\u0947", opts).value).toBe(
+        "\u0928\u092e\u0938\u094d\u0924\u0947",
+      );
+      expect(
+        SanitizedString.fromUnknown("\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1", opts).value,
+      ).toBe("\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1");
+    });
+
+    it("passes emoji (without ZWJ, since ZWJ is Cf)", () => {
+      expect(SanitizedString.fromUnknown("\ud83d\ude80", opts).value).toBe("\ud83d\ude80");
+      expect(SanitizedString.fromUnknown("\ud83d\ude00\u2b50\ud83d\udcaf", opts).value).toBe(
+        "\ud83d\ude00\u2b50\ud83d\udcaf",
+      );
+    });
+
+    it("strips soft hyphen U+00AD (Cf \u2014 accepted by default policy, rejected by allowlist)", () => {
+      // U+00AD is Cf "Format". The default denylist does not strip it; the
+      // allowlist moat does. This is the canonical example of the policy
+      // adding coverage beyond strip-zero-width.
+      expect(SanitizedString.fromUnknown("foo\u00adbar").value).toBe("foo\u00adbar");
+      expect(SanitizedString.fromUnknown("foo\u00adbar", opts).value).toBe("foobar");
+    });
+
+    it("strips private-use code points (Co \u2014 never legitimate text)", () => {
+      // U+E000 sits in the BMP Private Use Area. Apps sometimes use these for
+      // app-specific glyphs but the rendered text contract MUST NOT accept
+      // them \u2014 they are invisible-on-most-systems and trivially used for
+      // tracking / homograph attacks.
+      expect(SanitizedString.fromUnknown("a\ue000b", opts).value).toBe("ab");
+      // U+F8FF is the Apple logo PUA point.
+      expect(SanitizedString.fromUnknown("a\uf8ffb", opts).value).toBe("ab");
+      // Supplementary Private Use Area-A (U+F0000) and -B (U+100000) are
+      // astral Co code points. The moat iterates by code point, so an astral
+      // regression would not be caught by the BMP cases above.
+      expect(SanitizedString.fromUnknown(`a${String.fromCodePoint(0xf0000)}b`, opts).value).toBe(
+        "ab",
+      );
+      expect(SanitizedString.fromUnknown(`a${String.fromCodePoint(0x100000)}b`, opts).value).toBe(
+        "ab",
+      );
+    });
+
+    it("strips every bidi/format control, not just the U+202A-E and U+2066-9 ranges", () => {
+      // U+061C ARABIC LETTER MARK is Cf and is NOT in the default denylist.
+      // Allowlist must catch it.
+      expect(SanitizedString.fromUnknown("a\u061cb").value).toBe("a\u061cb");
+      expect(SanitizedString.fromUnknown("a\u061cb", opts).value).toBe("ab");
+      // U+200E LEFT-TO-RIGHT MARK is Cf, also not in the default denylist.
+      expect(SanitizedString.fromUnknown("a\u200eb").value).toBe("a\u200eb");
+      expect(SanitizedString.fromUnknown("a\u200eb", opts).value).toBe("ab");
+    });
+
+    it("strips ZWJ (allowlist supersedes allow-zwj)", () => {
+      // allow-zwj is meant to coexist with the default denylist for emoji
+      // sequences. The allowlist contract is stricter \u2014 even under an
+      // explicit `policy: "allowlist"` ZWJ is stripped because it's Cf.
+      expect(SanitizedString.fromUnknown("a\u200db", opts).value).toBe("ab");
+    });
+
+    it("never produces output longer than input (allowlist is purely subtractive after NFKC)", () => {
+      fc.assert(
+        fc.property(sanitizableStringArb, (input) => {
+          const out = SanitizedString.fromUnknown(input, opts).value;
+          // NFKC can shrink (e.g. \ufb01 \u2192 fi is +1 char, but \ufb01 is itself one
+          // code point); after normalization any additional reduction is
+          // strictly removal. The right invariant is: output is a subsequence
+          // of NFKC(input) \u2014 same order, same multiplicity, never inserts,
+          // reorders, or duplicates. Per-character containment alone would
+          // pass for a sanitizer that emitted "ba" or "aa" from "ab".
+          const normalized = [...input.normalize("NFKC")];
+          let cursor = 0;
+          for (const ch of out) {
+            while (cursor < normalized.length && normalized[cursor] !== ch) {
+              cursor += 1;
+            }
+            expect(cursor).toBeLessThan(normalized.length);
+            cursor += 1;
+          }
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+
+    it("is idempotent under repeated allowlist sanitization", () => {
+      fc.assert(
+        fc.property(sanitizableStringArb, (input) => {
+          const once = SanitizedString.fromUnknown(input, opts).value;
+          const twice = SanitizedString.fromUnknown(once, opts).value;
+          expect(twice).toBe(once);
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+
+    it("never lets a Unicode C* code point through, except allowed whitespace", () => {
+      fc.assert(
+        fc.property(sanitizableStringArb, (input) => {
+          const out = SanitizedString.fromUnknown(input, opts).value;
+          // No assigned format, unassigned, private-use, or surrogate code
+          // points should survive. Tab/newline/carriage return are `Cc` but
+          // intentionally-allowed whitespace, so strip them before asserting.
+          // Lone surrogates are already rejected earlier.
+          const withoutAllowedWhitespace = out.replace(/[\t\n\r]/g, "");
+          expect(/\p{C}/u.test(withoutAllowedWhitespace)).toBe(false);
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+
+    it.each([
+      { label: "U+115F HANGUL CHOSEONG FILLER", codePoint: 0x115f },
+      { label: "U+1160 HANGUL JUNGSEONG FILLER", codePoint: 0x1160 },
+      { label: "U+034F COMBINING GRAPHEME JOINER", codePoint: 0x034f },
+      { label: "U+FE0F VARIATION SELECTOR-16", codePoint: 0xfe0f },
+      { label: "U+E0100 VARIATION SELECTOR-17", codePoint: 0xe0100 },
+      { label: "U+17B4 KHMER VOWEL INHERENT AQ", codePoint: 0x17b4 },
+    ])("strips $label — a default-ignorable the denylist + \\p{C} both miss", ({ codePoint }) => {
+      const ch = String.fromCodePoint(codePoint);
+      // Prove the regex distinction: \p{C} alone would NOT catch this.
+      expect(/\p{C}/u.test(ch)).toBe(false);
+      expect(/\p{Default_Ignorable_Code_Point}/u.test(ch)).toBe(true);
+      // Default policy keeps it; the moat strips it.
+      expect(SanitizedString.fromUnknown(`a${ch}b`).value).toBe(`a${ch}b`);
+      expect(SanitizedString.fromUnknown(`a${ch}b`, opts).value).toBe("ab");
+    });
+
+    it("never lets any default-ignorable code point through, except allowed whitespace", () => {
+      fc.assert(
+        fc.property(sanitizableStringArb, (input) => {
+          const out = SanitizedString.fromUnknown(input, opts).value;
+          // Tab/newline/carriage return match `\p{C}` but are intentionally
+          // allowed; strip them before asserting the moat rejected the rest.
+          const withoutAllowedWhitespace = out.replace(/[\t\n\r]/g, "");
+          expect(MOAT_DISALLOWED_RE.test(withoutAllowedWhitespace)).toBe(false);
+        }),
+        { numRuns: MOAT_NUM_RUNS },
+      );
+    });
+  });
+
+  describe("policy validation", () => {
+    it("throws on an unknown policy string instead of silently using the default", () => {
+      // The security-critical failure mode: an untyped caller passes a typo
+      // ("allow-list") and silently gets the weaker default denylist. The
+      // sanitizer must fail closed.
+      expect(() =>
+        SanitizedString.fromUnknown("x", { policy: "allow-list" as SanitizedStringPolicy }),
+      ).toThrow(/unknown policy "allow-list"/);
+      expect(() =>
+        SanitizedString.fromUnknown("x", { policy: "" as SanitizedStringPolicy }),
+      ).toThrow(/unknown policy/);
+    });
+
+    it("throws on a non-object options argument instead of silently using the default", () => {
+      // An untyped caller that passes the policy positionally (a bare
+      // "allowlist" string, or an array) has `.policy` read as `undefined`
+      // and would silently get the weaker default denylist. Fail closed.
+      // `null` is the easy-to-miss case: `typeof null === "object"`, so a
+      // loose object test would let it through. Keep it in the table.
+      for (const malformed of ["allowlist", [], null, 42, true]) {
+        expect(() =>
+          SanitizedString.fromUnknown("x", malformed as unknown as SanitizedStringOptions),
+        ).toThrow(/options must be a plain object/);
+      }
+    });
+
+    it("throws on non-plain-object or prototype-smuggled options instead of downgrading", () => {
+      // A Map / class instance / Object.create(...) carrier passes a loose
+      // `typeof === "object"` test but is not a plain object; its `.policy`
+      // reads as undefined (silent default) or is reachable only through the
+      // prototype chain. Require an Object.prototype/null prototype.
+      const mapOptions = new Map([["policy", "allowlist"]]);
+      expect(() =>
+        SanitizedString.fromUnknown("x", mapOptions as unknown as SanitizedStringOptions),
+      ).toThrow(/options must be a plain object/);
+      const inheritedPolicy = Object.create({ policy: "allowlist" }) as SanitizedStringOptions;
+      expect(() => SanitizedString.fromUnknown("x", inheritedPolicy)).toThrow(
+        /options must be a plain object/,
+      );
+    });
+
+    it("throws on an accessor `policy` instead of running caller code", () => {
+      // An accessor `policy` would execute arbitrary caller code before
+      // sanitization runs. Resolve `policy` only as an own data property.
+      const accessorOptions = {} as SanitizedStringOptions;
+      Object.defineProperty(accessorOptions, "policy", {
+        get() {
+          return "allowlist";
+        },
+        enumerable: true,
+        configurable: true,
+      });
+      expect(() => SanitizedString.fromUnknown("x", accessorOptions)).toThrow(
+        /policy must be an own data property/,
+      );
+    });
+
+    it("accepts a null-prototype options object with an own data policy", () => {
+      // A null-prototype plain object has no prototype-smuggling surface, so
+      // it is a valid carrier; an own data `policy` resolves normally.
+      const nullProtoOptions = Object.create(null) as SanitizedStringOptions;
+      Object.defineProperty(nullProtoOptions, "policy", {
+        value: "allowlist",
+        enumerable: true,
+      });
+      expect(SanitizedString.fromUnknown("a\u00adb", nullProtoOptions).value).toBe("ab");
+    });
+
+    it("throws on a non-string policy instead of silently using the default", () => {
+      expect(() =>
+        SanitizedString.fromUnknown("x", { policy: 1 as unknown as SanitizedStringPolicy }),
+      ).toThrow(/policy must be a string/);
+    });
+
+    it("accepts every declared policy without throwing", () => {
+      const policies: readonly SanitizedStringPolicy[] = [
+        "strip-zero-width",
+        "allow-zwj",
+        "allowlist",
+      ];
+      for (const policy of policies) {
+        expect(SanitizedString.fromUnknown("ok", { policy }).value).toBe("ok");
+      }
+      // Absent policy → default, no throw.
+      expect(SanitizedString.fromUnknown("ok").value).toBe("ok");
+    });
+  });
+
   it.each([
     { left: "e\u0301", right: "\u00e9", expected: "\u00e9" },
     { left: "\u212b", right: "\u00c5", expected: "\u00c5" },
@@ -294,6 +558,29 @@ describe("SanitizedString", () => {
         expect(typeof result).toBe("string");
         expect(parsed).toEqual(expected);
       }),
+      { numRuns: JSON_NUM_RUNS },
+    );
+  });
+
+  it("keeps JSON object output parseable under the allowlist policy", () => {
+    fc.assert(
+      // `jsonObjectArb` is prefiltered with the default policy, so it still
+      // admits objects that only become invalid under allowlist stripping
+      // (e.g. `{ "­": 1, "": 2 }` — both keys sanitize to "" once the
+      // moat strips the soft hyphen, a collision). Re-filter with the same
+      // policy under test so the property only sees inputs the allowlist
+      // contract can actually round-trip.
+      fc.property(
+        jsonObjectArb.filter((input) => canExpectedRoundTripJson(input, "allowlist")),
+        (input) => {
+          const result = SanitizedString.fromUnknown(input, { policy: "allowlist" }).value;
+          const parsed = JSON.parse(result) as JsonValue;
+          const expected = expectedSanitizeJsonValue(projectJson(input), "allowlist");
+
+          expect(typeof result).toBe("string");
+          expect(parsed).toEqual(expected);
+        },
+      ),
       { numRuns: JSON_NUM_RUNS },
     );
   });
@@ -584,9 +871,12 @@ function canExpectedSanitizeText(input: string): boolean {
   }
 }
 
-function canExpectedRoundTripJson(input: JsonRecord): boolean {
+function canExpectedRoundTripJson(
+  input: JsonRecord,
+  policy: SanitizedStringPolicy = "strip-zero-width",
+): boolean {
   try {
-    expectedSanitizeJsonValue(projectJson(input));
+    expectedSanitizeJsonValue(projectJson(input), policy);
     return true;
   } catch {
     return false;
@@ -708,6 +998,20 @@ function isExpectedDisallowedCodePoint(codePoint: number, policy: SanitizedStrin
 
   // Mirrors production: U+180E + U+2060..U+2064 invisible format chars.
   if (codePoint === 0x180e || (codePoint >= 0x2060 && codePoint <= 0x2064)) {
+    return true;
+  }
+
+  // Mirrors production's `allowlist` (moat) branch: strip every `C*` AND
+  // every Default_Ignorable_Code_Point, except the intentionally-allowed
+  // whitespace controls (tab/newline/carriage return). Imports the production
+  // `MOAT_DISALLOWED_RE` directly so the oracle cannot drift from the impl.
+  if (
+    policy === "allowlist" &&
+    codePoint !== 0x09 &&
+    codePoint !== 0x0a &&
+    codePoint !== 0x0d &&
+    MOAT_DISALLOWED_RE.test(String.fromCodePoint(codePoint))
+  ) {
     return true;
   }
 
