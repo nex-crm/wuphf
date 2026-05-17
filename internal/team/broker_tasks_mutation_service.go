@@ -95,6 +95,13 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 	if task == nil {
 		return
 	}
+	// PR-style review-loop actions write reviewState directly; the
+	// reconciler must not overwrite their authoritative value with a
+	// status-derived guess.
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "request_changes", "submit_for_review", "comment", "reject":
+		return
+	}
 	if !taskNeedsStructuredReview(task) {
 		// For new create actions, leave task.reviewState empty so downstream logic
 		// can detect an uninitialized state; other actions or pre-set values
@@ -297,6 +304,9 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		reassignTriggered := false
 		cancelTriggered := false
 		cancelPrevOwner := ""
+		requestChangesTriggered := false
+		rejectTriggered := false
+		submitForReviewTriggered := false
 		beforeStatus := task.status
 		switch action {
 		case "claim", "assign":
@@ -384,6 +394,44 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			task.ReminderAt = ""
 			task.RecheckAt = ""
 			cancelTriggered = true
+		case "request_changes":
+			// PR-like revision loop. Reviewer rejects the current
+			// submission and bounces the task back to its existing
+			// owner with feedback. Owner stays unchanged; status
+			// resets so the owner picks up the rework.
+			task.status = "in_progress"
+			task.reviewState = "changes_requested"
+			task.blocked = false
+			appendDetails = true
+			requestChangesTriggered = true
+		case "submit_for_review":
+			// Explicit "hand off to reviewer" action so executor
+			// agents have a verb that matches PR-review intent
+			// instead of overloading "complete". The Details field
+			// (if present) carries the submitted artifact (code,
+			// copy, plan) which we capture below as a FeedbackItem
+			// so it shows up in the unified Inbox Discussion thread.
+			task.status = "review"
+			task.reviewState = "ready_for_review"
+			submitForReviewTriggered = true
+		case "comment":
+			// Append-only comment with no state change. Used by both
+			// humans and agents to leave PR-style notes on a task
+			// before anyone decides to approve / request changes /
+			// reject. The actual append happens below via the
+			// appendDetails branch.
+			appendDetails = true
+		case "reject":
+			// Terminal "this work cannot land" outcome. Distinct from
+			// block (recoverable, waiting on upstream) and from
+			// request_changes (revise + resubmit). LifecycleStateRejected
+			// keeps Blocked=true so unblockDependentsLocked treats the
+			// upstream as unresolved and downstream tasks STAY blocked.
+			if err := b.applyLifecycleStateLocked(task, LifecycleStateRejected); err != nil {
+				return TaskResponse{}, taskMutationError(TaskMutationInvalid, err.Error(), err)
+			}
+			appendDetails = true
+			rejectTriggered = true
 		default:
 			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "unknown action", nil)
 		}
@@ -468,6 +516,28 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		if cancelTriggered {
 			b.postTaskCancelNotificationsLocked(actor, task, cancelPrevOwner)
+		}
+		if requestChangesTriggered {
+			feedback := strings.TrimSpace(body.Details)
+			b.postTaskRequestChangesNotificationsLocked(actor, task, feedback)
+			b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, feedback)
+		}
+		if action == "comment" {
+			b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, strings.TrimSpace(body.Details))
+		}
+		if submitForReviewTriggered {
+			// Capture the submitted artifact (code, copy, plan) into
+			// the Decision Packet's feedback thread so reviewers see
+			// the exact submission inline in the unified Inbox.
+			body := strings.TrimSpace(body.Details)
+			if body != "" {
+				b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, "📤 Submitted for review:\n"+body)
+			}
+		}
+		if rejectTriggered {
+			feedback := strings.TrimSpace(body.Details)
+			b.postTaskRejectedNotificationsLocked(actor, task, feedback)
+			b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, feedback)
 		}
 		if err := b.saveLocked(); err != nil {
 			rollbackTask()

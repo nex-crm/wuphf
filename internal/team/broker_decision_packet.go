@@ -855,6 +855,17 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 			b.writeWikiPromotionLocked(taskID, *packet)
 			b.broadcastDecisionLocked(taskID, *packet)
 		}
+		if action == RecordDecisionRequestChanges {
+			// Mirror the agent-side path: when a human clicks
+			// "Request changes" in the unified Inbox, broadcast a
+			// channel message tagging the task owner with the
+			// reviewer feedback so they wake up and revise. The
+			// task lookup happens via findTaskByIDLocked so we can
+			// pull the current owner inside the lock.
+			if task := b.findTaskByIDLocked(taskID); task != nil {
+				b.postTaskRequestChangesNotificationsLocked(actorSlug, task, trimmedComment)
+			}
+		}
 		return nil
 	}(); err != nil {
 		return err
@@ -1038,6 +1049,30 @@ func (b *Broker) writeWikiPromotionLocked(taskID string, packet DecisionPacket) 
 			log.Printf("broker: wiki promotion for task %q failed: %v", taskID, err)
 		}
 	}()
+}
+
+// AppendPacketFeedbackLocked appends a FeedbackItem to a task's
+// DecisionPacket without changing any lifecycle state. Used by the
+// PR-style comment action so humans and agents can leave notes on a
+// task that show up in the unified Inbox detail thread before any
+// approve / request_changes decision is made.
+//
+// Caller holds b.mu.
+func (b *Broker) AppendPacketFeedbackLocked(taskID, author, body string) {
+	if b == nil {
+		return
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return
+	}
+	packet := b.getOrInitPacketLocked(taskID)
+	packet.Spec.Feedback = append(packet.Spec.Feedback, FeedbackItem{
+		AppendedAt: time.Now().UTC(),
+		Author:     strings.TrimSpace(author),
+		Body:       body,
+	})
+	b.persistDecisionPacketLocked(taskID, *packet)
 }
 
 // broadcastDecisionLocked posts a system message to the task's

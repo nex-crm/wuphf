@@ -239,3 +239,60 @@ export async function postDecision(
   if (trimmed) body.comment = trimmed;
   return post(`/tasks/${encodeURIComponent(taskId)}/decision`, body);
 }
+
+/**
+ * POST a PR-style comment on a task without making a decision. The
+ * broker appends the body as a FeedbackItem on the task's Decision
+ * Packet so it shows up in the unified Inbox discussion thread for
+ * other humans and agents to react to. State does not change.
+ *
+ * In mock mode this is a no-op resolved promise so the button remains
+ * clickable in the screenshot harness without spinning up a broker.
+ */
+export async function postTaskComment(
+  taskId: string,
+  _channel: string,
+  body: string,
+): Promise<{ taskId: string; status: string; author: string }> {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    throw new Error("comment body required");
+  }
+  if (USE_MOCKS) {
+    return Promise.resolve({
+      taskId,
+      status: "comment-mock",
+      author: "human",
+    });
+  }
+  return post(`/tasks/${encodeURIComponent(taskId)}/comment`, {
+    body: trimmed,
+  });
+}
+
+/**
+ * POST a terminal Reject on a task. Distinct from `block` (recoverable
+ * waiting on upstream) and from `request_changes` (revise + resubmit).
+ * After reject, downstream tasks that depend on this task STAY blocked
+ * permanently because the work did not land.
+ *
+ * Reject runs through the task mutation endpoint (POST /tasks with
+ * action=reject) rather than /tasks/{id}/decision so the lifecycle
+ * transition uses the same code path as the agent-side reject path.
+ */
+export async function postTaskReject(
+  taskId: string,
+  comment: string,
+): Promise<{ taskId: string; action: string; status: string }> {
+  const trimmed = comment.trim();
+  if (USE_MOCKS) {
+    return Promise.resolve({ taskId, action: "reject", status: "recorded-mock" });
+  }
+  return post(`/tasks`, {
+    action: "reject",
+    id: taskId,
+    channel: "general",
+    details: trimmed,
+    created_by: "human",
+  });
+}

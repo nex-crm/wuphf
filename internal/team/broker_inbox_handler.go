@@ -107,6 +107,9 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			case "decision":
 				b.handleTaskDecision(w, r, actor, taskID)
 				return
+			case "comment":
+				b.handleTaskComment(w, r, actor, taskID)
+				return
 			}
 		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -293,6 +296,67 @@ func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, acto
 		"taskId": id,
 		"action": action,
 		"status": "recorded",
+	})
+}
+
+// handleTaskComment serves POST /tasks/{id}/comment. Body shape:
+//
+//	{"body": "<PR-style comment, no state change>"}
+//
+// Uses the auth-resolved actor so humans appear under their session
+// slug ("human" by default) instead of the broker default "unknown".
+// The append is purely additive — no lifecycle transition, no broadcast.
+// Mirrors a GitHub PR review comment that does not approve or request
+// changes.
+func (b *Broker) handleTaskComment(w http.ResponseWriter, r *http.Request, actor requestActor, id string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
+		return
+	}
+	var body struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return
+	}
+	trimmed := strings.TrimSpace(body.Body)
+	if trimmed == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body required"})
+		return
+	}
+	b.mu.Lock()
+	task := b.findTaskByIDLocked(id)
+	if task == nil {
+		b.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	reviewers := append([]string(nil), task.Reviewers...)
+	b.mu.Unlock()
+	if !taskAccessAllowed(actor, reviewers) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	authorSlug := strings.TrimSpace(actor.Slug)
+	if actor.Kind == requestActorKindBroker {
+		authorSlug = "owner"
+	}
+	if authorSlug == "" {
+		authorSlug = "human"
+	}
+	b.mu.Lock()
+	b.AppendPacketFeedbackLocked(id, authorSlug, trimmed)
+	b.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]string{
+		"taskId": id,
+		"status": "recorded",
+		"author": authorSlug,
 	})
 }
 

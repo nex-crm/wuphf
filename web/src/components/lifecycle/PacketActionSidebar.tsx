@@ -16,6 +16,20 @@ interface PacketActionSidebarProps {
   onRequestChanges: (comment?: string) => void;
   onDefer: (comment?: string) => void;
   onBlock: (comment?: string) => void;
+  /**
+   * Optional comment-only handler. When provided, a "Comment" button
+   * appears alongside the decision actions; pressing it posts the
+   * comment as a FeedbackItem to the task without transitioning state.
+   * Mirrors a PR review-comment that does not approve or request changes.
+   */
+  onComment?: (body: string) => void | Promise<void>;
+  /**
+   * Optional terminal-reject handler. When provided, a "Reject" button
+   * appears alongside the other decision actions; pressing it posts a
+   * terminal rejection (downstream dependents stay blocked, because
+   * the work did not land).
+   */
+  onReject?: (comment: string) => void | Promise<void>;
   onOpenInWorktree: () => void;
 }
 
@@ -39,12 +53,27 @@ export function PacketActionSidebar({
   onRequestChanges,
   onDefer,
   onBlock,
+  onComment,
+  onReject,
   onOpenInWorktree,
 }: PacketActionSidebarProps) {
   const [comment, setComment] = useState("");
   const trimmedComment = comment.trim();
   const submit = (callback: (comment?: string) => void) => {
     callback(trimmedComment ? trimmedComment : undefined);
+    setComment("");
+  };
+  const submitComment = () => {
+    if (!onComment || trimmedComment.length === 0) return;
+    void onComment(trimmedComment);
+    setComment("");
+  };
+  const submitReject = () => {
+    if (!onReject) return;
+    // Reject without a reason is rude — require the textarea to be
+    // non-empty before firing the terminal action.
+    if (trimmedComment.length === 0) return;
+    void onReject(trimmedComment);
     setComment("");
   };
   const lockedTooltip = isDecisionLocked ? "Wait for review state" : undefined;
@@ -82,6 +111,22 @@ export function PacketActionSidebar({
         rows={3}
       />
       <div className="packet-actions">
+        {onComment ? (
+          <button
+            type="button"
+            className="packet-action packet-action--quiet"
+            onClick={submitComment}
+            disabled={isDecisionLocked || trimmedComment.length === 0}
+            title={
+              trimmedComment.length === 0
+                ? "Type something in the comment box first"
+                : lockedTooltip
+            }
+            data-testid="packet-comment-submit"
+          >
+            Comment <span className="kbd">c</span>
+          </button>
+        ) : null}
         <button
           type="button"
           className="packet-action packet-action--approve"
@@ -121,6 +166,22 @@ export function PacketActionSidebar({
         >
           Block <span className="kbd">b</span>
         </button>
+        {onReject ? (
+          <button
+            type="button"
+            className="packet-action packet-action--danger"
+            onClick={submitReject}
+            disabled={isDecisionLocked || trimmedComment.length === 0}
+            title={
+              trimmedComment.length === 0
+                ? "Reject needs a reason — type one in the comment box first"
+                : "Reject is terminal — downstream dependents stay blocked"
+            }
+            data-testid="packet-reject-submit"
+          >
+            Reject <span className="kbd">x</span>
+          </button>
+        ) : null}
         <button
           type="button"
           className="packet-action packet-action--quiet"

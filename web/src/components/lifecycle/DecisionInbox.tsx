@@ -22,6 +22,10 @@ import {
   updateReviewState,
 } from "../../api/notebook";
 import type { InboxItem, InboxItemKind } from "../../lib/types/inbox";
+import {
+  SEV_ORDER,
+  SEVERITY_TOKENS,
+} from "../../lib/types/lifecycle";
 import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 import { RequestItem } from "./RequestItem";
 
@@ -311,15 +315,21 @@ function MailRow({
 }
 
 function DetailPane({ item }: { item: InboxItem }) {
-  // Tasks in decision state render the full DecisionPacketRoute
-  // (3-pane decision UI). Other states render a lightweight task
-  // summary using the row data — there's nothing for the user to
-  // decide, so a fetch for the full packet would return a 404 and
-  // a cold error. Request / review bodies get our header bar above
-  // the embedded surface.
+  // Tasks in decision / review / changes_requested / approved state
+  // render the full DecisionPacketRoute (3-pane PR-style UI with
+  // discussion thread, comment composer, and action sidebar). Other
+  // states (intake / ready / running / blocked_on_pr_merge) render a
+  // lightweight task summary because they have no packet yet.
   if (item.kind === "task") {
-    const state = item.task?.state;
-    if (state === "decision") {
+    const state = item.task?.state ?? "";
+    const showFullPacket =
+      state === "decision" ||
+      state === "review" ||
+      state === "changes_requested" ||
+      state === "approved" ||
+      state === "rejected" ||
+      state === "blocked_on_pr_merge";
+    if (showFullPacket) {
       return (
         <main
           className="inbox-detail-pane inbox-detail-pane--task"
@@ -445,6 +455,8 @@ function stateExplainer(state: string): string {
       return "You asked for changes. The owner agent is iterating.";
     case "approved":
       return "This task was approved. No further action needed.";
+    case "rejected":
+      return "This task was rejected. The work will not land. Downstream tasks stay blocked.";
     default:
       return "Decision details aren't available for this task yet.";
   }
