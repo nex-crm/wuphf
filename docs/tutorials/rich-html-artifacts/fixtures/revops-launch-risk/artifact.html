@@ -30,7 +30,8 @@
     .risk.med { color: #9a640c; }
     .risk.low { color: #26724e; }
     .controls { display: grid; gap: 12px; }
-    label { display: grid; gap: 6px; font-size: 13px; color: #48556a; }
+    .control { display: grid; gap: 6px; }
+    label { font-size: 13px; color: #48556a; }
     input[type="range"] { width: 100%; accent-color: #2764d8; }
     .score { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; margin: 16px 0; }
     .dial { width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(#2764d8 var(--score, 56%), #e8edf5 0); color: #13213b; font-size: 26px; font-weight: 800; }
@@ -98,15 +99,24 @@
       <section>
         <h2>Risk Tuning</h2>
         <div class="controls">
-          <label for="pricing">Pricing severity <input id="pricing" type="range" min="0" max="100" value="82"></label>
-          <label for="support">Support readiness <input id="support" type="range" min="0" max="100" value="58"></label>
-          <label for="sales">Sales confidence <input id="sales" type="range" min="0" max="100" value="64"></label>
+          <div class="control">
+            <label for="pricing">Pricing severity</label>
+            <input id="pricing" type="range" min="0" max="100" value="82">
+          </div>
+          <div class="control">
+            <label for="support">Support readiness</label>
+            <input id="support" type="range" min="0" max="100" value="58">
+          </div>
+          <div class="control">
+            <label for="sales">Sales confidence</label>
+            <input id="sales" type="range" min="0" max="100" value="64">
+          </div>
         </div>
         <div class="score">
-          <div id="dial" class="dial" style="--score: 68%">68</div>
+          <div id="dial" class="dial" style="--score: 68%" aria-live="polite" aria-atomic="true">68</div>
           <div class="decision">
-            <strong id="decisionTitle">Hold for mitigation</strong>
-            <p id="decisionCopy">Launch can proceed only after pricing has an approved fallback.</p>
+            <strong id="decisionTitle" aria-live="polite">Hold for mitigation</strong>
+            <p id="decisionCopy" aria-live="polite">Launch can proceed only after pricing has an approved fallback.</p>
           </div>
         </div>
         <button type="button" id="copy">Copy mitigation prompt</button>
