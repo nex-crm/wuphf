@@ -32,13 +32,15 @@ import {
 // requires the moat invariant (e.g. the branch-12 cosign codec) MUST
 // re-sanitize at its own trust boundary with an explicit `allowlist` policy
 // rather than trusting a passed-in `SanitizedString`.
-export type SanitizedStringPolicy = "strip-zero-width" | "allow-zwj" | "allowlist";
 
-const SANITIZED_STRING_POLICIES: ReadonlySet<string> = new Set<SanitizedStringPolicy>([
-  "strip-zero-width",
-  "allow-zwj",
-  "allowlist",
-]);
+// Single source of truth for the closed policy domain: the value tuple drives
+// both the type and the runtime set, so a policy added to one cannot be
+// silently missing from the other.
+const SANITIZED_STRING_POLICY_VALUES = ["strip-zero-width", "allow-zwj", "allowlist"] as const;
+
+export type SanitizedStringPolicy = (typeof SANITIZED_STRING_POLICY_VALUES)[number];
+
+const SANITIZED_STRING_POLICIES: ReadonlySet<string> = new Set(SANITIZED_STRING_POLICY_VALUES);
 
 export interface SanitizedStringOptions {
   readonly policy?: SanitizedStringPolicy | undefined;
@@ -46,10 +48,12 @@ export interface SanitizedStringOptions {
 
 // `SanitizedStringOptions` is a compile-time type only; an untyped JS caller
 // (or a config/test fixture) can pass a malformed shape and — without these
-// guards — silently get the weaker default denylist instead of the moat. Two
-// silent-downgrade paths must fail closed, not fall through:
-//  - a non-object second argument (a bare `"allowlist"` string, `[]`, etc.):
-//    `.policy` reads as `undefined`, so the default policy applies;
+// guards — silently get the weaker default denylist instead of the moat.
+// Every silent-downgrade path must fail closed, not fall through:
+//  - a non-object / array / non-plain-object carrier (a bare `"allowlist"`
+//    string, `[]`, a `Map`, a class instance) whose `.policy` reads as
+//    `undefined` or is reachable only through the prototype chain;
+//  - an inherited or accessor `policy` (e.g. a polluted `Object.prototype`);
 //  - a `{ policy: "allow-list" }` typo or a non-string `policy`.
 // For a security boundary that must fail closed, every one of these is an
 // error, not a fall-through. Called once at the `fromUnknown` entry point.
@@ -57,10 +61,28 @@ function resolveSanitizedStringPolicy(options: SanitizedStringOptions): Sanitize
   if (typeof options !== "object" || options === null || Array.isArray(options)) {
     throw new Error("SanitizedString: options must be a plain object");
   }
+  // A `Map`, a class instance, or `Object.create(proto)` all pass the check
+  // above yet are not plain objects. Require an `Object.prototype` or null
+  // prototype so a `policy` cannot be smuggled in through the prototype chain.
+  const optionsProto: unknown = Object.getPrototypeOf(options);
+  if (optionsProto !== Object.prototype && optionsProto !== null) {
+    throw new Error("SanitizedString: options must be a plain object");
+  }
 
+  // Read `policy` only as an OWN data property. An inherited `policy` (a
+  // polluted `Object.prototype.policy`) would silently change the policy
+  // process-wide; an accessor `policy` would run arbitrary caller code before
+  // sanitization. Both must fail closed, not fall through.
+  if (!Object.hasOwn(options, "policy")) {
+    return "strip-zero-width";
+  }
+  const policyDescriptor = Object.getOwnPropertyDescriptor(options, "policy");
+  if (policyDescriptor === undefined || "get" in policyDescriptor || "set" in policyDescriptor) {
+    throw new Error("SanitizedString: policy must be an own data property");
+  }
   // Typed as `SanitizedStringPolicy | undefined`, but an untyped caller can
   // smuggle any runtime value in here — widen to `unknown` and re-check.
-  const rawPolicy: unknown = options.policy;
+  const rawPolicy: unknown = policyDescriptor.value;
   if (rawPolicy === undefined) {
     return "strip-zero-width";
   }
@@ -367,10 +389,10 @@ function sanitizeJsonObject(
 
       const sanitizedKey = sanitizeText(rawKey, options);
       if (FORBIDDEN_KEYS.has(sanitizedKey)) {
-        throw new Error(`SanitizedString: forbidden key "${sanitizedKey}"`);
+        throw new Error(`SanitizedString: forbidden key "${sanitizedKey}" at ${path}`);
       }
       if (Object.hasOwn(out, sanitizedKey)) {
-        throw new Error(`SanitizedString: sanitized key collision on "${sanitizedKey}"`);
+        throw new Error(`SanitizedString: sanitized key collision at ${path} on "${sanitizedKey}"`);
       }
 
       const child: unknown = descriptor.value;
