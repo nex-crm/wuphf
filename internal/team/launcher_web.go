@@ -134,15 +134,25 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		return fmt.Errorf("web UI failed to start: %w\n\nIs port %d already in use? Try: wuphf --web-port %d", err, webPort, webPort+1)
 	}
 
-	// Default path: headless `claude --print` per turn. Anthropic re-sanctioned
-	// this invocation (OpenClaw policy note, 2026-04), so it runs on the user's
-	// normal subscription quota — no separate extra-usage quota is charged on
-	// top. The legacy interactive pane-per-agent mode remains reachable via
-	// trySpawnWebAgentPanes as an internal fallback primitive, but is not
-	// invoked at startup.
+	// Default for claude-code: spawn an interactive tmux pane per agent so
+	// the user can attach and watch the real Claude TUI (tools, thinking,
+	// confirmations) for any agent at any time. TrySpawnWebAgentPanes
+	// self-guards on UsesPaneRuntime() (Codex/OpenCode/MLX runtimes skip
+	// this entirely), on visible-member count (blank-slate launches skip
+	// until onboarding adds members), and on tmux availability. Any failure
+	// (tmux missing, terminal too small, dead pane on spawn) flips the agent
+	// back to headless `claude --print` dispatch via the failedPaneSlugs /
+	// paneBackedAgents=false fallback paths already wired into the targeter.
+	//
+	// Anthropic re-sanctioned the `claude --print` invocation (OpenClaw
+	// policy note, 2026-04), so the headless fallback still runs on the
+	// user's normal subscription quota with no extra-usage charge.
+	l.panes().TrySpawnWebAgentPanes()
 
 	// Headless context is used for codex runtime, default dispatch, and
-	// per-turn operations that don't fit a long-lived pane session.
+	// per-turn operations that don't fit a long-lived pane session — and
+	// for every claude-code agent when the pane spawn above failed or
+	// declined.
 	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
 	l.resumeInFlightWork()
 

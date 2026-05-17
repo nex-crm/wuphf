@@ -200,11 +200,17 @@ func (p *paneLifecycle) DetectDeadPanesAfterSpawn(members []officeMember) {
 	}
 }
 
-// TrySpawnWebAgentPanes attempts to spawn the full pane-backed
-// fallback session (PLAN.md §C5e). On success flips the
-// paneBackedFlag *bool true so the targeter routes through pane
-// dispatch. On failure, calls reportPaneFallback which prints the
-// stderr banner and posts the broker-side advisory.
+// TrySpawnWebAgentPanes attempts to spawn the pane-backed session
+// (PLAN.md §C5e). On success flips the paneBackedFlag *bool true so
+// the targeter routes through pane dispatch. On failure, calls
+// reportPaneFallback which prints the stderr banner and posts the
+// broker-side advisory — the launcher continues in headless
+// `claude --print` mode for that agent (or for every agent, when the
+// failure was session-wide).
+//
+// No-op when there are zero visible members (blank-slate web launches
+// before onboarding finishes); reconfiguration after the user adds
+// agents picks up the panes via launcher_reconfigure.go.
 func (p *paneLifecycle) TrySpawnWebAgentPanes() {
 	if p.deps.postSystemMessage == nil {
 		// Production wires postSystemMessage from a non-nil broker;
@@ -212,6 +218,11 @@ func (p *paneLifecycle) TrySpawnWebAgentPanes() {
 		return
 	}
 	if p.deps.usesPaneRuntime != nil && !p.deps.usesPaneRuntime() {
+		return
+	}
+	if p.deps.visibleOfficeMembers != nil && len(p.deps.visibleOfficeMembers()) == 0 {
+		// Blank-slate launch: no agents to host yet. Skip rather than
+		// open an empty tmux session with only the placeholder pane.
 		return
 	}
 	if err := p.TmuxAvailable(); err != nil {
@@ -239,7 +250,7 @@ func (p *paneLifecycle) TrySpawnWebAgentPanes() {
 		*p.deps.paneBackedFlag = true
 	}
 	go p.DetectDeadPanesAfterSpawn(append(p.deps.visibleOfficeMembers(), p.deps.overflowOfficeMembers()...))
-	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (pane-backed fallback active)\n", p.sessionName)
+	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (pane-backed mode active)\n", p.sessionName)
 }
 
 // PrimeVisibleAgents waits for visible agent panes to clear claude's

@@ -238,6 +238,74 @@ func TestTrySpawnWebAgentPanes_HeadlessRuntimeNoOp(t *testing.T) {
 	}
 }
 
+// TestTrySpawnWebAgentPanes_BlankSlateNoOp guards the early-return that
+// prevents an empty tmux session (only the placeholder pane, no agent
+// panes) on blank-slate web launches where the broker has zero members
+// yet. Before this guard, LaunchWeb's pane-default call would create a
+// half-built session and flip paneBackedFlag=true, breaking subsequent
+// reconfigure paths and the capture loops.
+func TestTrySpawnWebAgentPanes_BlankSlateNoOp(t *testing.T) {
+	fake := newFakeTmuxRunner()
+	setTmuxRunnerForTest(t, fake)
+
+	flag := false
+	posted := 0
+	pl := newPaneLifecycleWithDeps("wuphf-team", paneLifecycleDeps{
+		postSystemMessage:    func(channel, body, kind string) { posted++ },
+		usesPaneRuntime:      func() bool { return true },
+		visibleOfficeMembers: func() []officeMember { return nil },
+		paneBackedFlag:       &flag,
+	})
+	pl.TrySpawnWebAgentPanes()
+
+	if got := len(fake.calls); got != 0 {
+		t.Errorf("expected zero tmux calls when there are no visible members, got %d (calls=%v)", got, fake.calls)
+	}
+	if flag {
+		t.Errorf("paneBackedFlag should stay false when blank-slate; got true")
+	}
+	if posted != 0 {
+		t.Errorf("expected zero broker posts on blank-slate skip, got %d", posted)
+	}
+}
+
+// TestTrySpawnWebAgentPanes_HappyPathFlipsFlag is the new default's
+// load-bearing contract: with claude-code + at least one visible
+// member + a working tmux runner, TrySpawnWebAgentPanes flips
+// paneBackedFlag=true so subsequent dispatch routes through the live
+// panes instead of falling through to headless `claude --print`. Before
+// the LaunchWeb wiring change this code path was reachable only via the
+// reconfigure flow.
+func TestTrySpawnWebAgentPanes_HappyPathFlipsFlag(t *testing.T) {
+	fake := newFakeTmuxRunner()
+	fake.outputs["split-window"] = []byte("ok")
+	setTmuxRunnerForTest(t, fake)
+
+	flag := false
+	pl := newPaneLifecycleWithDeps("wuphf-team", paneLifecycleDeps{
+		cwd:                   "/repo",
+		postSystemMessage:     func(channel, body, kind string) {},
+		usesPaneRuntime:       func() bool { return true },
+		visibleOfficeMembers:  func() []officeMember { return []officeMember{{Slug: "ceo"}} },
+		overflowOfficeMembers: func() []officeMember { return nil },
+		agentPaneTargets:      func() map[string]notificationTarget { return nil },
+		isOneOnOne:            func() bool { return false },
+		claudeCommand:         func(slug, prompt string) (string, error) { return "claude --slug=" + slug, nil },
+		buildPrompt:           func(slug string) string { return "" },
+		agentName:             func(slug string) string { return slug },
+		recordFailure:         func(slug, reason string) { t.Fatalf("unexpected recordFailure for %s: %s", slug, reason) },
+		paneBackedFlag:        &flag,
+	})
+	pl.TrySpawnWebAgentPanes()
+
+	if !flag {
+		t.Errorf("paneBackedFlag = false after successful spawn, want true (dispatch would stay headless)")
+	}
+	if len(fake.callsFor("new-session")) == 0 {
+		t.Errorf("expected at least one new-session call on happy path; calls = %v", fake.calls)
+	}
+}
+
 // countingRunner wraps a fakeTmuxRunner to inject a one-shot failure on
 // the Nth call to a specific tmux subcommand. Used by the
 // "additional split failure" test where we need success on the first
