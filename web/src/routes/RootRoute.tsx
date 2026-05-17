@@ -135,6 +135,17 @@ const DecisionPacketRoute = lazy(() =>
 );
 const CitedAnswer = lazy(() => import("../components/wiki/CitedAnswer"));
 const Wiki = lazy(() => import("../components/wiki/Wiki"));
+// Phase 3 — Issues surface.
+const IssuesList = lazy(() =>
+  import("../components/lifecycle/IssuesList").then((m) => ({
+    default: m.IssuesList,
+  })),
+);
+const IssueDocumentRoute = lazy(() =>
+  import("../components/lifecycle/IssueDocumentRoute").then((m) => ({
+    default: m.IssueDocumentRoute,
+  })),
+);
 
 function LazyPanelFallback() {
   return (
@@ -364,6 +375,45 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
 }
 
 /**
+ * IssueNewStub — Phase 3 placeholder for /issues/new.
+ * Phase 4 replaces this with the CEO draft writer.
+ * Renders a clear "not implemented yet" surface so `+ New issue` links
+ * don't 404 or silently fail.
+ */
+function IssueNewStub() {
+  return (
+    <div
+      className="app-panel active"
+      data-testid="issue-new-stub"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        flex: 1,
+        gap: 8,
+        padding: 32,
+        color: "var(--text-tertiary)",
+        fontSize: 14,
+      }}
+    >
+      <strong style={{ fontSize: 16, color: "var(--text-secondary)" }}>
+        New issue drafting coming in Phase 4
+      </strong>
+      <p style={{ margin: 0 }}>
+        Issue drafting with CEO will be available soon.
+      </p>
+      <Link
+        to="/issues"
+        style={{ color: "var(--text-secondary)", marginTop: 8 }}
+      >
+        Back to Issues
+      </Link>
+    </div>
+  );
+}
+
+/**
  * InboxRedirect navigates the user from the deprecated /apps/requests
  * and /reviews surfaces to the unified Inbox. Phase 2 collapsed both
  * surfaces into one Decision Inbox; Phase 2b deletes the heavy
@@ -508,6 +558,12 @@ function MainContent() {
       return <DecisionInbox />;
     case "task-decision":
       return <DecisionPacketRoute taskId={route.taskId} />;
+    case "issues-list":
+      return <IssuesList />;
+    case "issue-detail":
+      return <IssueDocumentRoute issueId={route.issueId} />;
+    case "issue-new":
+      return <IssueNewStub />;
     case "unknown":
       // RoutedBody catches root-only matches via isUnmatchedRoute, but
       // useCurrentRoute can also return `unknown` for matched leaves that
@@ -619,6 +675,36 @@ export default function RootRoute() {
   const [inCeoOnboarding, setInCeoOnboarding] = useState(false);
   // onboarding phase from /onboarding/state — set once on boot if available.
   const [bootPhase, setBootPhase] = useState<string | undefined>(undefined);
+
+  // Phase 2 RootRoute redirect gap fix:
+  // When CEO onboarding is active (phase set, not "complete", onboardingV2 on),
+  // redirect any root or /channels/general URL to the CEO DM so the Shell
+  // always shows the CEO conversation regardless of the URL the user landed on.
+  // This is a TanStack-level navigate (not a beforeLoad, because onboarding
+  // state is only known after the /onboarding/state API call in the effect
+  // below). Already-onboarded users (onboardingComplete === true) skip the
+  // whole inCeoOnboarding branch and never hit this redirect.
+  useEffect(() => {
+    if (!(inCeoOnboarding || bootPhase)) return;
+    if (!onboardingV2) return;
+    // Only redirect when the user is on a generic destination (root, general).
+    // Other explicit URLs (e.g. /dm/some-agent) should not be redirected so
+    // deep-links remain functional during onboarding.
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    const onGenericRoute =
+      hash === "" ||
+      hash === "#/" ||
+      hash === "#/channels/general" ||
+      hash.startsWith("#/?");
+    if (onGenericRoute) {
+      void router.navigate({
+        to: "/dm/$agentSlug",
+        params: { agentSlug: "ceo:onboarding" },
+        replace: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inCeoOnboarding, bootPhase, onboardingV2]);
 
   useKeyboardShortcuts();
   useBrokerEvents(apiReady);
