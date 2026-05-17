@@ -140,6 +140,15 @@
   /* Popover shadow — used by the Tier 2 hover peek card. */
   --shadow-popover: 0 8px 24px -8px rgba(0, 0, 0, 0.32);
 
+  /* ─── Phase 2 onboarding preview-state tokens ─── */
+  /* Visual language: dashed border + lavender bg = "this thing is staged,
+     not committed yet." Used by the sidebar preview overlay that shows
+     channels/agents forming as the user answers CEO questions.
+     Spec: docs/specs/onboarding-into-office.md "Design system / token bindings" */
+  --preview-row-bg: var(--accent-bg);
+  --preview-row-border: dashed 1px var(--accent-bg-strong);
+  --preview-row-text: var(--text-secondary);
+
   /* ─── Focus ring ─── */
   /* Single source-of-truth: all interactive elements use this token so
      keyboard navigation is always visible and consistent across themes.
