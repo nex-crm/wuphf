@@ -23,6 +23,7 @@ import {
 } from "../ui/ShredWarning";
 import { showNotice } from "../ui/Toast";
 import { WipeModal } from "../ui/WipeModal";
+import { NexConnectPanel } from "./NexConnectPanel";
 import { ImageGenSection } from "./SettingsApp.imageGen";
 import { Field, KeyField, SaveButton } from "./settings/components";
 import { SECTION_GROUPS } from "./settings/constants";
@@ -923,6 +924,22 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
             value={cfg.workspace_slug ?? ""}
           />
         </Field>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <div style={styles.groupTitle}>Nex</div>
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            margin: "4px 0 0",
+          }}
+        >
+          Nex is a context graph platform for AI agents. Register to enable
+          shared memory, entity briefs, and integrations. Once registered, paste
+          your API key in the API Keys section.
+        </p>
+        <NexConnectPanel />
       </div>
 
       <SaveButton label="Save integration settings" onSave={onSave} />

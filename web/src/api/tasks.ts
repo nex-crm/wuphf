@@ -248,7 +248,10 @@ export interface TaskLogEntry {
   completed_at?: number;
 }
 
-export function listAgentLogTasks(opts?: { limit?: number; agentSlug?: string }) {
+export function listAgentLogTasks(opts?: {
+  limit?: number;
+  agentSlug?: string;
+}) {
   const params: Record<string, string> = {};
   if (opts?.limit) params.limit = String(opts.limit);
   if (opts?.agentSlug) params.agent = opts.agentSlug;

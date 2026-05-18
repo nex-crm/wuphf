@@ -64,6 +64,8 @@ if (typeof document !== "undefined") {
 interface SidebarSectionsState {
   agents: boolean;
   channels: boolean;
+  // Phase 3 — Issues group added between Channels and Tools.
+  issues: boolean;
   apps: boolean;
 }
 
@@ -74,6 +76,7 @@ const _storedSidebarSections = ((): SidebarSectionsState => {
   const def: SidebarSectionsState = {
     agents: true,
     channels: true,
+    issues: true,
     apps: true,
   };
   try {
@@ -83,6 +86,7 @@ const _storedSidebarSections = ((): SidebarSectionsState => {
     return {
       agents: parsed.agents ?? def.agents,
       channels: parsed.channels ?? def.channels,
+      issues: parsed.issues ?? def.issues,
       apps: parsed.apps ?? def.apps,
     };
   } catch {
@@ -133,6 +137,9 @@ export interface AppStore {
   toggleSidebarAgents: () => void;
   sidebarChannelsOpen: boolean;
   toggleSidebarChannels: () => void;
+  /** Phase 3 — Issues group open/closed state. */
+  sidebarIssuesOpen: boolean;
+  toggleSidebarIssues: () => void;
   sidebarAppsOpen: boolean;
   toggleSidebarApps: () => void;
   sidebarCollapsed: boolean;
@@ -258,6 +265,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     persistSidebarSections({
       agents: next,
       channels: get().sidebarChannelsOpen,
+      issues: get().sidebarIssuesOpen,
       apps: get().sidebarAppsOpen,
     });
   },
@@ -268,6 +276,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     persistSidebarSections({
       agents: get().sidebarAgentsOpen,
       channels: next,
+      issues: get().sidebarIssuesOpen,
+      apps: get().sidebarAppsOpen,
+    });
+  },
+  sidebarIssuesOpen: _storedSidebarSections.issues,
+  toggleSidebarIssues: () => {
+    const next = !get().sidebarIssuesOpen;
+    set({ sidebarIssuesOpen: next });
+    persistSidebarSections({
+      agents: get().sidebarAgentsOpen,
+      channels: get().sidebarChannelsOpen,
+      issues: next,
       apps: get().sidebarAppsOpen,
     });
   },
@@ -278,6 +298,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     persistSidebarSections({
       agents: get().sidebarAgentsOpen,
       channels: get().sidebarChannelsOpen,
+      issues: get().sidebarIssuesOpen,
       apps: next,
     });
   },

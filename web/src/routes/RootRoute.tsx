@@ -24,8 +24,8 @@ import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
 import { TypingIndicator } from "../components/messages/TypingIndicator";
-import { SplashScreen } from "../components/onboarding/SplashScreen";
-import { Wizard } from "../components/onboarding/Wizard";
+import { OnboardingDMRoute } from "../components/onboarding/OnboardingDMRoute";
+import { PrePickScreen } from "../components/onboarding/PrePickScreen";
 import { ConfirmHost } from "../components/ui/ConfirmDialog";
 import { ProviderSwitcherHost } from "../components/ui/ProviderSwitcher";
 import { ToastContainer } from "../components/ui/Toast";
@@ -132,6 +132,17 @@ const DecisionPacketRoute = lazy(() =>
 );
 const CitedAnswer = lazy(() => import("../components/wiki/CitedAnswer"));
 const Wiki = lazy(() => import("../components/wiki/Wiki"));
+// Phase 3 — Issues surface.
+const IssuesList = lazy(() =>
+  import("../components/lifecycle/IssuesList").then((m) => ({
+    default: m.IssuesList,
+  })),
+);
+const IssueDocumentRoute = lazy(() =>
+  import("../components/lifecycle/IssueDocumentRoute").then((m) => ({
+    default: m.IssueDocumentRoute,
+  })),
+);
 
 function LazyPanelFallback() {
   return (
@@ -361,6 +372,45 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
 }
 
 /**
+ * IssueNewStub — Phase 3 placeholder for /issues/new.
+ * Phase 4 replaces this with the CEO draft writer.
+ * Renders a clear "not implemented yet" surface so `+ New issue` links
+ * don't 404 or silently fail.
+ */
+function IssueNewStub() {
+  return (
+    <div
+      className="app-panel active"
+      data-testid="issue-new-stub"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        flex: 1,
+        gap: 8,
+        padding: 32,
+        color: "var(--text-tertiary)",
+        fontSize: 14,
+      }}
+    >
+      <strong style={{ fontSize: 16, color: "var(--text-secondary)" }}>
+        New issue drafting coming in Phase 4
+      </strong>
+      <p style={{ margin: 0 }}>
+        Issue drafting with CEO will be available soon.
+      </p>
+      <Link
+        to="/issues"
+        style={{ color: "var(--text-secondary)", marginTop: 8 }}
+      >
+        Back to Issues
+      </Link>
+    </div>
+  );
+}
+
+/**
  * InboxRedirect navigates the user from the deprecated /apps/requests
  * and /reviews surfaces to the unified Inbox. Phase 2 collapsed both
  * surfaces into one Decision Inbox; Phase 2b deletes the heavy
@@ -505,6 +555,12 @@ function MainContent() {
       return <DecisionInbox />;
     case "task-decision":
       return <DecisionPacketRoute taskId={route.taskId} />;
+    case "issues-list":
+      return <IssuesList />;
+    case "issue-detail":
+      return <IssueDocumentRoute issueId={route.issueId} />;
+    case "issue-new":
+      return <IssueNewStub />;
     case "unknown":
       // RoutedBody catches root-only matches via isUnmatchedRoute, but
       // useCurrentRoute can also return `unknown` for matched leaves that
@@ -598,11 +654,48 @@ function RoutedBody() {
 
 export default function RootRoute() {
   const [apiReady, setApiReady] = useState(false);
-  const [showSplash, setShowSplash] = useState(false);
   const theme = useAppStore((s) => s.theme);
   const onboardingComplete = useAppStore((s) => s.onboardingComplete);
   const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
+
+  // After PrePickScreen, track whether the backend CEO phase machine is
+  // running. When true, Shell renders OnboardingDMRoute instead of RoutedBody.
+  // Flips false when the onboarding state returns onboarded=true.
+  //
+  // Flow: PrePickScreen → inCeoOnboarding=true → Shell+OnboardingDMRoute
+  //       → broker sets phase="bridge" done → onboarded=true → normal Shell
+  const [inCeoOnboarding, setInCeoOnboarding] = useState(false);
+  // onboarding phase from /onboarding/state — set once on boot if available.
+  const [bootPhase, setBootPhase] = useState<string | undefined>(undefined);
+
+  // When CEO onboarding is active (phase set, not "complete"), redirect any
+  // root or /channels/general URL to the CEO DM so the Shell always shows
+  // the CEO conversation regardless of the URL the user landed on.
+  // This is a TanStack-level navigate (not a beforeLoad, because onboarding
+  // state is only known after the /onboarding/state API call in the effect
+  // below). Already-onboarded users (onboardingComplete === true) skip the
+  // whole inCeoOnboarding branch and never hit this redirect.
+  useEffect(() => {
+    if (!(inCeoOnboarding || bootPhase)) return;
+    // Only redirect when the user is on a generic destination (root, general).
+    // Other explicit URLs (e.g. /dm/some-agent) should not be redirected so
+    // deep-links remain functional during onboarding.
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    const onGenericRoute =
+      hash === "" ||
+      hash === "#/" ||
+      hash === "#/channels/general" ||
+      hash.startsWith("#/?");
+    if (onGenericRoute) {
+      void router.navigate({
+        to: "/dm/$agentSlug",
+        params: { agentSlug: "ceo:onboarding" },
+        replace: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inCeoOnboarding, bootPhase]);
 
   useKeyboardShortcuts();
   useBrokerEvents(apiReady);
@@ -629,17 +722,23 @@ export default function RootRoute() {
       .then(() => {
         if (cancelled) return;
         setBrokerConnected(true);
-        return get<{ onboarded?: boolean }>("/onboarding/state");
+        return get<{ onboarded?: boolean; phase?: string }>(
+          "/onboarding/state",
+        );
       })
       .then((s) => {
         if (cancelled || !s) return;
         if (s.onboarded === true) {
           setOnboardingComplete(true);
+        } else if (typeof s.phase === "string" && s.phase) {
+          // Resume mid-onboarding: broker already started the CEO phase machine.
+          setBootPhase(s.phase);
+          setInCeoOnboarding(true);
         }
       })
       .catch(() => {
-        // Endpoint unreachable — fall through to wizard. Safer default for
-        // fresh installs where the broker may not have mounted onboarding yet.
+        // Endpoint unreachable — fall through to PrePickScreen. Safer default
+        // for fresh installs where the broker may not have mounted onboarding.
       })
       .finally(() => {
         if (!cancelled) setApiReady(true);
@@ -665,16 +764,31 @@ export default function RootRoute() {
         Connecting to broker...
       </div>
     );
-  } else if (showSplash) {
-    body = <SplashScreen onDone={() => setShowSplash(false)} />;
   } else if (!onboardingComplete) {
-    body = (
-      <Wizard
-        onComplete={() => {
-          setShowSplash(true);
-        }}
-      />
-    );
+    if (inCeoOnboarding || bootPhase) {
+      // CEO conversation running — Shell with OnboardingDMRoute.
+      // Already-onboarded users (onboardingComplete === true) skip this
+      // entirely via the branch above.
+      body = (
+        <Shell>
+          <OnboardingDMRoute />
+          <Outlet />
+        </Shell>
+      );
+    } else {
+      // Provider picker. No phase set yet — user hasn't picked a runtime.
+      // After they pick, setInCeoOnboarding(true) to enter the CEO DM.
+      body = (
+        <PrePickScreen
+          onComplete={() => {
+            // PrePickScreen transitions directly to CEO DM.
+            // The broker sets state.Phase = "greet" after /onboarding/complete.
+            // We enter the in-CEO state here so the Shell renders immediately.
+            setInCeoOnboarding(true);
+          }}
+        />
+      );
+    }
   } else {
     body = (
       <Shell>

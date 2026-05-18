@@ -148,6 +148,28 @@ export const indexRoute = createRoute({
   },
 });
 
+// /issues — Phase 3 Issue list surface.
+// Lists all existing tasks as Issues (back-compat read, no new write).
+export const issuesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.issues,
+});
+
+// /issues/$issueId — Phase 3 Issue detail surface.
+// Renders IssueDocument for a single task.
+export const issueDetailRoute = createRoute({
+  getParentRoute: () => issuesRoute,
+  path: "$issueId",
+});
+
+// /issues/new — Phase 4 stub.
+// Wired so `+ New issue` can navigate here without a 404.
+// Returns a 501 placeholder in Phase 3; Phase 4 wires the draft writer.
+export const issueNewRoute = createRoute({
+  getParentRoute: () => issuesRoute,
+  path: "new",
+});
+
 // Route tree
 export const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -166,6 +188,10 @@ export const routeTree = rootRoute.addChildren([
   reviewsRoute,
   inboxRoute,
   taskDecisionRoute,
+  // Phase 3 — Issues surface.
+  // issueNewRoute must be listed BEFORE issueDetailRoute so the static
+  // segment "new" wins over the dynamic "$issueId" catch-all.
+  issuesRoute.addChildren([issueNewRoute, issueDetailRoute]),
 ]);
 
 export function createAppRouter(history: RouterHistory = createHashHistory()) {

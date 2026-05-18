@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavArrowLeft, NavArrowRight, Xmark } from "iconoir-react";
 
@@ -9,15 +9,19 @@ import {
   getSkillsList,
   type InterviewOption,
   patchSkill,
+  post,
   type Skill,
   type SkillSimilarRef,
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
 import { parseApprovalContext } from "../../lib/parseApprovalContext";
 import { SkillCompareView } from "../apps/SkillCompareView";
+import { useOnboardingDMContext } from "../onboarding/OnboardingDMRoute";
+import type { CardStage, CeoSuggestion } from "../onboarding/types";
 import { SidePanel } from "../ui/SidePanel";
 import { showNotice } from "../ui/Toast";
 import { ApprovalContextView } from "./ApprovalContextView";
+import { StructuredMessageCard } from "./cards/StructuredMessageCard";
 
 /**
  * Inline interview bar shown above the Composer. Mirrors the TUI behavior:
@@ -32,6 +36,19 @@ import { ApprovalContextView } from "./ApprovalContextView";
  *   side-by-side preview + three buttons (Enhance / Approve anyway / Reject).
  * - kind="skill_proposal" with metadata.similar_to_existing renders a
  *   warning banner with a [Compare] action above the standard options.
+ *
+ * Phase 2 (onboarding-into-office spec) extends this with CEO card kinds:
+ * - kind="ceo_form_field": label + text input + submit/skip chips
+ * - kind="ceo_chip_row": single-select chip row (blueprint pick)
+ * - kind="ceo_checklist": multi-select checklist + submit (team trim)
+ * - kind="ceo_team_trim": alias for ceo_checklist with team-specific copy
+ * - kind="ceo_scan_chip": async scan status display (read-only)
+ *
+ * CEO cards are rendered by the CeoCardSection sub-component which reads
+ * the PendingSuggestion from OnboardingDMContext. They live above the
+ * regular request queue section. Sanitization is enforced by:
+ *   1. Backend: sanitizeContextValue in broker_onboarding.go (PR #684)
+ *   2. Frontend: all card components render strings as text, never innerHTML
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
@@ -637,5 +654,101 @@ function EnhanceActions({ options, submitting, onPick }: EnhanceActionsProps) {
         </button>
       ) : null}
     </div>
+  );
+}
+
+// ── CEO card section (Phase 2 onboarding) ─────────────────────────────────
+
+/**
+ * CeoCardSection renders the current PendingSuggestion from OnboardingDMContext
+ * as an interactive CEO card above the regular interview queue.
+ *
+ * This is a separate exported component so it can be rendered inside the CEO
+ * DM's InterviewBar slot, and tested independently.
+ *
+ * The card is only visible when:
+ *   1. The OnboardingDMRoute provides a non-null pendingSuggestion
+ *   2. The card has not yet been committed (stage !== "committed")
+ *
+ * POST /onboarding/answer wire shape: { field: string, value: unknown }
+ */
+export function CeoCardSection() {
+  const { pendingSuggestion } = useOnboardingDMContext();
+  const queryClient = useQueryClient();
+  const [stage, setStage] = useState<CardStage>("pending");
+  const [committedValue, setCommittedValue] = useState<
+    string | string[] | undefined
+  >(undefined);
+
+  // Reset stage when suggestion changes (new question arrived).
+  const suggestionId = pendingSuggestion?.id ?? null;
+  useEffect(() => {
+    setStage("pending");
+    setCommittedValue(undefined);
+  }, [suggestionId]);
+
+  if (!pendingSuggestion || stage === "committed") return null;
+
+  const submitAnswer = async (field: string, value: unknown) => {
+    if (stage === "submitting") return;
+    setStage("submitting");
+    try {
+      await post("/onboarding/answer", { field, value });
+      // Refresh onboarding state so the next suggestion appears.
+      await queryClient.invalidateQueries({ queryKey: ["onboarding-state"] });
+      if (typeof value === "string") {
+        setCommittedValue(value);
+      } else if (Array.isArray(value)) {
+        setCommittedValue(value as string[]);
+      }
+      setStage("committed");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to send answer";
+      showNotice(message, "error");
+      setStage("pending");
+    }
+  };
+
+  const handleSkip = async (field: string) => {
+    await submitAnswer(field, "");
+  };
+
+  return (
+    <section
+      className="ceo-card-section"
+      aria-label="CEO question"
+      data-testid="ceo-card-section"
+      data-kind={pendingSuggestion.kind}
+    >
+      {renderCeoCard(
+        pendingSuggestion,
+        stage,
+        committedValue,
+        submitAnswer,
+        handleSkip,
+        setStage,
+      )}
+    </section>
+  );
+}
+
+function renderCeoCard(
+  suggestion: CeoSuggestion,
+  stage: CardStage,
+  committedValue: string | string[] | undefined,
+  onSubmit: (field: string, value: unknown) => Promise<void>,
+  onSkip: (field: string) => Promise<void>,
+  onStageChange?: (next: CardStage) => void,
+): ReactNode {
+  return (
+    <StructuredMessageCard
+      suggestion={suggestion}
+      stage={stage}
+      committedValue={committedValue}
+      onSubmit={(field, value) => void onSubmit(field, value)}
+      onSkip={(field) => void onSkip(field)}
+      onStageChange={onStageChange}
+    />
   );
 }

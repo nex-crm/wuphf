@@ -15,6 +15,7 @@
 
 /** Lifecycle position of a task. Source of truth on the broker (`teamTask.LifecycleState`). */
 export type LifecycleState =
+  | "drafting"
   | "intake"
   | "ready"
   | "running"
@@ -229,6 +230,18 @@ export const STATE_PILL_TOKENS: Record<
   LifecycleState,
   { bg: string; text: string; label: string }
 > = {
+  /**
+   * drafting: pre-Intake mode where agents can comment but not dispatch.
+   * Uses brand-accent tokens (--accent-bg / --accent) to signal
+   * "needs human attention" — distinct from intake/ready (--bg-row-active)
+   * which use a neutral palette.
+   * Design review decision 2026-05-17: locked.
+   */
+  drafting: {
+    bg: "var(--accent-bg)",
+    text: "var(--accent)",
+    label: "drafting",
+  },
   intake: {
     bg: "var(--bg-row-active)",
     text: "var(--text-secondary)",
@@ -368,7 +381,9 @@ export const FILTER_TO_STATES: Record<
   ReadonlyArray<LifecycleState>
 > = {
   decision_required: ["decision"],
-  running: ["intake", "ready", "running", "review"],
+  // drafting is surfaced in the issues route, not the inbox; include it in
+  // running so inbox rows with this state still land somewhere readable.
+  running: ["drafting", "intake", "ready", "running", "review"],
   blocked: ["blocked_on_pr_merge", "changes_requested", "rejected"],
   approved: ["approved"],
 };

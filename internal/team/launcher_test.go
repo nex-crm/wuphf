@@ -1194,8 +1194,11 @@ func TestBuildPromptIncludesMarkdownNotebookPromotionGuidance(t *testing.T) {
 		prompt := l.buildPrompt(slug)
 		for _, want := range []string{
 			"notebook_write",
+			"notebook_visual_artifact_create",
 			"notebook_promote",
 			"wuphf_wiki_lookup",
+			"create a self-contained HTML companion",
+			"visual-artifact:ra_...",
 			"Do not bypass notebook_promote",
 		} {
 			if !strings.Contains(prompt, want) {

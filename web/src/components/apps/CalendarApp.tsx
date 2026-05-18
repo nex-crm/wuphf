@@ -668,7 +668,9 @@ function TaskChip({ task, compact = false }: TaskChipProps) {
         }}
       />
       <span>{task.title}</span>
-      <span style={{ marginLeft: 4, fontSize: 10, color: "var(--text-tertiary)" }}>
+      <span
+        style={{ marginLeft: 4, fontSize: 10, color: "var(--text-tertiary)" }}
+      >
         · {label}
       </span>
     </a>

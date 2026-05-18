@@ -2002,3 +2002,573 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 1: Pre-office provider picker (onboarding-into-office spec)
+   Single full-bleed screen — no modal chrome, no progress dots.
+   ═══════════════════════════════════════════════════════════════ */
+
+.pre-pick-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  background: radial-gradient(circle at center, #f9f9fb 0%, #ffffff 70%);
+}
+
+.pre-pick-body {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  align-items: center;
+}
+
+.pre-pick-hero {
+  text-align: center;
+}
+
+.pre-pick-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.pre-pick-headline {
+  font-family: var(--font-logo);
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0 0 12px 0;
+}
+
+.pre-pick-subhead {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 480px;
+  margin: 0 auto;
+  text-wrap: balance;
+}
+
+.pre-pick-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .pre-pick-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pre-pick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.pre-pick-card:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.pre-pick-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pre-pick-card:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.pre-pick-card.missing {
+  background: transparent;
+}
+
+.pre-pick-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pre-pick-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pre-pick-card-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.pre-pick-card.available .pre-pick-card-status {
+  color: var(--green-600, #16a34a);
+}
+
+.pre-pick-card-install {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.pre-pick-secondary-row {
+  display: flex;
+  justify-content: center;
+}
+
+.pre-pick-secondary-button {
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.pre-pick-secondary-button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.pre-pick-secondary-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pre-pick-secondary-button:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.pre-pick-helper {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.pre-pick-error {
+  font-size: 13px;
+  color: var(--red-600, #dc2626);
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.18);
+}
+
+/* ─── Phase 5: Pre-pick extra sections (API keys, local, OAI-compat) ────── */
+
+.pre-pick-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pre-pick-section-heading {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.pre-pick-section-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0 0 4px 0;
+  line-height: 1.5;
+}
+
+/* Local provider picker wrapper */
+.pre-pick-local-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.pre-pick-local-detecting {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.pre-pick-local-error {
+  font-size: 12px;
+  color: var(--danger-500, #c33);
+  padding: 6px 8px;
+  background: var(--danger-50, #fee);
+  border: 1px solid var(--danger-200, #fcc);
+  border-radius: 4px;
+}
+
+.pre-pick-local-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 4px 0 0 0;
+}
+
+/* OpenAI-compatible endpoint inputs */
+.pre-pick-oai-compat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pre-pick-oai-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pre-pick-oai-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pre-pick-input-error {
+  border-color: var(--danger-500, #c33);
+}
+
+.pre-pick-oai-url-error {
+  font-size: 12px;
+  color: var(--danger-500, #c33);
+}
+
+.pre-pick-form-submit {
+  width: 100%;
+}
+
+/* ─── Phase 2: CEO card section ─────────────────────────────────────────
+   Renders inside the InterviewBar slot in the OnboardingDMRoute CEO DM.
+   Card lifecycle: pending → submitting → committed.
+   Spec: docs/specs/onboarding-into-office.md "## Surface 3 / Card states matrix"
+   ─────────────────────────────────────────────────────────────────────── */
+
+.ceo-card-section {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* Base CEO card */
+.ceo-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Committed state: collapses to one line in --text-secondary */
+.ceo-card--committed {
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+}
+
+.ceo-card-committed-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Label */
+.ceo-card-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Text input */
+.ceo-card-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.ceo-card-input:focus {
+  border-color: var(--accent);
+}
+
+.ceo-card-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Action row */
+.ceo-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Inline spinner (submitting state only — never full-card animation) */
+.ceo-card-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ceo-spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ceo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ceo-card-spinner {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+/* ─── Chip row ─────────────────────────────────────────────────────────── */
+
+.ceo-chip-row-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ceo-chip {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.ceo-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.ceo-chip--selected,
+.ceo-chip:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text);
+  outline: none;
+}
+
+.ceo-chip:focus-visible {
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--accent);
+}
+
+.ceo-chip:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ─── Checklist ────────────────────────────────────────────────────────── */
+
+.ceo-checklist-items {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ceo-checklist-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ceo-checklist-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.ceo-checklist-item-text {
+  flex: 1;
+}
+
+/* ─── Scan chip ────────────────────────────────────────────────────────── */
+
+.ceo-scan-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+}
+
+.ceo-scan-chip--done {
+  background: var(--green-bg);
+  border-color: var(--green);
+  color: var(--green-dark);
+}
+
+.ceo-scan-chip--failed {
+  background: var(--red-bg);
+  border-color: var(--red);
+  color: var(--red-dark);
+}
+
+.ceo-scan-chip-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ceo-spin 0.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ceo-scan-chip-spinner {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+.ceo-scan-chip-icon {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ─── Sidebar preview overlay (Phase 2 onboarding) ────────────────────────
+   Shows during greet/identity/scan/blueprint/team phases.
+   Dashed lavender border signals "staged, not committed yet."
+   Spec tokens: --preview-row-bg, --preview-row-border, --preview-row-text
+   ─────────────────────────────────────────────────────────────────────── */
+
+.sidebar-preview-overlay {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 240ms cross-fade out when seeding phase completes (reduced-motion: instant) */
+.sidebar-preview-overlay--seeding {
+  animation: preview-fade-out 240ms ease-out forwards;
+}
+
+@keyframes preview-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-preview-overlay--seeding {
+    animation: none;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.sidebar-preview-workspace {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--preview-row-text);
+  padding: 4px 6px;
+  background: var(--preview-row-bg);
+  border-radius: var(--radius-sm);
+  border: var(--preview-row-border);
+}
+
+.sidebar-preview-rows {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--preview-row-bg);
+  border: var(--preview-row-border);
+  font-size: 13px;
+  color: var(--preview-row-text);
+}
+
+.sidebar-preview-row-icon {
+  font-size: 12px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+/* ─── OnboardingDMRoute wrapper ─────────────────────────────────────────── */
+
+.onboarding-dm-route {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}

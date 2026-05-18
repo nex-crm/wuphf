@@ -241,7 +241,9 @@ function HeadlessEventView({
             );
           })}
           {textLen !== null && textLen > 0 && (
-            <span className="stream-manifest-stat">{textLen.toLocaleString("en-US")} bytes</span>
+            <span className="stream-manifest-stat">
+              {textLen.toLocaleString("en-US")} bytes
+            </span>
           )}
           {inputTokens !== null && outputTokens !== null && (
             <span className="stream-manifest-stat">

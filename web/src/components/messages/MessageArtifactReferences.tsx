@@ -3,7 +3,6 @@ import { useQueries } from "@tanstack/react-query";
 
 import {
   fetchRichArtifact,
-  type RichArtifact,
   type RichArtifactDetail,
 } from "../../api/richArtifacts";
 import RichArtifactFrame from "../rich-artifacts/RichArtifactFrame";
@@ -104,7 +103,6 @@ export default function MessageArtifactReferences({
               </h2>
               <div className="rich-artifact-meta">
                 <span>{activeDetail.artifact.trustLevel}</span>
-                <span>{activeDetail.artifact.htmlPath}</span>
               </div>
             </div>
             <div className="rich-artifact-modal-actions">
@@ -121,6 +119,7 @@ export default function MessageArtifactReferences({
           <RichArtifactFrame
             title={activeDetail.artifact.title}
             html={activeDetail.html}
+            variant="modal"
           />
         </div>
       ) : null}
@@ -162,36 +161,31 @@ function MessageArtifactReference({
   const { artifact } = detail;
   return (
     <article
-      className="message-artifact-reference"
+      className="message-artifact-reference message-artifact-reference-inline"
       aria-label={`Rich artifact: ${artifact.title}`}
     >
-      <div className="message-artifact-main">
-        <span className="message-artifact-kicker">
-          {artifact.kind === "wiki_visual" ? "Wiki visual" : "Notebook visual"}
-        </span>
-        <h4>{artifact.title}</h4>
-        {artifact.summary ? <p>{artifact.summary}</p> : null}
-        <div className="message-artifact-meta">
-          <span>{artifact.trustLevel}</span>
-          <span>{artifactSource(artifact)}</span>
+      <div className="message-artifact-header">
+        <div className="message-artifact-main">
+          <span className="message-artifact-kicker">
+            {artifact.kind === "wiki_visual"
+              ? "Wiki visual"
+              : "Notebook visual"}
+          </span>
+          <h4>{artifact.title}</h4>
+          {artifact.summary ? <p>{artifact.summary}</p> : null}
+        </div>
+        <div className="message-artifact-actions">
+          {artifact.promotedWikiPath ? (
+            <a href={wikiHref(artifact.promotedWikiPath)}>Open wiki</a>
+          ) : null}
+          <button type="button" onClick={() => onOpen(detail)}>
+            Expand
+          </button>
         </div>
       </div>
-      <div className="message-artifact-actions">
-        {artifact.promotedWikiPath ? (
-          <a href={wikiHref(artifact.promotedWikiPath)}>Open wiki</a>
-        ) : null}
-        <button type="button" onClick={() => onOpen(detail)}>
-          Open
-        </button>
-      </div>
+      <RichArtifactFrame title={artifact.title} html={detail.html} />
     </article>
   );
-}
-
-function artifactSource(artifact: RichArtifact): string {
-  if (artifact.promotedWikiPath) return artifact.promotedWikiPath;
-  if (artifact.sourceMarkdownPath) return artifact.sourceMarkdownPath;
-  return `@${artifact.createdBy}`;
 }
 
 function queryErrorMessage(error: unknown): string | undefined {

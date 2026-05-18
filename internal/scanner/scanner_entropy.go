@@ -94,6 +94,9 @@ func entropyTokenize(s string) []string {
 // (e.g., English words, numeric-only IDs, hyphen-sentence fragments).
 // Real keys use a mix of letters + digits / base64 / hex.
 func isPlausibleSecretCharset(s string) bool {
+	if isWUPHFRichArtifactReferenceToken(s) {
+		return false
+	}
 	if isPathLikeToken(s) || strings.Contains(s, `\`) || isSchemeURI(s) {
 		return false
 	}
@@ -112,6 +115,53 @@ func isPlausibleSecretCharset(s string) bool {
 		}
 	}
 	return hasLetter && hasDigit
+}
+
+func isWUPHFRichArtifactReferenceToken(s string) bool {
+	token := strings.ToLower(strings.Trim(s, ".,\"'`:;!?()[]{}<>"))
+	for {
+		idx := strings.Index(token, "ra_")
+		if idx < 0 {
+			return false
+		}
+		if len(token) >= idx+19 && isHexRun(token[idx+3:idx+19]) {
+			before := token[:idx]
+			after := token[idx+19:]
+			if richArtifactPrefixOK(before) && richArtifactSuffixOK(after) {
+				return true
+			}
+		}
+		token = token[idx+3:]
+	}
+}
+
+func richArtifactPrefixOK(prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	return strings.HasSuffix(prefix, "visual-artifact:") ||
+		strings.HasSuffix(prefix, "visual_artifact:") ||
+		strings.HasSuffix(prefix, "rich-artifact:") ||
+		strings.HasSuffix(prefix, "rich_artifact:") ||
+		strings.HasSuffix(prefix, "notebook/visual-artifacts/") ||
+		strings.HasSuffix(prefix, "wiki/visual-artifacts/")
+}
+
+func richArtifactSuffixOK(suffix string) bool {
+	return suffix == "" || suffix == ".html"
+}
+
+func isHexRun(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r >= '0' && r <= '9' || r >= 'a' && r <= 'f' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func isPathLikeToken(s string) bool {

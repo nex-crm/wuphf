@@ -57,9 +57,26 @@ export const ROUTE_PATHS = {
   reviews: "/reviews",
   inbox: "/inbox",
   taskDecision: "/task/$taskId",
+  /** Phase 3 — Issue list surface (all tasks rendered as Issues). */
+  issues: "/issues",
+  /** Phase 3 — Issue detail surface (renders IssueDocument). */
+  issueDetail: "/issues/$issueId",
+  /**
+   * Phase 4 stub — new issue creation. Returns 501 in Phase 3.
+   * Wired so `+ New issue` can navigate here without a 404.
+   */
+  issueNew: "/issues/new",
 } as const;
 
 export type RouteKey = keyof typeof ROUTE_PATHS;
+
+/** Phase 3 — surface IDs for the Issues section (list + detail + new). */
+export const ISSUES_SURFACE_IDS = [
+  "issues",
+  "issueDetail",
+  "issueNew",
+] as const;
+export type IssuesSurfaceId = (typeof ISSUES_SURFACE_IDS)[number];
 
 /**
  * Route → URL params it carries. Used to document the URL contract for
@@ -151,6 +168,15 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     params: ["taskId"],
     search: [],
   },
+  // Phase 3 — Issues surface
+  { key: "issues", path: ROUTE_PATHS.issues, params: [], search: [] },
+  {
+    key: "issueDetail",
+    path: ROUTE_PATHS.issueDetail,
+    params: ["issueId"],
+    search: [],
+  },
+  { key: "issueNew", path: ROUTE_PATHS.issueNew, params: [], search: [] },
 ] as const;
 
 export const SIDEBAR_APP_IDS = SIDEBAR_APPS.map((app) => app.id);

@@ -92,7 +92,9 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- human_message: Send an emphasized report, recommendation, or action card directly to the human when you want it to stand out\n")
 		sb.WriteString("- human_interview: Ask the human a cancelable interview question; it never blocks chat, and dismiss/send cancels it\n\n")
 		sb.WriteString(secretHandlingPromptRule())
-		if noNex {
+		if markdownMemory {
+			sb.WriteString("Markdown notebook/wiki memory is active in this 1:1. Use notebook_write for durable source notes and create an HTML visual companion with notebook_visual_artifact_create when the work would be clearer as a diagram, mockup, report, comparison grid, code explainer, PR review, or interactive tuning surface. Keep the HTML self-contained and include visual-artifact:ra_... on its own line when you reference it in chat.\n\n")
+		} else if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the conversation and direct human answers only.\n\n")
 		} else {
 			sb.WriteString("Use the Nex context graph when it materially helps:\n")
@@ -238,7 +240,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- To suggest adding a new specialist agent, use team_member with a clear expertise and rationale\n")
 		sb.WriteString("- When integrations matter, make the required systems explicit in the skill instructions and agent rationale so the team knows which connected accounts or placeholders each workflow expects\n")
 		sb.WriteString("- When you create a new specialist for integration/onboarding work, include the owned integrations directly in that agent's expertise so the roster clearly shows who owns Gmail, Slack, YouTube, Drive, analytics, or similar lanes\n\n")
-		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data.\n")
+		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use compact markdown for simple chat structure; for dense, visual, or interactive outputs, create a notebook HTML visual artifact instead of leaving the human with a long markdown wall.\n")
 		if markdownMemory {
 			sb.WriteString("Do not pretend the team wiki was updated; verify notebook_promote or team_wiki_write succeeded before claiming canonical storage.\n")
 		} else if noNex {
@@ -343,7 +345,7 @@ func (p *promptBuilder) Build(slug string) string {
 			sb.WriteString("12. Use query_context when prior knowledge matters. Only use add_context for durable conclusions, and don't claim something stored unless add_context actually succeeded.\n")
 			sb.WriteString("13. Once you have posted the needed update for the current packet, stop. A later pushed notification will wake you again if more is needed.\n\n")
 		}
-		sb.WriteString("STYLE: Be concise, stay in lane, short lively messages. Use markdown tables/checklists for structured data.\n")
+		sb.WriteString("STYLE: Be concise, stay in lane, short lively messages. Use compact markdown for simple chat structure; for dense, visual, or interactive outputs, create a notebook HTML visual artifact instead of leaving the human with a long markdown wall.\n")
 		sb.WriteString("Never launch another WUPHF office from inside your turn (`wuphf`, `./wuphf`, `/reset`, or a new browser instance). The office is already running; inspect the current repo and UI instead.\n")
 	}
 
@@ -359,6 +361,8 @@ func (p *promptBuilder) Build(slug string) string {
 
 func markdownKnowledgeToolBlock() string {
 	return "- notebook_write: Save your own working notes, rough observations, draft decisions, draft playbooks, and task learnings at agents/{my_slug}/notebook/{date-or-topic}.md. This is the default write path for agent-authored knowledge.\n" +
+		"- notebook_visual_artifact_create: After notebook_write, create a self-contained HTML companion when the work would be clearer as a rich visual artifact: complex specs, implementation plans, code explainers, PR reviews, comparison grids, diagrams, mockups, reports, or interactive tuning surfaces. Use inline CSS/JS only, no network fetches, and default to the WUPHF technical-manual style: old mathematics/physics book on real paper with Making Software cobalt figure ink. Include visual-artifact:ra_... on its own line in your chat summary so the UI renders an artifact card.\n" +
+		"- notebook_visual_artifact_list / notebook_visual_artifact_read / notebook_visual_artifact_promote: Reuse, inspect, and promote notebook HTML companions into wiki visual views alongside the canonical markdown article.\n" +
 		"- notebook_promote: Submit a durable notebook entry for reviewer approval into the team wiki. Use this when the team should rely on the note as canonical knowledge.\n" +
 		"- notebook_read / notebook_list / notebook_search: Inspect agent notebooks for fresh working context before asking someone to repeat themselves. Cross-agent searches (looking at another agent's shelf) are tracked as promotion-demand signals — if their entry answers your question, the promotion pipeline scores it higher and surfaces it for review, so actually search instead of guessing.\n" +
 		"- team_wiki_read / team_wiki_search / team_wiki_list / wuphf_wiki_lookup: Read the canonical shared wiki.\n" +

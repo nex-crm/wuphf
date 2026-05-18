@@ -150,6 +150,15 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 }
 
 func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeActionLog, task teamTask, content string) {
+	// Approval gate (Phase 4): refuse to dispatch execution work to agents
+	// for tasks that are not in an executable lifecycle state. Only Running
+	// and Approved tasks may trigger agent execution turns. Drafting, Intake,
+	// Review, and ChangesRequested tasks are blocked here — agents may still
+	// post comments via the comment endpoint, which does not go through this
+	// path. ErrIssueNotApproved is the sentinel; log and drop (no retry).
+	if task.LifecycleState != "" && !isExecutableTeamTaskStatus(task.LifecycleState) {
+		return
+	}
 	channel := normalizeChannelSlug(task.Channel)
 	if channel == "" {
 		channel = "general"

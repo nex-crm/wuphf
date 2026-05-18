@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,6 +72,30 @@ func TestLooksUnparsedToolCall(t *testing.T) {
 			in:   "```json\n{\"name\":\"team_broadcast\",\"arguments\":{\"channel\":\"general\"}}\n```",
 			want: false, // doesn't START with { (leads with the fence) — caller already strips fences
 		},
+		// `<tools>...</tools>` is the prompted-tools dialect emitted by
+		// Hermes / OpenClaw-HTTP when the backend ignores the request's
+		// tools[] field. The live-chat-relay must NOT post the raw JSON
+		// to the channel; the openAICompatToolLoop dispatches it instead.
+		{
+			name: "tools-tag basic",
+			in:   `<tools>{"name":"team_broadcast","arguments":{"channel":"general","content":"hi"}}</tools>`,
+			want: true,
+		},
+		{
+			name: "tools-tag with surrounding whitespace",
+			in:   "   <tools>{\"name\":\"x\",\"arguments\":{}}</tools>\n",
+			want: true,
+		},
+		{
+			name: "tools-tag closed but empty body",
+			in:   `<tools></tools>`,
+			want: true, // structurally a tools-block; should not leak to chat
+		},
+		{
+			name: "prose mentioning the tag name without closer",
+			in:   `I would call the <tools> block but won't here.`,
+			want: false, // no </tools> closer; legitimate prose
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,6 +103,35 @@ func TestLooksUnparsedToolCall(t *testing.T) {
 				t.Errorf("looksUnparsedToolCall(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestOpenAICompatPromptedToolsPrompt_NilSchema pins the nil-schema
+// fallback for the schema-in-prompt protocol. json.Marshal(nil) yields
+// `"null"` (4 bytes, no error), so the historic check `err == nil && len > 0`
+// silently emitted `schema: null` for tools that registered no schema —
+// that confused the model and CodeRabbit flagged it. The contract: nil
+// schemas render as `{}`, matching the prompt's stated intent and
+// matching what the parser dispatches when the model leaves arguments
+// off (`"arguments":{}`).
+func TestOpenAICompatPromptedToolsPrompt_NilSchema(t *testing.T) {
+	tools := []agent.AgentTool{
+		{Name: "no_schema_tool", Description: "A tool that has no schema.", Schema: nil},
+		{Name: "with_schema_tool", Description: "A tool with a real schema.", Schema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"x": map[string]any{"type": "string"}},
+		}},
+	}
+	out := openAICompatPromptedToolsPrompt("ceo", "ORIGINAL", tools)
+
+	if !strings.Contains(out, "- no_schema_tool: A tool that has no schema.\n  schema: {}\n") {
+		t.Errorf("nil-schema tool should render `schema: {}`; got:\n%s", out)
+	}
+	if strings.Contains(out, "schema: null") {
+		t.Errorf("prompt must NOT render `schema: null` for nil-schema tools; got:\n%s", out)
+	}
+	if !strings.Contains(out, `"type":"object"`) {
+		t.Errorf("real-schema tool should render its JSON schema verbatim; got:\n%s", out)
 	}
 }
 
