@@ -14,6 +14,11 @@ on:
   pull_request:
     branches:
       - main
+  # Manual trigger for an installer build dry-run on a branch with no
+  # release tag (e.g. an electron-stack bump — see installer-stub
+  # AGENTS.md hard rule 7). The build jobs gate on this event
+  # explicitly; the publish job stays tag-only.
+  workflow_dispatch:
   push:
     # GitHub tag globs are intentionally broad here; detect-secrets validates
     # the full semver contract before release builds run:
@@ -111,8 +116,13 @@ jobs:
     # provided by ci.yml's go-cross-build (darwin/arm64), web, and desktop
     # jobs. The detect-secrets + installer-invariants gates above still run
     # on PRs (cheap Linux jobs) and remain the home for installer-stub unit
-    # checks. To restore a PR macOS build, run the workflow on demand.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    # checks. To build installers on a branch with no release tag (e.g.
+    # an electron-stack bump dry-run), trigger this workflow manually via
+    # workflow_dispatch — that runs the build jobs in unsigned PR mode
+    # without publishing.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
     needs:
       - detect-secrets
       - installer-invariants
@@ -283,9 +293,11 @@ jobs:
           if-no-files-found: error
 
   build-win:
-    # Tag-only: see build-mac. Windows runners bill at 2x; no PR consumes
-    # the installer before release.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    # Tag-only (+ manual workflow_dispatch): see build-mac. Windows
+    # runners bill at 2x; no PR consumes the installer before release.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
     needs:
       - detect-secrets
       - installer-invariants
@@ -560,9 +572,11 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    # Tag-only: see build-mac. Kept off PRs for parity so all three
-    # installer legs build from the same trigger surface.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    # Tag-only (+ manual workflow_dispatch): see build-mac. Kept off PRs
+    # for parity so all three installer legs share one trigger surface.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
     needs:
       - detect-secrets
       - installer-invariants

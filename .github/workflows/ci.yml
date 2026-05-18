@@ -30,7 +30,14 @@ jobs:
   # suite runs. Non-PR events (push to main, workflow_dispatch) also
   # force non_docs=true — main always runs the full suite. The only
   # inputs that skip the heavy jobs are PRs whose entire diff is
-  # markdown / docs / website / wiki payload. Cheap (~15s).
+  # markdown / docs / website payload. Cheap (~15s).
+  #
+  # Why a gate JOB and not `on: pull_request: paths-ignore:` — a
+  # path-filtered workflow never reports its required status checks, so
+  # a docs-only PR would sit blocked on permanently-pending
+  # lint/vet/build. A skipped JOB reports a `skipped` conclusion, which
+  # branch protection counts as satisfied. Do not "simplify" this into
+  # paths-ignore.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -59,9 +66,17 @@ jobs:
           non_docs=false
           while IFS= read -r f; do
             [[ -z "$f" ]] && continue
+            # Docs arm: ONLY non-buildable file types. Never add a code,
+            # config, or dependency pattern here — a match skips the
+            # whole heavy suite incl. required checks. `*.md`/`*.mdx`
+            # already cover markdown anywhere (incl. wiki under team/,
+            # index/), so directory globs here must not be widened to
+            # bare `team/*`/`index/*` — that would also match a stray
+            # `team/foo.go`. The `*)` default MUST stay non_docs=true;
+            # that fail-safe is the safety property of this classifier.
             case "$f" in
-              *.md|*.mdx|*.txt) ;;
-              docs/*|index/*|team/*|website/*) ;;
+              *.md|*.mdx) ;;
+              docs/*|website/*) ;;
               .github/ISSUE_TEMPLATE/*) ;;
               *) non_docs=true; echo "non-doc change: $f" ;;
             esac
@@ -338,10 +353,12 @@ jobs:
 
   web:
     # Skipped on docs-only PRs (see the `changes` job). `web` produces the
-    # web-dist artifact consumed by build / go-test / release-build /
-    # windows-smoke / web-e2e — every one of those consumers is gated on
-    # the same `non_docs` condition, so they skip together and no consumer
-    # is left waiting on an artifact that was never built.
+    # web-dist artifact consumed by the downstream Go build/test jobs.
+    # INVARIANT: every job that `needs: web` MUST also gate on
+    # `needs.changes` with the same `non_docs` condition, so producer and
+    # consumers skip together and no consumer is left waiting on an
+    # artifact that was never built. A new `needs: web` job added without
+    # that gate will hang on docs-only PRs.
     needs: changes
     if: ${{ needs.changes.outputs.non_docs == 'true' }}
     runs-on: ubuntu-latest
