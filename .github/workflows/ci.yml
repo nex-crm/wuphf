@@ -38,6 +38,13 @@ jobs:
   # lint/vet/build. A skipped JOB reports a `skipped` conclusion, which
   # branch protection counts as satisfied. Do not "simplify" this into
   # paths-ignore.
+  #
+  # `changes` is NOT itself a required check, so it must never be able
+  # to bypass one. Every gated job's `if:` therefore falls OPEN when
+  # this job does not succeed (`needs.changes.result != 'success'`):
+  # a failed/errored gate runs the full suite rather than skipping
+  # required jobs into a green merge. The only path that skips a
+  # required check is a deliberate `non_docs == 'false'` classification.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -360,7 +367,7 @@ jobs:
     # artifact that was never built. A new `needs: web` job added without
     # that gate will hang on docs-only PRs.
     needs: changes
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -417,7 +424,7 @@ jobs:
     # skipped required check satisfies branch protection, so docs-only
     # PRs still merge.
     needs: changes
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     # Single source of truth for govulncheck binary location. `go install`
     # writes to $GOBIN if set (else $GOPATH/bin), so pinning GOBIN here
@@ -615,7 +622,7 @@ jobs:
   go-test:
     # Skipped on docs-only PRs (see the `changes` job).
     needs: [web, changes]
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -706,7 +713,7 @@ jobs:
   go-cross-build:
     # Skipped on docs-only PRs (see the `changes` job).
     needs: [web, changes]
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -740,7 +747,7 @@ jobs:
   vet:
     # Skipped on docs-only PRs (required check; skipped satisfies it).
     needs: changes
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -753,7 +760,7 @@ jobs:
   build:
     # Skipped on docs-only PRs (required check; skipped satisfies it).
     needs: [web, changes]
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -773,7 +780,7 @@ jobs:
   vhs:
     # Skipped on docs-only PRs (see the `changes` job).
     needs: changes
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     env:
       VHS_VERSION: "v0.11.0"
@@ -857,7 +864,7 @@ jobs:
     # click) by booting wuphf, loading /, and walking the happy path.
     # Skipped on docs-only PRs (see the `changes` job).
     needs: [web, changes]
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
@@ -973,7 +980,7 @@ jobs:
     runs-on: ubuntu-latest
     # Skipped on docs-only PRs (see the `changes` job).
     needs: [web, changes]
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
         with:
@@ -1126,7 +1133,7 @@ jobs:
   windows-smoke:
     # Skipped on docs-only PRs (see the `changes` job).
     needs: [web, changes]
-    if: ${{ needs.changes.outputs.non_docs == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
