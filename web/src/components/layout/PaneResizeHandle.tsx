@@ -1,5 +1,8 @@
 import { useCallback } from "react";
 
+const STEP_PX = 16;
+const STEP_PX_LARGE = 64;
+
 interface PaneResizeHandleProps {
   /** Pointer-down from useResizablePane(). */
   onPointerDown: (event: React.PointerEvent<HTMLElement>) => void;
@@ -7,6 +10,8 @@ interface PaneResizeHandleProps {
   isResizing: boolean;
   /** Double-click target — reset pane to its default width. */
   onReset: () => void;
+  /** Keyboard step resize — positive widens the pane from the user's POV. */
+  onStepResize: (signedDelta: number) => void;
   /** Which edge of the parent pane this handle anchors to. */
   edge: "right" | "left";
   /** Accessibility label, e.g. "Resize sidebar". */
@@ -23,11 +28,18 @@ interface PaneResizeHandleProps {
  * Thin draggable splitter rendered on the edge of a resizable pane. The
  * pane element positions this absolutely; the handle expands its hit area
  * via a pseudo-element so the visible 1px rule is still easy to grab.
+ *
+ * Keyboard map (mirrors the WAI-ARIA separator pattern):
+ *   ArrowLeft / ArrowRight  → ±16px from the user's viewpoint
+ *   Shift + Arrow           → ±64px (coarse step)
+ *   Home / End              → snap to min / max
+ *   Enter                   → reset to default width
  */
 export function PaneResizeHandle({
   onPointerDown,
   isResizing,
   onReset,
+  onStepResize,
   edge,
   ariaLabel,
   valueNow,
@@ -36,14 +48,38 @@ export function PaneResizeHandle({
 }: PaneResizeHandleProps) {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      // Double-tap Enter / Space to reset is unusual; expose plain Enter
-      // because there's no good keyboard-driven width-set affordance.
-      if (e.key === "Enter") {
-        e.preventDefault();
-        onReset();
+      // Resolve direction from the user's perspective: pressing ArrowRight
+      // should widen a right-edge pane and narrow a left-edge pane. The
+      // hook expects a signed delta where positive = widen, so we flip
+      // the arrow sign for left-edge handles.
+      const stepBase = e.shiftKey ? STEP_PX_LARGE : STEP_PX;
+      const widen = edge === "right" ? stepBase : -stepBase;
+      const narrow = -widen;
+
+      switch (e.key) {
+        case "ArrowRight":
+          e.preventDefault();
+          onStepResize(widen);
+          return;
+        case "ArrowLeft":
+          e.preventDefault();
+          onStepResize(narrow);
+          return;
+        case "Home":
+          e.preventDefault();
+          onStepResize(Number.NEGATIVE_INFINITY);
+          return;
+        case "End":
+          e.preventDefault();
+          onStepResize(Number.POSITIVE_INFINITY);
+          return;
+        case "Enter":
+          e.preventDefault();
+          onReset();
+          return;
       }
     },
-    [onReset],
+    [edge, onReset, onStepResize],
   );
 
   return (

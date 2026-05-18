@@ -29,6 +29,13 @@ interface ResizablePane {
   isResizing: boolean;
   /** Reset to the default width (handle double-click target). */
   reset: () => void;
+  /**
+   * Apply a signed pixel delta from the user's perspective: positive widens
+   * the pane, negative narrows it. The hook resolves the edge orientation
+   * internally so callers don't need to care. ±Infinity snaps to the
+   * configured bounds (used by Home/End on the keyboard handle).
+   */
+  stepResize: (signedDelta: number) => void;
 }
 
 function readStoredWidth(key: string): number | null {
@@ -84,6 +91,9 @@ export function useResizablePane({
   // problem when the pointermove handler reads the starting geometry.
   const startXRef = useRef(0);
   const startWidthRef = useRef(width);
+  // Held so an unmount mid-drag can tear down the active pointer
+  // listeners and pointer capture, even when onUp never fires.
+  const cleanupDragRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     persistWidth(storageKey, width);
@@ -100,8 +110,9 @@ export function useResizablePane({
       setIsResizing(true);
 
       const handle = event.currentTarget;
+      const pointerId = event.pointerId;
       try {
-        handle.setPointerCapture(event.pointerId);
+        handle.setPointerCapture(pointerId);
       } catch {
         /* setPointerCapture can throw if the pointer was already
            captured elsewhere; the move/up listeners still fire. */
@@ -118,23 +129,55 @@ export function useResizablePane({
         setWidth(next);
       };
 
-      const onUp = (e: PointerEvent) => {
+      const teardown = () => {
         try {
-          handle.releasePointerCapture(e.pointerId);
+          handle.releasePointerCapture(pointerId);
         } catch {
           /* Same rationale as setPointerCapture above. */
         }
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
+        cleanupDragRef.current = null;
+      };
+
+      const onUp = () => {
+        teardown();
         setIsResizing(false);
       };
 
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onUp);
+      cleanupDragRef.current = teardown;
     },
     [edge, maxWidth, minWidth, width],
+  );
+
+  // Unmount safety: if the component unmounts mid-drag, the user's pointer
+  // is still down somewhere on the page. Removing the listeners here keeps
+  // them from continuing to call setWidth / setIsResizing on a stale
+  // hook instance, and also strips the body class so the cursor returns
+  // to normal even though the consumer disappeared.
+  useEffect(() => {
+    return () => {
+      cleanupDragRef.current?.();
+      cleanupDragRef.current = null;
+      if (typeof document !== "undefined") {
+        document.body.classList.remove("resizing-pane");
+      }
+    };
+  }, []);
+
+  const stepResize = useCallback(
+    (signedDelta: number) => {
+      setWidth((prev) => {
+        if (signedDelta === Number.POSITIVE_INFINITY) return maxWidth;
+        if (signedDelta === Number.NEGATIVE_INFINITY) return minWidth;
+        return clampWidth(prev + signedDelta, minWidth, maxWidth);
+      });
+    },
+    [maxWidth, minWidth],
   );
 
   // Toggle a body-level class so the global cursor + user-select rule
@@ -158,5 +201,5 @@ export function useResizablePane({
     setWidth(clampWidth(defaultWidth, minWidth, maxWidth));
   }, [defaultWidth, maxWidth, minWidth]);
 
-  return { width, onPointerDown, isResizing, reset };
+  return { width, onPointerDown, isResizing, reset, stepResize };
 }

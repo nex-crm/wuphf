@@ -155,6 +155,66 @@ describe("useResizablePane", () => {
     });
     expect(document.body.classList.contains("resizing-pane")).toBe(false);
   });
+
+  it("cleans drag listeners and body class when unmounted mid-drag", () => {
+    const { result, unmount } = renderHook(() => useResizablePane(baseOpts));
+    act(() => {
+      startDrag(result.current.onPointerDown, 100);
+    });
+    expect(document.body.classList.contains("resizing-pane")).toBe(true);
+
+    const widthBeforeUnmount = result.current.width;
+    unmount();
+    expect(document.body.classList.contains("resizing-pane")).toBe(false);
+
+    // Listeners must have been removed: subsequent pointermove/up events
+    // must not throw or mutate state on the stale hook instance.
+    expect(() => {
+      window.dispatchEvent(
+        new PointerEvent("pointermove", { clientX: 9999, pointerId: 1 }),
+      );
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
+    }).not.toThrow();
+    // The captured value never advanced past mount because the listener
+    // was already torn down before the move arrived.
+    expect(result.current.width).toBe(widthBeforeUnmount);
+  });
+
+  it("stepResize widens a right-edge pane by a positive delta", () => {
+    const { result } = renderHook(() => useResizablePane(baseOpts));
+    act(() => {
+      result.current.stepResize(16);
+    });
+    expect(result.current.width).toBe(236);
+  });
+
+  it("stepResize clamps to the max with +Infinity", () => {
+    const { result } = renderHook(() => useResizablePane(baseOpts));
+    act(() => {
+      result.current.stepResize(Number.POSITIVE_INFINITY);
+    });
+    expect(result.current.width).toBe(420);
+  });
+
+  it("stepResize clamps to the min with -Infinity", () => {
+    const { result } = renderHook(() => useResizablePane(baseOpts));
+    act(() => {
+      result.current.stepResize(Number.NEGATIVE_INFINITY);
+    });
+    expect(result.current.width).toBe(180);
+  });
+
+  it("stepResize never escapes the configured bounds", () => {
+    const { result } = renderHook(() => useResizablePane(baseOpts));
+    act(() => {
+      result.current.stepResize(10_000);
+    });
+    expect(result.current.width).toBe(420);
+    act(() => {
+      result.current.stepResize(-10_000);
+    });
+    expect(result.current.width).toBe(180);
+  });
 });
 
 // Helpers --------------------------------------------------------------------

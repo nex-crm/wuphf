@@ -213,6 +213,7 @@ export function Sidebar() {
           onPointerDown={resize.onPointerDown}
           isResizing={resize.isResizing}
           onReset={resize.reset}
+          onStepResize={resize.stepResize}
           valueNow={resize.width}
           valueMin={SIDEBAR_MIN_WIDTH}
           valueMax={SIDEBAR_MAX_WIDTH}

@@ -338,6 +338,7 @@ export function ThreadPanel() {
         onPointerDown={resize.onPointerDown}
         isResizing={resize.isResizing}
         onReset={resize.reset}
+        onStepResize={resize.stepResize}
         valueNow={resize.width}
         valueMin={THREAD_PANEL_MIN_WIDTH}
         valueMax={THREAD_PANEL_MAX_WIDTH}
