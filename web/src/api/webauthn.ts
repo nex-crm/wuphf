@@ -14,12 +14,6 @@ import type {
   ApprovalScopeJsonValue,
   SignedApprovalTokenJsonValue,
 } from "@wuphf/protocol";
-import {
-  approvalClaimFromJson,
-  approvalClaimToJsonValue,
-  approvalScopeFromJson,
-  approvalScopeToJsonValue,
-} from "@wuphf/protocol";
 
 import { ApiError, post } from "./client";
 
@@ -57,6 +51,23 @@ export interface WebAuthnCosignChallengeInput {
   readonly claim: ApprovalClaim;
   readonly scope: ApprovalScope;
 }
+
+type ApprovalClaimByKind<TKind extends ApprovalClaim["kind"]> = Extract<
+  ApprovalClaim,
+  { readonly kind: TKind }
+>;
+type ApprovalScopeByKind<TKind extends ApprovalScope["claimKind"]> = Extract<
+  ApprovalScope,
+  { readonly claimKind: TKind }
+>;
+
+export const APPROVAL_ROLE_VALUES = [
+  "viewer",
+  "approver",
+  "host",
+] as const satisfies readonly ApprovalRole[];
+
+const APPROVAL_ROLE_SET: ReadonlySet<string> = new Set(APPROVAL_ROLE_VALUES);
 
 interface WebAuthnCosignChallengeWireResponse {
   readonly challengeId: string;
@@ -102,6 +113,202 @@ export function isWebAuthnApprovalPendingResponse(
   );
 }
 
+export function isApprovalRole(value: string): value is ApprovalRole {
+  return APPROVAL_ROLE_SET.has(value);
+}
+
+export function approvalClaimToJsonValue(
+  claim: ApprovalClaim,
+): ApprovalClaimJsonValue {
+  switch (claim.kind) {
+    case "cost_spike_acknowledgement":
+      return {
+        schemaVersion: claim.schemaVersion,
+        claimId: claim.claimId,
+        kind: claim.kind,
+        agentId: claim.agentId,
+        costCeilingId: claim.costCeilingId,
+        thresholdBps: claim.thresholdBps,
+        currentMicroUsd: claim.currentMicroUsd,
+        ceilingMicroUsd: claim.ceilingMicroUsd,
+      };
+    case "endpoint_allowlist_extension":
+      return {
+        schemaVersion: claim.schemaVersion,
+        claimId: claim.claimId,
+        kind: claim.kind,
+        agentId: claim.agentId,
+        providerKind: claim.providerKind,
+        endpointOrigin: claim.endpointOrigin,
+        reason: claim.reason,
+      };
+    case "credential_grant_to_agent":
+      return {
+        schemaVersion: claim.schemaVersion,
+        claimId: claim.claimId,
+        kind: claim.kind,
+        granteeAgentId: claim.granteeAgentId,
+        credentialHandleId: claim.credentialHandleId,
+        credentialScope: claim.credentialScope,
+      };
+    case "receipt_co_sign":
+      return {
+        schemaVersion: claim.schemaVersion,
+        claimId: claim.claimId,
+        kind: claim.kind,
+        receiptId: claim.receiptId,
+        ...(claim.writeId === undefined ? {} : { writeId: claim.writeId }),
+        frozenArgsHash: claim.frozenArgsHash,
+        riskClass: claim.riskClass,
+      };
+  }
+}
+
+export function approvalClaimFromJson(
+  value: ApprovalClaimJsonValue,
+): ApprovalClaim {
+  switch (value.kind) {
+    case "cost_spike_acknowledgement":
+      return {
+        schemaVersion: value.schemaVersion,
+        claimId: value.claimId,
+        kind: value.kind,
+        agentId: value.agentId,
+        costCeilingId: value.costCeilingId,
+        thresholdBps: value.thresholdBps,
+        currentMicroUsd: value.currentMicroUsd,
+        ceilingMicroUsd: value.ceilingMicroUsd,
+      } as ApprovalClaimByKind<"cost_spike_acknowledgement">;
+    case "endpoint_allowlist_extension":
+      return {
+        schemaVersion: value.schemaVersion,
+        claimId: value.claimId,
+        kind: value.kind,
+        agentId: value.agentId,
+        providerKind: value.providerKind,
+        endpointOrigin: value.endpointOrigin,
+        reason: value.reason,
+      } as ApprovalClaimByKind<"endpoint_allowlist_extension">;
+    case "credential_grant_to_agent":
+      return {
+        schemaVersion: value.schemaVersion,
+        claimId: value.claimId,
+        kind: value.kind,
+        granteeAgentId: value.granteeAgentId,
+        credentialHandleId: value.credentialHandleId,
+        credentialScope: value.credentialScope,
+      } as ApprovalClaimByKind<"credential_grant_to_agent">;
+    case "receipt_co_sign":
+      return {
+        schemaVersion: value.schemaVersion,
+        claimId: value.claimId,
+        kind: value.kind,
+        receiptId: value.receiptId,
+        ...(value.writeId === undefined ? {} : { writeId: value.writeId }),
+        frozenArgsHash: value.frozenArgsHash,
+        riskClass: value.riskClass,
+      } as ApprovalClaimByKind<"receipt_co_sign">;
+  }
+}
+
+export function approvalScopeToJsonValue(
+  scope: ApprovalScope,
+): ApprovalScopeJsonValue {
+  switch (scope.claimKind) {
+    case "cost_spike_acknowledgement":
+      return {
+        mode: scope.mode,
+        claimId: scope.claimId,
+        claimKind: scope.claimKind,
+        role: scope.role,
+        maxUses: scope.maxUses,
+        agentId: scope.agentId,
+        costCeilingId: scope.costCeilingId,
+      };
+    case "endpoint_allowlist_extension":
+      return {
+        mode: scope.mode,
+        claimId: scope.claimId,
+        claimKind: scope.claimKind,
+        role: scope.role,
+        maxUses: scope.maxUses,
+        agentId: scope.agentId,
+        providerKind: scope.providerKind,
+        endpointOrigin: scope.endpointOrigin,
+      };
+    case "credential_grant_to_agent":
+      return {
+        mode: scope.mode,
+        claimId: scope.claimId,
+        claimKind: scope.claimKind,
+        role: scope.role,
+        maxUses: scope.maxUses,
+        granteeAgentId: scope.granteeAgentId,
+        credentialHandleId: scope.credentialHandleId,
+      };
+    case "receipt_co_sign":
+      return {
+        mode: scope.mode,
+        claimId: scope.claimId,
+        claimKind: scope.claimKind,
+        role: scope.role,
+        maxUses: scope.maxUses,
+        receiptId: scope.receiptId,
+        ...(scope.writeId === undefined ? {} : { writeId: scope.writeId }),
+        frozenArgsHash: scope.frozenArgsHash,
+      };
+  }
+}
+
+export function approvalScopeFromJson(
+  value: ApprovalScopeJsonValue,
+): ApprovalScope {
+  switch (value.claimKind) {
+    case "cost_spike_acknowledgement":
+      return {
+        mode: value.mode,
+        claimId: value.claimId,
+        claimKind: value.claimKind,
+        role: value.role,
+        maxUses: value.maxUses,
+        agentId: value.agentId,
+        costCeilingId: value.costCeilingId,
+      } as ApprovalScopeByKind<"cost_spike_acknowledgement">;
+    case "endpoint_allowlist_extension":
+      return {
+        mode: value.mode,
+        claimId: value.claimId,
+        claimKind: value.claimKind,
+        role: value.role,
+        maxUses: value.maxUses,
+        agentId: value.agentId,
+        providerKind: value.providerKind,
+        endpointOrigin: value.endpointOrigin,
+      } as ApprovalScopeByKind<"endpoint_allowlist_extension">;
+    case "credential_grant_to_agent":
+      return {
+        mode: value.mode,
+        claimId: value.claimId,
+        claimKind: value.claimKind,
+        role: value.role,
+        maxUses: value.maxUses,
+        granteeAgentId: value.granteeAgentId,
+        credentialHandleId: value.credentialHandleId,
+      } as ApprovalScopeByKind<"credential_grant_to_agent">;
+    case "receipt_co_sign":
+      return {
+        mode: value.mode,
+        claimId: value.claimId,
+        claimKind: value.claimKind,
+        role: value.role,
+        maxUses: value.maxUses,
+        receiptId: value.receiptId,
+        ...(value.writeId === undefined ? {} : { writeId: value.writeId }),
+        frozenArgsHash: value.frozenArgsHash,
+      } as ApprovalScopeByKind<"receipt_co_sign">;
+  }
+}
+
 export function toWebAuthnCosignChallengeRequest(
   input: WebAuthnCosignChallengeInput,
 ): WebAuthnCosignChallengeRequest {
@@ -139,14 +346,8 @@ export async function requestWebAuthnCosignChallenge(
   return {
     challengeId: response.challengeId,
     requestOptions: response.requestOptions,
-    claim: approvalClaimFromJson(
-      response.claim,
-      "webauthnCosignChallenge.claim",
-    ),
-    scope: approvalScopeFromJson(
-      response.scope,
-      "webauthnCosignChallenge.scope",
-    ),
+    claim: approvalClaimFromJson(response.claim),
+    scope: approvalScopeFromJson(response.scope),
   };
 }
 

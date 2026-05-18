@@ -1,10 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { APPROVAL_ROLE_VALUES } from "@wuphf/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/client";
 import * as webauthn from "../../api/webauthn";
+import { APPROVAL_ROLE_VALUES } from "../../api/webauthn";
 import { showNotice } from "../ui/Toast";
 import {
   CredentialRegistrationPanel,

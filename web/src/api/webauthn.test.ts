@@ -1,12 +1,17 @@
-import type { ApprovalClaim, ApprovalScope } from "@wuphf/protocol";
-import {
-  approvalClaimToJsonValue,
-  approvalScopeToJsonValue,
+import type {
+  ApprovalClaim,
+  ApprovalClaimJsonValue,
+  ApprovalScope,
+  ApprovalScopeJsonValue,
 } from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, post } from "./client";
 import {
+  approvalClaimFromJson,
+  approvalClaimToJsonValue,
+  approvalScopeFromJson,
+  approvalScopeToJsonValue,
   describeWebAuthnBrokerStorageError,
   isWebAuthnApprovalPendingResponse,
   requestWebAuthnCosignChallenge,
@@ -74,6 +79,19 @@ describe("webauthn api client", () => {
       challengeId: "challenge-1",
       attestationResponse,
     });
+  });
+
+  it("round-trips all approval claim and scope variants with local codecs", () => {
+    for (const { claim, claimJson, name, scope, scopeJson } of APPROVAL_PAIRS) {
+      expect(approvalClaimToJsonValue(claim), `${name} claim JSON`).toEqual(
+        claimJson,
+      );
+      expect(approvalScopeToJsonValue(scope), `${name} scope JSON`).toEqual(
+        scopeJson,
+      );
+      expect(approvalClaimFromJson(claimJson), `${name} claim`).toEqual(claim);
+      expect(approvalScopeFromJson(scopeJson), `${name} scope`).toEqual(scope);
+    }
   });
 
   it("serializes protocol claim and scope JSON for cosign challenge requests", async () => {
@@ -252,30 +270,184 @@ describe("webauthn api client", () => {
   });
 });
 
-function approvalPair(): { claim: ApprovalClaim; scope: ApprovalScope } {
-  const claimId = "claim1";
-  const receiptId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-  const frozenArgsHash =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-  return {
+interface ApprovalPairFixture {
+  readonly name: string;
+  readonly claim: ApprovalClaim;
+  readonly scope: ApprovalScope;
+  readonly claimJson: ApprovalClaimJsonValue;
+  readonly scopeJson: ApprovalScopeJsonValue;
+}
+
+const RECEIPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const FROZEN_ARGS_HASH =
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+const APPROVAL_PAIRS = [
+  {
+    name: "cost spike acknowledgement",
     claim: {
       schemaVersion: 1,
-      claimId,
-      kind: "receipt_co_sign",
-      receiptId,
-      frozenArgsHash,
-      riskClass: "high",
-    } as ApprovalClaim,
+      claimId: "cost-claim",
+      kind: "cost_spike_acknowledgement",
+      agentId: "agent-alpha",
+      costCeilingId: "ceiling-alpha",
+      thresholdBps: 2500,
+      currentMicroUsd: 1_250_000,
+      ceilingMicroUsd: 1_000_000,
+    } as unknown as ApprovalClaim,
     scope: {
       mode: "single_use",
-      claimId,
+      claimId: "cost-claim",
+      claimKind: "cost_spike_acknowledgement",
+      role: "approver",
+      maxUses: 1,
+      agentId: "agent-alpha",
+      costCeilingId: "ceiling-alpha",
+    } as unknown as ApprovalScope,
+    claimJson: {
+      schemaVersion: 1,
+      claimId: "cost-claim",
+      kind: "cost_spike_acknowledgement",
+      agentId: "agent-alpha",
+      costCeilingId: "ceiling-alpha",
+      thresholdBps: 2500,
+      currentMicroUsd: 1_250_000,
+      ceilingMicroUsd: 1_000_000,
+    },
+    scopeJson: {
+      mode: "single_use",
+      claimId: "cost-claim",
+      claimKind: "cost_spike_acknowledgement",
+      role: "approver",
+      maxUses: 1,
+      agentId: "agent-alpha",
+      costCeilingId: "ceiling-alpha",
+    },
+  },
+  {
+    name: "endpoint allowlist extension",
+    claim: {
+      schemaVersion: 1,
+      claimId: "endpoint-claim",
+      kind: "endpoint_allowlist_extension",
+      agentId: "agent-beta",
+      providerKind: "openai",
+      endpointOrigin: "https://api.example.test",
+      reason: "temporary model evaluation",
+    } as unknown as ApprovalClaim,
+    scope: {
+      mode: "single_use",
+      claimId: "endpoint-claim",
+      claimKind: "endpoint_allowlist_extension",
+      role: "host",
+      maxUses: 1,
+      agentId: "agent-beta",
+      providerKind: "openai",
+      endpointOrigin: "https://api.example.test",
+    } as unknown as ApprovalScope,
+    claimJson: {
+      schemaVersion: 1,
+      claimId: "endpoint-claim",
+      kind: "endpoint_allowlist_extension",
+      agentId: "agent-beta",
+      providerKind: "openai",
+      endpointOrigin: "https://api.example.test",
+      reason: "temporary model evaluation",
+    },
+    scopeJson: {
+      mode: "single_use",
+      claimId: "endpoint-claim",
+      claimKind: "endpoint_allowlist_extension",
+      role: "host",
+      maxUses: 1,
+      agentId: "agent-beta",
+      providerKind: "openai",
+      endpointOrigin: "https://api.example.test",
+    },
+  },
+  {
+    name: "credential grant to agent",
+    claim: {
+      schemaVersion: 1,
+      claimId: "credential-claim",
+      kind: "credential_grant_to_agent",
+      granteeAgentId: "agent-gamma",
+      credentialHandleId: "credential-prod",
+      credentialScope: "repo:read",
+    } as unknown as ApprovalClaim,
+    scope: {
+      mode: "single_use",
+      claimId: "credential-claim",
+      claimKind: "credential_grant_to_agent",
+      role: "approver",
+      maxUses: 1,
+      granteeAgentId: "agent-gamma",
+      credentialHandleId: "credential-prod",
+    } as unknown as ApprovalScope,
+    claimJson: {
+      schemaVersion: 1,
+      claimId: "credential-claim",
+      kind: "credential_grant_to_agent",
+      granteeAgentId: "agent-gamma",
+      credentialHandleId: "credential-prod",
+      credentialScope: "repo:read",
+    },
+    scopeJson: {
+      mode: "single_use",
+      claimId: "credential-claim",
+      claimKind: "credential_grant_to_agent",
+      role: "approver",
+      maxUses: 1,
+      granteeAgentId: "agent-gamma",
+      credentialHandleId: "credential-prod",
+    },
+  },
+  {
+    name: "receipt co-sign",
+    claim: {
+      schemaVersion: 1,
+      claimId: "claim1",
+      kind: "receipt_co_sign",
+      receiptId: RECEIPT_ID,
+      frozenArgsHash: FROZEN_ARGS_HASH,
+      riskClass: "high",
+    } as unknown as ApprovalClaim,
+    scope: {
+      mode: "single_use",
+      claimId: "claim1",
       claimKind: "receipt_co_sign",
       role: "approver",
       maxUses: 1,
-      receiptId,
-      frozenArgsHash,
-    } as ApprovalScope,
-  };
+      receiptId: RECEIPT_ID,
+      frozenArgsHash: FROZEN_ARGS_HASH,
+    } as unknown as ApprovalScope,
+    claimJson: {
+      schemaVersion: 1,
+      claimId: "claim1",
+      kind: "receipt_co_sign",
+      receiptId: RECEIPT_ID,
+      frozenArgsHash: FROZEN_ARGS_HASH,
+      riskClass: "high",
+    },
+    scopeJson: {
+      mode: "single_use",
+      claimId: "claim1",
+      claimKind: "receipt_co_sign",
+      role: "approver",
+      maxUses: 1,
+      receiptId: RECEIPT_ID,
+      frozenArgsHash: FROZEN_ARGS_HASH,
+    },
+  },
+] as const satisfies readonly [
+  ApprovalPairFixture,
+  ApprovalPairFixture,
+  ApprovalPairFixture,
+  ApprovalPairFixture,
+];
+
+function approvalPair(): { claim: ApprovalClaim; scope: ApprovalScope } {
+  return APPROVAL_PAIRS[3];
 }
 
 function registrationOptions(): WebAuthnCreationOptionsJson {

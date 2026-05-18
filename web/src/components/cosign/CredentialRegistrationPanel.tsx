@@ -1,12 +1,10 @@
 import { type ReactNode, useState } from "react";
-import {
-  APPROVAL_ROLE_VALUES,
-  type ApprovalRole,
-  isApprovalRole,
-} from "@wuphf/protocol";
+import type { ApprovalRole } from "@wuphf/protocol";
 
 import {
+  APPROVAL_ROLE_VALUES,
   describeWebAuthnBrokerStorageError,
+  isApprovalRole,
   requestWebAuthnRegistrationChallenge,
   runWebAuthnRegistrationCeremony,
   verifyWebAuthnRegistration,

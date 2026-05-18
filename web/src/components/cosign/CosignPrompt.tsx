@@ -4,14 +4,12 @@ import type {
   ApprovalScope,
   SignedApprovalTokenJsonValue,
 } from "@wuphf/protocol";
+
 import {
   approvalClaimFromJson,
   approvalClaimToJsonValue,
   approvalScopeFromJson,
   approvalScopeToJsonValue,
-} from "@wuphf/protocol";
-
-import {
   describeWebAuthnBrokerStorageError,
   isWebAuthnApprovalPendingResponse,
   requestWebAuthnCosignChallenge,
