@@ -1,6 +1,5 @@
 import type {
   ApprovalEvent,
-  ApprovalRole,
   BrokerTokenVerdict,
   FileChange,
   MemoryWriteRef,
@@ -47,11 +46,7 @@ export const TRIGGER_KIND_VALUES = [
   "system",
 ] as const satisfies readonly TriggerKind[];
 
-export const APPROVAL_ROLE_VALUES = [
-  "viewer",
-  "approver",
-  "host",
-] as const satisfies readonly ApprovalRole[];
+export const APPROVAL_ROLE_VALUES = ["viewer", "approver", "host"] as const;
 
 export const APPROVAL_DECISION_VALUES = [
   "approve",

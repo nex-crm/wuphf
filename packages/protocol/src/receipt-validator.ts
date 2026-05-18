@@ -689,6 +689,14 @@ function validateApprovalEvent(
       addError(errors, pointer(pointer(tokenPath, "claim"), "kind"), "must be receipt_co_sign");
       return;
     }
+    if (!isReceiptCoSignScope(token.scope)) {
+      addError(
+        errors,
+        pointer(pointer(tokenPath, "scope"), "claimKind"),
+        "must be receipt_co_sign",
+      );
+      return;
+    }
     if (typeof receiptId === "string" && token.claim.receiptId !== receiptId) {
       addError(
         errors,

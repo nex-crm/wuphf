@@ -183,6 +183,32 @@ describe("SignedApprovalToken codec", () => {
     );
   });
 
+  it.each(nonReceiptClaimVariantFixtures())("accepts $name claim tokens directly", ({
+    claim,
+    scope,
+  }) => {
+    const token = signedApprovalTokenFixture({ claim, scope });
+
+    const parsed = signedApprovalTokenFromJson(signedApprovalTokenToJsonValue(token));
+
+    expect(parsed.claim).toStrictEqual(claim);
+    expect(parsed.scope).toStrictEqual(scope);
+  });
+
+  it.each(
+    nonReceiptClaimVariantFixtures(),
+  )("rejects $name claim tokens missing their kind-specific field", ({ claim, scope }) => {
+    const token = mutableJson(
+      signedApprovalTokenToJsonValue(signedApprovalTokenFixture({ claim, scope })),
+    );
+    const missingField = REQUIRED_CLAIM_FIELD_BY_KIND[claim.kind];
+    Reflect.deleteProperty(nestedRecord(token, "claim"), missingField);
+
+    expect(() => signedApprovalTokenFromJson(token)).toThrow(
+      new RegExp(`${missingField}.*required`),
+    );
+  });
+
   it("bounds public canonical projection budget helpers at the edge", () => {
     expect(
       validateApprovalClaimCanonicalJsonBudget("A".repeat(MAX_APPROVAL_CLAIM_CANONICAL_JSON_BYTES)),
@@ -447,6 +473,22 @@ function claimVariantFixtures(): readonly {
       scope: receiptCoSignScopeFixture(receiptClaim),
     },
   ];
+}
+
+function nonReceiptClaimVariantFixtures(): readonly {
+  readonly name: string;
+  readonly claim: Exclude<ApprovalClaim, { readonly kind: "receipt_co_sign" }>;
+  readonly scope: Exclude<ApprovalScope, { readonly claimKind: "receipt_co_sign" }>;
+}[] {
+  return claimVariantFixtures().filter(
+    (
+      fixture,
+    ): fixture is {
+      readonly name: string;
+      readonly claim: Exclude<ApprovalClaim, { readonly kind: "receipt_co_sign" }>;
+      readonly scope: Exclude<ApprovalScope, { readonly claimKind: "receipt_co_sign" }>;
+    } => fixture.claim.kind !== "receipt_co_sign" && fixture.scope.claimKind !== "receipt_co_sign",
+  );
 }
 
 function receiptCoSignClaimFixture(): Extract<ApprovalClaim, { readonly kind: "receipt_co_sign" }> {

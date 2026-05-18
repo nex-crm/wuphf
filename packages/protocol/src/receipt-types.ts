@@ -34,7 +34,7 @@ export type IdempotencyKey = Brand<string, "IdempotencyKey">;
 export type ThreadId = Brand<string, "ThreadId">;
 export type ThreadSpecRevisionId = Brand<string, "ThreadSpecRevisionId">;
 export type SignerIdentity = Brand<string, "SignerIdentity">;
-export type ApprovalRole = "viewer" | "approver" | "host";
+export type ApprovalRole = (typeof APPROVAL_ROLE_VALUES)[number];
 
 export type ReceiptStatus = "ok" | "error" | "stalled" | "approval_pending" | "rejected";
 

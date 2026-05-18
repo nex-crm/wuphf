@@ -77,6 +77,7 @@ export interface ConsumedWebAuthnTokenRecord {
   readonly outcome: WebAuthnTokenOutcome;
   readonly responseJson: JsonValue;
   readonly role: ApprovalRole;
+  readonly claimScopeHash: Sha256Hex;
   readonly approvalGroupHash: Sha256Hex;
   readonly issuedToAgentId: AgentId;
   readonly expiresAtMs: number;

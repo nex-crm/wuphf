@@ -367,6 +367,7 @@ async function routeRequest(
   if (pathname === "/api/receipts") {
     await handleReceiptCreate(req, res, {
       receiptStore: deps.receiptStore,
+      webauthnStore: deps.webauthn?.store ?? null,
       logger: deps.logger,
     });
     return;
@@ -378,6 +379,7 @@ async function routeRequest(
     }
     await handleReceiptGet(pathname, res, {
       receiptStore: deps.receiptStore,
+      webauthnStore: deps.webauthn?.store ?? null,
       logger: deps.logger,
     });
     return;
@@ -389,6 +391,7 @@ async function routeRequest(
     }
     await handleThreadReceiptsList(req, res, {
       receiptStore: deps.receiptStore,
+      webauthnStore: deps.webauthn?.store ?? null,
       logger: deps.logger,
     });
     return;

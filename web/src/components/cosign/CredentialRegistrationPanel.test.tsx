@@ -71,7 +71,7 @@ describe("<CredentialRegistrationPanel>", () => {
     );
   });
 
-  it("can register a custom broker role", async () => {
+  it("registers another protocol role without offering custom roles", async () => {
     requestChallengeMock.mockResolvedValue({
       challengeId: "challenge-2",
       creationOptions: creationOptions(),
@@ -79,14 +79,23 @@ describe("<CredentialRegistrationPanel>", () => {
     runCeremonyMock.mockResolvedValue(attestationResponse());
     verifyMock.mockResolvedValue({
       credentialId: "credential-456",
-      role: "security",
+      role: "host",
     });
 
     render(<CredentialRegistrationPanel />);
 
+    const roleSelect = screen.getByLabelText("Approval role");
+    expect(
+      screen.queryByRole("option", { name: "Custom" }),
+    ).not.toBeInTheDocument();
+    expect(
+      Array.from(roleSelect.querySelectorAll("option")).map(
+        (option) => option.value,
+      ),
+    ).toEqual(["viewer", "approver", "host"]);
+
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Approval role"), "custom");
-    await user.type(screen.getByLabelText("Custom role"), "security");
+    await user.selectOptions(roleSelect, "host");
     await user.click(
       screen.getByRole("button", { name: "Register security key" }),
     );
@@ -94,7 +103,7 @@ describe("<CredentialRegistrationPanel>", () => {
     await waitFor(() =>
       expect(screen.getByText("credential-456")).toBeInTheDocument(),
     );
-    expect(requestChallengeMock).toHaveBeenCalledWith({ role: "security" });
+    expect(requestChallengeMock).toHaveBeenCalledWith({ role: "host" });
   });
 
   it("shows a clear expired registration challenge error", async () => {
@@ -112,15 +121,12 @@ describe("<CredentialRegistrationPanel>", () => {
     );
   });
 
-  it("disables registration until a custom role is present", async () => {
+  it("keeps registration enabled for the default protocol role", async () => {
     render(<CredentialRegistrationPanel />);
-
-    const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Approval role"), "custom");
 
     expect(
       screen.getByRole("button", { name: "Register security key" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(requestChallengeMock).not.toHaveBeenCalled();
   });
 

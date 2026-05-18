@@ -162,6 +162,13 @@ describe("webauthn api client", () => {
         requiredThreshold: 2,
       }),
     ).toBe(false);
+    expect(
+      isWebAuthnApprovalPendingResponse({
+        status: "approval_pending",
+        satisfiedRoles: ["approver"],
+        requiredThreshold: Number.POSITIVE_INFINITY,
+      }),
+    ).toBe(false);
   });
 
   it("runs the SimpleWebAuthn registration wrapper against navigator.credentials.create", async () => {

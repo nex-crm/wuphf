@@ -9,6 +9,7 @@ import {
 import type {
   ApprovalClaim,
   ApprovalClaimJsonValue,
+  ApprovalRole,
   ApprovalScope,
   ApprovalScopeJsonValue,
   SignedApprovalTokenJsonValue,
@@ -29,7 +30,7 @@ export type WebAuthnAttestationResponseJson = RegistrationResponseJSON;
 export type WebAuthnAssertionResponseJson = AuthenticationResponseJSON;
 
 export interface WebAuthnRegistrationChallengeRequest {
-  readonly role: string;
+  readonly role: ApprovalRole;
 }
 
 export interface WebAuthnRegistrationChallengeResponse {
@@ -44,7 +45,7 @@ export interface WebAuthnRegistrationVerifyRequest {
 
 export interface WebAuthnRegistrationVerifyResponse {
   readonly credentialId: string;
-  readonly role: string;
+  readonly role: ApprovalRole;
 }
 
 export interface WebAuthnCosignChallengeRequest {
@@ -91,11 +92,13 @@ export function isWebAuthnApprovalPendingResponse(
 ): response is WebAuthnApprovalPendingResponse {
   if (typeof response !== "object" || response === null) return false;
   const record = response as Record<string, unknown>;
+  const { requiredThreshold, satisfiedRoles, status } = record;
+  if (!Array.isArray(satisfiedRoles)) return false;
+  if (!satisfiedRoles.every((role) => typeof role === "string")) return false;
   return (
-    record.status === "approval_pending" &&
-    Array.isArray(record.satisfiedRoles) &&
-    record.satisfiedRoles.every((role) => typeof role === "string") &&
-    typeof record.requiredThreshold === "number"
+    status === "approval_pending" &&
+    typeof requiredThreshold === "number" &&
+    Number.isFinite(requiredThreshold)
   );
 }
 

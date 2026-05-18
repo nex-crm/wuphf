@@ -75,6 +75,7 @@ interface ConsumedTokenRow {
   readonly outcome: string;
   readonly responseJson: string;
   readonly role: string;
+  readonly claimScopeHash: string;
   readonly approvalGroupHash: string;
   readonly agentId: string;
   readonly expiresAtMs: number;
@@ -237,17 +238,20 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
       "UPDATE webauthn_challenges SET consumed_at_ms = ? WHERE challenge_id = ? AND consumed_at_ms IS NULL",
     );
     this.getConsumedTokenStmt = db.prepare<[ApprovalTokenId], ConsumedTokenRow>(
-      `SELECT token_id AS tokenId,
-              challenge_id AS challengeId,
-              outcome,
-              response_json AS responseJson,
-              role,
-              approval_group_hash AS approvalGroupHash,
-              agent_id AS agentId,
-              expires_at_ms AS expiresAtMs,
-              consumed_at_ms AS consumedAtMs
-       FROM webauthn_consumed_tokens
-       WHERE token_id = ?`,
+      `SELECT t.token_id AS tokenId,
+              t.challenge_id AS challengeId,
+              t.outcome,
+              t.response_json AS responseJson,
+              t.role,
+              c.claim_scope_hash AS claimScopeHash,
+              t.approval_group_hash AS approvalGroupHash,
+              t.agent_id AS agentId,
+              t.expires_at_ms AS expiresAtMs,
+              t.consumed_at_ms AS consumedAtMs
+       FROM webauthn_consumed_tokens AS t
+       INNER JOIN webauthn_challenges AS c
+         ON c.challenge_id = t.challenge_id
+       WHERE t.token_id = ?`,
     );
     this.listSatisfiedRolesStmt = db.prepare<[Sha256Hex, AgentId, number], RoleRow>(
       `SELECT DISTINCT role
@@ -304,6 +308,11 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
     this.consumeCosignTransaction = db.transaction((args: ConsumeCosignChallengeArgs) => {
       const existing = this.getConsumedTokenStmt.get(args.tokenId);
       if (existing !== undefined) return consumedTokenFromRow(existing);
+      const challenge = this.getChallengeStmt.get(args.challengeId);
+      if (challenge === undefined || challenge.claimScopeHash === null) {
+        throw new Error("webauthn consumed token challenge is missing claim_scope_hash");
+      }
+      const claimScopeHash = asSha256Hex(challenge.claimScopeHash);
       const result = this.markChallengeConsumedStmt.run(args.consumedAtMs, args.challengeId);
       if (result.changes !== 1) {
         throw new Error("webauthn cosign challenge was already consumed");
@@ -352,6 +361,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
         outcome,
         responseJson,
         role: args.role,
+        claimScopeHash,
         approvalGroupHash: args.approvalGroupHash,
         issuedToAgentId: args.issuedToAgentId,
         expiresAtMs: args.expiresAtMs,
@@ -591,6 +601,7 @@ function consumedTokenFromRow(row: ConsumedTokenRow): ConsumedWebAuthnTokenRecor
     outcome: outcomeFromString(row.outcome),
     responseJson: parseStoredJson(row.responseJson, "webauthn_consumed_tokens.response_json"),
     role: roleFromString(row.role, "webauthn_consumed_tokens.role"),
+    claimScopeHash: asSha256Hex(row.claimScopeHash),
     approvalGroupHash: asSha256Hex(row.approvalGroupHash),
     issuedToAgentId: asAgentId(row.agentId),
     expiresAtMs: row.expiresAtMs,

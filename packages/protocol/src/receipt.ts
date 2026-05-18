@@ -94,6 +94,7 @@ import {
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
+export { APPROVAL_ROLE_VALUES } from "./receipt-literals.ts";
 // Re-exports — public surface stays stable across the file split.
 export type {
   AgentSlug,

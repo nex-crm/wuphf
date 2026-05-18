@@ -300,6 +300,7 @@ export type {
   WriteResult,
 } from "./receipt.ts";
 export {
+  APPROVAL_ROLE_VALUES,
   asAgentSlug,
   asApprovalId,
   asApprovalRole,

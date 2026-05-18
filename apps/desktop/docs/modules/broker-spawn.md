@@ -48,10 +48,11 @@ the broker subprocess posts `{ ready: true, brokerUrl }`. In packaged mode the
 entry converts the listener's bound `http://127.0.0.1:<port>` handle into the
 browser-facing `http://localhost:<port>` form before posting readiness, so the
 renderer page origin, `/api-token` bootstrap URL, and WebAuthn RP ID all use
-`localhost`. The conversion is required because WebAuthn RP IDs cannot be IP
-addresses. The URL is validated against `@wuphf/protocol`'s `isBrokerUrl` brand
-at the IPC boundary — a malformed message is dropped, not handed downstream as
-a "string" the renderer might trust as a fetch origin.
+`localhost`. This is not cosmetic: WebAuthn RP IDs are registrable-domain
+identifiers, and browser WebAuthn APIs reject IP-address RP IDs such as
+`127.0.0.1`. The URL is validated against `@wuphf/protocol`'s `isBrokerUrl`
+brand at the IPC boundary — a malformed message is dropped, not handed
+downstream as a "string" the renderer might trust as a fetch origin.
 
 In packaged mode the `BrowserWindow` loads `${brokerUrl}/` in that localhost
 form so `/api-token`, `/api/*`, WebAuthn, and the agent terminal WebSocket are
@@ -145,9 +146,11 @@ real multi-agent identity model.
 The packaged renderer is loaded from `http://localhost:<broker-port>/`, so the
 broker appends that localhost origin to WebAuthn's `allowedOrigins` after
 `listen()` picks the ephemeral port. The listener still binds `127.0.0.1`;
-`localhost` is only the browser-facing name, chosen because WebAuthn RP IDs
-cannot be IP addresses. In dev, `WUPHF_DEV_RENDERER_ORIGIN` is still passed
-through so the electron-vite renderer origin is allowed as well.
+`localhost` is only the browser-facing name. WebAuthn validates the RP ID as a
+domain-style relying-party identifier, not as a loopback socket address, so an
+IP literal such as `127.0.0.1` cannot be the RP ID even though the listener
+binds that address. In dev, `WUPHF_DEV_RENDERER_ORIGIN` is still passed through
+so the electron-vite renderer origin is allowed as well.
 
 ## Receipt-Store Recovery
 

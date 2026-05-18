@@ -1,4 +1,9 @@
 import { type ReactNode, useState } from "react";
+import {
+  APPROVAL_ROLE_VALUES,
+  type ApprovalRole,
+  isApprovalRole,
+} from "@wuphf/protocol";
 
 import {
   requestWebAuthnRegistrationChallenge,
@@ -7,7 +12,7 @@ import {
 } from "../../api/webauthn";
 import { showNotice } from "../ui/Toast";
 
-const ROLE_OPTIONS = ["approver", "host"] as const;
+const ROLE_OPTIONS: readonly ApprovalRole[] = APPROVAL_ROLE_VALUES;
 
 type RegistrationState =
   | { readonly kind: "idle" }
@@ -15,21 +20,20 @@ type RegistrationState =
   | {
       readonly kind: "registered";
       readonly credentialId: string;
-      readonly role: string;
+      readonly role: ApprovalRole;
     }
   | { readonly kind: "error"; readonly message: string };
 
 export function CredentialRegistrationPanel() {
-  const [role, setRole] = useState<string>("approver");
-  const [customRole, setCustomRole] = useState("");
+  const [role, setRole] = useState<ApprovalRole>("approver");
   const [state, setState] = useState<RegistrationState>({ kind: "idle" });
-  const selectedRole = role === "custom" ? customRole.trim() : role;
+  const selectedRole = isApprovalRole(role) ? role : null;
   const running = state.kind === "running";
-  const canRegister = selectedRole.length > 0;
+  const canRegister = selectedRole !== null;
 
   const handleRegister = async () => {
     if (running) return;
-    if (!selectedRole) {
+    if (selectedRole === null) {
       setState({ kind: "error", message: "Choose a role before registering." });
       return;
     }
@@ -108,7 +112,11 @@ export function CredentialRegistrationPanel() {
         <select
           id="webauthn-role"
           value={role}
-          onChange={(event) => setRole(event.target.value)}
+          onChange={(event) => {
+            if (isApprovalRole(event.target.value)) {
+              setRole(event.target.value);
+            }
+          }}
           style={inputStyle}
         >
           {ROLE_OPTIONS.map((option) => (
@@ -116,29 +124,7 @@ export function CredentialRegistrationPanel() {
               {option}
             </option>
           ))}
-          <option value="custom">Custom</option>
         </select>
-        {role === "custom" ? (
-          <>
-            <label
-              htmlFor="webauthn-custom-role"
-              style={{
-                color: "var(--text-secondary)",
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              Custom role
-            </label>
-            <input
-              id="webauthn-custom-role"
-              value={customRole}
-              onChange={(event) => setCustomRole(event.target.value)}
-              style={inputStyle}
-              placeholder="security"
-            />
-          </>
-        ) : null}
       </div>
 
       <div>

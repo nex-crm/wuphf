@@ -84,6 +84,22 @@ describe("SqliteWebAuthnStore", () => {
     await expect(store.getChallenge("unexpiredOrphanChallenge")).resolves.not.toBeNull();
   });
 
+  it("returns the consumed token claim-scope hash from the linked challenge", async () => {
+    const store = createTestStore();
+    await saveCredential(store);
+    const consumed = await saveConsumedCosign(store, {
+      challengeId: "claimScopeHashChallenge",
+      tokenId: "01BRZ3NDEKTSV4RRFFQ69G5FC3",
+      expiresAtMs: 1_000,
+      consumedAtMs: 20,
+      newSignCount: 2,
+    });
+
+    const record = await store.getConsumedToken(consumed.tokenId);
+
+    expect(record?.claimScopeHash).toBe(consumed.claimScopeHash);
+  });
+
   it.each([
     "SQLITE_BUSY",
     "SQLITE_LOCKED",
@@ -208,6 +224,7 @@ async function saveConsumedCosign(
 ): Promise<{
   readonly challengeId: string;
   readonly tokenId: ReturnType<typeof asApprovalTokenId>;
+  readonly claimScopeHash: ReturnType<typeof sha256Hex>;
 }> {
   const { claim, scope } = receiptCoSignFixture("approver");
   const hashes = hashClaimScopeForTest(claim, scope);
@@ -238,7 +255,7 @@ async function saveConsumedCosign(
     expiresAtMs: args.expiresAtMs,
     consumedAtMs: args.consumedAtMs,
   });
-  return { challengeId: args.challengeId, tokenId };
+  return { challengeId: args.challengeId, tokenId, claimScopeHash: hashes.claimScopeHash };
 }
 
 function receiptCoSignFixture(role: ApprovalRole): {
