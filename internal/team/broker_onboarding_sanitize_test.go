@@ -482,7 +482,7 @@ func TestPhase2TransitionTableValidation(t *testing.T) {
 		// Invalid jumps (must be rejected with 400 by the handler).
 		{"", onboarding.PhaseSeed, false},
 		{onboarding.PhaseGreet, onboarding.PhaseSeed, false},
-		{onboarding.PhaseIdentity, onboarding.PhaseScan, false},     // must go through PhaseWebsite first
+		{onboarding.PhaseIdentity, onboarding.PhaseScan, false},      // must go through PhaseWebsite first
 		{onboarding.PhaseIdentity, onboarding.PhaseBlueprint, false}, // must go through PhaseWebsite first
 		{onboarding.PhaseIdentity, onboarding.PhaseComplete, false},
 		{onboarding.PhaseComplete, onboarding.PhaseGreet, false}, // cannot restart

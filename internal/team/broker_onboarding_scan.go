@@ -114,9 +114,9 @@ func (b *Broker) runScanPhase(dmSlug string) {
 // SSE/append-only message log stays append-only.
 func (b *Broker) postScanChipUpdate(dmSlug, websiteURL, status, label string) {
 	rawPayload := mustMarshalRaw(map[string]interface{}{
-		"url":         websiteURL,
-		"status":      status,
-		"done_label":  label,
+		"url":          websiteURL,
+		"status":       status,
+		"done_label":   label,
 		"failed_label": label,
 	})
 	payload := ceoMessagePayload{
@@ -202,4 +202,3 @@ func (b *Broker) advanceAfterScan(websiteURL string, success bool) {
 	}
 	_ = websiteURL // reserved for future telemetry; keep param for clarity
 }
-
