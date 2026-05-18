@@ -10,14 +10,25 @@ import type {
 import {
   type AgentId,
   type ApiToken,
+  type ApprovalClaim,
   type ApprovalRole,
+  type ApprovalScope,
   approvalClaimToJsonValue,
   approvalScopeToJsonValue,
   asAgentId,
   asApiToken,
   asApprovalClaimId,
+  asCredentialHandleId,
+  asCredentialScope,
+  asProviderKind,
   asReceiptId,
   asSha256Hex,
+  type CostSpikeAcknowledgementClaim,
+  type CostSpikeAcknowledgementScope,
+  type CredentialGrantToAgentClaim,
+  type CredentialGrantToAgentScope,
+  type EndpointAllowlistExtensionClaim,
+  type EndpointAllowlistExtensionScope,
   type ReceiptCoSignClaim,
   type ReceiptCoSignScope,
   signedApprovalTokenFromJson,
@@ -41,6 +52,15 @@ const otherAgentId = asAgentId("agent_beta");
 
 let broker: BrokerHandle | null = null;
 let db: Database.Database | null = null;
+
+const agentScopedClaimFixtureCases: readonly [
+  string,
+  (targetAgentId: AgentId, role: ApprovalRole) => AgentScopedClaimFixture,
+][] = [
+  ["cost spike acknowledgement", costSpikeAcknowledgementFixture],
+  ["endpoint allowlist extension", endpointAllowlistExtensionFixture],
+  ["credential grant", credentialGrantToAgentFixture],
+];
 
 describe("WebAuthn routes", () => {
   afterEach(async () => {
@@ -107,6 +127,36 @@ describe("WebAuthn routes", () => {
     expect(body.challengeId).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(body.creationOptions.rp.id).toBe("localhost");
     expect(body.creationOptions.challenge).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("allows registration challenges for broker-configured roles", async () => {
+    const handle = await startBroker({
+      enrollableRoles: enrollableRolesForAgent(agentId, ["host"]),
+    });
+
+    const res = await postJson(handle, "/api/webauthn/registration/challenge", {
+      role: "host",
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as RegistrationChallengeResponse;
+    expect(body.creationOptions.user.displayName).toBe("host");
+  });
+
+  it("rejects registration challenges for roles outside the broker enrollment policy", async () => {
+    const ceremony = new FakeCeremony();
+    const handle = await startBroker({
+      ceremony,
+      enrollableRoles: enrollableRolesForAgent(agentId, ["viewer"]),
+    });
+
+    const res = await postJson(handle, "/api/webauthn/registration/challenge", {
+      role: "host",
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({ error: "registration_role_not_enrollable" });
+    expect(ceremony.registrationOptionCalls).toBe(0);
   });
 
   it("verifies registration and persists the credential role", async () => {
@@ -219,6 +269,41 @@ describe("WebAuthn routes", () => {
     expect(body.error).toMatch(/receiptId/);
   });
 
+  it.each(
+    agentScopedClaimFixtureCases,
+  )("allows %s cosign challenges for the bearer-bound agent", async (_name, fixture) => {
+    const handle = await startBroker();
+    await registerRole(handle, "approver", "cred_approver");
+    const { claim, scope } = fixture(agentId, "approver");
+
+    const res = await postJson(handle, "/api/webauthn/cosign/challenge", {
+      claim: approvalClaimToJsonValue(claim),
+      scope: approvalScopeToJsonValue(scope),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as CosignChallengeResponse;
+    expect(body.requestOptions.allowCredentials?.map((credential) => credential.id)).toEqual([
+      "cred_approver",
+    ]);
+  });
+
+  it.each(
+    agentScopedClaimFixtureCases,
+  )("rejects %s cosign challenges targeting another agent", async (_name, fixture) => {
+    const handle = await startBroker();
+    await registerRole(handle, "approver", "cred_approver");
+    const { claim, scope } = fixture(otherAgentId, "approver");
+
+    const res = await postJson(handle, "/api/webauthn/cosign/challenge", {
+      claim: approvalClaimToJsonValue(claim),
+      scope: approvalScopeToJsonValue(scope),
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({ error: "wrong_claim_agent" });
+  });
+
   it("rejects a cosign assertion presented by a different bearer-bound agent", async () => {
     const tokenAgentIds = new Map([[token, agentId]]);
     const handle = await startBroker({ tokenAgentIds });
@@ -316,21 +401,51 @@ describe("WebAuthn routes", () => {
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({ error: "sign_count_replay" });
   });
+
+  it("rejects a concurrent lower sign-count verify inside the consume transaction", async () => {
+    const ceremony = new ControlledAuthenticationCeremony();
+    const handle = await startBroker({ ceremony });
+    await registerRole(handle, "approver", "cred_approver");
+    const firstChallenge = await cosignChallenge(handle, "approver");
+    const secondChallenge = await cosignChallenge(handle, "approver");
+
+    const firstVerify = postJson(handle, "/api/webauthn/cosign/verify", {
+      challengeId: firstChallenge.challengeId,
+      assertionResponse: assertionResponse("cred_approver"),
+    });
+    const secondVerify = postJson(handle, "/api/webauthn/cosign/verify", {
+      challengeId: secondChallenge.challengeId,
+      assertionResponse: assertionResponse("cred_approver"),
+    });
+    await waitForPendingAuthentications(ceremony, 2);
+
+    ceremony.resolveAuthentication(0, 3);
+    const first = await firstVerify;
+    expect(first.status).toBe(200);
+
+    ceremony.resolveAuthentication(1, 2);
+    const second = await secondVerify;
+    expect(second.status).toBe(400);
+    await expect(second.json()).resolves.toEqual({ error: "sign_count_replay" });
+  });
 });
 
 async function startBroker(
   options: {
     readonly clock?: Clock;
     readonly tokenAgentIds?: Map<ApiToken, AgentId>;
+    readonly enrollableRoles?: ReadonlyMap<AgentId, readonly ApprovalRole[]>;
     readonly receiptCoSignThreshold?: number;
     readonly ceremony?: FakeCeremony;
   } = {},
 ): Promise<BrokerHandle> {
   db = openDatabase({ path: ":memory:" });
   runMigrations(db);
+  const defaultEnrollableRoles = enrollableRolesForAgent(agentId, ["approver", "host"]);
   const webauthn = {
     store: createWebAuthnStore(db),
     tokenAgentIds: options.tokenAgentIds ?? new Map([[token, agentId]]),
+    enrollableRoles: options.enrollableRoles ?? defaultEnrollableRoles,
     ceremony: options.ceremony ?? new FakeCeremony(),
     rpId: "localhost",
     allowedOrigins: ["http://localhost:5173"],
@@ -345,6 +460,13 @@ async function startBroker(
   });
   broker = handle;
   return handle;
+}
+
+function enrollableRolesForAgent(
+  targetAgentId: AgentId,
+  roles: readonly ApprovalRole[],
+): ReadonlyMap<AgentId, readonly ApprovalRole[]> {
+  return new Map([[targetAgentId, roles]]);
 }
 
 async function registrationChallenge(
@@ -406,6 +528,96 @@ function receiptCoSignFixture(role: ApprovalRole): {
   return { claim, scope };
 }
 
+interface AgentScopedClaimFixture {
+  readonly claim: ApprovalClaim;
+  readonly scope: ApprovalScope;
+}
+
+function costSpikeAcknowledgementFixture(
+  targetAgentId: AgentId,
+  role: ApprovalRole,
+): {
+  readonly claim: CostSpikeAcknowledgementClaim;
+  readonly scope: CostSpikeAcknowledgementScope;
+} {
+  const claim: CostSpikeAcknowledgementClaim = {
+    schemaVersion: 1,
+    claimId: asApprovalClaimId("claim-cost-spike-12"),
+    kind: "cost_spike_acknowledgement",
+    agentId: targetAgentId,
+    costCeilingId: "ceiling-main",
+    thresholdBps: 9000,
+    currentMicroUsd: 120,
+    ceilingMicroUsd: 100,
+  };
+  const scope: CostSpikeAcknowledgementScope = {
+    mode: "single_use",
+    claimId: claim.claimId,
+    claimKind: "cost_spike_acknowledgement",
+    role,
+    maxUses: 1,
+    agentId: claim.agentId,
+    costCeilingId: claim.costCeilingId,
+  };
+  return { claim, scope };
+}
+
+function endpointAllowlistExtensionFixture(
+  targetAgentId: AgentId,
+  role: ApprovalRole,
+): {
+  readonly claim: EndpointAllowlistExtensionClaim;
+  readonly scope: EndpointAllowlistExtensionScope;
+} {
+  const claim: EndpointAllowlistExtensionClaim = {
+    schemaVersion: 1,
+    claimId: asApprovalClaimId("claim-endpoint-12"),
+    kind: "endpoint_allowlist_extension",
+    agentId: targetAgentId,
+    providerKind: asProviderKind("openai"),
+    endpointOrigin: "https://api.openai.com",
+    reason: "temporary endpoint access",
+  };
+  const scope: EndpointAllowlistExtensionScope = {
+    mode: "single_use",
+    claimId: claim.claimId,
+    claimKind: "endpoint_allowlist_extension",
+    role,
+    maxUses: 1,
+    agentId: claim.agentId,
+    providerKind: claim.providerKind,
+    endpointOrigin: claim.endpointOrigin,
+  };
+  return { claim, scope };
+}
+
+function credentialGrantToAgentFixture(
+  targetAgentId: AgentId,
+  role: ApprovalRole,
+): {
+  readonly claim: CredentialGrantToAgentClaim;
+  readonly scope: CredentialGrantToAgentScope;
+} {
+  const claim: CredentialGrantToAgentClaim = {
+    schemaVersion: 1,
+    claimId: asApprovalClaimId("claim-credential-grant-12"),
+    kind: "credential_grant_to_agent",
+    granteeAgentId: targetAgentId,
+    credentialHandleId: asCredentialHandleId("cred_1234567890123456789012"),
+    credentialScope: asCredentialScope("openai"),
+  };
+  const scope: CredentialGrantToAgentScope = {
+    mode: "single_use",
+    claimId: claim.claimId,
+    claimKind: "credential_grant_to_agent",
+    role,
+    maxUses: 1,
+    granteeAgentId: claim.granteeAgentId,
+    credentialHandleId: claim.credentialHandleId,
+  };
+  return { claim, scope };
+}
+
 function registrationResponse(credentialId: string): RegistrationResponseJSON {
   return {
     id: credentialId,
@@ -458,6 +670,7 @@ class FakeClock implements Clock {
 
 class FakeCeremony implements WebAuthnCeremony {
   readonly nextCounters = new Map<string, number>();
+  registrationOptionCalls = 0;
   authenticationCalls = 0;
 
   async generateRegistrationOptions(args: {
@@ -468,6 +681,7 @@ class FakeCeremony implements WebAuthnCeremony {
     readonly challenge: string;
     readonly excludeCredentialIds: readonly string[];
   }): Promise<PublicKeyCredentialCreationOptionsJSON> {
+    this.registrationOptionCalls += 1;
     return {
       rp: { name: args.rpName, id: args.rpId },
       user: {
@@ -528,6 +742,58 @@ class FakeCeremony implements WebAuthnCeremony {
       userVerified: true,
     };
   }
+}
+
+interface PendingAuthentication {
+  resolve(newSignCount: number): void;
+}
+
+class ControlledAuthenticationCeremony extends FakeCeremony {
+  readonly pendingAuthentications: PendingAuthentication[] = [];
+
+  override async verifyAuthentication(args: {
+    readonly response: AuthenticationResponseJSON;
+    readonly expectedChallenge: string;
+    readonly expectedOrigins: readonly string[];
+    readonly expectedRpId: string;
+    readonly credential: WebAuthnCredential;
+  }): Promise<WebAuthnAuthenticationVerification | null> {
+    this.authenticationCalls += 1;
+    expect(args.expectedChallenge).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(args.expectedOrigins).toEqual(["http://localhost:5173"]);
+    expect(args.expectedRpId).toBe("localhost");
+    expect(args.credential.id).toBe(args.response.id);
+    return new Promise<WebAuthnAuthenticationVerification>((resolveFn) => {
+      this.pendingAuthentications.push({
+        resolve: (newSignCount: number): void => {
+          resolveFn({
+            credentialId: args.response.id,
+            newSignCount,
+            userVerified: true,
+          });
+        },
+      });
+    });
+  }
+
+  resolveAuthentication(index: number, newSignCount: number): void {
+    const pending = this.pendingAuthentications[index];
+    if (pending === undefined) {
+      throw new Error(`missing pending authentication at index ${index}`);
+    }
+    pending.resolve(newSignCount);
+  }
+}
+
+async function waitForPendingAuthentications(
+  ceremony: ControlledAuthenticationCeremony,
+  count: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (ceremony.pendingAuthentications.length >= count) return;
+    await new Promise<void>((resolveFn) => setTimeout(resolveFn, 0));
+  }
+  throw new Error(`timed out waiting for ${count} pending authentications`);
 }
 
 interface RegistrationChallengeResponse {

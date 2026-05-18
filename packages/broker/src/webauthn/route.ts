@@ -34,7 +34,9 @@ import {
   type CosignChallengeRecord,
   type RegisteredWebAuthnCredential,
   thresholdForClaimKind,
+  WEBAUTHN_DEFAULT_ENROLLABLE_ROLES,
   type WebAuthnRouteDeps,
+  WebAuthnSignCountReplayError,
 } from "./types.ts";
 
 const MAX_WEBAUTHN_ROUTE_BODY_BYTES = 256 * 1024;
@@ -137,6 +139,11 @@ async function handleRegistrationChallenge(
     body = registrationChallengeBodyFromJson(await readJsonBody(req));
   } catch (err) {
     writeJson(res, 400, { error: messageOf(err) });
+    return;
+  }
+
+  if (!isRoleEnrollableForAgent(agentId, body.role, deps)) {
+    writeJson(res, 403, { error: "registration_role_not_enrollable" });
     return;
   }
 
@@ -248,6 +255,11 @@ async function handleCosignChallenge(
     assertClaimScopeBinding(body.claim, body.scope);
   } catch (err) {
     writeJson(res, 400, { error: messageOf(err) });
+    return;
+  }
+
+  if (!claimTargetsAgent(body.claim, agentId)) {
+    writeJson(res, 403, { error: "wrong_claim_agent" });
     return;
   }
 
@@ -401,19 +413,28 @@ async function handleCosignVerify(
     deps,
   });
   const outcome = isApprovalPendingResponse(responseJson) ? "approval_pending" : "approved";
-  const consumedReplay = await deps.store.consumeCosignChallenge({
-    challengeId: challenge.challengeId,
-    tokenId: challenge.tokenId,
-    credentialId: credential.credentialId,
-    newSignCount: verification.newSignCount,
-    outcome,
-    responseJson,
-    role: credential.role,
-    approvalGroupHash: challenge.approvalGroupHash,
-    issuedToAgentId: agentId,
-    expiresAtMs: challenge.expiresAtMs,
-    consumedAtMs: nowMs,
-  });
+  let consumedReplay: Awaited<ReturnType<WebAuthnRouteDeps["store"]["consumeCosignChallenge"]>>;
+  try {
+    consumedReplay = await deps.store.consumeCosignChallenge({
+      challengeId: challenge.challengeId,
+      tokenId: challenge.tokenId,
+      credentialId: credential.credentialId,
+      newSignCount: verification.newSignCount,
+      outcome,
+      responseJson,
+      role: credential.role,
+      approvalGroupHash: challenge.approvalGroupHash,
+      issuedToAgentId: agentId,
+      expiresAtMs: challenge.expiresAtMs,
+      consumedAtMs: nowMs,
+    });
+  } catch (err) {
+    if (err instanceof WebAuthnSignCountReplayError) {
+      writeJson(res, 400, { error: "sign_count_replay" });
+      return;
+    }
+    throw err;
+  }
   writeJson(res, 200, consumedReplay?.responseJson ?? responseJson);
 }
 
@@ -468,6 +489,33 @@ function credentialForSimpleWebAuthn(credential: RegisteredWebAuthnCredential): 
     publicKey: credential.publicKey,
     counter: credential.signCount,
   };
+}
+
+function isRoleEnrollableForAgent(
+  agentId: AgentId,
+  role: ApprovalRole,
+  deps: Pick<WebAuthnRouteDeps, "enrollableRoles">,
+): boolean {
+  const allowedRoles = deps.enrollableRoles.get(agentId) ?? WEBAUTHN_DEFAULT_ENROLLABLE_ROLES;
+  return allowedRoles.includes(role);
+}
+
+function claimTargetsAgent(claim: ApprovalClaim, agentId: AgentId): boolean {
+  const targetAgentId = targetAgentForClaim(claim);
+  return targetAgentId === null || targetAgentId === agentId;
+}
+
+function targetAgentForClaim(claim: ApprovalClaim): AgentId | null {
+  switch (claim.kind) {
+    case "cost_spike_acknowledgement":
+      return claim.agentId;
+    case "endpoint_allowlist_extension":
+      return claim.agentId;
+    case "credential_grant_to_agent":
+      return claim.granteeAgentId;
+    case "receipt_co_sign":
+      return null;
+  }
 }
 
 function hashClaimScope(

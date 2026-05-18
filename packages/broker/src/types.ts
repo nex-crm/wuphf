@@ -120,7 +120,9 @@ export interface BrokerConfig {
    * Optional WebAuthn co-sign routes. When supplied,
    * `/api/webauthn/{registration,cosign}/*` are mounted. The store owns
    * credential/challenge/token persistence; the bearer-to-agent map binds
-   * registration and token issuance to one agent.
+   * registration and token issuance to one agent. Privileged registration
+   * roles must be granted through `webauthn.enrollableRoles`; unmapped agents
+   * may only enroll the conservative default role.
    */
   readonly webauthn?: WebAuthnPolicyConfig & {
     readonly store: WebAuthnStore;
