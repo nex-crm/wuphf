@@ -5,16 +5,16 @@ package team
 // single-writer invariant (WIKI-SCHEMA §1.3) keeps holding when humans edit
 // the working tree directly.
 //
-// Scope of this file is intentionally the skeleton only:
+// Commit pipeline (in order):
 //
 //   - fsnotify watch on <wiki-root>/team/, recursive (re-arm on new dirs)
 //   - debounce per-path; latest write wins
 //   - drop events that follow a NotifyWrite within its TTL
 //   - resolve author via an injected identity callback; skip when absent
-//
-// Loose-link normalization, flock in Repo.Commit, the frontmatter sentinel,
-// and the synthesizer enqueue pipeline are deliberately deferred — they
-// integrate in a follow-up pass per WIKI-OBSIDIAN-COMPATIBILITY §6.
+//   - stamp `last_human_edit_ts` frontmatter sentinel (WIKI-OBSIDIAN §6.3)
+//   - normalize loose `[[Acme]]` wikilinks on brief paths (§5)
+//   - ingest `![[image.png]]` siblings into team/inbox/raw/ (§7.2)
+//   - call Repo.Commit, which takes an advisory flock for the write (§6.2)
 
 import (
 	"context"
@@ -43,6 +43,18 @@ const (
 // silently misattribute human edits.
 type ObsidianWatcherIdentity func() (slug string, ok bool)
 
+// ObsidianLooseLinkResolver resolves an Obsidian-typed wikilink target
+// (display string or bare slug) to the canonical (kind, slug) pair used in
+// the kinded wikilink form. Returning ok=false leaves the loose link
+// unmodified — per WIKI-OBSIDIAN-COMPATIBILITY §5 ambiguous matches must
+// not be auto-rewritten.
+type ObsidianLooseLinkResolver func(displayOrSlug string) (kind EntityKind, slug string, ok bool)
+
+// ObsidianEmbedIngester moves a brief-local image referenced by `![[...]]`
+// into team/inbox/raw/ and returns the rewritten body. The function lives
+// behind an interface so tests can inject a fake without touching disk.
+type ObsidianEmbedIngester func(repo *Repo, relPath, body string) (string, []string, error)
+
 // ObsidianWatcher is the fsnotify-driven daemon that funnels external
 // edits to <wiki-root>/team/ back through Repo.Commit.
 type ObsidianWatcher struct {
@@ -51,6 +63,8 @@ type ObsidianWatcher struct {
 
 	mu         sync.Mutex
 	identityFn ObsidianWatcherIdentity
+	normalizer ObsidianLooseLinkResolver
+	embedFn    ObsidianEmbedIngester
 	debounceMs time.Duration
 	writeTTL   time.Duration
 	timers     map[string]*time.Timer
@@ -85,6 +99,25 @@ func (w *ObsidianWatcher) SetIdentity(fn ObsidianWatcherIdentity) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.identityFn = fn
+}
+
+// SetNormalizer wires the loose-link resolver used to rewrite Obsidian-typed
+// `[[Acme Corp]]` to `[[companies/acme-corp|Acme Corp]]`. Nil disables
+// normalization (the commit pipeline still runs). Production wires this to
+// the signal index; tests inject a static map.
+func (w *ObsidianWatcher) SetNormalizer(fn ObsidianLooseLinkResolver) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.normalizer = fn
+}
+
+// SetEmbedIngester wires the image-embed pass that runs after the normalizer
+// and before Repo.Commit. Nil disables embed ingestion. Production wires
+// this to IngestImageEmbeds; tests inject a fake to keep the disk cold.
+func (w *ObsidianWatcher) SetEmbedIngester(fn ObsidianEmbedIngester) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.embedFn = fn
 }
 
 // SetLogger swaps the destination for warning lines. Defaults to the
@@ -271,6 +304,8 @@ func (w *ObsidianWatcher) fire(ctx context.Context, rel string) {
 		delete(w.recent, rel)
 	}
 	identityFn := w.identityFn
+	normalizer := w.normalizer
+	embedFn := w.embedFn
 	w.mu.Unlock()
 
 	if identityFn == nil {
@@ -301,10 +336,34 @@ func (w *ObsidianWatcher) fire(ctx context.Context, rel string) {
 		return
 	}
 
+	body := string(content)
+	if stamped, ferr := applyHumanEditSentinel(body, time.Now().UTC()); ferr == nil {
+		body = stamped
+	} else {
+		w.logf("obsidian watcher: sentinel stamp %s: %v", rel, ferr)
+	}
+
+	if normalizer != nil && isBriefPath(rel) {
+		if rewritten, changed := NormalizeLooseWikilinks(body, normalizer); changed {
+			body = rewritten
+		}
+	}
+
+	if embedFn != nil && isBriefPath(rel) {
+		if rewritten, ingested, ierr := embedFn(w.repo, rel, body); ierr != nil {
+			w.logf("obsidian watcher: image embed %s: %v", rel, ierr)
+		} else {
+			body = rewritten
+			for _, p := range ingested {
+				w.NotifyWrite(p)
+			}
+		}
+	}
+
 	commitCtx, cancel := context.WithTimeout(ctx, obsidianWatcherCommitTimout)
 	defer cancel()
 	msg := fmt.Sprintf("wiki: external edit to %s", rel)
-	if _, _, err := w.repo.Commit(commitCtx, slug, rel, string(content), "replace", msg); err != nil {
+	if _, _, err := w.repo.Commit(commitCtx, slug, rel, body, "replace", msg); err != nil {
 		w.logf("obsidian watcher: commit %s: %v", rel, err)
 	}
 }
