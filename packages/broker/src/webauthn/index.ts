@@ -17,4 +17,7 @@ export {
   WEBAUTHN_RP_NAME,
   WEBAUTHN_TRUSTED_APPROVAL_ROLES,
   WebAuthnSignCountReplayError,
+  WebAuthnStoreBusyError,
+  WebAuthnStoreFullError,
+  WebAuthnStoreUnavailableError,
 } from "./types.ts";

@@ -42,7 +42,7 @@ import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDatabase, runMigrations } from "../../src/event-log/index.ts";
-import { type BrokerHandle, createBroker } from "../../src/index.ts";
+import { type BrokerHandle, type BrokerLogger, createBroker } from "../../src/index.ts";
 import { createWebAuthnStore } from "../../src/webauthn/store.ts";
 import {
   type Clock,
@@ -51,6 +51,9 @@ import {
   type WebAuthnCeremony,
   WebAuthnSignCountReplayError,
   type WebAuthnStore,
+  WebAuthnStoreBusyError,
+  WebAuthnStoreFullError,
+  WebAuthnStoreUnavailableError,
 } from "../../src/webauthn/types.ts";
 
 const token = asApiToken("test-token-with-enough-entropy-AAAAAAAAA");
@@ -166,6 +169,30 @@ describe("WebAuthn routes", () => {
     expect(ceremony.registrationOptionCalls).toBe(0);
   });
 
+  it.each([
+    ["busy", () => new WebAuthnStoreBusyError("test busy"), 503, "store_busy", "1"],
+    ["full", () => new WebAuthnStoreFullError("test full"), 507, "store_full", null],
+    [
+      "unavailable",
+      () => new WebAuthnStoreUnavailableError("test readonly"),
+      503,
+      "storage_error",
+      null,
+    ],
+  ] as const)("maps WebAuthn store %s write failures to structured HTTP errors", async (_name, errorFactory, status, error, retryAfter) => {
+    const handle = await startBroker({
+      wrapStore: (inner) => new SaveRegistrationChallengeFailingStore(inner, errorFactory()),
+    });
+
+    const res = await postJson(handle, "/api/webauthn/registration/challenge", {
+      role: "approver",
+    });
+
+    expect(res.status).toBe(status);
+    expect(res.headers.get("retry-after")).toBe(retryAfter);
+    await expect(res.json()).resolves.toEqual({ error });
+  });
+
   it("does not implicitly enroll trusted viewer credentials when enrollableRoles is omitted", async () => {
     const handle = await startBroker({ omitEnrollableRoles: true, trustedRoles: ["viewer"] });
 
@@ -175,6 +202,30 @@ describe("WebAuthn routes", () => {
 
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toEqual({ error: "registration_role_not_enrollable" });
+  });
+
+  it("rejects unknown trusted approval roles at startup", async () => {
+    await expect(startBroker({ trustedRoles: ["typo" as ApprovalRole] })).rejects.toThrow(
+      /trustedRoles\[0\].*valid approval role/,
+    );
+  });
+
+  it("rejects impossible WebAuthn thresholds at startup", async () => {
+    await expect(
+      startBroker({ trustedRoles: ["approver", "approver"], receiptCoSignThreshold: 2 }),
+    ).rejects.toThrow(/receiptCoSignThreshold 2 exceeds distinct trusted approval roles 1/);
+  });
+
+  it("prunes expired WebAuthn state at startup using the injected clock", async () => {
+    const clock = new FakeClock(123_456);
+    const pruneCalls: number[] = [];
+
+    await startBroker({
+      clock,
+      wrapStore: (inner) => new RecordingPruneStore(inner, pruneCalls),
+    });
+
+    expect(pruneCalls).toEqual([123_456]);
   });
 
   it("verifies registration and persists the credential role", async () => {
@@ -193,6 +244,33 @@ describe("WebAuthn routes", () => {
       credentialId: "cred_approver",
       role: "approver",
     });
+  });
+
+  it("logs sanitized registration verification failure details", async () => {
+    const logger = new RecordingLogger();
+    const ceremony = new FakeCeremony();
+    ceremony.registrationVerificationFailure = new Error(
+      'Unexpected registration response challenge "attacker", expected "stored"',
+    );
+    const handle = await startBroker({ ceremony, logger });
+    const challenge = await registrationChallenge(handle, "approver");
+
+    const res = await postJson(handle, "/api/webauthn/registration/verify", {
+      challengeId: challenge.challengeId,
+      attestationResponse: registrationResponse("cred_approver"),
+    });
+
+    expect(res.status).toBe(400);
+    expect(logger.warns).toContainEqual({
+      event: "webauthn_registration_verification_failed",
+      payload: {
+        reason: "challenge_mismatch",
+        ceremony: "registration",
+        route: "/api/webauthn/registration/verify",
+        challengeType: "registration",
+      },
+    });
+    expect(JSON.stringify(logger.warns)).not.toContain("attacker");
   });
 
   it("rejects registration verify when a stale challenge role is no longer enrollable", async () => {
@@ -271,6 +349,31 @@ describe("WebAuthn routes", () => {
     expect(approvalToken.issuedTo).toBe(agentId);
     expect(approvalToken.scope.role).toBe("approver");
     expect(approvalToken.signature.credentialId).toBe("cred_approver");
+  });
+
+  it("logs sanitized assertion verification failure details", async () => {
+    const logger = new RecordingLogger();
+    const ceremony = new FakeCeremony();
+    ceremony.authenticationVerificationFailure = "null";
+    const handle = await startBroker({ ceremony, logger });
+    await registerRole(handle, "approver", "cred_approver");
+    const challenge = await cosignChallenge(handle, "approver");
+
+    const res = await postJson(handle, "/api/webauthn/cosign/verify", {
+      challengeId: challenge.challengeId,
+      assertionResponse: assertionResponse("cred_approver"),
+    });
+
+    expect(res.status).toBe(400);
+    expect(logger.warns).toContainEqual({
+      event: "webauthn_assertion_verification_failed",
+      payload: {
+        reason: "bad_signature",
+        ceremony: "authentication",
+        route: "/api/webauthn/cosign/verify",
+        challengeType: "cosign",
+      },
+    });
   });
 
   it("rejects expired cosign challenges without sleeping", async () => {
@@ -529,6 +632,29 @@ describe("WebAuthn routes", () => {
     expect(ceremony.authenticationCalls).toBe(1);
   });
 
+  it("rejects replay of a consumed token after the challenge expires", async () => {
+    const clock = new FakeClock(10_000);
+    const ceremony = new FakeCeremony();
+    const handle = await startBroker({ ceremony, clock });
+    await registerRole(handle, "approver", "cred_approver");
+    const challenge = await cosignChallenge(handle, "approver");
+    const first = await postJson(handle, "/api/webauthn/cosign/verify", {
+      challengeId: challenge.challengeId,
+      assertionResponse: assertionResponse("cred_approver"),
+    });
+    expect(first.status).toBe(200);
+    clock.set(10_000 + 5 * 60 * 1000 + 1);
+
+    const replay = await postJson(handle, "/api/webauthn/cosign/verify", {
+      challengeId: challenge.challengeId,
+      assertionResponse: "malformed replay body stays closed after expiry",
+    });
+
+    expect(replay.status).toBe(400);
+    await expect(replay.json()).resolves.toEqual({ error: "challenge_expired" });
+    expect(ceremony.authenticationCalls).toBe(1);
+  });
+
   it("rejects sign-count replay before consuming a token", async () => {
     const ceremony = new FakeCeremony();
     ceremony.nextCounters.set("cred_approver", 1);
@@ -635,8 +761,10 @@ async function startBroker(
     readonly enrollableRoles?: ReadonlyMap<AgentId, readonly ApprovalRole[]>;
     readonly omitEnrollableRoles?: boolean;
     readonly trustedRoles?: readonly ApprovalRole[];
+    readonly defaultThreshold?: number;
     readonly receiptCoSignThreshold?: number;
     readonly ceremony?: FakeCeremony;
+    readonly logger?: BrokerLogger;
     readonly wrapStore?: (store: WebAuthnStore) => WebAuthnStore;
   } = {},
 ): Promise<BrokerHandle> {
@@ -658,12 +786,16 @@ async function startBroker(
       ? {}
       : { enrollableRoles: configuredEnrollableRoles }),
     ...(options.trustedRoles === undefined ? {} : { trustedRoles: options.trustedRoles }),
+    ...(options.defaultThreshold === undefined
+      ? {}
+      : { defaultThreshold: options.defaultThreshold }),
     ...(options.receiptCoSignThreshold === undefined
       ? {}
       : { receiptCoSignThreshold: options.receiptCoSignThreshold }),
   };
   const handle = await createBroker({
     token,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     webauthn,
   });
@@ -924,10 +1056,37 @@ class FakeClock implements Clock {
   }
 }
 
+interface LogEntry {
+  readonly event: string;
+  readonly payload?: Readonly<Record<string, unknown>>;
+}
+
+class RecordingLogger implements BrokerLogger {
+  readonly infos: LogEntry[] = [];
+  readonly warns: LogEntry[] = [];
+  readonly errors: LogEntry[] = [];
+
+  info(event: string, payload?: Readonly<Record<string, unknown>>): void {
+    this.infos.push({ event, ...(payload === undefined ? {} : { payload }) });
+  }
+
+  warn(event: string, payload?: Readonly<Record<string, unknown>>): void {
+    this.warns.push({ event, ...(payload === undefined ? {} : { payload }) });
+  }
+
+  error(event: string, payload?: Readonly<Record<string, unknown>>): void {
+    this.errors.push({ event, ...(payload === undefined ? {} : { payload }) });
+  }
+}
+
+type CeremonyFailure = Error | "null";
+
 class FakeCeremony implements WebAuthnCeremony {
   readonly nextCounters = new Map<string, number>();
   expectedOrigins: readonly string[] = [];
   registrationVerificationOrigins: readonly string[] = [];
+  registrationVerificationFailure: CeremonyFailure | null = null;
+  authenticationVerificationFailure: CeremonyFailure | null = null;
   registrationOptionCalls = 0;
   authenticationCalls = 0;
 
@@ -963,6 +1122,12 @@ class FakeCeremony implements WebAuthnCeremony {
     expect(args.expectedOrigins).toEqual(this.expectedOrigins);
     expect(args.expectedRpId).toBe("localhost");
     this.registrationVerificationOrigins = args.expectedOrigins;
+    if (this.registrationVerificationFailure instanceof Error) {
+      throw this.registrationVerificationFailure;
+    }
+    if (this.registrationVerificationFailure === "null") {
+      return null;
+    }
     return {
       credentialId: args.response.id,
       publicKey: new Uint8Array([1, 2, 3]),
@@ -995,6 +1160,12 @@ class FakeCeremony implements WebAuthnCeremony {
     expect(args.expectedOrigins).toEqual(this.expectedOrigins);
     expect(args.expectedRpId).toBe("localhost");
     expect(args.credential.id).toBe(args.response.id);
+    if (this.authenticationVerificationFailure instanceof Error) {
+      throw this.authenticationVerificationFailure;
+    }
+    if (this.authenticationVerificationFailure === "null") {
+      return null;
+    }
     return {
       credentialId: args.response.id,
       newSignCount: this.nextCounters.get(args.response.id) ?? 2,
@@ -1069,6 +1240,12 @@ class DelayedConsumeStore implements WebAuthnStore {
     return this.inner.getChallenge(...args);
   }
 
+  pruneExpired(
+    ...args: Parameters<WebAuthnStore["pruneExpired"]>
+  ): ReturnType<WebAuthnStore["pruneExpired"]> {
+    return this.inner.pruneExpired(...args);
+  }
+
   listCredentialsForAgent(
     ...args: Parameters<WebAuthnStore["listCredentialsForAgent"]>
   ): ReturnType<WebAuthnStore["listCredentialsForAgent"]> {
@@ -1122,6 +1299,151 @@ class DelayedConsumeStore implements WebAuthnStore {
     for (const resolveFn of this.consumeWaiters.splice(0)) {
       resolveFn();
     }
+  }
+}
+
+class RecordingPruneStore implements WebAuthnStore {
+  constructor(
+    private readonly inner: WebAuthnStore,
+    private readonly pruneCalls: number[],
+  ) {}
+
+  saveRegistrationChallenge(
+    ...args: Parameters<WebAuthnStore["saveRegistrationChallenge"]>
+  ): ReturnType<WebAuthnStore["saveRegistrationChallenge"]> {
+    return this.inner.saveRegistrationChallenge(...args);
+  }
+
+  saveCosignChallenge(
+    ...args: Parameters<WebAuthnStore["saveCosignChallenge"]>
+  ): ReturnType<WebAuthnStore["saveCosignChallenge"]> {
+    return this.inner.saveCosignChallenge(...args);
+  }
+
+  pruneExpired(
+    ...args: Parameters<WebAuthnStore["pruneExpired"]>
+  ): ReturnType<WebAuthnStore["pruneExpired"]> {
+    this.pruneCalls.push(args[0].nowMs);
+    return this.inner.pruneExpired(...args);
+  }
+
+  getChallenge(
+    ...args: Parameters<WebAuthnStore["getChallenge"]>
+  ): ReturnType<WebAuthnStore["getChallenge"]> {
+    return this.inner.getChallenge(...args);
+  }
+
+  listCredentialsForAgent(
+    ...args: Parameters<WebAuthnStore["listCredentialsForAgent"]>
+  ): ReturnType<WebAuthnStore["listCredentialsForAgent"]> {
+    return this.inner.listCredentialsForAgent(...args);
+  }
+
+  listCredentialsForAgentRole(
+    ...args: Parameters<WebAuthnStore["listCredentialsForAgentRole"]>
+  ): ReturnType<WebAuthnStore["listCredentialsForAgentRole"]> {
+    return this.inner.listCredentialsForAgentRole(...args);
+  }
+
+  getCredential(
+    ...args: Parameters<WebAuthnStore["getCredential"]>
+  ): ReturnType<WebAuthnStore["getCredential"]> {
+    return this.inner.getCredential(...args);
+  }
+
+  saveCredential(
+    ...args: Parameters<WebAuthnStore["saveCredential"]>
+  ): ReturnType<WebAuthnStore["saveCredential"]> {
+    return this.inner.saveCredential(...args);
+  }
+
+  getConsumedToken(
+    ...args: Parameters<WebAuthnStore["getConsumedToken"]>
+  ): ReturnType<WebAuthnStore["getConsumedToken"]> {
+    return this.inner.getConsumedToken(...args);
+  }
+
+  listSatisfiedRoles(
+    ...args: Parameters<WebAuthnStore["listSatisfiedRoles"]>
+  ): ReturnType<WebAuthnStore["listSatisfiedRoles"]> {
+    return this.inner.listSatisfiedRoles(...args);
+  }
+
+  consumeCosignChallenge(
+    ...args: Parameters<WebAuthnStore["consumeCosignChallenge"]>
+  ): ReturnType<WebAuthnStore["consumeCosignChallenge"]> {
+    return this.inner.consumeCosignChallenge(...args);
+  }
+}
+
+class SaveRegistrationChallengeFailingStore implements WebAuthnStore {
+  constructor(
+    private readonly inner: WebAuthnStore,
+    private readonly error: Error,
+  ) {}
+
+  async saveRegistrationChallenge(): Promise<void> {
+    throw this.error;
+  }
+
+  saveCosignChallenge(
+    ...args: Parameters<WebAuthnStore["saveCosignChallenge"]>
+  ): ReturnType<WebAuthnStore["saveCosignChallenge"]> {
+    return this.inner.saveCosignChallenge(...args);
+  }
+
+  pruneExpired(
+    ...args: Parameters<WebAuthnStore["pruneExpired"]>
+  ): ReturnType<WebAuthnStore["pruneExpired"]> {
+    return this.inner.pruneExpired(...args);
+  }
+
+  getChallenge(
+    ...args: Parameters<WebAuthnStore["getChallenge"]>
+  ): ReturnType<WebAuthnStore["getChallenge"]> {
+    return this.inner.getChallenge(...args);
+  }
+
+  listCredentialsForAgent(
+    ...args: Parameters<WebAuthnStore["listCredentialsForAgent"]>
+  ): ReturnType<WebAuthnStore["listCredentialsForAgent"]> {
+    return this.inner.listCredentialsForAgent(...args);
+  }
+
+  listCredentialsForAgentRole(
+    ...args: Parameters<WebAuthnStore["listCredentialsForAgentRole"]>
+  ): ReturnType<WebAuthnStore["listCredentialsForAgentRole"]> {
+    return this.inner.listCredentialsForAgentRole(...args);
+  }
+
+  getCredential(
+    ...args: Parameters<WebAuthnStore["getCredential"]>
+  ): ReturnType<WebAuthnStore["getCredential"]> {
+    return this.inner.getCredential(...args);
+  }
+
+  saveCredential(
+    ...args: Parameters<WebAuthnStore["saveCredential"]>
+  ): ReturnType<WebAuthnStore["saveCredential"]> {
+    return this.inner.saveCredential(...args);
+  }
+
+  getConsumedToken(
+    ...args: Parameters<WebAuthnStore["getConsumedToken"]>
+  ): ReturnType<WebAuthnStore["getConsumedToken"]> {
+    return this.inner.getConsumedToken(...args);
+  }
+
+  listSatisfiedRoles(
+    ...args: Parameters<WebAuthnStore["listSatisfiedRoles"]>
+  ): ReturnType<WebAuthnStore["listSatisfiedRoles"]> {
+    return this.inner.listSatisfiedRoles(...args);
+  }
+
+  consumeCosignChallenge(
+    ...args: Parameters<WebAuthnStore["consumeCosignChallenge"]>
+  ): ReturnType<WebAuthnStore["consumeCosignChallenge"]> {
+    return this.inner.consumeCosignChallenge(...args);
   }
 }
 

@@ -144,7 +144,9 @@ stateDiagram-v2
 - Token is presented by an agent other than `issuedTo`.
 - Threshold has too few distinct trusted credentials.
 - Broker crashes after verification but before consumption; idempotent replay
-  must return the same outcome for the same `tokenId`.
+  returns the same outcome for the same `tokenId` only inside the challenge
+  validity window. After expiry the broker fails closed with
+  `400 challenge_expired`.
 
 ## Threat Model
 

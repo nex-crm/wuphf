@@ -128,6 +128,20 @@ describe("event log", () => {
           )
           .get()?.name,
       ).toBe("webauthn_consumed_tokens");
+      expect(
+        second
+          .prepare<[], { readonly name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'webauthn_challenges_expires_at_ms_idx'",
+          )
+          .get()?.name,
+      ).toBe("webauthn_challenges_expires_at_ms_idx");
+      expect(
+        second
+          .prepare<[], { readonly name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'webauthn_consumed_tokens_expires_at_ms_idx'",
+          )
+          .get()?.name,
+      ).toBe("webauthn_consumed_tokens_expires_at_ms_idx");
     } finally {
       second.close();
     }

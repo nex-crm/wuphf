@@ -16,6 +16,7 @@ import {
   type TimestampMs,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
+import BetterSqlite3 from "better-sqlite3";
 
 import { type OpenDatabaseArgs, openDatabase, runMigrations } from "../event-log/index.ts";
 import {
@@ -30,6 +31,9 @@ import {
   type WebAuthnChallengeRecord,
   WebAuthnSignCountReplayError,
   type WebAuthnStore,
+  WebAuthnStoreBusyError,
+  WebAuthnStoreFullError,
+  WebAuthnStoreUnavailableError,
   type WebAuthnTokenOutcome,
 } from "./types.ts";
 
@@ -110,6 +114,7 @@ type InsertConsumedTokenParams = [
   number,
 ];
 type UpdateConsumedTokenParams = [WebAuthnTokenOutcome, string, ApprovalTokenId];
+type PruneExpiredParams = [number];
 
 const APPROVAL_ROLE_SET: ReadonlySet<string> = new Set(["viewer", "approver", "host"]);
 const TOKEN_OUTCOME_SET: ReadonlySet<string> = new Set(["approval_pending", "approved"]);
@@ -135,12 +140,15 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   private readonly updateCredentialCounterStmt: Database.Statement<UpdateCredentialCounterParams>;
   private readonly insertConsumedTokenStmt: Database.Statement<InsertConsumedTokenParams>;
   private readonly updateConsumedTokenStmt: Database.Statement<UpdateConsumedTokenParams>;
+  private readonly pruneExpiredConsumedTokensStmt: Database.Statement<PruneExpiredParams>;
+  private readonly pruneExpiredOrphanChallengesStmt: Database.Statement<PruneExpiredParams>;
   private readonly saveCredentialTransaction: Database.Transaction<
     (args: SaveCredentialArgs) => void
   >;
   private readonly consumeCosignTransaction: Database.Transaction<
     (args: ConsumeCosignChallengeArgs) => ConsumedWebAuthnTokenRecord
   >;
+  private readonly pruneExpiredTransaction: Database.Transaction<(nowMs: number) => void>;
   private closed = false;
 
   static open(config: SqliteWebAuthnStoreConfig): SqliteWebAuthnStore {
@@ -267,6 +275,18 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
        SET outcome = ?, response_json = ?
        WHERE token_id = ?`,
     );
+    this.pruneExpiredConsumedTokensStmt = db.prepare<PruneExpiredParams>(
+      "DELETE FROM webauthn_consumed_tokens WHERE expires_at_ms <= ?",
+    );
+    this.pruneExpiredOrphanChallengesStmt = db.prepare<PruneExpiredParams>(
+      `DELETE FROM webauthn_challenges
+       WHERE expires_at_ms <= ?
+         AND NOT EXISTS (
+           SELECT 1
+           FROM webauthn_consumed_tokens
+           WHERE webauthn_consumed_tokens.challenge_id = webauthn_challenges.challenge_id
+         )`,
+    );
     this.saveCredentialTransaction = db.transaction((args: SaveCredentialArgs) => {
       this.insertCredentialStmt.run(
         args.credential.credentialId,
@@ -338,36 +358,57 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
         consumedAtMs: args.consumedAtMs,
       };
     });
+    this.pruneExpiredTransaction = db.transaction((nowMs: number) => {
+      this.pruneExpiredConsumedTokensStmt.run(nowMs);
+      this.pruneExpiredOrphanChallengesStmt.run(nowMs);
+    });
   }
 
   async saveRegistrationChallenge(args: SaveRegistrationChallengeArgs): Promise<void> {
     this.assertOpen();
-    this.insertRegistrationChallengeStmt.run(
-      args.challengeId,
-      args.challenge,
-      args.role,
-      args.issuedToAgentId,
-      args.expiresAtMs,
-      args.createdAtMs,
-    );
+    try {
+      this.insertRegistrationChallengeStmt.run(
+        args.challengeId,
+        args.challenge,
+        args.role,
+        args.issuedToAgentId,
+        args.expiresAtMs,
+        args.createdAtMs,
+      );
+    } catch (err) {
+      throw classifySqliteWriteError(err, "SqliteWebAuthnStore.saveRegistrationChallenge");
+    }
   }
 
   async saveCosignChallenge(args: SaveCosignChallengeArgs): Promise<void> {
     this.assertOpen();
-    this.insertCosignChallengeStmt.run(
-      args.challengeId,
-      args.challenge,
-      args.tokenId,
-      args.scope.role,
-      args.issuedToAgentId,
-      canonicalJSON(approvalClaimToJsonValue(args.claim)),
-      canonicalJSON(approvalScopeToJsonValue(args.scope)),
-      args.claimScopeHash,
-      args.approvalGroupHash,
-      args.notBeforeMs,
-      args.expiresAtMs,
-      args.createdAtMs,
-    );
+    try {
+      this.insertCosignChallengeStmt.run(
+        args.challengeId,
+        args.challenge,
+        args.tokenId,
+        args.scope.role,
+        args.issuedToAgentId,
+        canonicalJSON(approvalClaimToJsonValue(args.claim)),
+        canonicalJSON(approvalScopeToJsonValue(args.scope)),
+        args.claimScopeHash,
+        args.approvalGroupHash,
+        args.notBeforeMs,
+        args.expiresAtMs,
+        args.createdAtMs,
+      );
+    } catch (err) {
+      throw classifySqliteWriteError(err, "SqliteWebAuthnStore.saveCosignChallenge");
+    }
+  }
+
+  async pruneExpired(args: { readonly nowMs: number }): Promise<void> {
+    this.assertOpen();
+    try {
+      this.pruneExpiredTransaction.immediate(args.nowMs);
+    } catch (err) {
+      throw classifySqliteWriteError(err, "SqliteWebAuthnStore.pruneExpired");
+    }
   }
 
   async getChallenge(challengeId: string): Promise<WebAuthnChallengeRecord | null> {
@@ -399,7 +440,11 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
 
   async saveCredential(args: SaveCredentialArgs): Promise<void> {
     this.assertOpen();
-    this.saveCredentialTransaction.immediate(args);
+    try {
+      this.saveCredentialTransaction.immediate(args);
+    } catch (err) {
+      throw classifySqliteWriteError(err, "SqliteWebAuthnStore.saveCredential");
+    }
   }
 
   async getConsumedToken(tokenId: ApprovalTokenId): Promise<ConsumedWebAuthnTokenRecord | null> {
@@ -423,7 +468,14 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
     args: ConsumeCosignChallengeArgs,
   ): Promise<ConsumedWebAuthnTokenRecord> {
     this.assertOpen();
-    return this.consumeCosignTransaction.immediate(args);
+    try {
+      return this.consumeCosignTransaction.immediate(args);
+    } catch (err) {
+      if (err instanceof WebAuthnSignCountReplayError) {
+        throw err;
+      }
+      throw classifySqliteWriteError(err, "SqliteWebAuthnStore.consumeCosignChallenge");
+    }
   }
 
   close(): void {
@@ -554,4 +606,54 @@ function compareRoles(a: ApprovalRole, b: ApprovalRole): number {
 
 function roleOrder(role: ApprovalRole): number {
   return role === "viewer" ? 0 : role === "approver" ? 1 : 2;
+}
+
+function classifySqliteWriteError(err: unknown, operation: string): Error {
+  if (isSqliteFullError(err)) {
+    return new WebAuthnStoreFullError(`${operation}: database full (SQLITE_FULL)`);
+  }
+  if (isSqliteBusyError(err)) {
+    return new WebAuthnStoreBusyError(`${operation}: database busy (SQLITE_BUSY/LOCKED)`);
+  }
+  if (isSqliteUnavailableError(err)) {
+    return new WebAuthnStoreUnavailableError(
+      `${operation}: storage error (${
+        err instanceof BetterSqlite3.SqliteError ? err.code : "unknown"
+      })`,
+    );
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+function isSqliteFullError(err: unknown): boolean {
+  return err instanceof BetterSqlite3.SqliteError && err.code === "SQLITE_FULL";
+}
+
+function isSqliteBusyError(err: unknown): boolean {
+  if (!(err instanceof BetterSqlite3.SqliteError)) return false;
+  return (
+    err.code === "SQLITE_BUSY" ||
+    err.code === "SQLITE_LOCKED" ||
+    err.code.startsWith("SQLITE_BUSY_") ||
+    err.code.startsWith("SQLITE_LOCKED_")
+  );
+}
+
+function isSqliteUnavailableError(err: unknown): boolean {
+  if (!(err instanceof BetterSqlite3.SqliteError)) return false;
+  return (
+    err.code === "SQLITE_READONLY" ||
+    err.code === "SQLITE_CANTOPEN" ||
+    err.code === "SQLITE_CORRUPT" ||
+    err.code === "SQLITE_NOTADB" ||
+    err.code === "SQLITE_PERM" ||
+    err.code.startsWith("SQLITE_READONLY_") ||
+    err.code.startsWith("SQLITE_IOERR") ||
+    err.code.startsWith("SQLITE_CANTOPEN_") ||
+    err.code.startsWith("SQLITE_CORRUPT_")
+  );
+}
+
+export function __classifyWebAuthnSqliteWriteErrorForTesting(err: unknown): Error {
+  return classifySqliteWriteError(err, "SqliteWebAuthnStore.test");
 }

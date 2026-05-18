@@ -37,6 +37,9 @@ import {
   WEBAUTHN_DEFAULT_ENROLLABLE_ROLES,
   type WebAuthnRouteDeps,
   WebAuthnSignCountReplayError,
+  WebAuthnStoreBusyError,
+  WebAuthnStoreFullError,
+  WebAuthnStoreUnavailableError,
 } from "./types.ts";
 
 const MAX_WEBAUTHN_ROUTE_BODY_BYTES = 256 * 1024;
@@ -161,14 +164,21 @@ async function handleRegistrationChallenge(
     excludeCredentialIds: existingCredentials.map((credential) => credential.credentialId),
   });
 
-  await deps.store.saveRegistrationChallenge({
-    challengeId,
-    challenge,
-    role: body.role,
-    issuedToAgentId: agentId,
-    createdAtMs: nowMs,
-    expiresAtMs,
-  });
+  try {
+    await deps.store.saveRegistrationChallenge({
+      challengeId,
+      challenge,
+      role: body.role,
+      issuedToAgentId: agentId,
+      createdAtMs: nowMs,
+      expiresAtMs,
+    });
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps, "webauthn_registration_challenge_rejected")) {
+      return;
+    }
+    throw err;
+  }
   writeJson(res, 200, { challengeId, creationOptions: options });
 }
 
@@ -217,12 +227,25 @@ async function handleRegistrationVerify(
       expectedOrigins: deps.allowedOrigins,
       expectedRpId: deps.rpId,
     });
-  } catch {
-    deps.logger.warn("webauthn_registration_verification_failed");
+  } catch (err) {
+    logVerificationFailure(deps, {
+      event: "webauthn_registration_verification_failed",
+      err,
+      ceremony: "registration",
+      route: "/api/webauthn/registration/verify",
+      challengeType: challenge.type,
+    });
     writeJson(res, 400, { error: "registration_verification_failed" });
     return;
   }
   if (verification === null) {
+    logVerificationFailure(deps, {
+      event: "webauthn_registration_verification_failed",
+      err: null,
+      ceremony: "registration",
+      route: "/api/webauthn/registration/verify",
+      challengeType: challenge.type,
+    });
     writeJson(res, 400, { error: "registration_verification_failed" });
     return;
   }
@@ -232,18 +255,25 @@ async function handleRegistrationVerify(
     return;
   }
 
-  await deps.store.saveCredential({
-    challengeId: challenge.challengeId,
-    credential: {
-      credentialId: verification.credentialId,
-      publicKey: verification.publicKey,
-      signCount: verification.signCount,
-      role: challenge.role,
-      agentId,
-      createdAtMs: nowMs,
-    },
-    consumedAtMs: nowMs,
-  });
+  try {
+    await deps.store.saveCredential({
+      challengeId: challenge.challengeId,
+      credential: {
+        credentialId: verification.credentialId,
+        publicKey: verification.publicKey,
+        signCount: verification.signCount,
+        role: challenge.role,
+        agentId,
+        createdAtMs: nowMs,
+      },
+      consumedAtMs: nowMs,
+    });
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps, "webauthn_registration_verify_rejected")) {
+      return;
+    }
+    throw err;
+  }
   writeJson(res, 200, { credentialId: verification.credentialId, role: challenge.role });
 }
 
@@ -293,19 +323,26 @@ async function handleCosignChallenge(
     allowCredentialIds: credentials.map((credential) => credential.credentialId),
   });
 
-  await deps.store.saveCosignChallenge({
-    challengeId,
-    challenge,
-    tokenId,
-    claim: body.claim,
-    scope: body.scope,
-    claimScopeHash: hashes.claimScopeHash,
-    approvalGroupHash: hashes.approvalGroupHash,
-    issuedToAgentId: agentId,
-    notBeforeMs,
-    expiresAtMs,
-    createdAtMs: nowMs,
-  });
+  try {
+    await deps.store.saveCosignChallenge({
+      challengeId,
+      challenge,
+      tokenId,
+      claim: body.claim,
+      scope: body.scope,
+      claimScopeHash: hashes.claimScopeHash,
+      approvalGroupHash: hashes.approvalGroupHash,
+      issuedToAgentId: agentId,
+      notBeforeMs,
+      expiresAtMs,
+      createdAtMs: nowMs,
+    });
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps, "webauthn_cosign_challenge_rejected")) {
+      return;
+    }
+    throw err;
+  }
   writeJson(res, 200, { challengeId, requestOptions: options });
 }
 
@@ -336,6 +373,11 @@ async function handleCosignVerify(
     writeJson(res, 403, { error: "wrong_claim_agent" });
     return;
   }
+  const nowMs = readClock(deps);
+  if (challenge.expiresAtMs <= nowMs) {
+    writeJson(res, 400, { error: "challenge_expired" });
+    return;
+  }
   const replay = await deps.store.getConsumedToken(challenge.tokenId);
   if (replay !== null) {
     writeJson(res, 200, replay.responseJson);
@@ -343,11 +385,6 @@ async function handleCosignVerify(
   }
   if (challenge.consumedAtMs !== null) {
     writeJson(res, 409, { error: "challenge_consumed" });
-    return;
-  }
-  const nowMs = readClock(deps);
-  if (challenge.expiresAtMs <= nowMs) {
-    writeJson(res, 400, { error: "challenge_expired" });
     return;
   }
 
@@ -389,12 +426,25 @@ async function handleCosignVerify(
       expectedRpId: deps.rpId,
       credential: credentialForSimpleWebAuthn(credential),
     });
-  } catch {
-    deps.logger.warn("webauthn_assertion_verification_failed");
+  } catch (err) {
+    logVerificationFailure(deps, {
+      event: "webauthn_assertion_verification_failed",
+      err,
+      ceremony: "authentication",
+      route: "/api/webauthn/cosign/verify",
+      challengeType: challenge.type,
+    });
     writeJson(res, 400, { error: "assertion_verification_failed" });
     return;
   }
   if (verification === null) {
+    logVerificationFailure(deps, {
+      event: "webauthn_assertion_verification_failed",
+      err: null,
+      ceremony: "authentication",
+      route: "/api/webauthn/cosign/verify",
+      challengeType: challenge.type,
+    });
     writeJson(res, 400, { error: "assertion_verification_failed" });
     return;
   }
@@ -436,9 +486,86 @@ async function handleCosignVerify(
       writeJson(res, 400, { error: "sign_count_replay" });
       return;
     }
+    if (writeStorageErrorResponse(res, err, deps, "webauthn_cosign_verify_rejected")) {
+      return;
+    }
     throw err;
   }
   writeJson(res, 200, consumedToken.responseJson);
+}
+
+type WebAuthnVerificationFailureReason =
+  | "origin_mismatch"
+  | "rp_id_mismatch"
+  | "challenge_mismatch"
+  | "bad_signature"
+  | "malformed_client_data"
+  | "malformed_authenticator_data"
+  | "malformed_credential"
+  | "user_verification_required"
+  | "sign_count_replay"
+  | "verification_error";
+
+function logVerificationFailure(
+  deps: Pick<WebAuthnRouteDeps, "logger">,
+  args: {
+    readonly event: string;
+    readonly err: unknown;
+    readonly ceremony: "registration" | "authentication";
+    readonly route: string;
+    readonly challengeType: "registration" | "cosign";
+  },
+): void {
+  deps.logger.warn(args.event, {
+    reason: verificationFailureReason(args.err),
+    ceremony: args.ceremony,
+    route: args.route,
+    challengeType: args.challengeType,
+  });
+}
+
+function verificationFailureReason(err: unknown): WebAuthnVerificationFailureReason {
+  if (err === null) return "bad_signature";
+  const name = err instanceof Error ? err.name : "";
+  const message = err instanceof Error ? err.message : String(err);
+  if (name === "UnexpectedRPIDHash" || message.includes("Unexpected RP ID hash")) {
+    return "rp_id_mismatch";
+  }
+  if (message.includes("Unexpected") && message.includes(" origin ")) {
+    return "origin_mismatch";
+  }
+  if (message.includes(" challenge ")) {
+    return "challenge_mismatch";
+  }
+  if (
+    message.includes("clientDataJSON") ||
+    message.includes("ClientDataJSON") ||
+    message.includes("response type") ||
+    message.includes("tokenBinding") ||
+    message.includes("TokenBinding")
+  ) {
+    return "malformed_client_data";
+  }
+  if (message.includes("authenticatorData") || message.includes("Authenticator data")) {
+    return "malformed_authenticator_data";
+  }
+  if (message.includes("User verification")) {
+    return "user_verification_required";
+  }
+  if (message.includes("counter")) {
+    return "sign_count_replay";
+  }
+  if (
+    message.includes("credential") ||
+    message.includes("Credential") ||
+    message.includes("attestationObject")
+  ) {
+    return "malformed_credential";
+  }
+  if (message.includes("signature")) {
+    return "bad_signature";
+  }
+  return "verification_error";
 }
 
 function buildApprovedCosignResponseJson(args: {
@@ -924,12 +1051,42 @@ function generateApprovalTokenId(): ApprovalTokenId {
   return asApprovalTokenId(tokenId);
 }
 
-function writeJson(res: ServerResponse, status: number, bodyValue: unknown): void {
+function writeStorageErrorResponse(
+  res: ServerResponse,
+  err: unknown,
+  deps: Pick<WebAuthnRouteDeps, "logger">,
+  rejectedEvent: string,
+): boolean {
+  if (err instanceof WebAuthnStoreBusyError) {
+    deps.logger.warn(rejectedEvent, { reason: "store_busy" });
+    writeJson(res, 503, { error: "store_busy" }, { "Retry-After": "1" });
+    return true;
+  }
+  if (err instanceof WebAuthnStoreFullError) {
+    deps.logger.warn(rejectedEvent, { reason: "store_full" });
+    writeJson(res, 507, { error: "store_full" });
+    return true;
+  }
+  if (err instanceof WebAuthnStoreUnavailableError) {
+    deps.logger.error(rejectedEvent, { reason: "storage_error" });
+    writeJson(res, 503, { error: "storage_error" });
+    return true;
+  }
+  return false;
+}
+
+function writeJson(
+  res: ServerResponse,
+  status: number,
+  bodyValue: unknown,
+  extraHeaders: Record<string, string> = {},
+): void {
   const body = JSON.stringify(bodyValue);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
     "Content-Length": String(Buffer.byteLength(body, "utf8")),
+    ...extraHeaders,
   });
   res.end(body);
 }

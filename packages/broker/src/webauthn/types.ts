@@ -129,6 +129,7 @@ export interface ConsumeCosignChallengeArgs {
 export interface WebAuthnStore {
   saveRegistrationChallenge(args: SaveRegistrationChallengeArgs): Promise<void>;
   saveCosignChallenge(args: SaveCosignChallengeArgs): Promise<void>;
+  pruneExpired(args: { readonly nowMs: number }): Promise<void>;
   getChallenge(challengeId: string): Promise<WebAuthnChallengeRecord | null>;
   listCredentialsForAgent(agentId: AgentId): Promise<readonly RegisteredWebAuthnCredential[]>;
   listCredentialsForAgentRole(args: {
@@ -229,6 +230,18 @@ export class WebAuthnSignCountReplayError extends Error {
   constructor() {
     super("sign_count_replay");
   }
+}
+
+export class WebAuthnStoreFullError extends Error {
+  override readonly name = "WebAuthnStoreFullError";
+}
+
+export class WebAuthnStoreBusyError extends Error {
+  override readonly name = "WebAuthnStoreBusyError";
+}
+
+export class WebAuthnStoreUnavailableError extends Error {
+  override readonly name = "WebAuthnStoreUnavailableError";
 }
 
 export function thresholdForClaimKind(

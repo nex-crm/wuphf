@@ -67,6 +67,7 @@ import { type BrokerConfig, type BrokerHandle, type BrokerLogger, NOOP_LOGGER } 
 import { createSimpleWebAuthnCeremony } from "./webauthn/ceremony.ts";
 import { handleWebAuthnRoute } from "./webauthn/route.ts";
 import {
+  type Clock,
   SYSTEM_CLOCK,
   WEBAUTHN_ALLOWED_ORIGINS,
   WEBAUTHN_CHALLENGE_TTL_MS,
@@ -79,6 +80,7 @@ import {
 
 const LOOPBACK_HOST = "127.0.0.1";
 const BROWSER_WEBAUTHN_HOST = "localhost";
+const APPROVAL_ROLE_SET: ReadonlySet<string> = new Set(["viewer", "approver", "host"]);
 
 export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHandle> {
   const logger: BrokerLogger = config.logger ?? NOOP_LOGGER;
@@ -94,12 +96,29 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   // Reuse the same bearer→agent binding map that runner spawn uses so a
   // bearer pinned to agent_alpha cannot read or PUT agent_beta's routing.
   const tokenAgentIds = config.runners?.tokenAgentIds ?? null;
-  const webauthnTrustedRoles =
+  const webauthnTrustedRoles: readonly ApprovalRole[] | null =
     config.webauthn === undefined
       ? null
       : [...(config.webauthn.trustedRoles ?? WEBAUTHN_TRUSTED_APPROVAL_ROLES)];
+  let webauthnDefaultThreshold: number | null = null;
+  let webauthnReceiptCoSignThreshold: number | null = null;
   if (webauthnTrustedRoles !== null) {
+    assertKnownApprovalRoles("webauthn.trustedRoles", webauthnTrustedRoles);
     assertNoTrustedDefaultEnrollableRole(webauthnTrustedRoles);
+    webauthnDefaultThreshold = normalizeThreshold(config.webauthn?.defaultThreshold ?? 1);
+    webauthnReceiptCoSignThreshold = normalizeThreshold(
+      config.webauthn?.receiptCoSignThreshold ?? config.webauthn?.defaultThreshold ?? 1,
+    );
+    assertWebAuthnThresholdPossible(
+      "defaultThreshold",
+      webauthnDefaultThreshold,
+      webauthnTrustedRoles,
+    );
+    assertWebAuthnThresholdPossible(
+      "receiptCoSignThreshold",
+      webauthnReceiptCoSignThreshold,
+      webauthnTrustedRoles,
+    );
   }
   let webauthn =
     config.webauthn === undefined
@@ -116,10 +135,8 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
           allowedOrigins: [...(config.webauthn.allowedOrigins ?? WEBAUTHN_ALLOWED_ORIGINS)],
           challengeTtlMs: config.webauthn.challengeTtlMs ?? WEBAUTHN_CHALLENGE_TTL_MS,
           trustedRoles: webauthnTrustedRoles ?? [],
-          defaultThreshold: normalizeThreshold(config.webauthn.defaultThreshold ?? 1),
-          receiptCoSignThreshold: normalizeThreshold(
-            config.webauthn.receiptCoSignThreshold ?? config.webauthn.defaultThreshold ?? 1,
-          ),
+          defaultThreshold: webauthnDefaultThreshold ?? 1,
+          receiptCoSignThreshold: webauthnReceiptCoSignThreshold ?? 1,
           logger,
         } satisfies WebAuthnRouteDeps);
   const cost =
@@ -141,6 +158,9 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   }
   if (cost !== null) {
     pruneCostIdempotencyOnStartup(cost, logger);
+  }
+  if (webauthn !== null) {
+    await pruneWebAuthnOnStartup(webauthn, logger);
   }
   const runnerRoutes =
     config.runners === undefined
@@ -528,6 +548,29 @@ function pruneCostIdempotencyOnStartup(cost: CostRouteDeps, logger: BrokerLogger
   }
 }
 
+async function pruneWebAuthnOnStartup(
+  webauthn: Pick<WebAuthnRouteDeps, "clock" | "store">,
+  logger: BrokerLogger,
+): Promise<void> {
+  const nowMs = readWebAuthnClock(webauthn.clock);
+  try {
+    await webauthn.store.pruneExpired({ nowMs });
+    logger.info("webauthn_expired_state_pruned", { nowMs });
+  } catch (err) {
+    logger.warn("webauthn_expired_state_prune_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function readWebAuthnClock(clock: Clock): number {
+  const nowMs = clock.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+    throw new Error(`createBroker: webauthn clock returned invalid timestamp: ${nowMs}`);
+  }
+  return nowMs;
+}
+
 // Bucket an `/api/...` pathname into a fixed enum of known route families.
 // Anything else (or shapes attackers could exploit to inflate logs) falls
 // into `unknown`. Keeping cardinality bounded makes the log surface
@@ -559,12 +602,33 @@ function normalizeThreshold(value: number): number {
   return value;
 }
 
+function assertKnownApprovalRoles(path: string, roles: readonly unknown[]): void {
+  for (const [index, role] of roles.entries()) {
+    if (typeof role !== "string" || !APPROVAL_ROLE_SET.has(role)) {
+      throw new Error(`createBroker: ${path}[${index}] must be a valid approval role`);
+    }
+  }
+}
+
 function assertNoTrustedDefaultEnrollableRole(trustedRoles: readonly ApprovalRole[]): void {
   const trusted = new Set(trustedRoles);
   const overlap = WEBAUTHN_DEFAULT_ENROLLABLE_ROLES.filter((role) => trusted.has(role));
   if (overlap.length > 0) {
     throw new Error(
       `createBroker: webauthn default enrollable role cannot also be trusted: ${overlap.join(", ")}`,
+    );
+  }
+}
+
+function assertWebAuthnThresholdPossible(
+  name: string,
+  threshold: number,
+  trustedRoles: readonly ApprovalRole[],
+): void {
+  const distinctTrustedRoleCount = new Set(trustedRoles).size;
+  if (threshold > distinctTrustedRoleCount) {
+    throw new Error(
+      `createBroker: webauthn ${name} ${threshold} exceeds distinct trusted approval roles ${distinctTrustedRoleCount}`,
     );
   }
 }

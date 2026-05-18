@@ -101,14 +101,21 @@ allowed origins, threshold policy, and clock. v1 defaults are config-driven
 with RP ID `localhost`, dev origin `http://localhost:5173`, and the
 post-listen packaged origin `http://localhost:<broker-port>`. The listener
 still binds `127.0.0.1` only; `localhost` is the browser-facing host used so
-WebAuthn's RP ID matches the page origin.
+WebAuthn's RP ID matches the page origin. Startup prunes expired WebAuthn
+consumed-token rows and expired orphan challenge rows using the injected clock;
+request paths do not run unbounded cleanup.
 
 | Method | Path | Auth | Contract |
 |---|---|---|---|
 | POST | `/api/webauthn/registration/challenge` | bearer + agent map | Parses `{ role }`, creates a random challenge, stores it against the bearer-mapped agent and role, and returns broker control-plane `{ challengeId, options }` with W3C `PublicKeyCredentialCreationOptions` JSON. Registration is standalone and does not require a pending claim. |
 | POST | `/api/webauthn/registration/verify` | bearer + agent map | Parses `{ challengeId, attestationResponse }`, rejects expired/reused/wrong-agent challenges, verifies attestation through `@simplewebauthn/server`, and persists `{ credentialId, publicKey, signCount, role, agentId }`. |
 | POST | `/api/webauthn/cosign/challenge` | bearer + agent map | Parses `{ claim, scope }` through `approvalClaimFromJson` and `approvalScopeFromJson`, checks their target binding, creates a random challenge and token id, stores the canonical claim/scope preimage hash, and returns broker control-plane `{ challengeId, options }` with W3C `PublicKeyCredentialRequestOptions` JSON. |
-| POST | `/api/webauthn/cosign/verify` | bearer + agent map | Parses `{ challengeId, assertionResponse }`, rejects expired/consumed/wrong-agent/wrong-role submissions, verifies assertion origin/RP ID/user verification/signature/sign count through `@simplewebauthn/server`, counts distinct trusted roles for the approval group, atomically consumes the token id, and returns either `{ status: "approval_pending", satisfiedRoles, requiredThreshold }` or `signedApprovalTokenToJsonValue(token)`. Replays of an already consumed `tokenId` return the recorded outcome. |
+| POST | `/api/webauthn/cosign/verify` | bearer + agent map | Parses `{ challengeId, assertionResponse }`, rejects expired/consumed/wrong-agent/wrong-role submissions, verifies assertion origin/RP ID/user verification/signature/sign count through `@simplewebauthn/server`, counts distinct trusted roles for the approval group, atomically consumes the token id, and returns either `{ status: "approval_pending", satisfiedRoles, requiredThreshold }` or `signedApprovalTokenToJsonValue(token)`. Replays of an already consumed `tokenId` return the recorded outcome only while the challenge remains within its validity window; after expiry the response is `400 {"error":"challenge_expired"}`. |
+
+WebAuthn store writes use the same storage-failure contract as receipt writes:
+transient SQLite `BUSY`/`LOCKED` returns `503 {"error":"store_busy"}` with
+`Retry-After: 1`, `SQLITE_FULL` returns `507 {"error":"store_full"}`, and
+persistent storage-unavailable failures return `503 {"error":"storage_error"}`.
 
 ### Runner routes
 
