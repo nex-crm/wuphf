@@ -74,14 +74,43 @@ describe("SqliteWebAuthnStore", () => {
       expiresAtMs: 1_000,
     });
 
-    await store.pruneExpired({ nowMs: 100 });
+    const pruned = await store.pruneExpired({ nowMs: 100 });
 
+    expect(pruned).toEqual({ consumedTokens: 1, orphanChallenges: 2 });
     await expect(store.getConsumedToken(expired.tokenId)).resolves.toBeNull();
     await expect(store.getChallenge(expired.challengeId)).resolves.toBeNull();
     await expect(store.getConsumedToken(unexpired.tokenId)).resolves.not.toBeNull();
     await expect(store.getChallenge(unexpired.challengeId)).resolves.not.toBeNull();
     await expect(store.getChallenge("expiredOrphanChallenge")).resolves.toBeNull();
     await expect(store.getChallenge("unexpiredOrphanChallenge")).resolves.not.toBeNull();
+  });
+
+  it("bounds each expired state prune batch", async () => {
+    const store = createTestStore();
+    await store.saveRegistrationChallenge({
+      challengeId: "expiredOrphanOne",
+      challenge: "expiredOrphanOne",
+      role: "approver",
+      issuedToAgentId: agentId,
+      createdAtMs: 1,
+      expiresAtMs: 10,
+    });
+    await store.saveRegistrationChallenge({
+      challengeId: "expiredOrphanTwo",
+      challenge: "expiredOrphanTwo",
+      role: "approver",
+      issuedToAgentId: agentId,
+      createdAtMs: 1,
+      expiresAtMs: 20,
+    });
+
+    const first = await store.pruneExpired({ nowMs: 100, maxRows: 1 });
+    const second = await store.pruneExpired({ nowMs: 100, maxRows: 1 });
+
+    expect(first).toEqual({ consumedTokens: 0, orphanChallenges: 1 });
+    expect(second).toEqual({ consumedTokens: 0, orphanChallenges: 1 });
+    await expect(store.getChallenge("expiredOrphanOne")).resolves.toBeNull();
+    await expect(store.getChallenge("expiredOrphanTwo")).resolves.toBeNull();
   });
 
   it("returns the consumed token claim-scope hash from the linked challenge", async () => {
@@ -140,6 +169,8 @@ describe("SqliteWebAuthnStore", () => {
       tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FD1"),
       claim,
       scope,
+      claimJson: hashes.claimJson,
+      scopeJson: hashes.scopeJson,
       claimScopeHash: hashes.claimScopeHash,
       approvalGroupHash: hashes.approvalGroupHash,
       issuedToAgentId: agentId,
@@ -235,6 +266,8 @@ async function saveConsumedCosign(
     tokenId,
     claim,
     scope,
+    claimJson: hashes.claimJson,
+    scopeJson: hashes.scopeJson,
     claimScopeHash: hashes.claimScopeHash,
     approvalGroupHash: hashes.approvalGroupHash,
     issuedToAgentId: agentId,
@@ -288,11 +321,16 @@ function hashClaimScopeForTest(
 ): {
   readonly claimScopeHash: ReturnType<typeof sha256Hex>;
   readonly approvalGroupHash: ReturnType<typeof sha256Hex>;
+  readonly claimJson: string;
+  readonly scopeJson: string;
 } {
-  const claimJson = claim;
+  const claimJson = canonicalJSON(claim);
+  const scopeJson = canonicalJSON(scope);
   return {
-    claimScopeHash: sha256Hex(canonicalJSON({ claim: claimJson, scope })),
-    approvalGroupHash: sha256Hex(canonicalJSON({ claim: claimJson })),
+    claimScopeHash: sha256Hex(`{"claim":${claimJson},"scope":${scopeJson}}`),
+    approvalGroupHash: sha256Hex(`{"claim":${claimJson}}`),
+    claimJson,
+    scopeJson,
   };
 }
 

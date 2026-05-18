@@ -763,7 +763,8 @@ const APPROVAL_SUBMIT_FAILURE_CASES = [
       assertionOf(request).signature = "not base64!";
       return request;
     },
-    reason: /approvalToken\/signature\/signature: must be a non-empty base64url string/,
+    reason:
+      /approvalToken\/signature\/signature: must be a canonical non-empty unpadded base64url string/,
   },
   {
     name: "rejects oversized assertion signatures",
@@ -1031,7 +1032,9 @@ describe("approval submission IPC", () => {
     const receiptId = asReceiptId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const token = approvalTokenFor(receiptId);
     const assertionOverhead = canonicalJSON({ ...token.signature, signature: "" }).length;
-    const atTotalCapSignature = "A".repeat(MAX_WEBAUTHN_ASSERTION_BYTES - assertionOverhead);
+    const atTotalCapSignature = canonicalBase64UrlStringAtMost(
+      MAX_WEBAUTHN_ASSERTION_BYTES - assertionOverhead,
+    );
 
     expect(
       validateApprovalSubmitRequest(
@@ -1660,6 +1663,14 @@ function expectApprovalSubmitRejected(request: unknown, reason: RegExp): void {
   if (!result.ok) {
     expect(result.reason).toMatch(reason);
   }
+}
+
+function canonicalBase64UrlStringAtMost(maxLength: number): string {
+  let length = maxLength;
+  while (length % 4 === 1) {
+    length -= 1;
+  }
+  return "A".repeat(length);
 }
 
 function approvalTokenFor(

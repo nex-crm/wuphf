@@ -1187,7 +1187,17 @@ func validateBase64URLField(record map[string]interface{}, key string, path stri
 		return err
 	}
 	if !base64URLRE.MatchString(value) {
-		return fmt.Errorf("%s: must be a non-empty base64url string", path)
+		return fmt.Errorf("%s: must be a canonical non-empty unpadded base64url string", path)
+	}
+	if len(value)%4 == 1 {
+		return fmt.Errorf("%s: must be a canonical non-empty unpadded base64url string", path)
+	}
+	decoded, err := base64.RawURLEncoding.Strict().DecodeString(value)
+	if err != nil {
+		return fmt.Errorf("%s: must be a canonical non-empty unpadded base64url string", path)
+	}
+	if base64.RawURLEncoding.EncodeToString(decoded) != value {
+		return fmt.Errorf("%s: must be a canonical non-empty unpadded base64url string", path)
 	}
 	return nil
 }

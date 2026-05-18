@@ -34,6 +34,8 @@ import {
   type EndpointAllowlistExtensionClaim,
   type EndpointAllowlistExtensionScope,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
+  MAX_WEBAUTHN_ASSERTION_BYTES,
+  MAX_WEBAUTHN_ASSERTION_FIELD_BYTES,
   type ReceiptCoSignClaim,
   type ReceiptCoSignScope,
   sha256Hex,
@@ -44,6 +46,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openDatabase, runMigrations } from "../../src/event-log/index.ts";
 import { type BrokerHandle, type BrokerLogger, createBroker } from "../../src/index.ts";
+import { createOpportunisticPruningWebAuthnStore } from "../../src/webauthn/prune.ts";
 import { createWebAuthnStore } from "../../src/webauthn/store.ts";
 import {
   type Clock,
@@ -266,14 +269,57 @@ describe("WebAuthn routes", () => {
 
   it("prunes expired WebAuthn state at startup using the injected clock", async () => {
     const clock = new FakeClock(123_456);
-    const pruneCalls: number[] = [];
+    const pruneCalls: PruneCall[] = [];
 
     await startBroker({
       clock,
       wrapStore: (inner) => new RecordingPruneStore(inner, pruneCalls),
     });
 
-    expect(pruneCalls).toEqual([123_456]);
+    expect(pruneCalls).toEqual([{ nowMs: 123_456, maxRows: 64 }]);
+  });
+
+  it("prunes expired WebAuthn state opportunistically after bounded write batches", async () => {
+    const clock = new FakeClock(500);
+    const logger = new RecordingLogger();
+    const pruneCalls: PruneCall[] = [];
+    const inner = new RecordingPruneStore(createTestWebAuthnStore(), pruneCalls);
+    const store = createOpportunisticPruningWebAuthnStore(inner, {
+      clock,
+      logger,
+      writeInterval: 2,
+      maxRows: 3,
+    });
+
+    await store.saveRegistrationChallenge({
+      challengeId: "writePruneOne",
+      challenge: "writePruneOne",
+      role: "approver",
+      issuedToAgentId: agentId,
+      createdAtMs: 1,
+      expiresAtMs: 2,
+    });
+    clock.set(600);
+    await store.saveRegistrationChallenge({
+      challengeId: "writePruneTwo",
+      challenge: "writePruneTwo",
+      role: "approver",
+      issuedToAgentId: agentId,
+      createdAtMs: 1,
+      expiresAtMs: 2,
+    });
+
+    expect(pruneCalls).toEqual([{ nowMs: 600, maxRows: 3 }]);
+    expect(logger.infos).toContainEqual({
+      event: "webauthn_expired_state_pruned",
+      payload: {
+        trigger: "write_interval",
+        nowMs: 600,
+        maxRows: 3,
+        consumedTokens: 0,
+        orphanChallenges: 2,
+      },
+    });
   });
 
   it("verifies registration and persists the credential role", async () => {
@@ -288,10 +334,34 @@ describe("WebAuthn routes", () => {
 
     expect(res.status).toBe(200);
     expect(ceremony.registrationVerificationOrigins).toContain(packagedWebAuthnOrigin(handle));
+    expect(ceremony.registrationVerificationCalls).toBe(1);
     await expect(res.json()).resolves.toEqual({
-      credentialId: "cred_approver",
+      credentialId: webAuthnCredentialId("cred_approver"),
       role: "approver",
     });
+  });
+
+  it("rejects oversized registration attestations before WebAuthn verification", async () => {
+    const ceremony = new FakeCeremony();
+    const handle = await startBroker({ ceremony });
+    const challenge = await registrationChallenge(handle, "approver");
+    const attestation = registrationResponse("cred_approver");
+
+    const res = await postJson(handle, "/api/webauthn/registration/verify", {
+      challengeId: challenge.challengeId,
+      attestationResponse: {
+        ...attestation,
+        response: {
+          ...attestation.response,
+          attestationObject: "A".repeat(64 * 1024 + 1),
+        },
+      },
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { readonly error: string };
+    expect(body.error).toMatch(/attestationObject.*bytes/);
+    expect(ceremony.registrationVerificationCalls).toBe(0);
   });
 
   it("logs sanitized registration verification failure details", async () => {
@@ -377,8 +447,14 @@ describe("WebAuthn routes", () => {
     expect(body.challengeId).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(body.requestOptions.rpId).toBe("localhost");
     expect(body.requestOptions.allowCredentials?.map((credential) => credential.id)).toEqual([
-      "cred_approver",
+      webAuthnCredentialId("cred_approver"),
     ]);
+    const stored = await createWebAuthnStore(requiredDb()).getChallenge(body.challengeId);
+    const hashes = hashClaimScopeForTest(claim, scope);
+    expect(stored).toMatchObject({
+      claimScopeHash: hashes.claimScopeHash,
+      approvalGroupHash: hashes.approvalGroupHash,
+    });
   });
 
   it("echoes the canonical parsed claim and scope in cosign challenge responses", async () => {
@@ -420,7 +496,55 @@ describe("WebAuthn routes", () => {
     const approvalToken = signedApprovalTokenFromJson(tokenBody);
     expect(approvalToken.issuedTo).toBe(agentId);
     expect(approvalToken.scope.role).toBe("approver");
-    expect(approvalToken.signature.credentialId).toBe("cred_approver");
+    expect(approvalToken.signature.credentialId).toBe(webAuthnCredentialId("cred_approver"));
+  });
+
+  it("rejects oversized cosign assertion fields before WebAuthn verification", async () => {
+    const ceremony = new FakeCeremony();
+    const handle = await startBroker({ ceremony });
+    await registerRole(handle, "approver", "cred_approver");
+    const challenge = await cosignChallenge(handle, "approver");
+    const assertion = assertionResponse("cred_approver");
+
+    const res = await postJson(handle, "/api/webauthn/cosign/verify", {
+      challengeId: challenge.challengeId,
+      assertionResponse: {
+        ...assertion,
+        response: {
+          ...assertion.response,
+          signature: "A".repeat(MAX_WEBAUTHN_ASSERTION_FIELD_BYTES + 1),
+        },
+      },
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { readonly error: string };
+    expect(body.error).toMatch(/signature.*bytes/);
+    expect(ceremony.authenticationCalls).toBe(0);
+  });
+
+  it("rejects oversized cosign assertions before WebAuthn verification", async () => {
+    const ceremony = new FakeCeremony();
+    const handle = await startBroker({ ceremony });
+    await registerRole(handle, "approver", "cred_approver");
+    const challenge = await cosignChallenge(handle, "approver");
+    const assertion = assertionResponse("cred_approver");
+
+    const res = await postJson(handle, "/api/webauthn/cosign/verify", {
+      challengeId: challenge.challengeId,
+      assertionResponse: {
+        ...assertion,
+        response: {
+          ...assertion.response,
+          signature: "A".repeat(MAX_WEBAUTHN_ASSERTION_BYTES - 1),
+        },
+      },
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { readonly error: string };
+    expect(body.error).toMatch(/WebAuthnAssertion canonical JSON bytes/);
+    expect(ceremony.authenticationCalls).toBe(0);
   });
 
   it("logs sanitized assertion verification failure details", async () => {
@@ -520,7 +644,7 @@ describe("WebAuthn routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as CosignChallengeResponse;
     expect(body.requestOptions.allowCredentials?.map((credential) => credential.id)).toEqual([
-      "cred_approver",
+      webAuthnCredentialId("cred_approver"),
     ]);
   });
 
@@ -552,6 +676,8 @@ describe("WebAuthn routes", () => {
       tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA1"),
       claim,
       scope,
+      claimJson: hashes.claimJson,
+      scopeJson: hashes.scopeJson,
       claimScopeHash: hashes.claimScopeHash,
       approvalGroupHash: hashes.approvalGroupHash,
       issuedToAgentId: agentId,
@@ -729,7 +855,7 @@ describe("WebAuthn routes", () => {
 
   it("rejects sign-count replay before consuming a token", async () => {
     const ceremony = new FakeCeremony();
-    ceremony.nextCounters.set("cred_approver", 1);
+    ceremony.nextCounters.set(webAuthnCredentialId("cred_approver"), 1);
     const handle = await startBroker({ ceremony });
     await registerRole(handle, "approver", "cred_approver");
     const challenge = await cosignChallenge(handle, "approver");
@@ -800,6 +926,8 @@ describe("WebAuthn routes", () => {
       tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA2"),
       claim,
       scope,
+      claimJson: hashes.claimJson,
+      scopeJson: hashes.scopeJson,
       claimScopeHash: hashes.claimScopeHash,
       approvalGroupHash: hashes.approvalGroupHash,
       issuedToAgentId: agentId,
@@ -972,13 +1100,16 @@ function hashClaimScopeForTest(
 ): {
   readonly claimScopeHash: ReturnType<typeof sha256Hex>;
   readonly approvalGroupHash: ReturnType<typeof sha256Hex>;
+  readonly claimJson: string;
+  readonly scopeJson: string;
 } {
-  const claimJson = approvalClaimToJsonValue(claim);
+  const claimJson = canonicalJSON(approvalClaimToJsonValue(claim));
+  const scopeJson = canonicalJSON(approvalScopeToJsonValue(scope));
   return {
-    claimScopeHash: sha256Hex(
-      canonicalJSON({ claim: claimJson, scope: approvalScopeToJsonValue(scope) }),
-    ),
-    approvalGroupHash: sha256Hex(canonicalJSON({ claim: claimJson })),
+    claimScopeHash: sha256Hex(`{"claim":${claimJson},"scope":${scopeJson}}`),
+    approvalGroupHash: sha256Hex(`{"claim":${claimJson}}`),
+    claimJson,
+    scopeJson,
   };
 }
 
@@ -1083,12 +1214,13 @@ function credentialGrantToAgentFixture(
 }
 
 function registrationResponse(credentialId: string): RegistrationResponseJSON {
+  const id = webAuthnCredentialId(credentialId);
   return {
-    id: credentialId,
-    rawId: credentialId,
+    id,
+    rawId: id,
     response: {
-      clientDataJSON: "clientData",
-      attestationObject: "attestationObject",
+      clientDataJSON: webAuthnCredentialId("clientData"),
+      attestationObject: webAuthnCredentialId("attestationObject"),
     },
     clientExtensionResults: {},
     type: "public-key",
@@ -1096,17 +1228,22 @@ function registrationResponse(credentialId: string): RegistrationResponseJSON {
 }
 
 function assertionResponse(credentialId: string): AuthenticationResponseJSON {
+  const id = webAuthnCredentialId(credentialId);
   return {
-    id: credentialId,
-    rawId: credentialId,
+    id,
+    rawId: id,
     response: {
-      clientDataJSON: "clientData",
-      authenticatorData: "authenticatorData",
-      signature: "signature",
+      clientDataJSON: webAuthnCredentialId("clientData"),
+      authenticatorData: webAuthnCredentialId("authenticatorData"),
+      signature: webAuthnCredentialId("signature"),
     },
     clientExtensionResults: {},
     type: "public-key",
   };
+}
+
+function webAuthnCredentialId(label: string): string {
+  return Buffer.from(label, "utf8").toString("base64url");
 }
 
 async function postJson(handle: BrokerHandle, path: string, body: unknown): Promise<Response> {
@@ -1137,6 +1274,11 @@ interface LogEntry {
   readonly payload?: Readonly<Record<string, unknown>>;
 }
 
+interface PruneCall {
+  readonly nowMs: number;
+  readonly maxRows: number | undefined;
+}
+
 class RecordingLogger implements BrokerLogger {
   readonly infos: LogEntry[] = [];
   readonly warns: LogEntry[] = [];
@@ -1164,6 +1306,7 @@ class FakeCeremony implements WebAuthnCeremony {
   registrationVerificationFailure: CeremonyFailure | null = null;
   authenticationVerificationFailure: CeremonyFailure | null = null;
   registrationOptionCalls = 0;
+  registrationVerificationCalls = 0;
   authenticationCalls = 0;
 
   async generateRegistrationOptions(args: {
@@ -1194,6 +1337,7 @@ class FakeCeremony implements WebAuthnCeremony {
     readonly expectedOrigins: readonly string[];
     readonly expectedRpId: string;
   }): Promise<RegisteredWebAuthnCredentialVerification | null> {
+    this.registrationVerificationCalls += 1;
     expect(args.expectedChallenge).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(args.expectedOrigins).toEqual(this.expectedOrigins);
     expect(args.expectedRpId).toBe("localhost");
@@ -1381,7 +1525,7 @@ class DelayedConsumeStore implements WebAuthnStore {
 class RecordingPruneStore implements WebAuthnStore {
   constructor(
     private readonly inner: WebAuthnStore,
-    private readonly pruneCalls: number[],
+    private readonly pruneCalls: PruneCall[],
   ) {}
 
   saveRegistrationChallenge(
@@ -1399,7 +1543,7 @@ class RecordingPruneStore implements WebAuthnStore {
   pruneExpired(
     ...args: Parameters<WebAuthnStore["pruneExpired"]>
   ): ReturnType<WebAuthnStore["pruneExpired"]> {
-    this.pruneCalls.push(args[0].nowMs);
+    this.pruneCalls.push({ nowMs: args[0].nowMs, maxRows: args[0].maxRows });
     return this.inner.pruneExpired(...args);
   }
 

@@ -5,8 +5,9 @@ import {
 } from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { post } from "./client";
+import { ApiError, post } from "./client";
 import {
+  describeWebAuthnBrokerStorageError,
   isWebAuthnApprovalPendingResponse,
   requestWebAuthnCosignChallenge,
   requestWebAuthnRegistrationChallenge,
@@ -20,9 +21,13 @@ import {
   type WebAuthnRequestOptionsJson,
 } from "./webauthn";
 
-vi.mock("./client", () => ({
-  post: vi.fn(),
-}));
+vi.mock("./client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./client")>();
+  return {
+    ...actual,
+    post: vi.fn(),
+  };
+});
 
 const postMock = vi.mocked(post);
 
@@ -169,6 +174,28 @@ describe("webauthn api client", () => {
         requiredThreshold: Number.POSITIVE_INFINITY,
       }),
     ).toBe(false);
+  });
+
+  it("maps broker storage errors using structured codes and retry headers", () => {
+    expect(
+      describeWebAuthnBrokerStorageError(
+        new ApiError({
+          status: 503,
+          statusText: "Service Unavailable",
+          bodyText: '{"error":"store_busy"}',
+          errorCode: "store_busy",
+          retryAfter: "1",
+        }),
+      ),
+    ).toBe("The broker's WebAuthn storage is busy. Try again in 1 second.");
+    expect(
+      describeWebAuthnBrokerStorageError(new Error('{"error":"store_full"}')),
+    ).toContain("Free disk space");
+    expect(
+      describeWebAuthnBrokerStorageError(
+        new Error('{"error":"storage_error"}'),
+      ),
+    ).toContain("Restart the broker");
   });
 
   it("runs the SimpleWebAuthn registration wrapper against navigator.credentials.create", async () => {

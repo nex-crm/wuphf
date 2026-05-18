@@ -114,6 +114,30 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+  readonly bodyText: string;
+  readonly errorCode: string | null;
+  readonly retryAfter: string | null;
+
+  constructor(args: {
+    readonly status: number;
+    readonly statusText: string;
+    readonly bodyText: string;
+    readonly errorCode?: string | null;
+    readonly retryAfter?: string | null;
+  }) {
+    super(args.bodyText || `${args.status} ${args.statusText}`);
+    this.name = "ApiError";
+    this.status = args.status;
+    this.statusText = args.statusText;
+    this.bodyText = args.bodyText;
+    this.errorCode = args.errorCode ?? null;
+    this.retryAfter = args.retryAfter ?? null;
+  }
+}
+
 export async function get<T = unknown>(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
@@ -130,8 +154,7 @@ export async function get<T = unknown>(
   }
   const r = await fetch(url, { headers: authHeaders() });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
 }
@@ -152,8 +175,7 @@ export async function getText(
   }
   const r = await fetch(url, { headers: authHeaders() });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.text();
 }
@@ -170,8 +192,7 @@ export async function post<T = unknown>(
     signal: options.signal,
   });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
 }
@@ -186,8 +207,7 @@ export async function put<T = unknown>(
     body: JSON.stringify(body),
   });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
 }
@@ -207,8 +227,7 @@ export async function postWithTimeout<T = unknown>(
       signal: controller.signal,
     });
     if (!r.ok) {
-      const text = (await r.text().catch(() => "")).trim();
-      throw new Error(text || `${r.status} ${r.statusText}`);
+      throw await apiErrorFromResponse(r);
     }
     return r.json();
   } catch (err) {
@@ -231,8 +250,7 @@ export async function patch<T = unknown>(
     body: JSON.stringify(body),
   });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
 }
@@ -247,10 +265,38 @@ export async function del<T = unknown>(
     body: JSON.stringify(body),
   });
   if (!r.ok) {
-    const text = (await r.text().catch(() => "")).trim();
-    throw new Error(text || `${r.status} ${r.statusText}`);
+    throw await apiErrorFromResponse(r);
   }
   return r.json();
+}
+
+async function apiErrorFromResponse(response: Response): Promise<ApiError> {
+  const bodyText = (await response.text().catch(() => "")).trim();
+  return new ApiError({
+    status: response.status,
+    statusText: response.statusText,
+    bodyText,
+    errorCode: errorCodeFromBodyText(bodyText),
+    retryAfter: response.headers.get("Retry-After"),
+  });
+}
+
+function errorCodeFromBodyText(bodyText: string): string | null {
+  if (bodyText.length === 0) return null;
+  try {
+    const parsed = JSON.parse(bodyText) as unknown;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return null;
+    }
+    const { error } = parsed as Readonly<Record<string, unknown>>;
+    return typeof error === "string" ? error : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── SSE ──

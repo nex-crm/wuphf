@@ -12,6 +12,7 @@ import {
 } from "@wuphf/protocol";
 
 import {
+  describeWebAuthnBrokerStorageError,
   isWebAuthnApprovalPendingResponse,
   requestWebAuthnCosignChallenge,
   runWebAuthnAuthenticationCeremony,
@@ -266,6 +267,9 @@ function OutcomePanel({
 }
 
 export function describeCosignFailure(error: unknown): string {
+  const storageMessage = describeWebAuthnBrokerStorageError(error);
+  if (storageMessage !== null) return storageMessage;
+
   const message = error instanceof Error ? error.message : String(error);
   if (/expired|unknown|invalid|reused|challenge/i.test(message)) {
     return "The approval challenge expired or is no longer valid. Start the approval again.";

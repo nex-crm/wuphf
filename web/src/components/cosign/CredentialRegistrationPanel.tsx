@@ -6,6 +6,7 @@ import {
 } from "@wuphf/protocol";
 
 import {
+  describeWebAuthnBrokerStorageError,
   requestWebAuthnRegistrationChallenge,
   runWebAuthnRegistrationCeremony,
   verifyWebAuthnRegistration,
@@ -13,6 +14,7 @@ import {
 import { showNotice } from "../ui/Toast";
 
 const ROLE_OPTIONS: readonly ApprovalRole[] = APPROVAL_ROLE_VALUES;
+const [DEFAULT_ROLE] = APPROVAL_ROLE_VALUES;
 
 type RegistrationState =
   | { readonly kind: "idle" }
@@ -25,7 +27,7 @@ type RegistrationState =
   | { readonly kind: "error"; readonly message: string };
 
 export function CredentialRegistrationPanel() {
-  const [role, setRole] = useState<ApprovalRole>("approver");
+  const [role, setRole] = useState<ApprovalRole>(DEFAULT_ROLE);
   const [state, setState] = useState<RegistrationState>({ kind: "idle" });
   const selectedRole = isApprovalRole(role) ? role : null;
   const running = state.kind === "running";
@@ -212,6 +214,9 @@ function RegistrationOutcome({
 }
 
 export function describeRegistrationFailure(error: unknown): string {
+  const storageMessage = describeWebAuthnBrokerStorageError(error);
+  if (storageMessage !== null) return storageMessage;
+
   const message = error instanceof Error ? error.message : String(error);
   if (/expired|unknown|invalid|reused|challenge/i.test(message)) {
     return "The registration challenge expired or is no longer valid. Start registration again.";

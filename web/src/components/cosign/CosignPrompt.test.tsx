@@ -9,6 +9,7 @@ import type {
 } from "@wuphf/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../api/client";
 import * as webauthn from "../../api/webauthn";
 import { CosignPrompt, describeCosignFailure } from "./CosignPrompt";
 
@@ -162,6 +163,19 @@ describe("<CosignPrompt>", () => {
     expect(describeCosignFailure(new Error("NotAllowedError"))).toBe(
       "The security key ceremony was cancelled before a token was issued.",
     );
+  });
+
+  it("maps broker storage errors distinctly from policy failures", () => {
+    expect(
+      describeCosignFailure(
+        new ApiError({
+          status: 503,
+          statusText: "Service Unavailable",
+          bodyText: '{"error":"storage_error"}',
+          errorCode: "storage_error",
+        }),
+      ),
+    ).toContain("could not access WebAuthn storage");
   });
 });
 

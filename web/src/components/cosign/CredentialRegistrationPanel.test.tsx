@@ -1,7 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { APPROVAL_ROLE_VALUES } from "@wuphf/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../api/client";
 import * as webauthn from "../../api/webauthn";
 import { showNotice } from "../ui/Toast";
 import {
@@ -29,6 +31,7 @@ const requestChallengeMock = vi.mocked(
 const runCeremonyMock = vi.mocked(webauthn.runWebAuthnRegistrationCeremony);
 const verifyMock = vi.mocked(webauthn.verifyWebAuthnRegistration);
 const showNoticeMock = vi.mocked(showNotice);
+const [defaultRole] = APPROVAL_ROLE_VALUES;
 
 describe("<CredentialRegistrationPanel>", () => {
   beforeEach(() => {
@@ -47,7 +50,7 @@ describe("<CredentialRegistrationPanel>", () => {
     runCeremonyMock.mockResolvedValue(attestationResponse());
     verifyMock.mockResolvedValue({
       credentialId: "credential-123",
-      role: "approver",
+      role: defaultRole,
     });
 
     render(<CredentialRegistrationPanel />);
@@ -60,13 +63,13 @@ describe("<CredentialRegistrationPanel>", () => {
       expect(screen.getByText("Credential registered")).toBeInTheDocument(),
     );
     expect(screen.getByText("credential-123")).toBeInTheDocument();
-    expect(requestChallengeMock).toHaveBeenCalledWith({ role: "approver" });
+    expect(requestChallengeMock).toHaveBeenCalledWith({ role: defaultRole });
     expect(verifyMock).toHaveBeenCalledWith({
       challengeId: "challenge-1",
       attestationResponse: attestationResponse(),
     });
     expect(showNoticeMock).toHaveBeenCalledWith(
-      "Security key registered for approver",
+      `Security key registered for ${defaultRole}`,
       "success",
     );
   });
@@ -92,7 +95,7 @@ describe("<CredentialRegistrationPanel>", () => {
       Array.from(roleSelect.querySelectorAll("option")).map(
         (option) => option.value,
       ),
-    ).toEqual(["viewer", "approver", "host"]);
+    ).toEqual(APPROVAL_ROLE_VALUES);
 
     const user = userEvent.setup();
     await user.selectOptions(roleSelect, "host");
@@ -134,6 +137,30 @@ describe("<CredentialRegistrationPanel>", () => {
     expect(describeRegistrationFailure(new Error("AbortError"))).toBe(
       "The security key ceremony was cancelled before a credential was registered.",
     );
+  });
+
+  it("maps broker storage failures to clear operator guidance", () => {
+    expect(
+      describeRegistrationFailure(
+        new ApiError({
+          status: 503,
+          statusText: "Service Unavailable",
+          bodyText: '{"error":"store_busy"}',
+          errorCode: "store_busy",
+          retryAfter: "2",
+        }),
+      ),
+    ).toContain("Try again in 2 seconds");
+    expect(
+      describeRegistrationFailure(
+        new ApiError({
+          status: 507,
+          statusText: "Insufficient Storage",
+          bodyText: '{"error":"store_full"}',
+          errorCode: "store_full",
+        }),
+      ),
+    ).toContain("Free disk space and restart the broker");
   });
 });
 

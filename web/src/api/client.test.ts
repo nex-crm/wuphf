@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { connectBroker, initApi, post } from "./client";
+import { type ApiError, connectBroker, initApi, post } from "./client";
 
 describe("connectBroker", () => {
   afterEach(() => {
@@ -63,5 +63,24 @@ describe("connectBroker", () => {
         }),
       }),
     );
+  });
+
+  it("preserves structured broker error codes and retry hints on failed posts", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "store_busy" }), {
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": "1",
+        },
+      }),
+    );
+
+    await expect(post("/webauthn/cosign/challenge", {})).rejects.toMatchObject({
+      status: 503,
+      errorCode: "store_busy",
+      retryAfter: "1",
+    } satisfies Partial<ApiError>);
   });
 });

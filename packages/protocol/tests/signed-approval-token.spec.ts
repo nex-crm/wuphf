@@ -240,7 +240,9 @@ describe("SignedApprovalToken codec", () => {
 
     const baseAssertion = webAuthnAssertionFixture();
     const assertionOverhead = canonicalJSON({ ...baseAssertion, signature: "" }).length;
-    const atCapSignature = "A".repeat(MAX_WEBAUTHN_ASSERTION_BYTES - assertionOverhead);
+    const atCapSignature = canonicalBase64UrlStringAtMost(
+      MAX_WEBAUTHN_ASSERTION_BYTES - assertionOverhead,
+    );
     expect(
       webAuthnAssertionFromJson({
         ...baseAssertion,
@@ -251,7 +253,7 @@ describe("SignedApprovalToken codec", () => {
     expect(() =>
       webAuthnAssertionFromJson({
         ...baseAssertion,
-        signature: `${atCapSignature}A`,
+        signature: canonicalBase64UrlStringAbove(MAX_WEBAUTHN_ASSERTION_BYTES - assertionOverhead),
       }),
     ).toThrow(/WebAuthnAssertion canonical JSON bytes/);
   });
@@ -287,6 +289,16 @@ describe("SignedApprovalToken codec", () => {
       name: "invalid signature alphabet",
       value: { ...webAuthnAssertionFixture(), signature: "not base64!" },
       reason: /signature.*base64url/,
+    },
+    {
+      name: "invalid signature length",
+      value: { ...webAuthnAssertionFixture(), signature: "A" },
+      reason: /signature.*canonical.*base64url/,
+    },
+    {
+      name: "non-zero trailing pad bits",
+      value: { ...webAuthnAssertionFixture(), signature: "AB" },
+      reason: /signature.*canonical.*base64url/,
     },
   ])("rejects malformed WebAuthn assertion payloads: $name", ({ value, reason }) => {
     expect(() => webAuthnAssertionFromJson(value)).toThrow(reason);
@@ -610,6 +622,22 @@ function captureErrorMessage(fn: () => unknown): string {
     return err instanceof Error ? err.message : String(err);
   }
   throw new Error("expected function to throw");
+}
+
+function canonicalBase64UrlStringAtMost(maxLength: number): string {
+  let length = maxLength;
+  while (length % 4 === 1) {
+    length -= 1;
+  }
+  return "A".repeat(length);
+}
+
+function canonicalBase64UrlStringAbove(minLength: number): string {
+  let length = minLength + 1;
+  while (length % 4 === 1) {
+    length += 1;
+  }
+  return "A".repeat(length);
 }
 
 function claimKindOf(input: unknown): string {

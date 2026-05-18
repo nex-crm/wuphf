@@ -25,9 +25,12 @@ import {
   isApprovalRole,
   type JsonValue,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
+  type Sha256Hex,
   type SignedApprovalToken,
   sha256Hex,
   signedApprovalTokenToJsonValue,
+  validateWebAuthnAssertionBudget,
+  validateWebAuthnAssertionFieldBudget,
 } from "@wuphf/protocol";
 
 import { agentIdForBearer } from "../auth.ts";
@@ -44,6 +47,8 @@ import {
 } from "./types.ts";
 
 const MAX_WEBAUTHN_ROUTE_BODY_BYTES = 256 * 1024;
+const MAX_WEBAUTHN_ATTESTATION_FIELD_BYTES = 64 * 1024;
+const MAX_WEBAUTHN_ATTESTATION_BYTES = 128 * 1024;
 const ALLOW_WEBAUTHN_ROUTE = "POST";
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 const TOKEN_ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -345,7 +350,8 @@ async function handleCosignChallenge(
   const challengeId = randomBase64Url(32);
   const challenge = randomBase64Url(32);
   const tokenId = generateApprovalTokenId();
-  const hashes = hashClaimScope(body.claim, body.scope);
+  const canonicalPayload = canonicalApprovalPayload(body.claim, body.scope);
+  const hashes = hashCanonicalClaimScope(canonicalPayload);
   const options = await deps.ceremony.generateAuthenticationOptions({
     rpId: deps.rpId,
     challenge,
@@ -359,6 +365,8 @@ async function handleCosignChallenge(
       tokenId,
       claim: body.claim,
       scope: body.scope,
+      claimJson: canonicalPayload.claimJson,
+      scopeJson: canonicalPayload.scopeJson,
       claimScopeHash: hashes.claimScopeHash,
       approvalGroupHash: hashes.approvalGroupHash,
       issuedToAgentId: agentId,
@@ -684,18 +692,29 @@ function targetAgentForClaim(claim: ApprovalClaim): AgentId | null {
   }
 }
 
-function hashClaimScope(
+function canonicalApprovalPayload(
   claim: ApprovalClaim,
   scope: ApprovalScope,
 ): {
-  readonly claimScopeHash: ReturnType<typeof sha256Hex>;
-  readonly approvalGroupHash: ReturnType<typeof sha256Hex>;
+  readonly claimJson: string;
+  readonly scopeJson: string;
 } {
-  const claimJson = approvalClaimToJsonValue(claim);
-  const scopeJson = approvalScopeToJsonValue(scope);
   return {
-    claimScopeHash: sha256Hex(canonicalJSON({ claim: claimJson, scope: scopeJson })),
-    approvalGroupHash: sha256Hex(canonicalJSON({ claim: claimJson })),
+    claimJson: canonicalJSON(approvalClaimToJsonValue(claim)),
+    scopeJson: canonicalJSON(approvalScopeToJsonValue(scope)),
+  };
+}
+
+function hashCanonicalClaimScope(payload: {
+  readonly claimJson: string;
+  readonly scopeJson: string;
+}): {
+  readonly claimScopeHash: Sha256Hex;
+  readonly approvalGroupHash: Sha256Hex;
+} {
+  return {
+    claimScopeHash: sha256Hex(`{"claim":${payload.claimJson},"scope":${payload.scopeJson}}`),
+    approvalGroupHash: sha256Hex(`{"claim":${payload.claimJson}}`),
   };
 }
 
@@ -767,8 +786,11 @@ function registrationResponseFromJson(value: unknown, path: string): Registratio
   assertKnownKeys(record, path, CREDENTIAL_RESPONSE_KEYS);
   const response = requireRecord(requiredField(record, "response", path), `${path}.response`);
   assertKnownKeys(response, `${path}.response`, ATTESTATION_RESPONSE_KEYS);
-  const id = base64UrlStringFromJson(requiredString(record, "id", path), `${path}.id`);
-  const rawId = base64UrlStringFromJson(requiredString(record, "rawId", path), `${path}.rawId`);
+  const id = attestationBase64UrlStringFromJson(requiredString(record, "id", path), `${path}.id`);
+  const rawId = attestationBase64UrlStringFromJson(
+    requiredString(record, "rawId", path),
+    `${path}.rawId`,
+  );
   if (rawId !== id) {
     throw new Error(`${path}.rawId: must match id`);
   }
@@ -777,7 +799,7 @@ function registrationResponseFromJson(value: unknown, path: string): Registratio
     "authenticatorAttachment",
     path,
   );
-  const authenticatorData = optionalBase64UrlString(
+  const authenticatorData = optionalAttestationBase64UrlString(
     response,
     "authenticatorData",
     `${path}.response`,
@@ -788,24 +810,26 @@ function registrationResponseFromJson(value: unknown, path: string): Registratio
     "publicKeyAlgorithm",
     `${path}.response`,
   );
-  const publicKey = optionalBase64UrlString(response, "publicKey", `${path}.response`);
+  const publicKey = optionalAttestationBase64UrlString(response, "publicKey", `${path}.response`);
+  const parsedResponse = {
+    clientDataJSON: attestationBase64UrlStringFromJson(
+      requiredString(response, "clientDataJSON", `${path}.response`),
+      `${path}.response.clientDataJSON`,
+    ),
+    attestationObject: attestationBase64UrlStringFromJson(
+      requiredString(response, "attestationObject", `${path}.response`),
+      `${path}.response.attestationObject`,
+    ),
+    ...(authenticatorData === undefined ? {} : { authenticatorData }),
+    ...(transports === undefined ? {} : { transports }),
+    ...(publicKeyAlgorithm === undefined ? {} : { publicKeyAlgorithm }),
+    ...(publicKey === undefined ? {} : { publicKey }),
+  };
+  assertAttestationResponseBudget(parsedResponse, `${path}.response`);
   return {
     id,
     rawId,
-    response: {
-      clientDataJSON: base64UrlStringFromJson(
-        requiredString(response, "clientDataJSON", `${path}.response`),
-        `${path}.response.clientDataJSON`,
-      ),
-      attestationObject: base64UrlStringFromJson(
-        requiredString(response, "attestationObject", `${path}.response`),
-        `${path}.response.attestationObject`,
-      ),
-      ...(authenticatorData === undefined ? {} : { authenticatorData }),
-      ...(transports === undefined ? {} : { transports }),
-      ...(publicKeyAlgorithm === undefined ? {} : { publicKeyAlgorithm }),
-      ...(publicKey === undefined ? {} : { publicKey }),
-    },
+    response: parsedResponse,
     ...(authenticatorAttachment === undefined ? {} : { authenticatorAttachment }),
     clientExtensionResults: extensionResultsFromJson(
       requiredField(record, "clientExtensionResults", path),
@@ -825,30 +849,44 @@ function authenticationResponseFromJson(value: unknown, path: string): Authentic
     "authenticatorAttachment",
     path,
   );
-  const id = base64UrlStringFromJson(requiredString(record, "id", path), `${path}.id`);
-  const rawId = base64UrlStringFromJson(requiredString(record, "rawId", path), `${path}.rawId`);
+  const id = assertionBase64UrlStringFromJson(requiredString(record, "id", path), `${path}.id`);
+  const rawId = assertionBase64UrlStringFromJson(
+    requiredString(record, "rawId", path),
+    `${path}.rawId`,
+  );
   if (rawId !== id) {
     throw new Error(`${path}.rawId: must match id`);
   }
-  const userHandle = optionalBase64UrlString(response, "userHandle", `${path}.response`);
+  const userHandle = optionalAssertionBase64UrlString(response, "userHandle", `${path}.response`);
+  const parsedResponse = {
+    clientDataJSON: assertionBase64UrlStringFromJson(
+      requiredString(response, "clientDataJSON", `${path}.response`),
+      `${path}.response.clientDataJSON`,
+    ),
+    authenticatorData: assertionBase64UrlStringFromJson(
+      requiredString(response, "authenticatorData", `${path}.response`),
+      `${path}.response.authenticatorData`,
+    ),
+    signature: assertionBase64UrlStringFromJson(
+      requiredString(response, "signature", `${path}.response`),
+      `${path}.response.signature`,
+    ),
+    ...(userHandle === undefined ? {} : { userHandle }),
+  };
+  assertAssertionResponseBudget(
+    {
+      credentialId: id,
+      authenticatorData: parsedResponse.authenticatorData,
+      clientDataJson: parsedResponse.clientDataJSON,
+      signature: parsedResponse.signature,
+      ...(parsedResponse.userHandle === undefined ? {} : { userHandle: parsedResponse.userHandle }),
+    },
+    `${path}.response`,
+  );
   return {
     id,
     rawId,
-    response: {
-      clientDataJSON: base64UrlStringFromJson(
-        requiredString(response, "clientDataJSON", `${path}.response`),
-        `${path}.response.clientDataJSON`,
-      ),
-      authenticatorData: base64UrlStringFromJson(
-        requiredString(response, "authenticatorData", `${path}.response`),
-        `${path}.response.authenticatorData`,
-      ),
-      signature: base64UrlStringFromJson(
-        requiredString(response, "signature", `${path}.response`),
-        `${path}.response.signature`,
-      ),
-      ...(userHandle === undefined ? {} : { userHandle }),
-    },
+    response: parsedResponse,
     ...(authenticatorAttachment === undefined ? {} : { authenticatorAttachment }),
     clientExtensionResults: extensionResultsFromJson(
       requiredField(record, "clientExtensionResults", path),
@@ -1019,15 +1057,6 @@ function optionalSafeInteger(
   return value;
 }
 
-function optionalBase64UrlString(
-  record: Readonly<Record<string, unknown>>,
-  key: string,
-  path: string,
-): string | undefined {
-  if (!Object.hasOwn(record, key)) return undefined;
-  return base64UrlStringFromJson(requiredString(record, key, path), `${path}.${key}`);
-}
-
 function optionalTransports(
   record: Readonly<Record<string, unknown>>,
   path: string,
@@ -1074,6 +1103,80 @@ function publicKeyTypeFromJson(value: string, path: string): "public-key" {
     throw new Error(`${path}: must be public-key`);
   }
   return value;
+}
+
+function assertionBase64UrlStringFromJson(value: string, path: string): string {
+  assertBudgetResult(validateWebAuthnAssertionFieldBudget(value, `${path} bytes`), path);
+  return base64UrlStringFromJson(value, path);
+}
+
+function optionalAssertionBase64UrlString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): string | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  return assertionBase64UrlStringFromJson(requiredString(record, key, path), `${path}.${key}`);
+}
+
+function assertAssertionResponseBudget(
+  assertion: {
+    readonly credentialId: string;
+    readonly authenticatorData: string;
+    readonly clientDataJson: string;
+    readonly signature: string;
+    readonly userHandle?: string | undefined;
+  },
+  path: string,
+): void {
+  assertBudgetResult(validateWebAuthnAssertionBudget(canonicalJSON(assertion)), path);
+}
+
+function attestationBase64UrlStringFromJson(value: string, path: string): string {
+  assertUtf8StringBudget(value, MAX_WEBAUTHN_ATTESTATION_FIELD_BYTES, `${path} bytes`, path);
+  return base64UrlStringFromJson(value, path);
+}
+
+function optionalAttestationBase64UrlString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): string | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  return attestationBase64UrlStringFromJson(requiredString(record, key, path), `${path}.${key}`);
+}
+
+function assertAttestationResponseBudget(
+  response: RegistrationResponseJSON["response"],
+  path: string,
+): void {
+  assertUtf8StringBudget(
+    canonicalJSON(response),
+    MAX_WEBAUTHN_ATTESTATION_BYTES,
+    `${path} canonical JSON bytes`,
+    path,
+  );
+}
+
+function assertBudgetResult(
+  result: ReturnType<typeof validateWebAuthnAssertionFieldBudget>,
+  path: string,
+): void {
+  if (!result.ok) {
+    throw new Error(`${path}: ${result.reason}`);
+  }
+}
+
+function assertUtf8StringBudget(
+  value: string,
+  maxBytes: number,
+  label: string,
+  path: string,
+): void {
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (bytes > maxBytes) {
+    throw new Error(`${path}: ${label} exceed budget (${bytes} > ${maxBytes})`);
+  }
 }
 
 function base64UrlStringFromJson(value: string, path: string): string {

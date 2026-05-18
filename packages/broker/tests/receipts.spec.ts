@@ -414,7 +414,12 @@ class FakeReceiptWebAuthnStore implements WebAuthnStore {
     throw new Error("not used by receipt tests");
   }
 
-  async pruneExpired(): Promise<void> {}
+  async pruneExpired(): Promise<{
+    readonly consumedTokens: number;
+    readonly orphanChallenges: number;
+  }> {
+    return { consumedTokens: 0, orphanChallenges: 0 };
+  }
 
   async getChallenge(): Promise<null> {
     throw new Error("not used by receipt tests");

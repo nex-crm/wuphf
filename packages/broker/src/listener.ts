@@ -67,6 +67,10 @@ import { attachTerminalUpgrade } from "./terminal-ws.ts";
 import { generateApiToken } from "./token.ts";
 import { type BrokerConfig, type BrokerHandle, type BrokerLogger, NOOP_LOGGER } from "./types.ts";
 import { createSimpleWebAuthnCeremony } from "./webauthn/ceremony.ts";
+import {
+  createOpportunisticPruningWebAuthnStore,
+  WEBAUTHN_PRUNE_BATCH_ROWS,
+} from "./webauthn/prune.ts";
 import { handleWebAuthnRoute } from "./webauthn/route.ts";
 import {
   type Clock,
@@ -150,7 +154,10 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
     config.webauthn === undefined
       ? null
       : ({
-          store: config.webauthn.store,
+          store: createOpportunisticPruningWebAuthnStore(config.webauthn.store, {
+            clock,
+            logger,
+          }),
           tokenAgentIds: config.webauthn.tokenAgentIds,
           enrollableRoles:
             config.webauthn.enrollableRoles ?? new Map<AgentId, readonly ApprovalRole[]>(),
@@ -583,8 +590,17 @@ async function pruneWebAuthnOnStartup(
 ): Promise<void> {
   const nowMs = readWebAuthnClock(webauthn.clock);
   try {
-    await webauthn.store.pruneExpired({ nowMs });
-    logger.info("webauthn_expired_state_pruned", { nowMs });
+    const result = await webauthn.store.pruneExpired({
+      nowMs,
+      maxRows: WEBAUTHN_PRUNE_BATCH_ROWS,
+    });
+    logger.info("webauthn_expired_state_pruned", {
+      trigger: "startup",
+      nowMs,
+      maxRows: WEBAUTHN_PRUNE_BATCH_ROWS,
+      consumedTokens: result.consumedTokens,
+      orphanChallenges: result.orphanChallenges,
+    });
   } catch (err) {
     logger.warn("webauthn_expired_state_prune_failed", {
       error: err instanceof Error ? err.message : String(err),

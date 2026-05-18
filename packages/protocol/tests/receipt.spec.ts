@@ -504,7 +504,7 @@ describe("receipt schema", () => {
           setWireField(signature, "signature", "");
         },
         message:
-          /\/approvals\/0\/signedToken\/signature\/signature: must be a non-empty base64url string/,
+          /\/approvals\/0\/signedToken\/signature\/signature: must be a canonical non-empty unpadded base64url string/,
       },
       {
         name: "malformed authenticator data",
@@ -514,7 +514,7 @@ describe("receipt schema", () => {
           setWireField(signature, "authenticatorData", "");
         },
         message:
-          /\/approvals\/0\/signedToken\/signature\/authenticatorData: must be a non-empty base64url string/,
+          /\/approvals\/0\/signedToken\/signature\/authenticatorData: must be a canonical non-empty unpadded base64url string/,
       },
       {
         name: "write result literal",

@@ -631,7 +631,8 @@ expectEqual(
   }),
   {
     ok: false,
-    reason: "approvalToken/signature/signature: must be a non-empty base64url string",
+    reason:
+      "approvalToken/signature/signature: must be a canonical non-empty unpadded base64url string",
   },
 );
 expectEqual(

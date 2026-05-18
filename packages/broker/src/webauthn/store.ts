@@ -3,9 +3,7 @@ import {
   type ApprovalRole,
   type ApprovalTokenId,
   approvalClaimFromJson,
-  approvalClaimToJsonValue,
   approvalScopeFromJson,
-  approvalScopeToJsonValue,
   asAgentId,
   asApprovalTokenId,
   asSha256Hex,
@@ -24,6 +22,8 @@ import {
   type ConsumeCosignChallengeArgs,
   type ConsumedWebAuthnTokenRecord,
   type CosignChallengeRecord,
+  type PruneExpiredWebAuthnStateArgs,
+  type PruneExpiredWebAuthnStateResult,
   type RegisteredWebAuthnCredential,
   type RegistrationChallengeRecord,
   type SaveCosignChallengeArgs,
@@ -116,9 +116,11 @@ type InsertConsumedTokenParams = [
   number,
 ];
 type UpdateConsumedTokenParams = [WebAuthnTokenOutcome, string, ApprovalTokenId];
-type PruneExpiredParams = [number];
+type PruneExpiredParams = [number, number];
 
 const TOKEN_OUTCOME_SET: ReadonlySet<string> = new Set(["approval_pending", "approved"]);
+const DEFAULT_PRUNE_EXPIRED_BATCH_ROWS = 100;
+const MAX_PRUNE_EXPIRED_BATCH_ROWS = 1_000;
 
 export class SqliteWebAuthnStore implements WebAuthnStore {
   private readonly closeDatabase: boolean;
@@ -149,7 +151,9 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   private readonly consumeCosignTransaction: Database.Transaction<
     (args: ConsumeCosignChallengeArgs) => ConsumedWebAuthnTokenRecord
   >;
-  private readonly pruneExpiredTransaction: Database.Transaction<(nowMs: number) => void>;
+  private readonly pruneExpiredTransaction: Database.Transaction<
+    (args: Required<PruneExpiredWebAuthnStateArgs>) => PruneExpiredWebAuthnStateResult
+  >;
   private closed = false;
 
   static open(config: SqliteWebAuthnStoreConfig): SqliteWebAuthnStore {
@@ -280,16 +284,29 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
        WHERE token_id = ?`,
     );
     this.pruneExpiredConsumedTokensStmt = db.prepare<PruneExpiredParams>(
-      "DELETE FROM webauthn_consumed_tokens WHERE expires_at_ms <= ?",
+      `DELETE FROM webauthn_consumed_tokens
+       WHERE token_id IN (
+         SELECT token_id
+         FROM webauthn_consumed_tokens
+         WHERE expires_at_ms <= ?
+         ORDER BY expires_at_ms ASC, token_id ASC
+         LIMIT ?
+       )`,
     );
     this.pruneExpiredOrphanChallengesStmt = db.prepare<PruneExpiredParams>(
       `DELETE FROM webauthn_challenges
-       WHERE expires_at_ms <= ?
-         AND NOT EXISTS (
-           SELECT 1
-           FROM webauthn_consumed_tokens
-           WHERE webauthn_consumed_tokens.challenge_id = webauthn_challenges.challenge_id
-         )`,
+       WHERE challenge_id IN (
+         SELECT c.challenge_id
+         FROM webauthn_challenges AS c
+         WHERE c.expires_at_ms <= ?
+           AND NOT EXISTS (
+             SELECT 1
+             FROM webauthn_consumed_tokens AS t
+             WHERE t.challenge_id = c.challenge_id
+           )
+         ORDER BY c.expires_at_ms ASC, c.challenge_id ASC
+         LIMIT ?
+       )`,
     );
     this.saveCredentialTransaction = db.transaction((args: SaveCredentialArgs) => {
       this.insertCredentialStmt.run(
@@ -368,10 +385,19 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
         consumedAtMs: args.consumedAtMs,
       };
     });
-    this.pruneExpiredTransaction = db.transaction((nowMs: number) => {
-      this.pruneExpiredConsumedTokensStmt.run(nowMs);
-      this.pruneExpiredOrphanChallengesStmt.run(nowMs);
-    });
+    this.pruneExpiredTransaction = db.transaction(
+      (args: Required<PruneExpiredWebAuthnStateArgs>) => {
+        const consumedTokens = this.pruneExpiredConsumedTokensStmt.run(
+          args.nowMs,
+          args.maxRows,
+        ).changes;
+        const orphanChallenges = this.pruneExpiredOrphanChallengesStmt.run(
+          args.nowMs,
+          args.maxRows,
+        ).changes;
+        return { consumedTokens, orphanChallenges };
+      },
+    );
   }
 
   async saveRegistrationChallenge(args: SaveRegistrationChallengeArgs): Promise<void> {
@@ -399,8 +425,8 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
         args.tokenId,
         args.scope.role,
         args.issuedToAgentId,
-        canonicalJSON(approvalClaimToJsonValue(args.claim)),
-        canonicalJSON(approvalScopeToJsonValue(args.scope)),
+        args.claimJson,
+        args.scopeJson,
         args.claimScopeHash,
         args.approvalGroupHash,
         args.notBeforeMs,
@@ -412,10 +438,15 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
     }
   }
 
-  async pruneExpired(args: { readonly nowMs: number }): Promise<void> {
+  async pruneExpired(
+    args: PruneExpiredWebAuthnStateArgs,
+  ): Promise<PruneExpiredWebAuthnStateResult> {
     this.assertOpen();
     try {
-      this.pruneExpiredTransaction.immediate(args.nowMs);
+      return this.pruneExpiredTransaction.immediate({
+        nowMs: args.nowMs,
+        maxRows: normalizePruneExpiredBatchRows(args.maxRows),
+      });
     } catch (err) {
       throw classifySqliteWriteError(err, "SqliteWebAuthnStore.pruneExpired");
     }
@@ -617,6 +648,16 @@ function parseStoredJson(value: string, path: string): JsonValue {
     throw new Error(`${path}: ${err instanceof Error ? err.message : String(err)}`);
   }
   return parsed as JsonValue;
+}
+
+function normalizePruneExpiredBatchRows(value: number | undefined): number {
+  const rows = value ?? DEFAULT_PRUNE_EXPIRED_BATCH_ROWS;
+  if (!Number.isSafeInteger(rows) || rows < 1 || rows > MAX_PRUNE_EXPIRED_BATCH_ROWS) {
+    throw new Error(
+      `webauthn prune batch rows must be an integer in 1..${MAX_PRUNE_EXPIRED_BATCH_ROWS}`,
+    );
+  }
+  return rows;
 }
 
 function roleFromString(value: string, path: string): ApprovalRole {

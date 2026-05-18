@@ -1430,6 +1430,80 @@
       "expectedError": "lifetime"
     },
     {
+      "name": "receipt_co_sign rejects assertion signature length mod 4 equal to 1",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778265000000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMQ",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "A",
+          "userHandle": "dXNlci0wMQ"
+        }
+      },
+      "expectedError": "signedApprovalToken/signature/signature"
+    },
+    {
+      "name": "receipt_co_sign rejects assertion signature non-zero trailing pad bits",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778265000000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMQ",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "AB",
+          "userHandle": "dXNlci0wMQ"
+        }
+      },
+      "expectedError": "signedApprovalToken/signature/signature"
+    },
+    {
       "name": "receipt_co_sign malformed assertion signature",
       "input": {
         "schemaVersion": 1,

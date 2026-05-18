@@ -99,6 +99,8 @@ export interface SaveCosignChallengeArgs {
   readonly tokenId: ApprovalTokenId;
   readonly claim: ApprovalClaim;
   readonly scope: ApprovalScope;
+  readonly claimJson: string;
+  readonly scopeJson: string;
   readonly claimScopeHash: Sha256Hex;
   readonly approvalGroupHash: Sha256Hex;
   readonly issuedToAgentId: AgentId;
@@ -127,10 +129,20 @@ export interface ConsumeCosignChallengeArgs {
   readonly consumedAtMs: number;
 }
 
+export interface PruneExpiredWebAuthnStateArgs {
+  readonly nowMs: number;
+  readonly maxRows?: number;
+}
+
+export interface PruneExpiredWebAuthnStateResult {
+  readonly consumedTokens: number;
+  readonly orphanChallenges: number;
+}
+
 export interface WebAuthnStore {
   saveRegistrationChallenge(args: SaveRegistrationChallengeArgs): Promise<void>;
   saveCosignChallenge(args: SaveCosignChallengeArgs): Promise<void>;
-  pruneExpired(args: { readonly nowMs: number }): Promise<void>;
+  pruneExpired(args: PruneExpiredWebAuthnStateArgs): Promise<PruneExpiredWebAuthnStateResult>;
   getChallenge(challengeId: string): Promise<WebAuthnChallengeRecord | null>;
   listCredentialsForAgent(agentId: AgentId): Promise<readonly RegisteredWebAuthnCredential[]>;
   listCredentialsForAgentRole(args: {

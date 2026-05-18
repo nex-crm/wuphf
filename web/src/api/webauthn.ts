@@ -21,7 +21,7 @@ import {
   approvalScopeToJsonValue,
 } from "@wuphf/protocol";
 
-import { post } from "./client";
+import { ApiError, post } from "./client";
 
 export type WebAuthnCreationOptionsJson =
   PublicKeyCredentialCreationOptionsJSON;
@@ -156,6 +156,23 @@ export function verifyWebAuthnCosign(
   return post<WebAuthnCosignVerifyResponse>("/webauthn/cosign/verify", request);
 }
 
+export function describeWebAuthnBrokerStorageError(
+  error: unknown,
+): string | null {
+  const code = brokerErrorCode(error);
+  if (code === "store_busy") {
+    const retryAfter = error instanceof ApiError ? error.retryAfter : null;
+    return `The broker's WebAuthn storage is busy. Try again ${retryAfterPhrase(retryAfter)}.`;
+  }
+  if (code === "store_full") {
+    return "The broker cannot save WebAuthn state because local storage is full. Free disk space and restart the broker.";
+  }
+  if (code === "storage_error") {
+    return "The broker could not access WebAuthn storage. Restart the broker and try again.";
+  }
+  return null;
+}
+
 export function runWebAuthnRegistrationCeremony(
   creationOptions: WebAuthnCreationOptionsJson,
 ): Promise<WebAuthnAttestationResponseJson> {
@@ -166,4 +183,36 @@ export function runWebAuthnAuthenticationCeremony(
   requestOptions: WebAuthnRequestOptionsJson,
 ): Promise<WebAuthnAssertionResponseJson> {
   return startAuthentication({ optionsJSON: requestOptions });
+}
+
+function brokerErrorCode(error: unknown): string | null {
+  if (error instanceof ApiError) {
+    return error.errorCode;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    const parsed = JSON.parse(message) as unknown;
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return null;
+    }
+    const value = (parsed as Readonly<Record<string, unknown>>).error;
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function retryAfterPhrase(retryAfter: string | null): string {
+  if (retryAfter === null || retryAfter.trim().length === 0) {
+    return "shortly";
+  }
+  const seconds = Number(retryAfter);
+  if (Number.isSafeInteger(seconds) && seconds > 0) {
+    return seconds === 1 ? "in 1 second" : `in ${seconds} seconds`;
+  }
+  return "after the broker's retry window";
 }
