@@ -1,0 +1,1300 @@
+import { randomBytes } from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
+
+import type {
+  AuthenticationExtensionsClientOutputs,
+  AuthenticationResponseJSON,
+  AuthenticatorAttachment,
+  AuthenticatorTransportFuture,
+  RegistrationResponseJSON,
+  WebAuthnCredential,
+} from "@simplewebauthn/server";
+import {
+  type AgentId,
+  type ApprovalClaim,
+  type ApprovalRole,
+  type ApprovalScope,
+  type ApprovalTokenId,
+  approvalClaimFromJson,
+  approvalClaimToJsonValue,
+  approvalScopeFromJson,
+  approvalScopeToJsonValue,
+  asApprovalTokenId,
+  asTimestampMs,
+  canonicalJSON,
+  isApprovalRole,
+  type JsonValue,
+  MAX_APPROVAL_TOKEN_LIFETIME_MS,
+  type Sha256Hex,
+  type SignedApprovalToken,
+  sha256Hex,
+  signedApprovalTokenToJsonValue,
+  validateWebAuthnAssertionBudget,
+  validateWebAuthnAssertionFieldBudget,
+} from "@wuphf/protocol";
+
+import { agentIdForBearer } from "../auth.ts";
+import {
+  type CosignChallengeRecord,
+  type RegisteredWebAuthnCredential,
+  thresholdForClaimKind,
+  WEBAUTHN_DEFAULT_ENROLLABLE_ROLES,
+  type WebAuthnRouteDeps,
+  WebAuthnSignCountReplayError,
+  WebAuthnStoreBusyError,
+  WebAuthnStoreFullError,
+  WebAuthnStoreUnavailableError,
+} from "./types.ts";
+
+const MAX_WEBAUTHN_ROUTE_BODY_BYTES = 256 * 1024;
+const MAX_WEBAUTHN_ATTESTATION_FIELD_BYTES = 64 * 1024;
+const MAX_WEBAUTHN_ATTESTATION_BYTES = 128 * 1024;
+const ALLOW_WEBAUTHN_ROUTE = "POST";
+const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+const TOKEN_ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+const REGISTRATION_CHALLENGE_KEYS: ReadonlySet<string> = new Set(["role"]);
+const REGISTRATION_VERIFY_KEYS: ReadonlySet<string> = new Set([
+  "challengeId",
+  "attestationResponse",
+]);
+const COSIGN_CHALLENGE_KEYS: ReadonlySet<string> = new Set(["claim", "scope"]);
+const COSIGN_VERIFY_KEYS: ReadonlySet<string> = new Set(["challengeId", "assertionResponse"]);
+const CREDENTIAL_RESPONSE_KEYS: ReadonlySet<string> = new Set([
+  "id",
+  "rawId",
+  "response",
+  "authenticatorAttachment",
+  "clientExtensionResults",
+  "type",
+]);
+const ATTESTATION_RESPONSE_KEYS: ReadonlySet<string> = new Set([
+  "clientDataJSON",
+  "attestationObject",
+  "authenticatorData",
+  "transports",
+  "publicKeyAlgorithm",
+  "publicKey",
+]);
+const ASSERTION_RESPONSE_KEYS: ReadonlySet<string> = new Set([
+  "clientDataJSON",
+  "authenticatorData",
+  "signature",
+  "userHandle",
+]);
+const EXTENSION_RESULTS_KEYS: ReadonlySet<string> = new Set([
+  "appid",
+  "credProps",
+  "hmacCreateSecret",
+]);
+const CRED_PROPS_KEYS: ReadonlySet<string> = new Set(["rk"]);
+const AUTHENTICATOR_TRANSPORT_SET: ReadonlySet<string> = new Set([
+  "ble",
+  "cable",
+  "hybrid",
+  "internal",
+  "nfc",
+  "smart-card",
+  "usb",
+]);
+
+export async function handleWebAuthnRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathname: string,
+  deps: WebAuthnRouteDeps,
+): Promise<boolean> {
+  if (!pathname.startsWith("/api/webauthn/")) return false;
+  if (!isKnownWebAuthnPath(pathname)) return false;
+  if (req.method !== "POST") {
+    methodNotAllowed(res);
+    return true;
+  }
+  const agentId = agentIdForBearer(req, deps.tokenAgentIds);
+  if (agentId === null) {
+    deps.logger.warn("webauthn_rejected", { reason: "no_bearer_binding", route: pathname });
+    writeJson(res, 403, { error: "webauthn_not_authorized" });
+    return true;
+  }
+
+  if (pathname === "/api/webauthn/registration/challenge") {
+    await handleRegistrationChallenge(req, res, agentId, deps);
+    return true;
+  }
+  if (pathname === "/api/webauthn/registration/verify") {
+    await handleRegistrationVerify(req, res, agentId, deps);
+    return true;
+  }
+  if (pathname === "/api/webauthn/cosign/challenge") {
+    await handleCosignChallenge(req, res, agentId, deps);
+    return true;
+  }
+  if (pathname === "/api/webauthn/cosign/verify") {
+    await handleCosignVerify(req, res, agentId, deps);
+    return true;
+  }
+  return false;
+}
+
+async function handleRegistrationChallenge(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: AgentId,
+  deps: WebAuthnRouteDeps,
+): Promise<void> {
+  let body: RegistrationChallengeBody;
+  try {
+    body = registrationChallengeBodyFromJson(await readJsonBody(req));
+  } catch (err) {
+    writeJson(res, 400, { error: messageOf(err) });
+    return;
+  }
+
+  if (!isRoleEnrollableForAgent(agentId, body.role, deps)) {
+    writeJson(res, 403, { error: "registration_role_not_enrollable" });
+    return;
+  }
+
+  const nowMs = readClock(deps);
+  const expiresAtMs = safeExpiryMs(nowMs, deps.challengeTtlMs);
+  const challengeId = randomBase64Url(32);
+  const challenge = randomBase64Url(32);
+  const existingCredentialsResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_registration_challenge_rejected",
+    () => deps.store.listCredentialsForAgent(agentId),
+  );
+  if (!existingCredentialsResult.ok) return;
+  const existingCredentials = existingCredentialsResult.value;
+  const options = await deps.ceremony.generateRegistrationOptions({
+    rpName: deps.rpName,
+    rpId: deps.rpId,
+    agentId,
+    role: body.role,
+    challenge,
+    excludeCredentialIds: existingCredentials.map((credential) => credential.credentialId),
+  });
+
+  try {
+    await deps.store.saveRegistrationChallenge({
+      challengeId,
+      challenge,
+      role: body.role,
+      issuedToAgentId: agentId,
+      createdAtMs: nowMs,
+      expiresAtMs,
+    });
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps, "webauthn_registration_challenge_rejected")) {
+      return;
+    }
+    throw err;
+  }
+  writeJson(res, 200, { challengeId, creationOptions: options });
+}
+
+async function handleRegistrationVerify(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: AgentId,
+  deps: WebAuthnRouteDeps,
+): Promise<void> {
+  let body: RegistrationVerifyBody;
+  try {
+    body = registrationVerifyBodyFromJson(await readJsonBody(req));
+  } catch (err) {
+    writeJson(res, 400, { error: messageOf(err) });
+    return;
+  }
+
+  const challengeResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_registration_verify_rejected",
+    () => deps.store.getChallenge(body.challengeId),
+  );
+  if (!challengeResult.ok) return;
+  const challenge = challengeResult.value;
+  if (challenge === null || challenge.type !== "registration") {
+    writeJson(res, 404, { error: "challenge_not_found" });
+    return;
+  }
+  if (challenge.issuedToAgentId !== agentId) {
+    writeJson(res, 403, { error: "wrong_issued_to_agent" });
+    return;
+  }
+  if (challenge.consumedAtMs !== null) {
+    writeJson(res, 409, { error: "challenge_consumed" });
+    return;
+  }
+  const nowMs = readClock(deps);
+  if (challenge.expiresAtMs <= nowMs) {
+    writeJson(res, 400, { error: "challenge_expired" });
+    return;
+  }
+  if (!isRoleEnrollableForAgent(agentId, challenge.role, deps)) {
+    writeJson(res, 403, { error: "registration_role_not_enrollable" });
+    return;
+  }
+
+  let verification: Awaited<ReturnType<WebAuthnRouteDeps["ceremony"]["verifyRegistration"]>>;
+  try {
+    verification = await deps.ceremony.verifyRegistration({
+      response: body.attestationResponse,
+      expectedChallenge: challenge.challenge,
+      expectedOrigins: deps.allowedOrigins,
+      expectedRpId: deps.rpId,
+    });
+  } catch (err) {
+    logVerificationFailure(deps, {
+      event: "webauthn_registration_verification_failed",
+      err,
+      ceremony: "registration",
+      route: "/api/webauthn/registration/verify",
+      challengeType: challenge.type,
+    });
+    writeJson(res, 400, { error: "registration_verification_failed" });
+    return;
+  }
+  if (verification === null) {
+    logVerificationFailure(deps, {
+      event: "webauthn_registration_verification_failed",
+      err: null,
+      ceremony: "registration",
+      route: "/api/webauthn/registration/verify",
+      challengeType: challenge.type,
+    });
+    writeJson(res, 400, { error: "registration_verification_failed" });
+    return;
+  }
+  const existingResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_registration_verify_rejected",
+    () => deps.store.getCredential(verification.credentialId),
+  );
+  if (!existingResult.ok) return;
+  const existing = existingResult.value;
+  if (existing !== null) {
+    writeJson(res, 409, { error: "credential_already_registered" });
+    return;
+  }
+
+  try {
+    await deps.store.saveCredential({
+      challengeId: challenge.challengeId,
+      credential: {
+        credentialId: verification.credentialId,
+        publicKey: verification.publicKey,
+        signCount: verification.signCount,
+        role: challenge.role,
+        agentId,
+        createdAtMs: nowMs,
+      },
+      consumedAtMs: nowMs,
+    });
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps, "webauthn_registration_verify_rejected")) {
+      return;
+    }
+    throw err;
+  }
+  writeJson(res, 200, { credentialId: verification.credentialId, role: challenge.role });
+}
+
+async function handleCosignChallenge(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: AgentId,
+  deps: WebAuthnRouteDeps,
+): Promise<void> {
+  let body: CosignChallengeBody;
+  try {
+    body = cosignChallengeBodyFromJson(await readJsonBody(req));
+    assertClaimScopeBinding(body.claim, body.scope);
+  } catch (err) {
+    writeJson(res, 400, { error: messageOf(err) });
+    return;
+  }
+
+  if (!claimTargetsAgent(body.claim, agentId)) {
+    writeJson(res, 403, { error: "wrong_claim_agent" });
+    return;
+  }
+
+  if (!deps.trustedRoles.includes(body.scope.role)) {
+    writeJson(res, 403, { error: "untrusted_approval_role" });
+    return;
+  }
+  const credentialsResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_cosign_challenge_rejected",
+    () =>
+      deps.store.listCredentialsForAgentRole({
+        agentId,
+        role: body.scope.role,
+      }),
+  );
+  if (!credentialsResult.ok) return;
+  const credentials = credentialsResult.value;
+  if (credentials.length === 0) {
+    writeJson(res, 409, { error: "no_registered_credentials_for_role" });
+    return;
+  }
+
+  const nowMs = readClock(deps);
+  const expiresAtMs = asTimestampMs(safeExpiryMs(nowMs, deps.challengeTtlMs));
+  const notBeforeMs = asTimestampMs(nowMs);
+  const challengeId = randomBase64Url(32);
+  const challenge = randomBase64Url(32);
+  const tokenId = generateApprovalTokenId();
+  const canonicalPayload = canonicalApprovalPayload(body.claim, body.scope);
+  const hashes = hashCanonicalClaimScope(canonicalPayload);
+  const options = await deps.ceremony.generateAuthenticationOptions({
+    rpId: deps.rpId,
+    challenge,
+    allowCredentialIds: credentials.map((credential) => credential.credentialId),
+  });
+
+  try {
+    await deps.store.saveCosignChallenge({
+      challengeId,
+      challenge,
+      tokenId,
+      claim: body.claim,
+      scope: body.scope,
+      claimJson: canonicalPayload.claimJson,
+      scopeJson: canonicalPayload.scopeJson,
+      claimScopeHash: hashes.claimScopeHash,
+      approvalGroupHash: hashes.approvalGroupHash,
+      issuedToAgentId: agentId,
+      notBeforeMs,
+      expiresAtMs,
+      createdAtMs: nowMs,
+    });
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps, "webauthn_cosign_challenge_rejected")) {
+      return;
+    }
+    throw err;
+  }
+  writeJson(res, 200, {
+    challengeId,
+    requestOptions: options,
+    claim: approvalClaimToJsonValue(body.claim),
+    scope: approvalScopeToJsonValue(body.scope),
+  });
+}
+
+async function handleCosignVerify(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agentId: AgentId,
+  deps: WebAuthnRouteDeps,
+): Promise<void> {
+  let envelope: CosignVerifyEnvelope;
+  try {
+    envelope = cosignVerifyEnvelopeFromJson(await readJsonBody(req));
+  } catch (err) {
+    writeJson(res, 400, { error: messageOf(err) });
+    return;
+  }
+
+  const challengeResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_cosign_verify_rejected",
+    () => deps.store.getChallenge(envelope.challengeId),
+  );
+  if (!challengeResult.ok) return;
+  const challenge = challengeResult.value;
+  if (challenge === null || challenge.type !== "cosign") {
+    writeJson(res, 404, { error: "challenge_not_found" });
+    return;
+  }
+  if (challenge.issuedToAgentId !== agentId) {
+    writeJson(res, 403, { error: "wrong_issued_to_agent" });
+    return;
+  }
+  if (!claimTargetsAgent(challenge.claim, agentId)) {
+    writeJson(res, 403, { error: "wrong_claim_agent" });
+    return;
+  }
+  const nowMs = readClock(deps);
+  if (challenge.expiresAtMs <= nowMs) {
+    writeJson(res, 400, { error: "challenge_expired" });
+    return;
+  }
+  const replayResult = await readWebAuthnStore(res, deps, "webauthn_cosign_verify_rejected", () =>
+    deps.store.getConsumedToken(challenge.tokenId),
+  );
+  if (!replayResult.ok) return;
+  const replay = replayResult.value;
+  if (replay !== null) {
+    writeJson(res, 200, replay.responseJson);
+    return;
+  }
+  if (challenge.consumedAtMs !== null) {
+    writeJson(res, 409, { error: "challenge_consumed" });
+    return;
+  }
+
+  let assertionResponse: AuthenticationResponseJSON;
+  try {
+    assertionResponse = authenticationResponseFromJson(
+      envelope.assertionResponse,
+      "cosignVerify.assertionResponse",
+    );
+  } catch (err) {
+    writeJson(res, 400, { error: messageOf(err) });
+    return;
+  }
+
+  const credentialResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_cosign_verify_rejected",
+    () => deps.store.getCredential(assertionResponse.id),
+  );
+  if (!credentialResult.ok) return;
+  const credential = credentialResult.value;
+  if (credential === null) {
+    writeJson(res, 403, { error: "unknown_credential" });
+    return;
+  }
+  if (credential.agentId !== agentId) {
+    writeJson(res, 403, { error: "wrong_credential_agent" });
+    return;
+  }
+  if (credential.role !== challenge.scope.role) {
+    writeJson(res, 403, { error: "wrong_credential_role" });
+    return;
+  }
+  if (!deps.trustedRoles.includes(credential.role)) {
+    writeJson(res, 403, { error: "untrusted_approval_role" });
+    return;
+  }
+
+  let verification: Awaited<ReturnType<WebAuthnRouteDeps["ceremony"]["verifyAuthentication"]>>;
+  try {
+    verification = await deps.ceremony.verifyAuthentication({
+      response: assertionResponse,
+      expectedChallenge: challenge.challenge,
+      expectedOrigins: deps.allowedOrigins,
+      expectedRpId: deps.rpId,
+      credential: credentialForSimpleWebAuthn(credential),
+    });
+  } catch (err) {
+    logVerificationFailure(deps, {
+      event: "webauthn_assertion_verification_failed",
+      err,
+      ceremony: "authentication",
+      route: "/api/webauthn/cosign/verify",
+      challengeType: challenge.type,
+    });
+    writeJson(res, 400, { error: "assertion_verification_failed" });
+    return;
+  }
+  if (verification === null) {
+    logVerificationFailure(deps, {
+      event: "webauthn_assertion_verification_failed",
+      err: null,
+      ceremony: "authentication",
+      route: "/api/webauthn/cosign/verify",
+      challengeType: challenge.type,
+    });
+    writeJson(res, 400, { error: "assertion_verification_failed" });
+    return;
+  }
+  if (verification.credentialId !== credential.credentialId) {
+    writeJson(res, 400, { error: "credential_id_mismatch" });
+    return;
+  }
+  if (!verification.userVerified) {
+    writeJson(res, 400, { error: "user_verification_required" });
+    return;
+  }
+  if (credential.signCount > 0 && verification.newSignCount <= credential.signCount) {
+    writeJson(res, 400, { error: "sign_count_replay" });
+    return;
+  }
+
+  const approvedResponseJson = buildApprovedCosignResponseJson({
+    challenge,
+    assertionResponse,
+    agentId,
+  });
+  let consumedToken: Awaited<ReturnType<WebAuthnRouteDeps["store"]["consumeCosignChallenge"]>>;
+  try {
+    consumedToken = await deps.store.consumeCosignChallenge({
+      challengeId: challenge.challengeId,
+      tokenId: challenge.tokenId,
+      credentialId: credential.credentialId,
+      newSignCount: verification.newSignCount,
+      requiredThreshold: thresholdForClaimKind(challenge.claim.kind, deps),
+      approvedResponseJson,
+      role: credential.role,
+      approvalGroupHash: challenge.approvalGroupHash,
+      issuedToAgentId: agentId,
+      expiresAtMs: challenge.expiresAtMs,
+      consumedAtMs: nowMs,
+    });
+  } catch (err) {
+    if (err instanceof WebAuthnSignCountReplayError) {
+      writeJson(res, 400, { error: "sign_count_replay" });
+      return;
+    }
+    if (writeStorageErrorResponse(res, err, deps, "webauthn_cosign_verify_rejected")) {
+      return;
+    }
+    throw err;
+  }
+  writeJson(res, 200, consumedToken.responseJson);
+}
+
+type WebAuthnVerificationFailureReason =
+  | "origin_mismatch"
+  | "rp_id_mismatch"
+  | "challenge_mismatch"
+  | "bad_signature"
+  | "malformed_client_data"
+  | "malformed_authenticator_data"
+  | "malformed_credential"
+  | "user_verification_required"
+  | "sign_count_replay"
+  | "verification_error";
+
+function logVerificationFailure(
+  deps: Pick<WebAuthnRouteDeps, "logger">,
+  args: {
+    readonly event: string;
+    readonly err: unknown;
+    readonly ceremony: "registration" | "authentication";
+    readonly route: string;
+    readonly challengeType: "registration" | "cosign";
+  },
+): void {
+  deps.logger.warn(args.event, {
+    reason: verificationFailureReason(args.err),
+    ceremony: args.ceremony,
+    route: args.route,
+    challengeType: args.challengeType,
+  });
+}
+
+function verificationFailureReason(err: unknown): WebAuthnVerificationFailureReason {
+  if (err === null) return "bad_signature";
+  const name = err instanceof Error ? err.name : "";
+  const message = err instanceof Error ? err.message : String(err);
+  if (name === "UnexpectedRPIDHash" || message.includes("Unexpected RP ID hash")) {
+    return "rp_id_mismatch";
+  }
+  if (message.includes("Unexpected") && message.includes(" origin ")) {
+    return "origin_mismatch";
+  }
+  if (message.includes(" challenge ")) {
+    return "challenge_mismatch";
+  }
+  if (
+    message.includes("clientDataJSON") ||
+    message.includes("ClientDataJSON") ||
+    message.includes("response type") ||
+    message.includes("tokenBinding") ||
+    message.includes("TokenBinding")
+  ) {
+    return "malformed_client_data";
+  }
+  if (message.includes("authenticatorData") || message.includes("Authenticator data")) {
+    return "malformed_authenticator_data";
+  }
+  if (message.includes("User verification")) {
+    return "user_verification_required";
+  }
+  if (message.includes("counter")) {
+    return "sign_count_replay";
+  }
+  if (
+    message.includes("credential") ||
+    message.includes("Credential") ||
+    message.includes("attestationObject")
+  ) {
+    return "malformed_credential";
+  }
+  if (message.includes("signature")) {
+    return "bad_signature";
+  }
+  return "verification_error";
+}
+
+function buildApprovedCosignResponseJson(args: {
+  readonly challenge: CosignChallengeRecord;
+  readonly assertionResponse: AuthenticationResponseJSON;
+  readonly agentId: AgentId;
+}): JsonValue {
+  const token: SignedApprovalToken = {
+    schemaVersion: 1,
+    tokenId: args.challenge.tokenId,
+    claim: args.challenge.claim,
+    scope: args.challenge.scope,
+    notBefore: args.challenge.notBeforeMs,
+    expiresAt: args.challenge.expiresAtMs,
+    issuedTo: args.agentId,
+    signature: {
+      credentialId: args.assertionResponse.id,
+      authenticatorData: args.assertionResponse.response.authenticatorData,
+      clientDataJson: args.assertionResponse.response.clientDataJSON,
+      signature: args.assertionResponse.response.signature,
+      ...(args.assertionResponse.response.userHandle === undefined
+        ? {}
+        : { userHandle: args.assertionResponse.response.userHandle }),
+    },
+  };
+  return jsonValue(signedApprovalTokenToJsonValue(token));
+}
+
+function credentialForSimpleWebAuthn(credential: RegisteredWebAuthnCredential): WebAuthnCredential {
+  return {
+    id: credential.credentialId,
+    publicKey: credential.publicKey,
+    counter: credential.signCount,
+  };
+}
+
+function isRoleEnrollableForAgent(
+  agentId: AgentId,
+  role: ApprovalRole,
+  deps: Pick<WebAuthnRouteDeps, "enrollableRoles">,
+): boolean {
+  const allowedRoles = deps.enrollableRoles.get(agentId) ?? WEBAUTHN_DEFAULT_ENROLLABLE_ROLES;
+  return allowedRoles.includes(role);
+}
+
+function claimTargetsAgent(claim: ApprovalClaim, agentId: AgentId): boolean {
+  const targetAgentId = targetAgentForClaim(claim);
+  return targetAgentId === null || targetAgentId === agentId;
+}
+
+function targetAgentForClaim(claim: ApprovalClaim): AgentId | null {
+  switch (claim.kind) {
+    case "cost_spike_acknowledgement":
+      return claim.agentId;
+    case "endpoint_allowlist_extension":
+      return claim.agentId;
+    case "credential_grant_to_agent":
+      return claim.granteeAgentId;
+    case "receipt_co_sign":
+      // Receipt co-sign is intentionally not agent-scoped in v1: the broker
+      // has no receipt ownership context, so the receipt validator binds it by
+      // receiptId and frozenArgsHash instead.
+      return null;
+  }
+}
+
+function canonicalApprovalPayload(
+  claim: ApprovalClaim,
+  scope: ApprovalScope,
+): {
+  readonly claimJson: string;
+  readonly scopeJson: string;
+} {
+  return {
+    claimJson: canonicalJSON(approvalClaimToJsonValue(claim)),
+    scopeJson: canonicalJSON(approvalScopeToJsonValue(scope)),
+  };
+}
+
+function hashCanonicalClaimScope(payload: {
+  readonly claimJson: string;
+  readonly scopeJson: string;
+}): {
+  readonly claimScopeHash: Sha256Hex;
+  readonly approvalGroupHash: Sha256Hex;
+} {
+  return {
+    claimScopeHash: sha256Hex(`{"claim":${payload.claimJson},"scope":${payload.scopeJson}}`),
+    approvalGroupHash: sha256Hex(`{"claim":${payload.claimJson}}`),
+  };
+}
+
+interface RegistrationChallengeBody {
+  readonly role: ApprovalRole;
+}
+
+interface RegistrationVerifyBody {
+  readonly challengeId: string;
+  readonly attestationResponse: RegistrationResponseJSON;
+}
+
+interface CosignChallengeBody {
+  readonly claim: ApprovalClaim;
+  readonly scope: ApprovalScope;
+}
+
+interface CosignVerifyEnvelope {
+  readonly challengeId: string;
+  readonly assertionResponse: unknown;
+}
+
+function registrationChallengeBodyFromJson(value: unknown): RegistrationChallengeBody {
+  const record = requireRecord(value, "registrationChallenge");
+  assertKnownKeys(record, "registrationChallenge", REGISTRATION_CHALLENGE_KEYS);
+  return {
+    role: roleFromJson(requiredString(record, "role", "registrationChallenge")),
+  };
+}
+
+function registrationVerifyBodyFromJson(value: unknown): RegistrationVerifyBody {
+  const record = requireRecord(value, "registrationVerify");
+  assertKnownKeys(record, "registrationVerify", REGISTRATION_VERIFY_KEYS);
+  return {
+    challengeId: base64UrlStringFromJson(
+      requiredString(record, "challengeId", "registrationVerify"),
+      "registrationVerify.challengeId",
+    ),
+    attestationResponse: registrationResponseFromJson(
+      requiredField(record, "attestationResponse", "registrationVerify"),
+      "registrationVerify.attestationResponse",
+    ),
+  };
+}
+
+function cosignChallengeBodyFromJson(value: unknown): CosignChallengeBody {
+  const record = requireRecord(value, "cosignChallenge");
+  assertKnownKeys(record, "cosignChallenge", COSIGN_CHALLENGE_KEYS);
+  return {
+    claim: approvalClaimFromJson(requiredField(record, "claim", "cosignChallenge")),
+    scope: approvalScopeFromJson(requiredField(record, "scope", "cosignChallenge")),
+  };
+}
+
+function cosignVerifyEnvelopeFromJson(value: unknown): CosignVerifyEnvelope {
+  const record = requireRecord(value, "cosignVerify");
+  assertKnownKeys(record, "cosignVerify", COSIGN_VERIFY_KEYS);
+  return {
+    challengeId: base64UrlStringFromJson(
+      requiredString(record, "challengeId", "cosignVerify"),
+      "cosignVerify.challengeId",
+    ),
+    assertionResponse: requiredField(record, "assertionResponse", "cosignVerify"),
+  };
+}
+
+function registrationResponseFromJson(value: unknown, path: string): RegistrationResponseJSON {
+  const record = requireRecord(value, path);
+  assertKnownKeys(record, path, CREDENTIAL_RESPONSE_KEYS);
+  const response = requireRecord(requiredField(record, "response", path), `${path}.response`);
+  assertKnownKeys(response, `${path}.response`, ATTESTATION_RESPONSE_KEYS);
+  const id = attestationBase64UrlStringFromJson(requiredString(record, "id", path), `${path}.id`);
+  const rawId = attestationBase64UrlStringFromJson(
+    requiredString(record, "rawId", path),
+    `${path}.rawId`,
+  );
+  if (rawId !== id) {
+    throw new Error(`${path}.rawId: must match id`);
+  }
+  const authenticatorAttachment = optionalAuthenticatorAttachment(
+    record,
+    "authenticatorAttachment",
+    path,
+  );
+  const authenticatorData = optionalAttestationBase64UrlString(
+    response,
+    "authenticatorData",
+    `${path}.response`,
+  );
+  const transports = optionalTransports(response, `${path}.response`);
+  const publicKeyAlgorithm = optionalSafeInteger(
+    response,
+    "publicKeyAlgorithm",
+    `${path}.response`,
+  );
+  const publicKey = optionalAttestationBase64UrlString(response, "publicKey", `${path}.response`);
+  const parsedResponse = {
+    clientDataJSON: attestationBase64UrlStringFromJson(
+      requiredString(response, "clientDataJSON", `${path}.response`),
+      `${path}.response.clientDataJSON`,
+    ),
+    attestationObject: attestationBase64UrlStringFromJson(
+      requiredString(response, "attestationObject", `${path}.response`),
+      `${path}.response.attestationObject`,
+    ),
+    ...(authenticatorData === undefined ? {} : { authenticatorData }),
+    ...(transports === undefined ? {} : { transports }),
+    ...(publicKeyAlgorithm === undefined ? {} : { publicKeyAlgorithm }),
+    ...(publicKey === undefined ? {} : { publicKey }),
+  };
+  assertAttestationResponseBudget(parsedResponse, `${path}.response`);
+  return {
+    id,
+    rawId,
+    response: parsedResponse,
+    ...(authenticatorAttachment === undefined ? {} : { authenticatorAttachment }),
+    clientExtensionResults: extensionResultsFromJson(
+      requiredField(record, "clientExtensionResults", path),
+      `${path}.clientExtensionResults`,
+    ),
+    type: publicKeyTypeFromJson(requiredString(record, "type", path), `${path}.type`),
+  };
+}
+
+function authenticationResponseFromJson(value: unknown, path: string): AuthenticationResponseJSON {
+  const record = requireRecord(value, path);
+  assertKnownKeys(record, path, CREDENTIAL_RESPONSE_KEYS);
+  const response = requireRecord(requiredField(record, "response", path), `${path}.response`);
+  assertKnownKeys(response, `${path}.response`, ASSERTION_RESPONSE_KEYS);
+  const authenticatorAttachment = optionalAuthenticatorAttachment(
+    record,
+    "authenticatorAttachment",
+    path,
+  );
+  const id = assertionBase64UrlStringFromJson(requiredString(record, "id", path), `${path}.id`);
+  const rawId = assertionBase64UrlStringFromJson(
+    requiredString(record, "rawId", path),
+    `${path}.rawId`,
+  );
+  if (rawId !== id) {
+    throw new Error(`${path}.rawId: must match id`);
+  }
+  const userHandle = optionalAssertionBase64UrlString(response, "userHandle", `${path}.response`);
+  const parsedResponse = {
+    clientDataJSON: assertionBase64UrlStringFromJson(
+      requiredString(response, "clientDataJSON", `${path}.response`),
+      `${path}.response.clientDataJSON`,
+    ),
+    authenticatorData: assertionBase64UrlStringFromJson(
+      requiredString(response, "authenticatorData", `${path}.response`),
+      `${path}.response.authenticatorData`,
+    ),
+    signature: assertionBase64UrlStringFromJson(
+      requiredString(response, "signature", `${path}.response`),
+      `${path}.response.signature`,
+    ),
+    ...(userHandle === undefined ? {} : { userHandle }),
+  };
+  assertAssertionResponseBudget(
+    {
+      credentialId: id,
+      authenticatorData: parsedResponse.authenticatorData,
+      clientDataJson: parsedResponse.clientDataJSON,
+      signature: parsedResponse.signature,
+      ...(parsedResponse.userHandle === undefined ? {} : { userHandle: parsedResponse.userHandle }),
+    },
+    `${path}.response`,
+  );
+  return {
+    id,
+    rawId,
+    response: parsedResponse,
+    ...(authenticatorAttachment === undefined ? {} : { authenticatorAttachment }),
+    clientExtensionResults: extensionResultsFromJson(
+      requiredField(record, "clientExtensionResults", path),
+      `${path}.clientExtensionResults`,
+    ),
+    type: publicKeyTypeFromJson(requiredString(record, "type", path), `${path}.type`),
+  };
+}
+
+function assertClaimScopeBinding(claim: ApprovalClaim, scope: ApprovalScope): void {
+  if (claim.claimId !== scope.claimId) {
+    throw new Error("cosignChallenge.scope.claimId: must match claim.claimId");
+  }
+  if (claim.kind !== scope.claimKind) {
+    throw new Error("cosignChallenge.scope.claimKind: must match claim.kind");
+  }
+  switch (claim.kind) {
+    case "cost_spike_acknowledgement":
+      if (scope.claimKind !== claim.kind) return;
+      assertSame(scope.agentId, claim.agentId, "agentId");
+      assertSame(scope.costCeilingId, claim.costCeilingId, "costCeilingId");
+      return;
+    case "endpoint_allowlist_extension":
+      if (scope.claimKind !== claim.kind) return;
+      assertSame(scope.agentId, claim.agentId, "agentId");
+      assertSame(scope.providerKind, claim.providerKind, "providerKind");
+      assertSame(scope.endpointOrigin, claim.endpointOrigin, "endpointOrigin");
+      return;
+    case "credential_grant_to_agent":
+      if (scope.claimKind !== claim.kind) return;
+      assertSame(scope.granteeAgentId, claim.granteeAgentId, "granteeAgentId");
+      assertSame(scope.credentialHandleId, claim.credentialHandleId, "credentialHandleId");
+      return;
+    case "receipt_co_sign":
+      if (scope.claimKind !== claim.kind) return;
+      assertSame(scope.receiptId, claim.receiptId, "receiptId");
+      assertSame(scope.writeId, claim.writeId, "writeId");
+      assertSame(scope.frozenArgsHash, claim.frozenArgsHash, "frozenArgsHash");
+      return;
+  }
+}
+
+function assertSame(left: unknown, right: unknown, field: string): void {
+  if (left !== right) {
+    throw new Error(`cosignChallenge.scope.${field}: must match claim.${field}`);
+  }
+}
+
+function readClock(deps: WebAuthnRouteDeps): number {
+  const nowMs = deps.clock.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+    throw new Error(`webauthn clock returned invalid timestamp: ${nowMs}`);
+  }
+  return nowMs;
+}
+
+function safeExpiryMs(nowMs: number, ttlMs: number): number {
+  if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0 || ttlMs > MAX_APPROVAL_TOKEN_LIFETIME_MS) {
+    throw new Error(`webauthn challenge TTL must be 1..${MAX_APPROVAL_TOKEN_LIFETIME_MS} ms`);
+  }
+  const expiresAtMs = nowMs + ttlMs;
+  if (!Number.isSafeInteger(expiresAtMs)) {
+    throw new Error("webauthn challenge expiry is outside the safe integer range");
+  }
+  return expiresAtMs;
+}
+
+function jsonValue(value: unknown): JsonValue {
+  canonicalJSON(value);
+  return value as JsonValue;
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  return JSON.parse(await readBody(req, MAX_WEBAUTHN_ROUTE_BODY_BYTES)) as unknown;
+}
+
+async function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
+  let total = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
+    total += buffer.length;
+    if (total > maxBytes) {
+      throw new Error("webauthn route body too large");
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function requireRecord(value: unknown, path: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${path}: must be an object`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function assertKnownKeys(
+  record: Readonly<Record<string, unknown>>,
+  path: string,
+  allowed: ReadonlySet<string>,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) {
+      throw new Error(`${path}.${key}: key is not allowed`);
+    }
+  }
+}
+
+function requiredField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): unknown {
+  if (!Object.hasOwn(record, key)) {
+    throw new Error(`${path}.${key}: is required`);
+  }
+  return record[key];
+}
+
+function requiredString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): string {
+  const value = requiredField(record, key, path);
+  if (typeof value !== "string") {
+    throw new Error(`${path}.${key}: must be a string`);
+  }
+  return value;
+}
+
+function requiredBoolean(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): boolean {
+  const value = requiredField(record, key, path);
+  if (typeof value !== "boolean") {
+    throw new Error(`${path}.${key}: must be a boolean`);
+  }
+  return value;
+}
+
+function optionalAuthenticatorAttachment(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): AuthenticatorAttachment | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  const value = record[key];
+  if (value === "cross-platform" || value === "platform") {
+    return value;
+  }
+  throw new Error(`${path}.${key}: must be a supported authenticator attachment`);
+}
+
+function optionalSafeInteger(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): number | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  const value = record[key];
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    throw new Error(`${path}.${key}: must be a safe integer`);
+  }
+  return value;
+}
+
+function optionalTransports(
+  record: Readonly<Record<string, unknown>>,
+  path: string,
+): AuthenticatorTransportFuture[] | undefined {
+  if (!Object.hasOwn(record, "transports")) return undefined;
+  const value = requiredField(record, "transports", path);
+  if (!Array.isArray(value)) {
+    throw new Error(`${path}.transports: must be a string array`);
+  }
+  return value.map((item, index) => {
+    if (typeof item !== "string" || !AUTHENTICATOR_TRANSPORT_SET.has(item)) {
+      throw new Error(`${path}.transports/${index}: must be a supported authenticator transport`);
+    }
+    return item as AuthenticatorTransportFuture;
+  });
+}
+
+function extensionResultsFromJson(
+  value: unknown,
+  path: string,
+): AuthenticationExtensionsClientOutputs {
+  const record = requireRecord(value, path);
+  assertKnownKeys(record, path, EXTENSION_RESULTS_KEYS);
+  const result: AuthenticationExtensionsClientOutputs = {};
+  if (Object.hasOwn(record, "appid")) {
+    result.appid = requiredBoolean(record, "appid", path);
+  }
+  if (Object.hasOwn(record, "hmacCreateSecret")) {
+    result.hmacCreateSecret = requiredBoolean(record, "hmacCreateSecret", path);
+  }
+  if (Object.hasOwn(record, "credProps")) {
+    const credProps = requireRecord(requiredField(record, "credProps", path), `${path}.credProps`);
+    assertKnownKeys(credProps, `${path}.credProps`, CRED_PROPS_KEYS);
+    const rk = Object.hasOwn(credProps, "rk")
+      ? requiredBoolean(credProps, "rk", `${path}.credProps`)
+      : undefined;
+    result.credProps = rk === undefined ? {} : { rk };
+  }
+  return result;
+}
+
+function publicKeyTypeFromJson(value: string, path: string): "public-key" {
+  if (value !== "public-key") {
+    throw new Error(`${path}: must be public-key`);
+  }
+  return value;
+}
+
+function assertionBase64UrlStringFromJson(value: string, path: string): string {
+  assertBudgetResult(validateWebAuthnAssertionFieldBudget(value, `${path} bytes`), path);
+  return base64UrlStringFromJson(value, path);
+}
+
+function optionalAssertionBase64UrlString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): string | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  return assertionBase64UrlStringFromJson(requiredString(record, key, path), `${path}.${key}`);
+}
+
+function assertAssertionResponseBudget(
+  assertion: {
+    readonly credentialId: string;
+    readonly authenticatorData: string;
+    readonly clientDataJson: string;
+    readonly signature: string;
+    readonly userHandle?: string | undefined;
+  },
+  path: string,
+): void {
+  assertBudgetResult(validateWebAuthnAssertionBudget(canonicalJSON(assertion)), path);
+}
+
+function attestationBase64UrlStringFromJson(value: string, path: string): string {
+  assertUtf8StringBudget(value, MAX_WEBAUTHN_ATTESTATION_FIELD_BYTES, `${path} bytes`, path);
+  return base64UrlStringFromJson(value, path);
+}
+
+function optionalAttestationBase64UrlString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): string | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  return attestationBase64UrlStringFromJson(requiredString(record, key, path), `${path}.${key}`);
+}
+
+function assertAttestationResponseBudget(
+  response: RegistrationResponseJSON["response"],
+  path: string,
+): void {
+  assertUtf8StringBudget(
+    canonicalJSON(response),
+    MAX_WEBAUTHN_ATTESTATION_BYTES,
+    `${path} canonical JSON bytes`,
+    path,
+  );
+}
+
+function assertBudgetResult(
+  result: ReturnType<typeof validateWebAuthnAssertionFieldBudget>,
+  path: string,
+): void {
+  if (!result.ok) {
+    throw new Error(`${path}: ${result.reason}`);
+  }
+}
+
+function assertUtf8StringBudget(
+  value: string,
+  maxBytes: number,
+  label: string,
+  path: string,
+): void {
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (bytes > maxBytes) {
+    throw new Error(`${path}: ${label} exceed budget (${bytes} > ${maxBytes})`);
+  }
+}
+
+function base64UrlStringFromJson(value: string, path: string): string {
+  if (!isCanonicalUnpaddedBase64Url(value)) {
+    throw new Error(`${path}: must be a canonical non-empty unpadded base64url string`);
+  }
+  return value;
+}
+
+function isCanonicalUnpaddedBase64Url(value: string): boolean {
+  if (value.length === 0 || !BASE64URL_RE.test(value) || value.length % 4 === 1) {
+    return false;
+  }
+  try {
+    return Buffer.from(value, "base64url").toString("base64url") === value;
+  } catch {
+    return false;
+  }
+}
+
+function roleFromJson(value: string): ApprovalRole {
+  if (isApprovalRole(value)) {
+    return value;
+  }
+  throw new Error("registrationChallenge.role: not a supported approval role");
+}
+
+function randomBase64Url(byteLength: number): string {
+  return randomBytes(byteLength).toString("base64url");
+}
+
+function generateApprovalTokenId(): ApprovalTokenId {
+  const bytes = randomBytes(26);
+  let tokenId = "";
+  for (const byte of bytes) {
+    tokenId += TOKEN_ID_ALPHABET[byte & 31] ?? "0";
+  }
+  return asApprovalTokenId(tokenId);
+}
+
+type WebAuthnStoreReadResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false };
+
+async function readWebAuthnStore<T>(
+  res: ServerResponse,
+  deps: Pick<WebAuthnRouteDeps, "logger">,
+  rejectedEvent: string,
+  read: () => Promise<T>,
+): Promise<WebAuthnStoreReadResult<T>> {
+  try {
+    return { ok: true, value: await read() };
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps, rejectedEvent)) {
+      return { ok: false };
+    }
+    throw err;
+  }
+}
+
+function writeStorageErrorResponse(
+  res: ServerResponse,
+  err: unknown,
+  deps: Pick<WebAuthnRouteDeps, "logger">,
+  rejectedEvent: string,
+): boolean {
+  if (err instanceof WebAuthnStoreBusyError) {
+    deps.logger.warn(rejectedEvent, { reason: "store_busy" });
+    writeJson(res, 503, { error: "store_busy" }, { "Retry-After": "1" });
+    return true;
+  }
+  if (err instanceof WebAuthnStoreFullError) {
+    deps.logger.warn(rejectedEvent, { reason: "store_full" });
+    writeJson(res, 507, { error: "store_full" });
+    return true;
+  }
+  if (err instanceof WebAuthnStoreUnavailableError) {
+    deps.logger.error(rejectedEvent, { reason: "storage_error" });
+    writeJson(res, 503, { error: "storage_error" });
+    return true;
+  }
+  return false;
+}
+
+function writeJson(
+  res: ServerResponse,
+  status: number,
+  bodyValue: unknown,
+  extraHeaders: Record<string, string> = {},
+): void {
+  const body = JSON.stringify(bodyValue);
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Length": String(Buffer.byteLength(body, "utf8")),
+    ...extraHeaders,
+  });
+  res.end(body);
+}
+
+function methodNotAllowed(res: ServerResponse): void {
+  const body = JSON.stringify({ error: "method_not_allowed" });
+  res.writeHead(405, {
+    Allow: ALLOW_WEBAUTHN_ROUTE,
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Length": String(Buffer.byteLength(body, "utf8")),
+  });
+  res.end(body);
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function isKnownWebAuthnPath(pathname: string): boolean {
+  return (
+    pathname === "/api/webauthn/registration/challenge" ||
+    pathname === "/api/webauthn/registration/verify" ||
+    pathname === "/api/webauthn/cosign/challenge" ||
+    pathname === "/api/webauthn/cosign/verify"
+  );
+}

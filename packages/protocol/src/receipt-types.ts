@@ -12,8 +12,10 @@ import {
   validateSignerIdentityBudget,
 } from "./budgets.ts";
 import type { FrozenArgs } from "./frozen-args.ts";
+import { APPROVAL_ROLE_VALUES } from "./receipt-literals.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
 import type { Sha256Hex } from "./sha256.ts";
+import type { SignedApprovalToken } from "./signed-approval-token.ts";
 
 export type ReceiptId = Brand<string, "ReceiptId">;
 export type AgentSlug = Brand<string, "AgentSlug">;
@@ -32,6 +34,7 @@ export type IdempotencyKey = Brand<string, "IdempotencyKey">;
 export type ThreadId = Brand<string, "ThreadId">;
 export type ThreadSpecRevisionId = Brand<string, "ThreadSpecRevisionId">;
 export type SignerIdentity = Brand<string, "SignerIdentity">;
+export type ApprovalRole = (typeof APPROVAL_ROLE_VALUES)[number];
 
 export type ReceiptStatus = "ok" | "error" | "stalled" | "approval_pending" | "rejected";
 
@@ -79,7 +82,7 @@ export interface ToolCall {
 
 export interface ApprovalEvent {
   readonly approvalId: ApprovalId;
-  readonly role: "viewer" | "approver" | "host";
+  readonly role: ApprovalRole;
   readonly decision: "approve" | "reject" | "abstain";
   readonly signedToken: SignedApprovalToken;
   readonly tokenVerdict: BrokerTokenVerdict;
@@ -109,25 +112,6 @@ export interface MemoryWriteRef {
   readonly slug: string;
   readonly hash: Sha256Hex;
   readonly citation: string;
-}
-
-export interface ApprovalClaims {
-  readonly signerIdentity: SignerIdentity;
-  readonly role: "viewer" | "approver" | "host";
-  readonly receiptId: ReceiptId;
-  readonly writeId?: WriteId | undefined;
-  readonly frozenArgsHash: Sha256Hex;
-  readonly riskClass: RiskClass;
-  readonly issuedAt: Date;
-  readonly expiresAt: Date;
-  readonly webauthnAssertion?: string | undefined;
-}
-
-export interface SignedApprovalToken {
-  readonly claims: ApprovalClaims;
-  readonly algorithm: "ed25519";
-  readonly signerKeyId: string;
-  readonly signature: string;
 }
 
 export interface BrokerTokenVerdict {
@@ -295,6 +279,7 @@ export const PROVIDER_KIND_VALUES = [
   "opencodego",
 ] as const;
 const PROVIDER_KIND_SET: ReadonlySet<string> = new Set(PROVIDER_KIND_VALUES);
+const APPROVAL_ROLE_SET: ReadonlySet<string> = new Set(APPROVAL_ROLE_VALUES);
 
 export function asReceiptId(s: string): ReceiptId {
   if (!ULID_RE.test(s)) throw new Error("not a ReceiptId ULID");
@@ -330,6 +315,15 @@ export function asProviderKind(s: string): ProviderKind {
 
 export function isProviderKind(s: unknown): s is ProviderKind {
   return typeof s === "string" && PROVIDER_KIND_SET.has(s);
+}
+
+export function asApprovalRole(s: string): ApprovalRole {
+  if (!APPROVAL_ROLE_SET.has(s)) throw new Error("not a supported ApprovalRole");
+  return s as ApprovalRole;
+}
+
+export function isApprovalRole(s: unknown): s is ApprovalRole {
+  return typeof s === "string" && APPROVAL_ROLE_SET.has(s);
 }
 
 export function asToolCallId(s: string): ToolCallId {

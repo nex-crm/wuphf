@@ -5,7 +5,7 @@ import { app, BrowserWindow, dialog, session } from "electron";
 import { BrokerSupervisor } from "./broker.ts";
 import { registerIpcHandlers } from "./ipc/register-handlers.ts";
 import { createLogger, type LogPayload } from "./logger.ts";
-import { installSessionPermissionDenyAll } from "./permissions.ts";
+import { installSessionPermissionPolicy } from "./permissions.ts";
 import { selectRendererDevServerUrl } from "./renderer-dev-url.ts";
 import { createSecureWindow } from "./window.ts";
 
@@ -18,6 +18,7 @@ const RENDERER_DIST_ENV = "WUPHF_RENDERER_DIST";
 const DEV_RENDERER_ORIGIN_ENV = "WUPHF_DEV_RENDERER_ORIGIN";
 const ELECTRON_RENDERER_URL_ENV = "ELECTRON_RENDERER_URL";
 const RECEIPT_STORE_PATH_ENV = "WUPHF_RECEIPT_STORE_PATH";
+const WEBAUTHN_STORE_PATH_ENV = "WUPHF_WEBAUTHN_STORE_PATH";
 
 const logger = createLogger("main");
 const brokerLogger = createLogger("broker");
@@ -83,11 +84,12 @@ app
   .then(() => {
     logger.info("app_when_ready", { isPackaged: app.isPackaged });
 
-    // Electron approves permission requests by default. Install a deny-all
-    // pair on the default session BEFORE any BrowserWindow is created so
+    // Electron approves permission requests by default. Install a closed
+    // policy on the default session BEFORE any BrowserWindow is created so
     // hostile renderer JS cannot request media/geolocation/notifications/
-    // clipboard/displayCapture outside the IPC allowlist.
-    installSessionPermissionDenyAll(session.defaultSession, { logger });
+    // clipboard/displayCapture outside the IPC allowlist. WebAuthn is allowed
+    // only for loopback renderer origins.
+    installSessionPermissionPolicy(session.defaultSession, { logger });
 
     try {
       registerIpcHandlers(brokerSupervisor, { logger: ipcLogger });
@@ -102,13 +104,14 @@ app
       return;
     }
 
-    // The broker utility process opens a durable, SQLite event-log-
-    // backed ReceiptStore at `<userData>/event-log.sqlite` when this
-    // env var is set; without it the broker falls back to the in-
-    // memory store. We set it unconditionally for the packaged + dev
-    // paths so receipts persist across restarts.
+    // The broker utility process opens durable SQLite stores under userData
+    // when these env vars are set. We set them unconditionally for packaged
+    // + dev paths so receipts, WebAuthn credentials, and pending challenges
+    // persist across restarts.
     // `app.getPath("userData")` is safe inside `whenReady`.
-    process.env[RECEIPT_STORE_PATH_ENV] = join(app.getPath("userData"), "event-log.sqlite");
+    const userDataDir = app.getPath("userData");
+    process.env[RECEIPT_STORE_PATH_ENV] = join(userDataDir, "event-log.sqlite");
+    process.env[WEBAUTHN_STORE_PATH_ENV] = join(userDataDir, "webauthn.sqlite");
 
     logger.info("broker_start_requested");
     brokerSupervisor.start();

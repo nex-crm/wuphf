@@ -33,8 +33,8 @@ import { CeoChecklist } from "./cards/CeoChecklist";
 import { CeoChipRow } from "./cards/CeoChipRow";
 import { CeoFormField } from "./cards/CeoFormField";
 import { CeoScanChip } from "./cards/CeoScanChip";
-// We test CeoCardSection and the individual card components.
-import { CeoCardSection } from "./InterviewBar";
+// We test CeoCardSection, the full InterviewBar mount, and individual cards.
+import { CeoCardSection, InterviewBar } from "./InterviewBar";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────
 
@@ -478,10 +478,87 @@ describe("CeoCardSection", () => {
         value: "Acme Inc",
       }),
     );
+    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+      phase: "identity",
+    });
 
     // After commit the section disappears (stage="committed" hides it)
     await waitFor(() =>
       expect(screen.queryByTestId("ceo-card-section")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("advances from blueprint pick to the team trim phase", async () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-blueprint",
+      phase: "blueprint",
+      kind: "ceo_chip_row",
+      payload: {
+        field: "blueprint_id",
+        label: "Pick a template:",
+        options: [{ id: "niche-crm", label: "Niche CRM" }],
+      },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.click(screen.getByText("Niche CRM"));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/answer", {
+        field: "blueprint_id",
+        value: "niche-crm",
+      }),
+    );
+    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+      phase: "team",
+    });
+  });
+
+  it("transitions bridge choices without posting them as form answers", async () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-bridge",
+      phase: "bridge",
+      kind: "ceo_chip_row",
+      payload: {
+        field: "bridge_choice",
+        label: "All set up. What would you like to do?",
+        options: [{ id: "look_around", label: "Look around first" }],
+      },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.click(screen.getByText("Look around first"));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+        phase: "complete",
+      }),
+    );
+    expect(postMock).not.toHaveBeenCalledWith("/onboarding/answer", {
+      field: "bridge_choice",
+      value: "look_around",
+    });
+  });
+
+  it("keeps the start-issue bridge chip from entering an unwired draft phase", async () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-bridge-start",
+      phase: "bridge",
+      kind: "ceo_chip_row",
+      payload: {
+        field: "bridge_choice",
+        label: "All set up. What would you like to do?",
+        options: [{ id: "start_issue", label: "Start an issue" }],
+      },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.click(screen.getByText("Start an issue"));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+        phase: "complete",
+      }),
     );
   });
 
@@ -546,5 +623,30 @@ describe("CeoCardSection", () => {
     };
     render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
     expect(screen.getByTestId("ceo-scan-chip")).toBeInTheDocument();
+  });
+});
+
+// ── InterviewBar integration ──────────────────────────────────────────────
+
+describe("InterviewBar", () => {
+  it("renders the CEO card even when the regular request queue is empty", () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-interview-empty",
+      phase: "greet",
+      kind: "ceo_form_field",
+      payload: {
+        field: "company_name",
+        label: "Office name?",
+        optional: false,
+      },
+    };
+
+    render(<InterviewBar />, { wrapper: makeWrapper(suggestion) });
+
+    expect(screen.getByTestId("ceo-card-section")).toBeInTheDocument();
+    expect(screen.getByTestId("ceo-form-field")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Pending agent request" }),
+    ).not.toBeInTheDocument();
   });
 });

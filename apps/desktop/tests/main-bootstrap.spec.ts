@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const RENDERER_URL_ENV_KEY = "ELECTRON_RENDERER_URL";
 const RECEIPT_STORE_PATH_ENV = "WUPHF_RECEIPT_STORE_PATH";
+const WEBAUTHN_STORE_PATH_ENV = "WUPHF_WEBAUTHN_STORE_PATH";
 
 interface MockBrowserWindowInstance {
   readonly loadURL: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>;
@@ -98,9 +99,8 @@ const electronMock = vi.hoisted(() => {
       quit: vi.fn<() => void>(),
       exit: vi.fn<(code: number) => void>(),
       // `main/index.ts` calls `app.getPath("userData")` inside
-      // `whenReady` to plumb the SQLite event-log path through to the
-      // broker utility process. Tests don't exercise the durable store;
-      // a fake path is sufficient because broker-entry.ts is mocked.
+      // `whenReady` to plumb durable broker SQLite paths through to the
+      // utility process. Tests don't open the stores; a fake path is enough.
       getPath: vi.fn<(name: string) => string>(() => "/tmp/wuphf-test-userData"),
     },
     BrowserWindow,
@@ -230,6 +230,7 @@ const initialUnhandledRejectionListeners = new Set<ProcessListener>(
 describe("main bootstrap", () => {
   const previousRendererUrl = process.env[RENDERER_URL_ENV_KEY];
   const previousReceiptStorePath = process.env[RECEIPT_STORE_PATH_ENV];
+  const previousWebAuthnStorePath = process.env[WEBAUTHN_STORE_PATH_ENV];
 
   beforeEach(() => {
     vi.resetModules();
@@ -253,6 +254,7 @@ describe("main bootstrap", () => {
     cleanupProcessListeners();
     delete process.env[RENDERER_URL_ENV_KEY];
     delete process.env[RECEIPT_STORE_PATH_ENV];
+    delete process.env[WEBAUTHN_STORE_PATH_ENV];
   });
 
   afterEach(() => {
@@ -267,13 +269,19 @@ describe("main bootstrap", () => {
     } else {
       process.env[RECEIPT_STORE_PATH_ENV] = previousReceiptStorePath;
     }
+    if (previousWebAuthnStorePath === undefined) {
+      delete process.env[WEBAUTHN_STORE_PATH_ENV];
+    } else {
+      process.env[WEBAUTHN_STORE_PATH_ENV] = previousWebAuthnStorePath;
+    }
   });
 
   it("loads the broker URL when packaged and the broker has reported {ready}", async () => {
     // Packaged mode now serves the renderer bundle through the broker. The
-    // window must `loadURL(${brokerUrl}/)` so `/api-token` is same-origin
-    // loopback. ELECTRON_RENDERER_URL is set here to verify it's ignored in
-    // packaged mode — the dev-server branch must not win.
+    // window must load the localhost form of the broker URL so `/api-token`
+    // is same-origin loopback and WebAuthn's localhost RP ID is eligible.
+    // ELECTRON_RENDERER_URL is set here to verify it's ignored in packaged
+    // mode — the dev-server branch must not win.
     electronMock.app.isPackaged = true;
     process.env[RENDERER_URL_ENV_KEY] = "http://localhost:5173/";
     brokerMock.setBrokerUrl("http://127.0.0.1:54321");
@@ -281,24 +289,21 @@ describe("main bootstrap", () => {
     await importMainBootstrap();
 
     const window = getOnlyWindow();
-    expect(window.loadURL).toHaveBeenCalledWith("http://127.0.0.1:54321/");
+    expect(window.loadURL).toHaveBeenCalledWith("http://localhost:54321/");
     expect(window.loadFile).not.toHaveBeenCalled();
   });
 
-  it("plumbs WUPHF_RECEIPT_STORE_PATH to <userData>/event-log.sqlite inside whenReady", async () => {
-    // The broker utility process opens `SqliteReceiptStore` when this
-    // env var is set; main MUST set it unconditionally inside
-    // `whenReady` so receipts persist across restarts. Without this
-    // assertion, a regression that drops the env-var line could
-    // silently fall back to in-memory storage in packaged builds.
-    // `beforeEach` already deletes RECEIPT_STORE_PATH_ENV, so we
-    // assert main's `whenReady` is the one that sets it.
+  it("plumbs durable broker store paths to <userData> inside whenReady", async () => {
+    // The broker utility process opens SQLite stores when these env vars are
+    // set. Main MUST set them unconditionally inside `whenReady` so receipts
+    // and WebAuthn credentials persist across restarts.
     electronMock.app.isPackaged = true;
     brokerMock.setBrokerUrl("http://127.0.0.1:54321");
 
     await importMainBootstrap();
 
     expect(process.env[RECEIPT_STORE_PATH_ENV]).toBe("/tmp/wuphf-test-userData/event-log.sqlite");
+    expect(process.env[WEBAUTHN_STORE_PATH_ENV]).toBe("/tmp/wuphf-test-userData/webauthn.sqlite");
     expect(electronMock.app.getPath).toHaveBeenCalledWith("userData");
   });
 
@@ -327,7 +332,7 @@ describe("main bootstrap", () => {
 
     await importMainBootstrap();
     const firstWindow = getOnlyWindow();
-    expect(firstWindow.loadURL).toHaveBeenCalledWith("http://127.0.0.1:11111/");
+    expect(firstWindow.loadURL).toHaveBeenCalledWith("http://localhost:11111/");
 
     // Simulate a broker restart that publishes a new ready URL.
     brokerMock.emitReady("http://127.0.0.1:22222");
@@ -338,7 +343,7 @@ describe("main bootstrap", () => {
     const newest = allWindows[allWindows.length - 1];
     expect(newest).toBeDefined();
     if (newest === undefined) return;
-    expect(newest.loadURL).toHaveBeenCalledWith("http://127.0.0.1:22222/");
+    expect(newest.loadURL).toHaveBeenCalledWith("http://localhost:22222/");
   });
 
   it("loads ELECTRON_RENDERER_URL when app.isPackaged is false", async () => {
@@ -367,7 +372,7 @@ describe("main bootstrap", () => {
     expect(getOnlyBrokerSupervisor().stop).toHaveBeenCalledTimes(1);
   });
 
-  it("installs deny-all permission request and check handlers on the default session before windows open", async () => {
+  it("installs closed permission request and check handlers on the default session before windows open", async () => {
     await importMainBootstrap();
 
     expect(electronMock.defaultSession.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
@@ -395,7 +400,12 @@ describe("main bootstrap", () => {
 
     const requestHandler = electronMock.defaultSession.setPermissionRequestHandler.mock
       .calls[0]?.[0] as
-      | ((webContents: unknown, permission: string, callback: (granted: boolean) => void) => void)
+      | ((
+          webContents: unknown,
+          permission: string,
+          callback: (granted: boolean) => void,
+          details?: unknown,
+        ) => void)
       | undefined;
     if (requestHandler === undefined) {
       throw new Error("Expected setPermissionRequestHandler to be invoked");
@@ -403,14 +413,48 @@ describe("main bootstrap", () => {
     const grant = vi.fn<(granted: boolean) => void>();
     requestHandler({}, "media", grant);
     expect(grant).toHaveBeenCalledWith(false);
+    const webAuthnGrant = vi.fn<(granted: boolean) => void>();
+    requestHandler(
+      { getURL: () => "http://127.0.0.1:54321/" },
+      "publickey-credentials-create",
+      webAuthnGrant,
+    );
+    expect(webAuthnGrant).toHaveBeenCalledWith(true);
+    const remoteWebAuthnGrant = vi.fn<(granted: boolean) => void>();
+    requestHandler(
+      { getURL: () => "http://127.0.0.1:54321/" },
+      "publickey-credentials-get",
+      remoteWebAuthnGrant,
+      { requestingUrl: "https://attacker.example.com/" },
+    );
+    expect(remoteWebAuthnGrant).toHaveBeenCalledWith(false);
 
     const checkHandler = electronMock.defaultSession.setPermissionCheckHandler.mock.calls[0]?.[0] as
-      | ((webContents: unknown, permission: string) => boolean)
+      | ((
+          webContents: unknown,
+          permission: string,
+          requestingOrigin: string,
+          details?: unknown,
+        ) => boolean)
       | undefined;
     if (checkHandler === undefined) {
       throw new Error("Expected setPermissionCheckHandler to be invoked");
     }
-    expect(checkHandler({}, "geolocation")).toBe(false);
+    expect(checkHandler({}, "geolocation", "")).toBe(false);
+    expect(
+      checkHandler(
+        { getURL: () => "http://localhost:5173/" },
+        "publickey-credentials-get",
+        "http://localhost:5173",
+      ),
+    ).toBe(true);
+    expect(
+      checkHandler(
+        { getURL: () => "http://localhost:5173/" },
+        "publickey-credentials-get",
+        "https://attacker.example.com",
+      ),
+    ).toBe(false);
 
     expect(loggerMock.calls).toEqual(
       expect.arrayContaining([

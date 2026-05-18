@@ -1,0 +1,549 @@
+import type {
+  ApprovalClaim,
+  ApprovalClaimJsonValue,
+  ApprovalScope,
+  ApprovalScopeJsonValue,
+} from "@wuphf/protocol";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ApiError, post } from "./client";
+import {
+  approvalClaimFromJson,
+  approvalClaimToJsonValue,
+  approvalScopeFromJson,
+  approvalScopeToJsonValue,
+  describeWebAuthnBrokerStorageError,
+  isWebAuthnApprovalPendingResponse,
+  requestWebAuthnCosignChallenge,
+  requestWebAuthnRegistrationChallenge,
+  runWebAuthnAuthenticationCeremony,
+  runWebAuthnRegistrationCeremony,
+  verifyWebAuthnCosign,
+  verifyWebAuthnRegistration,
+  type WebAuthnAssertionResponseJson,
+  type WebAuthnAttestationResponseJson,
+  type WebAuthnCreationOptionsJson,
+  type WebAuthnRequestOptionsJson,
+} from "./webauthn";
+
+vi.mock("./client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./client")>();
+  return {
+    ...actual,
+    post: vi.fn(),
+  };
+});
+
+const postMock = vi.mocked(post);
+
+describe("webauthn api client", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    postMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("posts the registration challenge request to the frozen broker route", async () => {
+    const response = {
+      challengeId: "challenge-1",
+      creationOptions: registrationOptions(),
+    };
+    postMock.mockResolvedValue(response);
+
+    await expect(
+      requestWebAuthnRegistrationChallenge({ role: "approver" }),
+    ).resolves.toEqual(response);
+
+    expect(postMock).toHaveBeenCalledWith("/webauthn/registration/challenge", {
+      role: "approver",
+    });
+  });
+
+  it("posts the registration attestation to the frozen broker route", async () => {
+    const attestationResponse = registrationResponse();
+    const response = { credentialId: "cred_123", role: "approver" };
+    postMock.mockResolvedValue(response);
+
+    await expect(
+      verifyWebAuthnRegistration({
+        challengeId: "challenge-1",
+        attestationResponse,
+      }),
+    ).resolves.toEqual(response);
+
+    expect(postMock).toHaveBeenCalledWith("/webauthn/registration/verify", {
+      challengeId: "challenge-1",
+      attestationResponse,
+    });
+  });
+
+  it("round-trips all approval claim and scope variants with local codecs", () => {
+    for (const { claim, claimJson, name, scope, scopeJson } of APPROVAL_PAIRS) {
+      expect(approvalClaimToJsonValue(claim), `${name} claim JSON`).toEqual(
+        claimJson,
+      );
+      expect(approvalScopeToJsonValue(scope), `${name} scope JSON`).toEqual(
+        scopeJson,
+      );
+      expect(approvalClaimFromJson(claimJson), `${name} claim`).toEqual(claim);
+      expect(approvalScopeFromJson(scopeJson), `${name} scope`).toEqual(scope);
+    }
+  });
+
+  it("serializes protocol claim and scope JSON for cosign challenge requests", async () => {
+    const { claim, scope } = approvalPair();
+    const response = {
+      challengeId: "challenge-2",
+      requestOptions: authenticationOptions(),
+      claim: approvalClaimToJsonValue(claim),
+      scope: approvalScopeToJsonValue(scope),
+    };
+    postMock.mockResolvedValue(response);
+
+    await expect(
+      requestWebAuthnCosignChallenge({ claim, scope }),
+    ).resolves.toEqual(response);
+
+    expect(postMock).toHaveBeenCalledWith("/webauthn/cosign/challenge", {
+      claim: {
+        schemaVersion: 1,
+        claimId: "claim1",
+        kind: "receipt_co_sign",
+        receiptId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        frozenArgsHash:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        riskClass: "high",
+      },
+      scope: {
+        mode: "single_use",
+        claimId: "claim1",
+        claimKind: "receipt_co_sign",
+        role: "approver",
+        maxUses: 1,
+        receiptId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        frozenArgsHash:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    });
+  });
+
+  it("parses canonical claim and scope from cosign challenge responses", async () => {
+    const { claim, scope } = approvalPair();
+    const canonicalResponse = {
+      challengeId: "challenge-2",
+      requestOptions: authenticationOptions(),
+      claim: approvalClaimToJsonValue(claim),
+      scope: approvalScopeToJsonValue(scope),
+    };
+    postMock.mockResolvedValue(canonicalResponse);
+
+    await expect(
+      requestWebAuthnCosignChallenge({ claim, scope }),
+    ).resolves.toMatchObject({
+      challengeId: "challenge-2",
+      claim,
+      scope,
+    });
+  });
+
+  it("posts cosign assertions and narrows pending threshold responses", async () => {
+    const pending = {
+      status: "approval_pending" as const,
+      satisfiedRoles: ["approver"],
+      requiredThreshold: 2,
+    };
+    postMock.mockResolvedValue(pending);
+    const assertionResponse = authenticationResponse();
+
+    const response = await verifyWebAuthnCosign({
+      challengeId: "challenge-3",
+      assertionResponse,
+    });
+
+    expect(isWebAuthnApprovalPendingResponse(response)).toBe(true);
+    expect(postMock).toHaveBeenCalledWith("/webauthn/cosign/verify", {
+      challengeId: "challenge-3",
+      assertionResponse,
+    });
+  });
+
+  it("rejects malformed pending threshold response shapes", () => {
+    expect(
+      isWebAuthnApprovalPendingResponse({
+        status: "approval_pending",
+        satisfiedRoles: ["approver"],
+      }),
+    ).toBe(false);
+    expect(
+      isWebAuthnApprovalPendingResponse({
+        status: "approval_pending",
+        satisfiedRoles: ["approver", 1],
+        requiredThreshold: 2,
+      }),
+    ).toBe(false);
+    expect(
+      isWebAuthnApprovalPendingResponse({
+        status: "approval_pending",
+        satisfiedRoles: ["approver"],
+        requiredThreshold: Number.POSITIVE_INFINITY,
+      }),
+    ).toBe(false);
+  });
+
+  it("maps broker storage errors using structured codes and retry headers", () => {
+    expect(
+      describeWebAuthnBrokerStorageError(
+        new ApiError({
+          status: 503,
+          statusText: "Service Unavailable",
+          bodyText: '{"error":"store_busy"}',
+          errorCode: "store_busy",
+          retryAfter: "1",
+        }),
+      ),
+    ).toBe("The broker's WebAuthn storage is busy. Try again in 1 second.");
+    expect(
+      describeWebAuthnBrokerStorageError(new Error('{"error":"store_full"}')),
+    ).toContain("Free disk space");
+    expect(
+      describeWebAuthnBrokerStorageError(
+        new Error('{"error":"storage_error"}'),
+      ),
+    ).toContain("Restart the broker");
+  });
+
+  it("runs the SimpleWebAuthn registration wrapper against navigator.credentials.create", async () => {
+    const create = vi.fn<
+      (options: CredentialCreationOptions) => Promise<Credential | null>
+    >(() => Promise.resolve(mockRegistrationCredential()));
+    installWebAuthnMocks({ create });
+
+    await expect(
+      runWebAuthnRegistrationCeremony(registrationOptions()),
+    ).resolves.toMatchObject({
+      id: "registration-credential",
+      rawId: "AQID",
+      response: {
+        attestationObject: "BAU",
+        clientDataJSON: "Bg",
+        transports: ["usb"],
+      },
+      type: "public-key",
+    });
+
+    expect(create).toHaveBeenCalledTimes(1);
+    const options = create.mock.calls[0]?.[0];
+    expect(options?.publicKey?.challenge).toBeInstanceOf(ArrayBuffer);
+    expect(options?.publicKey?.user.id).toBeInstanceOf(ArrayBuffer);
+  });
+
+  it("runs the SimpleWebAuthn authentication wrapper against navigator.credentials.get", async () => {
+    const get = vi.fn<
+      (options?: CredentialRequestOptions) => Promise<Credential | null>
+    >(() => Promise.resolve(mockAuthenticationCredential()));
+    installWebAuthnMocks({ get });
+
+    await expect(
+      runWebAuthnAuthenticationCeremony(authenticationOptions()),
+    ).resolves.toMatchObject({
+      id: "authentication-credential",
+      rawId: "AQID",
+      response: {
+        authenticatorData: "Bw",
+        clientDataJSON: "CA",
+        signature: "CQ",
+        userHandle: "Cg",
+      },
+      type: "public-key",
+    });
+
+    expect(get).toHaveBeenCalledTimes(1);
+    const options = get.mock.calls[0]?.[0];
+    expect(options?.publicKey?.challenge).toBeInstanceOf(ArrayBuffer);
+    expect(options?.publicKey?.allowCredentials?.[0]?.id).toBeInstanceOf(
+      ArrayBuffer,
+    );
+  });
+});
+
+interface ApprovalPairFixture {
+  readonly name: string;
+  readonly claim: ApprovalClaim;
+  readonly scope: ApprovalScope;
+  readonly claimJson: ApprovalClaimJsonValue;
+  readonly scopeJson: ApprovalScopeJsonValue;
+}
+
+const RECEIPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const FROZEN_ARGS_HASH =
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+const APPROVAL_PAIRS = [
+  {
+    name: "cost spike acknowledgement",
+    claim: {
+      schemaVersion: 1,
+      claimId: "cost-claim",
+      kind: "cost_spike_acknowledgement",
+      agentId: "agent-alpha",
+      costCeilingId: "ceiling-alpha",
+      thresholdBps: 2500,
+      currentMicroUsd: 1_250_000,
+      ceilingMicroUsd: 1_000_000,
+    } as unknown as ApprovalClaim,
+    scope: {
+      mode: "single_use",
+      claimId: "cost-claim",
+      claimKind: "cost_spike_acknowledgement",
+      role: "approver",
+      maxUses: 1,
+      agentId: "agent-alpha",
+      costCeilingId: "ceiling-alpha",
+    } as unknown as ApprovalScope,
+    claimJson: {
+      schemaVersion: 1,
+      claimId: "cost-claim",
+      kind: "cost_spike_acknowledgement",
+      agentId: "agent-alpha",
+      costCeilingId: "ceiling-alpha",
+      thresholdBps: 2500,
+      currentMicroUsd: 1_250_000,
+      ceilingMicroUsd: 1_000_000,
+    },
+    scopeJson: {
+      mode: "single_use",
+      claimId: "cost-claim",
+      claimKind: "cost_spike_acknowledgement",
+      role: "approver",
+      maxUses: 1,
+      agentId: "agent-alpha",
+      costCeilingId: "ceiling-alpha",
+    },
+  },
+  {
+    name: "endpoint allowlist extension",
+    claim: {
+      schemaVersion: 1,
+      claimId: "endpoint-claim",
+      kind: "endpoint_allowlist_extension",
+      agentId: "agent-beta",
+      providerKind: "openai",
+      endpointOrigin: "https://api.example.test",
+      reason: "temporary model evaluation",
+    } as unknown as ApprovalClaim,
+    scope: {
+      mode: "single_use",
+      claimId: "endpoint-claim",
+      claimKind: "endpoint_allowlist_extension",
+      role: "host",
+      maxUses: 1,
+      agentId: "agent-beta",
+      providerKind: "openai",
+      endpointOrigin: "https://api.example.test",
+    } as unknown as ApprovalScope,
+    claimJson: {
+      schemaVersion: 1,
+      claimId: "endpoint-claim",
+      kind: "endpoint_allowlist_extension",
+      agentId: "agent-beta",
+      providerKind: "openai",
+      endpointOrigin: "https://api.example.test",
+      reason: "temporary model evaluation",
+    },
+    scopeJson: {
+      mode: "single_use",
+      claimId: "endpoint-claim",
+      claimKind: "endpoint_allowlist_extension",
+      role: "host",
+      maxUses: 1,
+      agentId: "agent-beta",
+      providerKind: "openai",
+      endpointOrigin: "https://api.example.test",
+    },
+  },
+  {
+    name: "credential grant to agent",
+    claim: {
+      schemaVersion: 1,
+      claimId: "credential-claim",
+      kind: "credential_grant_to_agent",
+      granteeAgentId: "agent-gamma",
+      credentialHandleId: "credential-prod",
+      credentialScope: "repo:read",
+    } as unknown as ApprovalClaim,
+    scope: {
+      mode: "single_use",
+      claimId: "credential-claim",
+      claimKind: "credential_grant_to_agent",
+      role: "approver",
+      maxUses: 1,
+      granteeAgentId: "agent-gamma",
+      credentialHandleId: "credential-prod",
+    } as unknown as ApprovalScope,
+    claimJson: {
+      schemaVersion: 1,
+      claimId: "credential-claim",
+      kind: "credential_grant_to_agent",
+      granteeAgentId: "agent-gamma",
+      credentialHandleId: "credential-prod",
+      credentialScope: "repo:read",
+    },
+    scopeJson: {
+      mode: "single_use",
+      claimId: "credential-claim",
+      claimKind: "credential_grant_to_agent",
+      role: "approver",
+      maxUses: 1,
+      granteeAgentId: "agent-gamma",
+      credentialHandleId: "credential-prod",
+    },
+  },
+  {
+    name: "receipt co-sign",
+    claim: {
+      schemaVersion: 1,
+      claimId: "claim1",
+      kind: "receipt_co_sign",
+      receiptId: RECEIPT_ID,
+      frozenArgsHash: FROZEN_ARGS_HASH,
+      riskClass: "high",
+    } as unknown as ApprovalClaim,
+    scope: {
+      mode: "single_use",
+      claimId: "claim1",
+      claimKind: "receipt_co_sign",
+      role: "approver",
+      maxUses: 1,
+      receiptId: RECEIPT_ID,
+      frozenArgsHash: FROZEN_ARGS_HASH,
+    } as unknown as ApprovalScope,
+    claimJson: {
+      schemaVersion: 1,
+      claimId: "claim1",
+      kind: "receipt_co_sign",
+      receiptId: RECEIPT_ID,
+      frozenArgsHash: FROZEN_ARGS_HASH,
+      riskClass: "high",
+    },
+    scopeJson: {
+      mode: "single_use",
+      claimId: "claim1",
+      claimKind: "receipt_co_sign",
+      role: "approver",
+      maxUses: 1,
+      receiptId: RECEIPT_ID,
+      frozenArgsHash: FROZEN_ARGS_HASH,
+    },
+  },
+] as const satisfies readonly [
+  ApprovalPairFixture,
+  ApprovalPairFixture,
+  ApprovalPairFixture,
+  ApprovalPairFixture,
+];
+
+function approvalPair(): { claim: ApprovalClaim; scope: ApprovalScope } {
+  return APPROVAL_PAIRS[3];
+}
+
+function registrationOptions(): WebAuthnCreationOptionsJson {
+  return {
+    rp: { id: "localhost", name: "WUPHF" },
+    user: {
+      id: "AQID",
+      name: "approver",
+      displayName: "Approver",
+    },
+    challenge: "BAU",
+    pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+  };
+}
+
+function authenticationOptions(): WebAuthnRequestOptionsJson {
+  return {
+    challenge: "BAU",
+    rpId: "localhost",
+    allowCredentials: [{ id: "AQID", type: "public-key", transports: ["usb"] }],
+    userVerification: "preferred",
+  };
+}
+
+function registrationResponse(): WebAuthnAttestationResponseJson {
+  return {
+    id: "registration-credential",
+    rawId: "AQID",
+    response: {
+      clientDataJSON: "Bg",
+      attestationObject: "BAU",
+      transports: ["usb"],
+    },
+    clientExtensionResults: {},
+    type: "public-key",
+  };
+}
+
+function authenticationResponse(): WebAuthnAssertionResponseJson {
+  return {
+    id: "authentication-credential",
+    rawId: "AQID",
+    response: {
+      clientDataJSON: "CA",
+      authenticatorData: "Bw",
+      signature: "CQ",
+      userHandle: "Cg",
+    },
+    clientExtensionResults: {},
+    type: "public-key",
+  };
+}
+
+function installWebAuthnMocks(
+  credentials: Partial<CredentialsContainer>,
+): void {
+  vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {
+    return undefined;
+  });
+  Object.defineProperty(navigator, "credentials", {
+    configurable: true,
+    value: credentials,
+  });
+}
+
+function mockRegistrationCredential(): Credential {
+  return {
+    id: "registration-credential",
+    rawId: bytes(1, 2, 3),
+    type: "public-key",
+    response: {
+      attestationObject: bytes(4, 5),
+      clientDataJSON: bytes(6),
+      getTransports: () => ["usb"],
+    },
+    getClientExtensionResults: () => ({}),
+  } as unknown as Credential;
+}
+
+function mockAuthenticationCredential(): Credential {
+  return {
+    id: "authentication-credential",
+    rawId: bytes(1, 2, 3),
+    type: "public-key",
+    response: {
+      authenticatorData: bytes(7),
+      clientDataJSON: bytes(8),
+      signature: bytes(9),
+      userHandle: bytes(10),
+    },
+    getClientExtensionResults: () => ({}),
+  } as unknown as Credential;
+}
+
+function bytes(...values: readonly number[]): ArrayBuffer {
+  const buffer = new ArrayBuffer(values.length);
+  new Uint8Array(buffer).set(values);
+  return buffer;
+}

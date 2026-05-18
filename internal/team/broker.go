@@ -642,9 +642,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/workspaces/trash", b.withAuth(b.handleWorkspacesTrash))
 	mux.HandleFunc("/workspaces/onboarding", b.withAuth(b.handleWorkspacesOnboarding))
 	mux.HandleFunc("/admin/pause", b.withAuth(b.handleAdminPause))
-	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
-	// completeFn posts the first task as a human message and seeds the team.
-	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth, filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki"))
+	// Onboarding: state/progress/complete + deterministic CEO phase machine.
+	// completeFn posts the first task as a human message and seeds the team;
+	// transitionFn emits deterministic CEO onboarding cards into the CEO DM.
+	onboarding.RegisterRoutesWithTransition(mux, b.onboardingCompleteFn, b.ceoOnboardingTransitionFn(), b.packSlug, b.requireAuth, filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki"))
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
 	// After a successful wipe, b.Reset clears live in-memory broker state so the
 	// broker stays up without repersisting stale messages back onto disk.

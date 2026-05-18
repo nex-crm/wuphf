@@ -240,10 +240,10 @@ func TestTrySpawnWebAgentPanes_HeadlessRuntimeNoOp(t *testing.T) {
 
 // TestTrySpawnWebAgentPanes_BlankSlateNoOp guards the early-return that
 // prevents an empty tmux session (only the placeholder pane, no agent
-// panes) on blank-slate web launches where the broker has zero members
-// yet. Before this guard, LaunchWeb's pane-default call would create a
-// half-built session and flip paneBackedFlag=true, breaking subsequent
-// reconfigure paths and the capture loops.
+// panes) when this fallback primitive is explicitly invoked while the
+// broker has zero members yet. Without this guard, the fallback path
+// would create a half-built session and flip paneBackedFlag=true,
+// breaking subsequent reconfigure paths and the capture loops.
 func TestTrySpawnWebAgentPanes_BlankSlateNoOp(t *testing.T) {
 	fake := newFakeTmuxRunner()
 	setTmuxRunnerForTest(t, fake)
@@ -269,13 +269,11 @@ func TestTrySpawnWebAgentPanes_BlankSlateNoOp(t *testing.T) {
 	}
 }
 
-// TestTrySpawnWebAgentPanes_HappyPathFlipsFlag is the new default's
-// load-bearing contract: with claude-code + at least one visible
-// member + a working tmux runner, TrySpawnWebAgentPanes flips
-// paneBackedFlag=true so subsequent dispatch routes through the live
-// panes instead of falling through to headless `claude --print`. Before
-// the LaunchWeb wiring change this code path was reachable only via the
-// reconfigure flow.
+// TestTrySpawnWebAgentPanes_HappyPathFlipsFlag is the fallback path's
+// load-bearing contract: with claude-code + at least one visible member
+// + a working tmux runner, TrySpawnWebAgentPanes flips paneBackedFlag=true
+// so subsequent dispatch routes through the live panes instead of falling
+// through to headless `claude --print`.
 func TestTrySpawnWebAgentPanes_HappyPathFlipsFlag(t *testing.T) {
 	fake := newFakeTmuxRunner()
 	fake.outputs["split-window"] = []byte("ok")

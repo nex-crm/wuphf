@@ -6,10 +6,101 @@ import {
   validateSanitizedJsonNodeBudget,
 } from "./budgets.ts";
 
-export type SanitizedStringPolicy = "strip-zero-width" | "allow-zwj";
+// SanitizedString policies trade off renderer permissiveness vs. moat width.
+// Every policy STRIPS the offending code points after NFKC — it does not
+// throw or reject the whole string. Only malformed surrogate input and
+// unsafe object-graph shapes throw.
+//
+// - `strip-zero-width` (default) — denylist of known-weaponized invisible code
+//   points (bidi overrides, ZWSP/ZWNJ/ZWJ, U+E0000 tag block, etc.). Anything
+//   not on the denylist is kept. Use for general renderer text.
+// - `allow-zwj` — same as `strip-zero-width` but preserves ZWJ (needed for
+//   emoji sequences like 👨‍👩‍👧).
+// - `allowlist` — moat model: on top of the existing denylist, strip every
+//   Unicode `C*` code point (Cc, Cf, Cn, Co, Cs) AND every
+//   Default_Ignorable_Code_Point (variation selectors, the Hangul fillers
+//   U+115F/U+1160, U+034F CGJ, etc. — invisible code points that are not in
+//   `C*` but are still weaponizable). Closes the broad "unassigned /
+//   private-use / control / format / default-ignorable" injection class at
+//   the cost of stripping characters legitimate text rarely contains. Use for
+//   high-stakes writes (audit-chain payloads, signed receipts, anything the
+//   v1 cosign path will sign).
+//
+// NOTE ON PROVENANCE: a `SanitizedString` instance does NOT record which
+// policy produced it. A value sanitized under `allowlist` is structurally
+// indistinguishable from one sanitized under `strip-zero-width`. Code that
+// requires the moat invariant (e.g. the branch-12 cosign codec) MUST
+// re-sanitize at its own trust boundary with an explicit `allowlist` policy
+// rather than trusting a passed-in `SanitizedString`.
+
+// Single source of truth for the closed policy domain: the value tuple drives
+// both the type and the runtime set, so a policy added to one cannot be
+// silently missing from the other.
+const SANITIZED_STRING_POLICY_VALUES = ["strip-zero-width", "allow-zwj", "allowlist"] as const;
+
+export type SanitizedStringPolicy = (typeof SANITIZED_STRING_POLICY_VALUES)[number];
+
+const SANITIZED_STRING_POLICIES: ReadonlySet<string> = new Set(SANITIZED_STRING_POLICY_VALUES);
 
 export interface SanitizedStringOptions {
   readonly policy?: SanitizedStringPolicy | undefined;
+}
+
+// `SanitizedStringOptions` is a compile-time type only; an untyped JS caller
+// (or a config/test fixture) can pass a malformed shape and — without these
+// guards — silently get the weaker default denylist instead of the moat.
+// Every silent-downgrade path must fail closed, not fall through:
+//  - a non-object / array / non-plain-object carrier (a bare `"allowlist"`
+//    string, `[]`, a `Map`, a class instance) whose `.policy` reads as
+//    `undefined` or is reachable only through the prototype chain;
+//  - an inherited or accessor `policy` (e.g. a polluted `Object.prototype`);
+//  - a `{ policy: "allow-list" }` typo or a non-string `policy`.
+// For a security boundary that must fail closed, every one of these is an
+// error, not a fall-through. Called once at the `fromUnknown` entry point.
+function resolveSanitizedStringPolicy(options: SanitizedStringOptions): SanitizedStringPolicy {
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+    throw new Error("SanitizedString: options must be a plain object");
+  }
+  // A `Map`, a class instance, or `Object.create(proto)` all pass the check
+  // above yet are not plain objects. Require an `Object.prototype` or null
+  // prototype so a `policy` cannot be smuggled in through the prototype chain.
+  const optionsProto: unknown = Object.getPrototypeOf(options);
+  if (optionsProto !== Object.prototype && optionsProto !== null) {
+    throw new Error("SanitizedString: options must be a plain object");
+  }
+
+  // Read `policy` only as an OWN data property. An inherited `policy` (a
+  // polluted `Object.prototype.policy`) would silently change the policy
+  // process-wide; an accessor `policy` would run arbitrary caller code before
+  // sanitization. Both must fail closed, not fall through.
+  if (!Object.hasOwn(options, "policy")) {
+    return "strip-zero-width";
+  }
+  const policyDescriptor = Object.getOwnPropertyDescriptor(options, "policy");
+  if (policyDescriptor === undefined || "get" in policyDescriptor || "set" in policyDescriptor) {
+    throw new Error("SanitizedString: policy must be an own data property");
+  }
+  // Typed as `SanitizedStringPolicy | undefined`, but an untyped caller can
+  // smuggle any runtime value in here — widen to `unknown` and re-check.
+  const rawPolicy: unknown = policyDescriptor.value;
+  if (rawPolicy === undefined) {
+    return "strip-zero-width";
+  }
+  if (typeof rawPolicy !== "string") {
+    throw new Error("SanitizedString: policy must be a string");
+  }
+  if (!SANITIZED_STRING_POLICIES.has(rawPolicy)) {
+    throw new Error(
+      `SanitizedString: unknown policy ${JSON.stringify(rawPolicy)} (expected one of ${[
+        ...SANITIZED_STRING_POLICIES,
+      ]
+        .map((value) => JSON.stringify(value))
+        .join(", ")})`,
+    );
+  }
+  // Membership in SANITIZED_STRING_POLICIES verified above; the Set is typed
+  // `ReadonlySet<string>` so `.has` does not narrow `rawPolicy` on its own.
+  return rawPolicy as SanitizedStringPolicy;
 }
 
 const MAX_DEPTH = 64;
@@ -30,14 +121,19 @@ export class SanitizedString {
   }
 
   static fromUnknown(input: unknown, options: SanitizedStringOptions = {}): SanitizedString {
+    // Fail closed on an unknown policy before any sanitization runs — a typo
+    // on the security policy must not silently degrade to the default.
+    const resolved: SanitizedStringOptions = {
+      policy: resolveSanitizedStringPolicy(options),
+    };
     if (typeof input === "string") {
       assertSanitizedStringByteBudget(input, "SanitizedString input bytes");
     }
-    const coerced = coerceToString(input, options);
+    const coerced = coerceToString(input, resolved);
     if (typeof input === "object" && input !== null) {
       assertSanitizedStringByteBudget(coerced, "SanitizedString JSON projection bytes");
     }
-    const value = sanitizeText(coerced, options);
+    const value = sanitizeText(coerced, resolved);
     assertSanitizedStringByteBudget(value, "SanitizedString value bytes");
     return new SanitizedString(value);
   }
@@ -293,10 +389,10 @@ function sanitizeJsonObject(
 
       const sanitizedKey = sanitizeText(rawKey, options);
       if (FORBIDDEN_KEYS.has(sanitizedKey)) {
-        throw new Error(`SanitizedString: forbidden key "${sanitizedKey}"`);
+        throw new Error(`SanitizedString: forbidden key "${sanitizedKey}" at ${path}`);
       }
       if (Object.hasOwn(out, sanitizedKey)) {
-        throw new Error(`SanitizedString: sanitized key collision on "${sanitizedKey}"`);
+        throw new Error(`SanitizedString: sanitized key collision at ${path} on "${sanitizedKey}"`);
       }
 
       const child: unknown = descriptor.value;
@@ -411,6 +507,29 @@ function sanitizeText(input: string, options: SanitizedStringOptions): string {
   return out;
 }
 
+// Pre-compiled to avoid rebuilding on every code point under the allowlist
+// policy. The moat rejects two overlapping-but-distinct Unicode sets:
+//
+//   \p{C}                          — Cc (control), Cf (format), Cn
+//                                    (unassigned), Co (private use), Cs
+//                                    (surrogate). Non-textual categories.
+//   \p{Default_Ignorable_Code_Point} — code points Unicode marks as safe to
+//                                    render as nothing: variation selectors
+//                                    (U+FE00-0F, U+E0100-EF1EF), the Hangul
+//                                    fillers U+115F/U+1160/U+3164, U+034F
+//                                    COMBINING GRAPHEME JOINER, U+17B4/B5,
+//                                    Mongolian variation selectors, etc.
+//
+// `\p{C}` alone misses the second set: U+115F is `Lo` (a letter!) and U+FE0F
+// is `Mn` (a mark) — neither is `C*`, yet both are invisible and trivially
+// weaponized for homograph / hidden-payload attacks. A signed write payload
+// must contain neither.
+//
+// Exported (not via `index.ts`, so not public package API) so the test
+// oracle can import the one true pattern instead of hand-copying it — a
+// copied literal can silently drift from this one.
+export const MOAT_DISALLOWED_RE = /[\p{C}\p{Default_Ignorable_Code_Point}]/u;
+
 function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOptions): boolean {
   if (codePoint <= 0x1f && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d) {
     return true;
@@ -430,6 +549,8 @@ function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOption
   }
 
   if (codePoint === 0x200d) {
+    // ZWJ rules: `allow-zwj` keeps it, every other policy strips it. Under
+    // `allowlist` ZWJ is rejected because it's Cf — the broad rule wins.
     return options.policy !== "allow-zwj";
   }
 
@@ -440,6 +561,29 @@ function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOption
   // renderer boundary closes a homograph/spoofing path that the existing ZWSP
   // strip alone leaves open.
   if (codePoint === 0x180e || (codePoint >= 0x2060 && codePoint <= 0x2064)) {
+    return true;
+  }
+
+  // Allowlist (moat) policy: strip every `C*` AND every
+  // Default_Ignorable_Code_Point. Catches what the denylist above misses —
+  // soft hyphen U+00AD, U+061C ARABIC LETTER MARK, the Hangul fillers
+  // U+115F/U+1160, every variation selector, the full Cn/Co planes, every
+  // bidi/format mark Unicode adds in the future. The denylist branches above
+  // remain in effect for older policies; this branch only widens the
+  // rejection set when the caller has opted into the stricter contract.
+  //
+  // Tab (U+0009), newline (U+000A), and carriage return (U+000D) are `Cc`
+  // and so match `\p{C}`, but they are intentionally-allowed whitespace:
+  // every other policy keeps them (see the C0 carve-out at the top of this
+  // function). The moat must not silently flatten the line structure of a
+  // signed multi-line payload, so they are carved out of the moat too.
+  if (
+    options.policy === "allowlist" &&
+    codePoint !== 0x09 &&
+    codePoint !== 0x0a &&
+    codePoint !== 0x0d &&
+    MOAT_DISALLOWED_RE.test(String.fromCodePoint(codePoint))
+  ) {
     return true;
   }
 

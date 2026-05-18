@@ -19,9 +19,9 @@ import { RUNTIMES } from "./runtimes";
 // OpenAI-compatible sections forward as inline sections below the three
 // CLI runtime cards. The screen remains a single screen with no pagination.
 //
-// `onComplete` is invoked after both the /config and /onboarding/complete
-// requests succeed. RootRoute then flips onboardingComplete and routes the
-// user to the Shell.
+// `onComplete` is invoked after runtime config is saved and the deterministic
+// CEO onboarding state machine has entered the greet phase. RootRoute then
+// renders the Shell around the CEO DM instead of marking onboarding complete.
 
 interface PrePickScreenProps {
   onComplete: () => void;
@@ -138,17 +138,6 @@ function isCliProvider(provider: RuntimeSpec["provider"] | string): boolean {
     provider !== "form" &&
     provider !== "skip"
   );
-}
-
-/** Derives the runtime string to send to /onboarding/complete. */
-function resolveRuntime(
-  isCliRuntime: boolean,
-  provider: string,
-  localProvider: string,
-): string {
-  if (isCliRuntime) return provider;
-  if (localProvider.trim().length > 0) return localProvider;
-  return "";
 }
 
 /** Returns true when any of the form sections has meaningful content. */
@@ -292,6 +281,10 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
     setSubmitting(runtimeLabel);
     try {
       const isCli = isCliProvider(provider);
+      // Skip path ("I'll add one later") must NOT persist anything the user
+      // typed into the form sections — the contract is "sandbox until you
+      // configure later". Trigger: provider === null only.
+      const isSkipChoice = provider === null;
       const providerStr = isCli ? (provider as string) : "";
       const configPayload = buildConfigPayload(
         isCli,
@@ -301,27 +294,13 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
         oaiKey,
         apiKeys,
       );
-      if (hasConfigContent(isCli, localProvider, oaiUrl, apiKeys)) {
+      if (
+        !isSkipChoice &&
+        hasConfigContent(isCli, localProvider, oaiUrl, apiKeys)
+      ) {
         await post("/config", configPayload);
       }
-      const resolvedRuntime = resolveRuntime(isCli, providerStr, localProvider);
-      await post("/onboarding/complete", {
-        company: "",
-        description: "",
-        priority: "",
-        website: "",
-        owner_name: "",
-        owner_role: "",
-        scan_completed: false,
-        runtime: resolvedRuntime,
-        runtime_priority: resolvedRuntime ? [resolvedRuntime] : [],
-        memory_backend: "markdown",
-        blueprint: "",
-        agents: [],
-        api_keys: {},
-        task: "",
-        skip_task: true,
-      });
+      await post("/onboarding/transition", { phase: "greet" });
       onComplete();
     } catch (err: unknown) {
       const msg =

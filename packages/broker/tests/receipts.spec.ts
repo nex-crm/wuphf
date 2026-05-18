@@ -1,16 +1,33 @@
 import { request as httpRequest } from "node:http";
 
 import {
+  type AgentId,
+  type ApprovalClaim,
+  type ApprovalScope,
+  approvalClaimToJsonValue,
+  approvalScopeToJsonValue,
+  asAgentId,
   asAgentSlug,
   asApiToken,
+  asApprovalClaimId,
+  asApprovalId,
+  asApprovalTokenId,
+  asIdempotencyKey,
   asProviderKind,
   asReceiptId,
   asTaskId,
   asThreadId,
+  asTimestampMs,
+  asWriteId,
+  canonicalJSON,
+  FrozenArgs,
+  type JsonValue,
   type ReceiptSnapshot,
   receiptToJson,
   SanitizedString,
+  type SignedApprovalToken,
   sha256Hex,
+  signedApprovalTokenToJsonValue,
 } from "@wuphf/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BrokerHandle } from "../src/index.ts";
@@ -21,6 +38,11 @@ import {
   ReceiptStoreBusyError,
   ReceiptStoreUnavailableError,
 } from "../src/receipt-store.ts";
+import type {
+  ConsumedWebAuthnTokenRecord,
+  WebAuthnCeremony,
+  WebAuthnStore,
+} from "../src/webauthn/types.ts";
 
 const FIXED_TOKEN = asApiToken("test-token-with-enough-entropy-AAAAAAAAA");
 const RECEIPT_ID_A = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -29,6 +51,8 @@ const TASK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const THREAD_ID_A = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
 const THREAD_ID_B = "01ARZ3NDEKTSV4RRFFQ69G5FB0";
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const AGENT_ID = asAgentId("agent_alpha");
+const TOKEN_CONSUMED_AT_MS = Date.UTC(2026, 4, 8, 18, 1, 1, 0);
 
 // Builds a minimal valid Receipt v1 (no thread). Receipt validation is
 // strict; every required field must be present. These tests cover the
@@ -210,6 +234,228 @@ async function postReceipt(
   });
 }
 
+function receiptWithApprovalToken(
+  idStr: string,
+  opts: {
+    readonly includeApprovalEvent?: boolean;
+    readonly clientVerifiedAt?: Date;
+  } = {},
+): {
+  readonly receipt: ReceiptSnapshot;
+  readonly approvalToken: SignedApprovalToken;
+} {
+  const receipt = minimalReceiptV1(idStr);
+  const writeId = asWriteId("write_01");
+  const proposedDiff = FrozenArgs.freeze({
+    after: { stage: "approved" },
+    before: { stage: "pending" },
+  });
+  const approvalToken = signedApprovalTokenFixture({
+    receiptId: receipt.id,
+    writeId,
+    frozenArgsHash: proposedDiff.hash,
+  });
+  const appliedDiff = FrozenArgs.freeze({ stage: { from: "pending", to: "approved" } });
+  const postWriteVerify = FrozenArgs.freeze({ stage: "approved" });
+  const approvals =
+    opts.includeApprovalEvent === false
+      ? []
+      : [
+          {
+            approvalId: asApprovalId("approval_01"),
+            role: approvalToken.scope.role,
+            decision: "approve" as const,
+            signedToken: approvalToken,
+            tokenVerdict: {
+              status: "valid" as const,
+              verifiedAt: opts.clientVerifiedAt ?? new Date("2026-05-08T18:01:00.000Z"),
+            },
+            decidedAt: new Date("2026-05-08T18:01:00.000Z"),
+          },
+        ];
+  return {
+    receipt: {
+      ...receipt,
+      status: "ok",
+      approvals,
+      writes: [
+        {
+          writeId,
+          action: "docs.update",
+          target: "doc:security-plan",
+          idempotencyKey: asIdempotencyKey("receipt-approval-write-01"),
+          proposedDiff,
+          approvalToken,
+          approvedAt: new Date("2026-05-08T18:01:02.000Z"),
+          result: "applied",
+          appliedDiff,
+          postWriteVerify,
+        },
+      ],
+    },
+    approvalToken,
+  };
+}
+
+function signedApprovalTokenFixture(input: {
+  readonly receiptId: ReturnType<typeof asReceiptId>;
+  readonly writeId: ReturnType<typeof asWriteId>;
+  readonly frozenArgsHash: ReturnType<typeof sha256Hex>;
+}): SignedApprovalToken {
+  const claimId = asApprovalClaimId("claim_01");
+  return {
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "receipt_co_sign",
+      receiptId: input.receiptId,
+      writeId: input.writeId,
+      frozenArgsHash: input.frozenArgsHash,
+      riskClass: "high",
+    },
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "receipt_co_sign",
+      role: "approver",
+      maxUses: 1,
+      receiptId: input.receiptId,
+      writeId: input.writeId,
+      frozenArgsHash: input.frozenArgsHash,
+    },
+    notBefore: asTimestampMs(Date.UTC(2026, 4, 8, 18, 0, 0, 0)),
+    expiresAt: asTimestampMs(Date.UTC(2026, 4, 8, 18, 30, 0, 0)),
+    issuedTo: AGENT_ID,
+    signature: {
+      credentialId: "Y3JlZF9hcHByb3Zlcg",
+      authenticatorData: "YXV0aGVudGljYXRvci1kYXRh",
+      clientDataJson: "Y2xpZW50LWRhdGE",
+      signature: "YXNzZXJ0aW9uLXNpZ25hdHVyZQ",
+    },
+  };
+}
+
+function consumedRecordForToken(
+  token: SignedApprovalToken,
+  overrides: Partial<Pick<ConsumedWebAuthnTokenRecord, "claimScopeHash" | "outcome">> = {},
+): ConsumedWebAuthnTokenRecord {
+  return {
+    tokenId: token.tokenId,
+    challengeId: "cosignChallenge",
+    outcome: overrides.outcome ?? "approved",
+    responseJson: jsonValue(signedApprovalTokenToJsonValue(token)),
+    role: token.scope.role,
+    claimScopeHash: overrides.claimScopeHash ?? hashClaimScopeForTest(token.claim, token.scope),
+    approvalGroupHash: sha256Hex(canonicalJSON({ claim: approvalClaimToJsonValue(token.claim) })),
+    issuedToAgentId: token.issuedTo,
+    expiresAtMs: token.expiresAt,
+    consumedAtMs: TOKEN_CONSUMED_AT_MS,
+  };
+}
+
+function jsonValue(value: unknown): JsonValue {
+  return JSON.parse(JSON.stringify(value)) as JsonValue;
+}
+
+function hashClaimScopeForTest(
+  claim: ApprovalClaim,
+  scope: ApprovalScope,
+): ReturnType<typeof sha256Hex> {
+  return sha256Hex(
+    canonicalJSON({
+      claim: approvalClaimToJsonValue(claim),
+      scope: approvalScopeToJsonValue(scope),
+    }),
+  );
+}
+
+function webAuthnConfig(store: WebAuthnStore): {
+  readonly store: WebAuthnStore;
+  readonly tokenAgentIds: ReadonlyMap<typeof FIXED_TOKEN, AgentId>;
+  readonly ceremony: WebAuthnCeremony;
+} {
+  return {
+    store,
+    tokenAgentIds: new Map([[FIXED_TOKEN, AGENT_ID]]),
+    ceremony: unusedCeremony,
+  };
+}
+
+const unusedCeremony: WebAuthnCeremony = {
+  async generateRegistrationOptions() {
+    throw new Error("not used by receipt tests");
+  },
+  async verifyRegistration() {
+    throw new Error("not used by receipt tests");
+  },
+  async generateAuthenticationOptions() {
+    throw new Error("not used by receipt tests");
+  },
+  async verifyAuthentication() {
+    throw new Error("not used by receipt tests");
+  },
+};
+
+class FakeReceiptWebAuthnStore implements WebAuthnStore {
+  constructor(
+    private readonly consumedTokens: ReadonlyMap<
+      SignedApprovalToken["tokenId"],
+      ConsumedWebAuthnTokenRecord
+    >,
+  ) {}
+
+  async saveRegistrationChallenge(): Promise<void> {
+    throw new Error("not used by receipt tests");
+  }
+
+  async saveCosignChallenge(): Promise<void> {
+    throw new Error("not used by receipt tests");
+  }
+
+  async pruneExpired(): Promise<{
+    readonly consumedTokens: number;
+    readonly orphanChallenges: number;
+  }> {
+    return { consumedTokens: 0, orphanChallenges: 0 };
+  }
+
+  async getChallenge(): Promise<null> {
+    throw new Error("not used by receipt tests");
+  }
+
+  async listCredentialsForAgent(): Promise<never> {
+    throw new Error("not used by receipt tests");
+  }
+
+  async listCredentialsForAgentRole(): Promise<never> {
+    throw new Error("not used by receipt tests");
+  }
+
+  async getCredential(): Promise<null> {
+    throw new Error("not used by receipt tests");
+  }
+
+  async saveCredential(): Promise<void> {
+    throw new Error("not used by receipt tests");
+  }
+
+  async getConsumedToken(
+    tokenId: SignedApprovalToken["tokenId"],
+  ): Promise<ConsumedWebAuthnTokenRecord | null> {
+    return this.consumedTokens.get(tokenId) ?? null;
+  }
+
+  async listSatisfiedRoles(): Promise<never> {
+    throw new Error("not used by receipt tests");
+  }
+
+  async consumeCosignChallenge(): Promise<never> {
+    throw new Error("not used by receipt tests");
+  }
+}
+
 describe("receipts API", () => {
   let broker: BrokerHandle | null = null;
 
@@ -283,6 +529,128 @@ describe("receipts API", () => {
       const body = (await res.json()) as { error: string; reason: string };
       expect(body.error).toBe("invalid_receipt");
       expect(body.reason.length).toBeGreaterThan(0);
+    });
+
+    it("rejects a write approval token when WebAuthn is not configured", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const { receipt } = receiptWithApprovalToken(RECEIPT_ID_A, {
+        includeApprovalEvent: false,
+      });
+
+      const res = await postReceipt(broker.url, receiptToJson(receipt));
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        error: "webauthn_required_for_approval_token",
+      });
+    });
+
+    it("rejects a forged write approval token with no consumed-token record", async () => {
+      const { receipt } = receiptWithApprovalToken(RECEIPT_ID_A, {
+        includeApprovalEvent: false,
+      });
+      broker = await createBroker({
+        port: 0,
+        token: FIXED_TOKEN,
+        webauthn: webAuthnConfig(new FakeReceiptWebAuthnStore(new Map())),
+      });
+
+      const res = await postReceipt(broker.url, receiptToJson(receipt));
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        error: "unverified_approval_token",
+      });
+    });
+
+    it("rejects an approval token whose claim/scope hash differs from the consumed record", async () => {
+      const { receipt, approvalToken } = receiptWithApprovalToken(RECEIPT_ID_A);
+      const record = consumedRecordForToken(approvalToken, {
+        claimScopeHash: sha256Hex("different claim/scope"),
+      });
+      broker = await createBroker({
+        port: 0,
+        token: FIXED_TOKEN,
+        webauthn: webAuthnConfig(
+          new FakeReceiptWebAuthnStore(new Map([[approvalToken.tokenId, record]])),
+        ),
+      });
+
+      const res = await postReceipt(broker.url, receiptToJson(receipt));
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        error: "approval_token_scope_mismatch",
+      });
+    });
+
+    it("rejects an approval token whose consumed outcome is still pending", async () => {
+      const { receipt, approvalToken } = receiptWithApprovalToken(RECEIPT_ID_A);
+      const record = consumedRecordForToken(approvalToken, {
+        outcome: "approval_pending",
+      });
+      broker = await createBroker({
+        port: 0,
+        token: FIXED_TOKEN,
+        webauthn: webAuthnConfig(
+          new FakeReceiptWebAuthnStore(new Map([[approvalToken.tokenId, record]])),
+        ),
+      });
+
+      const res = await postReceipt(broker.url, receiptToJson(receipt));
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        error: "approval_token_not_approved",
+      });
+    });
+
+    it("accepts a consumed approval token and overwrites the client token verdict", async () => {
+      const { receipt, approvalToken } = receiptWithApprovalToken(RECEIPT_ID_A, {
+        clientVerifiedAt: new Date("2026-05-08T18:59:00.000Z"),
+      });
+      const record = consumedRecordForToken(approvalToken);
+      broker = await createBroker({
+        port: 0,
+        token: FIXED_TOKEN,
+        webauthn: webAuthnConfig(
+          new FakeReceiptWebAuthnStore(new Map([[approvalToken.tokenId, record]])),
+        ),
+      });
+
+      const res = await postReceipt(broker.url, receiptToJson(receipt));
+
+      expect(res.status).toBe(201);
+      const approval = receipt.approvals[0];
+      if (approval === undefined) throw new Error("fixture expected an approval event");
+      const echoedReceipt: ReceiptSnapshot =
+        receipt.schemaVersion === 1
+          ? {
+              ...receipt,
+              approvals: [
+                {
+                  ...approval,
+                  tokenVerdict: {
+                    status: "valid",
+                    verifiedAt: new Date(TOKEN_CONSUMED_AT_MS),
+                  },
+                },
+              ],
+            }
+          : {
+              ...receipt,
+              approvals: [
+                {
+                  ...approval,
+                  tokenVerdict: {
+                    status: "valid",
+                    verifiedAt: new Date(TOKEN_CONSUMED_AT_MS),
+                  },
+                },
+              ],
+            };
+      const echoed = receiptToJson(echoedReceipt);
+      expect(await res.text()).toBe(echoed);
     });
 
     it("rejects oversize body with 413 (Content-Length pre-check)", async () => {

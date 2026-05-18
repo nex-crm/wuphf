@@ -18,11 +18,11 @@ sequenceDiagram
   Main->>Supervisor: start()
   Supervisor->>Utility: fork(broker-entry.js, serviceName: wuphf-broker)
   Utility->>Entry: boot utility process
-  Entry->>Listener: createBroker({ port: 0, renderer, logger })
+  Entry->>Listener: createBroker({ port: 0, renderer, logger, receiptStore, webauthn })
   Listener-->>Entry: { url, port, token }
-  Entry-->>Supervisor: postMessage({ ready: true, brokerUrl })
+  Entry-->>Supervisor: postMessage({ ready: true, brokerUrl: browser URL })
   Supervisor->>Main: whenReady() resolves with BrokerUrl
-  Main->>Main: createMainWindow() — loads brokerUrl in packaged mode
+  Main->>Main: createMainWindow() — loads localhost broker URL in packaged mode
   Entry-->>Supervisor: postMessage({ alive: true }) every 1s
   Listener-->>Supervisor: postMessage({ broker_log, event, payload }) per log
   Main->>Supervisor: app.before-quit stop()
@@ -44,15 +44,22 @@ sequenceDiagram
 ## Ready Handshake
 
 The supervisor exposes `whenReady(): Promise<BrokerUrl>` which resolves once
-the broker subprocess posts `{ ready: true, brokerUrl }`. The URL is
-validated against `@wuphf/protocol`'s `isBrokerUrl` brand at the IPC
-boundary — a malformed message is dropped, not handed downstream as a
-"string" the renderer might trust as a fetch origin.
+the broker subprocess posts `{ ready: true, brokerUrl }`. In packaged mode the
+entry converts the listener's bound `http://127.0.0.1:<port>` handle into the
+browser-facing `http://localhost:<port>` form before posting readiness, so the
+renderer page origin, `/api-token` bootstrap URL, and WebAuthn RP ID all use
+`localhost`. This is not cosmetic: WebAuthn RP IDs are registrable-domain
+identifiers, and browser WebAuthn APIs reject IP-address RP IDs such as
+`127.0.0.1`. The URL is validated against `@wuphf/protocol`'s `isBrokerUrl`
+brand at the IPC boundary — a malformed message is dropped, not handed
+downstream as a "string" the renderer might trust as a fetch origin.
 
-In packaged mode the `BrowserWindow` loads `${brokerUrl}/` so `/api-token`,
-`/api/*`, and the agent terminal WebSocket are all same-origin loopback. In
-dev mode (electron-vite serves the renderer) the broker still starts and
-the renderer reaches it cross-origin via `getBrokerStatus().brokerUrl`.
+In packaged mode the `BrowserWindow` loads `${brokerUrl}/` in that localhost
+form so `/api-token`, `/api/*`, WebAuthn, and the agent terminal WebSocket are
+all same-origin loopback. In dev mode (electron-vite serves the renderer) the
+broker still starts and the renderer reaches it cross-origin via
+`getBrokerStatus().brokerUrl`; `WUPHF_DEV_RENDERER_ORIGIN` keeps `/api-token`
+available to the dev renderer origin.
 
 `subscribeReady(listener)` fires on every `{ ready }`, including restarts.
 The main process uses this to destroy and recreate the `BrowserWindow` when
@@ -120,13 +127,32 @@ are passed through:
 | `WUPHF_RENDERER_DIST` | Packaged-only renderer bundle path so the broker can serve `/`. |
 | `WUPHF_DEV_RENDERER_ORIGIN` | Dev-only electron-vite renderer origin accepted by the broker's `/api-token` gate. |
 | `WUPHF_RECEIPT_STORE_PATH` | Absolute path to the durable receipt-store SQLite database. Set by main to `<userData>/event-log.sqlite`; absent → broker uses an in-memory store. |
+| `WUPHF_WEBAUTHN_STORE_PATH` | Absolute path to the durable WebAuthn SQLite database. Set by main to `<userData>/webauthn.sqlite`; absent → `/api/webauthn/*` routes remain unmounted. |
 
 Secrets, tokens, and cloud credentials are not passed through. The
-`WUPHF_RECEIPT_STORE_PATH` is the one app-data path that crosses the
-boundary — it lets the utility process open the durable
-`SqliteReceiptStore`.
+SQLite store paths are the app-data paths that cross the boundary. They let
+the utility process open the durable `SqliteReceiptStore` and
+`SqliteWebAuthnStore`; app data itself still flows over loopback HTTP, not IPC.
 
-### Receipt-store recovery
+## WebAuthn Co-Sign Wiring
+
+When `WUPHF_WEBAUTHN_STORE_PATH` is present, `broker-entry` mounts the broker's
+WebAuthn registration and co-sign routes. The desktop v1 identity model is a
+single trusted-LAN operator install: the broker bootstrap bearer is mapped to
+the stable `operator` agent id, and that agent may enroll `viewer`, `approver`,
+and `host` credentials. This is intentionally narrow until the desktop has a
+real multi-agent identity model.
+
+The packaged renderer is loaded from `http://localhost:<broker-port>/`, so the
+broker appends that localhost origin to WebAuthn's `allowedOrigins` after
+`listen()` picks the ephemeral port. The listener still binds `127.0.0.1`;
+`localhost` is only the browser-facing name. WebAuthn validates the RP ID as a
+domain-style relying-party identifier, not as a loopback socket address, so an
+IP literal such as `127.0.0.1` cannot be the RP ID even though the listener
+binds that address. In dev, `WUPHF_DEV_RENDERER_ORIGIN` is still passed through
+so the electron-vite renderer origin is allowed as well.
+
+## Receipt-Store Recovery
 
 If the durable store fails the broker route surface returns:
 

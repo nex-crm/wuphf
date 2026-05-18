@@ -15,6 +15,7 @@ import {
 } from "../../api/client";
 import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
+import { CredentialRegistrationPanel } from "../cosign";
 import { CommandRow } from "../ui/CommandRow";
 import {
   ShredCardSubtitle,
@@ -894,6 +895,11 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
           your API key in the API Keys section.
         </p>
         <NexConnectPanel />
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <div style={styles.groupTitle}>Approval cosign</div>
+        <CredentialRegistrationPanel />
       </div>
 
       <SaveButton label="Save integration settings" onSave={onSave} />
