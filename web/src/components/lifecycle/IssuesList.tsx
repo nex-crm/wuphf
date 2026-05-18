@@ -1,14 +1,16 @@
 /**
- * IssuesList — Phase 3 /issues list surface.
+ * IssuesList — /issues surface.
  *
- * Lists all existing tasks rendered as Issues (back-compat read).
- * Each row shows the task title, status pill, and a link to the issue
- * detail view. No filters in Phase 3 — that is Phase 4+ scope.
+ * Renders all office tasks (back-compat read of GET /tasks?all_channels=true)
+ * as a lifecycle kanban. Six columns: Draft / Intake / Running / Review /
+ * Approved / Rejected. Each card opens the IssueDocument detail surface at
+ * /issues/$issueId.
  *
- * Data source: GET /tasks?all_channels=true (the existing getOfficeTasks
- * endpoint). No new write endpoints or new primitives.
+ * Replaces the previous flat list view — the kanban surfaces movement across
+ * the agent workflow that the old TasksApp used to show.
  */
 
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getOfficeTasks, type Task } from "../../api/tasks";
@@ -25,10 +27,8 @@ import { LifecycleStatePill } from "./LifecycleStatePill";
  */
 function taskToLifecycleState(task: Task): LifecycleState {
   if (task.pipeline_stage === "draft") return "drafting";
-  // Use lifecycle_state if the broker has set it.
   const raw = (task as unknown as Record<string, unknown>).lifecycle_state;
   if (typeof raw === "string" && raw) return raw as LifecycleState;
-  // Fall back to legacy status mapping.
   switch (task.status) {
     case "open":
       return "intake";
@@ -47,9 +47,66 @@ function taskToLifecycleState(task: Task): LifecycleState {
   }
 }
 
+type ColumnId =
+  | "drafting"
+  | "intake"
+  | "running"
+  | "review"
+  | "approved"
+  | "rejected";
+
+const COLUMN_ORDER: readonly ColumnId[] = [
+  "drafting",
+  "intake",
+  "running",
+  "review",
+  "approved",
+  "rejected",
+];
+
+const COLUMN_LABEL: Record<ColumnId, string> = {
+  drafting: "Draft",
+  intake: "Intake",
+  running: "Running",
+  review: "Review",
+  approved: "Approved",
+  rejected: "Rejected",
+};
+
+const COLUMN_HINT: Record<ColumnId, string> = {
+  drafting: "Filed but not picked up",
+  intake: "Owner agent gathering spec",
+  running: "Active work + blocked items",
+  review: "Awaiting reviewer grades or human decision",
+  approved: "Landed",
+  rejected: "Will not land",
+};
+
+/** Map a lifecycle state to its kanban column. */
+function lifecycleToColumn(state: LifecycleState): ColumnId {
+  switch (state) {
+    case "drafting":
+      return "drafting";
+    case "intake":
+    case "ready":
+      return "intake";
+    case "running":
+    case "changes_requested":
+    case "blocked_on_pr_merge":
+      return "running";
+    case "review":
+    case "decision":
+      return "review";
+    case "approved":
+      return "approved";
+    case "rejected":
+      return "rejected";
+  }
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────
 
-function IssueRow({ task }: { task: Task }) {
+function IssueCard({ task }: { task: Task }) {
   const state = taskToLifecycleState(task);
 
   function navigate() {
@@ -59,27 +116,34 @@ function IssueRow({ task }: { task: Task }) {
     });
   }
 
+  function handleKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      navigate();
+    }
+  }
+
   return (
-    <button
-      type="button"
-      className="issues-list-row"
+    <div
+      className="issues-kanban-card"
+      role="button"
+      tabIndex={0}
       onClick={navigate}
+      onKeyDown={handleKey}
       data-testid="issue-row"
       aria-label={`Issue: ${task.title}, state: ${state}`}
     >
-      <span className="issues-list-row-pill">
+      <div className="issues-kanban-card-title">{task.title || "Untitled"}</div>
+      <div className="issues-kanban-card-meta">
         <LifecycleStatePill state={state} />
-      </span>
-      <span className="issues-list-row-title">{task.title}</span>
-      {task.owner && (
-        <span
-          className="issues-list-row-owner"
-          aria-label={`Owner: ${task.owner}`}
-        >
-          {task.owner}
-        </span>
-      )}
-    </button>
+        {task.owner ? (
+          <span className="issues-kanban-card-owner">@{task.owner}</span>
+        ) : null}
+        {task.channel ? (
+          <span className="issues-kanban-card-channel">#{task.channel}</span>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -157,41 +221,78 @@ interface IssuesListProps {
 }
 
 export function IssuesList({ initialTasks }: IssuesListProps = {}) {
-  const query = useQuery({
+  const [query, setQuery] = useState("");
+
+  const result = useQuery({
     queryKey: ["issues", "list"],
     queryFn: () => getOfficeTasks({ includeDone: true }),
     initialData: initialTasks ? { tasks: initialTasks } : undefined,
     staleTime: 5_000,
+    refetchInterval: 10_000,
     enabled: !initialTasks,
   });
 
-  if (query.isPending && !initialTasks) {
+  const tasks = result.data?.tasks ?? [];
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return tasks;
+    return tasks.filter((t) => {
+      const hay = `${t.title ?? ""} ${t.description ?? ""} ${t.owner ?? ""} ${t.channel ?? ""}`;
+      return hay.toLowerCase().includes(needle);
+    });
+  }, [tasks, query]);
+
+  const columns = useMemo(() => {
+    const buckets: Record<ColumnId, Task[]> = {
+      drafting: [],
+      intake: [],
+      running: [],
+      review: [],
+      approved: [],
+      rejected: [],
+    };
+    for (const task of filtered) {
+      const col = lifecycleToColumn(taskToLifecycleState(task));
+      buckets[col].push(task);
+    }
+    return buckets;
+  }, [filtered]);
+
+  if (result.isPending && !initialTasks) {
     return <IssuesListSkeleton />;
   }
 
-  if (query.isError && !query.data) {
+  if (result.isError && !result.data) {
     return (
       <IssuesListError
         message={
-          query.error instanceof Error
-            ? query.error.message
+          result.error instanceof Error
+            ? result.error.message
             : "Network or broker error."
         }
-        onRetry={() => void query.refetch()}
+        onRetry={() => void result.refetch()}
       />
     );
   }
-
-  const tasks = query.data?.tasks ?? [];
 
   if (tasks.length === 0) {
     return <IssuesEmptyState />;
   }
 
   return (
-    <div className="issues-list" data-testid="issues-list">
+    <div className="issues-list issues-list--kanban" data-testid="issues-list">
       <header className="issues-list-header">
         <h2 className="issues-list-heading">Issues</h2>
+        <input
+          type="search"
+          className="issues-list-search"
+          placeholder="Filter…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Filter issues"
+          data-testid="issues-list-search"
+        />
         <button
           type="button"
           className="issues-new-btn issues-new-btn--header"
@@ -203,15 +304,39 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
         </button>
       </header>
       <div
-        className="issues-list-rows"
+        className="issues-kanban"
         role="list"
-        aria-label="Issues"
+        aria-label="Issues kanban"
         data-testid="issues-list-rows"
       >
-        {tasks.map((task) => (
-          <div role="listitem" key={task.id}>
-            <IssueRow task={task} />
-          </div>
+        {COLUMN_ORDER.map((col) => (
+          <section
+            key={col}
+            className="issues-kanban-column"
+            data-column={col}
+            data-testid={`issues-kanban-column-${col}`}
+          >
+            <header className="issues-kanban-column-header">
+              <span className="issues-kanban-column-title">
+                {COLUMN_LABEL[col]}
+              </span>
+              <span className="issues-kanban-column-count">
+                {columns[col].length}
+              </span>
+            </header>
+            <p className="issues-kanban-column-hint">{COLUMN_HINT[col]}</p>
+            <div className="issues-kanban-column-cards" role="list">
+              {columns[col].length === 0 ? (
+                <p className="issues-kanban-column-empty">—</p>
+              ) : (
+                columns[col].map((task) => (
+                  <div role="listitem" key={task.id}>
+                    <IssueCard task={task} />
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
         ))}
       </div>
     </div>

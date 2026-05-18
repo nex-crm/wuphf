@@ -8,6 +8,7 @@ import {
   postTaskComment,
   postTaskReject,
 } from "../../api/lifecycle";
+import type { InboxItem } from "../../lib/types/inbox";
 import type { DecisionPacket } from "../../lib/types/lifecycle";
 import { DecisionPacketView } from "./DecisionPacketView";
 
@@ -25,6 +26,13 @@ interface DecisionPacketRouteProps {
     | "reviewer_timeout"
     | "persistence_error";
   onClose?: () => void;
+  /**
+   * Inbox-row fallback used when the broker has not yet written a packet to
+   * disk. Renders the task's basic metadata instead of the cold "details
+   * aren't ready yet" placeholder, so the human at least sees what the task
+   * is about while the owner agent is still working.
+   */
+  fallbackItem?: Extract<InboxItem, { kind: "task" }>;
 }
 
 /**
@@ -40,6 +48,7 @@ export function DecisionPacketRoute({
   initialPacket,
   forceState,
   onClose,
+  fallbackItem,
 }: DecisionPacketRouteProps) {
   const query = useQuery<DecisionPacket>({
     queryKey: ["lifecycle", "task", taskId],
@@ -131,13 +140,22 @@ export function DecisionPacketRoute({
   }
 
   if (forceState === "error" || (query.isError && !query.data)) {
+    const message =
+      query.error instanceof Error
+        ? query.error.message
+        : "Network or persistence error.";
+    if (fallbackItem && /not yet available/i.test(message)) {
+      return (
+        <PacketPending
+          item={fallbackItem}
+          onRetry={() => query.refetch()}
+          onClose={close}
+        />
+      );
+    }
     return (
       <PacketError
-        message={
-          query.error instanceof Error
-            ? query.error.message
-            : "Network or persistence error."
-        }
+        message={message}
         onRetry={() => query.refetch()}
         onClose={close}
       />
@@ -208,6 +226,94 @@ function PacketSkeleton({ onClose: _onClose }: { onClose: () => void }) {
             style={{ width: `${60 + (i % 3) * 10}%` }}
           />
         ))}
+      </main>
+    </div>
+  );
+}
+
+function pendingStateExplainer(state: string): string {
+  switch (state) {
+    case "decision":
+      return "Waiting on a packet write. The owner agent has flagged this for a human call.";
+    case "review":
+      return "Reviewers are grading the work. Detail surfaces once enough grades land.";
+    case "changes_requested":
+      return "Changes were requested. The owner agent is iterating on the spec.";
+    case "blocked_on_pr_merge":
+      return "Waiting on an upstream PR merge before this task can land.";
+    case "approved":
+      return "Approved. The packet write is still in flight.";
+    case "rejected":
+      return "Rejected. The packet write is still in flight.";
+    default:
+      return "The owner agent is still working. Full decision packet will surface here once it lands.";
+  }
+}
+
+function PacketPending({
+  item,
+  onRetry,
+  onClose,
+}: {
+  item: Extract<InboxItem, { kind: "task" }>;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  const state = item.task?.state ?? "";
+  const explainer = pendingStateExplainer(state);
+  const owner = item.agentSlug || item.task?.assignment || "";
+  return (
+    <div
+      className="packet-shell packet-shell--message"
+      data-testid="decision-packet-pending"
+    >
+      <main className="packet-center">
+        <div className="packet-error" role="status">
+          <h2>{item.title || "(no subject)"}</h2>
+          <p>{explainer}</p>
+          <dl
+            style={{
+              display: "grid",
+              gridTemplateColumns: "auto 1fr",
+              columnGap: 12,
+              rowGap: 4,
+              fontSize: 13,
+              margin: "12px 0",
+              textAlign: "left",
+            }}
+          >
+            <dt style={{ color: "var(--text-tertiary)" }}>Task</dt>
+            <dd style={{ margin: 0 }}>
+              <code>{item.taskId}</code>
+            </dd>
+            {state ? (
+              <>
+                <dt style={{ color: "var(--text-tertiary)" }}>State</dt>
+                <dd style={{ margin: 0 }}>{state}</dd>
+              </>
+            ) : null}
+            {owner ? (
+              <>
+                <dt style={{ color: "var(--text-tertiary)" }}>Owner</dt>
+                <dd style={{ margin: 0 }}>@{owner}</dd>
+              </>
+            ) : null}
+            {item.channel ? (
+              <>
+                <dt style={{ color: "var(--text-tertiary)" }}>Channel</dt>
+                <dd style={{ margin: 0 }}>#{item.channel}</dd>
+              </>
+            ) : null}
+          </dl>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button type="button" className="retry" onClick={onRetry}>
+              Refresh
+            </button>
+            <button type="button" className="retry" onClick={onClose}>
+              Back to inbox
+            </button>
+          </div>
+        </div>
       </main>
     </div>
   );

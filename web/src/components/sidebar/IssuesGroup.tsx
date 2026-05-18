@@ -139,7 +139,7 @@ export function IssuesGroup({ open, onToggle }: IssuesGroupProps) {
         <button
           type="button"
           className="sidebar-icon-btn issues-new-icon-btn"
-          title="New issue (Phase 4)"
+          title="New issue"
           aria-label="New issue"
           onClick={() => void router.navigate({ to: "/issues/new" })}
           data-testid="issues-sidebar-new-btn"

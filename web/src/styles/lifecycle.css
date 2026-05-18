@@ -3055,3 +3055,345 @@ html[data-theme="noir-gold"] {
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
+
+/* ── Issues list (kanban) ─────────────────────────────────────────── */
+
+.issues-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px;
+  gap: 12px;
+}
+
+.issues-list-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.issues-list-heading {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.issues-list-search {
+  flex: 1 1 220px;
+  max-width: 320px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: var(--bg-input, var(--bg-card));
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.issues-list-search:focus {
+  outline: none;
+  border-color: var(--accent, #5b8def);
+}
+
+.issues-new-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  background: var(--accent, #5b8def);
+  color: var(--bg-primary, #fff);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.issues-new-btn:hover {
+  filter: brightness(1.08);
+}
+
+.issues-new-btn--header {
+  margin-left: auto;
+}
+
+.issues-kanban {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(180px, 1fr));
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+}
+
+.issues-kanban-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.02));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  gap: 6px;
+  min-height: 0;
+}
+
+.issues-kanban-column-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.issues-kanban-column-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.issues-kanban-column-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.issues-kanban-column-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.issues-kanban-column-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.issues-kanban-column-empty {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  margin: 4px 0 0;
+  text-align: center;
+}
+
+.issues-kanban-card {
+  background: var(--bg-card, var(--bg-primary, #fff));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.issues-kanban-card:hover,
+.issues-kanban-card:focus-visible {
+  border-color: var(--accent, #5b8def);
+  outline: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.issues-kanban-card-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.issues-kanban-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.issues-kanban-card-owner,
+.issues-kanban-card-channel {
+  font-variant-numeric: tabular-nums;
+}
+
+.issues-list--empty,
+.issues-list--error {
+  align-items: center;
+  justify-content: center;
+  padding: 48px 20px;
+  text-align: center;
+}
+
+.issues-empty-copy {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+
+.issues-list-error-card {
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.issues-list-retry-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.issues-list--loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 20px;
+}
+
+.issues-list-skeleton-row {
+  height: 14px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-secondary, rgba(0, 0, 0, 0.04)),
+    var(--bg-card, rgba(0, 0, 0, 0.08)),
+    var(--bg-secondary, rgba(0, 0, 0, 0.04))
+  );
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: issues-skel 1.6s ease-in-out infinite;
+}
+
+@keyframes issues-skel {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* ── Issue draft form ─────────────────────────────────────────────── */
+
+.issue-new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 640px;
+  margin: 24px auto;
+  padding: 24px;
+  background: var(--bg-card, var(--bg-primary, #fff));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.issue-new-form-heading {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.issue-new-form-hint {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.issue-new-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.issue-new-form-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.issue-new-form-field input,
+.issue-new-form-field textarea {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-input, var(--bg-primary, #fff));
+  color: var(--text-primary);
+}
+
+.issue-new-form-field textarea {
+  min-height: 110px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.issue-new-form-field input:focus,
+.issue-new-form-field textarea:focus {
+  outline: none;
+  border-color: var(--accent, #5b8def);
+}
+
+.issue-new-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.issue-new-form-error {
+  color: var(--text-danger, #c0392b);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* ── Inbox filter chips ───────────────────────────────────────────── */
+
+.inbox-filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+}
+
+.inbox-filter-chip {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbox-filter-chip:hover {
+  border-color: var(--accent, #5b8def);
+  color: var(--text-primary);
+}
+
+.inbox-filter-chip[aria-pressed="true"] {
+  background: var(--accent, #5b8def);
+  color: var(--bg-primary, #fff);
+  border-color: var(--accent, #5b8def);
+}
+
+.inbox-filter-chip-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}

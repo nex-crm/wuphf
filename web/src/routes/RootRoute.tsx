@@ -114,11 +114,6 @@ const SkillsApp = lazy(() =>
     default: m.SkillsApp,
   })),
 );
-const TasksApp = lazy(() =>
-  import("../components/apps/TasksApp").then((m) => ({
-    default: m.TasksApp,
-  })),
-);
 const Notebook = lazy(() => import("../components/notebook/Notebook"));
 const DecisionInbox = lazy(() =>
   import("../components/lifecycle/DecisionInbox").then((m) => ({
@@ -141,6 +136,11 @@ const IssuesList = lazy(() =>
 const IssueDocumentRoute = lazy(() =>
   import("../components/lifecycle/IssueDocumentRoute").then((m) => ({
     default: m.IssueDocumentRoute,
+  })),
+);
+const IssueNewForm = lazy(() =>
+  import("../components/lifecycle/IssueNewForm").then((m) => ({
+    default: m.IssueNewForm,
   })),
 );
 
@@ -289,7 +289,7 @@ function navigateNotebookEntry(
 }
 
 const APP_PANELS = {
-  tasks: TasksApp,
+  tasks: IssuesRedirect,
   requests: InboxRedirect,
   graph: GraphApp,
   policies: PoliciesApp,
@@ -372,45 +372,6 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
 }
 
 /**
- * IssueNewStub — Phase 3 placeholder for /issues/new.
- * Phase 4 replaces this with the CEO draft writer.
- * Renders a clear "not implemented yet" surface so `+ New issue` links
- * don't 404 or silently fail.
- */
-function IssueNewStub() {
-  return (
-    <div
-      className="app-panel active"
-      data-testid="issue-new-stub"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        flex: 1,
-        gap: 8,
-        padding: 32,
-        color: "var(--text-tertiary)",
-        fontSize: 14,
-      }}
-    >
-      <strong style={{ fontSize: 16, color: "var(--text-secondary)" }}>
-        New issue drafting coming in Phase 4
-      </strong>
-      <p style={{ margin: 0 }}>
-        Issue drafting with CEO will be available soon.
-      </p>
-      <Link
-        to="/issues"
-        style={{ color: "var(--text-secondary)", marginTop: 8 }}
-      >
-        Back to Issues
-      </Link>
-    </div>
-  );
-}
-
-/**
  * InboxRedirect navigates the user from the deprecated /apps/requests
  * and /reviews surfaces to the unified Inbox. Phase 2 collapsed both
  * surfaces into one Decision Inbox; Phase 2b deletes the heavy
@@ -439,6 +400,69 @@ function InboxRedirect() {
   );
 }
 
+/**
+ * IssueDetailRedirect routes legacy `/tasks/$taskId` URLs to the
+ * canonical issue detail surface so bookmarks keep working without
+ * resurfacing the deprecated TasksApp modal.
+ */
+function IssueDetailRedirect({ issueId }: { issueId: string }) {
+  useEffect(() => {
+    void router.navigate({
+      to: "/issues/$issueId",
+      params: { issueId },
+      replace: true,
+    });
+  }, [issueId]);
+  return (
+    <div
+      className="app-panel active"
+      data-testid="legacy-redirect-issue-detail"
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flex: 1,
+          color: "var(--text-tertiary)",
+          fontSize: 14,
+        }}
+      >
+        Redirecting to issue…
+      </div>
+    </div>
+  );
+}
+
+/**
+ * IssuesRedirect navigates the user from the deprecated /apps/tasks
+ * surface to the unified Issues list. Tasks-as-a-sidebar-app was
+ * replaced by the Issues group + dedicated /issues route; this stub
+ * keeps existing bookmarks working without surfacing the old
+ * TasksApp kanban inside the apps panel.
+ */
+function IssuesRedirect() {
+  useEffect(() => {
+    void router.navigate({ to: "/issues", replace: true });
+  }, []);
+  return (
+    <div className="app-panel active" data-testid="legacy-redirect-issues">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flex: 1,
+          color: "var(--text-tertiary)",
+          fontSize: 14,
+        }}
+      >
+        Redirecting to Issues…
+      </div>
+    </div>
+  );
+}
+
 function UnknownAppPanel({ appId }: { appId: string }) {
   return (
     <div className="app-panel active" data-testid={`app-page-${appId}`}>
@@ -459,19 +483,11 @@ function UnknownAppPanel({ appId }: { appId: string }) {
 }
 
 function AppPanel({ appId }: { appId: AppPanelId }) {
-  if (appId === "tasks") return <TaskAppPanel taskId={null} />;
+  if (appId === "tasks") return <IssuesRedirect />;
   const Panel = APP_PANELS[appId];
   return (
     <div className="app-panel active" data-testid={`app-page-${appId}`}>
       <Panel />
-    </div>
-  );
-}
-
-function TaskAppPanel({ taskId }: { taskId: string | null }) {
-  return (
-    <div className="app-panel active" data-testid="app-page-tasks">
-      <TasksApp taskId={taskId} />
     </div>
   );
 }
@@ -530,9 +546,9 @@ function MainContent() {
       }
       return <AppPanel appId={route.appId} />;
     case "task-board":
-      return <TaskAppPanel taskId={null} />;
+      return <IssuesRedirect />;
     case "task-detail":
-      return <TaskAppPanel taskId={route.taskId} />;
+      return <IssueDetailRedirect issueId={route.taskId} />;
     case "wiki":
     case "wiki-article":
       return <WikiSurface current="wiki" route={route} />;
@@ -560,7 +576,7 @@ function MainContent() {
     case "issue-detail":
       return <IssueDocumentRoute issueId={route.issueId} />;
     case "issue-new":
-      return <IssueNewStub />;
+      return <IssueNewForm />;
     case "unknown":
       // RoutedBody catches root-only matches via isUnmatchedRoute, but
       // useCurrentRoute can also return `unknown` for matched leaves that
