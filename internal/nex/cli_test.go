@@ -105,6 +105,21 @@ func TestRun_MissingBinary(t *testing.T) {
 	}
 }
 
+// TestRun_ShimWithoutBinary covers the case the WUPHF onboarding flow hit in
+// the wild: the `nex` alias on PATH is the @nex-ai/nex npm shim, which runs
+// but can't find the real binary, prints "nex-cli binary not found", and
+// exits non-zero. Run() must report that as ErrNotInstalled, not a raw error.
+func TestRun_ShimWithoutBinary(t *testing.T) {
+	dir := withIsolatedPATH(t)
+	writeFakeNexCLI(t, dir, "nex",
+		"echo 'nex-cli binary not found. Install it with: curl ...' >&2; exit 1")
+	t.Setenv("WUPHF_NO_NEX", "")
+	_, err := Run(context.Background(), "setup", "user@example.com")
+	if !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("Run: expected ErrNotInstalled for a shim without its binary, got %v", err)
+	}
+}
+
 func TestRun_Disabled(t *testing.T) {
 	dir := withIsolatedPATH(t)
 	writeFakeNexCLI(t, dir, "nex-cli", "echo ok")

@@ -2,7 +2,7 @@
  * OnboardingDMRoute — Phase 2 entry point for the deterministic CEO conversation.
  *
  * This is a thin wrapper around DMView that:
- *   1. Points DMView at the reserved channel `dm:ceo:onboarding`
+ *   1. Points DMView at the canonical CEO DM channel
  *   2. Exposes the PendingSuggestion context so InterviewBar can render
  *      CEO cards (ceo_form_field, ceo_chip_row, ceo_checklist, etc.)
  *   3. Reads onboarding state on mount and subscribes to updates
@@ -11,7 +11,7 @@
  * decisions"):
  *   "Frontend reuses DMView for the CEO chat. A small OnboardingDMRoute
  *    wrapper provides the preview-overlay context and points DMView at
- *    the reserved dm:ceo:onboarding channel."
+ *    the CEO DM channel."
  *
  * No new chat shell, no new composer, no duplicated SSE/scroll/optimistic-post
  * code. CEO DM inherits all of that from DMView.
@@ -19,6 +19,7 @@
 
 import { createContext, useContext } from "react";
 
+import { directChannelSlug } from "../../stores/app";
 import { DMView } from "../messages/DMView";
 import type { CeoSuggestion } from "./types";
 import { useOnboardingState } from "./useOnboardingState";
@@ -46,13 +47,13 @@ export function useOnboardingDMContext(): OnboardingDMContextValue {
  */
 export const OnboardingDMContextProvider = OnboardingDMContext.Provider;
 
-// ── Reserved channel slug ──────────────────────────────────────────────────
-
-/** The broker reserves this slug for the onboarding CEO DM. */
-const CEO_ONBOARDING_CHANNEL = "dm:ceo:onboarding";
+// ── CEO DM channel slug ────────────────────────────────────────────────────
 
 /** The agent slug for the CEO (matches existing broker configuration). */
 const CEO_AGENT_SLUG = "ceo";
+
+/** The broker stores DMs as canonical pair-sorted slugs. */
+const CEO_ONBOARDING_CHANNEL = directChannelSlug(CEO_AGENT_SLUG);
 
 // ── Component ─────────────────────────────────────────────────────────────
 

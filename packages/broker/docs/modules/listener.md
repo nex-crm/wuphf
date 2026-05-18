@@ -28,6 +28,7 @@ flowchart LR
   dispatch -- "GET /api/threads/:tid/receipts" --> list["ReceiptStore.list({threadId, cursor?, limit?})<br/>200 JSON array (+ Link rel=next when more pages)<br/>400 on invalid cursor/limit"]
   dispatch -- "/api/v1/cost/*" --> cost["cost ledger routes<br/>read: bearer<br/>mutate: bearer + operator capability"]
   dispatch -- "/api/agents/:id/provider-routing" --> routing["provider-routing routes<br/>GET read · PUT replace"]
+  dispatch -- "/api/webauthn/*" --> webauthn["WebAuthn control-plane routes<br/>registration · cosign"]
   dispatch -- "/api/runners*" --> runners["runner routes<br/>POST spawn · GET events SSE<br/>bearer maps to AgentId"]
   dispatch -- "unknown /api/*" --> apinotfound["404"]
   dispatch -- "/, /index.html, /assets/*" --> static["GET/HEAD only · RendererBundleSource"]
@@ -49,6 +50,14 @@ falling into static dispatch.
 The broker emits this through `apiBootstrapToJson` from `@wuphf/protocol`; that
 codec is the single source of truth for the wire shape and is round-trip
 verified by both packages' tests.
+
+WebAuthn registration/challenge and assertion option objects are the documented
+carve-out: they are standardized W3C ceremony JSON produced by
+`@simplewebauthn/server`, wrapped in broker-local
+`{ challengeId, creationOptions }` (registration) and
+`{ challengeId, requestOptions }` (cosign) envelopes. They are not WUPHF protocol wire contracts. Inbound broker
+control-plane bodies are strict known-key JSON, while the final successful
+co-sign result is always emitted through `signedApprovalTokenToJsonValue`.
 
 ### Cost-ledger routes
 
@@ -81,6 +90,32 @@ behave like unknown authenticated API routes and return 404.
 |---|---|---|---|
 | GET | `/api/agents/:agentId/provider-routing` | bearer | Returns `agentProviderRoutingToJsonValue(await store.get(agentId))`. |
 | PUT | `/api/agents/:agentId/provider-routing` | bearer | Parses the body through `agentProviderRoutingWriteRequestFromJson`, rejects body/path `agentId` mismatches with 400, atomically replaces the routes via `store.put`, and returns `{ applied: true }`. |
+
+### WebAuthn co-sign routes
+
+When `createBroker({ webauthn })` is supplied, the listener mounts WebAuthn
+registration and co-sign routes under `/api/webauthn/*`. Without that config,
+those paths behave like unknown authenticated API routes and return 404. The
+route config supplies the SQLite-backed store, bearer-to-agent map, RP ID,
+allowed origins, threshold policy, and clock. v1 defaults are config-driven
+with RP ID `localhost`, dev origin `http://localhost:5173`, and the
+post-listen packaged origin `http://localhost:<broker-port>`. The listener
+still binds `127.0.0.1` only; `localhost` is the browser-facing host used so
+WebAuthn's RP ID matches the page origin. Startup prunes expired WebAuthn
+consumed-token rows and expired orphan challenge rows using the injected clock;
+request paths do not run unbounded cleanup.
+
+| Method | Path | Auth | Contract |
+|---|---|---|---|
+| POST | `/api/webauthn/registration/challenge` | bearer + agent map | Parses `{ role }`, creates a random challenge, stores it against the bearer-mapped agent and role, and returns broker control-plane `{ challengeId, creationOptions }` with W3C `PublicKeyCredentialCreationOptions` JSON. Registration is standalone and does not require a pending claim. |
+| POST | `/api/webauthn/registration/verify` | bearer + agent map | Parses `{ challengeId, attestationResponse }`, rejects expired/reused/wrong-agent challenges, verifies attestation through `@simplewebauthn/server`, and persists `{ credentialId, publicKey, signCount, role, agentId }`. |
+| POST | `/api/webauthn/cosign/challenge` | bearer + agent map | Parses `{ claim, scope }` through `approvalClaimFromJson` and `approvalScopeFromJson`, checks their target binding, creates a random challenge and token id, stores the canonical claim/scope preimage hash, and returns broker control-plane `{ challengeId, requestOptions }` with W3C `PublicKeyCredentialRequestOptions` JSON. |
+| POST | `/api/webauthn/cosign/verify` | bearer + agent map | Parses `{ challengeId, assertionResponse }`, rejects expired/consumed/wrong-agent/wrong-role submissions, verifies assertion origin/RP ID/user verification/signature/sign count through `@simplewebauthn/server`, counts distinct trusted roles for the approval group, atomically consumes the token id, and returns either `{ status: "approval_pending", satisfiedRoles, requiredThreshold }` or `signedApprovalTokenToJsonValue(token)`. Replays of an already consumed `tokenId` return the recorded outcome only while the challenge remains within its validity window; after expiry the response is `400 {"error":"challenge_expired"}`. |
+
+WebAuthn store writes use the same storage-failure contract as receipt writes:
+transient SQLite `BUSY`/`LOCKED` returns `503 {"error":"store_busy"}` with
+`Retry-After: 1`, `SQLITE_FULL` returns `507 {"error":"store_full"}`, and
+persistent storage-unavailable failures return `503 {"error":"storage_error"}`.
 
 ### Runner routes
 

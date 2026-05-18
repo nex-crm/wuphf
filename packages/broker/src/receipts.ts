@@ -35,6 +35,16 @@ import {
   ReceiptStoreUnavailableError,
 } from "./receipt-store.ts";
 import type { BrokerLogger } from "./types.ts";
+import {
+  ReceiptApprovalTokenVerificationError,
+  verifyReceiptApprovalTokens,
+} from "./webauthn/receipt-token-verify.ts";
+import {
+  type WebAuthnStore,
+  WebAuthnStoreBusyError,
+  WebAuthnStoreFullError,
+  WebAuthnStoreUnavailableError,
+} from "./webauthn/types.ts";
 
 // 1 MiB body budget. This is the broker's wire-layer pre-parse cap and is
 // INTENTIONALLY stricter than the protocol-level receipt budget (see
@@ -52,6 +62,7 @@ const LIST_LIMIT_PARAM = /^[1-9][0-9]*$/;
 
 interface ReceiptRouteDeps {
   readonly receiptStore: ReceiptStore;
+  readonly webauthnStore: WebAuthnStore | null;
   readonly logger: BrokerLogger;
 }
 
@@ -137,6 +148,36 @@ export async function handleReceiptCreate(
     deps.logger.warn("receipt_post_rejected", { reason: "invalid_receipt" });
     writeJsonResponse(res, 400, JSON.stringify({ error: "invalid_receipt", reason }));
     return;
+  }
+
+  try {
+    receipt = await verifyReceiptApprovalTokens(receipt, {
+      webauthnStore: deps.webauthnStore,
+    });
+  } catch (err) {
+    if (err instanceof ReceiptApprovalTokenVerificationError) {
+      deps.logger.warn("receipt_post_rejected", { reason: err.code });
+      writeJsonResponse(res, 400, JSON.stringify({ error: err.code, reason: err.message }));
+      return;
+    }
+    if (err instanceof WebAuthnStoreFullError) {
+      deps.logger.warn("receipt_post_rejected", { reason: "webauthn_store_full" });
+      writeJsonResponse(res, 507, JSON.stringify({ error: "store_full" }));
+      return;
+    }
+    if (err instanceof WebAuthnStoreBusyError) {
+      deps.logger.warn("receipt_post_rejected", { reason: "webauthn_store_busy" });
+      writeJsonResponse(res, 503, JSON.stringify({ error: "store_busy" }), {
+        "Retry-After": "1",
+      });
+      return;
+    }
+    if (err instanceof WebAuthnStoreUnavailableError) {
+      deps.logger.warn("receipt_post_rejected", { reason: "webauthn_storage_error" });
+      writeJsonResponse(res, 503, JSON.stringify({ error: "storage_error" }));
+      return;
+    }
+    throw err;
   }
 
   let result: { readonly existed: boolean };

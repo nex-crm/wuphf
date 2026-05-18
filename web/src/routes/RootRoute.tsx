@@ -24,7 +24,7 @@ import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
 import { TypingIndicator } from "../components/messages/TypingIndicator";
-import { OnboardingDMRoute } from "../components/onboarding/OnboardingDMRoute";
+import { OnboardingChat } from "../components/onboarding/OnboardingChat";
 import { PrePickScreen } from "../components/onboarding/PrePickScreen";
 import { ConfirmHost } from "../components/ui/ConfirmDialog";
 import { ProviderSwitcherHost } from "../components/ui/ProviderSwitcher";
@@ -690,7 +690,7 @@ export default function RootRoute() {
     if (onGenericRoute) {
       void router.navigate({
         to: "/dm/$agentSlug",
-        params: { agentSlug: "ceo:onboarding" },
+        params: { agentSlug: "ceo" },
         replace: true,
       });
     }
@@ -766,15 +766,13 @@ export default function RootRoute() {
     );
   } else if (!onboardingComplete) {
     if (inCeoOnboarding || bootPhase) {
-      // CEO conversation running — Shell with OnboardingDMRoute.
-      // Already-onboarded users (onboardingComplete === true) skip this
-      // entirely via the branch above.
-      body = (
-        <Shell>
-          <OnboardingDMRoute />
-          <Outlet />
-        </Shell>
-      );
+      // CEO wizard running — render OnboardingChat full-screen, NOT inside
+      // the office Shell. The user is not "in the office" yet; the wizard
+      // is mocked as a CEO chat so the experience reads as a conversation
+      // while still gating progress through deterministic chip / form
+      // cards. Once the broker flips onboarded=true the user falls through
+      // to the post-onboarding Shell branch below and lands in the office.
+      body = <OnboardingChat />;
     } else {
       // Provider picker. No phase set yet — user hasn't picked a runtime.
       // After they pick, setInCeoOnboarding(true) to enter the CEO DM.
@@ -782,7 +780,7 @@ export default function RootRoute() {
         <PrePickScreen
           onComplete={() => {
             // PrePickScreen transitions directly to CEO DM.
-            // The broker sets state.Phase = "greet" after /onboarding/complete.
+            // The broker sets state.Phase = "greet" after /onboarding/transition.
             // We enter the in-CEO state here so the Shell renders immediately.
             setInCeoOnboarding(true);
           }}

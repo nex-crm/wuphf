@@ -1,7 +1,7 @@
 /**
  * OnboardingDMRoute tests
  *
- * 1. Renders DMView with the correct channel slug (dm:ceo:onboarding)
+ * 1. Renders DMView with the canonical CEO DM channel slug
  * 2. Surfaces PendingSuggestion as a CEO card via CeoCardSection
  * 3. Loading state renders without crash when state is undefined
  */
@@ -59,12 +59,12 @@ afterEach(() => {
 });
 
 describe("OnboardingDMRoute", () => {
-  it("renders DMView pointed at dm:ceo:onboarding channel", async () => {
+  it("renders DMView pointed at the canonical CEO DM channel", async () => {
     getMock.mockResolvedValue({ phase: "greet" });
     render(<OnboardingDMRoute />, { wrapper });
 
     const stub = await screen.findByTestId("dm-view-stub");
-    expect(stub).toHaveAttribute("data-channel", "dm:ceo:onboarding");
+    expect(stub).toHaveAttribute("data-channel", "ceo__human");
     expect(stub).toHaveAttribute("data-agent", "ceo");
   });
 

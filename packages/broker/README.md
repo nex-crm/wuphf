@@ -79,6 +79,10 @@ store.close();
 | GET | `/api/v1/cost/replay-check` | bearer | Replays cost events and compares projections. 200 when `ok: true`; 500 with structured discrepancies when drift or unparseable cost payloads are found. |
 | GET | `/api/agents/:agentId/provider-routing` | bearer | Returns the per-agent provider-routing config via `agentProviderRoutingToJsonValue`. Mounted when `createBroker({ runners: { agentProviderRoutingStore } })` is supplied. |
 | PUT | `/api/agents/:agentId/provider-routing` | bearer | Replaces all routes for the agent. Body parses through `agentProviderRoutingWriteRequestFromJson`; the body `agentId` must match the path `agentId`. |
+| POST | `/api/webauthn/registration/challenge` | bearer + agent map + enrollable role | Broker control-plane route. Body `{ role }`; the role must be allowed by `webauthn.enrollableRoles` for the bearer-mapped agent. Returns `{ challengeId, creationOptions }` where `creationOptions` is the W3C `PublicKeyCredentialCreationOptions` JSON from `@simplewebauthn/server`. Mounted when `createBroker({ webauthn })` is supplied. Store writes map `SQLITE_BUSY`/`LOCKED` to 503 + `Retry-After`, `SQLITE_FULL` to 507, and storage-unavailable errors to `503 {"error":"storage_error"}`. |
+| POST | `/api/webauthn/registration/verify` | bearer + agent map | Broker control-plane route. Body `{ challengeId, attestationResponse }`; verifies attestation with `@simplewebauthn/server`, persists the credential against the bearer-mapped agent and authorized challenge role, then returns `{ credentialId, role }`. Store write failures use the same 503/507 mapping as registration challenge creation. |
+| POST | `/api/webauthn/cosign/challenge` | bearer + agent map | Broker control-plane route. Body `{ claim, scope }`; parses claim/scope through `@wuphf/protocol`, requires agent-scoped claims to target the bearer-mapped agent, binds a random WebAuthn challenge to the canonical preimage, and returns `{ challengeId, requestOptions }` where `requestOptions` is the W3C `PublicKeyCredentialRequestOptions` JSON. Store write failures use the same 503/507 mapping as registration challenge creation. |
+| POST | `/api/webauthn/cosign/verify` | bearer + agent map | Verifies assertion origin, RP ID, credential id, role, monotonic sign count, and threshold. Pending thresholds return `{ status: "approval_pending", satisfiedRoles, requiredThreshold }`; satisfied thresholds return `signedApprovalTokenToJsonValue(token)`. Replays of consumed `tokenId`s return the recorded outcome only within the challenge validity window; after expiry they return `400 {"error":"challenge_expired"}`. Store write failures use the same 503/507 mapping as registration challenge creation. |
 | POST | `/api/runners` | bearer + runner agent map | Body: `RunnerSpawnRequest`. The bearer maps to one `agentId`; mismatches return 403. The broker mints/injects `BrokerIdentity`, resolves the `CredentialHandle`, and returns `{ runnerId }`. Mounted only when `createBroker({ runners })` is supplied. |
 | GET | `/api/runners/:id/events` | bearer + runner agent map | SSE stream of `RunnerEvent` values. The caller's bearer-mapped `agentId` must match the runner owner. |
 | GET | `/`, `/index.html` | none (loopback) | Renderer bundle (404 if `renderer: null`). |
@@ -98,8 +102,9 @@ GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
 ## Invariants
 
 1. **Bind is `127.0.0.1` only.** Never `0.0.0.0`, never a LAN IP.
-2. **DNS-rebinding guard runs on every request.** Both `Host` (allowed loopback
-   hostname) and `RemoteAddr` (loopback peer IP) must pass.
+2. **DNS-rebinding guard runs on every request.** Both `Host`
+   (`127.0.0.1` or `localhost`, with an optional port) and `RemoteAddr`
+   (loopback peer IP) must pass.
 3. **Constant-time token comparison.** Bearer compare goes through
    `node:crypto.timingSafeEqual`.
 4. **Token is bootstrap-only on `/api-token`.** Every other API surface requires
@@ -120,12 +125,25 @@ GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
    identity.
 9. **Provider-routing writes are path-bound.** The URL `agentId` and request
    body `agentId` must match before the broker writes routing state.
+10. **WebAuthn ceremony objects are broker control-plane shapes.** The
+    creation/request option JSON is the standardized W3C shape emitted by
+    `@simplewebauthn/server`, not a WUPHF protocol wire contract. Final
+    approval tokens still go through `signedApprovalTokenToJsonValue`.
+11. **WebAuthn registration roles are broker-authorized.** The request body can
+    ask for a role, but only roles listed for the bearer-mapped agent in
+    `webauthn.enrollableRoles` can receive a registration challenge. Agents
+    without an explicit entry cannot enroll any role.
+12. **Packaged WebAuthn uses localhost as the browser origin.** The listener
+    still binds `127.0.0.1`, but the desktop loads
+    `http://localhost:<port>/` and the broker appends
+    `http://localhost:<port>` to WebAuthn `allowedOrigins` so the RP ID
+    `localhost` matches the page origin.
 
 ## Spec anchors
 
 - `business-musings/wuphf-greenfield-rewrite-rfc-2026-05.md` §7.3 (IPC discipline) and §15 Stream A row "feat/broker-loopback-listener".
 - `docs/architecture/broker-contract.md` (the v0 broker contract this branch carries forward to v1).
-- `@wuphf/protocol#ApiBootstrap`, `isAllowedLoopbackHost`, `isLoopbackRemoteAddress`.
+- `@wuphf/protocol#ApiBootstrap`, `BrokerUrl`, and `isLoopbackRemoteAddress`.
 
 ## Validation
 

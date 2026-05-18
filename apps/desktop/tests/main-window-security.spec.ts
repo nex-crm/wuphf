@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseBootstrap } from "../src/renderer/bootstrap.ts";
@@ -399,6 +401,28 @@ describe("createSecureWindow", () => {
         expectedDevServerUrl: "http://192.168.0.10:5173/",
       }),
     ).toThrow("Refusing to load non-local ELECTRON_RENDERER_URL: http://192.168.0.10:5173/");
+  });
+
+  it("loads the localhost browser form of a broker URL for WebAuthn eligibility", async () => {
+    const { createSecureWindow } = await import("../src/main/window.ts");
+
+    createSecureWindow({
+      preloadPath: "/tmp/preload.js",
+      rendererIndexPath: "/tmp/index.html",
+      allowDevServerUrl: false,
+      brokerUrl: "http://127.0.0.1:54321",
+    });
+
+    const loadedUrl = getOnlyWindow().loadURL.mock.calls[0]?.[0];
+    if (loadedUrl === undefined) {
+      throw new Error("Expected broker loadURL call");
+    }
+    const loadedHost = new URL(loadedUrl).hostname;
+    const webAuthnRpId = "localhost";
+
+    expect(loadedUrl).toBe("http://localhost:54321/");
+    expect(loadedHost).toBe(webAuthnRpId);
+    expect(isIP(webAuthnRpId)).toBe(0);
   });
 
   it("rejects a brokerUrl that parses but is not a loopback http URL", async () => {

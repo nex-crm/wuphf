@@ -15,6 +15,8 @@ import {
 } from "../../api/client";
 import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
+import { CredentialRegistrationPanel } from "../cosign";
+import { CommandRow } from "../ui/CommandRow";
 import {
   ShredCardSubtitle,
   ShredDeletionsList,
@@ -284,53 +286,6 @@ function StatusDot({ status }: { status: LocalProviderStatus | undefined }) {
         flexShrink: 0,
       }}
     />
-  );
-}
-
-function CommandRow({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false);
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      showNotice("Copy failed — select the text and copy manually.", "error");
-    }
-  };
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 8,
-        alignItems: "center",
-        padding: "6px 8px",
-        background: "var(--bg-card-soft, var(--bg-card))",
-        border: "1px solid var(--border-light)",
-        borderRadius: 4,
-        marginTop: 6,
-      }}
-    >
-      <code
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 12,
-          flex: 1,
-          overflowX: "auto",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {command}
-      </code>
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        onClick={onCopy}
-        style={{ flexShrink: 0 }}
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
-    </div>
   );
 }
 
@@ -940,6 +895,11 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
           your API key in the API Keys section.
         </p>
         <NexConnectPanel />
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <div style={styles.groupTitle}>Approval cosign</div>
+        <CredentialRegistrationPanel />
       </div>
 
       <SaveButton label="Save integration settings" onSave={onSave} />

@@ -18,6 +18,10 @@
 //   POST /api/v1/cost/idempotency/prune   — bearer + operator capability required.
 //   GET  /api/agents/:id/provider-routing — bearer required. Per-agent provider routes.
 //   PUT  /api/agents/:id/provider-routing — bearer required. Replace provider routes.
+//   POST /api/webauthn/registration/challenge — bearer + agent map required.
+//   POST /api/webauthn/registration/verify    — bearer + agent map required.
+//   POST /api/webauthn/cosign/challenge       — bearer + agent map required.
+//   POST /api/webauthn/cosign/verify          — bearer + agent map required.
 //   POST /api/runners                     — bearer + runner agent map required.
 //   GET  /api/runners/:id/events          — bearer + runner agent map required. SSE.
 //   GET  /                                — static (renderer bundle) or 404 if disabled.
@@ -37,11 +41,14 @@ import {
   type AgentId,
   type ApiBootstrap,
   type ApiToken,
+  type ApprovalRole,
   apiBootstrapToJson,
   asAgentId,
   asBrokerPort,
   asBrokerUrl,
   type BrokerPort,
+  isApprovalRole,
+  MAX_APPROVAL_TOKEN_LIFETIME_MS,
 } from "@wuphf/protocol";
 import { WebSocketServer } from "ws";
 
@@ -50,7 +57,7 @@ import type { AgentProviderRoutingStore } from "./agent-provider-routing/types.t
 import { extractBearerFromHeader, tokenMatches } from "./auth.ts";
 import { DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS } from "./cost-ledger/idempotency.ts";
 import { type CostRouteDeps, handleCostRoute } from "./cost-ledger/routes.ts";
-import { checkLoopbackRequest } from "./dns-rebinding-guard.ts";
+import { checkLoopbackRequest, parseAllowedBrokerHost } from "./dns-rebinding-guard.ts";
 import { InMemoryReceiptStore, type ReceiptStore } from "./receipt-store.ts";
 import { handleReceiptCreate, handleReceiptGet, handleThreadReceiptsList } from "./receipts.ts";
 import { createRunnerRouteState, type RunnerRouteState } from "./runners/route.ts";
@@ -59,12 +66,31 @@ import { startSseSession } from "./sse.ts";
 import { attachTerminalUpgrade } from "./terminal-ws.ts";
 import { generateApiToken } from "./token.ts";
 import { type BrokerConfig, type BrokerHandle, type BrokerLogger, NOOP_LOGGER } from "./types.ts";
+import { createSimpleWebAuthnCeremony } from "./webauthn/ceremony.ts";
+import {
+  createOpportunisticPruningWebAuthnStore,
+  WEBAUTHN_PRUNE_BATCH_ROWS,
+} from "./webauthn/prune.ts";
+import { handleWebAuthnRoute } from "./webauthn/route.ts";
+import {
+  type Clock,
+  SYSTEM_CLOCK,
+  WEBAUTHN_ALLOWED_ORIGINS,
+  WEBAUTHN_CHALLENGE_TTL_MS,
+  WEBAUTHN_DEFAULT_ENROLLABLE_ROLES,
+  WEBAUTHN_RP_ID,
+  WEBAUTHN_RP_NAME,
+  WEBAUTHN_TRUSTED_APPROVAL_ROLES,
+  type WebAuthnRouteDeps,
+} from "./webauthn/types.ts";
 
 const LOOPBACK_HOST = "127.0.0.1";
+const BROWSER_WEBAUTHN_HOST = "localhost";
 
 export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHandle> {
   const logger: BrokerLogger = config.logger ?? NOOP_LOGGER;
   const token: ApiToken = config.token ?? generateApiToken();
+  const clock = config.clock ?? SYSTEM_CLOCK;
   const staticHandler = createStaticHandler(config.renderer ?? null);
   const trustedOrigins = normalizeTrustedOrigins(config.trustedOrigins);
   // Default to an in-memory store when the host doesn't supply one. Branch
@@ -75,6 +101,84 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   // Reuse the same bearer→agent binding map that runner spawn uses so a
   // bearer pinned to agent_alpha cannot read or PUT agent_beta's routing.
   const tokenAgentIds = config.runners?.tokenAgentIds ?? null;
+  const webauthnTrustedRoles: readonly ApprovalRole[] | null =
+    config.webauthn === undefined
+      ? null
+      : [...(config.webauthn.trustedRoles ?? WEBAUTHN_TRUSTED_APPROVAL_ROLES)];
+  const webauthnEnrollableRoles =
+    config.webauthn?.enrollableRoles ?? new Map<AgentId, readonly ApprovalRole[]>();
+  let webauthnDefaultThreshold: number | null = null;
+  let webauthnReceiptCoSignThreshold: number | null = null;
+  if (webauthnTrustedRoles !== null) {
+    assertKnownApprovalRoles("webauthn.trustedRoles", webauthnTrustedRoles);
+    assertNoTrustedDefaultEnrollableRole(webauthnTrustedRoles);
+    if (config.webauthn?.enrollableRoles !== undefined) {
+      assertConfiguredEnrollableRoles(
+        config.webauthn.enrollableRoles,
+        config.webauthn.trustedRoles ?? [],
+      );
+    }
+    webauthnDefaultThreshold = normalizeThreshold(config.webauthn?.defaultThreshold ?? 1);
+    webauthnReceiptCoSignThreshold = normalizeThreshold(
+      config.webauthn?.receiptCoSignThreshold ?? config.webauthn?.defaultThreshold ?? 1,
+    );
+    assertWebAuthnThresholdPossible(
+      "defaultThreshold",
+      webauthnDefaultThreshold,
+      webauthnTrustedRoles,
+    );
+    assertWebAuthnThresholdPossible(
+      "receiptCoSignThreshold",
+      webauthnReceiptCoSignThreshold,
+      webauthnTrustedRoles,
+    );
+  }
+  const webauthnRpId =
+    config.webauthn === undefined
+      ? WEBAUTHN_RP_ID
+      : normalizeWebAuthnRpId(config.webauthn.rpId ?? WEBAUTHN_RP_ID);
+  const webauthnAllowedOrigins =
+    config.webauthn === undefined
+      ? []
+      : normalizeWebAuthnAllowedOrigins(
+          config.webauthn.allowedOrigins ?? WEBAUTHN_ALLOWED_ORIGINS,
+          webauthnRpId,
+        );
+  const webauthnChallengeTtlMs =
+    config.webauthn === undefined
+      ? WEBAUTHN_CHALLENGE_TTL_MS
+      : normalizeWebAuthnChallengeTtlMs(
+          config.webauthn.challengeTtlMs ?? WEBAUTHN_CHALLENGE_TTL_MS,
+        );
+  if (config.webauthn !== undefined) {
+    assertWebAuthnRpIdCompatibleWithHostname(
+      webauthnRpId,
+      BROWSER_WEBAUTHN_HOST,
+      "packaged renderer origin",
+    );
+    assertWebAuthnChallengeExpirySafe(readWebAuthnClock(clock), webauthnChallengeTtlMs);
+  }
+  let webauthn =
+    config.webauthn === undefined
+      ? null
+      : ({
+          store: createOpportunisticPruningWebAuthnStore(config.webauthn.store, {
+            clock,
+            logger,
+          }),
+          tokenAgentIds: config.webauthn.tokenAgentIds,
+          enrollableRoles: webauthnEnrollableRoles,
+          ceremony: config.webauthn.ceremony ?? createSimpleWebAuthnCeremony(),
+          clock,
+          rpName: config.webauthn.rpName ?? WEBAUTHN_RP_NAME,
+          rpId: webauthnRpId,
+          allowedOrigins: webauthnAllowedOrigins,
+          challengeTtlMs: webauthnChallengeTtlMs,
+          trustedRoles: webauthnTrustedRoles ?? [],
+          defaultThreshold: webauthnDefaultThreshold ?? 1,
+          receiptCoSignThreshold: webauthnReceiptCoSignThreshold ?? 1,
+          logger,
+        } satisfies WebAuthnRouteDeps);
   const cost =
     config.cost === undefined
       ? null
@@ -94,6 +198,9 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   }
   if (cost !== null) {
     pruneCostIdempotencyOnStartup(cost, logger);
+  }
+  if (webauthn !== null) {
+    await pruneWebAuthnOnStartup(webauthn, logger);
   }
   const runnerRoutes =
     config.runners === undefined
@@ -115,6 +222,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       runnerRoutes,
       agentProviderRoutingStore,
       tokenAgentIds,
+      webauthn,
     }).catch((err: unknown) => {
       logger.error("listener_route_failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -133,6 +241,14 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
 
   const port = await listen(server, config.port ?? 0);
   const url = `http://${LOOPBACK_HOST}:${port}`;
+  if (webauthn !== null) {
+    // WebAuthn verifies the renderer's browser origin. With port: 0 the
+    // broker's own packaged renderer origin is knowable only after listen().
+    webauthn = {
+      ...webauthn,
+      allowedOrigins: appendAllowedWebAuthnOrigin(webauthn.allowedOrigins, port),
+    };
+  }
   logger.info("listener_started", { port, url });
 
   let stopInflight: Promise<void> | null = null;
@@ -164,6 +280,7 @@ interface RouteDeps {
   readonly runnerRoutes: RunnerRouteState | null;
   readonly agentProviderRoutingStore: AgentProviderRoutingStore | null;
   readonly tokenAgentIds: ReadonlyMap<ApiToken, AgentId> | null;
+  readonly webauthn: WebAuthnRouteDeps | null;
 }
 
 async function routeRequest(
@@ -264,6 +381,7 @@ async function routeRequest(
   if (pathname === "/api/receipts") {
     await handleReceiptCreate(req, res, {
       receiptStore: deps.receiptStore,
+      webauthnStore: deps.webauthn?.store ?? null,
       logger: deps.logger,
     });
     return;
@@ -275,6 +393,7 @@ async function routeRequest(
     }
     await handleReceiptGet(pathname, res, {
       receiptStore: deps.receiptStore,
+      webauthnStore: deps.webauthn?.store ?? null,
       logger: deps.logger,
     });
     return;
@@ -286,6 +405,7 @@ async function routeRequest(
     }
     await handleThreadReceiptsList(req, res, {
       receiptStore: deps.receiptStore,
+      webauthnStore: deps.webauthn?.store ?? null,
       logger: deps.logger,
     });
     return;
@@ -307,6 +427,10 @@ async function routeRequest(
       });
       return;
     }
+  }
+  if (deps.webauthn !== null && pathname.startsWith("/api/webauthn/")) {
+    const handled = await handleWebAuthnRoute(req, res, pathname, deps.webauthn);
+    if (handled) return;
   }
   if (deps.runnerRoutes !== null && pathname.startsWith("/api/runners")) {
     const handled = await deps.runnerRoutes.handle(req, res, pathname);
@@ -352,10 +476,9 @@ async function routeRequest(
 
 function handleApiToken(req: IncomingMessage, res: ServerResponse, deps: RouteDeps): void {
   // Bootstrap returns the bearer + broker URL. The Host header is already
-  // validated by the loopback guard; we synthesize the broker_url from the
-  // listener's bound port (taken from the request socket) so the response
-  // is honest about where the broker is listening even when a forwarded
-  // Host header tries to lie.
+  // validated by the loopback guard, and only `127.0.0.1` or `localhost`
+  // can reach this point. Pair that host with the socket's bound port so
+  // browser same-origin callers receive a URL matching their page origin.
   const localAddress = req.socket.localAddress ?? LOOPBACK_HOST;
   const localPort = req.socket.localPort ?? 0;
   if (localPort === 0) {
@@ -371,15 +494,18 @@ function handleApiToken(req: IncomingMessage, res: ServerResponse, deps: RouteDe
   }
   // asBrokerUrl validates the full shape (http: scheme, explicit non-default
   // port, loopback host) at the wire boundary. We just built the URL from
-  // socket.localAddress + localPort which are both already validated; this
-  // is belt-and-suspenders against future refactors that might produce a
+  // the validated Host header and the socket's bound port; this is
+  // belt-and-suspenders against future refactors that might produce a
   // malformed URL silently. Throwing here would 500 the caller via the
   // routeRequest catch in createBroker — preferable to emitting a wire
   // value the codec would reject on read.
-  const brokerUrl = asBrokerUrl(`http://${normalizeLoopback(localAddress)}:${localPort}`);
+  const brokerHost =
+    parseAllowedBrokerHost(req.headers.host ?? "") ?? normalizeLoopback(localAddress);
+  const brokerUrl = asBrokerUrl(`http://${brokerHost}:${localPort}`);
 
   // Browser-hardening: if the request carries an Origin header (every
-  // browser-context fetch does), it MUST match the broker's bound origin.
+  // browser-context fetch does), it MUST match the validated Host + bound
+  // port origin we will return in the bootstrap body.
   // This blocks cross-origin fetches from same-machine browser contexts
   // (Chrome extensions, dev-tool consoles attached to other pages, third-
   // party local web apps that happen to be running). It does NOT block
@@ -465,6 +591,38 @@ function pruneCostIdempotencyOnStartup(cost: CostRouteDeps, logger: BrokerLogger
   }
 }
 
+async function pruneWebAuthnOnStartup(
+  webauthn: Pick<WebAuthnRouteDeps, "clock" | "store">,
+  logger: BrokerLogger,
+): Promise<void> {
+  const nowMs = readWebAuthnClock(webauthn.clock);
+  try {
+    const result = await webauthn.store.pruneExpired({
+      nowMs,
+      maxRows: WEBAUTHN_PRUNE_BATCH_ROWS,
+    });
+    logger.info("webauthn_expired_state_pruned", {
+      trigger: "startup",
+      nowMs,
+      maxRows: WEBAUTHN_PRUNE_BATCH_ROWS,
+      consumedTokens: result.consumedTokens,
+      orphanChallenges: result.orphanChallenges,
+    });
+  } catch (err) {
+    logger.warn("webauthn_expired_state_prune_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function readWebAuthnClock(clock: Clock): number {
+  const nowMs = clock.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+    throw new Error(`createBroker: webauthn clock returned invalid timestamp: ${nowMs}`);
+  }
+  return nowMs;
+}
+
 // Bucket an `/api/...` pathname into a fixed enum of known route families.
 // Anything else (or shapes attackers could exploit to inflate logs) falls
 // into `unknown`. Keeping cardinality bounded makes the log surface
@@ -485,7 +643,165 @@ function classifyApiRoute(pathname: string): string {
     return "agent_provider_routing";
   }
   if (pathname.startsWith("/api/runners")) return "runners";
+  if (pathname.startsWith("/api/webauthn/")) return "webauthn";
   return "unknown";
+}
+
+function normalizeThreshold(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`createBroker: webauthn threshold must be a positive safe integer: ${value}`);
+  }
+  return value;
+}
+
+function normalizeWebAuthnChallengeTtlMs(value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_APPROVAL_TOKEN_LIFETIME_MS) {
+    throw new Error(
+      `createBroker: webauthn challengeTtlMs must be 1..${MAX_APPROVAL_TOKEN_LIFETIME_MS} ms`,
+    );
+  }
+  return value;
+}
+
+function assertWebAuthnChallengeExpirySafe(nowMs: number, ttlMs: number): void {
+  if (!Number.isSafeInteger(nowMs + ttlMs)) {
+    throw new Error("createBroker: webauthn challenge expiry is outside the safe integer range");
+  }
+}
+
+function normalizeWebAuthnAllowedOrigins(
+  values: readonly string[],
+  rpId: string,
+): readonly string[] {
+  const origins: string[] = [];
+  const seen = new Set<string>();
+  for (const [index, raw] of values.entries()) {
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new Error(`createBroker: webauthn.allowedOrigins[${index}] is not a URL: ${raw}`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(
+        `createBroker: webauthn.allowedOrigins[${index}] must use http/https: ${raw}`,
+      );
+    }
+    if (parsed.username !== "" || parsed.password !== "") {
+      throw new Error(
+        `createBroker: webauthn.allowedOrigins[${index}] must not include userinfo: ${raw}`,
+      );
+    }
+    if (parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
+      throw new Error(
+        `createBroker: webauthn.allowedOrigins[${index}] must be a bare origin: ${raw}`,
+      );
+    }
+    if (!isWebAuthnLoopbackHostname(parsed.hostname)) {
+      throw new Error(`createBroker: webauthn.allowedOrigins[${index}] must be loopback: ${raw}`);
+    }
+    assertWebAuthnRpIdCompatibleWithHostname(rpId, parsed.hostname, raw);
+    if (!seen.has(parsed.origin)) {
+      origins.push(parsed.origin);
+      seen.add(parsed.origin);
+    }
+  }
+  return origins;
+}
+
+function assertWebAuthnRpIdCompatibleWithHostname(
+  rpId: string,
+  hostname: string,
+  source: string,
+): void {
+  const normalizedRpId = normalizeWebAuthnRpId(rpId);
+  const normalizedHostname = hostname.toLowerCase();
+  if (normalizedHostname !== normalizedRpId && !normalizedHostname.endsWith(`.${normalizedRpId}`)) {
+    throw new Error(`createBroker: WebAuthn origin ${source} is not compatible with RP ID ${rpId}`);
+  }
+}
+
+function normalizeWebAuthnRpId(rpId: string): string {
+  const trimmed = rpId.trim();
+  const normalized = trimmed.toLowerCase();
+  if (
+    normalized.length === 0 ||
+    trimmed !== rpId ||
+    normalized.includes("/") ||
+    normalized.includes(":") ||
+    normalized.includes("@") ||
+    normalized.includes("?") ||
+    normalized.includes("#")
+  ) {
+    throw new Error(`createBroker: webauthn.rpId must be a bare host name: ${rpId}`);
+  }
+  return normalized;
+}
+
+function isWebAuthnLoopbackHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+function assertKnownApprovalRoles(path: string, roles: readonly unknown[]): void {
+  for (const [index, role] of roles.entries()) {
+    if (!isApprovalRole(role)) {
+      throw new Error(`createBroker: ${path}[${index}] must be a valid approval role`);
+    }
+  }
+}
+
+function assertNoTrustedDefaultEnrollableRole(trustedRoles: readonly ApprovalRole[]): void {
+  const trusted = new Set(trustedRoles);
+  const overlap = WEBAUTHN_DEFAULT_ENROLLABLE_ROLES.filter((role) => trusted.has(role));
+  if (overlap.length > 0) {
+    throw new Error(
+      `createBroker: webauthn default enrollable role cannot also be trusted: ${overlap.join(", ")}`,
+    );
+  }
+}
+
+function assertConfiguredEnrollableRoles(
+  enrollableRoles: ReadonlyMap<AgentId, readonly unknown[]>,
+  explicitlyTrustedRoles: readonly ApprovalRole[],
+): void {
+  const explicitlyTrusted = new Set(explicitlyTrustedRoles);
+  for (const [agentId, roles] of enrollableRoles) {
+    const path = `webauthn.enrollableRoles[${agentId}]`;
+    assertKnownApprovalRoles(path, roles);
+    const overlap = sortedUniqueApprovalRoles(
+      roles.filter(
+        (role): role is ApprovalRole => isApprovalRole(role) && explicitlyTrusted.has(role),
+      ),
+    );
+    if (overlap.length > 0) {
+      throw new Error(
+        `createBroker: ${path} cannot include explicitly trusted role: ${overlap.join(", ")}`,
+      );
+    }
+  }
+}
+
+function sortedUniqueApprovalRoles(roles: readonly ApprovalRole[]): readonly ApprovalRole[] {
+  return [...new Set(roles)].sort((a, b) => a.localeCompare(b));
+}
+
+function assertWebAuthnThresholdPossible(
+  name: string,
+  threshold: number,
+  trustedRoles: readonly ApprovalRole[],
+): void {
+  const distinctTrustedRoleCount = new Set(trustedRoles).size;
+  if (threshold > distinctTrustedRoleCount) {
+    throw new Error(
+      `createBroker: webauthn ${name} ${threshold} exceeds distinct trusted approval roles ${distinctTrustedRoleCount}`,
+    );
+  }
+}
+
+function appendAllowedWebAuthnOrigin(allowedOrigins: readonly string[], port: number): string[] {
+  const brokerOrigin = `http://${BROWSER_WEBAUTHN_HOST}:${port}`;
+  if (allowedOrigins.includes(brokerOrigin)) return [...allowedOrigins];
+  return [...allowedOrigins, brokerOrigin];
 }
 
 function agentProviderRoutingAgentIdFromPathname(pathname: string): AgentId | null {

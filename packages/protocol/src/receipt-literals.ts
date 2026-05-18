@@ -1,18 +1,14 @@
 import type {
-  ApprovalClaims,
   ApprovalEvent,
   BrokerTokenVerdict,
   FileChange,
   MemoryWriteRef,
   ReceiptStatus,
   RiskClass,
-  SignedApprovalToken,
   ToolCall,
   TriggerKind,
   WriteResult,
 } from "./receipt-types.ts";
-
-type ApprovalRole = ApprovalClaims["role"] | ApprovalEvent["role"];
 
 // Typo-protection example:
 //
@@ -50,11 +46,7 @@ export const TRIGGER_KIND_VALUES = [
   "system",
 ] as const satisfies readonly TriggerKind[];
 
-export const APPROVAL_ROLE_VALUES = [
-  "viewer",
-  "approver",
-  "host",
-] as const satisfies readonly ApprovalRole[];
+export const APPROVAL_ROLE_VALUES = ["viewer", "approver", "host"] as const;
 
 export const APPROVAL_DECISION_VALUES = [
   "approve",
@@ -77,10 +69,6 @@ export const MEMORY_STORE_VALUES = [
   "notebook",
   "wiki",
 ] as const satisfies readonly MemoryWriteRef["store"][];
-
-export const APPROVAL_TOKEN_ALGORITHM_VALUES = [
-  "ed25519",
-] as const satisfies readonly SignedApprovalToken["algorithm"][];
 
 export const BROKER_TOKEN_VERDICT_STATUS_VALUES = [
   "valid",
