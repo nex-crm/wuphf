@@ -222,22 +222,27 @@ const { browser, context, page } = await launchBrowser({
   viewport: { width: 1280, height: 800 },
 });
 
-// Frame 1: the website prompt that the chat-mode redesign accidentally dropped.
-await installFrameMocks(context, STATE_WEBSITE_PROMPT);
-await bootFrame(page);
-await shotPage(page, OUT, "01-website-prompt");
+try {
+  // Frame 1: the website prompt that the chat-mode redesign accidentally dropped.
+  await installFrameMocks(context, STATE_WEBSITE_PROMPT);
+  await bootFrame(page);
+  await shotPage(page, OUT, "01-website-prompt");
 
-// Frame 2: scan running.
-await installFrameMocks(context, STATE_SCAN_IN_PROGRESS);
-await bootFrame(page);
-await shotPage(page, OUT, "02-scan-in-progress");
+  // Frame 2: scan running.
+  await installFrameMocks(context, STATE_SCAN_IN_PROGRESS);
+  await bootFrame(page);
+  await shotPage(page, OUT, "02-scan-in-progress");
 
-// Frame 3: post-scan reveal — done chip + per-article CEO bubble.
-await installFrameMocks(context, STATE_SCAN_DONE, {
-  messages: SCAN_REVEAL_MESSAGES,
-});
-await bootFrame(page);
-await shotPage(page, OUT, "03-scan-reveal");
+  // Frame 3: post-scan reveal — done chip + per-article CEO bubble.
+  await installFrameMocks(context, STATE_SCAN_DONE, {
+    messages: SCAN_REVEAL_MESSAGES,
+  });
+  await bootFrame(page);
+  await shotPage(page, OUT, "03-scan-reveal");
 
-console.log(`captured 3 screenshots to ${OUT}`);
-await browser.close();
+  console.log(`captured 3 screenshots to ${OUT}`);
+} finally {
+  // Cleanup runs even if any frame throws — otherwise CI leaks a chromium
+  // child process and the next run picks up a stale port (CodeRabbit on #911).
+  await browser.close();
+}

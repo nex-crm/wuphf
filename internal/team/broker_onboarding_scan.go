@@ -96,10 +96,16 @@ func (b *Broker) runScanPhase(dmSlug string) {
 
 	// Stagger one chat bubble per article written. Each bubble is a plain
 	// text CEO message so it renders as a normal CEO line with the ✓ prefix.
+	//
+	// The labeled `break revealLoop` is load-bearing: a bare `break` inside
+	// the select would only exit the select and the for loop would keep
+	// posting article bubbles after the goroutine's context was cancelled
+	// (caught by staticcheck SA4011 and the CodeRabbit review on #911).
+revealLoop:
 	for _, article := range result.ArticlesWritten {
 		select {
 		case <-ctx.Done():
-			break
+			break revealLoop
 		case <-time.After(scanRevealStagger):
 		}
 		b.postScanArticleLine(dmSlug, article)
