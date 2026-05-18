@@ -4,8 +4,10 @@
  * Moved here from the legacy onboarding wizard as part of Phase 5 cleanup.
  *
  * Wire endpoint: POST /nex/register { email } → { status, output? }
- * On 502 the broker returns ErrNotInstalled; we flip to the external-link
- * fallback (open nex.ai/register, paste key in API Keys section).
+ * On 502 the broker returns the nex-cli failure; when that failure means
+ * nex-cli isn't usable here (missing binary, or only the @nex-ai/nex npm
+ * shim without its backing binary) we flip to the external-link fallback
+ * (open nex.ai/register, paste key in API Keys section).
  *
  * Nex is a context graph platform for AI agents, not a CRM.
  */
@@ -16,6 +18,40 @@ import { post } from "../../api/client";
 import { showNotice } from "../ui/Toast";
 
 type NexConnectStatus = "open" | "submitting" | "ok" | "fallback";
+
+/**
+ * The broker reports /nex/register failures as a JSON body
+ * {"status":"error","error":"..."}, which api/client throws verbatim as the
+ * Error message. Pull out the human-readable `error` field so the panel
+ * never renders a raw JSON blob at the user.
+ */
+function readNexError(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { error?: unknown };
+    if (typeof parsed.error === "string" && parsed.error.trim()) {
+      return parsed.error.trim();
+    }
+  } catch {
+    // Not JSON (e.g. a bare "502 Bad Gateway") — fall through to raw text.
+  }
+  return raw;
+}
+
+/**
+ * True when the failure means nex-cli can't run on this machine: the binary
+ * is missing, or only the @nex-ai/nex npm shim is present without the real
+ * binary behind it (the shim prints "nex-cli binary not found"). Both should
+ * flip the panel to the register-externally fallback rather than show an
+ * error the user can't act on.
+ */
+function isNexUnavailable(detail: string): boolean {
+  const m = detail.toLowerCase();
+  return (
+    m.includes("not installed") ||
+    m.includes("binary not found") ||
+    m.includes("502")
+  );
+}
 
 export function NexConnectPanel() {
   const [email, setEmail] = useState("");
@@ -33,12 +69,14 @@ export function NexConnectPanel() {
       setStatus("ok");
       showNotice("Check your inbox for the Nex API key.", "success");
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Registration failed";
-      // 502 means nex-cli not installed — flip to external link fallback.
-      if (msg.includes("502") || msg.toLowerCase().includes("not installed")) {
+      const raw = err instanceof Error ? err.message : "Registration failed";
+      const detail = readNexError(raw);
+      // nex-cli unusable here → external-link fallback. Anything else is a
+      // real, actionable error: show the parsed message, not a JSON blob.
+      if (isNexUnavailable(detail)) {
         setStatus("fallback");
       } else {
-        setError(msg);
+        setError(detail);
         setStatus("open");
       }
     }

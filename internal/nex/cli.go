@@ -89,12 +89,24 @@ func quoteArg(s string) string {
 	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
 }
 
+// shimNotInstalledMarker is the phrase the @nex-ai/nex npm shim prints to
+// stderr when it runs but cannot locate the real nex-cli binary. BinaryPath()
+// accepts the `nex` alias, which may resolve to that shim; a shim with no
+// binary behind it is functionally "not installed", so Run() translates this
+// signature back to ErrNotInstalled instead of surfacing the shim's raw
+// install blurb to callers (and, ultimately, to the onboarding UI).
+const shimNotInstalledMarker = "nex-cli binary not found"
+
 // Run executes `nex-cli --cmd "<args...>"` with the given context/timeout and
 // returns stdout (trimmed) on success. nex-cli refuses to start without a TTY
 // unless --cmd/--script is used, so every shell-out goes through --cmd with
 // the args joined (and quoted where necessary) into a single command string.
 // A non-zero exit code, missing binary, or context timeout are all returned
 // as errors. The caller is responsible for logging and falling back.
+//
+// A shell-out that fails because the resolved binary is really the npm shim
+// without its backing binary is reported as ErrNotInstalled, so callers can
+// errors.Is-check a single "not installed" condition.
 func Run(ctx context.Context, args ...string) (string, error) {
 	if Disabled() {
 		return "", ErrDisabled
@@ -126,6 +138,12 @@ func Run(ctx context.Context, args ...string) (string, error) {
 			return "", fmt.Errorf("nex-cli %s: timeout after %s", cmdStr, DefaultTimeout)
 		}
 		trimmed := strings.TrimSpace(stderr.String())
+		// The npm shim ran but found no real binary behind it — treat as
+		// not-installed so callers hit the same fallback path as a bare
+		// missing binary, not a hard error with a raw install blurb.
+		if strings.Contains(trimmed, shimNotInstalledMarker) {
+			return "", ErrNotInstalled
+		}
 		if trimmed != "" {
 			return "", fmt.Errorf("nex-cli %s: %s", cmdStr, trimmed)
 		}
