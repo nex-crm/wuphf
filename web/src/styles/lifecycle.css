@@ -3386,7 +3386,7 @@ html[data-theme="noir-gold"] {
   color: var(--text-primary);
 }
 
-.inbox-filter-chip[aria-pressed="true"] {
+.inbox-filter-chip[aria-selected="true"] {
   background: var(--accent, #5b8def);
   color: var(--bg-primary, #fff);
   border-color: var(--accent, #5b8def);

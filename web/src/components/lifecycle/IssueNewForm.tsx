@@ -138,7 +138,7 @@ export function IssueNewForm() {
               type="text"
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
-              placeholder="agent slug — leave blank for auto"
+              placeholder="agent slug — leave blank to self-assign"
               data-testid="issue-new-assignee"
             />
           </div>

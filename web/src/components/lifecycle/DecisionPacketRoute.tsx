@@ -56,6 +56,14 @@ export function DecisionPacketRoute({
     initialData: initialPacket,
     enabled: forceState !== "loading" && forceState !== "error",
     staleTime: 2_000,
+    // "not yet available" is a definitive 404 — retrying just keeps the
+    // user staring at the loading skeleton. Skip retries for that branch
+    // so the PacketPending / PacketError fallback renders immediately.
+    retry: (failureCount, error) => {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/not yet available/i.test(msg)) return false;
+      return failureCount < 2;
+    },
   });
 
   const queryClient = useQueryClient();

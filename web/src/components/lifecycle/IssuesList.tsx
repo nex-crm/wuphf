@@ -20,15 +20,37 @@ import { LifecycleStatePill } from "./LifecycleStatePill";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
+const KNOWN_LIFECYCLE_STATES: ReadonlySet<LifecycleState> = new Set<LifecycleState>([
+  "drafting",
+  "intake",
+  "ready",
+  "running",
+  "review",
+  "decision",
+  "blocked_on_pr_merge",
+  "changes_requested",
+  "approved",
+  "rejected",
+]);
+
+function isLifecycleState(value: unknown): value is LifecycleState {
+  return (
+    typeof value === "string" && KNOWN_LIFECYCLE_STATES.has(value as LifecycleState)
+  );
+}
+
 /**
  * Map a Task's raw status/lifecycle_state fields to a LifecycleState.
  * Prefers `lifecycle_state` (set by the broker post Lane-A); falls back
  * to the legacy `status` string so pre-Lane-A tasks still render a pill.
+ * Unknown wire-shape strings (legacy broker rows) fall through to the
+ * status-driven mapping so `LifecycleStatePill` never receives a value
+ * outside the typed union.
  */
 function taskToLifecycleState(task: Task): LifecycleState {
   if (task.pipeline_stage === "draft") return "drafting";
   const raw = (task as unknown as Record<string, unknown>).lifecycle_state;
-  if (typeof raw === "string" && raw) return raw as LifecycleState;
+  if (isLifecycleState(raw)) return raw;
   switch (task.status) {
     case "open":
       return "intake";
@@ -82,8 +104,11 @@ const COLUMN_HINT: Record<ColumnId, string> = {
   rejected: "Will not land",
 };
 
-/** Map a lifecycle state to its kanban column. */
-function lifecycleToColumn(state: LifecycleState): ColumnId {
+/** Map a lifecycle state to its kanban column. Wire shape from the broker
+ *  can drift (legacy "blocked", "in_progress" strings, unknown future states),
+ *  so a fall-through default lands those in the Intake column instead of
+ *  crashing on `buckets[undefined].push`. */
+function lifecycleToColumn(state: LifecycleState | string): ColumnId {
   switch (state) {
     case "drafting":
       return "drafting";
@@ -101,6 +126,8 @@ function lifecycleToColumn(state: LifecycleState): ColumnId {
       return "approved";
     case "rejected":
       return "rejected";
+    default:
+      return "intake";
   }
 }
 

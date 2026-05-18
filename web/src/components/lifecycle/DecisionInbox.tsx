@@ -344,7 +344,6 @@ function ListPane({
               type="button"
               role="tab"
               className="inbox-filter-chip"
-              aria-pressed={f === filter}
               aria-selected={f === filter}
               onClick={() => onFilter(f)}
               data-testid={`inbox-filter-${f}`}
