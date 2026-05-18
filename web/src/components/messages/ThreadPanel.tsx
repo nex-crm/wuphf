@@ -10,9 +10,11 @@ import { getConfig, type Message, postMessage } from "../../api/client";
 import { useCommands } from "../../hooks/useCommands";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useThreadMessages } from "../../hooks/useMessages";
+import { useResizablePane } from "../../hooks/useResizablePane";
 import { extractTaggedMentions } from "../../lib/mentions";
 import { handleSlashCommand, resolveLeadSlug } from "../../lib/slashCommands";
 import { useAppStore } from "../../stores/app";
+import { PaneResizeHandle } from "../layout/PaneResizeHandle";
 import { showNotice } from "../ui/Toast";
 import {
   Autocomplete,
@@ -20,6 +22,11 @@ import {
   applyAutocomplete,
 } from "./Autocomplete";
 import { MessageBubble } from "./MessageBubble";
+
+export const THREAD_PANEL_DEFAULT_WIDTH = 340;
+export const THREAD_PANEL_MIN_WIDTH = 280;
+export const THREAD_PANEL_MAX_WIDTH = 560;
+export const THREAD_PANEL_WIDTH_STORAGE_KEY = "wuphf-thread-panel-width";
 
 interface MessagesQueryData {
   messages?: Message[];
@@ -57,6 +64,13 @@ export function ThreadPanel() {
   const setActiveThread = useAppStore((s) => s.setActiveThread);
   const setLastMessageId = useAppStore((s) => s.setLastMessageId);
   const setChannelClearMarker = useAppStore((s) => s.setChannelClearMarker);
+  const resize = useResizablePane({
+    storageKey: THREAD_PANEL_WIDTH_STORAGE_KEY,
+    defaultWidth: THREAD_PANEL_DEFAULT_WIDTH,
+    minWidth: THREAD_PANEL_MIN_WIDTH,
+    maxWidth: THREAD_PANEL_MAX_WIDTH,
+    edge: "left",
+  });
   // Channel is captured at thread-open time and stored on activeThread so
   // replies posted while the user has navigated away from the originating
   // channel still land in the right place. Reading useChannelSlug() here
@@ -313,7 +327,21 @@ export function ThreadPanel() {
   if (!activeThreadId) return null;
 
   return (
-    <aside className="thread-panel open" aria-label="Thread">
+    <aside
+      className="thread-panel open"
+      aria-label="Thread"
+      style={{ width: resize.width }}
+    >
+      <PaneResizeHandle
+        edge="left"
+        ariaLabel="Resize thread panel"
+        onPointerDown={resize.onPointerDown}
+        isResizing={resize.isResizing}
+        onReset={resize.reset}
+        valueNow={resize.width}
+        valueMin={THREAD_PANEL_MIN_WIDTH}
+        valueMax={THREAD_PANEL_MAX_WIDTH}
+      />
       <div className="thread-panel-header">
         <div className="thread-panel-title-group">
           <span className="thread-panel-title">Thread</span>

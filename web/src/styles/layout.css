@@ -11,7 +11,10 @@
 
 /* ─── Sidebar ─── */
 .sidebar {
-  width: 260px;
+  /* Default width is intentionally narrow — most users were left with
+     little room for the main column. The Sidebar component overrides
+     this inline via useResizablePane() so a user-dragged width persists. */
+  width: 220px;
   flex-shrink: 0;
   background: var(--bg-card);
   border-right: 1px solid var(--border);
@@ -22,6 +25,8 @@
      scroll container for windows too short to fit the fixed sidebar chrome. */
   overflow-y: auto;
   overflow-x: hidden;
+  /* Anchor the absolutely-positioned resize handle. */
+  position: relative;
 }
 
 /* ─── Collapsed rail ─── */
@@ -2150,7 +2155,10 @@ html[data-theme="nex"]
 
 /* ─── Thread Panel ─── */
 .thread-panel {
-  width: 380px;
+  /* Default width chosen to leave the main column room on a 13" laptop.
+     ThreadPanel overrides this inline via useResizablePane() so a
+     user-dragged width persists across reloads. */
+  width: 340px;
   flex-shrink: 0;
   background: var(--bg-card);
   border-left: 1px solid var(--border);
@@ -2158,6 +2166,8 @@ html[data-theme="nex"]
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  /* Anchor the absolutely-positioned resize handle. */
+  position: relative;
 }
 .thread-panel.open {
   display: flex;
@@ -3453,4 +3463,67 @@ html[data-theme="nex"]
 .workspace-rail-add:active {
   background: rgba(255, 255, 255, 0.1);
   transition-duration: 100ms;
+}
+
+/* ─── Resizable pane drag handle ─────────────────────────────────
+   Thin vertical splitter anchored to a side pane's edge. The visible
+   rule is 1px wide so the layout doesn't shift, while a pseudo-element
+   expands the hit area to ~8px for easy grabbing. */
+.pane-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 50;
+  touch-action: none;
+  /* Keep keyboard focus visible without the default outline pushing
+     the rule away from the edge. */
+  outline: none;
+}
+
+.pane-resize-handle--right {
+  right: -1px;
+}
+
+.pane-resize-handle--left {
+  left: -1px;
+}
+
+.pane-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Expand horizontal hit area without nudging the visible rule. */
+  left: -3px;
+  right: -3px;
+}
+
+.pane-resize-handle:hover,
+.pane-resize-handle:focus-visible,
+.pane-resize-handle.is-active {
+  background: var(--cyan-500, #06b6d4);
+}
+
+.pane-resize-handle:focus-visible {
+  /* Visible focus marker without shifting layout. */
+  box-shadow: 0 0 0 1px var(--focus-ring-color, var(--cyan-500, #06b6d4));
+}
+
+/* Globally suppress text selection + force the resize cursor while a
+   drag is in progress, so the cursor doesn't flicker to text-select
+   when the pointer crosses the main content area mid-drag. The
+   high-specificity `*` selector combined with !important is the
+   classic web idiom for this; biome flags it but the override is
+   intentional and scoped to the duration of the drag. */
+body.resizing-pane {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+body.resizing-pane * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }

@@ -1,5 +1,6 @@
 import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
 
+import { useResizablePane } from "../../hooks/useResizablePane";
 import { router } from "../../lib/router";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
@@ -15,6 +16,12 @@ import { SidebarColorPicker } from "../sidebar/SidebarColorPicker";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { WorkspaceSummary } from "../sidebar/WorkspaceSummary";
 import { CollapsedSidebar } from "./CollapsedSidebar";
+import { PaneResizeHandle } from "./PaneResizeHandle";
+
+export const SIDEBAR_DEFAULT_WIDTH = 220;
+export const SIDEBAR_MIN_WIDTH = 180;
+export const SIDEBAR_MAX_WIDTH = 420;
+export const SIDEBAR_WIDTH_STORAGE_KEY = "wuphf-sidebar-width";
 
 function SectionToggle({
   label,
@@ -70,7 +77,21 @@ export function Sidebar() {
   const sidebarBg = useAppStore((s) => s.sidebarBg);
   const currentApp = useCurrentApp();
 
-  const asideStyle = sidebarBg ? { background: sidebarBg } : undefined;
+  const resize = useResizablePane({
+    storageKey: SIDEBAR_WIDTH_STORAGE_KEY,
+    defaultWidth: SIDEBAR_DEFAULT_WIDTH,
+    minWidth: SIDEBAR_MIN_WIDTH,
+    maxWidth: SIDEBAR_MAX_WIDTH,
+    edge: "right",
+  });
+
+  // Collapsed rail keeps its fixed CSS width; only the expanded sidebar
+  // honors the user's drag. Inline width overrides the stylesheet so the
+  // CSS rule remains the default for the collapsed state.
+  const asideStyle: React.CSSProperties = {
+    ...(sidebarBg ? { background: sidebarBg } : null),
+    ...(sidebarCollapsed ? null : { width: resize.width }),
+  };
 
   return (
     <aside
@@ -184,6 +205,18 @@ export function Sidebar() {
           <UsagePanel />
           <SidebarColorPicker />
         </>
+      )}
+      {!sidebarCollapsed && (
+        <PaneResizeHandle
+          edge="right"
+          ariaLabel="Resize sidebar"
+          onPointerDown={resize.onPointerDown}
+          isResizing={resize.isResizing}
+          onReset={resize.reset}
+          valueNow={resize.width}
+          valueMin={SIDEBAR_MIN_WIDTH}
+          valueMax={SIDEBAR_MAX_WIDTH}
+        />
       )}
     </aside>
   );
