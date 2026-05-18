@@ -341,6 +341,13 @@ func (l *FactLog) commitTimestamp(ctx context.Context, sha string) (time.Time, e
 // so that inputs containing NUL cannot produce collisions across field
 // boundaries. For example, text="a\x00b", recordedBy="c" produces different
 // bytes than text="a", recordedBy="\x00b\x00c".
+//
+// NOTE: encoding break in #896 — facts written before this PR (using the
+// old NUL-separator scheme introduced in #855) carry different IDs. Those
+// pre-existing facts will not be recognised as duplicates of their
+// length-prefix counterparts, so a re-ingestion window of ~4 days of data
+// may append a one-time harmless duplicate in an otherwise-idempotent
+// append-only log. No migration script is required; synthesis is additive.
 func deterministicFactID(kind EntityKind, slug, text, recordedBy string) string {
 	h := sha256.New()
 	writeField := func(s string) {
