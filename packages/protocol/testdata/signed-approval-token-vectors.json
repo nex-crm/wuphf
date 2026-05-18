@@ -78,11 +78,85 @@
       "expected": {
         "canonicalSerialization": "{\"claim\":{\"agentId\":\"agent_alpha\",\"claimId\":\"claim_endpoint_01\",\"endpointOrigin\":\"https://api.openai.example\",\"kind\":\"endpoint_allowlist_extension\",\"providerKind\":\"openai\",\"reason\":\"Temporary allowlist expansion for signed approval test.\",\"schemaVersion\":1},\"expiresAt\":1778264100000,\"issuedTo\":\"agent_alpha\",\"notBefore\":1778263200000,\"schemaVersion\":1,\"scope\":{\"agentId\":\"agent_alpha\",\"claimId\":\"claim_endpoint_01\",\"claimKind\":\"endpoint_allowlist_extension\",\"endpointOrigin\":\"https://api.openai.example\",\"maxUses\":1,\"mode\":\"single_use\",\"providerKind\":\"openai\",\"role\":\"host\"},\"signature\":{\"authenticatorData\":\"YXV0aGVudGljYXRvci1kYXRh\",\"clientDataJson\":\"Y2xpZW50LWRhdGEtanNvbg\",\"credentialId\":\"Y3JlZGVudGlhbC0wMg\",\"signature\":\"c2lnbmF0dXJl\"},\"tokenId\":\"01HX6P2D8T4Y7K9M3N5Q1R6S2W\"}"
       }
+    },
+    {
+      "name": "cost spike budget edge token",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"claim\":{\"agentId\":\"agent_alpha\",\"ceilingMicroUsd\":1000000000000,\"claimId\":\"claim_cost_edge_01\",\"costCeilingId\":\"budget-prod-01\",\"currentMicroUsd\":1000000000000,\"kind\":\"cost_spike_acknowledgement\",\"schemaVersion\":1,\"thresholdBps\":10000},\"expiresAt\":1778264100000,\"issuedTo\":\"agent_alpha\",\"notBefore\":1778263200000,\"schemaVersion\":1,\"scope\":{\"agentId\":\"agent_alpha\",\"claimId\":\"claim_cost_edge_01\",\"claimKind\":\"cost_spike_acknowledgement\",\"costCeilingId\":\"budget-prod-01\",\"maxUses\":1,\"mode\":\"single_use\",\"role\":\"approver\"},\"signature\":{\"authenticatorData\":\"YXV0aGVudGljYXRvci1kYXRh\",\"clientDataJson\":\"Y2xpZW50LWRhdGEtanNvbg\",\"credentialId\":\"Y3JlZGVudGlhbC0wMw\",\"signature\":\"c2lnbmF0dXJl\"},\"tokenId\":\"01HX6P2D8T4Y7K9M3N5Q1R6S2X\"}"
+      }
+    },
+    {
+      "name": "credential grant max handle token",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2Y",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_credential_01",
+          "kind": "credential_grant_to_agent",
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "credentialScope": "openai"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_credential_01",
+          "claimKind": "credential_grant_to_agent",
+          "role": "host",
+          "maxUses": 1,
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNA",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"claim\":{\"claimId\":\"claim_credential_01\",\"credentialHandleId\":\"cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"credentialScope\":\"openai\",\"granteeAgentId\":\"agent_beta\",\"kind\":\"credential_grant_to_agent\",\"schemaVersion\":1},\"expiresAt\":1778264100000,\"issuedTo\":\"agent_alpha\",\"notBefore\":1778263200000,\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_credential_01\",\"claimKind\":\"credential_grant_to_agent\",\"credentialHandleId\":\"cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"granteeAgentId\":\"agent_beta\",\"maxUses\":1,\"mode\":\"single_use\",\"role\":\"host\"},\"signature\":{\"authenticatorData\":\"YXV0aGVudGljYXRvci1kYXRh\",\"clientDataJson\":\"Y2xpZW50LWRhdGEtanNvbg\",\"credentialId\":\"Y3JlZGVudGlhbC0wNA\",\"signature\":\"c2lnbmF0dXJl\"},\"tokenId\":\"01HX6P2D8T4Y7K9M3N5Q1R6S2Y\"}"
+      }
     }
   ],
   "rejected": [
     {
-      "name": "unknown top-level key",
+      "name": "receipt_co_sign unknown top-level key",
       "input": {
         "schemaVersion": 1,
         "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
@@ -91,6 +165,7 @@
           "claimId": "claim_receipt_cosign_01",
           "kind": "receipt_co_sign",
           "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
           "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           "riskClass": "high"
         },
@@ -101,6 +176,7 @@
           "role": "approver",
           "maxUses": 1,
           "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
           "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         },
         "notBefore": 1778263200000,
@@ -108,6 +184,230 @@
         "issuedTo": "agent_alpha",
         "signature": {
           "credentialId": "Y3JlZGVudGlhbC0wMQ",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl",
+          "userHandle": "dXNlci0wMQ"
+        },
+        "extra": true
+      },
+      "expectedError": "signedApprovalToken/extra"
+    },
+    {
+      "name": "receipt_co_sign unknown claim key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "riskClass": "high",
+          "extra": true
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778265000000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMQ",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl",
+          "userHandle": "dXNlci0wMQ"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/extra"
+    },
+    {
+      "name": "receipt_co_sign unknown scope key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "extra": true
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778265000000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMQ",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl",
+          "userHandle": "dXNlci0wMQ"
+        }
+      },
+      "expectedError": "signedApprovalToken/scope/extra"
+    },
+    {
+      "name": "receipt_co_sign unknown signature key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778265000000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMQ",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl",
+          "userHandle": "dXNlci0wMQ",
+          "extra": true
+        }
+      },
+      "expectedError": "signedApprovalToken/signature/extra"
+    },
+    {
+      "name": "receipt_co_sign claim scope kind mismatch",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778265000000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMQ",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl",
+          "userHandle": "dXNlci0wMQ"
+        }
+      },
+      "expectedError": "signedApprovalToken/scope/claimKind"
+    },
+    {
+      "name": "receipt_co_sign missing required claim field",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778265000000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMQ",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl",
+          "userHandle": "dXNlci0wMQ"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/frozenArgsHash"
+    },
+    {
+      "name": "endpoint_allowlist_extension unknown top-level key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2W",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_endpoint_01",
+          "kind": "endpoint_allowlist_extension",
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example",
+          "reason": "Temporary allowlist expansion for signed approval test."
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_endpoint_01",
+          "claimKind": "endpoint_allowlist_extension",
+          "role": "host",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMg",
           "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
           "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
           "signature": "c2lnbmF0dXJl"
@@ -117,40 +417,724 @@
       "expectedError": "signedApprovalToken/extra"
     },
     {
-      "name": "scope omits role",
+      "name": "endpoint_allowlist_extension unknown claim key",
       "input": {
         "schemaVersion": 1,
-        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2W",
         "claim": {
           "schemaVersion": 1,
-          "claimId": "claim_receipt_cosign_01",
-          "kind": "receipt_co_sign",
-          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-          "riskClass": "high"
+          "claimId": "claim_endpoint_01",
+          "kind": "endpoint_allowlist_extension",
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example",
+          "reason": "Temporary allowlist expansion for signed approval test.",
+          "extra": true
         },
         "scope": {
           "mode": "single_use",
-          "claimId": "claim_receipt_cosign_01",
-          "claimKind": "receipt_co_sign",
+          "claimId": "claim_endpoint_01",
+          "claimKind": "endpoint_allowlist_extension",
+          "role": "host",
           "maxUses": 1,
-          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example"
         },
         "notBefore": 1778263200000,
-        "expiresAt": 1778265000000,
+        "expiresAt": 1778264100000,
         "issuedTo": "agent_alpha",
         "signature": {
-          "credentialId": "Y3JlZGVudGlhbC0wMQ",
+          "credentialId": "Y3JlZGVudGlhbC0wMg",
           "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
           "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
           "signature": "c2lnbmF0dXJl"
         }
       },
-      "expectedError": "signedApprovalToken/scope/role"
+      "expectedError": "signedApprovalToken/claim/extra"
     },
     {
-      "name": "scope mismatches claim id",
+      "name": "endpoint_allowlist_extension unknown scope key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2W",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_endpoint_01",
+          "kind": "endpoint_allowlist_extension",
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example",
+          "reason": "Temporary allowlist expansion for signed approval test."
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_endpoint_01",
+          "claimKind": "endpoint_allowlist_extension",
+          "role": "host",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example",
+          "extra": true
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMg",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/scope/extra"
+    },
+    {
+      "name": "endpoint_allowlist_extension unknown signature key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2W",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_endpoint_01",
+          "kind": "endpoint_allowlist_extension",
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example",
+          "reason": "Temporary allowlist expansion for signed approval test."
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_endpoint_01",
+          "claimKind": "endpoint_allowlist_extension",
+          "role": "host",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMg",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl",
+          "extra": true
+        }
+      },
+      "expectedError": "signedApprovalToken/signature/extra"
+    },
+    {
+      "name": "endpoint_allowlist_extension claim scope kind mismatch",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2W",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_endpoint_01",
+          "kind": "endpoint_allowlist_extension",
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example",
+          "reason": "Temporary allowlist expansion for signed approval test."
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_endpoint_01",
+          "claimKind": "credential_grant_to_agent",
+          "role": "host",
+          "maxUses": 1,
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMg",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/scope/claimKind"
+    },
+    {
+      "name": "endpoint_allowlist_extension missing required claim field",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2W",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_endpoint_01",
+          "kind": "endpoint_allowlist_extension",
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_endpoint_01",
+          "claimKind": "endpoint_allowlist_extension",
+          "role": "host",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMg",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/reason"
+    },
+    {
+      "name": "cost_spike_acknowledgement unknown top-level key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        },
+        "extra": true
+      },
+      "expectedError": "signedApprovalToken/extra"
+    },
+    {
+      "name": "cost_spike_acknowledgement unknown claim key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000,
+          "extra": true
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/extra"
+    },
+    {
+      "name": "cost_spike_acknowledgement unknown scope key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "extra": true
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/scope/extra"
+    },
+    {
+      "name": "cost_spike_acknowledgement unknown signature key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl",
+          "extra": true
+        }
+      },
+      "expectedError": "signedApprovalToken/signature/extra"
+    },
+    {
+      "name": "cost_spike_acknowledgement claim scope kind mismatch",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "endpoint_allowlist_extension",
+          "role": "host",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/scope/claimKind"
+    },
+    {
+      "name": "cost_spike_acknowledgement missing required claim field",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/currentMicroUsd"
+    },
+    {
+      "name": "credential_grant_to_agent unknown top-level key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2Y",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_credential_01",
+          "kind": "credential_grant_to_agent",
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "credentialScope": "openai"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_credential_01",
+          "claimKind": "credential_grant_to_agent",
+          "role": "host",
+          "maxUses": 1,
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNA",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        },
+        "extra": true
+      },
+      "expectedError": "signedApprovalToken/extra"
+    },
+    {
+      "name": "credential_grant_to_agent unknown claim key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2Y",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_credential_01",
+          "kind": "credential_grant_to_agent",
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "credentialScope": "openai",
+          "extra": true
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_credential_01",
+          "claimKind": "credential_grant_to_agent",
+          "role": "host",
+          "maxUses": 1,
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNA",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/extra"
+    },
+    {
+      "name": "credential_grant_to_agent unknown scope key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2Y",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_credential_01",
+          "kind": "credential_grant_to_agent",
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "credentialScope": "openai"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_credential_01",
+          "claimKind": "credential_grant_to_agent",
+          "role": "host",
+          "maxUses": 1,
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "extra": true
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNA",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/scope/extra"
+    },
+    {
+      "name": "credential_grant_to_agent unknown signature key",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2Y",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_credential_01",
+          "kind": "credential_grant_to_agent",
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "credentialScope": "openai"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_credential_01",
+          "claimKind": "credential_grant_to_agent",
+          "role": "host",
+          "maxUses": 1,
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNA",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl",
+          "extra": true
+        }
+      },
+      "expectedError": "signedApprovalToken/signature/extra"
+    },
+    {
+      "name": "credential_grant_to_agent claim scope kind mismatch",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2Y",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_credential_01",
+          "kind": "credential_grant_to_agent",
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "credentialScope": "openai"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_credential_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNA",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/scope/claimKind"
+    },
+    {
+      "name": "credential_grant_to_agent missing required claim field",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2Y",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_credential_01",
+          "kind": "credential_grant_to_agent",
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_credential_01",
+          "claimKind": "credential_grant_to_agent",
+          "role": "host",
+          "maxUses": 1,
+          "granteeAgentId": "agent_beta",
+          "credentialHandleId": "cred_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNA",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/credentialScope"
+    },
+    {
+      "name": "cost_spike_acknowledgement currentMicroUsd above budget",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000001,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "1000000000000"
+    },
+    {
+      "name": "cost_spike_acknowledgement ceilingMicroUsd above budget",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000001
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "1000000000000"
+    },
+    {
+      "name": "cost_spike_acknowledgement thresholdBps above max",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2X",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_edge_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01",
+          "thresholdBps": 10001,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_edge_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/thresholdBps"
+    },
+    {
+      "name": "receipt_co_sign scope mismatches claim id",
       "input": {
         "schemaVersion": 1,
         "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
@@ -159,6 +1143,7 @@
           "claimId": "claim_receipt_cosign_01",
           "kind": "receipt_co_sign",
           "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
           "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           "riskClass": "high"
         },
@@ -169,6 +1154,7 @@
           "role": "approver",
           "maxUses": 1,
           "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
           "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         },
         "notBefore": 1778263200000,
@@ -178,13 +1164,14 @@
           "credentialId": "Y3JlZGVudGlhbC0wMQ",
           "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
           "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
-          "signature": "c2lnbmF0dXJl"
+          "signature": "c2lnbmF0dXJl",
+          "userHandle": "dXNlci0wMQ"
         }
       },
       "expectedError": "signedApprovalToken/scope/claimId"
     },
     {
-      "name": "lifetime exceeds thirty minutes",
+      "name": "receipt_co_sign lifetime exceeds thirty minutes",
       "input": {
         "schemaVersion": 1,
         "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
@@ -193,6 +1180,7 @@
           "claimId": "claim_receipt_cosign_01",
           "kind": "receipt_co_sign",
           "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
           "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           "riskClass": "high"
         },
@@ -203,6 +1191,7 @@
           "role": "approver",
           "maxUses": 1,
           "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
           "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         },
         "notBefore": 1778263200000,
@@ -212,13 +1201,14 @@
           "credentialId": "Y3JlZGVudGlhbC0wMQ",
           "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
           "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
-          "signature": "c2lnbmF0dXJl"
+          "signature": "c2lnbmF0dXJl",
+          "userHandle": "dXNlci0wMQ"
         }
       },
       "expectedError": "lifetime"
     },
     {
-      "name": "malformed assertion signature",
+      "name": "receipt_co_sign malformed assertion signature",
       "input": {
         "schemaVersion": 1,
         "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2V",
@@ -227,6 +1217,7 @@
           "claimId": "claim_receipt_cosign_01",
           "kind": "receipt_co_sign",
           "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
           "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           "riskClass": "high"
         },
@@ -237,6 +1228,7 @@
           "role": "approver",
           "maxUses": 1,
           "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
           "frozenArgsHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         },
         "notBefore": 1778263200000,
@@ -246,7 +1238,8 @@
           "credentialId": "Y3JlZGVudGlhbC0wMQ",
           "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
           "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
-          "signature": "not base64!"
+          "signature": "not base64!",
+          "userHandle": "dXNlci0wMQ"
         }
       },
       "expectedError": "signedApprovalToken/signature/signature"

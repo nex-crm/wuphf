@@ -368,10 +368,12 @@ const (
 	maxRunnerOptionHeaderValueBytes = 8 * 1024
 	maxAgentIDBytes                 = 128
 	maxCredentialHandleBytes        = 128
+	maxCredentialHandleIDBytes      = len("cred_") + 128
 	maxCredentialScopeBytes         = 128
 	maxRunnerIDBytes                = 128
 	maxCostModelBytes               = 128
 	maxCostEventAmountMicroUsd      = 100_000_000
+	maxBudgetLimitMicroUsd          = 1_000_000_000_000
 	maxSafeInteger                  = 9_007_199_254_740_991
 	maxAgentProviderRoutes          = 16
 	maxApprovalTokenLifetimeMs      = 30 * 60 * 1000
@@ -703,10 +705,10 @@ func validateApprovalClaim(record map[string]interface{}, path string) (string, 
 		if err := requiredIntegerInRange(record, "thresholdBps", path+"/thresholdBps", 1, maxBudgetThresholdBps); err != nil {
 			return "", "", err
 		}
-		if err := requiredNonNegativeInteger(record, "currentMicroUsd", path+"/currentMicroUsd", maxSafeInteger); err != nil {
+		if err := requiredNonNegativeInteger(record, "currentMicroUsd", path+"/currentMicroUsd", maxBudgetLimitMicroUsd); err != nil {
 			return "", "", err
 		}
-		if err := requiredNonNegativeInteger(record, "ceilingMicroUsd", path+"/ceilingMicroUsd", maxSafeInteger); err != nil {
+		if err := requiredNonNegativeInteger(record, "ceilingMicroUsd", path+"/ceilingMicroUsd", maxBudgetLimitMicroUsd); err != nil {
 			return "", "", err
 		}
 	case "endpoint_allowlist_extension":
@@ -1005,7 +1007,7 @@ func validateCredentialHandleIDField(record map[string]interface{}, key string, 
 	if err != nil {
 		return err
 	}
-	if err := validateUtf8Budget(value, maxCredentialHandleBytes, path); err != nil {
+	if err := validateUtf8Budget(value, maxCredentialHandleIDBytes, path); err != nil {
 		return err
 	}
 	if !credentialHandleRE.MatchString(value) {
