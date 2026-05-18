@@ -273,9 +273,26 @@ describe("SignedApprovalToken conformance vectors", () => {
   });
 
   it("covers all claim kinds and required rejection boundaries", () => {
+    const acceptedVectorNames = new Set(
+      signedApprovalTokenVectors.accepted.map((vector) => vector.name),
+    );
+    const rejectedVectorNames = new Set(
+      signedApprovalTokenVectors.rejected.map((vector) => vector.name),
+    );
+
     expect(
       new Set(signedApprovalTokenVectors.accepted.map((vector) => claimKindOf(vector.input))),
     ).toEqual(new Set(APPROVAL_CLAIM_KIND_VALUES));
+    expect(acceptedVectorNames).toContain(
+      "endpoint allowlist extension sanitizes reason and keeps html-significant chars",
+    );
+    expect(acceptedVectorNames).toContain("cost spike token sanitizes cost ceiling id");
+    expect(rejectedVectorNames).toContain(
+      "endpoint_allowlist_extension rejects default port origin",
+    );
+    expect(rejectedVectorNames).toContain(
+      "endpoint_allowlist_extension rejects uppercase host origin",
+    );
 
     for (const kind of APPROVAL_CLAIM_KIND_VALUES) {
       const vectorsForKind = signedApprovalTokenVectors.rejected.filter(

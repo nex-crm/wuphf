@@ -71,10 +71,16 @@ pre-commit:
 
     go-vet:
       glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/*.go"
+        - "packages/protocol/testdata/**/*.go"
       run: go vet ./...
 
     golangci-lint:
       glob: "*.go"
+      exclude:
+        - "packages/protocol/testdata/*.go"
+        - "packages/protocol/testdata/**/*.go"
       run: golangci-lint run ./...
 
     no-secrets:
