@@ -80,6 +80,44 @@
       }
     },
     {
+      "name": "endpoint allowlist extension sanitizes reason and keeps html-significant chars",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2Z",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_endpoint_html_01",
+          "kind": "endpoint_allowlist_extension",
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example",
+          "reason": "Temporary allowlist for <api> & partners\u200b."
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_endpoint_html_01",
+          "claimKind": "endpoint_allowlist_extension",
+          "role": "host",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.openai.example"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNQ",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"claim\":{\"agentId\":\"agent_alpha\",\"claimId\":\"claim_endpoint_html_01\",\"endpointOrigin\":\"https://api.openai.example\",\"kind\":\"endpoint_allowlist_extension\",\"providerKind\":\"openai\",\"reason\":\"Temporary allowlist for <api> & partners.\",\"schemaVersion\":1},\"expiresAt\":1778264100000,\"issuedTo\":\"agent_alpha\",\"notBefore\":1778263200000,\"schemaVersion\":1,\"scope\":{\"agentId\":\"agent_alpha\",\"claimId\":\"claim_endpoint_html_01\",\"claimKind\":\"endpoint_allowlist_extension\",\"endpointOrigin\":\"https://api.openai.example\",\"maxUses\":1,\"mode\":\"single_use\",\"providerKind\":\"openai\",\"role\":\"host\"},\"signature\":{\"authenticatorData\":\"YXV0aGVudGljYXRvci1kYXRh\",\"clientDataJson\":\"Y2xpZW50LWRhdGEtanNvbg\",\"credentialId\":\"Y3JlZGVudGlhbC0wNQ\",\"signature\":\"c2lnbmF0dXJl\"},\"tokenId\":\"01HX6P2D8T4Y7K9M3N5Q1R6S2Z\"}"
+      }
+    },
+    {
       "name": "cost spike budget edge token",
       "input": {
         "schemaVersion": 1,
@@ -115,6 +153,44 @@
       },
       "expected": {
         "canonicalSerialization": "{\"claim\":{\"agentId\":\"agent_alpha\",\"ceilingMicroUsd\":1000000000000,\"claimId\":\"claim_cost_edge_01\",\"costCeilingId\":\"budget-prod-01\",\"currentMicroUsd\":1000000000000,\"kind\":\"cost_spike_acknowledgement\",\"schemaVersion\":1,\"thresholdBps\":10000},\"expiresAt\":1778264100000,\"issuedTo\":\"agent_alpha\",\"notBefore\":1778263200000,\"schemaVersion\":1,\"scope\":{\"agentId\":\"agent_alpha\",\"claimId\":\"claim_cost_edge_01\",\"claimKind\":\"cost_spike_acknowledgement\",\"costCeilingId\":\"budget-prod-01\",\"maxUses\":1,\"mode\":\"single_use\",\"role\":\"approver\"},\"signature\":{\"authenticatorData\":\"YXV0aGVudGljYXRvci1kYXRh\",\"clientDataJson\":\"Y2xpZW50LWRhdGEtanNvbg\",\"credentialId\":\"Y3JlZGVudGlhbC0wMw\",\"signature\":\"c2lnbmF0dXJl\"},\"tokenId\":\"01HX6P2D8T4Y7K9M3N5Q1R6S2X\"}"
+      }
+    },
+    {
+      "name": "cost spike token sanitizes cost ceiling id",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S30",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_sanitized_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget\u200b-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_sanitized_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget\u200b-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNg",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"claim\":{\"agentId\":\"agent_alpha\",\"ceilingMicroUsd\":1000000000000,\"claimId\":\"claim_cost_sanitized_01\",\"costCeilingId\":\"budget-prod-01\",\"currentMicroUsd\":1000000000000,\"kind\":\"cost_spike_acknowledgement\",\"schemaVersion\":1,\"thresholdBps\":10000},\"expiresAt\":1778264100000,\"issuedTo\":\"agent_alpha\",\"notBefore\":1778263200000,\"schemaVersion\":1,\"scope\":{\"agentId\":\"agent_alpha\",\"claimId\":\"claim_cost_sanitized_01\",\"claimKind\":\"cost_spike_acknowledgement\",\"costCeilingId\":\"budget-prod-01\",\"maxUses\":1,\"mode\":\"single_use\",\"role\":\"approver\"},\"signature\":{\"authenticatorData\":\"YXV0aGVudGljYXRvci1kYXRh\",\"clientDataJson\":\"Y2xpZW50LWRhdGEtanNvbg\",\"credentialId\":\"Y3JlZGVudGlhbC0wNg\",\"signature\":\"c2lnbmF0dXJl\"},\"tokenId\":\"01HX6P2D8T4Y7K9M3N5Q1R6S30\"}"
       }
     },
     {
@@ -598,6 +674,78 @@
       "expectedError": "signedApprovalToken/claim/reason"
     },
     {
+      "name": "endpoint_allowlist_extension rejects default port origin",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2W",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_endpoint_01",
+          "kind": "endpoint_allowlist_extension",
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.example:443",
+          "reason": "Temporary allowlist expansion for signed approval test."
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_endpoint_01",
+          "claimKind": "endpoint_allowlist_extension",
+          "role": "host",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://api.example:443"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMg",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/endpointOrigin"
+    },
+    {
+      "name": "endpoint_allowlist_extension rejects uppercase host origin",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S2W",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_endpoint_01",
+          "kind": "endpoint_allowlist_extension",
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://API.EXAMPLE",
+          "reason": "Temporary allowlist expansion for signed approval test."
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_endpoint_01",
+          "claimKind": "endpoint_allowlist_extension",
+          "role": "host",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "providerKind": "openai",
+          "endpointOrigin": "https://API.EXAMPLE"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wMg",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/endpointOrigin"
+    },
+    {
       "name": "cost_spike_acknowledgement unknown top-level key",
       "input": {
         "schemaVersion": 1,
@@ -1059,7 +1207,7 @@
           "signature": "c2lnbmF0dXJl"
         }
       },
-      "expectedError": "1000000000000"
+      "expectedError": "claim/currentMicroUsd"
     },
     {
       "name": "cost_spike_acknowledgement ceilingMicroUsd above budget",
@@ -1095,7 +1243,7 @@
           "signature": "c2lnbmF0dXJl"
         }
       },
-      "expectedError": "1000000000000"
+      "expectedError": "claim/ceilingMicroUsd"
     },
     {
       "name": "cost_spike_acknowledgement thresholdBps above max",

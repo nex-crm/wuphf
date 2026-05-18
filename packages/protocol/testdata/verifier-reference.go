@@ -19,7 +19,7 @@
 // no escape edge cases beyond standard JSON). It is not a general RFC 8785
 // JCS implementation; for production use the cyberphone/json-canonicalization
 // library or equivalent. The bundled vectors stay within the limited shapes
-// on purpose so that this file remains stdlib-only and pasteable.
+// on purpose so that this file remains small and pasteable.
 
 package main
 
@@ -36,6 +36,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 type auditPayloadInput struct {
@@ -173,9 +176,8 @@ type agentProviderRoutingRawEntry struct {
 
 // canonicalize is a *minimal* JCS implementation sufficient for the bundled
 // vectors. Sorts object keys lexicographically (Go's encoding/json does this
-// for map[string]any by default), uses null for nil, and emits no whitespace.
-// Strings get standard JSON escaping (sufficient because the vectors use
-// base64 / ASCII / printable Unicode only).
+// for map[string]any by default), uses null for nil, emits no whitespace, and
+// keeps '<', '>', and '&' unescaped to match ECMAScript JSON.stringify/JCS.
 //
 // LIMITATIONS vs full RFC 8785: no number normalization (vectors carry no
 // numbers in the hashed projection), no special handling of -0 or NaN, no
@@ -183,7 +185,13 @@ type agentProviderRoutingRawEntry struct {
 // adversarial Unicode, swap this for a real JCS library before trusting the
 // match.
 func canonicalize(v interface{}) ([]byte, error) {
-	return json.Marshal(v)
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // computeEventHash mirrors packages/protocol/src/audit-event.ts:computeEventHash.
@@ -725,11 +733,7 @@ func validateApprovalClaim(record map[string]interface{}, path string) (string, 
 		if err := validateEndpointOriginField(record, "endpointOrigin", path+"/endpointOrigin"); err != nil {
 			return "", "", err
 		}
-		reason, err := requiredStringValue(record, "reason", path+"/reason")
-		if err != nil {
-			return "", "", err
-		}
-		if err := validateUtf8Budget(reason, maxApprovalReasonBytes, path+"/reason"); err != nil {
+		if err := validateReasonField(record, "reason", path+"/reason"); err != nil {
 			return "", "", err
 		}
 	case "credential_grant_to_agent":
@@ -977,9 +981,14 @@ func validateCostCeilingIDField(record map[string]interface{}, key string, path 
 	if err := validateUtf8Budget(value, maxApprovalCostCeilingIDBytes, path); err != nil {
 		return err
 	}
-	if !costCeilingIDRE.MatchString(value) {
+	sanitized := sanitizeAllowlistText(value)
+	if err := validateUtf8Budget(sanitized, maxApprovalCostCeilingIDBytes, path); err != nil {
+		return err
+	}
+	if !costCeilingIDRE.MatchString(sanitized) {
 		return fmt.Errorf("%s: must be a valid cost ceiling id", path)
 	}
+	record[key] = sanitized
 	return nil
 }
 
@@ -991,15 +1000,98 @@ func validateEndpointOriginField(record map[string]interface{}, key string, path
 	if err := validateUtf8Budget(value, maxApprovalEndpointOriginBytes, path); err != nil {
 		return err
 	}
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	sanitized := sanitizeAllowlistText(value)
+	if err := validateUtf8Budget(sanitized, maxApprovalEndpointOriginBytes, path); err != nil {
+		return err
+	}
+	parsed, err := url.Parse(sanitized)
+	if err != nil {
 		return fmt.Errorf("%s: must be an http(s) URL origin", path)
 	}
-	origin := parsed.Scheme + "://" + parsed.Host
-	if origin != value {
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme == "" || parsed.Host == "" || (scheme != "http" && scheme != "https") {
+		return fmt.Errorf("%s: must be an http(s) URL origin", path)
+	}
+	if !isASCII(parsed.Hostname()) {
 		return fmt.Errorf("%s: must be a canonical URL origin", path)
 	}
+	origin := canonicalURLOrigin(parsed)
+	if origin != sanitized {
+		return fmt.Errorf("%s: must be a canonical URL origin", path)
+	}
+	record[key] = origin
 	return nil
+}
+
+func validateReasonField(record map[string]interface{}, key string, path string) error {
+	value, err := requiredStringValue(record, key, path)
+	if err != nil {
+		return err
+	}
+	if err := validateUtf8Budget(value, maxApprovalReasonBytes, path); err != nil {
+		return err
+	}
+	sanitized := sanitizeAllowlistText(value)
+	if err := validateUtf8Budget(sanitized, maxApprovalReasonBytes, path); err != nil {
+		return err
+	}
+	record[key] = sanitized
+	return nil
+}
+
+func canonicalURLOrigin(parsed *url.URL) string {
+	scheme := strings.ToLower(parsed.Scheme)
+	host := strings.ToLower(parsed.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	port := parsed.Port()
+	if port != "" && !((scheme == "https" && port == "443") || (scheme == "http" && port == "80")) {
+		host += ":" + port
+	}
+	return scheme + "://" + host
+}
+
+func isASCII(value string) bool {
+	for _, r := range value {
+		if r > 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func sanitizeAllowlistText(value string) string {
+	normalized := norm.NFKC.String(value)
+	var out strings.Builder
+	for _, r := range normalized {
+		if !isAllowlistDisallowedCodePoint(r) {
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
+func isAllowlistDisallowedCodePoint(r rune) bool {
+	if r <= 0x1f && r != '\t' && r != '\n' && r != '\r' {
+		return true
+	}
+	if r == '\t' || r == '\n' || r == '\r' {
+		return false
+	}
+	if unicode.In(r, unicode.Cc, unicode.Cf, unicode.Cn, unicode.Co, unicode.Cs) {
+		return true
+	}
+	return isDefaultIgnorableNonOtherCodePoint(r)
+}
+
+func isDefaultIgnorableNonOtherCodePoint(r rune) bool {
+	return r == 0x034f ||
+		(r >= 0x115f && r <= 0x1160) ||
+		(r >= 0x17b4 && r <= 0x17b5) ||
+		r == 0x3164 ||
+		(r >= 0xfe00 && r <= 0xfe0f) ||
+		(r >= 0xe0100 && r <= 0xe01ef)
 }
 
 func validateCredentialHandleIDField(record map[string]interface{}, key string, path string) error {
