@@ -17,6 +17,7 @@ import { asAgentId } from "../src/credential-handle.ts";
 import { FrozenArgs } from "../src/frozen-args.ts";
 import { approvalSubmitRequestFromJson } from "../src/ipc.ts";
 import {
+  APPROVAL_ROLE_VALUES,
   asAgentSlug,
   asApprovalClaimId,
   asApprovalId,
@@ -1311,6 +1312,11 @@ describe("receipt schema", () => {
     expect(isApprovalRole("approver")).toBe(true);
     expect(isApprovalRole("custom")).toBe(false);
     expect(() => asApprovalRole("custom")).toThrow(/ApprovalRole/);
+    expect(APPROVAL_ROLE_VALUES).toEqual(["viewer", "approver", "host"]);
+    for (const role of APPROVAL_ROLE_VALUES) {
+      expect(isApprovalRole(role)).toBe(true);
+      expect(asApprovalRole(role)).toBe(role);
+    }
   });
 
   it("length-caps receipt-local brand constructors at the byte budget", () => {
