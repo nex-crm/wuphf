@@ -104,6 +104,15 @@ jobs:
           node apps/installer-stub/scripts/check-packaged-runtime-deps.test.mjs
 
   build-mac:
+    # Installer artifacts build only on release tags, never on PRs. This
+    # macOS leg runs on macos-15 — a 10x billing multiplier — for ~12 min;
+    # running it on every PR cost ~$800/mo to validate installers that no
+    # one consumes before a release. PR-time build coverage is already
+    # provided by ci.yml's go-cross-build (darwin/arm64), web, and desktop
+    # jobs. The detect-secrets + installer-invariants gates above still run
+    # on PRs (cheap Linux jobs) and remain the home for installer-stub unit
+    # checks. To restore a PR macOS build, run the workflow on demand.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs:
       - detect-secrets
       - installer-invariants
@@ -274,6 +283,9 @@ jobs:
           if-no-files-found: error
 
   build-win:
+    # Tag-only: see build-mac. Windows runners bill at 2x; no PR consumes
+    # the installer before release.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs:
       - detect-secrets
       - installer-invariants
@@ -548,6 +560,9 @@ jobs:
           if-no-files-found: error
 
   build-linux:
+    # Tag-only: see build-mac. Kept off PRs for parity so all three
+    # installer legs build from the same trigger surface.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs:
       - detect-secrets
       - installer-invariants
