@@ -1146,6 +1146,9 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/onboarding/validate-key",
 		"/onboarding/templates",
 		"/onboarding/blueprints",
+		"/onboarding/transition",
+		"/onboarding/answer",
+		"/onboarding/suggestion/ack",
 		"/onboarding/checklist/dismiss",
 		"/onboarding/checklist/anything", // /onboarding/checklist/ subpath
 		// workspace wipes (mounted via workspace.RegisterRoutesWithOptions)

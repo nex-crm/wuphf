@@ -17,6 +17,7 @@ import "./styles/kbd.css";
 import "./styles/console.css";
 import "./styles/pixel-skill-card.css";
 import "./styles/lifecycle.css";
+import "./styles/onboarding.css";
 
 // Attach the root route's component at startup. Defining the component
 // inside `lib/router.ts` would create a circular import: RootRoute reads

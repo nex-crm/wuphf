@@ -690,7 +690,7 @@ export default function RootRoute() {
     if (onGenericRoute) {
       void router.navigate({
         to: "/dm/$agentSlug",
-        params: { agentSlug: "ceo:onboarding" },
+        params: { agentSlug: "ceo" },
         replace: true,
       });
     }
@@ -782,7 +782,7 @@ export default function RootRoute() {
         <PrePickScreen
           onComplete={() => {
             // PrePickScreen transitions directly to CEO DM.
-            // The broker sets state.Phase = "greet" after /onboarding/complete.
+            // The broker sets state.Phase = "greet" after /onboarding/transition.
             // We enter the in-CEO state here so the Shell renders immediately.
             setInCeoOnboarding(true);
           }}

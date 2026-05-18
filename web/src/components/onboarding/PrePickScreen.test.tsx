@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PrePickScreen } from "./PrePickScreen";
 
 // The pre-pick screen reads /onboarding/prereqs and POSTs /config +
-// /onboarding/complete. Stub both so tests stay focused on the screen's
+// /onboarding/transition. Stub both so tests stay focused on the screen's
 // own behavior -- no broker contract is exercised here.
 vi.mock("../../api/client", async () => {
   const actual =
@@ -74,7 +74,7 @@ describe("PrePickScreen", () => {
     expect(screen.getByTestId("pre-pick-skip")).toBeInTheDocument();
   });
 
-  it("posts /config and /onboarding/complete when a detected runtime is picked", async () => {
+  it("posts /config and starts CEO onboarding when a detected runtime is picked", async () => {
     mockPrereqs({ claude: true });
     const onComplete = vi.fn();
     render(<PrePickScreen onComplete={onComplete} />);
@@ -93,18 +93,15 @@ describe("PrePickScreen", () => {
         memory_backend: "markdown",
       }),
     );
-    expect(postMock).toHaveBeenCalledWith(
-      "/onboarding/complete",
-      expect.objectContaining({
-        skip_task: true,
-        blueprint: "",
-        agents: [],
-        runtime: "claude-code",
-      }),
-    );
+    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+      phase: "greet",
+    });
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/onboarding/complete"),
+    ).toBeUndefined();
   });
 
-  it("posts /onboarding/complete with no runtime when the user picks the skip affordance", async () => {
+  it("starts CEO onboarding with no runtime when the user picks the skip affordance", async () => {
     mockPrereqs({});
     const onComplete = vi.fn();
     render(<PrePickScreen onComplete={onComplete} />);
@@ -120,14 +117,9 @@ describe("PrePickScreen", () => {
     expect(
       postMock.mock.calls.find((call) => call[0] === "/config"),
     ).toBeUndefined();
-    expect(postMock).toHaveBeenCalledWith(
-      "/onboarding/complete",
-      expect.objectContaining({
-        skip_task: true,
-        runtime: "",
-        runtime_priority: [],
-      }),
-    );
+    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+      phase: "greet",
+    });
   });
 
   it("opens the install URL in a new tab when a missing runtime card is clicked", async () => {
@@ -161,10 +153,10 @@ describe("PrePickScreen", () => {
     }
   });
 
-  it("surfaces an error if /onboarding/complete fails and does not invoke onComplete", async () => {
+  it("surfaces an error if /onboarding/transition fails and does not invoke onComplete", async () => {
     mockPrereqs({ codex: true });
     postMock.mockImplementation(async (path: string) => {
-      if (path === "/onboarding/complete") {
+      if (path === "/onboarding/transition") {
         throw new Error("broker unreachable");
       }
       return {};
