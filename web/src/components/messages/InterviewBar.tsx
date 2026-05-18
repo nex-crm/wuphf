@@ -117,6 +117,11 @@ export function InterviewBar() {
     }
   }, [textMode]);
 
+  // When there's no agent interview request, fall back to the CEO card
+  // section so the deterministic onboarding chip / form-field input still
+  // renders during Phase 2. CeoCardSection returns null on its own when
+  // there's no pendingSuggestion either, so this is safe in non-onboarding
+  // surfaces (the context default is `phase: undefined`).
   if (!current) return <CeoCardSection />;
 
   const rawOptions = current.options ?? current.choices ?? [];
