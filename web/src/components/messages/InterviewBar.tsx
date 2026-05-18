@@ -788,7 +788,7 @@ async function advanceOnboardingAfterAnswer(
       await post("/onboarding/transition", { phase: "identity" });
       return;
     case "description":
-      await post("/onboarding/transition", { phase: "blueprint" });
+      await post("/onboarding/transition", { phase: "website" });
       return;
     case "blueprint_id":
       // Strict trimmed-string check: an unknown payload can be a whitespace

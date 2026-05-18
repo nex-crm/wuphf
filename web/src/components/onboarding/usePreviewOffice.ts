@@ -33,6 +33,7 @@ export interface PreviewOfficeState {
 const PREVIEW_PHASES = new Set([
   "greet",
   "identity",
+  "website",
   "scan",
   "blueprint",
   "team",

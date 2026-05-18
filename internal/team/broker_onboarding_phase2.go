@@ -125,7 +125,19 @@ func (b *Broker) advancePhase(s *onboarding.State, next string) error {
 		return fmt.Errorf("onboarding: persist PendingSuggestion for phase %s: %w", next, err)
 	}
 
-	return b.saveLocked()
+	if err := b.saveLocked(); err != nil {
+		return err
+	}
+
+	// PhaseScan: launch the real website scan asynchronously so the chat
+	// can keep flowing. The goroutine updates the chip status, stagger-
+	// posts one "✓ <article>" message per wiki page that gets written,
+	// then auto-advances to PhaseBlueprint when done.
+	if next == onboarding.PhaseScan {
+		go b.runScanPhase(dmSlug)
+	}
+
+	return nil
 }
 
 // runSeedPhase runs the atomic office seed at the seed phase boundary.
@@ -362,6 +374,19 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 				"field":       "description",
 				"label":       "Short description",
 				"placeholder": "e.g. Subscription billing for indie SaaS",
+				"optional":    true,
+			}),
+		}}
+
+	case onboarding.PhaseWebsite:
+		return []ceoMessagePayload{{
+			Kind:         "ceo_form_field",
+			Content:      "Got a website I can scan for context?",
+			SuggestionID: "identity-website",
+			SuggestionPayload: mustMarshalRaw(map[string]interface{}{
+				"field":       "website_url",
+				"label":       "Company website",
+				"placeholder": "acme.com",
 				"optional":    true,
 			}),
 		}}
