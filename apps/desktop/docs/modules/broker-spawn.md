@@ -48,9 +48,10 @@ the broker subprocess posts `{ ready: true, brokerUrl }`. In packaged mode the
 entry converts the listener's bound `http://127.0.0.1:<port>` handle into the
 browser-facing `http://localhost:<port>` form before posting readiness, so the
 renderer page origin, `/api-token` bootstrap URL, and WebAuthn RP ID all use
-`localhost`. The URL is validated against `@wuphf/protocol`'s `isBrokerUrl`
-brand at the IPC boundary — a malformed message is dropped, not handed
-downstream as a "string" the renderer might trust as a fetch origin.
+`localhost`. The conversion is required because WebAuthn RP IDs cannot be IP
+addresses. The URL is validated against `@wuphf/protocol`'s `isBrokerUrl` brand
+at the IPC boundary — a malformed message is dropped, not handed downstream as
+a "string" the renderer might trust as a fetch origin.
 
 In packaged mode the `BrowserWindow` loads `${brokerUrl}/` in that localhost
 form so `/api-token`, `/api/*`, WebAuthn, and the agent terminal WebSocket are
@@ -148,7 +149,7 @@ broker appends that localhost origin to WebAuthn's `allowedOrigins` after
 cannot be IP addresses. In dev, `WUPHF_DEV_RENDERER_ORIGIN` is still passed
 through so the electron-vite renderer origin is allowed as well.
 
-### Receipt-store recovery
+## Receipt-Store Recovery
 
 If the durable store fails the broker route surface returns:
 

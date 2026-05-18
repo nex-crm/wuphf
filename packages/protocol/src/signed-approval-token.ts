@@ -23,9 +23,10 @@ import {
   type CredentialHandleId,
   type CredentialScope,
 } from "./credential-handle.ts";
-import { APPROVAL_ROLE_VALUES, RISK_CLASS_VALUES } from "./receipt-literals.ts";
+import { RISK_CLASS_VALUES } from "./receipt-literals.ts";
 import {
   type ApprovalRole,
+  asApprovalRole,
   asProviderKind,
   asReceiptId,
   asWriteId,
@@ -166,7 +167,6 @@ const COST_CEILING_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 
 const APPROVAL_CLAIM_KIND_SET: ReadonlySet<string> = new Set(APPROVAL_CLAIM_KIND_VALUES);
-const APPROVAL_ROLE_SET: ReadonlySet<string> = new Set(APPROVAL_ROLE_VALUES);
 const RISK_CLASS_SET: ReadonlySet<string> = new Set(RISK_CLASS_VALUES);
 
 const SIGNED_APPROVAL_TOKEN_KEYS_TUPLE = [
@@ -882,10 +882,11 @@ function requiredApprovalClaimKind(
 
 function approvalRoleFromJson(value: string, path: string): ApprovalRole {
   assertBudget(validateApprovalIdentifierBudget(value, `${pointer(path, "role")} bytes`), path);
-  if (!APPROVAL_ROLE_SET.has(value)) {
+  try {
+    return asApprovalRole(value);
+  } catch {
     throw new Error(`${pointer(path, "role")}: must be a valid approval role`);
   }
-  return value as ApprovalRole;
 }
 
 function riskClassFromJson(value: string, path: string): RiskClass {

@@ -22,6 +22,7 @@ import {
   asApprovalTokenId,
   asTimestampMs,
   canonicalJSON,
+  isApprovalRole,
   type JsonValue,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   type SignedApprovalToken,
@@ -46,7 +47,6 @@ const MAX_WEBAUTHN_ROUTE_BODY_BYTES = 256 * 1024;
 const ALLOW_WEBAUTHN_ROUTE = "POST";
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 const TOKEN_ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const APPROVAL_ROLE_SET: ReadonlySet<string> = new Set(["viewer", "approver", "host"]);
 
 const REGISTRATION_CHALLENGE_KEYS: ReadonlySet<string> = new Set(["role"]);
 const REGISTRATION_VERIFY_KEYS: ReadonlySet<string> = new Set([
@@ -1084,8 +1084,8 @@ function base64UrlStringFromJson(value: string, path: string): string {
 }
 
 function roleFromJson(value: string): ApprovalRole {
-  if (APPROVAL_ROLE_SET.has(value)) {
-    return value as ApprovalRole;
+  if (isApprovalRole(value)) {
+    return value;
   }
   throw new Error("registrationChallenge.role: not a supported approval role");
 }

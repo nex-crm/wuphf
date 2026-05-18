@@ -25,6 +25,7 @@ export function CredentialRegistrationPanel() {
   const [state, setState] = useState<RegistrationState>({ kind: "idle" });
   const selectedRole = role === "custom" ? customRole.trim() : role;
   const running = state.kind === "running";
+  const canRegister = selectedRole.length > 0;
 
   const handleRegister = async () => {
     if (running) return;
@@ -145,7 +146,7 @@ export function CredentialRegistrationPanel() {
           type="button"
           className="btn btn-primary btn-sm"
           onClick={handleRegister}
-          disabled={running}
+          disabled={running || !canRegister}
         >
           {running ? "Waiting for security key..." : "Register security key"}
         </button>

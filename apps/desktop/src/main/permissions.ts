@@ -104,6 +104,8 @@ function isLoopbackHttpOrigin(origin: string): boolean {
 
 function isMainFrame(details: unknown): boolean {
   const value = recordBoolean(details, "isMainFrame");
+  // Older Electron permission callbacks may omit isMainFrame; treat omission as
+  // main-frame so legacy shapes do not accidentally block the top-level page.
   return value !== false;
 }
 

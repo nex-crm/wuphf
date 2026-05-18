@@ -302,6 +302,7 @@ export type {
 export {
   asAgentSlug,
   asApprovalId,
+  asApprovalRole,
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
@@ -313,6 +314,7 @@ export {
   asWriteId,
   isAgentSlug,
   isApprovalId,
+  isApprovalRole,
   isIdempotencyKey,
   isProviderKind,
   isReceiptId,

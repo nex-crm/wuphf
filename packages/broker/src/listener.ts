@@ -47,6 +47,7 @@ import {
   asBrokerPort,
   asBrokerUrl,
   type BrokerPort,
+  isApprovalRole,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
 } from "@wuphf/protocol";
 import { WebSocketServer } from "ws";
@@ -81,7 +82,6 @@ import {
 
 const LOOPBACK_HOST = "127.0.0.1";
 const BROWSER_WEBAUTHN_HOST = "localhost";
-const APPROVAL_ROLE_SET: ReadonlySet<string> = new Set(["viewer", "approver", "host"]);
 
 export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHandle> {
   const logger: BrokerLogger = config.logger ?? NOOP_LOGGER;
@@ -718,7 +718,7 @@ function isWebAuthnLoopbackHostname(hostname: string): boolean {
 
 function assertKnownApprovalRoles(path: string, roles: readonly unknown[]): void {
   for (const [index, role] of roles.entries()) {
-    if (typeof role !== "string" || !APPROVAL_ROLE_SET.has(role)) {
+    if (!isApprovalRole(role)) {
       throw new Error(`createBroker: ${path}[${index}] must be a valid approval role`);
     }
   }

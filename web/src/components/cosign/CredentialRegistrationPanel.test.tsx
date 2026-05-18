@@ -112,19 +112,16 @@ describe("<CredentialRegistrationPanel>", () => {
     );
   });
 
-  it("requires a non-empty custom role before contacting the broker", async () => {
+  it("disables registration until a custom role is present", async () => {
     render(<CredentialRegistrationPanel />);
 
     const user = userEvent.setup();
     await user.selectOptions(screen.getByLabelText("Approval role"), "custom");
-    await user.click(
-      screen.getByRole("button", { name: "Register security key" }),
-    );
 
+    expect(
+      screen.getByRole("button", { name: "Register security key" }),
+    ).toBeDisabled();
     expect(requestChallengeMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Choose a role before registering",
-    );
   });
 
   it("maps authenticator cancellation to a clear local error", () => {

@@ -788,13 +788,30 @@ function validateMaybeSignedApprovalTokenBudget(
   value: unknown,
   label: string,
 ): BudgetValidationResult {
+  const tokenId = stringProperty(value, "tokenId");
+  if (tokenId !== undefined) {
+    const tokenIdBudget = validateApprovalTokenIdBudget(tokenId);
+    if (!tokenIdBudget.ok) return prefixBudgetReason(`${label}.tokenId`, tokenIdBudget);
+  }
+
+  const claim = objectProperty(value, "claim");
+  const claimBudget = validateMaybeApprovalClaimBudget(claim, `${label}.claim`);
+  if (!claimBudget.ok) return claimBudget;
+
+  const scope = objectProperty(value, "scope");
+  const scopeBudget = validateMaybeApprovalScopeBudget(scope, `${label}.scope`);
+  if (!scopeBudget.ok) return scopeBudget;
+
+  const issuedTo = stringProperty(value, "issuedTo");
+  if (issuedTo !== undefined) {
+    const issuedToBudget = validateApprovalIdentifierBudget(issuedTo, `${label}.issuedTo bytes`);
+    if (!issuedToBudget.ok) return issuedToBudget;
+  }
+
   const signature = objectProperty(value, "signature");
   if (signature !== undefined) {
-    const assertionBudget = validateMaybeWebAuthnAssertionBudget(
-      signature,
-      "approvalToken.signature",
-    );
-    if (!assertionBudget.ok) return prefixBudgetReason(label, assertionBudget);
+    const assertionBudget = validateMaybeWebAuthnAssertionBudget(signature, `${label}.signature`);
+    if (!assertionBudget.ok) return assertionBudget;
   }
 
   const notBefore = objectProperty(value, "notBefore");
@@ -802,6 +819,206 @@ function validateMaybeSignedApprovalTokenBudget(
   if (typeof notBefore !== "number" || typeof expiresAt !== "number") return { ok: true };
   const result = validateApprovalTokenLifetimeValues(notBefore, expiresAt);
   return result.ok ? result : prefixBudgetReason(label, result);
+}
+
+function validateMaybeApprovalClaimBudget(value: unknown, label: string): BudgetValidationResult {
+  if (typeof value !== "object" || value === null) return { ok: true };
+
+  const claimId = stringProperty(value, "claimId");
+  if (claimId !== undefined) {
+    const claimIdBudget = validateApprovalClaimIdBudget(claimId);
+    if (!claimIdBudget.ok) return prefixBudgetReason(`${label}.claimId`, claimIdBudget);
+  }
+
+  const kind = stringProperty(value, "kind");
+  if (kind !== undefined) {
+    const kindBudget = validateApprovalIdentifierBudget(kind, `${label}.kind bytes`);
+    if (!kindBudget.ok) return kindBudget;
+  }
+
+  if (kind === "cost_spike_acknowledgement") {
+    const agentId = stringProperty(value, "agentId");
+    if (agentId !== undefined) {
+      const agentIdBudget = validateApprovalIdentifierBudget(agentId, `${label}.agentId bytes`);
+      if (!agentIdBudget.ok) return agentIdBudget;
+    }
+    const costCeilingId = stringProperty(value, "costCeilingId");
+    if (costCeilingId !== undefined) {
+      const costCeilingBudget = validateApprovalCostCeilingIdBudget(costCeilingId);
+      if (!costCeilingBudget.ok) {
+        return prefixBudgetReason(`${label}.costCeilingId`, costCeilingBudget);
+      }
+    }
+  } else if (kind === "endpoint_allowlist_extension") {
+    const agentId = stringProperty(value, "agentId");
+    if (agentId !== undefined) {
+      const agentIdBudget = validateApprovalIdentifierBudget(agentId, `${label}.agentId bytes`);
+      if (!agentIdBudget.ok) return agentIdBudget;
+    }
+    const providerKind = stringProperty(value, "providerKind");
+    if (providerKind !== undefined) {
+      const providerKindBudget = validateApprovalIdentifierBudget(
+        providerKind,
+        `${label}.providerKind bytes`,
+      );
+      if (!providerKindBudget.ok) return providerKindBudget;
+    }
+    const endpointOrigin = stringProperty(value, "endpointOrigin");
+    if (endpointOrigin !== undefined) {
+      const endpointBudget = validateApprovalEndpointOriginBudget(endpointOrigin);
+      if (!endpointBudget.ok) return prefixBudgetReason(`${label}.endpointOrigin`, endpointBudget);
+    }
+    const reason = stringProperty(value, "reason");
+    if (reason !== undefined) {
+      const reasonBudget = validateApprovalReasonBudget(reason);
+      if (!reasonBudget.ok) return prefixBudgetReason(`${label}.reason`, reasonBudget);
+    }
+  } else if (kind === "credential_grant_to_agent") {
+    const granteeAgentId = stringProperty(value, "granteeAgentId");
+    if (granteeAgentId !== undefined) {
+      const granteeBudget = validateApprovalIdentifierBudget(
+        granteeAgentId,
+        `${label}.granteeAgentId bytes`,
+      );
+      if (!granteeBudget.ok) return granteeBudget;
+    }
+    const credentialHandleId = stringProperty(value, "credentialHandleId");
+    if (credentialHandleId !== undefined) {
+      const credentialBudget = validateApprovalIdentifierBudget(
+        credentialHandleId,
+        `${label}.credentialHandleId bytes`,
+      );
+      if (!credentialBudget.ok) return credentialBudget;
+    }
+    const credentialScope = stringProperty(value, "credentialScope");
+    if (credentialScope !== undefined) {
+      const scopeBudget = validateApprovalIdentifierBudget(
+        credentialScope,
+        `${label}.credentialScope bytes`,
+      );
+      if (!scopeBudget.ok) return scopeBudget;
+    }
+  } else if (kind === "receipt_co_sign") {
+    const receiptId = stringProperty(value, "receiptId");
+    if (receiptId !== undefined) {
+      const receiptBudget = validateApprovalIdentifierBudget(receiptId, `${label}.receiptId bytes`);
+      if (!receiptBudget.ok) return receiptBudget;
+    }
+    const writeId = stringProperty(value, "writeId");
+    if (writeId !== undefined) {
+      const writeBudget = validateApprovalIdentifierBudget(writeId, `${label}.writeId bytes`);
+      if (!writeBudget.ok) return writeBudget;
+    }
+    const frozenArgsHash = stringProperty(value, "frozenArgsHash");
+    if (frozenArgsHash !== undefined) {
+      const hashBudget = validateApprovalIdentifierBudget(
+        frozenArgsHash,
+        `${label}.frozenArgsHash bytes`,
+      );
+      if (!hashBudget.ok) return hashBudget;
+    }
+    const riskClass = stringProperty(value, "riskClass");
+    if (riskClass !== undefined) {
+      const riskBudget = validateApprovalIdentifierBudget(riskClass, `${label}.riskClass bytes`);
+      if (!riskBudget.ok) return riskBudget;
+    }
+  }
+
+  return validateJsonProjectionBudget(value, validateApprovalClaimCanonicalJsonBudget, label);
+}
+
+function validateMaybeApprovalScopeBudget(value: unknown, label: string): BudgetValidationResult {
+  if (typeof value !== "object" || value === null) return { ok: true };
+
+  const claimId = stringProperty(value, "claimId");
+  if (claimId !== undefined) {
+    const claimIdBudget = validateApprovalClaimIdBudget(claimId);
+    if (!claimIdBudget.ok) return prefixBudgetReason(`${label}.claimId`, claimIdBudget);
+  }
+
+  const claimKind = stringProperty(value, "claimKind");
+  if (claimKind !== undefined) {
+    const kindBudget = validateApprovalIdentifierBudget(claimKind, `${label}.claimKind bytes`);
+    if (!kindBudget.ok) return kindBudget;
+  }
+
+  const role = stringProperty(value, "role");
+  if (role !== undefined) {
+    const roleBudget = validateApprovalIdentifierBudget(role, `${label}.role bytes`);
+    if (!roleBudget.ok) return roleBudget;
+  }
+
+  if (claimKind === "cost_spike_acknowledgement") {
+    const agentId = stringProperty(value, "agentId");
+    if (agentId !== undefined) {
+      const agentIdBudget = validateApprovalIdentifierBudget(agentId, `${label}.agentId bytes`);
+      if (!agentIdBudget.ok) return agentIdBudget;
+    }
+    const costCeilingId = stringProperty(value, "costCeilingId");
+    if (costCeilingId !== undefined) {
+      const costCeilingBudget = validateApprovalCostCeilingIdBudget(costCeilingId);
+      if (!costCeilingBudget.ok) {
+        return prefixBudgetReason(`${label}.costCeilingId`, costCeilingBudget);
+      }
+    }
+  } else if (claimKind === "endpoint_allowlist_extension") {
+    const agentId = stringProperty(value, "agentId");
+    if (agentId !== undefined) {
+      const agentIdBudget = validateApprovalIdentifierBudget(agentId, `${label}.agentId bytes`);
+      if (!agentIdBudget.ok) return agentIdBudget;
+    }
+    const providerKind = stringProperty(value, "providerKind");
+    if (providerKind !== undefined) {
+      const providerKindBudget = validateApprovalIdentifierBudget(
+        providerKind,
+        `${label}.providerKind bytes`,
+      );
+      if (!providerKindBudget.ok) return providerKindBudget;
+    }
+    const endpointOrigin = stringProperty(value, "endpointOrigin");
+    if (endpointOrigin !== undefined) {
+      const endpointBudget = validateApprovalEndpointOriginBudget(endpointOrigin);
+      if (!endpointBudget.ok) return prefixBudgetReason(`${label}.endpointOrigin`, endpointBudget);
+    }
+  } else if (claimKind === "credential_grant_to_agent") {
+    const granteeAgentId = stringProperty(value, "granteeAgentId");
+    if (granteeAgentId !== undefined) {
+      const granteeBudget = validateApprovalIdentifierBudget(
+        granteeAgentId,
+        `${label}.granteeAgentId bytes`,
+      );
+      if (!granteeBudget.ok) return granteeBudget;
+    }
+    const credentialHandleId = stringProperty(value, "credentialHandleId");
+    if (credentialHandleId !== undefined) {
+      const credentialBudget = validateApprovalIdentifierBudget(
+        credentialHandleId,
+        `${label}.credentialHandleId bytes`,
+      );
+      if (!credentialBudget.ok) return credentialBudget;
+    }
+  } else if (claimKind === "receipt_co_sign") {
+    const receiptId = stringProperty(value, "receiptId");
+    if (receiptId !== undefined) {
+      const receiptBudget = validateApprovalIdentifierBudget(receiptId, `${label}.receiptId bytes`);
+      if (!receiptBudget.ok) return receiptBudget;
+    }
+    const writeId = stringProperty(value, "writeId");
+    if (writeId !== undefined) {
+      const writeBudget = validateApprovalIdentifierBudget(writeId, `${label}.writeId bytes`);
+      if (!writeBudget.ok) return writeBudget;
+    }
+    const frozenArgsHash = stringProperty(value, "frozenArgsHash");
+    if (frozenArgsHash !== undefined) {
+      const hashBudget = validateApprovalIdentifierBudget(
+        frozenArgsHash,
+        `${label}.frozenArgsHash bytes`,
+      );
+      if (!hashBudget.ok) return hashBudget;
+    }
+  }
+
+  return validateJsonProjectionBudget(value, validateApprovalScopeCanonicalJsonBudget, label);
 }
 
 export function validateApprovalTokenLifetimeValues(
@@ -812,11 +1029,11 @@ export function validateApprovalTokenLifetimeValues(
   if (!Number.isFinite(lifetimeMs)) {
     return { ok: false, reason: "approval token lifetime must be finite" };
   }
-  // Lower-bound enforcement (strict `expiresAt > notBefore`) lives in the
-  // signed-approval-token codec so it can report the exact field path. This
-  // budget validator owns only the upper bound — the 30-minute cap.
   if (lifetimeMs <= 0) {
-    return { ok: true };
+    return {
+      ok: false,
+      reason: "approval token expiresAt must be strictly greater than notBefore",
+    };
   }
   try {
     assertWithinBudget(lifetimeMs, MAX_APPROVAL_TOKEN_LIFETIME_MS, "approval token lifetime ms");
@@ -843,7 +1060,7 @@ function validateMaybeWebAuthnAssertionBudget(
     const result = validateWebAuthnAssertionFieldBudget(fieldValue, `${label}.${field} bytes`);
     if (!result.ok) return result;
   }
-  return { ok: true };
+  return validateJsonProjectionBudget(value, validateWebAuthnAssertionBudget, label);
 }
 
 function arrayOrEmpty(value: unknown): readonly unknown[] {
@@ -888,6 +1105,23 @@ function prefixBudgetReason(
   result: { ok: false; reason: string },
 ): BudgetValidationResult {
   return { ok: false, reason: `${label}: ${result.reason}` };
+}
+
+function validateJsonProjectionBudget(
+  value: unknown,
+  validator: (json: string) => BudgetValidationResult,
+  label: string,
+): BudgetValidationResult {
+  const safety = validateJsonStringifySafety(value, label, new Set<object>());
+  if (!safety.ok) return safety;
+  try {
+    const json = JSON.stringify(value);
+    if (json === undefined) return { ok: true };
+    const result = validator(json);
+    return result.ok ? result : prefixBudgetReason(label, result);
+  } catch (err) {
+    return { ok: false, reason: `${label}: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 function validateSerializableStringFloor(value: unknown, budget: number): BudgetValidationResult {

@@ -24,6 +24,9 @@ import {
   GENESIS_PREV_HASH,
   INITIAL_VERIFIER_STATE,
   lsnFromV1Number,
+  MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES,
+  MAX_APPROVAL_REASON_BYTES,
+  MAX_APPROVAL_TOKEN_ID_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
   MAX_AUDIT_CHAIN_BATCH_SIZE,
   MAX_AUDIT_EVENT_BODY_BYTES,
@@ -46,6 +49,7 @@ import {
   MAX_THREAD_TASK_IDS,
   MAX_THREAD_TITLE_BYTES,
   MAX_TOOL_CALLS_PER_RECEIPT,
+  MAX_WEBAUTHN_ASSERTION_BYTES,
   MAX_WEBAUTHN_ASSERTION_FIELD_BYTES,
   type MemoryWriteRef,
   type ReceiptSnapshot,
@@ -368,22 +372,22 @@ describe("resource budgets", () => {
     expectBudgetRejection(result, /approval token lifetime ms.*1800001 > 1800000/);
   });
 
-  it("does not reject zero or negative approval token lifetimes — that is the per-field validator's job", () => {
-    // The lower bound (`expiresAt > notBefore`) is enforced by the token codec
-    // at the proper field path. The budget helper owns only the 30-minute cap.
+  it("rejects zero or negative approval token lifetimes", () => {
     const notBefore = 1_778_262_000_000;
-    expect(
+    expectBudgetRejection(
       validateApprovalTokenLifetime({
         notBefore,
         expiresAt: notBefore,
       }),
-    ).toEqual({ ok: true });
-    expect(
+      /expiresAt must be strictly greater than notBefore/,
+    );
+    expectBudgetRejection(
       validateApprovalTokenLifetime({
         notBefore,
         expiresAt: notBefore - 1,
       }),
-    ).toEqual({ ok: true });
+      /expiresAt must be strictly greater than notBefore/,
+    );
   });
 
   it("rejects approval token lifetimes with non-finite numeric inputs", () => {
@@ -418,17 +422,59 @@ describe("resource budgets", () => {
     }
   });
 
-  it("bounds nested WebAuthn assertion fields in receipt budgets", () => {
-    const atCap = receiptWithWriteApprovalToken({
+  it("bounds nested approval token ids in receipt budgets", () => {
+    const overCap = receiptWithWriteApprovalToken({
+      ...signedApprovalTokenFixture(),
+      tokenId: `A${"B".repeat(MAX_APPROVAL_TOKEN_ID_BYTES)}` as SignedApprovalToken["tokenId"],
+    });
+
+    expectBudgetRejection(
+      validateReceiptBudget(overCap),
+      /receipt writes\[0\]\.approvalToken\.tokenId: ApprovalTokenId bytes.*27 > 26/,
+    );
+  });
+
+  it("bounds nested approval token claim and scope fields in receipt budgets", () => {
+    const overReason = receiptWithWriteApprovalToken(
+      endpointApprovalTokenFixture(
+        "a".repeat(MAX_APPROVAL_REASON_BYTES + 1),
+        "https://api.example",
+      ),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overReason),
+      /receipt writes\[0\]\.approvalToken\.claim\.reason: ApprovalClaim\.reason bytes.*8193 > 8192/,
+    );
+
+    const overEndpoint = receiptWithWriteApprovalToken(
+      endpointApprovalTokenFixture(
+        "approved",
+        `https://example.com/${"a".repeat(MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES)}`,
+      ),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overEndpoint),
+      /receipt writes\[0\]\.approvalToken\.claim\.endpointOrigin: ApprovalClaim\.endpointOrigin bytes/,
+    );
+  });
+
+  it("bounds nested WebAuthn assertions in receipt budgets", () => {
+    const overTotal = receiptWithWriteApprovalToken({
       ...signedApprovalTokenFixture(),
       signature: {
         ...webAuthnAssertionFixture(),
-        signature: "A".repeat(MAX_WEBAUTHN_ASSERTION_FIELD_BYTES),
+        credentialId: "A".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 4)),
+        authenticatorData: "A".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 4)),
+        clientDataJson: "A".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 4)),
+        signature: "A".repeat(Math.floor(MAX_WEBAUTHN_ASSERTION_BYTES / 4)),
       },
     });
-    expect(validateReceiptBudget(atCap)).toEqual({ ok: true });
+    expectBudgetRejection(
+      validateReceiptBudget(overTotal),
+      /receipt writes\[0\]\.approvalToken\.signature: WebAuthnAssertion canonical JSON bytes/,
+    );
 
-    const overCap = receiptWithWriteApprovalToken({
+    const overField = receiptWithWriteApprovalToken({
       ...signedApprovalTokenFixture(),
       signature: {
         ...webAuthnAssertionFixture(),
@@ -437,8 +483,21 @@ describe("resource budgets", () => {
     });
 
     expectBudgetRejection(
-      validateReceiptBudget(overCap),
-      /receipt writes\[0\]\.approvalToken: approvalToken\.signature\.signature bytes.*16385 > 16384/,
+      validateReceiptBudget(overField),
+      /receipt writes\[0\]\.approvalToken\.signature\.signature bytes.*16385 > 16384/,
+    );
+  });
+
+  it("rejects embedded approval tokens that expire before they are valid", () => {
+    const token = signedApprovalTokenFixture();
+    const receipt = receiptWithWriteApprovalToken({
+      ...token,
+      expiresAt: token.notBefore,
+    });
+
+    expectBudgetRejection(
+      validateReceiptBudget(receipt),
+      /receipt writes\[0\]\.approvalToken: approval token expiresAt must be strictly greater than notBefore/,
     );
   });
 
@@ -829,6 +888,39 @@ function signedApprovalTokenFixture(): SignedApprovalToken {
     notBefore: asTimestampMs(1_778_262_000_000),
     expiresAt: asTimestampMs(1_778_263_800_000),
     issuedTo: asAgentId("agent_alpha"),
+    signature: webAuthnAssertionFixture(),
+  };
+}
+
+function endpointApprovalTokenFixture(reason: string, endpointOrigin: string): SignedApprovalToken {
+  const claimId = asApprovalClaimId("claim_endpoint");
+  const agentId = asAgentId("agent_alpha");
+  const providerKind = asProviderKind("openai");
+  return {
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA1"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "endpoint_allowlist_extension",
+      agentId,
+      providerKind,
+      endpointOrigin,
+      reason,
+    },
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "endpoint_allowlist_extension",
+      role: "approver",
+      maxUses: 1,
+      agentId,
+      providerKind,
+      endpointOrigin,
+    },
+    notBefore: asTimestampMs(1_778_262_000_000),
+    expiresAt: asTimestampMs(1_778_263_800_000),
+    issuedTo: agentId,
     signature: webAuthnAssertionFixture(),
   };
 }

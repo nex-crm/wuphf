@@ -13,7 +13,12 @@ import type {
   ApprovalScopeJsonValue,
   SignedApprovalTokenJsonValue,
 } from "@wuphf/protocol";
-import { approvalClaimFromJson, approvalScopeFromJson } from "@wuphf/protocol";
+import {
+  approvalClaimFromJson,
+  approvalClaimToJsonValue,
+  approvalScopeFromJson,
+  approvalScopeToJsonValue,
+} from "@wuphf/protocol";
 
 import { post } from "./client";
 
@@ -82,12 +87,15 @@ export type WebAuthnCosignVerifyResponse =
   | WebAuthnApprovalPendingResponse;
 
 export function isWebAuthnApprovalPendingResponse(
-  response: WebAuthnCosignVerifyResponse,
+  response: unknown,
 ): response is WebAuthnApprovalPendingResponse {
+  if (typeof response !== "object" || response === null) return false;
+  const record = response as Record<string, unknown>;
   return (
-    "status" in response &&
-    response.status === "approval_pending" &&
-    Array.isArray(response.satisfiedRoles)
+    record.status === "approval_pending" &&
+    Array.isArray(record.satisfiedRoles) &&
+    record.satisfiedRoles.every((role) => typeof role === "string") &&
+    typeof record.requiredThreshold === "number"
   );
 }
 
@@ -95,8 +103,8 @@ export function toWebAuthnCosignChallengeRequest(
   input: WebAuthnCosignChallengeInput,
 ): WebAuthnCosignChallengeRequest {
   return {
-    claim: approvalClaimJsonFromClaim(input.claim),
-    scope: approvalScopeJsonFromScope(input.scope),
+    claim: approvalClaimToJsonValue(input.claim),
+    scope: approvalScopeToJsonValue(input.scope),
   };
 }
 
@@ -155,108 +163,4 @@ export function runWebAuthnAuthenticationCeremony(
   requestOptions: WebAuthnRequestOptionsJson,
 ): Promise<WebAuthnAssertionResponseJson> {
   return startAuthentication({ optionsJSON: requestOptions });
-}
-
-function approvalClaimJsonFromClaim(
-  claim: ApprovalClaim,
-): ApprovalClaimJsonValue {
-  switch (claim.kind) {
-    case "cost_spike_acknowledgement":
-      return {
-        schemaVersion: claim.schemaVersion,
-        claimId: claim.claimId,
-        kind: claim.kind,
-        agentId: claim.agentId,
-        costCeilingId: claim.costCeilingId,
-        thresholdBps: claim.thresholdBps,
-        currentMicroUsd: claim.currentMicroUsd,
-        ceilingMicroUsd: claim.ceilingMicroUsd,
-      };
-    case "endpoint_allowlist_extension":
-      return {
-        schemaVersion: claim.schemaVersion,
-        claimId: claim.claimId,
-        kind: claim.kind,
-        agentId: claim.agentId,
-        providerKind: claim.providerKind,
-        endpointOrigin: claim.endpointOrigin,
-        reason: claim.reason,
-      };
-    case "credential_grant_to_agent":
-      return {
-        schemaVersion: claim.schemaVersion,
-        claimId: claim.claimId,
-        kind: claim.kind,
-        granteeAgentId: claim.granteeAgentId,
-        credentialHandleId: claim.credentialHandleId,
-        credentialScope: claim.credentialScope,
-      };
-    case "receipt_co_sign":
-      return omitUndefined({
-        schemaVersion: claim.schemaVersion,
-        claimId: claim.claimId,
-        kind: claim.kind,
-        receiptId: claim.receiptId,
-        writeId: claim.writeId,
-        frozenArgsHash: claim.frozenArgsHash,
-        riskClass: claim.riskClass,
-      });
-  }
-}
-
-function approvalScopeJsonFromScope(
-  scope: ApprovalScope,
-): ApprovalScopeJsonValue {
-  switch (scope.claimKind) {
-    case "cost_spike_acknowledgement":
-      return {
-        mode: scope.mode,
-        claimId: scope.claimId,
-        claimKind: scope.claimKind,
-        role: scope.role,
-        maxUses: scope.maxUses,
-        agentId: scope.agentId,
-        costCeilingId: scope.costCeilingId,
-      };
-    case "endpoint_allowlist_extension":
-      return {
-        mode: scope.mode,
-        claimId: scope.claimId,
-        claimKind: scope.claimKind,
-        role: scope.role,
-        maxUses: scope.maxUses,
-        agentId: scope.agentId,
-        providerKind: scope.providerKind,
-        endpointOrigin: scope.endpointOrigin,
-      };
-    case "credential_grant_to_agent":
-      return {
-        mode: scope.mode,
-        claimId: scope.claimId,
-        claimKind: scope.claimKind,
-        role: scope.role,
-        maxUses: scope.maxUses,
-        granteeAgentId: scope.granteeAgentId,
-        credentialHandleId: scope.credentialHandleId,
-      };
-    case "receipt_co_sign":
-      return omitUndefined({
-        mode: scope.mode,
-        claimId: scope.claimId,
-        claimKind: scope.claimKind,
-        role: scope.role,
-        maxUses: scope.maxUses,
-        receiptId: scope.receiptId,
-        writeId: scope.writeId,
-        frozenArgsHash: scope.frozenArgsHash,
-      });
-  }
-}
-
-function omitUndefined<T extends Record<string, unknown>>(value: T): T {
-  const entries = Object.entries(value).filter(
-    (entry): entry is [string, Exclude<unknown, undefined>] =>
-      entry[1] !== undefined,
-  );
-  return Object.fromEntries(entries) as T;
 }

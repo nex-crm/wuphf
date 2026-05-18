@@ -148,6 +148,22 @@ describe("webauthn api client", () => {
     });
   });
 
+  it("rejects malformed pending threshold response shapes", () => {
+    expect(
+      isWebAuthnApprovalPendingResponse({
+        status: "approval_pending",
+        satisfiedRoles: ["approver"],
+      }),
+    ).toBe(false);
+    expect(
+      isWebAuthnApprovalPendingResponse({
+        status: "approval_pending",
+        satisfiedRoles: ["approver", 1],
+        requiredThreshold: 2,
+      }),
+    ).toBe(false);
+  });
+
   it("runs the SimpleWebAuthn registration wrapper against navigator.credentials.create", async () => {
     const create = vi.fn<
       (options: CredentialCreationOptions) => Promise<Credential | null>

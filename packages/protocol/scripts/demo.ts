@@ -24,6 +24,7 @@ import {
   asApiToken,
   asApprovalClaimId,
   asApprovalId,
+  asApprovalRole,
   asApprovalTokenId,
   asBudgetId,
   asCredentialHandleId,
@@ -57,6 +58,7 @@ import {
   GENESIS_PREV_HASH,
   INITIAL_VERIFIER_STATE,
   isAllowedLoopbackHost,
+  isApprovalRole,
   isBudgetId,
   isBudgetScope,
   isCostAuditEventKind,
@@ -1241,6 +1243,11 @@ expectThrows(
     }),
   /RunnerFailureCode/,
 );
+
+header(31, "ApprovalRole helpers keep the closed enum importable at runtime");
+expectEqual("asApprovalRole accepts a known role", asApprovalRole("approver"), "approver");
+expectEqual("isApprovalRole rejects unknown roles", isApprovalRole("custom"), false);
+expectThrows(() => asApprovalRole("custom"), /ApprovalRole/);
 
 // ──────────────────────────────────────────────────────────────────────────
 console.log("");

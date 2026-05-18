@@ -11,6 +11,7 @@ import {
   asSha256Hex,
   asTimestampMs,
   canonicalJSON,
+  isApprovalRole,
   type JsonValue,
   type Sha256Hex,
   type TimestampMs,
@@ -116,7 +117,6 @@ type InsertConsumedTokenParams = [
 type UpdateConsumedTokenParams = [WebAuthnTokenOutcome, string, ApprovalTokenId];
 type PruneExpiredParams = [number];
 
-const APPROVAL_ROLE_SET: ReadonlySet<string> = new Set(["viewer", "approver", "host"]);
 const TOKEN_OUTCOME_SET: ReadonlySet<string> = new Set(["approval_pending", "approved"]);
 
 export class SqliteWebAuthnStore implements WebAuthnStore {
@@ -609,8 +609,8 @@ function parseStoredJson(value: string, path: string): JsonValue {
 }
 
 function roleFromString(value: string, path: string): ApprovalRole {
-  if (APPROVAL_ROLE_SET.has(value)) {
-    return value as ApprovalRole;
+  if (isApprovalRole(value)) {
+    return value;
   }
   throw new Error(`${path}: invalid approval role`);
 }

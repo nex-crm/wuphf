@@ -20,6 +20,7 @@ import {
   asAgentSlug,
   asApprovalClaimId,
   asApprovalId,
+  asApprovalRole,
   asApprovalTokenId,
   asIdempotencyKey,
   asProviderKind,
@@ -30,6 +31,7 @@ import {
   asToolCallId,
   asWriteId,
   type ExternalWrite,
+  isApprovalRole,
   isReceiptSnapshot,
   PROVIDER_KIND_VALUES,
   type ReceiptSnapshot,
@@ -109,6 +111,10 @@ const RECORD_BOUNDARIES = [
   { path: "/toolCalls/0/inputs", keys: FROZEN_ARGS_KEYS },
   { path: "/writes/0/failureMetadata", keys: WRITE_FAILURE_METADATA_KEYS },
   { path: "/writes/0", keys: EXTERNAL_WRITE_KEYS },
+  { path: "/writes/0/approvalToken", keys: SIGNED_APPROVAL_TOKEN_KEYS },
+  { path: "/writes/0/approvalToken/claim", keys: RECEIPT_CO_SIGN_CLAIM_KEYS },
+  { path: "/writes/0/approvalToken/scope", keys: RECEIPT_CO_SIGN_SCOPE_KEYS },
+  { path: "/writes/0/approvalToken/signature", keys: WEBAUTHN_ASSERTION_KEYS },
   { path: "/approvals/0/signedToken", keys: SIGNED_APPROVAL_TOKEN_KEYS },
   { path: "/approvals/0/signedToken/claim", keys: RECEIPT_CO_SIGN_CLAIM_KEYS },
   { path: "/approvals/0/signedToken/scope", keys: RECEIPT_CO_SIGN_SCOPE_KEYS },
@@ -562,7 +568,7 @@ describe("receipt schema", () => {
       mutate: (token: ApprovalTokenWire) => {
         token.tokenId = "A".repeat(27);
       },
-      receiptMessage: /\/writes\/0\/approvalToken\/tokenId: ApprovalTokenId: ApprovalTokenId bytes/,
+      receiptMessage: /receipt writes\[0\]\.approvalToken\.tokenId: ApprovalTokenId bytes/,
       ipcMessage:
         /approvalSubmitRequest\.approvalToken\/tokenId: ApprovalTokenId: ApprovalTokenId bytes/,
     },
@@ -572,8 +578,7 @@ describe("receipt schema", () => {
         const signature = wireRecordField(token, "signature");
         setWireField(signature, "signature", "A".repeat(MAX_WEBAUTHN_ASSERTION_FIELD_BYTES + 1));
       },
-      receiptMessage:
-        /receipt writes\[0\]\.approvalToken: approvalToken\.signature\.signature bytes/,
+      receiptMessage: /receipt writes\[0\]\.approvalToken\.signature\.signature bytes/,
       ipcMessage:
         /approvalSubmitRequest\.approvalToken\/signature\/signature: .*signature bytes exceeds budget: 16385 > 16384/,
     },
@@ -967,8 +972,8 @@ describe("receipt schema", () => {
 
     expectReceiptValidationError(
       tampered,
-      "/approvals/0/signedToken/expiresAt",
-      /strictly greater than notBefore/,
+      "",
+      /receipt approvals\[0\]\.signedToken: approval token expiresAt must be strictly greater than notBefore/,
     );
   });
 
@@ -1240,6 +1245,23 @@ describe("receipt schema", () => {
         },
       },
       {
+        path: "/writes/0/approvalToken",
+        mutate: (receipt) => {
+          const firstWrite = nonNull(validReceiptFixture().writes[0]);
+          setWireField(receipt, "writes", [{ ...firstWrite, approvalToken: "not-an-object" }]);
+        },
+      },
+      {
+        path: "/writes/0/approvalToken/claim",
+        mutate: (receipt) => {
+          const firstWrite = nonNull(validReceiptFixture().writes[0]);
+          const approvalToken = nonNull(firstWrite.approvalToken);
+          setWireField(receipt, "writes", [
+            { ...firstWrite, approvalToken: { ...approvalToken, claim: "not-an-object" } },
+          ]);
+        },
+      },
+      {
         path: "/writes/0/failureMetadata",
         mutate: (receipt) => {
           const firstWrite = nonNull(validReceiptFixture().writes[0]);
@@ -1282,6 +1304,13 @@ describe("receipt schema", () => {
   it("rejects ToolCallId/ApprovalId containing colons (LOCAL_ID_RE excludes ':')", () => {
     expect(() => asToolCallId("tool:01")).toThrow();
     expect(() => asApprovalId("approval:01")).toThrow();
+  });
+
+  it("exports runtime helpers for the closed ApprovalRole enum", () => {
+    expect(asApprovalRole("host")).toBe("host");
+    expect(isApprovalRole("approver")).toBe(true);
+    expect(isApprovalRole("custom")).toBe(false);
+    expect(() => asApprovalRole("custom")).toThrow(/ApprovalRole/);
   });
 
   it("length-caps receipt-local brand constructors at the byte budget", () => {
