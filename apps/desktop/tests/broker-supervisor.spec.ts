@@ -59,6 +59,8 @@ describe("BrokerSupervisor", () => {
         LANG: "en_US.UTF-8",
         LC_ALL: "C",
         TZ: "UTC",
+        WUPHF_RECEIPT_STORE_PATH: "/Users/fran/Library/Application Support/WUPHF/event-log.sqlite",
+        WUPHF_WEBAUTHN_STORE_PATH: "/Users/fran/Library/Application Support/WUPHF/webauthn.sqlite",
         SECRET_TOKEN: "must-not-leak",
       },
       forkProcess,
@@ -76,6 +78,8 @@ describe("BrokerSupervisor", () => {
         LANG: "en_US.UTF-8",
         LC_ALL: "C",
         TZ: "UTC",
+        WUPHF_RECEIPT_STORE_PATH: "/Users/fran/Library/Application Support/WUPHF/event-log.sqlite",
+        WUPHF_WEBAUTHN_STORE_PATH: "/Users/fran/Library/Application Support/WUPHF/webauthn.sqlite",
       },
     });
     expect(supervisor.getPid()).toBe(4321);
@@ -2335,6 +2339,8 @@ describe("buildBrokerEnv", () => {
         LANG: "en_US.UTF-8",
         LC_ALL: "C",
         TZ: "UTC",
+        WUPHF_RECEIPT_STORE_PATH: "/tmp/event-log.sqlite",
+        WUPHF_WEBAUTHN_STORE_PATH: "/tmp/webauthn.sqlite",
         AWS_SECRET_ACCESS_KEY: "must-not-leak",
       }),
     ).toEqual({
@@ -2344,6 +2350,8 @@ describe("buildBrokerEnv", () => {
       LANG: "en_US.UTF-8",
       LC_ALL: "C",
       TZ: "UTC",
+      WUPHF_RECEIPT_STORE_PATH: "/tmp/event-log.sqlite",
+      WUPHF_WEBAUTHN_STORE_PATH: "/tmp/webauthn.sqlite",
     });
   });
 });

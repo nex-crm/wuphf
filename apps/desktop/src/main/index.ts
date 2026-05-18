@@ -18,6 +18,7 @@ const RENDERER_DIST_ENV = "WUPHF_RENDERER_DIST";
 const DEV_RENDERER_ORIGIN_ENV = "WUPHF_DEV_RENDERER_ORIGIN";
 const ELECTRON_RENDERER_URL_ENV = "ELECTRON_RENDERER_URL";
 const RECEIPT_STORE_PATH_ENV = "WUPHF_RECEIPT_STORE_PATH";
+const WEBAUTHN_STORE_PATH_ENV = "WUPHF_WEBAUTHN_STORE_PATH";
 
 const logger = createLogger("main");
 const brokerLogger = createLogger("broker");
@@ -103,13 +104,14 @@ app
       return;
     }
 
-    // The broker utility process opens a durable, SQLite event-log-
-    // backed ReceiptStore at `<userData>/event-log.sqlite` when this
-    // env var is set; without it the broker falls back to the in-
-    // memory store. We set it unconditionally for the packaged + dev
-    // paths so receipts persist across restarts.
+    // The broker utility process opens durable SQLite stores under userData
+    // when these env vars are set. We set them unconditionally for packaged
+    // + dev paths so receipts, WebAuthn credentials, and pending challenges
+    // persist across restarts.
     // `app.getPath("userData")` is safe inside `whenReady`.
-    process.env[RECEIPT_STORE_PATH_ENV] = join(app.getPath("userData"), "event-log.sqlite");
+    const userDataDir = app.getPath("userData");
+    process.env[RECEIPT_STORE_PATH_ENV] = join(userDataDir, "event-log.sqlite");
+    process.env[WEBAUTHN_STORE_PATH_ENV] = join(userDataDir, "webauthn.sqlite");
 
     logger.info("broker_start_requested");
     brokerSupervisor.start();

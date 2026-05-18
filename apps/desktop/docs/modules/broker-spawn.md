@@ -18,7 +18,7 @@ sequenceDiagram
   Main->>Supervisor: start()
   Supervisor->>Utility: fork(broker-entry.js, serviceName: wuphf-broker)
   Utility->>Entry: boot utility process
-  Entry->>Listener: createBroker({ port: 0, renderer, logger })
+  Entry->>Listener: createBroker({ port: 0, renderer, logger, receiptStore, webauthn })
   Listener-->>Entry: { url, port, token }
   Entry-->>Supervisor: postMessage({ ready: true, brokerUrl })
   Supervisor->>Main: whenReady() resolves with BrokerUrl
@@ -120,11 +120,26 @@ are passed through:
 | `WUPHF_RENDERER_DIST` | Packaged-only renderer bundle path so the broker can serve `/`. |
 | `WUPHF_DEV_RENDERER_ORIGIN` | Dev-only electron-vite renderer origin accepted by the broker's `/api-token` gate. |
 | `WUPHF_RECEIPT_STORE_PATH` | Absolute path to the durable receipt-store SQLite database. Set by main to `<userData>/event-log.sqlite`; absent → broker uses an in-memory store. |
+| `WUPHF_WEBAUTHN_STORE_PATH` | Absolute path to the durable WebAuthn SQLite database. Set by main to `<userData>/webauthn.sqlite`; absent → `/api/webauthn/*` routes remain unmounted. |
 
 Secrets, tokens, and cloud credentials are not passed through. The
-`WUPHF_RECEIPT_STORE_PATH` is the one app-data path that crosses the
-boundary — it lets the utility process open the durable
-`SqliteReceiptStore`.
+SQLite store paths are the app-data paths that cross the boundary. They let
+the utility process open the durable `SqliteReceiptStore` and
+`SqliteWebAuthnStore`; app data itself still flows over loopback HTTP, not IPC.
+
+## WebAuthn Co-Sign Wiring
+
+When `WUPHF_WEBAUTHN_STORE_PATH` is present, `broker-entry` mounts the broker's
+WebAuthn registration and co-sign routes. The desktop v1 identity model is a
+single trusted-LAN operator install: the broker bootstrap bearer is mapped to
+the stable `operator` agent id, and that agent may enroll `viewer`, `approver`,
+and `host` credentials. This is intentionally narrow until the desktop has a
+real multi-agent identity model.
+
+The packaged renderer is loaded from `${brokerUrl}/`, so the broker appends its
+own bound loopback origin to WebAuthn's `allowedOrigins` after `listen()` picks
+the ephemeral port. In dev, `WUPHF_DEV_RENDERER_ORIGIN` is still passed through
+so the electron-vite renderer origin is allowed as well.
 
 ### Receipt-store recovery
 
