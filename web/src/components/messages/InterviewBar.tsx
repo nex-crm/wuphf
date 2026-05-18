@@ -15,6 +15,7 @@ import {
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
 import { parseApprovalContext } from "../../lib/parseApprovalContext";
+import { useAppStore } from "../../stores/app";
 import { SkillCompareView } from "../apps/SkillCompareView";
 import { useOnboardingDMContext } from "../onboarding/OnboardingDMRoute";
 import type { CardStage, CeoSuggestion } from "../onboarding/types";
@@ -116,7 +117,7 @@ export function InterviewBar() {
     }
   }, [textMode]);
 
-  if (!current) return null;
+  if (!current) return <CeoCardSection />;
 
   const rawOptions = current.options ?? current.choices ?? [];
   const options = [...rawOptions].sort((a, b) => {
@@ -243,190 +244,193 @@ export function InterviewBar() {
     fallbackCandidateFromRequest(current);
 
   return (
-    <section className="interview-bar" aria-label="Pending agent request">
-      <div className="interview-bar-head">
-        <span className="badge badge-yellow">
-          {current.blocking ? "BLOCKING" : "INTERVIEW"}
-        </span>
-        {current.kind === "approval" ? (
-          <span className="badge badge-orange">EXTERNAL ACTION</span>
-        ) : null}
-        <span className="interview-bar-from">
-          @{current.from || "agent"} asks
-        </span>
-        {current.channel ? (
-          <span className="interview-bar-channel">in #{current.channel}</span>
-        ) : null}
-        <span className="interview-bar-counter">
-          {safeCursor + 1}/{visible.length}
-        </span>
-        <div className="interview-bar-cycle">
-          <button
-            type="button"
-            className="interview-bar-icon-btn"
-            onClick={handlePrev}
-            disabled={safeCursor === 0}
-            aria-label="Previous request"
-            title="Previous"
-          >
-            <NavArrowLeft width={16} height={16} />
-          </button>
-          <button
-            type="button"
-            className="interview-bar-icon-btn"
-            onClick={handleNext}
-            disabled={safeCursor >= visible.length - 1}
-            aria-label="Next request"
-            title="Next"
-          >
-            <NavArrowRight width={16} height={16} />
-          </button>
-        </div>
-        <button
-          type="button"
-          className="interview-bar-close"
-          onClick={handleDismiss}
-          disabled={submitting}
-          aria-label="Dismiss request"
-          title="Dismiss"
-        >
-          <Xmark width={20} height={20} />
-        </button>
-      </div>
-
-      <div className="interview-bar-body">
-        {current.title && current.title !== "Request" ? (
-          <div className="interview-bar-title">{current.title}</div>
-        ) : null}
-        <div className="interview-bar-question">
-          {(current.question || "")
-            .replace(/\*\*/g, "")
-            .replace(/^\s*\d+\.\s*/, "")}
-        </div>
-        {(() => {
-          if (current.kind === "approval") {
-            const parsed = parseApprovalContext(current.context);
-            if (parsed) return <ApprovalContextView parsed={parsed} />;
-          }
-          return current.context ? (
-            <div className="interview-bar-context">{current.context}</div>
-          ) : null;
-        })()}
-
-        {ambiguousRef ? (
-          <SimilarBanner
-            slug={ambiguousRef.slug}
-            score={ambiguousRef.score}
-            onCompare={() => setCompareOpen(true)}
-          />
-        ) : null}
-
-        {isEnhance ? (
-          <EnhancePreview
-            existing={existingSkill}
-            candidate={candidateForCompare}
-            score={enhanceContext.similarRef?.score}
-            method={enhanceContext.similarRef?.method}
-            onOpenFull={() => setCompareOpen(true)}
-          />
-        ) : null}
-      </div>
-
-      {textMode ? (
-        <div className="interview-bar-text">
-          <textarea
-            ref={textareaRef}
-            className="interview-bar-textarea"
-            placeholder={textMode.option.text_hint || "Type your answer..."}
-            value={customText}
-            onChange={(e) => setCustomText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.preventDefault();
-                setTextMode(null);
-              }
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                if (customText.trim())
-                  submit(textMode.option, customText.trim());
-              }
-            }}
-            rows={3}
-          />
-          <div className="interview-bar-text-actions">
+    <>
+      <CeoCardSection />
+      <section className="interview-bar" aria-label="Pending agent request">
+        <div className="interview-bar-head">
+          <span className="badge badge-yellow">
+            {current.blocking ? "BLOCKING" : "INTERVIEW"}
+          </span>
+          {current.kind === "approval" ? (
+            <span className="badge badge-orange">EXTERNAL ACTION</span>
+          ) : null}
+          <span className="interview-bar-from">
+            @{current.from || "agent"} asks
+          </span>
+          {current.channel ? (
+            <span className="interview-bar-channel">in #{current.channel}</span>
+          ) : null}
+          <span className="interview-bar-counter">
+            {safeCursor + 1}/{visible.length}
+          </span>
+          <div className="interview-bar-cycle">
             <button
               type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setTextMode(null)}
-              disabled={submitting}
+              className="interview-bar-icon-btn"
+              onClick={handlePrev}
+              disabled={safeCursor === 0}
+              aria-label="Previous request"
+              title="Previous"
             >
-              Back
+              <NavArrowLeft width={16} height={16} />
             </button>
             <button
               type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => submit(textMode.option, customText.trim())}
-              disabled={submitting || !customText.trim()}
+              className="interview-bar-icon-btn"
+              onClick={handleNext}
+              disabled={safeCursor >= visible.length - 1}
+              aria-label="Next request"
+              title="Next"
             >
-              {submitting ? "Sending..." : `Send as ${textMode.option.label}`}
+              <NavArrowRight width={16} height={16} />
             </button>
           </div>
+          <button
+            type="button"
+            className="interview-bar-close"
+            onClick={handleDismiss}
+            disabled={submitting}
+            aria-label="Dismiss request"
+            title="Dismiss"
+          >
+            <Xmark width={20} height={20} />
+          </button>
         </div>
-      ) : isEnhance ? (
-        <EnhanceActions
-          options={options}
-          submitting={submitting}
-          onPick={handleOption}
-        />
-      ) : options.length > 0 ? (
-        <div
-          className={`interview-bar-actions${options.length <= 2 ? " interview-bar-actions-inline" : ""}`}
-        >
-          {options.map((opt, i) => (
-            <button
-              key={opt.id}
-              type="button"
-              className={`btn btn-sm ${opt.id === current.recommended_id ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => handleOption(opt)}
-              disabled={submitting}
-              title={opt.description}
-            >
-              <span className="interview-bar-opt-num">{i + 1}</span>
-              <span className="interview-bar-opt-label">{opt.label}</span>
-              {opt.requires_text ? (
-                <span className="interview-bar-text-hint"> · type</span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="interview-bar-empty">No options provided.</div>
-      )}
 
-      <SidePanel
-        open={compareOpen}
-        onClose={() => setCompareOpen(false)}
-        title="Compare skills"
-        subtitle={
-          enhanceContext.existingSlug
-            ? `existing: @${enhanceContext.existingSlug}`
-            : undefined
-        }
-      >
-        {candidateForCompare ? (
-          <SkillCompareView
-            existing={existingSkill}
-            candidate={candidateForCompare}
-            score={enhanceContext.similarRef?.score}
-            method={enhanceContext.similarRef?.method}
+        <div className="interview-bar-body">
+          {current.title && current.title !== "Request" ? (
+            <div className="interview-bar-title">{current.title}</div>
+          ) : null}
+          <div className="interview-bar-question">
+            {(current.question || "")
+              .replace(/\*\*/g, "")
+              .replace(/^\s*\d+\.\s*/, "")}
+          </div>
+          {(() => {
+            if (current.kind === "approval") {
+              const parsed = parseApprovalContext(current.context);
+              if (parsed) return <ApprovalContextView parsed={parsed} />;
+            }
+            return current.context ? (
+              <div className="interview-bar-context">{current.context}</div>
+            ) : null;
+          })()}
+
+          {ambiguousRef ? (
+            <SimilarBanner
+              slug={ambiguousRef.slug}
+              score={ambiguousRef.score}
+              onCompare={() => setCompareOpen(true)}
+            />
+          ) : null}
+
+          {isEnhance ? (
+            <EnhancePreview
+              existing={existingSkill}
+              candidate={candidateForCompare}
+              score={enhanceContext.similarRef?.score}
+              method={enhanceContext.similarRef?.method}
+              onOpenFull={() => setCompareOpen(true)}
+            />
+          ) : null}
+        </div>
+
+        {textMode ? (
+          <div className="interview-bar-text">
+            <textarea
+              ref={textareaRef}
+              className="interview-bar-textarea"
+              placeholder={textMode.option.text_hint || "Type your answer..."}
+              value={customText}
+              onChange={(e) => setCustomText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setTextMode(null);
+                }
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  if (customText.trim())
+                    submit(textMode.option, customText.trim());
+                }
+              }}
+              rows={3}
+            />
+            <div className="interview-bar-text-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setTextMode(null)}
+                disabled={submitting}
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => submit(textMode.option, customText.trim())}
+                disabled={submitting || !customText.trim()}
+              >
+                {submitting ? "Sending..." : `Send as ${textMode.option.label}`}
+              </button>
+            </div>
+          </div>
+        ) : isEnhance ? (
+          <EnhanceActions
+            options={options}
+            submitting={submitting}
+            onPick={handleOption}
           />
+        ) : options.length > 0 ? (
+          <div
+            className={`interview-bar-actions${options.length <= 2 ? " interview-bar-actions-inline" : ""}`}
+          >
+            {options.map((opt, i) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={`btn btn-sm ${opt.id === current.recommended_id ? "btn-primary" : "btn-ghost"}`}
+                onClick={() => handleOption(opt)}
+                disabled={submitting}
+                title={opt.description}
+              >
+                <span className="interview-bar-opt-num">{i + 1}</span>
+                <span className="interview-bar-opt-label">{opt.label}</span>
+                {opt.requires_text ? (
+                  <span className="interview-bar-text-hint"> · type</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
         ) : (
-          <p style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
-            Couldn't load candidate data.
-          </p>
+          <div className="interview-bar-empty">No options provided.</div>
         )}
-      </SidePanel>
-    </section>
+
+        <SidePanel
+          open={compareOpen}
+          onClose={() => setCompareOpen(false)}
+          title="Compare skills"
+          subtitle={
+            enhanceContext.existingSlug
+              ? `existing: @${enhanceContext.existingSlug}`
+              : undefined
+          }
+        >
+          {candidateForCompare ? (
+            <SkillCompareView
+              existing={existingSkill}
+              candidate={candidateForCompare}
+              score={enhanceContext.similarRef?.score}
+              method={enhanceContext.similarRef?.method}
+            />
+          ) : (
+            <p style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
+              Couldn't load candidate data.
+            </p>
+          )}
+        </SidePanel>
+      </section>
+    </>
   );
 }
 
@@ -673,8 +677,9 @@ function EnhanceActions({ options, submitting, onPick }: EnhanceActionsProps) {
  * POST /onboarding/answer wire shape: { field: string, value: unknown }
  */
 export function CeoCardSection() {
-  const { pendingSuggestion } = useOnboardingDMContext();
+  const { phase, pendingSuggestion } = useOnboardingDMContext();
   const queryClient = useQueryClient();
+  const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
   const [stage, setStage] = useState<CardStage>("pending");
   const [committedValue, setCommittedValue] = useState<
     string | string[] | undefined
@@ -693,15 +698,17 @@ export function CeoCardSection() {
     if (stage === "submitting") return;
     setStage("submitting");
     try {
-      await post("/onboarding/answer", { field, value });
+      if (shouldPersistOnboardingAnswer(field)) {
+        await post("/onboarding/answer", { field, value });
+      }
+      await advanceOnboardingAfterAnswer(field, value, phase);
       // Refresh onboarding state so the next suggestion appears.
       await queryClient.invalidateQueries({ queryKey: ["onboarding-state"] });
-      if (typeof value === "string") {
-        setCommittedValue(value);
-      } else if (Array.isArray(value)) {
-        setCommittedValue(value as string[]);
-      }
+      setCommittedValue(committedOnboardingValue(value));
       setStage("committed");
+      if (completesOnboarding(field)) {
+        setOnboardingComplete(true);
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to send answer";
@@ -731,6 +738,63 @@ export function CeoCardSection() {
       )}
     </section>
   );
+}
+
+function shouldPersistOnboardingAnswer(field: string) {
+  return field !== "bridge_choice";
+}
+
+function committedOnboardingValue(
+  value: unknown,
+): string | string[] | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value as string[];
+  return undefined;
+}
+
+function completesOnboarding(field: string) {
+  return field === "bridge_choice";
+}
+
+async function advanceOnboardingAfterAnswer(
+  field: string,
+  value: unknown,
+  phase: string | undefined,
+) {
+  switch (field) {
+    case "company_name":
+      await post("/onboarding/transition", { phase: "identity" });
+      return;
+    case "description":
+      await post("/onboarding/transition", { phase: "blueprint" });
+      return;
+    case "blueprint_id":
+      if (value) {
+        await post("/onboarding/transition", { phase: "team" });
+      } else {
+        await post("/onboarding/transition", { phase: "seed" });
+        await post("/onboarding/transition", { phase: "bridge" });
+      }
+      return;
+    case "picked_agents":
+      await post("/onboarding/transition", { phase: "seed" });
+      await post("/onboarding/transition", { phase: "bridge" });
+      return;
+    case "bridge_choice":
+      await post("/onboarding/transition", {
+        phase: "complete",
+      });
+      return;
+    case "website_url":
+      await post("/onboarding/transition", {
+        phase: value ? "scan" : "blueprint",
+      });
+      return;
+    default:
+      if (phase === "scan" && field === "scan_complete") {
+        await post("/onboarding/transition", { phase: "blueprint" });
+      }
+  }
 }
 
 function renderCeoCard(

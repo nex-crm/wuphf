@@ -107,29 +107,22 @@ func (b *Broker) advancePhase(s *onboarding.State, next string) error {
 	// Store the last suggestion in the onboarding state as PendingSuggestion
 	// so it can be re-emitted on resume (idempotent by suggestion ID).
 	// We only track the last interactive card (not plain text messages).
+	var pending *onboarding.Suggestion
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].SuggestionPayload != nil {
-			pending := &onboarding.Suggestion{
+			pending = &onboarding.Suggestion{
 				ID:       msgs[i].SuggestionID,
 				Phase:    next,
 				Kind:     msgs[i].Kind,
 				Payload:  *msgs[i].SuggestionPayload,
 				IssuedAt: time.Now().UTC(),
 			}
-			// Best-effort: persist the pending suggestion outside the broker
-			// lock in a goroutine so we don't hold the lock during file I/O.
-			// A failure here means the suggestion won't be re-emitted on crash
-			// recovery — acceptable for Phase 2.
-			go func(p *onboarding.Suggestion) {
-				if st, loadErr := onboarding.Load(); loadErr == nil {
-					st.PendingSuggestion = p
-					if saveErr := onboarding.Save(st); saveErr != nil {
-						log.Printf("onboarding: persist PendingSuggestion for phase %s: %v", next, saveErr)
-					}
-				}
-			}(pending)
 			break
 		}
+	}
+	s.PendingSuggestion = pending
+	if err := onboarding.Save(s); err != nil {
+		log.Printf("onboarding: persist PendingSuggestion for phase %s: %v", next, err)
 	}
 
 	return b.saveLocked()
@@ -361,57 +354,17 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 		}}
 
 	case onboarding.PhaseIdentity:
-		// Identity collects description, priority, website URL, and owner
-		// info as sequential form-field cards. Return them all at once; the
-		// frontend renders one at a time as each is submitted.
-		return []ceoMessagePayload{
-			{
-				Kind:         "ceo_form_field",
-				Content:      "What does " + displayCompany(companyName) + " do?",
-				SuggestionID: "identity-description",
-				SuggestionPayload: mustMarshalRaw(map[string]interface{}{
-					"field":       "description",
-					"label":       "Short description",
-					"placeholder": "e.g. Subscription billing for indie SaaS",
-					"required":    false,
-				}),
-			},
-			{
-				Kind:         "ceo_form_field",
-				Content:      "Top priority right now? (Optional.)",
-				SuggestionID: "identity-priority",
-				SuggestionPayload: mustMarshalRaw(map[string]interface{}{
-					"field":       "priority",
-					"label":       "Top priority",
-					"placeholder": "e.g. Stripe webhooks",
-					"required":    false,
-					"skip_chip":   "Not yet",
-				}),
-			},
-			{
-				Kind:         "ceo_form_field",
-				Content:      "Got a website I can scan for context?",
-				SuggestionID: "identity-website",
-				SuggestionPayload: mustMarshalRaw(map[string]interface{}{
-					"field":       "website_url",
-					"label":       "Website URL",
-					"placeholder": "e.g. https://acme.com",
-					"required":    false,
-					"skip_chip":   "Skip",
-				}),
-			},
-			{
-				Kind:         "ceo_form_field",
-				Content:      "Your name? Your role? (Optional.)",
-				SuggestionID: "identity-owner",
-				SuggestionPayload: mustMarshalRaw(map[string]interface{}{
-					"fields": []map[string]interface{}{
-						{"field": "owner_name", "label": "Your name", "placeholder": "e.g. Sam", "required": false},
-						{"field": "owner_role", "label": "Your role", "placeholder": "e.g. Founder", "required": false},
-					},
-				}),
-			},
-		}
+		return []ceoMessagePayload{{
+			Kind:         "ceo_form_field",
+			Content:      "What does " + displayCompany(companyName) + " do?",
+			SuggestionID: "identity-description",
+			SuggestionPayload: mustMarshalRaw(map[string]interface{}{
+				"field":       "description",
+				"label":       "Short description",
+				"placeholder": "e.g. Subscription billing for indie SaaS",
+				"optional":    true,
+			}),
+		}}
 
 	case onboarding.PhaseScan:
 		websiteURL := ""
@@ -435,10 +388,11 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 			SuggestionID: "blueprint-pick",
 			SuggestionPayload: mustMarshalRaw(map[string]interface{}{
 				"field": "blueprint_id",
-				"chips": []map[string]interface{}{
-					{"id": "bookkeeping", "label": "Bookkeeping"},
-					{"id": "content-ops", "label": "Content Ops"},
-					{"id": "engineering-team", "label": "Engineering Team"},
+				"label": "Pick a starter template, or start from scratch:",
+				"options": []map[string]interface{}{
+					{"id": "bookkeeping-invoicing-service", "label": "Bookkeeping"},
+					{"id": "niche-crm", "label": "Niche CRM"},
+					{"id": "youtube-factory", "label": "YouTube Factory"},
 					{"id": "", "label": "Start from scratch"},
 				},
 			}),
@@ -453,8 +407,10 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 			Content:      "This blueprint comes with a team — keep or trim:",
 			SuggestionID: "team-trim",
 			SuggestionPayload: mustMarshalRaw(map[string]interface{}{
-				"field":  "picked_agents",
-				"agents": []interface{}{}, // populated by broker at emit time
+				"field":        "picked_agents",
+				"label":        "This blueprint comes with a team — keep or trim:",
+				"items":        teamTrimItems(s),
+				"submit_label": "Confirm team",
 			}),
 		}}
 
@@ -481,7 +437,9 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 			Content:      "All set up. What would you like to do?",
 			SuggestionID: "bridge-choice",
 			SuggestionPayload: mustMarshalRaw(map[string]interface{}{
-				"chips": []map[string]interface{}{
+				"field": "bridge_choice",
+				"label": "All set up. What would you like to do?",
+				"options": []map[string]interface{}{
 					{"id": "start_issue", "label": "Start an issue", "action": "transition", "phase": "draft"},
 					{"id": "look_around", "label": "Look around first", "action": "transition", "phase": "complete"},
 				},
@@ -499,6 +457,38 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 		// draft/approve/kickoff and unknown phases return nil — no Phase 2 wiring.
 		return nil
 	}
+}
+
+func teamTrimItems(s *onboarding.State) []map[string]interface{} {
+	blueprintID := ""
+	if s != nil {
+		blueprintID = strings.TrimSpace(s.FormAnswers.BlueprintID)
+	}
+	if blueprintID == "" {
+		return nil
+	}
+	bp, err := operations.LoadBlueprint(onboarding.ResolveTemplatesRepoRoot(""), blueprintID)
+	if err != nil {
+		log.Printf("onboarding: load blueprint %q for team trim: %v", blueprintID, err)
+		return nil
+	}
+	items := make([]map[string]interface{}, 0, len(bp.Starter.Agents))
+	for _, agent := range bp.Starter.Agents {
+		slug := normalizeChannelSlug(operationFirstNonEmpty(agent.Slug, agent.EmployeeBlueprint, operationSlug(agent.Name)))
+		if slug == "" {
+			continue
+		}
+		label := strings.TrimSpace(agent.Name)
+		if label == "" {
+			label = humanizeSlug(slug)
+		}
+		items = append(items, map[string]interface{}{
+			"id":              slug,
+			"label":           label,
+			"default_checked": agent.Checked,
+		})
+	}
+	return items
 }
 
 // sanitizeCEOPayload sanitizes all user-controlled string fields in a CEO
