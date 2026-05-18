@@ -281,6 +281,10 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
     setSubmitting(runtimeLabel);
     try {
       const isCli = isCliProvider(provider);
+      // Skip path ("I'll add one later") must NOT persist anything the user
+      // typed into the form sections — the contract is "sandbox until you
+      // configure later". Trigger: provider === null only.
+      const isSkipChoice = provider === null;
       const providerStr = isCli ? (provider as string) : "";
       const configPayload = buildConfigPayload(
         isCli,
@@ -290,7 +294,10 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
         oaiKey,
         apiKeys,
       );
-      if (hasConfigContent(isCli, localProvider, oaiUrl, apiKeys)) {
+      if (
+        !isSkipChoice &&
+        hasConfigContent(isCli, localProvider, oaiUrl, apiKeys)
+      ) {
         await post("/config", configPayload);
       }
       await post("/onboarding/transition", { phase: "greet" });

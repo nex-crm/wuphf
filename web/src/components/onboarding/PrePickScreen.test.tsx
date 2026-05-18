@@ -122,6 +122,38 @@ describe("PrePickScreen", () => {
     });
   });
 
+  it("does NOT persist /config on skip even when form fields are filled", async () => {
+    mockPrereqs({});
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+
+    // User types an API key, then changes their mind and clicks skip.
+    const apiKeyToggle = await screen.findByTestId(
+      "pre-pick-api-paste-ANTHROPIC_API_KEY",
+    );
+    fireEvent.click(apiKeyToggle);
+    const apiKeyInput = await screen.findByTestId(
+      "pre-pick-api-input-ANTHROPIC_API_KEY",
+    );
+    fireEvent.change(apiKeyInput, {
+      target: { value: "sk-ant-leaked-secret" },
+    });
+
+    const skip = screen.getByTestId("pre-pick-skip");
+    fireEvent.click(skip);
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+
+    // Hard contract: skip must not persist anything the user typed. The
+    // /config endpoint never sees the key, so leaked-secret can't reach disk.
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/config"),
+    ).toBeUndefined();
+    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+      phase: "greet",
+    });
+  });
+
   it("opens the install URL in a new tab when a missing runtime card is clicked", async () => {
     mockPrereqs({});
     const open = vi.fn();
