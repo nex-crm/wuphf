@@ -326,6 +326,35 @@
   position: relative;
 }
 
+/* Inside the two-column layout, `.nb-layout` is `overflow: hidden` and the
+   shelf owns its own scroll. The article column needs to own its own scroll
+   too — otherwise long entries are clipped and the user cannot reach the
+   promote button, review thread, or footer. */
+.notebook-surface .nb-layout > .nb-article {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+.notebook-surface .nb-layout > .nb-article::-webkit-scrollbar {
+  width: 10px;
+}
+.notebook-surface .nb-layout > .nb-article::-webkit-scrollbar-track {
+  background: transparent;
+}
+.notebook-surface .nb-layout > .nb-article::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.notebook-surface .nb-layout > .nb-article::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
+  background-clip: padding-box;
+}
+
 /* Breadcrumb */
 .notebook-surface .nb-crumb {
   font-family: var(--nb-chrome);
