@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { canonicalJSON } from "../src/canonical-json.ts";
 import {
   APPROVAL_CLAIM_KIND_VALUES,
   APPROVAL_TOKEN_SCHEMA_VERSION,
   type ApprovalClaim,
+  type ApprovalClaimKind,
   type ApprovalScope,
   approvalClaimFromJson,
   approvalClaimToJsonValue,
@@ -50,6 +52,36 @@ import {
 } from "../src/index.ts";
 import { asReceiptId, asWriteId } from "../src/receipt.ts";
 import { sha256Hex } from "../src/sha256.ts";
+
+interface SignedApprovalTokenAcceptedVector {
+  readonly name: string;
+  readonly input: unknown;
+  readonly expected: {
+    readonly canonicalSerialization: string;
+  };
+}
+
+interface SignedApprovalTokenRejectedVector {
+  readonly name: string;
+  readonly input: unknown;
+  readonly expectedError: string;
+}
+
+interface SignedApprovalTokenVectorsFixture {
+  readonly schemaVersion: 1;
+  readonly comment: string;
+  readonly accepted: readonly SignedApprovalTokenAcceptedVector[];
+  readonly rejected: readonly SignedApprovalTokenRejectedVector[];
+}
+
+const signedApprovalTokenVectors = loadSignedApprovalTokenVectors();
+
+const REQUIRED_CLAIM_FIELD_BY_KIND = {
+  cost_spike_acknowledgement: "currentMicroUsd",
+  endpoint_allowlist_extension: "reason",
+  credential_grant_to_agent: "credentialScope",
+  receipt_co_sign: "frozenArgsHash",
+} as const satisfies Record<ApprovalClaimKind, string>;
 
 describe("SignedApprovalToken codec", () => {
   it("exposes the approval token public surface through src/index.ts", () => {
@@ -235,6 +267,61 @@ describe("SignedApprovalToken codec", () => {
   });
 });
 
+describe("SignedApprovalToken conformance vectors", () => {
+  it("uses fixture schemaVersion 1", () => {
+    expect(signedApprovalTokenVectors.schemaVersion).toBe(1);
+  });
+
+  it("covers all claim kinds and required rejection boundaries", () => {
+    expect(
+      new Set(signedApprovalTokenVectors.accepted.map((vector) => claimKindOf(vector.input))),
+    ).toEqual(new Set(APPROVAL_CLAIM_KIND_VALUES));
+
+    for (const kind of APPROVAL_CLAIM_KIND_VALUES) {
+      const vectorsForKind = signedApprovalTokenVectors.rejected.filter(
+        (vector) => claimKindOf(vector.input) === kind,
+      );
+      expect(
+        vectorsForKind.some((vector) =>
+          Object.hasOwn(fixtureRecord(vector.input, "input"), "extra"),
+        ),
+      ).toBe(true);
+      expect(
+        vectorsForKind.some((vector) => Object.hasOwn(claimRecordOf(vector.input), "extra")),
+      ).toBe(true);
+      expect(
+        vectorsForKind.some((vector) => Object.hasOwn(scopeRecordOf(vector.input), "extra")),
+      ).toBe(true);
+      expect(
+        vectorsForKind.some((vector) => Object.hasOwn(signatureRecordOf(vector.input), "extra")),
+      ).toBe(true);
+      expect(vectorsForKind.some((vector) => scopeClaimKindOf(vector.input) !== kind)).toBe(true);
+      expect(
+        vectorsForKind.some(
+          (vector) =>
+            !Object.hasOwn(claimRecordOf(vector.input), REQUIRED_CLAIM_FIELD_BY_KIND[kind]),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  for (const vector of signedApprovalTokenVectors.accepted) {
+    it(`accepts ${vector.name}`, () => {
+      const parsed = signedApprovalTokenFromJson(vector.input);
+      expect(canonicalJSON(signedApprovalTokenToJsonValue(parsed))).toBe(
+        vector.expected.canonicalSerialization,
+      );
+    });
+  }
+
+  for (const vector of signedApprovalTokenVectors.rejected) {
+    it(`rejects ${vector.name}`, () => {
+      const message = captureErrorMessage(() => signedApprovalTokenFromJson(vector.input));
+      expect(message).toContain(vector.expectedError);
+    });
+  }
+});
+
 type MutableJsonRecord = Record<string, unknown> & {
   extra?: unknown;
   expiresAt?: unknown;
@@ -410,4 +497,153 @@ function receiptCoSignClaim(
     throw new Error("test fixture requires a receipt co-sign claim");
   }
   return claim;
+}
+
+function loadSignedApprovalTokenVectors(): SignedApprovalTokenVectorsFixture {
+  const parsed: unknown = JSON.parse(
+    readFileSync(
+      new URL("../testdata/signed-approval-token-vectors.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const record = fixtureRecord(parsed, "fixture");
+  assertKnownFixtureKeys(record, "fixture", ["schemaVersion", "comment", "accepted", "rejected"]);
+  return {
+    schemaVersion: fixtureSchemaVersion(record, "schemaVersion", "fixture"),
+    comment: fixtureString(record, "comment", "fixture"),
+    accepted: fixtureArray(record, "accepted", "fixture").map((vector, index) =>
+      parseAcceptedVector(vector, `fixture.accepted.${index}`),
+    ),
+    rejected: fixtureArray(record, "rejected", "fixture").map((vector, index) =>
+      parseRejectedVector(vector, `fixture.rejected.${index}`),
+    ),
+  };
+}
+
+function parseAcceptedVector(value: unknown, path: string): SignedApprovalTokenAcceptedVector {
+  const record = fixtureRecord(value, path);
+  assertKnownFixtureKeys(record, path, ["name", "input", "expected"]);
+  const expected = fixtureRecord(fixtureField(record, "expected", path), `${path}.expected`);
+  assertKnownFixtureKeys(expected, `${path}.expected`, ["canonicalSerialization"]);
+  return {
+    name: fixtureString(record, "name", path),
+    input: fixtureField(record, "input", path),
+    expected: {
+      canonicalSerialization: fixtureString(expected, "canonicalSerialization", `${path}.expected`),
+    },
+  };
+}
+
+function parseRejectedVector(value: unknown, path: string): SignedApprovalTokenRejectedVector {
+  const record = fixtureRecord(value, path);
+  assertKnownFixtureKeys(record, path, ["name", "input", "expectedError"]);
+  return {
+    name: fixtureString(record, "name", path),
+    input: fixtureField(record, "input", path),
+    expectedError: fixtureString(record, "expectedError", path),
+  };
+}
+
+function captureErrorMessage(fn: () => unknown): string {
+  try {
+    fn();
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  throw new Error("expected function to throw");
+}
+
+function claimKindOf(input: unknown): string {
+  return fixtureString(claimRecordOf(input), "kind", "input.claim");
+}
+
+function scopeClaimKindOf(input: unknown): string {
+  return fixtureString(scopeRecordOf(input), "claimKind", "input.scope");
+}
+
+function claimRecordOf(input: unknown): Readonly<Record<string, unknown>> {
+  return fixtureRecord(
+    fixtureField(fixtureRecord(input, "input"), "claim", "input"),
+    "input.claim",
+  );
+}
+
+function scopeRecordOf(input: unknown): Readonly<Record<string, unknown>> {
+  return fixtureRecord(
+    fixtureField(fixtureRecord(input, "input"), "scope", "input"),
+    "input.scope",
+  );
+}
+
+function signatureRecordOf(input: unknown): Readonly<Record<string, unknown>> {
+  return fixtureRecord(
+    fixtureField(fixtureRecord(input, "input"), "signature", "input"),
+    "input.signature",
+  );
+}
+
+function fixtureRecord(value: unknown, path: string): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${path}: must be an object`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function fixtureField(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): unknown {
+  if (!Object.hasOwn(record, key) || record[key] === undefined) {
+    throw new Error(`${path}.${key}: is required`);
+  }
+  return record[key];
+}
+
+function fixtureString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): string {
+  const value = fixtureField(record, key, path);
+  if (typeof value !== "string") {
+    throw new Error(`${path}.${key}: must be a string`);
+  }
+  return value;
+}
+
+function fixtureArray(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): readonly unknown[] {
+  const value = fixtureField(record, key, path);
+  if (!Array.isArray(value)) {
+    throw new Error(`${path}.${key}: must be an array`);
+  }
+  return value;
+}
+
+function fixtureSchemaVersion(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): 1 {
+  const value = fixtureField(record, key, path);
+  if (value !== 1) {
+    throw new Error(`${path}.${key}: must be 1`);
+  }
+  return 1;
+}
+
+function assertKnownFixtureKeys(
+  record: Readonly<Record<string, unknown>>,
+  path: string,
+  allowed: readonly string[],
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowed.includes(key)) {
+      throw new Error(`${path}/${key}: is not allowed`);
+    }
+  }
 }
