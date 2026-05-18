@@ -228,7 +228,7 @@ func (r *Repo) ensureLayoutLocked() error {
 			}
 		}
 	}
-	return nil
+	return r.ensureObsidianVaultLocked()
 }
 
 // Commit writes content for slug @ path, stages, and commits with a per-commit
