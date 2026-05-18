@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -335,15 +336,23 @@ func (l *FactLog) commitTimestamp(ctx context.Context, sha string) (time.Time, e
 // both the JSONL append layer and the SQLite UpsertFact layer. The ID is a
 // 16-character hex prefix of SHA-256 — collision probability is negligible for
 // the expected fact counts per entity (hundreds, not millions).
+//
+// Each field is length-prefixed (4-byte big-endian uint32) before its bytes
+// so that inputs containing NUL cannot produce collisions across field
+// boundaries. For example, text="a\x00b", recordedBy="c" produces different
+// bytes than text="a", recordedBy="\x00b\x00c".
 func deterministicFactID(kind EntityKind, slug, text, recordedBy string) string {
 	h := sha256.New()
-	h.Write([]byte(kind))
-	h.Write([]byte{0}) // separator
-	h.Write([]byte(slug))
-	h.Write([]byte{0})
-	h.Write([]byte(text))
-	h.Write([]byte{0})
-	h.Write([]byte(recordedBy))
+	writeField := func(s string) {
+		var lenBuf [4]byte
+		binary.BigEndian.PutUint32(lenBuf[:], uint32(len(s)))
+		h.Write(lenBuf[:])
+		h.Write([]byte(s))
+	}
+	writeField(string(kind))
+	writeField(slug)
+	writeField(text)
+	writeField(recordedBy)
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 

@@ -195,6 +195,24 @@ func TestFactLog_DeterministicID(t *testing.T) {
 	}
 }
 
+func TestFactLog_DeterministicID_NULAmbiguity(t *testing.T) {
+	// Ensure length-prefixed encoding prevents field-boundary collisions.
+	// text="a\x00b", recordedBy="c" must differ from text="a", recordedBy="\x00b\x00c"
+	// because otherwise a fact containing NUL could dedup against a different fact.
+	id1 := deterministicFactID(EntityKindPeople, "slug", "a\x00b", "c")
+	id2 := deterministicFactID(EntityKindPeople, "slug", "a", "\x00b\x00c")
+	if id1 == id2 {
+		t.Errorf("NUL-ambiguity: text+recordedBy boundary collision: both produced %q", id1)
+	}
+
+	// Verify length-prefix separation also holds across kind and slug boundaries.
+	id3 := deterministicFactID(EntityKindPeople, "ab", "c", "d")
+	id4 := deterministicFactID(EntityKindPeople, "a", "bc", "d")
+	if id3 == id4 {
+		t.Errorf("NUL-ambiguity: slug+text boundary collision: both produced %q", id3)
+	}
+}
+
 func TestFactLog_DedupSameFactTwice(t *testing.T) {
 	log, _, teardown := newFactLogFixture(t)
 	defer teardown()
