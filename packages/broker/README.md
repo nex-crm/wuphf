@@ -131,7 +131,7 @@ GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
 11. **WebAuthn registration roles are broker-authorized.** The request body can
     ask for a role, but only roles listed for the bearer-mapped agent in
     `webauthn.enrollableRoles` can receive a registration challenge. Agents
-    without an explicit entry default to `viewer` enrollment only.
+    without an explicit entry cannot enroll any role.
 
 ## Spec anchors
 

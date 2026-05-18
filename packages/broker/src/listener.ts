@@ -70,6 +70,7 @@ import {
   SYSTEM_CLOCK,
   WEBAUTHN_ALLOWED_ORIGINS,
   WEBAUTHN_CHALLENGE_TTL_MS,
+  WEBAUTHN_DEFAULT_ENROLLABLE_ROLES,
   WEBAUTHN_RP_ID,
   WEBAUTHN_RP_NAME,
   WEBAUTHN_TRUSTED_APPROVAL_ROLES,
@@ -92,6 +93,13 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   // Reuse the same bearer→agent binding map that runner spawn uses so a
   // bearer pinned to agent_alpha cannot read or PUT agent_beta's routing.
   const tokenAgentIds = config.runners?.tokenAgentIds ?? null;
+  const webauthnTrustedRoles =
+    config.webauthn === undefined
+      ? null
+      : [...(config.webauthn.trustedRoles ?? WEBAUTHN_TRUSTED_APPROVAL_ROLES)];
+  if (webauthnTrustedRoles !== null) {
+    assertNoTrustedDefaultEnrollableRole(webauthnTrustedRoles);
+  }
   const webauthn =
     config.webauthn === undefined
       ? null
@@ -106,7 +114,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
           rpId: config.webauthn.rpId ?? WEBAUTHN_RP_ID,
           allowedOrigins: [...(config.webauthn.allowedOrigins ?? WEBAUTHN_ALLOWED_ORIGINS)],
           challengeTtlMs: config.webauthn.challengeTtlMs ?? WEBAUTHN_CHALLENGE_TTL_MS,
-          trustedRoles: [...(config.webauthn.trustedRoles ?? WEBAUTHN_TRUSTED_APPROVAL_ROLES)],
+          trustedRoles: webauthnTrustedRoles ?? [],
           defaultThreshold: normalizeThreshold(config.webauthn.defaultThreshold ?? 1),
           receiptCoSignThreshold: normalizeThreshold(
             config.webauthn.receiptCoSignThreshold ?? config.webauthn.defaultThreshold ?? 1,
@@ -538,6 +546,16 @@ function normalizeThreshold(value: number): number {
     throw new Error(`createBroker: webauthn threshold must be a positive safe integer: ${value}`);
   }
   return value;
+}
+
+function assertNoTrustedDefaultEnrollableRole(trustedRoles: readonly ApprovalRole[]): void {
+  const trusted = new Set(trustedRoles);
+  const overlap = WEBAUTHN_DEFAULT_ENROLLABLE_ROLES.filter((role) => trusted.has(role));
+  if (overlap.length > 0) {
+    throw new Error(
+      `createBroker: webauthn default enrollable role cannot also be trusted: ${overlap.join(", ")}`,
+    );
+  }
 }
 
 function agentProviderRoutingAgentIdFromPathname(pathname: string): AgentId | null {

@@ -109,6 +109,7 @@ type InsertConsumedTokenParams = [
   number,
   number,
 ];
+type UpdateConsumedTokenParams = [WebAuthnTokenOutcome, string, ApprovalTokenId];
 
 const APPROVAL_ROLE_SET: ReadonlySet<string> = new Set(["viewer", "approver", "host"]);
 const TOKEN_OUTCOME_SET: ReadonlySet<string> = new Set(["approval_pending", "approved"]);
@@ -133,11 +134,12 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   >;
   private readonly updateCredentialCounterStmt: Database.Statement<UpdateCredentialCounterParams>;
   private readonly insertConsumedTokenStmt: Database.Statement<InsertConsumedTokenParams>;
+  private readonly updateConsumedTokenStmt: Database.Statement<UpdateConsumedTokenParams>;
   private readonly saveCredentialTransaction: Database.Transaction<
     (args: SaveCredentialArgs) => void
   >;
   private readonly consumeCosignTransaction: Database.Transaction<
-    (args: ConsumeCosignChallengeArgs) => ConsumedWebAuthnTokenRecord | null
+    (args: ConsumeCosignChallengeArgs) => ConsumedWebAuthnTokenRecord
   >;
   private closed = false;
 
@@ -260,6 +262,11 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
          agent_id, expires_at_ms, consumed_at_ms)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
+    this.updateConsumedTokenStmt = db.prepare<UpdateConsumedTokenParams>(
+      `UPDATE webauthn_consumed_tokens
+       SET outcome = ?, response_json = ?
+       WHERE token_id = ?`,
+    );
     this.saveCredentialTransaction = db.transaction((args: SaveCredentialArgs) => {
       this.insertCredentialStmt.run(
         args.credential.credentialId,
@@ -292,15 +299,44 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
       this.insertConsumedTokenStmt.run(
         args.tokenId,
         args.challengeId,
-        args.outcome,
-        canonicalJSON(args.responseJson),
+        "approval_pending",
+        canonicalJSON({
+          status: "approval_pending",
+          satisfiedRoles: [args.role],
+          requiredThreshold: args.requiredThreshold,
+        }),
         args.role,
         args.approvalGroupHash,
         args.issuedToAgentId,
         args.expiresAtMs,
         args.consumedAtMs,
       );
-      return null;
+      const satisfiedRoles = sortedUniqueRoles(
+        this.listSatisfiedRolesStmt
+          .all(args.approvalGroupHash, args.issuedToAgentId, args.consumedAtMs)
+          .map((row) => roleFromString(row.role, "webauthn_consumed_tokens.role")),
+      );
+      const thresholdMet = satisfiedRoles.length >= args.requiredThreshold;
+      const outcome = thresholdMet ? "approved" : "approval_pending";
+      const responseJson: JsonValue = thresholdMet
+        ? args.approvedResponseJson
+        : {
+            status: "approval_pending",
+            satisfiedRoles,
+            requiredThreshold: args.requiredThreshold,
+          };
+      this.updateConsumedTokenStmt.run(outcome, canonicalJSON(responseJson), args.tokenId);
+      return {
+        tokenId: args.tokenId,
+        challengeId: args.challengeId,
+        outcome,
+        responseJson,
+        role: args.role,
+        approvalGroupHash: args.approvalGroupHash,
+        issuedToAgentId: args.issuedToAgentId,
+        expiresAtMs: args.expiresAtMs,
+        consumedAtMs: args.consumedAtMs,
+      };
     });
   }
 
@@ -385,7 +421,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
 
   async consumeCosignChallenge(
     args: ConsumeCosignChallengeArgs,
-  ): Promise<ConsumedWebAuthnTokenRecord | null> {
+  ): Promise<ConsumedWebAuthnTokenRecord> {
     this.assertOpen();
     return this.consumeCosignTransaction.immediate(args);
   }
@@ -506,4 +542,16 @@ function outcomeFromString(value: string): WebAuthnTokenOutcome {
     return value as WebAuthnTokenOutcome;
   }
   throw new Error(`webauthn_consumed_tokens.outcome: invalid outcome ${value}`);
+}
+
+function sortedUniqueRoles(values: readonly ApprovalRole[]): readonly ApprovalRole[] {
+  return [...new Set(values)].sort(compareRoles);
+}
+
+function compareRoles(a: ApprovalRole, b: ApprovalRole): number {
+  return roleOrder(a) - roleOrder(b);
+}
+
+function roleOrder(role: ApprovalRole): number {
+  return role === "viewer" ? 0 : role === "approver" ? 1 : 2;
 }
