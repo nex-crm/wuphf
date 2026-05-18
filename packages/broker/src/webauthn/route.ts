@@ -162,7 +162,7 @@ async function handleRegistrationChallenge(
     createdAtMs: nowMs,
     expiresAtMs,
   });
-  writeJson(res, 200, { challengeId, options });
+  writeJson(res, 200, { challengeId, creationOptions: options });
 }
 
 async function handleRegistrationVerify(
@@ -290,7 +290,7 @@ async function handleCosignChallenge(
     expiresAtMs,
     createdAtMs: nowMs,
   });
-  writeJson(res, 200, { challengeId, options });
+  writeJson(res, 200, { challengeId, requestOptions: options });
 }
 
 async function handleCosignVerify(

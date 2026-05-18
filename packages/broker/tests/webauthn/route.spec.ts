@@ -105,8 +105,8 @@ describe("WebAuthn routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as RegistrationChallengeResponse;
     expect(body.challengeId).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(body.options.rp.id).toBe("localhost");
-    expect(body.options.challenge).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(body.creationOptions.rp.id).toBe("localhost");
+    expect(body.creationOptions.challenge).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
   it("verifies registration and persists the credential role", async () => {
@@ -138,8 +138,8 @@ describe("WebAuthn routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as CosignChallengeResponse;
     expect(body.challengeId).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(body.options.rpId).toBe("localhost");
-    expect(body.options.allowCredentials?.map((credential) => credential.id)).toEqual([
+    expect(body.requestOptions.rpId).toBe("localhost");
+    expect(body.requestOptions.allowCredentials?.map((credential) => credential.id)).toEqual([
       "cred_approver",
     ]);
   });
@@ -532,12 +532,12 @@ class FakeCeremony implements WebAuthnCeremony {
 
 interface RegistrationChallengeResponse {
   readonly challengeId: string;
-  readonly options: PublicKeyCredentialCreationOptionsJSON;
+  readonly creationOptions: PublicKeyCredentialCreationOptionsJSON;
 }
 
 interface CosignChallengeResponse {
   readonly challengeId: string;
-  readonly options: PublicKeyCredentialRequestOptionsJSON;
+  readonly requestOptions: PublicKeyCredentialRequestOptionsJSON;
 }
 
 interface RawResponse {
