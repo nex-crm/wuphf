@@ -23,6 +23,7 @@ import { showNotice } from "../ui/Toast";
 import { ApprovalContextView } from "./ApprovalContextView";
 import { CeoChecklist } from "./cards/CeoChecklist";
 import { CeoChipRow } from "./cards/CeoChipRow";
+import { CeoExecutionLineup } from "./cards/CeoExecutionLineup";
 import { CeoFormField } from "./cards/CeoFormField";
 import { CeoScanChip } from "./cards/CeoScanChip";
 
@@ -730,6 +731,7 @@ export function CeoCardSection() {
         committedValue,
         submitAnswer,
         handleSkip,
+        setStage,
       )}
     </section>
   );
@@ -741,6 +743,7 @@ function renderCeoCard(
   committedValue: string | string[] | undefined,
   onSubmit: (field: string, value: unknown) => Promise<void>,
   onSkip: (field: string) => Promise<void>,
+  onStageChange?: (next: CardStage) => void,
 ): ReactNode {
   switch (suggestion.kind) {
     case "ceo_form_field":
@@ -784,6 +787,19 @@ function renderCeoCard(
       );
     case "ceo_scan_chip":
       return <CeoScanChip payload={suggestion.payload} />;
+    case "ceo_execution_lineup":
+      return (
+        <CeoExecutionLineup
+          payload={suggestion.payload}
+          stage={stage}
+          onStageChange={
+            onStageChange ??
+            (() => {
+              /* no-op fallback */
+            })
+          }
+        />
+      );
     default: {
       // Exhaustiveness guard: if a new CEO kind is added to the union
       // without a case here, TypeScript will flag the assignment below.

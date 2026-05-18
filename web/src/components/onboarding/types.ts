@@ -43,7 +43,8 @@ export type CeoSuggestion =
   | CeoChipRowSuggestion
   | CeoChecklistSuggestion
   | CeoTeamTrimSuggestion
-  | CeoScanChipSuggestion;
+  | CeoScanChipSuggestion
+  | CeoExecutionLineupSuggestion;
 
 interface SuggestionBase {
   /** Stable per (phase, options-hash) — used for idempotent re-emit dedup. */
@@ -74,6 +75,11 @@ export interface CeoTeamTrimSuggestion extends SuggestionBase {
 export interface CeoScanChipSuggestion extends SuggestionBase {
   kind: "ceo_scan_chip";
   payload: CeoScanChipPayload;
+}
+
+export interface CeoExecutionLineupSuggestion extends SuggestionBase {
+  kind: "ceo_execution_lineup";
+  payload: CeoExecutionLineupPayload;
 }
 
 // ── Per-kind payload shapes ────────────────────────────────────────────────
@@ -123,6 +129,24 @@ export interface CeoTeamTrimPayload extends CeoChecklistPayload {
 }
 
 export type ScanStatus = "scanning" | "done" | "failed";
+
+// ── Execution lineup payload ───────────────────────────────────────────────
+
+export interface ExecutionLineupAgent {
+  /** Agent slug, e.g. "engineer". Rendered as plain text. */
+  slug: string;
+  /** Human-readable role, e.g. "Founding Engineer". Plain text. */
+  role: string;
+  /** One-sentence reason for this agent's inclusion. Plain text. */
+  reason: string;
+}
+
+export interface CeoExecutionLineupPayload {
+  /** Stable suggestion ID for idempotent dedup. */
+  suggestion_id: string;
+  /** Agents proposed for the execution roster. */
+  agents: ExecutionLineupAgent[];
+}
 
 export interface CeoScanChipPayload {
   field: string;

@@ -252,9 +252,29 @@ type teamTask struct {
 	ReminderAt           string          `json:"reminder_at,omitempty"`
 	RecheckAt            string          `json:"recheck_at,omitempty"`
 	MemoryWorkflow       *MemoryWorkflow `json:"memory_workflow,omitempty"`
-	CreatedAt            string          `json:"created_at"`
-	UpdatedAt            string          `json:"updated_at"`
-	CompletedAt          string          `json:"completed_at,omitempty"`
+	// IssueDraftSpec holds the four-section spec produced by the CEO draft
+	// writer (Phase 4). Stored as a typed struct rather than a JSON blob in
+	// Details so callers can read sections without re-parsing.
+	// Design choice: explicit typed field over JSON-in-Details avoids
+	// ambiguity between "a task with a long Details string" and "an issue
+	// with a structured spec".
+	IssueDraftSpec *IssueDraftSpec `json:"issue_draft_spec,omitempty"`
+	CreatedAt      string          `json:"created_at"`
+	UpdatedAt      string          `json:"updated_at"`
+	CompletedAt    string          `json:"completed_at,omitempty"`
+}
+
+// IssueDraftSpec holds the four spec sections the CEO draft writer
+// (Phase 4) produces when a user describes a first issue.
+type IssueDraftSpec struct {
+	Goal       string `json:"goal,omitempty"`
+	Context    string `json:"context,omitempty"`
+	Approach   string `json:"approach,omitempty"`
+	Acceptance string `json:"acceptance,omitempty"`
+	// DraftedAt is an RFC3339 timestamp set when the spec is written.
+	// The CEO draft writer checks DraftedAt != "" to short-circuit
+	// duplicate calls (idempotency sentinel).
+	DraftedAt string `json:"drafted_at,omitempty"`
 }
 
 // Status returns the persisted status string. Read accessor for callers
@@ -327,6 +347,7 @@ type teamTaskWire struct {
 	ReminderAt           string          `json:"reminder_at,omitempty"`
 	RecheckAt            string          `json:"recheck_at,omitempty"`
 	MemoryWorkflow       *MemoryWorkflow `json:"memory_workflow,omitempty"`
+	IssueDraftSpec       *IssueDraftSpec `json:"issue_draft_spec,omitempty"`
 	CreatedAt            string          `json:"created_at"`
 	UpdatedAt            string          `json:"updated_at"`
 	CompletedAt          string          `json:"completed_at,omitempty"`
@@ -368,6 +389,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		ReminderAt:           t.ReminderAt,
 		RecheckAt:            t.RecheckAt,
 		MemoryWorkflow:       t.MemoryWorkflow,
+		IssueDraftSpec:       t.IssueDraftSpec,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
 		CompletedAt:          t.CompletedAt,
@@ -411,6 +433,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.ReminderAt = w.ReminderAt
 	t.RecheckAt = w.RecheckAt
 	t.MemoryWorkflow = w.MemoryWorkflow
+	t.IssueDraftSpec = w.IssueDraftSpec
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt
 	t.CompletedAt = w.CompletedAt
