@@ -196,20 +196,93 @@ func TestFactLog_DeterministicID(t *testing.T) {
 }
 
 func TestFactLog_DeterministicID_NULAmbiguity(t *testing.T) {
-	// Ensure length-prefixed encoding prevents field-boundary collisions.
-	// text="a\x00b", recordedBy="c" must differ from text="a", recordedBy="\x00b\x00c"
-	// because otherwise a fact containing NUL could dedup against a different fact.
-	id1 := deterministicFactID(EntityKindPeople, "slug", "a\x00b", "c")
-	id2 := deterministicFactID(EntityKindPeople, "slug", "a", "\x00b\x00c")
-	if id1 == id2 {
-		t.Errorf("NUL-ambiguity: text+recordedBy boundary collision: both produced %q", id1)
+	// Length-prefixed encoding must prevent field-boundary collisions: no two
+	// distinct (kind, slug, text, recordedBy) tuples may hash to the same ID,
+	// even when a field contains NUL or two fields' bytes could re-associate
+	// across the boundary.
+	cases := []struct {
+		name           string
+		aKind, bKind   EntityKind
+		aSlug, bSlug   string
+		aText, bText   string
+		aRecBy, bRecBy string
+	}{
+		{
+			name:  "text/recordedBy boundary with embedded NUL",
+			aKind: EntityKindPeople, bKind: EntityKindPeople,
+			aSlug: "slug", bSlug: "slug",
+			aText: "a\x00b", bText: "a",
+			aRecBy: "c", bRecBy: "\x00b\x00c",
+		},
+		{
+			name:  "slug/text boundary shift",
+			aKind: EntityKindPeople, bKind: EntityKindPeople,
+			aSlug: "ab", bSlug: "a",
+			aText: "c", bText: "bc",
+			aRecBy: "d", bRecBy: "d",
+		},
+		{
+			// kind is a fixed literal on the real write path; cast synthetic
+			// kinds here to exercise the kind/slug boundary of the encoding.
+			name:  "kind/slug boundary shift",
+			aKind: EntityKind("ab"), bKind: EntityKind("a"),
+			aSlug: "c", bSlug: "bc",
+			aText: "t", bText: "t",
+			aRecBy: "r", bRecBy: "r",
+		},
+		{
+			name:  "multi-byte UTF-8 vs ASCII (length prefix counts bytes)",
+			aKind: EntityKindPeople, bKind: EntityKindPeople,
+			aSlug: "s", bSlug: "s",
+			aText: "é", bText: "e",
+			aRecBy: "r", bRecBy: "r",
+		},
+		{
+			name:  "empty fields differ from non-empty",
+			aKind: EntityKindPeople, bKind: EntityKindPeople,
+			aSlug: "", bSlug: "",
+			aText: "", bText: "",
+			aRecBy: "", bRecBy: "x",
+		},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := deterministicFactID(tc.aKind, tc.aSlug, tc.aText, tc.aRecBy)
+			b := deterministicFactID(tc.bKind, tc.bSlug, tc.bText, tc.bRecBy)
+			if a == b {
+				t.Errorf("field-boundary collision: distinct tuples both produced %q", a)
+			}
+		})
+	}
+}
 
-	// Verify length-prefix separation also holds across kind and slug boundaries.
-	id3 := deterministicFactID(EntityKindPeople, "ab", "c", "d")
-	id4 := deterministicFactID(EntityKindPeople, "a", "bc", "d")
-	if id3 == id4 {
-		t.Errorf("NUL-ambiguity: slug+text boundary collision: both produced %q", id3)
+func TestFactLog_DeterministicID_Golden(t *testing.T) {
+	// Pins the exact encoding output. deterministicFactID feeds a persisted,
+	// dedup-load-bearing ID; a silent encoding change breaks dedup for every
+	// fact written before it (as the 3826daac NUL scheme -> length-prefix
+	// change did). If a case below fails after an intentional encoding change,
+	// bump the version byte in deterministicFactID and re-pin these vectors.
+	cases := []struct {
+		name                   string
+		kind                   EntityKind
+		slug, text, recordedBy string
+		want                   string
+	}{
+		{"ascii", EntityKindPeople, "sarah", "CEO of Acme", "pm", "2dffeb23c0b581e1"},
+		{"empty fields", EntityKindPeople, "", "", "", "ba3b4644dd3a568a"},
+		{"embedded NUL", EntityKindPeople, "slug", "a\x00b", "c", "b5b9247e8a2eaa18"},
+		{"multi-byte UTF-8", EntityKindCompanies, "acme", "café", "agent", "fa887ff59356a4b3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deterministicFactID(tc.kind, tc.slug, tc.text, tc.recordedBy)
+			if len(got) != factIDHexLen {
+				t.Fatalf("want %d hex chars, got %d (%q)", factIDHexLen, len(got), got)
+			}
+			if got != tc.want {
+				t.Errorf("encoding drift: got %q, want %q — if intentional, bump the version byte and re-pin", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -145,8 +145,8 @@ func (l *FactLog) Append(ctx context.Context, kind EntityKind, slug, text, sourc
 	}
 
 	// Deterministic ID: hash of immutable content fields so the same fact
-	// recorded twice produces the same ID. This enables dedup at both the
-	// JSONL append layer (below) and the SQLite UpsertFact layer.
+	// recorded twice produces the same ID, enabling append-time dedup in the
+	// JSONL fact log (findFactInJSONL, below).
 	factID := deterministicFactID(kind, slug, text, recordedBy)
 
 	fact := Fact{
@@ -331,28 +331,43 @@ func (l *FactLog) commitTimestamp(ctx context.Context, sha string) (time.Time, e
 	return ts.UTC(), nil
 }
 
+// factIDHexLen is the hex-character width of a deterministicFactID. 16 hex
+// chars = 64 bits of SHA-256; negligible collision risk at the expected
+// hundreds-of-facts-per-log scale.
+const factIDHexLen = 16
+
 // deterministicFactID computes a stable ID from the immutable content fields.
-// The same observation recorded twice produces the same ID, enabling dedup at
-// both the JSONL append layer and the SQLite UpsertFact layer. The ID is a
-// 16-character hex prefix of SHA-256 — collision probability is negligible for
-// the expected fact counts per entity (hundreds, not millions).
+// The same observation recorded twice produces the same ID, enabling
+// append-time dedup in the JSONL fact log (findFactInJSONL, below). The ID is
+// also stored as EntityEdge.FirstSeenFactID for graph-edge provenance. It is
+// NOT the SQLite facts-table key — that table is keyed by ComputeFactID over a
+// different tuple (see wiki_index.go).
 //
-// Each field is length-prefixed (4-byte big-endian uint32) before its bytes
-// so that inputs containing NUL cannot produce collisions across field
-// boundaries. For example, text="a\x00b", recordedBy="c" produces different
-// bytes than text="a", recordedBy="\x00b\x00c".
+// Encoding: a fixed domain-separation tag and scheme-version byte, then each
+// content field length-prefixed (8-byte big-endian) before its bytes. The
+// length prefix means a field containing NUL cannot collide across field
+// boundaries — text="a\x00b", recordedBy="c" hashes differently from
+// text="a", recordedBy="\x00b\x00c". On any change to this encoding, bump the
+// version byte and re-pin TestFactLog_DeterministicID_Golden.
 //
-// NOTE: encoding break in #896 — facts written before this PR (using the
-// old NUL-separator scheme introduced in #855) carry different IDs. Those
-// pre-existing facts will not be recognised as duplicates of their
-// length-prefix counterparts, so a re-ingestion window of ~4 days of data
-// may append a one-time harmless duplicate in an otherwise-idempotent
-// append-only log. No migration script is required; synthesis is additive.
+// Encoding break: this scheme differs from the previous NUL-separator scheme
+// (commit 3826daac), so a fact re-ingested after this change is appended once
+// under the new ID before dedup stabilises — one extra JSONL line per
+// re-ingested fact, which synthesis sees as a low-impact duplicate. The log is
+// append-only and synthesis is additive, so no migration or backfill is
+// required.
 func deterministicFactID(kind EntityKind, slug, text, recordedBy string) string {
 	h := sha256.New()
+	// Domain-separation tag + scheme version (\x01). Isolates this hash from
+	// any other SHA-256 use and makes a future encoding change detectable
+	// rather than a silent ID break.
+	h.Write([]byte("wuphf/entity-fact-id\x01"))
 	writeField := func(s string) {
-		var lenBuf [4]byte
-		binary.BigEndian.PutUint32(lenBuf[:], uint32(len(s)))
+		// 8-byte length prefix. len() is a non-negative int; uint64 never
+		// truncates it. A uint32 prefix would wrap for >=4 GiB fields and
+		// reopen the field-boundary collision this guards against.
+		var lenBuf [8]byte
+		binary.BigEndian.PutUint64(lenBuf[:], uint64(len(s)))
 		h.Write(lenBuf[:])
 		h.Write([]byte(s))
 	}
@@ -360,7 +375,7 @@ func deterministicFactID(kind EntityKind, slug, text, recordedBy string) string 
 	writeField(slug)
 	writeField(text)
 	writeField(recordedBy)
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return hex.EncodeToString(h.Sum(nil))[:factIDHexLen]
 }
 
 // findFactInJSONL scans existing JSONL bytes for a fact with the given ID.
