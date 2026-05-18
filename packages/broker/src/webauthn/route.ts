@@ -204,6 +204,10 @@ async function handleRegistrationVerify(
     writeJson(res, 400, { error: "challenge_expired" });
     return;
   }
+  if (!isRoleEnrollableForAgent(agentId, challenge.role, deps)) {
+    writeJson(res, 403, { error: "registration_role_not_enrollable" });
+    return;
+  }
 
   let verification: Awaited<ReturnType<WebAuthnRouteDeps["ceremony"]["verifyRegistration"]>>;
   try {
@@ -328,6 +332,10 @@ async function handleCosignVerify(
     writeJson(res, 403, { error: "wrong_issued_to_agent" });
     return;
   }
+  if (!claimTargetsAgent(challenge.claim, agentId)) {
+    writeJson(res, 403, { error: "wrong_claim_agent" });
+    return;
+  }
   const replay = await deps.store.getConsumedToken(challenge.tokenId);
   if (replay !== null) {
     writeJson(res, 200, replay.responseJson);
@@ -403,25 +411,20 @@ async function handleCosignVerify(
     return;
   }
 
-  const responseJson = await buildCosignResponseJson({
+  const approvedResponseJson = buildApprovedCosignResponseJson({
     challenge,
     assertionResponse,
-    credentialRole: credential.role,
-    newSignCount: verification.newSignCount,
     agentId,
-    nowMs,
-    deps,
   });
-  const outcome = isApprovalPendingResponse(responseJson) ? "approval_pending" : "approved";
-  let consumedReplay: Awaited<ReturnType<WebAuthnRouteDeps["store"]["consumeCosignChallenge"]>>;
+  let consumedToken: Awaited<ReturnType<WebAuthnRouteDeps["store"]["consumeCosignChallenge"]>>;
   try {
-    consumedReplay = await deps.store.consumeCosignChallenge({
+    consumedToken = await deps.store.consumeCosignChallenge({
       challengeId: challenge.challengeId,
       tokenId: challenge.tokenId,
       credentialId: credential.credentialId,
       newSignCount: verification.newSignCount,
-      outcome,
-      responseJson,
+      requiredThreshold: thresholdForClaimKind(challenge.claim.kind, deps),
+      approvedResponseJson,
       role: credential.role,
       approvalGroupHash: challenge.approvalGroupHash,
       issuedToAgentId: agentId,
@@ -435,33 +438,14 @@ async function handleCosignVerify(
     }
     throw err;
   }
-  writeJson(res, 200, consumedReplay?.responseJson ?? responseJson);
+  writeJson(res, 200, consumedToken.responseJson);
 }
 
-async function buildCosignResponseJson(args: {
+function buildApprovedCosignResponseJson(args: {
   readonly challenge: CosignChallengeRecord;
   readonly assertionResponse: AuthenticationResponseJSON;
-  readonly credentialRole: ApprovalRole;
-  readonly newSignCount: number;
   readonly agentId: AgentId;
-  readonly nowMs: number;
-  readonly deps: WebAuthnRouteDeps;
-}): Promise<JsonValue> {
-  const priorRoles = await args.deps.store.listSatisfiedRoles({
-    approvalGroupHash: args.challenge.approvalGroupHash,
-    issuedToAgentId: args.agentId,
-    nowMs: args.nowMs,
-  });
-  const satisfiedRoles = sortedUniqueRoles([...priorRoles, args.credentialRole]);
-  const requiredThreshold = thresholdForClaimKind(args.challenge.claim.kind, args.deps);
-  if (satisfiedRoles.length < requiredThreshold) {
-    return {
-      status: "approval_pending",
-      satisfiedRoles,
-      requiredThreshold,
-    };
-  }
-
+}): JsonValue {
   const token: SignedApprovalToken = {
     schemaVersion: 1,
     tokenId: args.challenge.tokenId,
@@ -514,6 +498,9 @@ function targetAgentForClaim(claim: ApprovalClaim): AgentId | null {
     case "credential_grant_to_agent":
       return claim.granteeAgentId;
     case "receipt_co_sign":
+      // Receipt co-sign is intentionally not agent-scoped in v1: the broker
+      // has no receipt ownership context, so the receipt validator binds it by
+      // receiptId and frozenArgsHash instead.
       return null;
   }
 }
@@ -748,24 +735,6 @@ function safeExpiryMs(nowMs: number, ttlMs: number): number {
     throw new Error("webauthn challenge expiry is outside the safe integer range");
   }
   return expiresAtMs;
-}
-
-function sortedUniqueRoles(values: readonly ApprovalRole[]): readonly ApprovalRole[] {
-  return [...new Set(values)].sort(compareRoles);
-}
-
-function compareRoles(a: ApprovalRole, b: ApprovalRole): number {
-  return roleOrder(a) - roleOrder(b);
-}
-
-function roleOrder(role: ApprovalRole): number {
-  return role === "viewer" ? 0 : role === "approver" ? 1 : 2;
-}
-
-function isApprovalPendingResponse(value: JsonValue): boolean {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const record = value as { readonly status?: JsonValue };
-  return record.status === "approval_pending";
 }
 
 function jsonValue(value: unknown): JsonValue {

@@ -122,7 +122,7 @@ export interface BrokerConfig {
    * credential/challenge/token persistence; the bearer-to-agent map binds
    * registration and token issuance to one agent. Privileged registration
    * roles must be granted through `webauthn.enrollableRoles`; unmapped agents
-   * may only enroll the conservative default role.
+   * cannot enroll any role.
    */
   readonly webauthn?: WebAuthnPolicyConfig & {
     readonly store: WebAuthnStore;

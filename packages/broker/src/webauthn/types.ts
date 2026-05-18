@@ -22,7 +22,7 @@ export const WEBAUTHN_RP_NAME = "WUPHF";
 export const WEBAUTHN_RP_ID = "localhost";
 export const WEBAUTHN_ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"] as const;
 export const WEBAUTHN_TRUSTED_APPROVAL_ROLES = ["approver", "host"] as const;
-export const WEBAUTHN_DEFAULT_ENROLLABLE_ROLES: readonly ApprovalRole[] = ["viewer"];
+export const WEBAUTHN_DEFAULT_ENROLLABLE_ROLES: readonly ApprovalRole[] = [];
 
 export type WebAuthnChallengeType = "registration" | "cosign";
 export type WebAuthnTokenOutcome = "approval_pending" | "approved";
@@ -117,8 +117,8 @@ export interface ConsumeCosignChallengeArgs {
   readonly tokenId: ApprovalTokenId;
   readonly credentialId: string;
   readonly newSignCount: number;
-  readonly outcome: WebAuthnTokenOutcome;
-  readonly responseJson: JsonValue;
+  readonly requiredThreshold: number;
+  readonly approvedResponseJson: JsonValue;
   readonly role: ApprovalRole;
   readonly approvalGroupHash: Sha256Hex;
   readonly issuedToAgentId: AgentId;
@@ -143,9 +143,15 @@ export interface WebAuthnStore {
     readonly issuedToAgentId: AgentId;
     readonly nowMs: number;
   }): Promise<readonly ApprovalRole[]>;
-  consumeCosignChallenge(
-    args: ConsumeCosignChallengeArgs,
-  ): Promise<ConsumedWebAuthnTokenRecord | null>;
+  /**
+   * Atomically consumes a cosign challenge. Implementations must compare-and-set
+   * the credential sign counter in the same transaction that marks the
+   * challenge consumed, rejecting non-monotonic `newSignCount` values with
+   * `WebAuthnSignCountReplayError`. They must also persist the current role and
+   * choose the pending/approved response from the post-insert satisfied-role set
+   * in that same transaction.
+   */
+  consumeCosignChallenge(args: ConsumeCosignChallengeArgs): Promise<ConsumedWebAuthnTokenRecord>;
 }
 
 export interface WebAuthnCeremony {
