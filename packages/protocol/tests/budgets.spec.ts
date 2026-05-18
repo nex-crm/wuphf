@@ -8,6 +8,8 @@ import {
   asApprovalClaimId,
   asApprovalId,
   asApprovalTokenId,
+  asCredentialHandleId,
+  asCredentialScope,
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
@@ -24,7 +26,9 @@ import {
   GENESIS_PREV_HASH,
   INITIAL_VERIFIER_STATE,
   lsnFromV1Number,
+  MAX_APPROVAL_COST_CEILING_ID_BYTES,
   MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES,
+  MAX_APPROVAL_IDENTIFIER_BYTES,
   MAX_APPROVAL_REASON_BYTES,
   MAX_APPROVAL_TOKEN_ID_BYTES,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
@@ -435,6 +439,26 @@ describe("resource budgets", () => {
   });
 
   it("bounds nested approval token claim and scope fields in receipt budgets", () => {
+    const overCostAgent = receiptWithWriteApprovalToken(
+      costApprovalTokenFixture({
+        agentId: "a".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+      }),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overCostAgent),
+      /receipt writes\[0\]\.approvalToken\.claim\.agentId bytes.*257 > 256/,
+    );
+
+    const overCostCeiling = receiptWithWriteApprovalToken(
+      costApprovalTokenFixture({
+        costCeilingId: `A${"B".repeat(MAX_APPROVAL_COST_CEILING_ID_BYTES)}`,
+      }),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overCostCeiling),
+      /receipt writes\[0\]\.approvalToken\.claim\.costCeilingId: ApprovalClaim\.costCeilingId bytes.*129 > 128/,
+    );
+
     const overReason = receiptWithWriteApprovalToken(
       endpointApprovalTokenFixture(
         "a".repeat(MAX_APPROVAL_REASON_BYTES + 1),
@@ -455,6 +479,114 @@ describe("resource budgets", () => {
     expectBudgetRejection(
       validateReceiptBudget(overEndpoint),
       /receipt writes\[0\]\.approvalToken\.claim\.endpointOrigin: ApprovalClaim\.endpointOrigin bytes/,
+    );
+
+    const overCredentialHandle = receiptWithWriteApprovalToken(
+      credentialGrantApprovalTokenFixture({
+        credentialHandleId: "c".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+      }),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overCredentialHandle),
+      /receipt writes\[0\]\.approvalToken\.claim\.credentialHandleId bytes.*257 > 256/,
+    );
+
+    const overCredentialScope = receiptWithWriteApprovalToken(
+      credentialGrantApprovalTokenFixture({
+        credentialScope: "s".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+      }),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(overCredentialScope),
+      /receipt writes\[0\]\.approvalToken\.claim\.credentialScope bytes.*257 > 256/,
+    );
+
+    const overCostScopeAgent = costApprovalTokenFixture();
+    expectBudgetRejection(
+      validateReceiptBudget(
+        receiptWithWriteApprovalToken({
+          ...overCostScopeAgent,
+          scope: {
+            ...overCostScopeAgent.scope,
+            agentId: "a".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+          } as SignedApprovalToken["scope"],
+        }),
+      ),
+      /receipt writes\[0\]\.approvalToken\.scope\.agentId bytes.*257 > 256/,
+    );
+
+    const endpointScopeToken = endpointApprovalTokenFixture("approved", "https://api.example");
+    expectBudgetRejection(
+      validateReceiptBudget(
+        receiptWithWriteApprovalToken({
+          ...endpointScopeToken,
+          scope: {
+            ...endpointScopeToken.scope,
+            endpointOrigin: `https://example.com/${"a".repeat(MAX_APPROVAL_ENDPOINT_ORIGIN_BYTES)}`,
+          } as SignedApprovalToken["scope"],
+        }),
+      ),
+      /receipt writes\[0\]\.approvalToken\.scope\.endpointOrigin: ApprovalClaim\.endpointOrigin bytes/,
+    );
+
+    const credentialScopeToken = credentialGrantApprovalTokenFixture();
+    expectBudgetRejection(
+      validateReceiptBudget(
+        receiptWithWriteApprovalToken({
+          ...credentialScopeToken,
+          scope: {
+            ...credentialScopeToken.scope,
+            credentialHandleId: "c".repeat(MAX_APPROVAL_IDENTIFIER_BYTES + 1),
+          } as SignedApprovalToken["scope"],
+        }),
+      ),
+      /receipt writes\[0\]\.approvalToken\.scope\.credentialHandleId bytes.*257 > 256/,
+    );
+  });
+
+  it("rejects hostile JSON shapes before receipt serialization", () => {
+    let toJsonGetterInvoked = false;
+    const toJsonPrototype = {};
+    Object.defineProperty(toJsonPrototype, "toJSON", {
+      enumerable: true,
+      get() {
+        toJsonGetterInvoked = true;
+        return () => undefined;
+      },
+    });
+    const toJsonAccessorReceipt = Object.assign(
+      Object.create(toJsonPrototype) as ReceiptSnapshot,
+      validReceiptFixture(),
+    );
+
+    expectBudgetRejection(
+      validateReceiptBudget(toJsonAccessorReceipt),
+      /receipt serialized bytes: accessor toJSON at \$/,
+    );
+    expect(toJsonGetterInvoked).toBe(false);
+
+    let nestedGetterInvoked = false;
+    const accessorReceipt = { ...validReceiptFixture() };
+    Object.defineProperty(accessorReceipt, "triggerRef", {
+      enumerable: true,
+      get() {
+        nestedGetterInvoked = true;
+        return "message:01ARZ3NDEKTSV4RRFFQ69G5FAX";
+      },
+    });
+
+    expectBudgetRejection(
+      validateReceiptBudget(accessorReceipt),
+      /receipt serialized bytes: accessor property at triggerRef/,
+    );
+    expect(nestedGetterInvoked).toBe(false);
+
+    const tokenWithBigIntClaim = receiptWithWriteApprovalToken(
+      endpointApprovalTokenFixture(1n as unknown as string, "https://api.example"),
+    );
+    expectBudgetRejection(
+      validateReceiptBudget(tokenWithBigIntClaim),
+      /approvalToken\.claim: Do not know how to serialize a BigInt/,
     );
   });
 
@@ -923,6 +1055,76 @@ function endpointApprovalTokenFixture(reason: string, endpointOrigin: string): S
     issuedTo: agentId,
     signature: webAuthnAssertionFixture(),
   };
+}
+
+function costApprovalTokenFixture(
+  overrides: { readonly agentId?: string; readonly costCeilingId?: string } = {},
+): SignedApprovalToken {
+  const claimId = asApprovalClaimId("claim_cost");
+  const agentId = overrides.agentId ?? asAgentId("agent_alpha");
+  const costCeilingId = overrides.costCeilingId ?? "budget-prod-01";
+  return {
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA2"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "cost_spike_acknowledgement",
+      agentId,
+      costCeilingId,
+      thresholdBps: 2500,
+      currentMicroUsd: 42_000_000,
+      ceilingMicroUsd: 20_000_000,
+    },
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "cost_spike_acknowledgement",
+      role: "approver",
+      maxUses: 1,
+      agentId,
+      costCeilingId,
+    },
+    notBefore: asTimestampMs(1_778_262_000_000),
+    expiresAt: asTimestampMs(1_778_263_800_000),
+    issuedTo: asAgentId("agent_alpha"),
+    signature: webAuthnAssertionFixture(),
+  } as SignedApprovalToken;
+}
+
+function credentialGrantApprovalTokenFixture(
+  overrides: { readonly credentialHandleId?: string; readonly credentialScope?: string } = {},
+): SignedApprovalToken {
+  const claimId = asApprovalClaimId("claim_credential");
+  const granteeAgentId = asAgentId("agent_alpha");
+  const credentialHandleId =
+    overrides.credentialHandleId ?? asCredentialHandleId("cred_budget0123456789ABCDEFGHIJKL");
+  const credentialScope = overrides.credentialScope ?? asCredentialScope("openai");
+  return {
+    schemaVersion: 1,
+    tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FA3"),
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "credential_grant_to_agent",
+      granteeAgentId,
+      credentialHandleId,
+      credentialScope,
+    },
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "credential_grant_to_agent",
+      role: "host",
+      maxUses: 1,
+      granteeAgentId,
+      credentialHandleId,
+    },
+    notBefore: asTimestampMs(1_778_262_000_000),
+    expiresAt: asTimestampMs(1_778_263_800_000),
+    issuedTo: granteeAgentId,
+    signature: webAuthnAssertionFixture(),
+  } as SignedApprovalToken;
 }
 
 function webAuthnAssertionFixture(): SignedApprovalToken["signature"] {

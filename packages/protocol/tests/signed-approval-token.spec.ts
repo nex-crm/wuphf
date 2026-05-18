@@ -274,6 +274,84 @@ describe("SignedApprovalToken codec", () => {
     expect(() => signedApprovalTokenFromJson(token)).toThrow(/approval token lifetime ms/);
   });
 
+  it("rejects malformed scalar fields before building a token", () => {
+    expect(() => asApprovalClaimId("")).toThrow(/ApprovalClaimId/);
+    expect(() => asTimestampMs(-1)).toThrow(/TimestampMs/);
+
+    expectTokenMutationToThrow((token) => {
+      token.notBefore = -1;
+    }, /notBefore.*TimestampMs/);
+    expectTokenMutationToThrow((token) => {
+      nestedRecord(token, "claim").schemaVersion = 2;
+    }, /schemaVersion.*must be 1/);
+    expectTokenMutationToThrow((token) => {
+      nestedRecord(token, "claim").claimId = "";
+    }, /claimId.*ApprovalClaimId/);
+    expectTokenMutationToThrow((token) => {
+      nestedRecord(token, "claim").kind = "operator_override";
+    }, /kind.*valid approval claim kind/);
+    expectTokenMutationToThrow((token) => {
+      nestedRecord(token, "scope").mode = "multi_use";
+    }, /mode.*single_use/);
+    expectTokenMutationToThrow((token) => {
+      nestedRecord(token, "scope").maxUses = 2;
+    }, /maxUses.*must be 1/);
+    expectTokenMutationToThrow((token) => {
+      nestedRecord(token, "scope").role = "owner";
+    }, /role.*valid approval role/);
+    expectTokenMutationToThrow((token) => {
+      nestedRecord(token, "claim").writeId = 42;
+    }, /writeId.*must be a string/);
+  });
+
+  it("rejects malformed claim-kind specific fields", () => {
+    const endpoint = nonReceiptClaimVariantFixtures().find(
+      (fixture) => fixture.name === "endpoint_allowlist_extension",
+    );
+    const credential = nonReceiptClaimVariantFixtures().find(
+      (fixture) => fixture.name === "credential_grant_to_agent",
+    );
+    if (endpoint === undefined || credential === undefined) {
+      throw new Error("expected endpoint and credential claim fixtures");
+    }
+
+    expectTokenMutationToThrow((token) => {
+      token.claim = approvalClaimToJsonValue(endpoint.claim);
+      token.scope = approvalScopeToJsonValue(endpoint.scope);
+      nestedRecord(token, "claim").providerKind = "mistral";
+    }, /providerKind.*ProviderKind/);
+    expectTokenMutationToThrow((token) => {
+      token.claim = approvalClaimToJsonValue(endpoint.claim);
+      token.scope = approvalScopeToJsonValue(endpoint.scope);
+      nestedRecord(token, "claim").endpointOrigin = "ftp://api.example";
+    }, /endpointOrigin.*http\(s\) URL origin/);
+    expectTokenMutationToThrow((token) => {
+      token.claim = approvalClaimToJsonValue(credential.claim);
+      token.scope = approvalScopeToJsonValue(credential.scope);
+      nestedRecord(token, "claim").credentialHandleId = "not a handle";
+    }, /credentialHandleId.*CredentialHandleId/);
+    expectTokenMutationToThrow((token) => {
+      token.claim = approvalClaimToJsonValue(credential.claim);
+      token.scope = approvalScopeToJsonValue(credential.scope);
+      nestedRecord(token, "claim").credentialScope = "unknown-scope";
+    }, /credentialScope.*CredentialScope/);
+  });
+
+  it("rejects accessor-backed required fields without invoking them", () => {
+    const token = mutableJson(signedApprovalTokenToJsonValue(signedApprovalTokenFixture()));
+    let invoked = false;
+    Object.defineProperty(token, "tokenId", {
+      enumerable: true,
+      get() {
+        invoked = true;
+        return "01HX6P2D8T4Y7K9M3N5Q1R6S2V";
+      },
+    });
+
+    expect(() => signedApprovalTokenFromJson(token)).toThrow(/tokenId.*data property/);
+    expect(invoked).toBe(false);
+  });
+
   it.each([
     {
       name: "non-object assertions",
@@ -378,9 +456,23 @@ describe("SignedApprovalToken conformance vectors", () => {
 });
 
 type MutableJsonRecord = Record<string, unknown> & {
+  claim?: unknown;
+  claimId?: unknown;
+  credentialHandleId?: unknown;
+  credentialScope?: unknown;
+  endpointOrigin?: unknown;
   extra?: unknown;
   expiresAt?: unknown;
+  kind?: unknown;
+  maxUses?: unknown;
+  mode?: unknown;
+  notBefore?: unknown;
+  providerKind?: unknown;
+  role?: unknown;
+  schemaVersion?: unknown;
+  scope?: unknown;
   tokenId?: unknown;
+  writeId?: unknown;
 };
 
 function signedApprovalTokenFixture(
@@ -559,6 +651,15 @@ function omitKey(record: unknown, key: string): MutableJsonRecord {
   const copy = mutableJson(record);
   Reflect.deleteProperty(copy, key);
   return copy;
+}
+
+function expectTokenMutationToThrow(
+  mutate: (token: MutableJsonRecord) => void,
+  reason: RegExp,
+): void {
+  const token = mutableJson(signedApprovalTokenToJsonValue(signedApprovalTokenFixture()));
+  mutate(token);
+  expect(() => signedApprovalTokenFromJson(token)).toThrow(reason);
 }
 
 function receiptCoSignClaim(
