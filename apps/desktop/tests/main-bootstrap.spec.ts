@@ -278,9 +278,10 @@ describe("main bootstrap", () => {
 
   it("loads the broker URL when packaged and the broker has reported {ready}", async () => {
     // Packaged mode now serves the renderer bundle through the broker. The
-    // window must `loadURL(${brokerUrl}/)` so `/api-token` is same-origin
-    // loopback. ELECTRON_RENDERER_URL is set here to verify it's ignored in
-    // packaged mode — the dev-server branch must not win.
+    // window must load the localhost form of the broker URL so `/api-token`
+    // is same-origin loopback and WebAuthn's localhost RP ID is eligible.
+    // ELECTRON_RENDERER_URL is set here to verify it's ignored in packaged
+    // mode — the dev-server branch must not win.
     electronMock.app.isPackaged = true;
     process.env[RENDERER_URL_ENV_KEY] = "http://localhost:5173/";
     brokerMock.setBrokerUrl("http://127.0.0.1:54321");
@@ -288,7 +289,7 @@ describe("main bootstrap", () => {
     await importMainBootstrap();
 
     const window = getOnlyWindow();
-    expect(window.loadURL).toHaveBeenCalledWith("http://127.0.0.1:54321/");
+    expect(window.loadURL).toHaveBeenCalledWith("http://localhost:54321/");
     expect(window.loadFile).not.toHaveBeenCalled();
   });
 
@@ -331,7 +332,7 @@ describe("main bootstrap", () => {
 
     await importMainBootstrap();
     const firstWindow = getOnlyWindow();
-    expect(firstWindow.loadURL).toHaveBeenCalledWith("http://127.0.0.1:11111/");
+    expect(firstWindow.loadURL).toHaveBeenCalledWith("http://localhost:11111/");
 
     // Simulate a broker restart that publishes a new ready URL.
     brokerMock.emitReady("http://127.0.0.1:22222");
@@ -342,7 +343,7 @@ describe("main bootstrap", () => {
     const newest = allWindows[allWindows.length - 1];
     expect(newest).toBeDefined();
     if (newest === undefined) return;
-    expect(newest.loadURL).toHaveBeenCalledWith("http://127.0.0.1:22222/");
+    expect(newest.loadURL).toHaveBeenCalledWith("http://localhost:22222/");
   });
 
   it("loads ELECTRON_RENDERER_URL when app.isPackaged is false", async () => {

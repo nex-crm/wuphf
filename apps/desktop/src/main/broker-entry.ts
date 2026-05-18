@@ -9,7 +9,12 @@
 
 import type { BrokerLogger } from "@wuphf/broker";
 
-import { type DesktopBrokerRuntime, startDesktopBrokerFromEnv } from "./broker-entry-runtime.ts";
+import {
+  type DesktopBrokerRuntime,
+  RENDERER_DIST_ENV,
+  startDesktopBrokerFromEnv,
+} from "./broker-entry-runtime.ts";
+import { toDesktopBrowserBrokerUrl } from "./broker-url.ts";
 
 const parentPort = process.parentPort;
 if (!parentPort) {
@@ -69,7 +74,11 @@ process.on("SIGINT", () => void shutdown());
 
 async function main(): Promise<void> {
   runtime = await startDesktopBrokerFromEnv({ env: process.env, logger });
-  sendReady(runtime.broker.url);
+  const readyUrl =
+    typeof process.env[RENDERER_DIST_ENV] === "string" && process.env[RENDERER_DIST_ENV].length > 0
+      ? toDesktopBrowserBrokerUrl(runtime.broker.url)
+      : runtime.broker.url;
+  sendReady(readyUrl);
   sendAlive();
   aliveInterval = setInterval(sendAlive, ALIVE_INTERVAL_MS);
 }

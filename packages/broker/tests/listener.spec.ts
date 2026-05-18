@@ -12,6 +12,8 @@ interface RawResponse {
 interface RawTestHeaders {
   Host?: string;
   Authorization?: string;
+  Origin?: string;
+  "Sec-Fetch-Site"?: string;
 }
 
 function rawGet(args: {
@@ -19,11 +21,15 @@ function rawGet(args: {
   path: string;
   hostHeader?: string;
   authorization?: string;
+  origin?: string;
+  secFetchSite?: string;
 }): Promise<RawResponse> {
   return new Promise((resolveFn, rejectFn) => {
     const headers: RawTestHeaders = {};
     if (args.hostHeader !== undefined) headers.Host = args.hostHeader;
     if (args.authorization !== undefined) headers.Authorization = args.authorization;
+    if (args.origin !== undefined) headers.Origin = args.origin;
+    if (args.secFetchSite !== undefined) headers["Sec-Fetch-Site"] = args.secFetchSite;
     const req = request(
       {
         host: "127.0.0.1",
@@ -89,6 +95,24 @@ describe("createBroker", () => {
     });
     expect(res.status).toBe(403);
     expect(res.body).toMatch(/^loopback_/);
+  });
+
+  it("accepts localhost Host on /api-token and emits a matching localhost broker_url", async () => {
+    broker = await createBroker({ token: FIXED_TOKEN });
+    const origin = `http://localhost:${broker.port}`;
+    const res = await rawGet({
+      port: broker.port,
+      path: "/api-token",
+      hostHeader: `localhost:${broker.port}`,
+      origin,
+      secFetchSite: "same-origin",
+    });
+
+    expect(res.status).toBe(200);
+    const json: unknown = JSON.parse(res.body);
+    const bootstrap = apiBootstrapFromJson(json);
+    expect(bootstrap.token).toBe(FIXED_TOKEN);
+    expect(bootstrap.brokerUrl).toBe(origin);
   });
 
   it("requires bearer auth on /api/health and accepts the issued token", async () => {

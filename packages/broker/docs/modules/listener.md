@@ -98,9 +98,10 @@ registration and co-sign routes under `/api/webauthn/*`. Without that config,
 those paths behave like unknown authenticated API routes and return 404. The
 route config supplies the SQLite-backed store, bearer-to-agent map, RP ID,
 allowed origins, threshold policy, and clock. v1 defaults are config-driven
-with dev values of RP ID `localhost` and allowed origins
-`http://localhost:5173` / `http://127.0.0.1:5173`; packaged desktop and future
-cloud-bridge origins are host follow-up work.
+with RP ID `localhost`, dev origin `http://localhost:5173`, and the
+post-listen packaged origin `http://localhost:<broker-port>`. The listener
+still binds `127.0.0.1` only; `localhost` is the browser-facing host used so
+WebAuthn's RP ID matches the page origin.
 
 | Method | Path | Auth | Contract |
 |---|---|---|---|

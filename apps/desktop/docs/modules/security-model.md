@@ -85,14 +85,15 @@ documentation of intent; the server header is authoritative in packaged mode.
 
 ## Loopback Trust Model
 
-The broker's loopback listener treats `127.0.0.1` / `localhost` / `::1` as the
-trust boundary. That means:
+The broker's loopback listener binds `127.0.0.1` and accepts
+`Host: 127.0.0.1:<port>` or `Host: localhost:<port>` as the loopback trust
+boundary. That means:
 
 - **Trusted**: any process running on the same machine as the user can reach
-  the listener. The DNS-rebinding guard (`@wuphf/protocol`'s
-  `isAllowedLoopbackHost` + `isLoopbackRemoteAddress`) keeps remote peers
-  out, but does not distinguish "the desktop renderer" from "a curl shell on
-  the box" or "a Chrome extension with localhost access".
+  the listener. The DNS-rebinding guard combines the broker's exact Host
+  allowlist with `@wuphf/protocol`'s `isLoopbackRemoteAddress` peer-IP check
+  to keep remote peers out, but does not distinguish "the desktop renderer"
+  from "a curl shell on the box" or "a Chrome extension with localhost access".
 - **Implication**: `/api-token` issues the bearer to any same-machine caller
   that gets past the loopback + Origin gates. The bearer then grants the
   full bearer-protected API surface (`/api/*`) and the agent terminal
@@ -101,8 +102,9 @@ trust boundary. That means:
 This is the documented v1 trust model. Mitigations on the browser side
 (`/api-token` route in `packages/broker/src/listener.ts`):
 
-- **Origin gate**: when `Origin` is present, it must match the broker's bound
-  origin (`http://127.0.0.1:<port>`). Cross-origin browser fetches —
+- **Origin gate**: when `Origin` is present, it must match the broker URL
+  synthesized for the validated Host header (`http://127.0.0.1:<port>` or
+  `http://localhost:<port>`). Cross-origin browser fetches —
   including from Chrome extensions, dev-tool consoles attached to other
   pages, and same-machine web apps on a different port — are rejected with
   `403 cross_origin_api_token`.
