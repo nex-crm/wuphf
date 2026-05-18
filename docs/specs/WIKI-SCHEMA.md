@@ -54,9 +54,9 @@ Layer 2 — The wiki (LLM-owned markdown)
   wiki/facts/{kind}/{slug}.jsonl         # append-only fact log per entity
   wiki/insights/entity/{slug}.jsonl      # append-only typed insight log per entity
   wiki/insights/knowledge/{slug}.md      # workspace-wide facts/decisions/preferences
-  wiki/playbooks/{slug}.md               # compiled playbooks (from executions
+  team/playbooks/{slug}.md               # compiled playbooks (from executions
                                          # and/or insight clusters)
-  wiki/playbooks/{slug}.executions.jsonl # per-playbook execution log
+  team/playbooks/{slug}.executions.jsonl # per-playbook execution log
   wiki/.lint/report-YYYY-MM-DD.md        # daily lint report
   wiki/.dlq/extractions.jsonl            # extraction failures awaiting replay
   wiki/.dlq/permanent-failures.jsonl     # artifacts that exceeded max_retries
@@ -177,7 +177,7 @@ Insights are facts that rise above the noise: status changes, decisions, pattern
 
 `source` = `"synthesis"` | `"save_as_insight"` | `"lint"` | `"human"`.
 
-### 4.5 Playbook — `wiki/playbooks/{slug}.md`
+### 4.5 Playbook — `team/playbooks/{slug}.md`
 
 ```yaml
 ---

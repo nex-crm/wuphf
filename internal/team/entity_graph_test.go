@@ -96,6 +96,47 @@ func TestExtractRefs_KindedAndBareNoDoubleCount(t *testing.T) {
 	}
 }
 
+// TestExtractRefs_BasenameCollisionAcrossKinds pins the Obsidian
+// basename-collision guard documented in WIKI-OBSIDIAN-COMPATIBILITY.md §5.
+//
+// When the same slug exists under two kinds (e.g. team/people/acme.md and
+// team/companies/acme.md), a bare `[[acme]]` written by a user in Obsidian
+// is ambiguous. The known() resolver must return ("", false) on ambiguity,
+// and ExtractRefs must produce no edge — silently picking a kind would
+// poison the graph. Kinded forms remain unambiguous and resolve.
+//
+// If this test fails, do not relax the known() contract — the bare-slug
+// path is the Obsidian-compatibility seam and must stay strict.
+func TestExtractRefs_BasenameCollisionAcrossKinds(t *testing.T) {
+	// Two entities share a basename across kinds — the collision case.
+	known := func(slug string) (EntityKind, bool) {
+		if slug == "acme" {
+			return "", false // ambiguous: exists as both person and company
+		}
+		return "", false
+	}
+
+	bare := ExtractRefs(EntityKindPeople, "sarah", "See [[acme]].", known)
+	if len(bare) != 0 {
+		t.Fatalf("bare [[acme]] must not resolve when ambiguous across kinds; got %#v", bare)
+	}
+
+	kinded := ExtractRefs(EntityKindPeople, "sarah", "Person [[people/acme]] vs company [[companies/acme]].", known)
+	if len(kinded) != 2 {
+		t.Fatalf("kinded forms must resolve to distinct entities; got %d refs: %#v", len(kinded), kinded)
+	}
+	seen := map[EntityKind]bool{}
+	for _, ref := range kinded {
+		if ref.Slug != "acme" {
+			t.Errorf("unexpected slug: %#v", ref)
+		}
+		seen[ref.Kind] = true
+	}
+	if !seen[EntityKindPeople] || !seen[EntityKindCompanies] {
+		t.Fatalf("expected both people and companies kinds; got %v", seen)
+	}
+}
+
 func TestRecordFactRefs_WritesEdges(t *testing.T) {
 	factLog, graph, worker, teardown := newGraphFixture(t)
 	defer teardown()
