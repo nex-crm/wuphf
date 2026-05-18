@@ -122,7 +122,7 @@ func (b *Broker) advancePhase(s *onboarding.State, next string) error {
 	}
 	s.PendingSuggestion = pending
 	if err := onboarding.Save(s); err != nil {
-		log.Printf("onboarding: persist PendingSuggestion for phase %s: %v", next, err)
+		return fmt.Errorf("onboarding: persist PendingSuggestion for phase %s: %w", next, err)
 	}
 
 	return b.saveLocked()

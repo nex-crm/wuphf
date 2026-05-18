@@ -769,7 +769,11 @@ async function advanceOnboardingAfterAnswer(
       await post("/onboarding/transition", { phase: "blueprint" });
       return;
     case "blueprint_id":
-      if (value) {
+      // Strict trimmed-string check: an unknown payload can be a whitespace
+      // string, a number, or any other truthy non-string value. Only a real
+      // blueprint id (non-empty after trim) routes to "team"; everything
+      // else is the scratch path.
+      if (typeof value === "string" && value.trim() !== "") {
         await post("/onboarding/transition", { phase: "team" });
       } else {
         await post("/onboarding/transition", { phase: "seed" });
