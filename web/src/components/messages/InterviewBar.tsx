@@ -740,10 +740,20 @@ export function CeoCardSection() {
   );
 }
 
+/**
+ * Returns true if the field's answer should be persisted via /onboarding/answer.
+ * `bridge_choice` is the terminal action (Start Issue vs. Look Around) and
+ * advances the phase machine directly, so it is not stored as form state.
+ */
 function shouldPersistOnboardingAnswer(field: string) {
   return field !== "bridge_choice";
 }
 
+/**
+ * Narrows an unknown CEO card value to the union the answer endpoint accepts.
+ * Strings pass through; arrays are coerced to string[]; everything else
+ * becomes undefined so the caller can elide the field from the request body.
+ */
 function committedOnboardingValue(
   value: unknown,
 ): string | string[] | undefined {
@@ -752,10 +762,17 @@ function committedOnboardingValue(
   return undefined;
 }
 
+/** Returns true when answering this field terminates the onboarding loop. */
 function completesOnboarding(field: string) {
   return field === "bridge_choice";
 }
 
+/**
+ * Drives the deterministic phase machine after a CEO card answer commits.
+ * Each `case` maps the just-answered field to the next phase transition the
+ * client should request. The broker validates the transition before emitting
+ * the next CEO card.
+ */
 async function advanceOnboardingAfterAnswer(
   field: string,
   value: unknown,
