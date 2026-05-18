@@ -369,7 +369,7 @@ func (s *EntitySynthesizer) runJob(ctx context.Context, job SynthesisJob) {
 func (s *EntitySynthesizer) synthesize(ctx context.Context, job SynthesisJob) error {
 	relBrief := briefPath(job.Kind, job.Slug)
 	existingBrief, hadBrief := s.readBrief(relBrief)
-	_, _, lastFactCount := parseSynthesisFrontmatter(existingBrief)
+	_, lastSynthTS, lastFactCount := parseSynthesisFrontmatter(existingBrief)
 
 	facts, err := s.factLog.List(job.Kind, job.Slug)
 	if err != nil {
@@ -452,7 +452,20 @@ func (s *EntitySynthesizer) synthesize(ctx context.Context, job SynthesisJob) er
 
 	now := time.Now().UTC()
 	factCount := len(facts)
-	newBody := applySynthesisFrontmatter(output, headSHA, now, factCount, existingBrief)
+
+	// Sentinel guard: when the brief has been edited from Obsidian since the
+	// last synthesis, preserve the user's body and land new synthesis content
+	// in a sentinel-wrapped "What we've learned" section instead of replacing
+	// the whole body. See WIKI-OBSIDIAN-COMPATIBILITY §6.3.
+	var rewritten string
+	if hadBrief && humanEditedSince(existingBrief, lastSynthTS) {
+		rewritten = applyLearnedSection(stripFrontmatter(existingBrief), output)
+	} else {
+		rewritten = output
+	}
+
+	newBody := applySynthesisFrontmatter(rewritten, headSHA, now, factCount, existingBrief)
+	newBody = applyTagsFrontmatter(newBody, deriveTagsFromBrief(existingBrief))
 
 	// Commit via the wiki queue under the archivist identity. We can't
 	// call CommitBootstrap because that's tree-wide + picks its own slug;
