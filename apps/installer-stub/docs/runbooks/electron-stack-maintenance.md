@@ -88,7 +88,11 @@ shipping no Windows installer.
    bash apps/installer-stub/scripts/verify-latest-yml.sh
    ```
 
-8. Let PR CI build all three platform artifacts.
+8. Build all three platform artifacts. Since #906, PR pushes no longer
+   build installers — trigger `release-rewrite.yml` via `workflow_dispatch`
+   on the bump branch. That runs `build-mac` / `build-win` / `build-linux`
+   in unsigned PR mode (no publish) so an electron-stack bump still gets a
+   three-platform dry-run.
 9. Before merge, run a draft-only signed rewrite smoke tag and verify:
    - macOS codesign/notary/staple still pass
    - Windows Azure signing and signer CN assertion still pass

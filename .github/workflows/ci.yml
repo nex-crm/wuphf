@@ -45,6 +45,11 @@ jobs:
   # a failed/errored gate runs the full suite rather than skipping
   # required jobs into a green merge. The only path that skips a
   # required check is a deliberate `non_docs == 'false'` classification.
+  #
+  # Jobs protocol/broker/llm-router/desktop deliberately do NOT gate on
+  # this job — they self-classify per-package at step granularity and
+  # cheaply no-op on docs-only PRs. shellcheck/npm-tests run
+  # unconditionally (cheap, and shellcheck must see any *.sh change).
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -361,11 +366,13 @@ jobs:
   web:
     # Skipped on docs-only PRs (see the `changes` job). `web` produces the
     # web-dist artifact consumed by the downstream Go build/test jobs.
-    # INVARIANT: every job that `needs: web` MUST also gate on
-    # `needs.changes` with the same `non_docs` condition, so producer and
-    # consumers skip together and no consumer is left waiting on an
-    # artifact that was never built. A new `needs: web` job added without
-    # that gate will hang on docs-only PRs.
+    # INVARIANT: every job that `needs: web` MUST also carry `web`'s
+    # `needs.changes` gate, so on a docs-only PR producer and consumers
+    # skip together. A `needs: web` job added without that gate would
+    # skip-cascade on docs-only PRs. (If `web` itself FAILS — e.g. a web
+    # typecheck break — consumers run and fail fast at download-artifact.
+    # That is intended: a broken web build must block the required
+    # `build` check, not skip it into a satisfied state.)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.non_docs == 'true') }}
     runs-on: ubuntu-latest
