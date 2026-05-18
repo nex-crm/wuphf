@@ -18,18 +18,19 @@ import {
 import type Database from "better-sqlite3";
 
 import { type OpenDatabaseArgs, openDatabase, runMigrations } from "../event-log/index.ts";
-import type {
-  ConsumeCosignChallengeArgs,
-  ConsumedWebAuthnTokenRecord,
-  CosignChallengeRecord,
-  RegisteredWebAuthnCredential,
-  RegistrationChallengeRecord,
-  SaveCosignChallengeArgs,
-  SaveCredentialArgs,
-  SaveRegistrationChallengeArgs,
-  WebAuthnChallengeRecord,
-  WebAuthnStore,
-  WebAuthnTokenOutcome,
+import {
+  type ConsumeCosignChallengeArgs,
+  type ConsumedWebAuthnTokenRecord,
+  type CosignChallengeRecord,
+  type RegisteredWebAuthnCredential,
+  type RegistrationChallengeRecord,
+  type SaveCosignChallengeArgs,
+  type SaveCredentialArgs,
+  type SaveRegistrationChallengeArgs,
+  type WebAuthnChallengeRecord,
+  WebAuthnSignCountReplayError,
+  type WebAuthnStore,
+  type WebAuthnTokenOutcome,
 } from "./types.ts";
 
 export interface SqliteWebAuthnStoreConfig extends OpenDatabaseArgs {}
@@ -96,7 +97,7 @@ type InsertCosignChallengeParams = [
 ];
 type InsertCredentialParams = [string, string, number, ApprovalRole, AgentId, number];
 type MarkChallengeConsumedParams = [number, string];
-type UpdateCredentialCounterParams = [number, string];
+type UpdateCredentialCounterParams = [number, string, number];
 type InsertConsumedTokenParams = [
   ApprovalTokenId,
   string,
@@ -248,7 +249,10 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
        ORDER BY role ASC`,
     );
     this.updateCredentialCounterStmt = db.prepare<UpdateCredentialCounterParams>(
-      "UPDATE webauthn_registered_credentials SET sign_count = ? WHERE credential_id = ?",
+      `UPDATE webauthn_registered_credentials
+       SET sign_count = ?
+       WHERE credential_id = ?
+         AND (sign_count = 0 OR sign_count < ?)`,
     );
     this.insertConsumedTokenStmt = db.prepare<InsertConsumedTokenParams>(
       `INSERT INTO webauthn_consumed_tokens
@@ -277,7 +281,14 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
       if (result.changes !== 1) {
         throw new Error("webauthn cosign challenge was already consumed");
       }
-      this.updateCredentialCounterStmt.run(args.newSignCount, args.credentialId);
+      const counterResult = this.updateCredentialCounterStmt.run(
+        args.newSignCount,
+        args.credentialId,
+        args.newSignCount,
+      );
+      if (counterResult.changes !== 1) {
+        throw new WebAuthnSignCountReplayError();
+      }
       this.insertConsumedTokenStmt.run(
         args.tokenId,
         args.challengeId,

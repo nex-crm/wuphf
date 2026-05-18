@@ -22,6 +22,7 @@ export const WEBAUTHN_RP_NAME = "WUPHF";
 export const WEBAUTHN_RP_ID = "localhost";
 export const WEBAUTHN_ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"] as const;
 export const WEBAUTHN_TRUSTED_APPROVAL_ROLES = ["approver", "host"] as const;
+export const WEBAUTHN_DEFAULT_ENROLLABLE_ROLES: readonly ApprovalRole[] = ["viewer"];
 
 export type WebAuthnChallengeType = "registration" | "cosign";
 export type WebAuthnTokenOutcome = "approval_pending" | "approved";
@@ -191,6 +192,7 @@ export interface WebAuthnAuthenticationVerification {
 export interface WebAuthnRouteDeps {
   readonly store: WebAuthnStore;
   readonly tokenAgentIds: ReadonlyMap<import("@wuphf/protocol").ApiToken, AgentId>;
+  readonly enrollableRoles: ReadonlyMap<AgentId, readonly ApprovalRole[]>;
   readonly ceremony: WebAuthnCeremony;
   readonly clock: Clock;
   readonly rpName: string;
@@ -209,9 +211,18 @@ export interface WebAuthnPolicyConfig {
   readonly allowedOrigins?: readonly string[];
   readonly challengeTtlMs?: number;
   readonly trustedRoles?: readonly ApprovalRole[];
+  readonly enrollableRoles?: ReadonlyMap<AgentId, readonly ApprovalRole[]>;
   readonly defaultThreshold?: number;
   readonly receiptCoSignThreshold?: number;
   readonly ceremony?: WebAuthnCeremony;
+}
+
+export class WebAuthnSignCountReplayError extends Error {
+  override readonly name = "WebAuthnSignCountReplayError";
+
+  constructor() {
+    super("sign_count_replay");
+  }
 }
 
 export function thresholdForClaimKind(

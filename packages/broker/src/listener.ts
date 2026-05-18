@@ -41,6 +41,7 @@ import {
   type AgentId,
   type ApiBootstrap,
   type ApiToken,
+  type ApprovalRole,
   apiBootstrapToJson,
   asAgentId,
   asBrokerPort,
@@ -97,6 +98,8 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       : ({
           store: config.webauthn.store,
           tokenAgentIds: config.webauthn.tokenAgentIds,
+          enrollableRoles:
+            config.webauthn.enrollableRoles ?? new Map<AgentId, readonly ApprovalRole[]>(),
           ceremony: config.webauthn.ceremony ?? createSimpleWebAuthnCeremony(),
           clock,
           rpName: config.webauthn.rpName ?? WEBAUTHN_RP_NAME,
