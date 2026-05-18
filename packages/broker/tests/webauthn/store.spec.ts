@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openDatabase, runMigrations } from "../../src/event-log/index.ts";
 import {
+  __classifyWebAuthnSqliteReadErrorForTesting,
   __classifyWebAuthnSqliteWriteErrorForTesting,
   createWebAuthnStore,
 } from "../../src/webauthn/store.ts";
@@ -112,12 +113,64 @@ describe("SqliteWebAuthnStore", () => {
 
     expect(classified).toBeInstanceOf(WebAuthnStoreUnavailableError);
   });
+
+  it("classifies corrupt stored JSON on read as storage unavailable", async () => {
+    const store = createTestStore();
+    const { claim, scope } = receiptCoSignFixture("approver");
+    const hashes = hashClaimScopeForTest(claim, scope);
+    await store.saveCosignChallenge({
+      challengeId: "corruptReadChallenge",
+      challenge: "corruptReadChallenge",
+      tokenId: asApprovalTokenId("01BRZ3NDEKTSV4RRFFQ69G5FD1"),
+      claim,
+      scope,
+      claimScopeHash: hashes.claimScopeHash,
+      approvalGroupHash: hashes.approvalGroupHash,
+      issuedToAgentId: agentId,
+      notBeforeMs: asTimestampMs(1),
+      expiresAtMs: asTimestampMs(10_000),
+      createdAtMs: 1,
+    });
+    requiredDb()
+      .prepare("UPDATE webauthn_challenges SET claim_json = ? WHERE challenge_id = ?")
+      .run("{", "corruptReadChallenge");
+
+    await expect(store.getChallenge("corruptReadChallenge")).rejects.toBeInstanceOf(
+      WebAuthnStoreUnavailableError,
+    );
+  });
+
+  it("classifies closed store reads as storage unavailable", async () => {
+    const store = createTestStore();
+    const closeableStore = store as WebAuthnStore & { close(): void };
+    closeableStore.close();
+
+    await expect(store.getCredential("cred_approver")).rejects.toBeInstanceOf(
+      WebAuthnStoreUnavailableError,
+    );
+  });
+
+  it.each([
+    "SQLITE_BUSY",
+    "SQLITE_LOCKED",
+  ])("classifies read-side %s as retryable storage contention", (code) => {
+    const classified = __classifyWebAuthnSqliteReadErrorForTesting(sqliteError(code));
+
+    expect(classified).toBeInstanceOf(WebAuthnStoreBusyError);
+  });
 });
 
 function createTestStore(): WebAuthnStore {
   db = openDatabase({ path: ":memory:" });
   runMigrations(db);
   return createWebAuthnStore(db);
+}
+
+function requiredDb(): Database.Database {
+  if (db === null) {
+    throw new Error("test database is not open");
+  }
+  return db;
 }
 
 async function saveCredential(store: WebAuthnStore): Promise<void> {

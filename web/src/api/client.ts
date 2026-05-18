@@ -106,7 +106,7 @@ function baseURL(): string {
 
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (!useProxy && token) h.Authorization = `Bearer ${token}`;
+  if (token) h.Authorization = `Bearer ${token}`;
   return h;
 }
 

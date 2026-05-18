@@ -412,30 +412,48 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   }
 
   async getChallenge(challengeId: string): Promise<WebAuthnChallengeRecord | null> {
-    this.assertOpen();
-    const row = this.getChallengeStmt.get(challengeId);
-    return row === undefined ? null : challengeFromRow(row);
+    try {
+      this.assertOpen();
+      const row = this.getChallengeStmt.get(challengeId);
+      return row === undefined ? null : challengeFromRow(row);
+    } catch (err) {
+      throw classifySqliteReadError(err, "SqliteWebAuthnStore.getChallenge");
+    }
   }
 
   async listCredentialsForAgent(
     agentId: AgentId,
   ): Promise<readonly RegisteredWebAuthnCredential[]> {
-    this.assertOpen();
-    return this.listCredentialsForAgentStmt.all(agentId).map(credentialFromRow);
+    try {
+      this.assertOpen();
+      return this.listCredentialsForAgentStmt.all(agentId).map(credentialFromRow);
+    } catch (err) {
+      throw classifySqliteReadError(err, "SqliteWebAuthnStore.listCredentialsForAgent");
+    }
   }
 
   async listCredentialsForAgentRole(args: {
     readonly agentId: AgentId;
     readonly role: ApprovalRole;
   }): Promise<readonly RegisteredWebAuthnCredential[]> {
-    this.assertOpen();
-    return this.listCredentialsForAgentRoleStmt.all(args.agentId, args.role).map(credentialFromRow);
+    try {
+      this.assertOpen();
+      return this.listCredentialsForAgentRoleStmt
+        .all(args.agentId, args.role)
+        .map(credentialFromRow);
+    } catch (err) {
+      throw classifySqliteReadError(err, "SqliteWebAuthnStore.listCredentialsForAgentRole");
+    }
   }
 
   async getCredential(credentialId: string): Promise<RegisteredWebAuthnCredential | null> {
-    this.assertOpen();
-    const row = this.getCredentialStmt.get(credentialId);
-    return row === undefined ? null : credentialFromRow(row);
+    try {
+      this.assertOpen();
+      const row = this.getCredentialStmt.get(credentialId);
+      return row === undefined ? null : credentialFromRow(row);
+    } catch (err) {
+      throw classifySqliteReadError(err, "SqliteWebAuthnStore.getCredential");
+    }
   }
 
   async saveCredential(args: SaveCredentialArgs): Promise<void> {
@@ -448,9 +466,13 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   }
 
   async getConsumedToken(tokenId: ApprovalTokenId): Promise<ConsumedWebAuthnTokenRecord | null> {
-    this.assertOpen();
-    const row = this.getConsumedTokenStmt.get(tokenId);
-    return row === undefined ? null : consumedTokenFromRow(row);
+    try {
+      this.assertOpen();
+      const row = this.getConsumedTokenStmt.get(tokenId);
+      return row === undefined ? null : consumedTokenFromRow(row);
+    } catch (err) {
+      throw classifySqliteReadError(err, "SqliteWebAuthnStore.getConsumedToken");
+    }
   }
 
   async listSatisfiedRoles(args: {
@@ -458,10 +480,14 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
     readonly issuedToAgentId: AgentId;
     readonly nowMs: number;
   }): Promise<readonly ApprovalRole[]> {
-    this.assertOpen();
-    return this.listSatisfiedRolesStmt
-      .all(args.approvalGroupHash, args.issuedToAgentId, args.nowMs)
-      .map((row) => roleFromString(row.role, "webauthn_consumed_tokens.role"));
+    try {
+      this.assertOpen();
+      return this.listSatisfiedRolesStmt
+        .all(args.approvalGroupHash, args.issuedToAgentId, args.nowMs)
+        .map((row) => roleFromString(row.role, "webauthn_consumed_tokens.role"));
+    } catch (err) {
+      throw classifySqliteReadError(err, "SqliteWebAuthnStore.listSatisfiedRoles");
+    }
   }
 
   async consumeCosignChallenge(
@@ -488,7 +514,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new Error("SqliteWebAuthnStore is closed");
+      throw new WebAuthnStoreUnavailableError("SqliteWebAuthnStore: storage error (closed)");
     }
   }
 }
@@ -625,6 +651,25 @@ function classifySqliteWriteError(err: unknown, operation: string): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
+function classifySqliteReadError(err: unknown, operation: string): Error {
+  if (
+    err instanceof WebAuthnStoreBusyError ||
+    err instanceof WebAuthnStoreFullError ||
+    err instanceof WebAuthnStoreUnavailableError
+  ) {
+    return err;
+  }
+  if (isSqliteFullError(err)) {
+    return new WebAuthnStoreFullError(`${operation}: database full (SQLITE_FULL)`);
+  }
+  if (isSqliteBusyError(err)) {
+    return new WebAuthnStoreBusyError(`${operation}: database busy (SQLITE_BUSY/LOCKED)`);
+  }
+  return new WebAuthnStoreUnavailableError(
+    `${operation}: storage error (${err instanceof Error ? err.message : String(err)})`,
+  );
+}
+
 function isSqliteFullError(err: unknown): boolean {
   return err instanceof BetterSqlite3.SqliteError && err.code === "SQLITE_FULL";
 }
@@ -656,4 +701,8 @@ function isSqliteUnavailableError(err: unknown): boolean {
 
 export function __classifyWebAuthnSqliteWriteErrorForTesting(err: unknown): Error {
   return classifySqliteWriteError(err, "SqliteWebAuthnStore.test");
+}
+
+export function __classifyWebAuthnSqliteReadErrorForTesting(err: unknown): Error {
+  return classifySqliteReadError(err, "SqliteWebAuthnStore.test");
 }

@@ -13,6 +13,7 @@ import type {
   ApprovalScopeJsonValue,
   SignedApprovalTokenJsonValue,
 } from "@wuphf/protocol";
+import { approvalClaimFromJson, approvalScopeFromJson } from "@wuphf/protocol";
 
 import { post } from "./client";
 
@@ -51,9 +52,18 @@ export interface WebAuthnCosignChallengeInput {
   readonly scope: ApprovalScope;
 }
 
+interface WebAuthnCosignChallengeWireResponse {
+  readonly challengeId: string;
+  readonly requestOptions: WebAuthnRequestOptionsJson;
+  readonly claim: ApprovalClaimJsonValue;
+  readonly scope: ApprovalScopeJsonValue;
+}
+
 export interface WebAuthnCosignChallengeResponse {
   readonly challengeId: string;
   readonly requestOptions: WebAuthnRequestOptionsJson;
+  readonly claim: ApprovalClaim;
+  readonly scope: ApprovalScope;
 }
 
 export interface WebAuthnCosignVerifyRequest {
@@ -108,13 +118,25 @@ export function verifyWebAuthnRegistration(
   );
 }
 
-export function requestWebAuthnCosignChallenge(
+export async function requestWebAuthnCosignChallenge(
   input: WebAuthnCosignChallengeInput,
 ): Promise<WebAuthnCosignChallengeResponse> {
-  return post<WebAuthnCosignChallengeResponse>(
+  const response = await post<WebAuthnCosignChallengeWireResponse>(
     "/webauthn/cosign/challenge",
     toWebAuthnCosignChallengeRequest(input),
   );
+  return {
+    challengeId: response.challengeId,
+    requestOptions: response.requestOptions,
+    claim: approvalClaimFromJson(
+      response.claim,
+      "webauthnCosignChallenge.claim",
+    ),
+    scope: approvalScopeFromJson(
+      response.scope,
+      "webauthnCosignChallenge.scope",
+    ),
+  };
 }
 
 export function verifyWebAuthnCosign(

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { connectBroker } from "./client";
+import { connectBroker, initApi, post } from "./client";
 
 describe("connectBroker", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -27,5 +28,40 @@ describe("connectBroker", () => {
     await vi.advanceTimersByTimeAsync(8000);
 
     await pending;
+  });
+
+  it("sends the bootstrap bearer on same-origin api calls", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            token: "same-origin-token",
+            broker_url: "http://127.0.0.1:4567",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    await initApi();
+    await expect(post("/webauthn/cosign/challenge", {})).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/webauthn/cosign/challenge",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer same-origin-token",
+        }),
+      }),
+    );
   });
 });

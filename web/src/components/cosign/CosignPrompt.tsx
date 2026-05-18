@@ -1,8 +1,14 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ApprovalClaim,
   ApprovalScope,
   SignedApprovalTokenJsonValue,
+} from "@wuphf/protocol";
+import {
+  approvalClaimFromJson,
+  approvalClaimToJsonValue,
+  approvalScopeFromJson,
+  approvalScopeToJsonValue,
 } from "@wuphf/protocol";
 
 import {
@@ -11,6 +17,8 @@ import {
   runWebAuthnAuthenticationCeremony,
   verifyWebAuthnCosign,
   type WebAuthnApprovalPendingResponse,
+  type WebAuthnCosignVerifyResponse,
+  type WebAuthnRequestOptionsJson,
 } from "../../api/webauthn";
 import { ClaimSummary } from "./ClaimSummary";
 
@@ -22,7 +30,12 @@ interface CosignPromptProps {
 
 type CosignState =
   | { readonly kind: "idle" }
-  | { readonly kind: "running" }
+  | { readonly kind: "requesting" }
+  | {
+      readonly kind: "ceremony";
+      readonly challengeId: string;
+      readonly requestOptions: WebAuthnRequestOptionsJson;
+    }
   | {
       readonly kind: "accepted";
       readonly token: SignedApprovalTokenJsonValue;
@@ -34,27 +47,67 @@ type CosignState =
   | { readonly kind: "error"; readonly message: string };
 
 export function CosignPrompt({ claim, scope, onAccepted }: CosignPromptProps) {
+  const canonicalProps = useMemo(
+    () => canonicalizeApprovalPayload(claim, scope),
+    [claim, scope],
+  );
+  const onAcceptedRef = useRef(onAccepted);
+  const [reviewPayload, setReviewPayload] = useState(canonicalProps);
   const [state, setState] = useState<CosignState>({ kind: "idle" });
-  const running = state.kind === "running";
+  const running = state.kind === "requesting" || state.kind === "ceremony";
+
+  useEffect(() => {
+    onAcceptedRef.current = onAccepted;
+  }, [onAccepted]);
+
+  useEffect(() => {
+    setReviewPayload(canonicalProps);
+    setState({ kind: "idle" });
+  }, [canonicalProps]);
+
+  useEffect(() => {
+    if (state.kind !== "ceremony") return;
+    const ceremony = state;
+    let cancelled = false;
+
+    async function runCosignCeremony(): Promise<void> {
+      try {
+        const response = await runCosignChallenge(
+          ceremony.challengeId,
+          ceremony.requestOptions,
+        );
+        if (cancelled) return;
+        if (isWebAuthnApprovalPendingResponse(response)) {
+          setState({ kind: "pending", pending: response });
+          return;
+        }
+        setState({ kind: "accepted", token: response });
+        onAcceptedRef.current?.(response);
+      } catch (error) {
+        if (!cancelled) {
+          setState({ kind: "error", message: describeCosignFailure(error) });
+        }
+      }
+    }
+
+    void runCosignCeremony();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state]);
 
   const handleCosign = async () => {
     if (running) return;
-    setState({ kind: "running" });
+    setState({ kind: "requesting" });
     try {
       const challenge = await requestWebAuthnCosignChallenge({ claim, scope });
-      const assertionResponse = await runWebAuthnAuthenticationCeremony(
-        challenge.requestOptions,
-      );
-      const response = await verifyWebAuthnCosign({
+      setReviewPayload({ claim: challenge.claim, scope: challenge.scope });
+      setState({
+        kind: "ceremony",
         challengeId: challenge.challengeId,
-        assertionResponse,
+        requestOptions: challenge.requestOptions,
       });
-      if (isWebAuthnApprovalPendingResponse(response)) {
-        setState({ kind: "pending", pending: response });
-        return;
-      }
-      setState({ kind: "accepted", token: response });
-      onAccepted?.(response);
     } catch (error) {
       setState({ kind: "error", message: describeCosignFailure(error) });
     }
@@ -70,7 +123,7 @@ export function CosignPrompt({ claim, scope, onAccepted }: CosignPromptProps) {
         maxWidth: 720,
       }}
     >
-      <ClaimSummary claim={claim} scope={scope} />
+      <ClaimSummary claim={reviewPayload.claim} scope={reviewPayload.scope} />
 
       <div
         style={{
@@ -89,7 +142,7 @@ export function CosignPrompt({ claim, scope, onAccepted }: CosignPromptProps) {
           {running ? "Waiting for security key..." : "Sign approval"}
         </button>
         <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          Role: <code>{scope.role}</code>
+          Role: <code>{reviewPayload.scope.role}</code>
         </span>
       </div>
 
@@ -112,6 +165,28 @@ export function CosignPrompt({ claim, scope, onAccepted }: CosignPromptProps) {
       ) : null}
     </section>
   );
+}
+
+async function runCosignChallenge(
+  challengeId: string,
+  requestOptions: WebAuthnRequestOptionsJson,
+): Promise<WebAuthnCosignVerifyResponse> {
+  const assertionResponse =
+    await runWebAuthnAuthenticationCeremony(requestOptions);
+  return verifyWebAuthnCosign({ challengeId, assertionResponse });
+}
+
+function canonicalizeApprovalPayload(
+  claim: ApprovalClaim,
+  scope: ApprovalScope,
+): {
+  readonly claim: ApprovalClaim;
+  readonly scope: ApprovalScope;
+} {
+  return {
+    claim: approvalClaimFromJson(approvalClaimToJsonValue(claim)),
+    scope: approvalScopeFromJson(approvalScopeToJsonValue(scope)),
+  };
 }
 
 function PendingPanel({

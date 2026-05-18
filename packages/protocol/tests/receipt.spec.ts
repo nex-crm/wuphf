@@ -1348,6 +1348,27 @@ describe("receipt schema", () => {
     );
   });
 
+  it("rejects approve decisions whose broker token verdict is not valid", () => {
+    const fixture = validReceiptFixture();
+    const firstApproval = nonNull(fixture.approvals[0]);
+    const tampered: ReceiptSnapshot = {
+      ...fixture,
+      approvals: [
+        {
+          ...firstApproval,
+          decision: "approve",
+          tokenVerdict: { ...firstApproval.tokenVerdict, status: "tampered" },
+        },
+      ],
+    };
+
+    expectReceiptValidationError(
+      tampered,
+      "/approvals/0/tokenVerdict/status",
+      /must be valid when decision is approve/,
+    );
+  });
+
   it("rejects ok receipts whose tool-call evidence failed", () => {
     const fixture = validReceiptFixture();
     const firstToolCall = nonNull(fixture.toolCalls[0]);

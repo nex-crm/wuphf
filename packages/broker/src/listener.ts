@@ -47,6 +47,7 @@ import {
   asBrokerPort,
   asBrokerUrl,
   type BrokerPort,
+  MAX_APPROVAL_TOKEN_LIFETIME_MS,
 } from "@wuphf/protocol";
 import { WebSocketServer } from "ws";
 
@@ -120,6 +121,31 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       webauthnTrustedRoles,
     );
   }
+  const webauthnRpId =
+    config.webauthn === undefined
+      ? WEBAUTHN_RP_ID
+      : normalizeWebAuthnRpId(config.webauthn.rpId ?? WEBAUTHN_RP_ID);
+  const webauthnAllowedOrigins =
+    config.webauthn === undefined
+      ? []
+      : normalizeWebAuthnAllowedOrigins(
+          config.webauthn.allowedOrigins ?? WEBAUTHN_ALLOWED_ORIGINS,
+          webauthnRpId,
+        );
+  const webauthnChallengeTtlMs =
+    config.webauthn === undefined
+      ? WEBAUTHN_CHALLENGE_TTL_MS
+      : normalizeWebAuthnChallengeTtlMs(
+          config.webauthn.challengeTtlMs ?? WEBAUTHN_CHALLENGE_TTL_MS,
+        );
+  if (config.webauthn !== undefined) {
+    assertWebAuthnRpIdCompatibleWithHostname(
+      webauthnRpId,
+      BROWSER_WEBAUTHN_HOST,
+      "packaged renderer origin",
+    );
+    assertWebAuthnChallengeExpirySafe(readWebAuthnClock(clock), webauthnChallengeTtlMs);
+  }
   let webauthn =
     config.webauthn === undefined
       ? null
@@ -131,9 +157,9 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
           ceremony: config.webauthn.ceremony ?? createSimpleWebAuthnCeremony(),
           clock,
           rpName: config.webauthn.rpName ?? WEBAUTHN_RP_NAME,
-          rpId: config.webauthn.rpId ?? WEBAUTHN_RP_ID,
-          allowedOrigins: [...(config.webauthn.allowedOrigins ?? WEBAUTHN_ALLOWED_ORIGINS)],
-          challengeTtlMs: config.webauthn.challengeTtlMs ?? WEBAUTHN_CHALLENGE_TTL_MS,
+          rpId: webauthnRpId,
+          allowedOrigins: webauthnAllowedOrigins,
+          challengeTtlMs: webauthnChallengeTtlMs,
           trustedRoles: webauthnTrustedRoles ?? [],
           defaultThreshold: webauthnDefaultThreshold ?? 1,
           receiptCoSignThreshold: webauthnReceiptCoSignThreshold ?? 1,
@@ -600,6 +626,94 @@ function normalizeThreshold(value: number): number {
     throw new Error(`createBroker: webauthn threshold must be a positive safe integer: ${value}`);
   }
   return value;
+}
+
+function normalizeWebAuthnChallengeTtlMs(value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_APPROVAL_TOKEN_LIFETIME_MS) {
+    throw new Error(
+      `createBroker: webauthn challengeTtlMs must be 1..${MAX_APPROVAL_TOKEN_LIFETIME_MS} ms`,
+    );
+  }
+  return value;
+}
+
+function assertWebAuthnChallengeExpirySafe(nowMs: number, ttlMs: number): void {
+  if (!Number.isSafeInteger(nowMs + ttlMs)) {
+    throw new Error("createBroker: webauthn challenge expiry is outside the safe integer range");
+  }
+}
+
+function normalizeWebAuthnAllowedOrigins(
+  values: readonly string[],
+  rpId: string,
+): readonly string[] {
+  const origins: string[] = [];
+  const seen = new Set<string>();
+  for (const [index, raw] of values.entries()) {
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new Error(`createBroker: webauthn.allowedOrigins[${index}] is not a URL: ${raw}`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(
+        `createBroker: webauthn.allowedOrigins[${index}] must use http/https: ${raw}`,
+      );
+    }
+    if (parsed.username !== "" || parsed.password !== "") {
+      throw new Error(
+        `createBroker: webauthn.allowedOrigins[${index}] must not include userinfo: ${raw}`,
+      );
+    }
+    if (parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
+      throw new Error(
+        `createBroker: webauthn.allowedOrigins[${index}] must be a bare origin: ${raw}`,
+      );
+    }
+    if (!isWebAuthnLoopbackHostname(parsed.hostname)) {
+      throw new Error(`createBroker: webauthn.allowedOrigins[${index}] must be loopback: ${raw}`);
+    }
+    assertWebAuthnRpIdCompatibleWithHostname(rpId, parsed.hostname, raw);
+    if (!seen.has(parsed.origin)) {
+      origins.push(parsed.origin);
+      seen.add(parsed.origin);
+    }
+  }
+  return origins;
+}
+
+function assertWebAuthnRpIdCompatibleWithHostname(
+  rpId: string,
+  hostname: string,
+  source: string,
+): void {
+  const normalizedRpId = normalizeWebAuthnRpId(rpId);
+  const normalizedHostname = hostname.toLowerCase();
+  if (normalizedHostname !== normalizedRpId && !normalizedHostname.endsWith(`.${normalizedRpId}`)) {
+    throw new Error(`createBroker: WebAuthn origin ${source} is not compatible with RP ID ${rpId}`);
+  }
+}
+
+function normalizeWebAuthnRpId(rpId: string): string {
+  const trimmed = rpId.trim();
+  const normalized = trimmed.toLowerCase();
+  if (
+    normalized.length === 0 ||
+    trimmed !== rpId ||
+    normalized.includes("/") ||
+    normalized.includes(":") ||
+    normalized.includes("@") ||
+    normalized.includes("?") ||
+    normalized.includes("#")
+  ) {
+    throw new Error(`createBroker: webauthn.rpId must be a bare host name: ${rpId}`);
+  }
+  return normalized;
+}
+
+function isWebAuthnLoopbackHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
 function assertKnownApprovalRoles(path: string, roles: readonly unknown[]): void {

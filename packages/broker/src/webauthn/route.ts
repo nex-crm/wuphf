@@ -154,7 +154,14 @@ async function handleRegistrationChallenge(
   const expiresAtMs = safeExpiryMs(nowMs, deps.challengeTtlMs);
   const challengeId = randomBase64Url(32);
   const challenge = randomBase64Url(32);
-  const existingCredentials = await deps.store.listCredentialsForAgent(agentId);
+  const existingCredentialsResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_registration_challenge_rejected",
+    () => deps.store.listCredentialsForAgent(agentId),
+  );
+  if (!existingCredentialsResult.ok) return;
+  const existingCredentials = existingCredentialsResult.value;
   const options = await deps.ceremony.generateRegistrationOptions({
     rpName: deps.rpName,
     rpId: deps.rpId,
@@ -196,7 +203,14 @@ async function handleRegistrationVerify(
     return;
   }
 
-  const challenge = await deps.store.getChallenge(body.challengeId);
+  const challengeResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_registration_verify_rejected",
+    () => deps.store.getChallenge(body.challengeId),
+  );
+  if (!challengeResult.ok) return;
+  const challenge = challengeResult.value;
   if (challenge === null || challenge.type !== "registration") {
     writeJson(res, 404, { error: "challenge_not_found" });
     return;
@@ -249,7 +263,14 @@ async function handleRegistrationVerify(
     writeJson(res, 400, { error: "registration_verification_failed" });
     return;
   }
-  const existing = await deps.store.getCredential(verification.credentialId);
+  const existingResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_registration_verify_rejected",
+    () => deps.store.getCredential(verification.credentialId),
+  );
+  if (!existingResult.ok) return;
+  const existing = existingResult.value;
   if (existing !== null) {
     writeJson(res, 409, { error: "credential_already_registered" });
     return;
@@ -301,10 +322,18 @@ async function handleCosignChallenge(
     writeJson(res, 403, { error: "untrusted_approval_role" });
     return;
   }
-  const credentials = await deps.store.listCredentialsForAgentRole({
-    agentId,
-    role: body.scope.role,
-  });
+  const credentialsResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_cosign_challenge_rejected",
+    () =>
+      deps.store.listCredentialsForAgentRole({
+        agentId,
+        role: body.scope.role,
+      }),
+  );
+  if (!credentialsResult.ok) return;
+  const credentials = credentialsResult.value;
   if (credentials.length === 0) {
     writeJson(res, 409, { error: "no_registered_credentials_for_role" });
     return;
@@ -343,7 +372,12 @@ async function handleCosignChallenge(
     }
     throw err;
   }
-  writeJson(res, 200, { challengeId, requestOptions: options });
+  writeJson(res, 200, {
+    challengeId,
+    requestOptions: options,
+    claim: approvalClaimToJsonValue(body.claim),
+    scope: approvalScopeToJsonValue(body.scope),
+  });
 }
 
 async function handleCosignVerify(
@@ -360,7 +394,14 @@ async function handleCosignVerify(
     return;
   }
 
-  const challenge = await deps.store.getChallenge(envelope.challengeId);
+  const challengeResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_cosign_verify_rejected",
+    () => deps.store.getChallenge(envelope.challengeId),
+  );
+  if (!challengeResult.ok) return;
+  const challenge = challengeResult.value;
   if (challenge === null || challenge.type !== "cosign") {
     writeJson(res, 404, { error: "challenge_not_found" });
     return;
@@ -378,7 +419,11 @@ async function handleCosignVerify(
     writeJson(res, 400, { error: "challenge_expired" });
     return;
   }
-  const replay = await deps.store.getConsumedToken(challenge.tokenId);
+  const replayResult = await readWebAuthnStore(res, deps, "webauthn_cosign_verify_rejected", () =>
+    deps.store.getConsumedToken(challenge.tokenId),
+  );
+  if (!replayResult.ok) return;
+  const replay = replayResult.value;
   if (replay !== null) {
     writeJson(res, 200, replay.responseJson);
     return;
@@ -399,7 +444,14 @@ async function handleCosignVerify(
     return;
   }
 
-  const credential = await deps.store.getCredential(assertionResponse.id);
+  const credentialResult = await readWebAuthnStore(
+    res,
+    deps,
+    "webauthn_cosign_verify_rejected",
+    () => deps.store.getCredential(assertionResponse.id),
+  );
+  if (!credentialResult.ok) return;
+  const credential = credentialResult.value;
   if (credential === null) {
     writeJson(res, 403, { error: "unknown_credential" });
     return;
@@ -1049,6 +1101,24 @@ function generateApprovalTokenId(): ApprovalTokenId {
     tokenId += TOKEN_ID_ALPHABET[byte & 31] ?? "0";
   }
   return asApprovalTokenId(tokenId);
+}
+
+type WebAuthnStoreReadResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false };
+
+async function readWebAuthnStore<T>(
+  res: ServerResponse,
+  deps: Pick<WebAuthnRouteDeps, "logger">,
+  rejectedEvent: string,
+  read: () => Promise<T>,
+): Promise<WebAuthnStoreReadResult<T>> {
+  try {
+    return { ok: true, value: await read() };
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps, rejectedEvent)) {
+      return { ok: false };
+    }
+    throw err;
+  }
 }
 
 function writeStorageErrorResponse(

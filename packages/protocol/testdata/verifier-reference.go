@@ -1082,16 +1082,39 @@ func isAllowlistDisallowedCodePoint(r rune) bool {
 	if unicode.In(r, unicode.Cc, unicode.Cf, unicode.Cn, unicode.Co, unicode.Cs) {
 		return true
 	}
-	return isDefaultIgnorableNonOtherCodePoint(r)
+	return unicode.Is(defaultIgnorableCodePointTable, r)
 }
 
-func isDefaultIgnorableNonOtherCodePoint(r rune) bool {
-	return r == 0x034f ||
-		(r >= 0x115f && r <= 0x1160) ||
-		(r >= 0x17b4 && r <= 0x17b5) ||
-		r == 0x3164 ||
-		(r >= 0xfe00 && r <= 0xfe0f) ||
-		(r >= 0xe0100 && r <= 0xe01ef)
+const defaultIgnorableCodePointUnicodeVersion = "15.1.0"
+
+// Complete Default_Ignorable_Code_Point table pinned to Unicode 15.1.0,
+// generated from the ECMAScript property escape
+// /\p{Default_Ignorable_Code_Point}/u used by sanitized-string.ts.
+// Go's stdlib Unicode tables expose Other_Default_Ignorable_Code_Point and
+// Variation_Selector separately, but not the derived property as a single
+// table, so the verifier keeps the exact generated ranges here.
+var defaultIgnorableCodePointTable = &unicode.RangeTable{
+	R16: []unicode.Range16{
+		{Lo: 0x00ad, Hi: 0x00ad, Stride: 1},
+		{Lo: 0x034f, Hi: 0x034f, Stride: 1},
+		{Lo: 0x061c, Hi: 0x061c, Stride: 1},
+		{Lo: 0x115f, Hi: 0x1160, Stride: 1},
+		{Lo: 0x17b4, Hi: 0x17b5, Stride: 1},
+		{Lo: 0x180b, Hi: 0x180f, Stride: 1},
+		{Lo: 0x200b, Hi: 0x200f, Stride: 1},
+		{Lo: 0x202a, Hi: 0x202e, Stride: 1},
+		{Lo: 0x2060, Hi: 0x206f, Stride: 1},
+		{Lo: 0x3164, Hi: 0x3164, Stride: 1},
+		{Lo: 0xfe00, Hi: 0xfe0f, Stride: 1},
+		{Lo: 0xfeff, Hi: 0xfeff, Stride: 1},
+		{Lo: 0xffa0, Hi: 0xffa0, Stride: 1},
+		{Lo: 0xfff0, Hi: 0xfff8, Stride: 1},
+	},
+	R32: []unicode.Range32{
+		{Lo: 0x1bca0, Hi: 0x1bca3, Stride: 1},
+		{Lo: 0x1d173, Hi: 0x1d17a, Stride: 1},
+		{Lo: 0xe0000, Hi: 0xe0fff, Stride: 1},
+	},
 }
 
 func validateCredentialHandleIDField(record map[string]interface{}, key string, path string) error {

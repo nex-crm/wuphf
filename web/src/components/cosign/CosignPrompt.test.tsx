@@ -52,10 +52,9 @@ describe("<CosignPrompt>", () => {
   it("runs the cosign ceremony and shows the issued token id", async () => {
     const { claim, scope } = approvalPair();
     const onAccepted = vi.fn();
-    requestChallengeMock.mockResolvedValue({
-      challengeId: "challenge-1",
-      requestOptions: requestOptions(),
-    });
+    requestChallengeMock.mockResolvedValue(
+      challengeResponse("challenge-1", claim, scope),
+    );
     runCeremonyMock.mockResolvedValue(assertionResponse());
     verifyMock.mockResolvedValue(signedToken(claim, scope));
 
@@ -76,10 +75,9 @@ describe("<CosignPrompt>", () => {
 
   it("shows threshold progress when the broker returns approval_pending", async () => {
     const { claim, scope } = approvalPair();
-    requestChallengeMock.mockResolvedValue({
-      challengeId: "challenge-2",
-      requestOptions: requestOptions(),
-    });
+    requestChallengeMock.mockResolvedValue(
+      challengeResponse("challenge-2", claim, scope),
+    );
     runCeremonyMock.mockResolvedValue(assertionResponse());
     verifyMock.mockResolvedValue({
       status: "approval_pending",
@@ -118,10 +116,9 @@ describe("<CosignPrompt>", () => {
 
   it("shows a non-leaky wrong-agent error", async () => {
     const { claim, scope } = approvalPair();
-    requestChallengeMock.mockResolvedValue({
-      challengeId: "challenge-3",
-      requestOptions: requestOptions(),
-    });
+    requestChallengeMock.mockResolvedValue(
+      challengeResponse("challenge-3", claim, scope),
+    );
     runCeremonyMock.mockResolvedValue(assertionResponse());
     verifyMock.mockRejectedValue(new Error("wrong agent"));
 
@@ -135,6 +132,30 @@ describe("<CosignPrompt>", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "rejected this approval for the current agent",
     );
+  });
+
+  it("renders the broker-canonical challenge payload before the security key ceremony", async () => {
+    const raw = costSpikePair("budget\u180b-prod-01");
+    const canonical = costSpikePair("budget-prod-01");
+    requestChallengeMock.mockResolvedValue(
+      challengeResponse("challenge-4", canonical.claim, canonical.scope),
+    );
+    runCeremonyMock.mockImplementation(async () => {
+      expect(screen.getAllByText("budget-prod-01")).toHaveLength(2);
+      expect(
+        screen.queryByText("budget\u180b-prod-01"),
+      ).not.toBeInTheDocument();
+      return assertionResponse();
+    });
+    verifyMock.mockResolvedValue(signedToken(canonical.claim, canonical.scope));
+
+    render(<CosignPrompt claim={raw.claim} scope={raw.scope} />);
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Sign approval" }));
+
+    await waitFor(() => expect(runCeremonyMock).toHaveBeenCalledTimes(1));
   });
 
   it("maps authenticator cancellation to a clear local error", () => {
@@ -167,6 +188,47 @@ function approvalPair(): { claim: ApprovalClaim; scope: ApprovalScope } {
       receiptId,
       frozenArgsHash,
     } as ApprovalScope,
+  };
+}
+
+function costSpikePair(costCeilingId: string): {
+  readonly claim: ApprovalClaim;
+  readonly scope: ApprovalScope;
+} {
+  const claimId = "claim-cost-spike-1";
+  return {
+    claim: {
+      schemaVersion: 1,
+      claimId,
+      kind: "cost_spike_acknowledgement",
+      agentId: "agent_alpha",
+      costCeilingId,
+      thresholdBps: 9000,
+      currentMicroUsd: 120,
+      ceilingMicroUsd: 100,
+    } as ApprovalClaim,
+    scope: {
+      mode: "single_use",
+      claimId,
+      claimKind: "cost_spike_acknowledgement",
+      role: "approver",
+      maxUses: 1,
+      agentId: "agent_alpha",
+      costCeilingId,
+    } as ApprovalScope,
+  };
+}
+
+function challengeResponse(
+  challengeId: string,
+  claim: ApprovalClaim,
+  scope: ApprovalScope,
+): webauthn.WebAuthnCosignChallengeResponse {
+  return {
+    challengeId,
+    requestOptions: requestOptions(),
+    claim,
+    scope,
   };
 }
 

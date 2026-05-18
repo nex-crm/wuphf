@@ -663,6 +663,18 @@ function validateApprovalEvent(
   validateRequired(value, "signedToken", path, errors, validateSignedApprovalToken);
   validateRequired(value, "tokenVerdict", path, errors, validateBrokerTokenVerdict);
   validateRequired(value, "decidedAt", path, errors, validateDate);
+  const decision = recordValue(value, "decision");
+  const tokenVerdict = recordValue(value, "tokenVerdict");
+  if (decision === "approve" && isRecord(tokenVerdict)) {
+    const verdictStatus = recordValue(tokenVerdict, "status");
+    if (typeof verdictStatus === "string" && verdictStatus !== "valid") {
+      addError(
+        errors,
+        pointer(pointer(path, "tokenVerdict"), "status"),
+        "must be valid when decision is approve",
+      );
+    }
+  }
 
   // Cross-field invariant: the signed token must reference this receipt.
   const signedToken = recordValue(value, "signedToken");

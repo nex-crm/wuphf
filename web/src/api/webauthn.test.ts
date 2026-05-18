@@ -1,4 +1,8 @@
 import type { ApprovalClaim, ApprovalScope } from "@wuphf/protocol";
+import {
+  approvalClaimToJsonValue,
+  approvalScopeToJsonValue,
+} from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { post } from "./client";
@@ -68,11 +72,13 @@ describe("webauthn api client", () => {
   });
 
   it("serializes protocol claim and scope JSON for cosign challenge requests", async () => {
+    const { claim, scope } = approvalPair();
     const response = {
       challengeId: "challenge-2",
       requestOptions: authenticationOptions(),
+      claim: approvalClaimToJsonValue(claim),
+      scope: approvalScopeToJsonValue(scope),
     };
-    const { claim, scope } = approvalPair();
     postMock.mockResolvedValue(response);
 
     await expect(
@@ -99,6 +105,25 @@ describe("webauthn api client", () => {
         frozenArgsHash:
           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       },
+    });
+  });
+
+  it("parses canonical claim and scope from cosign challenge responses", async () => {
+    const { claim, scope } = approvalPair();
+    const canonicalResponse = {
+      challengeId: "challenge-2",
+      requestOptions: authenticationOptions(),
+      claim: approvalClaimToJsonValue(claim),
+      scope: approvalScopeToJsonValue(scope),
+    };
+    postMock.mockResolvedValue(canonicalResponse);
+
+    await expect(
+      requestWebAuthnCosignChallenge({ claim, scope }),
+    ).resolves.toMatchObject({
+      challengeId: "challenge-2",
+      claim,
+      scope,
     });
   });
 

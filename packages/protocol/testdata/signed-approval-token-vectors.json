@@ -194,6 +194,44 @@
       }
     },
     {
+      "name": "cost spike token sanitizes Mongolian variation selector",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S31",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_mongolian_vs_01",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget\u180b-prod-01",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_mongolian_vs_01",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "budget\u180b-prod-01"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wNw",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"claim\":{\"agentId\":\"agent_alpha\",\"ceilingMicroUsd\":1000000000000,\"claimId\":\"claim_cost_mongolian_vs_01\",\"costCeilingId\":\"budget-prod-01\",\"currentMicroUsd\":1000000000000,\"kind\":\"cost_spike_acknowledgement\",\"schemaVersion\":1,\"thresholdBps\":10000},\"expiresAt\":1778264100000,\"issuedTo\":\"agent_alpha\",\"notBefore\":1778263200000,\"schemaVersion\":1,\"scope\":{\"agentId\":\"agent_alpha\",\"claimId\":\"claim_cost_mongolian_vs_01\",\"claimKind\":\"cost_spike_acknowledgement\",\"costCeilingId\":\"budget-prod-01\",\"maxUses\":1,\"mode\":\"single_use\",\"role\":\"approver\"},\"signature\":{\"authenticatorData\":\"YXV0aGVudGljYXRvci1kYXRh\",\"clientDataJson\":\"Y2xpZW50LWRhdGEtanNvbg\",\"credentialId\":\"Y3JlZGVudGlhbC0wNw\",\"signature\":\"c2lnbmF0dXJl\"},\"tokenId\":\"01HX6P2D8T4Y7K9M3N5Q1R6S31\"}"
+      }
+    },
+    {
       "name": "credential grant max handle token",
       "input": {
         "schemaVersion": 1,
@@ -231,6 +269,42 @@
     }
   ],
   "rejected": [
+    {
+      "name": "cost spike rejects all-default-ignorable cost ceiling id",
+      "input": {
+        "schemaVersion": 1,
+        "tokenId": "01HX6P2D8T4Y7K9M3N5Q1R6S32",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_cost_mongolian_vs_02",
+          "kind": "cost_spike_acknowledgement",
+          "agentId": "agent_alpha",
+          "costCeilingId": "\u180f",
+          "thresholdBps": 10000,
+          "currentMicroUsd": 1000000000000,
+          "ceilingMicroUsd": 1000000000000
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_cost_mongolian_vs_02",
+          "claimKind": "cost_spike_acknowledgement",
+          "role": "approver",
+          "maxUses": 1,
+          "agentId": "agent_alpha",
+          "costCeilingId": "\u180f"
+        },
+        "notBefore": 1778263200000,
+        "expiresAt": 1778264100000,
+        "issuedTo": "agent_alpha",
+        "signature": {
+          "credentialId": "Y3JlZGVudGlhbC0wOA",
+          "authenticatorData": "YXV0aGVudGljYXRvci1kYXRh",
+          "clientDataJson": "Y2xpZW50LWRhdGEtanNvbg",
+          "signature": "c2lnbmF0dXJl"
+        }
+      },
+      "expectedError": "signedApprovalToken/claim/costCeilingId"
+    },
     {
       "name": "receipt_co_sign unknown top-level key",
       "input": {

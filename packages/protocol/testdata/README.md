@@ -49,7 +49,8 @@ strict known-key rejection at every object boundary, enforce the role-bearing
 approval scope, validate caller-supplied millisecond timestamps and WebAuthn
 assertion budgets, and serialize to the listed canonical JSON bytes. Rejected
 vectors cover unknown keys, missing scope role, claim/scope mismatch, lifetime
-cap enforcement, and malformed assertion bytes.
+cap enforcement, malformed assertion bytes, and moat sanitization of Unicode
+15.1 `Default_Ignorable_Code_Point` ranges.
 
 ## Audit Event Golden Vectors
 

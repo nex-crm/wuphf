@@ -33,6 +33,7 @@ import {
   canonicalJSON,
   type EndpointAllowlistExtensionClaim,
   type EndpointAllowlistExtensionScope,
+  MAX_APPROVAL_TOKEN_LIFETIME_MS,
   type ReceiptCoSignClaim,
   type ReceiptCoSignScope,
   sha256Hex,
@@ -46,6 +47,7 @@ import { type BrokerHandle, type BrokerLogger, createBroker } from "../../src/in
 import { createWebAuthnStore } from "../../src/webauthn/store.ts";
 import {
   type Clock,
+  type RegisteredWebAuthnCredential,
   type RegisteredWebAuthnCredentialVerification,
   type WebAuthnAuthenticationVerification,
   type WebAuthnCeremony,
@@ -193,6 +195,26 @@ describe("WebAuthn routes", () => {
     await expect(res.json()).resolves.toEqual({ error });
   });
 
+  it("maps WebAuthn store read failures to structured HTTP errors and route logs", async () => {
+    const logger = new RecordingLogger();
+    const handle = await startBroker({
+      logger,
+      wrapStore: (inner) => new ListCredentialsForAgentFailingStore(inner),
+    });
+
+    const res = await postJson(handle, "/api/webauthn/registration/challenge", {
+      role: "approver",
+    });
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("1");
+    await expect(res.json()).resolves.toEqual({ error: "store_busy" });
+    expect(logger.warns).toContainEqual({
+      event: "webauthn_registration_challenge_rejected",
+      payload: { reason: "store_busy" },
+    });
+  });
+
   it("does not implicitly enroll trusted viewer credentials when enrollableRoles is omitted", async () => {
     const handle = await startBroker({ omitEnrollableRoles: true, trustedRoles: ["viewer"] });
 
@@ -214,6 +236,32 @@ describe("WebAuthn routes", () => {
     await expect(
       startBroker({ trustedRoles: ["approver", "approver"], receiptCoSignThreshold: 2 }),
     ).rejects.toThrow(/receiptCoSignThreshold 2 exceeds distinct trusted approval roles 1/);
+  });
+
+  it("rejects WebAuthn allowed origins that cannot satisfy the RP ID", async () => {
+    await expect(
+      startBroker({
+        rpId: "localhost",
+        allowedOrigins: ["http://127.0.0.1:5173"],
+      }),
+    ).rejects.toThrow(/RP ID localhost/);
+  });
+
+  it("rejects non-origin WebAuthn allowed origin entries at startup", async () => {
+    await expect(startBroker({ allowedOrigins: ["http://localhost:5173/app"] })).rejects.toThrow(
+      /bare origin/,
+    );
+    await expect(startBroker({ allowedOrigins: ["http://user@localhost:5173"] })).rejects.toThrow(
+      /userinfo/,
+    );
+  });
+
+  it("rejects invalid WebAuthn challenge TTLs at startup", async () => {
+    await expect(startBroker({ challengeTtlMs: 0 })).rejects.toThrow(/challengeTtlMs/);
+    await expect(
+      startBroker({ challengeTtlMs: MAX_APPROVAL_TOKEN_LIFETIME_MS + 1 }),
+    ).rejects.toThrow(/challengeTtlMs/);
+    await expect(startBroker({ challengeTtlMs: 1.5 })).rejects.toThrow(/challengeTtlMs/);
   });
 
   it("prunes expired WebAuthn state at startup using the injected clock", async () => {
@@ -331,6 +379,30 @@ describe("WebAuthn routes", () => {
     expect(body.requestOptions.allowCredentials?.map((credential) => credential.id)).toEqual([
       "cred_approver",
     ]);
+  });
+
+  it("echoes the canonical parsed claim and scope in cosign challenge responses", async () => {
+    const handle = await startBroker();
+    await registerRole(handle, "approver", "cred_approver");
+    const { claim, scope } = costSpikeAcknowledgementFixture(agentId, "approver");
+    const rawClaim = {
+      ...approvalClaimToJsonValue(claim),
+      costCeilingId: "ceiling\u180b-main",
+    };
+    const rawScope = {
+      ...approvalScopeToJsonValue(scope),
+      costCeilingId: "ceiling\u180b-main",
+    };
+
+    const res = await postJson(handle, "/api/webauthn/cosign/challenge", {
+      claim: rawClaim,
+      scope: rawScope,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as CosignChallengeResponse;
+    expect(body.claim).toMatchObject({ costCeilingId: "ceiling-main" });
+    expect(body.scope).toMatchObject({ costCeilingId: "ceiling-main" });
   });
 
   it("verifies a cosign assertion and returns a protocol SignedApprovalToken", async () => {
@@ -766,6 +838,9 @@ async function startBroker(
     readonly ceremony?: FakeCeremony;
     readonly logger?: BrokerLogger;
     readonly wrapStore?: (store: WebAuthnStore) => WebAuthnStore;
+    readonly rpId?: string;
+    readonly allowedOrigins?: readonly string[];
+    readonly challengeTtlMs?: number;
   } = {},
 ): Promise<BrokerHandle> {
   db = openDatabase({ path: ":memory:" });
@@ -780,8 +855,9 @@ async function startBroker(
     store,
     tokenAgentIds: options.tokenAgentIds ?? new Map([[token, agentId]]),
     ceremony,
-    rpId: "localhost",
-    allowedOrigins: ["http://localhost:5173"],
+    rpId: options.rpId ?? "localhost",
+    allowedOrigins: options.allowedOrigins ?? ["http://localhost:5173"],
+    ...(options.challengeTtlMs === undefined ? {} : { challengeTtlMs: options.challengeTtlMs }),
     ...(configuredEnrollableRoles === undefined
       ? {}
       : { enrollableRoles: configuredEnrollableRoles }),
@@ -1447,6 +1523,76 @@ class SaveRegistrationChallengeFailingStore implements WebAuthnStore {
   }
 }
 
+class ListCredentialsForAgentFailingStore implements WebAuthnStore {
+  constructor(private readonly inner: WebAuthnStore) {}
+
+  saveRegistrationChallenge(
+    ...args: Parameters<WebAuthnStore["saveRegistrationChallenge"]>
+  ): ReturnType<WebAuthnStore["saveRegistrationChallenge"]> {
+    return this.inner.saveRegistrationChallenge(...args);
+  }
+
+  saveCosignChallenge(
+    ...args: Parameters<WebAuthnStore["saveCosignChallenge"]>
+  ): ReturnType<WebAuthnStore["saveCosignChallenge"]> {
+    return this.inner.saveCosignChallenge(...args);
+  }
+
+  pruneExpired(
+    ...args: Parameters<WebAuthnStore["pruneExpired"]>
+  ): ReturnType<WebAuthnStore["pruneExpired"]> {
+    return this.inner.pruneExpired(...args);
+  }
+
+  async listCredentialsForAgent(
+    _agentId: AgentId,
+  ): Promise<readonly RegisteredWebAuthnCredential[]> {
+    throw new WebAuthnStoreBusyError("test busy read");
+  }
+
+  getChallenge(
+    ...args: Parameters<WebAuthnStore["getChallenge"]>
+  ): ReturnType<WebAuthnStore["getChallenge"]> {
+    return this.inner.getChallenge(...args);
+  }
+
+  listCredentialsForAgentRole(
+    ...args: Parameters<WebAuthnStore["listCredentialsForAgentRole"]>
+  ): ReturnType<WebAuthnStore["listCredentialsForAgentRole"]> {
+    return this.inner.listCredentialsForAgentRole(...args);
+  }
+
+  getCredential(
+    ...args: Parameters<WebAuthnStore["getCredential"]>
+  ): ReturnType<WebAuthnStore["getCredential"]> {
+    return this.inner.getCredential(...args);
+  }
+
+  saveCredential(
+    ...args: Parameters<WebAuthnStore["saveCredential"]>
+  ): ReturnType<WebAuthnStore["saveCredential"]> {
+    return this.inner.saveCredential(...args);
+  }
+
+  getConsumedToken(
+    ...args: Parameters<WebAuthnStore["getConsumedToken"]>
+  ): ReturnType<WebAuthnStore["getConsumedToken"]> {
+    return this.inner.getConsumedToken(...args);
+  }
+
+  listSatisfiedRoles(
+    ...args: Parameters<WebAuthnStore["listSatisfiedRoles"]>
+  ): ReturnType<WebAuthnStore["listSatisfiedRoles"]> {
+    return this.inner.listSatisfiedRoles(...args);
+  }
+
+  consumeCosignChallenge(
+    ...args: Parameters<WebAuthnStore["consumeCosignChallenge"]>
+  ): ReturnType<WebAuthnStore["consumeCosignChallenge"]> {
+    return this.inner.consumeCosignChallenge(...args);
+  }
+}
+
 async function waitForPendingAuthentications(
   ceremony: ControlledAuthenticationCeremony,
   count: number,
@@ -1474,6 +1620,8 @@ interface RegistrationChallengeResponse {
 interface CosignChallengeResponse {
   readonly challengeId: string;
   readonly requestOptions: PublicKeyCredentialRequestOptionsJSON;
+  readonly claim: Readonly<Record<string, unknown>>;
+  readonly scope: Readonly<Record<string, unknown>>;
 }
 
 interface RawResponse {

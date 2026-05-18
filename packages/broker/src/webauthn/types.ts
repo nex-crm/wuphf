@@ -20,7 +20,7 @@ import type {
 export const WEBAUTHN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 export const WEBAUTHN_RP_NAME = "WUPHF";
 export const WEBAUTHN_RP_ID = "localhost";
-export const WEBAUTHN_ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"] as const;
+export const WEBAUTHN_ALLOWED_ORIGINS = ["http://localhost:5173"] as const;
 export const WEBAUTHN_TRUSTED_APPROVAL_ROLES = ["approver", "host"] as const;
 export const WEBAUTHN_DEFAULT_ENROLLABLE_ROLES: readonly ApprovalRole[] = [];
 
