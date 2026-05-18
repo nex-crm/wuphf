@@ -71,14 +71,43 @@ values and run `bunx vitest run tests/audit-event.spec.ts` from
 `packages/protocol/`. The test file at `../tests/audit-event.spec.ts` reads
 this fixture and verifies the package serializer and hash function against it.
 
+## Moat Disallowed Code-Point Table
+
+`moat-disallowed-table.json` is the frozen Unicode classification the
+`SanitizedString` `allowlist` ("moat") policy rejects: the union of `\p{C}`
+(Cc, Cf, Cn, Co, Cs) and `\p{Default_Ignorable_Code_Point}`, captured once at a
+pinned Unicode version.
+
+The moat does **not** evaluate `\p{...}` at runtime — those property escapes
+resolve against the host runtime's Unicode data, which differs across versions
+(Node 24 ships Unicode 17; Bun 1.3 ships 15.1). A signer and a verifier on
+different runtimes would disagree on the boundary. Freezing the table makes the
+moat boundary a fixed cross-language contract.
+
+The artifact has two parts:
+
+- `disallowedRanges` — sorted, non-overlapping, non-adjacent inclusive
+  `[start, end]` code-point ranges. Tab/LF/CR are `Cc` and therefore listed
+  here; the sanitizer applies the tab/LF/CR carve-out on top of this raw table.
+- `classificationVectors` — a curated corpus spanning every rejected class
+  (Cc/Cf/Cn/Co/Cs and default-ignorables) plus range-edge probes. Every
+  language port must classify each vector as listed.
+
+Regenerate (only to deliberately bump the pinned Unicode version) with
+`bun run scripts/generate-moat-table.ts` from `packages/protocol/`; it rewrites
+both this file and the embedded `src/moat-disallowed-table.ts`. The TypeScript
+test `tests/sanitized-string.spec.ts` pins the embedded table to this artifact.
+
 ## Cross-language verification
 
 `verifier-reference.go` is a stdlib-only Go reference implementation of the
-audit-chain, runner, agent-provider-routing, and signed-approval-token wire
-contracts. It loads `audit-event-vectors.json`, `runner-vectors.json`,
-`agent-provider-routing-vectors.json`, and `signed-approval-token-vectors.json`,
-recomputes each canonical serialization and eventHash, and verifies
-accept/reject behavior against the bundled vectors. Run it from this directory:
+audit-chain, runner, agent-provider-routing, signed-approval-token, and
+moat-table wire contracts. It loads `audit-event-vectors.json`,
+`runner-vectors.json`, `agent-provider-routing-vectors.json`,
+`signed-approval-token-vectors.json`, and `moat-disallowed-table.json`,
+recomputes each canonical serialization and eventHash, binary-searches the moat
+ranges, and verifies accept/reject and classification behavior against the
+bundled vectors. Run it from this directory:
 
 ```bash
 cd packages/protocol/testdata

@@ -1069,7 +1069,12 @@ func sanitizeAllowlistText(value string) string {
 			out.WriteRune(r)
 		}
 	}
-	return out.String()
+	// Re-normalize after stripping — mirrors the production TS sanitizer's
+	// second NFKC pass. Stripping a composition-blocking code point can leave
+	// neighbours that NFKC composes; without this pass the moat is not
+	// idempotent and the Go reference would compute a different sanitized
+	// value than production for joiner-between-marks inputs.
+	return norm.NFKC.String(out.String())
 }
 
 func isAllowlistDisallowedCodePoint(r rune) bool {
@@ -1875,6 +1880,112 @@ const (
 	colorBold  = "\x1b[1m"
 )
 
+// ─── moat (SanitizedString allowlist) frozen code-point table ───────────────
+//
+// moat-disallowed-table.json pins the Unicode \p{C} +
+// \p{Default_Ignorable_Code_Point} union the `allowlist` policy rejects. The
+// TypeScript sanitizer binary-searches an embedded copy of disallowedRanges;
+// this Go reference loads the same JSON and binary-searches it independently.
+// If both agree on every classificationVectors entry, the moat boundary is
+// genuinely cross-language portable and not coupled to one runtime's Unicode
+// data.
+
+type moatVector struct {
+	CodePoint  int    `json:"codePoint"`
+	Name       string `json:"name"`
+	Disallowed bool   `json:"disallowed"`
+}
+
+type moatTableFixture struct {
+	Description           string       `json:"description"`
+	UnicodeVersion        string       `json:"unicodeVersion"`
+	GeneratedBy           string       `json:"generatedBy"`
+	DisallowedRanges      [][2]int     `json:"disallowedRanges"`
+	ClassificationVectors []moatVector `json:"classificationVectors"`
+}
+
+func loadMoatTableFixture() (moatTableFixture, error) {
+	fixtureBytes, err := os.ReadFile("moat-disallowed-table.json")
+	if err != nil {
+		return moatTableFixture{}, err
+	}
+	var fx moatTableFixture
+	decoder := json.NewDecoder(bytes.NewReader(fixtureBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fx); err != nil {
+		return moatTableFixture{}, err
+	}
+	return fx, nil
+}
+
+// moatDisallowed binary-searches the sorted, non-overlapping ranges — the same
+// algorithm isMoatDisallowedCodePoint uses in sanitized-string.ts.
+func moatDisallowed(codePoint int, ranges [][2]int) bool {
+	lo, hi := 0, len(ranges)-1
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		r := ranges[mid]
+		switch {
+		case codePoint < r[0]:
+			hi = mid - 1
+		case codePoint > r[1]:
+			lo = mid + 1
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func verifyMoatTable(fx moatTableFixture) int {
+	failed := 0
+
+	// The ranges must be sorted, non-overlapping, and non-adjacent or the
+	// binary search above is unsound.
+	previousEnd := -2
+	wellFormed := true
+	for _, r := range fx.DisallowedRanges {
+		if r[0] > r[1] || r[0] <= previousEnd+1 {
+			fmt.Printf("  %sFAIL%s moat-table: malformed range [%d, %d] after %d\n",
+				colorRed, colorReset, r[0], r[1], previousEnd)
+			failed++
+			wellFormed = false
+			break
+		}
+		previousEnd = r[1]
+	}
+	if wellFormed {
+		fmt.Printf("  %sPASS%s moat-table %d ranges sorted, non-overlapping, non-adjacent\n",
+			colorGreen, colorReset, len(fx.DisallowedRanges))
+	}
+
+	for _, vec := range fx.ClassificationVectors {
+		fromTable := moatDisallowed(vec.CodePoint, fx.DisallowedRanges)
+		if fromTable != vec.Disallowed {
+			fmt.Printf("  %sFAIL%s moat-table/%s: JSON range table disagrees on disallowed=%t\n",
+				colorRed, colorReset, vec.Name, vec.Disallowed)
+			failed++
+			continue
+		}
+		// Independent cross-check: classify the same code point with Go's own
+		// Unicode data (unicode.In + the pinned Default_Ignorable table) rather
+		// than re-reading the JSON. The JSON table is raw \p{C}∪\p{DI}, so add
+		// back tab/LF/CR, which isAllowlistDisallowedCodePoint carves out. The
+		// curated vectors are all version-stable code points, so Go's Unicode
+		// version need not match the table's for this to hold.
+		r := rune(vec.CodePoint)
+		native := isAllowlistDisallowedCodePoint(r) || r == '\t' || r == '\n' || r == '\r'
+		if native != vec.Disallowed {
+			fmt.Printf("  %sFAIL%s moat-table/%s: Go-native Unicode classification disagrees on disallowed=%t\n",
+				colorRed, colorReset, vec.Name, vec.Disallowed)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s moat-table/%s\n", colorGreen, colorReset, vec.Name)
+	}
+	return failed
+}
+
 func main() {
 	fixtureBytes, err := os.ReadFile("audit-event-vectors.json")
 	if err != nil {
@@ -1909,10 +2020,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "could not load signed-approval-token fixture: %v\n", err)
 		os.Exit(2)
 	}
+	moatFx, err := loadMoatTableFixture()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not load moat-disallowed-table fixture: %v\n", err)
+		os.Exit(2)
+	}
 
 	fmt.Printf("%s@wuphf/protocol — Go reference verifier%s\n", colorBold, colorReset)
-	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d signed-approval-token accept vectors, %d signed-approval-token reject vectors, %d runner accept vectors, %d runner reject vectors, %d agent-provider-routing accept vectors, %d agent-provider-routing reject vectors%s\n\n",
-		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(signedApprovalTokenFx.Accepted), len(signedApprovalTokenFx.Rejected), len(runnerFx.Vectors), len(runnerFx.RejectVectors), len(agentProviderRoutingFx.Accepted), len(agentProviderRoutingFx.Rejected), colorReset)
+	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d signed-approval-token accept vectors, %d signed-approval-token reject vectors, %d runner accept vectors, %d runner reject vectors, %d agent-provider-routing accept vectors, %d agent-provider-routing reject vectors, moat table Unicode %s (%d ranges, %d vectors)%s\n\n",
+		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(signedApprovalTokenFx.Accepted), len(signedApprovalTokenFx.Rejected), len(runnerFx.Vectors), len(runnerFx.RejectVectors), len(agentProviderRoutingFx.Accepted), len(agentProviderRoutingFx.Rejected), moatFx.UnicodeVersion, len(moatFx.DisallowedRanges), len(moatFx.ClassificationVectors), colorReset)
 
 	failed := 0
 
@@ -2049,10 +2165,12 @@ func main() {
 		fmt.Printf("  %sPASS%s signed-approval-token/%s rejected\n", colorGreen, colorReset, vec.Name)
 	}
 
+	failed += verifyMoatTable(moatFx)
+
 	fmt.Println()
 	if failed == 0 {
 		fmt.Printf("%s%sAll %d vectors match — wire contract is cross-language portable.%s\n",
-			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(signedApprovalTokenFx.Accepted)+len(signedApprovalTokenFx.Rejected)+len(runnerFx.Vectors)+len(runnerFx.RejectVectors)+len(agentProviderRoutingFx.Accepted)+len(agentProviderRoutingFx.Rejected), colorReset)
+			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(signedApprovalTokenFx.Accepted)+len(signedApprovalTokenFx.Rejected)+len(runnerFx.Vectors)+len(runnerFx.RejectVectors)+len(agentProviderRoutingFx.Accepted)+len(agentProviderRoutingFx.Rejected)+len(moatFx.ClassificationVectors), colorReset)
 		os.Exit(0)
 	}
 	fmt.Printf("%s%s%d vector(s) failed — TypeScript writer and Go reference disagree.%s\n",
