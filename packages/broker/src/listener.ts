@@ -100,7 +100,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   if (webauthnTrustedRoles !== null) {
     assertNoTrustedDefaultEnrollableRole(webauthnTrustedRoles);
   }
-  const webauthn =
+  let webauthn =
     config.webauthn === undefined
       ? null
       : ({
@@ -180,6 +180,14 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
 
   const port = await listen(server, config.port ?? 0);
   const url = `http://${LOOPBACK_HOST}:${port}`;
+  if (webauthn !== null) {
+    // WebAuthn verifies the renderer's browser origin. With port: 0 the
+    // broker's own packaged renderer origin is knowable only after listen().
+    webauthn = {
+      ...webauthn,
+      allowedOrigins: appendAllowedWebAuthnOrigin(webauthn.allowedOrigins, url),
+    };
+  }
   logger.info("listener_started", { port, url });
 
   let stopInflight: Promise<void> | null = null;
@@ -556,6 +564,15 @@ function assertNoTrustedDefaultEnrollableRole(trustedRoles: readonly ApprovalRol
       `createBroker: webauthn default enrollable role cannot also be trusted: ${overlap.join(", ")}`,
     );
   }
+}
+
+function appendAllowedWebAuthnOrigin(
+  allowedOrigins: readonly string[],
+  brokerUrl: string,
+): string[] {
+  const brokerOrigin = new URL(brokerUrl).origin;
+  if (allowedOrigins.includes(brokerOrigin)) return [...allowedOrigins];
+  return [...allowedOrigins, brokerOrigin];
 }
 
 function agentProviderRoutingAgentIdFromPathname(pathname: string): AgentId | null {

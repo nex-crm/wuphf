@@ -177,7 +177,8 @@ describe("WebAuthn routes", () => {
   });
 
   it("verifies registration and persists the credential role", async () => {
-    const handle = await startBroker();
+    const ceremony = new FakeCeremony();
+    const handle = await startBroker({ ceremony });
     const challenge = await registrationChallenge(handle, "approver");
 
     const res = await postJson(handle, "/api/webauthn/registration/verify", {
@@ -186,6 +187,7 @@ describe("WebAuthn routes", () => {
     });
 
     expect(res.status).toBe(200);
+    expect(ceremony.registrationVerificationOrigins).toContain(handle.url);
     await expect(res.json()).resolves.toEqual({
       credentialId: "cred_approver",
       role: "approver",
@@ -618,10 +620,11 @@ async function startBroker(
     ? undefined
     : (options.enrollableRoles ?? defaultEnrollableRoles);
   const store = options.wrapStore?.(createWebAuthnStore(db)) ?? createWebAuthnStore(db);
+  const ceremony = options.ceremony ?? new FakeCeremony();
   const webauthn = {
     store,
     tokenAgentIds: options.tokenAgentIds ?? new Map([[token, agentId]]),
-    ceremony: options.ceremony ?? new FakeCeremony(),
+    ceremony,
     rpId: "localhost",
     allowedOrigins: ["http://localhost:5173"],
     ...(configuredEnrollableRoles === undefined
@@ -637,6 +640,7 @@ async function startBroker(
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     webauthn,
   });
+  ceremony.expectedOrigins = ["http://localhost:5173", handle.url];
   broker = handle;
   return handle;
 }
@@ -891,6 +895,8 @@ class FakeClock implements Clock {
 
 class FakeCeremony implements WebAuthnCeremony {
   readonly nextCounters = new Map<string, number>();
+  expectedOrigins: readonly string[] = [];
+  registrationVerificationOrigins: readonly string[] = [];
   registrationOptionCalls = 0;
   authenticationCalls = 0;
 
@@ -923,8 +929,9 @@ class FakeCeremony implements WebAuthnCeremony {
     readonly expectedRpId: string;
   }): Promise<RegisteredWebAuthnCredentialVerification | null> {
     expect(args.expectedChallenge).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(args.expectedOrigins).toEqual(["http://localhost:5173"]);
+    expect(args.expectedOrigins).toEqual(this.expectedOrigins);
     expect(args.expectedRpId).toBe("localhost");
+    this.registrationVerificationOrigins = args.expectedOrigins;
     return {
       credentialId: args.response.id,
       publicKey: new Uint8Array([1, 2, 3]),
@@ -954,7 +961,7 @@ class FakeCeremony implements WebAuthnCeremony {
   }): Promise<WebAuthnAuthenticationVerification | null> {
     this.authenticationCalls += 1;
     expect(args.expectedChallenge).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(args.expectedOrigins).toEqual(["http://localhost:5173"]);
+    expect(args.expectedOrigins).toEqual(this.expectedOrigins);
     expect(args.expectedRpId).toBe("localhost");
     expect(args.credential.id).toBe(args.response.id);
     return {
@@ -981,7 +988,7 @@ class ControlledAuthenticationCeremony extends FakeCeremony {
   }): Promise<WebAuthnAuthenticationVerification | null> {
     this.authenticationCalls += 1;
     expect(args.expectedChallenge).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(args.expectedOrigins).toEqual(["http://localhost:5173"]);
+    expect(args.expectedOrigins).toEqual(this.expectedOrigins);
     expect(args.expectedRpId).toBe("localhost");
     expect(args.credential.id).toBe(args.response.id);
     return new Promise<WebAuthnAuthenticationVerification>((resolveFn) => {
