@@ -852,6 +852,7 @@ jobs:
             tests/route-matrix.spec.ts \
             tests/route-regressions.spec.ts \
             tests/sidebar-scroll.spec.ts \
+            tests/nex-connect.spec.ts \
             tests/chat.spec.ts \
             tests/slash-commands.spec.ts \
             tests/dm.spec.ts \
