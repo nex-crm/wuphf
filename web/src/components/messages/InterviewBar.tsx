@@ -807,8 +807,13 @@ async function advanceOnboardingAfterAnswer(
       });
       return;
     case "website_url":
+      // Same strict trimmed-string guard as blueprint_id — whitespace-only
+      // values must NOT route to "scan" (the scanner would fetch nothing).
       await post("/onboarding/transition", {
-        phase: value ? "scan" : "blueprint",
+        phase:
+          typeof value === "string" && value.trim() !== ""
+            ? "scan"
+            : "blueprint",
       });
       return;
     default:
