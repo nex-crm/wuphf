@@ -53,8 +53,9 @@ verified by both packages' tests.
 
 WebAuthn registration/challenge and assertion option objects are the documented
 carve-out: they are standardized W3C ceremony JSON produced by
-`@simplewebauthn/server`, wrapped in broker-local `{ challengeId, options }`
-envelopes. They are not WUPHF protocol wire contracts. Inbound broker
+`@simplewebauthn/server`, wrapped in broker-local
+`{ challengeId, creationOptions }` (registration) and
+`{ challengeId, requestOptions }` (cosign) envelopes. They are not WUPHF protocol wire contracts. Inbound broker
 control-plane bodies are strict known-key JSON, while the final successful
 co-sign result is always emitted through `signedApprovalTokenToJsonValue`.
 
