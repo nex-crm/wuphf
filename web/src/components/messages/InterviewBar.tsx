@@ -21,11 +21,7 @@ import type { CardStage, CeoSuggestion } from "../onboarding/types";
 import { SidePanel } from "../ui/SidePanel";
 import { showNotice } from "../ui/Toast";
 import { ApprovalContextView } from "./ApprovalContextView";
-import { CeoChecklist } from "./cards/CeoChecklist";
-import { CeoChipRow } from "./cards/CeoChipRow";
-import { CeoExecutionLineup } from "./cards/CeoExecutionLineup";
-import { CeoFormField } from "./cards/CeoFormField";
-import { CeoScanChip } from "./cards/CeoScanChip";
+import { StructuredMessageCard } from "./cards/StructuredMessageCard";
 
 /**
  * Inline interview bar shown above the Composer. Mirrors the TUI behavior:
@@ -745,67 +741,14 @@ function renderCeoCard(
   onSkip: (field: string) => Promise<void>,
   onStageChange?: (next: CardStage) => void,
 ): ReactNode {
-  switch (suggestion.kind) {
-    case "ceo_form_field":
-      return (
-        <CeoFormField
-          payload={suggestion.payload}
-          stage={stage}
-          committedValue={
-            typeof committedValue === "string" ? committedValue : undefined
-          }
-          onSubmit={(field, value) => void onSubmit(field, value)}
-          onSkip={
-            suggestion.payload.optional
-              ? (field) => void onSkip(field)
-              : undefined
-          }
-        />
-      );
-    case "ceo_chip_row":
-      return (
-        <CeoChipRow
-          payload={suggestion.payload}
-          stage={stage}
-          committedValue={
-            typeof committedValue === "string" ? committedValue : undefined
-          }
-          onSubmit={(field, value) => void onSubmit(field, value)}
-        />
-      );
-    case "ceo_checklist":
-    case "ceo_team_trim":
-      return (
-        <CeoChecklist
-          payload={suggestion.payload}
-          stage={stage}
-          committedValue={
-            Array.isArray(committedValue) ? committedValue : undefined
-          }
-          onSubmit={(field, value) => void onSubmit(field, value)}
-        />
-      );
-    case "ceo_scan_chip":
-      return <CeoScanChip payload={suggestion.payload} />;
-    case "ceo_execution_lineup":
-      return (
-        <CeoExecutionLineup
-          payload={suggestion.payload}
-          stage={stage}
-          onStageChange={
-            onStageChange ??
-            (() => {
-              /* no-op fallback */
-            })
-          }
-        />
-      );
-    default: {
-      // Exhaustiveness guard: if a new CEO kind is added to the union
-      // without a case here, TypeScript will flag the assignment below.
-      const _exhaustive: never = suggestion;
-      void _exhaustive;
-      return null;
-    }
-  }
+  return (
+    <StructuredMessageCard
+      suggestion={suggestion}
+      stage={stage}
+      committedValue={committedValue}
+      onSubmit={(field, value) => void onSubmit(field, value)}
+      onSkip={(field) => void onSkip(field)}
+      onStageChange={onStageChange}
+    />
+  );
 }

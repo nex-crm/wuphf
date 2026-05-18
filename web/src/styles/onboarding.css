@@ -2180,6 +2180,96 @@
   border: 1px solid rgba(220, 38, 38, 0.18);
 }
 
+/* ─── Phase 5: Pre-pick extra sections (API keys, local, OAI-compat) ────── */
+
+.pre-pick-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pre-pick-section-heading {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.pre-pick-section-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0 0 4px 0;
+  line-height: 1.5;
+}
+
+/* Local provider picker wrapper */
+.pre-pick-local-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.pre-pick-local-detecting {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.pre-pick-local-error {
+  font-size: 12px;
+  color: var(--danger-500, #c33);
+  padding: 6px 8px;
+  background: var(--danger-50, #fee);
+  border: 1px solid var(--danger-200, #fcc);
+  border-radius: 4px;
+}
+
+.pre-pick-local-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 4px 0 0 0;
+}
+
+/* OpenAI-compatible endpoint inputs */
+.pre-pick-oai-compat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pre-pick-oai-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pre-pick-oai-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pre-pick-input-error {
+  border-color: var(--danger-500, #c33);
+}
+
+.pre-pick-oai-url-error {
+  font-size: 12px;
+  color: var(--danger-500, #c33);
+}
+
+.pre-pick-form-submit {
+  width: 100%;
+}
+
 /* ─── Phase 2: CEO card section ─────────────────────────────────────────
    Renders inside the InterviewBar slot in the OnboardingDMRoute CEO DM.
    Card lifecycle: pending → submitting → committed.

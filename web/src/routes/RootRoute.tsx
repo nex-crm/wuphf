@@ -26,8 +26,6 @@ import { MessageFeed } from "../components/messages/MessageFeed";
 import { TypingIndicator } from "../components/messages/TypingIndicator";
 import { OnboardingDMRoute } from "../components/onboarding/OnboardingDMRoute";
 import { PrePickScreen } from "../components/onboarding/PrePickScreen";
-import { SplashScreen } from "../components/onboarding/SplashScreen";
-import { Wizard } from "../components/onboarding/Wizard";
 import { ConfirmHost } from "../components/ui/ConfirmDialog";
 import { ProviderSwitcherHost } from "../components/ui/ProviderSwitcher";
 import { ToastContainer } from "../components/ui/Toast";
@@ -35,7 +33,6 @@ import type { WikiTab } from "../components/wiki/WikiTabs";
 import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { isOnboardingV2Enabled } from "../lib/featureFlags";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
 import { useAppStore } from "../stores/app";
@@ -657,18 +654,14 @@ function RoutedBody() {
 
 export default function RootRoute() {
   const [apiReady, setApiReady] = useState(false);
-  const [showSplash, setShowSplash] = useState(false);
-  // The flag is resolved once at mount. Switching it mid-session would
-  // require a reload anyway — onboarding state is loaded once at boot.
-  const [onboardingV2] = useState<boolean>(() => isOnboardingV2Enabled());
   const theme = useAppStore((s) => s.theme);
   const onboardingComplete = useAppStore((s) => s.onboardingComplete);
   const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete);
 
-  // Phase 2 state: after PrePickScreen, track whether the backend CEO phase
-  // machine is running. When true, Shell renders OnboardingDMRoute instead of
-  // RoutedBody. Flips false when the onboarding state returns onboarded=true.
+  // After PrePickScreen, track whether the backend CEO phase machine is
+  // running. When true, Shell renders OnboardingDMRoute instead of RoutedBody.
+  // Flips false when the onboarding state returns onboarded=true.
   //
   // Flow: PrePickScreen → inCeoOnboarding=true → Shell+OnboardingDMRoute
   //       → broker sets phase="bridge" done → onboarded=true → normal Shell
@@ -676,17 +669,15 @@ export default function RootRoute() {
   // onboarding phase from /onboarding/state — set once on boot if available.
   const [bootPhase, setBootPhase] = useState<string | undefined>(undefined);
 
-  // Phase 2 RootRoute redirect gap fix:
-  // When CEO onboarding is active (phase set, not "complete", onboardingV2 on),
-  // redirect any root or /channels/general URL to the CEO DM so the Shell
-  // always shows the CEO conversation regardless of the URL the user landed on.
+  // When CEO onboarding is active (phase set, not "complete"), redirect any
+  // root or /channels/general URL to the CEO DM so the Shell always shows
+  // the CEO conversation regardless of the URL the user landed on.
   // This is a TanStack-level navigate (not a beforeLoad, because onboarding
   // state is only known after the /onboarding/state API call in the effect
   // below). Already-onboarded users (onboardingComplete === true) skip the
   // whole inCeoOnboarding branch and never hit this redirect.
   useEffect(() => {
     if (!(inCeoOnboarding || bootPhase)) return;
-    if (!onboardingV2) return;
     // Only redirect when the user is on a generic destination (root, general).
     // Other explicit URLs (e.g. /dm/some-agent) should not be redirected so
     // deep-links remain functional during onboarding.
@@ -704,7 +695,7 @@ export default function RootRoute() {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inCeoOnboarding, bootPhase, onboardingV2]);
+  }, [inCeoOnboarding, bootPhase]);
 
   useKeyboardShortcuts();
   useBrokerEvents(apiReady);
@@ -739,15 +730,15 @@ export default function RootRoute() {
         if (cancelled || !s) return;
         if (s.onboarded === true) {
           setOnboardingComplete(true);
-        } else if (onboardingV2 && typeof s.phase === "string" && s.phase) {
+        } else if (typeof s.phase === "string" && s.phase) {
           // Resume mid-onboarding: broker already started the CEO phase machine.
           setBootPhase(s.phase);
           setInCeoOnboarding(true);
         }
       })
       .catch(() => {
-        // Endpoint unreachable — fall through to wizard. Safer default for
-        // fresh installs where the broker may not have mounted onboarding yet.
+        // Endpoint unreachable — fall through to PrePickScreen. Safer default
+        // for fresh installs where the broker may not have mounted onboarding.
       })
       .finally(() => {
         if (!cancelled) setApiReady(true);
@@ -755,7 +746,7 @@ export default function RootRoute() {
     return () => {
       cancelled = true;
     };
-  }, [setBrokerConnected, setOnboardingComplete, onboardingV2]);
+  }, [setBrokerConnected, setOnboardingComplete]);
 
   let body: ReactNode;
   if (!apiReady) {
@@ -773,11 +764,9 @@ export default function RootRoute() {
         Connecting to broker...
       </div>
     );
-  } else if (showSplash) {
-    body = <SplashScreen onDone={() => setShowSplash(false)} />;
   } else if (!onboardingComplete) {
-    if (onboardingV2 && (inCeoOnboarding || bootPhase)) {
-      // Phase 2: CEO conversation running — Shell with OnboardingDMRoute.
+    if (inCeoOnboarding || bootPhase) {
+      // CEO conversation running — Shell with OnboardingDMRoute.
       // Already-onboarded users (onboardingComplete === true) skip this
       // entirely via the branch above.
       body = (
@@ -786,24 +775,16 @@ export default function RootRoute() {
           <Outlet />
         </Shell>
       );
-    } else if (onboardingV2) {
-      // Phase 1: provider picker. No phase set yet — user hasn't picked a
-      // runtime. After they pick, setInCeoOnboarding(true) to enter Phase 2.
+    } else {
+      // Provider picker. No phase set yet — user hasn't picked a runtime.
+      // After they pick, setInCeoOnboarding(true) to enter the CEO DM.
       body = (
         <PrePickScreen
           onComplete={() => {
-            // Phase 1 transitions directly to Phase 2: Shell+CEO DM.
+            // PrePickScreen transitions directly to CEO DM.
             // The broker sets state.Phase = "greet" after /onboarding/complete.
             // We enter the in-CEO state here so the Shell renders immediately.
             setInCeoOnboarding(true);
-          }}
-        />
-      );
-    } else {
-      body = (
-        <Wizard
-          onComplete={() => {
-            setShowSplash(true);
           }}
         />
       );

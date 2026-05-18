@@ -17,7 +17,25 @@ package team
 //   - Approval gate: do NOT call the LLM if the task is not in Drafting state.
 //   - Phase 6 (sub-issues, wiki mirror) is deferred; do NOT touch it here.
 //
-// Provider routing: re-uses callAnthropic / callOpenAI from
+// # Transport selection
+//
+// The draft writer uses a dual-transport strategy so it works out-of-the-box
+// for both local developers and CI/headless servers.
+//
+// Preferred — claude CLI subprocess: when `claude` is on PATH the writer
+// shells out to `claude -p "<prompt>" --output-format json`. This path uses
+// the user's existing Claude OAuth session (set up once via `claude login`)
+// so no API key is required. This matches the ICP persona (Sam the founder
+// running wuphf locally after a single OAuth login) and avoids a separate
+// ANTHROPIC_API_KEY configuration step.
+//
+// Fallback — HTTP direct: when the `claude` binary is not found (CI,
+// headless servers, Docker) the writer falls through to the existing
+// callAnthropicCEODraft / callOpenAICEODraft HTTP path gated on API key
+// availability. If neither transport is viable, errCEODraftLLMDisabled is
+// returned so the caller can surface a human-friendly nudge.
+//
+// Provider routing (HTTP path): re-uses callAnthropic / callOpenAI from
 // skill_synth_provider.go (same package). Picks Anthropic key first;
 // falls back to OpenAI. When neither is configured, returns a
 // sentinel error so the caller can surface a user-visible nudge.
@@ -37,10 +55,19 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+)
+
+// ceoDraftLookPath and ceoDraftCommandContext are package-level vars so tests
+// can inject a fake claude binary without modifying PATH globally.
+var (
+	ceoDraftLookPath       = exec.LookPath
+	ceoDraftCommandContext = exec.CommandContext
 )
 
 // errCEODraftLLMDisabled is returned when no LLM key is configured so the
@@ -234,40 +261,44 @@ func (b *Broker) onboardingCEODMSlug() string {
 	return reserved
 }
 
-// callCEODraftLLM makes the LLM call for the CEO draft writer. Uses the
-// same Anthropic/OpenAI routing as skill_synth_provider.go. Returns
-// errCEODraftLLMDisabled when no key is configured.
+// ceoDraftTimeout is the per-call deadline for the CEO draft LLM request,
+// whether via claude CLI subprocess or HTTP direct.
+const ceoDraftTimeout = 90 * time.Second
+
+// callCEODraftLLM makes the LLM call for the CEO draft writer.
+//
+// Transport selection (see file header for full rationale):
+//  1. claude CLI subprocess — preferred when `claude` is on PATH. Uses the
+//     user's OAuth session; no API key required.
+//  2. HTTP direct (Anthropic then OpenAI) — fallback when claude is not found.
+//
+// Returns errCEODraftLLMDisabled when neither transport is viable.
 func callCEODraftLLM(ctx context.Context, userRequest, agentRoster string, wikiContext []string) (issueDraftLLMResponse, error) {
+	wikiSection := buildCEODraftWikiSection(wikiContext)
+	userPrompt := fmt.Sprintf(ceoDraftUserPromptTpl, userRequest, agentRoster, wikiSection)
+
+	callCtx, cancel := context.WithTimeout(ctx, ceoDraftTimeout)
+	defer cancel()
+
+	// Preferred: claude CLI subprocess (uses OAuth, no API key needed).
+	if claudePath, err := ceoDraftLookPath("claude"); err == nil {
+		log.Printf("ceo_draft: transport=claude_cli path=%q", claudePath)
+		raw, cliErr := callClaudeCLICEODraft(callCtx, userPrompt)
+		if cliErr != nil {
+			return issueDraftLLMResponse{}, cliErr
+		}
+		return parseCEODraftResponse(raw)
+	}
+
+	// Fallback: HTTP direct to Anthropic / OpenAI.
 	anthroKey := strings.TrimSpace(config.ResolveAnthropicAPIKey())
 	openaiKey := strings.TrimSpace(config.ResolveOpenAIAPIKey())
-
 	if anthroKey == "" && openaiKey == "" {
 		return issueDraftLLMResponse{}, errCEODraftLLMDisabled
 	}
 
-	wikiSection := ""
-	if len(wikiContext) > 0 {
-		var sb strings.Builder
-		sb.WriteString("Wiki context (use this to ground the spec):\n")
-		for _, w := range wikiContext {
-			if t := strings.TrimSpace(w); t != "" {
-				sb.WriteString("- ")
-				sb.WriteString(t)
-				sb.WriteString("\n")
-			}
-		}
-		sb.WriteString("\n")
-		wikiSection = sb.String()
-	}
-
-	userPrompt := fmt.Sprintf(ceoDraftUserPromptTpl, userRequest, agentRoster, wikiSection)
-
-	timeout := 30 * time.Second
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	client := &http.Client{Timeout: timeout}
-
+	log.Printf("ceo_draft: transport=http_direct anthropic=%t openai=%t", anthroKey != "", openaiKey != "")
+	client := &http.Client{Timeout: ceoDraftTimeout}
 	var raw string
 	var err error
 	if anthroKey != "" {
@@ -278,8 +309,138 @@ func callCEODraftLLM(ctx context.Context, userRequest, agentRoster string, wikiC
 	if err != nil {
 		return issueDraftLLMResponse{}, err
 	}
-
 	return parseCEODraftResponse(raw)
+}
+
+// buildCEODraftWikiSection formats the wiki context slice into the prompt
+// section that grounds the spec. Returns an empty string when no context is
+// provided.
+func buildCEODraftWikiSection(wikiContext []string) string {
+	if len(wikiContext) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Wiki context (use this to ground the spec):\n")
+	for _, w := range wikiContext {
+		if t := strings.TrimSpace(w); t != "" {
+			sb.WriteString("- ")
+			sb.WriteString(t)
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// claudeCLIJSONOutput is the top-level envelope emitted by
+// `claude -p "<prompt>" --output-format json`.
+// The CLI writes a single JSON object to stdout on success.
+type claudeCLIJSONOutput struct {
+	// Result contains the assistant's final text response.
+	Result string `json:"result"`
+	// Type is "result" for a successful completion.
+	Type string `json:"type"`
+	// Subtype is "success" for a normal completion, "error" for failures.
+	Subtype string `json:"subtype"`
+}
+
+// callClaudeCLICEODraft runs `claude -p "<combinedPrompt>" --output-format json`
+// as a subprocess and returns the assistant text from the JSON envelope.
+//
+// The full prompt (system prompt + user turn) is passed as a single -p argument
+// because the non-interactive claude CLI treats the first positional as the
+// initial user message. The system prompt is prepended inline to keep the CEO
+// voice rules in scope without needing a separate --system-prompt flag (which
+// would be visible in ps output).
+//
+// Context cancellation is wired through exec.CommandContext so the subprocess
+// is killed when the parent context is cancelled or times out.
+func callClaudeCLICEODraft(ctx context.Context, userPrompt string) (string, error) {
+	// Embed the system prompt inline so the CEO voice rules are always applied.
+	// Format: "<system>\n\n<user_turn>" — the model treats everything before the
+	// first blank line as context when no role markers are present.
+	combined := ceoDraftSystemPrompt + "\n\n" + userPrompt
+
+	cmd := ceoDraftCommandContext(ctx, "claude", "-p", combined, "--output-format", "json")
+	// Strip Claude Code session env vars to prevent recursive-invocation
+	// detection, matching the pattern used by internal/provider/claude.go.
+	cmd.Env = filteredEnvForCEODraft()
+
+	// WaitDelay ensures cmd.Wait() returns promptly after context cancellation
+	// even when child processes (spawned by a wrapper shell) keep the stdout
+	// pipe open. Without WaitDelay, cmd.Wait() blocks until all file descriptors
+	// are closed, which can be the full subprocess lifetime for shell scripts.
+	// For the real `claude` binary this is never an issue (single process, no
+	// children), but test harness scripts and edge cases benefit from the cap.
+	cmd.WaitDelay = 2 * time.Second
+
+	var stdoutBuf, stderrBuf strings.Builder
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("ceo_draft cli: %w", ctx.Err())
+		}
+		detail := strings.TrimSpace(stderrBuf.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return "", fmt.Errorf("ceo_draft cli: subprocess exited: %w: %s", err, detail)
+	}
+
+	raw := strings.TrimSpace(stdoutBuf.String())
+	if raw == "" {
+		return "", fmt.Errorf("ceo_draft cli: empty stdout from claude subprocess")
+	}
+
+	// Parse the JSON envelope. The CLI emits a single object.
+	var out claudeCLIJSONOutput
+	if jsonErr := json.Unmarshal([]byte(raw), &out); jsonErr != nil {
+		return "", fmt.Errorf("ceo_draft cli: parse envelope: %w (raw: %.120s)", jsonErr, raw)
+	}
+	if strings.TrimSpace(out.Result) == "" {
+		return "", fmt.Errorf("ceo_draft cli: empty result in envelope (subtype=%q raw: %.120s)", out.Subtype, raw)
+	}
+	return out.Result, nil
+}
+
+// claudeDraftEnvVarsToStrip are the env vars set by Claude Code that must be
+// removed so the child `claude` process does not detect a recursive invocation.
+// Mirrors internal/provider.claudeEnvVarsToStrip.
+var claudeDraftEnvVarsToStrip = []string{
+	"CLAUDECODE",
+	"CLAUDE_CODE_ENTRYPOINT",
+	"CLAUDE_CODE_SESSION",
+	"CLAUDE_CODE_PARENT_SESSION",
+}
+
+// filteredEnvForCEODraft returns os.Environ() with Claude Code session vars
+// removed. Does NOT do full git-env scrubbing (only full agent launches need
+// that; a one-shot prompt invocation is fine with the inherited env).
+func filteredEnvForCEODraft() []string {
+	stripSet := make(map[string]struct{}, len(claudeDraftEnvVarsToStrip))
+	for _, k := range claudeDraftEnvVarsToStrip {
+		stripSet[k] = struct{}{}
+	}
+	all := ceoDraftOsEnviron()
+	out := make([]string, 0, len(all))
+	for _, kv := range all {
+		key := kv
+		if idx := strings.IndexByte(kv, '='); idx >= 0 {
+			key = kv[:idx]
+		}
+		if _, skip := stripSet[key]; !skip {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// ceoDraftOsEnviron is a seam for testing: returns the current process
+// environment. Tests can swap this to inject a controlled env.
+var ceoDraftOsEnviron = func() []string {
+	return os.Environ()
 }
 
 // callAnthropicCEODraft calls the Anthropic API for the CEO draft writer.
