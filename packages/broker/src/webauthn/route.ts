@@ -1180,10 +1180,21 @@ function assertUtf8StringBudget(
 }
 
 function base64UrlStringFromJson(value: string, path: string): string {
-  if (value.length === 0 || !BASE64URL_RE.test(value)) {
-    throw new Error(`${path}: must be a base64url string`);
+  if (!isCanonicalUnpaddedBase64Url(value)) {
+    throw new Error(`${path}: must be a canonical non-empty unpadded base64url string`);
   }
   return value;
+}
+
+function isCanonicalUnpaddedBase64Url(value: string): boolean {
+  if (value.length === 0 || !BASE64URL_RE.test(value) || value.length % 4 === 1) {
+    return false;
+  }
+  try {
+    return Buffer.from(value, "base64url").toString("base64url") === value;
+  } catch {
+    return false;
+  }
 }
 
 function roleFromJson(value: string): ApprovalRole {

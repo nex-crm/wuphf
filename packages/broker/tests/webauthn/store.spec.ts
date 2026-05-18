@@ -9,6 +9,8 @@ import {
   asSha256Hex,
   asTimestampMs,
   canonicalJSON,
+  type ReceiptCoSignClaim,
+  type ReceiptCoSignScope,
   sha256Hex,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
@@ -127,6 +129,65 @@ describe("SqliteWebAuthnStore", () => {
     const record = await store.getConsumedToken(consumed.tokenId);
 
     expect(record?.claimScopeHash).toBe(consumed.claimScopeHash);
+  });
+
+  it("derives consumed token identity from the stored cosign challenge", async () => {
+    const store = createTestStore();
+    await saveCredential(store);
+    const first = await saveCosignChallenge(store, {
+      challengeId: "identityChallengeOne",
+      tokenId: "01BRZ3NDEKTSV4RRFFQ69G5FD2",
+      receiptId: "01BRZ3NDEKTSV4RRFFQ69G5FA1",
+      frozenArgsHash: "b".repeat(64),
+    });
+    const second = await saveCosignChallenge(store, {
+      challengeId: "identityChallengeTwo",
+      tokenId: "01BRZ3NDEKTSV4RRFFQ69G5FD3",
+      receiptId: "01BRZ3NDEKTSV4RRFFQ69G5FA2",
+      frozenArgsHash: "c".repeat(64),
+    });
+
+    const consumed = await store.consumeCosignChallenge({
+      challengeId: first.challengeId,
+      tokenId: second.tokenId,
+      credentialId: "cred_approver",
+      newSignCount: 2,
+      requiredThreshold: 1,
+      approvedResponseJson: { status: "approved" },
+      role: "host",
+      approvalGroupHash: second.approvalGroupHash,
+      issuedToAgentId: asAgentId("agent_beta"),
+      expiresAtMs: 99_999,
+      consumedAtMs: 20,
+    });
+
+    expect(consumed).toMatchObject({
+      tokenId: first.tokenId,
+      challengeId: first.challengeId,
+      role: "approver",
+      approvalGroupHash: first.approvalGroupHash,
+      issuedToAgentId: agentId,
+      expiresAtMs: 10_000,
+    });
+    await expect(store.getConsumedToken(first.tokenId)).resolves.toMatchObject({
+      tokenId: first.tokenId,
+      approvalGroupHash: first.approvalGroupHash,
+    });
+    await expect(store.getConsumedToken(second.tokenId)).resolves.toBeNull();
+    await expect(
+      store.listSatisfiedRoles({
+        approvalGroupHash: first.approvalGroupHash,
+        issuedToAgentId: agentId,
+        nowMs: 20,
+      }),
+    ).resolves.toEqual(["approver"]);
+    await expect(
+      store.listSatisfiedRoles({
+        approvalGroupHash: second.approvalGroupHash,
+        issuedToAgentId: asAgentId("agent_beta"),
+        nowMs: 20,
+      }),
+    ).resolves.toEqual([]);
   });
 
   it.each([
@@ -291,9 +352,55 @@ async function saveConsumedCosign(
   return { challengeId: args.challengeId, tokenId, claimScopeHash: hashes.claimScopeHash };
 }
 
+async function saveCosignChallenge(
+  store: WebAuthnStore,
+  args: {
+    readonly challengeId: string;
+    readonly tokenId: string;
+    readonly receiptId: string;
+    readonly frozenArgsHash: string;
+  },
+): Promise<{
+  readonly challengeId: string;
+  readonly tokenId: ReturnType<typeof asApprovalTokenId>;
+  readonly approvalGroupHash: ReturnType<typeof sha256Hex>;
+}> {
+  const fixture = receiptCoSignFixture("approver");
+  const claim = {
+    ...fixture.claim,
+    claimId: asApprovalClaimId(`claim-${args.challengeId}`),
+    receiptId: asReceiptId(args.receiptId),
+    frozenArgsHash: asSha256Hex(args.frozenArgsHash),
+  } satisfies ApprovalClaim;
+  const scope = {
+    ...fixture.scope,
+    claimId: claim.claimId,
+    receiptId: claim.receiptId,
+    frozenArgsHash: claim.frozenArgsHash,
+  } satisfies ApprovalScope;
+  const hashes = hashClaimScopeForTest(claim, scope);
+  const tokenId = asApprovalTokenId(args.tokenId);
+  await store.saveCosignChallenge({
+    challengeId: args.challengeId,
+    challenge: args.challengeId,
+    tokenId,
+    claim,
+    scope,
+    claimJson: hashes.claimJson,
+    scopeJson: hashes.scopeJson,
+    claimScopeHash: hashes.claimScopeHash,
+    approvalGroupHash: hashes.approvalGroupHash,
+    issuedToAgentId: agentId,
+    notBeforeMs: asTimestampMs(10),
+    expiresAtMs: asTimestampMs(10_000),
+    createdAtMs: 10,
+  });
+  return { challengeId: args.challengeId, tokenId, approvalGroupHash: hashes.approvalGroupHash };
+}
+
 function receiptCoSignFixture(role: ApprovalRole): {
-  readonly claim: ApprovalClaim;
-  readonly scope: ApprovalScope;
+  readonly claim: ReceiptCoSignClaim;
+  readonly scope: ReceiptCoSignScope;
 } {
   const claim = {
     schemaVersion: 1,
@@ -302,7 +409,7 @@ function receiptCoSignFixture(role: ApprovalRole): {
     receiptId: asReceiptId("01BRZ3NDEKTSV4RRFFQ69G5FA0"),
     frozenArgsHash: asSha256Hex("a".repeat(64)),
     riskClass: "high",
-  } satisfies ApprovalClaim;
+  } satisfies ReceiptCoSignClaim;
   const scope = {
     mode: "single_use",
     claimId: claim.claimId,
@@ -311,7 +418,7 @@ function receiptCoSignFixture(role: ApprovalRole): {
     maxUses: 1,
     receiptId: claim.receiptId,
     frozenArgsHash: claim.frozenArgsHash,
-  } satisfies ApprovalScope;
+  } satisfies ReceiptCoSignScope;
   return { claim, scope };
 }
 

@@ -235,9 +235,28 @@ describe("WebAuthn routes", () => {
     );
   });
 
+  it("rejects unknown enrollable approval roles at startup", async () => {
+    await expect(
+      startBroker({ enrollableRoles: enrollableRolesForAgent(agentId, ["typo" as ApprovalRole]) }),
+    ).rejects.toThrow(/enrollableRoles\[agent_alpha\]\[0\].*valid approval role/);
+  });
+
+  it("rejects explicitly trusted roles in configured enrollable roles at startup", async () => {
+    await expect(
+      startBroker({
+        trustedRoles: ["viewer"],
+        enrollableRoles: enrollableRolesForAgent(agentId, ["viewer"]),
+      }),
+    ).rejects.toThrow(/enrollableRoles\[agent_alpha\].*explicitly trusted role: viewer/);
+  });
+
   it("rejects impossible WebAuthn thresholds at startup", async () => {
     await expect(
-      startBroker({ trustedRoles: ["approver", "approver"], receiptCoSignThreshold: 2 }),
+      startBroker({
+        omitEnrollableRoles: true,
+        trustedRoles: ["approver", "approver"],
+        receiptCoSignThreshold: 2,
+      }),
     ).rejects.toThrow(/receiptCoSignThreshold 2 exceeds distinct trusted approval roles 1/);
   });
 
@@ -520,6 +539,30 @@ describe("WebAuthn routes", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { readonly error: string };
     expect(body.error).toMatch(/signature.*bytes/);
+    expect(ceremony.authenticationCalls).toBe(0);
+  });
+
+  it("rejects non-canonical cosign assertion base64url before WebAuthn verification", async () => {
+    const ceremony = new FakeCeremony();
+    const handle = await startBroker({ ceremony });
+    await registerRole(handle, "approver", "cred_approver");
+    const challenge = await cosignChallenge(handle, "approver");
+    const assertion = assertionResponse("cred_approver");
+
+    const res = await postJson(handle, "/api/webauthn/cosign/verify", {
+      challengeId: challenge.challengeId,
+      assertionResponse: {
+        ...assertion,
+        response: {
+          ...assertion.response,
+          signature: "A",
+        },
+      },
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { readonly error: string };
+    expect(body.error).toMatch(/signature.*canonical.*base64url/);
     expect(ceremony.authenticationCalls).toBe(0);
   });
 
@@ -1142,7 +1185,7 @@ function costSpikeAcknowledgementFixture(
     agentId: targetAgentId,
     costCeilingId: "ceiling-main",
     thresholdBps: 9000,
-    currentMicroUsd: 120,
+    currentMicroUsd: 80,
     ceilingMicroUsd: 100,
   };
   const scope: CostSpikeAcknowledgementScope = {

@@ -323,14 +323,25 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
       }
     });
     this.consumeCosignTransaction = db.transaction((args: ConsumeCosignChallengeArgs) => {
-      const existing = this.getConsumedTokenStmt.get(args.tokenId);
-      if (existing !== undefined) return consumedTokenFromRow(existing);
       const challenge = this.getChallengeStmt.get(args.challengeId);
-      if (challenge === undefined || challenge.claimScopeHash === null) {
+      if (
+        challenge === undefined ||
+        challenge.tokenId === null ||
+        challenge.role === null ||
+        challenge.claimScopeHash === null ||
+        challenge.approvalGroupHash === null
+      ) {
         throw new Error("webauthn consumed token challenge is missing claim_scope_hash");
       }
+      const tokenId = asApprovalTokenId(challenge.tokenId);
+      const role = roleFromString(challenge.role, "webauthn_challenges.role");
       const claimScopeHash = asSha256Hex(challenge.claimScopeHash);
-      const result = this.markChallengeConsumedStmt.run(args.consumedAtMs, args.challengeId);
+      const approvalGroupHash = asSha256Hex(challenge.approvalGroupHash);
+      const issuedToAgentId = asAgentId(challenge.agentId);
+      const expiresAtMs = challenge.expiresAtMs;
+      const existing = this.getConsumedTokenStmt.get(tokenId);
+      if (existing !== undefined) return consumedTokenFromRow(existing);
+      const result = this.markChallengeConsumedStmt.run(args.consumedAtMs, challenge.challengeId);
       if (result.changes !== 1) {
         throw new Error("webauthn cosign challenge was already consumed");
       }
@@ -343,23 +354,23 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
         throw new WebAuthnSignCountReplayError();
       }
       this.insertConsumedTokenStmt.run(
-        args.tokenId,
-        args.challengeId,
+        tokenId,
+        challenge.challengeId,
         "approval_pending",
         canonicalJSON({
           status: "approval_pending",
-          satisfiedRoles: [args.role],
+          satisfiedRoles: [role],
           requiredThreshold: args.requiredThreshold,
         }),
-        args.role,
-        args.approvalGroupHash,
-        args.issuedToAgentId,
-        args.expiresAtMs,
+        role,
+        approvalGroupHash,
+        issuedToAgentId,
+        expiresAtMs,
         args.consumedAtMs,
       );
       const satisfiedRoles = sortedUniqueRoles(
         this.listSatisfiedRolesStmt
-          .all(args.approvalGroupHash, args.issuedToAgentId, args.consumedAtMs)
+          .all(approvalGroupHash, issuedToAgentId, args.consumedAtMs)
           .map((row) => roleFromString(row.role, "webauthn_consumed_tokens.role")),
       );
       const thresholdMet = satisfiedRoles.length >= args.requiredThreshold;
@@ -371,17 +382,17 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
             satisfiedRoles,
             requiredThreshold: args.requiredThreshold,
           };
-      this.updateConsumedTokenStmt.run(outcome, canonicalJSON(responseJson), args.tokenId);
+      this.updateConsumedTokenStmt.run(outcome, canonicalJSON(responseJson), tokenId);
       return {
-        tokenId: args.tokenId,
-        challengeId: args.challengeId,
+        tokenId,
+        challengeId: challenge.challengeId,
         outcome,
         responseJson,
-        role: args.role,
+        role,
         claimScopeHash,
-        approvalGroupHash: args.approvalGroupHash,
-        issuedToAgentId: args.issuedToAgentId,
-        expiresAtMs: args.expiresAtMs,
+        approvalGroupHash,
+        issuedToAgentId,
+        expiresAtMs,
         consumedAtMs: args.consumedAtMs,
       };
     });

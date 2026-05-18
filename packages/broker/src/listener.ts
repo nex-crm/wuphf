@@ -105,11 +105,19 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
     config.webauthn === undefined
       ? null
       : [...(config.webauthn.trustedRoles ?? WEBAUTHN_TRUSTED_APPROVAL_ROLES)];
+  const webauthnEnrollableRoles =
+    config.webauthn?.enrollableRoles ?? new Map<AgentId, readonly ApprovalRole[]>();
   let webauthnDefaultThreshold: number | null = null;
   let webauthnReceiptCoSignThreshold: number | null = null;
   if (webauthnTrustedRoles !== null) {
     assertKnownApprovalRoles("webauthn.trustedRoles", webauthnTrustedRoles);
     assertNoTrustedDefaultEnrollableRole(webauthnTrustedRoles);
+    if (config.webauthn?.enrollableRoles !== undefined) {
+      assertConfiguredEnrollableRoles(
+        config.webauthn.enrollableRoles,
+        config.webauthn.trustedRoles ?? [],
+      );
+    }
     webauthnDefaultThreshold = normalizeThreshold(config.webauthn?.defaultThreshold ?? 1);
     webauthnReceiptCoSignThreshold = normalizeThreshold(
       config.webauthn?.receiptCoSignThreshold ?? config.webauthn?.defaultThreshold ?? 1,
@@ -159,8 +167,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
             logger,
           }),
           tokenAgentIds: config.webauthn.tokenAgentIds,
-          enrollableRoles:
-            config.webauthn.enrollableRoles ?? new Map<AgentId, readonly ApprovalRole[]>(),
+          enrollableRoles: webauthnEnrollableRoles,
           ceremony: config.webauthn.ceremony ?? createSimpleWebAuthnCeremony(),
           clock,
           rpName: config.webauthn.rpName ?? WEBAUTHN_RP_NAME,
@@ -751,6 +758,31 @@ function assertNoTrustedDefaultEnrollableRole(trustedRoles: readonly ApprovalRol
       `createBroker: webauthn default enrollable role cannot also be trusted: ${overlap.join(", ")}`,
     );
   }
+}
+
+function assertConfiguredEnrollableRoles(
+  enrollableRoles: ReadonlyMap<AgentId, readonly unknown[]>,
+  explicitlyTrustedRoles: readonly ApprovalRole[],
+): void {
+  const explicitlyTrusted = new Set(explicitlyTrustedRoles);
+  for (const [agentId, roles] of enrollableRoles) {
+    const path = `webauthn.enrollableRoles[${agentId}]`;
+    assertKnownApprovalRoles(path, roles);
+    const overlap = sortedUniqueApprovalRoles(
+      roles.filter(
+        (role): role is ApprovalRole => isApprovalRole(role) && explicitlyTrusted.has(role),
+      ),
+    );
+    if (overlap.length > 0) {
+      throw new Error(
+        `createBroker: ${path} cannot include explicitly trusted role: ${overlap.join(", ")}`,
+      );
+    }
+  }
+}
+
+function sortedUniqueApprovalRoles(roles: readonly ApprovalRole[]): readonly ApprovalRole[] {
+  return [...new Set(roles)].sort((a, b) => a.localeCompare(b));
 }
 
 function assertWebAuthnThresholdPossible(

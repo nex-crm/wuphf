@@ -660,7 +660,10 @@ function validateApprovalEvent(
   validateRequired(value, "decision", path, errors, (v, p, e) =>
     validateLiteral(v, p, e, APPROVAL_DECISION_VALUES, "must be a valid approval decision"),
   );
-  validateRequired(value, "signedToken", path, errors, validateSignedApprovalToken);
+  let token: ReturnType<typeof signedApprovalTokenFromJson> | undefined;
+  validateRequired(value, "signedToken", path, errors, (v, p, e) => {
+    token = parseSignedApprovalTokenForValidation(v, p, e);
+  });
   validateRequired(value, "tokenVerdict", path, errors, validateBrokerTokenVerdict);
   validateRequired(value, "decidedAt", path, errors, validateDate);
   const decision = recordValue(value, "decision");
@@ -677,12 +680,6 @@ function validateApprovalEvent(
   }
 
   // Cross-field invariant: the signed token must reference this receipt.
-  const signedToken = recordValue(value, "signedToken");
-  const token = parseSignedApprovalTokenForValidation(
-    signedToken,
-    pointer(path, "signedToken"),
-    errors,
-  );
   if (token !== undefined) {
     const tokenPath = pointer(path, "signedToken");
     if (!isReceiptCoSignClaim(token.claim)) {
@@ -780,14 +777,6 @@ function validateBrokerTokenVerdict(
   validateRequired(value, "verifiedAt", path, errors, validateDate);
 }
 
-function validateSignedApprovalToken(
-  value: unknown,
-  path: string,
-  errors: ReceiptValidationError[],
-): void {
-  parseSignedApprovalTokenForValidation(value, path, errors);
-}
-
 function validateExternalWrite(
   value: unknown,
   path: string,
@@ -807,8 +796,11 @@ function validateExternalWrite(
   validateRequired(value, "proposedDiff", path, errors, (v, p, e) =>
     validateFrozenArgs(v, p, e, context),
   );
+  let token: ReturnType<typeof signedApprovalTokenFromJson> | undefined;
   validateRequired(value, "approvalToken", path, errors, (v, p, e) =>
-    validateNullable(v, p, e, validateSignedApprovalToken),
+    validateNullable(v, p, e, (tokenValue, tokenPath, tokenErrors) => {
+      token = parseSignedApprovalTokenForValidation(tokenValue, tokenPath, tokenErrors);
+    }),
   );
   validateOptional(value, "approvedAt", path, errors, validateDate);
   validateRequired(value, "result", path, errors, (v, p, e) =>
@@ -862,15 +854,8 @@ function validateExternalWrite(
   // Cross-field invariants: when present, the approval token must reference
   // this receipt, bind to the proposedDiff hash, and bind to writeId when the
   // token is write-scoped. RFC §6 invariant chain.
-  const approvalToken = recordValue(value, "approvalToken");
   const proposedDiff = recordValue(value, "proposedDiff");
-  if (isRecord(approvalToken)) {
-    const token = parseSignedApprovalTokenForValidation(
-      approvalToken,
-      pointer(path, "approvalToken"),
-      errors,
-    );
-    if (token === undefined) return;
+  if (token !== undefined) {
     const tokenPath = pointer(path, "approvalToken");
     if (!isReceiptCoSignClaim(token.claim) || !isReceiptCoSignScope(token.scope)) {
       addError(errors, pointer(pointer(tokenPath, "claim"), "kind"), "must be receipt_co_sign");

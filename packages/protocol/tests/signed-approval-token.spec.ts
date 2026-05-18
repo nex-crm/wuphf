@@ -509,7 +509,7 @@ function claimVariantFixtures(): readonly {
     costCeilingId: "budget-prod-01",
     thresholdBps: 2500,
     currentMicroUsd: 42_000_000,
-    ceilingMicroUsd: 20_000_000,
+    ceilingMicroUsd: 50_000_000,
   };
   const endpointClaim: ApprovalClaim = {
     schemaVersion: 1,
