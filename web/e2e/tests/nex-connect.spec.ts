@@ -13,7 +13,8 @@ import {
 //
 // Regression guard: a user with only the @nex-ai/nex npm shim on PATH
 // (no backing binary) used to see the broker's raw JSON error blob in
-// this panel. It must now degrade to the register-externally fallback.
+// this panel. It must now degrade to the install-instructions fallback —
+// a copy-paste install command plus a register-at-nex.ai escape hatch.
 
 // stubNexRegister intercepts POST /nex/register and replies with `body`
 // at `status`, mimicking the broker's handleNexRegister response.
@@ -43,7 +44,7 @@ async function submitEmail(page: Page, email: string) {
 }
 
 test.describe("Settings → Integrations → Connect Nex", () => {
-  test("flips to the external-link fallback when nex-cli is not installed", async ({
+  test("offers the install command and retry when nex-cli is not installed", async ({
     page,
   }) => {
     const getErrors = collectReactErrors(page);
@@ -56,9 +57,17 @@ test.describe("Settings → Integrations → Connect Nex", () => {
     await goToIntegrations(page);
     await submitEmail(page, "founder@example.com");
 
+    const panel = page.getByTestId("nex-connect-panel");
+    // Copy-paste install command surfaced (wuphf never runs it for you).
+    await expect(panel).toContainText("install.sh | sh");
+    // No-terminal escape hatch still offered.
     const fallback = page.getByRole("link", { name: /nex\.ai\/register/i });
-    await expect(fallback).toBeVisible();
     await expect(fallback).toHaveAttribute("href", "https://nex.ai/register");
+    // Retry path returns to the email form without a reload.
+    await page.getByRole("button", { name: /try again/i }).click();
+    await expect(
+      page.getByLabel("Email address for Nex registration"),
+    ).toBeVisible();
     await expectNoReactErrors(page, getErrors, "after not-installed fallback");
   });
 
@@ -75,13 +84,12 @@ test.describe("Settings → Integrations → Connect Nex", () => {
     await goToIntegrations(page);
     await submitEmail(page, "hi@mustafa.li");
 
-    // Fallback shown; none of the raw blob / JSON leaks to the user.
-    await expect(
-      page.getByRole("link", { name: /nex\.ai\/register/i }),
-    ).toBeVisible();
+    // Install instructions shown; the raw JSON / stderr blob does not leak.
     const panel = page.getByTestId("nex-connect-panel");
+    await expect(panel).toContainText("install.sh | sh");
     await expect(panel).not.toContainText('"status":"error"');
-    await expect(panel).not.toContainText("curl -fsSL");
+    await expect(panel).not.toContainText("hi@mustafa.li");
+    await expect(panel).not.toContainText("binary not found");
   });
 
   test("confirms success when registration succeeds", async ({ page }) => {

@@ -49,8 +49,8 @@ describe("<NexConnectPanel>", () => {
   // The reported bug: the @nex-ai/nex npm shim is on PATH but the real
   // binary is not, so `nex-cli setup` exits with "nex-cli binary not found".
   // The broker forwards that as a 502 JSON body. The panel must degrade to
-  // the register-externally fallback — never render the raw JSON.
-  it("flips to the fallback when only the npm shim is installed", async () => {
+  // the install-instructions fallback — never render the raw JSON.
+  it("offers the install command when only the npm shim is installed", async () => {
     postMock.mockRejectedValue(
       new Error(
         JSON.stringify({
@@ -62,15 +62,19 @@ describe("<NexConnectPanel>", () => {
     );
     await submitEmail("hi@mustafa.li");
 
+    // The copy-paste install command is surfaced...
+    expect(await screen.findByText(/install\.sh \| sh$/)).toBeInTheDocument();
+    // ...alongside the no-terminal escape hatch.
     expect(
-      await screen.findByRole("link", { name: /nex\.ai\/register/i }),
+      screen.getByRole("link", { name: /nex\.ai\/register/i }),
     ).toBeInTheDocument();
     // The raw JSON / stderr blob must not leak into the UI.
     expect(screen.queryByText(/"status":"error"/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/hi@mustafa\.li/)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("flips to the fallback when nex-cli is not installed at all", async () => {
+  it("offers the install command when nex-cli is not installed at all", async () => {
     postMock.mockRejectedValue(
       new Error(
         JSON.stringify({ status: "error", error: "nex-cli not installed" }),
@@ -78,9 +82,25 @@ describe("<NexConnectPanel>", () => {
     );
     await submitEmail("founder@example.com");
 
+    expect(await screen.findByText(/install\.sh \| sh$/)).toBeInTheDocument();
+  });
+
+  it("returns to the email form when the user retries after installing", async () => {
+    postMock.mockRejectedValue(
+      new Error(
+        JSON.stringify({ status: "error", error: "nex-cli not installed" }),
+      ),
+    );
+    await submitEmail("founder@example.com");
+    await screen.findByText(/install\.sh \| sh$/);
+
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    // Back to the email input — the user can re-attempt without a reload.
     expect(
-      await screen.findByRole("link", { name: /nex\.ai\/register/i }),
+      screen.getByLabelText("Email address for Nex registration"),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/install\.sh \| sh$/)).not.toBeInTheDocument();
   });
 
   it("shows the parsed message (not raw JSON) for a genuine failure", async () => {
