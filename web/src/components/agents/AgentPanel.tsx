@@ -60,6 +60,13 @@ function routeIdentityKey(route: CurrentRoute): string {
       return "inbox";
     case "task-decision":
       return `task-decision:${route.taskId}`;
+    // Phase 3 — Issues surface
+    case "issues-list":
+      return "issues-list";
+    case "issue-detail":
+      return `issue-detail:${route.issueId}`;
+    case "issue-new":
+      return "issue-new";
     case "unknown":
       return "unknown";
     default: {

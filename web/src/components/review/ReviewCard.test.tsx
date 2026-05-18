@@ -50,17 +50,32 @@ describe("<ReviewCard>", () => {
   });
 
   it("shows no grade badge for fresh cards (< 12 hours old)", () => {
-    render(<ReviewCard review={makeReview({ submitted_ts: tsHoursAgo(1) })} onOpen={() => {}} />);
+    render(
+      <ReviewCard
+        review={makeReview({ submitted_ts: tsHoursAgo(1) })}
+        onOpen={() => {}}
+      />,
+    );
     expect(screen.queryByText(/Waiting|Urgent/i)).not.toBeInTheDocument();
   });
 
   it("shows 'Waiting' badge for cards >= 12 hours old", () => {
-    render(<ReviewCard review={makeReview({ submitted_ts: tsHoursAgo(13) })} onOpen={() => {}} />);
+    render(
+      <ReviewCard
+        review={makeReview({ submitted_ts: tsHoursAgo(13) })}
+        onOpen={() => {}}
+      />,
+    );
     expect(screen.getByText("Waiting")).toBeInTheDocument();
   });
 
   it("shows 'Urgent' badge for cards >= 48 hours old", () => {
-    render(<ReviewCard review={makeReview({ submitted_ts: tsHoursAgo(50) })} onOpen={() => {}} />);
+    render(
+      <ReviewCard
+        review={makeReview({ submitted_ts: tsHoursAgo(50) })}
+        onOpen={() => {}}
+      />,
+    );
     expect(screen.getByText("Urgent")).toBeInTheDocument();
   });
 
@@ -75,7 +90,12 @@ describe("<ReviewCard>", () => {
   });
 
   it("renders the timeout-fill bar for pending cards with age > 0", () => {
-    render(<ReviewCard review={makeReview({ submitted_ts: tsHoursAgo(6) })} onOpen={() => {}} />);
+    render(
+      <ReviewCard
+        review={makeReview({ submitted_ts: tsHoursAgo(6) })}
+        onOpen={() => {}}
+      />,
+    );
     const bar = document.querySelector(".nb-review-card-timeout-bar");
     expect(bar).not.toBeNull();
   });

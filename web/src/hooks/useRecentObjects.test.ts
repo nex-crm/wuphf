@@ -5,9 +5,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import {
-  RECENT_OBJECTS_MAX,
   pushRecentObject,
+  RECENT_OBJECTS_MAX,
   readRecentObjects,
 } from "./useRecentObjects";
 
@@ -17,9 +18,15 @@ beforeEach(() => {
   store = new Map();
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => { store.set(k, v); },
-    removeItem: (k: string) => { store.delete(k); },
-    clear: () => { store.clear(); },
+    setItem: (k: string, v: string) => {
+      store.set(k, v);
+    },
+    removeItem: (k: string) => {
+      store.delete(k);
+    },
+    clear: () => {
+      store.clear();
+    },
   });
 });
 afterEach(() => {
@@ -59,7 +66,9 @@ describe("pushRecentObject", () => {
     // pushRecentObject with a missing field resolves to a fallback and skips.
     // Cast through unknown to test the runtime guard without TS complaining.
     const before = readRecentObjects().length;
-    pushRecentObject({ kind: "agent", slug: "" } as unknown as Parameters<typeof pushRecentObject>[0]);
+    pushRecentObject({ kind: "agent", slug: "" } as unknown as Parameters<
+      typeof pushRecentObject
+    >[0]);
     expect(readRecentObjects().length).toBe(before);
   });
 });

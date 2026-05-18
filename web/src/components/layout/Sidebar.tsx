@@ -9,6 +9,7 @@ import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
 import { InboxButton } from "../sidebar/InboxButton";
+import { IssuesGroup } from "../sidebar/IssuesGroup";
 import { RecentObjectsPanel } from "../sidebar/RecentObjectsPanel";
 import { SidebarColorPicker } from "../sidebar/SidebarColorPicker";
 import { UsagePanel } from "../sidebar/UsagePanel";
@@ -60,6 +61,8 @@ export function Sidebar() {
   const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
   const sidebarChannelsOpen = useAppStore((s) => s.sidebarChannelsOpen);
   const toggleSidebarChannels = useAppStore((s) => s.toggleSidebarChannels);
+  const sidebarIssuesOpen = useAppStore((s) => s.sidebarIssuesOpen);
+  const toggleSidebarIssues = useAppStore((s) => s.toggleSidebarIssues);
   const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
   const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
@@ -140,6 +143,21 @@ export function Sidebar() {
             className={`sidebar-collapsible${sidebarChannelsOpen ? " is-open" : ""}`}
           >
             <ChannelList />
+          </div>
+
+          {/* Phase 3 — Issues group (between Channels and Tools, per spec Surface 2 layout). */}
+          <div
+            className={`sidebar-section${sidebarIssuesOpen ? "" : " is-collapsed"}`}
+          >
+            <IssuesGroup
+              open={sidebarIssuesOpen}
+              onToggle={toggleSidebarIssues}
+            />
+          </div>
+          <div
+            className={`sidebar-collapsible${sidebarIssuesOpen ? " is-open" : ""}`}
+          >
+            {/* Issue list rows are rendered inside IssuesGroup when open */}
           </div>
 
           <div

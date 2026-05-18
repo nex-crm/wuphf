@@ -292,7 +292,11 @@ export async function postTaskReject(
     throw new Error("reject reason required");
   }
   if (USE_MOCKS) {
-    return Promise.resolve({ taskId, action: "reject", status: "recorded-mock" });
+    return Promise.resolve({
+      taskId,
+      action: "reject",
+      status: "recorded-mock",
+    });
   }
   return post(`/tasks`, {
     action: "reject",

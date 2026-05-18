@@ -26,6 +26,10 @@ func TestLifecycleForwardMapAllStates(t *testing.T) {
 		status        string
 		blocked       bool
 	}{
+		// Phase 3 — Drafting: pre-Intake mode where agents comment but cannot
+		// dispatch. PipelineStage="draft" matches the spec's draft phase name.
+		// Status="open" keeps it visible in the open-tasks view. Blocked=false.
+		{LifecycleStateDrafting, "draft", "pending_review", "open", false},
 		{LifecycleStateIntake, "triage", "pending_review", "open", false},
 		{LifecycleStateReady, "triage", "pending_review", "open", false},
 		{LifecycleStateRunning, "implement", "pending_review", "in_progress", false},

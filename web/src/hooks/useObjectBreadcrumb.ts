@@ -127,6 +127,23 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
       ];
     }
     case "channel":
+      return [];
+    // Phase 3 — Issues surface breadcrumbs
+    case "issues-list":
+      return [{ label: "Issues", href: "#/issues" }];
+    case "issue-detail":
+      return [
+        { label: "Issues", href: "#/issues" },
+        {
+          label: route.issueId,
+          href: `#/issues/${encodeURIComponent(route.issueId)}`,
+        },
+      ];
+    case "issue-new":
+      return [
+        { label: "Issues", href: "#/issues" },
+        { label: "New issue", href: "#/issues/new" },
+      ];
     case "unknown":
       return [];
     default: {

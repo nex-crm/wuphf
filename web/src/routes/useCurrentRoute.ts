@@ -6,6 +6,9 @@ import {
   channelRoute,
   dmRoute,
   inboxRoute,
+  issueDetailRoute,
+  issueNewRoute,
+  issuesRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
@@ -44,6 +47,10 @@ export type CurrentRoute =
   | { kind: "reviews" }
   | { kind: "inbox" }
   | { kind: "task-decision"; taskId: string }
+  // Phase 3 — Issues surface
+  | { kind: "issues-list" }
+  | { kind: "issue-detail"; issueId: string }
+  | { kind: "issue-new" }
   | { kind: "unknown" };
 
 interface ParamsShape {
@@ -53,6 +60,7 @@ interface ParamsShape {
   entrySlug?: string;
   taskId?: string;
   _splat?: string;
+  issueId?: string;
 }
 
 interface SearchShape {
@@ -75,7 +83,10 @@ type CurrentRouteId =
   | typeof notebookEntryRoute.id
   | typeof reviewsRoute.id
   | typeof inboxRoute.id
-  | typeof taskDecisionRoute.id;
+  | typeof taskDecisionRoute.id
+  | typeof issuesRoute.id
+  | typeof issueDetailRoute.id
+  | typeof issueNewRoute.id;
 
 const CURRENT_ROUTE_IDS = [
   channelRoute.id,
@@ -93,6 +104,9 @@ const CURRENT_ROUTE_IDS = [
   reviewsRoute.id,
   inboxRoute.id,
   taskDecisionRoute.id,
+  issuesRoute.id,
+  issueDetailRoute.id,
+  issueNewRoute.id,
 ] as const satisfies readonly CurrentRouteId[];
 
 const CURRENT_ROUTE_ID_SET = new Set<string>(CURRENT_ROUTE_IDS);
@@ -153,6 +167,13 @@ const ROUTE_DERIVERS = {
     kind: "task-decision",
     taskId: params.taskId ?? "",
   }),
+  // Phase 3 — Issues surface
+  [issuesRoute.id]: () => ({ kind: "issues-list" }),
+  [issueDetailRoute.id]: (params) => ({
+    kind: "issue-detail",
+    issueId: params.issueId ?? "",
+  }),
+  [issueNewRoute.id]: () => ({ kind: "issue-new" }),
 } satisfies Record<CurrentRouteId, RouteDeriver>;
 
 /**
@@ -241,6 +262,10 @@ export function useCurrentApp(): string | null {
       return "inbox";
     case "task-decision":
       return "inbox";
+    case "issues-list":
+    case "issue-detail":
+    case "issue-new":
+      return "issues";
     case "channel":
     case "dm":
     case "unknown":

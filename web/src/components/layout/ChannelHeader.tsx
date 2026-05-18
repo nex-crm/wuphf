@@ -42,6 +42,13 @@ function headerTitleAndDesc(
       return { title: "Decision Inbox", desc: "" };
     case "task-decision":
       return { title: `Task ${route.taskId}`, desc: "" };
+    // Phase 3 — Issues surface
+    case "issues-list":
+      return { title: "Issues", desc: "" };
+    case "issue-detail":
+      return { title: `Issue ${route.issueId}`, desc: "" };
+    case "issue-new":
+      return { title: "New issue", desc: "" };
     case "unknown":
       return { title: "", desc: "" };
     default: {
@@ -95,8 +102,13 @@ function routeToObjectRef(
     case "reviews":
     case "inbox":
     case "channel":
+    // Phase 3 — Issues surface (not discrete navigable objects for recent-objects)
+    case "issues-list":
+    case "issue-new":
     case "unknown":
       return null;
+    case "issue-detail":
+      return { kind: "task", id: route.issueId };
     default: {
       const _exhaustive: never = route;
       void _exhaustive;

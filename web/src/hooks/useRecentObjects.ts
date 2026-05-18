@@ -10,7 +10,8 @@
  */
 
 import { useCallback } from "react";
-import { resolveObjectRoute, type ObjectRef } from "../lib/objectRoutes";
+
+import { type ObjectRef, resolveObjectRoute } from "../lib/objectRoutes";
 
 export const RECENT_OBJECTS_MAX = 10;
 const STORAGE_KEY = "wuphf-recent-objects";

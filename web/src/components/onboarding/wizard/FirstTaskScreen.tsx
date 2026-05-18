@@ -1,4 +1,5 @@
 import { useState } from "react";
+
 import { ArrowIcon } from "./components";
 
 interface FirstTaskScreenProps {
@@ -61,7 +62,10 @@ export function FirstTaskScreen({
         </p>
       </div>
 
-      <div className="wizard-panel" style={{ gap: 8, display: "flex", flexDirection: "column" }}>
+      <div
+        className="wizard-panel"
+        style={{ gap: 8, display: "flex", flexDirection: "column" }}
+      >
         <p
           style={{
             fontSize: 12,
@@ -78,7 +82,10 @@ export function FirstTaskScreen({
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={() => { setActed(true); onSkipToOffice(); }}
+          onClick={() => {
+            setActed(true);
+            onSkipToOffice();
+          }}
           disabled={acted}
           data-testid="first-task-skip"
         >
@@ -87,7 +94,10 @@ export function FirstTaskScreen({
         <button
           type="button"
           className="btn btn-primary"
-          onClick={() => { setActed(true); onWatchTask(); }}
+          onClick={() => {
+            setActed(true);
+            onWatchTask();
+          }}
           disabled={acted}
           data-testid="first-task-watch"
         >
