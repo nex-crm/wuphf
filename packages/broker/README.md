@@ -102,8 +102,9 @@ GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
 ## Invariants
 
 1. **Bind is `127.0.0.1` only.** Never `0.0.0.0`, never a LAN IP.
-2. **DNS-rebinding guard runs on every request.** Both `Host` (allowed loopback
-   hostname) and `RemoteAddr` (loopback peer IP) must pass.
+2. **DNS-rebinding guard runs on every request.** Both `Host`
+   (`127.0.0.1` or `localhost`, with an optional port) and `RemoteAddr`
+   (loopback peer IP) must pass.
 3. **Constant-time token comparison.** Bearer compare goes through
    `node:crypto.timingSafeEqual`.
 4. **Token is bootstrap-only on `/api-token`.** Every other API surface requires
@@ -132,12 +133,17 @@ GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
     ask for a role, but only roles listed for the bearer-mapped agent in
     `webauthn.enrollableRoles` can receive a registration challenge. Agents
     without an explicit entry cannot enroll any role.
+12. **Packaged WebAuthn uses localhost as the browser origin.** The listener
+    still binds `127.0.0.1`, but the desktop loads
+    `http://localhost:<port>/` and the broker appends
+    `http://localhost:<port>` to WebAuthn `allowedOrigins` so the RP ID
+    `localhost` matches the page origin.
 
 ## Spec anchors
 
 - `business-musings/wuphf-greenfield-rewrite-rfc-2026-05.md` §7.3 (IPC discipline) and §15 Stream A row "feat/broker-loopback-listener".
 - `docs/architecture/broker-contract.md` (the v0 broker contract this branch carries forward to v1).
-- `@wuphf/protocol#ApiBootstrap`, `isAllowedLoopbackHost`, `isLoopbackRemoteAddress`.
+- `@wuphf/protocol#ApiBootstrap`, `BrokerUrl`, and `isLoopbackRemoteAddress`.
 
 ## Validation
 

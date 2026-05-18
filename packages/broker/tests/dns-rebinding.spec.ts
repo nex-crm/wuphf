@@ -7,6 +7,9 @@ describe("checkLoopbackRequest", () => {
     expect(
       checkLoopbackRequest({ hostHeader: "127.0.0.1:7891", remoteAddress: "127.0.0.1" }),
     ).toEqual({ allowed: true });
+    expect(
+      checkLoopbackRequest({ hostHeader: "localhost:7891", remoteAddress: "127.0.0.1" }),
+    ).toEqual({ allowed: true });
     expect(checkLoopbackRequest({ hostHeader: "localhost", remoteAddress: "::1" })).toEqual({
       allowed: true,
     });
@@ -31,6 +34,14 @@ describe("checkLoopbackRequest", () => {
     expect(
       checkLoopbackRequest({ hostHeader: "127.0.0.1.evil", remoteAddress: "127.0.0.1" }),
     ).toEqual({ allowed: false, reason: "bad_host" });
+    expect(checkLoopbackRequest({ hostHeader: "[::1]:7891", remoteAddress: "127.0.0.1" })).toEqual({
+      allowed: false,
+      reason: "bad_host",
+    });
+    expect(checkLoopbackRequest({ hostHeader: "::1", remoteAddress: "127.0.0.1" })).toEqual({
+      allowed: false,
+      reason: "bad_host",
+    });
   });
 
   it("rejects missing peer", () => {

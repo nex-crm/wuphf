@@ -55,7 +55,7 @@ import type { AgentProviderRoutingStore } from "./agent-provider-routing/types.t
 import { extractBearerFromHeader, tokenMatches } from "./auth.ts";
 import { DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS } from "./cost-ledger/idempotency.ts";
 import { type CostRouteDeps, handleCostRoute } from "./cost-ledger/routes.ts";
-import { checkLoopbackRequest } from "./dns-rebinding-guard.ts";
+import { checkLoopbackRequest, parseAllowedBrokerHost } from "./dns-rebinding-guard.ts";
 import { InMemoryReceiptStore, type ReceiptStore } from "./receipt-store.ts";
 import { handleReceiptCreate, handleReceiptGet, handleThreadReceiptsList } from "./receipts.ts";
 import { createRunnerRouteState, type RunnerRouteState } from "./runners/route.ts";
@@ -78,6 +78,7 @@ import {
 } from "./webauthn/types.ts";
 
 const LOOPBACK_HOST = "127.0.0.1";
+const BROWSER_WEBAUTHN_HOST = "localhost";
 
 export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHandle> {
   const logger: BrokerLogger = config.logger ?? NOOP_LOGGER;
@@ -185,7 +186,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
     // broker's own packaged renderer origin is knowable only after listen().
     webauthn = {
       ...webauthn,
-      allowedOrigins: appendAllowedWebAuthnOrigin(webauthn.allowedOrigins, url),
+      allowedOrigins: appendAllowedWebAuthnOrigin(webauthn.allowedOrigins, port),
     };
   }
   logger.info("listener_started", { port, url });
@@ -364,7 +365,7 @@ async function routeRequest(
       return;
     }
   }
-  if (deps.webauthn !== null) {
+  if (deps.webauthn !== null && pathname.startsWith("/api/webauthn/")) {
     const handled = await handleWebAuthnRoute(req, res, pathname, deps.webauthn);
     if (handled) return;
   }
@@ -412,10 +413,9 @@ async function routeRequest(
 
 function handleApiToken(req: IncomingMessage, res: ServerResponse, deps: RouteDeps): void {
   // Bootstrap returns the bearer + broker URL. The Host header is already
-  // validated by the loopback guard; we synthesize the broker_url from the
-  // listener's bound port (taken from the request socket) so the response
-  // is honest about where the broker is listening even when a forwarded
-  // Host header tries to lie.
+  // validated by the loopback guard, and only `127.0.0.1` or `localhost`
+  // can reach this point. Pair that host with the socket's bound port so
+  // browser same-origin callers receive a URL matching their page origin.
   const localAddress = req.socket.localAddress ?? LOOPBACK_HOST;
   const localPort = req.socket.localPort ?? 0;
   if (localPort === 0) {
@@ -431,15 +431,18 @@ function handleApiToken(req: IncomingMessage, res: ServerResponse, deps: RouteDe
   }
   // asBrokerUrl validates the full shape (http: scheme, explicit non-default
   // port, loopback host) at the wire boundary. We just built the URL from
-  // socket.localAddress + localPort which are both already validated; this
-  // is belt-and-suspenders against future refactors that might produce a
+  // the validated Host header and the socket's bound port; this is
+  // belt-and-suspenders against future refactors that might produce a
   // malformed URL silently. Throwing here would 500 the caller via the
   // routeRequest catch in createBroker — preferable to emitting a wire
   // value the codec would reject on read.
-  const brokerUrl = asBrokerUrl(`http://${normalizeLoopback(localAddress)}:${localPort}`);
+  const brokerHost =
+    parseAllowedBrokerHost(req.headers.host ?? "") ?? normalizeLoopback(localAddress);
+  const brokerUrl = asBrokerUrl(`http://${brokerHost}:${localPort}`);
 
   // Browser-hardening: if the request carries an Origin header (every
-  // browser-context fetch does), it MUST match the broker's bound origin.
+  // browser-context fetch does), it MUST match the validated Host + bound
+  // port origin we will return in the bootstrap body.
   // This blocks cross-origin fetches from same-machine browser contexts
   // (Chrome extensions, dev-tool consoles attached to other pages, third-
   // party local web apps that happen to be running). It does NOT block
@@ -566,11 +569,8 @@ function assertNoTrustedDefaultEnrollableRole(trustedRoles: readonly ApprovalRol
   }
 }
 
-function appendAllowedWebAuthnOrigin(
-  allowedOrigins: readonly string[],
-  brokerUrl: string,
-): string[] {
-  const brokerOrigin = new URL(brokerUrl).origin;
+function appendAllowedWebAuthnOrigin(allowedOrigins: readonly string[], port: number): string[] {
+  const brokerOrigin = `http://${BROWSER_WEBAUTHN_HOST}:${port}`;
   if (allowedOrigins.includes(brokerOrigin)) return [...allowedOrigins];
   return [...allowedOrigins, brokerOrigin];
 }

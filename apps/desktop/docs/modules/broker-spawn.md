@@ -20,9 +20,9 @@ sequenceDiagram
   Utility->>Entry: boot utility process
   Entry->>Listener: createBroker({ port: 0, renderer, logger, receiptStore, webauthn })
   Listener-->>Entry: { url, port, token }
-  Entry-->>Supervisor: postMessage({ ready: true, brokerUrl })
+  Entry-->>Supervisor: postMessage({ ready: true, brokerUrl: browser URL })
   Supervisor->>Main: whenReady() resolves with BrokerUrl
-  Main->>Main: createMainWindow() — loads brokerUrl in packaged mode
+  Main->>Main: createMainWindow() — loads localhost broker URL in packaged mode
   Entry-->>Supervisor: postMessage({ alive: true }) every 1s
   Listener-->>Supervisor: postMessage({ broker_log, event, payload }) per log
   Main->>Supervisor: app.before-quit stop()
@@ -44,15 +44,20 @@ sequenceDiagram
 ## Ready Handshake
 
 The supervisor exposes `whenReady(): Promise<BrokerUrl>` which resolves once
-the broker subprocess posts `{ ready: true, brokerUrl }`. The URL is
-validated against `@wuphf/protocol`'s `isBrokerUrl` brand at the IPC
-boundary — a malformed message is dropped, not handed downstream as a
-"string" the renderer might trust as a fetch origin.
+the broker subprocess posts `{ ready: true, brokerUrl }`. In packaged mode the
+entry converts the listener's bound `http://127.0.0.1:<port>` handle into the
+browser-facing `http://localhost:<port>` form before posting readiness, so the
+renderer page origin, `/api-token` bootstrap URL, and WebAuthn RP ID all use
+`localhost`. The URL is validated against `@wuphf/protocol`'s `isBrokerUrl`
+brand at the IPC boundary — a malformed message is dropped, not handed
+downstream as a "string" the renderer might trust as a fetch origin.
 
-In packaged mode the `BrowserWindow` loads `${brokerUrl}/` so `/api-token`,
-`/api/*`, and the agent terminal WebSocket are all same-origin loopback. In
-dev mode (electron-vite serves the renderer) the broker still starts and
-the renderer reaches it cross-origin via `getBrokerStatus().brokerUrl`.
+In packaged mode the `BrowserWindow` loads `${brokerUrl}/` in that localhost
+form so `/api-token`, `/api/*`, WebAuthn, and the agent terminal WebSocket are
+all same-origin loopback. In dev mode (electron-vite serves the renderer) the
+broker still starts and the renderer reaches it cross-origin via
+`getBrokerStatus().brokerUrl`; `WUPHF_DEV_RENDERER_ORIGIN` keeps `/api-token`
+available to the dev renderer origin.
 
 `subscribeReady(listener)` fires on every `{ ready }`, including restarts.
 The main process uses this to destroy and recreate the `BrowserWindow` when
@@ -136,10 +141,12 @@ the stable `operator` agent id, and that agent may enroll `viewer`, `approver`,
 and `host` credentials. This is intentionally narrow until the desktop has a
 real multi-agent identity model.
 
-The packaged renderer is loaded from `${brokerUrl}/`, so the broker appends its
-own bound loopback origin to WebAuthn's `allowedOrigins` after `listen()` picks
-the ephemeral port. In dev, `WUPHF_DEV_RENDERER_ORIGIN` is still passed through
-so the electron-vite renderer origin is allowed as well.
+The packaged renderer is loaded from `http://localhost:<broker-port>/`, so the
+broker appends that localhost origin to WebAuthn's `allowedOrigins` after
+`listen()` picks the ephemeral port. The listener still binds `127.0.0.1`;
+`localhost` is only the browser-facing name, chosen because WebAuthn RP IDs
+cannot be IP addresses. In dev, `WUPHF_DEV_RENDERER_ORIGIN` is still passed
+through so the electron-vite renderer origin is allowed as well.
 
 ### Receipt-store recovery
 

@@ -1,7 +1,8 @@
 import { pathToFileURL } from "node:url";
 
-import { isBrokerUrl } from "@wuphf/protocol";
 import { BrowserWindow, shell } from "electron";
+
+import { toDesktopBrowserBrokerUrl } from "./broker-url.ts";
 
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
 const RENDERER_DEV_URL_ENV_KEY = "ELECTRON_RENDERER_URL";
@@ -14,10 +15,10 @@ export interface CreateSecureWindowConfig {
   readonly expectedDevServerUrl?: string;
   /**
    * Loopback broker URL (e.g. `http://127.0.0.1:54321`). When present and no
-   * dev server URL is supplied, the BrowserWindow loads `${brokerUrl}/` so
-   * `/api-token`, `/api/*`, and the agent terminal WebSocket are all
-   * same-origin loopback. Branch-4 contract: the broker serves the renderer
-   * bundle in packaged mode.
+   * dev server URL is supplied, the BrowserWindow loads the browser-facing
+   * form of this broker URL so `/api-token`, `/api/*`, and the agent terminal
+   * WebSocket are all same-origin loopback. Packaged loads use `localhost`
+   * rather than `127.0.0.1` so WebAuthn's `localhost` RP ID is eligible.
    */
   readonly brokerUrl?: string;
 }
@@ -100,10 +101,13 @@ function resolveRendererUrl(config: CreateSecureWindowConfig): string {
     // value like `http://127.0.0.1:54321/api-token?x=1#frag` would pass
     // it but smuggle path/query/fragment into the `loadURL` target and
     // through the `will-navigate` exact-match gate downstream.
-    if (!isBrokerUrl(config.brokerUrl)) {
+    let browserBrokerUrl: string;
+    try {
+      browserBrokerUrl = toDesktopBrowserBrokerUrl(config.brokerUrl);
+    } catch {
       throw new Error(`Refusing to load non-loopback broker URL: ${config.brokerUrl}`);
     }
-    const brokerUrl = parseUrl(config.brokerUrl, "broker URL");
+    const brokerUrl = parseUrl(browserBrokerUrl, "broker URL");
     // Trailing slash matters: `will-navigate` exact-match compares against
     // `rendererUrl`, and the broker serves `/` for the bundle. Without the
     // slash, navigation back to `${brokerUrl}/` would be blocked.

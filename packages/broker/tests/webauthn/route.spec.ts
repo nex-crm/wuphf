@@ -1,4 +1,5 @@
 import { type IncomingHttpHeaders, type OutgoingHttpHeaders, request } from "node:http";
+import { isIP } from "node:net";
 
 import type {
   AuthenticationResponseJSON,
@@ -187,7 +188,7 @@ describe("WebAuthn routes", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(ceremony.registrationVerificationOrigins).toContain(handle.url);
+    expect(ceremony.registrationVerificationOrigins).toContain(packagedWebAuthnOrigin(handle));
     await expect(res.json()).resolves.toEqual({
       credentialId: "cred_approver",
       role: "approver",
@@ -207,6 +208,32 @@ describe("WebAuthn routes", () => {
 
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toEqual({ error: "registration_role_not_enrollable" });
+  });
+
+  it("uses a browser-valid packaged WebAuthn origin and RP ID pairing", async () => {
+    const ceremony = new FakeCeremony();
+    const handle = await startBroker({ ceremony });
+    const challenge = await registrationChallenge(handle, "approver");
+
+    const res = await postJson(handle, "/api/webauthn/registration/verify", {
+      challengeId: challenge.challengeId,
+      attestationResponse: registrationResponse("cred_packaged_pairing"),
+    });
+
+    expect(res.status).toBe(200);
+    const packagedOrigin = packagedWebAuthnOrigin(handle);
+    const windowLoadUrl = `${packagedOrigin}/`;
+    const originHost = new URL(packagedOrigin).hostname;
+    const windowHost = new URL(windowLoadUrl).hostname;
+    const rpId = challenge.creationOptions.rp.id;
+    if (rpId === undefined) {
+      throw new Error("Expected registration options to include an RP ID");
+    }
+
+    expect(ceremony.registrationVerificationOrigins).toContain(packagedOrigin);
+    expect(windowHost).toBe(originHost);
+    expect(rpId).toBe(originHost);
+    expect(isIP(rpId)).toBe(0);
   });
 
   it("starts a cosign challenge bound to a protocol-parsed claim and scope", async () => {
@@ -640,9 +667,13 @@ async function startBroker(
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     webauthn,
   });
-  ceremony.expectedOrigins = ["http://localhost:5173", handle.url];
+  ceremony.expectedOrigins = ["http://localhost:5173", packagedWebAuthnOrigin(handle)];
   broker = handle;
   return handle;
+}
+
+function packagedWebAuthnOrigin(handle: BrokerHandle): string {
+  return `http://localhost:${handle.port}`;
 }
 
 function enrollableRolesForAgent(
