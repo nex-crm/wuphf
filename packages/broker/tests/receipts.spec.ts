@@ -36,8 +36,10 @@ import {
   InMemoryReceiptStore,
   type ReceiptStore,
   ReceiptStoreBusyError,
+  ReceiptStoreFullError,
   ReceiptStoreUnavailableError,
 } from "../src/receipt-store.ts";
+import { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
 import type {
   ConsumedWebAuthnTokenRecord,
   WebAuthnCeremony,
@@ -741,6 +743,26 @@ describe("receipts API", () => {
       expect(await res.text()).toBe(receiptToJson(receipt));
     });
 
+    it("returns a structured 400 when a SQLite receipt names a missing thread", async () => {
+      const store = SqliteReceiptStore.open({ path: ":memory:" });
+      try {
+        broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+        const res = await postReceipt(
+          broker.url,
+          receiptToJson(minimalReceiptV2(RECEIPT_ID_A, THREAD_ID_A)),
+        );
+
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: "thread_not_found" });
+      } finally {
+        if (broker !== null) {
+          await broker.stop();
+          broker = null;
+        }
+        store.close();
+      }
+    });
+
     it("returns 404 for a syntactically-valid but unknown receipt id", async () => {
       broker = await createBroker({ port: 0, token: FIXED_TOKEN });
       const res = await fetch(`${broker.url}/api/receipts/${RECEIPT_ID_A}`, {
@@ -840,6 +862,22 @@ describe("receipts API", () => {
       expect(next.pathname).toBe(`/api/threads/${THREAD_ID_A}/receipts`);
       expect(next.searchParams.get("cursor")).toBeTruthy();
       expect(next.searchParams.get("limit")).toBe("2");
+    });
+
+    it("serves the canonical /api/v1 thread receipts path", async () => {
+      const store = new InMemoryReceiptStore();
+      await seedThreadReceipts(store, 3);
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await fetch(`${broker.url}/api/v1/threads/${THREAD_ID_A}/receipts?limit=2`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      });
+
+      expect(res.status).toBe(200);
+      const parsed = JSON.parse(await res.text()) as Array<{ id: string }>;
+      expect(parsed).toHaveLength(2);
+      const next = new URL(nextLinkPath(res.headers), broker.url);
+      expect(next.pathname).toBe(`/api/v1/threads/${THREAD_ID_A}/receipts`);
     });
 
     it("omits the Link header on the last page", async () => {
@@ -1017,6 +1055,29 @@ describe("receipts API", () => {
       expect(res.status).toBe(503);
       expect(res.headers.get("retry-after")).toBe("1");
       expect(await res.json()).toEqual({ error: "store_busy" });
+    });
+
+    it("maps a fake ReceiptStoreFullError to 507", async () => {
+      const store: ReceiptStore = {
+        async put() {
+          throw new ReceiptStoreFullError("test full");
+        },
+        async get() {
+          return null;
+        },
+        async list() {
+          return { items: [], nextCursor: null };
+        },
+        size() {
+          return 0;
+        },
+      };
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN, receiptStore: store });
+
+      const res = await postReceipt(broker.url, receiptToJson(minimalReceiptV1(RECEIPT_ID_A)));
+
+      expect(res.status).toBe(507);
+      expect(await res.json()).toEqual({ error: "store_full" });
     });
 
     it("maps ReceiptStoreUnavailableError to 503 without Retry-After", async () => {

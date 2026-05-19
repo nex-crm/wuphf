@@ -21,6 +21,7 @@ import {
   InvalidListCursorError,
   InvalidListLimitError,
   ReceiptStoreFullError,
+  ReceiptThreadNotFoundError,
 } from "../src/receipt-store.ts";
 import type { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
 
@@ -81,6 +82,16 @@ function openStore(): { readonly db: Database.Database; readonly store: SqliteRe
   return { db, store: constructSqliteReceiptStoreForTesting(db) };
 }
 
+function openStoreWithThreads(): {
+  readonly db: Database.Database;
+  readonly store: SqliteReceiptStore;
+} {
+  const db = openDatabase({ path: ":memory:" });
+  runMigrations(db);
+  seedThreadRows(db, THREAD_A, THREAD_B);
+  return { db, store: constructSqliteReceiptStoreForTesting(db) };
+}
+
 function tempDbPath(): string {
   const dir = mkdtempSync(join(tmpdir(), "wuphf-sqlite-store-"));
   tempDirs.push(dir);
@@ -118,6 +129,24 @@ function maxEventLogLsn(db: Database.Database): number {
   return row.lsn;
 }
 
+function seedThreadRows(db: Database.Database, ...threadIds: readonly string[]): void {
+  const appendEvent = db.prepare<[Buffer], { readonly lsn: number }>(
+    "INSERT INTO event_log (ts_ms, type, payload) VALUES (0, 'thread.created', ?) RETURNING lsn",
+  );
+  const insertThread = db.prepare<[string, number, string]>(
+    `INSERT INTO threads
+       (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms, external_refs)
+     VALUES (?, 'receipt store test thread', 'open', ?, 'broker', 0, 0, ?)`,
+  );
+  for (const threadId of threadIds) {
+    const row = appendEvent.get(Buffer.from(`{"threadId":"${threadId}"}`, "utf8"));
+    if (row === undefined) {
+      throw new Error("seed thread event insert returned no row");
+    }
+    insertThread.run(threadId, row.lsn, '{"source_urls":[],"entity_ids":[]}');
+  }
+}
+
 function receiptIdAt(index: number): string {
   let value = index;
   let suffix = "";
@@ -130,7 +159,7 @@ function receiptIdAt(index: number): string {
 
 describe("SqliteReceiptStore", () => {
   it("put returns existed:false, then get and list immediately include the receipt", async () => {
-    const { store } = openStore();
+    const { store } = openStoreWithThreads();
     try {
       const receipt = minimalReceiptV2(receiptIdAt(1), THREAD_A);
 
@@ -140,6 +169,19 @@ describe("SqliteReceiptStore", () => {
         items: [receipt],
         nextCursor: null,
       });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("rejects a V2 receipt that names a missing thread without appending receipt.put", async () => {
+    const { db, store } = openStore();
+    try {
+      await expect(store.put(minimalReceiptV2(receiptIdAt(1), THREAD_A))).rejects.toBeInstanceOf(
+        ReceiptThreadNotFoundError,
+      );
+      expect(countRows(db, "event_log")).toBe(0);
+      expect(countRows(db, "receipts_projection")).toBe(0);
     } finally {
       store.close();
     }
@@ -163,7 +205,7 @@ describe("SqliteReceiptStore", () => {
   });
 
   it("list({ threadId }) returns receipts for that thread only in LSN order", async () => {
-    const { store } = openStore();
+    const { store } = openStoreWithThreads();
     try {
       const a1 = minimalReceiptV2(receiptIdAt(1), THREAD_A);
       const b1 = minimalReceiptV2(receiptIdAt(2), THREAD_B);
@@ -184,7 +226,7 @@ describe("SqliteReceiptStore", () => {
   });
 
   it("list({ threadId, limit }) returns a bounded page and nextCursor when more rows exist", async () => {
-    const { store } = openStore();
+    const { store } = openStoreWithThreads();
     try {
       const receipts = Array.from({ length: 6 }, (_, index) =>
         minimalReceiptV2(receiptIdAt(index + 1), THREAD_A),
@@ -205,7 +247,7 @@ describe("SqliteReceiptStore", () => {
   });
 
   it("list({ cursor }) skips already-seen items", async () => {
-    const { store } = openStore();
+    const { store } = openStoreWithThreads();
     try {
       const receipts = Array.from({ length: 5 }, (_, index) =>
         minimalReceiptV2(receiptIdAt(index + 1), THREAD_A),
@@ -278,6 +320,7 @@ describe("SqliteReceiptStore", () => {
     const path = tempDbPath();
     const firstDb = openDatabase({ path });
     runMigrations(firstDb);
+    seedThreadRows(firstDb, THREAD_A, THREAD_B);
     const firstStore = constructSqliteReceiptStoreForTesting(firstDb);
     const first = minimalReceiptV2(receiptIdAt(1), THREAD_A);
     try {
@@ -294,7 +337,7 @@ describe("SqliteReceiptStore", () => {
 
       expect(await secondStore.get(first.id)).toEqual(first);
       expect(await secondStore.put(second)).toEqual({ existed: false });
-      expect(maxEventLogLsn(secondDb)).toBe(2);
+      expect(maxEventLogLsn(secondDb)).toBe(4);
       expect((await secondStore.list()).items.map((receipt) => receipt.id)).toEqual([
         first.id,
         second.id,
@@ -305,7 +348,7 @@ describe("SqliteReceiptStore", () => {
   });
 
   it("rolls back event_log when projection insert fails in the same transaction", async () => {
-    const { db, store } = openStore();
+    const { db, store } = openStoreWithThreads();
     try {
       db.exec(`
         CREATE TRIGGER fail_receipts_projection_insert
@@ -318,7 +361,7 @@ describe("SqliteReceiptStore", () => {
       await expect(store.put(minimalReceiptV2(receiptIdAt(1), THREAD_A))).rejects.toThrow(
         /forced_projection_failure/,
       );
-      expect(countRows(db, "event_log")).toBe(0);
+      expect(countRows(db, "event_log")).toBe(2);
       expect(countRows(db, "receipts_projection")).toBe(0);
     } finally {
       store.close();
@@ -328,6 +371,7 @@ describe("SqliteReceiptStore", () => {
   it("throws ReceiptStoreFullError when maxReceipts is exceeded", async () => {
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
+    seedThreadRows(db, THREAD_A, THREAD_B);
     const store = constructSqliteReceiptStoreForTesting(db, undefined, 2);
     try {
       await store.put(minimalReceiptV2(receiptIdAt(1), THREAD_A));
@@ -336,7 +380,7 @@ describe("SqliteReceiptStore", () => {
         ReceiptStoreFullError,
       );
       // The 507 path rolls back: third receipt didn't land in either table.
-      expect(countRows(db, "event_log")).toBe(2);
+      expect(countRows(db, "event_log")).toBe(4);
       expect(countRows(db, "receipts_projection")).toBe(2);
     } finally {
       store.close();
@@ -349,6 +393,7 @@ describe("SqliteReceiptStore", () => {
     // receipt at capacity returns 409 not 507.
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
+    seedThreadRows(db, THREAD_A, THREAD_B);
     const store = constructSqliteReceiptStoreForTesting(db, undefined, 1);
     try {
       const r = minimalReceiptV1(receiptIdAt(1));

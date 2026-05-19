@@ -13,19 +13,22 @@ import {
   SanitizedString,
   sha256Hex,
   type ThreadCreateCommand,
+  type ThreadCreatedAuditPayload,
   type ThreadSpecEditCommand,
   type ThreadSpecEditedAuditPayload,
   type ThreadStatusChangeCommand,
+  type ThreadStatusChangedAuditPayload,
   threadAuditPayloadFromJsonValue,
+  threadAuditPayloadToBytes,
   threadSpecContentHash,
 } from "@wuphf/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createEventLog, openDatabase, runMigrations } from "../../src/event-log/index.ts";
-import { InMemoryReceiptStore } from "../../src/receipt-store.ts";
+import { constructSqliteReceiptStoreForTesting } from "../../src/internal/sqlite-receipt-store-testing.ts";
+import type { SqliteReceiptStore } from "../../src/sqlite-receipt-store.ts";
 import {
-  createThreadAppender,
-  createThreadStateStore,
+  createThreadSubsystem,
   parseThreadIdempotencyKey,
   snapshotThreadProjection,
   type ThreadAppender,
@@ -33,6 +36,7 @@ import {
   ThreadConflictError,
   ThreadNotFoundError,
   type ThreadStateStore,
+  type ThreadSubsystem,
   ThreadTerminalTransitionError,
 } from "../../src/threads/index.ts";
 
@@ -49,15 +53,16 @@ const INITIAL_CONTENT: JsonValue = { goal: "ship threads", version: 1 };
 interface Fixture {
   readonly db: ReturnType<typeof openDatabase>;
   readonly eventLog: ReturnType<typeof createEventLog>;
+  readonly subsystem: ThreadSubsystem;
   readonly state: ThreadStateStore;
   readonly appender: ThreadAppender;
-  readonly receiptStore: InMemoryReceiptStore;
+  readonly receiptStore: SqliteReceiptStore;
 }
 
 let fixture: Fixture | null = null;
 
 afterEach(() => {
-  fixture?.db.close();
+  fixture?.receiptStore.close();
   fixture = null;
 });
 
@@ -65,10 +70,10 @@ function setup(): Fixture {
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
   const eventLog = createEventLog(db);
-  const state = createThreadStateStore(db);
-  const appender = createThreadAppender(db, eventLog, state);
-  const receiptStore = new InMemoryReceiptStore();
-  fixture = { db, eventLog, state, appender, receiptStore };
+  const receiptStore = constructSqliteReceiptStoreForTesting(db, eventLog);
+  const subsystem = createThreadSubsystem(db, eventLog, receiptStore);
+  const { state, appender } = subsystem;
+  fixture = { db, eventLog, subsystem, state, appender, receiptStore };
   return fixture;
 }
 
@@ -113,6 +118,7 @@ function appendCreate(fix: Fixture, key = CREATE_KEY, threadId = THREAD_ID) {
 
 function specEditCommand(args: {
   readonly key?: string;
+  readonly threadId?: string;
   readonly revisionId?: string;
   readonly baseRevisionId: string;
   readonly content: JsonValue;
@@ -122,7 +128,7 @@ function specEditCommand(args: {
   return {
     kind: "thread.spec.edit",
     idempotencyKey: commandIdempotencyKey(key, "thread.spec.edit"),
-    threadId: asThreadId(THREAD_ID),
+    threadId: asThreadId(args.threadId ?? THREAD_ID),
     revisionId: asThreadSpecRevisionId(args.revisionId ?? "01JRZ3NDEKTSV4RRFFQ69G5FJ0"),
     baseRevisionId: asThreadSpecRevisionId(args.baseRevisionId),
     content: args.content,
@@ -182,6 +188,41 @@ function countEvents(fix: Fixture, type: string): number {
       )
       .get(type)?.count ?? 0
   );
+}
+
+function eventPayloadBytes(fix: Fixture, type: string): readonly Buffer[] {
+  return fix.db
+    .prepare<[string], { readonly payload: Buffer }>(
+      "SELECT payload FROM event_log WHERE type = ? ORDER BY lsn ASC",
+    )
+    .all(type)
+    .map((row) => row.payload);
+}
+
+function expectThreadPayloadBytes(
+  actual: Buffer,
+  kind: "thread_created",
+  payload: ThreadCreatedAuditPayload,
+): void;
+function expectThreadPayloadBytes(
+  actual: Buffer,
+  kind: "thread_spec_edited",
+  payload: ThreadSpecEditedAuditPayload,
+): void;
+function expectThreadPayloadBytes(
+  actual: Buffer,
+  kind: "thread_status_changed",
+  payload: ThreadStatusChangedAuditPayload,
+): void;
+function expectThreadPayloadBytes(
+  actual: Buffer,
+  kind: "thread_created" | "thread_spec_edited" | "thread_status_changed",
+  payload:
+    | ThreadCreatedAuditPayload
+    | ThreadSpecEditedAuditPayload
+    | ThreadStatusChangedAuditPayload,
+): void {
+  expect(actual).toEqual(Buffer.from(threadAuditPayloadToBytes(kind, payload)));
 }
 
 function minimalReceiptV1(id: string, taskId: string): ReceiptSnapshot {
@@ -305,6 +346,38 @@ describe("thread appender and projection", () => {
     expect(baseRevisionIds).toEqual([null, baseRevisionId]);
   });
 
+  it("rejects spec revision id reuse across threads", () => {
+    const fix = setup();
+    appendCreate(fix);
+    appendCreate(fix, "cmd_thread.create_01SRZ3NDEKTSV4RRFFQ69G5FS0", OTHER_THREAD_ID);
+    const duplicateRevisionId = "01JRZ3NDEKTSV4RRFFQ69G5FJ0";
+    appendSpecEdit(
+      fix,
+      specEditCommand({
+        revisionId: duplicateRevisionId,
+        baseRevisionId: "01CRZ3NDEKTSV4RRFFQ69G5FC0",
+        content: { thread: "one" },
+      }),
+      EDIT_KEY,
+      INITIAL_CONTENT,
+    );
+
+    expect(() =>
+      appendSpecEdit(
+        fix,
+        specEditCommand({
+          key: "cmd_thread.spec.edit_01MRZ3NDEKTSV4RRFFQ69G5FM0",
+          threadId: OTHER_THREAD_ID,
+          revisionId: duplicateRevisionId,
+          baseRevisionId: "01SRZ3NDEKTSV4RRFFQ69G5FS0",
+          content: { thread: "two" },
+        }),
+        "cmd_thread.spec.edit_01MRZ3NDEKTSV4RRFFQ69G5FM0",
+        INITIAL_CONTENT,
+      ),
+    ).toThrow(ThreadConflictError);
+  });
+
   it("folds status by LSN, rejects bad fromStatus, and blocks terminal exits", () => {
     const fix = setup();
     appendCreate(fix);
@@ -403,19 +476,54 @@ describe("thread appender and projection", () => {
 
   it("rebuilds thread projection from the event log byte-equal to live rows", () => {
     const fix = setup();
+    const create = createCommand();
     appendCreate(fix);
-    appendSpecEdit(
-      fix,
-      specEditCommand({
-        baseRevisionId: "01CRZ3NDEKTSV4RRFFQ69G5FC0",
-        content: { edit: "replay" },
-      }),
-      EDIT_KEY,
-      INITIAL_CONTENT,
-    );
+    const edit = specEditCommand({
+      baseRevisionId: "01CRZ3NDEKTSV4RRFFQ69G5FC0",
+      content: { edit: "replay" },
+    });
+    appendSpecEdit(fix, edit, EDIT_KEY, INITIAL_CONTENT);
+    const status = statusCommand({ fromStatus: "open", toStatus: "in_progress" });
+    appendStatus(fix, status, STATUS_KEY);
     appendCreate(fix, "cmd_thread.create_01SRZ3NDEKTSV4RRFFQ69G5FS0", OTHER_THREAD_ID);
+
+    const createdRows = eventPayloadBytes(fix, "thread.created");
+    const specRows = eventPayloadBytes(fix, "thread.spec_edited");
+    const statusRows = eventPayloadBytes(fix, "thread.status_changed");
+    expectThreadPayloadBytes(createdRows[0] ?? Buffer.alloc(0), "thread_created", {
+      threadId: create.threadId,
+      title: create.title,
+      createdBy: create.createdBy,
+      createdAt: create.createdAt,
+      externalRefs: create.externalRefs,
+    });
+    expectThreadPayloadBytes(specRows[0] ?? Buffer.alloc(0), "thread_spec_edited", {
+      threadId: create.threadId,
+      revisionId: asThreadSpecRevisionId("01CRZ3NDEKTSV4RRFFQ69G5FC0"),
+      content: create.content,
+      contentHash: threadSpecContentHash(create.content),
+      authoredBy: create.createdBy,
+      authoredAt: create.createdAt,
+    });
+    expectThreadPayloadBytes(specRows[1] ?? Buffer.alloc(0), "thread_spec_edited", {
+      threadId: edit.threadId,
+      revisionId: edit.revisionId,
+      baseRevisionId: edit.baseRevisionId,
+      content: edit.content,
+      contentHash: edit.contentHash,
+      authoredBy: edit.authoredBy,
+      authoredAt: edit.authoredAt,
+    });
+    expectThreadPayloadBytes(statusRows[0] ?? Buffer.alloc(0), "thread_status_changed", {
+      threadId: status.threadId,
+      fromStatus: status.fromStatus,
+      toStatus: status.toStatus,
+      changedBy: status.changedBy,
+      changedAt: status.changedAt,
+    });
+
     const live = snapshotThreadProjection(fix.db);
-    fix.state.rebuildFromLog(fix.eventLog, 0);
+    fix.subsystem.rebuildFromLog(0);
     expect(snapshotThreadProjection(fix.db)).toEqual(live);
   });
 
@@ -434,5 +542,16 @@ describe("thread appender and projection", () => {
       "01RRZ3NDEKTSV4RRFFQ69G5FR0",
     ]);
     expect([...new Set(page.items.map((receipt) => receipt.taskId))]).toEqual([taskA, taskB]);
+    const liveRefs = {
+      receiptIds: [
+        "01PRZ3NDEKTSV4RRFFQ69G5FP0",
+        "01QRZ3NDEKTSV4RRFFQ69G5FQ0",
+        "01RRZ3NDEKTSV4RRFFQ69G5FR0",
+      ],
+      taskIds: [taskA, taskB],
+    };
+    expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
+    fix.subsystem.rebuildFromLog(0);
+    expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
   });
 });
