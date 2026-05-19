@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   type ApprovalRequest,
-  type ApprovalView,
   asIdempotencyKey,
   asSignerIdentity,
   asThreadId,
@@ -40,7 +39,7 @@ import {
   validateThread,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
-
+import { approvalViewFromApproval } from "../approvals/view.ts";
 import {
   InvalidListCursorError,
   InvalidListLimitError,
@@ -310,7 +309,7 @@ async function handleThreadCreate(
       content: request.specContent,
     };
   } catch (err) {
-    writeRouteError(res, 400, "invalid_thread_command", errorMessage(err));
+    writeRouteError(res, 422, "invalid_payload", errorMessage(err));
     return;
   }
 
@@ -383,7 +382,7 @@ async function handleThreadSpecPatch(
     };
     baseContentHash = request.baseContentHash;
   } catch (err) {
-    writeRouteError(res, 400, "invalid_thread_command", errorMessage(err));
+    writeRouteError(res, 422, "invalid_payload", errorMessage(err));
     return;
   }
 
@@ -454,7 +453,7 @@ async function handleThreadStatusPatch(
       changedAt: routeDate(deps.nowMs()),
     };
   } catch (err) {
-    writeRouteError(res, 400, "invalid_thread_command", errorMessage(err));
+    writeRouteError(res, 422, "invalid_payload", errorMessage(err));
     return;
   }
 
@@ -646,31 +645,6 @@ function maxHeadLsn(
   return lsnFromV1Number(max);
 }
 
-function approvalViewFromApproval(approval: ApprovalRequest): ApprovalView {
-  return {
-    id: approval.id,
-    claim: approval.claim,
-    scope: approval.scope,
-    riskClass: approval.riskClass,
-    ...(approval.threadId === undefined ? {} : { threadId: approval.threadId }),
-    ...(approval.taskId === undefined ? {} : { taskId: approval.taskId }),
-    ...(approval.receiptId === undefined ? {} : { receiptId: approval.receiptId }),
-    requestedBy: approval.requestedBy,
-    requestedAt: approval.requestedAt,
-    status: approval.status,
-    ...(approval.decision === undefined
-      ? {}
-      : {
-          decisionSummary: {
-            decision: approval.decision.decision,
-            decidedBy: approval.decision.decidedBy,
-            decidedAt: approval.decision.decidedAt,
-          },
-        }),
-    schemaVersion: 1,
-  };
-}
-
 function parseThreadIdPath(encoded: string): ThreadId | null {
   if (encoded.length === 0 || encoded.includes("/")) return null;
   try {
@@ -688,7 +662,7 @@ function writeThreadAppenderError(
 ): void {
   if (err instanceof ThreadCommandValidationError) {
     logger.warn(rejectedEvent, { reason: "invalid_command" });
-    writeRouteError(res, 400, "invalid_thread_command", err.message);
+    writeRouteError(res, 422, "invalid_payload", err.message);
     return;
   }
   if (err instanceof ThreadNotFoundError) {

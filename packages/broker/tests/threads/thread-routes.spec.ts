@@ -25,6 +25,7 @@ import {
   sha256Hex,
   threadGetResponseFromJson,
   threadListResponseFromJson,
+  threadMutationResponseFromJson,
   threadPinnedApprovalsResponseFromJson,
   threadSpecContentHash,
   validateThreadStreamEvent,
@@ -251,11 +252,9 @@ async function createThread(fix: Fixture): Promise<{ readonly headLsn: EventLsn 
     body: JSON.stringify(createBody()),
   });
   expect(res.status).toBe(201);
-  const body = (await res.json()) as {
-    readonly headLsn: EventLsn;
-    readonly revisionId: string;
-    readonly contentHash: string;
-  };
+  const body = threadMutationResponseFromJson((await res.json()) as unknown);
+  expect(body.threadId).toBe(THREAD_ID);
+  expect(body.headLsn).toBe("v1:4");
   expect(body.revisionId).toBe(CREATE_REVISION_ID);
   expect(body.contentHash).toBe(threadSpecContentHash(INITIAL_CONTENT));
   return body;
@@ -511,6 +510,107 @@ describe("/api/v1/threads routes", () => {
     expect(checks.map((res) => res.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
   });
 
+  it("returns structured errors for unsupported thread methods and bad paths", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const checks = await Promise.all([
+      rawRequest({
+        port: fixture.broker.port,
+        path: "/api/v1/threads",
+        method: "PUT",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}`,
+        method: "POST",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/pinned-approvals`,
+        method: "POST",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/spec`,
+        method: "GET",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/status`,
+        method: "GET",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/unknown`,
+        method: "GET",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+    ]);
+    expect(checks.map((res) => res.status)).toEqual([405, 405, 405, 405, 405, 404]);
+    expect(checks.map((res) => routeErrorFromJson(JSON.parse(res.body) as unknown).error)).toEqual([
+      "method_not_allowed",
+      "method_not_allowed",
+      "method_not_allowed",
+      "method_not_allowed",
+      "method_not_allowed",
+      "not_found",
+    ]);
+  });
+
+  it("returns the unified v1 route validation contract for thread mutations", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const unsupportedMedia = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "text/plain" }),
+      body: JSON.stringify(createBody()),
+    });
+    expect(unsupportedMedia.status).toBe(415);
+    expect(routeErrorFromJson((await unsupportedMedia.json()) as unknown).error).toBe(
+      "unsupported_media_type",
+    );
+
+    const malformedJson = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{",
+    });
+    expect(malformedJson.status).toBe(400);
+    expect(routeErrorFromJson((await malformedJson.json()) as unknown).error).toBe("invalid_json");
+
+    const invalidCreate = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...createBody(), title: "" }),
+    });
+    expect(invalidCreate.status).toBe(422);
+    expect(routeErrorFromJson((await invalidCreate.json()) as unknown).error).toBe(
+      "invalid_payload",
+    );
+
+    await createThread(fixture);
+    const invalidSpec = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/spec`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...specBody(), baseRevisionId: "not-a-revision" }),
+    });
+    expect(invalidSpec.status).toBe(422);
+    expect(routeErrorFromJson((await invalidSpec.json()) as unknown).error).toBe("invalid_payload");
+
+    const invalidStatus = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/status`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...statusBody(), toStatus: "not-a-status" }),
+    });
+    expect(invalidStatus.status).toBe(422);
+    expect(routeErrorFromJson((await invalidStatus.json()) as unknown).error).toBe(
+      "invalid_payload",
+    );
+  });
+
   it("rejects approval deps that do not share thread storage provenance", async () => {
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
@@ -581,9 +681,14 @@ describe("/api/v1/threads routes", () => {
       body: JSON.stringify(specBody()),
     });
     expect(spec.status).toBe(200);
-    expect((await spec.json()) as unknown).toMatchObject({
+    const specMutation = threadMutationResponseFromJson((await spec.json()) as unknown);
+    const editedContentHash = threadSpecContentHash({ goal: "route threads", version: 2 });
+    expect(specMutation).toEqual({
+      schemaVersion: 1,
+      threadId: asThreadId(THREAD_ID),
+      headLsn: "v1:8",
       revisionId: SPEC_REVISION_ID,
-      contentHash: threadSpecContentHash({ goal: "route threads", version: 2 }),
+      contentHash: editedContentHash,
     });
 
     const status = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/status`, {
@@ -592,6 +697,13 @@ describe("/api/v1/threads routes", () => {
       body: JSON.stringify(statusBody("open", "closed")),
     });
     expect(status.status).toBe(200);
+    expect(threadMutationResponseFromJson((await status.json()) as unknown)).toEqual({
+      schemaVersion: 1,
+      threadId: asThreadId(THREAD_ID),
+      headLsn: "v1:9",
+      revisionId: SPEC_REVISION_ID,
+      contentHash: editedContentHash,
+    });
 
     const closed = await fetch(`${fixture.broker.url}/api/v1/threads?status=closed`, {
       headers: authHeaders(),

@@ -19,7 +19,6 @@ import {
   type ApprovalRequestId,
   type ApprovalRequestStatus,
   type ApprovalStreamEvent,
-  type ApprovalView,
   approvalDecisionRequestFromJson,
   approvalDecisionRequestToJsonValue,
   approvalDecisionResponseToJsonValue,
@@ -61,6 +60,7 @@ import {
 } from "./appender.ts";
 import type { ApprovalCommand, ParsedApprovalIdempotencyKey } from "./idempotency.ts";
 import type { ApprovalListFilter, ApprovalProjection } from "./projections.ts";
+import { approvalViewFromApproval } from "./view.ts";
 
 const MAX_APPROVAL_BODY_BYTES = 256 * 1024;
 const APPROVAL_STATUS_SET: ReadonlySet<string> = new Set<string>(APPROVAL_REQUEST_STATUS_VALUES);
@@ -100,7 +100,7 @@ export async function handleApprovalRoute(
       handleApprovalList(req, res, deps);
       return true;
     }
-    methodNotAllowed(res, "GET, POST");
+    methodNotAllowed(res, "GET, HEAD, POST");
     return true;
   }
 
@@ -121,7 +121,7 @@ export async function handleApprovalRoute(
       return true;
     }
     if (req.method !== "GET" && req.method !== "HEAD") {
-      methodNotAllowed(res, "GET");
+      methodNotAllowed(res, "GET, HEAD");
       return true;
     }
     handleApprovalGet(res, deps, id);
@@ -569,31 +569,6 @@ function emitThreadPinnedApprovalsInvalidation(
   });
 }
 
-function approvalViewFromApproval(approval: ApprovalRequest): ApprovalView {
-  return {
-    id: approval.id,
-    claim: approval.claim,
-    scope: approval.scope,
-    riskClass: approval.riskClass,
-    ...(approval.threadId === undefined ? {} : { threadId: approval.threadId }),
-    ...(approval.taskId === undefined ? {} : { taskId: approval.taskId }),
-    ...(approval.receiptId === undefined ? {} : { receiptId: approval.receiptId }),
-    requestedBy: approval.requestedBy,
-    requestedAt: approval.requestedAt,
-    status: approval.status,
-    ...(approval.decision === undefined
-      ? {}
-      : {
-          decisionSummary: {
-            decision: approval.decision.decision,
-            decidedBy: approval.decision.decidedBy,
-            decidedAt: approval.decision.decidedAt,
-          },
-        }),
-    schemaVersion: 1,
-  };
-}
-
 function invalidPayload(
   res: ServerResponse,
   deps: Pick<ApprovalRouteDeps, "logger">,
@@ -611,9 +586,9 @@ function malformedJson(
   routeName: string,
   err: unknown,
 ): void {
-  const reason = err instanceof Error ? err.message : "malformed_json";
-  deps.logger.warn(`${routeName}_rejected`, { reason: "malformed_json" });
-  writeRouteError(res, 400, { error: "malformed_json", message: reason });
+  const reason = err instanceof Error ? err.message : "invalid_json";
+  deps.logger.warn(`${routeName}_rejected`, { reason: "invalid_json" });
+  writeRouteError(res, 400, { error: "invalid_json", message: reason });
 }
 
 function parseJsonBody(

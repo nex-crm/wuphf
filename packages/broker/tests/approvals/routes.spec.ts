@@ -1,4 +1,8 @@
-import { request as httpRequest, type OutgoingHttpHeaders } from "node:http";
+import {
+  request as httpRequest,
+  type IncomingHttpHeaders,
+  type OutgoingHttpHeaders,
+} from "node:http";
 
 import {
   type ApprovalDecidedAuditPayload,
@@ -241,7 +245,11 @@ function rawRequest(args: {
   readonly path: string;
   readonly headers?: OutgoingHttpHeaders;
   readonly body?: string;
-}): Promise<{ readonly status: number; readonly body: string }> {
+}): Promise<{
+  readonly status: number;
+  readonly body: string;
+  readonly headers: IncomingHttpHeaders;
+}> {
   return new Promise((resolveFn, rejectFn) => {
     const req = httpRequest(
       {
@@ -258,6 +266,7 @@ function rawRequest(args: {
           resolveFn({
             status: res.statusCode ?? 0,
             body: Buffer.concat(chunks).toString("utf8"),
+            headers: res.headers,
           }),
         );
       },
@@ -377,6 +386,27 @@ describe("/api/v1/approvals routes", () => {
     const secondPageBody = approvalListResponseFromJson((await secondPage.json()) as unknown);
     expect(secondPageBody.approvals.map((approval) => approval.id)).toEqual([third.id]);
     expect(secondPageBody.nextCursor).toBeUndefined();
+  });
+
+  it.each([
+    ["invalid status", "status=not_a_status", "invalid_status"],
+    ["duplicate status", "status=pending&status=approved", "invalid_status"],
+    ["invalid thread", "threadId=not-a-thread", "invalid_thread_id"],
+    ["duplicate thread", `threadId=${THREAD_ID}&threadId=${OTHER_THREAD_ID}`, "invalid_thread_id"],
+    ["invalid task", "taskId=not-a-task", "invalid_task_id"],
+    ["duplicate task", `taskId=${TASK_ID}&taskId=${OTHER_TASK_ID}`, "invalid_task_id"],
+    ["invalid limit", "limit=abc", "invalid_limit"],
+    ["zero limit", "limit=0", "invalid_limit"],
+    ["duplicate limit", "limit=1&limit=2", "invalid_limit"],
+    ["invalid cursor", "cursor=not-an-lsn", "invalid_cursor"],
+    ["duplicate cursor", "cursor=v1:1&cursor=v1:2", "invalid_cursor"],
+  ])("rejects %s on the approval list route", async (_name, query, error) => {
+    if (fix === null) throw new Error("fixture missing");
+    const res = await fetch(`${fix.broker.url}/api/v1/approvals?${query}`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(res.status).toBe(400);
+    expect(routeErrorFromJson((await res.json()) as unknown).error).toBe(error);
   });
 
   it("filters approvals by status, thread, and task across mixed rows", async () => {
@@ -753,7 +783,7 @@ describe("/api/v1/approvals routes", () => {
     });
 
     expect(malformed.status).toBe(400);
-    expect(routeErrorFromJson((await malformed.json()) as unknown).error).toBe("malformed_json");
+    expect(routeErrorFromJson((await malformed.json()) as unknown).error).toBe("invalid_json");
   });
 
   it("returns 422 route errors for semantic approval command validation failures", async () => {
@@ -820,6 +850,27 @@ describe("/api/v1/approvals routes", () => {
       });
       expect(badHost.status).toBe(403);
     }
+  });
+
+  it("includes HEAD in approval read-route Allow headers", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const list = await rawRequest({
+      port: fix.broker.port,
+      method: "PUT",
+      path: "/api/v1/approvals",
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(list.status).toBe(405);
+    expect(list.headers.allow).toBe("GET, HEAD, POST");
+
+    const get = await rawRequest({
+      port: fix.broker.port,
+      method: "POST",
+      path: `/api/v1/approvals/${REQUEST_ID}`,
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(get.status).toBe(405);
+    expect(get.headers.allow).toBe("GET, HEAD");
   });
 });
 
