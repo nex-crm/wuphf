@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -28,11 +28,7 @@ function setup(edge: "right" | "left", isResizing = false): Captured {
 }
 
 afterEach(() => {
-  // Clear the DOM between tests without resorting to innerHTML
-  // assignment, which security tooling rightly flags as a sink.
-  while (document.body.firstChild) {
-    document.body.removeChild(document.body.firstChild);
-  }
+  cleanup();
 });
 
 describe("<PaneResizeHandle> keyboard", () => {
@@ -61,6 +57,12 @@ describe("<PaneResizeHandle> keyboard", () => {
     const { step } = setup("left");
     fireEvent.keyDown(screen.getByRole("separator"), { key: "ArrowRight" });
     expect(step).toHaveBeenCalledWith(-16);
+  });
+
+  it("ArrowLeft widens a left-edge pane (+16px)", () => {
+    const { step } = setup("left");
+    fireEvent.keyDown(screen.getByRole("separator"), { key: "ArrowLeft" });
+    expect(step).toHaveBeenCalledWith(16);
   });
 
   it("Home snaps to the minimum", () => {
