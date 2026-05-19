@@ -9,6 +9,7 @@ import {
 import { validateApprovalView } from "./approval-view-validator.ts";
 import {
   MAX_ROUTE_APPROVAL_LIST_ITEMS,
+  MAX_ROUTE_THREAD_LIST_ITEMS,
   validateRouteCursorBudget,
   validateRouteErrorCodeBudget,
   validateRouteErrorMessageBudget,
@@ -566,6 +567,11 @@ export function threadListResponseFromJson(value: unknown): ThreadListResponse {
 export function threadListResponseToJsonValue(
   response: ThreadListResponse,
 ): Readonly<Record<string, unknown>> {
+  if (response.threads.length > MAX_ROUTE_THREAD_LIST_ITEMS) {
+    throw new Error(
+      `threadListResponse.threads: length exceeds MAX_ROUTE_THREAD_LIST_ITEMS: ${response.threads.length} > ${MAX_ROUTE_THREAD_LIST_ITEMS}`,
+    );
+  }
   return omitUndefined({
     schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
     threads: response.threads.map((thread) => threadViewToRouteJsonValue(thread)),
@@ -791,6 +797,11 @@ export function approvalListResponseFromJson(value: unknown): ApprovalListRespon
 export function approvalListResponseToJsonValue(
   response: ApprovalListResponse,
 ): Readonly<Record<string, unknown>> {
+  if (response.approvals.length > MAX_ROUTE_APPROVAL_LIST_ITEMS) {
+    throw new Error(
+      `approvalListResponse.approvals: length exceeds MAX_ROUTE_APPROVAL_LIST_ITEMS: ${response.approvals.length} > ${MAX_ROUTE_APPROVAL_LIST_ITEMS}`,
+    );
+  }
   return omitUndefined({
     schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
     approvals: response.approvals.map((approval) => approvalViewToJsonValue(approval)),
@@ -877,9 +888,12 @@ export function routeErrorFromJson(value: unknown): RouteError {
 
 export function routeErrorToJsonValue(error: RouteError): Readonly<Record<string, unknown>> {
   return omitUndefined({
-    error: error.error,
-    message: error.message,
-    retryAfterMs: error.retryAfterMs,
+    error: routeErrorCodeFromJson(error.error),
+    message: error.message === undefined ? undefined : routeErrorMessageToJsonValue(error.message),
+    retryAfterMs:
+      error.retryAfterMs === undefined
+        ? undefined
+        : routeErrorRetryAfterMsToJsonValue(error.retryAfterMs),
   });
 }
 
@@ -1288,6 +1302,19 @@ function routeErrorCodeFromJson(value: string): string {
   }
   const budget = validateRouteErrorCodeBudget(value);
   if (!budget.ok) throw new Error(`routeError.error: ${budget.reason}`);
+  return value;
+}
+
+function routeErrorMessageToJsonValue(value: string): string {
+  const budget = validateRouteErrorMessageBudget(value);
+  if (!budget.ok) throw new Error(`routeError.message: ${budget.reason}`);
+  return value;
+}
+
+function routeErrorRetryAfterMsToJsonValue(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error("routeError.retryAfterMs: must be a non-negative safe integer");
+  }
   return value;
 }
 

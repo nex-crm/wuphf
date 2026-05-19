@@ -414,6 +414,13 @@ describe("route-envelope codecs", () => {
     ).toThrow(/MAX_ROUTE_THREAD_LIST_ITEMS/);
 
     expect(() =>
+      threadListResponseToJsonValue({
+        schemaVersion: 1,
+        threads: Array.from({ length: MAX_ROUTE_THREAD_LIST_ITEMS + 1 }, () => threadViewFixture()),
+      }),
+    ).toThrow(/MAX_ROUTE_THREAD_LIST_ITEMS/);
+
+    expect(() =>
       threadListResponseFromJson({
         schemaVersion: 1,
         threads: [threadViewToJsonValue(threadViewFixture())],
@@ -431,6 +438,15 @@ describe("route-envelope codecs", () => {
     ).toThrow(/MAX_ROUTE_APPROVAL_LIST_ITEMS/);
 
     expect(() =>
+      approvalListResponseToJsonValue({
+        schemaVersion: 1,
+        approvals: Array.from({ length: MAX_ROUTE_APPROVAL_LIST_ITEMS + 1 }, () =>
+          approvalViewFixture(),
+        ),
+      }),
+    ).toThrow(/MAX_ROUTE_APPROVAL_LIST_ITEMS/);
+
+    expect(() =>
       threadViewFromJson({
         ...threadViewToJsonValue(threadViewFixture()),
         pendingApprovalCount: -1,
@@ -443,6 +459,25 @@ describe("route-envelope codecs", () => {
         message: "x".repeat(MAX_ROUTE_ERROR_MESSAGE_BYTES + 1),
       }),
     ).toThrow(/RouteError\.message bytes/);
+
+    expect(() =>
+      routeErrorToJsonValue({
+        error: "x".repeat(MAX_ROUTE_ERROR_CODE_BYTES + 1),
+      }),
+    ).toThrow(/RouteError\.error bytes/);
+
+    expect(() => routeErrorToJsonValue({ error: "" })).toThrow(/non-empty string/);
+
+    expect(() =>
+      routeErrorToJsonValue({
+        error: "store_busy",
+        message: "x".repeat(MAX_ROUTE_ERROR_MESSAGE_BYTES + 1),
+      }),
+    ).toThrow(/RouteError\.message bytes/);
+
+    expect(() => routeErrorToJsonValue({ error: "store_busy", retryAfterMs: -1 })).toThrow(
+      /retryAfterMs/,
+    );
   });
 
   it("keeps exported route budget helpers covered", () => {

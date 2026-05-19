@@ -123,7 +123,7 @@ export async function handleThreadRoute(
       await handleThreadCreate(req, res, deps);
       return true;
     }
-    methodNotAllowed(res, "GET, POST");
+    methodNotAllowed(res, "GET, HEAD, POST");
     return true;
   }
 
@@ -134,7 +134,7 @@ export async function handleThreadRoute(
   const parts = suffix.split("/");
   if (parts.length === 2 && parts[1] === "pinned-approvals") {
     if (req.method !== "GET" && req.method !== "HEAD") {
-      methodNotAllowed(res, "GET");
+      methodNotAllowed(res, "GET, HEAD");
       return true;
     }
     handleThreadPinnedApprovalsGet(res, deps, parts[0] ?? "");
@@ -142,7 +142,7 @@ export async function handleThreadRoute(
   }
   if (parts.length === 1) {
     if (req.method !== "GET" && req.method !== "HEAD") {
-      methodNotAllowed(res, "GET");
+      methodNotAllowed(res, "GET, HEAD");
       return true;
     }
     handleThreadGet(res, deps, parts[0] ?? "");
