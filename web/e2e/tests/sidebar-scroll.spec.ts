@@ -54,7 +54,13 @@ async function stubCrowdedSidebarData(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem(
       "wuphf-sidebar-sections",
-      JSON.stringify({ agents: true, channels: true, apps: true }),
+      JSON.stringify({
+        agents: true,
+        channels: true,
+        issues: true,
+        apps: true,
+        recent: true,
+      }),
     );
     localStorage.removeItem("wuphf-sidebar-bg");
   });
@@ -117,52 +123,52 @@ async function waitForScrollSettle(section: Locator): Promise<void> {
   );
 }
 
+/**
+ * The sidebar refactor (PR #919) collapsed per-section scroll regions
+ * into one parent scroll container `.sidebar-scroll`. Sections themselves
+ * now hug their content; reachability is verified by wheel-scrolling
+ * `.sidebar-scroll` until each target is in viewport.
+ */
 async function expectWheelCanReach(
   page: Page,
-  section: Locator,
   label: string,
   targets: Locator[],
 ): Promise<void> {
-  await expect(
-    section,
-    `${label} scroll region should be visible`,
-  ).toBeVisible();
-  await section.evaluate((el) => {
+  const scroll = page.locator(".sidebar-scroll");
+  await expect(scroll, "sidebar scroll region should be visible").toBeVisible();
+  await scroll.evaluate((el) => {
     el.scrollTop = 0;
   });
 
-  const before = await scrollMetrics(section);
+  const before = await scrollMetrics(scroll);
   expect(
     before.scrollHeight,
-    `${label} should overflow in the crowded sidebar fixture`,
+    `sidebar should overflow in the crowded fixture (${label})`,
   ).toBeGreaterThan(before.clientHeight + 1);
   expect(
     ["auto", "scroll"].includes(before.overflowY),
-    `${label} should own vertical scrolling, found overflow-y: ${before.overflowY}`,
+    `sidebar-scroll should own vertical scrolling, found overflow-y: ${before.overflowY}`,
   ).toBe(true);
 
-  await section.hover();
-  for (let i = 0; i < 8; i += 1) {
-    await page.mouse.wheel(0, 1600);
-    await waitForScrollSettle(section);
-    const current = await scrollMetrics(section);
-    if (current.scrollTop + current.clientHeight >= current.scrollHeight - 2) {
-      break;
-    }
-  }
-
-  const after = await scrollMetrics(section);
-  expect(
-    after.scrollTop,
-    `${label} should respond to wheel scrolling`,
-  ).toBeGreaterThan(0);
-  expect(
-    after.scrollTop + after.clientHeight,
-    `${label} should scroll to its last items`,
-  ).toBeGreaterThanOrEqual(after.scrollHeight - 2);
-
+  await scroll.hover();
   for (const target of targets) {
-    await expect(target).toBeInViewport({ ratio: 0.2 });
+    for (let i = 0; i < 24; i += 1) {
+      const isInView = await target.evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.top >= 0 && rect.bottom <= window.innerHeight;
+      });
+      if (isInView) break;
+      await page.mouse.wheel(0, 600);
+      await waitForScrollSettle(scroll);
+      const current = await scrollMetrics(scroll);
+      if (current.scrollTop + current.clientHeight >= current.scrollHeight - 2) {
+        break;
+      }
+    }
+    await expect(
+      target,
+      `${label} target should be reachable by scrolling .sidebar-scroll`,
+    ).toBeInViewport({ ratio: 0.2 });
   }
 }
 
@@ -191,22 +197,15 @@ test.describe("left sidebar scrolling", () => {
       const appItems = page.locator(".sidebar-apps button.sidebar-item");
       await expect(appItems.first()).toBeVisible();
 
-      await expectWheelCanReach(page, page.locator(".sidebar-agents"), "Team", [
+      await expectWheelCanReach(page, "Team", [
         page.locator('button[data-agent-slug="agent-24"]'),
         page.locator(".sidebar-agents .sidebar-add-btn"),
       ]);
-      await expectWheelCanReach(
-        page,
-        page.locator(".sidebar-channels"),
-        "Channels",
-        [
-          page.getByRole("button", { name: "Channel 24" }),
-          page.locator(".sidebar-channels .sidebar-add-btn"),
-        ],
-      );
-      await expectWheelCanReach(page, page.locator(".sidebar-apps"), "Apps", [
-        appItems.last(),
+      await expectWheelCanReach(page, "Channels", [
+        page.getByRole("button", { name: "Channel 24" }),
+        page.locator(".sidebar-channels .sidebar-add-btn"),
       ]);
+      await expectWheelCanReach(page, "Apps", [appItems.last()]);
 
       await expectNoReactErrors(page, getErrors, "while scrolling the sidebar");
     });
