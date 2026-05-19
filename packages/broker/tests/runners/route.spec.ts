@@ -6,13 +6,21 @@ import { createFakeAgentRunner, type FakeAgentRunner } from "@wuphf/agent-runner
 import { forBrokerTests } from "@wuphf/credentials/testing";
 import {
   asAgentId,
+  asAgentSlug,
   asApiToken,
   asCredentialHandleId,
   asCredentialScope,
   asProviderKind,
+  asReceiptId,
   asRunnerId,
+  asTaskId,
+  asThreadId,
+  type ReceiptSnapshot,
   type RunnerSpawnRequest,
   runnerSpawnRequestToJsonValue,
+  SanitizedString,
+  sha256Hex,
+  validateThreadStreamEvent,
 } from "@wuphf/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -24,6 +32,8 @@ const otherAgentId = asAgentId("agent_beta");
 const runnerId = asRunnerId("run_0123456789ABCDEFGHIJKLMNOPQRSTUV");
 const runnerId2 = asRunnerId("run_1123456789ABCDEFGHIJKLMNOPQRSTUV");
 const runnerId3 = asRunnerId("run_2123456789ABCDEFGHIJKLMNOPQRSTUV");
+const runnerThreadId = asThreadId("01TRZ3NDEKTSV4RRFFQ69G5FT0");
+const runnerTaskId = asTaskId("01TRZ3NDEKTSV4RRFFQ69G5FT1");
 
 function spawnRequest(agent = agentId): RunnerSpawnRequest {
   return {
@@ -42,6 +52,7 @@ describe("runner routes", () => {
   let terminateCount = 0;
   let terminatedRunnerIds = new Set<string>();
   let tempDirs: string[] = [];
+  let receiptToWriteOnSpawn: ReceiptSnapshot | null = null;
 
   afterEach(async () => {
     for (const item of runners) {
@@ -52,6 +63,7 @@ describe("runner routes", () => {
     spawnedRequest = null;
     terminateCount = 0;
     terminatedRunnerIds = new Set<string>();
+    receiptToWriteOnSpawn = null;
     if (broker !== null) {
       await broker.stop();
       broker = null;
@@ -92,8 +104,12 @@ describe("runner routes", () => {
         },
         costLedger: { record: async () => undefined },
         eventLog: { append: async () => 1 },
-        spawnRunner: async (request) => {
+        spawnRunner: async (request, deps) => {
           spawnedRequest = request;
+          if (receiptToWriteOnSpawn !== null) {
+            const result = await deps.receiptStore.put(receiptToWriteOnSpawn);
+            expect(result.stored).toBe(true);
+          }
           const fake = createFakeAgentRunner({
             id: [runnerId, runnerId2, runnerId3][runners.length] ?? runnerId,
             kind: request.kind,
@@ -136,6 +152,44 @@ describe("runner routes", () => {
     await expect(res.json()).resolves.toEqual({ runnerId });
     expect(runner?.agentId).toBe(agentId);
     expect(spawnedRequest?.cwd).toBe(await realpath(projectDir));
+  });
+
+  it("emits thread.updated invalidations for runner-written threaded receipts", async () => {
+    receiptToWriteOnSpawn = minimalReceiptV2("01VRZ3NDEKTSV4RRFFQ69G5FV0", runnerTaskId, "ok");
+    const workspaceRoot = await makeWorkspaceRoot();
+    const handle = await startBroker(workspaceRoot);
+    const controller = new AbortController();
+    const events = await fetch(`${handle.url}/api/events`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream",
+      },
+      signal: controller.signal,
+    });
+    expect(events.status).toBe(200);
+    const reader = events.body?.getReader();
+    if (reader === undefined) throw new Error("missing SSE body");
+    await readUntil(reader, "event: ready");
+
+    const res = await fetch(`${handle.url}/api/runners`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(runnerSpawnRequestToJsonValue(spawnRequest())),
+    });
+
+    expect(res.status).toBe(201);
+    const text = await readUntil(reader, "event: thread.updated");
+    controller.abort();
+    const event = parseThreadSse(text, "thread.updated");
+    expect(validateThreadStreamEvent(event).ok).toBe(true);
+    expect(event).toMatchObject({
+      id: "v1:1",
+      kind: "thread.updated",
+      payload: { threadId: runnerThreadId, headLsn: "v1:1" },
+    });
   });
 
   it.each([
@@ -524,4 +578,90 @@ function openAICompatSpawnRequest(endpoint: string): RunnerSpawnRequest {
       endpoint,
     },
   };
+}
+
+function minimalReceiptV2(
+  id: string,
+  taskId: ReturnType<typeof asTaskId>,
+  status: ReceiptSnapshot["status"],
+): ReceiptSnapshot {
+  return {
+    id: asReceiptId(id),
+    agentSlug: asAgentSlug("agent"),
+    taskId,
+    triggerKind: "human_message",
+    triggerRef: "message",
+    startedAt: new Date("2026-05-18T09:00:00.000Z"),
+    finishedAt: new Date("2026-05-18T09:01:00.000Z"),
+    status,
+    providerKind: asProviderKind("anthropic"),
+    model: "claude-opus-4-7",
+    promptHash: sha256Hex("prompt"),
+    toolManifest: sha256Hex("tools"),
+    toolCalls: [],
+    approvals: [],
+    filesChanged: [],
+    commits: [],
+    sourceReads: [],
+    writes: [],
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    costUsd: 0,
+    finalMessage: SanitizedString.fromUnknown(""),
+    error: SanitizedString.fromUnknown(status === "error" ? "receipt failed" : ""),
+    notebookWrites: [],
+    wikiWrites: [],
+    schemaVersion: 2,
+    threadId: runnerThreadId,
+  };
+}
+
+const sseReaderBuffers = new WeakMap<ReadableStreamDefaultReader<Uint8Array>, string>();
+
+async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, needle: string) {
+  let text = sseReaderBuffers.get(reader) ?? "";
+  for (let i = 0; i < 20; i += 1) {
+    const buffered = takeBufferedSse(text, needle);
+    text = buffered.remaining;
+    if (buffered.match !== null) {
+      sseReaderBuffers.set(reader, buffered.remaining);
+      return buffered.match;
+    }
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    text += new TextDecoder().decode(chunk.value);
+  }
+  sseReaderBuffers.set(reader, text);
+  throw new Error(`SSE stream did not include ${needle}`);
+}
+
+function takeBufferedSse(
+  text: string,
+  needle: string,
+): { readonly match: string | null; readonly remaining: string } {
+  let cursor = 0;
+  for (;;) {
+    const blockEnd = text.indexOf("\n\n", cursor);
+    if (blockEnd === -1) {
+      return { match: null, remaining: text.slice(cursor) };
+    }
+    const nextCursor = blockEnd + 2;
+    if (text.slice(cursor, nextCursor).includes(needle)) {
+      return { match: text.slice(0, nextCursor), remaining: text.slice(nextCursor) };
+    }
+    cursor = nextCursor;
+  }
+}
+
+function parseThreadSse(text: string, kind: "thread.updated") {
+  const blocks = text.split("\n\n");
+  for (const block of blocks) {
+    if (!block.includes(`event: ${kind}`)) continue;
+    const dataLine = block.split("\n").find((line) => line.startsWith("data: "));
+    if (dataLine === undefined) throw new Error(`missing data line for ${kind}`);
+    return JSON.parse(dataLine.slice("data: ".length)) as unknown;
+  }
+  throw new Error(`missing SSE event ${kind}`);
 }
