@@ -3280,6 +3280,12 @@ html[data-theme="noir-gold"] {
   50% { background-position: 100% 50%; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .issues-list-skeleton-row {
+    animation: none;
+  }
+}
+
 /* ── Issue draft form ─────────────────────────────────────────────── */
 
 .issue-new-form {
