@@ -352,6 +352,35 @@ describe("approval projection and appender", () => {
     }
   });
 
+  it("prunes only approval command idempotency rows", () => {
+    const { db, appender } = setup();
+    try {
+      db.prepare<[string, string, number], void>(
+        `INSERT INTO command_idempotency
+           (idempotency_key, command, status_code, response_payload, created_at_lsn,
+            created_at_ms, request_fingerprint)
+         VALUES (?, ?, 201, x'7B7D', NULL, ?, NULL)`,
+      ).run("old-approval", "approval.requested", 1_700_000_000_000);
+      db.prepare<[string, string, number], void>(
+        `INSERT INTO command_idempotency
+           (idempotency_key, command, status_code, response_payload, created_at_lsn,
+            created_at_ms, request_fingerprint)
+         VALUES (?, ?, 201, x'7B7D', NULL, ?, NULL)`,
+      ).run("old-cost", "cost.event", 1_700_000_000_000);
+
+      expect(appender.pruneIdempotencyOlderThan(1_700_000_000_001)).toBe(1);
+      expect(
+        db
+          .prepare<[], { readonly command: string }>(
+            "SELECT command FROM command_idempotency ORDER BY command ASC",
+          )
+          .all(),
+      ).toEqual([{ command: "cost.event" }]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("rebuilds pending_approvals from the event log byte-equivalent to live projection", () => {
     const { db, eventLog, projection, appender } = setup();
     try {

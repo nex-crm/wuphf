@@ -138,7 +138,9 @@ export function createApprovalAppender(
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   const pruneIdempotencyStmt = db.prepare<[number]>(
-    `DELETE FROM command_idempotency WHERE created_at_ms < ?`,
+    `DELETE FROM command_idempotency
+     WHERE created_at_ms < ?
+       AND command IN ('approval.requested', 'approval.decided')`,
   );
 
   const assertApprovalTokenUnused = (payload: ApprovalDecidedAuditPayload): void => {
