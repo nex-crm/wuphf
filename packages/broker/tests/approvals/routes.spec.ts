@@ -43,10 +43,21 @@ const REQUEST_ID = asApprovalRequestId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 const UNKNOWN_REQUEST_ID = asApprovalRequestId("01ARZ3NDEKTSV4RRFFQ69G5FAZ");
 const RECEIPT_ID = asReceiptId("01BRZ3NDEKTSV4RRFFQ69G5FA0");
 const THREAD_ID = asThreadId("01CRZ3NDEKTSV4RRFFQ69G5FA1");
+const OTHER_THREAD_ID = asThreadId("01CRZ3NDEKTSV4RRFFQ69G5FA3");
 const TASK_ID = asTaskId("01DRZ3NDEKTSV4RRFFQ69G5FA2");
+const OTHER_TASK_ID = asTaskId("01DRZ3NDEKTSV4RRFFQ69G5FA4");
+const FILTER_REQUEST_ID_1 = asApprovalRequestId("01FRZ3NDEKTSV4RRFFQ69G5FA5");
+const FILTER_REQUEST_ID_2 = asApprovalRequestId("01GRZ3NDEKTSV4RRFFQ69G5FA6");
+const FILTER_REQUEST_ID_3 = asApprovalRequestId("01HRZ3NDEKTSV4RRFFQ69G5FA7");
 const ROUTE_NOW_MS = Date.UTC(2026, 4, 18, 11, 1, 0, 0);
 const REQUEST_KEY = asIdempotencyKey("approval-request-01");
 const DECISION_KEY = asIdempotencyKey("approval-decision-01");
+
+interface FixtureOverrides {
+  readonly appender?: (base: ApprovalAppender) => ApprovalAppender;
+  readonly projection?: (base: ApprovalProjection) => ApprovalProjection;
+  readonly tokenAgentIds?: ReadonlyMap<typeof TOKEN, ReturnType<typeof asAgentId>>;
+}
 
 interface Fixture {
   readonly db: ReturnType<typeof openDatabase>;
@@ -55,7 +66,13 @@ interface Fixture {
   readonly projection: ApprovalProjection;
 }
 
-function requestedPayload(requestId = REQUEST_ID): ApprovalRequestedAuditPayload {
+function requestedPayload(
+  requestId = REQUEST_ID,
+  overrides: {
+    readonly threadId?: ReturnType<typeof asThreadId>;
+    readonly taskId?: ReturnType<typeof asTaskId>;
+  } = {},
+): ApprovalRequestedAuditPayload {
   const claimId = asApprovalClaimId("claim_route");
   const frozenArgsHash = asSha256Hex("b".repeat(64));
   const claim = {
@@ -80,8 +97,8 @@ function requestedPayload(requestId = REQUEST_ID): ApprovalRequestedAuditPayload
     claim,
     scope,
     riskClass: "critical",
-    threadId: THREAD_ID,
-    taskId: TASK_ID,
+    threadId: overrides.threadId ?? THREAD_ID,
+    taskId: overrides.taskId ?? TASK_ID,
     receiptId: RECEIPT_ID,
     requestedBy: asSignerIdentity("operator@example.com"),
     requestedAt: new Date("2026-05-18T11:00:00.000Z"),
@@ -125,11 +142,7 @@ function signedApprovalTokenFixture(
   return signedApprovalTokenFromJson(signedApprovalTokenToJsonValue(token));
 }
 
-async function buildFixture(overrides?: {
-  readonly appender?: (base: ApprovalAppender) => ApprovalAppender;
-  readonly projection?: (base: ApprovalProjection) => ApprovalProjection;
-  readonly tokenAgentIds?: ReadonlyMap<typeof TOKEN, ReturnType<typeof asAgentId>>;
-}): Promise<Fixture> {
+async function buildFixture(overrides?: FixtureOverrides): Promise<Fixture> {
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
   const eventLog = createEventLog(db);
@@ -300,21 +313,12 @@ describe("/api/v1/approvals routes", () => {
     expect(createdEnvelope.headLsn).toBe("v1:1");
     expect(created.status).toBe("pending");
 
-    const listPending = await fetch(`${fix.broker.url}/api/v1/approvals?status=pending`, {
+    const listPending = await fetch(`${fix.broker.url}/api/v1/approvals`, {
       headers: { Authorization: `Bearer ${TOKEN}` },
     });
     expect(listPending.status).toBe(200);
     const pendingBody = approvalListResponseFromJson((await listPending.json()) as unknown);
     expect(pendingBody.approvals.map((item) => item.id)).toEqual([created.id]);
-
-    const byThread = await fetch(
-      `${fix.broker.url}/api/v1/approvals?threadId=${THREAD_ID}&taskId=${TASK_ID}`,
-      { headers: { Authorization: `Bearer ${TOKEN}` } },
-    );
-    expect(byThread.status).toBe(200);
-    expect(approvalListResponseFromJson((await byThread.json()) as unknown).approvals.length).toBe(
-      1,
-    );
 
     const get = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}`, {
       headers: { Authorization: `Bearer ${TOKEN}` },
@@ -375,6 +379,82 @@ describe("/api/v1/approvals routes", () => {
     const secondPageBody = approvalListResponseFromJson((await secondPage.json()) as unknown);
     expect(secondPageBody.approvals.map((approval) => approval.id)).toEqual([third.id]);
     expect(secondPageBody.nextCursor).toBeUndefined();
+  });
+
+  it("filters approvals by status, thread, and task across mixed rows", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const fixture = fix;
+    const firstPayload = requestedPayload(FILTER_REQUEST_ID_1, {
+      threadId: THREAD_ID,
+      taskId: TASK_ID,
+    });
+    const secondPayload = requestedPayload(FILTER_REQUEST_ID_2, {
+      threadId: OTHER_THREAD_ID,
+      taskId: TASK_ID,
+    });
+    const thirdPayload = requestedPayload(FILTER_REQUEST_ID_3, {
+      threadId: OTHER_THREAD_ID,
+      taskId: OTHER_TASK_ID,
+    });
+
+    const create = async (payload: ApprovalRequestedAuditPayload) => {
+      const res = await fetch(`${fixture.broker.url}/api/v1/approvals`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: requestBody(payload, asIdempotencyKey(payload.requestId)),
+      });
+      expect(res.status).toBe(201);
+      return approvalRequestCreateResponseFromJson((await res.json()) as unknown).approvalRequest;
+    };
+
+    const first = await create(firstPayload);
+    const second = await create(secondPayload);
+    const third = await create(thirdPayload);
+    const rejectSecond = await fetch(
+      `${fixture.broker.url}/api/v1/approvals/${second.id}/decision`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: decisionBody(
+          decidedPayload("reject", second.id),
+          asIdempotencyKey("approval-filter-decision-02"),
+        ),
+      },
+    );
+    expect(rejectSecond.status).toBe(201);
+
+    const pending = await fetch(`${fixture.broker.url}/api/v1/approvals?status=pending`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(pending.status).toBe(200);
+    expect(
+      approvalListResponseFromJson((await pending.json()) as unknown).approvals.map(
+        (approval) => approval.id,
+      ),
+    ).toEqual([first.id, third.id]);
+
+    const byThread = await fetch(
+      `${fixture.broker.url}/api/v1/approvals?threadId=${OTHER_THREAD_ID}`,
+      {
+        headers: { Authorization: `Bearer ${TOKEN}` },
+      },
+    );
+    expect(byThread.status).toBe(200);
+    expect(
+      approvalListResponseFromJson((await byThread.json()) as unknown).approvals.map(
+        (approval) => approval.id,
+      ),
+    ).toEqual([third.id, second.id]);
+
+    const byTask = await fetch(`${fixture.broker.url}/api/v1/approvals?taskId=${TASK_ID}`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(byTask.status).toBe(200);
+    expect(
+      approvalListResponseFromJson((await byTask.json()) as unknown).approvals.map(
+        (approval) => approval.id,
+      ),
+    ).toEqual([first.id, second.id]);
   });
 
   it("uses a ULID create idempotency key as the approval request id", async () => {
@@ -655,6 +735,43 @@ describe("/api/v1/approvals routes", () => {
     expect(routeErrorFromJson((await malformed.json()) as unknown).error).toBe("malformed_json");
   });
 
+  it("returns 422 route errors for semantic approval command validation failures", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const valid = requestedPayload();
+    const invalidCreate = await fetch(`${fix.broker.url}/api/v1/approvals`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        schemaVersion: 1,
+        claim: valid.claim,
+        scope: valid.scope,
+        riskClass: "not-a-risk-class",
+        idempotencyKey: "approval-invalid-create",
+      }),
+    });
+    expect(invalidCreate.status).toBe(422);
+    expect(routeErrorFromJson((await invalidCreate.json()) as unknown).error).toBe(
+      "invalid_payload",
+    );
+
+    const invalidDecision = await fetch(
+      `${fix.broker.url}/api/v1/approvals/${REQUEST_ID}/decision`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          schemaVersion: 1,
+          decision: "defer",
+          idempotencyKey: "approval-invalid-decision",
+        }),
+      },
+    );
+    expect(invalidDecision.status).toBe(422);
+    expect(routeErrorFromJson((await invalidDecision.json()) as unknown).error).toBe(
+      "invalid_payload",
+    );
+  });
+
   it("requires bearer auth and loopback host on every approvals route", async () => {
     if (fix === null) throw new Error("fixture missing");
     const routes = [
@@ -693,34 +810,97 @@ describe("approval route SQLite error mapping", () => {
 
   let currentFixture: Fixture | null = null;
 
-  it("maps SQLITE_BUSY / LOCKED to 503 + Retry-After", async () => {
-    currentFixture = await buildFixture({
-      appender: (base) => ({
-        ...base,
-        requestApprovalIdempotent: () => {
-          throw sqliteError("SQLITE_BUSY");
+  const routeCases = (code: string) =>
+    [
+      {
+        name: "create",
+        overrides: {
+          appender: (base) => ({
+            ...base,
+            requestApprovalIdempotent: () => {
+              throw sqliteError(code);
+            },
+          }),
         },
-      }),
-    });
-    const res = await postApproval(currentFixture);
-    expect(res.status).toBe(503);
-    expect(res.headers.get("Retry-After")).toBe("1");
-    expect(await res.json()).toEqual({ error: "store_busy", retryAfterMs: 1000 });
-  });
+        request: (fixture) => postApproval(fixture),
+      },
+      {
+        name: "decide",
+        overrides: {
+          appender: (base) => ({
+            ...base,
+            decideApprovalIdempotent: () => {
+              throw sqliteError(code);
+            },
+          }),
+        },
+        request: (fixture) =>
+          fetch(`${fixture.broker.url}/api/v1/approvals/${REQUEST_ID}/decision`, {
+            method: "POST",
+            headers: authHeaders(),
+            body: decisionBody(decidedPayload("reject", REQUEST_ID)),
+          }),
+      },
+      {
+        name: "list",
+        overrides: {
+          projection: (base) => ({
+            ...base,
+            listPage: () => {
+              throw sqliteError(code);
+            },
+          }),
+        },
+        request: (fixture) =>
+          fetch(`${fixture.broker.url}/api/v1/approvals`, {
+            headers: { Authorization: `Bearer ${TOKEN}` },
+          }),
+      },
+      {
+        name: "get",
+        overrides: {
+          projection: (base) => ({
+            ...base,
+            getById: () => {
+              throw sqliteError(code);
+            },
+          }),
+        },
+        request: (fixture) =>
+          fetch(`${fixture.broker.url}/api/v1/approvals/${REQUEST_ID}`, {
+            headers: { Authorization: `Bearer ${TOKEN}` },
+          }),
+      },
+    ] satisfies readonly {
+      readonly name: string;
+      readonly overrides: FixtureOverrides;
+      readonly request: (fixture: Fixture) => Promise<Response>;
+    }[];
 
-  it("maps SQLITE_FULL to 507", async () => {
-    currentFixture = await buildFixture({
-      appender: (base) => ({
-        ...base,
-        requestApprovalIdempotent: () => {
-          throw sqliteError("SQLITE_FULL");
-        },
-      }),
+  for (const code of ["SQLITE_BUSY", "SQLITE_LOCKED"] as const) {
+    for (const routeCase of routeCases(code)) {
+      it(`maps ${code} on ${routeCase.name} to 503 + Retry-After`, async () => {
+        currentFixture = await buildFixture(routeCase.overrides);
+        const res = await routeCase.request(currentFixture);
+        expect(res.status).toBe(503);
+        expect(res.headers.get("Retry-After")).toBe("1");
+        expect(routeErrorFromJson((await res.json()) as unknown)).toEqual({
+          error: "store_busy",
+          retryAfterMs: 1000,
+        });
+      });
+    }
+  }
+
+  for (const routeCase of routeCases("SQLITE_FULL")) {
+    it(`maps SQLITE_FULL on ${routeCase.name} to 507`, async () => {
+      currentFixture = await buildFixture(routeCase.overrides);
+      const res = await routeCase.request(currentFixture);
+      expect(res.status).toBe(507);
+      expect(res.headers.get("Retry-After")).toBeNull();
+      expect(routeErrorFromJson((await res.json()) as unknown)).toEqual({ error: "store_full" });
     });
-    const res = await postApproval(currentFixture);
-    expect(res.status).toBe(507);
-    expect(await res.json()).toEqual({ error: "store_full" });
-  });
+  }
 });
 
 describe("approval routes when broker has no approvals config", () => {
