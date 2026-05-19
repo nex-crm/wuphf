@@ -21,7 +21,10 @@ implementations:
   event-log-backed. Loads the native `better-sqlite3` binding only when
   imported, so consumers that only need the in-memory path don't pay the
   cost. Hosts (e.g. the Electron utility process) wire this in by
-  passing `receiptStore: SqliteReceiptStore.open({ path })`.
+  passing `receiptStore: SqliteReceiptStore.open({ path })`, or by using
+  `SqliteReceiptStore.fromDatabase(db, eventLog)` with
+  `createThreadSubsystem(db, eventLog, receiptStore)` when thread routes are
+  mounted.
 
 ## API
 
@@ -59,21 +62,38 @@ await broker.stop();
 store.close();
 ```
 
+For thread routes, construct the receipt store from the same database/event-log
+handle and pass the subsystem to the broker:
+
+```ts
+import { createEventLog, openDatabase, runMigrations } from "@wuphf/broker/event-log";
+import { SqliteReceiptStore } from "@wuphf/broker/sqlite";
+import { createThreadSubsystem } from "@wuphf/broker/threads";
+
+const db = openDatabase({ path: "/abs/path/event-log.sqlite" });
+runMigrations(db);
+const eventLog = createEventLog(db);
+const receiptStore = SqliteReceiptStore.fromDatabase(db, eventLog);
+const threads = createThreadSubsystem(db, eventLog, receiptStore);
+const broker = await createBroker({ port: 0, threads });
+```
+
 ## Routes
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | GET | `/api-token` | none (loopback only) | Returns `{ token, broker_url }` (snake_case wire). |
 | GET | `/api/health` | bearer | Returns `{ "ok": true }`. Process-only liveness — does NOT probe the receipt store. Storage failures surface on the receipt routes themselves. A dedicated storage-diagnostics endpoint is tracked as future work. |
-| GET | `/api/events` | bearer | SSE stream; emits `ready`, keepalive comments, and invalidation-only `thread.created` / `thread.updated` events when thread routes are mounted. |
-| POST | `/api/receipts` | bearer | Body: receipt JSON. 201 + canonical body on insert, 409 on `id` collision, 400 on parse/validation, 413 on `> 1 MiB`, 415 on non-JSON content-type, 507 `{"error":"store_full"}` when the store reaches `maxReceipts` or `SqliteReceiptStore` hits `SQLITE_FULL`, 503 `{"error":"store_busy"}` + `Retry-After: 1` for transient `SQLITE_BUSY`/`LOCKED`, 503 `{"error":"storage_error"}` for persistent `SQLITE_READONLY`/`SQLITE_IOERR_*`/`SQLITE_CORRUPT`. |
+| GET | `/api/events` | bearer | SSE stream; emits `ready`, keepalive comments, and invalidation-only `thread.created` / `thread.updated` events when thread routes are mounted. Thread event ids are committed LSNs; clients must refetch on `ready`, reconnect, and every thread invalidation. |
+| POST | `/api/receipts` | bearer | Body: receipt JSON. 201 + canonical body on insert, 409 on `id` collision, 400 on parse/validation or a V2 `threadId` that does not exist in the SQLite thread projection, 413 on `> 1 MiB`, 415 on non-JSON content-type, 507 `{"error":"store_full"}` when the store reaches `maxReceipts` or `SqliteReceiptStore` hits `SQLITE_FULL`, 503 `{"error":"store_busy"}` + `Retry-After: 1` for transient `SQLITE_BUSY`/`LOCKED`, 503 `{"error":"storage_error"}` for persistent `SQLITE_READONLY`/`SQLITE_IOERR_*`/`SQLITE_CORRUPT`. |
 | GET | `/api/receipts/:id` | bearer | 200 + receipt JSON on hit, 404 on miss or malformed id. |
-| GET | `/api/threads/:tid/receipts` | bearer | JSON array of V2 receipts in the thread. Supports `?cursor=<opaque>` (empty string ≡ absent) and `?limit=<positive integer>` (1–1000; default `MAX_LIST_LIMIT=1000`). Responses include `Link: <...>; rel="next"` when another page exists. Returns 400 on invalid cursor/limit and 404 on malformed thread id. |
-| GET | `/api/v1/threads` | bearer | Lists folded thread projections as `{ threads: [{ thread, head_lsn, receipt_ids }] }`. Supports `?status=open\|in_progress\|needs_review\|merged\|closed`. `thread` is emitted through `threadToJsonValue`; `task_ids` and `receipt_ids` are derived from the receipt store in LSN order. Mounted when `createBroker({ threads })` is supplied. |
-| GET | `/api/v1/threads/:id` | bearer | Returns one folded thread projection, or 404 on malformed/missing id. |
-| POST | `/api/v1/threads` | bearer | Creates a thread and its initial spec revision. Requires `Idempotency-Key: cmd_thread.create_<ULID>`. 201 returns `{ threadId, headLsn }`; duplicate idempotency keys replay the original response without appending events. |
-| PATCH | `/api/v1/threads/:id/spec` | bearer | Appends a spec revision with OCC. Requires `Idempotency-Key: cmd_thread.spec.edit_<ULID>`, `baseRevisionId`, and `baseContentHash`; stale bases return 409. 200 returns `{ threadId, headLsn }`. |
-| PATCH | `/api/v1/threads/:id/status` | bearer | Appends a status transition. Requires `Idempotency-Key: cmd_thread.status.change_<ULID>`. `fromStatus` mismatches return 409; attempts to transition out of `merged`/`closed` return 422. 200 returns `{ threadId, headLsn }`. |
+| GET | `/api/v1/threads/:tid/receipts` | bearer | Canonical JSON array of V2 receipts in the thread. Supports `?cursor=<opaque>` (empty string ≡ absent) and `?limit=<positive integer>` (1–1000; default `MAX_LIST_LIMIT=1000`). Responses include `Link: <...>; rel="next"` when another page exists. Returns 400 on invalid cursor/limit and 404 on malformed thread id. |
+| GET | `/api/threads/:tid/receipts` | bearer | One-release alias for `/api/v1/threads/:tid/receipts`. |
+| GET | `/api/v1/threads` | bearer | Lists folded thread projections through `threadListResponseToJsonValue({ threads })`. Supports `?status=open\|in_progress\|needs_review\|merged\|closed`. `Thread.task_ids` comes from the bounded `thread_receipts` projection. Mounted when `createBroker({ threads })` is supplied. |
+| GET | `/api/v1/threads/:id` | bearer | Returns `threadGetResponseToJsonValue({ thread })`, or 404 on malformed/missing id. |
+| POST | `/api/v1/threads` | bearer | Creates a thread and its initial spec revision. Body parses through `threadCreateRequestFromJson`: `{ title, specContent, externalRefs?, idempotencyKey }`; `idempotencyKey` must be a 26-char ULID and becomes the thread id and initial revision id. 201 returns `threadMutationResponseToJsonValue({ threadId, headLsn, revisionId, contentHash })`; duplicate idempotency keys replay the original response without appending events. |
+| PATCH | `/api/v1/threads/:id/spec` | bearer | Appends a spec revision with OCC. Body parses through `threadSpecEditRequestFromJson`: `{ baseRevisionId, baseContentHash, content, idempotencyKey }`; `idempotencyKey` must be a 26-char ULID and becomes the new revision id. Stale bases return 409. 200 returns the mutation response envelope. |
+| PATCH | `/api/v1/threads/:id/status` | bearer | Appends a status transition. Body parses through `threadStatusChangeRequestFromJson`: `{ fromStatus, toStatus, idempotencyKey }`. `fromStatus` mismatches return 409; attempts to transition out of `merged`/`closed` return 422. 200 returns the mutation response envelope for the unchanged current spec revision. |
 | POST | `/api/v1/cost/events` | bearer + operator capability | Body: cost event JSON. Requires `Idempotency-Key: cmd_cost.event_<ULID>`, `X-Operator-Identity`, and `X-Operator-Capability` when `cost.operatorToken` is configured. 201 returns `{ lsn, agentDayTotal, taskTotal, newCrossings }`; duplicate idempotency keys replay the original response. |
 | POST | `/api/v1/cost/budgets` | bearer + operator capability | Body: budget JSON. Requires `Idempotency-Key: cmd_cost.budget.set_<ULID>`, `X-Operator-Identity`, and `X-Operator-Capability` when configured. The broker overwrites `setBy`/`setAt` server-side. 201 returns `{ lsn, tombstoned }`; `limitMicroUsd: 0` returns 400 because tombstones use DELETE. |
 | DELETE | `/api/v1/cost/budgets/:id` | bearer + operator capability | Tombstones an existing budget. Requires `Idempotency-Key: cmd_cost.budget.tombstone_<ULID>`, `X-Operator-Identity`, and `X-Operator-Capability` when configured. 200 returns `{ lsn, tombstoned: true }`; 404 on malformed or missing id. |
@@ -94,14 +114,14 @@ store.close();
 | GET | `/assets/*` | none (loopback) | Static assets under the renderer dir. |
 | WS | `/terminal/agents/:slug?token=` | token + loopback origin | Currently closes with `1011 not_implemented`; the agent stdio bridge replaces this in a later branch. |
 
-Receipt thread-list pagination keeps the response body as a bare JSON array. Follow
-the RFC 8288 `Link` header to continue:
+Receipt thread-list pagination keeps the response body as a bare JSON array.
+Follow the RFC 8288 `Link` header to continue:
 
 ```http
-GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?limit=2
-Link: </api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2>; rel="next"
+GET /api/v1/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?limit=2
+Link: </api/v1/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2>; rel="next"
 
-GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
+GET /api/v1/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
 ```
 
 ## Invariants

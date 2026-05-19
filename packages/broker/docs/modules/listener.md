@@ -25,7 +25,7 @@ flowchart LR
   dispatch -- "/api/events" --> events["GET/HEAD only · SSE ready + thread invalidations"]
   dispatch -- "POST /api/receipts" --> create["receiptFromJson → ReceiptStore.put<br/>201 / 400 / 409 / 413 / 415 / 503 / 507"]
   dispatch -- "GET /api/receipts/:id" --> read["ReceiptStore.get<br/>200 / 404"]
-  dispatch -- "GET /api/threads/:tid/receipts" --> list["ReceiptStore.list({threadId, cursor?, limit?})<br/>200 JSON array (+ Link rel=next when more pages)<br/>400 on invalid cursor/limit"]
+  dispatch -- "GET /api/v1/threads/:tid/receipts" --> list["ReceiptStore.list({threadId, cursor?, limit?})<br/>200 JSON array (+ Link rel=next when more pages)<br/>400 on invalid cursor/limit"]
   dispatch -- "/api/v1/cost/*" --> cost["cost ledger routes<br/>read: bearer<br/>mutate: bearer + operator capability"]
   dispatch -- "/api/v1/threads*" --> threads["thread routes<br/>folded projection reads · idempotent commands · SSE invalidations"]
   dispatch -- "/api/agents/:id/provider-routing" --> routing["provider-routing routes<br/>GET read · PUT replace"]
@@ -89,14 +89,16 @@ loopback guard and default `/api/*` bearer gate.
 
 | Method | Path | Auth | Contract |
 |---|---|---|---|
-| GET | `/api/v1/threads` | bearer | Lists folded thread projections with optional `?status=` filter. Each entry wraps a protocol `threadToJsonValue(thread)` body plus `head_lsn` and derived `receipt_ids`. |
-| GET | `/api/v1/threads/:id` | bearer | Fetches one folded projection, deriving `task_ids` and `receipt_ids` from the receipt store in LSN order. |
-| POST | `/api/v1/threads` | bearer | Validates a create command, appends `thread.created` and the initial `thread.spec_edited` in one SQLite transaction, and emits `thread.created` SSE. |
-| PATCH | `/api/v1/threads/:id/spec` | bearer | Validates OCC against the event-log fold under the appender lock; stale `baseRevisionId`/`baseContentHash` returns 409 and accepted edits emit `thread.updated` SSE. |
-| PATCH | `/api/v1/threads/:id/status` | bearer | Validates status fold under the appender lock; `fromStatus` mismatch returns 409 and terminal exits return 422. Accepted changes emit `thread.updated` SSE. |
+| GET | `/api/v1/threads` | bearer | Lists folded thread projections with optional `?status=` filter through `threadListResponseToJsonValue`; `Thread.task_ids` comes from the bounded `thread_receipts` index. |
+| GET | `/api/v1/threads/:id` | bearer | Fetches one folded projection through `threadGetResponseToJsonValue`; full receipt enumeration stays behind the paginated receipts route. |
+| POST | `/api/v1/threads` | bearer | Parses `threadCreateRequestFromJson`, appends `thread.created` and the initial `thread.spec_edited` in one SQLite transaction, returns `threadMutationResponseToJsonValue`, and emits `thread.created` SSE. |
+| PATCH | `/api/v1/threads/:id/spec` | bearer | Parses `threadSpecEditRequestFromJson` and validates OCC against the keyed `threads` projection under the appender lock; stale `baseRevisionId`/`baseContentHash` returns 409 and accepted edits emit `thread.updated` SSE. |
+| PATCH | `/api/v1/threads/:id/status` | bearer | Parses `threadStatusChangeRequestFromJson` and validates status against the keyed projection under the appender lock; `fromStatus` mismatch returns 409 and terminal exits return 422. Accepted changes emit `thread.updated` SSE. |
 
 See [threads.md](./threads.md) for projection storage, idempotency, and replay
-details.
+details. Thread SSE events are invalidation-only and use the committed event LSN
+as the SSE `id`; clients must refetch on `ready`, reconnect, and every
+thread invalidation. Last-Event-ID backfill from `event_log` is still a TODO.
 
 ### Agent provider-routing routes
 
@@ -169,17 +171,18 @@ the route only transports events.
 
 ### Thread-list pagination
 
-`GET /api/threads/:tid/receipts` accepts `?cursor=<opaque>` (empty value
+`GET /api/v1/threads/:tid/receipts` accepts `?cursor=<opaque>` (empty value
 ≡ absent) and `?limit=<positive integer>` (clamped to 1–1000, default
 1000). When more pages exist, the response carries:
 
 ```http
-Link: </api/threads/<tid>/receipts?cursor=<base64url>&limit=<n>>; rel="next"
+Link: </api/v1/threads/<tid>/receipts?cursor=<base64url>&limit=<n>>; rel="next"
 ```
 
 Cursors are opaque RFC 4648 §5 base64url tokens; clients MUST NOT parse
 them. The body shape stays a bare JSON array — callers ignoring `Link`
-simply see the first page.
+simply see the first page. `/api/threads/:tid/receipts` remains as a
+one-release alias.
 
 ## WebSocket upgrade
 
