@@ -7,6 +7,7 @@ import {
   CheckCircle,
   ClipboardCheck,
   Flash,
+  HomeSimple,
   Package,
   Page,
   Play,
@@ -33,6 +34,7 @@ import {
 const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
+  overview: HomeSimple,
   studio: Play,
   wiki: BookStack,
   console: Terminal,

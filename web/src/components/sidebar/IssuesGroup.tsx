@@ -145,22 +145,11 @@ export function IssuesGroup({ open, onToggle }: IssuesGroupProps) {
 
   return (
     <>
-      {/* Section header — always visible */}
-      <div
-        className="sidebar-section-title-row issues-group-header"
-        data-testid="issues-group-header"
-      >
+      {/* Section header — toggle only. The "New issue" + "View all"
+          affordances live inside the collapsible list so they share the
+          row chrome with the other sidebar lists. */}
+      <div className="sidebar-section" data-testid="issues-group-header">
         <SectionToggle label="Issues" open={open} onToggle={onToggle} />
-        <button
-          type="button"
-          className="sidebar-icon-btn issues-new-icon-btn"
-          title="New issue"
-          aria-label="New issue"
-          onClick={() => void router.navigate({ to: "/issues/new" })}
-          data-testid="issues-sidebar-new-btn"
-        >
-          +
-        </button>
       </div>
 
       {/* Collapsible list */}
@@ -213,6 +202,22 @@ export function IssuesGroup({ open, onToggle }: IssuesGroupProps) {
               </button>
             ))
           )}
+          {/* New issue — matches the "+ New channel" button at the bottom
+              of ChannelList for consistent affordance shape. */}
+          <button
+            type="button"
+            className="sidebar-item sidebar-add-btn"
+            title="New issue"
+            onClick={() => void router.navigate({ to: "/issues/new" })}
+            data-testid="issues-sidebar-new-btn"
+          >
+            <span
+              style={{ width: 18, textAlign: "center", flexShrink: 0 }}
+            >
+              +
+            </span>
+            <span>New issue</span>
+          </button>
           {/* View all issues link */}
           <button
             type="button"

@@ -428,7 +428,6 @@ html[data-theme="nex"]
   padding: 4px var(--sidebar-pad-x) 8px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
 }
 
 .sidebar-section + .sidebar-section,
