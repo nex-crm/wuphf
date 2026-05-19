@@ -470,6 +470,36 @@ describe("/api/v1/threads routes", () => {
     expect(checks.map((res) => res.status)).toEqual([403, 403, 403, 403, 403, 403]);
   });
 
+  it("rejects approval deps that do not share thread storage provenance", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const receiptStore = constructSqliteReceiptStoreForTesting(db, eventLog);
+    const subsystem = createThreadSubsystem(db, eventLog, receiptStore);
+
+    const otherDb = openDatabase({ path: ":memory:" });
+    try {
+      runMigrations(otherDb);
+      const otherEventLog = createEventLog(otherDb);
+      const approvals = createApprovalSubsystem(otherDb, otherEventLog);
+
+      await expect(
+        createBroker({
+          port: 0,
+          token: TOKEN,
+          threads: subsystem,
+          approvals: {
+            appender: approvals.appender,
+            projection: approvals.projection,
+          },
+        }),
+      ).rejects.toThrow(/approvals must share threads storage provenance/);
+    } finally {
+      otherDb.close();
+      receiptStore.close();
+    }
+  });
+
   it("creates, lists, reads, edits spec, changes status, and derives receipt indexes", async () => {
     if (fixture === null) throw new Error("fixture missing");
     await createThread(fixture);
@@ -667,6 +697,31 @@ describe("/api/v1/threads routes", () => {
     expect(second.status).toBe(201);
     expect(second.headers.get("Idempotent-Replay")).toBe("true");
     expect(await second.text()).toBe(firstText);
+
+    const count = fixture.db
+      .prepare<[], { readonly count: number }>(
+        "SELECT COUNT(*) AS count FROM event_log WHERE type IN ('thread.created', 'thread.spec_edited')",
+      )
+      .get();
+    expect(count?.count).toBe(4);
+  });
+
+  it("rejects duplicate idempotency keys with a different request body", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const first = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify(createBody()),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...createBody(), title: "Different title" }),
+    });
+    expect(second.status).toBe(409);
+    expect((await second.json()) as unknown).toEqual({ error: "idempotency_key_conflict" });
 
     const count = fixture.db
       .prepare<[], { readonly count: number }>(

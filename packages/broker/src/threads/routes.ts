@@ -26,13 +26,16 @@ import {
   type ThreadStatusChangeCommand,
   type ThreadView,
   threadCreateRequestFromJson,
+  threadCreateRequestToJsonValue,
   threadGetResponseToJsonValue,
   threadListResponseToJsonValue,
   threadMutationResponseToJsonValue,
   threadPinnedApprovalsResponseToJsonValue,
   threadSpecContentHash,
   threadSpecEditRequestFromJson,
+  threadSpecEditRequestToJsonValue,
   threadStatusChangeRequestFromJson,
+  threadStatusChangeRequestToJsonValue,
   validateThread,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
@@ -49,6 +52,7 @@ import {
   type ThreadAppender,
   ThreadCommandValidationError,
   ThreadConflictError,
+  ThreadIdempotencyConflictError,
   ThreadNotFoundError,
   ThreadTerminalTransitionError,
 } from "./appender.ts";
@@ -261,6 +265,7 @@ async function handleThreadCreate(
 
   let command: ThreadCreateCommand;
   let idempotency: ParsedIdempotencyKey;
+  let requestFingerprint: string;
   try {
     const request = threadCreateRequestFromJson(parsed);
     const parsedIdempotency = parseThreadIdempotencyKey(request.idempotencyKey, "thread.create");
@@ -269,11 +274,17 @@ async function handleThreadCreate(
       return;
     }
     idempotency = parsedIdempotency.key;
+    const threadId = asThreadId(idempotency.ulid);
+    requestFingerprint = threadRouteRequestFingerprint(
+      "thread.create",
+      threadId,
+      threadCreateRequestToJsonValue(request),
+    );
     const now = routeDate(deps.nowMs());
     command = {
       kind: "thread.create",
       idempotencyKey: asIdempotencyKey(idempotency.ulid),
-      threadId: asThreadId(idempotency.ulid),
+      threadId,
       title: request.title,
       createdBy: ROUTE_SIGNER,
       createdAt: now,
@@ -289,6 +300,7 @@ async function handleThreadCreate(
     const result = deps.appender.appendCreateIdempotent({
       command,
       idempotency,
+      requestFingerprint,
       nowMs: deps.nowMs(),
       render: renderThreadCommandAccepted(201),
     });
@@ -324,6 +336,7 @@ async function handleThreadSpecPatch(
   let command: ThreadSpecEditCommand;
   let baseContentHash: Sha256Hex;
   let idempotency: ParsedIdempotencyKey;
+  let requestFingerprint: string;
   try {
     const request = threadSpecEditRequestFromJson(parsed);
     const parsedIdempotency = parseThreadIdempotencyKey(request.idempotencyKey, "thread.spec.edit");
@@ -332,6 +345,11 @@ async function handleThreadSpecPatch(
       return;
     }
     idempotency = parsedIdempotency.key;
+    requestFingerprint = threadRouteRequestFingerprint(
+      "thread.spec.edit",
+      threadId,
+      threadSpecEditRequestToJsonValue(request),
+    );
     const content = request.content;
     const contentHash = threadSpecContentHash(content);
     command = {
@@ -356,6 +374,7 @@ async function handleThreadSpecPatch(
       command,
       baseContentHash,
       idempotency,
+      requestFingerprint,
       nowMs: deps.nowMs(),
       render: renderThreadCommandAccepted(200),
     });
@@ -390,6 +409,7 @@ async function handleThreadStatusPatch(
 
   let command: ThreadStatusChangeCommand;
   let idempotency: ParsedIdempotencyKey;
+  let requestFingerprint: string;
   try {
     const request = threadStatusChangeRequestFromJson(parsed);
     const parsedIdempotency = parseThreadIdempotencyKey(
@@ -401,6 +421,11 @@ async function handleThreadStatusPatch(
       return;
     }
     idempotency = parsedIdempotency.key;
+    requestFingerprint = threadRouteRequestFingerprint(
+      "thread.status.change",
+      threadId,
+      threadStatusChangeRequestToJsonValue(request),
+    );
     command = {
       kind: "thread.status.change",
       idempotencyKey: asIdempotencyKey(idempotency.ulid),
@@ -419,6 +444,7 @@ async function handleThreadStatusPatch(
     const result = deps.appender.appendStatusChangeIdempotent({
       command,
       idempotency,
+      requestFingerprint,
       nowMs: deps.nowMs(),
       render: renderThreadCommandAccepted(200),
     });
@@ -602,6 +628,11 @@ function writeThreadAppenderError(
     writeRouteError(res, 422, "terminal_status_transition");
     return;
   }
+  if (err instanceof ThreadIdempotencyConflictError) {
+    logger.warn(rejectedEvent, { reason: "idempotency_key_conflict" });
+    writeRouteError(res, 409, "idempotency_key_conflict");
+    return;
+  }
   if (isCommandIdempotencyConstraintError(err)) {
     logger.warn(rejectedEvent, { reason: "idempotency_key_conflict" });
     writeRouteError(res, 409, "idempotency_key_conflict");
@@ -780,6 +811,14 @@ function routeDate(nowMs: number): Date {
     throw new Error(`thread route clock returned invalid timestamp: ${nowMs}`);
   }
   return date;
+}
+
+function threadRouteRequestFingerprint(
+  command: ThreadCommand,
+  threadId: ThreadId,
+  body: Readonly<Record<string, unknown>>,
+): string {
+  return canonicalJSON({ command, threadId, body });
 }
 
 function writeJsonValue(

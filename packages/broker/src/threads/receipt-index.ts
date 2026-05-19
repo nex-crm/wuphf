@@ -44,7 +44,6 @@ export interface ThreadLatestReceipt {
 }
 
 export interface ThreadReceiptIndexStore {
-  applyReceipt(receipt: ReceiptSnapshot, lsn: number): void;
   applyEvent(record: EventLogRecord): void;
   clear(): void;
   rebuildFromLog(eventLog: EventLog, fromLsn?: number): void;
@@ -107,7 +106,9 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
   );
   const clearStmt = db.prepare<[]>("DELETE FROM thread_receipts");
 
-  const applyReceiptInner = (receipt: ReceiptSnapshot, lsn: number): void => {
+  // Replay-only writer. The live receipt.put transaction owns thread_receipts
+  // insertion so route writes cannot accidentally double-apply this index.
+  const applyReplayReceipt = (receipt: ReceiptSnapshot, lsn: number): void => {
     if (receipt.schemaVersion !== 2 || receipt.threadId === undefined) return;
     assertLsn(lsn);
     insertStmt.run(receipt.threadId, receipt.id, receipt.taskId, lsn);
@@ -139,13 +140,10 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
   const applyEventInner = (record: EventLogRecord): void => {
     if (record.type !== "receipt.put") return;
     const receipt = receiptFromJson(record.payload.toString("utf8"));
-    applyReceiptInner(receipt, record.lsn);
+    applyReplayReceipt(receipt, record.lsn);
   };
 
   return {
-    applyReceipt(receipt: ReceiptSnapshot, lsn: number): void {
-      applyReceiptInner(receipt, lsn);
-    },
     applyEvent(record: EventLogRecord): void {
       applyEventInner(record);
     },

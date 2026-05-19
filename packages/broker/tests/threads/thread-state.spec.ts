@@ -35,6 +35,7 @@ import {
   type ThreadAppender,
   type ThreadCommand,
   ThreadConflictError,
+  ThreadIdempotencyConflictError,
   ThreadNotFoundError,
   type ThreadStateStore,
   type ThreadSubsystem,
@@ -95,6 +96,10 @@ function render(applied: { readonly threadId: string; readonly headLsn: string }
   };
 }
 
+function idempotencyFingerprint(command: ThreadCommand, raw: string): string {
+  return canonicalJSON({ command, raw });
+}
+
 function createCommand(key = CREATE_KEY, threadId = THREAD_ID): ThreadCreateCommand {
   return {
     kind: "thread.create",
@@ -112,6 +117,7 @@ function appendCreate(fix: Fixture, key = CREATE_KEY, threadId = THREAD_ID) {
   return fix.appender.appendCreateIdempotent({
     command: createCommand(key, threadId),
     idempotency: parsedIdempotency(key, "thread.create"),
+    requestFingerprint: idempotencyFingerprint("thread.create", key),
     nowMs: 1_700_000_000_000,
     render,
   });
@@ -149,6 +155,7 @@ function appendSpecEdit(
     command,
     baseContentHash: threadSpecContentHash(baseContent),
     idempotency: parsedIdempotency(key, "thread.spec.edit"),
+    requestFingerprint: idempotencyFingerprint("thread.spec.edit", key),
     nowMs: 1_700_000_000_100,
     render,
   });
@@ -176,6 +183,7 @@ function appendStatus(fix: Fixture, command: ThreadStatusChangeCommand, key: str
   return fix.appender.appendStatusChangeIdempotent({
     command,
     idempotency: parsedIdempotency(key, "thread.status.change"),
+    requestFingerprint: idempotencyFingerprint("thread.status.change", key),
     nowMs: 1_700_000_000_200,
     render,
   });
@@ -474,6 +482,23 @@ describe("thread appender and projection", () => {
     expect(editFirst.replayed).toBe(false);
     expect(editSecond.replayed).toBe(true);
     expect(countEvents(fix, "thread.spec_edited")).toBe(3);
+  });
+
+  it("rejects idempotency key reuse with a different request fingerprint", () => {
+    const fix = setup();
+    appendCreate(fix);
+
+    expect(() =>
+      fix.appender.appendCreateIdempotent({
+        command: createCommand(),
+        idempotency: parsedIdempotency(CREATE_KEY, "thread.create"),
+        requestFingerprint: idempotencyFingerprint("thread.create", "different-body"),
+        nowMs: 1_700_000_000_000,
+        render,
+      }),
+    ).toThrow(ThreadIdempotencyConflictError);
+    expect(countEvents(fix, "thread.created")).toBe(2);
+    expect(countEvents(fix, "thread.spec_edited")).toBe(2);
   });
 
   it("rebuilds thread projection from the event log byte-equal to live rows", () => {

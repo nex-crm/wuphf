@@ -50,6 +50,7 @@ export interface ThreadCommandRenderResult {
 export interface ThreadCreateIdempotentArgs {
   readonly command: ThreadCreateCommand;
   readonly idempotency: ParsedIdempotencyKey;
+  readonly requestFingerprint: string;
   readonly nowMs: number;
   readonly render: (applied: AppliedThreadCommand) => ThreadCommandRenderResult;
 }
@@ -58,6 +59,7 @@ export interface ThreadSpecEditIdempotentArgs {
   readonly command: ThreadSpecEditCommand;
   readonly baseContentHash: Sha256Hex;
   readonly idempotency: ParsedIdempotencyKey;
+  readonly requestFingerprint: string;
   readonly nowMs: number;
   readonly render: (applied: AppliedThreadCommand) => ThreadCommandRenderResult;
 }
@@ -65,6 +67,7 @@ export interface ThreadSpecEditIdempotentArgs {
 export interface ThreadStatusChangeIdempotentArgs {
   readonly command: ThreadStatusChangeCommand;
   readonly idempotency: ParsedIdempotencyKey;
+  readonly requestFingerprint: string;
   readonly nowMs: number;
   readonly render: (applied: AppliedThreadCommand) => ThreadCommandRenderResult;
 }
@@ -104,9 +107,14 @@ export class ThreadTerminalTransitionError extends Error {
   }
 }
 
+export class ThreadIdempotencyConflictError extends Error {
+  override readonly name = "ThreadIdempotencyConflictError";
+}
+
 interface IdempotencyRow {
   readonly statusCode: number;
   readonly responsePayload: Buffer;
+  readonly requestFingerprint: string | null;
 }
 
 export function createThreadAppender(
@@ -115,25 +123,26 @@ export function createThreadAppender(
   threadState: ThreadStateStore,
 ): ThreadAppender {
   const idempotencyLookupStmt = db.prepare<[string, string], IdempotencyRow>(
-    `SELECT status_code AS statusCode, response_payload AS responsePayload
+    `SELECT status_code AS statusCode, response_payload AS responsePayload,
+            request_fingerprint AS requestFingerprint
      FROM command_idempotency
      WHERE idempotency_key = ? AND command = ?`,
   );
-  const idempotencyInsertStmt = db.prepare<[string, string, number, Buffer, number | null, number]>(
+  const idempotencyInsertStmt = db.prepare<
+    [string, string, number, Buffer, number | null, number, string]
+  >(
     `INSERT INTO command_idempotency
-       (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+       (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms,
+        request_fingerprint)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
 
   const appendCreateInner = (args: ThreadCreateIdempotentArgs): IdempotentThreadAppendResult => {
+    assertRequestFingerprint(args.requestFingerprint);
     const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
     if (cached !== undefined) {
-      return {
-        replayed: true,
-        statusCode: cached.statusCode,
-        payload: Buffer.from(cached.responsePayload),
-        applied: null,
-      };
+      assertIdempotencyFingerprint(cached, args.requestFingerprint);
+      return idempotentReplay(cached);
     }
     assertIdempotencyMatches(args.command.idempotencyKey, args.idempotency);
     assertThreadCommandValid(args.command);
@@ -191,6 +200,7 @@ export function createThreadAppender(
       rendered.payload,
       specLsn,
       args.nowMs,
+      args.requestFingerprint,
     );
     return { replayed: false, statusCode: rendered.statusCode, payload: rendered.payload, applied };
   };
@@ -198,14 +208,11 @@ export function createThreadAppender(
   const appendSpecEditInner = (
     args: ThreadSpecEditIdempotentArgs,
   ): IdempotentThreadAppendResult => {
+    assertRequestFingerprint(args.requestFingerprint);
     const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
     if (cached !== undefined) {
-      return {
-        replayed: true,
-        statusCode: cached.statusCode,
-        payload: Buffer.from(cached.responsePayload),
-        applied: null,
-      };
+      assertIdempotencyFingerprint(cached, args.requestFingerprint);
+      return idempotentReplay(cached);
     }
     assertIdempotencyMatches(args.command.idempotencyKey, args.idempotency);
     assertThreadCommandValid(args.command);
@@ -263,6 +270,7 @@ export function createThreadAppender(
       rendered.payload,
       lsn,
       args.nowMs,
+      args.requestFingerprint,
     );
     return { replayed: false, statusCode: rendered.statusCode, payload: rendered.payload, applied };
   };
@@ -270,14 +278,11 @@ export function createThreadAppender(
   const appendStatusChangeInner = (
     args: ThreadStatusChangeIdempotentArgs,
   ): IdempotentThreadAppendResult => {
+    assertRequestFingerprint(args.requestFingerprint);
     const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
     if (cached !== undefined) {
-      return {
-        replayed: true,
-        statusCode: cached.statusCode,
-        payload: Buffer.from(cached.responsePayload),
-        applied: null,
-      };
+      assertIdempotencyFingerprint(cached, args.requestFingerprint);
+      return idempotentReplay(cached);
     }
     assertIdempotencyMatches(args.command.idempotencyKey, args.idempotency);
     const current = threadState.getById(args.command.threadId);
@@ -318,6 +323,7 @@ export function createThreadAppender(
       rendered.payload,
       lsn,
       args.nowMs,
+      args.requestFingerprint,
     );
     return { replayed: false, statusCode: rendered.statusCode, payload: rendered.payload, applied };
   };
@@ -389,6 +395,27 @@ function assertIdempotencyMatches(commandKey: string, idempotency: ParsedIdempot
       { path: "/idempotencyKey", message: "must match Idempotency-Key ULID suffix" },
     ]);
   }
+}
+
+function assertRequestFingerprint(requestFingerprint: string): void {
+  if (requestFingerprint.length === 0) {
+    throw new Error("thread idempotency request fingerprint must not be empty");
+  }
+}
+
+function assertIdempotencyFingerprint(row: IdempotencyRow, requestFingerprint: string): void {
+  if (row.requestFingerprint !== requestFingerprint) {
+    throw new ThreadIdempotencyConflictError("idempotency key reused for a different request");
+  }
+}
+
+function idempotentReplay(row: IdempotencyRow): IdempotentThreadAppendResult {
+  return {
+    replayed: true,
+    statusCode: row.statusCode,
+    payload: Buffer.from(row.responsePayload),
+    applied: null,
+  };
 }
 
 function formatValidationErrors(errors: readonly ThreadValidationError[]): string {

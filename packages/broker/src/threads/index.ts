@@ -11,6 +11,7 @@ export {
   createThreadAppender,
   ThreadCommandValidationError,
   ThreadConflictError,
+  ThreadIdempotencyConflictError,
   ThreadNotFoundError,
   ThreadTerminalTransitionError,
 } from "./appender.ts";

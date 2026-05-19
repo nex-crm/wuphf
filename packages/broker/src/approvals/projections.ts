@@ -62,6 +62,7 @@ export interface ApprovalProjectionRebuildResult {
 }
 
 export interface ApprovalProjection {
+  sharesProvenance(db: Database.Database, eventLog: EventLog): boolean;
   applyEvent(event: ApprovalProjectionEvent): FoldedApprovalRow | null;
   rebuildFromLog(eventLog: EventLog): ApprovalProjectionRebuildResult;
   getById(id: ApprovalRequestId): FoldedApprovalRow | null;
@@ -266,6 +267,9 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
   );
 
   return {
+    sharesProvenance(candidateDb: Database.Database, _eventLog: EventLog): boolean {
+      return candidateDb === db;
+    },
     applyEvent,
     rebuildFromLog(eventLog: EventLog): ApprovalProjectionRebuildResult {
       return rebuildTransaction.immediate(eventLog);

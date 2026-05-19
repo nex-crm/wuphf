@@ -63,6 +63,7 @@ export interface IdempotentApprovalDecisionArgs {
 }
 
 export interface ApprovalAppender {
+  sharesProvenance(db: Database.Database, eventLog: EventLog): boolean;
   requestApproval(payload: ApprovalRequestedAuditPayload): ApprovalAppendResult;
   decideApproval(payload: ApprovalDecidedAuditPayload): ApprovalAppendResult;
   requestApprovalIdempotent(args: IdempotentApprovalRequestArgs): IdempotentApprovalAppendResult;
@@ -269,6 +270,9 @@ export function createApprovalAppender(
   );
 
   return {
+    sharesProvenance(candidateDb: Database.Database, candidateEventLog: EventLog): boolean {
+      return candidateDb === db && candidateEventLog === eventLog;
+    },
     requestApproval(payload: ApprovalRequestedAuditPayload): ApprovalAppendResult {
       return requestApprovalTransaction.immediate(payload);
     },

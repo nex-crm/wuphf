@@ -9,6 +9,7 @@ import {
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
 
+import type { ApprovalAppender, ApprovalProjection } from "../approvals/index.ts";
 import type { EventLog } from "../event-log/index.ts";
 import type { SqliteReceiptStore } from "../sqlite-receipt-store.ts";
 import { createThreadAppender, type ThreadAppender } from "./appender.ts";
@@ -35,6 +36,7 @@ export interface ThreadSubsystem {
   readonly receiptIndex: ThreadReceiptIndexStore;
   readonly receiptStore: SqliteReceiptStore;
   readonly inboxThreadId: ThreadId;
+  sharesApprovalProvenance(appender: ApprovalAppender, projection: ApprovalProjection): boolean;
   rebuildFromLog(fromLsn?: number): void;
 }
 
@@ -56,6 +58,9 @@ export function createThreadSubsystem(
     receiptIndex,
     receiptStore,
     inboxThreadId: SYSTEM_INBOX_THREAD_ID,
+    sharesApprovalProvenance(appender: ApprovalAppender, projection: ApprovalProjection): boolean {
+      return appender.sharesProvenance(db, eventLog) && projection.sharesProvenance(db, eventLog);
+    },
     rebuildFromLog(fromLsn = 0): void {
       if (fromLsn === 0) {
         receiptIndex.clear();
@@ -81,6 +86,7 @@ function ensureSystemInboxThread(appender: ThreadAppender, state: ThreadStateSto
       content: { purpose: "system_inbox" },
     },
     idempotency: SYSTEM_INBOX_IDEMPOTENCY,
+    requestFingerprint: "system:thread-inbox",
     nowMs: 0,
     render: (applied) => ({
       statusCode: 201,
