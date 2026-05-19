@@ -22,7 +22,12 @@ export {
 } from "./effective-status.ts";
 export type { ParsedIdempotencyKey, ThreadCommand } from "./idempotency.ts";
 export { parseThreadIdempotencyKey, THREAD_COMMAND_VALUES } from "./idempotency.ts";
-export type { ThreadStateRow, ThreadStateStore } from "./projections.ts";
+export type {
+  ThreadStatePage,
+  ThreadStatePageOptions,
+  ThreadStateRow,
+  ThreadStateStore,
+} from "./projections.ts";
 export {
   createThreadStateStore,
   threadAuditKindForEventType,

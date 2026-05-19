@@ -51,9 +51,11 @@ import {
   type ApprovalAppender,
   ApprovalDecisionInvalidError,
   ApprovalIdempotencyConflictError,
+  ApprovalPendingLimitExceededError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalRequestAlreadyExistsError,
   ApprovalRequestNotFoundError,
+  ApprovalThreadNotFoundError,
   ApprovalTokenAlreadyUsedError,
 } from "./appender.ts";
 import type { ApprovalCommand, ParsedApprovalIdempotencyKey } from "./idempotency.ts";
@@ -185,6 +187,14 @@ async function handleApprovalRequestPost(
   } catch (err) {
     if (err instanceof ApprovalRequestAlreadyExistsError) {
       writeRouteError(res, 409, { error: "approval_request_exists" });
+      return;
+    }
+    if (err instanceof ApprovalPendingLimitExceededError) {
+      writeRouteError(res, 409, { error: "pending_approval_limit_exceeded" });
+      return;
+    }
+    if (err instanceof ApprovalThreadNotFoundError) {
+      writeRouteError(res, 400, { error: "thread_not_found" });
       return;
     }
     if (err instanceof ApprovalIdempotencyConflictError) {

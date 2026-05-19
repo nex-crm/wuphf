@@ -20,6 +20,7 @@ import {
   canonicalJSON,
   type EventLsn,
   lsnFromV1Number,
+  MAX_ROUTE_APPROVAL_LIST_ITEMS,
   type TaskId,
   type ThreadId,
 } from "@wuphf/protocol";
@@ -308,7 +309,13 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       return row.count;
     },
     listPendingByThread(threadId: ThreadId): readonly FoldedApprovalRow[] {
-      return listRows(db, { threadId, status: "pending" }).map(rowToFolded);
+      return listRows(
+        db,
+        { threadId, status: "pending" },
+        {
+          limit: MAX_ROUTE_APPROVAL_LIST_ITEMS,
+        },
+      ).map(rowToFolded);
     },
     latestHeadLsnByThread(threadId: ThreadId): EventLsn | null {
       const row = latestHeadLsnByThreadStmt.get(threadId);

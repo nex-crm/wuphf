@@ -10,6 +10,7 @@ import {
   canonicalJSON,
   type EventLsn,
   lsnFromV1Number,
+  MAX_ROUTE_THREAD_LIST_ITEMS,
   parseLsn,
   routeErrorToJsonValue,
   type Sha256Hex,
@@ -71,6 +72,7 @@ import {
 import type { ThreadReceiptIndexStore } from "./receipt-index.ts";
 
 const MAX_THREAD_BODY_BYTES = 512 * 1_024;
+const DEFAULT_THREAD_LIST_LIMIT = MAX_ROUTE_THREAD_LIST_ITEMS;
 const THREAD_EFFECTIVE_STATUS_SET: ReadonlySet<string> = new Set<string>(
   THREAD_EFFECTIVE_STATUS_VALUES,
 );
@@ -170,17 +172,24 @@ export async function handleThreadRoute(
 
 function handleThreadList(req: IncomingMessage, res: ServerResponse, deps: ThreadRouteDeps): void {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  const filter = parseStatusFilter(url.searchParams);
-  if (!filter.ok) {
-    writeRouteError(res, 400, "invalid_status", filter.reason);
+  const query = parseThreadListQuery(url.searchParams);
+  if (!query.ok) {
+    writeRouteError(res, 400, query.error, query.reason);
     return;
   }
   try {
-    const rows = deps.state.list();
-    const threads = rows
+    const page = deps.state.listPage({
+      limit: query.limit,
+      ...(query.afterHeadLsn === undefined ? {} : { afterHeadLsn: query.afterHeadLsn }),
+    });
+    const threads = page.rows
       .map((row) => threadViewFromRow(row, deps))
-      .filter((thread) => threadMatchesStatusFilter(thread, filter.filter));
-    writeJsonValue(res, 200, threadListResponseToJsonValue({ threads }));
+      .filter((thread) => threadMatchesStatusFilter(thread, query.filter));
+    writeJsonValue(
+      res,
+      200,
+      threadListResponseToJsonValue({ threads, nextCursor: page.nextCursor }),
+    );
   } catch (err) {
     if (writeStorageErrorResponse(res, err, deps.logger, "thread_list_rejected")) return;
     throw err;
@@ -523,14 +532,63 @@ function assertThreadValid(thread: Thread): void {
   }
 }
 
+function parseThreadListQuery(params: URLSearchParams):
+  | {
+      readonly ok: true;
+      readonly filter?: ThreadStatusFilter;
+      readonly limit: number;
+      readonly afterHeadLsn?: number;
+    }
+  | { readonly ok: false; readonly error: string; readonly reason?: string } {
+  const status = parseStatusFilter(params);
+  if (!status.ok) return status;
+
+  const limitParam = singleQueryParam(params, "limit");
+  if (limitParam === "multiple") {
+    return { ok: false, error: "invalid_limit", reason: "limit may appear only once" };
+  }
+  let limit = DEFAULT_THREAD_LIST_LIMIT;
+  if (limitParam !== undefined) {
+    if (!/^\d+$/.test(limitParam)) {
+      return { ok: false, error: "invalid_limit", reason: "limit must be a positive integer" };
+    }
+    const parsedLimit = Number.parseInt(limitParam, 10);
+    if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1) {
+      return { ok: false, error: "invalid_limit", reason: "limit must be a positive integer" };
+    }
+    limit = Math.min(parsedLimit, MAX_ROUTE_THREAD_LIST_ITEMS);
+  }
+
+  const cursor = singleQueryParam(params, "cursor");
+  if (cursor === "multiple") {
+    return { ok: false, error: "invalid_cursor", reason: "cursor may appear only once" };
+  }
+  if (cursor !== undefined) {
+    try {
+      return {
+        ok: true,
+        ...(status.filter === undefined ? {} : { filter: status.filter }),
+        limit,
+        afterHeadLsn: parseLsn(cursor as EventLsn).localLsn,
+      };
+    } catch {
+      return { ok: false, error: "invalid_cursor", reason: "cursor must be an EventLsn" };
+    }
+  }
+
+  return { ok: true, ...(status.filter === undefined ? {} : { filter: status.filter }), limit };
+}
+
 function parseStatusFilter(
   params: URLSearchParams,
 ):
   | { readonly ok: true; readonly filter?: ThreadStatusFilter }
-  | { readonly ok: false; readonly reason: string } {
+  | { readonly ok: false; readonly error: string; readonly reason: string } {
   const values = params.getAll("status");
   if (values.length === 0) return { ok: true };
-  if (values.length > 1) return { ok: false, reason: "status may appear only once" };
+  if (values.length > 1) {
+    return { ok: false, error: "invalid_status", reason: "status may appear only once" };
+  }
   const raw = values[0] ?? "";
   if (THREAD_EFFECTIVE_STATUS_SET.has(raw)) {
     return {
@@ -541,7 +599,18 @@ function parseStatusFilter(
   if (THREAD_BOARD_COLUMN_SET.has(raw)) {
     return { ok: true, filter: { kind: "board_column", value: raw as ThreadBoardColumn } };
   }
-  return { ok: false, reason: "unknown thread status, effective status, or board column" };
+  return {
+    ok: false,
+    error: "invalid_status",
+    reason: "unknown thread status, effective status, or board column",
+  };
+}
+
+function singleQueryParam(params: URLSearchParams, key: string): string | "multiple" | undefined {
+  const values = params.getAll(key);
+  if (values.length === 0) return undefined;
+  if (values.length > 1) return "multiple";
+  return values[0] ?? "";
 }
 
 type ThreadStatusFilter =

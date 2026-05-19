@@ -15,7 +15,9 @@ import {
   approvalRequestToJson,
   type EventLsn,
   lsnFromV1Number,
+  MAX_ROUTE_APPROVAL_LIST_ITEMS,
   parseLsn,
+  type ThreadId,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
 
@@ -86,8 +88,32 @@ export class ApprovalRequestAlreadyDecidedError extends Error {
   }
 }
 
+export class ApprovalPendingLimitExceededError extends Error {
+  override readonly name = "ApprovalPendingLimitExceededError";
+  constructor(readonly threadId: ThreadId) {
+    super(`thread ${threadId} already has ${MAX_ROUTE_APPROVAL_LIST_ITEMS} pending approvals`);
+  }
+}
+
+export class ApprovalThreadNotFoundError extends Error {
+  override readonly name = "ApprovalThreadNotFoundError";
+  constructor(readonly threadId: ThreadId) {
+    super(`thread not found: ${threadId}`);
+  }
+}
+
 export class ApprovalDecisionInvalidError extends Error {
   override readonly name = "ApprovalDecisionInvalidError";
+}
+
+export class ApprovalTokenIssuedToMismatchError extends Error {
+  override readonly name = "ApprovalTokenIssuedToMismatchError";
+  constructor(
+    readonly issuedTo: string,
+    readonly decidedBy: string,
+  ) {
+    super(`approval token issued to ${issuedTo}, not ${decidedBy}`);
+  }
 }
 
 export class ApprovalTokenAlreadyUsedError extends Error {
@@ -110,6 +136,10 @@ interface IdempotencyRow {
 
 interface TokenUsageRow {
   readonly approvalId: string;
+}
+
+interface ExistsRow {
+  readonly present: 1;
 }
 
 export function createApprovalAppender(
@@ -142,6 +172,10 @@ export function createApprovalAppender(
      WHERE created_at_ms < ?
        AND command IN ('approval.requested', 'approval.decided')`,
   );
+  const threadExistsStmt = db.prepare<[ThreadId], ExistsRow>(
+    "SELECT 1 AS present FROM threads WHERE thread_id = ?",
+  );
+  const enforceThreadReferences = false;
 
   const assertApprovalTokenUnused = (payload: ApprovalDecidedAuditPayload): void => {
     const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
@@ -152,12 +186,37 @@ export function createApprovalAppender(
     }
   };
 
+  const assertThreadReferenceExists = (payload: ApprovalRequestedAuditPayload): void => {
+    if (!enforceThreadReferences || payload.threadId === undefined) return;
+    if (threadExistsStmt.get(payload.threadId) === undefined) {
+      throw new ApprovalThreadNotFoundError(payload.threadId);
+    }
+  };
+
+  const assertApprovalTokenIssuedToDecider = (payload: ApprovalDecidedAuditPayload): void => {
+    const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
+    if (suppliedApprovalToken === undefined) return;
+    if (String(suppliedApprovalToken.issuedTo) !== String(payload.decidedBy)) {
+      throw new ApprovalTokenIssuedToMismatchError(
+        String(suppliedApprovalToken.issuedTo),
+        String(payload.decidedBy),
+      );
+    }
+  };
+
   const requestApprovalInner = (payload: ApprovalRequestedAuditPayload): ApprovalAppendResult => {
     const existing = projection.getById(payload.requestId);
     if (existing !== null) {
       throw new ApprovalRequestAlreadyExistsError(
         `approval request already exists: ${payload.requestId}`,
       );
+    }
+    assertThreadReferenceExists(payload);
+    if (
+      payload.threadId !== undefined &&
+      projection.countPendingByThread(payload.threadId) >= MAX_ROUTE_APPROVAL_LIST_ITEMS
+    ) {
+      throw new ApprovalPendingLimitExceededError(payload.threadId);
     }
     const bytes = approvalAuditPayloadToBytes("approval_requested", payload);
     const lsn = eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
