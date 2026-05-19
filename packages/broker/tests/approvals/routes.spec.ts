@@ -4,17 +4,27 @@ import {
   type ApprovalDecidedAuditPayload,
   type ApprovalRequestedAuditPayload,
   type ApprovalStreamEvent,
-  approvalAuditPayloadToJsonValue,
+  approvalDecisionRequestToJsonValue,
+  approvalDecisionResponseFromJson,
+  approvalRequestCreateRequestToJsonValue,
+  approvalRequestCreateResponseFromJson,
   approvalRequestFromJsonValue,
+  asAgentId,
   asApiToken,
   asApprovalClaimId,
   asApprovalRequestId,
   asApprovalRole,
+  asApprovalTokenId,
+  asIdempotencyKey,
   asReceiptId,
   asSha256Hex,
   asSignerIdentity,
   asTaskId,
   asThreadId,
+  asTimestampMs,
+  type SignedApprovalToken,
+  signedApprovalTokenFromJson,
+  signedApprovalTokenToJsonValue,
   validateApprovalStreamEvent,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
@@ -32,6 +42,9 @@ const UNKNOWN_REQUEST_ID = asApprovalRequestId("01ARZ3NDEKTSV4RRFFQ69G5FAZ");
 const RECEIPT_ID = asReceiptId("01BRZ3NDEKTSV4RRFFQ69G5FA0");
 const THREAD_ID = asThreadId("01CRZ3NDEKTSV4RRFFQ69G5FA1");
 const TASK_ID = asTaskId("01DRZ3NDEKTSV4RRFFQ69G5FA2");
+const ROUTE_NOW_MS = Date.UTC(2026, 4, 18, 11, 1, 0, 0);
+const REQUEST_KEY = asIdempotencyKey("approval-request-01");
+const DECISION_KEY = asIdempotencyKey("approval-decision-01");
 
 interface Fixture {
   readonly db: ReturnType<typeof openDatabase>;
@@ -77,12 +90,37 @@ function decidedPayload(
   decision: ApprovalDecidedAuditPayload["decision"],
   requestId = REQUEST_ID,
 ): ApprovalDecidedAuditPayload {
+  const token =
+    decision === "approve" ? signedApprovalTokenFixture(requestedPayload(requestId)) : undefined;
   return {
     requestId,
     decision,
     decidedBy: asSignerIdentity("approver@example.com"),
     decidedAt: new Date("2026-05-18T11:01:00.000Z"),
+    ...(token === undefined ? {} : { token }),
   };
+}
+
+function signedApprovalTokenFixture(
+  requested = requestedPayload(),
+  tokenId = asApprovalTokenId("01ERZ3NDEKTSV4RRFFQ69G5FA3"),
+): SignedApprovalToken {
+  const token: SignedApprovalToken = {
+    schemaVersion: 1,
+    tokenId,
+    claim: requested.claim,
+    scope: requested.scope,
+    notBefore: asTimestampMs(Date.UTC(2026, 4, 18, 11, 0, 0, 0)),
+    expiresAt: asTimestampMs(Date.UTC(2026, 4, 18, 11, 30, 0, 0)),
+    issuedTo: asAgentId("agent_alpha"),
+    signature: {
+      credentialId: "YQ",
+      authenticatorData: "YQ",
+      clientDataJson: "YQ",
+      signature: "YQ",
+    },
+  };
+  return signedApprovalTokenFromJson(signedApprovalTokenToJsonValue(token));
 }
 
 async function buildFixture(overrides?: {
@@ -99,6 +137,7 @@ async function buildFixture(overrides?: {
   const broker = await createBroker({
     port: 0,
     token: TOKEN,
+    clock: { now: () => ROUTE_NOW_MS },
     approvals: { appender, projection, db },
   });
   return { db, broker, appender, projection };
@@ -118,19 +157,47 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
   };
 }
 
-function requestBody(payload: ApprovalRequestedAuditPayload): string {
-  return JSON.stringify(approvalAuditPayloadToJsonValue("approval_requested", payload));
+function requestBody(payload: ApprovalRequestedAuditPayload, idempotencyKey = REQUEST_KEY): string {
+  return JSON.stringify(
+    approvalRequestCreateRequestToJsonValue({
+      schemaVersion: 1,
+      claim: payload.claim,
+      scope: payload.scope,
+      riskClass: payload.riskClass,
+      threadId: payload.threadId,
+      taskId: payload.taskId,
+      receiptId: payload.receiptId,
+      idempotencyKey,
+    }),
+  );
 }
 
-function decisionBody(payload: ApprovalDecidedAuditPayload): string {
-  return JSON.stringify(approvalAuditPayloadToJsonValue("approval_decided", payload));
+function decisionBody(payload: ApprovalDecidedAuditPayload, idempotencyKey = DECISION_KEY): string {
+  return JSON.stringify(
+    approvalDecisionRequestToJsonValue({
+      schemaVersion: 1,
+      decision: payload.decision,
+      token: payload.decision === "approve" ? payload.token : undefined,
+      idempotencyKey,
+    }),
+  );
 }
 
-async function postApproval(fix: Fixture, keyTail = "01ARZ3NDEKTSV4RRFFQ69G5FAV") {
+function approveDecisionBodyWithoutToken(idempotencyKey = DECISION_KEY): string {
+  return JSON.stringify(
+    approvalDecisionRequestToJsonValue({
+      schemaVersion: 1,
+      decision: "approve",
+      idempotencyKey,
+    }),
+  );
+}
+
+async function postApproval(fix: Fixture, idempotencyKey = REQUEST_KEY) {
   return await fetch(`${fix.broker.url}/api/v1/approvals`, {
     method: "POST",
-    headers: authHeaders({ "Idempotency-Key": `cmd_approval.requested_${keyTail}` }),
-    body: requestBody(requestedPayload()),
+    headers: authHeaders(),
+    body: requestBody(requestedPayload(), idempotencyKey),
   });
 }
 
@@ -219,8 +286,9 @@ describe("/api/v1/approvals routes", () => {
     if (fix === null) throw new Error("fixture missing");
     const create = await postApproval(fix);
     expect(create.status).toBe(201);
-    const created = approvalRequestFromJsonValue((await create.json()) as unknown);
-    expect(created.id).toBe(REQUEST_ID);
+    const createdEnvelope = approvalRequestCreateResponseFromJson((await create.json()) as unknown);
+    const created = createdEnvelope.approvalRequest;
+    expect(createdEnvelope.headLsn).toBe("v1:1");
     expect(created.status).toBe("pending");
 
     const listPending = await fetch(`${fix.broker.url}/api/v1/approvals?status=pending`, {
@@ -229,7 +297,7 @@ describe("/api/v1/approvals routes", () => {
     expect(listPending.status).toBe(200);
     const pendingBody = (await listPending.json()) as { readonly approvals: readonly unknown[] };
     expect(pendingBody.approvals.map((item) => approvalRequestFromJsonValue(item).id)).toEqual([
-      REQUEST_ID,
+      created.id,
     ]);
 
     const byThread = await fetch(
@@ -241,23 +309,34 @@ describe("/api/v1/approvals routes", () => {
       ((await byThread.json()) as { readonly approvals: readonly unknown[] }).approvals.length,
     ).toBe(1);
 
-    const get = await fetch(`${fix.broker.url}/api/v1/approvals/${REQUEST_ID}`, {
+    const get = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}`, {
       headers: { Authorization: `Bearer ${TOKEN}` },
     });
     expect(get.status).toBe(200);
     expect(approvalRequestFromJsonValue((await get.json()) as unknown).status).toBe("pending");
 
-    const decided = await fetch(`${fix.broker.url}/api/v1/approvals/${REQUEST_ID}/decision`, {
+    const decided = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}/decision`, {
       method: "POST",
-      headers: authHeaders({
-        "Idempotency-Key": "cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAW",
-      }),
+      headers: authHeaders(),
       body: decisionBody(decidedPayload("approve")),
     });
     expect(decided.status).toBe(201);
-    const decidedBody = approvalRequestFromJsonValue((await decided.json()) as unknown);
+    const decidedBody = approvalDecisionResponseFromJson(
+      (await decided.json()) as unknown,
+    ).approvalRequest;
     expect(decidedBody.status).toBe("approved");
     expect(decidedBody.decision?.decision).toBe("approve");
+  });
+
+  it("uses a ULID create idempotency key as the approval request id", async () => {
+    if (fix === null) throw new Error("fixture missing");
+
+    const created = await postApproval(fix, asIdempotencyKey(REQUEST_ID));
+
+    expect(created.status).toBe(201);
+    expect(
+      approvalRequestCreateResponseFromJson((await created.json()) as unknown).approvalRequest.id,
+    ).toBe(REQUEST_ID);
   });
 
   it("emits validated approval.requested and approval.decided SSE invalidations", async () => {
@@ -274,20 +353,24 @@ describe("/api/v1/approvals routes", () => {
 
     const created = await postApproval(fix);
     expect(created.status).toBe(201);
+    const createdApproval = approvalRequestCreateResponseFromJson(
+      (await created.json()) as unknown,
+    ).approvalRequest;
     const requestedText = await readUntil(reader, "event: approval.requested");
     const requestedEvent = parseApprovalSse(requestedText, "approval.requested");
     expect(validateApprovalStreamEvent(requestedEvent).ok).toBe(true);
-    expect(requestedEvent.payload.requestId).toBe(REQUEST_ID);
+    expect(requestedEvent.payload.requestId).toBe(createdApproval.id);
     expect(requestedEvent.payload.threadId).toBe(THREAD_ID);
     expect(requestedEvent.payload.headLsn).toBe("v1:1");
 
-    const decided = await fetch(`${fix.broker.url}/api/v1/approvals/${REQUEST_ID}/decision`, {
-      method: "POST",
-      headers: authHeaders({
-        "Idempotency-Key": "cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAW",
-      }),
-      body: decisionBody(decidedPayload("reject")),
-    });
+    const decided = await fetch(
+      `${fix.broker.url}/api/v1/approvals/${createdApproval.id}/decision`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: decisionBody(decidedPayload("reject")),
+      },
+    );
     expect(decided.status).toBe(201);
     const decidedText = await readUntil(reader, "event: approval.decided");
     const decidedEvent = parseApprovalSse(decidedText, "approval.decided");
@@ -298,30 +381,32 @@ describe("/api/v1/approvals routes", () => {
 
   it("duplicate command keys replay without appending duplicate events", async () => {
     if (fix === null) throw new Error("fixture missing");
-    const keyTail = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-    const first = await postApproval(fix, keyTail);
+    const requestKey = asIdempotencyKey("approval-request-dup");
+    const decisionKey = asIdempotencyKey("approval-decision-dup");
+    const first = await postApproval(fix, requestKey);
     const firstBody = await first.text();
-    const second = await postApproval(fix, keyTail);
+    const created = approvalRequestCreateResponseFromJson(
+      JSON.parse(firstBody) as unknown,
+    ).approvalRequest;
+    const second = await postApproval(fix, requestKey);
     expect(second.status).toBe(201);
     expect(second.headers.get("Idempotent-Replay")).toBe("true");
     expect(await second.text()).toBe(firstBody);
     expect(eventCount(fix.db, "approval.requested")).toBe(1);
 
-    const decisionHeaders = authHeaders({
-      "Idempotency-Key": "cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAW",
-    });
-    const firstDecision = await fetch(`${fix.broker.url}/api/v1/approvals/${REQUEST_ID}/decision`, {
+    const firstDecision = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}/decision`, {
       method: "POST",
-      headers: decisionHeaders,
-      body: decisionBody(decidedPayload("approve")),
+      headers: authHeaders(),
+      body: decisionBody(decidedPayload("approve"), decisionKey),
     });
+    expect(firstDecision.status).toBe(201);
     const firstDecisionBody = await firstDecision.text();
     const replayedDecision = await fetch(
-      `${fix.broker.url}/api/v1/approvals/${REQUEST_ID}/decision`,
+      `${fix.broker.url}/api/v1/approvals/${created.id}/decision`,
       {
         method: "POST",
-        headers: decisionHeaders,
-        body: decisionBody(decidedPayload("reject")),
+        headers: authHeaders(),
+        body: decisionBody(decidedPayload("reject"), decisionKey),
       },
     );
     expect(replayedDecision.status).toBe(201);
@@ -332,21 +417,19 @@ describe("/api/v1/approvals routes", () => {
 
   it("returns 409 for a second decision with a fresh key and appends no event", async () => {
     if (fix === null) throw new Error("fixture missing");
-    expect((await postApproval(fix)).status).toBe(201);
-    const first = await fetch(`${fix.broker.url}/api/v1/approvals/${REQUEST_ID}/decision`, {
+    const created = approvalRequestCreateResponseFromJson(
+      (await (await postApproval(fix)).json()) as unknown,
+    ).approvalRequest;
+    const first = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}/decision`, {
       method: "POST",
-      headers: authHeaders({
-        "Idempotency-Key": "cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAW",
-      }),
+      headers: authHeaders(),
       body: decisionBody(decidedPayload("approve")),
     });
     expect(first.status).toBe(201);
-    const second = await fetch(`${fix.broker.url}/api/v1/approvals/${REQUEST_ID}/decision`, {
+    const second = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}/decision`, {
       method: "POST",
-      headers: authHeaders({
-        "Idempotency-Key": "cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAX",
-      }),
-      body: decisionBody(decidedPayload("reject")),
+      headers: authHeaders(),
+      body: decisionBody(decidedPayload("reject"), asIdempotencyKey("approval-decision-02")),
     });
     expect(second.status).toBe(409);
     expect(await second.json()).toEqual({ error: "approval_not_pending" });
@@ -359,10 +442,8 @@ describe("/api/v1/approvals routes", () => {
       `${fix.broker.url}/api/v1/approvals/${UNKNOWN_REQUEST_ID}/decision`,
       {
         method: "POST",
-        headers: authHeaders({
-          "Idempotency-Key": "cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAW",
-        }),
-        body: decisionBody(decidedPayload("approve", UNKNOWN_REQUEST_ID)),
+        headers: authHeaders(),
+        body: decisionBody(decidedPayload("reject", UNKNOWN_REQUEST_ID)),
       },
     );
     expect(unknown.status).toBe(404);
@@ -371,13 +452,10 @@ describe("/api/v1/approvals routes", () => {
       `${fix.broker.url}/api/v1/approvals/${REQUEST_ID}/decision`,
       {
         method: "POST",
-        headers: authHeaders({
-          "Idempotency-Key": "cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAX",
-        }),
+        headers: authHeaders(),
         body: JSON.stringify({
-          requestId: REQUEST_ID,
-          decidedBy: "approver@example.com",
-          decidedAt: "2026-05-18T11:01:00.000Z",
+          schemaVersion: 1,
+          idempotencyKey: "approval-decision-missing",
         }),
       },
     );
@@ -385,6 +463,25 @@ describe("/api/v1/approvals routes", () => {
     expect(((await missingDecision.json()) as { readonly error: string }).error).toBe(
       "invalid_payload",
     );
+  });
+
+  it("rejects approve decisions that omit the signed approval token", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const created = approvalRequestCreateResponseFromJson(
+      (await (await postApproval(fix)).json()) as unknown,
+    ).approvalRequest;
+
+    const missingToken = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}/decision`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: approveDecisionBodyWithoutToken(asIdempotencyKey("approval-decision-no-token")),
+    });
+
+    expect(missingToken.status).toBe(400);
+    expect(((await missingToken.json()) as { readonly error: string }).error).toBe(
+      "invalid_payload",
+    );
+    expect(eventCount(fix.db, "approval.decided")).toBe(0);
   });
 
   it("requires bearer auth and loopback host on every approvals route", async () => {
@@ -437,7 +534,7 @@ describe("approval route SQLite error mapping", () => {
     const res = await postApproval(currentFixture);
     expect(res.status).toBe(503);
     expect(res.headers.get("Retry-After")).toBe("1");
-    expect(await res.json()).toEqual({ error: "store_busy" });
+    expect(await res.json()).toEqual({ error: "store_busy", retryAfterMs: 1000 });
   });
 
   it("maps SQLITE_FULL to 507", async () => {

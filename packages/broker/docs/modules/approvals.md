@@ -49,10 +49,17 @@ bearer gate.
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | `/api/v1/approvals` | `ApprovalRequestedAuditPayload` JSON; `Idempotency-Key: cmd_approval.requested_<ULID>` | Folded `ApprovalRequest` via `approvalRequestToJsonValue` |
+| POST | `/api/v1/approvals` | `ApprovalRequestCreateRequest` route envelope with body `idempotencyKey` | `ApprovalRequestCreateResponse` route envelope |
 | GET | `/api/v1/approvals` | Optional `status`, `threadId`, `taskId` filters | `{ approvals: ApprovalRequest[] }` |
 | GET | `/api/v1/approvals/:id` | none | One folded `ApprovalRequest` |
-| POST | `/api/v1/approvals/:id/decision` | `ApprovalDecidedAuditPayload` JSON; `Idempotency-Key: cmd_approval.decided_<ULID>` | Folded terminal `ApprovalRequest`; 409 if not pending |
+| POST | `/api/v1/approvals/:id/decision` | `ApprovalDecisionRequest` route envelope with body `idempotencyKey`; `approve` requires `token` | `ApprovalDecisionResponse` route envelope; 409 if not pending |
+
+The route layer stamps audit-only fields that are not part of the renderer
+route envelope: `requestedAt` / `decidedAt` from the broker clock and
+`requestedBy` / reject-or-abstain `decidedBy` as `broker`. For approve
+decisions, `decidedBy` is the token `issuedTo` identity. If a create
+`idempotencyKey` is itself an `ApprovalRequestId` ULID, that value becomes the
+request id; otherwise the broker derives a stable request id from the key.
 
 SQLite storage errors follow the receipt route contract:
 `SQLITE_BUSY`/`SQLITE_LOCKED` returns `503 {"error":"store_busy"}` with

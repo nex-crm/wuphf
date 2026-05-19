@@ -85,16 +85,17 @@ keys, replay-check discrepancy contract, and public subpath exports.
 When `createBroker({ approvals })` is supplied, the listener mounts explicit
 approval state under `/api/v1/approvals`. Without an approvals config, those
 paths behave like unknown authenticated API routes and return 404. Writes use
-the same `cmd_<command>_<ULID>` idempotency shape as the cost ledger, and every
-folded approval returned to the renderer is emitted through
+the approval route-envelope `idempotencyKey` carried in the request body. POST
+responses and route errors are emitted through the approval route-envelope
+codecs; folded approvals returned by GET routes are emitted through
 `approvalRequestToJsonValue`.
 
 | Method | Path | Auth | Contract |
 |---|---|---|---|
-| POST | `/api/v1/approvals` | bearer | Parses `ApprovalRequestedAuditPayload`, appends `approval.requested`, projects a pending `ApprovalRequest`, returns that protocol wire shape, and emits `approval.requested` on `/api/events`. |
+| POST | `/api/v1/approvals` | bearer | Parses `ApprovalRequestCreateRequest`, appends `approval.requested`, projects a pending `ApprovalRequest`, returns `ApprovalRequestCreateResponse`, and emits `approval.requested` on `/api/events`. |
 | GET | `/api/v1/approvals` | bearer | Lists folded approvals. Optional filters: `status`, `threadId`, `taskId`. |
 | GET | `/api/v1/approvals/:id` | bearer | Fetches one folded approval, or 404 for malformed/missing ids. |
-| POST | `/api/v1/approvals/:id/decision` | bearer | Parses `ApprovalDecidedAuditPayload`, requires path/body `requestId` match, rejects non-pending approvals with 409, records any supplied token without WebAuthn verification, and emits `approval.decided`. |
+| POST | `/api/v1/approvals/:id/decision` | bearer | Parses `ApprovalDecisionRequest`, requires a token for `approve`, rejects non-pending approvals with 409, records the approve token without WebAuthn verification, and emits `approval.decided`. |
 
 See [approvals.md](./approvals.md) for the projection schema, replay rebuild,
 and SSE payload contract.

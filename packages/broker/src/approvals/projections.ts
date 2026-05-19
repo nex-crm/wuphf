@@ -311,7 +311,7 @@ export function approvalWithDecision(
   approval: ApprovalRequest,
   payload: ApprovalDecidedAuditPayload,
 ): ApprovalRequest {
-  const suppliedApprovalToken = payload.token;
+  const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
   return {
     ...approval,
     status: statusForDecision(payload.decision),
@@ -391,7 +391,7 @@ function parseApprovalEvent(
 }
 
 function tokenColumn(payload: ApprovalDecidedAuditPayload): string | null {
-  const suppliedApprovalToken = payload.token;
+  const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
   if (suppliedApprovalToken === undefined) return null;
   const wire = approvalAuditPayloadToJsonValue(
     "approval_decided",

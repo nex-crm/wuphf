@@ -15,6 +15,9 @@ import {
   asThreadId,
   asTimestampMs,
   canonicalJSON,
+  type SignedApprovalToken,
+  signedApprovalTokenFromJson,
+  signedApprovalTokenToJsonValue,
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 
@@ -82,11 +85,14 @@ function decidedPayload(
   decision: ApprovalDecidedAuditPayload["decision"],
   requestId = REQUEST_ID,
 ): ApprovalDecidedAuditPayload {
+  const token =
+    decision === "approve" ? signedApprovalTokenFixture(requestedPayload(requestId)) : undefined;
   return {
     requestId,
     decision,
     decidedBy: asSignerIdentity("approver@example.com"),
     decidedAt: new Date("2026-05-18T10:01:00.000Z"),
+    ...(token === undefined ? {} : { token }),
   };
 }
 
@@ -94,22 +100,30 @@ function decidedPayloadWithToken(): ApprovalDecidedAuditPayload {
   const requested = requestedPayload();
   return {
     ...decidedPayload("approve"),
-    token: {
-      schemaVersion: 1,
-      tokenId: asApprovalTokenId("01ERZ3NDEKTSV4RRFFQ69G5FA3"),
-      claim: requested.claim,
-      scope: requested.scope,
-      notBefore: asTimestampMs(1_700_000_000_000),
-      expiresAt: asTimestampMs(1_700_000_060_000),
-      issuedTo: asAgentId("agent_alpha"),
-      signature: {
-        credentialId: "YQ",
-        authenticatorData: "YQ",
-        clientDataJson: "YQ",
-        signature: "YQ",
-      },
+    token: signedApprovalTokenFixture(requested),
+  };
+}
+
+function signedApprovalTokenFixture(
+  requested: ApprovalRequestedAuditPayload,
+  tokenId = asApprovalTokenId("01ERZ3NDEKTSV4RRFFQ69G5FA3"),
+): SignedApprovalToken {
+  const token: SignedApprovalToken = {
+    schemaVersion: 1,
+    tokenId,
+    claim: requested.claim,
+    scope: requested.scope,
+    notBefore: asTimestampMs(Date.UTC(2026, 4, 18, 10, 0, 0, 0)),
+    expiresAt: asTimestampMs(Date.UTC(2026, 4, 18, 10, 30, 0, 0)),
+    issuedTo: asAgentId("agent_alpha"),
+    signature: {
+      credentialId: "YQ",
+      authenticatorData: "YQ",
+      clientDataJson: "YQ",
+      signature: "YQ",
     },
   };
+  return signedApprovalTokenFromJson(signedApprovalTokenToJsonValue(token));
 }
 
 function eventCount(db: ReturnType<typeof openDatabase>, type: string): number {

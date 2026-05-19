@@ -14,17 +14,20 @@ import { join } from "node:path";
 
 import { forBrokerTests } from "@wuphf/credentials/testing";
 import {
-  approvalAuditPayloadToJsonValue,
+  approvalDecisionRequestToJsonValue,
+  approvalRequestCreateRequestToJsonValue,
   asAgentId,
   asApiToken,
   asApprovalClaimId,
   asApprovalRequestId,
   asApprovalRole,
+  asApprovalTokenId,
+  asIdempotencyKey,
   asReceiptId,
   asSha256Hex,
-  asSignerIdentity,
   asTaskId,
   asThreadId,
+  asTimestampMs,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
 
@@ -69,6 +72,22 @@ const approvalScope = {
   maxUses: 1,
   receiptId,
   frozenArgsHash,
+} as const;
+const approvalTokenNotBeforeMs = Date.now() - 60_000;
+const approvalToken = {
+  schemaVersion: 1,
+  tokenId: asApprovalTokenId("01ERZ3NDEKTSV4RRFFQ69G5FA3"),
+  claim: approvalClaim,
+  scope: approvalScope,
+  notBefore: asTimestampMs(approvalTokenNotBeforeMs),
+  expiresAt: asTimestampMs(approvalTokenNotBeforeMs + 30 * 60 * 1000),
+  issuedTo: agentId,
+  signature: {
+    credentialId: "YQ",
+    authenticatorData: "YQ",
+    clientDataJson: "YQ",
+    signature: "YQ",
+  },
 } as const;
 
 const broker = await createBroker({
@@ -130,32 +149,30 @@ const writeBody = JSON.stringify({
   ],
 });
 const approvalRequestBody = JSON.stringify(
-  approvalAuditPayloadToJsonValue("approval_requested", {
-    requestId: approvalRequestId,
+  approvalRequestCreateRequestToJsonValue({
+    schemaVersion: 1,
     claim: approvalClaim,
     scope: approvalScope,
     riskClass: "high",
     threadId,
     taskId,
     receiptId,
-    requestedBy: asSignerIdentity("operator@example.com"),
-    requestedAt: new Date("2026-05-18T12:00:00.000Z"),
+    idempotencyKey: asIdempotencyKey(approvalRequestId),
   }),
 );
 const approvalDecisionBody = JSON.stringify(
-  approvalAuditPayloadToJsonValue("approval_decided", {
-    requestId: approvalRequestId,
+  approvalDecisionRequestToJsonValue({
+    schemaVersion: 1,
     decision: "approve",
-    decidedBy: asSignerIdentity("approver@example.com"),
-    decidedAt: new Date("2026-05-18T12:01:00.000Z"),
+    token: approvalToken,
+    idempotencyKey: asIdempotencyKey("approval-decision-01"),
   }),
 );
 const unknownApprovalDecisionBody = JSON.stringify(
-  approvalAuditPayloadToJsonValue("approval_decided", {
-    requestId: unknownApprovalRequestId,
+  approvalDecisionRequestToJsonValue({
+    schemaVersion: 1,
     decision: "reject",
-    decidedBy: asSignerIdentity("approver@example.com"),
-    decidedAt: new Date("2026-05-18T12:02:00.000Z"),
+    idempotencyKey: asIdempotencyKey("approval-decision-unknown"),
   }),
 );
 
@@ -201,7 +218,7 @@ console.log(
 console.log("");
 console.log("# 8. Create an explicit pending approval request");
 console.log(
-  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_approval.requested_01ARZ3NDEKTSV4RRFFQ69G5FAV" \\\n     -d '${approvalRequestBody}' \\\n     "${broker.url}/api/v1/approvals"; echo`,
+  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${approvalRequestBody}' \\\n     "${broker.url}/api/v1/approvals"; echo`,
 );
 console.log("");
 console.log("# 9. List pending approvals");
@@ -211,22 +228,22 @@ console.log(
 console.log("");
 console.log("# 10. Decide the approval");
 console.log(
-  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAW" \\\n     -d '${approvalDecisionBody}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision"; echo`,
+  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${approvalDecisionBody}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision"; echo`,
 );
 console.log("");
 console.log("# 11. Decide twice with a fresh key → 409");
 console.log(
-  `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAX" \\\n     -d '${approvalDecisionBody}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision" | head -1`,
+  `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '{"schemaVersion":1,"decision":"reject","idempotencyKey":"approval-decision-02"}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision" | head -1`,
 );
 console.log("");
 console.log("# 12. Unknown approval id → 404");
 console.log(
-  `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAY" \\\n     -d '${unknownApprovalDecisionBody}' \\\n     "${broker.url}/api/v1/approvals/${unknownApprovalRequestId}/decision" | head -1`,
+  `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${unknownApprovalDecisionBody}' \\\n     "${broker.url}/api/v1/approvals/${unknownApprovalRequestId}/decision" | head -1`,
 );
 console.log("");
 console.log("# 13. Missing decision field → 400");
 console.log(
-  `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAT" \\\n     -d '{"requestId":"${approvalRequestId}","decidedBy":"approver@example.com","decidedAt":"2026-05-18T12:03:00.000Z"}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision" | head -1`,
+  `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '{"schemaVersion":1,"idempotencyKey":"approval-decision-missing"}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision" | head -1`,
 );
 console.log("");
 console.log("Ctrl-C to stop. Temp DB will be cleaned up on shutdown.");

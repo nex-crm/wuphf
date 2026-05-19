@@ -8,6 +8,7 @@ export type {
   IdempotentApprovalRequestArgs,
 } from "./appender.ts";
 export {
+  ApprovalDecisionInvalidError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalRequestAlreadyExistsError,
   ApprovalRequestNotFoundError,

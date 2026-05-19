@@ -1,11 +1,13 @@
 // Command idempotency for approval writes.
 //
-// Approval mutations use the same structural shape as the cost ledger:
+// Direct appender callers may use the same structural shape as the cost ledger:
 //
 //   cmd_<command>_<26-char-ULID>
 //
-// The command segment is pinned by the route, so a key minted for
-// approval.requested cannot replay an approval.decided response.
+// HTTP routes use the protocol route-envelope `idempotencyKey` body field
+// instead. The route layer prefixes it with the command before passing it to
+// the appender so a key minted for approval.requested cannot replay an
+// approval.decided response.
 
 export type ApprovalCommand = "approval.requested" | "approval.decided";
 

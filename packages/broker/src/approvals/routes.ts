@@ -4,24 +4,34 @@
 // config block. The listener owns loopback and bearer checks before this
 // dispatcher runs.
 
+import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   APPROVAL_REQUEST_STATUS_VALUES,
   type ApprovalDecidedAuditPayload,
+  type ApprovalDecisionRequest,
   type ApprovalRequest,
+  type ApprovalRequestCreateRequest,
   type ApprovalRequestedAuditPayload,
   type ApprovalRequestId,
   type ApprovalRequestStatus,
   type ApprovalStreamEvent,
-  approvalAuditPayloadFromJsonValue,
-  approvalRequestToJson,
+  approvalDecisionRequestFromJson,
+  approvalDecisionResponseToJsonValue,
+  approvalRequestCreateRequestFromJson,
+  approvalRequestCreateResponseToJsonValue,
   approvalRequestToJsonValue,
   asApprovalRequestId,
+  asSignerIdentity,
   asTaskId,
   asThreadId,
+  canonicalJSON,
   type EventLsn,
+  type IdempotencyKey,
+  isApprovalRequestId,
   parseLsn,
+  routeErrorToJsonValue,
   validateApprovalStreamEvent,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
@@ -29,20 +39,18 @@ import BetterSqlite3 from "better-sqlite3";
 import type { BrokerLogger } from "../types.ts";
 import {
   type ApprovalAppender,
+  ApprovalDecisionInvalidError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalRequestAlreadyExistsError,
   ApprovalRequestNotFoundError,
 } from "./appender.ts";
-import {
-  type ApprovalCommand,
-  type ApprovalIdempotencyParseError,
-  type ParsedApprovalIdempotencyKey,
-  parseApprovalIdempotencyKey,
-} from "./idempotency.ts";
+import type { ApprovalCommand, ParsedApprovalIdempotencyKey } from "./idempotency.ts";
 import type { ApprovalListFilter, ApprovalProjection } from "./projections.ts";
 
 const MAX_APPROVAL_BODY_BYTES = 256 * 1024;
 const APPROVAL_STATUS_SET: ReadonlySet<string> = new Set<string>(APPROVAL_REQUEST_STATUS_VALUES);
+const APPROVAL_ROUTE_ACTOR = asSignerIdentity("broker");
+const APPROVAL_REQUEST_ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 export interface ApprovalRouteDeps {
   readonly appender: ApprovalAppender;
@@ -103,8 +111,6 @@ async function handleApprovalRequestPost(
   res: ServerResponse,
   deps: ApprovalRouteDeps,
 ): Promise<void> {
-  const idem = requireIdempotency(req, res, deps, "approval.requested", "approval_request");
-  if (!idem.ok) return;
   if (!ensureJsonContentType(req, res)) return;
 
   let body: string;
@@ -114,25 +120,29 @@ async function handleApprovalRequestPost(
     return;
   }
 
-  let payload: ApprovalRequestedAuditPayload;
+  let request: ApprovalRequestCreateRequest;
   try {
-    payload = approvalAuditPayloadFromJsonValue(
-      "approval_requested",
-      JSON.parse(body) as unknown,
-    ) as ApprovalRequestedAuditPayload;
+    request = approvalRequestCreateRequestFromJson(JSON.parse(body) as unknown);
   } catch (err) {
     invalidPayload(res, deps, "approval_request", err);
     return;
   }
 
+  const nowMs = deps.nowMs();
+  const payload = approvalRequestedPayloadFromRouteRequest(request, nowMs);
   try {
     const result = deps.appender.requestApprovalIdempotent({
       payload,
-      idempotency: idem.key,
-      nowMs: deps.nowMs(),
+      idempotency: parsedRouteIdempotencyKey(request.idempotencyKey, "approval.requested"),
+      nowMs,
       render: (applied) => ({
         statusCode: 201,
-        payload: Buffer.from(approvalRequestToJson(applied.approval), "utf8"),
+        payload: jsonBuffer(
+          approvalRequestCreateResponseToJsonValue({
+            approvalRequest: applied.approval,
+            headLsn: applied.lsn,
+          }),
+        ),
       }),
     });
     writeJsonRaw(res, result.statusCode, result.payload, result.replayed);
@@ -141,7 +151,7 @@ async function handleApprovalRequestPost(
     }
   } catch (err) {
     if (err instanceof ApprovalRequestAlreadyExistsError) {
-      writeJson(res, 409, { error: "approval_request_exists" });
+      writeRouteError(res, 409, { error: "approval_request_exists" });
       return;
     }
     if (writeSqliteErrorResponse(res, err, deps.logger, "approval_request_rejected")) return;
@@ -155,8 +165,6 @@ async function handleApprovalDecisionPost(
   deps: ApprovalRouteDeps,
   pathId: ApprovalRequestId,
 ): Promise<void> {
-  const idem = requireIdempotency(req, res, deps, "approval.decided", "approval_decision");
-  if (!idem.ok) return;
   if (!ensureJsonContentType(req, res)) return;
 
   let body: string;
@@ -166,29 +174,29 @@ async function handleApprovalDecisionPost(
     return;
   }
 
-  let payload: ApprovalDecidedAuditPayload;
+  let request: ApprovalDecisionRequest;
   try {
-    payload = approvalAuditPayloadFromJsonValue(
-      "approval_decided",
-      JSON.parse(body) as unknown,
-    ) as ApprovalDecidedAuditPayload;
+    request = approvalDecisionRequestFromJson(JSON.parse(body) as unknown);
   } catch (err) {
     invalidPayload(res, deps, "approval_decision", err);
     return;
   }
-  if (payload.requestId !== pathId) {
-    writeJson(res, 400, { error: "approval_request_id_mismatch" });
-    return;
-  }
 
+  const nowMs = deps.nowMs();
+  const payload = approvalDecidedPayloadFromRouteRequest(pathId, request, nowMs);
   try {
     const result = deps.appender.decideApprovalIdempotent({
       payload,
-      idempotency: idem.key,
-      nowMs: deps.nowMs(),
+      idempotency: parsedRouteIdempotencyKey(request.idempotencyKey, "approval.decided"),
+      nowMs,
       render: (applied) => ({
         statusCode: 201,
-        payload: Buffer.from(approvalRequestToJson(applied.approval), "utf8"),
+        payload: jsonBuffer(
+          approvalDecisionResponseToJsonValue({
+            approvalRequest: applied.approval,
+            headLsn: applied.lsn,
+          }),
+        ),
       }),
     });
     writeJsonRaw(res, result.statusCode, result.payload, result.replayed);
@@ -196,12 +204,16 @@ async function handleApprovalDecisionPost(
       emitApprovalInvalidation("approval.decided", result.approval, result.lsn, deps);
     }
   } catch (err) {
+    if (err instanceof ApprovalDecisionInvalidError) {
+      invalidPayload(res, deps, "approval_decision", err);
+      return;
+    }
     if (err instanceof ApprovalRequestNotFoundError) {
       notFound(res);
       return;
     }
     if (err instanceof ApprovalRequestAlreadyDecidedError) {
-      writeJson(res, 409, { error: "approval_not_pending" });
+      writeRouteError(res, 409, { error: "approval_not_pending" });
       return;
     }
     if (writeSqliteErrorResponse(res, err, deps.logger, "approval_decision_rejected")) return;
@@ -216,7 +228,7 @@ function handleApprovalList(
 ): void {
   const parsed = parseListFilter(req);
   if (!parsed.ok) {
-    writeJson(res, 400, { error: parsed.error });
+    writeRouteError(res, 400, { error: parsed.error });
     return;
   }
   try {
@@ -248,23 +260,66 @@ function handleApprovalGet(
   }
 }
 
-type IdempotencyRouteResult =
-  | { readonly ok: true; readonly key: ParsedApprovalIdempotencyKey }
-  | { readonly ok: false };
+function approvalRequestedPayloadFromRouteRequest(
+  request: ApprovalRequestCreateRequest,
+  nowMs: number,
+): ApprovalRequestedAuditPayload {
+  return {
+    requestId: approvalRequestIdFromIdempotencyKey(request.idempotencyKey),
+    claim: request.claim,
+    scope: request.scope,
+    riskClass: request.riskClass,
+    ...(request.threadId === undefined ? {} : { threadId: request.threadId }),
+    ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
+    ...(request.receiptId === undefined ? {} : { receiptId: request.receiptId }),
+    requestedBy: APPROVAL_ROUTE_ACTOR,
+    requestedAt: new Date(nowMs),
+  };
+}
 
-function requireIdempotency(
-  req: IncomingMessage,
-  res: ServerResponse,
-  deps: Pick<ApprovalRouteDeps, "logger">,
+function approvalDecidedPayloadFromRouteRequest(
+  requestId: ApprovalRequestId,
+  request: ApprovalDecisionRequest,
+  nowMs: number,
+): ApprovalDecidedAuditPayload {
+  const suppliedApprovalToken = request.decision === "approve" ? request.token : undefined;
+  return {
+    requestId,
+    decision: request.decision,
+    decidedBy:
+      suppliedApprovalToken === undefined
+        ? APPROVAL_ROUTE_ACTOR
+        : asSignerIdentity(suppliedApprovalToken.issuedTo),
+    decidedAt: new Date(nowMs),
+    ...(suppliedApprovalToken === undefined ? {} : { token: suppliedApprovalToken }),
+  };
+}
+
+function parsedRouteIdempotencyKey(
+  idempotencyKey: IdempotencyKey,
   command: ApprovalCommand,
-  routeName: string,
-): IdempotencyRouteResult {
-  const parsed = parseApprovalIdempotencyKey(req.headers["idempotency-key"]?.toString(), command);
-  if (!parsed.ok) {
-    writeIdempotencyError(res, parsed.error, deps.logger, routeName);
-    return { ok: false };
+): ParsedApprovalIdempotencyKey {
+  const raw = `${command}:${idempotencyKey}`;
+  return { raw, command, ulid: "" };
+}
+
+function approvalRequestIdFromIdempotencyKey(idempotencyKey: IdempotencyKey): ApprovalRequestId {
+  if (isApprovalRequestId(idempotencyKey)) return asApprovalRequestId(idempotencyKey);
+  const digest = createHash("sha256").update(idempotencyKey).digest();
+  let output = "";
+  let buffer = 0;
+  let bits = 0;
+  for (const byte of digest) {
+    buffer = (buffer << 8) | byte;
+    bits += 8;
+    while (bits >= 5 && output.length < 26) {
+      bits -= 5;
+      output += APPROVAL_REQUEST_ID_ALPHABET[(buffer >> bits) & 31];
+    }
+    buffer &= (1 << bits) - 1;
+    if (output.length === 26) break;
   }
-  return { ok: true, key: parsed.key };
+  return asApprovalRequestId(output);
 }
 
 function parseListFilter(
@@ -372,27 +427,13 @@ function invalidPayload(
 ): void {
   const reason = err instanceof Error ? err.message : "validation_failed";
   deps.logger.warn(`${routeName}_rejected`, { reason: "invalid_payload" });
-  writeJson(res, 400, { error: "invalid_payload", reason });
-}
-
-function writeIdempotencyError(
-  res: ServerResponse,
-  err: ApprovalIdempotencyParseError,
-  logger: BrokerLogger,
-  routeName: string,
-): void {
-  logger.warn(`${routeName}_rejected`, { reason: `idempotency_${err.code}` });
-  if (err.code === "missing") {
-    writeJson(res, 400, { error: "idempotency_key_required" });
-    return;
-  }
-  writeJson(res, 400, { error: "idempotency_key_invalid", reason: err });
+  writeRouteError(res, 400, { error: "invalid_payload", message: reason });
 }
 
 function ensureJsonContentType(req: IncomingMessage, res: ServerResponse): boolean {
   const contentType = req.headers["content-type"];
   if (typeof contentType !== "string" || !isJsonMediaType(contentType)) {
-    writeJson(res, 415, { error: "unsupported_media_type" });
+    writeRouteError(res, 415, { error: "unsupported_media_type" });
     return false;
   }
   return true;
@@ -419,8 +460,7 @@ function readBody(req: IncomingMessage, res: ServerResponse, maxBytes: number): 
       if (receivedBytes > maxBytes) {
         req.pause();
         if (!res.writableEnded) {
-          res.writeHead(413, { "Content-Type": "text/plain", Connection: "close" });
-          res.end("body_too_large");
+          writeRouteError(res, 413, { error: "body_too_large" }, { Connection: "close" });
         }
         finish(() => rejectFn(new Error("body_too_large")));
         return;
@@ -442,17 +482,17 @@ function writeSqliteErrorResponse(
   if (!isSqliteError(err)) return false;
   if (isSqliteBusyError(err)) {
     logger.warn(rejectedEvent, { reason: "store_busy" });
-    writeJson(res, 503, { error: "store_busy" }, { "Retry-After": "1" });
+    writeRouteError(res, 503, { error: "store_busy", retryAfterMs: 1000 }, { "Retry-After": "1" });
     return true;
   }
   if (isSqliteFullError(err)) {
     logger.warn(rejectedEvent, { reason: "store_full" });
-    writeJson(res, 507, { error: "store_full" });
+    writeRouteError(res, 507, { error: "store_full" });
     return true;
   }
   if (isSqliteUnavailableError(err)) {
     logger.error(rejectedEvent, { reason: "storage_error" });
-    writeJson(res, 503, { error: "storage_error" });
+    writeRouteError(res, 503, { error: "storage_error" });
     return true;
   }
   return false;
@@ -497,7 +537,7 @@ function writeJson(
   bodyValue: unknown,
   extraHeaders: Record<string, string> = {},
 ): void {
-  const body = JSON.stringify(bodyValue);
+  const body = canonicalJSON(bodyValue);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
@@ -507,32 +547,47 @@ function writeJson(
   res.end(body);
 }
 
+function writeRouteError(
+  res: ServerResponse,
+  status: number,
+  error: Parameters<typeof routeErrorToJsonValue>[0],
+  extraHeaders: Record<string, string> = {},
+): void {
+  writeJsonRaw(res, status, jsonBuffer(routeErrorToJsonValue(error)), false, extraHeaders);
+}
+
 function writeJsonRaw(
   res: ServerResponse,
   status: number,
   payload: Buffer,
   replayed: boolean,
+  extraHeaders: Record<string, string> = {},
 ): void {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
     "Content-Length": String(payload.byteLength),
     ...(replayed ? { "Idempotent-Replay": "true" } : {}),
+    ...extraHeaders,
   });
   res.end(payload);
 }
 
+function jsonBuffer(value: Readonly<Record<string, unknown>>): Buffer {
+  return Buffer.from(canonicalJSON(value), "utf8");
+}
+
 function notFound(res: ServerResponse): void {
-  writeJson(res, 404, { error: "not_found" });
+  writeRouteError(res, 404, { error: "not_found" });
 }
 
 function methodNotAllowed(res: ServerResponse, allow: string): void {
-  const body = JSON.stringify({ error: "method_not_allowed" });
+  const body = jsonBuffer(routeErrorToJsonValue({ error: "method_not_allowed" }));
   res.writeHead(405, {
     Allow: allow,
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
-    "Content-Length": String(Buffer.byteLength(body, "utf8")),
+    "Content-Length": String(body.byteLength),
   });
   res.end(body);
 }

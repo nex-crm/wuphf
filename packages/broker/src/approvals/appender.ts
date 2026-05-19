@@ -11,6 +11,7 @@ import {
   type ApprovalRequestedAuditPayload,
   type ApprovalRequestId,
   approvalAuditPayloadToBytes,
+  approvalRequestToJson,
   type EventLsn,
   lsnFromV1Number,
   parseLsn,
@@ -82,6 +83,10 @@ export class ApprovalRequestAlreadyDecidedError extends Error {
   }
 }
 
+export class ApprovalDecisionInvalidError extends Error {
+  override readonly name = "ApprovalDecisionInvalidError";
+}
+
 interface IdempotencyRow {
   readonly statusCode: number;
   readonly responsePayload: Buffer;
@@ -139,6 +144,13 @@ export function createApprovalAppender(
     const folded = approvalWithDecision(current.approval, payload);
     if (folded.status === "pending") {
       throw new Error("approval decision did not produce a terminal status");
+    }
+    try {
+      approvalRequestToJson(folded);
+    } catch (err) {
+      throw new ApprovalDecisionInvalidError(
+        err instanceof Error ? err.message : "invalid approval decision",
+      );
     }
     // TODO(webauthn-module): verify SignedApprovalToken at this hook once the
     // WebAuthn approval verifier owns token trust decisions. This appender
