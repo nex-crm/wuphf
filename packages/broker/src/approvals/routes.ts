@@ -18,8 +18,10 @@ import {
   type ApprovalRequestStatus,
   type ApprovalStreamEvent,
   approvalDecisionRequestFromJson,
+  approvalDecisionRequestToJsonValue,
   approvalDecisionResponseToJsonValue,
   approvalRequestCreateRequestFromJson,
+  approvalRequestCreateRequestToJsonValue,
   approvalRequestCreateResponseToJsonValue,
   approvalRequestToJsonValue,
   asApprovalRequestId,
@@ -40,6 +42,7 @@ import type { BrokerLogger } from "../types.ts";
 import {
   type ApprovalAppender,
   ApprovalDecisionInvalidError,
+  ApprovalIdempotencyConflictError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalRequestAlreadyExistsError,
   ApprovalRequestNotFoundError,
@@ -134,6 +137,11 @@ async function handleApprovalRequestPost(
     const result = deps.appender.requestApprovalIdempotent({
       payload,
       idempotency: parsedRouteIdempotencyKey(request.idempotencyKey, "approval.requested"),
+      requestFingerprint: approvalRouteRequestFingerprint(
+        "approval.requested",
+        payload.requestId,
+        approvalRequestCreateRequestToJsonValue(request),
+      ),
       nowMs,
       render: (applied) => ({
         statusCode: 201,
@@ -152,6 +160,10 @@ async function handleApprovalRequestPost(
   } catch (err) {
     if (err instanceof ApprovalRequestAlreadyExistsError) {
       writeRouteError(res, 409, { error: "approval_request_exists" });
+      return;
+    }
+    if (err instanceof ApprovalIdempotencyConflictError) {
+      writeRouteError(res, 409, { error: "idempotency_key_conflict" });
       return;
     }
     if (writeSqliteErrorResponse(res, err, deps.logger, "approval_request_rejected")) return;
@@ -188,6 +200,11 @@ async function handleApprovalDecisionPost(
     const result = deps.appender.decideApprovalIdempotent({
       payload,
       idempotency: parsedRouteIdempotencyKey(request.idempotencyKey, "approval.decided"),
+      requestFingerprint: approvalRouteRequestFingerprint(
+        "approval.decided",
+        pathId,
+        approvalDecisionRequestToJsonValue(request),
+      ),
       nowMs,
       render: (applied) => ({
         statusCode: 201,
@@ -214,6 +231,10 @@ async function handleApprovalDecisionPost(
     }
     if (err instanceof ApprovalRequestAlreadyDecidedError) {
       writeRouteError(res, 409, { error: "approval_not_pending" });
+      return;
+    }
+    if (err instanceof ApprovalIdempotencyConflictError) {
+      writeRouteError(res, 409, { error: "idempotency_key_conflict" });
       return;
     }
     if (writeSqliteErrorResponse(res, err, deps.logger, "approval_decision_rejected")) return;
@@ -301,6 +322,18 @@ function parsedRouteIdempotencyKey(
 ): ParsedApprovalIdempotencyKey {
   const raw = `${command}:${idempotencyKey}`;
   return { raw, command, ulid: "" };
+}
+
+function approvalRouteRequestFingerprint(
+  command: ApprovalCommand,
+  approvalId: ApprovalRequestId,
+  body: Readonly<Record<string, unknown>>,
+): string {
+  return canonicalJSON({
+    command,
+    approvalId,
+    body,
+  });
 }
 
 function approvalRequestIdFromIdempotencyKey(idempotencyKey: IdempotencyKey): ApprovalRequestId {

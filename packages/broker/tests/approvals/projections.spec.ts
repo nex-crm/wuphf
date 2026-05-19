@@ -22,6 +22,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  ApprovalIdempotencyConflictError,
   ApprovalRequestAlreadyDecidedError,
   createApprovalAppender,
   createApprovalProjection,
@@ -169,6 +170,14 @@ function projectionSnapshot(db: ReturnType<typeof openDatabase>): string {
   return canonicalJSON(rows);
 }
 
+function requestFingerprint(
+  command: "approval.requested" | "approval.decided",
+  requestId = REQUEST_ID,
+  body: Readonly<Record<string, unknown>> = {},
+): string {
+  return canonicalJSON({ command, approvalId: requestId, body });
+}
+
 describe("approval projection and appender", () => {
   it("folds request then decision in LSN order and rejects a second decision", () => {
     const { db, projection, appender } = setup();
@@ -232,12 +241,14 @@ describe("approval projection and appender", () => {
       const firstRequest = appender.requestApprovalIdempotent({
         payload: requestedPayload(),
         idempotency: requestKey.key,
+        requestFingerprint: requestFingerprint("approval.requested"),
         nowMs: 1_700_000_000_000,
         render,
       });
       const replayedRequest = appender.requestApprovalIdempotent({
-        payload: requestedPayload(SECOND_REQUEST_ID),
+        payload: requestedPayload(),
         idempotency: requestKey.key,
+        requestFingerprint: requestFingerprint("approval.requested"),
         nowMs: 1_700_000_000_001,
         render: () => {
           throw new Error("request render must not run on replay");
@@ -249,12 +260,14 @@ describe("approval projection and appender", () => {
       const firstDecision = appender.decideApprovalIdempotent({
         payload: decidedPayload("approve"),
         idempotency: decisionKey.key,
+        requestFingerprint: requestFingerprint("approval.decided"),
         nowMs: 1_700_000_000_002,
         render,
       });
       const replayedDecision = appender.decideApprovalIdempotent({
-        payload: decidedPayload("reject"),
+        payload: decidedPayload("approve"),
         idempotency: decisionKey.key,
+        requestFingerprint: requestFingerprint("approval.decided"),
         nowMs: 1_700_000_000_003,
         render: () => {
           throw new Error("decision render must not run on replay");
@@ -270,6 +283,42 @@ describe("approval projection and appender", () => {
         db.prepare<[], { readonly n: number }>("SELECT COUNT(*) AS n FROM approval_requests").get()
           ?.n,
       ).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects idempotency key reuse with a different resource fingerprint", () => {
+    const { db, appender } = setup();
+    try {
+      const requestKey = parseApprovalIdempotencyKey(
+        "cmd_approval.requested_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "approval.requested",
+      );
+      expect(requestKey.ok).toBe(true);
+      if (!requestKey.ok) return;
+
+      const render = (applied: { readonly approval: unknown }) => ({
+        statusCode: 201,
+        payload: Buffer.from(JSON.stringify(applied.approval), "utf8"),
+      });
+      appender.requestApprovalIdempotent({
+        payload: requestedPayload(),
+        idempotency: requestKey.key,
+        requestFingerprint: requestFingerprint("approval.requested", REQUEST_ID),
+        nowMs: 1_700_000_000_000,
+        render,
+      });
+      expect(() =>
+        appender.requestApprovalIdempotent({
+          payload: requestedPayload(SECOND_REQUEST_ID),
+          idempotency: requestKey.key,
+          requestFingerprint: requestFingerprint("approval.requested", SECOND_REQUEST_ID),
+          nowMs: 1_700_000_000_001,
+          render,
+        }),
+      ).toThrow(ApprovalIdempotencyConflictError);
+      expect(eventCount(db, "approval.requested")).toBe(1);
     } finally {
       db.close();
     }

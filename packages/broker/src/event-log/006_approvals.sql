@@ -1,5 +1,11 @@
 PRAGMA foreign_keys = ON;
 
+-- Approval commands share the cost-ledger command_idempotency table. Approval
+-- route idempotency is additionally bound to the target resource and canonical
+-- request body so key reuse cannot replay a response for a different approval.
+ALTER TABLE command_idempotency
+  ADD COLUMN request_fingerprint TEXT;
+
 -- §15.B D2: pending approvals are explicit backend events, projected into a
 -- disposable folded-state table. "Pending" is a status filter over this table,
 -- not a derivation from receipt.approvals[].

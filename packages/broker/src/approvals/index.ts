@@ -9,6 +9,7 @@ export type {
 } from "./appender.ts";
 export {
   ApprovalDecisionInvalidError,
+  ApprovalIdempotencyConflictError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalRequestAlreadyExistsError,
   ApprovalRequestNotFoundError,

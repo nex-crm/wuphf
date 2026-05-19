@@ -43,6 +43,7 @@ export interface IdempotentApprovalAppendResult {
 export interface IdempotentApprovalRequestArgs {
   readonly payload: ApprovalRequestedAuditPayload;
   readonly idempotency: ParsedApprovalIdempotencyKey;
+  readonly requestFingerprint: string;
   readonly nowMs: number;
   readonly render: (applied: ApprovalAppendResult) => {
     readonly statusCode: number;
@@ -53,6 +54,7 @@ export interface IdempotentApprovalRequestArgs {
 export interface IdempotentApprovalDecisionArgs {
   readonly payload: ApprovalDecidedAuditPayload;
   readonly idempotency: ParsedApprovalIdempotencyKey;
+  readonly requestFingerprint: string;
   readonly nowMs: number;
   readonly render: (applied: ApprovalAppendResult) => {
     readonly statusCode: number;
@@ -87,10 +89,15 @@ export class ApprovalDecisionInvalidError extends Error {
   override readonly name = "ApprovalDecisionInvalidError";
 }
 
+export class ApprovalIdempotencyConflictError extends Error {
+  override readonly name = "ApprovalIdempotencyConflictError";
+}
+
 interface IdempotencyRow {
   readonly statusCode: number;
   readonly responsePayload: Buffer;
   readonly createdAtLsn: number | null;
+  readonly requestFingerprint: string | null;
 }
 
 export function createApprovalAppender(
@@ -100,14 +107,17 @@ export function createApprovalAppender(
 ): ApprovalAppender {
   const idempotencyLookupStmt = db.prepare<[string, string], IdempotencyRow>(
     `SELECT status_code AS statusCode, response_payload AS responsePayload,
-            created_at_lsn AS createdAtLsn
+            created_at_lsn AS createdAtLsn, request_fingerprint AS requestFingerprint
      FROM command_idempotency
      WHERE idempotency_key = ? AND command = ?`,
   );
-  const idempotencyInsertStmt = db.prepare<[string, string, number, Buffer, number | null, number]>(
+  const idempotencyInsertStmt = db.prepare<
+    [string, string, number, Buffer, number | null, number, string]
+  >(
     `INSERT INTO command_idempotency
-       (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+       (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms,
+        request_fingerprint)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   const pruneIdempotencyStmt = db.prepare<[number]>(
     `DELETE FROM command_idempotency WHERE created_at_ms < ?`,
@@ -173,8 +183,10 @@ export function createApprovalAppender(
 
   const requestApprovalIdempotentTransaction = db.transaction(
     (args: IdempotentApprovalRequestArgs): IdempotentApprovalAppendResult => {
+      assertRequestFingerprint(args.requestFingerprint);
       const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
       if (cached !== undefined) {
+        assertIdempotencyFingerprint(cached, args.requestFingerprint);
         return idempotentReplay(cached);
       }
       const applied = requestApprovalInner(args.payload);
@@ -186,6 +198,7 @@ export function createApprovalAppender(
         rendered.payload,
         parseLsn(applied.lsn).localLsn,
         args.nowMs,
+        args.requestFingerprint,
       );
       return {
         replayed: false,
@@ -199,8 +212,10 @@ export function createApprovalAppender(
 
   const decideApprovalIdempotentTransaction = db.transaction(
     (args: IdempotentApprovalDecisionArgs): IdempotentApprovalAppendResult => {
+      assertRequestFingerprint(args.requestFingerprint);
       const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
       if (cached !== undefined) {
+        assertIdempotencyFingerprint(cached, args.requestFingerprint);
         return idempotentReplay(cached);
       }
       const applied = decideApprovalInner(args.payload);
@@ -212,6 +227,7 @@ export function createApprovalAppender(
         rendered.payload,
         parseLsn(applied.lsn).localLsn,
         args.nowMs,
+        args.requestFingerprint,
       );
       return {
         replayed: false,
@@ -243,6 +259,18 @@ export function createApprovalAppender(
       return pruneIdempotencyStmt.run(cutoffMs).changes;
     },
   };
+}
+
+function assertRequestFingerprint(requestFingerprint: string): void {
+  if (requestFingerprint.length === 0) {
+    throw new Error("approval idempotency request fingerprint must not be empty");
+  }
+}
+
+function assertIdempotencyFingerprint(row: IdempotencyRow, requestFingerprint: string): void {
+  if (row.requestFingerprint !== requestFingerprint) {
+    throw new ApprovalIdempotencyConflictError("idempotency key reused for a different request");
+  }
 }
 
 function idempotentReplay(row: IdempotencyRow): IdempotentApprovalAppendResult {

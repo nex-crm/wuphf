@@ -406,13 +406,51 @@ describe("/api/v1/approvals routes", () => {
       {
         method: "POST",
         headers: authHeaders(),
-        body: decisionBody(decidedPayload("reject"), decisionKey),
+        body: decisionBody(decidedPayload("approve"), decisionKey),
       },
     );
     expect(replayedDecision.status).toBe(201);
     expect(replayedDecision.headers.get("Idempotent-Replay")).toBe("true");
     expect(await replayedDecision.text()).toBe(firstDecisionBody);
     expect(eventCount(fix.db, "approval.decided")).toBe(1);
+  });
+
+  it("rejects decision idempotency key reuse across approval paths", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const decisionKey = asIdempotencyKey("approval-decision-cross-resource");
+    const firstCreated = approvalRequestCreateResponseFromJson(
+      (await (
+        await postApproval(fix, asIdempotencyKey("approval-request-first"))
+      ).json()) as unknown,
+    ).approvalRequest;
+    const secondCreated = approvalRequestCreateResponseFromJson(
+      (await (
+        await postApproval(fix, asIdempotencyKey("approval-request-second"))
+      ).json()) as unknown,
+    ).approvalRequest;
+
+    const firstDecision = await fetch(
+      `${fix.broker.url}/api/v1/approvals/${firstCreated.id}/decision`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: decisionBody(decidedPayload("reject", firstCreated.id), decisionKey),
+      },
+    );
+    expect(firstDecision.status).toBe(201);
+
+    const secondDecision = await fetch(
+      `${fix.broker.url}/api/v1/approvals/${secondCreated.id}/decision`,
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: decisionBody(decidedPayload("reject", secondCreated.id), decisionKey),
+      },
+    );
+    expect(secondDecision.status).toBe(409);
+    expect(await secondDecision.json()).toEqual({ error: "idempotency_key_conflict" });
+    expect(eventCount(fix.db, "approval.decided")).toBe(1);
+    expect(fix.projection.getById(secondCreated.id)?.approval.status).toBe("pending");
   });
 
   it("returns 409 for a second decision with a fresh key and appends no event", async () => {
