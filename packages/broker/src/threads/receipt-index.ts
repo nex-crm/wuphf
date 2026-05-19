@@ -87,7 +87,8 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
        GROUP BY task_id
        ORDER BY first_lsn ASC
        LIMIT ?
-     )`,
+     )
+     ORDER BY first_lsn ASC`,
   );
   const receiptRefsStmt = db.prepare<[string, number], ThreadReceiptIndexRow>(
     `SELECT receipt_id AS receiptId, task_id AS taskId, lsn

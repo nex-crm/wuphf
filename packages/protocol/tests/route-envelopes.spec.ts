@@ -450,6 +450,28 @@ describe("route-envelope codecs", () => {
     ).toThrow(/MAX_ROUTE_APPROVAL_LIST_ITEMS/);
 
     expect(() =>
+      threadPinnedApprovalsResponseFromJson({
+        schemaVersion: 1,
+        threadId: THREAD_ID,
+        headLsn: HEAD_LSN,
+        approvals: Array.from({ length: MAX_ROUTE_APPROVAL_LIST_ITEMS + 1 }, () =>
+          approvalViewToJsonValue(approvalViewFixture()),
+        ),
+      }),
+    ).toThrow(/MAX_ROUTE_APPROVAL_LIST_ITEMS/);
+
+    expect(() =>
+      threadPinnedApprovalsResponseToJsonValue({
+        schemaVersion: 1,
+        threadId: THREAD_ID,
+        headLsn: HEAD_LSN,
+        approvals: Array.from({ length: MAX_ROUTE_APPROVAL_LIST_ITEMS + 1 }, () =>
+          approvalViewFixture(),
+        ),
+      }),
+    ).toThrow(/MAX_ROUTE_APPROVAL_LIST_ITEMS/);
+
+    expect(() =>
       threadViewFromJson({
         ...threadViewToJsonValue(threadViewFixture()),
         pendingApprovalCount: -1,
@@ -523,6 +545,14 @@ describe("route-envelope codecs", () => {
 
     expect(() =>
       approvalDecisionRequestFromJson({
+        schemaVersion: 1,
+        decision: "approve",
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/token.*required/);
+
+    expect(() =>
+      approvalDecisionRequestToJsonValue({
         schemaVersion: 1,
         decision: "approve",
         idempotencyKey: IDEMPOTENCY_KEY,

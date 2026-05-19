@@ -206,13 +206,11 @@ function decisionBody(payload: ApprovalDecidedAuditPayload, idempotencyKey = DEC
 }
 
 function approveDecisionBodyWithoutToken(idempotencyKey = DECISION_KEY): string {
-  return JSON.stringify(
-    approvalDecisionRequestToJsonValue({
-      schemaVersion: 1,
-      decision: "approve",
-      idempotencyKey,
-    }),
-  );
+  return JSON.stringify({
+    schemaVersion: 1,
+    decision: "approve",
+    idempotencyKey,
+  });
 }
 
 async function postApproval(fix: Fixture, idempotencyKey = REQUEST_KEY) {

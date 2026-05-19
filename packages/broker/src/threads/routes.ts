@@ -275,10 +275,11 @@ async function handleThreadCreate(
     }
     idempotency = parsedIdempotency.key;
     const threadId = asThreadId(idempotency.ulid);
+    const externalRefs = request.externalRefs ?? EMPTY_EXTERNAL_REFS;
     requestFingerprint = threadRouteRequestFingerprint(
       "thread.create",
       threadId,
-      threadCreateRequestToJsonValue(request),
+      threadCreateRequestToJsonValue({ ...request, externalRefs }),
     );
     const now = routeDate(deps.nowMs());
     command = {
@@ -288,7 +289,7 @@ async function handleThreadCreate(
       title: request.title,
       createdBy: ROUTE_SIGNER,
       createdAt: now,
-      externalRefs: request.externalRefs ?? EMPTY_EXTERNAL_REFS,
+      externalRefs,
       content: request.specContent,
     };
   } catch (err) {

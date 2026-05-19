@@ -685,6 +685,9 @@ export function approvalDecisionRequestFromJson(value: unknown): ApprovalDecisio
 export function approvalDecisionRequestToJsonValue(
   request: ApprovalDecisionRequest,
 ): Readonly<Record<string, unknown>> {
+  if (request.decision === "approve" && request.token === undefined) {
+    throw new Error("approvalDecisionRequest.token: is required when decision is approve");
+  }
   return omitUndefined({
     schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
     decision: request.decision,
@@ -861,6 +864,11 @@ export function threadPinnedApprovalsResponseFromJson(
 export function threadPinnedApprovalsResponseToJsonValue(
   response: ThreadPinnedApprovalsResponse,
 ): Readonly<Record<string, unknown>> {
+  if (response.approvals.length > MAX_ROUTE_APPROVAL_LIST_ITEMS) {
+    throw new Error(
+      `threadPinnedApprovalsResponse.approvals: length exceeds MAX_ROUTE_APPROVAL_LIST_ITEMS: ${response.approvals.length} > ${MAX_ROUTE_APPROVAL_LIST_ITEMS}`,
+    );
+  }
   return {
     schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
     threadId: response.threadId,

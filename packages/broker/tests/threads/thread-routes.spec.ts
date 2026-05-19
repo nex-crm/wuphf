@@ -358,15 +358,41 @@ function indexedReceiptId(index: number): string {
   return `${ULID_TIME_PREFIX}${suffix}`;
 }
 
+const sseReaderBuffers = new WeakMap<ReadableStreamDefaultReader<Uint8Array>, string>();
+
 async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, needle: string) {
-  let text = "";
+  let text = sseReaderBuffers.get(reader) ?? "";
   for (let i = 0; i < 20; i += 1) {
+    const buffered = takeBufferedSse(text, needle);
+    text = buffered.remaining;
+    if (buffered.match !== null) {
+      sseReaderBuffers.set(reader, buffered.remaining);
+      return buffered.match;
+    }
     const chunk = await reader.read();
     if (chunk.done) break;
     text += new TextDecoder().decode(chunk.value);
-    if (text.includes(needle)) return text;
   }
+  sseReaderBuffers.set(reader, text);
   throw new Error(`SSE stream did not include ${needle}`);
+}
+
+function takeBufferedSse(
+  text: string,
+  needle: string,
+): { readonly match: string | null; readonly remaining: string } {
+  let cursor = 0;
+  for (;;) {
+    const blockEnd = text.indexOf("\n\n", cursor);
+    if (blockEnd === -1) {
+      return { match: null, remaining: text.slice(cursor) };
+    }
+    const nextCursor = blockEnd + 2;
+    if (text.slice(cursor, nextCursor).includes(needle)) {
+      return { match: text.slice(0, nextCursor), remaining: text.slice(nextCursor) };
+    }
+    cursor = nextCursor;
+  }
 }
 
 function parseThreadSse(
@@ -701,6 +727,36 @@ describe("/api/v1/threads routes", () => {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify(createBody()),
+    });
+    expect(second.status).toBe(201);
+    expect(second.headers.get("Idempotent-Replay")).toBe("true");
+    expect(await second.text()).toBe(firstText);
+
+    const count = fixture.db
+      .prepare<[], { readonly count: number }>(
+        "SELECT COUNT(*) AS count FROM event_log WHERE type IN ('thread.created', 'thread.spec_edited')",
+      )
+      .get();
+    expect(count?.count).toBe(4);
+  });
+
+  it("replays create idempotency when omitted external refs retry as explicit empty refs", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const first = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...createBody(), externalRefs: undefined }),
+    });
+    expect(first.status).toBe(201);
+    const firstText = await first.text();
+
+    const second = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        ...createBody(),
+        externalRefs: { source_urls: [], entity_ids: [] },
+      }),
     });
     expect(second.status).toBe(201);
     expect(second.headers.get("Idempotent-Replay")).toBe("true");
