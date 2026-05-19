@@ -1,10 +1,14 @@
 import {
+  APPROVAL_REQUEST_STATUS_VALUES,
   type ApprovalDecision,
   type ApprovalRequest,
+  type ApprovalRequestStatus,
   approvalRequestFromJsonValue,
   approvalRequestToJsonValue,
 } from "./approval-request.ts";
+import { validateApprovalView } from "./approval-view-validator.ts";
 import {
+  MAX_ROUTE_APPROVAL_LIST_ITEMS,
   MAX_ROUTE_THREAD_LIST_ITEMS,
   validateRouteCursorBudget,
   validateRouteErrorCodeBudget,
@@ -15,20 +19,30 @@ import {
 import { canonicalJSON, type JsonValue } from "./canonical-json.ts";
 import { type EventLsn, parseLsn } from "./event-lsn.ts";
 import {
+  type ApprovalRequestId,
+  asApprovalRequestId,
   asIdempotencyKey,
   asReceiptId,
+  asSignerIdentity,
   asTaskId,
   asThreadId,
   asThreadSpecRevisionId,
   type IdempotencyKey,
   type ReceiptId,
   type RiskClass,
+  type SignerIdentity,
   type TaskId,
   type ThreadId,
   type ThreadSpecRevisionId,
 } from "./receipt.ts";
 import { APPROVAL_DECISION_VALUES, RISK_CLASS_VALUES } from "./receipt-literals.ts";
-import { assertKnownKeys, hasOwn, omitUndefined, requireRecord } from "./receipt-utils.ts";
+import {
+  assertKnownKeys,
+  formatValidationErrors,
+  hasOwn,
+  omitUndefined,
+  requireRecord,
+} from "./receipt-utils.ts";
 import { asSha256Hex, type Sha256Hex } from "./sha256.ts";
 import {
   type ApprovalClaim,
@@ -54,6 +68,7 @@ import {
 
 export type RouteEnvelopeSchemaVersion = 1;
 export const ROUTE_ENVELOPE_SCHEMA_VERSION = 1 satisfies RouteEnvelopeSchemaVersion;
+export { validateApprovalView } from "./approval-view-validator.ts";
 
 export interface ThreadCreateRequest {
   readonly schemaVersion?: RouteEnvelopeSchemaVersion | undefined;
@@ -127,6 +142,38 @@ export interface ApprovalDecisionResponse {
   readonly headLsn: EventLsn;
 }
 
+export interface ApprovalDecisionSummary {
+  readonly decision: ApprovalDecision;
+  readonly decidedBy: SignerIdentity;
+  readonly decidedAt: Date;
+}
+
+export interface ApprovalView {
+  readonly id: ApprovalRequestId;
+  readonly claim: ApprovalClaim;
+  readonly scope: ApprovalScope;
+  readonly riskClass: RiskClass;
+  readonly threadId?: ThreadId | undefined;
+  readonly taskId?: TaskId | undefined;
+  readonly receiptId?: ReceiptId | undefined;
+  readonly requestedBy: SignerIdentity;
+  readonly requestedAt: Date;
+  readonly status: ApprovalRequestStatus;
+  readonly decisionSummary?: ApprovalDecisionSummary | undefined;
+  readonly schemaVersion: RouteEnvelopeSchemaVersion;
+}
+
+export interface ApprovalListResponse {
+  readonly schemaVersion?: RouteEnvelopeSchemaVersion | undefined;
+  readonly approvals: readonly ApprovalView[];
+  readonly nextCursor?: string | undefined;
+}
+
+export interface ApprovalGetResponse {
+  readonly schemaVersion?: RouteEnvelopeSchemaVersion | undefined;
+  readonly approval: ApprovalView;
+}
+
 export interface RouteError {
   readonly error: string;
   readonly message?: string | undefined;
@@ -169,6 +216,30 @@ type ApprovalDecisionRequestWire = Readonly<
 type ApprovalRequestCreateResponseWire = Readonly<
   Record<"schemaVersion" | "approvalRequest" | "headLsn", unknown>
 >;
+type ApprovalDecisionSummaryWire = Readonly<
+  Record<"decision" | "decidedBy" | "decidedAt", unknown>
+>;
+type ApprovalViewWire = Readonly<
+  Record<
+    | "id"
+    | "claim"
+    | "scope"
+    | "riskClass"
+    | "threadId"
+    | "taskId"
+    | "receiptId"
+    | "requestedBy"
+    | "requestedAt"
+    | "status"
+    | "decisionSummary"
+    | "schemaVersion",
+    unknown
+  >
+>;
+type ApprovalListResponseWire = Readonly<
+  Record<"schemaVersion" | "approvals" | "nextCursor", unknown>
+>;
+type ApprovalGetResponseWire = Readonly<Record<"schemaVersion" | "approval", unknown>>;
 type RouteErrorWire = Readonly<Record<"error" | "message" | "retryAfterMs", unknown>>;
 
 const THREAD_CREATE_REQUEST_KEYS_TUPLE = [
@@ -228,6 +299,34 @@ const APPROVAL_RESPONSE_KEYS_TUPLE = [
   "approvalRequest",
   "headLsn",
 ] as const satisfies readonly (keyof ApprovalRequestCreateResponseWire)[];
+const APPROVAL_DECISION_SUMMARY_KEYS_TUPLE = [
+  "decision",
+  "decidedBy",
+  "decidedAt",
+] as const satisfies readonly (keyof ApprovalDecisionSummaryWire)[];
+const APPROVAL_VIEW_KEYS_TUPLE = [
+  "id",
+  "claim",
+  "scope",
+  "riskClass",
+  "threadId",
+  "taskId",
+  "receiptId",
+  "requestedBy",
+  "requestedAt",
+  "status",
+  "decisionSummary",
+  "schemaVersion",
+] as const satisfies readonly (keyof ApprovalViewWire)[];
+const APPROVAL_LIST_RESPONSE_KEYS_TUPLE = [
+  "schemaVersion",
+  "approvals",
+  "nextCursor",
+] as const satisfies readonly (keyof ApprovalListResponseWire)[];
+const APPROVAL_GET_RESPONSE_KEYS_TUPLE = [
+  "schemaVersion",
+  "approval",
+] as const satisfies readonly (keyof ApprovalGetResponseWire)[];
 const ROUTE_ERROR_KEYS_TUPLE = [
   "error",
   "message",
@@ -253,11 +352,21 @@ const APPROVAL_DECISION_REQUEST_KEYS: ReadonlySet<string> = new Set(
   APPROVAL_DECISION_REQUEST_KEYS_TUPLE,
 );
 const APPROVAL_RESPONSE_KEYS: ReadonlySet<string> = new Set(APPROVAL_RESPONSE_KEYS_TUPLE);
+const APPROVAL_DECISION_SUMMARY_KEYS: ReadonlySet<string> = new Set(
+  APPROVAL_DECISION_SUMMARY_KEYS_TUPLE,
+);
+const APPROVAL_VIEW_KEYS: ReadonlySet<string> = new Set(APPROVAL_VIEW_KEYS_TUPLE);
+const APPROVAL_LIST_RESPONSE_KEYS: ReadonlySet<string> = new Set(APPROVAL_LIST_RESPONSE_KEYS_TUPLE);
+const APPROVAL_GET_RESPONSE_KEYS: ReadonlySet<string> = new Set(APPROVAL_GET_RESPONSE_KEYS_TUPLE);
 const ROUTE_ERROR_KEYS: ReadonlySet<string> = new Set(ROUTE_ERROR_KEYS_TUPLE);
 
 const THREAD_STATUS_SET: ReadonlySet<string> = new Set<string>(THREAD_STATUS_VALUES);
 const APPROVAL_DECISION_SET: ReadonlySet<string> = new Set<string>(APPROVAL_DECISION_VALUES);
+const APPROVAL_REQUEST_STATUS_SET: ReadonlySet<string> = new Set<string>(
+  APPROVAL_REQUEST_STATUS_VALUES,
+);
 const RISK_CLASS_SET: ReadonlySet<string> = new Set<string>(RISK_CLASS_VALUES);
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 export function threadCreateRequestFromJson(value: unknown): ThreadCreateRequest {
   const record = requireRecord(value, "threadCreateRequest");
@@ -597,6 +706,81 @@ export function approvalDecisionResponseToJsonValue(
   };
 }
 
+export function approvalViewFromJson(value: unknown): ApprovalView {
+  return approvalViewFromJsonValue(value, "approvalView");
+}
+
+export function approvalViewToJsonValue(view: ApprovalView): Readonly<Record<string, unknown>> {
+  const validation = validateApprovalView(view);
+  if (!validation.ok) {
+    throw new Error(formatValidationErrors(validation.errors));
+  }
+  return omitUndefined({
+    id: view.id,
+    claim: approvalClaimToJsonValue(view.claim),
+    scope: approvalScopeToJsonValue(view.scope),
+    riskClass: view.riskClass,
+    threadId: view.threadId,
+    taskId: view.taskId,
+    receiptId: view.receiptId,
+    requestedBy: view.requestedBy,
+    requestedAt: view.requestedAt.toISOString(),
+    status: view.status,
+    decisionSummary:
+      view.decisionSummary === undefined
+        ? undefined
+        : approvalDecisionSummaryToJsonValue(view.decisionSummary),
+    schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+  });
+}
+
+export function approvalListResponseFromJson(value: unknown): ApprovalListResponse {
+  const record = requireRecord(value, "approvalListResponse");
+  assertKnownKeys(record, "approvalListResponse", APPROVAL_LIST_RESPONSE_KEYS);
+  const schemaVersion = optionalSchemaVersion(record, "schemaVersion", "approvalListResponse");
+  const nextCursor = optionalCursor(record, "nextCursor", "approvalListResponse.nextCursor");
+  return omitUndefined({
+    schemaVersion,
+    approvals: approvalViewArrayFromJson(
+      requiredField(record, "approvals", "approvalListResponse.approvals"),
+      "approvalListResponse.approvals",
+    ),
+    nextCursor,
+  });
+}
+
+export function approvalListResponseToJsonValue(
+  response: ApprovalListResponse,
+): Readonly<Record<string, unknown>> {
+  return omitUndefined({
+    schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+    approvals: response.approvals.map((approval) => approvalViewToJsonValue(approval)),
+    nextCursor: response.nextCursor,
+  });
+}
+
+export function approvalGetResponseFromJson(value: unknown): ApprovalGetResponse {
+  const record = requireRecord(value, "approvalGetResponse");
+  assertKnownKeys(record, "approvalGetResponse", APPROVAL_GET_RESPONSE_KEYS);
+  const schemaVersion = optionalSchemaVersion(record, "schemaVersion", "approvalGetResponse");
+  return {
+    schemaVersion,
+    approval: approvalViewFromJsonValue(
+      requiredField(record, "approval", "approvalGetResponse.approval"),
+      "approvalGetResponse.approval",
+    ),
+  };
+}
+
+export function approvalGetResponseToJsonValue(
+  response: ApprovalGetResponse,
+): Readonly<Record<string, unknown>> {
+  return {
+    schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+    approval: approvalViewToJsonValue(response.approval),
+  };
+}
+
 export function routeErrorFromJson(value: unknown): RouteError {
   const record = requireRecord(value, "routeError");
   assertKnownKeys(record, "routeError", ROUTE_ERROR_KEYS);
@@ -635,6 +819,21 @@ function optionalSchemaVersion(
   }
   if (value > ROUTE_ENVELOPE_SCHEMA_VERSION) {
     throw new Error(`${path}: unsupported schemaVersion`);
+  }
+  if (value !== ROUTE_ENVELOPE_SCHEMA_VERSION) {
+    throw new Error(`${path}: must be ${ROUTE_ENVELOPE_SCHEMA_VERSION}`);
+  }
+  return ROUTE_ENVELOPE_SCHEMA_VERSION;
+}
+
+function requiredSchemaVersion(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  path: string,
+): RouteEnvelopeSchemaVersion {
+  const value = requiredField(record, key, path);
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new Error(`${path}: must be an integer`);
   }
   if (value !== ROUTE_ENVELOPE_SCHEMA_VERSION) {
     throw new Error(`${path}: must be ${ROUTE_ENVELOPE_SCHEMA_VERSION}`);
@@ -795,11 +994,34 @@ function eventLsnFromJson(value: string, path: string): EventLsn {
   }
 }
 
+function approvalRequestIdFromJson(value: string, path: string): ApprovalRequestId {
+  try {
+    return asApprovalRequestId(value);
+  } catch (err) {
+    throw new Error(`${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function signerIdentityFromJson(value: string, path: string): SignerIdentity {
+  try {
+    return asSignerIdentity(value);
+  } catch (err) {
+    throw new Error(`${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 function threadStatusFromJson(value: string, path: string): ThreadStatus {
   if (!THREAD_STATUS_SET.has(value)) {
     throw new Error(`${path}: must be one of ${THREAD_STATUS_VALUES.join(", ")}`);
   }
   return value as ThreadStatus;
+}
+
+function approvalRequestStatusFromJson(value: string, path: string): ApprovalRequestStatus {
+  if (!APPROVAL_REQUEST_STATUS_SET.has(value)) {
+    throw new Error(`${path}: must be one of ${APPROVAL_REQUEST_STATUS_VALUES.join(", ")}`);
+  }
+  return value as ApprovalRequestStatus;
 }
 
 function approvalDecisionFromJson(value: string, path: string): ApprovalDecision {
@@ -814,6 +1036,18 @@ function riskClassFromJson(value: string, path: string): RiskClass {
     throw new Error(`${path}: must be one of ${RISK_CLASS_VALUES.join(", ")}`);
   }
   return value as RiskClass;
+}
+
+function requiredDate(record: Readonly<Record<string, unknown>>, key: string, path: string): Date {
+  const value = requiredString(record, key, path);
+  if (!ISO_DATE_RE.test(value)) {
+    throw new Error(`${path}: must be an ISO 8601 string`);
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime()) || date.toISOString() !== value) {
+    throw new Error(`${path}: must be a valid ISO 8601 instant`);
+  }
+  return date;
 }
 
 function threadSpecContentFromJson(value: unknown, path: string): JsonValue {
@@ -855,6 +1089,79 @@ function optionalSignedApprovalToken(
   return signedApprovalTokenFromJson(value, path);
 }
 
+function approvalViewFromJsonValue(value: unknown, path: string): ApprovalView {
+  const record = requireRecord(value, path);
+  assertKnownKeys(record, path, APPROVAL_VIEW_KEYS);
+  const threadId = optionalThreadId(record, "threadId", `${path}.threadId`);
+  const taskId = optionalTaskId(record, "taskId", `${path}.taskId`);
+  const receiptId = optionalReceiptId(record, "receiptId", `${path}.receiptId`);
+  const view: ApprovalView = omitUndefined({
+    id: approvalRequestIdFromJson(requiredString(record, "id", `${path}.id`), `${path}.id`),
+    claim: approvalClaimFromJson(requiredField(record, "claim", `${path}.claim`), `${path}.claim`),
+    scope: approvalScopeFromJson(requiredField(record, "scope", `${path}.scope`), `${path}.scope`),
+    riskClass: riskClassFromJson(
+      requiredString(record, "riskClass", `${path}.riskClass`),
+      `${path}.riskClass`,
+    ),
+    threadId,
+    taskId,
+    receiptId,
+    requestedBy: signerIdentityFromJson(
+      requiredString(record, "requestedBy", `${path}.requestedBy`),
+      `${path}.requestedBy`,
+    ),
+    requestedAt: requiredDate(record, "requestedAt", `${path}.requestedAt`),
+    status: approvalRequestStatusFromJson(
+      requiredString(record, "status", `${path}.status`),
+      `${path}.status`,
+    ),
+    decisionSummary: optionalApprovalDecisionSummary(record, "decisionSummary", path),
+    schemaVersion: requiredSchemaVersion(record, "schemaVersion", `${path}.schemaVersion`),
+  });
+  const validation = validateApprovalView(view);
+  if (!validation.ok) throw new Error(formatValidationErrors(validation.errors));
+  return view;
+}
+
+function approvalDecisionSummaryToJsonValue(
+  summary: ApprovalDecisionSummary,
+): Readonly<Record<string, unknown>> {
+  return {
+    decision: summary.decision,
+    decidedBy: summary.decidedBy,
+    decidedAt: summary.decidedAt.toISOString(),
+  };
+}
+
+function optionalApprovalDecisionSummary(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  basePath: string,
+): ApprovalDecisionSummary | undefined {
+  const value = optionalField(record, key, `${basePath}.${key}`);
+  if (value === undefined) return undefined;
+  return approvalDecisionSummaryFromJsonValue(value, `${basePath}.${key}`);
+}
+
+function approvalDecisionSummaryFromJsonValue(
+  value: unknown,
+  path: string,
+): ApprovalDecisionSummary {
+  const record = requireRecord(value, path);
+  assertKnownKeys(record, path, APPROVAL_DECISION_SUMMARY_KEYS);
+  return {
+    decision: approvalDecisionFromJson(
+      requiredString(record, "decision", `${path}.decision`),
+      `${path}.decision`,
+    ),
+    decidedBy: signerIdentityFromJson(
+      requiredString(record, "decidedBy", `${path}.decidedBy`),
+      `${path}.decidedBy`,
+    ),
+    decidedAt: requiredDate(record, "decidedAt", `${path}.decidedAt`),
+  };
+}
+
 function threadArrayFromJson(value: unknown, path: string): readonly Thread[] {
   if (!Array.isArray(value)) {
     throw new Error(`${path}: must be an array`);
@@ -865,6 +1172,18 @@ function threadArrayFromJson(value: unknown, path: string): readonly Thread[] {
     );
   }
   return value.map((item) => threadFromJsonValue(item));
+}
+
+function approvalViewArrayFromJson(value: unknown, path: string): readonly ApprovalView[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${path}: must be an array`);
+  }
+  if (value.length > MAX_ROUTE_APPROVAL_LIST_ITEMS) {
+    throw new Error(
+      `${path}: length exceeds MAX_ROUTE_APPROVAL_LIST_ITEMS: ${value.length} > ${MAX_ROUTE_APPROVAL_LIST_ITEMS}`,
+    );
+  }
+  return value.map((item, index) => approvalViewFromJsonValue(item, `${path}/${index}`));
 }
 
 function optionalCursor(

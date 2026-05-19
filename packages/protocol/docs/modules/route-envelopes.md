@@ -47,12 +47,22 @@ client can perform the next OCC spec edit without a follow-up GET.
 | `approvalDecisionRequestFromJson` / `approvalDecisionRequestToJsonValue` | `{ schemaVersion?, decision, token?, idempotencyKey }` |
 | `approvalRequestCreateResponseFromJson` / `approvalRequestCreateResponseToJsonValue` | `{ schemaVersion?, approvalRequest, headLsn }` |
 | `approvalDecisionResponseFromJson` / `approvalDecisionResponseToJsonValue` | `{ schemaVersion?, approvalRequest, headLsn }` |
+| `approvalViewFromJson` / `approvalViewToJsonValue` | `{ schemaVersion, id, claim, scope, riskClass, threadId?, taskId?, receiptId?, requestedBy, requestedAt, status, decisionSummary? }` |
+| `approvalListResponseFromJson` / `approvalListResponseToJsonValue` | `{ schemaVersion?, approvals, nextCursor? }` |
+| `approvalGetResponseFromJson` / `approvalGetResponseToJsonValue` | `{ schemaVersion?, approval }` |
 
 Approval envelopes reuse the existing `ApprovalClaim`, `ApprovalScope`,
-`SignedApprovalToken`, and `ApprovalRequest` codecs. The create request
-re-checks claim/scope bindings and receipt co-sign top-level `receiptId` and
-`riskClass` bindings. The decision request requires a token when `decision` is
-`approve`.
+`SignedApprovalToken`, and `ApprovalRequest` codecs for write-side create and
+decision routes. The create request re-checks claim/scope bindings and receipt
+co-sign top-level `receiptId` and `riskClass` bindings. The decision request
+requires a token when `decision` is `approve`.
+
+Read-side approval routes use `ApprovalView`, a distinct token-redacted
+projection. `decisionSummary` contains only `{ decision, decidedBy, decidedAt }`
+and the codec rejects a `token` field. Pending approvals must omit
+`decisionSummary`; non-pending approvals must include it and its `decision` must
+match `status`. List responses are capped by `MAX_ROUTE_APPROVAL_LIST_ITEMS`
+and include `nextCursor?` for pagination.
 
 ## 5. Invariants
 
@@ -62,7 +72,8 @@ re-checks claim/scope bindings and receipt co-sign top-level `receiptId` and
    codes, route error messages, and nested artifact strings.
 3. Serializers are field-enumerated and route bytes are canonicalized through
    `canonicalJSON` in tests and vectors.
-4. Route list responses are capped by `MAX_ROUTE_THREAD_LIST_ITEMS`.
+4. Route list responses are capped by `MAX_ROUTE_THREAD_LIST_ITEMS` or
+   `MAX_ROUTE_APPROVAL_LIST_ITEMS`.
 5. `testdata/route-envelope-vectors.json` and
    `testdata/verifier-reference.go` pin accepted and rejected wire behavior for
    Go/Rust implementers.

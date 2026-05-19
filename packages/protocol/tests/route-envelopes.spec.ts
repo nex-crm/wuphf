@@ -3,19 +3,28 @@ import {
   type ApprovalClaim,
   type ApprovalDecisionRequest,
   type ApprovalDecisionResponse,
+  type ApprovalGetResponse,
+  type ApprovalListResponse,
   type ApprovalRequest,
   type ApprovalRequestCreateRequest,
   type ApprovalRequestCreateResponse,
   type ApprovalScope,
+  type ApprovalView,
   approvalDecisionRequestFromJson,
   approvalDecisionRequestToJsonValue,
   approvalDecisionResponseFromJson,
   approvalDecisionResponseToJsonValue,
+  approvalGetResponseFromJson,
+  approvalGetResponseToJsonValue,
+  approvalListResponseFromJson,
+  approvalListResponseToJsonValue,
   approvalRequestCreateRequestFromJson,
   approvalRequestCreateRequestToJsonValue,
   approvalRequestCreateResponseFromJson,
   approvalRequestCreateResponseToJsonValue,
   approvalRequestToJsonValue,
+  approvalViewFromJson,
+  approvalViewToJsonValue,
   asAgentId,
   asApprovalClaimId,
   asApprovalRequestId,
@@ -30,6 +39,7 @@ import {
   asWriteId,
   canonicalJSON,
   lsnFromV1Number,
+  MAX_ROUTE_APPROVAL_LIST_ITEMS,
   MAX_ROUTE_CURSOR_BYTES,
   MAX_ROUTE_ERROR_CODE_BYTES,
   MAX_ROUTE_ERROR_MESSAGE_BYTES,
@@ -63,6 +73,7 @@ import {
   threadStatusChangeRequestFromJson,
   threadStatusChangeRequestToJsonValue,
   threadToJsonValue,
+  validateApprovalView,
   validateRouteCursorBudget,
   validateRouteErrorCodeBudget,
   validateRouteErrorMessageBudget,
@@ -220,6 +231,17 @@ describe("route-envelope codecs", () => {
       approvalRequest: approvalRequestFixture(),
       headLsn: lsnFromV1Number(43),
     };
+    const approvedView = approvalViewFixture();
+    const pendingView = approvalViewFixture({ status: "pending", decisionSummary: undefined });
+    const listResponse: ApprovalListResponse = {
+      schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+      approvals: [approvedView, pendingView],
+      nextCursor: "bHNuOjQz",
+    };
+    const getResponse: ApprovalGetResponse = {
+      schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+      approval: approvedView,
+    };
 
     expect(
       roundTrip(
@@ -281,6 +303,24 @@ describe("route-envelope codecs", () => {
     expect(decisionResponseJson.approvalRequest).toEqual(
       approvalRequestToJsonValue(decisionResponse.approvalRequest),
     );
+    expect(roundTrip(approvedView, approvalViewToJsonValue, approvalViewFromJson)).toStrictEqual(
+      approvedView,
+    );
+    expect(
+      roundTrip(listResponse, approvalListResponseToJsonValue, approvalListResponseFromJson),
+    ).toStrictEqual(listResponse);
+    expect(
+      roundTrip(getResponse, approvalGetResponseToJsonValue, approvalGetResponseFromJson),
+    ).toStrictEqual(getResponse);
+    expect(validateApprovalView(approvedView).ok).toBe(true);
+
+    const viewJson = approvalViewToJsonValue(approvedView) as JsonObject & {
+      readonly decisionSummary?: unknown;
+    };
+    expect(viewJson).toHaveProperty("decisionSummary");
+    expect(viewJson).not.toHaveProperty("decision");
+    expect(viewJson.decisionSummary).not.toHaveProperty("token");
+    expect(JSON.stringify(viewJson)).not.toContain("tokenId");
   });
 
   it("round-trips route errors with optional diagnostics present and absent", () => {
@@ -343,6 +383,15 @@ describe("route-envelope codecs", () => {
     ).toThrow(/RouteListResponse\.nextCursor bytes/);
 
     expect(() =>
+      approvalListResponseFromJson({
+        schemaVersion: 1,
+        approvals: Array.from({ length: MAX_ROUTE_APPROVAL_LIST_ITEMS + 1 }, () =>
+          approvalViewToJsonValue(approvalViewFixture()),
+        ),
+      }),
+    ).toThrow(/MAX_ROUTE_APPROVAL_LIST_ITEMS/);
+
+    expect(() =>
       routeErrorFromJson({
         error: "store_busy",
         message: "x".repeat(MAX_ROUTE_ERROR_MESSAGE_BYTES + 1),
@@ -393,6 +442,28 @@ describe("route-envelope codecs", () => {
         idempotencyKey: IDEMPOTENCY_KEY,
       }),
     ).toThrow(/receiptId.*must match claim\.receiptId/);
+
+    const approvedViewJson = approvalViewToJsonValue(approvalViewFixture()) as JsonObject & {
+      readonly decisionSummary?: unknown;
+    };
+    const withoutDecisionSummary = { ...approvedViewJson };
+    Reflect.deleteProperty(withoutDecisionSummary, "decisionSummary");
+    expect(() => approvalViewFromJson(withoutDecisionSummary)).toThrow(/decisionSummary.*required/);
+    expect(() => approvalViewFromJson({ ...approvedViewJson, status: "pending" })).toThrow(
+      /decisionSummary.*absent/,
+    );
+    expect(() => approvalViewFromJson({ ...approvedViewJson, status: "rejected" })).toThrow(
+      /decisionSummary\/decision.*must match status/,
+    );
+    expect(() =>
+      approvalViewFromJson({
+        ...approvedViewJson,
+        decisionSummary: {
+          ...(approvedViewJson.decisionSummary as JsonObject),
+          token: signedApprovalTokenFixture(),
+        },
+      }),
+    ).toThrow(/decisionSummary\/token.*not allowed/);
   });
 });
 
@@ -414,6 +485,9 @@ describe("route-envelope conformance vectors", () => {
         "approvalDecisionRequest",
         "approvalRequestCreateResponse",
         "approvalDecisionResponse",
+        "approvalView",
+        "approvalListResponse",
+        "approvalGetResponse",
         "routeError",
       ]),
     );
@@ -473,12 +547,24 @@ type RouteEnvelopeCodec =
   | "approvalDecisionRequest"
   | "approvalRequestCreateResponse"
   | "approvalDecisionResponse"
+  | "approvalView"
+  | "approvalListResponse"
+  | "approvalGetResponse"
   | "routeError";
 
 type JsonObject = Record<string, unknown>;
 type FixtureOverrides = Partial<
   Omit<
     ApprovalRequest,
+    "id" | "claim" | "scope" | "riskClass" | "requestedBy" | "requestedAt" | "schemaVersion"
+  >
+> & {
+  readonly claim?: ApprovalClaim | undefined;
+  readonly scope?: ApprovalScope | undefined;
+};
+type ApprovalViewFixtureOverrides = Partial<
+  Omit<
+    ApprovalView,
     "id" | "claim" | "scope" | "riskClass" | "requestedBy" | "requestedAt" | "schemaVersion"
   >
 > & {
@@ -528,6 +614,12 @@ function routeEnvelopeCanonicalSerialization(codec: RouteEnvelopeCodec, input: u
       return canonicalJSON(
         approvalDecisionResponseToJsonValue(approvalDecisionResponseFromJson(input)),
       );
+    case "approvalView":
+      return canonicalJSON(approvalViewToJsonValue(approvalViewFromJson(input)));
+    case "approvalListResponse":
+      return canonicalJSON(approvalListResponseToJsonValue(approvalListResponseFromJson(input)));
+    case "approvalGetResponse":
+      return canonicalJSON(approvalGetResponseToJsonValue(approvalGetResponseFromJson(input)));
     case "routeError":
       return canonicalJSON(routeErrorToJsonValue(routeErrorFromJson(input)));
   }
@@ -541,6 +633,7 @@ function strictKnownKeyCases(): readonly {
   const thread = threadFixture();
   const claim = receiptCoSignClaimFixture();
   const approval = approvalRequestFixture();
+  const view = approvalViewFixture();
   return [
     {
       name: "threadCreateRequest",
@@ -635,6 +728,27 @@ function strictKnownKeyCases(): readonly {
       parse: approvalDecisionResponseFromJson,
     },
     {
+      name: "approvalView",
+      input: approvalViewToJsonValue(view) as JsonObject,
+      parse: approvalViewFromJson,
+    },
+    {
+      name: "approvalListResponse",
+      input: approvalListResponseToJsonValue({
+        schemaVersion: 1,
+        approvals: [view],
+      }) as JsonObject,
+      parse: approvalListResponseFromJson,
+    },
+    {
+      name: "approvalGetResponse",
+      input: approvalGetResponseToJsonValue({
+        schemaVersion: 1,
+        approval: view,
+      }) as JsonObject,
+      parse: approvalGetResponseFromJson,
+    },
+    {
       name: "routeError",
       input: routeErrorToJsonValue({ error: "store_busy" }) as JsonObject,
       parse: routeErrorFromJson,
@@ -700,6 +814,28 @@ function approvalRequestFixture(overrides: FixtureOverrides = {}): ApprovalReque
   };
 }
 
+function approvalViewFixture(overrides: ApprovalViewFixtureOverrides = {}): ApprovalView {
+  const claim = overrides.claim ?? receiptCoSignClaimFixture();
+  const scope = overrides.scope ?? receiptCoSignScopeFor(claim);
+  const decisionSummary = Object.hasOwn(overrides, "decisionSummary")
+    ? overrides.decisionSummary
+    : decisionSummaryFixture();
+  return {
+    id: REQUEST_ID,
+    claim,
+    scope,
+    riskClass: "high",
+    threadId: THREAD_ID,
+    taskId: TASK_ID,
+    receiptId: RECEIPT_ID,
+    requestedBy: SIGNER,
+    requestedAt: CREATED_AT,
+    status: overrides.status ?? "approved",
+    ...(decisionSummary === undefined ? {} : { decisionSummary }),
+    schemaVersion: 1,
+  };
+}
+
 function receiptCoSignScopeFor(claim: ApprovalClaim): ApprovalScope {
   if (claim.kind !== "receipt_co_sign") {
     throw new Error("approvalRequestFixture requires scope when overriding non-receipt claims");
@@ -713,6 +849,14 @@ function decisionRecordFixture() {
     decidedBy: DECIDER,
     decidedAt: DECIDED_AT,
     token: signedApprovalTokenFixture(),
+  };
+}
+
+function decisionSummaryFixture() {
+  return {
+    decision: "approve" as const,
+    decidedBy: DECIDER,
+    decidedAt: DECIDED_AT,
   };
 }
 

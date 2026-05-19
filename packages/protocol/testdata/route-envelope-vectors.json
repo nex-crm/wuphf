@@ -302,6 +302,171 @@
       }
     },
     {
+      "name": "approval view",
+      "codec": "approvalView",
+      "input": {
+        "schemaVersion": 1,
+        "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+        },
+        "riskClass": "high",
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "requestedBy": "fran@example.com",
+        "requestedAt": "2026-05-08T18:00:00.000Z",
+        "status": "approved",
+        "decisionSummary": {
+          "decision": "approve",
+          "decidedBy": "approver@example.com",
+          "decidedAt": "2026-05-08T18:05:00.000Z"
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"decisionSummary\":{\"decidedAt\":\"2026-05-08T18:05:00.000Z\",\"decidedBy\":\"approver@example.com\",\"decision\":\"approve\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"approved\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}"
+      }
+    },
+    {
+      "name": "approval list response",
+      "codec": "approvalListResponse",
+      "input": {
+        "schemaVersion": 1,
+        "approvals": [
+          {
+            "schemaVersion": 1,
+            "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+            "claim": {
+              "schemaVersion": 1,
+              "claimId": "claim_receipt_cosign_01",
+              "kind": "receipt_co_sign",
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+              "riskClass": "high"
+            },
+            "scope": {
+              "mode": "single_use",
+              "claimId": "claim_receipt_cosign_01",
+              "claimKind": "receipt_co_sign",
+              "role": "approver",
+              "maxUses": 1,
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+            },
+            "riskClass": "high",
+            "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+            "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "requestedBy": "fran@example.com",
+            "requestedAt": "2026-05-08T18:00:00.000Z",
+            "status": "approved",
+            "decisionSummary": {
+              "decision": "approve",
+              "decidedBy": "approver@example.com",
+              "decidedAt": "2026-05-08T18:05:00.000Z"
+            }
+          },
+          {
+            "schemaVersion": 1,
+            "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+            "claim": {
+              "schemaVersion": 1,
+              "claimId": "claim_receipt_cosign_01",
+              "kind": "receipt_co_sign",
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+              "riskClass": "high"
+            },
+            "scope": {
+              "mode": "single_use",
+              "claimId": "claim_receipt_cosign_01",
+              "claimKind": "receipt_co_sign",
+              "role": "approver",
+              "maxUses": 1,
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+            },
+            "riskClass": "high",
+            "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+            "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "requestedBy": "fran@example.com",
+            "requestedAt": "2026-05-08T18:00:00.000Z",
+            "status": "pending"
+          }
+        ],
+        "nextCursor": "bHNuOjQz"
+      },
+      "expected": {
+        "canonicalSerialization": "{\"approvals\":[{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"decisionSummary\":{\"decidedAt\":\"2026-05-08T18:05:00.000Z\",\"decidedBy\":\"approver@example.com\",\"decision\":\"approve\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"approved\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"pending\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}],\"nextCursor\":\"bHNuOjQz\",\"schemaVersion\":1}"
+      }
+    },
+    {
+      "name": "approval get response",
+      "codec": "approvalGetResponse",
+      "input": {
+        "schemaVersion": 1,
+        "approval": {
+          "schemaVersion": 1,
+          "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+          "claim": {
+            "schemaVersion": 1,
+            "claimId": "claim_receipt_cosign_01",
+            "kind": "receipt_co_sign",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "writeId": "write_01",
+            "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+            "riskClass": "high"
+          },
+          "scope": {
+            "mode": "single_use",
+            "claimId": "claim_receipt_cosign_01",
+            "claimKind": "receipt_co_sign",
+            "role": "approver",
+            "maxUses": 1,
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "writeId": "write_01",
+            "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+          },
+          "riskClass": "high",
+          "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+          "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "requestedBy": "fran@example.com",
+          "requestedAt": "2026-05-08T18:00:00.000Z",
+          "status": "approved",
+          "decisionSummary": {
+            "decision": "approve",
+            "decidedBy": "approver@example.com",
+            "decidedAt": "2026-05-08T18:05:00.000Z"
+          }
+        }
+      },
+      "expected": {
+        "canonicalSerialization": "{\"approval\":{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"decisionSummary\":{\"decidedAt\":\"2026-05-08T18:05:00.000Z\",\"decidedBy\":\"approver@example.com\",\"decision\":\"approve\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"approved\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"schemaVersion\":1}"
+      }
+    },
+    {
       "name": "route error",
       "codec": "routeError",
       "input": {
@@ -369,6 +534,82 @@
         "idempotencyKey": "route-envelope-01"
       },
       "expectedError": "token: is required"
+    },
+    {
+      "name": "approval view decision summary rejects token",
+      "codec": "approvalView",
+      "input": {
+        "schemaVersion": 1,
+        "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+        },
+        "riskClass": "high",
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "requestedBy": "fran@example.com",
+        "requestedAt": "2026-05-08T18:00:00.000Z",
+        "status": "approved",
+        "decisionSummary": {
+          "decision": "approve",
+          "decidedBy": "approver@example.com",
+          "decidedAt": "2026-05-08T18:05:00.000Z",
+          "token": {}
+        }
+      },
+      "expectedError": "decisionSummary/token"
+    },
+    {
+      "name": "approval view approved missing decision summary",
+      "codec": "approvalView",
+      "input": {
+        "schemaVersion": 1,
+        "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+        "claim": {
+          "schemaVersion": 1,
+          "claimId": "claim_receipt_cosign_01",
+          "kind": "receipt_co_sign",
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+          "riskClass": "high"
+        },
+        "scope": {
+          "mode": "single_use",
+          "claimId": "claim_receipt_cosign_01",
+          "claimKind": "receipt_co_sign",
+          "role": "approver",
+          "maxUses": 1,
+          "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          "writeId": "write_01",
+          "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+        },
+        "riskClass": "high",
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "requestedBy": "fran@example.com",
+        "requestedAt": "2026-05-08T18:00:00.000Z",
+        "status": "approved"
+      },
+      "expectedError": "decisionSummary"
     },
     {
       "name": "route error message exceeds budget",

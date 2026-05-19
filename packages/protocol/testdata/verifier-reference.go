@@ -474,6 +474,7 @@ const (
 	maxThreadExternalRefBytes       = 2 * 1024
 	maxThreadTaskIDs                = 1024
 	maxRouteThreadListItems         = 256
+	maxRouteApprovalListItems       = 256
 	maxRouteErrorCodeBytes          = 128
 	maxRouteErrorMessageBytes       = 8 * 1024
 	maxRouteCursorBytes             = 1024
@@ -778,6 +779,12 @@ func parseRouteEnvelope(codec string, raw json.RawMessage) (map[string]interface
 		return record, validateApprovalRequestEnvelopeResponse(record, "approvalRequestCreateResponse")
 	case "approvalDecisionResponse":
 		return record, validateApprovalRequestEnvelopeResponse(record, "approvalDecisionResponse")
+	case "approvalView":
+		return record, validateApprovalViewRecord(record, "approvalView")
+	case "approvalListResponse":
+		return record, validateApprovalListResponse(record)
+	case "approvalGetResponse":
+		return record, validateApprovalGetResponse(record)
 	case "routeError":
 		return record, validateRouteErrorEnvelope(record)
 	default:
@@ -1101,6 +1108,204 @@ func validateApprovalRequestEnvelopeResponse(record map[string]interface{}, path
 		return err
 	}
 	return validateEventLsnField(record, "headLsn", path+".headLsn")
+}
+
+func validateApprovalListResponse(record map[string]interface{}) error {
+	const path = "approvalListResponse"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"approvals":     true,
+		"nextCursor":    true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	approvals, err := requiredArrayValue(record, "approvals", path+".approvals")
+	if err != nil {
+		return err
+	}
+	if len(approvals) > maxRouteApprovalListItems {
+		return fmt.Errorf("%s.approvals: length exceeds MAX_ROUTE_APPROVAL_LIST_ITEMS: %d > %d", path, len(approvals), maxRouteApprovalListItems)
+	}
+	for index, item := range approvals {
+		approval, ok := item.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s.approvals/%d: must be an object", path, index)
+		}
+		if err := validateApprovalViewRecord(approval, fmt.Sprintf("%s.approvals/%d", path, index)); err != nil {
+			return err
+		}
+	}
+	if cursor, ok, err := optionalString(record, "nextCursor", path+".nextCursor"); err != nil {
+		return err
+	} else if ok {
+		if cursor == "" {
+			return fmt.Errorf("%s.nextCursor: must be non-empty when present", path)
+		}
+		if err := validateUtf8Budget(cursor, maxRouteCursorBytes, "RouteListResponse.nextCursor bytes"); err != nil {
+			return fmt.Errorf("%s.nextCursor: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func validateApprovalGetResponse(record map[string]interface{}) error {
+	const path = "approvalGetResponse"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"approval":      true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	approval, err := requiredObjectValue(record, "approval", path+".approval")
+	if err != nil {
+		return err
+	}
+	return validateApprovalViewRecord(approval, path+".approval")
+}
+
+func validateApprovalViewRecord(record map[string]interface{}, path string) error {
+	if err := knownKeys(record, path, map[string]bool{
+		"id":              true,
+		"claim":           true,
+		"scope":           true,
+		"riskClass":       true,
+		"threadId":        true,
+		"taskId":          true,
+		"receiptId":       true,
+		"requestedBy":     true,
+		"requestedAt":     true,
+		"status":          true,
+		"decisionSummary": true,
+		"schemaVersion":   true,
+	}); err != nil {
+		return err
+	}
+	if err := requiredExactNumber(record, "schemaVersion", path+"/schemaVersion", 1); err != nil {
+		return err
+	}
+	if err := validateULIDField(record, "id", path+".id", "ApprovalRequestId"); err != nil {
+		return err
+	}
+	claim, err := requiredObjectValue(record, "claim", path+".claim")
+	if err != nil {
+		return err
+	}
+	claimKind, claimID, err := validateApprovalClaim(claim, path+".claim")
+	if err != nil {
+		return err
+	}
+	scope, err := requiredObjectValue(record, "scope", path+".scope")
+	if err != nil {
+		return err
+	}
+	scopeKind, scopeClaimID, err := validateApprovalScope(scope, path+".scope")
+	if err != nil {
+		return err
+	}
+	if claimID != scopeClaimID {
+		return fmt.Errorf("%s.scope.claimId: must match claim.claimId", path)
+	}
+	if claimKind != scopeKind {
+		return fmt.Errorf("%s.scope.claimKind: must match claim.kind", path)
+	}
+	if err := validateApprovalClaimScopeBinding(claimKind, claim, scope, path+".scope"); err != nil {
+		return err
+	}
+	riskClass, err := requiredStringValue(record, "riskClass", path+".riskClass")
+	if err != nil {
+		return err
+	}
+	if !riskClassSet[riskClass] {
+		return fmt.Errorf("%s.riskClass: must be a valid risk class", path)
+	}
+	if threadID, ok, err := optionalString(record, "threadId", path+".threadId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(threadID) {
+		return fmt.Errorf("%s.threadId: not a ThreadId", path)
+	}
+	if taskID, ok, err := optionalString(record, "taskId", path+".taskId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(taskID) {
+		return fmt.Errorf("%s.taskId: not a TaskId", path)
+	}
+	if receiptID, ok, err := optionalString(record, "receiptId", path+".receiptId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(receiptID) {
+		return fmt.Errorf("%s.receiptId: not a ReceiptId", path)
+	} else if claimKind == "receipt_co_sign" && (!ok || receiptID != claim["receiptId"]) {
+		return fmt.Errorf("%s.receiptId: must match claim.receiptId", path)
+	}
+	if claimKind == "receipt_co_sign" && riskClass != claim["riskClass"] {
+		return fmt.Errorf("%s.riskClass: must match claim.riskClass", path)
+	}
+	requestedBy, err := requiredStringValue(record, "requestedBy", path+".requestedBy")
+	if err != nil {
+		return err
+	}
+	if err := validateSignerIdentity(requestedBy, path+".requestedBy"); err != nil {
+		return err
+	}
+	if _, err := requiredTimestampMillis(record, "requestedAt", path+".requestedAt"); err != nil {
+		return err
+	}
+	status, err := requiredStringValue(record, "status", path+".status")
+	if err != nil {
+		return err
+	}
+	if !approvalRequestStatusSet[status] {
+		return fmt.Errorf("%s.status: must be a valid approval request status", path)
+	}
+	summaryValue, hasSummary := record["decisionSummary"]
+	if status == "pending" && hasSummary {
+		return fmt.Errorf("%s/decisionSummary: must be absent when status is pending", path)
+	}
+	if status != "pending" && !hasSummary {
+		return fmt.Errorf("%s/decisionSummary: is required when status is not pending", path)
+	}
+	if hasSummary {
+		summary, ok := summaryValue.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s/decisionSummary: must be an object", path)
+		}
+		return validateApprovalDecisionSummaryRecord(summary, status, path+"/decisionSummary")
+	}
+	return nil
+}
+
+func validateApprovalDecisionSummaryRecord(summary map[string]interface{}, status string, path string) error {
+	if err := knownKeys(summary, path, map[string]bool{
+		"decision":  true,
+		"decidedBy": true,
+		"decidedAt": true,
+	}); err != nil {
+		return err
+	}
+	decision, err := requiredStringValue(summary, "decision", path+".decision")
+	if err != nil {
+		return err
+	}
+	if !approvalDecisionSet[decision] {
+		return fmt.Errorf("%s.decision: must be a valid approval decision", path)
+	}
+	expectedStatus := map[string]string{"approve": "approved", "reject": "rejected", "abstain": "abstained"}[decision]
+	if status != expectedStatus {
+		return fmt.Errorf("%s/decision: must match status", path)
+	}
+	decidedBy, err := requiredStringValue(summary, "decidedBy", path+".decidedBy")
+	if err != nil {
+		return err
+	}
+	if err := validateSignerIdentity(decidedBy, path+".decidedBy"); err != nil {
+		return err
+	}
+	_, err = requiredTimestampMillis(summary, "decidedAt", path+".decidedAt")
+	return err
 }
 
 func validateRouteErrorEnvelope(record map[string]interface{}) error {
