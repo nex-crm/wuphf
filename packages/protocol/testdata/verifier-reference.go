@@ -1065,6 +1065,13 @@ func sanitizeAllowlistText(value string) string {
 	// on different Unicode versions agree on the sanitized bytes. See
 	// frozenNFKC below and src/nfkc-core.ts (the production TS algorithm this
 	// mirrors).
+	//
+	// Input domain: well-formed UTF-8 only. Production's TS sanitizer calls
+	// `rejectLoneSurrogates` before normalising and THROWS on a lone surrogate;
+	// the Go `range` below would instead substitute U+FFFD. Every input this
+	// reference sees comes from a JSON fixture and is well-formed UTF-8, so the
+	// two never diverge in practice — but this reference does not re-implement
+	// the lone-surrogate rejection.
 	normalized := frozenNfkcTables.frozenNFKC(value)
 	var out strings.Builder
 	for _, r := range normalized {

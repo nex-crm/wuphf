@@ -155,6 +155,22 @@ jobs:
         # COMPOSE — naming drift, missing exports, accidental API breaks
         # at the index.ts boundary. Cheap (<1s).
         run: bun run packages/protocol/scripts/demo.ts
+      - name: Frozen NFKC table drift check
+        # The moat normalises NFKC against frozen, version-pinned tables
+        # (src/nfkc-table.generated.ts + testdata/nfkc-table.json). The
+        # generator proves frozenNfkc === the runtime's NFKC for every code
+        # point before writing them. Vitest runs in Node workers (Unicode
+        # 17.0) even under Bun, so nfkc.spec.ts's exhaustive-equivalence tests
+        # skip there — this step is the ONLY automated gate that runs that
+        # proof, on the pinned Bun (Unicode 15.1), and fails if the committed
+        # tables drifted from a fresh regeneration (a hand-edit, or a runtime
+        # whose Unicode version no longer matches the pin).
+        working-directory: packages/protocol
+        run: |
+          bun run scripts/generate-nfkc-table.ts
+          git -C "$GITHUB_WORKSPACE" diff --exit-code -- \
+            packages/protocol/src/nfkc-table.generated.ts \
+            packages/protocol/testdata/nfkc-table.json
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
         with:
           go-version-file: go.mod

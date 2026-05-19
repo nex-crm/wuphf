@@ -488,6 +488,14 @@ function main(): void {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const packageRoot = join(scriptDir, "..");
 
+  // The vendored UCD file is the one input not derived from the runtime. Its
+  // integrity is transitively verified: a wrong combining class changes
+  // canonical ordering or composition, so `verifyAgainstRuntime` below — which
+  // re-derives every code point's NFKC and compares against the runtime —
+  // would catch a corrupted file. (A standalone content-hash assertion would
+  // be cleaner, but the hashing primitive would trip check-invariants'
+  // single-hashing-entry guard; the equivalence proof is the stronger check
+  // regardless.)
   const combiningClassText = readFileSync(join(scriptDir, DERIVED_COMBINING_CLASS_FILE), "utf8");
   const combiningClass = parseCombiningClasses(combiningClassText);
   const decomposition = buildDecomposition();
@@ -506,7 +514,11 @@ function main(): void {
   // A handful of long decomposition rows (Arabic presentation ligatures) exceed
   // Biome's line width; let Biome reflow the generated module so a fresh
   // `bun run` of this script produces a file that already passes `biome check`.
-  execFileSync("bunx", ["biome", "format", "--write", tableModulePath], { cwd: packageRoot });
+  // Invoke the repo-pinned Biome from node_modules directly — not `bunx`, which
+  // could resolve a different version and silently desync the committed file's
+  // formatting from what CI's `biome check` expects.
+  const biomeBin = join(packageRoot, "node_modules", ".bin", "biome");
+  execFileSync(biomeBin, ["format", "--write", tableModulePath], { cwd: packageRoot });
 
   const jsonPath = join(packageRoot, "testdata", "nfkc-table.json");
   writeFileSync(jsonPath, renderJsonArtifact(decomposition, composition, combiningClass), "utf8");

@@ -2,6 +2,7 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { frozenNfkc } from "../src/nfkc.ts";
 import { NFKC_UNICODE_VERSION } from "../src/nfkc-table.generated.ts";
+import { isMoatDisallowedCodePoint } from "../src/sanitized-string.ts";
 import nfkcTableJson from "../testdata/nfkc-table.json";
 
 const NUM_RUNS = 2000;
@@ -194,6 +195,33 @@ describe("frozenNfkc", () => {
             expect(hasLoneSurrogate(frozenNfkc(input))).toBe(false);
           },
         ),
+        { numRuns: NUM_RUNS },
+      );
+    });
+
+    it("never introduces a moat-disallowed code point", () => {
+      // `sanitizeText` strips moat-disallowed code points ONCE, between two
+      // `frozenNfkc` passes, and relies on the second pass not re-introducing
+      // one. NFKC compatibility/canonical mappings only ever expand to
+      // letters, marks, digits, and punctuation — never `\p{C}` or
+      // default-ignorables. This pins that: any disallowed code point in the
+      // output must have been present in the input, never created by NFKC.
+      fc.assert(
+        fc.property(nfkcStringArb, (input) => {
+          const inputCodePoints = new Set<number>();
+          for (const character of input) {
+            const codePoint = character.codePointAt(0);
+            if (codePoint !== undefined) {
+              inputCodePoints.add(codePoint);
+            }
+          }
+          for (const character of frozenNfkc(input)) {
+            const codePoint = character.codePointAt(0);
+            if (codePoint !== undefined && isMoatDisallowedCodePoint(codePoint)) {
+              expect(inputCodePoints.has(codePoint)).toBe(true);
+            }
+          }
+        }),
         { numRuns: NUM_RUNS },
       );
     });
