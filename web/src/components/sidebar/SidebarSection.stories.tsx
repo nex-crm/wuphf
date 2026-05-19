@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useState } from "react";
 import {
   BookStack,
@@ -178,8 +178,8 @@ function StatefulSection({
   children,
 }: {
   label: string;
-  headerActions?: React.ReactNode;
-  children: React.ReactNode;
+  headerActions?: ReactNode;
+  children: ReactNode;
 }) {
   const [open, setOpen] = useState(true);
   return (
