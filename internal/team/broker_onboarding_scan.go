@@ -186,23 +186,40 @@ func (b *Broker) postScanArticleLine(dmSlug, article string) {
 // blueprint CEO card. Mirrors handleTransition's invariant: Phase is set
 // and saved before advancePhase runs the broker-side emission so a resume
 // would re-emit the blueprint card, not the scan chip.
+//
+// The load-check-save is serialized under b.mu (the same mutex advancePhase
+// takes while appending messages and saving state) so a concurrent
+// broker-internal write cannot land between our Load and Save and get
+// clobbered by the stale snapshot. Addresses CodeRabbit on #911.
+//
+// b.mu is released before calling b.advancePhase: that function acquires
+// b.mu itself, and re-entrant locking on sync.Mutex would deadlock. The
+// remaining window between our Save and advancePhase's Save is microseconds
+// and not user-actionable — the only card the user could submit during
+// PhaseScan is the read-only scan chip, which has no submit handler.
 func (b *Broker) advanceAfterScan(websiteURL string, success bool) {
+	b.mu.Lock()
 	s, err := onboarding.Load()
 	if err != nil {
+		b.mu.Unlock()
 		log.Printf("onboarding scan: load for advance: %v", err)
 		return
 	}
 	// Only auto-advance from PhaseScan — protect against the user already
 	// having clicked through some other path during the scan window.
 	if s.Phase != onboarding.PhaseScan {
+		b.mu.Unlock()
 		return
 	}
 	s.FormAnswers.ScanComplete = success
 	s.Phase = onboarding.PhaseBlueprint
 	if err := onboarding.Save(s); err != nil {
+		b.mu.Unlock()
 		log.Printf("onboarding scan: persist blueprint transition: %v", err)
 		return
 	}
+	b.mu.Unlock()
+
 	if err := b.advancePhase(s, onboarding.PhaseBlueprint); err != nil {
 		log.Printf("onboarding scan: advance to blueprint: %v", err)
 	}
