@@ -38,7 +38,10 @@ export function parseThreadIdempotencyKey(
     return { ok: false, error: { code: "missing" } };
   }
   if (ULID_RE.test(raw)) {
-    return { ok: true, key: { raw, command: expectedCommand, ulid: raw } };
+    return {
+      ok: true,
+      key: { raw: `${expectedCommand}:${raw}`, command: expectedCommand, ulid: raw },
+    };
   }
   const match = LEGACY_KEY_RE.exec(raw);
   if (match === null) {
@@ -58,5 +61,8 @@ export function parseThreadIdempotencyKey(
       error: { code: "command_mismatch", expected: expectedCommand, actual: command },
     };
   }
-  return { ok: true, key: { raw, command: command as ThreadCommand, ulid } };
+  return {
+    ok: true,
+    key: { raw: `${command}:${ulid}`, command: command as ThreadCommand, ulid },
+  };
 }

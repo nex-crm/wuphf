@@ -64,4 +64,4 @@ CREATE UNIQUE INDEX pending_approvals_token_id
   ON pending_approvals(token_id)
   WHERE token_id IS NOT NULL;
 
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;

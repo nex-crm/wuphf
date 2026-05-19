@@ -1,9 +1,9 @@
 // Approval appender.
 //
-// Each command folds the approval's current state from event_log, validates
-// the command against that fold, appends the audit event, updates the
-// projection, and stores the idempotency replay row in one BEGIN IMMEDIATE
-// transaction.
+// Each command reads the approval's current state from the transactionally
+// updated projection, validates against that fold, appends the audit event,
+// updates the projection, and stores the idempotency replay row in one
+// BEGIN IMMEDIATE transaction.
 
 import {
   type ApprovalDecidedAuditPayload,
@@ -25,7 +25,6 @@ import {
   type ApprovalProjection,
   approvalWithDecision,
   type FoldedApprovalRow,
-  foldApprovalFromLog,
 } from "./projections.ts";
 
 export interface ApprovalAppendResult {
@@ -153,7 +152,7 @@ export function createApprovalAppender(
   };
 
   const requestApprovalInner = (payload: ApprovalRequestedAuditPayload): ApprovalAppendResult => {
-    const existing = foldApprovalFromLog(db, payload.requestId);
+    const existing = projection.getById(payload.requestId);
     if (existing !== null) {
       throw new ApprovalRequestAlreadyExistsError(
         `approval request already exists: ${payload.requestId}`,
@@ -173,7 +172,7 @@ export function createApprovalAppender(
   };
 
   const decideApprovalInner = (payload: ApprovalDecidedAuditPayload): ApprovalAppendResult => {
-    const current = foldApprovalFromLog(db, payload.requestId);
+    const current = projection.getById(payload.requestId);
     if (current === null) {
       throw new ApprovalRequestNotFoundError(`approval request not found: ${payload.requestId}`);
     }

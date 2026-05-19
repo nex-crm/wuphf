@@ -602,6 +602,11 @@ function writeThreadAppenderError(
     writeRouteError(res, 422, "terminal_status_transition");
     return;
   }
+  if (isCommandIdempotencyConstraintError(err)) {
+    logger.warn(rejectedEvent, { reason: "idempotency_key_conflict" });
+    writeRouteError(res, 409, "idempotency_key_conflict");
+    return;
+  }
   if (writeSqliteErrorResponse(res, err, logger, rejectedEvent)) return;
   throw err;
 }
@@ -657,6 +662,14 @@ function writeSqliteErrorResponse(
     return true;
   }
   return false;
+}
+
+function isCommandIdempotencyConstraintError(err: unknown): boolean {
+  return (
+    err instanceof BetterSqlite3.SqliteError &&
+    (err.code === "SQLITE_CONSTRAINT_PRIMARYKEY" || err.code === "SQLITE_CONSTRAINT_UNIQUE") &&
+    err.message.includes("command_idempotency.idempotency_key")
+  );
 }
 
 function isSqliteFullError(err: unknown): boolean {
