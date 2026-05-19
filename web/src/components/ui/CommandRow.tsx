@@ -48,7 +48,7 @@ export function CommandRow({ command }: { command: string }) {
       </code>
       <button
         type="button"
-        className="btn btn-secondary btn-sm"
+        className="btn btn-ghost btn-sm"
         onClick={onCopy}
         style={{ flexShrink: 0 }}
       >

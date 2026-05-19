@@ -102,11 +102,11 @@ html[data-theme="nex"] {
 
   /* ── Typography ── */
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-serif: Georgia, "Times New Roman", serif;
-  --font-logo:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  --font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-logo: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-mono:
+    "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 
   /* ── Radii ── */
   --radius-sm: 4px;
@@ -958,29 +958,12 @@ html[data-theme^="nex"] .agent-panel-skill {
 /* ═══════════════════════════════════════
    BUTTONS
    ═══════════════════════════════════════ */
-html[data-theme^="nex"] .btn {
-  font-family: var(--font-sans);
-}
-html[data-theme^="nex"] .btn-primary {
-  background: var(--accent);
-  border-radius: var(--radius-md);
-  font-weight: 600;
-  box-shadow: none;
-  color: #ffffff;
-}
-html[data-theme^="nex"] .btn-primary:hover {
-  background: var(--accent-warm);
-}
-html[data-theme^="nex"] .btn-ghost {
-  border: 1px solid var(--border-dark);
-  border-radius: var(--radius-md);
-  background: var(--bg);
-  color: var(--text);
-  font-weight: 600;
-}
-html[data-theme^="nex"] .btn-ghost:hover {
-  background: var(--bg-warm);
-  border-color: var(--border-dark);
+/* Theme restyles atoms via tokens — class behavior stays in global.css. */
+html[data-theme^="nex"] {
+  --btn-radius: var(--radius-md);
+  --btn-font-weight: 600;
+  --btn-primary-shadow: none;
+  --input-border: var(--border-dark);
 }
 
 /* ═══════════════════════════════════════
@@ -1030,17 +1013,7 @@ html[data-theme^="nex"] .card {
   background: var(--bg);
   border-color: var(--border);
 }
-html[data-theme^="nex"] .input {
-  border-radius: var(--radius-md);
-  font-family: var(--font-sans);
-  background: var(--bg);
-  border-color: var(--border-dark);
-  color: var(--text);
-}
-html[data-theme^="nex"] .input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(6, 157, 228, 0.25);
-}
+/* Input restyles via tokens — geometry and state behavior stay in global.css. */
 html[data-theme^="nex"] .label {
   font-family: var(--font-sans);
   font-weight: 600;

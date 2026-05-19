@@ -14,9 +14,15 @@
     "check": "biome check src/",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
+    "@fontsource/geist-mono": "^5.2.8",
+    "@fontsource/geist-sans": "^5.2.5",
+    "@fontsource/newsreader": "^5.2.10",
+    "@fontsource/silkscreen": "^5.2.8",
     "@milkdown/core": "^7.20.0",
     "@milkdown/ctx": "^7.20.0",
     "@milkdown/plugin-listener": "^7.20.0",
@@ -68,6 +74,8 @@
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
     "@playwright/test": "^1.60.0",
+    "@storybook/addon-a11y": "^10.4.0",
+    "@storybook/react-vite": "^10.4.0",
     "@tailwindcss/postcss": "^4.2.4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -83,6 +91,7 @@
     "postcss": "^8.5.10",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
+    "storybook": "^10.4.0",
     "tailwindcss": "^4.2.4",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "~6.0.3",

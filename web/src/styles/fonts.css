@@ -1,0 +1,75 @@
+/* ═══════════════════════════════════════════════════════════════
+   WUPHF Web — Self-hosted font faces
+   Loaded from `@fontsource/*` so the app does not depend on the
+   Google Fonts CDN at runtime. Each weight is a separate .woff2
+   bundled by Vite into /assets/.
+
+   Replacement map:
+     Source Serif 4    → Geist Sans
+     IBM Plex Serif    → Geist Sans
+     Press Start 2P    → Geist Sans
+     Fraunces          → Newsreader
+     VT323             → Geist Pixel (alias for Pixelify Sans)
+
+   "Geist Pixel" is an alias on top of Pixelify Sans because Vercel
+   does not publish a font with that exact name. If Vercel ever ships
+   a real Geist Pixel, swap the @font-face src below.
+   ═══════════════════════════════════════════════════════════════ */
+
+@import "@fontsource/geist-sans/400.css";
+@import "@fontsource/geist-sans/500.css";
+@import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-sans/700.css";
+
+@import "@fontsource/geist-mono/400.css";
+@import "@fontsource/geist-mono/500.css";
+
+@import "@fontsource/newsreader/400.css";
+@import "@fontsource/newsreader/500.css";
+@import "@fontsource/newsreader/600.css";
+@import "@fontsource/newsreader/700.css";
+@import "@fontsource/newsreader/400-italic.css";
+@import "@fontsource/newsreader/500-italic.css";
+@import "@fontsource/newsreader/600-italic.css";
+
+@import "@fontsource/silkscreen/400.css";
+@import "@fontsource/silkscreen/700.css";
+
+/* "Geist Pixel" — alias on top of Silkscreen (square pixel style). Vercel
+   does not publish a font with this exact name, so we ship Silkscreen under
+   the brand-aligned alias. Silkscreen exposes 400 / 700 only; we expose 500
+   and 600 as aliases of 400 + 700 so callers using --font-pixel with weight
+   ranges don't fall back to the system stack. If Vercel ever releases a real
+   Geist Pixel, swap the src URLs below. */
+@font-face {
+  font-family: "Geist Pixel";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("@fontsource/silkscreen/files/silkscreen-latin-400-normal.woff2")
+    format("woff2");
+}
+@font-face {
+  font-family: "Geist Pixel";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("@fontsource/silkscreen/files/silkscreen-latin-400-normal.woff2")
+    format("woff2");
+}
+@font-face {
+  font-family: "Geist Pixel";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("@fontsource/silkscreen/files/silkscreen-latin-700-normal.woff2")
+    format("woff2");
+}
+@font-face {
+  font-family: "Geist Pixel";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("@fontsource/silkscreen/files/silkscreen-latin-700-normal.woff2")
+    format("woff2");
+}

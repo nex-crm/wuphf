@@ -161,6 +161,45 @@ Bun's native test runner instead of the repo's Vitest setup.
   the diff is purely test/doc/build config, or the same feature is
   already covered by a linked sibling PR's screenshots.
 
+### Storybook (web/)
+
+The web app ships a Storybook at `web/.storybook/`. Use it as the
+single playground for UI work — not for routes or full-app flows, but
+for visual components.
+
+- Run it with `cd web && bun run storybook` (port 6006 by default,
+  6007 if 6006 is taken).
+- Themes (`Nex Light`, `Nex Dark`, `Noir Gold`) switch from the
+  toolbar — same `data-theme` + `/themes/<id>.css` loader as
+  `RootRoute`. New themes should plug in via `src/lib/themes.ts` and
+  appear automatically.
+
+When you add or change a visual component in `web/src/components/`:
+
+1. Style with design tokens, not hardcoded values. The token
+   surface is the CSS custom properties in `web/src/styles/` and
+   `web/public/themes/*.css` — `--text`, `--text-secondary`,
+   `--bg-card`, `--border`, `--accent`, `--font-mono`, `--radius-*`,
+   etc. Reach for an existing token before inventing one.
+2. Check the component renders in all three themes. If it visibly
+   breaks under one of them, the issue is almost always a hardcoded
+   color — fix it at the source, not with a theme override.
+3. Co-locate a `*.stories.tsx` next to the component. Use the
+   existing title taxonomy: `UI / *` for primitives in
+   `components/ui/`, `Layout / *`, `Sidebar / *`, etc. Cover the
+   states that matter — default, edge cases, and any destructive or
+   error variants.
+4. For components that need a Zustand store or React Query data,
+   seed it inside the story (see
+   `web/src/components/sidebar/AgentEventPill.stories.tsx` for the
+   pattern) rather than mounting the full app shell.
+
+These are defaults, not gates. If the user asks to skip Storybook
+for a one-off — a prototype, a quick fix, a story that would need
+heavy mocking for little signal — do it and move on. Don't lecture.
+The point is to keep the playground honest as the app grows, not to
+slow down work.
+
 ### Multi-round review rhythm
 
 Use this heavier rhythm for substantial changes such as new packages,

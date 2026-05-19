@@ -5,6 +5,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { JoinPage } from "./components/join/JoinPage";
 import { rootRoute, router } from "./lib/router";
 import RootRoute from "./routes/RootRoute";
+import "./styles/fonts.css";
 import "./styles/shadcn.css";
 import "./styles/global.css";
 import "./styles/layout.css";

@@ -113,9 +113,9 @@ html[data-theme="noir-gold"] {
   --blue-bg: var(--accent-bg);
 
   --font-sans:
-    "Source Serif 4", "IBM Plex Serif", Georgia, "Times New Roman", serif;
-  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
-  --font-logo: "Fraunces", Georgia, "Times New Roman", serif;
+    "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-logo: "Newsreader", Georgia, "Times New Roman", serif;
   --font-mono:
     "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 
@@ -277,12 +277,12 @@ html[data-theme="noir-gold"] .btn-primary:hover {
   background: var(--gold-300);
   color: #000;
 }
-html[data-theme="noir-gold"] .btn-secondary {
+html[data-theme="noir-gold"] .btn-ghost {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border-strong);
 }
-html[data-theme="noir-gold"] .btn-secondary:hover {
+html[data-theme="noir-gold"] .btn-ghost:hover {
   border-color: var(--gold-500);
   color: var(--gold-100);
 }
