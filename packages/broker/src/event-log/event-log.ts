@@ -5,13 +5,19 @@ export type EventType =
   | "receipt.put"
   | "cost.event"
   | "cost.budget.set"
-  | "cost.budget.threshold.crossed";
+  | "cost.budget.threshold.crossed"
+  | "thread.created"
+  | "thread.spec_edited"
+  | "thread.status_changed";
 
 const EVENT_TYPES: ReadonlySet<EventType> = new Set<EventType>([
   "receipt.put",
   "cost.event",
   "cost.budget.set",
   "cost.budget.threshold.crossed",
+  "thread.created",
+  "thread.spec_edited",
+  "thread.status_changed",
 ]);
 
 export interface EventLogRecord {

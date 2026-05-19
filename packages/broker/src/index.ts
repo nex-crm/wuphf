@@ -3,10 +3,10 @@
 // auth. Hosts (Electron utility process, future `wuphf serve --headless`)
 // import `createBroker` and ignore the rest of the module graph.
 //
-// Cost-ledger and event-log primitives live on the `@wuphf/broker/cost-ledger`
-// subpath so consumers that only need the listener don't pull in the storage
-// internals. `SqliteReceiptStore` is on `@wuphf/broker/sqlite` for the same
-// reason (native binding load cost).
+// Cost-ledger, thread, and event-log primitives live on subpaths so consumers
+// that only need the listener don't pull in storage internals.
+// `SqliteReceiptStore` is on `@wuphf/broker/sqlite` for the same reason
+// (native binding load cost).
 
 export { createBroker } from "./listener.ts";
 export type {

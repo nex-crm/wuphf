@@ -22,11 +22,12 @@ flowchart LR
   auth --> dispatch{"pathname"}
   dispatch -- "/api-token" --> bootstrap["GET/HEAD only · bootstrap JSON"]
   dispatch -- "/api/health" --> health["GET/HEAD only · {ok:true}"]
-  dispatch -- "/api/events" --> events["GET/HEAD only · SSE ready"]
+  dispatch -- "/api/events" --> events["GET/HEAD only · SSE ready + thread invalidations"]
   dispatch -- "POST /api/receipts" --> create["receiptFromJson → ReceiptStore.put<br/>201 / 400 / 409 / 413 / 415 / 503 / 507"]
   dispatch -- "GET /api/receipts/:id" --> read["ReceiptStore.get<br/>200 / 404"]
   dispatch -- "GET /api/threads/:tid/receipts" --> list["ReceiptStore.list({threadId, cursor?, limit?})<br/>200 JSON array (+ Link rel=next when more pages)<br/>400 on invalid cursor/limit"]
   dispatch -- "/api/v1/cost/*" --> cost["cost ledger routes<br/>read: bearer<br/>mutate: bearer + operator capability"]
+  dispatch -- "/api/v1/threads*" --> threads["thread routes<br/>folded projection reads · idempotent commands · SSE invalidations"]
   dispatch -- "/api/agents/:id/provider-routing" --> routing["provider-routing routes<br/>GET read · PUT replace"]
   dispatch -- "/api/webauthn/*" --> webauthn["WebAuthn control-plane routes<br/>registration · cosign"]
   dispatch -- "/api/runners*" --> runners["runner routes<br/>POST spawn · GET events SSE<br/>bearer maps to AgentId"]
@@ -78,6 +79,24 @@ unknown authenticated API routes and return 404.
 
 See [cost-ledger.md](./cost-ledger.md) for the full route table, idempotency
 keys, replay-check discrepancy contract, and public subpath exports.
+
+### Thread routes
+
+When `createBroker({ threads })` is supplied, the listener mounts the thread
+foundation under `/api/v1/threads`. Without a threads config, those paths behave
+like unknown authenticated API routes and return 404. All routes inherit the
+loopback guard and default `/api/*` bearer gate.
+
+| Method | Path | Auth | Contract |
+|---|---|---|---|
+| GET | `/api/v1/threads` | bearer | Lists folded thread projections with optional `?status=` filter. Each entry wraps a protocol `threadToJsonValue(thread)` body plus `head_lsn` and derived `receipt_ids`. |
+| GET | `/api/v1/threads/:id` | bearer | Fetches one folded projection, deriving `task_ids` and `receipt_ids` from the receipt store in LSN order. |
+| POST | `/api/v1/threads` | bearer | Validates a create command, appends `thread.created` and the initial `thread.spec_edited` in one SQLite transaction, and emits `thread.created` SSE. |
+| PATCH | `/api/v1/threads/:id/spec` | bearer | Validates OCC against the event-log fold under the appender lock; stale `baseRevisionId`/`baseContentHash` returns 409 and accepted edits emit `thread.updated` SSE. |
+| PATCH | `/api/v1/threads/:id/status` | bearer | Validates status fold under the appender lock; `fromStatus` mismatch returns 409 and terminal exits return 422. Accepted changes emit `thread.updated` SSE. |
+
+See [threads.md](./threads.md) for projection storage, idempotency, and replay
+details.
 
 ### Agent provider-routing routes
 

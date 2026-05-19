@@ -20,6 +20,13 @@
 
 import type { ServerResponse } from "node:http";
 
+import {
+  type EventLsn,
+  type ThreadId,
+  type ThreadStreamEvent,
+  validateThreadStreamEvent,
+} from "@wuphf/protocol";
+
 const KEEPALIVE_MS = 30_000;
 
 export interface SseSession {
@@ -42,6 +49,70 @@ export interface SseSessionOptions {
    * (`broker_<seq>`); tests pass a fixed value to assert framing.
    */
   readonly idForReady?: string;
+  readonly onClose?: () => void;
+}
+
+export interface ThreadSseEmitArgs {
+  readonly kind: "thread.created" | "thread.updated";
+  readonly threadId: ThreadId;
+  readonly headLsn: EventLsn;
+}
+
+export interface SseHub {
+  startSession(res: ServerResponse, opts?: SseSessionOptions): SseSession;
+  emitThreadEvent(event: ThreadSseEmitArgs): void;
+  closeAll(): void;
+}
+
+export function createSseHub(): SseHub {
+  const sessions = new Set<ServerResponse>();
+  let nextThreadEventId = 1;
+  return {
+    startSession(res: ServerResponse, opts: SseSessionOptions = {}): SseSession {
+      sessions.add(res);
+      return startSseSession(res, {
+        ...opts,
+        onClose: () => {
+          sessions.delete(res);
+          opts.onClose?.();
+        },
+      });
+    },
+    emitThreadEvent(input: ThreadSseEmitArgs): void {
+      const event: ThreadStreamEvent = {
+        id: `broker_thread_${nextThreadEventId}`,
+        kind: input.kind,
+        emittedAt: new Date().toISOString(),
+        payload: { threadId: input.threadId, headLsn: input.headLsn },
+      };
+      nextThreadEventId += 1;
+      const validation = validateThreadStreamEvent(event);
+      if (!validation.ok) {
+        throw new Error(
+          `invalid thread SSE event: ${validation.errors
+            .map((error) => `${error.path}: ${error.message}`)
+            .join("; ")}`,
+        );
+      }
+      const frame = formatEvent({ id: event.id, event: event.kind, data: event });
+      for (const session of sessions) {
+        if (session.writableEnded) continue;
+        try {
+          session.write(frame);
+        } catch {
+          sessions.delete(session);
+        }
+      }
+    },
+    closeAll(): void {
+      for (const session of sessions) {
+        if (!session.writableEnded) {
+          session.end();
+        }
+      }
+      sessions.clear();
+    },
+  };
 }
 
 export function startSseSession(res: ServerResponse, opts: SseSessionOptions = {}): SseSession {
@@ -81,6 +152,7 @@ export function startSseSession(res: ServerResponse, opts: SseSessionOptions = {
     if (closed) return;
     closed = true;
     clearInterval(keepalive);
+    opts.onClose?.();
     if (!res.writableEnded) {
       res.end();
     }
@@ -95,7 +167,7 @@ export function startSseSession(res: ServerResponse, opts: SseSessionOptions = {
 interface SseEvent {
   readonly id: string;
   readonly event: string;
-  readonly data: Readonly<Record<string, unknown>>;
+  readonly data: unknown;
 }
 
 function formatEvent(event: SseEvent): string {

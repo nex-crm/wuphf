@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 import type { CostLedger } from "./cost-ledger/index.ts";
 import type { ReceiptStore } from "./receipt-store.ts";
 import type { RunnerRouteConfig } from "./runners/route.ts";
+import type { ThreadAppender, ThreadStateStore } from "./threads/index.ts";
 import type { Clock, WebAuthnPolicyConfig, WebAuthnStore } from "./webauthn/types.ts";
 
 export interface BrokerLogger {
@@ -108,6 +109,16 @@ export interface BrokerConfig {
      * routes. Read routes continue to use the broker bearer only.
      */
     readonly operatorToken?: ApiToken;
+  };
+  /**
+   * Optional thread foundation routes. When supplied, `/api/v1/threads*`
+   * routes are mounted. Hosts construct the deps via
+   * `createThreadAppender(db, eventLog, threadState)` and
+   * `createThreadStateStore(db)`.
+   */
+  readonly threads?: {
+    readonly appender: ThreadAppender;
+    readonly state: ThreadStateStore;
   };
   /**
    * Optional agent runner routes. When supplied, POST /api/runners and
