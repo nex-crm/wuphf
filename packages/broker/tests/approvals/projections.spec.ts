@@ -2,7 +2,6 @@ import {
   type ApprovalDecidedAuditPayload,
   type ApprovalRequestedAuditPayload,
   approvalAuditPayloadToBytes,
-  approvalRequestToJsonValue,
   asAgentId,
   asApprovalClaimId,
   asApprovalRequestId,
@@ -373,7 +372,7 @@ describe("approval projection and appender", () => {
     }
   });
 
-  it("projection replay follows LSN order for forged duplicate decision events", () => {
+  it("projection replay rejects forged duplicate decision events", () => {
     const { db, eventLog, projection, appender } = setup();
     try {
       appender.requestApproval(requestedPayload());
@@ -384,11 +383,22 @@ describe("approval projection and appender", () => {
       );
       eventLog.append({ type: "approval.decided", payload: Buffer.from(rejectBytes) });
       eventLog.append({ type: "approval.decided", payload: Buffer.from(approveBytes) });
-      projection.rebuildFromLog(eventLog);
-      const row = projection.getById(REQUEST_ID);
-      if (row === null) throw new Error("missing approval row");
-      expect(row.approval.status).toBe("approved");
-      expect(approvalRequestToJsonValue(row.approval)).toMatchObject({ status: "approved" });
+      expect(() => projection.rebuildFromLog(eventLog)).toThrow(
+        "approval.decided has no pending request",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("projection replay rejects duplicate requested events", () => {
+    const { db, eventLog, projection } = setup();
+    try {
+      const bytes = approvalAuditPayloadToBytes("approval_requested", requestedPayload());
+      eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
+      eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
+
+      expect(() => projection.rebuildFromLog(eventLog)).toThrow();
     } finally {
       db.close();
     }

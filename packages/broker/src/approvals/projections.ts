@@ -154,33 +154,17 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
   const selectByIdStmt = db.prepare<[string], ApprovalDbRow>(
     approvalSelectSql("WHERE approval_id = ?"),
   );
-  const upsertRequestedStmt = db.prepare<RequestUpsertParams>(
+  const insertRequestedStmt = db.prepare<RequestUpsertParams>(
     `INSERT INTO pending_approvals
        (approval_id, status, head_lsn, claim, scope, risk_class, thread_id, task_id, receipt_id,
         requested_by, requested_at_ms, decided_by, decided_at_ms, decision, token, token_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)
-     ON CONFLICT (approval_id) DO UPDATE SET
-       status = excluded.status,
-       head_lsn = excluded.head_lsn,
-       claim = excluded.claim,
-       scope = excluded.scope,
-       risk_class = excluded.risk_class,
-       thread_id = excluded.thread_id,
-       task_id = excluded.task_id,
-       receipt_id = excluded.receipt_id,
-       requested_by = excluded.requested_by,
-       requested_at_ms = excluded.requested_at_ms,
-       decided_by = NULL,
-       decided_at_ms = NULL,
-       decision = NULL,
-       token = NULL,
-       token_id = NULL`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)`,
   );
   const updateDecidedStmt = db.prepare<DecisionUpdateParams>(
     `UPDATE pending_approvals
      SET status = ?, head_lsn = ?, decided_by = ?, decided_at_ms = ?, decision = ?, token = ?,
          token_id = ?
-     WHERE approval_id = ?`,
+     WHERE approval_id = ? AND status = 'pending'`,
   );
   const clearStmt = db.prepare<[]>("DELETE FROM pending_approvals");
 
@@ -190,7 +174,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
   ): FoldedApprovalRow => {
     const approval = approvalFromRequested(payload);
     const wire = approvalRequestToJsonValue(approval) as unknown as ApprovalRequestJsonFields;
-    upsertRequestedStmt.run(
+    insertRequestedStmt.run(
       approval.id,
       approval.status,
       lsn,
@@ -205,18 +189,15 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
     );
     const row = selectByIdStmt.get(approval.id);
     if (row === undefined) {
-      throw new Error("pending_approvals upsert produced no row");
+      throw new Error("pending_approvals insert produced no row");
     }
     return rowToFolded(row);
   };
 
-  const applyDecided = (
-    payload: ApprovalDecidedAuditPayload,
-    lsn: number,
-  ): FoldedApprovalRow | null => {
+  const applyDecided = (payload: ApprovalDecidedAuditPayload, lsn: number): FoldedApprovalRow => {
     const tokenJson = tokenColumn(payload);
     const tokenId = approvalTokenIdColumn(payload);
-    updateDecidedStmt.run(
+    const result = updateDecidedStmt.run(
       statusForDecision(payload.decision),
       lsn,
       payload.decidedBy,
@@ -226,8 +207,14 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       tokenId,
       payload.requestId,
     );
+    if (result.changes !== 1) {
+      throw new Error(`approval.decided has no pending request: ${payload.requestId}`);
+    }
     const row = selectByIdStmt.get(payload.requestId);
-    return row === undefined ? null : rowToFolded(row);
+    if (row === undefined) {
+      throw new Error(`approval.decided update produced no row: ${payload.requestId}`);
+    }
+    return rowToFolded(row);
   };
 
   const applyEvent = (event: ApprovalProjectionEvent): FoldedApprovalRow | null => {
@@ -311,13 +298,18 @@ export function foldApprovalFromLog(
     const decoded = parseApprovalEvent(row);
     if (decoded === null || decoded.payload.requestId !== requestId) continue;
     if (decoded.kind === "approval_requested") {
+      if (folded !== null) {
+        throw new Error(`duplicate approval.requested event for ${requestId}`);
+      }
       folded = {
         approval: approvalFromRequested(decoded.payload),
         headLsn: lsnFromV1Number(row.lsn),
       };
       continue;
     }
-    if (folded === null) continue;
+    if (folded === null || folded.approval.status !== "pending") {
+      throw new Error(`approval.decided event has no pending request for ${requestId}`);
+    }
     folded = {
       approval: approvalWithDecision(folded.approval, decoded.payload),
       headLsn: lsnFromV1Number(row.lsn),
