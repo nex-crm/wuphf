@@ -51,7 +51,14 @@ func (b *Broker) runScanPhase(dmSlug string) {
 	// transition fired; that write is durable by the time we get here.
 	s, err := onboarding.Load()
 	if err != nil {
+		// Don't strand the user on a spinning "Scanning…" chip. Post a
+		// generic failed terminal chip + try to advance out of PhaseScan
+		// even though advanceAfterScan will likely hit the same Load
+		// failure — at minimum the chat shows the failure state.
+		// (CodeRabbit on #911.)
 		log.Printf("onboarding scan: load state: %v", err)
+		b.postScanChipUpdate(dmSlug, "", "failed", "Couldn’t read onboarding state — skipping the scan.")
+		b.advanceAfterScan("", false)
 		return
 	}
 	websiteURL := strings.TrimSpace(s.FormAnswers.WebsiteURL)
@@ -92,6 +99,14 @@ func (b *Broker) runScanPhase(dmSlug string) {
 		return
 	}
 
+	// Re-check phase before each side-effect: if a concurrent resume/tab has
+	// already moved onboarding past PhaseScan, don't append stale "Wiki
+	// updated ✓" / "✓ <article>" messages on top of the new phase's chat.
+	// (CodeRabbit on #911.)
+	if !b.phaseStillScan() {
+		return
+	}
+
 	b.postScanChipUpdate(dmSlug, websiteURL, "done", "Wiki updated ✓")
 
 	// Stagger one chat bubble per article written. Each bubble is a plain
@@ -108,10 +123,28 @@ revealLoop:
 			break revealLoop
 		case <-time.After(scanRevealStagger):
 		}
+		if !b.phaseStillScan() {
+			break revealLoop
+		}
 		b.postScanArticleLine(dmSlug, article)
 	}
 
 	b.advanceAfterScan(websiteURL, true)
+}
+
+// phaseStillScan reports whether the persisted onboarding state is still in
+// PhaseScan. It is called before each post-scan side effect (terminal chip +
+// each article reveal line) so a concurrent resume/tab that already moved
+// onboarding forward does not get stale "Wiki updated ✓" + "✓ <article>"
+// CEO messages appended on top of the new phase's chat. On load failure we
+// return false (bail out is safer than posting stale content).
+func (b *Broker) phaseStillScan() bool {
+	s, err := onboarding.Load()
+	if err != nil {
+		log.Printf("onboarding scan: phase recheck load: %v", err)
+		return false
+	}
+	return s.Phase == onboarding.PhaseScan
 }
 
 // postScanChipUpdate appends a second ceo_scan_chip message into the CEO DM
