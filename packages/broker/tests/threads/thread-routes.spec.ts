@@ -1018,9 +1018,9 @@ describe("/api/v1/threads routes", () => {
     expect(clearedThread.pendingApprovalCount).toBe(0);
   });
 
-  it("paginates thread lists by scanned rows before applying read-time filters", async () => {
+  it("paginates thread lists by the filtered effective view LSN", async () => {
     if (fixture === null) throw new Error("fixture missing");
-    await createThread(fixture);
+    const created = await createThread(fixture);
     await createApproval(fixture, {
       threadId: asThreadId(THREAD_ID),
       taskId: APPROVAL_TASK_ID,
@@ -1034,11 +1034,11 @@ describe("/api/v1/threads routes", () => {
     );
     expect(first.status).toBe(200);
     const firstBody = threadListResponseFromJson((await first.json()) as unknown);
-    expect(firstBody.threads).toEqual([]);
-    expect(firstBody.nextCursor).toBeDefined();
+    expect(firstBody.threads.map((thread) => thread.id)).toEqual([THREAD_ID]);
+    expect(firstBody.nextCursor).toBeUndefined();
 
     const second = await fetch(
-      `${fixture.broker.url}/api/v1/threads?status=needs_attention&limit=1&cursor=${firstBody.nextCursor}`,
+      `${fixture.broker.url}/api/v1/threads?status=needs_attention&limit=1&cursor=${created.headLsn}`,
       {
         headers: authHeaders(),
       },

@@ -115,6 +115,16 @@ export interface ThreadRouteStreamEvent {
   readonly headLsn: EventLsn;
 }
 
+interface ThreadListViewPage {
+  readonly threads: readonly ThreadView[];
+  readonly nextCursor?: EventLsn;
+}
+
+interface ThreadListViewItem {
+  readonly thread: ThreadView;
+  readonly viewLsn: number;
+}
+
 export async function handleThreadRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -183,17 +193,15 @@ function handleThreadList(req: IncomingMessage, res: ServerResponse, deps: Threa
     return;
   }
   try {
-    const page = deps.state.listPage({
+    const page = listThreadViewPage(deps, {
       limit: query.limit,
-      ...(query.afterHeadLsn === undefined ? {} : { afterHeadLsn: query.afterHeadLsn }),
+      ...(query.filter === undefined ? {} : { filter: query.filter }),
+      ...(query.afterViewLsn === undefined ? {} : { afterViewLsn: query.afterViewLsn }),
     });
-    const threads = page.rows
-      .map((row) => threadViewFromRow(row, deps))
-      .filter((thread) => threadMatchesStatusFilter(thread, query.filter));
     writeJsonValue(
       res,
       200,
-      threadListResponseToJsonValue({ threads, nextCursor: page.nextCursor }),
+      threadListResponseToJsonValue({ threads: page.threads, nextCursor: page.nextCursor }),
     );
   } catch (err) {
     if (writeStorageErrorResponse(res, err, deps.logger, "thread_list_rejected")) return;
@@ -512,19 +520,60 @@ function threadRouteStreamEventFromApplied(applied: {
 }
 
 function threadViewFromRow(row: ThreadStateRow, deps: ThreadRouteDeps): ThreadView {
+  return threadViewItemFromRow(row, deps).thread;
+}
+
+function listThreadViewPage(
+  deps: ThreadRouteDeps,
+  args: {
+    readonly limit: number;
+    readonly filter?: ThreadStatusFilter;
+    readonly afterViewLsn?: number;
+  },
+): ThreadListViewPage {
+  if (!Number.isSafeInteger(args.limit) || args.limit < 1) {
+    throw new Error("thread view page limit must be a positive safe integer");
+  }
+  const afterViewLsn = args.afterViewLsn ?? 0;
+  const candidates = deps.state
+    .list()
+    .map((row) => threadViewItemFromRow(row, deps))
+    .filter((item) => item.viewLsn > afterViewLsn)
+    .filter((item) => threadMatchesStatusFilter(item.thread, args.filter))
+    .sort((left, right) => left.viewLsn - right.viewLsn);
+  const visibleItems = candidates.slice(0, args.limit);
+  const last = visibleItems.at(-1);
+  return {
+    threads: visibleItems.map((item) => item.thread),
+    ...(candidates.length > args.limit && last !== undefined
+      ? { nextCursor: lsnFromV1Number(last.viewLsn) }
+      : {}),
+  };
+}
+
+function threadViewItemFromRow(row: ThreadStateRow, deps: ThreadRouteDeps): ThreadListViewItem {
   const refs = deps.receiptIndex.refsForThread(row.id);
   const thread = threadStateRowToThread(row, refs.taskIds);
   assertThreadValid(thread);
   const pendingApprovalCount = deps.approvals?.countPendingByThread(row.id) ?? 0;
   const latestReceipt = deps.receiptIndex.latestForThread(row.id);
+  const approvalHeadLsn = deps.approvals?.latestHeadLsnByThread(row.id) ?? null;
+  const viewLsn = Math.max(
+    parseLsn(row.headLsn).localLsn,
+    latestReceipt?.lsn ?? 0,
+    approvalHeadLsn === null ? 0 : parseLsn(approvalHeadLsn).localLsn,
+  );
   return {
-    ...thread,
-    ...deriveThreadEffectiveStatus({
-      storedStatus: row.status,
+    viewLsn,
+    thread: {
+      ...thread,
+      ...deriveThreadEffectiveStatus({
+        storedStatus: row.status,
+        pendingApprovalCount,
+        latestReceiptStatus: latestReceipt?.status,
+      }),
       pendingApprovalCount,
-      latestReceiptStatus: latestReceipt?.status,
-    }),
-    pendingApprovalCount,
+    },
   };
 }
 
@@ -544,7 +593,7 @@ function parseThreadListQuery(params: URLSearchParams):
       readonly ok: true;
       readonly filter?: ThreadStatusFilter;
       readonly limit: number;
-      readonly afterHeadLsn?: number;
+      readonly afterViewLsn?: number;
     }
   | { readonly ok: false; readonly error: string; readonly reason?: string } {
   const status = parseStatusFilter(params);
@@ -576,7 +625,7 @@ function parseThreadListQuery(params: URLSearchParams):
         ok: true,
         ...(status.filter === undefined ? {} : { filter: status.filter }),
         limit,
-        afterHeadLsn: parseLsn(cursor as EventLsn).localLsn,
+        afterViewLsn: parseLsn(cursor as EventLsn).localLsn,
       };
     } catch {
       return { ok: false, error: "invalid_cursor", reason: "cursor must be an EventLsn" };
