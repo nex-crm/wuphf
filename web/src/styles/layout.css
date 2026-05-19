@@ -12,9 +12,13 @@
 /* ─── Sidebar ─── */
 .sidebar {
   /* Default width is intentionally narrow — most users were left with
-     little room for the main column. The Sidebar component overrides
-     this inline via useResizablePane() so a user-dragged width persists. */
-  width: 220px;
+     little room for the main column. The Sidebar component supplies a
+     `--sidebar-resize-width` CSS variable via useResizablePane() so a
+     user-dragged width persists; the variable resolves to 220px when
+     unset. Mobile breakpoints further down override the width directly
+     and intentionally bypass the variable so persisted desktop widths
+     can't leak into the mobile overlay layout. */
+  width: var(--sidebar-resize-width, 220px);
   flex-shrink: 0;
   background: var(--bg-card);
   border-right: 1px solid var(--border);
@@ -2156,9 +2160,12 @@ html[data-theme="nex"]
 /* ─── Thread Panel ─── */
 .thread-panel {
   /* Default width chosen to leave the main column room on a 13" laptop.
-     ThreadPanel overrides this inline via useResizablePane() so a
-     user-dragged width persists across reloads. */
-  width: 340px;
+     ThreadPanel supplies a `--thread-panel-resize-width` variable via
+     useResizablePane(); the variable resolves to 340px when unset. The
+     mobile media query below sets `width: 100%` and intentionally
+     bypasses the variable so a persisted desktop width can't shrink
+     the mobile overlay. */
+  width: var(--thread-panel-resize-width, 340px);
   flex-shrink: 0;
   background: var(--bg-card);
   border-left: 1px solid var(--border);

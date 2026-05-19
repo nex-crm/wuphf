@@ -330,7 +330,14 @@ export function ThreadPanel() {
     <aside
       className="thread-panel open"
       aria-label="Thread"
-      style={{ width: resize.width }}
+      // CSS variable rather than `width:` directly so the mobile
+      // media query (which sets the panel to 100% as an overlay)
+      // still wins over a persisted desktop drag width.
+      style={
+        {
+          "--thread-panel-resize-width": `${resize.width}px`,
+        } as React.CSSProperties
+      }
     >
       <PaneResizeHandle
         edge="left"

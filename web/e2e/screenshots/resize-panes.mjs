@@ -29,27 +29,26 @@ await shotPage(page, OUT, "01-sidebar-default-width");
 
 // 2. Sidebar widened to ~360px via dragging the handle.
 const sidebar = page.locator(".sidebar");
-const sidebarBox = await sidebar.boundingBox();
-if (sidebarBox) {
-  const handleX = sidebarBox.x + sidebarBox.width - 1;
-  const handleY = sidebarBox.y + sidebarBox.height / 2;
+async function dragSidebar(deltaX, reason) {
+  const box = await sidebar.boundingBox();
+  if (!box) {
+    // Fail loudly. Silent fallback would write a "dragged" screenshot
+    // with no drag, masking a real regression in the layout.
+    throw new Error(`Cannot drag sidebar (${reason}) — .sidebar has no bounding box.`);
+  }
+  const handleX = box.x + box.width - 1;
+  const handleY = box.y + box.height / 2;
   await page.mouse.move(handleX, handleY);
   await page.mouse.down();
-  await page.mouse.move(handleX + 140, handleY, { steps: 12 });
+  await page.mouse.move(handleX + deltaX, handleY, { steps: 12 });
   await page.mouse.up();
 }
+
+await dragSidebar(140, "widen");
 await shotPage(page, OUT, "02-sidebar-dragged-wider");
 
 // 3. Sidebar shrunk to the floor (~180px).
-const sidebarBox2 = await sidebar.boundingBox();
-if (sidebarBox2) {
-  const handleX = sidebarBox2.x + sidebarBox2.width - 1;
-  const handleY = sidebarBox2.y + sidebarBox2.height / 2;
-  await page.mouse.move(handleX, handleY);
-  await page.mouse.down();
-  await page.mouse.move(handleX - 300, handleY, { steps: 12 });
-  await page.mouse.up();
-}
+await dragSidebar(-300, "shrink");
 await shotElement(page, ".sidebar", OUT, "03-sidebar-min-width");
 
 // 4. Close-up of the resize handle on hover.

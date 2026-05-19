@@ -86,12 +86,16 @@ export function Sidebar() {
   });
 
   // Collapsed rail keeps its fixed CSS width; only the expanded sidebar
-  // honors the user's drag. Inline width overrides the stylesheet so the
-  // CSS rule remains the default for the collapsed state.
-  const asideStyle: React.CSSProperties = {
+  // honors the user's drag. We hand the dragged width to CSS as a custom
+  // property rather than `width:` directly so the mobile media queries
+  // (which clamp the sidebar to 240px / full overlay) can still win
+  // — inline `width` would beat them with normal cascade rules.
+  const asideStyle = {
     ...(sidebarBg ? { background: sidebarBg } : null),
-    ...(sidebarCollapsed ? null : { width: resize.width }),
-  };
+    ...(sidebarCollapsed
+      ? null
+      : { "--sidebar-resize-width": `${resize.width}px` }),
+  } as React.CSSProperties;
 
   return (
     <aside

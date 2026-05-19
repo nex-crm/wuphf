@@ -119,6 +119,10 @@ export function useResizablePane({
       }
 
       const onMove = (e: PointerEvent) => {
+        // Ignore stray pointers — e.g. a second touch or a mouse moving
+        // through while a pen drag is in progress — so they don't drive
+        // width updates that the user didn't initiate.
+        if (e.pointerId !== pointerId) return;
         const delta = e.clientX - startXRef.current;
         const signed = edge === "right" ? delta : -delta;
         const next = clampWidth(
@@ -141,7 +145,11 @@ export function useResizablePane({
         cleanupDragRef.current = null;
       };
 
-      const onUp = () => {
+      const onUp = (e: PointerEvent) => {
+        // Only the pointer that started the drag can end it. Without
+        // this guard, a second pointer's up event would terminate the
+        // active drag prematurely.
+        if (e.pointerId !== pointerId) return;
         teardown();
         setIsResizing(false);
       };

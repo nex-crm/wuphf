@@ -66,12 +66,14 @@ describe("useResizablePane", () => {
   });
 
   it("persists width changes to localStorage", () => {
-    const { result, rerender } = renderHook(() => useResizablePane(baseOpts));
+    // Drive a real width update — the mount-time write already stores
+    // the default, so an assertion against "220" after reset() would
+    // pass even if change-driven persistence regressed.
+    const { result } = renderHook(() => useResizablePane(baseOpts));
     act(() => {
-      result.current.reset();
+      result.current.stepResize(17);
     });
-    rerender();
-    expect(store.get(STORAGE_KEY)).toBe("220");
+    expect(store.get(STORAGE_KEY)).toBe("237");
   });
 
   it("reset() restores the default width within bounds", () => {
@@ -214,6 +216,38 @@ describe("useResizablePane", () => {
       result.current.stepResize(-10_000);
     });
     expect(result.current.width).toBe(180);
+  });
+
+  it("ignores pointer events from a pointer other than the one that started the drag", () => {
+    const { result } = renderHook(() => useResizablePane(baseOpts));
+    act(() => {
+      startDrag(result.current.onPointerDown, 100);
+    });
+    expect(result.current.isResizing).toBe(true);
+
+    // Stray pointer move must not change width.
+    act(() => {
+      window.dispatchEvent(
+        new PointerEvent("pointermove", { clientX: 9999, pointerId: 99 }),
+      );
+    });
+    expect(result.current.width).toBe(220);
+
+    // Stray pointerup must not end the drag.
+    act(() => {
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 99 }));
+    });
+    expect(result.current.isResizing).toBe(true);
+
+    // The real pointer can still complete the drag.
+    act(() => {
+      window.dispatchEvent(
+        new PointerEvent("pointermove", { clientX: 150, pointerId: 1 }),
+      );
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
+    });
+    expect(result.current.width).toBe(270);
+    expect(result.current.isResizing).toBe(false);
   });
 });
 
