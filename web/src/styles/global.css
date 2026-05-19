@@ -179,15 +179,48 @@
   --focus-ring-width: 2px;
 
   /* ─── Spacing scale ─── */
-  /* Consistent spacing prevents scattered hardcoded values. */
+  /* Consistent spacing prevents scattered hardcoded values.
+     Half-steps (1-5, 2-5, 3-5) are the off-grid sizes the codebase
+     reaches for most often — icon-button padding, dense rail gaps,
+     mid-density form fields. They live in the system rather than
+     bleeding into inline px. */
   --space-1: 4px;
+  --space-1-5: 6px;
   --space-2: 8px;
+  --space-2-5: 10px;
   --space-3: 12px;
+  --space-3-5: 14px;
   --space-4: 16px;
   --space-5: 20px;
   --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  /* ─── Border widths ─── */
+  --border-width-sm: 1px;
+  --border-width-md: 2px;
+
+  /* ─── Elevation (shadows) — single token surface for the whole app.
+     Replace inline `box-shadow: 0 8px 40px ...` etc. with these. */
+  --shadow-card-soft:
+    0 1px 3px rgba(59, 47, 47, 0.04),
+    0 8px 30px rgba(59, 47, 47, 0.04);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+  /* ─── z-index scale — keep modal/overlay stacking explicit so adding
+     a new layer never overlaps the wrong thing. Higher = closer. */
+  --z-dropdown: 100;
+  --z-popover: 120;
+  --z-overlay: 150;
+  --z-modal: 160;
+  --z-modal-critical: 200;
+  --z-toast: 300;
 
   /* ─── Typography scale ─── */
+  /* `--text-2xs` is the small-caps eyebrow/section-header size — used in
+     agents.css, command.css, lifecycle.css for the all-caps tracking
+     labels. Anything below this is decorative-only territory. */
+  --text-2xs: 10px;
   --text-xs: 11px;
   --text-sm: 12px;
   --text-base: 13px;
@@ -414,9 +447,119 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow:
-    0 1px 3px rgba(59, 47, 47, 0.04),
-    0 8px 30px rgba(59, 47, 47, 0.04);
+  box-shadow: var(--shadow-card-soft);
+}
+
+/* ─── Modal shell + backdrop — shared by every dialog (ConfirmDialog,
+   WipeModal, SidePanel, HelpModal, VersionModal, command palette).
+   Pair them: `<div class="modal-backdrop"><div class="modal-shell" /></div>`.
+   Backdrop owns the scrim + z-index; shell owns the card. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  z-index: var(--z-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-shell {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
+  max-width: min(560px, calc(100vw - 40px));
+  width: 100%;
+}
+
+/* ─── Section header — the small caps + tracking label that sits above
+   sidebar groups, settings sections, panel rails. Replaces ~6 ad-hoc
+   `font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;`
+   declarations across agents.css / console.css / lifecycle.css. */
+.section-header {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  line-height: 1;
+}
+
+/* ─── Chip — passive inline label with rounded geometry. Differs from
+   `.badge` (smaller, square) in that it carries identity / ownership
+   (agent, skill, channel) rather than status. `.chip--interactive` adds
+   hover/focus chrome for clickable variants. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  background: var(--bg-warm);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.chip--accent {
+  background: var(--accent-bg);
+  color: var(--accent-warm);
+  border-color: var(--accent-bg-strong);
+}
+.chip--interactive {
+  cursor: pointer;
+  transition:
+    background var(--duration-base),
+    border-color var(--duration-base);
+}
+.chip--interactive:hover {
+  background: var(--bg-subtle);
+  border-color: var(--border-dark);
+}
+.chip--interactive:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ─── Icon button — square-ish hit area for icon-only controls.
+   Size variants mirror .btn-sm / default / .btn-lg in height. Already
+   used implicitly in 8+ places (.sidebar-icon-btn, .agent-panel-close);
+   this is the single source of truth. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-base),
+    color var(--duration-base);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-warm);
+  color: var(--text);
+}
+.icon-btn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.icon-btn--sm {
+  width: 28px;
+  height: 28px;
+}
+.icon-btn--lg {
+  width: 44px;
+  height: 44px;
 }
 
 /* ─── Inputs ─── */

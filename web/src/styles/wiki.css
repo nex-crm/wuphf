@@ -112,7 +112,7 @@
 }
 .wk-nav-sidebar h3 {
   font-family: var(--wk-chrome);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -703,7 +703,7 @@
   margin-left: auto;
   color: var(--wk-wikilink);
   font-weight: 400;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   cursor: pointer;
   text-transform: none;
   letter-spacing: 0;
@@ -904,7 +904,7 @@
   color: var(--wk-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   flex-shrink: 0;
 }
 .wk-edit-log .wk-entry {
@@ -1308,7 +1308,7 @@
 .wk-audit-tag {
   display: inline-block;
   font-family: var(--wk-chrome);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1410,7 +1410,7 @@
 .wk-tree-count {
   color: var(--wk-text-tertiary);
   font-family: var(--wk-mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 500;
 }
 .wk-section-discovered {
@@ -1483,7 +1483,7 @@
   width: 10px;
   color: var(--wk-text-tertiary);
   font-family: var(--wk-mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1;
   text-align: center;
 }
@@ -2115,7 +2115,7 @@
 }
 .wk-playbook-execution__pill {
   font-family: var(--wk-chrome);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;

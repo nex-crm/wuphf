@@ -66,14 +66,14 @@
   height: 100%;
 }
 .agent-panel-role {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
   font-weight: 400;
   line-height: 1.4;
 }
 
 .agent-panel-name {
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 700;
   color: var(--text);
   overflow: hidden;
@@ -114,7 +114,7 @@
 }
 
 .agent-panel-section-title {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -133,7 +133,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .agent-panel-info-label {
@@ -163,7 +163,7 @@
   align-items: center;
   padding: 2px 8px;
   border-radius: var(--radius-full);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-family: var(--font-mono);
   background: var(--accent-bg);
   color: var(--accent);
@@ -172,7 +172,7 @@
 /* ─── Stream log ─── */
 .agent-stream-log {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.6;
   max-height: 300px;
   overflow-y: auto;
@@ -196,14 +196,14 @@
   font-style: italic;
   padding: 12px 0;
   text-align: center;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .agent-stream-status {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   margin-bottom: 6px;
 }
@@ -239,7 +239,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 0;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 .agent-panel-stat-label {
   color: var(--text-secondary);
@@ -297,7 +297,7 @@
 .agent-log-item {
   padding: 8px 20px;
   border-bottom: 1px solid var(--border-light);
-  font-size: 12px;
+  font-size: var(--text-sm);
   transition: background 0.1s;
 }
 .agent-log-item:hover {
@@ -318,7 +318,7 @@
 }
 
 .agent-log-time {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   margin-top: 2px;
@@ -329,18 +329,18 @@
   font-style: italic;
   padding: 20px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* ─── Agent Wizard (modal overlay) ─── */
 .agent-wizard-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: var(--z-modal-critical);
   animation: fadeIn 0.15s ease-out;
 }
 
@@ -348,7 +348,7 @@
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-modal);
   width: 100%;
   max-width: 500px;
   padding: 24px;
@@ -376,14 +376,14 @@
 }
 
 .agent-wizard-field .label {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .agent-wizard-field .input {
   height: 40px;
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .agent-wizard-field select {
@@ -392,7 +392,7 @@
   color: var(--text);
   border-radius: var(--radius-md);
   height: 40px;
-  font-size: 14px;
+  font-size: var(--text-md);
   padding: 0 14px;
   outline: none;
   width: 100%;
@@ -415,7 +415,7 @@
 }
 
 .agent-wizard-error {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--red);
   padding: 8px 12px;
   background: var(--red-bg);
@@ -439,7 +439,7 @@
 }
 
 .agent-workbench-empty {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
   font-style: italic;
   padding: 6px 4px;
@@ -490,7 +490,7 @@
 .agent-workbench-task-title {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -502,7 +502,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   flex-shrink: 0;
@@ -512,7 +512,7 @@
   flex: 1;
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -556,7 +556,7 @@
 }
 
 .agent-profile-section-title {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -566,7 +566,7 @@
 }
 
 .agent-profile-empty {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-tertiary);
   font-style: italic;
   padding: 2px 0;
@@ -575,7 +575,7 @@
 .agent-profile-role-text,
 .agent-profile-current-task {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-base);
   color: var(--text-secondary);
   line-height: 1.5;
 }
@@ -585,7 +585,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-family: var(--font-mono);
   color: var(--text-tertiary);
   text-transform: lowercase;
@@ -621,7 +621,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text);
   min-height: 26px;
 }
@@ -651,7 +651,7 @@
   align-items: center;
   padding: 3px 8px;
   border-radius: var(--radius-full);
-  font-size: 11px;
+  font-size: var(--text-xs);
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text-secondary);
@@ -699,7 +699,7 @@
 
 .agent-profile-run-id {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -708,14 +708,14 @@
 }
 
 .agent-profile-run-meta {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .agent-profile-task-title {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -727,7 +727,7 @@
   display: inline-flex;
   align-items: center;
   margin-top: 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--accent);
   background: transparent;
   border: none;
@@ -752,7 +752,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .agent-profile-perm-label {

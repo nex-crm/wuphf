@@ -42,7 +42,7 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-family: var(--font-mono);
 }
 
@@ -84,7 +84,7 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   color: rgba(244, 247, 230, 0.72);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .console-terminal-body {
@@ -97,7 +97,7 @@
   gap: 7px;
   color: #edf4d0;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
@@ -204,13 +204,13 @@
 }
 
 .console-stat strong {
-  font-size: 20px;
+  font-size: var(--text-2xl);
   line-height: 1;
 }
 
 .console-stat small {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .console-panel {
@@ -224,7 +224,7 @@
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0;
@@ -259,14 +259,14 @@ button.console-command {
 .console-command-name {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 650;
 }
 
 .console-command-desc {
   width: 100%;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -303,7 +303,7 @@ button.console-command {
 
   .console-terminal-body {
     padding: 12px;
-    font-size: 11px;
+    font-size: var(--text-xs);
   }
 
   .console-stat-row {

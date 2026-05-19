@@ -115,7 +115,7 @@ html[data-theme="nex"] .sidebar-rail-bottom {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-modal);
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -1868,7 +1868,7 @@ html[data-theme="nex"]
 .task-detail-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;

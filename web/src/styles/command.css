@@ -10,13 +10,13 @@
 .cmd-palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: 12vh;
   /* Above search (150), below help (160). */
-  z-index: 155;
+  z-index: var(--z-modal);
   animation: fadeIn 0.12s ease-out;
 }
 
@@ -56,7 +56,7 @@
   border: none;
   background: transparent;
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--text-lg);
   color: var(--text);
   outline: none;
   min-width: 0;
@@ -79,7 +79,7 @@
   padding: 28px 20px;
   text-align: center;
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.5;
 }
 
@@ -89,7 +89,7 @@
 }
 
 .cmd-palette-group-title {
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -104,7 +104,7 @@
   gap: 12px;
   padding: 8px 16px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-base);
   transition: background 0.1s;
   width: 100%;
   border: none;
@@ -128,7 +128,7 @@
   width: 22px;
   flex-shrink: 0;
   text-align: center;
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .cmd-palette-item-text {
@@ -148,7 +148,7 @@
 }
 
 .cmd-palette-item-desc {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -156,7 +156,7 @@
 }
 
 .cmd-palette-item-meta {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   flex-shrink: 0;
@@ -177,7 +177,7 @@
   gap: 14px;
   padding: 8px 16px;
   border-top: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   flex-shrink: 0;
 }
