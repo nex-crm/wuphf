@@ -359,7 +359,13 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
             <p className="issues-kanban-column-hint">{COLUMN_HINT[col]}</p>
             <div className="issues-kanban-column-cards" role="list">
               {columns[col].length === 0 ? (
-                <p className="issues-kanban-column-empty">—</p>
+                <p
+                  className="issues-kanban-column-empty"
+                  role="listitem"
+                  aria-label={`No issues in ${COLUMN_LABEL[col]}`}
+                >
+                  —
+                </p>
               ) : (
                 columns[col].map((task) => (
                   <div role="listitem" key={task.id}>
