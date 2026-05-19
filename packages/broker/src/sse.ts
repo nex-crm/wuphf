@@ -21,6 +21,8 @@
 import type { ServerResponse } from "node:http";
 
 const KEEPALIVE_MS = 30_000;
+export const DEFAULT_MAX_SSE_SESSIONS = 64;
+export const DEFAULT_MAX_SSE_WRITABLE_BYTES = 1024 * 1024;
 
 export interface SseSession {
   close(): void;
@@ -35,6 +37,11 @@ export interface SseEvent {
 export interface SseHub {
   startSession(res: ServerResponse, opts?: SseSessionOptions): SseSession;
   emit(event: SseEvent): void;
+}
+
+export interface SseHubOptions {
+  readonly maxSessions?: number;
+  readonly maxWritableLength?: number;
 }
 
 export interface SseSessionOptions {
@@ -53,14 +60,31 @@ export interface SseSessionOptions {
    * (`broker_<seq>`); tests pass a fixed value to assert framing.
    */
   readonly idForReady?: string;
+  readonly maxWritableLength?: number;
 }
 
-export function createSseHub(): SseHub {
-  const clients = new Set<ServerResponse>();
+interface ManagedSseSession extends SseSession {
+  readonly active: boolean;
+  write(frame: string): boolean;
+  drop(): void;
+}
+
+export function createSseHub(opts: SseHubOptions = {}): SseHub {
+  const maxSessions = opts.maxSessions ?? DEFAULT_MAX_SSE_SESSIONS;
+  const maxWritableLength = opts.maxWritableLength ?? DEFAULT_MAX_SSE_WRITABLE_BYTES;
+  const clients = new Map<ServerResponse, ManagedSseSession>();
   return {
     startSession(res: ServerResponse, opts: SseSessionOptions = {}): SseSession {
-      const session = startSseSession(res, opts);
-      clients.add(res);
+      if (clients.size >= maxSessions) {
+        rejectSseSession(res);
+        return { close: () => undefined };
+      }
+      const session = startManagedSseSession(res, {
+        ...opts,
+        maxWritableLength: opts.maxWritableLength ?? maxWritableLength,
+      });
+      if (!session.active) return { close: () => undefined };
+      clients.set(res, session);
       const remove = (): void => {
         clients.delete(res);
       };
@@ -77,14 +101,12 @@ export function createSseHub(): SseHub {
     },
     emit(event: SseEvent): void {
       const frame = formatEvent(event);
-      for (const res of clients) {
-        if (res.writableEnded) {
+      for (const [res, session] of clients) {
+        if (!session.active) {
           clients.delete(res);
           continue;
         }
-        try {
-          res.write(frame);
-        } catch {
+        if (!session.write(frame)) {
           clients.delete(res);
         }
       }
@@ -93,6 +115,14 @@ export function createSseHub(): SseHub {
 }
 
 export function startSseSession(res: ServerResponse, opts: SseSessionOptions = {}): SseSession {
+  return startManagedSseSession(res, opts);
+}
+
+function startManagedSseSession(
+  res: ServerResponse,
+  opts: SseSessionOptions = {},
+): ManagedSseSession {
+  const maxWritableLength = opts.maxWritableLength ?? DEFAULT_MAX_SSE_WRITABLE_BYTES;
   res.statusCode = 200;
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
@@ -105,41 +135,93 @@ export function startSseSession(res: ServerResponse, opts: SseSessionOptions = {
 
   const emittedAt = opts.nowIso ?? new Date().toISOString();
   const id = opts.idForReady ?? "broker_ready_0";
-  res.write(formatEvent({ id, event: "ready", data: { emittedAt } }));
-
-  const keepaliveMs = opts.keepaliveMs ?? KEEPALIVE_MS;
-  const keepalive = setInterval(() => {
-    if (res.writableEnded) return;
-    try {
-      res.write(": keepalive\n\n");
-    } catch {
-      // `writableEnded` is false while the response is *destroying* (after a
-      // socket error but before `'close'` fires). A `res.write` here throws
-      // ERR_STREAM_DESTROYED synchronously; tear the interval down rather
-      // than letting it become an unhandled exception every keepalive tick.
-      clearInterval(keepalive);
-    }
-  }, keepaliveMs);
-  // `unref` so a hanging keepalive does not keep the broker process alive
-  // after `BrokerHandle.stop` closes the listener.
-  keepalive.unref();
 
   let closed = false;
-  const close = (): void => {
+  let keepalive: ReturnType<typeof setInterval> | null = null;
+  const detach = (): void => {
+    res.off("close", peerClosed);
+    res.off("error", peerClosed);
+  };
+  const finish = (mode: "graceful" | "drop" | "peer"): void => {
     if (closed) return;
     closed = true;
-    clearInterval(keepalive);
-    if (!res.writableEnded) {
+    if (keepalive !== null) clearInterval(keepalive);
+    detach();
+    if (mode === "drop") {
+      if (!res.destroyed) res.destroy();
+      return;
+    }
+    if (mode === "graceful" && !res.writableEnded && !res.destroyed) {
       res.end();
     }
   };
+  const close = (): void => {
+    finish("graceful");
+  };
+  const drop = (): void => {
+    finish("drop");
+  };
+  const peerClosed = (): void => {
+    finish("peer");
+  };
+  const write = (frame: string): boolean => {
+    if (closed || shouldDropForBackpressure(res, maxWritableLength)) {
+      drop();
+      return false;
+    }
+    try {
+      if (!res.write(frame)) {
+        drop();
+        return false;
+      }
+    } catch {
+      drop();
+      return false;
+    }
+    if (shouldDropForBackpressure(res, maxWritableLength)) {
+      drop();
+      return false;
+    }
+    return true;
+  };
 
-  res.on("close", close);
-  res.on("error", close);
+  res.on("close", peerClosed);
+  res.on("error", peerClosed);
+  write(formatEvent({ id, event: "ready", data: { emittedAt } }));
+  if (!closed) {
+    keepalive = setInterval(() => {
+      write(": keepalive\n\n");
+    }, opts.keepaliveMs ?? KEEPALIVE_MS);
+    // `unref` so a hanging keepalive does not keep the broker process alive
+    // after `BrokerHandle.stop` closes the listener.
+    keepalive.unref();
+  }
 
-  return { close };
+  return {
+    get active(): boolean {
+      return !closed;
+    },
+    write,
+    close,
+    drop,
+  };
 }
 
 function formatEvent(event: SseEvent): string {
   return `id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`;
+}
+
+function shouldDropForBackpressure(res: ServerResponse, maxWritableLength: number): boolean {
+  return res.writableEnded || res.destroyed || res.writableLength > maxWritableLength;
+}
+
+function rejectSseSession(res: ServerResponse): void {
+  const body = "sse_session_limit\n";
+  res.writeHead(503, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Retry-After": "1",
+    "Content-Length": String(Buffer.byteLength(body, "utf8")),
+  });
+  res.end(body);
 }
