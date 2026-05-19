@@ -381,6 +381,33 @@ var threadStatusSet = map[string]bool{
 	"closed":       true,
 }
 
+var threadEffectiveStatusSet = map[string]bool{
+	"open":            true,
+	"in_progress":     true,
+	"needs_review":    true,
+	"needs_attention": true,
+	"merged":          true,
+	"closed":          true,
+}
+
+var threadAttentionReasonSet = map[string]bool{
+	"pending_approval": true,
+	"failed":           true,
+	"stalled":          true,
+}
+
+var threadBoardColumnSet = map[string]bool{
+	"running":  true,
+	"review":   true,
+	"needs_me": true,
+	"done":     true,
+}
+
+var threadCurrentSeatSet = map[string]bool{
+	"agent": true,
+	"human": true,
+}
+
 var runnerKindSet = map[string]bool{
 	"claude-cli":    true,
 	"codex-cli":     true,
@@ -785,6 +812,8 @@ func parseRouteEnvelope(codec string, raw json.RawMessage) (map[string]interface
 		return record, validateApprovalListResponse(record)
 	case "approvalGetResponse":
 		return record, validateApprovalGetResponse(record)
+	case "threadPinnedApprovalsResponse":
+		return record, validateThreadPinnedApprovalsResponse(record)
 	case "routeError":
 		return record, validateRouteErrorEnvelope(record)
 	default:
@@ -944,7 +973,7 @@ func validateThreadListResponse(record map[string]interface{}) error {
 		if !ok {
 			return fmt.Errorf("%s.threads/%d: must be an object", path, index)
 		}
-		if err := validateThreadRecord(threadRecord, fmt.Sprintf("%s.threads/%d", path, index)); err != nil {
+		if err := validateThreadViewRecord(threadRecord, fmt.Sprintf("%s.threads/%d", path, index)); err != nil {
 			return err
 		}
 	}
@@ -976,7 +1005,45 @@ func validateThreadGetResponse(record map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	return validateThreadRecord(thread, path+".thread")
+	return validateThreadViewRecord(thread, path+".thread")
+}
+
+func validateThreadPinnedApprovalsResponse(record map[string]interface{}) error {
+	const path = "threadPinnedApprovalsResponse"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"threadId":      true,
+		"headLsn":       true,
+		"approvals":     true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	if err := validateULIDField(record, "threadId", path+".threadId", "ThreadId"); err != nil {
+		return err
+	}
+	if err := validateEventLsnField(record, "headLsn", path+".headLsn"); err != nil {
+		return err
+	}
+	approvals, err := requiredArrayValue(record, "approvals", path+".approvals")
+	if err != nil {
+		return err
+	}
+	if len(approvals) > maxRouteApprovalListItems {
+		return fmt.Errorf("%s.approvals: length exceeds MAX_ROUTE_APPROVAL_LIST_ITEMS: %d > %d", path, len(approvals), maxRouteApprovalListItems)
+	}
+	for index, item := range approvals {
+		approval, ok := item.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s.approvals/%d: must be an object", path, index)
+		}
+		if err := validateApprovalViewRecord(approval, fmt.Sprintf("%s.approvals/%d", path, index)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateApprovalRequestCreateRequest(record map[string]interface{}) error {
@@ -1440,6 +1507,114 @@ func validateThreadRecord(record map[string]interface{}, path string) error {
 		}
 	}
 	return nil
+}
+
+func validateThreadViewRecord(record map[string]interface{}, path string) error {
+	if err := knownKeys(record, path, map[string]bool{
+		"thread_id":            true,
+		"title":                true,
+		"status":               true,
+		"spec":                 true,
+		"external_refs":        true,
+		"task_ids":             true,
+		"created_by":           true,
+		"created_at":           true,
+		"updated_at":           true,
+		"closed_at":            true,
+		"effectiveStatus":      true,
+		"attentionReason":      true,
+		"boardColumn":          true,
+		"currentSeat":          true,
+		"pendingApprovalCount": true,
+	}); err != nil {
+		return err
+	}
+	if err := validateThreadRecord(threadRecordSubset(record), path); err != nil {
+		return err
+	}
+	effectiveStatus, err := requiredStringValue(record, "effectiveStatus", path+".effectiveStatus")
+	if err != nil {
+		return err
+	}
+	if !threadEffectiveStatusSet[effectiveStatus] {
+		return fmt.Errorf("%s.effectiveStatus: must be a valid thread effective status", path)
+	}
+	attentionReason, hasAttentionReason, err := optionalString(record, "attentionReason", path+".attentionReason")
+	if err != nil {
+		return err
+	}
+	if hasAttentionReason && !threadAttentionReasonSet[attentionReason] {
+		return fmt.Errorf("%s.attentionReason: must be a valid thread attention reason", path)
+	}
+	if effectiveStatus == "needs_attention" && !hasAttentionReason {
+		return fmt.Errorf("%s.attentionReason: is required when effectiveStatus is needs_attention", path)
+	}
+	if effectiveStatus != "needs_attention" && hasAttentionReason {
+		return fmt.Errorf("%s.attentionReason: must be absent unless effectiveStatus is needs_attention", path)
+	}
+	boardColumn, err := requiredStringValue(record, "boardColumn", path+".boardColumn")
+	if err != nil {
+		return err
+	}
+	if !threadBoardColumnSet[boardColumn] {
+		return fmt.Errorf("%s.boardColumn: must be a valid thread board column", path)
+	}
+	if boardColumn != boardColumnForEffectiveStatus(effectiveStatus) {
+		return fmt.Errorf("%s.boardColumn: must match effectiveStatus", path)
+	}
+	currentSeat, err := requiredStringValue(record, "currentSeat", path+".currentSeat")
+	if err != nil {
+		return err
+	}
+	if !threadCurrentSeatSet[currentSeat] {
+		return fmt.Errorf("%s.currentSeat: must be a valid thread current seat", path)
+	}
+	status, err := requiredStringValue(record, "status", path+"/status")
+	if err != nil {
+		return err
+	}
+	expectedSeat := "agent"
+	if effectiveStatus == "needs_attention" || status == "needs_review" {
+		expectedSeat = "human"
+	}
+	if currentSeat != expectedSeat {
+		return fmt.Errorf("%s.currentSeat: must match effectiveStatus and status", path)
+	}
+	return requiredNonNegativeInteger(record, "pendingApprovalCount", path+".pendingApprovalCount", maxSafeInteger)
+}
+
+func threadRecordSubset(record map[string]interface{}) map[string]interface{} {
+	subset := map[string]interface{}{}
+	for _, key := range []string{
+		"thread_id",
+		"title",
+		"status",
+		"spec",
+		"external_refs",
+		"task_ids",
+		"created_by",
+		"created_at",
+		"updated_at",
+		"closed_at",
+	} {
+		if value, ok := record[key]; ok {
+			subset[key] = value
+		}
+	}
+	return subset
+}
+
+func boardColumnForEffectiveStatus(status string) string {
+	switch status {
+	case "needs_attention":
+		return "needs_me"
+	case "needs_review":
+		return "review"
+	case "merged", "closed":
+		return "done"
+	default:
+		return "running"
+	}
 }
 
 func validateThreadSpecRevisionRecord(record map[string]interface{}, path string, expectedThreadID string) error {

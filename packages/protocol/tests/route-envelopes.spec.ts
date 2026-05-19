@@ -52,13 +52,19 @@ import {
   routeErrorToJsonValue,
   type SignedApprovalToken,
   sha256Hex,
+  THREAD_ATTENTION_REASON_VALUES,
+  THREAD_BOARD_COLUMN_VALUES,
+  THREAD_CURRENT_SEAT_VALUES,
+  THREAD_EFFECTIVE_STATUS_VALUES,
   type Thread,
   type ThreadCreateRequest,
   type ThreadGetResponse,
   type ThreadListResponse,
   type ThreadMutationResponse,
+  type ThreadPinnedApprovalsResponse,
   type ThreadSpecEditRequest,
   type ThreadStatusChangeRequest,
+  type ThreadView,
   threadCreateRequestFromJson,
   threadCreateRequestToJsonValue,
   threadGetResponseFromJson,
@@ -67,12 +73,15 @@ import {
   threadListResponseToJsonValue,
   threadMutationResponseFromJson,
   threadMutationResponseToJsonValue,
+  threadPinnedApprovalsResponseFromJson,
+  threadPinnedApprovalsResponseToJsonValue,
   threadSpecContentHash,
   threadSpecEditRequestFromJson,
   threadSpecEditRequestToJsonValue,
   threadStatusChangeRequestFromJson,
   threadStatusChangeRequestToJsonValue,
-  threadToJsonValue,
+  threadViewFromJson,
+  threadViewToJsonValue,
   validateApprovalView,
   validateRouteCursorBudget,
   validateRouteErrorCodeBudget,
@@ -161,7 +170,7 @@ describe("route-envelope codecs", () => {
   });
 
   it("round-trips thread list and get responses with nested Thread codec output", () => {
-    const thread = threadFixture();
+    const thread = threadViewFixture();
     const listWithCursor: ThreadListResponse = {
       schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
       threads: [thread],
@@ -189,7 +198,7 @@ describe("route-envelope codecs", () => {
     const listJson = threadListResponseToJsonValue(listWithCursor) as Readonly<{
       threads: unknown;
     }>;
-    expect(listJson.threads).toEqual([threadToJsonValue(thread)]);
+    expect(listJson.threads).toEqual([threadViewToJsonValue(thread)]);
   });
 
   it("round-trips approval route requests and responses", () => {
@@ -241,6 +250,12 @@ describe("route-envelope codecs", () => {
     const getResponse: ApprovalGetResponse = {
       schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
       approval: approvedView,
+    };
+    const pinnedApprovals: ThreadPinnedApprovalsResponse = {
+      schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+      threadId: THREAD_ID,
+      headLsn: lsnFromV1Number(44),
+      approvals: [pendingView],
     };
 
     expect(
@@ -312,6 +327,13 @@ describe("route-envelope codecs", () => {
     expect(
       roundTrip(getResponse, approvalGetResponseToJsonValue, approvalGetResponseFromJson),
     ).toStrictEqual(getResponse);
+    expect(
+      roundTrip(
+        pinnedApprovals,
+        threadPinnedApprovalsResponseToJsonValue,
+        threadPinnedApprovalsResponseFromJson,
+      ),
+    ).toStrictEqual(pinnedApprovals);
     expect(validateApprovalView(approvedView).ok).toBe(true);
 
     const viewJson = approvalViewToJsonValue(approvedView) as JsonObject & {
@@ -369,7 +391,7 @@ describe("route-envelope codecs", () => {
       threadListResponseFromJson({
         schemaVersion: 1,
         threads: Array.from({ length: MAX_ROUTE_THREAD_LIST_ITEMS + 1 }, () =>
-          threadToJsonValue(threadFixture()),
+          threadViewToJsonValue(threadViewFixture()),
         ),
       }),
     ).toThrow(/MAX_ROUTE_THREAD_LIST_ITEMS/);
@@ -377,7 +399,7 @@ describe("route-envelope codecs", () => {
     expect(() =>
       threadListResponseFromJson({
         schemaVersion: 1,
-        threads: [threadToJsonValue(threadFixture())],
+        threads: [threadViewToJsonValue(threadViewFixture())],
         nextCursor: "x".repeat(MAX_ROUTE_CURSOR_BYTES + 1),
       }),
     ).toThrow(/RouteListResponse\.nextCursor bytes/);
@@ -390,6 +412,13 @@ describe("route-envelope codecs", () => {
         ),
       }),
     ).toThrow(/MAX_ROUTE_APPROVAL_LIST_ITEMS/);
+
+    expect(() =>
+      threadViewFromJson({
+        ...threadViewToJsonValue(threadViewFixture()),
+        pendingApprovalCount: -1,
+      }),
+    ).toThrow(/pendingApprovalCount/);
 
     expect(() =>
       routeErrorFromJson({
@@ -410,6 +439,20 @@ describe("route-envelope codecs", () => {
     expect(validateRouteErrorMessageBudget("x".repeat(MAX_ROUTE_ERROR_MESSAGE_BYTES + 1)).ok).toBe(
       false,
     );
+  });
+
+  it("keeps thread view enum value arrays closed and exported", () => {
+    expect(THREAD_EFFECTIVE_STATUS_VALUES).toEqual([
+      "open",
+      "in_progress",
+      "needs_review",
+      "needs_attention",
+      "merged",
+      "closed",
+    ]);
+    expect(THREAD_ATTENTION_REASON_VALUES).toEqual(["pending_approval", "failed", "stalled"]);
+    expect(THREAD_BOARD_COLUMN_VALUES).toEqual(["running", "review", "needs_me", "done"]);
+    expect(THREAD_CURRENT_SEAT_VALUES).toEqual(["agent", "human"]);
   });
 
   it("rejects unsupported schema versions and approval invariant drift", () => {
@@ -464,6 +507,21 @@ describe("route-envelope codecs", () => {
         },
       }),
     ).toThrow(/decisionSummary\/token.*not allowed/);
+
+    expect(() =>
+      threadViewFromJson({
+        ...threadViewToJsonValue(
+          threadViewFixture({
+            effectiveStatus: "open",
+            attentionReason: undefined,
+            boardColumn: "running",
+            currentSeat: "agent",
+            pendingApprovalCount: 0,
+          }),
+        ),
+        attentionReason: "pending_approval",
+      }),
+    ).toThrow(/attentionReason.*absent/);
   });
 });
 
@@ -488,6 +546,7 @@ describe("route-envelope conformance vectors", () => {
         "approvalView",
         "approvalListResponse",
         "approvalGetResponse",
+        "threadPinnedApprovalsResponse",
         "routeError",
       ]),
     );
@@ -550,6 +609,7 @@ type RouteEnvelopeCodec =
   | "approvalView"
   | "approvalListResponse"
   | "approvalGetResponse"
+  | "threadPinnedApprovalsResponse"
   | "routeError";
 
 type JsonObject = Record<string, unknown>;
@@ -620,6 +680,10 @@ function routeEnvelopeCanonicalSerialization(codec: RouteEnvelopeCodec, input: u
       return canonicalJSON(approvalListResponseToJsonValue(approvalListResponseFromJson(input)));
     case "approvalGetResponse":
       return canonicalJSON(approvalGetResponseToJsonValue(approvalGetResponseFromJson(input)));
+    case "threadPinnedApprovalsResponse":
+      return canonicalJSON(
+        threadPinnedApprovalsResponseToJsonValue(threadPinnedApprovalsResponseFromJson(input)),
+      );
     case "routeError":
       return canonicalJSON(routeErrorToJsonValue(routeErrorFromJson(input)));
   }
@@ -630,7 +694,7 @@ function strictKnownKeyCases(): readonly {
   readonly input: JsonObject;
   readonly parse: (value: unknown) => unknown;
 }[] {
-  const thread = threadFixture();
+  const thread = threadViewFixture();
   const claim = receiptCoSignClaimFixture();
   const approval = approvalRequestFixture();
   const view = approvalViewFixture();
@@ -676,6 +740,11 @@ function strictKnownKeyCases(): readonly {
         contentHash: thread.spec.contentHash,
       }) as JsonObject,
       parse: threadMutationResponseFromJson,
+    },
+    {
+      name: "threadView",
+      input: threadViewToJsonValue(thread) as JsonObject,
+      parse: threadViewFromJson,
     },
     {
       name: "threadListResponse",
@@ -749,6 +818,16 @@ function strictKnownKeyCases(): readonly {
       parse: approvalGetResponseFromJson,
     },
     {
+      name: "threadPinnedApprovalsResponse",
+      input: threadPinnedApprovalsResponseToJsonValue({
+        schemaVersion: 1,
+        threadId: THREAD_ID,
+        headLsn: HEAD_LSN,
+        approvals: [view],
+      }) as JsonObject,
+      parse: threadPinnedApprovalsResponseFromJson,
+    },
+    {
       name: "routeError",
       input: routeErrorToJsonValue({ error: "store_busy" }) as JsonObject,
       parse: routeErrorFromJson,
@@ -789,6 +868,18 @@ function threadFixture(): Thread {
     createdBy: SIGNER,
     createdAt: CREATED_AT,
     updatedAt: UPDATED_AT,
+  };
+}
+
+function threadViewFixture(overrides: Partial<ThreadView> = {}): ThreadView {
+  return {
+    ...threadFixture(),
+    effectiveStatus: "needs_attention",
+    attentionReason: "pending_approval",
+    boardColumn: "needs_me",
+    currentSeat: "human",
+    pendingApprovalCount: 1,
+    ...overrides,
   };
 }
 

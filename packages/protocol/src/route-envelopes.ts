@@ -9,7 +9,6 @@ import {
 import { validateApprovalView } from "./approval-view-validator.ts";
 import {
   MAX_ROUTE_APPROVAL_LIST_ITEMS,
-  MAX_ROUTE_THREAD_LIST_ITEMS,
   validateRouteCursorBudget,
   validateRouteErrorCodeBudget,
   validateRouteErrorMessageBudget,
@@ -57,18 +56,36 @@ import {
 } from "./signed-approval-token.ts";
 import {
   THREAD_STATUS_VALUES,
-  type Thread,
   type ThreadExternalRefs,
   type ThreadStatus,
   threadExternalRefsFromJsonValue,
   threadExternalRefsToJsonValue,
-  threadFromJsonValue,
-  threadToJsonValue,
 } from "./thread.ts";
+import {
+  type ThreadView,
+  threadArrayFromJson,
+  threadViewFromJsonValue,
+  threadViewToJsonValue as threadViewToRouteJsonValue,
+} from "./thread-route-view.ts";
 
 export type RouteEnvelopeSchemaVersion = 1;
 export const ROUTE_ENVELOPE_SCHEMA_VERSION = 1 satisfies RouteEnvelopeSchemaVersion;
 export { validateApprovalView } from "./approval-view-validator.ts";
+export type {
+  ThreadAttentionReason,
+  ThreadBoardColumn,
+  ThreadCurrentSeat,
+  ThreadEffectiveStatus,
+  ThreadView,
+} from "./thread-route-view.ts";
+export {
+  THREAD_ATTENTION_REASON_VALUES,
+  THREAD_BOARD_COLUMN_VALUES,
+  THREAD_CURRENT_SEAT_VALUES,
+  THREAD_EFFECTIVE_STATUS_VALUES,
+  threadViewFromJson,
+  threadViewToJsonValue,
+} from "./thread-route-view.ts";
 
 export interface ThreadCreateRequest {
   readonly schemaVersion?: RouteEnvelopeSchemaVersion | undefined;
@@ -103,13 +120,13 @@ export interface ThreadMutationResponse {
 
 export interface ThreadListResponse {
   readonly schemaVersion?: RouteEnvelopeSchemaVersion | undefined;
-  readonly threads: readonly Thread[];
+  readonly threads: readonly ThreadView[];
   readonly nextCursor?: string | undefined;
 }
 
 export interface ThreadGetResponse {
   readonly schemaVersion?: RouteEnvelopeSchemaVersion | undefined;
-  readonly thread: Thread;
+  readonly thread: ThreadView;
 }
 
 export interface ApprovalRequestCreateRequest {
@@ -172,6 +189,13 @@ export interface ApprovalListResponse {
 export interface ApprovalGetResponse {
   readonly schemaVersion?: RouteEnvelopeSchemaVersion | undefined;
   readonly approval: ApprovalView;
+}
+
+export interface ThreadPinnedApprovalsResponse {
+  readonly schemaVersion?: RouteEnvelopeSchemaVersion | undefined;
+  readonly threadId: ThreadId;
+  readonly headLsn: EventLsn;
+  readonly approvals: readonly ApprovalView[];
 }
 
 export interface RouteError {
@@ -240,6 +264,9 @@ type ApprovalListResponseWire = Readonly<
   Record<"schemaVersion" | "approvals" | "nextCursor", unknown>
 >;
 type ApprovalGetResponseWire = Readonly<Record<"schemaVersion" | "approval", unknown>>;
+type ThreadPinnedApprovalsResponseWire = Readonly<
+  Record<"schemaVersion" | "threadId" | "headLsn" | "approvals", unknown>
+>;
 type RouteErrorWire = Readonly<Record<"error" | "message" | "retryAfterMs", unknown>>;
 
 const THREAD_CREATE_REQUEST_KEYS_TUPLE = [
@@ -327,6 +354,12 @@ const APPROVAL_GET_RESPONSE_KEYS_TUPLE = [
   "schemaVersion",
   "approval",
 ] as const satisfies readonly (keyof ApprovalGetResponseWire)[];
+const THREAD_PINNED_APPROVALS_RESPONSE_KEYS_TUPLE = [
+  "schemaVersion",
+  "threadId",
+  "headLsn",
+  "approvals",
+] as const satisfies readonly (keyof ThreadPinnedApprovalsResponseWire)[];
 const ROUTE_ERROR_KEYS_TUPLE = [
   "error",
   "message",
@@ -358,6 +391,9 @@ const APPROVAL_DECISION_SUMMARY_KEYS: ReadonlySet<string> = new Set(
 const APPROVAL_VIEW_KEYS: ReadonlySet<string> = new Set(APPROVAL_VIEW_KEYS_TUPLE);
 const APPROVAL_LIST_RESPONSE_KEYS: ReadonlySet<string> = new Set(APPROVAL_LIST_RESPONSE_KEYS_TUPLE);
 const APPROVAL_GET_RESPONSE_KEYS: ReadonlySet<string> = new Set(APPROVAL_GET_RESPONSE_KEYS_TUPLE);
+const THREAD_PINNED_APPROVALS_RESPONSE_KEYS: ReadonlySet<string> = new Set(
+  THREAD_PINNED_APPROVALS_RESPONSE_KEYS_TUPLE,
+);
 const ROUTE_ERROR_KEYS: ReadonlySet<string> = new Set(ROUTE_ERROR_KEYS_TUPLE);
 
 const THREAD_STATUS_SET: ReadonlySet<string> = new Set<string>(THREAD_STATUS_VALUES);
@@ -532,7 +568,7 @@ export function threadListResponseToJsonValue(
 ): Readonly<Record<string, unknown>> {
   return omitUndefined({
     schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
-    threads: response.threads.map((thread) => threadToJsonValue(thread)),
+    threads: response.threads.map((thread) => threadViewToRouteJsonValue(thread)),
     nextCursor: response.nextCursor,
   });
 }
@@ -543,7 +579,10 @@ export function threadGetResponseFromJson(value: unknown): ThreadGetResponse {
   const schemaVersion = optionalSchemaVersion(record, "schemaVersion", "threadGetResponse");
   return {
     schemaVersion,
-    thread: threadFromJsonValue(requiredField(record, "thread", "threadGetResponse.thread")),
+    thread: threadViewFromJsonValue(
+      requiredField(record, "thread", "threadGetResponse.thread"),
+      "threadGetResponse.thread",
+    ),
   };
 }
 
@@ -552,7 +591,7 @@ export function threadGetResponseToJsonValue(
 ): Readonly<Record<string, unknown>> {
   return {
     schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
-    thread: threadToJsonValue(response.thread),
+    thread: threadViewToRouteJsonValue(response.thread),
   };
 }
 
@@ -778,6 +817,44 @@ export function approvalGetResponseToJsonValue(
   return {
     schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
     approval: approvalViewToJsonValue(response.approval),
+  };
+}
+
+export function threadPinnedApprovalsResponseFromJson(
+  value: unknown,
+): ThreadPinnedApprovalsResponse {
+  const record = requireRecord(value, "threadPinnedApprovalsResponse");
+  assertKnownKeys(record, "threadPinnedApprovalsResponse", THREAD_PINNED_APPROVALS_RESPONSE_KEYS);
+  const schemaVersion = optionalSchemaVersion(
+    record,
+    "schemaVersion",
+    "threadPinnedApprovalsResponse",
+  );
+  return {
+    schemaVersion,
+    threadId: threadIdFromJson(
+      requiredString(record, "threadId", "threadPinnedApprovalsResponse.threadId"),
+      "threadPinnedApprovalsResponse.threadId",
+    ),
+    headLsn: eventLsnFromJson(
+      requiredString(record, "headLsn", "threadPinnedApprovalsResponse.headLsn"),
+      "threadPinnedApprovalsResponse.headLsn",
+    ),
+    approvals: approvalViewArrayFromJson(
+      requiredField(record, "approvals", "threadPinnedApprovalsResponse.approvals"),
+      "threadPinnedApprovalsResponse.approvals",
+    ),
+  };
+}
+
+export function threadPinnedApprovalsResponseToJsonValue(
+  response: ThreadPinnedApprovalsResponse,
+): Readonly<Record<string, unknown>> {
+  return {
+    schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+    threadId: response.threadId,
+    headLsn: response.headLsn,
+    approvals: response.approvals.map((approval) => approvalViewToJsonValue(approval)),
   };
 }
 
@@ -1160,18 +1237,6 @@ function approvalDecisionSummaryFromJsonValue(
     ),
     decidedAt: requiredDate(record, "decidedAt", `${path}.decidedAt`),
   };
-}
-
-function threadArrayFromJson(value: unknown, path: string): readonly Thread[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`${path}: must be an array`);
-  }
-  if (value.length > MAX_ROUTE_THREAD_LIST_ITEMS) {
-    throw new Error(
-      `${path}: length exceeds MAX_ROUTE_THREAD_LIST_ITEMS: ${value.length} > ${MAX_ROUTE_THREAD_LIST_ITEMS}`,
-    );
-  }
-  return value.map((item) => threadFromJsonValue(item));
 }
 
 function approvalViewArrayFromJson(value: unknown, path: string): readonly ApprovalView[] {

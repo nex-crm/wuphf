@@ -115,13 +115,18 @@
             ],
             "created_by": "fran@example.com",
             "created_at": "2026-05-08T18:00:00.000Z",
-            "updated_at": "2026-05-08T18:05:00.000Z"
+            "updated_at": "2026-05-08T18:05:00.000Z",
+            "effectiveStatus": "needs_attention",
+            "attentionReason": "pending_approval",
+            "boardColumn": "needs_me",
+            "currentSeat": "human",
+            "pendingApprovalCount": 1
           }
         ],
         "nextCursor": "bHNuOjQy"
       },
       "expected": {
-        "canonicalSerialization": "{\"nextCursor\":\"bHNuOjQy\",\"schemaVersion\":1,\"threads\":[{\"created_at\":\"2026-05-08T18:00:00.000Z\",\"created_by\":\"fran@example.com\",\"external_refs\":{\"entity_ids\":[\"issue:914\"],\"source_urls\":[\"https://example.test/wuphf/914\"]},\"spec\":{\"authored_at\":\"2026-05-08T18:00:00.000Z\",\"authored_by\":\"fran@example.com\",\"content\":{\"body\":\"Implement route envelope codecs\",\"checklist\":[\"codecs\",\"vectors\",\"docs\"]},\"content_hash\":\"a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3\",\"revision_id\":\"01BRZ3NDEKTSV4RRFFQ69G5FA0\",\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"status\":\"open\",\"task_ids\":[\"01ARZ3NDEKTSV4RRFFQ69G5FAW\"],\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\",\"title\":\"Approval request protocol\",\"updated_at\":\"2026-05-08T18:05:00.000Z\"}]}"
+        "canonicalSerialization": "{\"nextCursor\":\"bHNuOjQy\",\"schemaVersion\":1,\"threads\":[{\"attentionReason\":\"pending_approval\",\"boardColumn\":\"needs_me\",\"created_at\":\"2026-05-08T18:00:00.000Z\",\"created_by\":\"fran@example.com\",\"currentSeat\":\"human\",\"effectiveStatus\":\"needs_attention\",\"external_refs\":{\"entity_ids\":[\"issue:914\"],\"source_urls\":[\"https://example.test/wuphf/914\"]},\"pendingApprovalCount\":1,\"spec\":{\"authored_at\":\"2026-05-08T18:00:00.000Z\",\"authored_by\":\"fran@example.com\",\"content\":{\"body\":\"Implement route envelope codecs\",\"checklist\":[\"codecs\",\"vectors\",\"docs\"]},\"content_hash\":\"a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3\",\"revision_id\":\"01BRZ3NDEKTSV4RRFFQ69G5FA0\",\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"status\":\"open\",\"task_ids\":[\"01ARZ3NDEKTSV4RRFFQ69G5FAW\"],\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\",\"title\":\"Approval request protocol\",\"updated_at\":\"2026-05-08T18:05:00.000Z\"}]}"
       }
     },
     {
@@ -161,11 +166,16 @@
           ],
           "created_by": "fran@example.com",
           "created_at": "2026-05-08T18:00:00.000Z",
-          "updated_at": "2026-05-08T18:05:00.000Z"
+          "updated_at": "2026-05-08T18:05:00.000Z",
+          "effectiveStatus": "needs_attention",
+          "attentionReason": "pending_approval",
+          "boardColumn": "needs_me",
+          "currentSeat": "human",
+          "pendingApprovalCount": 1
         }
       },
       "expected": {
-        "canonicalSerialization": "{\"schemaVersion\":1,\"thread\":{\"created_at\":\"2026-05-08T18:00:00.000Z\",\"created_by\":\"fran@example.com\",\"external_refs\":{\"entity_ids\":[\"issue:914\"],\"source_urls\":[\"https://example.test/wuphf/914\"]},\"spec\":{\"authored_at\":\"2026-05-08T18:00:00.000Z\",\"authored_by\":\"fran@example.com\",\"content\":{\"body\":\"Implement route envelope codecs\",\"checklist\":[\"codecs\",\"vectors\",\"docs\"]},\"content_hash\":\"a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3\",\"revision_id\":\"01BRZ3NDEKTSV4RRFFQ69G5FA0\",\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"status\":\"open\",\"task_ids\":[\"01ARZ3NDEKTSV4RRFFQ69G5FAW\"],\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\",\"title\":\"Approval request protocol\",\"updated_at\":\"2026-05-08T18:05:00.000Z\"}}"
+        "canonicalSerialization": "{\"schemaVersion\":1,\"thread\":{\"attentionReason\":\"pending_approval\",\"boardColumn\":\"needs_me\",\"created_at\":\"2026-05-08T18:00:00.000Z\",\"created_by\":\"fran@example.com\",\"currentSeat\":\"human\",\"effectiveStatus\":\"needs_attention\",\"external_refs\":{\"entity_ids\":[\"issue:914\"],\"source_urls\":[\"https://example.test/wuphf/914\"]},\"pendingApprovalCount\":1,\"spec\":{\"authored_at\":\"2026-05-08T18:00:00.000Z\",\"authored_by\":\"fran@example.com\",\"content\":{\"body\":\"Implement route envelope codecs\",\"checklist\":[\"codecs\",\"vectors\",\"docs\"]},\"content_hash\":\"a14e90e8b3d72826110ebd6fa86c39a407337bd9d7787e7b701abf3ec26f9fa3\",\"revision_id\":\"01BRZ3NDEKTSV4RRFFQ69G5FA0\",\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"status\":\"open\",\"task_ids\":[\"01ARZ3NDEKTSV4RRFFQ69G5FAW\"],\"thread_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\",\"title\":\"Approval request protocol\",\"updated_at\":\"2026-05-08T18:05:00.000Z\"}}"
       }
     },
     {
@@ -464,6 +474,50 @@
       },
       "expected": {
         "canonicalSerialization": "{\"approval\":{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"decisionSummary\":{\"decidedAt\":\"2026-05-08T18:05:00.000Z\",\"decidedBy\":\"approver@example.com\",\"decision\":\"approve\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"approved\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"},\"schemaVersion\":1}"
+      }
+    },
+    {
+      "name": "thread pinned approvals response",
+      "codec": "threadPinnedApprovalsResponse",
+      "input": {
+        "schemaVersion": 1,
+        "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "headLsn": "v1:44",
+        "approvals": [
+          {
+            "schemaVersion": 1,
+            "id": "01HRQ7KZ7D4E6F8G9H0J1K2M3N",
+            "claim": {
+              "schemaVersion": 1,
+              "claimId": "claim_receipt_cosign_01",
+              "kind": "receipt_co_sign",
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051",
+              "riskClass": "high"
+            },
+            "scope": {
+              "mode": "single_use",
+              "claimId": "claim_receipt_cosign_01",
+              "claimKind": "receipt_co_sign",
+              "role": "approver",
+              "maxUses": 1,
+              "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              "writeId": "write_01",
+              "frozenArgsHash": "debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051"
+            },
+            "riskClass": "high",
+            "threadId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+            "taskId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            "receiptId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "requestedBy": "fran@example.com",
+            "requestedAt": "2026-05-08T18:00:00.000Z",
+            "status": "pending"
+          }
+        ]
+      },
+      "expected": {
+        "canonicalSerialization": "{\"approvals\":[{\"claim\":{\"claimId\":\"claim_receipt_cosign_01\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"kind\":\"receipt_co_sign\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"riskClass\":\"high\",\"schemaVersion\":1,\"writeId\":\"write_01\"},\"id\":\"01HRQ7KZ7D4E6F8G9H0J1K2M3N\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"requestedAt\":\"2026-05-08T18:00:00.000Z\",\"requestedBy\":\"fran@example.com\",\"riskClass\":\"high\",\"schemaVersion\":1,\"scope\":{\"claimId\":\"claim_receipt_cosign_01\",\"claimKind\":\"receipt_co_sign\",\"frozenArgsHash\":\"debc31800d2c893ffe8ff5f2d297af64fda692c08492785d922b8c0c82ae9051\",\"maxUses\":1,\"mode\":\"single_use\",\"receiptId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\",\"role\":\"approver\",\"writeId\":\"write_01\"},\"status\":\"pending\",\"taskId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAW\",\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}],\"headLsn\":\"v1:44\",\"schemaVersion\":1,\"threadId\":\"01ARZ3NDEKTSV4RRFFQ69G5FAY\"}"
       }
     },
     {
