@@ -330,9 +330,14 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
           + New issue
         </button>
       </header>
+      {/*
+        The outer wrapper is a layout grid of columns, not a list — each
+        column has its own role="list" of cards below. Putting role="list"
+        here too with <section> children that aren't role="listitem" would
+        be invalid ARIA, so the wrapper is left as a plain <div>.
+      */}
       <div
         className="issues-kanban"
-        role="list"
         aria-label="Issues kanban"
         data-testid="issues-list-rows"
       >

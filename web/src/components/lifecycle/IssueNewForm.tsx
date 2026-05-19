@@ -23,6 +23,11 @@ export function IssueNewForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+  // Synchronous lock. React state updates batch on the next render, so a
+  // fast double-click can fire handleSubmit twice before `submitting` flips
+  // the button to disabled. The ref blocks the second entry the moment the
+  // first one starts.
+  const submitLockRef = useRef(false);
 
   const queryClient = useQueryClient();
 
@@ -32,6 +37,7 @@ export function IssueNewForm() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitLockRef.current) return;
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       setError("Title is required.");
@@ -39,6 +45,7 @@ export function IssueNewForm() {
     }
 
     setError(null);
+    submitLockRef.current = true;
     setSubmitting(true);
     try {
       const response = await createTasks(
@@ -67,6 +74,7 @@ export function IssueNewForm() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not file issue.");
     } finally {
+      submitLockRef.current = false;
       setSubmitting(false);
     }
   }

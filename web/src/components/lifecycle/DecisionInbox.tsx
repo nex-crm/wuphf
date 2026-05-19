@@ -332,9 +332,14 @@ function ListPane({
         <h1 className="inbox-mail-title">Inbox</h1>
       </header>
       {filter && counts && onFilter ? (
+        // Toggle-button group, not ARIA tabs. The chips don't gate a
+        // separate tabpanel — they re-filter the inbox list directly —
+        // so role="tab"/"tablist" without aria-controls + arrow-key
+        // navigation would be a half-implemented pattern. aria-pressed
+        // gives screen readers the right "toggled" semantics.
         <div
           className="inbox-filter-bar"
-          role="tablist"
+          role="group"
           aria-label="Inbox filter"
           data-testid="inbox-filter-bar"
         >
@@ -342,9 +347,8 @@ function ListPane({
             <button
               key={f}
               type="button"
-              role="tab"
               className="inbox-filter-chip"
-              aria-selected={f === filter}
+              aria-pressed={f === filter}
               onClick={() => onFilter(f)}
               data-testid={`inbox-filter-${f}`}
             >
