@@ -27,6 +27,8 @@ export {
 } from "./idempotency.ts";
 export type {
   ApprovalListFilter,
+  ApprovalListPage,
+  ApprovalListPageOptions,
   ApprovalProjection,
   ApprovalProjectionEvent,
   ApprovalProjectionRebuildResult,

@@ -50,8 +50,8 @@ bearer gate.
 | Method | Path | Request | Response |
 |---|---|---|---|
 | POST | `/api/v1/approvals` | `ApprovalRequestCreateRequest` route envelope with body `idempotencyKey` | `ApprovalRequestCreateResponse` route envelope |
-| GET | `/api/v1/approvals` | Optional `status`, `threadId`, `taskId` filters | `{ approvals: ApprovalRequest[] }` |
-| GET | `/api/v1/approvals/:id` | none | One folded `ApprovalRequest` |
+| GET | `/api/v1/approvals` | Optional `status`, `threadId`, `taskId`, `limit`, `cursor` filters | `ApprovalListResponse` with token-redacted `ApprovalView[]` and optional `nextCursor` |
+| GET | `/api/v1/approvals/:id` | none | `ApprovalGetResponse` with one token-redacted `ApprovalView` |
 | POST | `/api/v1/approvals/:id/decision` | `ApprovalDecisionRequest` route envelope with body `idempotencyKey`; `approve` requires `token` | `ApprovalDecisionResponse` route envelope; 409 if not pending |
 
 The route layer stamps audit-only fields that are not part of the renderer

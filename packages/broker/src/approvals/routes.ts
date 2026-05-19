@@ -19,13 +19,15 @@ import {
   type ApprovalRequestId,
   type ApprovalRequestStatus,
   type ApprovalStreamEvent,
+  type ApprovalView,
   approvalDecisionRequestFromJson,
   approvalDecisionRequestToJsonValue,
   approvalDecisionResponseToJsonValue,
+  approvalGetResponseToJsonValue,
+  approvalListResponseToJsonValue,
   approvalRequestCreateRequestFromJson,
   approvalRequestCreateRequestToJsonValue,
   approvalRequestCreateResponseToJsonValue,
-  approvalRequestToJsonValue,
   asApprovalRequestId,
   asSignerIdentity,
   asTaskId,
@@ -34,6 +36,7 @@ import {
   type EventLsn,
   type IdempotencyKey,
   isApprovalRequestId,
+  MAX_ROUTE_APPROVAL_LIST_ITEMS,
   parseLsn,
   routeErrorToJsonValue,
   type SignerIdentity,
@@ -58,6 +61,7 @@ const MAX_APPROVAL_BODY_BYTES = 256 * 1024;
 const APPROVAL_STATUS_SET: ReadonlySet<string> = new Set<string>(APPROVAL_REQUEST_STATUS_VALUES);
 const APPROVAL_ROUTE_ACTOR = asSignerIdentity("broker");
 const APPROVAL_REQUEST_ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const DEFAULT_APPROVAL_LIST_LIMIT = MAX_ROUTE_APPROVAL_LIST_ITEMS;
 
 export interface ApprovalRouteDeps {
   readonly appender: ApprovalAppender;
@@ -257,16 +261,24 @@ function handleApprovalList(
   res: ServerResponse,
   deps: ApprovalRouteDeps,
 ): void {
-  const parsed = parseListFilter(req);
+  const parsed = parseListQuery(req);
   if (!parsed.ok) {
     writeRouteError(res, 400, { error: parsed.error });
     return;
   }
   try {
-    const approvals = deps.projection
-      .list(parsed.filter)
-      .map((row) => approvalRequestToJsonValue(row.approval));
-    writeJson(res, 200, { approvals });
+    const page = deps.projection.listPage(parsed.filter, {
+      limit: parsed.limit,
+      ...(parsed.afterHeadLsn === undefined ? {} : { afterHeadLsn: parsed.afterHeadLsn }),
+    });
+    writeJson(
+      res,
+      200,
+      approvalListResponseToJsonValue({
+        approvals: page.rows.map((row) => approvalViewFromApproval(row.approval)),
+        nextCursor: page.nextCursor,
+      }),
+    );
   } catch (err) {
     if (writeSqliteErrorResponse(res, err, deps.logger, "approval_list_rejected")) return;
     throw err;
@@ -284,7 +296,11 @@ function handleApprovalGet(
       notFound(res);
       return;
     }
-    writeJson(res, 200, approvalRequestToJsonValue(row.approval));
+    writeJson(
+      res,
+      200,
+      approvalGetResponseToJsonValue({ approval: approvalViewFromApproval(row.approval) }),
+    );
   } catch (err) {
     if (writeSqliteErrorResponse(res, err, deps.logger, "approval_get_rejected")) return;
     throw err;
@@ -375,10 +391,13 @@ function approvalRequestIdFromIdempotencyKey(idempotencyKey: IdempotencyKey): Ap
   return asApprovalRequestId(output);
 }
 
-function parseListFilter(
-  req: IncomingMessage,
-):
-  | { readonly ok: true; readonly filter: ApprovalListFilter }
+function parseListQuery(req: IncomingMessage):
+  | {
+      readonly ok: true;
+      readonly filter: ApprovalListFilter;
+      readonly limit: number;
+      readonly afterHeadLsn?: number;
+    }
   | { readonly ok: false; readonly error: string } {
   const url = new URL(req.url ?? "", "http://127.0.0.1");
   const filter: {
@@ -414,7 +433,30 @@ function parseListFilter(
     }
   }
 
-  return { ok: true, filter };
+  const limitParam = singleQueryParam(url.searchParams, "limit");
+  if (limitParam === "multiple") return { ok: false, error: "invalid_limit" };
+  let limit = DEFAULT_APPROVAL_LIST_LIMIT;
+  if (limitParam !== undefined) {
+    if (!/^\d+$/.test(limitParam)) return { ok: false, error: "invalid_limit" };
+    const parsedLimit = Number.parseInt(limitParam, 10);
+    if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1) {
+      return { ok: false, error: "invalid_limit" };
+    }
+    limit = Math.min(parsedLimit, MAX_ROUTE_APPROVAL_LIST_ITEMS);
+  }
+
+  const cursor = singleQueryParam(url.searchParams, "cursor");
+  if (cursor === "multiple") return { ok: false, error: "invalid_cursor" };
+  if (cursor !== undefined) {
+    try {
+      const afterHeadLsn = parseLsn(cursor as EventLsn).localLsn;
+      return { ok: true, filter, limit, afterHeadLsn };
+    } catch {
+      return { ok: false, error: "invalid_cursor" };
+    }
+  }
+
+  return { ok: true, filter, limit };
 }
 
 function singleQueryParam(params: URLSearchParams, key: string): string | "multiple" | undefined {
@@ -470,6 +512,31 @@ function emitApprovalInvalidation(
     throw new Error(`invalid approval stream event: ${JSON.stringify(validation.errors)}`);
   }
   deps.emit(event);
+}
+
+function approvalViewFromApproval(approval: ApprovalRequest): ApprovalView {
+  return {
+    id: approval.id,
+    claim: approval.claim,
+    scope: approval.scope,
+    riskClass: approval.riskClass,
+    ...(approval.threadId === undefined ? {} : { threadId: approval.threadId }),
+    ...(approval.taskId === undefined ? {} : { taskId: approval.taskId }),
+    ...(approval.receiptId === undefined ? {} : { receiptId: approval.receiptId }),
+    requestedBy: approval.requestedBy,
+    requestedAt: approval.requestedAt,
+    status: approval.status,
+    ...(approval.decision === undefined
+      ? {}
+      : {
+          decisionSummary: {
+            decision: approval.decision.decision,
+            decidedBy: approval.decision.decidedBy,
+            decidedAt: approval.decision.decidedAt,
+          },
+        }),
+    schemaVersion: 1,
+  };
 }
 
 function invalidPayload(

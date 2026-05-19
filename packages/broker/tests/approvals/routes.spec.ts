@@ -6,9 +6,10 @@ import {
   type ApprovalStreamEvent,
   approvalDecisionRequestToJsonValue,
   approvalDecisionResponseFromJson,
+  approvalGetResponseFromJson,
+  approvalListResponseFromJson,
   approvalRequestCreateRequestToJsonValue,
   approvalRequestCreateResponseFromJson,
-  approvalRequestFromJsonValue,
   asAgentId,
   asApiToken,
   asApprovalClaimId,
@@ -301,25 +302,25 @@ describe("/api/v1/approvals routes", () => {
       headers: { Authorization: `Bearer ${TOKEN}` },
     });
     expect(listPending.status).toBe(200);
-    const pendingBody = (await listPending.json()) as { readonly approvals: readonly unknown[] };
-    expect(pendingBody.approvals.map((item) => approvalRequestFromJsonValue(item).id)).toEqual([
-      created.id,
-    ]);
+    const pendingBody = approvalListResponseFromJson((await listPending.json()) as unknown);
+    expect(pendingBody.approvals.map((item) => item.id)).toEqual([created.id]);
 
     const byThread = await fetch(
       `${fix.broker.url}/api/v1/approvals?threadId=${THREAD_ID}&taskId=${TASK_ID}`,
       { headers: { Authorization: `Bearer ${TOKEN}` } },
     );
     expect(byThread.status).toBe(200);
-    expect(
-      ((await byThread.json()) as { readonly approvals: readonly unknown[] }).approvals.length,
-    ).toBe(1);
+    expect(approvalListResponseFromJson((await byThread.json()) as unknown).approvals.length).toBe(
+      1,
+    );
 
     const get = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}`, {
       headers: { Authorization: `Bearer ${TOKEN}` },
     });
     expect(get.status).toBe(200);
-    expect(approvalRequestFromJsonValue((await get.json()) as unknown).status).toBe("pending");
+    expect(approvalGetResponseFromJson((await get.json()) as unknown).approval.status).toBe(
+      "pending",
+    );
 
     const decided = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}/decision`, {
       method: "POST",
@@ -333,6 +334,45 @@ describe("/api/v1/approvals routes", () => {
     expect(decidedBody.status).toBe("approved");
     expect(decidedBody.decision?.decision).toBe("approve");
     expect(decidedBody.decision?.decidedBy).toBe("agent_alpha");
+
+    const getDecided = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    const getDecidedJson = (await getDecided.json()) as unknown;
+    expect(JSON.stringify(getDecidedJson)).not.toContain("token");
+    const getDecidedBody = approvalGetResponseFromJson(getDecidedJson).approval;
+    expect(getDecidedBody.decisionSummary?.decision).toBe("approve");
+    expect(getDecidedBody.decisionSummary?.decidedBy).toBe("agent_alpha");
+  });
+
+  it("paginates approval list responses with token-redacted ApprovalView items", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const first = approvalRequestCreateResponseFromJson(
+      (await (await postApproval(fix, asIdempotencyKey("approval-page-01"))).json()) as unknown,
+    ).approvalRequest;
+    const second = approvalRequestCreateResponseFromJson(
+      (await (await postApproval(fix, asIdempotencyKey("approval-page-02"))).json()) as unknown,
+    ).approvalRequest;
+    const third = approvalRequestCreateResponseFromJson(
+      (await (await postApproval(fix, asIdempotencyKey("approval-page-03"))).json()) as unknown,
+    ).approvalRequest;
+
+    const firstPage = await fetch(`${fix.broker.url}/api/v1/approvals?limit=2`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(firstPage.status).toBe(200);
+    const firstPageBody = approvalListResponseFromJson((await firstPage.json()) as unknown);
+    expect(firstPageBody.approvals.map((approval) => approval.id)).toEqual([first.id, second.id]);
+    expect(firstPageBody.nextCursor).toBe("v1:2");
+
+    const secondPage = await fetch(
+      `${fix.broker.url}/api/v1/approvals?limit=2&cursor=${firstPageBody.nextCursor}`,
+      { headers: { Authorization: `Bearer ${TOKEN}` } },
+    );
+    expect(secondPage.status).toBe(200);
+    const secondPageBody = approvalListResponseFromJson((await secondPage.json()) as unknown);
+    expect(secondPageBody.approvals.map((approval) => approval.id)).toEqual([third.id]);
+    expect(secondPageBody.nextCursor).toBeUndefined();
   });
 
   it("uses a ULID create idempotency key as the approval request id", async () => {

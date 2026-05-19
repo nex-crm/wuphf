@@ -88,13 +88,14 @@ paths behave like unknown authenticated API routes and return 404. Writes use
 the approval route-envelope `idempotencyKey` carried in the request body. POST
 responses and route errors are emitted through the approval route-envelope
 codecs; folded approvals returned by GET routes are emitted through
-`approvalRequestToJsonValue`.
+`ApprovalListResponse` / `ApprovalGetResponse` codecs so stored decision
+tokens are redacted from read responses.
 
 | Method | Path | Auth | Contract |
 |---|---|---|---|
 | POST | `/api/v1/approvals` | bearer | Parses `ApprovalRequestCreateRequest`, appends `approval.requested`, projects a pending `ApprovalRequest`, returns `ApprovalRequestCreateResponse`, and emits `approval.requested` on `/api/events`. |
-| GET | `/api/v1/approvals` | bearer | Lists folded approvals. Optional filters: `status`, `threadId`, `taskId`. |
-| GET | `/api/v1/approvals/:id` | bearer | Fetches one folded approval, or 404 for malformed/missing ids. |
+| GET | `/api/v1/approvals` | bearer | Lists token-redacted approval views. Optional filters: `status`, `threadId`, `taskId`, plus capped `limit` and `cursor` pagination. |
+| GET | `/api/v1/approvals/:id` | bearer | Fetches one token-redacted approval view, or 404 for malformed/missing ids. |
 | POST | `/api/v1/approvals/:id/decision` | bearer | Parses `ApprovalDecisionRequest`, requires a token for `approve`, rejects non-pending approvals with 409, records the approve token without WebAuthn verification, and emits `approval.decided`. |
 
 See [approvals.md](./approvals.md) for the projection schema, replay rebuild,

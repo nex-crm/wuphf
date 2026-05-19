@@ -40,6 +40,16 @@ export interface ApprovalListFilter {
   readonly taskId?: TaskId;
 }
 
+export interface ApprovalListPageOptions {
+  readonly limit: number;
+  readonly afterHeadLsn?: number;
+}
+
+export interface ApprovalListPage {
+  readonly rows: readonly FoldedApprovalRow[];
+  readonly nextCursor?: EventLsn;
+}
+
 export interface ApprovalProjectionEvent {
   readonly lsn: number;
   readonly type: EventType | string;
@@ -56,6 +66,7 @@ export interface ApprovalProjection {
   rebuildFromLog(eventLog: EventLog): ApprovalProjectionRebuildResult;
   getById(id: ApprovalRequestId): FoldedApprovalRow | null;
   list(filter?: ApprovalListFilter): readonly FoldedApprovalRow[];
+  listPage(filter: ApprovalListFilter | undefined, page: ApprovalListPageOptions): ApprovalListPage;
 }
 
 interface ApprovalDbRow {
@@ -257,6 +268,24 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       const rows = listRows(db, filter);
       return rows.map(rowToFolded);
     },
+    listPage(
+      filter: ApprovalListFilter | undefined,
+      page: ApprovalListPageOptions,
+    ): ApprovalListPage {
+      if (!Number.isSafeInteger(page.limit) || page.limit < 1) {
+        throw new Error("approval list page limit must be a positive safe integer");
+      }
+      const rows = listRows(db, filter, { ...page, limit: page.limit + 1 });
+      const hasMore = rows.length > page.limit;
+      const selectedRows = hasMore ? rows.slice(0, page.limit) : rows;
+      const nextCursor = hasMore
+        ? lsnFromV1Number(selectedRows[selectedRows.length - 1]?.headLsn ?? 0)
+        : undefined;
+      return {
+        rows: selectedRows.map(rowToFolded),
+        ...(nextCursor === undefined ? {} : { nextCursor }),
+      };
+    },
   };
 }
 
@@ -332,9 +361,13 @@ export function statusForDecision(
   return "abstained";
 }
 
-function listRows(db: Database.Database, filter: ApprovalListFilter | undefined): ApprovalDbRow[] {
+function listRows(
+  db: Database.Database,
+  filter: ApprovalListFilter | undefined,
+  page?: ApprovalListPageOptions,
+): ApprovalDbRow[] {
   const clauses: string[] = [];
-  const params: string[] = [];
+  const params: (number | string)[] = [];
   if (filter?.status !== undefined) {
     clauses.push("status = ?");
     params.push(filter.status);
@@ -347,9 +380,17 @@ function listRows(db: Database.Database, filter: ApprovalListFilter | undefined)
     clauses.push("task_id = ?");
     params.push(filter.taskId);
   }
+  if (page?.afterHeadLsn !== undefined) {
+    clauses.push("head_lsn > ?");
+    params.push(page.afterHeadLsn);
+  }
   const where = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+  const limit = page === undefined ? "" : " LIMIT ?";
+  if (page !== undefined) params.push(page.limit);
   return db
-    .prepare<string[], ApprovalDbRow>(`${approvalSelectSql(where)} ORDER BY head_lsn ASC`)
+    .prepare<(number | string)[], ApprovalDbRow>(
+      `${approvalSelectSql(where)} ORDER BY head_lsn ASC${limit}`,
+    )
     .all(...params);
 }
 
