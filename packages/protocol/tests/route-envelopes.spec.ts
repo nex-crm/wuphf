@@ -201,6 +201,23 @@ describe("route-envelope codecs", () => {
     expect(listJson.threads).toEqual([threadViewToJsonValue(thread)]);
   });
 
+  it("rejects accessor fields on thread view records without invoking getters", () => {
+    let getterCalled = false;
+    const record: Record<string, unknown> = { ...threadViewToJsonValue(threadViewFixture()) };
+    Object.defineProperty(record, "thread_id", {
+      enumerable: true,
+      get() {
+        getterCalled = true;
+        return THREAD_ID;
+      },
+    });
+
+    expect(() => threadViewFromJson(record)).toThrow(
+      "threadView.thread_id: must be a data property",
+    );
+    expect(getterCalled).toBe(false);
+  });
+
   it("round-trips approval route requests and responses", () => {
     const claim = receiptCoSignClaimFixture();
     const receiptCreate: ApprovalRequestCreateRequest = {

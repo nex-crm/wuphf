@@ -880,6 +880,39 @@ describe("receipts API", () => {
       expect(next.pathname).toBe(`/api/v1/threads/${THREAD_ID_A}/receipts`);
     });
 
+    it("rejects canonical /api/v1 thread receipts without bearer", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const res = await fetch(`${broker.url}/api/v1/threads/${THREAD_ID_A}/receipts`);
+      expect(res.status).toBe(401);
+    });
+
+    it("rejects canonical /api/v1 thread receipts with non-loopback Host header", async () => {
+      broker = await createBroker({ port: 0, token: FIXED_TOKEN });
+      const u = new URL(broker.url);
+      const status = await new Promise<number>((resolveFn, rejectFn) => {
+        const req = httpRequest(
+          {
+            host: u.hostname,
+            port: Number(u.port),
+            path: `/api/v1/threads/${THREAD_ID_A}/receipts`,
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${FIXED_TOKEN}`,
+              Host: "evil.example.com",
+            },
+          },
+          (res) => {
+            resolveFn(res.statusCode ?? 0);
+            res.resume();
+          },
+        );
+        req.setTimeout(2_000, () => req.destroy(new Error("loopback-gate timeout")));
+        req.on("error", rejectFn);
+        req.end();
+      });
+      expect(status).toBe(403);
+    });
+
     it("omits the Link header on the last page", async () => {
       const store = new InMemoryReceiptStore();
       await seedThreadReceipts(store, 5);

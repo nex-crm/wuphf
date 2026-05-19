@@ -400,6 +400,7 @@ describe("/api/v1/threads routes", () => {
       fetch(`${fixture.broker.url}/api/v1/threads`),
       fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`),
       fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/pinned-approvals`),
+      fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/receipts`),
       fetch(`${fixture.broker.url}/api/v1/threads`, {
         method: "POST",
         body: JSON.stringify(createBody()),
@@ -414,7 +415,7 @@ describe("/api/v1/threads routes", () => {
       }),
     ];
     const responses = await Promise.all(routeChecks);
-    expect(responses.map((res) => res.status)).toEqual([401, 401, 401, 401, 401, 401]);
+    expect(responses.map((res) => res.status)).toEqual([401, 401, 401, 401, 401, 401, 401]);
   });
 
   it("runs the loopback Host guard before every thread route", async () => {
@@ -444,6 +445,13 @@ describe("/api/v1/threads routes", () => {
       }),
       rawRequest({
         port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/receipts`,
+        method: "GET",
+        hostHeader: "evil.example.com",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
         path: "/api/v1/threads",
         method: "POST",
         hostHeader: "evil.example.com",
@@ -467,7 +475,7 @@ describe("/api/v1/threads routes", () => {
         body: JSON.stringify(statusBody()),
       }),
     ]);
-    expect(checks.map((res) => res.status)).toEqual([403, 403, 403, 403, 403, 403]);
+    expect(checks.map((res) => res.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
   });
 
   it("rejects approval deps that do not share thread storage provenance", async () => {

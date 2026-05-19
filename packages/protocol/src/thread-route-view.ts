@@ -97,7 +97,7 @@ export function threadViewToJsonValue(view: ThreadView): Readonly<Record<string,
 export function threadViewFromJsonValue(value: unknown, path: string): ThreadView {
   const record = requireRecord(value, path);
   assertKnownKeys(record, path, THREAD_VIEW_KEYS);
-  const thread = threadFromJsonValue(threadJsonFromThreadViewRecord(record));
+  const thread = threadFromJsonValue(threadJsonFromThreadViewRecord(record, path));
   const effectiveStatus = threadEffectiveStatusFromJson(
     requiredString(record, "effectiveStatus", `${path}.effectiveStatus`),
     `${path}.effectiveStatus`,
@@ -142,19 +142,19 @@ export function threadArrayFromJson(value: unknown, path: string): readonly Thre
 
 function threadJsonFromThreadViewRecord(
   record: Readonly<Record<string, unknown>>,
+  path: string,
 ): Readonly<Record<string, unknown>> {
-  const threadRecord = record as ThreadViewWire;
   return omitUndefined({
-    thread_id: threadRecord.thread_id,
-    title: threadRecord.title,
-    status: threadRecord.status,
-    spec: threadRecord.spec,
-    external_refs: threadRecord.external_refs,
-    task_ids: threadRecord.task_ids,
-    created_by: threadRecord.created_by,
-    created_at: threadRecord.created_at,
-    updated_at: threadRecord.updated_at,
-    closed_at: threadRecord.closed_at,
+    thread_id: requiredField(record, "thread_id", `${path}.thread_id`),
+    title: requiredField(record, "title", `${path}.title`),
+    status: requiredField(record, "status", `${path}.status`),
+    spec: requiredField(record, "spec", `${path}.spec`),
+    external_refs: requiredField(record, "external_refs", `${path}.external_refs`),
+    task_ids: requiredField(record, "task_ids", `${path}.task_ids`),
+    created_by: requiredField(record, "created_by", `${path}.created_by`),
+    created_at: requiredField(record, "created_at", `${path}.created_at`),
+    updated_at: requiredField(record, "updated_at", `${path}.updated_at`),
+    closed_at: optionalField(record, "closed_at", `${path}.closed_at`),
   });
 }
 
