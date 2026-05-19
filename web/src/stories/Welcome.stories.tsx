@@ -86,6 +86,14 @@ export const Intro: StoryObj = {
       <Section title="Patterns">
         <Item href="?path=/story/patterns-focus-ring--examples" label="Focus ring" desc="System focus ring tokens + behavior" />
         <Item href="?path=/story/patterns-shred-warning--modal-copy" label="Shred warning" desc="Canonical destructive copy module" />
+        <Item href="?path=/story/patterns-modal-shell--default" label="Modal shell" desc="Paired .modal-backdrop + .modal-shell primitives" />
+        <Item href="?path=/story/patterns-approval-context--default" label="Approval context" desc="Structured detail panel for approval surfaces" />
+      </Section>
+
+      <Section title="Sidebar">
+        <Item href="?path=/story/sidebar-anatomy--anatomy" label="Anatomy" desc="Labeled diagram of the 10 sidebar parts" />
+        <Item href="?path=/story/sidebar-modules--workspace-header" label="Modules" desc="Each section in isolation — header, agents, channels, apps, usage, color picker" />
+        <Item href="?path=/story/sidebar-full-view--expanded" label="Full view" desc="Assembled sidebar in expanded / collapsed / heavy-unread states" />
       </Section>
 
       <Section title="Features">
