@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_FROZEN_ARGS_BYTES } from "../src/budgets.ts";
-import { asSha256Hex, isSha256Hex, sha256Hex } from "../src/sha256.ts";
+import { asSha256Hex, isSha256Hex, SHA256_HEX_RE } from "../src/sha256.ts";
+import { sha256Hex } from "../src/sha256-node.ts";
 
 describe("sha256", () => {
   it("hashes empty input to the standard SHA-256 digest", () => {
@@ -31,6 +32,8 @@ describe("sha256", () => {
     expect(isSha256Hex(digest)).toBe(true);
     expect(asSha256Hex(digest)).toBe(digest);
     expect(isSha256Hex(digest.toUpperCase())).toBe(false);
+    expect(SHA256_HEX_RE.test(digest)).toBe(true);
+    expect(SHA256_HEX_RE.test(digest.toUpperCase())).toBe(false);
     expect(isSha256Hex(digest.slice(1))).toBe(false);
     expect(isSha256Hex(`${digest}0`)).toBe(false);
     expect(isSha256Hex(`${digest.slice(0, 63)}g`)).toBe(false);

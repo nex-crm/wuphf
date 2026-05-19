@@ -76,7 +76,7 @@ import {
   type ReceiptId,
   type SignedApprovalToken,
 } from "../src/receipt.ts";
-import { sha256Hex } from "../src/sha256.ts";
+import { sha256Hex } from "../src/sha256-node.ts";
 import brokerUrlVectors from "../testdata/broker-url-vectors.json";
 
 type WireKeysOf<T> = readonly (keyof T)[];

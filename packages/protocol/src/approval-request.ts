@@ -1,4 +1,5 @@
 import { canonicalJSON } from "./canonical-json.ts";
+import { APPROVAL_DECISION_VALUES, RISK_CLASS_VALUES } from "./receipt-literals.ts";
 import {
   type ApprovalEvent,
   type ApprovalRequestId,
@@ -19,8 +20,7 @@ import {
   type SignerIdentity,
   type TaskId,
   type ThreadId,
-} from "./receipt.ts";
-import { APPROVAL_DECISION_VALUES, RISK_CLASS_VALUES } from "./receipt-literals.ts";
+} from "./receipt-types.ts";
 import {
   addError,
   assertKnownKeys,

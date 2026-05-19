@@ -18,6 +18,7 @@ import {
 } from "./budgets.ts";
 import { canonicalJSON, type JsonValue } from "./canonical-json.ts";
 import { type EventLsn, parseLsn } from "./event-lsn.ts";
+import { APPROVAL_DECISION_VALUES, RISK_CLASS_VALUES } from "./receipt-literals.ts";
 import {
   type ApprovalRequestId,
   asApprovalRequestId,
@@ -34,8 +35,7 @@ import {
   type TaskId,
   type ThreadId,
   type ThreadSpecRevisionId,
-} from "./receipt.ts";
-import { APPROVAL_DECISION_VALUES, RISK_CLASS_VALUES } from "./receipt-literals.ts";
+} from "./receipt-types.ts";
 import {
   assertKnownKeys,
   formatValidationErrors,
@@ -61,7 +61,7 @@ import {
   type ThreadStatus,
   threadExternalRefsFromJsonValue,
   threadExternalRefsToJsonValue,
-} from "./thread.ts";
+} from "./thread-browser.ts";
 import {
   type ThreadView,
   threadArrayFromJson,

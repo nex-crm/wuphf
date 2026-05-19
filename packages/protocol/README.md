@@ -17,6 +17,16 @@ This package is the moat. It defines the type-system invariants that make tamper
 
 This package is pure types and pure-data classes. SQLite, filesystem, network, keychain — all live in other packages. That keeps the moat invariants verifiable in isolation.
 
+## Entry points
+
+- `@wuphf/protocol` is the Node/Electron-main entry. It includes audit-chain
+  hashing, `FrozenArgs`, receipt codecs, and other helpers backed by
+  `node:crypto`.
+- `@wuphf/protocol/browser` is the sandboxed Electron renderer entry. It
+  exposes route-envelope codecs, `thread-route-view`, and the branded
+  validators those codecs need. Its runtime import graph is statically guarded
+  to contain no `node:` imports and no bare `crypto` / `buffer` imports.
+
 ## RFC anchor
 
 Spec: `business-musings/wuphf-greenfield-rewrite-rfc-2026-05.md` §6 (Receipt schema), §7.3 (IPC discipline).

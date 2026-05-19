@@ -16,14 +16,23 @@ choose.
 
 ## Runtime target
 
-This package targets **Node.js (and Electron's main process)**. The tsconfig
-declares `"types": ["node"]`; the audit chain uses `node:crypto.createHash` and
-`Buffer` for byte/base64 encoding. The protocol shapes themselves are
+The default `@wuphf/protocol` entry targets **Node.js (and Electron's main
+process)**. The tsconfig declares `"types": ["node"]`; the audit chain uses
+`node:crypto.createHash`, and the Node-only `sha256-node.ts` helper backs
+hash construction and verification paths. The protocol shapes themselves are
 runtime-agnostic, but the verifier helpers (`computeEventHash`,
 `serializeAuditEventRecordForHash`) will not run in a browser or Electron
-renderer with `nodeIntegration: false`. If renderer-side verification is ever
-needed, port `sha256.ts` and the base64 encoder in `audit-event.ts` to
-`crypto.subtle` + `btoa` together — they're a matched pair.
+renderer with `nodeIntegration: false`. If renderer-side audit verification is
+ever needed, port the SHA-256 helper and the base64 encoder in
+`audit-event.ts` to `crypto.subtle` + `btoa` together — they're a matched pair.
+
+The `@wuphf/protocol/browser` subpath is the curated renderer-safe surface for
+route-envelope codecs, `thread-route-view`, and the branded ID / wire
+validators those codecs use. Its transitive runtime import graph MUST stay
+free of `node:` imports and bare `crypto` / `buffer`; the static guard lives in
+`tests/browser-subpath.spec.ts`. Do not export audit-chain hashing,
+`sha256Hex`, `FrozenArgs`, or receipt codec modules from this subpath unless
+the full graph remains renderer-safe without changing wire behavior.
 
 ## What this package does
 
@@ -369,7 +378,8 @@ packages/protocol/
 └── src/
     ├── index.ts                       (public API surface)
     ├── brand.ts                       (Brand<T, "Tag"> primitive)
-    ├── sha256.ts                      (Sha256Hex brand + sha256Hex helper)
+    ├── sha256.ts                      (Sha256Hex brand + regex guard)
+    ├── sha256-node.ts                 (Node-only sha256Hex helper)
     ├── canonical-json.ts              (RFC 8785 JCS + assertJcsValue)
     ├── frozen-args.ts                 (canonical-JSON + content-hash class)
     ├── sanitized-string.ts            (NFKC + Unicode bypass + safe walk)

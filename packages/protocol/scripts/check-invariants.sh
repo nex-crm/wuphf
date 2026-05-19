@@ -56,25 +56,25 @@ check_no_instanceof_outside_class() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────
-# Check 2 — Single hashing entry point (`src/sha256.ts`).
+# Check 2 — Single hashing entry point (`src/sha256-node.ts`).
 #
-# crypto.subtle / createHash MUST live behind sha256.ts so that a
+# crypto.subtle / createHash MUST live behind sha256-node.ts so that a
 # follow-on swap (FIPS provider, hardware key, etc.) is one-file work.
 # Allowlist:
-#   - src/sha256.ts: the entry point itself.
+#   - src/sha256-node.ts: the Node-only entry point itself.
 #   - src/audit-event.ts: uses createHash directly for the chain hash
 #     (`computeEventHash`). Documented at the call site as the only
 #     audit-chain exception. If you broaden hashing usage, refactor
-#     through sha256.ts first.
+#     through sha256-node.ts first.
 # ─────────────────────────────────────────────────────────────────────────
 check_single_hashing_entry_point() {
   local pattern='(crypto\.subtle|createHash\b)'
   local violators
   violators=$(grep -rnE --include='*.ts' "$pattern" src/ scripts/ 2>/dev/null \
-    | grep -vE '^src/(sha256|audit-event)\.ts:' \
+    | grep -vE '^src/(sha256-node|audit-event)\.ts:' \
     || true)
   if [ -n "$violators" ]; then
-    fail "crypto.subtle / createHash outside allowlist (sha256.ts, audit-event.ts):"
+    fail "crypto.subtle / createHash outside allowlist (sha256-node.ts, audit-event.ts):"
     printf '    %s\n' "$violators" >&2
     return 1
   fi

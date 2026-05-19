@@ -181,8 +181,8 @@ sequenceDiagram
    [audit-event](modules/audit-event.md).
 7. Unknown keys are rejected at every object boundary by shared key tuples in
    [receipt](modules/receipt.md), [ipc](modules/ipc.md), and checkpoint codecs.
-8. Public API is only `src/index.ts`; module docs describe implementation
-   surfaces, not subpath imports.
+8. Public API is `src/index.ts` plus the curated `src/browser.ts` subpath;
+   other module docs describe implementation surfaces, not subpath imports.
 
 ## 5. Wire contract surface
 

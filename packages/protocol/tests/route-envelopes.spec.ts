@@ -204,6 +204,22 @@ describe("route-envelope codecs", () => {
     expect(listJson.threads).toEqual([threadViewToJsonValue(thread)]);
   });
 
+  it("keeps default thread view decode strict on contentHash", () => {
+    const wire = threadViewToJsonValue(threadViewFixture()) as JsonObject & {
+      spec: JsonObject;
+    };
+
+    expect(() =>
+      threadViewFromJson({
+        ...wire,
+        spec: {
+          ...wire.spec,
+          content_hash: sha256Hex("forged-thread-view-content"),
+        },
+      }),
+    ).toThrow(/contentHash/);
+  });
+
   it("rejects accessor fields on thread view records without invoking getters", () => {
     let getterCalled = false;
     const record: Record<string, unknown> = { ...threadViewToJsonValue(threadViewFixture()) };

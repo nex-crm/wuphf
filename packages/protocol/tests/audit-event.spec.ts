@@ -52,7 +52,8 @@ import {
   threadSpecContentHash,
 } from "../src/index.ts";
 import { asReceiptId, type ReceiptId } from "../src/receipt.ts";
-import { asSha256Hex, type Sha256Hex, sha256Hex } from "../src/sha256.ts";
+import { asSha256Hex, type Sha256Hex } from "../src/sha256.ts";
+import { sha256Hex } from "../src/sha256-node.ts";
 
 interface AuditEventVectorPayloadInput {
   readonly kind: AuditEventKind;

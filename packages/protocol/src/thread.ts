@@ -35,7 +35,8 @@ import {
   recordValue,
   requireRecord,
 } from "./receipt-utils.ts";
-import { asSha256Hex, isSha256Hex, type Sha256Hex, sha256Hex } from "./sha256.ts";
+import { asSha256Hex, isSha256Hex, type Sha256Hex } from "./sha256.ts";
+import { sha256Hex } from "./sha256-node.ts";
 
 export const THREAD_STATUS_VALUES = [
   "open",

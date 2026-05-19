@@ -38,7 +38,8 @@ import {
 import { type EventLsn, GENESIS_LSN, isEqualLsn, nextLsn, parseLsn } from "./event-lsn.ts";
 import { isReceiptId, type ReceiptId, type ReceiptValidationResult } from "./receipt.ts";
 import { assertKnownKeys, hasOwn, pointer, recordValue, requireRecord } from "./receipt-utils.ts";
-import { asSha256Hex, type Sha256Hex, sha256Hex } from "./sha256.ts";
+import { asSha256Hex, type Sha256Hex } from "./sha256.ts";
+import { sha256Hex } from "./sha256-node.ts";
 import {
   type ThreadAuditEventKind,
   threadAuditPayloadFromJsonValue,

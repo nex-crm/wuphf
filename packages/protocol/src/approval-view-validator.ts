@@ -5,14 +5,14 @@ import {
   type ApprovalValidationError,
   type ApprovalValidationResult,
 } from "./approval-request.ts";
+import { APPROVAL_DECISION_VALUES, RISK_CLASS_VALUES } from "./receipt-literals.ts";
 import {
   isApprovalRequestId,
   isReceiptId,
   isSignerIdentity,
   isTaskId,
   isThreadId,
-} from "./receipt.ts";
-import { APPROVAL_DECISION_VALUES, RISK_CLASS_VALUES } from "./receipt-literals.ts";
+} from "./receipt-types.ts";
 import { addError, hasOwn, isRecord, pointer, recordValue } from "./receipt-utils.ts";
 import type { ApprovalDecisionSummary, ApprovalView } from "./route-envelopes.ts";
 import {

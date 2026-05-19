@@ -3,7 +3,6 @@
 // because the combined module exceeded the 1500-LOC budget; the public API is
 // preserved here via re-exports so consumers do not need to change imports.
 
-import { Buffer } from "node:buffer";
 import {
   assertWithinBudget,
   MAX_RECEIPT_APPROVALS,
@@ -93,6 +92,7 @@ import {
 } from "./signed-approval-token.ts";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const TEXT_ENCODER = new TextEncoder();
 
 export { APPROVAL_ROLE_VALUES } from "./receipt-literals.ts";
 // Re-exports — public surface stays stable across the file split.
@@ -294,7 +294,7 @@ function assertSerializedReceiptJsonBudget(json: string): void {
     return;
   }
   assertWithinBudget(
-    new TextEncoder().encode(json).byteLength,
+    TEXT_ENCODER.encode(json).byteLength,
     MAX_RECEIPT_BYTES,
     "receipt serialized bytes",
   );
@@ -867,7 +867,7 @@ function sanitizedStringFromJson(value: unknown, path: string): SanitizedString 
   if (typeof value !== "string") {
     throw new Error(`${path}: must be a string`);
   }
-  const valueBytes = Buffer.byteLength(value, "utf8");
+  const valueBytes = TEXT_ENCODER.encode(value).length;
   if (valueBytes > MAX_SANITIZED_STRING_BYTES) {
     throw new Error(
       `${path}: value exceeds MAX_SANITIZED_STRING_BYTES (got ${valueBytes}, max ${MAX_SANITIZED_STRING_BYTES})`,

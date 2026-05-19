@@ -1087,11 +1087,27 @@ function isCanonicalUnpaddedBase64Url(value: string): boolean {
   if (value.length === 0 || !BASE64URL_RE.test(value) || value.length % 4 === 1) {
     return false;
   }
-  try {
-    return Buffer.from(value, "base64url").toString("base64url") === value;
-  } catch {
-    return false;
+
+  const remainder = value.length % 4;
+  if (remainder === 0) {
+    return true;
   }
+
+  const trailingSextet = base64UrlSextet(value.charCodeAt(value.length - 1));
+  return remainder === 2 ? (trailingSextet & 0b1111) === 0 : (trailingSextet & 0b11) === 0;
+}
+
+function base64UrlSextet(codeUnit: number): number {
+  if (codeUnit >= 65 && codeUnit <= 90) {
+    return codeUnit - 65;
+  }
+  if (codeUnit >= 97 && codeUnit <= 122) {
+    return codeUnit - 71;
+  }
+  if (codeUnit >= 48 && codeUnit <= 57) {
+    return codeUnit + 4;
+  }
+  return codeUnit === 45 ? 62 : 63;
 }
 
 function sanitizeAllowlistText(value: string): string {

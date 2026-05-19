@@ -51,7 +51,7 @@ import {
   webAuthnAssertionToJsonValue,
 } from "../src/index.ts";
 import { asReceiptId, asWriteId } from "../src/receipt.ts";
-import { sha256Hex } from "../src/sha256.ts";
+import { sha256Hex } from "../src/sha256-node.ts";
 
 interface SignedApprovalTokenAcceptedVector {
   readonly name: string;

@@ -61,7 +61,8 @@ import {
   WRITE_FAILURE_METADATA_KEYS,
 } from "../src/receipt-validator.ts";
 import { SanitizedString } from "../src/sanitized-string.ts";
-import { type Sha256Hex, sha256Hex } from "../src/sha256.ts";
+import type { Sha256Hex } from "../src/sha256.ts";
+import { sha256Hex } from "../src/sha256-node.ts";
 import {
   RECEIPT_CO_SIGN_CLAIM_KEYS,
   RECEIPT_CO_SIGN_SCOPE_KEYS,

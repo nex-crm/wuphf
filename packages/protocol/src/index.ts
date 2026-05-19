@@ -444,7 +444,7 @@ export {
   threadViewFromJson,
   threadViewToJsonValue,
   validateApprovalView,
-} from "./route-envelopes.ts";
+} from "./route-envelopes-node.ts";
 export type {
   CostLedgerEntry,
   RunnerEvent,
@@ -475,9 +475,10 @@ export { SanitizedString } from "./sanitized-string.ts";
 export {
   asSha256Hex,
   isSha256Hex,
+  SHA256_HEX_RE,
   type Sha256Hex,
-  sha256Hex,
 } from "./sha256.ts";
+export { sha256Hex } from "./sha256-node.ts";
 export type {
   ApprovalClaim,
   ApprovalClaimId,

@@ -1,6 +1,6 @@
 import { MAX_ROUTE_THREAD_LIST_ITEMS } from "./budgets.ts";
 import { assertKnownKeys, hasOwn, omitUndefined, requireRecord } from "./receipt-utils.ts";
-import { type Thread, threadFromJsonValue, threadToJsonValue } from "./thread.ts";
+import { type Thread, threadFromJsonValue, threadToJsonValue } from "./thread-browser.ts";
 
 export const THREAD_EFFECTIVE_STATUS_VALUES = [
   "open",

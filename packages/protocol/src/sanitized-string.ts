@@ -1,5 +1,3 @@
-import { Buffer } from "node:buffer";
-
 import {
   MAX_SANITIZED_JSON_NODES,
   MAX_SANITIZED_STRING_BYTES,
@@ -43,6 +41,7 @@ const SANITIZED_STRING_POLICY_VALUES = ["strip-zero-width", "allow-zwj", "allowl
 export type SanitizedStringPolicy = (typeof SANITIZED_STRING_POLICY_VALUES)[number];
 
 const SANITIZED_STRING_POLICIES: ReadonlySet<string> = new Set(SANITIZED_STRING_POLICY_VALUES);
+const TEXT_ENCODER = new TextEncoder();
 
 // Compiler-enforced narrowing: a plain `Set.has` returns `boolean` and does
 // not narrow, which would force an `as SanitizedStringPolicy` assertion at the
@@ -285,7 +284,7 @@ function reserveSanitizedJsonChildNodes(
 }
 
 function assertSanitizedStringByteBudget(value: string, label: string): void {
-  const bytes = Buffer.byteLength(value, "utf8");
+  const bytes = TEXT_ENCODER.encode(value).length;
   if (bytes > MAX_SANITIZED_STRING_BYTES) {
     throw new Error(
       `${label} exceeds MAX_SANITIZED_STRING_BYTES (got ${bytes}, max ${MAX_SANITIZED_STRING_BYTES})`,
