@@ -98,7 +98,7 @@ tokens are redacted from read responses.
 | GET | `/api/v1/approvals/:id` | bearer | Fetches one token-redacted approval view, or 404 for malformed/missing ids. |
 | POST | `/api/v1/approvals/:id/decision` | bearer | Parses `ApprovalDecisionRequest`, requires a token for `approve`, rejects non-pending approvals with 409, records the approve token without WebAuthn verification, and emits `approval.decided`. |
 
-See [approvals.md](./approvals.md) for the projection schema, replay rebuild,
+See [approvals.md](./approvals.md) for the projection schema, projection rebuild,
 and SSE payload contract.
 
 ### Agent provider-routing routes

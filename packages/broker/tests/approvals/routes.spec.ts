@@ -23,6 +23,7 @@ import {
   asTaskId,
   asThreadId,
   asTimestampMs,
+  routeErrorFromJson,
   type SignedApprovalToken,
   signedApprovalTokenFromJson,
   signedApprovalTokenToJsonValue,
@@ -32,7 +33,7 @@ import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ApprovalAppender, ApprovalProjection } from "../../src/approvals/index.ts";
-import { createApprovalAppender, createApprovalProjection } from "../../src/approvals/index.ts";
+import { createApprovalSubsystem } from "../../src/approvals/index.ts";
 import { createEventLog, openDatabase, runMigrations } from "../../src/event-log/index.ts";
 import type { BrokerHandle } from "../../src/index.ts";
 import { createBroker } from "../../src/index.ts";
@@ -132,8 +133,10 @@ async function buildFixture(overrides?: {
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
   const eventLog = createEventLog(db);
-  const baseProjection = createApprovalProjection(db);
-  const baseAppender = createApprovalAppender(db, eventLog, baseProjection);
+  const { appender: baseAppender, projection: baseProjection } = createApprovalSubsystem(
+    db,
+    eventLog,
+  );
   const projection = overrides?.projection?.(baseProjection) ?? baseProjection;
   const appender = overrides?.appender?.(baseAppender) ?? baseAppender;
   const broker = await createBroker({
@@ -144,7 +147,6 @@ async function buildFixture(overrides?: {
       appender,
       projection,
       tokenAgentIds: overrides?.tokenAgentIds ?? new Map([[TOKEN, asAgentId("agent_alpha")]]),
-      db,
     },
   });
   return { db, broker, appender, projection };
@@ -615,8 +617,8 @@ describe("/api/v1/approvals routes", () => {
         }),
       },
     );
-    expect(missingDecision.status).toBe(400);
-    expect(((await missingDecision.json()) as { readonly error: string }).error).toBe(
+    expect(missingDecision.status).toBe(422);
+    expect(routeErrorFromJson((await missingDecision.json()) as unknown).error).toBe(
       "invalid_payload",
     );
   });
@@ -633,11 +635,24 @@ describe("/api/v1/approvals routes", () => {
       body: approveDecisionBodyWithoutToken(asIdempotencyKey("approval-decision-no-token")),
     });
 
-    expect(missingToken.status).toBe(400);
-    expect(((await missingToken.json()) as { readonly error: string }).error).toBe(
+    expect(missingToken.status).toBe(422);
+    expect(routeErrorFromJson((await missingToken.json()) as unknown).error).toBe(
       "invalid_payload",
     );
     expect(eventCount(fix.db, "approval.decided")).toBe(0);
+  });
+
+  it("returns 400 for malformed approval JSON before route-envelope validation", async () => {
+    if (fix === null) throw new Error("fixture missing");
+
+    const malformed = await fetch(`${fix.broker.url}/api/v1/approvals`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: "{",
+    });
+
+    expect(malformed.status).toBe(400);
+    expect(routeErrorFromJson((await malformed.json()) as unknown).error).toBe("malformed_json");
   });
 
   it("requires bearer auth and loopback host on every approvals route", async () => {

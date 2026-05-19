@@ -134,8 +134,13 @@ async function handleApprovalRequestPost(
   }
 
   let request: ApprovalRequestCreateRequest;
+  const parsedJson = parseJsonBody(body);
+  if (!parsedJson.ok) {
+    malformedJson(res, deps, "approval_request", parsedJson.err);
+    return;
+  }
   try {
-    request = approvalRequestCreateRequestFromJson(JSON.parse(body) as unknown);
+    request = approvalRequestCreateRequestFromJson(parsedJson.value);
   } catch (err) {
     invalidPayload(res, deps, "approval_request", err);
     return;
@@ -197,8 +202,13 @@ async function handleApprovalDecisionPost(
   }
 
   let request: ApprovalDecisionRequest;
+  const parsedJson = parseJsonBody(body);
+  if (!parsedJson.ok) {
+    malformedJson(res, deps, "approval_decision", parsedJson.err);
+    return;
+  }
   try {
-    request = approvalDecisionRequestFromJson(JSON.parse(body) as unknown);
+    request = approvalDecisionRequestFromJson(parsedJson.value);
   } catch (err) {
     invalidPayload(res, deps, "approval_decision", err);
     return;
@@ -552,7 +562,28 @@ function invalidPayload(
 ): void {
   const reason = err instanceof Error ? err.message : "validation_failed";
   deps.logger.warn(`${routeName}_rejected`, { reason: "invalid_payload" });
-  writeRouteError(res, 400, { error: "invalid_payload", message: reason });
+  writeRouteError(res, 422, { error: "invalid_payload", message: reason });
+}
+
+function malformedJson(
+  res: ServerResponse,
+  deps: Pick<ApprovalRouteDeps, "logger">,
+  routeName: string,
+  err: unknown,
+): void {
+  const reason = err instanceof Error ? err.message : "malformed_json";
+  deps.logger.warn(`${routeName}_rejected`, { reason: "malformed_json" });
+  writeRouteError(res, 400, { error: "malformed_json", message: reason });
+}
+
+function parseJsonBody(
+  body: string,
+): { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly err: unknown } {
+  try {
+    return { ok: true, value: JSON.parse(body) as unknown };
+  } catch (err) {
+    return { ok: false, err };
+  }
 }
 
 function ensureJsonContentType(req: IncomingMessage, res: ServerResponse): boolean {

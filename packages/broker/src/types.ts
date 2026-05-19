@@ -113,8 +113,7 @@ export interface BrokerConfig {
   /**
    * Optional explicit approvals feature. When supplied,
    * `/api/v1/approvals` routes are mounted. Hosts construct these deps via
-   * `createApprovalProjection(db)` and
-   * `createApprovalAppender(db, eventLog, projection)`.
+   * `createApprovalSubsystem(db, eventLog)`.
    * Decisions are attributed to the bearer-bound agent in `tokenAgentIds`;
    * when omitted, the listener falls back to the runner bearer map if one
    * is configured.
@@ -126,7 +125,6 @@ export interface BrokerConfig {
     readonly appender: ApprovalAppender;
     readonly projection: ApprovalProjection;
     readonly tokenAgentIds?: ReadonlyMap<ApiToken, AgentId>;
-    readonly db: Database.Database;
   };
   /**
    * Optional agent runner routes. When supplied, POST /api/runners and

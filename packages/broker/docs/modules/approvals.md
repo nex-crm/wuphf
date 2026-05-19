@@ -66,6 +66,9 @@ SQLite storage errors follow the receipt route contract:
 `SQLITE_BUSY`/`SQLITE_LOCKED` returns `503 {"error":"store_busy"}` with
 `Retry-After: 1`; `SQLITE_FULL` returns `507 {"error":"store_full"}`; persistent
 read-only/IO/corruption errors return `503 {"error":"storage_error"}`.
+Malformed JSON request bodies return `400 {"error":"malformed_json"}`. Bodies
+that parse as JSON but fail approval route-envelope or command validation return
+`422 {"error":"invalid_payload"}`.
 
 ## SSE
 
@@ -95,7 +98,8 @@ cache invalidations and re-query the folded approval if they need full state.
 
 | Area | Exports |
 |---|---|
+| Construction | `createApprovalSubsystem`, event-log primitives (`openDatabase`, `runMigrations`, `createEventLog`) |
 | Projection | `createApprovalProjection`, `ApprovalProjection`, `FoldedApprovalRow`, `foldApprovalFromLog` |
 | Appender | `createApprovalAppender`, `ApprovalAppender`, append result/error types |
 | Idempotency | `parseApprovalIdempotencyKey`, `APPROVAL_COMMAND_VALUES`, `DEFAULT_APPROVAL_IDEMPOTENCY_TTL_MS` |
-| Replay rebuild | `rebuildApprovalsProjectionFromLog`, `ApprovalProjectionRebuildResult` |
+| Projection rebuild | `rebuildApprovalsProjectionFromLog`, `ApprovalProjectionRebuildResult` |
