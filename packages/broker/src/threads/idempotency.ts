@@ -7,7 +7,8 @@ export const THREAD_COMMAND_VALUES: readonly ThreadCommand[] = [
 ];
 
 const THREAD_COMMAND_SET: ReadonlySet<string> = new Set<string>(THREAD_COMMAND_VALUES);
-const KEY_RE = /^cmd_([a-z][a-z0-9.]*[a-z0-9])_([0-9A-HJKMNP-TV-Z]{26})$/;
+const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+const LEGACY_KEY_RE = /^cmd_([a-z][a-z0-9.]*[a-z0-9])_([0-9A-HJKMNP-TV-Z]{26})$/;
 
 export interface ParsedIdempotencyKey {
   readonly raw: string;
@@ -36,11 +37,14 @@ export function parseThreadIdempotencyKey(
   if (raw === undefined || raw.length === 0) {
     return { ok: false, error: { code: "missing" } };
   }
-  const match = KEY_RE.exec(raw);
+  if (ULID_RE.test(raw)) {
+    return { ok: true, key: { raw, command: expectedCommand, ulid: raw } };
+  }
+  const match = LEGACY_KEY_RE.exec(raw);
   if (match === null) {
     return {
       ok: false,
-      error: { code: "malformed", reason: "must match cmd_<command>_<26-char-ULID>" },
+      error: { code: "malformed", reason: "must be a 26-char ULID idempotency key" },
     };
   }
   const command = match[1] ?? "";

@@ -7,7 +7,8 @@
 //   POST /api/receipts                    — bearer required. Body: receipt JSON.
 //                                           201 on insert, 409 on id collision.
 //   GET  /api/receipts/:id                — bearer required. 200 on hit, 404 on miss.
-//   GET  /api/threads/:tid/receipts       — bearer required. List receipts in a thread.
+//   GET  /api/v1/threads/:tid/receipts    — bearer required. List receipts in a thread.
+//   GET  /api/threads/:tid/receipts       — bearer required. One-release alias.
 //   GET  /api/v1/threads                  — bearer required. List folded threads.
 //   GET  /api/v1/threads/:id              — bearer required. Read one folded thread.
 //   POST /api/v1/threads                  — bearer required. Create thread.
@@ -100,10 +101,18 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   const staticHandler = createStaticHandler(config.renderer ?? null);
   const sseHub = createSseHub();
   const trustedOrigins = normalizeTrustedOrigins(config.trustedOrigins);
-  // Default to an in-memory store when the host doesn't supply one. Branch
-  // 6 hosts will pass a durable event-log-backed store; this default keeps
-  // the package self-contained for tests and dev runs.
-  const receiptStore: ReceiptStore = config.receiptStore ?? new InMemoryReceiptStore();
+  if (
+    config.threads !== undefined &&
+    config.receiptStore !== undefined &&
+    config.receiptStore !== config.threads.receiptStore
+  ) {
+    throw new Error("createBroker: receiptStore must match threads.receiptStore");
+  }
+  // Default to an in-memory store when the host doesn't supply one. Thread
+  // routes carry their own cohesive store handle so receipt indexing cannot
+  // be wired to a different database from the thread projection.
+  const receiptStore: ReceiptStore =
+    config.threads?.receiptStore ?? config.receiptStore ?? new InMemoryReceiptStore();
   const agentProviderRoutingStore = config.runners?.agentProviderRoutingStore ?? null;
   // Reuse the same bearer→agent binding map that runner spawn uses so a
   // bearer pinned to agent_alpha cannot read or PUT agent_beta's routing.
@@ -212,7 +221,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       : ({
           appender: config.threads.appender,
           state: config.threads.state,
-          receiptStore,
+          receiptIndex: config.threads.receiptIndex,
           logger,
           nowMs: () => Date.now(),
           emitThreadEvent: (event) => sseHub.emitThreadEvent(event),
@@ -420,7 +429,10 @@ async function routeRequest(
     });
     return;
   }
-  if (pathname.startsWith("/api/threads/") && pathname.endsWith("/receipts")) {
+  if (
+    (pathname.startsWith("/api/v1/threads/") || pathname.startsWith("/api/threads/")) &&
+    pathname.endsWith("/receipts")
+  ) {
     if (req.method !== "GET" && req.method !== "HEAD") {
       methodNotAllowed(res);
       return;
@@ -664,7 +676,10 @@ function classifyApiRoute(pathname: string): string {
   if (pathname === "/api/events") return "events";
   if (pathname === "/api/receipts") return "receipts";
   if (pathname.startsWith("/api/receipts/")) return "receipt";
-  if (pathname.startsWith("/api/threads/") && pathname.endsWith("/receipts")) {
+  if (
+    (pathname.startsWith("/api/v1/threads/") || pathname.startsWith("/api/threads/")) &&
+    pathname.endsWith("/receipts")
+  ) {
     return "thread_receipts";
   }
   if (pathname.startsWith("/api/v1/cost/")) return "cost";

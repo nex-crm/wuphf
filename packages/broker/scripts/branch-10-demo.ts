@@ -19,7 +19,8 @@ import BetterSqlite3 from "better-sqlite3";
 import { createAgentProviderRoutingStore } from "../src/agent-provider-routing/index.ts";
 import { createEventLog, runMigrations } from "../src/event-log/index.ts";
 import { createBroker } from "../src/index.ts";
-import { createThreadAppender, createThreadStateStore } from "../src/threads/index.ts";
+import { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
+import { createThreadSubsystem } from "../src/threads/index.ts";
 
 const tmp = mkdtempSync(join(tmpdir(), "wuphf-branch-10-"));
 const dbPath = join(tmp, "broker.db");
@@ -29,8 +30,8 @@ const db = new BetterSqlite3(dbPath);
 runMigrations(db);
 const eventLog = createEventLog(db);
 const agentProviderRoutingStore = createAgentProviderRoutingStore(db);
-const threadState = createThreadStateStore(db);
-const threadAppender = createThreadAppender(db, eventLog, threadState);
+const receiptStore = SqliteReceiptStore.fromDatabase(db, eventLog);
+const threads = createThreadSubsystem(db, eventLog, receiptStore);
 
 const token = asApiToken("demo-token-with-enough-entropy-AAAAAAAAA");
 const agentId = asAgentId("agent_alice_001");
@@ -59,7 +60,7 @@ const broker = await createBroker({
     },
     agentProviderRoutingStore,
   },
-  threads: { appender: threadAppender, state: threadState },
+  threads,
 });
 
 let cleanupStarted = false;
@@ -90,48 +91,38 @@ const writeBody = JSON.stringify({
   ],
 });
 
-const threadId = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
 const createRevisionId = "01BRZ3NDEKTSV4RRFFQ69G5FB0";
+const threadId = createRevisionId;
 const editRevisionId = "01CRZ3NDEKTSV4RRFFQ69G5FC0";
 const initialThreadContent = { goal: "manual thread smoke", version: 1 };
 const editedThreadContent = { goal: "manual thread smoke", version: 2 };
 const threadCreateBody = JSON.stringify({
-  threadId,
   title: "Manual thread smoke",
-  createdBy: "operator@example.com",
-  createdAt: "2026-05-18T10:00:00.000Z",
-  externalRefs: { sourceUrls: ["https://example.com/manual-thread"], entityIds: ["demo:thread"] },
-  content: initialThreadContent,
+  specContent: initialThreadContent,
+  externalRefs: { source_urls: ["https://example.com/manual-thread"], entity_ids: ["demo:thread"] },
+  idempotencyKey: createRevisionId,
 });
 const threadSpecEditBody = JSON.stringify({
-  revisionId: editRevisionId,
   baseRevisionId: createRevisionId,
   baseContentHash: threadSpecContentHash(initialThreadContent),
   content: editedThreadContent,
-  contentHash: threadSpecContentHash(editedThreadContent),
-  authoredBy: "operator@example.com",
-  authoredAt: "2026-05-18T10:05:00.000Z",
+  idempotencyKey: editRevisionId,
 });
 const staleThreadSpecEditBody = JSON.stringify({
-  revisionId: "01DRZ3NDEKTSV4RRFFQ69G5FD0",
   baseRevisionId: createRevisionId,
   baseContentHash: threadSpecContentHash(initialThreadContent),
   content: { goal: "stale edit", version: 3 },
-  contentHash: threadSpecContentHash({ goal: "stale edit", version: 3 }),
-  authoredBy: "operator@example.com",
-  authoredAt: "2026-05-18T10:06:00.000Z",
+  idempotencyKey: "01DRZ3NDEKTSV4RRFFQ69G5FD0",
 });
 const closeThreadBody = JSON.stringify({
   fromStatus: "open",
   toStatus: "closed",
-  changedBy: "operator@example.com",
-  changedAt: "2026-05-18T10:10:00.000Z",
+  idempotencyKey: "01ERZ3NDEKTSV4RRFFQ69G5FE0",
 });
 const outOfTerminalThreadBody = JSON.stringify({
   fromStatus: "closed",
   toStatus: "merged",
-  changedBy: "operator@example.com",
-  changedAt: "2026-05-18T10:11:00.000Z",
+  idempotencyKey: "01FRZ3NDEKTSV4RRFFQ69G5FF0",
 });
 
 console.log("");
@@ -176,30 +167,30 @@ console.log(
 console.log("");
 console.log("# 8. Create a thread (appends thread.created + initial thread.spec_edited)");
 console.log(
-  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_thread.create_${createRevisionId}" \\\n     -d '${threadCreateBody}' \\\n     "${broker.url}/api/v1/threads"; echo`,
+  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${threadCreateBody}' \\\n     "${broker.url}/api/v1/threads"; echo`,
 );
 console.log("");
 console.log("# 9. Duplicate create idempotency key → replayed response, no duplicate event");
 console.log(
-  `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_thread.create_${createRevisionId}" \\\n     -d '${threadCreateBody}' \\\n     "${broker.url}/api/v1/threads" | head -6`,
+  `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${threadCreateBody}' \\\n     "${broker.url}/api/v1/threads" | head -6`,
 );
 console.log("");
 console.log("# 10. Accepted spec edit with matching baseRevisionId + baseContentHash");
 console.log(
-  `curl -s -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_thread.spec.edit_${editRevisionId}" \\\n     -d '${threadSpecEditBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/spec"; echo`,
+  `curl -s -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${threadSpecEditBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/spec"; echo`,
 );
 console.log("");
 console.log("# 11. Stale-base spec edit → 409");
 console.log(
-  `curl -s -i -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_thread.spec.edit_01DRZ3NDEKTSV4RRFFQ69G5FD0" \\\n     -d '${staleThreadSpecEditBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/spec" | head -1`,
+  `curl -s -i -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${staleThreadSpecEditBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/spec" | head -1`,
 );
 console.log("");
 console.log("# 12. Close thread, then prove out-of-terminal transition returns 422");
 console.log(
-  `curl -s -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_thread.status.change_01ERZ3NDEKTSV4RRFFQ69G5FE0" \\\n     -d '${closeThreadBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/status"; echo`,
+  `curl -s -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${closeThreadBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/status"; echo`,
 );
 console.log(
-  `curl -s -i -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -H "Idempotency-Key: cmd_thread.status.change_01FRZ3NDEKTSV4RRFFQ69G5FF0" \\\n     -d '${outOfTerminalThreadBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/status" | head -1`,
+  `curl -s -i -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${outOfTerminalThreadBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/status" | head -1`,
 );
 console.log("");
 console.log("# 13. Read folded projection");

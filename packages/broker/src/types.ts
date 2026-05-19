@@ -5,7 +5,7 @@ import type Database from "better-sqlite3";
 import type { CostLedger } from "./cost-ledger/index.ts";
 import type { ReceiptStore } from "./receipt-store.ts";
 import type { RunnerRouteConfig } from "./runners/route.ts";
-import type { ThreadAppender, ThreadStateStore } from "./threads/index.ts";
+import type { ThreadSubsystem } from "./threads/index.ts";
 import type { Clock, WebAuthnPolicyConfig, WebAuthnStore } from "./webauthn/types.ts";
 
 export interface BrokerLogger {
@@ -112,14 +112,12 @@ export interface BrokerConfig {
   };
   /**
    * Optional thread foundation routes. When supplied, `/api/v1/threads*`
-   * routes are mounted. Hosts construct the deps via
-   * `createThreadAppender(db, eventLog, threadState)` and
-   * `createThreadStateStore(db)`.
+   * routes are mounted. Hosts construct the cohesive handle via
+   * `createThreadSubsystem(db, eventLog, receiptStore)` so command appends,
+   * projection reads, replay, and receipt indexing share one SQLite
+   * provenance.
    */
-  readonly threads?: {
-    readonly appender: ThreadAppender;
-    readonly state: ThreadStateStore;
-  };
+  readonly threads?: ThreadSubsystem;
   /**
    * Optional agent runner routes. When supplied, POST /api/runners and
    * GET /api/runners/:id/events are mounted. The broker owns bearer-to-agent

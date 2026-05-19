@@ -5,11 +5,13 @@
 // loopback contract end-to-end. Real event payloads (`receipt.created`,
 // `approval.requested`, etc.) come in later branches; the framing — named
 // events with JSON data and `id` — is locked here so subsequent branches
-// only add event kinds, not transport mechanics.
+// only add event kinds, not transport mechanics. Thread events are
+// invalidation-only: clients MUST refetch on `ready`, reconnect, and every
+// thread event. Last-Event-ID log backfill is intentionally deferred.
 //
 // Wire format (one event):
 //
-//   id: <ulid-or-monotonic-id>
+//   id: <ready-id-or-committed-event-lsn>
 //   event: ready
 //   data: {"emittedAt":"2026-05-10T12:00:00.000Z"}
 //   <blank line>
@@ -45,8 +47,7 @@ export interface SseSessionOptions {
    */
   readonly nowIso?: string;
   /**
-   * Override the event id source. Production uses a monotonic counter
-   * (`broker_<seq>`); tests pass a fixed value to assert framing.
+   * Override the ready event id source. Thread event ids are committed LSNs.
    */
   readonly idForReady?: string;
   readonly onClose?: () => void;
@@ -66,7 +67,6 @@ export interface SseHub {
 
 export function createSseHub(): SseHub {
   const sessions = new Set<ServerResponse>();
-  let nextThreadEventId = 1;
   return {
     startSession(res: ServerResponse, opts: SseSessionOptions = {}): SseSession {
       sessions.add(res);
@@ -80,12 +80,11 @@ export function createSseHub(): SseHub {
     },
     emitThreadEvent(input: ThreadSseEmitArgs): void {
       const event: ThreadStreamEvent = {
-        id: `broker_thread_${nextThreadEventId}`,
+        id: input.headLsn,
         kind: input.kind,
         emittedAt: new Date().toISOString(),
         payload: { threadId: input.threadId, headLsn: input.headLsn },
       };
-      nextThreadEventId += 1;
       const validation = validateThreadStreamEvent(event);
       if (!validation.ok) {
         throw new Error(

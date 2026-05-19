@@ -6,8 +6,9 @@
 //                                 on parse/validation error, 413 on
 //                                 oversize body, 415 on wrong content-type.
 //   GET  /api/receipts/:id      — 200 + body on hit, 404 on miss / bad id.
-//   GET  /api/threads/:tid/receipts — list-scope-by-thread. 200 + JSON
+//   GET  /api/v1/threads/:tid/receipts — list-scope-by-thread. 200 + JSON
 //                                 array, 404 on bad thread id shape.
+//   GET  /api/threads/:tid/receipts — one-release alias for the v1 path.
 //
 // Bearer auth is enforced at the listener level (default-deny gate on
 // `/api/*`); these handlers assume the caller has already passed
@@ -33,6 +34,7 @@ import {
   ReceiptStoreBusyError,
   ReceiptStoreFullError,
   ReceiptStoreUnavailableError,
+  ReceiptThreadNotFoundError,
 } from "./receipt-store.ts";
 import type { BrokerLogger } from "./types.ts";
 import {
@@ -189,6 +191,11 @@ export async function handleReceiptCreate(
       writeJsonResponse(res, 507, JSON.stringify({ error: "store_full" }));
       return;
     }
+    if (err instanceof ReceiptThreadNotFoundError) {
+      deps.logger.warn("receipt_post_rejected", { reason: "thread_not_found" });
+      writeJsonResponse(res, 400, JSON.stringify({ error: "thread_not_found" }));
+      return;
+    }
     if (writeStorageErrorResponse(res, err, deps.logger, "receipt_post_rejected")) {
       return;
     }
@@ -254,10 +261,11 @@ export async function handleThreadReceiptsList(
   res: ServerResponse,
   deps: ReceiptRouteDeps,
 ): Promise<void> {
-  // /api/threads/:tid/receipts — extract :tid and require an exact match.
+  // /api/v1/threads/:tid/receipts — extract :tid and require an exact match.
+  // /api/threads/:tid/receipts remains a thin alias for one release.
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const pathname = url.pathname;
-  const prefix = "/api/threads/";
+  const prefix = pathname.startsWith("/api/v1/threads/") ? "/api/v1/threads/" : "/api/threads/";
   const suffix = "/receipts";
   if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) {
     notFoundJson(res);
@@ -348,7 +356,7 @@ export async function handleThreadReceiptsList(
     page.nextCursor === null
       ? {}
       : {
-          Link: buildThreadReceiptsNextLink(threadId, page.nextCursor, linkLimit),
+          Link: buildThreadReceiptsNextLink(prefix, threadId, page.nextCursor, linkLimit),
         };
   writeJsonResponse(res, 200, body, headers);
 }
@@ -367,6 +375,7 @@ function parseListLimitParam(
 }
 
 function buildThreadReceiptsNextLink(
+  prefix: "/api/v1/threads/" | "/api/threads/",
   threadId: ThreadId,
   cursor: string,
   limit: string | undefined,
@@ -375,7 +384,7 @@ function buildThreadReceiptsNextLink(
   if (limit !== undefined) {
     query.push(`limit=${encodeURIComponent(limit)}`);
   }
-  return `</api/threads/${encodeURIComponent(threadId)}/receipts?${query.join("&")}>; rel="next"`;
+  return `<${prefix}${encodeURIComponent(threadId)}/receipts?${query.join("&")}>; rel="next"`;
 }
 
 function notFoundJson(res: ServerResponse): void {
@@ -395,6 +404,11 @@ function writeStorageErrorResponse(
   logger: BrokerLogger,
   rejectedEvent: string,
 ): boolean {
+  if (err instanceof ReceiptStoreFullError) {
+    logger.warn(rejectedEvent, { reason: "store_full" });
+    writeJsonResponse(res, 507, JSON.stringify({ error: "store_full" }));
+    return true;
+  }
   if (err instanceof ReceiptStoreBusyError) {
     logger.warn(rejectedEvent, { reason: "store_busy" });
     writeJsonResponse(res, 503, JSON.stringify({ error: "store_busy" }), {

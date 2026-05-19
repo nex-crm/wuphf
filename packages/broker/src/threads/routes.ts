@@ -2,17 +2,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   asIdempotencyKey,
-  asSha256Hex,
   asSignerIdentity,
   asThreadId,
   asThreadSpecRevisionId,
+  canonicalJSON,
   type EventLsn,
-  type JsonValue,
-  type ReceiptId,
-  type ReceiptSnapshot,
+  routeErrorToJsonValue,
   type Sha256Hex,
   type SignerIdentity,
-  type TaskId,
   THREAD_STATUS_VALUES,
   type Thread,
   type ThreadCreateCommand,
@@ -21,17 +18,20 @@ import {
   type ThreadSpecEditCommand,
   type ThreadStatus,
   type ThreadStatusChangeCommand,
-  threadToJsonValue,
+  threadCreateRequestFromJson,
+  threadGetResponseToJsonValue,
+  threadListResponseToJsonValue,
+  threadMutationResponseToJsonValue,
+  threadSpecContentHash,
+  threadSpecEditRequestFromJson,
+  threadStatusChangeRequestFromJson,
   validateThread,
-  validateThreadReceiptIndex,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
 
 import {
   InvalidListCursorError,
   InvalidListLimitError,
-  MAX_LIST_LIMIT,
-  type ReceiptStore,
   ReceiptStoreBusyError,
   ReceiptStoreFullError,
   ReceiptStoreUnavailableError,
@@ -46,6 +46,7 @@ import {
 } from "./appender.ts";
 import {
   type IdempotencyParseError,
+  type ParsedIdempotencyKey,
   parseThreadIdempotencyKey,
   type ThreadCommand,
 } from "./idempotency.ts";
@@ -54,15 +55,20 @@ import {
   type ThreadStateStore,
   threadStateRowToThread,
 } from "./projections.ts";
+import type { ThreadReceiptIndexStore } from "./receipt-index.ts";
 
 const MAX_THREAD_BODY_BYTES = 512 * 1_024;
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const THREAD_STATUS_SET: ReadonlySet<string> = new Set<string>(THREAD_STATUS_VALUES);
+const ROUTE_SIGNER: SignerIdentity = asSignerIdentity("broker");
+const EMPTY_EXTERNAL_REFS: ThreadExternalRefs = Object.freeze({
+  sourceUrls: Object.freeze([]),
+  entityIds: Object.freeze([]),
+});
 
 export interface ThreadRouteDeps {
   readonly appender: ThreadAppender;
   readonly state: ThreadStateStore;
-  readonly receiptStore: ReceiptStore;
+  readonly receiptIndex: ThreadReceiptIndexStore;
   readonly logger: BrokerLogger;
   readonly nowMs: () => number;
   readonly emitThreadEvent: (event: ThreadRouteStreamEvent) => void;
@@ -82,7 +88,7 @@ export async function handleThreadRoute(
 ): Promise<boolean> {
   if (pathname === "/api/v1/threads") {
     if (req.method === "GET" || req.method === "HEAD") {
-      await handleThreadList(req, res, deps);
+      handleThreadList(req, res, deps);
       return true;
     }
     if (req.method === "POST") {
@@ -103,7 +109,7 @@ export async function handleThreadRoute(
       methodNotAllowed(res, "GET");
       return true;
     }
-    await handleThreadGet(res, deps, parts[0] ?? "");
+    handleThreadGet(res, deps, parts[0] ?? "");
     return true;
   }
   if (parts.length === 2 && parts[1] === "spec") {
@@ -126,35 +132,30 @@ export async function handleThreadRoute(
   return true;
 }
 
-async function handleThreadList(
-  req: IncomingMessage,
-  res: ServerResponse,
-  deps: ThreadRouteDeps,
-): Promise<void> {
+function handleThreadList(req: IncomingMessage, res: ServerResponse, deps: ThreadRouteDeps): void {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const status = parseStatusFilter(url.searchParams);
   if (!status.ok) {
-    writeJson(res, 400, { error: "invalid_status", reason: status.reason });
+    writeRouteError(res, 400, "invalid_status", status.reason);
     return;
   }
-  const rows = deps.state.list(status.status === undefined ? undefined : { status: status.status });
   try {
-    const threads: ThreadResponse[] = [];
-    for (const row of rows) {
-      threads.push(await threadResponseFromRow(row, deps.receiptStore));
-    }
-    writeJson(res, 200, { threads });
+    const rows = deps.state.list(
+      status.status === undefined ? undefined : { status: status.status },
+    );
+    const threads = rows.map((row) => threadFromRow(row, deps.receiptIndex));
+    writeJsonValue(res, 200, threadListResponseToJsonValue({ threads }));
   } catch (err) {
     if (writeStorageErrorResponse(res, err, deps.logger, "thread_list_rejected")) return;
     throw err;
   }
 }
 
-async function handleThreadGet(
+function handleThreadGet(
   res: ServerResponse,
   deps: ThreadRouteDeps,
   encodedThreadId: string,
-): Promise<void> {
+): void {
   const threadId = parseThreadIdPath(encodedThreadId);
   if (threadId === null) {
     notFound(res);
@@ -166,7 +167,11 @@ async function handleThreadGet(
     return;
   }
   try {
-    writeJson(res, 200, await threadResponseFromRow(row, deps.receiptStore));
+    writeJsonValue(
+      res,
+      200,
+      threadGetResponseToJsonValue({ thread: threadFromRow(row, deps.receiptIndex) }),
+    );
   } catch (err) {
     if (writeStorageErrorResponse(res, err, deps.logger, "thread_get_rejected")) return;
     throw err;
@@ -178,38 +183,45 @@ async function handleThreadCreate(
   res: ServerResponse,
   deps: ThreadRouteDeps,
 ): Promise<void> {
-  const idem = parseThreadIdempotencyKey(
-    headerString(req.headers["idempotency-key"]),
-    "thread.create",
-  );
-  if (!idem.ok) {
-    writeIdempotencyError(res, idem.error, deps.logger, "thread_create");
-    return;
-  }
   if (!ensureJsonContentType(req, res)) return;
-
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readBody(req, res, MAX_THREAD_BODY_BYTES)) as unknown;
+    parsed = await readJsonBody(req, res);
   } catch (err) {
-    if (!res.writableEnded) {
-      writeJson(res, 400, { error: "invalid_json", reason: errorMessage(err) });
-    }
+    writeBodyReadError(res, err);
     return;
   }
 
   let command: ThreadCreateCommand;
+  let idempotency: ParsedIdempotencyKey;
   try {
-    command = threadCreateCommandFromRequest(parsed, idem.key.ulid);
+    const request = threadCreateRequestFromJson(parsed);
+    const parsedIdempotency = parseThreadIdempotencyKey(request.idempotencyKey, "thread.create");
+    if (!parsedIdempotency.ok) {
+      writeIdempotencyError(res, parsedIdempotency.error, deps.logger, "thread_create");
+      return;
+    }
+    idempotency = parsedIdempotency.key;
+    const now = routeDate(deps.nowMs());
+    command = {
+      kind: "thread.create",
+      idempotencyKey: asIdempotencyKey(idempotency.ulid),
+      threadId: asThreadId(idempotency.ulid),
+      title: request.title,
+      createdBy: ROUTE_SIGNER,
+      createdAt: now,
+      externalRefs: request.externalRefs ?? EMPTY_EXTERNAL_REFS,
+      content: request.specContent,
+    };
   } catch (err) {
-    writeJson(res, 400, { error: "invalid_thread_command", reason: errorMessage(err) });
+    writeRouteError(res, 400, "invalid_thread_command", errorMessage(err));
     return;
   }
 
   try {
     const result = deps.appender.appendCreateIdempotent({
       command,
-      idempotency: idem.key,
+      idempotency,
       nowMs: deps.nowMs(),
       render: renderThreadCommandAccepted(201),
     });
@@ -233,34 +245,42 @@ async function handleThreadSpecPatch(
     notFound(res);
     return;
   }
-  const idem = parseThreadIdempotencyKey(
-    headerString(req.headers["idempotency-key"]),
-    "thread.spec.edit",
-  );
-  if (!idem.ok) {
-    writeIdempotencyError(res, idem.error, deps.logger, "thread_spec_edit");
-    return;
-  }
   if (!ensureJsonContentType(req, res)) return;
-
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readBody(req, res, MAX_THREAD_BODY_BYTES)) as unknown;
+    parsed = await readJsonBody(req, res);
   } catch (err) {
-    if (!res.writableEnded) {
-      writeJson(res, 400, { error: "invalid_json", reason: errorMessage(err) });
-    }
+    writeBodyReadError(res, err);
     return;
   }
 
   let command: ThreadSpecEditCommand;
   let baseContentHash: Sha256Hex;
+  let idempotency: ParsedIdempotencyKey;
   try {
-    const parsedCommand = threadSpecEditCommandFromRequest(parsed, threadId, idem.key.ulid);
-    command = parsedCommand.command;
-    baseContentHash = parsedCommand.baseContentHash;
+    const request = threadSpecEditRequestFromJson(parsed);
+    const parsedIdempotency = parseThreadIdempotencyKey(request.idempotencyKey, "thread.spec.edit");
+    if (!parsedIdempotency.ok) {
+      writeIdempotencyError(res, parsedIdempotency.error, deps.logger, "thread_spec_edit");
+      return;
+    }
+    idempotency = parsedIdempotency.key;
+    const content = request.content;
+    const contentHash = threadSpecContentHash(content);
+    command = {
+      kind: "thread.spec.edit",
+      idempotencyKey: asIdempotencyKey(idempotency.ulid),
+      threadId,
+      revisionId: asThreadSpecRevisionId(idempotency.ulid),
+      baseRevisionId: request.baseRevisionId,
+      content,
+      contentHash,
+      authoredBy: ROUTE_SIGNER,
+      authoredAt: routeDate(deps.nowMs()),
+    };
+    baseContentHash = request.baseContentHash;
   } catch (err) {
-    writeJson(res, 400, { error: "invalid_thread_command", reason: errorMessage(err) });
+    writeRouteError(res, 400, "invalid_thread_command", errorMessage(err));
     return;
   }
 
@@ -268,7 +288,7 @@ async function handleThreadSpecPatch(
     const result = deps.appender.appendSpecEditIdempotent({
       command,
       baseContentHash,
-      idempotency: idem.key,
+      idempotency,
       nowMs: deps.nowMs(),
       render: renderThreadCommandAccepted(200),
     });
@@ -292,38 +312,46 @@ async function handleThreadStatusPatch(
     notFound(res);
     return;
   }
-  const idem = parseThreadIdempotencyKey(
-    headerString(req.headers["idempotency-key"]),
-    "thread.status.change",
-  );
-  if (!idem.ok) {
-    writeIdempotencyError(res, idem.error, deps.logger, "thread_status_change");
-    return;
-  }
   if (!ensureJsonContentType(req, res)) return;
-
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readBody(req, res, MAX_THREAD_BODY_BYTES)) as unknown;
+    parsed = await readJsonBody(req, res);
   } catch (err) {
-    if (!res.writableEnded) {
-      writeJson(res, 400, { error: "invalid_json", reason: errorMessage(err) });
-    }
+    writeBodyReadError(res, err);
     return;
   }
 
   let command: ThreadStatusChangeCommand;
+  let idempotency: ParsedIdempotencyKey;
   try {
-    command = threadStatusChangeCommandFromRequest(parsed, threadId, idem.key.ulid);
+    const request = threadStatusChangeRequestFromJson(parsed);
+    const parsedIdempotency = parseThreadIdempotencyKey(
+      request.idempotencyKey,
+      "thread.status.change",
+    );
+    if (!parsedIdempotency.ok) {
+      writeIdempotencyError(res, parsedIdempotency.error, deps.logger, "thread_status_change");
+      return;
+    }
+    idempotency = parsedIdempotency.key;
+    command = {
+      kind: "thread.status.change",
+      idempotencyKey: asIdempotencyKey(idempotency.ulid),
+      threadId,
+      fromStatus: request.fromStatus,
+      toStatus: request.toStatus,
+      changedBy: ROUTE_SIGNER,
+      changedAt: routeDate(deps.nowMs()),
+    };
   } catch (err) {
-    writeJson(res, 400, { error: "invalid_thread_command", reason: errorMessage(err) });
+    writeRouteError(res, 400, "invalid_thread_command", errorMessage(err));
     return;
   }
 
   try {
     const result = deps.appender.appendStatusChangeIdempotent({
       command,
-      idempotency: idem.key,
+      idempotency,
       nowMs: deps.nowMs(),
       render: renderThreadCommandAccepted(200),
     });
@@ -339,6 +367,8 @@ async function handleThreadStatusPatch(
 function renderThreadCommandAccepted(statusCode: number): (applied: {
   readonly threadId: ThreadId;
   readonly headLsn: EventLsn;
+  readonly revisionId: string;
+  readonly contentHash: Sha256Hex;
 }) => {
   readonly statusCode: number;
   readonly payload: Buffer;
@@ -346,7 +376,14 @@ function renderThreadCommandAccepted(statusCode: number): (applied: {
   return (applied) => ({
     statusCode,
     payload: Buffer.from(
-      JSON.stringify({ threadId: applied.threadId, headLsn: applied.headLsn }),
+      canonicalJSON(
+        threadMutationResponseToJsonValue({
+          threadId: applied.threadId,
+          headLsn: applied.headLsn,
+          revisionId: asThreadSpecRevisionId(applied.revisionId),
+          contentHash: applied.contentHash,
+        }),
+      ),
       "utf8",
     ),
   });
@@ -364,60 +401,14 @@ function threadRouteStreamEventFromApplied(applied: {
   };
 }
 
-interface ThreadResponse {
-  readonly thread: Record<string, unknown>;
-  readonly head_lsn: EventLsn;
-  readonly receipt_ids: readonly ReceiptId[];
+function threadFromRow(row: ThreadStateRow, receiptIndex: ThreadReceiptIndexStore): Thread {
+  const refs = receiptIndex.refsForThread(row.id);
+  const thread = threadStateRowToThread(row, refs.taskIds);
+  assertThreadValid(thread);
+  return thread;
 }
 
-async function threadResponseFromRow(
-  row: ThreadStateRow,
-  receiptStore: ReceiptStore,
-): Promise<ThreadResponse> {
-  const derived = await deriveThreadReceiptRefs(receiptStore, row.id);
-  const thread = threadStateRowToThread(row, derived.taskIds);
-  assertThreadValid(thread, derived.receipts);
-  return {
-    thread: threadToJsonValue(thread),
-    head_lsn: row.headLsn,
-    receipt_ids: derived.receiptIds,
-  };
-}
-
-async function deriveThreadReceiptRefs(
-  receiptStore: ReceiptStore,
-  threadId: ThreadId,
-): Promise<{
-  readonly receipts: readonly ReceiptSnapshot[];
-  readonly receiptIds: readonly ReceiptId[];
-  readonly taskIds: readonly TaskId[];
-}> {
-  const receipts: ReceiptSnapshot[] = [];
-  const receiptIds: ReceiptId[] = [];
-  const taskIds: TaskId[] = [];
-  const seenTaskIds = new Set<string>();
-  let cursor: string | undefined;
-  for (;;) {
-    const page = await receiptStore.list({
-      threadId,
-      limit: MAX_LIST_LIMIT,
-      ...(cursor === undefined ? {} : { cursor }),
-    });
-    for (const receipt of page.items) {
-      receipts.push(receipt);
-      receiptIds.push(receipt.id);
-      if (!seenTaskIds.has(receipt.taskId)) {
-        seenTaskIds.add(receipt.taskId);
-        taskIds.push(receipt.taskId);
-      }
-    }
-    if (page.nextCursor === null) break;
-    cursor = page.nextCursor;
-  }
-  return { receipts, receiptIds, taskIds };
-}
-
-function assertThreadValid(thread: Thread, receipts: readonly ReceiptSnapshot[]): void {
+function assertThreadValid(thread: Thread): void {
   const threadValidation = validateThread(thread);
   if (!threadValidation.ok) {
     throw new Error(
@@ -426,100 +417,6 @@ function assertThreadValid(thread: Thread, receipts: readonly ReceiptSnapshot[])
         .join("; ")}`,
     );
   }
-  const indexValidation = validateThreadReceiptIndex(thread, receipts);
-  if (!indexValidation.ok) {
-    throw new Error(
-      `thread receipt index failed validation: ${indexValidation.errors
-        .map((error) => `${error.path}: ${error.message}`)
-        .join("; ")}`,
-    );
-  }
-}
-
-function threadCreateCommandFromRequest(
-  value: unknown,
-  idempotencyKey: string,
-): ThreadCreateCommand {
-  const record = requireRecord(value, "thread.create");
-  assertKnownKeys(record, "thread.create", [
-    "threadId",
-    "title",
-    "createdBy",
-    "createdAt",
-    "externalRefs",
-    "content",
-  ]);
-  return {
-    kind: "thread.create",
-    idempotencyKey: asIdempotencyKey(idempotencyKey),
-    threadId: asThreadId(requiredString(record, "threadId", "thread.create")),
-    title: requiredString(record, "title", "thread.create"),
-    createdBy: parseSignerIdentity(record, "createdBy", "thread.create"),
-    createdAt: parseIsoDate(record, "createdAt", "thread.create"),
-    externalRefs: parseThreadExternalRefs(requiredField(record, "externalRefs", "thread.create")),
-    content: requiredField(record, "content", "thread.create") as JsonValue,
-  };
-}
-
-function threadSpecEditCommandFromRequest(
-  value: unknown,
-  pathThreadId: ThreadId,
-  idempotencyKey: string,
-): { readonly command: ThreadSpecEditCommand; readonly baseContentHash: Sha256Hex } {
-  const record = requireRecord(value, "thread.spec.edit");
-  assertKnownKeys(record, "thread.spec.edit", [
-    "threadId",
-    "revisionId",
-    "baseRevisionId",
-    "baseContentHash",
-    "content",
-    "contentHash",
-    "authoredBy",
-    "authoredAt",
-  ]);
-  assertOptionalThreadIdMatchesPath(record, pathThreadId, "thread.spec.edit");
-  const command: ThreadSpecEditCommand = {
-    kind: "thread.spec.edit",
-    idempotencyKey: asIdempotencyKey(idempotencyKey),
-    threadId: pathThreadId,
-    revisionId: asThreadSpecRevisionId(requiredString(record, "revisionId", "thread.spec.edit")),
-    baseRevisionId: asThreadSpecRevisionId(
-      requiredString(record, "baseRevisionId", "thread.spec.edit"),
-    ),
-    content: requiredField(record, "content", "thread.spec.edit") as JsonValue,
-    contentHash: asSha256Hex(requiredString(record, "contentHash", "thread.spec.edit")),
-    authoredBy: parseSignerIdentity(record, "authoredBy", "thread.spec.edit"),
-    authoredAt: parseIsoDate(record, "authoredAt", "thread.spec.edit"),
-  };
-  return {
-    command,
-    baseContentHash: asSha256Hex(requiredString(record, "baseContentHash", "thread.spec.edit")),
-  };
-}
-
-function threadStatusChangeCommandFromRequest(
-  value: unknown,
-  pathThreadId: ThreadId,
-  idempotencyKey: string,
-): ThreadStatusChangeCommand {
-  const record = requireRecord(value, "thread.status.change");
-  assertKnownKeys(record, "thread.status.change", [
-    "threadId",
-    "fromStatus",
-    "toStatus",
-    "changedBy",
-    "changedAt",
-  ]);
-  assertOptionalThreadIdMatchesPath(record, pathThreadId, "thread.status.change");
-  return {
-    kind: "thread.status.change",
-    idempotencyKey: asIdempotencyKey(idempotencyKey),
-    threadId: pathThreadId,
-    fromStatus: parseThreadStatus(record, "fromStatus", "thread.status.change"),
-    toStatus: parseThreadStatus(record, "toStatus", "thread.status.change"),
-    changedBy: parseSignerIdentity(record, "changedBy", "thread.status.change"),
-    changedAt: parseIsoDate(record, "changedAt", "thread.status.change"),
-  };
 }
 
 function parseStatusFilter(
@@ -546,123 +443,6 @@ function parseThreadIdPath(encoded: string): ThreadId | null {
   }
 }
 
-function assertOptionalThreadIdMatchesPath(
-  record: Readonly<Record<string, unknown>>,
-  pathThreadId: ThreadId,
-  context: string,
-): void {
-  if (!Object.hasOwn(record, "threadId")) return;
-  const bodyThreadId = asThreadId(requiredString(record, "threadId", context));
-  if (bodyThreadId !== pathThreadId) {
-    throw new Error(`${context}.threadId: must match path thread id`);
-  }
-}
-
-function parseThreadExternalRefs(value: unknown): ThreadExternalRefs {
-  const record = requireRecord(value, "externalRefs");
-  assertKnownKeys(record, "externalRefs", ["sourceUrls", "entityIds"]);
-  return {
-    sourceUrls: requiredStringArray(record, "sourceUrls", "externalRefs"),
-    entityIds: requiredStringArray(record, "entityIds", "externalRefs"),
-  };
-}
-
-function parseSignerIdentity(
-  record: Readonly<Record<string, unknown>>,
-  key: string,
-  context: string,
-): SignerIdentity {
-  return asSignerIdentity(requiredString(record, key, context));
-}
-
-function parseThreadStatus(
-  record: Readonly<Record<string, unknown>>,
-  key: string,
-  context: string,
-): ThreadStatus {
-  const value = requiredString(record, key, context);
-  if (!THREAD_STATUS_SET.has(value)) {
-    throw new Error(`${context}.${key}: must be a valid thread status`);
-  }
-  return value as ThreadStatus;
-}
-
-function parseIsoDate(
-  record: Readonly<Record<string, unknown>>,
-  key: string,
-  context: string,
-): Date {
-  const raw = requiredString(record, key, context);
-  if (!ISO_DATE_RE.test(raw)) {
-    throw new Error(`${context}.${key}: must be an ISO 8601 instant`);
-  }
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime()) || date.toISOString() !== raw) {
-    throw new Error(`${context}.${key}: must be a valid ISO 8601 instant`);
-  }
-  return date;
-}
-
-function requireRecord(value: unknown, context: string): Readonly<Record<string, unknown>> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${context}: must be a JSON object`);
-  }
-  return value as Readonly<Record<string, unknown>>;
-}
-
-function assertKnownKeys(
-  record: Readonly<Record<string, unknown>>,
-  context: string,
-  allowed: readonly string[],
-): void {
-  const allowedSet = new Set<string>(allowed);
-  for (const key of Object.keys(record)) {
-    if (!allowedSet.has(key)) {
-      throw new Error(`${context}.${key}: is not allowed`);
-    }
-  }
-}
-
-function requiredField(
-  record: Readonly<Record<string, unknown>>,
-  key: string,
-  context: string,
-): unknown {
-  if (!Object.hasOwn(record, key) || record[key] === undefined) {
-    throw new Error(`${context}.${key}: is required`);
-  }
-  return record[key];
-}
-
-function requiredString(
-  record: Readonly<Record<string, unknown>>,
-  key: string,
-  context: string,
-): string {
-  const value = requiredField(record, key, context);
-  if (typeof value !== "string") {
-    throw new Error(`${context}.${key}: must be a string`);
-  }
-  return value;
-}
-
-function requiredStringArray(
-  record: Readonly<Record<string, unknown>>,
-  key: string,
-  context: string,
-): readonly string[] {
-  const value = requiredField(record, key, context);
-  if (!Array.isArray(value)) {
-    throw new Error(`${context}.${key}: must be an array`);
-  }
-  return value.map((item, index) => {
-    if (typeof item !== "string") {
-      throw new Error(`${context}.${key}.${index}: must be a string`);
-    }
-    return item;
-  });
-}
-
 function writeThreadAppenderError(
   res: ServerResponse,
   err: unknown,
@@ -671,7 +451,7 @@ function writeThreadAppenderError(
 ): void {
   if (err instanceof ThreadCommandValidationError) {
     logger.warn(rejectedEvent, { reason: "invalid_command" });
-    writeJson(res, 400, { error: "invalid_thread_command", reason: err.message });
+    writeRouteError(res, 400, "invalid_thread_command", err.message);
     return;
   }
   if (err instanceof ThreadNotFoundError) {
@@ -681,12 +461,12 @@ function writeThreadAppenderError(
   }
   if (err instanceof ThreadConflictError) {
     logger.warn(rejectedEvent, { reason: err.code });
-    writeJson(res, 409, { error: err.code });
+    writeRouteError(res, 409, err.code);
     return;
   }
   if (err instanceof ThreadTerminalTransitionError) {
     logger.warn(rejectedEvent, { reason: "terminal_status_transition" });
-    writeJson(res, 422, { error: "terminal_status_transition" });
+    writeRouteError(res, 422, "terminal_status_transition");
     return;
   }
   if (writeSqliteErrorResponse(res, err, logger, rejectedEvent)) return;
@@ -701,22 +481,22 @@ function writeStorageErrorResponse(
 ): boolean {
   if (err instanceof ReceiptStoreFullError) {
     logger.warn(rejectedEvent, { reason: "store_full" });
-    writeJson(res, 507, { error: "store_full" });
+    writeRouteError(res, 507, "store_full");
     return true;
   }
   if (err instanceof ReceiptStoreBusyError) {
     logger.warn(rejectedEvent, { reason: "store_busy" });
-    writeJson(res, 503, { error: "store_busy" }, { "Retry-After": "1" });
+    writeRouteError(res, 503, "store_busy", undefined, { "Retry-After": "1" }, 1_000);
     return true;
   }
   if (err instanceof ReceiptStoreUnavailableError) {
     logger.error(rejectedEvent, { reason: "storage_error" });
-    writeJson(res, 503, { error: "storage_error" });
+    writeRouteError(res, 503, "storage_error");
     return true;
   }
   if (err instanceof InvalidListCursorError || err instanceof InvalidListLimitError) {
     logger.warn(rejectedEvent, { reason: "receipt_index_invalid" });
-    writeJson(res, 500, { error: "receipt_index_invalid" });
+    writeRouteError(res, 500, "receipt_index_invalid");
     return true;
   }
   return writeSqliteErrorResponse(res, err, logger, rejectedEvent);
@@ -730,17 +510,17 @@ function writeSqliteErrorResponse(
 ): boolean {
   if (isSqliteFullError(err)) {
     logger.warn(rejectedEvent, { reason: "store_full" });
-    writeJson(res, 507, { error: "store_full" });
+    writeRouteError(res, 507, "store_full");
     return true;
   }
   if (isSqliteBusyError(err)) {
     logger.warn(rejectedEvent, { reason: "store_busy" });
-    writeJson(res, 503, { error: "store_busy" }, { "Retry-After": "1" });
+    writeRouteError(res, 503, "store_busy", undefined, { "Retry-After": "1" }, 1_000);
     return true;
   }
   if (isSqliteUnavailableError(err)) {
     logger.error(rejectedEvent, { reason: "storage_error" });
-    writeJson(res, 503, { error: "storage_error" });
+    writeRouteError(res, 503, "storage_error");
     return true;
   }
   return false;
@@ -781,16 +561,22 @@ function writeIdempotencyError(
 ): void {
   logger.warn(`${routeName}_rejected`, { reason: `idempotency_${err.code}` });
   if (err.code === "missing") {
-    writeJson(res, 400, { error: "idempotency_key_required" });
+    writeRouteError(res, 400, "idempotency_key_required");
     return;
   }
-  writeJson(res, 400, { error: "idempotency_key_invalid", reason: err });
+  writeRouteError(res, 400, "idempotency_key_invalid", idempotencyErrorMessage(err));
+}
+
+function idempotencyErrorMessage(err: Exclude<IdempotencyParseError, { code: "missing" }>): string {
+  if (err.code === "malformed") return err.reason;
+  if (err.code === "unknown_command") return `unknown command ${err.command}`;
+  return `expected ${err.expected}, got ${err.actual}`;
 }
 
 function ensureJsonContentType(req: IncomingMessage, res: ServerResponse): boolean {
   const contentType = req.headers["content-type"];
   if (typeof contentType !== "string" || !isJsonMediaType(contentType)) {
-    writeJson(res, 415, { error: "unsupported_media_type" });
+    writeRouteError(res, 415, "unsupported_media_type");
     return false;
   }
   return true;
@@ -800,6 +586,10 @@ function isJsonMediaType(value: string): boolean {
   const semi = value.indexOf(";");
   const head = (semi === -1 ? value : value.slice(0, semi)).trim().toLowerCase();
   return head === "application/json";
+}
+
+async function readJsonBody(req: IncomingMessage, res: ServerResponse): Promise<unknown> {
+  return JSON.parse(await readBody(req, res, MAX_THREAD_BODY_BYTES)) as unknown;
 }
 
 function readBody(req: IncomingMessage, res: ServerResponse, maxBytes: number): Promise<string> {
@@ -817,8 +607,7 @@ function readBody(req: IncomingMessage, res: ServerResponse, maxBytes: number): 
       if (receivedBytes > maxBytes) {
         req.pause();
         if (!res.writableEnded) {
-          res.writeHead(413, { "Content-Type": "text/plain", Connection: "close" });
-          res.end("body_too_large");
+          writeRouteError(res, 413, "body_too_large", undefined, { Connection: "close" });
         }
         finish(() => rejectFn(new Error("body_too_large")));
         return;
@@ -831,19 +620,29 @@ function readBody(req: IncomingMessage, res: ServerResponse, maxBytes: number): 
   });
 }
 
-function headerString(value: string | string[] | undefined): string | undefined {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
-  return undefined;
+function writeBodyReadError(res: ServerResponse, err: unknown): void {
+  if (res.writableEnded) return;
+  writeRouteError(res, 400, "invalid_json", errorMessage(err));
 }
 
-function writeJson(
+function routeDate(nowMs: number): Date {
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+    throw new Error(`thread route clock returned invalid timestamp: ${nowMs}`);
+  }
+  const date = new Date(nowMs);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`thread route clock returned invalid timestamp: ${nowMs}`);
+  }
+  return date;
+}
+
+function writeJsonValue(
   res: ServerResponse,
   status: number,
-  body: unknown,
+  body: Readonly<Record<string, unknown>>,
   extraHeaders: Record<string, string> = {},
 ): void {
-  const text = JSON.stringify(body);
+  const text = canonicalJSON(body);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
@@ -868,17 +667,28 @@ function writeJsonRaw(
   res.end(payload);
 }
 
+function writeRouteError(
+  res: ServerResponse,
+  status: number,
+  error: string,
+  message?: string,
+  extraHeaders: Record<string, string> = {},
+  retryAfterMs?: number,
+): void {
+  writeJsonValue(
+    res,
+    status,
+    routeErrorToJsonValue({ error, ...(message === undefined ? {} : { message }), retryAfterMs }),
+    extraHeaders,
+  );
+}
+
 function notFound(res: ServerResponse): void {
-  writeJson(res, 404, { error: "not_found" });
+  writeRouteError(res, 404, "not_found");
 }
 
 function methodNotAllowed(res: ServerResponse, allow: string): void {
-  res.writeHead(405, {
-    Allow: allow,
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-  });
-  res.end(JSON.stringify({ error: "method_not_allowed" }));
+  writeRouteError(res, 405, "method_not_allowed", undefined, { Allow: allow });
 }
 
 function errorMessage(err: unknown): string {

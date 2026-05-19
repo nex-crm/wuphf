@@ -8,16 +8,17 @@ import {
   type ThreadId,
   type ThreadSpecEditCommand,
   type ThreadSpecEditedAuditPayload,
+  type ThreadSpecRevisionId,
   type ThreadStatus,
   type ThreadStatusChangeCommand,
   type ThreadStatusChangedAuditPayload,
   type ThreadValidationError,
-  threadAuditPayloadFromJsonValue,
   threadAuditPayloadToBytes,
   threadSpecContentHash,
   validateThreadCommand,
-  validateThreadForeignKeys,
+  validateThreadSpecEditedAuditPayload,
   validateThreadSpecRevisionChain,
+  validateThreadStatusChangedAuditPayload,
   validateThreadStatusFold,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
@@ -29,6 +30,8 @@ import type { ThreadStateStore } from "./projections.ts";
 export interface AppliedThreadCommand {
   readonly threadId: ThreadId;
   readonly headLsn: EventLsn;
+  readonly revisionId: ThreadSpecRevisionId;
+  readonly contentHash: Sha256Hex;
   readonly streamKind: "thread.created" | "thread.updated";
 }
 
@@ -87,7 +90,9 @@ export class ThreadNotFoundError extends Error {
 
 export class ThreadConflictError extends Error {
   override readonly name = "ThreadConflictError";
-  constructor(readonly code: "thread_exists" | "stale_spec_base" | "status_mismatch") {
+  constructor(
+    readonly code: "thread_exists" | "revision_exists" | "stale_spec_base" | "status_mismatch",
+  ) {
     super(code);
   }
 }
@@ -102,22 +107,6 @@ export class ThreadTerminalTransitionError extends Error {
 interface IdempotencyRow {
   readonly statusCode: number;
   readonly responsePayload: Buffer;
-}
-
-interface ThreadEventLogRow {
-  readonly lsn: number;
-  readonly tsMs: number;
-  readonly type: "thread.created" | "thread.spec_edited" | "thread.status_changed";
-  readonly payload: Buffer;
-}
-
-interface FoldedThreadLog {
-  readonly existingThreadIds: ReadonlySet<ThreadId>;
-  readonly created: ThreadCreatedAuditPayload | null;
-  readonly specEdits: readonly ThreadSpecEditedAuditPayload[];
-  readonly statusChanges: readonly ThreadStatusChangedAuditPayload[];
-  readonly currentSpec: ThreadSpecEditedAuditPayload | null;
-  readonly currentStatus: ThreadStatus | null;
 }
 
 export function createThreadAppender(
@@ -135,56 +124,6 @@ export function createThreadAppender(
        (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
-  const threadEventsStmt = db.prepare<[], ThreadEventLogRow>(
-    `SELECT lsn, ts_ms AS tsMs, type, payload
-     FROM event_log
-     WHERE type IN ('thread.created', 'thread.spec_edited', 'thread.status_changed')
-     ORDER BY lsn ASC`,
-  );
-
-  const foldThreadLog = (threadId: ThreadId): FoldedThreadLog => {
-    const existingThreadIds = new Set<ThreadId>();
-    let created: ThreadCreatedAuditPayload | null = null;
-    const specEdits: ThreadSpecEditedAuditPayload[] = [];
-    const statusChanges: ThreadStatusChangedAuditPayload[] = [];
-    let currentSpec: ThreadSpecEditedAuditPayload | null = null;
-    let currentStatus: ThreadStatus | null = null;
-
-    for (const row of threadEventsStmt.all()) {
-      const parsed = JSON.parse(row.payload.toString("utf8")) as unknown;
-      if (row.type === "thread.created") {
-        const payload = parsedThreadCreatedPayload(parsed);
-        existingThreadIds.add(payload.threadId);
-        if (payload.threadId === threadId) {
-          created = payload;
-          currentStatus = "open";
-        }
-        continue;
-      }
-      if (row.type === "thread.spec_edited") {
-        const payload = parsedThreadSpecEditedPayload(parsed);
-        if (payload.threadId === threadId) {
-          specEdits.push(payload);
-          currentSpec = payload;
-        }
-        continue;
-      }
-      const payload = parsedThreadStatusChangedPayload(parsed);
-      if (payload.threadId === threadId) {
-        statusChanges.push(payload);
-        currentStatus = payload.toStatus;
-      }
-    }
-
-    return {
-      existingThreadIds,
-      created,
-      specEdits,
-      statusChanges,
-      currentSpec,
-      currentStatus,
-    };
-  };
 
   const appendCreateInner = (args: ThreadCreateIdempotentArgs): IdempotentThreadAppendResult => {
     const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
@@ -199,8 +138,7 @@ export function createThreadAppender(
     assertIdempotencyMatches(args.command.idempotencyKey, args.idempotency);
     assertThreadCommandValid(args.command);
 
-    const folded = foldThreadLog(args.command.threadId);
-    if (folded.existingThreadIds.has(args.command.threadId)) {
+    if (threadState.getById(args.command.threadId) !== null) {
       throw new ThreadConflictError("thread_exists");
     }
 
@@ -221,6 +159,9 @@ export function createThreadAppender(
       authoredBy: args.command.createdBy,
       authoredAt: args.command.createdAt,
     };
+    if (threadState.hasSpecRevision(initialSpecPayload.revisionId)) {
+      throw new ThreadConflictError("revision_exists");
+    }
     assertValidationOk(validateThreadSpecRevisionChain([initialSpecPayload]));
     assertValidationOk(
       validateThreadStatusFold([{ kind: "thread_created", threadId: args.command.threadId }]),
@@ -238,6 +179,8 @@ export function createThreadAppender(
     const applied: AppliedThreadCommand = {
       threadId: args.command.threadId,
       headLsn: lsnFromV1Number(specLsn),
+      revisionId: initialSpecPayload.revisionId,
+      contentHash: initialSpecPayload.contentHash,
       streamKind: "thread.created",
     };
     const rendered = args.render(applied);
@@ -273,18 +216,18 @@ export function createThreadAppender(
     }
     const baseRevisionId = args.command.baseRevisionId;
 
-    const folded = foldThreadLog(args.command.threadId);
-    if (folded.created === null || !folded.existingThreadIds.has(args.command.threadId)) {
+    const current = threadState.getById(args.command.threadId);
+    if (current === null) {
       throw new ThreadNotFoundError(`thread ${args.command.threadId} not found`);
     }
-    if (folded.currentSpec === null) {
-      throw new ThreadConflictError("stale_spec_base");
-    }
     if (
-      folded.currentSpec.revisionId !== baseRevisionId ||
-      folded.currentSpec.contentHash !== args.baseContentHash
+      current.spec.revisionId !== baseRevisionId ||
+      current.spec.contentHash !== args.baseContentHash
     ) {
       throw new ThreadConflictError("stale_spec_base");
+    }
+    if (threadState.hasSpecRevision(args.command.revisionId)) {
+      throw new ThreadConflictError("revision_exists");
     }
 
     const payload: ThreadSpecEditedAuditPayload = {
@@ -296,21 +239,20 @@ export function createThreadAppender(
       authoredBy: args.command.authoredBy,
       authoredAt: args.command.authoredAt,
     };
-    assertValidationOk(
-      validateThreadForeignKeys({
-        existingThreadIds: folded.existingThreadIds,
-        specEdits: [payload],
-        statusChanges: [],
-        receipts: [],
-      }),
-    );
-    assertValidationOk(validateThreadSpecRevisionChain([...folded.specEdits, payload]));
+    assertValidationOk(validateThreadSpecEditedAuditPayload(payload));
+    if (payload.baseRevisionId === payload.revisionId) {
+      throw new ThreadCommandValidationError([
+        { path: "/baseRevisionId", message: "must not equal revisionId" },
+      ]);
+    }
 
     const lsn = appendThreadEvent("thread.spec_edited", "thread_spec_edited", payload);
     threadState.applyEvent(toEventLogRecord(lsn, "thread.spec_edited", payload));
     const applied: AppliedThreadCommand = {
       threadId: args.command.threadId,
       headLsn: lsnFromV1Number(lsn),
+      revisionId: payload.revisionId,
+      contentHash: payload.contentHash,
       streamKind: "thread.updated",
     };
     const rendered = args.render(applied);
@@ -338,22 +280,15 @@ export function createThreadAppender(
       };
     }
     assertIdempotencyMatches(args.command.idempotencyKey, args.idempotency);
-    if (isTerminalStatus(args.command.fromStatus)) {
+    const current = threadState.getById(args.command.threadId);
+    if (current === null) {
+      throw new ThreadNotFoundError(`thread ${args.command.threadId} not found`);
+    }
+    if (isTerminalStatus(current.status)) {
       throw new ThreadTerminalTransitionError();
     }
     assertThreadCommandValid(args.command);
-
-    const folded = foldThreadLog(args.command.threadId);
-    if (folded.created === null || !folded.existingThreadIds.has(args.command.threadId)) {
-      throw new ThreadNotFoundError(`thread ${args.command.threadId} not found`);
-    }
-    if (folded.currentStatus === null) {
-      throw new ThreadConflictError("status_mismatch");
-    }
-    if (isTerminalStatus(folded.currentStatus)) {
-      throw new ThreadTerminalTransitionError();
-    }
-    if (folded.currentStatus !== args.command.fromStatus) {
+    if (current.status !== args.command.fromStatus) {
       throw new ThreadConflictError("status_mismatch");
     }
 
@@ -364,30 +299,15 @@ export function createThreadAppender(
       changedBy: args.command.changedBy,
       changedAt: args.command.changedAt,
     };
-    assertValidationOk(
-      validateThreadForeignKeys({
-        existingThreadIds: folded.existingThreadIds,
-        specEdits: [],
-        statusChanges: [payload],
-        receipts: [],
-      }),
-    );
-    assertValidationOk(
-      validateThreadStatusFold([
-        { kind: "thread_created", threadId: args.command.threadId },
-        ...folded.statusChanges.map((event) => ({
-          kind: "thread_status_changed" as const,
-          ...event,
-        })),
-        { kind: "thread_status_changed", ...payload },
-      ]),
-    );
+    assertValidationOk(validateThreadStatusChangedAuditPayload(payload));
 
     const lsn = appendThreadEvent("thread.status_changed", "thread_status_changed", payload);
     threadState.applyEvent(toEventLogRecord(lsn, "thread.status_changed", payload));
     const applied: AppliedThreadCommand = {
       threadId: args.command.threadId,
       headLsn: lsnFromV1Number(lsn),
+      revisionId: current.spec.revisionId,
+      contentHash: current.spec.contentHash,
       streamKind: "thread.updated",
     };
     const rendered = args.render(applied);
@@ -485,22 +405,4 @@ function auditKindForEventType(
   if (type === "thread.created") return "thread_created";
   if (type === "thread.spec_edited") return "thread_spec_edited";
   return "thread_status_changed";
-}
-
-function parsedThreadCreatedPayload(value: unknown): ThreadCreatedAuditPayload {
-  return threadAuditPayloadFromJsonValue("thread_created", value) as ThreadCreatedAuditPayload;
-}
-
-function parsedThreadSpecEditedPayload(value: unknown): ThreadSpecEditedAuditPayload {
-  return threadAuditPayloadFromJsonValue(
-    "thread_spec_edited",
-    value,
-  ) as ThreadSpecEditedAuditPayload;
-}
-
-function parsedThreadStatusChangedPayload(value: unknown): ThreadStatusChangedAuditPayload {
-  return threadAuditPayloadFromJsonValue(
-    "thread_status_changed",
-    value,
-  ) as ThreadStatusChangedAuditPayload;
 }

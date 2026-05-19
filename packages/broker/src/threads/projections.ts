@@ -47,6 +47,7 @@ export interface ThreadStateStore {
   applyEvent(record: EventLogRecord): void;
   rebuildFromLog(eventLog: EventLog, fromLsn?: number): void;
   getById(threadId: ThreadId): ThreadStateRow | null;
+  hasSpecRevision(revisionId: string): boolean;
   list(filter?: { readonly status?: ThreadStatus }): readonly ThreadStateRow[];
 }
 
@@ -66,6 +67,10 @@ interface ThreadDbRow {
   readonly specAuthoredBy: string | null;
   readonly specAuthoredAtMs: number | null;
   readonly externalRefs: string;
+}
+
+interface ExistsRow {
+  readonly present: 1;
 }
 
 type DecodedThreadEvent =
@@ -111,6 +116,13 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
        updated_at_ms = ?,
        closed_at_ms = ?
      WHERE thread_id = ?`,
+  );
+  const insertSpecRevisionStmt = db.prepare<[string, string, number]>(
+    `INSERT INTO thread_spec_revisions (revision_id, thread_id, lsn)
+     VALUES (?, ?, ?)`,
+  );
+  const hasSpecRevisionStmt = db.prepare<[string], ExistsRow>(
+    "SELECT 1 AS present FROM thread_spec_revisions WHERE revision_id = ?",
   );
   const getByIdStmt = db.prepare<[string], ThreadDbRow>(
     `SELECT thread_id AS threadId,
@@ -166,7 +178,8 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
             external_refs AS externalRefs
      FROM threads WHERE status = ? ORDER BY head_lsn ASC`,
   );
-  const clearStmt = db.prepare<[]>("DELETE FROM threads");
+  const clearSpecRevisionsStmt = db.prepare<[]>("DELETE FROM thread_spec_revisions");
+  const clearThreadsStmt = db.prepare<[]>("DELETE FROM threads");
 
   const applyEventInner = (record: EventLogRecord): void => {
     const decoded = decodeThreadEvent(record);
@@ -187,6 +200,7 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
     }
     if (decoded.kind === "thread_spec_edited") {
       const authoredAtMs = decoded.payload.authoredAt.getTime();
+      insertSpecRevisionStmt.run(decoded.payload.revisionId, decoded.payload.threadId, record.lsn);
       const result = updateSpecStmt.run(
         record.lsn,
         authoredAtMs,
@@ -224,7 +238,8 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
       );
     }
     if (fromLsn === 0) {
-      clearStmt.run();
+      clearSpecRevisionsStmt.run();
+      clearThreadsStmt.run();
     }
     let cursor = fromLsn;
     for (;;) {
@@ -250,6 +265,9 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
     getById(threadId: ThreadId): ThreadStateRow | null {
       const row = getByIdStmt.get(threadId);
       return row === undefined ? null : toThreadStateRow(row);
+    },
+    hasSpecRevision(revisionId: string): boolean {
+      return hasSpecRevisionStmt.get(revisionId) !== undefined;
     },
     list(filter?: { readonly status?: ThreadStatus }): readonly ThreadStateRow[] {
       const rows =

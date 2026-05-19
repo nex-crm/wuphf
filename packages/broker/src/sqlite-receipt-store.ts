@@ -18,6 +18,7 @@ import {
   ReceiptStoreBusyError,
   ReceiptStoreFullError,
   ReceiptStoreUnavailableError,
+  ReceiptThreadNotFoundError,
   resolveListLimit,
 } from "./receipt-store.ts";
 
@@ -38,6 +39,10 @@ export interface SqliteReceiptStoreConfig {
   readonly maxReceipts?: number;
 }
 
+export interface SqliteReceiptStoreFromDatabaseConfig {
+  readonly maxReceipts?: number;
+}
+
 interface ReceiptExistsRow {
   readonly present: 1;
 }
@@ -51,13 +56,20 @@ interface CountRow {
   readonly count: number;
 }
 
+interface ExistsRow {
+  readonly present: 1;
+}
+
 type ProjectionInsertParams = [ReceiptId, ThreadId | null, number, number, Buffer];
+type ThreadReceiptInsertParams = [ThreadId, ReceiptId, string, number];
 
 export class SqliteReceiptStore implements ReceiptStore {
   private readonly eventLog: EventLog;
   private readonly maxReceipts: number;
   private readonly receiptExistsStmt: Database.Statement<[ReceiptId], ReceiptExistsRow>;
+  private readonly threadExistsStmt: Database.Statement<[ThreadId], ExistsRow>;
   private readonly insertProjectionStmt: Database.Statement<ProjectionInsertParams>;
+  private readonly insertThreadReceiptStmt: Database.Statement<ThreadReceiptInsertParams>;
   private readonly getPayloadStmt: Database.Statement<[ReceiptId], ProjectionPayloadRow>;
   private readonly listAllStmt: Database.Statement<[number, number], ProjectionPayloadRow>;
   private readonly listThreadStmt: Database.Statement<
@@ -81,6 +93,14 @@ export class SqliteReceiptStore implements ReceiptStore {
     }
   }
 
+  static fromDatabase(
+    db: Database.Database,
+    eventLog: EventLog,
+    config: SqliteReceiptStoreFromDatabaseConfig = {},
+  ): SqliteReceiptStore {
+    return new SqliteReceiptStore(db, eventLog, config.maxReceipts);
+  }
+
   private constructor(
     private readonly db: Database.Database,
     eventLog: EventLog = createEventLog(db),
@@ -97,8 +117,15 @@ export class SqliteReceiptStore implements ReceiptStore {
     this.receiptExistsStmt = db.prepare<[ReceiptId], ReceiptExistsRow>(
       "SELECT 1 AS present FROM receipts_projection WHERE receipt_id = ?",
     );
+    this.threadExistsStmt = db.prepare<[ThreadId], ExistsRow>(
+      "SELECT 1 AS present FROM threads WHERE thread_id = ?",
+    );
     this.insertProjectionStmt = db.prepare<ProjectionInsertParams>(
       "INSERT INTO receipts_projection (receipt_id, thread_id, schema_version, lsn, payload) VALUES (?, ?, ?, ?, ?)",
+    );
+    this.insertThreadReceiptStmt = db.prepare<ThreadReceiptInsertParams>(
+      `INSERT INTO thread_receipts (thread_id, receipt_id, task_id, lsn)
+       VALUES (?, ?, ?, ?)`,
     );
     this.getPayloadStmt = db.prepare<[ReceiptId], ProjectionPayloadRow>(
       "SELECT lsn, payload FROM receipts_projection WHERE receipt_id = ?",
@@ -124,17 +151,23 @@ export class SqliteReceiptStore implements ReceiptStore {
         throw new ReceiptStoreFullError(`SqliteReceiptStore at capacity (${this.maxReceipts})`);
       }
 
+      const threadId = projectionThreadId(receipt);
+      if (threadId !== null && this.threadExistsStmt.get(threadId) === undefined) {
+        throw new ReceiptThreadNotFoundError(`thread ${threadId} not found`);
+      }
+
       const payload = Buffer.from(receiptToJson(receipt), "utf8");
       const lsn = this.eventLog.append({ type: "receipt.put", payload });
-      this.insertProjectionStmt.run(
-        receipt.id,
-        projectionThreadId(receipt),
-        receipt.schemaVersion,
-        lsn,
-        payload,
-      );
+      this.insertProjectionStmt.run(receipt.id, threadId, receipt.schemaVersion, lsn, payload);
+      if (threadId !== null) {
+        this.insertThreadReceiptStmt.run(threadId, receipt.id, receipt.taskId, lsn);
+      }
       return { existed: false };
     });
+  }
+
+  sharesProvenance(db: Database.Database, eventLog: EventLog): boolean {
+    return this.db === db && this.eventLog === eventLog;
   }
 
   async put(receipt: ReceiptSnapshot): Promise<{ readonly existed: boolean }> {

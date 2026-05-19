@@ -24,6 +24,7 @@ export {
   ReceiptStoreBusyError,
   ReceiptStoreFullError,
   ReceiptStoreUnavailableError,
+  ReceiptThreadNotFoundError,
 } from "./receipt-store.ts";
 export type {
   AgentRunnerFactoryDeps,

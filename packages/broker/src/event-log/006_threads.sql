@@ -31,4 +31,36 @@ CREATE TABLE threads (
 CREATE INDEX threads_status
   ON threads(status);
 
+-- Globally accepted spec revision ids. This is projection state rebuilt from
+-- thread.spec_edited events; the UNIQUE primary key preserves the audit-log
+-- invariant without folding unrelated thread histories on every command.
+CREATE TABLE thread_spec_revisions (
+  revision_id TEXT PRIMARY KEY,
+  thread_id   TEXT NOT NULL,
+  lsn         INTEGER NOT NULL,
+  FOREIGN KEY (thread_id) REFERENCES threads(thread_id) ON DELETE RESTRICT,
+  FOREIGN KEY (lsn) REFERENCES event_log(lsn) ON DELETE RESTRICT,
+  CHECK (lsn > 0)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX thread_spec_revisions_thread_lsn
+  ON thread_spec_revisions(thread_id, lsn);
+
+-- Receipt/thread index projection. Updated in the same SQLite write
+-- transaction that appends receipt.put so thread reads never scan the receipt
+-- store and never synthesize an unbounded Thread.task_ids array.
+CREATE TABLE thread_receipts (
+  thread_id  TEXT NOT NULL,
+  receipt_id TEXT NOT NULL,
+  task_id    TEXT NOT NULL,
+  lsn        INTEGER NOT NULL,
+  PRIMARY KEY (thread_id, receipt_id),
+  FOREIGN KEY (thread_id) REFERENCES threads(thread_id) ON DELETE RESTRICT,
+  FOREIGN KEY (lsn) REFERENCES event_log(lsn) ON DELETE RESTRICT,
+  CHECK (lsn > 0)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX thread_receipts_thread_lsn
+  ON thread_receipts(thread_id, lsn);
+
 PRAGMA user_version = 6;

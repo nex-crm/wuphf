@@ -22,5 +22,14 @@ export {
   threadAuditKindForEventType,
   threadStateRowToThread,
 } from "./projections.ts";
+export type {
+  ThreadReceiptIndexEntry,
+  ThreadReceiptIndexPage,
+  ThreadReceiptIndexRefs,
+  ThreadReceiptIndexStore,
+} from "./receipt-index.ts";
+export { createThreadReceiptIndexStore } from "./receipt-index.ts";
 export type { ThreadProjectionSnapshotRow } from "./replay-check/index.ts";
 export { snapshotThreadProjection } from "./replay-check/index.ts";
+export type { ThreadSubsystem } from "./subsystem.ts";
+export { createThreadSubsystem } from "./subsystem.ts";
