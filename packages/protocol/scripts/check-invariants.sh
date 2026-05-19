@@ -194,6 +194,55 @@ check_no_date_now_or_date_parse() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────
+# Check 7 — No `String.prototype.normalize()` anywhere in src/.
+#
+# The moat must normalize to NFKC against the FROZEN, version-pinned tables
+# (src/nfkc.ts → src/nfkc-core.ts + src/nfkc-table.generated.ts), never the host
+# runtime's `.normalize()` — that resolves against whatever Unicode version
+# the runtime ships, so a signer and a verifier on different runtimes would
+# produce different sanitized bytes. `.normalize()` is legitimate in
+# scripts/generate-nfkc-table.ts (it derives the frozen tables from the
+# pinned runtime) and in tests/ (they cross-check against the runtime), so
+# the guard is scoped to src/.
+# ─────────────────────────────────────────────────────────────────────────
+check_no_runtime_normalize_in_src() {
+  local violators
+  # Drop comment lines (`//`, `*`, `/*`) — the nfkc modules name
+  # `String.prototype.normalize` in prose explaining why they do NOT call it.
+  violators=$(grep -rnE --include='*.ts' '\.normalize\(' src/ 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' \
+    || true)
+  if [ -n "$violators" ]; then
+    fail "String.prototype.normalize() in src/ — normalize via frozenNfkc (src/nfkc.ts), never the runtime's Unicode data:"
+    printf '    %s\n' "$violators" >&2
+    return 1
+  fi
+  pass "no runtime .normalize() in src/ (NFKC is frozen via nfkc.ts)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# Check 8 — The frozen NFKC artifacts agree on the pinned Unicode version.
+#
+# src/nfkc-table.generated.ts (embedded tables) and testdata/nfkc-table.json (the
+# cross-language wire artifact) are generated together from
+# scripts/generate-nfkc-table.ts. Regenerating one but not the other — or a
+# hand-edit of a pinned version — silently desyncs the TypeScript normaliser
+# from the Go reference. They must declare the same Unicode version.
+# ─────────────────────────────────────────────────────────────────────────
+check_nfkc_table_artifacts_consistent() {
+  local ts_version json_version
+  ts_version=$(grep -oE 'NFKC_UNICODE_VERSION = "[^"]+"' src/nfkc-table.generated.ts 2>/dev/null \
+    | grep -oE '"[^"]+"' || true)
+  json_version=$(grep -oE '"unicodeVersion": *"[^"]+"' testdata/nfkc-table.json 2>/dev/null \
+    | grep -oE '"[^"]+"$' || true)
+  if [ -z "$ts_version" ] || [ "$ts_version" != "$json_version" ]; then
+    fail "nfkc-table.generated.ts (${ts_version:-missing}) and nfkc-table.json (${json_version:-missing}) disagree on the pinned Unicode version — regenerate both: bun run scripts/generate-nfkc-table.ts"
+    return 1
+  fi
+  pass "nfkc-table.generated.ts and nfkc-table.json agree on the pinned Unicode version (${ts_version})"
+}
+
+# ─────────────────────────────────────────────────────────────────────────
 # Run all checks; collect violations rather than fast-fail so a
 # contributor sees every issue per run.
 # ─────────────────────────────────────────────────────────────────────────
@@ -204,6 +253,8 @@ check_no_process_env_in_src || true
 check_demo_imports_index_only || true
 check_index_value_exports_have_coverage || true
 check_no_date_now_or_date_parse || true
+check_no_runtime_normalize_in_src || true
+check_nfkc_table_artifacts_consistent || true
 
 if [ "$violations" -gt 0 ]; then
   echo ""

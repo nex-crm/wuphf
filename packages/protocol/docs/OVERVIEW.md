@@ -27,6 +27,7 @@ flowchart LR
     lsn[event-lsn]
     frozen[frozen-args]
     sanitized[sanitized-string]
+    nfkc[nfkc: frozen normaliser + tables]
   end
   subgraph C["codecs and validators"]
     literals[receipt-literals]
@@ -47,6 +48,8 @@ flowchart LR
   frozen --> budgets
   frozen --> jcs
   frozen --> sha256
+  sanitized --> budgets
+  sanitized --> nfkc
   literals --> types
   shared --> types
   rvalidator --> budgets

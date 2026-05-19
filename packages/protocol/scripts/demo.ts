@@ -1251,6 +1251,34 @@ expectEqual("isApprovalRole rejects unknown roles", isApprovalRole("custom"), fa
 expectThrows(() => asApprovalRole("custom"), /ApprovalRole/);
 
 // ──────────────────────────────────────────────────────────────────────────
+header(32, "SanitizedString normalizes NFKC against frozen Unicode 15.1 tables");
+// ──────────────────────────────────────────────────────────────────────────
+// NFKC normalization is version-pinned (src/nfkc.ts → frozen tables), not the
+// host runtime's String.prototype.normalize — so the sanitized bytes are
+// identical whether the signer runs Bun (Unicode 15.1) or Node 24 (17.0),
+// which is what the cosign byte-compare trust boundary relies on.
+expectEqual(
+  "decomposed 'A + combining ring' composes to 'Å'",
+  SanitizedString.fromUnknown("Å").value,
+  "Å",
+);
+expectEqual(
+  "precomposed 'Å' is byte-identical to the decomposed form",
+  SanitizedString.fromUnknown("Å").value,
+  SanitizedString.fromUnknown("Å").value,
+);
+expectEqual(
+  "recursive: U+1E09 (c+cedilla+acute) round-trips through frozen NFKC",
+  SanitizedString.fromUnknown("ḉ").value,
+  "ḉ",
+);
+expectEqual(
+  "U+A7F1 stays U+A7F1 — frozen at Unicode 15.1, not folded to 'S' (17.0)",
+  SanitizedString.fromUnknown("x꟱y").value,
+  "x꟱y",
+);
+
+// ──────────────────────────────────────────────────────────────────────────
 console.log("");
 console.log(`${ANSI.bold}─────────────────────────────────────${ANSI.reset}`);
 const summaryColor = failed === 0 ? ANSI.green : ANSI.red;

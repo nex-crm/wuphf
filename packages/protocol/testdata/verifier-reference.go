@@ -37,8 +37,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-
-	"golang.org/x/text/unicode/norm"
 )
 
 type auditPayloadInput struct {
@@ -1062,7 +1060,12 @@ func isASCII(value string) bool {
 }
 
 func sanitizeAllowlistText(value string) string {
-	normalized := norm.NFKC.String(value)
+	// Frozen NFKC, NOT golang.org/x/text norm.NFKC: the moat normalises against
+	// the version-pinned tables in nfkc-table.json so a signer and a verifier
+	// on different Unicode versions agree on the sanitized bytes. See
+	// frozenNFKC below and src/nfkc-core.ts (the production TS algorithm this
+	// mirrors).
+	normalized := frozenNfkcTables.frozenNFKC(value)
 	var out strings.Builder
 	for _, r := range normalized {
 		if !isAllowlistDisallowedCodePoint(r) {
@@ -1070,11 +1073,11 @@ func sanitizeAllowlistText(value string) string {
 		}
 	}
 	// Re-normalize after stripping — mirrors the production TS sanitizer's
-	// second NFKC pass. Stripping a composition-blocking code point can leave
-	// neighbours that NFKC composes; without this pass the moat is not
+	// second frozenNfkc pass. Stripping a composition-blocking code point can
+	// leave neighbours that NFKC composes; without this pass the moat is not
 	// idempotent and the Go reference would compute a different sanitized
 	// value than production for joiner-between-marks inputs.
-	return norm.NFKC.String(out.String())
+	return frozenNfkcTables.frozenNFKC(out.String())
 }
 
 func isAllowlistDisallowedCodePoint(r rune) bool {
@@ -1120,6 +1123,203 @@ var defaultIgnorableCodePointTable = &unicode.RangeTable{
 		{Lo: 0x1d173, Hi: 0x1d17a, Stride: 1},
 		{Lo: 0xe0000, Hi: 0xe0fff, Stride: 1},
 	},
+}
+
+// --- Frozen NFKC ----------------------------------------------------------
+//
+// The moat normalises text to NFKC before and after the strip. Using
+// golang.org/x/text norm.NFKC would couple the result to whatever Unicode
+// version that library ships — defeating the cross-runtime byte equality the
+// moat exists to guarantee. So this reference re-implements NFKC against the
+// version-pinned tables in nfkc-table.json, exactly mirroring the production
+// TypeScript algorithm in src/nfkc-core.ts. Hangul is decomposed/composed
+// algorithmically (its syllable layout is mathematical and stable), so the
+// JSON table omits the 11,172 Hangul syllables.
+
+type nfkcDecompEntry struct {
+	CP int   `json:"cp"`
+	To []int `json:"to"`
+}
+
+type nfkcVector struct {
+	Input    string `json:"input"`
+	Expected string `json:"expected"`
+	Name     string `json:"name"`
+}
+
+type nfkcTableFixture struct {
+	Description          string            `json:"description"`
+	UnicodeVersion       string            `json:"unicodeVersion"`
+	GeneratedBy          string            `json:"generatedBy"`
+	Decomposition        []nfkcDecompEntry `json:"decomposition"`
+	Composition          [][3]int          `json:"composition"`
+	CombiningClass       [][2]int          `json:"combiningClass"`
+	NormalizationVectors []nfkcVector      `json:"normalizationVectors"`
+}
+
+// nfkcTables holds the frozen NFKC data in lookup-ready form.
+type nfkcTables struct {
+	decomposition  map[rune][]rune
+	composition    map[[2]rune]rune
+	combiningClass map[rune]int
+}
+
+// frozenNfkcTables is loaded once in main before any sanitizeAllowlistText call.
+var frozenNfkcTables nfkcTables
+
+// Hangul algorithmic constants — Unicode §3.12 / UAX #15.
+const (
+	hangulSBase  = 0xac00
+	hangulLBase  = 0x1100
+	hangulVBase  = 0x1161
+	hangulTBase  = 0x11a7
+	hangulLCount = 19
+	hangulVCount = 21
+	hangulTCount = 28
+	hangulNCount = hangulVCount * hangulTCount
+	hangulSCount = hangulLCount * hangulNCount
+)
+
+func buildNfkcTables(fx nfkcTableFixture) nfkcTables {
+	decomposition := make(map[rune][]rune, len(fx.Decomposition))
+	for _, entry := range fx.Decomposition {
+		runes := make([]rune, len(entry.To))
+		for i, cp := range entry.To {
+			runes[i] = rune(cp)
+		}
+		decomposition[rune(entry.CP)] = runes
+	}
+	composition := make(map[[2]rune]rune, len(fx.Composition))
+	for _, pair := range fx.Composition {
+		composition[[2]rune{rune(pair[0]), rune(pair[1])}] = rune(pair[2])
+	}
+	combiningClass := make(map[rune]int, len(fx.CombiningClass))
+	for _, entry := range fx.CombiningClass {
+		combiningClass[rune(entry[0])] = entry[1]
+	}
+	return nfkcTables{decomposition: decomposition, composition: composition, combiningClass: combiningClass}
+}
+
+func loadNfkcTableFixture() (nfkcTableFixture, error) {
+	fixtureBytes, err := os.ReadFile("nfkc-table.json")
+	if err != nil {
+		return nfkcTableFixture{}, err
+	}
+	var fx nfkcTableFixture
+	decoder := json.NewDecoder(bytes.NewReader(fixtureBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fx); err != nil {
+		return nfkcTableFixture{}, err
+	}
+	return fx, nil
+}
+
+// ccc returns the Canonical_Combining_Class — absent ⇒ 0 (a starter).
+func (t nfkcTables) ccc(r rune) int {
+	return t.combiningClass[r]
+}
+
+// decomposeRune appends the full compatibility decomposition of r to out.
+func (t nfkcTables) decomposeRune(r rune, out []rune) []rune {
+	if r >= hangulSBase && r < hangulSBase+hangulSCount {
+		syllableIndex := int(r) - hangulSBase
+		out = append(out, rune(hangulLBase+syllableIndex/hangulNCount))
+		out = append(out, rune(hangulVBase+(syllableIndex%hangulNCount)/hangulTCount))
+		if trailingIndex := syllableIndex % hangulTCount; trailingIndex > 0 {
+			out = append(out, rune(hangulTBase+trailingIndex))
+		}
+		return out
+	}
+	if mapped, ok := t.decomposition[r]; ok {
+		return append(out, mapped...)
+	}
+	return append(out, r)
+}
+
+// canonicalOrder stably sorts each maximal non-starter run by combining class.
+func (t nfkcTables) canonicalOrder(cps []rune) {
+	index := 0
+	for index < len(cps) {
+		if t.ccc(cps[index]) == 0 {
+			index++
+			continue
+		}
+		runEnd := index
+		for runEnd < len(cps) && t.ccc(cps[runEnd]) != 0 {
+			runEnd++
+		}
+		for cursor := index + 1; cursor < runEnd; cursor++ {
+			cp := cps[cursor]
+			cpClass := t.ccc(cp)
+			probe := cursor - 1
+			for probe >= index && t.ccc(cps[probe]) > cpClass {
+				cps[probe+1] = cps[probe]
+				probe--
+			}
+			cps[probe+1] = cp
+		}
+		index = runEnd
+	}
+}
+
+// composePair returns the Hangul-aware primary composite of an ordered pair.
+func (t nfkcTables) composePair(starter, second rune) (rune, bool) {
+	if starter >= hangulLBase && starter < hangulLBase+hangulLCount &&
+		second >= hangulVBase && second < hangulVBase+hangulVCount {
+		leadingIndex := int(starter) - hangulLBase
+		vowelIndex := int(second) - hangulVBase
+		return rune(hangulSBase + (leadingIndex*hangulVCount+vowelIndex)*hangulTCount), true
+	}
+	if starter >= hangulSBase && starter < hangulSBase+hangulSCount &&
+		(int(starter)-hangulSBase)%hangulTCount == 0 &&
+		second > hangulTBase && second < hangulTBase+hangulTCount {
+		return starter + (second - hangulTBase), true
+	}
+	if composed, ok := t.composition[[2]rune{starter, second}]; ok {
+		return composed, true
+	}
+	return 0, false
+}
+
+// compose performs canonical composition with the UAX #15 blocked rule.
+func (t nfkcTables) compose(cps []rune) []rune {
+	out := make([]rune, 0, len(cps))
+	starterIndex := -1
+	var starterCP rune
+	lastKeptClass := -1
+	for _, cp := range cps {
+		cpClass := t.ccc(cp)
+		notBlocked := lastKeptClass == -1 || lastKeptClass < cpClass
+		if starterIndex >= 0 && notBlocked {
+			if composed, ok := t.composePair(starterCP, cp); ok {
+				out[starterIndex] = composed
+				starterCP = composed
+				continue
+			}
+		}
+		out = append(out, cp)
+		if cpClass == 0 {
+			starterIndex = len(out) - 1
+			starterCP = cp
+			lastKeptClass = -1
+		} else {
+			lastKeptClass = cpClass
+		}
+	}
+	return out
+}
+
+// frozenNFKC normalises input to NFKC against the frozen tables.
+func (t nfkcTables) frozenNFKC(input string) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var cps []rune
+	for _, r := range input {
+		cps = t.decomposeRune(r, cps)
+	}
+	t.canonicalOrder(cps)
+	return string(t.compose(cps))
 }
 
 func validateCredentialHandleIDField(record map[string]interface{}, key string, path string) error {
@@ -1986,6 +2186,36 @@ func verifyMoatTable(fx moatTableFixture) int {
 	return failed
 }
 
+// verifyNfkcTable runs the frozen NFKC normaliser over the curated corpus in
+// nfkc-table.json. Each `expected` was frozen at table-generation time from
+// the pinned Unicode 15.1 runtime; tests/nfkc.spec.ts checks the same corpus,
+// so the TypeScript normaliser and this Go reference are pinned to one oracle.
+func verifyNfkcTable(fx nfkcTableFixture, tables nfkcTables) int {
+	failed := 0
+	if len(fx.NormalizationVectors) == 0 {
+		fmt.Printf("  %sFAIL%s nfkc-table: no normalization vectors\n", colorRed, colorReset)
+		return 1
+	}
+	for _, vec := range fx.NormalizationVectors {
+		got := tables.frozenNFKC(vec.Input)
+		if got != vec.Expected {
+			fmt.Printf("  %sFAIL%s nfkc/%s: frozen NFKC mismatch\n", colorRed, colorReset, vec.Name)
+			fmt.Printf("    expected: %q\n", vec.Expected)
+			fmt.Printf("    actual:   %q\n", got)
+			failed++
+			continue
+		}
+		// Idempotence — re-normalising the output must be a no-op.
+		if again := tables.frozenNFKC(got); again != got {
+			fmt.Printf("  %sFAIL%s nfkc/%s: not idempotent\n", colorRed, colorReset, vec.Name)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s nfkc/%s\n", colorGreen, colorReset, vec.Name)
+	}
+	return failed
+}
+
 func main() {
 	fixtureBytes, err := os.ReadFile("audit-event-vectors.json")
 	if err != nil {
@@ -2025,10 +2255,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "could not load moat-disallowed-table fixture: %v\n", err)
 		os.Exit(2)
 	}
+	nfkcFx, err := loadNfkcTableFixture()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not load nfkc-table fixture: %v\n", err)
+		os.Exit(2)
+	}
+	// Loaded before any sanitizeAllowlistText call below — it normalises via
+	// frozenNfkcTables.
+	frozenNfkcTables = buildNfkcTables(nfkcFx)
 
 	fmt.Printf("%s@wuphf/protocol — Go reference verifier%s\n", colorBold, colorReset)
-	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d signed-approval-token accept vectors, %d signed-approval-token reject vectors, %d runner accept vectors, %d runner reject vectors, %d agent-provider-routing accept vectors, %d agent-provider-routing reject vectors, moat table Unicode %s (%d ranges, %d vectors)%s\n\n",
-		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(signedApprovalTokenFx.Accepted), len(signedApprovalTokenFx.Rejected), len(runnerFx.Vectors), len(runnerFx.RejectVectors), len(agentProviderRoutingFx.Accepted), len(agentProviderRoutingFx.Rejected), moatFx.UnicodeVersion, len(moatFx.DisallowedRanges), len(moatFx.ClassificationVectors), colorReset)
+	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d signed-approval-token accept vectors, %d signed-approval-token reject vectors, %d runner accept vectors, %d runner reject vectors, %d agent-provider-routing accept vectors, %d agent-provider-routing reject vectors, moat table Unicode %s (%d ranges, %d vectors), nfkc table Unicode %s (%d normalization vectors)%s\n\n",
+		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(signedApprovalTokenFx.Accepted), len(signedApprovalTokenFx.Rejected), len(runnerFx.Vectors), len(runnerFx.RejectVectors), len(agentProviderRoutingFx.Accepted), len(agentProviderRoutingFx.Rejected), moatFx.UnicodeVersion, len(moatFx.DisallowedRanges), len(moatFx.ClassificationVectors), nfkcFx.UnicodeVersion, len(nfkcFx.NormalizationVectors), colorReset)
 
 	failed := 0
 
@@ -2166,11 +2404,12 @@ func main() {
 	}
 
 	failed += verifyMoatTable(moatFx)
+	failed += verifyNfkcTable(nfkcFx, frozenNfkcTables)
 
 	fmt.Println()
 	if failed == 0 {
 		fmt.Printf("%s%sAll %d vectors match — wire contract is cross-language portable.%s\n",
-			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(signedApprovalTokenFx.Accepted)+len(signedApprovalTokenFx.Rejected)+len(runnerFx.Vectors)+len(runnerFx.RejectVectors)+len(agentProviderRoutingFx.Accepted)+len(agentProviderRoutingFx.Rejected)+len(moatFx.ClassificationVectors), colorReset)
+			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(signedApprovalTokenFx.Accepted)+len(signedApprovalTokenFx.Rejected)+len(runnerFx.Vectors)+len(runnerFx.RejectVectors)+len(agentProviderRoutingFx.Accepted)+len(agentProviderRoutingFx.Rejected)+len(moatFx.ClassificationVectors)+len(nfkcFx.NormalizationVectors), colorReset)
 		os.Exit(0)
 	}
 	fmt.Printf("%s%s%d vector(s) failed — TypeScript writer and Go reference disagree.%s\n",

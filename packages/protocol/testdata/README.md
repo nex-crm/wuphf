@@ -98,15 +98,49 @@ Regenerate (only to deliberately bump the pinned Unicode version) with
 both this file and the embedded `src/moat-disallowed-table.ts`. The TypeScript
 test `tests/sanitized-string.spec.ts` pins the embedded table to this artifact.
 
+## NFKC Normalization Table
+
+`nfkc-table.json` is the frozen Unicode NFKC normalization data the
+`SanitizedString` moat normalizes against — before and after the strip.
+
+`String.prototype.normalize("NFKC")` resolves against the host runtime's
+Unicode data, which differs across versions. The moat does **not** call it: a
+signer on Bun 1.3 (Unicode 15.1) and a verifier on Node 24 (Unicode 17.0)
+would otherwise produce different sanitized bytes (e.g. `U+A7F1` folds to `S`
+under 17.0 but is unchanged under 15.1). Freezing the tables makes the
+sanitized output a fixed cross-language contract — classification *and*
+normalization.
+
+The artifact has four parts:
+
+- `decomposition` — `{ "cp", "to" }` rows mapping a code point to its
+  fully-recursive NFKD decomposition. Hangul syllables are omitted; they are
+  decomposed algorithmically.
+- `composition` — `[starter, second, composite]` canonical composition pairs
+  (non-Hangul).
+- `combiningClass` — `[codePoint, class]` for every non-zero
+  Canonical_Combining_Class.
+- `normalizationVectors` — a curated `{ input, expected, name }` corpus. Every
+  language port must reproduce `expected`. `tests/nfkc.spec.ts` and
+  `verifier-reference.go` both check it.
+
+Regenerate (only to deliberately bump the pinned Unicode version) with
+`bun run scripts/generate-nfkc-table.ts` from `packages/protocol/`; it rewrites
+both this file and the embedded `src/nfkc-table.generated.ts`, and refuses to
+run unless the host runtime ships the pinned Unicode version. The generator
+proves `frozenNfkc` equals the runtime's `normalize("NFKC")` for every code
+point plus an adversarial corpus before writing.
+
 ## Cross-language verification
 
 `verifier-reference.go` is a stdlib-only Go reference implementation of the
-audit-chain, runner, agent-provider-routing, signed-approval-token, and
-moat-table wire contracts. It loads `audit-event-vectors.json`,
+audit-chain, runner, agent-provider-routing, signed-approval-token, moat-table,
+and frozen-NFKC wire contracts. It loads `audit-event-vectors.json`,
 `runner-vectors.json`, `agent-provider-routing-vectors.json`,
-`signed-approval-token-vectors.json`, and `moat-disallowed-table.json`,
-recomputes each canonical serialization and eventHash, binary-searches the moat
-ranges, and verifies accept/reject and classification behavior against the
+`signed-approval-token-vectors.json`, `moat-disallowed-table.json`, and
+`nfkc-table.json`, recomputes each canonical serialization and eventHash,
+binary-searches the moat ranges, re-normalizes with the frozen NFKC tables, and
+verifies accept/reject, classification, and normalization behavior against the
 bundled vectors. Run it from this directory:
 
 ```bash
