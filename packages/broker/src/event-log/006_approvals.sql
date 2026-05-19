@@ -9,7 +9,7 @@ ALTER TABLE command_idempotency
 -- §15.B D2: pending approvals are explicit backend events, projected into a
 -- disposable folded-state table. "Pending" is a status filter over this table,
 -- not a derivation from receipt.approvals[].
-CREATE TABLE approval_requests (
+CREATE TABLE pending_approvals (
   approval_id      TEXT PRIMARY KEY,
   status           TEXT NOT NULL,
   head_lsn         INTEGER NOT NULL,
@@ -40,17 +40,17 @@ CREATE TABLE approval_requests (
   )
 ) STRICT, WITHOUT ROWID;
 
-CREATE INDEX approval_requests_status
-  ON approval_requests(status);
+CREATE INDEX pending_approvals_status
+  ON pending_approvals(status);
 
 -- TODO(PR3): add a thread FK once the thread_state table lands. In this PR,
 -- thread/task/receipt ids are opaque optional references.
-CREATE INDEX approval_requests_thread
-  ON approval_requests(thread_id)
+CREATE INDEX pending_approvals_thread
+  ON pending_approvals(thread_id)
   WHERE thread_id IS NOT NULL;
 
-CREATE INDEX approval_requests_task
-  ON approval_requests(task_id)
+CREATE INDEX pending_approvals_task
+  ON pending_approvals(task_id)
   WHERE task_id IS NOT NULL;
 
 PRAGMA user_version = 6;

@@ -144,7 +144,7 @@ GET /api/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
     `localhost` matches the page origin.
 13. **Pending approvals are explicit backend events.** The broker appends
     `approval.requested` / `approval.decided` events and projects
-    `approval_requests`; it does not derive pending approvals from
+    `pending_approvals`; it does not derive pending approvals from
     `receipt.approvals[]`.
 
 ## Spec anchors

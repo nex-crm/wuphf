@@ -164,7 +164,7 @@ function projectionSnapshot(db: ReturnType<typeof openDatabase>): string {
               receipt_id AS receiptId, requested_by AS requestedBy,
               requested_at_ms AS requestedAtMs, decided_by AS decidedBy,
               decided_at_ms AS decidedAtMs, decision, token
-       FROM approval_requests ORDER BY approval_id ASC`,
+       FROM pending_approvals ORDER BY approval_id ASC`,
     )
     .all();
   return canonicalJSON(rows);
@@ -212,7 +212,7 @@ describe("approval projection and appender", () => {
       expect(row?.approval.decision?.token?.tokenId).toBe("01ERZ3NDEKTSV4RRFFQ69G5FA3");
 
       expect(() => {
-        db.exec("UPDATE approval_requests SET status = 'rejected' WHERE approval_id IS NOT NULL");
+        db.exec("UPDATE pending_approvals SET status = 'rejected' WHERE approval_id IS NOT NULL");
       }).toThrow();
     } finally {
       db.close();
@@ -280,7 +280,7 @@ describe("approval projection and appender", () => {
       expect(eventCount(db, "approval.requested")).toBe(1);
       expect(eventCount(db, "approval.decided")).toBe(1);
       expect(
-        db.prepare<[], { readonly n: number }>("SELECT COUNT(*) AS n FROM approval_requests").get()
+        db.prepare<[], { readonly n: number }>("SELECT COUNT(*) AS n FROM pending_approvals").get()
           ?.n,
       ).toBe(1);
     } finally {
@@ -324,7 +324,7 @@ describe("approval projection and appender", () => {
     }
   });
 
-  it("rebuilds approval_requests from the event log byte-equivalent to live projection", () => {
+  it("rebuilds pending_approvals from the event log byte-equivalent to live projection", () => {
     const { db, eventLog, projection, appender } = setup();
     try {
       appender.requestApproval(requestedPayload(REQUEST_ID));
@@ -332,7 +332,7 @@ describe("approval projection and appender", () => {
       appender.requestApproval(requestedPayload(SECOND_REQUEST_ID, { thread: false, task: false }));
 
       const live = projectionSnapshot(db);
-      db.exec("DELETE FROM approval_requests");
+      db.exec("DELETE FROM pending_approvals");
       const rebuilt = rebuildApprovalsProjectionFromLog(db, eventLog);
       expect(rebuilt.eventsApplied).toBe(3);
       expect(projectionSnapshot(db)).toBe(live);

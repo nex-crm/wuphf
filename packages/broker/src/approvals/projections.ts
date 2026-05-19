@@ -1,6 +1,6 @@
 // Approval projection writer.
 //
-// `approval_requests` is disposable folded state. The event log is the
+// `pending_approvals` is disposable folded state. The event log is the
 // source of truth; writes apply one event incrementally in the append
 // transaction, and replay can rebuild the table from LSN 0.
 
@@ -142,7 +142,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
     approvalSelectSql("WHERE approval_id = ?"),
   );
   const upsertRequestedStmt = db.prepare<RequestUpsertParams>(
-    `INSERT INTO approval_requests
+    `INSERT INTO pending_approvals
        (approval_id, status, head_lsn, claim, scope, risk_class, thread_id, task_id, receipt_id,
         requested_by, requested_at_ms, decided_by, decided_at_ms, decision, token)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
@@ -163,11 +163,11 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
        token = NULL`,
   );
   const updateDecidedStmt = db.prepare<DecisionUpdateParams>(
-    `UPDATE approval_requests
+    `UPDATE pending_approvals
      SET status = ?, head_lsn = ?, decided_by = ?, decided_at_ms = ?, decision = ?, token = ?
      WHERE approval_id = ?`,
   );
-  const clearStmt = db.prepare<[]>("DELETE FROM approval_requests");
+  const clearStmt = db.prepare<[]>("DELETE FROM pending_approvals");
 
   const applyRequested = (
     payload: ApprovalRequestedAuditPayload,
@@ -190,7 +190,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
     );
     const row = selectByIdStmt.get(approval.id);
     if (row === undefined) {
-      throw new Error("approval_requests upsert produced no row");
+      throw new Error("pending_approvals upsert produced no row");
     }
     return rowToFolded(row);
   };
@@ -360,7 +360,7 @@ function approvalSelectSql(where: string): string {
                  requested_by AS requestedBy, requested_at_ms AS requestedAtMs,
                  decided_by AS decidedBy, decided_at_ms AS decidedAtMs,
                  decision, token
-          FROM approval_requests ${where}`;
+          FROM pending_approvals ${where}`;
 }
 
 function parseApprovalEvent(
@@ -418,7 +418,7 @@ function rowToFolded(row: ApprovalDbRow): FoldedApprovalRow {
   if (row.receiptId !== null) wire.receipt_id = row.receiptId;
   if (row.decision !== null) {
     if (row.decidedBy === null || row.decidedAtMs === null) {
-      throw new Error(`approval_requests decision fields are incomplete for ${row.approvalId}`);
+      throw new Error(`pending_approvals decision fields are incomplete for ${row.approvalId}`);
     }
     const decision: ApprovalDecisionWireForRow = {
       decision: row.decision,

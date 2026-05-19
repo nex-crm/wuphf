@@ -9,7 +9,7 @@ The approvals module owns the broker-side pending approval subsystem for
 ```mermaid
 flowchart LR
   request["approval_requested audit payload"] --> requested["event_log: approval.requested"]
-  requested --> projection["approval_requests folded row<br/>status=pending"]
+  requested --> projection["pending_approvals folded row<br/>status=pending"]
   decision["approval_decided audit payload"] --> decided["event_log: approval.decided"]
   decided --> projection
   projection --> routes["/api/v1/approvals REST reads"]
@@ -19,13 +19,13 @@ flowchart LR
 
 Both commands run inside one `BEGIN IMMEDIATE` transaction: fold the request
 from `event_log`, validate against the folded head, append the event, update
-`approval_requests`, and insert the idempotency replay row. A decision is
+`pending_approvals`, and insert the idempotency replay row. A decision is
 accepted only while the folded approval is `pending`; a second decision returns
 409 and appends no event.
 
 ## Projection
 
-Migration `006_approvals.sql` creates `approval_requests`, a disposable folded
+Migration `006_approvals.sql` creates `pending_approvals`, a disposable folded
 state table keyed by `approval_id`. The row stores canonical JSON for `claim`,
 `scope`, and any supplied `SignedApprovalToken`, plus `head_lsn`,
 requester/decider identities, timestamps, and optional `thread_id`, `task_id`,
@@ -56,10 +56,10 @@ bearer gate.
 
 The route layer stamps audit-only fields that are not part of the renderer
 route envelope: `requestedAt` / `decidedAt` from the broker clock and
-`requestedBy` / reject-or-abstain `decidedBy` as `broker`. For approve
-decisions, `decidedBy` is the token `issuedTo` identity. If a create
-`idempotencyKey` is itself an `ApprovalRequestId` ULID, that value becomes the
-request id; otherwise the broker derives a stable request id from the key.
+`requestedBy` as `broker`. Decisions require a bearer-bound agent identity and
+stamp `decidedBy` to that agent. If a create `idempotencyKey` is itself an
+`ApprovalRequestId` ULID, that value becomes the request id; otherwise the
+broker derives a stable request id from the key.
 
 SQLite storage errors follow the receipt route contract:
 `SQLITE_BUSY`/`SQLITE_LOCKED` returns `503 {"error":"store_busy"}` with
