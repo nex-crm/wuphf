@@ -12,13 +12,12 @@ import { ChannelList } from "../sidebar/ChannelList";
 import { InboxButton } from "../sidebar/InboxButton";
 import { IssuesGroup } from "../sidebar/IssuesGroup";
 import { RecentObjectsPanel } from "../sidebar/RecentObjectsPanel";
-import { SidebarColorPicker } from "../sidebar/SidebarColorPicker";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { WorkspaceSummary } from "../sidebar/WorkspaceSummary";
 import { CollapsedSidebar } from "./CollapsedSidebar";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 
-export const SIDEBAR_DEFAULT_WIDTH = 220;
+export const SIDEBAR_DEFAULT_WIDTH = 280;
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 420;
 export const SIDEBAR_WIDTH_STORAGE_KEY = "wuphf-sidebar-width";
@@ -74,7 +73,6 @@ export function Sidebar() {
   const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
-  const sidebarBg = useAppStore((s) => s.sidebarBg);
   const currentApp = useCurrentApp();
 
   const resize = useResizablePane({
@@ -90,17 +88,14 @@ export function Sidebar() {
   // property rather than `width:` directly so the mobile media queries
   // (which clamp the sidebar to 240px / full overlay) can still win
   // — inline `width` would beat them with normal cascade rules.
-  const asideStyle = {
-    ...(sidebarBg ? { background: sidebarBg } : null),
-    ...(sidebarCollapsed
-      ? null
-      : { "--sidebar-resize-width": `${resize.width}px` }),
-  } as React.CSSProperties;
+  const asideStyle = (sidebarCollapsed
+    ? null
+    : { "--sidebar-resize-width": `${resize.width}px` }) as React.CSSProperties | null;
 
   return (
     <aside
       className={`sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
-      style={asideStyle}
+      style={asideStyle ?? undefined}
     >
       {sidebarCollapsed ? (
         <CollapsedSidebar />
@@ -207,7 +202,6 @@ export function Sidebar() {
           <RecentObjectsPanel />
           <WorkspaceSummary />
           <UsagePanel />
-          <SidebarColorPicker />
         </>
       )}
       {!sidebarCollapsed && (

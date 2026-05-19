@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { SidebarContext } from "../../../.storybook/sidebar-decorator";
-import { SidebarColorPicker } from "./SidebarColorPicker";
 import { UsagePanel } from "./UsagePanel";
 import { WorkspaceSummary } from "./WorkspaceSummary";
 import { AgentList } from "./AgentList";
@@ -115,9 +114,4 @@ export const Workspace: StoryObj = {
 export const Usage: StoryObj = {
   name: "Usage panel",
   render: () => <UsagePanel />,
-};
-
-export const ColorPicker: StoryObj = {
-  name: "Color picker",
-  render: () => <SidebarColorPicker />,
 };

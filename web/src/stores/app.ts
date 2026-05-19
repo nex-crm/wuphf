@@ -70,7 +70,6 @@ interface SidebarSectionsState {
 }
 
 const SIDEBAR_SECTIONS_KEY = "wuphf-sidebar-sections";
-const SIDEBAR_BG_KEY = "wuphf-sidebar-bg";
 
 const _storedSidebarSections = ((): SidebarSectionsState => {
   const def: SidebarSectionsState = {
@@ -91,15 +90,6 @@ const _storedSidebarSections = ((): SidebarSectionsState => {
     };
   } catch {
     return def;
-  }
-})();
-
-const _storedSidebarBg = ((): string | null => {
-  try {
-    const v = localStorage.getItem(SIDEBAR_BG_KEY);
-    return v?.trim() ? v : null;
-  } catch {
-    return null;
   }
 })();
 
@@ -144,8 +134,6 @@ export interface AppStore {
   toggleSidebarApps: () => void;
   sidebarCollapsed: boolean;
   toggleSidebarCollapsed: () => void;
-  sidebarBg: string | null;
-  setSidebarBg: (color: string | null) => void;
 
   // Thread panel — captures the originating channel alongside the message id
   // so that replies posted while the user has navigated away from the channel
@@ -305,14 +293,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   sidebarCollapsed: false,
   toggleSidebarCollapsed: () =>
     set({ sidebarCollapsed: !get().sidebarCollapsed }),
-  sidebarBg: _storedSidebarBg,
-  setSidebarBg: (color) => {
-    try {
-      if (color) localStorage.setItem(SIDEBAR_BG_KEY, color);
-      else localStorage.removeItem(SIDEBAR_BG_KEY);
-    } catch {}
-    set({ sidebarBg: color });
-  },
 
   activeThread: null,
   setActiveThread: (thread) => set({ activeThread: thread }),

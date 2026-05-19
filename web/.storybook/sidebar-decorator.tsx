@@ -202,6 +202,14 @@ export function SidebarContext({
     [initialUrl],
   );
 
+  // Stories should always render at the design-default width, not whatever
+  // the live app last persisted via useResizablePane. Clear once on mount.
+  useEffect(() => {
+    try {
+      localStorage.removeItem("wuphf-sidebar-width");
+    } catch {}
+  }, []);
+
   // Sidebar groups start expanded so reviewers can see them without
   // hunting for toggles. Reset on unmount so we don't leak state to the
   // app's live store between stories (the store is a singleton).
