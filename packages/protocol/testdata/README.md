@@ -124,12 +124,19 @@ The artifact has four parts:
   language port must reproduce `expected`. `tests/nfkc.spec.ts` and
   `verifier-reference.go` both check it.
 
-Regenerate (only to deliberately bump the pinned Unicode version) with
+The generator derives all three tables from vendored, authoritative Unicode
+Character Database text files (`packages/protocol/scripts/ucd/` —
+`UnicodeData-15.1.0.txt` and `CompositionExclusions-15.1.0.txt`), never from
+the host runtime's `.normalize()`. It is therefore fully deterministic on any
+host, regardless of the Unicode version the runtime ships (Bun reports a stale
+`process.versions.unicode` and uses the platform ICU, so the runtime cannot be
+trusted as the source). Regenerate (only to deliberately bump the pinned
+Unicode version — replace the vendored UCD files first) with
 `bun run scripts/generate-nfkc-table.ts` from `packages/protocol/`; it rewrites
-both this file and the embedded `src/nfkc-table.generated.ts`, and refuses to
-run unless the host runtime ships the pinned Unicode version. The generator
-proves `frozenNfkc` equals the runtime's `normalize("NFKC")` for every code
-point plus an adversarial corpus before writing.
+both this file and the embedded `src/nfkc-table.generated.ts`. When run on a
+host whose runtime genuinely ships the pinned version, it additionally
+cross-checks `frozenNfkc` against `String.prototype.normalize("NFKC")` for
+every code point as a bonus proof.
 
 ## Cross-language verification
 

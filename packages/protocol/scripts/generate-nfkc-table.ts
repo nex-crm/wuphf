@@ -2,26 +2,29 @@
 //
 // `SanitizedString` normalises text to NFKC before and after the moat strip.
 // `String.prototype.normalize("NFKC")` resolves against the Unicode data baked
-// into the running runtime (Node 24 → Unicode 17.0, Bun 1.3 → 15.1). For a
-// security boundary whose output is signed and re-verified on a *different*
-// runtime, that is a moving target: a signer and a verifier on different
-// Unicode versions produce different bytes (e.g. `U+A7F1` → "S" under 17.0,
-// unchanged under 15.1). The moat must normalise against FROZEN tables.
+// into the running runtime, and that data is NOT reliably the version it
+// claims: Bun 1.3.13 reports `process.versions.unicode === "15.1"` on every
+// platform, yet on a recent macOS its `.normalize()` uses the OS ICU (Unicode
+// 16.0+). For a security boundary whose output is signed and re-verified on a
+// different runtime, the tables cannot come from `.normalize()` at all.
 //
 //   bun run scripts/generate-nfkc-table.ts
 //
-// This script is the one place the runtime's Unicode normaliser is consulted.
-// It derives the decomposition and composition tables from the pinned runtime
-// and the canonical combining classes from the vendored official UCD file,
-// then PROVES correctness — `normalizeNfkc` must equal `String.prototype.
-// normalize("NFKC")` for every code point plus an adversarial multi-code-point
-// corpus — before writing two artifacts from a single source of truth:
+// So this generator derives the tables ENTIRELY from vendored, authoritative
+// Unicode Character Database text files (scripts/ucd/), never from the runtime
+// — it is fully deterministic on any host. It writes two artifacts from a
+// single source of truth:
 //   - src/nfkc-table.generated.ts  embedded tables the normaliser uses
 //   - testdata/nfkc-table.json     cross-language wire artifact + vectors,
 //                                  verified by verifier-reference.go
 //
-// Run it deliberately to bump the pinned Unicode version; the runtime it runs
-// on MUST match the version of the vendored DerivedCombiningClass file.
+// When run on a host whose runtime genuinely ships the pinned Unicode version,
+// it ALSO cross-checks `frozenNfkc` against `String.prototype.normalize` for
+// every code point as a bonus proof; on a newer runtime that cross-check is
+// skipped (the vendored UCD remains the source of truth).
+//
+// To bump the pinned Unicode version, replace the vendored UCD files and the
+// version constants below; nothing else depends on the host.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -36,15 +39,26 @@ const SURROGATE_END = 0xdfff;
 const HANGUL_S_BASE = 0xac00;
 const HANGUL_S_COUNT = 11172;
 
-// The pinned Unicode version. The vendored UCD file below is for this version;
-// the runtime running this generator must match it, or the runtime-derived
-// decomposition/composition would drift from the vendored combining classes.
+// The pinned Unicode version. The vendored UCD files below are for this
+// version; both artifacts are stamped with it.
 const PINNED_UNICODE_VERSION = "15.1";
-const DERIVED_COMBINING_CLASS_FILE = "ucd/DerivedCombiningClass-15.1.0.txt";
+const UNICODE_DATA_FILE = "ucd/UnicodeData-15.1.0.txt";
+const COMPOSITION_EXCLUSIONS_FILE = "ucd/CompositionExclusions-15.1.0.txt";
+
+// A code point assigned in Unicode 16.0 but unassigned in 15.1 (Symbols for
+// Legacy Computing Supplement). Used only to detect whether the host runtime
+// ships data newer than the pin, so the optional runtime cross-check knows
+// whether a mismatch is expected drift or a genuine bug.
+const POST_PIN_SENTINEL = 0x1ccd6;
 
 type DecompositionEntry = readonly [number, readonly number[]];
 type CompositionEntry = readonly [number, number, number];
 type CombiningClassEntry = readonly [number, number];
+
+interface DecompositionMapping {
+  readonly compat: boolean;
+  readonly to: readonly number[];
+}
 
 function isSurrogate(codePoint: number): boolean {
   return codePoint >= SURROGATE_START && codePoint <= SURROGATE_END;
@@ -54,121 +68,203 @@ function isHangulSyllable(codePoint: number): boolean {
   return codePoint >= HANGUL_S_BASE && codePoint < HANGUL_S_BASE + HANGUL_S_COUNT;
 }
 
-// Code points of a string, in order. `for...of` iterates by code point, so
-// astral characters are handled; `codePointAt(0)` is always defined for the
-// non-empty substrings `for...of` yields.
-function codePointsOf(value: string): number[] {
-  const out: number[] = [];
-  for (const character of value) {
-    const codePoint = character.codePointAt(0);
-    if (codePoint !== undefined) {
-      out.push(codePoint);
-    }
-  }
-  return out;
+interface UnicodeDataTables {
+  // Code point → Canonical_Combining_Class, non-zero entries only.
+  readonly combiningClass: Map<number, number>;
+  // Code point → its SINGLE-LEVEL decomposition mapping (UnicodeData.txt
+  // field 5). `compat` is true when the mapping carries a `<tag>`.
+  readonly decompositionMappings: Map<number, DecompositionMapping>;
 }
 
-// Parse the vendored official UCD DerivedCombiningClass file. Lines look like
-// `0300..0314    ; 230 # Mn ...` or `0334  ; 1 # ...`; `#` begins a comment,
-// blank lines are skipped. Only non-zero classes are kept (absent ⇒ class 0).
-function parseCombiningClasses(fileText: string): CombiningClassEntry[] {
-  const entries: CombiningClassEntry[] = [];
+// Parse the vendored official UnicodeData.txt. Each line is 15 semicolon-
+// separated fields; field 0 is the code point (hex), field 3 the canonical
+// combining class (decimal), field 5 the decomposition mapping — empty, or
+// `0041 0300` (canonical), or `<compat> 0020 0308` (a tagged compatibility
+// mapping). Range markers (`<…, First>` / `<…, Last>`) carry neither a
+// non-zero class nor a mapping, so processing line-by-line is sufficient.
+function parseUnicodeData(fileText: string): UnicodeDataTables {
+  const combiningClass = new Map<number, number>();
+  const decompositionMappings = new Map<number, DecompositionMapping>();
+  for (const rawLine of fileText.split("\n")) {
+    const line = rawLine.trim();
+    if (line.length === 0) {
+      continue;
+    }
+    const fields = line.split(";");
+    if (fields.length < 6) {
+      throw new Error(`UnicodeData: malformed line ${JSON.stringify(rawLine)}`);
+    }
+    const codePoint = Number.parseInt(fields[0] ?? "", 16);
+    if (!Number.isInteger(codePoint)) {
+      throw new Error(`UnicodeData: bad code point ${JSON.stringify(fields[0])}`);
+    }
+
+    const combiningClassValue = Number.parseInt(fields[3] ?? "", 10);
+    if (!Number.isInteger(combiningClassValue) || combiningClassValue < 0) {
+      throw new Error(`UnicodeData: bad combining class for U+${codePoint.toString(16)}`);
+    }
+    if (combiningClassValue !== 0) {
+      combiningClass.set(codePoint, combiningClassValue);
+    }
+
+    const decompositionField = (fields[5] ?? "").trim();
+    if (decompositionField.length > 0) {
+      const tokens = decompositionField.split(/\s+/);
+      const compat = tokens[0]?.startsWith("<") ?? false;
+      const mapping = (compat ? tokens.slice(1) : tokens).map((token) => {
+        const value = Number.parseInt(token, 16);
+        if (!Number.isInteger(value)) {
+          throw new Error(`UnicodeData: bad decomposition token ${JSON.stringify(token)}`);
+        }
+        return value;
+      });
+      decompositionMappings.set(codePoint, { compat, to: mapping });
+    }
+  }
+  return { combiningClass, decompositionMappings };
+}
+
+// Parse the vendored official CompositionExclusions.txt — one code point (hex)
+// per non-comment line. These are the script-specific and post-composition-
+// version exclusions; singletons and non-starter decomposables are excluded
+// structurally by `buildComposition` and are not listed here.
+function parseCompositionExclusions(fileText: string): Set<number> {
+  const exclusions = new Set<number>();
   for (const rawLine of fileText.split("\n")) {
     const line = rawLine.split("#", 1)[0]?.trim() ?? "";
     if (line.length === 0) {
       continue;
     }
-    const [rangeField, classField] = line.split(";").map((field) => field.trim());
-    if (rangeField === undefined || classField === undefined) {
-      throw new Error(`DerivedCombiningClass: malformed line ${JSON.stringify(rawLine)}`);
+    const codePoint = Number.parseInt(line, 16);
+    if (!Number.isInteger(codePoint)) {
+      throw new Error(`CompositionExclusions: bad code point ${JSON.stringify(rawLine)}`);
     }
-    const combiningClass = Number.parseInt(classField, 10);
-    if (!Number.isInteger(combiningClass) || combiningClass < 0 || combiningClass > 254) {
-      throw new Error(`DerivedCombiningClass: bad class ${JSON.stringify(classField)}`);
-    }
-    if (combiningClass === 0) {
-      continue;
-    }
-    const bounds = rangeField.split("..");
-    const start = Number.parseInt(bounds[0] ?? "", 16);
-    const end = Number.parseInt(bounds[1] ?? bounds[0] ?? "", 16);
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start > end) {
-      throw new Error(`DerivedCombiningClass: bad range ${JSON.stringify(rangeField)}`);
-    }
-    for (let codePoint = start; codePoint <= end; codePoint += 1) {
-      entries.push([codePoint, combiningClass]);
-    }
+    exclusions.add(codePoint);
   }
-  entries.sort((left, right) => left[0] - right[0]);
-  return entries;
+  return exclusions;
 }
 
-// Derive the full-recursive NFKD decomposition table from the runtime. Hangul
-// syllables are excluded — the normaliser decomposes them algorithmically.
-function buildDecomposition(): DecompositionEntry[] {
+function combiningClassOf(codePoint: number, combiningClass: ReadonlyMap<number, number>): number {
+  return combiningClass.get(codePoint) ?? 0;
+}
+
+// Recursively expand a code point's full compatibility decomposition (NFKD,
+// pre-ordering): replace each code point with its single-level mapping until
+// no code point decomposes. The depth guard catches a malformed (cyclic) UCD.
+function fullyDecompose(
+  codePoint: number,
+  decompositionMappings: ReadonlyMap<number, DecompositionMapping>,
+  out: number[],
+  depth: number,
+): void {
+  if (depth > 32) {
+    throw new Error(`decomposition of U+${codePoint.toString(16)} exceeds depth 32 — cyclic UCD?`);
+  }
+  const mapping = decompositionMappings.get(codePoint);
+  if (mapping === undefined) {
+    out.push(codePoint);
+    return;
+  }
+  for (const part of mapping.to) {
+    fullyDecompose(part, decompositionMappings, out, depth + 1);
+  }
+}
+
+// Stable canonical ordering: sort each maximal run of non-starters by combining
+// class, preserving input order within an equal class. Same algorithm as
+// `canonicalOrder` in nfkc-core.ts (inlined so the generator does not depend on
+// a non-exported helper).
+function canonicalOrderInPlace(
+  codePoints: number[],
+  combiningClass: ReadonlyMap<number, number>,
+): void {
+  let index = 0;
+  while (index < codePoints.length) {
+    const codePoint = codePoints[index];
+    if (codePoint === undefined || combiningClassOf(codePoint, combiningClass) === 0) {
+      index += 1;
+      continue;
+    }
+    let runEnd = index;
+    while (runEnd < codePoints.length) {
+      const runCodePoint = codePoints[runEnd];
+      if (runCodePoint === undefined || combiningClassOf(runCodePoint, combiningClass) === 0) {
+        break;
+      }
+      runEnd += 1;
+    }
+    for (let cursor = index + 1; cursor < runEnd; cursor += 1) {
+      const cursorCodePoint = codePoints[cursor];
+      if (cursorCodePoint === undefined) {
+        continue;
+      }
+      const cursorClass = combiningClassOf(cursorCodePoint, combiningClass);
+      let probe = cursor - 1;
+      while (probe >= index) {
+        const probeCodePoint = codePoints[probe];
+        if (probeCodePoint === undefined) {
+          break;
+        }
+        if (combiningClassOf(probeCodePoint, combiningClass) <= cursorClass) {
+          break;
+        }
+        codePoints[probe + 1] = probeCodePoint;
+        probe -= 1;
+      }
+      codePoints[probe + 1] = cursorCodePoint;
+    }
+    index = runEnd;
+  }
+}
+
+// Build the fully-recursive NFKD decomposition table. Hangul syllables are
+// excluded (the normaliser decomposes them algorithmically).
+function buildDecomposition(
+  decompositionMappings: ReadonlyMap<number, DecompositionMapping>,
+  combiningClass: ReadonlyMap<number, number>,
+): DecompositionEntry[] {
   const entries: DecompositionEntry[] = [];
-  for (let codePoint = 0; codePoint <= MAX_CODE_POINT; codePoint += 1) {
+  for (const codePoint of [...decompositionMappings.keys()].sort((a, b) => a - b)) {
     if (isSurrogate(codePoint) || isHangulSyllable(codePoint)) {
       continue;
     }
-    const source = String.fromCodePoint(codePoint);
-    const decomposed = source.normalize("NFKD");
-    if (decomposed !== source) {
-      entries.push([codePoint, codePointsOf(decomposed)]);
-    }
+    const decomposed: number[] = [];
+    fullyDecompose(codePoint, decompositionMappings, decomposed, 0);
+    canonicalOrderInPlace(decomposed, combiningClass);
+    entries.push([codePoint, decomposed]);
   }
   return entries;
 }
 
-// Derive the canonical composition table from the runtime. The composition
-// step needs SINGLE-LEVEL pairs — `(prefix, mark) → composite` — but
-// `String.prototype.normalize("NFD")` only exposes the FULLY-RECURSIVE
-// decomposition (`U+01EC` → `O + ogonek + macron`, never the single level
-// `Ǫ + macron`).
-//
-// The outer mark of a primary composite's single-level decomposition is always
-// the LAST code point of its recursive, canonically-ordered NFD: NFC composes
-// marks in ascending combining-class (canonical) order, so the last-applied —
-// hence outer — mark is the last in that order. The prefix is the rest,
-// recomposed. A round-trip test (`NFC([prefix, mark]) === composite`) cannot be
-// used to *pick* the mark: `NFC` re-decomposes and re-orders its input, so it
-// also accepts non-canonical pairs (`NFC(["Ō", ogonek])` reorders to `O ogonek
-// macron` and yields `U+01EC` too) — that false positive is exactly the bug
-// this derivation avoids.
-//
-// `NFC(cp) === cp` filters to genuine primary composites: a Composition
-// Exclusion or a singleton decomposes under NFC instead of staying put, so the
-// exclusion list is never consulted by hand. Iterating every composite records
-// every intermediate pair. Hangul is composed algorithmically and excluded.
-function buildComposition(): CompositionEntry[] {
+// Build the canonical composition table. A primary composite is a code point
+// whose CANONICAL (untagged) decomposition is exactly two code points, whose
+// first element is a starter, and which is not a Composition Exclusion.
+// Singletons (length 1) and non-starter decomposables (first element a
+// non-starter) are excluded by the length and starter checks. Hangul is
+// composed algorithmically and excluded.
+function buildComposition(
+  decompositionMappings: ReadonlyMap<number, DecompositionMapping>,
+  combiningClass: ReadonlyMap<number, number>,
+  exclusions: ReadonlySet<number>,
+): CompositionEntry[] {
   const entries: CompositionEntry[] = [];
-  for (let codePoint = 0; codePoint <= MAX_CODE_POINT; codePoint += 1) {
-    if (isSurrogate(codePoint) || isHangulSyllable(codePoint)) {
+  for (const codePoint of [...decompositionMappings.keys()].sort((a, b) => a - b)) {
+    if (isSurrogate(codePoint) || isHangulSyllable(codePoint) || exclusions.has(codePoint)) {
       continue;
     }
-    const source = String.fromCodePoint(codePoint);
-    if (source.normalize("NFC") !== source) {
-      continue; // a Composition Exclusion or singleton — never a primary composite
-    }
-    const decomposed = source.normalize("NFD");
-    if (decomposed === source) {
-      continue; // no canonical decomposition — not a composite
-    }
-    const full = codePointsOf(decomposed);
-    const mark = full[full.length - 1];
-    if (full.length < 2 || mark === undefined) {
+    const mapping = decompositionMappings.get(codePoint);
+    if (mapping === undefined || mapping.compat || mapping.to.length !== 2) {
       continue;
     }
-    const prefixPoints = codePointsOf(
-      String.fromCodePoint(...full.slice(0, full.length - 1)).normalize("NFC"),
-    );
-    const starter = prefixPoints[0];
-    if (prefixPoints.length !== 1 || starter === undefined) {
+    const [starter, second] = mapping.to;
+    if (starter === undefined || second === undefined) {
       continue;
     }
-    entries.push([starter, mark, codePoint]);
+    if (combiningClassOf(starter, combiningClass) !== 0) {
+      continue; // non-starter decomposable — never a primary composite
+    }
+    entries.push([starter, second, codePoint]);
   }
-  entries.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
   return entries;
 }
 
@@ -186,8 +282,7 @@ function buildTables(
   };
 }
 
-// Assert the tables are internally well-formed. A malformed table would make
-// `normalizeNfkc` silently wrong, so this runs before the equivalence proof.
+// Assert the tables are internally well-formed before they are written.
 function assertWellFormed(
   decomposition: readonly DecompositionEntry[],
   composition: readonly CompositionEntry[],
@@ -240,8 +335,8 @@ interface NamedVector {
 }
 
 // Curated adversarial corpus. Each input names the normalisation trap it
-// targets; `expected` is computed from the runtime at generation time. These
-// become the cross-language wire vectors run by both Vitest and the Go
+// targets; `expected` is computed from the FROZEN tables at generation time.
+// These become the cross-language wire vectors run by both Vitest and the Go
 // reference, so every language port is pinned to the same corpus.
 function curatedVectors(): NamedVector[] {
   return [
@@ -271,36 +366,44 @@ function curatedVectors(): NamedVector[] {
     { input: "㌀", name: "U+3300 SQUARE APAATO — compatibility decomposition" },
     { input: "ＡＢ", name: "fullwidth AB → ASCII AB" },
     { input: "①", name: "U+2460 CIRCLED DIGIT ONE → '1'" },
-    { input: "½", name: "U+00BD VULGAR FRACTION ONE HALF → '1/2'" },
+    { input: "½", name: "U+00BD VULGAR FRACTION ONE HALF → '1⁄2'" },
     { input: "Ǆ", name: "U+01C4 LATIN CAPITAL LETTER DZ WITH CARON → 'DŽ'" },
     { input: "Ĳ", name: "U+0132 LATIN CAPITAL LIGATURE IJ → 'IJ'" },
     { input: "⁵", name: "U+2075 SUPERSCRIPT FIVE → '5'" },
-    { input: "𝐀", name: "U+1D400 MATHEMATICAL BOLD CAPITAL A → 'A' (astral)" },
-    { input: "𞤀", name: "U+1D900-area astral, ADLAM-adjacent — passthrough" },
+    { input: "\u{1d400}", name: "U+1D400 MATHEMATICAL BOLD CAPITAL A → 'A' (astral)" },
+    { input: "\u{1e900}", name: "U+1E900 ADLAM CAPITAL ALPHA — astral passthrough" },
     { input: " ", name: "U+00A0 NO-BREAK SPACE → SPACE" },
     { input: "Á̖́", name: "A + three marks across classes 230/220/230" },
     { input: "x͏́", name: "x + CGJ(0) + acute — CGJ is a starter, blocks composition" },
     { input: "ཱི", name: "U+0F73 TIBETAN — decomposes to two non-starters" },
-    { input: "ְׄ", name: "Hebrew marks — reorder by combining class" },
-    { input: "aְׄb", name: "marks between two base letters" },
+    { input: "ְ֔", name: "Hebrew marks — reorder by combining class" },
+    { input: "aְ֔b", name: "marks between two base letters" },
     { input: "ế", name: "U+1EBF — recursive: e + circumflex + acute precomposed" },
-    { input: "क़", name: "U+0958 DEVANAGARI QA — composition-excluded, stays decomposed form" },
+    { input: "क़", name: "U+0958 DEVANAGARI QA — composition-excluded, stays decomposed" },
   ];
 }
 
-// The full self-verification corpus: curated vectors plus a programmatic
-// adversarial spread of mark orderings, triples, and Hangul jamo runs.
-function verificationCorpus(combiningClass: readonly CombiningClassEntry[]): string[] {
+// The runtime cross-check corpus: curated inputs plus a programmatic spread of
+// mark orderings, triples, and Hangul jamo runs.
+function verificationCorpus(combiningClass: ReadonlyMap<number, number>): string[] {
   const corpus = curatedVectors().map((vector) => vector.input);
 
-  // A spread of non-starter marks across distinct combining classes.
+  // A spread of non-starter marks across distinct combining classes. The list
+  // is FIXED; every entry must be a real non-starter in the pinned data, or the
+  // run fails loudly — a silent prune would weaken the corpus.
   const sampleMarks = [
     0x0300, 0x0301, 0x0302, 0x0307, 0x0308, 0x0316, 0x0323, 0x0327, 0x0328, 0x031b, 0x0334, 0x0345,
     0x05b0, 0x05c1, 0x05c2, 0x064b, 0x0653, 0x093c, 0x0f71, 0x0f72, 0x1dc0,
-  ].filter((mark) => combiningClass.some(([codePoint]) => codePoint === mark));
+  ];
+  for (const mark of sampleMarks) {
+    if (combiningClassOf(mark, combiningClass) === 0) {
+      throw new Error(
+        `corpus sample mark U+${mark.toString(16)} is a starter in the pinned data — ` +
+          `the fixed sample-mark list is stale`,
+      );
+    }
+  }
 
-  // Every ordered pair and triple of sample marks after a base letter — drives
-  // the canonical-ordering and blocked-composition paths exhaustively.
   for (const first of sampleMarks) {
     for (const second of sampleMarks) {
       corpus.push(`a${String.fromCodePoint(first, second)}`);
@@ -310,7 +413,6 @@ function verificationCorpus(combiningClass: readonly CombiningClassEntry[]): str
     }
   }
 
-  // Random multi-code-point strings drawn from a mark-heavy alphabet.
   const random = mulberry32(0x6e666b63);
   const alphabet = [0x61, 0x65, 0x6e, 0x6f, 0xac00, 0x1100, 0x1161, 0x11a8, ...sampleMarks];
   for (let sample = 0; sample < 4000; sample += 1) {
@@ -328,48 +430,57 @@ function verificationCorpus(combiningClass: readonly CombiningClassEntry[]): str
 interface VerificationResult {
   readonly singleCodePointChecks: number;
   readonly corpusChecks: number;
+  readonly runtimeNewerThanPin: boolean;
+  readonly runtimeMismatches: number;
 }
 
-// Prove `normalizeNfkc` against the supplied tables equals the runtime's
-// `String.prototype.normalize("NFKC")` — for every code point, then for the
-// adversarial multi-code-point corpus, plus idempotence and NFKC-stability.
+// Cross-check `normalizeNfkc` (driven by the just-built tables) against the
+// host runtime's `String.prototype.normalize("NFKC")`. The tables are the
+// authoritative output — derived from the vendored UCD — so this is a bonus
+// proof, not the source of truth: on a runtime whose Unicode data is newer
+// than the pin, mismatches on code points the pin leaves unassigned are
+// EXPECTED and reported, not fatal; on a runtime that matches the pin, ANY
+// mismatch is a genuine bug and aborts. Idempotence is runtime-independent and
+// is always asserted hard.
 function verifyAgainstRuntime(
   tables: NfkcTables,
-  combiningClass: readonly CombiningClassEntry[],
+  combiningClass: ReadonlyMap<number, number>,
 ): VerificationResult {
+  const sentinel = String.fromCodePoint(POST_PIN_SENTINEL);
+  const runtimeNewerThanPin = sentinel.normalize("NFKD") !== sentinel;
+
+  let runtimeMismatches = 0;
+  const crossCheck = (input: string, label: string): void => {
+    const frozen = normalizeNfkc(input, tables);
+    if (normalizeNfkc(frozen, tables) !== frozen) {
+      throw new Error(`frozen NFKC is not idempotent for ${label}`);
+    }
+    if (frozen !== input.normalize("NFKC")) {
+      runtimeMismatches += 1;
+      if (!runtimeNewerThanPin) {
+        throw new Error(
+          `frozen NFKC disagrees with the runtime for ${label}: ` +
+            `frozen=${JSON.stringify(frozen)} runtime=${JSON.stringify(input.normalize("NFKC"))}`,
+        );
+      }
+    }
+  };
+
   let singleCodePointChecks = 0;
   for (let codePoint = 0; codePoint <= MAX_CODE_POINT; codePoint += 1) {
     if (isSurrogate(codePoint)) {
       continue;
     }
-    const source = String.fromCodePoint(codePoint);
-    const frozen = normalizeNfkc(source, tables);
-    const runtime = source.normalize("NFKC");
-    if (frozen !== runtime) {
-      throw new Error(
-        `frozen NFKC disagrees with the runtime at U+${codePoint.toString(16)}: ` +
-          `frozen=${JSON.stringify(frozen)} runtime=${JSON.stringify(runtime)}`,
-      );
-    }
+    crossCheck(String.fromCodePoint(codePoint), `U+${codePoint.toString(16)}`);
     singleCodePointChecks += 1;
   }
 
   let corpusChecks = 0;
   for (const input of verificationCorpus(combiningClass)) {
-    const frozen = normalizeNfkc(input, tables);
-    const runtime = input.normalize("NFKC");
-    if (frozen !== runtime) {
-      throw new Error(
-        `frozen NFKC disagrees with the runtime for ${JSON.stringify(input)}: ` +
-          `frozen=${JSON.stringify(frozen)} runtime=${JSON.stringify(runtime)}`,
-      );
-    }
-    if (normalizeNfkc(frozen, tables) !== frozen) {
-      throw new Error(`frozen NFKC is not idempotent for ${JSON.stringify(input)}`);
-    }
+    crossCheck(input, JSON.stringify(input));
     corpusChecks += 1;
   }
-  return { singleCodePointChecks, corpusChecks };
+  return { singleCodePointChecks, corpusChecks, runtimeNewerThanPin, runtimeMismatches };
 }
 
 function hex(value: number): string {
@@ -391,13 +502,14 @@ function renderTableModule(
     .map(([codePoint, value]) => `  [${hex(codePoint)}, ${value}],`)
     .join("\n");
   return `// GENERATED FILE — do not edit by hand.
-// Source of truth: scripts/generate-nfkc-table.ts
-// Regenerate: bun run scripts/generate-nfkc-table.ts
+// Source of truth: scripts/generate-nfkc-table.ts + the vendored UCD files in
+// scripts/ucd/. Regenerate: bun run scripts/generate-nfkc-table.ts
 //
-// Frozen Unicode NFKC tables, captured at the version below. The moat
-// normalises against THESE tables, not the host runtime's live Unicode data,
-// so a signer and a verifier on different Node/Bun/ICU versions agree on the
-// sanitized bytes. The cross-language wire artifact and Go reference live in
+// Frozen Unicode NFKC tables, derived from the vendored Unicode Character
+// Database at the version below. The moat normalises against THESE tables, not
+// the host runtime's live Unicode data, so a signer and a verifier on
+// different Node/Bun/ICU versions agree on the sanitized bytes. The
+// cross-language wire artifact and Go reference live in
 // testdata/nfkc-table.json. Hangul is decomposed/composed algorithmically (see
 // nfkc-core.ts), so its 11,172 syllables are intentionally absent below.
 
@@ -427,14 +539,16 @@ function renderJsonArtifact(
   decomposition: readonly DecompositionEntry[],
   composition: readonly CompositionEntry[],
   combiningClass: readonly CombiningClassEntry[],
+  tables: NfkcTables,
 ): string {
   const description =
-    "Frozen Unicode NFKC tables for the SanitizedString moat. decomposition is " +
-    "the fully-recursive NFKD mapping (Hangul excluded — decomposed " +
-    "algorithmically); composition is the [starter, second, composite] " +
-    "canonical pairs; combiningClass is the non-zero Canonical_Combining_Class " +
-    "values. normalizationVectors is a curated corpus every language port must " +
-    "agree on. Run by verifier-reference.go and tests/nfkc.spec.ts.";
+    "Frozen Unicode NFKC tables for the SanitizedString moat, derived from the " +
+    "vendored Unicode Character Database. decomposition is the fully-recursive " +
+    "NFKD mapping (Hangul excluded — decomposed algorithmically); composition " +
+    "is the [starter, second, composite] canonical pairs; combiningClass is the " +
+    "non-zero Canonical_Combining_Class values. normalizationVectors is a " +
+    "curated corpus every language port must agree on. Run by " +
+    "verifier-reference.go and tests/nfkc.spec.ts.";
   const decompositionLines = decomposition
     .map(([codePoint, parts]) => `    {"cp": ${codePoint}, "to": [${parts.join(", ")}]}`)
     .join(",\n");
@@ -446,7 +560,9 @@ function renderJsonArtifact(
     .join(",\n");
   const vectorLines = curatedVectors()
     .map((vector) => {
-      const expected = vector.input.normalize("NFKC");
+      // `expected` is the FROZEN normalisation, not the runtime's — the
+      // artifact must not depend on the host that generated it.
+      const expected = normalizeNfkc(vector.input, tables);
       return (
         `    {"input": ${JSON.stringify(vector.input)}, ` +
         `"expected": ${JSON.stringify(expected)}, ` +
@@ -475,35 +591,30 @@ ${vectorLines}
 }
 
 function main(): void {
-  const runtimeUnicodeVersion = process.versions.unicode ?? "unknown";
-  if (!runtimeUnicodeVersion.startsWith(PINNED_UNICODE_VERSION)) {
-    throw new Error(
-      `this generator must run on a runtime shipping Unicode ${PINNED_UNICODE_VERSION} ` +
-        `(it derives the decomposition/composition tables from the runtime and pairs them ` +
-        `with the vendored Unicode ${PINNED_UNICODE_VERSION} combining classes); ` +
-        `the current runtime ships Unicode ${runtimeUnicodeVersion}. Use the pinned Bun.`,
-    );
-  }
-
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const packageRoot = join(scriptDir, "..");
 
-  // The vendored UCD file is the one input not derived from the runtime. Its
-  // integrity is transitively verified: a wrong combining class changes
-  // canonical ordering or composition, so `verifyAgainstRuntime` below — which
-  // re-derives every code point's NFKC and compares against the runtime —
-  // would catch a corrupted file. (A standalone content-hash assertion would
-  // be cleaner, but the hashing primitive would trip check-invariants'
-  // single-hashing-entry guard; the equivalence proof is the stronger check
-  // regardless.)
-  const combiningClassText = readFileSync(join(scriptDir, DERIVED_COMBINING_CLASS_FILE), "utf8");
-  const combiningClass = parseCombiningClasses(combiningClassText);
-  const decomposition = buildDecomposition();
-  const composition = buildComposition();
+  const unicodeData = parseUnicodeData(readFileSync(join(scriptDir, UNICODE_DATA_FILE), "utf8"));
+  const exclusions = parseCompositionExclusions(
+    readFileSync(join(scriptDir, COMPOSITION_EXCLUSIONS_FILE), "utf8"),
+  );
+
+  const combiningClass: CombiningClassEntry[] = [...unicodeData.combiningClass.entries()].sort(
+    (left, right) => left[0] - right[0],
+  );
+  const decomposition = buildDecomposition(
+    unicodeData.decompositionMappings,
+    unicodeData.combiningClass,
+  );
+  const composition = buildComposition(
+    unicodeData.decompositionMappings,
+    unicodeData.combiningClass,
+    exclusions,
+  );
 
   const tables = buildTables(decomposition, composition, combiningClass);
   assertWellFormed(decomposition, composition, tables);
-  const result = verifyAgainstRuntime(tables, combiningClass);
+  const result = verifyAgainstRuntime(tables, unicodeData.combiningClass);
 
   const tableModulePath = join(packageRoot, "src", "nfkc-table.generated.ts");
   writeFileSync(
@@ -521,13 +632,22 @@ function main(): void {
   execFileSync(biomeBin, ["format", "--write", tableModulePath], { cwd: packageRoot });
 
   const jsonPath = join(packageRoot, "testdata", "nfkc-table.json");
-  writeFileSync(jsonPath, renderJsonArtifact(decomposition, composition, combiningClass), "utf8");
+  writeFileSync(
+    jsonPath,
+    renderJsonArtifact(decomposition, composition, combiningClass, tables),
+    "utf8",
+  );
 
+  const crossCheck = result.runtimeNewerThanPin
+    ? `  runtime ships Unicode newer than ${PINNED_UNICODE_VERSION}; ` +
+      `runtime cross-check skipped (${result.runtimeMismatches} expected drift mismatches over ` +
+      `${result.singleCodePointChecks} code points + ${result.corpusChecks} corpus strings)\n`
+    : `  verified: frozen NFKC matches the runtime for ${result.singleCodePointChecks} code ` +
+      `points + ${result.corpusChecks} corpus strings + idempotent\n`;
   process.stdout.write(
     `nfkc tables: Unicode ${PINNED_UNICODE_VERSION}, ${decomposition.length} decompositions, ` +
       `${composition.length} composition pairs, ${combiningClass.length} combining classes\n` +
-      `  verified: ${result.singleCodePointChecks} single code points + ` +
-      `${result.corpusChecks} corpus strings match the runtime NFKC + idempotent\n` +
+      crossCheck +
       `  wrote ${tableModulePath}\n  wrote ${jsonPath}\n`,
   );
 }

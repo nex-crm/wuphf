@@ -209,7 +209,7 @@ check_no_runtime_normalize_in_src() {
   local violators
   # Drop comment lines (`//`, `*`, `/*`) — the nfkc modules name
   # `String.prototype.normalize` in prose explaining why they do NOT call it.
-  violators=$(grep -rnE --include='*.ts' '\.normalize\(' src/ 2>/dev/null \
+  violators=$(grep -rnE --include='*.ts' '\.normalize[[:space:]]*\(' src/ 2>/dev/null \
     | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*|/\*)' \
     || true)
   if [ -n "$violators" ]; then

@@ -1075,7 +1075,12 @@ func sanitizeAllowlistText(value string) string {
 	normalized := frozenNfkcTables.frozenNFKC(value)
 	var out strings.Builder
 	for _, r := range normalized {
-		if !isAllowlistDisallowedCodePoint(r) {
+		// Strip against the FROZEN moat ranges (moat-disallowed-table.json),
+		// not Go's live unicode.C* tables — otherwise the reference's sanitized
+		// bytes would still be Unicode-version-coupled. tab/LF/CR are Cc and so
+		// in the table; the moat carves them out as intentional whitespace.
+		if r == '\t' || r == '\n' || r == '\r' ||
+			!moatDisallowed(int(r), frozenMoatDisallowedRanges) {
 			out.WriteRune(r)
 		}
 	}
@@ -1171,8 +1176,11 @@ type nfkcTables struct {
 	combiningClass map[rune]int
 }
 
-// frozenNfkcTables is loaded once in main before any sanitizeAllowlistText call.
+// frozenNfkcTables and frozenMoatDisallowedRanges are loaded once in main
+// before any sanitizeAllowlistText call — it normalises via the former and
+// strips against the latter, both version-pinned.
 var frozenNfkcTables nfkcTables
+var frozenMoatDisallowedRanges [][2]int
 
 // Hangul algorithmic constants — Unicode §3.12 / UAX #15.
 const (
@@ -2146,6 +2154,12 @@ func moatDisallowed(codePoint int, ranges [][2]int) bool {
 
 func verifyMoatTable(fx moatTableFixture) int {
 	failed := 0
+	if len(fx.ClassificationVectors) == 0 {
+		// Fail closed — with no vectors the classification cross-check below is
+		// vacuous. verifyNfkcTable does the same for its vectors.
+		fmt.Printf("  %sFAIL%s moat-table: no classification vectors\n", colorRed, colorReset)
+		return 1
+	}
 
 	// The ranges must be sorted, non-overlapping, and non-adjacent or the
 	// binary search above is unsound.
@@ -2177,16 +2191,21 @@ func verifyMoatTable(fx moatTableFixture) int {
 		// Independent cross-check: classify the same code point with Go's own
 		// Unicode data (unicode.In + the pinned Default_Ignorable table) rather
 		// than re-reading the JSON. The JSON table is raw \p{C}∪\p{DI}, so add
-		// back tab/LF/CR, which isAllowlistDisallowedCodePoint carves out. The
-		// curated vectors are all version-stable code points, so Go's Unicode
-		// version need not match the table's for this to hold.
-		r := rune(vec.CodePoint)
-		native := isAllowlistDisallowedCodePoint(r) || r == '\t' || r == '\n' || r == '\r'
-		if native != vec.Disallowed {
-			fmt.Printf("  %sFAIL%s moat-table/%s: Go-native Unicode classification disagrees on disallowed=%t\n",
-				colorRed, colorReset, vec.Name, vec.Disallowed)
-			failed++
-			continue
+		// back tab/LF/CR, which isAllowlistDisallowedCodePoint carves out.
+		//
+		// Skip this for unassigned (Cn) vectors: a future Go release could
+		// assign one, flipping its unicode.Cn membership and breaking the
+		// cross-check even though the frozen JSON table is unchanged. The
+		// JSON-range check above still covers them.
+		if !strings.Contains(vec.Name, "unassigned") {
+			r := rune(vec.CodePoint)
+			native := isAllowlistDisallowedCodePoint(r) || r == '\t' || r == '\n' || r == '\r'
+			if native != vec.Disallowed {
+				fmt.Printf("  %sFAIL%s moat-table/%s: Go-native Unicode classification disagrees on disallowed=%t\n",
+					colorRed, colorReset, vec.Name, vec.Disallowed)
+				failed++
+				continue
+			}
 		}
 		fmt.Printf("  %sPASS%s moat-table/%s\n", colorGreen, colorReset, vec.Name)
 	}
@@ -2268,8 +2287,9 @@ func main() {
 		os.Exit(2)
 	}
 	// Loaded before any sanitizeAllowlistText call below — it normalises via
-	// frozenNfkcTables.
+	// frozenNfkcTables and strips against frozenMoatDisallowedRanges.
 	frozenNfkcTables = buildNfkcTables(nfkcFx)
+	frozenMoatDisallowedRanges = moatFx.DisallowedRanges
 
 	fmt.Printf("%s@wuphf/protocol — Go reference verifier%s\n", colorBold, colorReset)
 	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d signed-approval-token accept vectors, %d signed-approval-token reject vectors, %d runner accept vectors, %d runner reject vectors, %d agent-provider-routing accept vectors, %d agent-provider-routing reject vectors, moat table Unicode %s (%d ranges, %d vectors), nfkc table Unicode %s (%d normalization vectors)%s\n\n",
