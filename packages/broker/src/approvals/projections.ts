@@ -67,6 +67,9 @@ export interface ApprovalProjection {
   getById(id: ApprovalRequestId): FoldedApprovalRow | null;
   list(filter?: ApprovalListFilter): readonly FoldedApprovalRow[];
   listPage(filter: ApprovalListFilter | undefined, page: ApprovalListPageOptions): ApprovalListPage;
+  countPendingByThread(threadId: ThreadId): number;
+  listPendingByThread(threadId: ThreadId): readonly FoldedApprovalRow[];
+  latestHeadLsnByThread(threadId: ThreadId): EventLsn | null;
 }
 
 interface ApprovalDbRow {
@@ -92,6 +95,14 @@ interface ApprovalEventDbRow {
   readonly lsn: number;
   readonly type: string;
   readonly payload: Buffer;
+}
+
+interface CountRow {
+  readonly count: number;
+}
+
+interface MaxLsnRow {
+  readonly headLsn: number | null;
 }
 
 interface ApprovalRequestJsonFields {
@@ -167,6 +178,12 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
      WHERE approval_id = ? AND status = 'pending'`,
   );
   const clearStmt = db.prepare<[]>("DELETE FROM pending_approvals");
+  const countPendingByThreadStmt = db.prepare<[string], CountRow>(
+    "SELECT COUNT(*) AS count FROM pending_approvals WHERE thread_id = ? AND status = 'pending'",
+  );
+  const latestHeadLsnByThreadStmt = db.prepare<[string], MaxLsnRow>(
+    "SELECT MAX(head_lsn) AS headLsn FROM pending_approvals WHERE thread_id = ?",
+  );
 
   const applyRequested = (
     payload: ApprovalRequestedAuditPayload,
@@ -278,6 +295,21 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
         rows: selectedRows.map(rowToFolded),
         ...(nextCursor === undefined ? {} : { nextCursor }),
       };
+    },
+    countPendingByThread(threadId: ThreadId): number {
+      const row = countPendingByThreadStmt.get(threadId);
+      if (row === undefined) {
+        throw new Error(`pending approval count query returned no row for ${threadId}`);
+      }
+      return row.count;
+    },
+    listPendingByThread(threadId: ThreadId): readonly FoldedApprovalRow[] {
+      return listRows(db, { threadId, status: "pending" }).map(rowToFolded);
+    },
+    latestHeadLsnByThread(threadId: ThreadId): EventLsn | null {
+      const row = latestHeadLsnByThreadStmt.get(threadId);
+      if (row === undefined || row.headLsn === null) return null;
+      return lsnFromV1Number(row.headLsn);
     },
   };
 }

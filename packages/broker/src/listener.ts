@@ -11,6 +11,7 @@
 //   GET  /api/threads/:tid/receipts       — bearer required. One-release alias.
 //   GET  /api/v1/threads                  — bearer required. List folded threads.
 //   GET  /api/v1/threads/:id              — bearer required. Read one folded thread.
+//   GET  /api/v1/threads/:id/pinned-approvals — bearer required. Read pending approvals.
 //   POST /api/v1/threads                  — bearer required. Create thread.
 //   PATCH /api/v1/threads/:id/spec        — bearer required. Append spec revision.
 //   PATCH /api/v1/threads/:id/status      — bearer required. Append status transition.
@@ -241,8 +242,9 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
           appender: config.threads.appender,
           state: config.threads.state,
           receiptIndex: config.threads.receiptIndex,
+          approvals: config.approvals?.projection ?? null,
           logger,
-          nowMs: () => Date.now(),
+          nowMs: () => readBrokerClock(clock),
           emitThreadEvent: (event) => sseHub.emitThreadEvent(event),
         } satisfies ThreadRouteDeps);
   if (approvals !== null) {

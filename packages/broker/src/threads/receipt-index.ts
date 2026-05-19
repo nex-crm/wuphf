@@ -2,6 +2,7 @@ import {
   MAX_THREAD_TASK_IDS,
   type ReceiptId,
   type ReceiptSnapshot,
+  type ReceiptStatus,
   receiptFromJson,
   type TaskId,
   type ThreadId,
@@ -35,6 +36,13 @@ export interface ThreadReceiptIndexRefs {
   readonly taskIds: readonly TaskId[];
 }
 
+export interface ThreadLatestReceipt {
+  readonly receiptId: ReceiptId;
+  readonly taskId: TaskId;
+  readonly lsn: number;
+  readonly status: ReceiptStatus;
+}
+
 export interface ThreadReceiptIndexStore {
   applyReceipt(receipt: ReceiptSnapshot, lsn: number): void;
   applyEvent(record: EventLogRecord): void;
@@ -42,12 +50,17 @@ export interface ThreadReceiptIndexStore {
   rebuildFromLog(eventLog: EventLog, fromLsn?: number): void;
   list(threadId: ThreadId, filter?: Pick<ListFilter, "cursor" | "limit">): ThreadReceiptIndexPage;
   refsForThread(threadId: ThreadId): ThreadReceiptIndexRefs;
+  latestForThread(threadId: ThreadId): ThreadLatestReceipt | null;
 }
 
 interface ThreadReceiptIndexRow {
   readonly receiptId: string;
   readonly taskId: string;
   readonly lsn: number;
+}
+
+interface ThreadLatestReceiptRow extends ThreadReceiptIndexRow {
+  readonly payload: Buffer;
 }
 
 interface ThreadTaskIndexRow {
@@ -83,6 +96,14 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
      WHERE thread_id = ?
      ORDER BY lsn ASC
      LIMIT ?`,
+  );
+  const latestStmt = db.prepare<[string], ThreadLatestReceiptRow>(
+    `SELECT tr.receipt_id AS receiptId, tr.task_id AS taskId, tr.lsn, rp.payload
+     FROM thread_receipts AS tr
+     INNER JOIN receipts_projection AS rp ON rp.receipt_id = tr.receipt_id
+     WHERE tr.thread_id = ?
+     ORDER BY tr.lsn DESC
+     LIMIT 1`,
   );
   const clearStmt = db.prepare<[]>("DELETE FROM thread_receipts");
 
@@ -155,6 +176,17 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
       return {
         receiptIds: receiptRows.map((row) => row.receiptId as ReceiptId),
         taskIds: taskRows.map((row) => row.taskId as TaskId),
+      };
+    },
+    latestForThread(threadId: ThreadId): ThreadLatestReceipt | null {
+      const row = latestStmt.get(threadId);
+      if (row === undefined) return null;
+      const receipt = receiptFromJson(row.payload.toString("utf8"));
+      return {
+        receiptId: row.receiptId as ReceiptId,
+        taskId: row.taskId as TaskId,
+        lsn: row.lsn,
+        status: receipt.status,
       };
     },
   };

@@ -1,27 +1,35 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
+  type ApprovalRequest,
+  type ApprovalView,
   asIdempotencyKey,
   asSignerIdentity,
   asThreadId,
   asThreadSpecRevisionId,
   canonicalJSON,
   type EventLsn,
+  lsnFromV1Number,
+  parseLsn,
   routeErrorToJsonValue,
   type Sha256Hex,
   type SignerIdentity,
-  THREAD_STATUS_VALUES,
+  THREAD_BOARD_COLUMN_VALUES,
+  THREAD_EFFECTIVE_STATUS_VALUES,
   type Thread,
+  type ThreadBoardColumn,
   type ThreadCreateCommand,
+  type ThreadEffectiveStatus,
   type ThreadExternalRefs,
   type ThreadId,
   type ThreadSpecEditCommand,
-  type ThreadStatus,
   type ThreadStatusChangeCommand,
+  type ThreadView,
   threadCreateRequestFromJson,
   threadGetResponseToJsonValue,
   threadListResponseToJsonValue,
   threadMutationResponseToJsonValue,
+  threadPinnedApprovalsResponseToJsonValue,
   threadSpecContentHash,
   threadSpecEditRequestFromJson,
   threadStatusChangeRequestFromJson,
@@ -44,6 +52,7 @@ import {
   ThreadNotFoundError,
   ThreadTerminalTransitionError,
 } from "./appender.ts";
+import { deriveThreadEffectiveStatus } from "./effective-status.ts";
 import {
   type IdempotencyParseError,
   type ParsedIdempotencyKey,
@@ -58,7 +67,10 @@ import {
 import type { ThreadReceiptIndexStore } from "./receipt-index.ts";
 
 const MAX_THREAD_BODY_BYTES = 512 * 1_024;
-const THREAD_STATUS_SET: ReadonlySet<string> = new Set<string>(THREAD_STATUS_VALUES);
+const THREAD_EFFECTIVE_STATUS_SET: ReadonlySet<string> = new Set<string>(
+  THREAD_EFFECTIVE_STATUS_VALUES,
+);
+const THREAD_BOARD_COLUMN_SET: ReadonlySet<string> = new Set<string>(THREAD_BOARD_COLUMN_VALUES);
 const ROUTE_SIGNER: SignerIdentity = asSignerIdentity("broker");
 const EMPTY_EXTERNAL_REFS: ThreadExternalRefs = Object.freeze({
   sourceUrls: Object.freeze([]),
@@ -69,13 +81,25 @@ export interface ThreadRouteDeps {
   readonly appender: ThreadAppender;
   readonly state: ThreadStateStore;
   readonly receiptIndex: ThreadReceiptIndexStore;
+  readonly approvals: ThreadApprovalQuery | null;
   readonly logger: BrokerLogger;
   readonly nowMs: () => number;
   readonly emitThreadEvent: (event: ThreadRouteStreamEvent) => void;
 }
 
+export interface ThreadApprovalQuery {
+  countPendingByThread(threadId: ThreadId): number;
+  listPendingByThread(threadId: ThreadId): readonly ThreadApprovalQueryRow[];
+  latestHeadLsnByThread(threadId: ThreadId): EventLsn | null;
+}
+
+export interface ThreadApprovalQueryRow {
+  readonly approval: ApprovalRequest;
+  readonly headLsn: EventLsn;
+}
+
 export interface ThreadRouteStreamEvent {
-  readonly kind: "thread.created" | "thread.updated";
+  readonly kind: "thread.created" | "thread.updated" | "thread.pinned_approvals.changed";
   readonly threadId: ThreadId;
   readonly headLsn: EventLsn;
 }
@@ -104,6 +128,14 @@ export async function handleThreadRoute(
   }
   const suffix = pathname.slice("/api/v1/threads/".length);
   const parts = suffix.split("/");
+  if (parts.length === 2 && parts[1] === "pinned-approvals") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      methodNotAllowed(res, "GET");
+      return true;
+    }
+    handleThreadPinnedApprovalsGet(res, deps, parts[0] ?? "");
+    return true;
+  }
   if (parts.length === 1) {
     if (req.method !== "GET" && req.method !== "HEAD") {
       methodNotAllowed(res, "GET");
@@ -134,16 +166,16 @@ export async function handleThreadRoute(
 
 function handleThreadList(req: IncomingMessage, res: ServerResponse, deps: ThreadRouteDeps): void {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  const status = parseStatusFilter(url.searchParams);
-  if (!status.ok) {
-    writeRouteError(res, 400, "invalid_status", status.reason);
+  const filter = parseStatusFilter(url.searchParams);
+  if (!filter.ok) {
+    writeRouteError(res, 400, "invalid_status", filter.reason);
     return;
   }
   try {
-    const rows = deps.state.list(
-      status.status === undefined ? undefined : { status: status.status },
-    );
-    const threads = rows.map((row) => threadFromRow(row, deps.receiptIndex));
+    const rows = deps.state.list();
+    const threads = rows
+      .map((row) => threadViewFromRow(row, deps))
+      .filter((thread) => threadMatchesStatusFilter(thread, filter.filter));
     writeJsonValue(res, 200, threadListResponseToJsonValue({ threads }));
   } catch (err) {
     if (writeStorageErrorResponse(res, err, deps.logger, "thread_list_rejected")) return;
@@ -170,10 +202,45 @@ function handleThreadGet(
     writeJsonValue(
       res,
       200,
-      threadGetResponseToJsonValue({ thread: threadFromRow(row, deps.receiptIndex) }),
+      threadGetResponseToJsonValue({ thread: threadViewFromRow(row, deps) }),
     );
   } catch (err) {
     if (writeStorageErrorResponse(res, err, deps.logger, "thread_get_rejected")) return;
+    throw err;
+  }
+}
+
+function handleThreadPinnedApprovalsGet(
+  res: ServerResponse,
+  deps: ThreadRouteDeps,
+  encodedThreadId: string,
+): void {
+  const threadId = parseThreadIdPath(encodedThreadId);
+  if (threadId === null) {
+    notFound(res);
+    return;
+  }
+  const row = deps.state.getById(threadId);
+  if (row === null) {
+    notFound(res);
+    return;
+  }
+  try {
+    const approvals = deps.approvals?.listPendingByThread(threadId) ?? [];
+    const approvalHeadLsn = deps.approvals?.latestHeadLsnByThread(threadId) ?? null;
+    writeJsonValue(
+      res,
+      200,
+      threadPinnedApprovalsResponseToJsonValue({
+        threadId,
+        headLsn: maxHeadLsn(row.headLsn, approvals, approvalHeadLsn),
+        approvals: approvals.map((approval) => approvalViewFromApproval(approval.approval)),
+      }),
+    );
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps.logger, "thread_pinned_approvals_rejected")) {
+      return;
+    }
     throw err;
   }
 }
@@ -401,11 +468,21 @@ function threadRouteStreamEventFromApplied(applied: {
   };
 }
 
-function threadFromRow(row: ThreadStateRow, receiptIndex: ThreadReceiptIndexStore): Thread {
-  const refs = receiptIndex.refsForThread(row.id);
+function threadViewFromRow(row: ThreadStateRow, deps: ThreadRouteDeps): ThreadView {
+  const refs = deps.receiptIndex.refsForThread(row.id);
   const thread = threadStateRowToThread(row, refs.taskIds);
   assertThreadValid(thread);
-  return thread;
+  const pendingApprovalCount = deps.approvals?.countPendingByThread(row.id) ?? 0;
+  const latestReceipt = deps.receiptIndex.latestForThread(row.id);
+  return {
+    ...thread,
+    ...deriveThreadEffectiveStatus({
+      storedStatus: row.status,
+      pendingApprovalCount,
+      latestReceiptStatus: latestReceipt?.status,
+    }),
+    pendingApprovalCount,
+  };
 }
 
 function assertThreadValid(thread: Thread): void {
@@ -422,16 +499,72 @@ function assertThreadValid(thread: Thread): void {
 function parseStatusFilter(
   params: URLSearchParams,
 ):
-  | { readonly ok: true; readonly status?: ThreadStatus }
+  | { readonly ok: true; readonly filter?: ThreadStatusFilter }
   | { readonly ok: false; readonly reason: string } {
   const values = params.getAll("status");
   if (values.length === 0) return { ok: true };
   if (values.length > 1) return { ok: false, reason: "status may appear only once" };
   const raw = values[0] ?? "";
-  if (!THREAD_STATUS_SET.has(raw)) {
-    return { ok: false, reason: "unknown thread status" };
+  if (THREAD_EFFECTIVE_STATUS_SET.has(raw)) {
+    return {
+      ok: true,
+      filter: { kind: "effective_status", value: raw as ThreadEffectiveStatus },
+    };
   }
-  return { ok: true, status: raw as ThreadStatus };
+  if (THREAD_BOARD_COLUMN_SET.has(raw)) {
+    return { ok: true, filter: { kind: "board_column", value: raw as ThreadBoardColumn } };
+  }
+  return { ok: false, reason: "unknown thread status, effective status, or board column" };
+}
+
+type ThreadStatusFilter =
+  | { readonly kind: "effective_status"; readonly value: ThreadEffectiveStatus }
+  | { readonly kind: "board_column"; readonly value: ThreadBoardColumn };
+
+function threadMatchesStatusFilter(thread: ThreadView, filter: ThreadStatusFilter | undefined) {
+  if (filter === undefined) return true;
+  if (filter.kind === "effective_status") return thread.effectiveStatus === filter.value;
+  return thread.boardColumn === filter.value;
+}
+
+function maxHeadLsn(
+  threadHeadLsn: EventLsn,
+  approvals: readonly ThreadApprovalQueryRow[],
+  approvalHeadLsn: EventLsn | null,
+): EventLsn {
+  let max = parseLsn(threadHeadLsn).localLsn;
+  if (approvalHeadLsn !== null) {
+    max = Math.max(max, parseLsn(approvalHeadLsn).localLsn);
+  }
+  for (const approval of approvals) {
+    max = Math.max(max, parseLsn(approval.headLsn).localLsn);
+  }
+  return lsnFromV1Number(max);
+}
+
+function approvalViewFromApproval(approval: ApprovalRequest): ApprovalView {
+  return {
+    id: approval.id,
+    claim: approval.claim,
+    scope: approval.scope,
+    riskClass: approval.riskClass,
+    ...(approval.threadId === undefined ? {} : { threadId: approval.threadId }),
+    ...(approval.taskId === undefined ? {} : { taskId: approval.taskId }),
+    ...(approval.receiptId === undefined ? {} : { receiptId: approval.receiptId }),
+    requestedBy: approval.requestedBy,
+    requestedAt: approval.requestedAt,
+    status: approval.status,
+    ...(approval.decision === undefined
+      ? {}
+      : {
+          decisionSummary: {
+            decision: approval.decision.decision,
+            decidedBy: approval.decision.decidedBy,
+            decidedAt: approval.decision.decidedAt,
+          },
+        }),
+    schemaVersion: 1,
+  };
 }
 
 function parseThreadIdPath(encoded: string): ThreadId | null {

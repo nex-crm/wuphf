@@ -14,6 +14,11 @@ export {
   ThreadNotFoundError,
   ThreadTerminalTransitionError,
 } from "./appender.ts";
+export {
+  deriveThreadEffectiveStatus,
+  type ThreadEffectiveStatusInput,
+  type ThreadEffectiveStatusResult,
+} from "./effective-status.ts";
 export type { ParsedIdempotencyKey, ThreadCommand } from "./idempotency.ts";
 export { parseThreadIdempotencyKey, THREAD_COMMAND_VALUES } from "./idempotency.ts";
 export type { ThreadStateRow, ThreadStateStore } from "./projections.ts";
