@@ -25,9 +25,9 @@
         "@tanstack/match-sorter-utils": "^8.19.4",
         "@tanstack/react-devtools": "^0.10.3",
         "@tanstack/react-form": "^1.32.0",
-        "@tanstack/react-query": "^5.100.10",
+        "@tanstack/react-query": "5.100.10",
         "@tanstack/react-query-devtools": "^5.100.10",
-        "@tanstack/react-router": "^1.169.2",
+        "@tanstack/react-router": "1.169.2",
         "@tanstack/react-router-devtools": "^1.166.13",
         "@tanstack/react-router-ssr-query": "^1.166.12",
         "@tanstack/react-start": "^1.167.65",
@@ -39,6 +39,7 @@
         "github-slugger": "^2.0.0",
         "iconoir-react": "^7.11.0",
         "mdast-util-to-markdown": "^2.1.2",
+        "pixelarticons": "^2.1.0",
         "react": "^19.1.0",
         "react-dom": "^19.1.0",
         "react-markdown": "^10.1.0",
@@ -1139,6 +1140,8 @@
     "picocolors": ["picocolors@1.1.1", "", {}, ""],
 
     "picomatch": ["picomatch@4.0.4", "", {}, ""],
+
+    "pixelarticons": ["pixelarticons@2.1.0", "", { "peerDependencies": { "react": ">=16" }, "bin": { "pixelarticons": "bin/upgrade.js" } }, "sha512-t03/DsFadIEU7SCwmi4mcnYgZMCKPawvvPt+KM9bW5nC4TcNFatCD196Qm9IT/5bIIbSCGjmjAoMrTZKxRBdJw=="],
 
     "postcss": ["postcss@8.5.10", "", { "dependencies": { "nanoid": "^3.3.11", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-pMMHxBOZKFU6HgAZ4eyGnwXF/EvPGGqUr0MnZ5+99485wwW41kW91A4LOGxSHhgugZmSChL5AlElNdwlNgcnLQ=="],
 

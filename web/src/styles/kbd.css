@@ -86,14 +86,16 @@
 .btn-label {
   display: inline-flex;
   align-items: center;
-  padding: 12px 24px;
+  height: 100%;
+  padding: 0 24px;
 }
 
 .btn .kbd-hint {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 12px;
+  height: 100%;
+  padding: 0 12px;
   font-size: 10px;
   color: inherit;
   opacity: 0.8;
@@ -107,6 +109,24 @@
   border-bottom-width: 3px;
   border-radius: 4px;
   box-sizing: border-box;
+}
+/* Number keycap variant — same chrome as the svg keycap but renders a
+   digit instead. Used on the choose-mode CTAs where "1" picks Build
+   and "2" picks Tour. */
+.kbd-hint-num {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-bottom-width: 3px;
+  border-radius: 4px;
+  box-sizing: border-box;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
 }
 .kbd-hint-mod {
   padding: 2px 4px;

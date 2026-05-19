@@ -51,6 +51,7 @@
     "github-slugger": "^2.0.0",
     "iconoir-react": "^7.11.0",
     "mdast-util-to-markdown": "^2.1.2",
+    "pixelarticons": "^2.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

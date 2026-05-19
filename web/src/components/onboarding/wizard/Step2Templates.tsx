@@ -1,6 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
+import { Children, useEffect, useMemo, useState } from "react";
 
-import { ArrowIcon, EnterHint } from "./components";
+import { InfoCircle, NavArrowDown, Plus } from "iconoir-react";
+import { Briefcase } from "pixelarticons/react/Briefcase";
+import { MessageText } from "pixelarticons/react/MessageText";
+import { Receipt } from "pixelarticons/react/Receipt";
+import { Store } from "pixelarticons/react/Store";
+import { Target } from "pixelarticons/react/Target";
+import { Video } from "pixelarticons/react/Video";
+
+import { BtnLabel, EnterHint } from "./components";
+
+// Pixel-art icon override per pack id. Falls back to the emoji from
+// BLUEPRINT_DISPLAY when there's no mapping.
+const PACK_PIXEL_ICONS: Record<
+  string,
+  React.ComponentType<React.SVGProps<SVGSVGElement>>
+> = {
+  "bookkeeping-invoicing-service": Receipt,
+  "local-business-ai-package": Store,
+  "multi-agent-workflow-consulting": Briefcase,
+  "niche-crm": Target,
+  "paid-discord-community": MessageText,
+  "youtube-factory": Video,
+};
 import { BLUEPRINT_CATEGORIES } from "./constants";
 import { adaptPackPreview, type PackPreview } from "./packPreview";
 import type { BlueprintCategoryKey, BlueprintTemplate } from "./types";
@@ -56,18 +78,8 @@ export function TemplatesStep({
   const [filter, setFilter] = useState<FilterKey>(ALL_FILTER);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // Auto-open the detail panel for the currently-selected pack so a
-  // user who returns to this step (Back from Team) sees their pick
-  // already expanded. previews is read for the validity guard only —
-  // it is not a trigger dep so a parent re-creating the array cannot
-  // re-open a panel the user explicitly closed.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: previews intentionally omitted as trigger; void read below satisfies the linter
-  useEffect(() => {
-    void previews;
-    if (selected && previews.some((p) => p.id === selected)) {
-      setOpenId(selected);
-    }
-  }, [selected]);
+  // (No auto-open on mount — the modal is purely opt-in via the info
+  // button on each card.)
 
   // Drop the "other" filter if the underlying data no longer has any
   // unknown blueprints. Without this the chip can stick after a
@@ -88,8 +100,13 @@ export function TemplatesStep({
     [previews, openId],
   );
 
+  // Clicking the card body now just selects the pack — it does NOT open
+  // the detail modal anymore. The dedicated info button opens the modal.
   const handleCardClick = (id: string) => {
     onSelect(id);
+  };
+
+  const handleInfoClick = (id: string) => {
     setOpenId(id);
   };
 
@@ -98,17 +115,23 @@ export function TemplatesStep({
     setOpenId(null);
   };
 
+  // Close modal on Escape so it feels like a real dialog.
+  useEffect(() => {
+    if (!openId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenId(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [openId]);
+
   return (
     <div className="wizard-step">
       <div className="wizard-hero">
-        <div className="wizard-eyebrow">
-          <span className="status-dot active pulse" />
-          Pick the outcome you want to ship
-        </div>
-        <h1 className="wizard-headline">What should your office run?</h1>
+        <h1 className="wizard-headline">Choose your office's focus</h1>
         <p className="wizard-subhead">
-          Each pack is a starting team, channels, skills, and a first task —
-          assembled around an outcome. You can change anything later.
+          Each one is a ready-made team for a specific outcome. You can tweak
+          everything later.
         </p>
       </div>
 
@@ -127,52 +150,6 @@ export function TemplatesStep({
         </div>
       ) : (
         <>
-          <div className="pack-library">
-            <div
-              className="pack-filter-row"
-              role="tablist"
-              aria-label="Pack categories"
-            >
-              {filterChips.map((chip) => (
-                <button
-                  key={chip.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={filter === chip.key}
-                  className={`pack-filter-chip ${filter === chip.key ? "active" : ""}`}
-                  onClick={() => setFilter(chip.key)}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-
-            {visiblePreviews.length === 0 ? (
-              <div className="pack-empty">No packs match this filter yet.</div>
-            ) : (
-              <div className="pack-grid">
-                {visiblePreviews.map((preview) => (
-                  <PackCard
-                    key={preview.id}
-                    preview={preview}
-                    selected={selected === preview.id}
-                    open={openId === preview.id}
-                    onClick={() => handleCardClick(preview.id)}
-                  />
-                ))}
-              </div>
-            )}
-
-            {openPreview && (
-              <PackDetailPanel
-                preview={openPreview}
-                selected={selected === openPreview.id}
-                onChoose={() => onSelect(openPreview.id)}
-                onClose={() => setOpenId(null)}
-              />
-            )}
-          </div>
-
           <div className="template-from-scratch">
             <button
               className={`template-from-scratch-btn ${selected === null ? "selected" : ""}`}
@@ -180,14 +157,46 @@ export function TemplatesStep({
               aria-pressed={selected === null}
               type="button"
             >
-              <span className="template-from-scratch-icon">+</span>
+              <span className="pack-card-radio" aria-hidden="true" />
               Start from scratch
-              <span className="template-from-scratch-sub">
-                5-person founding team: CEO, GTM Lead, Founding Engineer, PM,
-                Designer
-              </span>
             </button>
           </div>
+
+          <h2 className="pack-library-title">
+            or pick a ready-made office
+          </h2>
+          <section className="pack-library-section">
+            <div className="pack-library">
+              {visiblePreviews.length === 0 ? (
+              <div className="pack-empty">No packs match this filter yet.</div>
+            ) : (
+              <PackGrid>
+                {visiblePreviews.map((preview) => (
+                  <PackCard
+                    key={preview.id}
+                    preview={preview}
+                    selected={selected === preview.id}
+                    open={openId === preview.id}
+                    onClick={() => handleCardClick(preview.id)}
+                    onInfo={() => handleInfoClick(preview.id)}
+                  />
+                ))}
+              </PackGrid>
+            )}
+
+            {openPreview && (
+              <PackDetailModal
+                preview={openPreview}
+                selected={selected === openPreview.id}
+                onChoose={() => {
+                  onSelect(openPreview.id);
+                  setOpenId(null);
+                }}
+                onClose={() => setOpenId(null)}
+              />
+            )}
+            </div>
+          </section>
         </>
       )}
 
@@ -196,11 +205,57 @@ export function TemplatesStep({
           Back
         </button>
         <button className="btn btn-primary" onClick={onNext} type="button">
-          Review the team
-          <ArrowIcon />
+          <BtnLabel>Pick your team</BtnLabel>
           <EnterHint />
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Pack grid ──────────────────────────────────────────────────────────
+//
+// 3 cards per row. Initially shows 1.5 rows with a bottom gradient mask
+// that fades the second row's bottom half — signalling "more below."
+// A down-arrow button under the grid expands by 3 more rows per click;
+// it disappears once everything is visible.
+const PACK_GRID_INITIAL_ROWS = 1.5;
+const PACK_GRID_ROW_STEP = 3;
+
+function PackGrid({ children }: { children: React.ReactNode }) {
+  const total = Children.count(children);
+  const totalRows = Math.ceil(total / 3);
+  const [visibleRows, setVisibleRows] = useState<number>(
+    PACK_GRID_INITIAL_ROWS,
+  );
+
+  // Are there more rows beyond what's currently visible? If not, hide
+  // the expand affordance.
+  const collapsed = visibleRows < totalRows;
+  const expand = () =>
+    setVisibleRows((r) =>
+      Math.min(totalRows, Math.ceil(r) + PACK_GRID_ROW_STEP),
+    );
+
+  return (
+    <div className="pack-grid">
+      <div
+        className="pack-grid-track"
+        data-collapsed={collapsed || undefined}
+        style={{ "--pack-grid-rows": visibleRows } as React.CSSProperties}
+      >
+        {children}
+      </div>
+      {collapsed ? (
+        <button
+          type="button"
+          className="pack-grid-more"
+          onClick={expand}
+          aria-label="Show more packs"
+        >
+          <NavArrowDown width={18} height={18} aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -210,61 +265,83 @@ interface PackCardProps {
   selected: boolean;
   open: boolean;
   onClick: () => void;
+  onInfo: () => void;
 }
 
-function PackCard({ preview, selected, open, onClick }: PackCardProps) {
+function PackCard({
+  preview,
+  selected,
+  open,
+  onClick,
+  onInfo,
+}: PackCardProps) {
   return (
-    <button
-      type="button"
+    <div
       className={`pack-card ${selected ? "selected" : ""} ${open ? "open" : ""}`}
-      onClick={onClick}
-      aria-pressed={selected}
-      aria-expanded={open}
     >
-      <div className="pack-card-head">
-        {preview.icon ? (
-          <span className="pack-card-icon" aria-hidden="true">
-            {preview.icon}
+      <button
+        type="button"
+        className="pack-card-body"
+        onClick={onClick}
+        aria-pressed={selected}
+      >
+        <div className="pack-card-head">
+          <span className="pack-card-head-row">
+            <span className="pack-card-radio" aria-hidden="true" />
+            {(() => {
+              const PixelIcon = PACK_PIXEL_ICONS[preview.id];
+              if (PixelIcon) {
+                return (
+                  <span className="pack-card-icon" aria-hidden="true">
+                    <PixelIcon width={20} height={20} />
+                  </span>
+                );
+              }
+              return preview.icon ? (
+                <span className="pack-card-icon" aria-hidden="true">
+                  {preview.icon}
+                </span>
+              ) : null;
+            })()}
           </span>
-        ) : null}
-        <span className="pack-card-name">{preview.name}</span>
-      </div>
-      <p className="pack-card-outcome">{preview.outcome}</p>
-      <div className="pack-card-meta">
-        {preview.agents.length > 0 && (
-          <span className="pack-card-meta-item">
-            {preview.agents.length} agents
-          </span>
-        )}
-        {preview.firstTasks.length > 0 && (
-          <span className="pack-card-meta-item">
-            {preview.firstTasks.length} first task
-            {preview.firstTasks.length === 1 ? "" : "s"}
-          </span>
-        )}
-        {typeof preview.estimatedSetupMinutes === "number" && (
-          <span className="pack-card-meta-item">
-            ~{preview.estimatedSetupMinutes} min setup
-          </span>
-        )}
-      </div>
-    </button>
+          <span className="pack-card-name">{preview.name}</span>
+        </div>
+        <p className="pack-card-outcome">{preview.outcome}</p>
+      </button>
+      <button
+        type="button"
+        className="pack-card-info"
+        onClick={(e) => {
+          e.stopPropagation();
+          onInfo();
+        }}
+        aria-label={`See ${preview.name} details`}
+        aria-haspopup="dialog"
+      >
+        <InfoCircle
+          width={18}
+          height={18}
+          strokeWidth={1.75}
+          aria-hidden="true"
+        />
+      </button>
+    </div>
   );
 }
 
-interface PackDetailPanelProps {
+interface PackDetailModalProps {
   preview: PackPreview;
   selected: boolean;
   onChoose: () => void;
   onClose: () => void;
 }
 
-function PackDetailPanel({
+function PackDetailModal({
   preview,
   selected,
   onChoose,
   onClose,
-}: PackDetailPanelProps) {
+}: PackDetailModalProps) {
   const noMetadata =
     preview.firstTasks.length === 0 &&
     preview.skills.length === 0 &&
@@ -272,7 +349,22 @@ function PackDetailPanel({
     preview.wikiScaffold.length === 0;
 
   return (
-    <section className="pack-detail" aria-label={`${preview.name} details`}>
+    <div
+      className="pack-modal-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+      role="presentation"
+    >
+      <section
+        className="pack-detail pack-modal"
+        aria-label={`${preview.name} details`}
+        role="dialog"
+        aria-modal="true"
+      >
       <header className="pack-detail-head">
         <div>
           <p className="pack-detail-eyebrow">Pack details</p>
@@ -431,7 +523,8 @@ function PackDetailPanel({
           {selected ? "Selected" : "Choose this pack"}
         </button>
       </div>
-    </section>
+      </section>
+    </div>
   );
 }
 

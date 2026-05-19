@@ -1,6 +1,43 @@
+import { useState } from "react";
+
 import { ONBOARDING_COPY } from "../../../lib/constants";
 import { BtnLabel, CheckIcon, EnterHint } from "./components";
 import type { BlueprintAgent } from "./types";
+
+// Pool of pixel-art sprites — alternate by index across the roster so
+// adjacent agents always look different.
+// Sprites are interleaved manager/worker in /public so adjacent slots
+// always look different. Position 0 is reserved for the lead.
+const ROSTER_SPRITES = [
+  "/team-agent.gif",
+  "/team-agent-2.gif",
+  "/team-agent-3.gif",
+  "/team-agent-4.gif",
+  "/team-agent-5.gif",
+  "/team-agent-6.gif",
+  "/team-agent-7.gif",
+  "/team-agent-8.gif",
+  "/team-agent-9.gif",
+  "/team-agent-10.gif",
+  "/team-agent-11.gif",
+  "/team-agent-12.gif",
+  "/team-agent-13.gif",
+  "/team-agent-14.gif",
+  "/team-agent-15.gif",
+  "/team-agent-16.gif",
+  "/team-agent-17.gif",
+  "/team-agent-18.gif",
+  "/team-agent-19.gif",
+  "/team-agent-20.gif",
+  "/team-agent-21.gif",
+  "/team-agent-22.gif",
+  "/team-agent-23.gif",
+  "/team-agent-24.gif",
+  "/team-agent-25.gif",
+];
+function spriteAt(index: number): string {
+  return ROSTER_SPRITES[index % ROSTER_SPRITES.length];
+}
 
 interface TeamStepProps {
   agents: BlueprintAgent[];
@@ -12,9 +49,11 @@ interface TeamStepProps {
 function TeamAgentTile({
   agent,
   onToggle,
+  onHover,
 }: {
   agent: BlueprintAgent;
   onToggle: (slug: string) => void;
+  onHover: (slug: string | null) => void;
 }) {
   const locked = agent.built_in === true;
 
@@ -22,6 +61,8 @@ function TeamAgentTile({
     <button
       className={`wiz-team-tile ${agent.checked ? "selected" : ""} ${locked ? "locked" : ""}`}
       onClick={() => onToggle(agent.slug)}
+      onMouseEnter={() => onHover(agent.slug)}
+      onMouseLeave={() => onHover(null)}
       type="button"
       disabled={locked}
       title={locked ? "Lead agent — always included" : undefined}
@@ -31,9 +72,6 @@ function TeamAgentTile({
       </div>
       <div className="wiz-team-info">
         <div className="wiz-team-name-row">
-          {agent.emoji ? (
-            <span className="wiz-team-emoji">{agent.emoji}</span>
-          ) : null}
           <span className="wiz-team-name">{agent.name}</span>
           {locked ? <span className="wiz-team-lead-badge">Lead</span> : null}
         </div>
@@ -44,6 +82,7 @@ function TeamAgentTile({
 }
 
 export function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
+  const [hoveredSlug, setHoveredSlug] = useState<string | null>(null);
   return (
     <div className="wizard-step">
       <div className="wizard-hero">
@@ -61,11 +100,37 @@ export function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
           </div>
         </div>
       ) : (
-        <div className="wiz-team-grid">
-          {agents.map((agent) => (
-            <TeamAgentTile key={agent.slug} agent={agent} onToggle={onToggle} />
-          ))}
-        </div>
+        <>
+          <div className="wiz-team-roster" aria-hidden="true">
+            {agents
+              .filter((a) => a.checked)
+              .map((agent, i) => (
+                <img
+                  key={agent.slug}
+                  className="wiz-team-roster-sprite"
+                  data-muted={
+                    hoveredSlug !== null && hoveredSlug !== agent.slug
+                      ? "true"
+                      : undefined
+                  }
+                  src={spriteAt(i)}
+                  alt=""
+                  width={80}
+                  height={80}
+                />
+              ))}
+          </div>
+          <div className="wiz-team-grid">
+            {agents.map((agent) => (
+              <TeamAgentTile
+                key={agent.slug}
+                agent={agent}
+                onToggle={onToggle}
+                onHover={setHoveredSlug}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       <div className="wizard-nav">

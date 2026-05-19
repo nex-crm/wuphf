@@ -12,7 +12,7 @@ import type { WizardStep } from "./types";
 
 export const LOCAL_STORAGE_KEY = "wuphf:onboarding-draft";
 export const STALE_BANNER_KEY = "wuphf:onboarding-draft-stale-banner";
-export const CURRENT_VERSION = 2;
+export const CURRENT_VERSION = 3;
 export const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface OnboardingDraft {
@@ -21,6 +21,9 @@ export interface OnboardingDraft {
   selectedBlueprint: string | null;
   company: string;
   description: string;
+  // User-picked office avatar color (hex). Persisted so the workspace
+  // sidebar later renders the same tint the user chose during onboarding.
+  companyColor: string | null;
   priority: string;
   website: string;
   ownerName: string;
@@ -42,6 +45,7 @@ export interface DraftableWizardState {
   selectedBlueprint: string | null;
   company: string;
   description: string;
+  companyColor: string | null;
   priority: string;
   website: string;
   ownerName: string;
@@ -72,6 +76,7 @@ export function extractDraftableState(
     selectedBlueprint: state.selectedBlueprint,
     company: state.company,
     description: state.description,
+    companyColor: state.companyColor,
     priority: state.priority,
     website: state.website,
     ownerName: state.ownerName,
@@ -98,6 +103,7 @@ function sanitizeDraft(draft: OnboardingDraft): OnboardingDraft {
     selectedBlueprint: draft.selectedBlueprint,
     company: draft.company,
     description: draft.description,
+    companyColor: draft.companyColor,
     priority: draft.priority,
     website: draft.website,
     ownerName: draft.ownerName,
@@ -140,6 +146,7 @@ function isValidDraft(value: unknown): value is OnboardingDraft {
   if (!VALID_STEPS.has(draft.step as WizardStep)) return false;
   if (!isStringOrNull(draft.selectedBlueprint)) return false;
   if (!isStringOrNull(draft.selectedTaskTemplate)) return false;
+  if (!isStringOrNull(draft.companyColor)) return false;
   if (!isStringArray(draft.runtimePriority)) return false;
   return hasValidStringFields(draft);
 }
@@ -244,6 +251,7 @@ export interface DraftSeed {
   selectedBlueprint: string | null;
   company: string;
   description: string;
+  companyColor: string | null;
   priority: string;
   website: string;
   ownerName: string;
@@ -259,6 +267,7 @@ const EMPTY_SEED: DraftSeed = {
   selectedBlueprint: null,
   company: "",
   description: "",
+  companyColor: null,
   priority: "",
   website: "",
   ownerName: "",
@@ -276,6 +285,7 @@ export function seedFromDraft(draft: OnboardingDraft | null): DraftSeed {
     selectedBlueprint: draft.selectedBlueprint,
     company: draft.company,
     description: draft.description,
+    companyColor: draft.companyColor,
     priority: draft.priority,
     website: draft.website,
     ownerName: draft.ownerName,

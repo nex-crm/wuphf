@@ -15,6 +15,7 @@ import type {
 // exactly what's configured before we submit.
 export const STEP_ORDER: readonly WizardStep[] = [
   "welcome",
+  "choose-mode",
   "identity",
   "templates",
   "team",

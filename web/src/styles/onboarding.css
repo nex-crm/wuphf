@@ -3,6 +3,20 @@
    Uses existing design tokens from global.css / theme files.
    ═══════════════════════════════════════════════════════════════ */
 
+/* ─── Onboarding motion tokens ───
+   Strong custom curves + sized durations so every interaction in the
+   wizard shares the same vocabulary. Built from Emil Kowalski's
+   guidelines: ease-out for entrances/UI, ease-in-out for movement. */
+:root {
+  --ob-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ob-ease-out-strong: cubic-bezier(0.22, 1, 0.36, 1);
+  --ob-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ob-t-press: 120ms;
+  --ob-t-tooltip: 150ms;
+  --ob-t-ui: 200ms;
+  --ob-t-modal: 250ms;
+}
+
 /* ─── Form primitives (not yet in global.css) ─── */
 .label {
   display: block;
@@ -71,6 +85,110 @@
   background: var(--border-light);
 }
 
+/* ─── Welcome split (Step 1: two-pane "Create vs. Sample" decision) ─── */
+/* The step itself escapes the 640px wizard-body cap so the split can fill
+   the viewport. The wizard-progress dots and resume banner still live in
+   the normal wizard chrome above/below. */
+/* When the choose-mode card is mounted, widen the wizard-body cap so the
+   card has room to render at 800px. Using :has() instead of a transform-
+   based recentering trick — the latter conflicts with the wizard-step's
+   fadeIn translateY animation and causes a horizontal jump. */
+.wizard-body:has(.welcome-split-step) {
+  max-width: 800px;
+}
+.welcome-split-step {
+  width: 100%;
+  gap: 0;
+}
+.welcome-split {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+  background: var(--bg-card);
+  border: none;
+  border-radius: 16px;
+  overflow: hidden;
+  /* Match .wizard-panel: hairline ring + soft layered shadows so this
+     card sits in the same visual family as the other onboarding panels. */
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.05),
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.03);
+}
+.welcome-half {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 56px clamp(24px, 5vw, 56px);
+  min-height: 420px;
+  text-align: center;
+  isolation: isolate;
+}
+/* Hover bloom rendered through a pseudo-element so we can crossfade its
+   opacity instead of swapping the `background` property (gradients are
+   not animatable, and switching them snaps). 700ms ease-out feels like
+   the panel "lights up" rather than flips on. */
+/* Hover bloom removed — keep the card calm; the primary half is visually
+   differentiated by its 4px inset frame below. */
+.welcome-half-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  max-width: 460px;
+}
+.welcome-half-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.welcome-half-icon {
+  color: var(--accent);
+  margin-bottom: 4px;
+  /* Pixel-art icons — keep the pixel grid crisp at any scale. */
+  image-rendering: pixelated;
+  shape-rendering: crispEdges;
+}
+.welcome-half-text .wizard-headline,
+.welcome-half-text .wizard-subhead {
+  margin: 0;
+}
+.welcome-half-text .wizard-headline {
+  font-size: 26px;
+}
+.welcome-half-cta {
+  margin-top: 0;
+}
+/* Vertical divider between the two halves. */
+.welcome-half--primary {
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+}
+/* When one half is hovered, the other instantly desaturates to gray. */
+.welcome-split:hover .welcome-half:not(:hover) {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.welcome-reset-row {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0 8px;
+}
+@media (max-width: 860px) {
+  .welcome-split {
+    grid-template-columns: 1fr;
+  }
+  .welcome-half {
+    min-height: 320px;
+  }
+  .welcome-half--primary {
+    border-right: 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  }
+}
+
 /* ─── Hero (Step 1) ─── */
 .wizard-hero {
   text-align: center;
@@ -125,6 +243,192 @@
     0 0 0 1px rgba(0, 0, 0, 0.05),
     0 1px 2px rgba(0, 0, 0, 0.04),
     0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+/* ─── Identity step: form + live preview split ─── */
+.identity-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
+  gap: 24px;
+  align-items: stretch;
+}
+.identity-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.identity-form .form-group {
+  margin-bottom: 0;
+}
+/* Second form-group (description) absorbs remaining vertical space in
+   the form column so the textarea's empty state fills the available
+   area instead of leaving a gap. */
+.identity-form .form-group:last-child {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.identity-form .form-group:last-child .identity-description-input {
+  flex: 1;
+  min-height: 0;
+}
+/* Chained selector raises specificity above `.input` from global.css
+   regardless of CSS-load order — without this the `padding: 0 14px`
+   from `.input` wins and the textarea hugs the top edge once it grows
+   past one line. */
+.input.identity-description-input {
+  resize: none;
+  overflow: hidden;
+  /* Drop the fixed 44px height from .input so the textarea can grow,
+     and add symmetric vertical padding so the text doesn't hug the top
+     edge once it's taller than one line. */
+  height: auto;
+  min-height: 44px;
+  padding: 11px 14px;
+  line-height: 1.5;
+  font-family: inherit;
+  /* Modern browsers (Chrome 123+, Safari 17.4+, Firefox 124+) grow
+     the field to fit its content automatically. The onInput handler
+     in the component handles older browsers. */
+  field-sizing: content;
+  width: 100%;
+}
+.identity-preview {
+  position: relative;
+  overflow: hidden;
+  /* Break out of the wizard-panel's 24px padding on top, right, and
+     bottom — only the left side keeps the panel padding so the form
+     side still has its 24px inset. */
+  margin: -24px -24px -24px 0;
+  padding: 0;
+  border-radius: 0 16px 16px 0;
+  background: var(--bg-secondary, #f9f9fb);
+  min-width: 0;
+  min-height: 240px;
+}
+
+/* App-window mock that sits inside the preview frame and intentionally
+   overflows past the right and bottom edges, so it reads as a real
+   window the user is peeking at. */
+.identity-window {
+  position: absolute;
+  top: 32px;
+  left: 32px;
+  right: -80px;
+  bottom: -80px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--bg-card, #ffffff);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 16px 32px rgba(0, 0, 0, 0.08),
+    0 4px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+.identity-window-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  background: rgba(0, 0, 0, 0.02);
+}
+.identity-window-dot {
+  /* The SVG path is 16×16 pixel-art rendered into a 12×12 box so the
+     dots sit closer to standard window-control sizing. `currentColor`
+     fills the SVG so the modifier class just sets `color`. */
+  width: 12px;
+  height: 12px;
+  display: block;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+  shape-rendering: crispEdges;
+}
+.identity-window-dot--red {
+  color: #ff5f57;
+}
+.identity-window-dot--yellow {
+  color: #febc2e;
+}
+.identity-window-dot--green {
+  color: #28c840;
+}
+.identity-window-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  /* Right/bottom inner padding matches the window's overflow distance
+     so the content stays inside the visible frame — only the empty
+     window chrome peeks past the edges. */
+  padding: 20px 100px 100px 20px;
+  min-width: 0;
+}
+.identity-preview-avatar {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  padding: 0;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  font-size: 22px;
+  cursor: pointer;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+  transition:
+    background 200ms var(--ob-ease-out),
+    color 200ms var(--ob-ease-out);
+}
+/* Hide the native color picker — we trigger it via .click() on the
+   avatar button. position:absolute keeps it from affecting layout. */
+.identity-preview-color-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+.identity-preview-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.identity-preview-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  word-break: break-word;
+}
+.identity-preview-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+.identity-preview-name.is-placeholder,
+.identity-preview-desc.is-placeholder {
+  color: var(--text-tertiary);
+}
+@media (max-width: 720px) {
+  .identity-panel {
+    grid-template-columns: 1fr;
+  }
 }
 
 .setup-split-panel {
@@ -198,50 +502,59 @@
 
 /* From-scratch escape hatch — separated from grouped presets */
 .template-from-scratch {
-  margin-top: 4px;
   display: flex;
   justify-content: center;
 }
 
+/* Styled to match .pack-card — same border, radius, background, hover,
+   and selected states so the row of options reads as one family. */
 .template-from-scratch-btn {
   width: 100%;
   display: inline-flex;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 64px;
-  padding: 0 18px;
-  border: 1px dashed var(--border-dark);
+  height: 160px;
+  padding: 16px;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: transparent;
-  color: var(--text-secondary);
+  background: var(--bg-card);
+  color: var(--text);
   cursor: pointer;
   font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   transition:
-    border-color 0.15s,
-    background 0.15s,
-    color 0.15s;
+    border-color 150ms var(--ob-ease-out),
+    background 150ms var(--ob-ease-out),
+    color 150ms var(--ob-ease-out),
+    transform var(--ob-t-press) var(--ob-ease-out);
 }
 
 .template-from-scratch-btn:hover {
-  border-color: var(--accent);
-  color: var(--text);
+  border-color: var(--border-dark, rgba(0, 0, 0, 0.18));
+  background: var(--bg-secondary, #f4f4f6);
 }
 
 .template-from-scratch-btn.selected {
-  border-style: solid;
-  border-color: var(--accent, #9333ea);
-  background: var(--accent-bg, #faf5ff);
+  border-color: var(--accent);
+  background: var(--accent-bg);
   color: var(--text);
 }
 
 .template-from-scratch-icon {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  color: var(--text-tertiary);
+  font-size: 22px;
+  line-height: 1;
+  /* Inherits the button's text color so the icon and label stay in sync
+     across default / hover / selected states. */
+  color: inherit;
 }
 
 .template-from-scratch-btn.selected .template-from-scratch-icon {
@@ -314,14 +627,35 @@
 .wiz-team-grid {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(2, 1fr);
-  padding: 24px;
-  border-radius: 16px;
-  background: var(--bg-card);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.05),
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 4px 12px rgba(0, 0, 0, 0.03);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Pixel-sprite roster row above the tile grid — one sprite per checked
+   agent. Removes/adds sprites as the user toggles tiles. */
+.wiz-team-roster {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 8px;
+  min-height: 80px;
+  padding: 32px 0;
+}
+.wiz-team-roster-sprite {
+  width: 80px;
+  height: 80px;
+  display: block;
+  image-rendering: pixelated;
+  shape-rendering: crispEdges;
+  transition:
+    opacity 150ms var(--ob-ease-out),
+    filter 150ms var(--ob-ease-out);
+}
+/* While any card is hovered, every non-matching sprite mutes; the
+   `data-muted` flag is set per-sprite by the React component so we
+   don't need attribute-equality gymnastics in CSS. */
+.wiz-team-roster-sprite[data-muted="true"] {
+  opacity: 0.3;
+  filter: grayscale(0.6);
 }
 
 @media (max-width: 640px) {
@@ -330,42 +664,45 @@
   }
 }
 
+/* Mirrors .pack-card styling — same border / radius / hover / selected
+   states so the team-tile vocabulary matches the templates step. */
 .wiz-team-tile {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 16px 18px;
+  padding: 16px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--bg-card);
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color 150ms var(--ob-ease-out),
+    background 150ms var(--ob-ease-out);
   text-align: left;
   width: 100%;
   font-family: var(--font-sans);
 }
 
 .wiz-team-tile:hover {
-  border-color: var(--border-dark);
+  border-color: var(--border-dark, rgba(0, 0, 0, 0.18));
+  background: var(--bg-secondary, #f4f4f6);
 }
 
 .wiz-team-tile.selected {
-  border-color: transparent;
-  background: var(--accent-bg, #faf5ff);
+  border-color: var(--accent);
+  background: var(--accent-bg);
 }
 
 .wiz-team-tile.selected:hover {
-  border-color: transparent;
+  background: var(--accent-bg);
 }
 
 .wiz-team-tile.locked {
   cursor: not-allowed;
 }
-
 .wiz-team-tile.locked:hover {
-  border-color: transparent;
+  border-color: var(--accent);
+  background: var(--accent-bg);
 }
 
 .wiz-team-info {
@@ -399,24 +736,37 @@
   line-height: 1.4;
 }
 
+/* Mirrors .pack-card-radio (16px hollow ring → accent-filled on
+   selected) so the indicator vocabulary matches across steps. */
 .wiz-team-check {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  border: 1.6px solid var(--border-dark, #ccc);
-  display: flex;
+  border: 1.5px solid var(--border-dark, rgba(0, 0, 0, 0.25));
+  background: transparent;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  color: transparent;
+  margin-top: 2px;
   transition:
-    background 0.15s,
-    border-color 0.15s;
+    background 150ms var(--ob-ease-out),
+    border-color 150ms var(--ob-ease-out),
+    color 150ms var(--ob-ease-out);
 }
-
+.wiz-team-tile:hover .wiz-team-check {
+  border-color: var(--text-secondary);
+}
 .wiz-team-tile.selected .wiz-team-check {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+/* Trim the inner SVG so the check glyph fits the 16px ring. */
+.wiz-team-check svg {
+  width: 10px;
+  height: 10px;
 }
 
 .wiz-team-name {
@@ -1055,50 +1405,147 @@
 }
 
 /* ─── Pack Library (Step 2) ─── */
+/* Section wrapper around the tabs + carousel — no visual chrome, just
+   layout. The tabs and cards sit directly on the wizard background. */
+.pack-library-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pack-library-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  text-align: center;
+  letter-spacing: 0;
+}
+
 .pack-library {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
+/* Tab-style category filter. Visually decoupled from the pill-shaped
+   "selected" cards/buttons elsewhere so the user doesn't conflate
+   "the category I'm filtering by" with "the pack I picked". */
 .pack-filter-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  justify-content: center;
+  gap: 4px;
+  /* Hairline rail underneath the tabs — the active tab's bottom border
+     sits flush with it. The 16px stack gap from .pack-library handles
+     spacing to the carousel below. */
+  border-bottom: 1px solid var(--border);
 }
 
 .pack-filter-chip {
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  color: var(--text-secondary);
+  position: relative;
+  padding: 8px 12px;
+  margin-bottom: -1px; /* overlap the row's border for the seamless rail */
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-tertiary);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s,
-    color 0.15s;
+    color var(--ob-t-press) var(--ob-ease-out),
+    border-color var(--ob-t-press) var(--ob-ease-out);
 }
 
 .pack-filter-chip:hover {
-  border-color: var(--border-dark);
   color: var(--text);
 }
 
 .pack-filter-chip.active {
-  border-color: var(--accent);
-  background: var(--accent-bg);
   color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
 }
 
+/* ─── Pack grid ──────────────────────────────────────────────────────
+   3 columns. The grid initially shows 1.5 rows; clicking the down-arrow
+   expands by 3 more rows at a time. While more rows remain hidden, the
+   bottom of the visible area fades to transparent so the user knows to
+   keep scrolling/expanding. */
 .pack-grid {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.pack-grid-track {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
-  align-items: stretch;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  /* Cap visible height by the number of rows we're showing — 144px
+     card height + 8px row gap. The +0px on a 1.5-row crop trims the
+     hidden bottom half. */
+  --pack-row-h: 144px;
+  --pack-row-gap: 8px;
+  max-height: calc(
+    var(--pack-grid-rows, 1.5) * var(--pack-row-h) +
+      (max(var(--pack-grid-rows, 1.5) - 1, 0)) * var(--pack-row-gap)
+  );
+  overflow: hidden;
+  transition: max-height var(--ob-t-modal) var(--ob-ease-out);
+}
+.pack-grid-track[data-collapsed] {
+  /* While more is hidden, fade the bottom half of the last visible
+     row to transparent — visual cue that there's more below. */
+  mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black 60%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black 60%,
+    transparent 100%
+  );
+}
+.pack-grid-track > .pack-card {
+  /* Layout/paint containment isolates each card so resizes/expands
+     don't restyle neighbors. */
+  contain: layout paint;
+}
+.pack-grid-more {
+  --pack-more-scale: 1;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full, 9999px);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transform: scale(var(--pack-more-scale));
+  transition:
+    background var(--ob-t-press) var(--ob-ease-out),
+    color var(--ob-t-press) var(--ob-ease-out),
+    transform var(--ob-t-press) var(--ob-ease-out);
+}
+.pack-grid-more:hover,
+.pack-grid-more:focus-visible {
+  color: var(--accent);
+  background: var(--bg-secondary, #f4f4f6);
+}
+.pack-grid-more:active {
+  --pack-more-scale: 0.92;
 }
 
 .pack-empty {
@@ -1111,40 +1558,152 @@
 }
 
 .pack-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
+  /* Fixed-size cards so the row stays even — meta info pinned to the
+     bottom via margin-top:auto on .pack-card-meta. */
+  height: 144px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 12px;
   background: var(--bg-card);
-  cursor: pointer;
   text-align: left;
   font-family: var(--font-sans);
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color 150ms var(--ob-ease-out),
+    background 150ms var(--ob-ease-out);
+}
+/* Card body button — fills the card and handles selection. The dedicated
+   info button is layered on top (absolutely positioned) and opens the
+   modal. */
+.pack-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Equal padding on all sides — the absolutely-positioned info button
+     floats above the corner without reserving space in the layout. */
+  padding: 16px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+.pack-card-info {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  /* Muted by default, full strength on hover/focus. No bg or border
+     change — just the icon color transitions. */
+  color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition: color var(--ob-t-press) var(--ob-ease-out);
+}
+.pack-card-info:hover,
+.pack-card-info:focus-visible {
+  color: rgba(0, 0, 0, 1);
 }
 
+/* Hover: subtle. Border darkens, background gets a barely-there lift.
+   Doesn't pre-commit the user to a selection. */
 .pack-card:hover {
-  border-color: var(--accent);
-  background: var(--accent-bg);
+  border-color: var(--border-dark, rgba(0, 0, 0, 0.18));
+  background: var(--bg-secondary, #f4f4f6);
 }
 
+/* Selected: deliberate. 1px accent border + accent background tint —
+   no extra ring; the color shift is the differentiator. */
 .pack-card.selected,
 .pack-card.open {
   border-color: var(--accent);
   background: var(--accent-bg);
 }
+.pack-card.selected:hover,
+.pack-card.open:hover {
+  background: var(--accent-bg);
+}
 
 .pack-card-head {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.pack-card-head-row {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+/* Radio button placed before the icon, signaling the card's selection
+   state. Hollow ring by default; accent-filled center dot when the
+   parent card is .selected. */
+.pack-card-radio {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-dark, rgba(0, 0, 0, 0.25));
+  background: transparent;
+  position: relative;
+  transition:
+    border-color 150ms var(--ob-ease-out),
+    background 150ms var(--ob-ease-out);
+}
+.pack-card-radio::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: scale(0);
+  transition: transform 150ms var(--ob-ease-out);
+}
+.pack-card:hover .pack-card-radio,
+.template-from-scratch-btn:hover .pack-card-radio {
+  border-color: var(--text-secondary);
+}
+.pack-card.selected .pack-card-radio,
+.pack-card.open .pack-card-radio,
+.template-from-scratch-btn.selected .pack-card-radio {
+  border-color: var(--accent);
+}
+.pack-card.selected .pack-card-radio::after,
+.pack-card.open .pack-card-radio::after,
+.template-from-scratch-btn.selected .pack-card-radio::after {
+  transform: scale(1);
 }
 
 .pack-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   font-size: 18px;
+  /* Default: matches the title color. Lights up to the accent only
+     when the card is selected, so the icon doubles as a selection
+     state cue. */
+  color: var(--text);
+  image-rendering: pixelated;
+  shape-rendering: crispEdges;
+  transition: color 150ms var(--ob-ease-out);
+}
+.pack-card.selected .pack-card-icon,
+.pack-card.open .pack-card-icon {
+  color: var(--accent);
 }
 
 .pack-card-name {
@@ -1158,13 +1717,17 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-secondary);
+  /* Push the description to the bottom of the card so the gap between
+     it and the title above grows to fill the remaining height. */
+  margin-top: auto;
 }
 
 .pack-card-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 2px;
+  /* Pinned to the bottom — the gap above grows to fill the card. */
+  margin-top: auto;
 }
 
 .pack-card-meta-item {
@@ -1180,6 +1743,78 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-card);
+}
+
+/* ─── Pack detail modal ─── */
+.pack-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 16, 28, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: pack-modal-overlay-in var(--ob-t-ui) var(--ob-ease-out);
+}
+.pack-modal {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border-radius: var(--radius-lg, 16px);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.05),
+    0 12px 32px rgba(0, 0, 0, 0.18);
+  /* Modals stay centered (Emil exception) — keep transform-origin: center. */
+  animation: pack-modal-content-in var(--ob-t-modal) var(--ob-ease-out-strong);
+  transform-origin: center;
+}
+@keyframes pack-modal-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pack-modal-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── Reduced motion ───
+   Users who opt in to reduced motion get the same outcomes (states
+   change, modal opens, cards select) but the movement vocabulary is
+   stripped to opacity-only crossfades. */
+@media (prefers-reduced-motion: reduce) {
+  .pack-carousel-track {
+    scroll-behavior: auto;
+  }
+  .pack-card-body,
+  .pack-card-info,
+  .pack-carousel-nav {
+    transition: none;
+  }
+  .pack-card-body:active,
+  .pack-card-info:active,
+  .pack-carousel-nav:active {
+    transform: none;
+  }
+  .pack-carousel-nav:active {
+    --pack-nav-scale: 1;
+  }
+  .pack-modal-overlay,
+  .pack-modal {
+    animation: none;
+  }
 }
 
 .pack-detail-head {
@@ -1851,15 +2486,26 @@
 }
 
 .wizard-resume-banner {
+  /* Pinned to the bottom of the viewport, full-width, above any
+     onboarding chrome (progress dots, modals, overlays). */
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2147483647;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
-  margin: 0 auto 16px;
-  max-width: 680px;
-  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
-  border-radius: 8px;
-  background: var(--surface-1, rgba(0, 0, 0, 0.02));
+  padding: 12px clamp(16px, 4vw, 32px);
+  margin: 0;
+  max-width: none;
+  border: 0;
+  border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  border-radius: 0;
+  background: var(--surface-1, rgba(255, 255, 255, 0.98));
+  backdrop-filter: saturate(140%) blur(8px);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.06);
   font-size: 13px;
   color: var(--text-secondary);
 }

@@ -35,6 +35,7 @@ import {
   runtimeIsReady,
   runtimeLabelsFromProviderConfig,
 } from "./wizard/runtime-helpers";
+import { ChooseModeStep } from "./wizard/Step2ChooseMode";
 import { WelcomeStep } from "./wizard/Step1Welcome";
 import { TemplatesStep } from "./wizard/Step2Templates";
 import { AnalysisStep } from "./wizard/Step3bAnalysis";
@@ -195,6 +196,9 @@ export function Wizard({ onComplete }: WizardProps) {
   // Step 3: identity
   const [company, setCompany] = useState(seed.company);
   const [description, setDescription] = useState(seed.description);
+  const [companyColor, setCompanyColor] = useState<string | null>(
+    seed.companyColor,
+  );
   const [priority, setPriority] = useState(seed.priority);
   const [website, setWebsite] = useState(seed.website);
   const [ownerName, setOwnerName] = useState(seed.ownerName);
@@ -689,6 +693,7 @@ export function Wizard({ onComplete }: WizardProps) {
         await post("/onboarding/complete", {
           company,
           description,
+          company_color: companyColor,
           priority,
           website,
           owner_name: ownerName,
@@ -906,6 +911,7 @@ export function Wizard({ onComplete }: WizardProps) {
     selectedBlueprint,
     company,
     description,
+    companyColor,
     priority,
     website,
     ownerName,
@@ -924,6 +930,7 @@ export function Wizard({ onComplete }: WizardProps) {
     setSelectedBlueprint(null);
     setCompany("");
     setDescription("");
+    setCompanyColor(null);
     setPriority("");
     setNexEmail("");
     setNexSignupStatus("open");
@@ -1006,9 +1013,37 @@ export function Wizard({ onComplete }: WizardProps) {
 
         {step === "welcome" && (
           <WelcomeStep
-            onNext={() => goTo(activeSteps[1] ?? "templates")}
-            hasSavedDraft={hasSavedDraft}
-            onResetDraft={resetDraft}
+            onNext={() => goTo(activeSteps[1] ?? "choose-mode")}
+          />
+        )}
+
+        {step === "choose-mode" && (
+          <ChooseModeStep
+            onCreate={() => {
+              // Skip past the choose-mode pseudo-step into the next
+              // real step in the active flow.
+              const idx = activeSteps.indexOf("choose-mode");
+              const next = activeSteps[idx + 1];
+              if (next) {
+                goTo(next);
+              }
+            }}
+            onTrySample={() => {
+              // Playground: pre-seed sane defaults (scratch founding team,
+              // generic identity) and jump straight to the final "ready"
+              // step so the user lands in a working office without filling
+              // out the wizard. The agents are still wired up by the same
+              // /onboarding/complete path Step7Ready uses on submit.
+              setSelectedBlueprint(null);
+              setAgents(SCRATCH_FOUNDING_TEAM.map((a) => ({ ...a })));
+              setCompany((c) => c || "Sample Office");
+              setDescription(
+                (d) => d || "Playground workspace for exploring WUPHF.",
+              );
+              setOwnerName((n) => n || "You");
+              setOwnerRole((r) => r || "Founder");
+              goTo("ready");
+            }}
           />
         )}
 
@@ -1027,23 +1062,19 @@ export function Wizard({ onComplete }: WizardProps) {
           <IdentityStep
             company={company}
             description={description}
+            companyColor={companyColor}
             priority={priority}
             website={website}
             ownerName={ownerName}
             ownerRole={ownerRole}
             onChangeCompany={setCompany}
             onChangeDescription={setDescription}
+            onChangeCompanyColor={setCompanyColor}
             onChangePriority={setPriority}
             onChangeWebsite={setWebsite}
             onChangeOwnerName={setOwnerName}
             onChangeOwnerRole={setOwnerRole}
-            onNext={() => {
-              if (website.trim() || ownerName.trim()) {
-                setStep("analysis");
-              } else {
-                nextStep();
-              }
-            }}
+            onNext={nextStep}
             onBack={prevStep}
           />
         )}

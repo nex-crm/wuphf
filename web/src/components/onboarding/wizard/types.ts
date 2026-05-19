@@ -85,6 +85,7 @@ export interface TaskTemplate {
 
 export type WizardStep =
   | "welcome"
+  | "choose-mode"
   | "templates"
   | "identity"
   | "analysis"

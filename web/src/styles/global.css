@@ -283,11 +283,9 @@ body {
     transform var(--duration-slow, 0.2s),
     box-shadow var(--duration-slow, 0.2s);
   text-decoration: none;
-  min-height: 44px;
+  height: 44px;
 }
-.btn:not(.btn-sm):not(:disabled):hover {
-  transform: translateY(-1px);
-}
+/* Lift-on-hover removed — buttons stay put on hover. */
 .btn:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
@@ -307,6 +305,10 @@ body {
 .btn-primary:has(.btn-label) {
   padding: 0;
   gap: 0;
+  /* The kbd-hint child has its own subtle right-side fill; without
+     clipping, its square corners poke through the parent's pill
+     radius. */
+  overflow: hidden;
 }
 .btn-primary:hover {
   background: var(--accent-warm);
@@ -317,6 +319,42 @@ body {
   padding: 10px 20px;
   border-radius: var(--radius-full);
   font-size: 14px;
+}
+/* "Sample office" CTA — secondary intent but still reads as a real
+   button next to .btn-primary. Outlined in the accent color with a
+   subtle tinted fill on hover so it holds visual weight without
+   competing with the primary purple. */
+.btn-sample {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 1px 2px rgba(159, 77, 191, 0.08);
+}
+/* Mirror .btn-primary's split-with-divider treatment when the sample
+   button has a BtnLabel + keycap hint. */
+.btn-sample:has(.btn-label) {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+/* Only the left divider rule is held at the requested 10% tint; the
+   keycap chrome itself stays bolder so the digit still reads as a key.
+   Chained `.btn.btn-sample` raises specificity above kbd.css's
+   `.btn .kbd-hint` base rule. */
+.btn.btn-sample .kbd-hint {
+  border-left-color: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.btn.btn-sample .kbd-hint-num,
+.btn.btn-sample .kbd-hint svg {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.btn-sample:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .btn-ghost {
   background: transparent;

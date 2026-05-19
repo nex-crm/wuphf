@@ -26,6 +26,7 @@ function isPristine(state: DraftableWizardState): boolean {
     state.selectedBlueprint === null &&
     state.company === "" &&
     state.description === "" &&
+    state.companyColor === null &&
     state.priority === "" &&
     state.website === "" &&
     state.ownerName === "" &&
@@ -43,6 +44,7 @@ export function useOnboardingDraftSync(state: DraftableWizardState): void {
     selectedBlueprint,
     company,
     description,
+    companyColor,
     priority,
     website,
     ownerName,
@@ -59,6 +61,7 @@ export function useOnboardingDraftSync(state: DraftableWizardState): void {
       selectedBlueprint,
       company,
       description,
+      companyColor,
       priority,
       website,
       ownerName,
@@ -80,6 +83,7 @@ export function useOnboardingDraftSync(state: DraftableWizardState): void {
     selectedBlueprint,
     company,
     description,
+    companyColor,
     priority,
     website,
     ownerName,

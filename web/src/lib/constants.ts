@@ -31,6 +31,14 @@ export const ONBOARDING_COPY = {
   step1_subhead:
     "A collaborative office where AI agents like Claude Code, Codex, and OpenClaw learn your work playbooks, build personalized skills, and execute, 24x7.\nEach agent is backed by its own knowledge graph.",
   step1_cta: "Continue",
+  step1_cta_sample: "Try a sample office",
+  step2_choose_create_cta: "Create office",
+  step1_sample_headline: "Tour a sample office",
+  step1_sample_subhead:
+    "Drop into a pre-built office with a founding team. Wipe it anytime.",
+  step2_choose_create_headline: "Build your own office",
+  step2_choose_create_subhead:
+    "Name your office, pick a blueprint, and tune your team.",
   step2_headline: "Name your office",
   step2_subhead: "This becomes the workspace your agents call home.",
   step2_cta: "Continue",
