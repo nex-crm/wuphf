@@ -107,7 +107,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   const token: ApiToken = config.token ?? generateApiToken();
   const clock = config.clock ?? SYSTEM_CLOCK;
   const staticHandler = createStaticHandler(config.renderer ?? null);
-  const sseHub = createSseHub();
+  const sseHub = createSseHub(config.sse);
   const trustedOrigins = normalizeTrustedOrigins(config.trustedOrigins);
   if (
     config.threads !== undefined &&
