@@ -115,6 +115,9 @@ export interface BrokerConfig {
    * `/api/v1/approvals` routes are mounted. Hosts construct these deps via
    * `createApprovalProjection(db)` and
    * `createApprovalAppender(db, eventLog, projection)`.
+   * Decisions are attributed to the bearer-bound agent in `tokenAgentIds`;
+   * when omitted, the listener falls back to the runner bearer map if one
+   * is configured.
    *
    * The broker does NOT own the database — closing the broker does not
    * close `db`. Host owns lifecycle.
@@ -122,6 +125,7 @@ export interface BrokerConfig {
   readonly approvals?: {
     readonly appender: ApprovalAppender;
     readonly projection: ApprovalProjection;
+    readonly tokenAgentIds?: ReadonlyMap<ApiToken, AgentId>;
     readonly db: Database.Database;
   };
   /**

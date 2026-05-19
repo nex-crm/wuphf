@@ -126,6 +126,7 @@ function signedApprovalTokenFixture(
 async function buildFixture(overrides?: {
   readonly appender?: (base: ApprovalAppender) => ApprovalAppender;
   readonly projection?: (base: ApprovalProjection) => ApprovalProjection;
+  readonly tokenAgentIds?: ReadonlyMap<typeof TOKEN, ReturnType<typeof asAgentId>>;
 }): Promise<Fixture> {
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
@@ -138,7 +139,12 @@ async function buildFixture(overrides?: {
     port: 0,
     token: TOKEN,
     clock: { now: () => ROUTE_NOW_MS },
-    approvals: { appender, projection, db },
+    approvals: {
+      appender,
+      projection,
+      tokenAgentIds: overrides?.tokenAgentIds ?? new Map([[TOKEN, asAgentId("agent_alpha")]]),
+      db,
+    },
   });
   return { db, broker, appender, projection };
 }
@@ -326,6 +332,7 @@ describe("/api/v1/approvals routes", () => {
     ).approvalRequest;
     expect(decidedBody.status).toBe("approved");
     expect(decidedBody.decision?.decision).toBe("approve");
+    expect(decidedBody.decision?.decidedBy).toBe("agent_alpha");
   });
 
   it("uses a ULID create idempotency key as the approval request id", async () => {
@@ -472,6 +479,24 @@ describe("/api/v1/approvals routes", () => {
     expect(second.status).toBe(409);
     expect(await second.json()).toEqual({ error: "approval_not_pending" });
     expect(eventCount(fix.db, "approval.decided")).toBe(1);
+  });
+
+  it("rejects decisions when the bearer cannot be resolved to an agent", async () => {
+    await teardown(fix);
+    fix = await buildFixture({ tokenAgentIds: new Map() });
+    const created = approvalRequestCreateResponseFromJson(
+      (await (await postApproval(fix)).json()) as unknown,
+    ).approvalRequest;
+
+    const decided = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}/decision`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: decisionBody(decidedPayload("reject", created.id)),
+    });
+
+    expect(decided.status).toBe(403);
+    expect(await decided.json()).toEqual({ error: "approval_actor_unresolved" });
+    expect(eventCount(fix.db, "approval.decided")).toBe(0);
   });
 
   it("rejects unknown approvals and missing decision payloads", async () => {

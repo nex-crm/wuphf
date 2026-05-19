@@ -8,7 +8,9 @@ import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
+  type AgentId,
   APPROVAL_REQUEST_STATUS_VALUES,
+  type ApiToken,
   type ApprovalDecidedAuditPayload,
   type ApprovalDecisionRequest,
   type ApprovalRequest,
@@ -34,10 +36,12 @@ import {
   isApprovalRequestId,
   parseLsn,
   routeErrorToJsonValue,
+  type SignerIdentity,
   validateApprovalStreamEvent,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
 
+import { agentIdForBearer } from "../auth.ts";
 import type { BrokerLogger } from "../types.ts";
 import {
   type ApprovalAppender,
@@ -58,6 +62,7 @@ const APPROVAL_REQUEST_ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export interface ApprovalRouteDeps {
   readonly appender: ApprovalAppender;
   readonly projection: ApprovalProjection;
+  readonly tokenAgentIds: ReadonlyMap<ApiToken, AgentId> | null;
   readonly logger: BrokerLogger;
   readonly nowMs: () => number;
   readonly emit: (event: ApprovalStreamEvent) => void;
@@ -195,7 +200,12 @@ async function handleApprovalDecisionPost(
   }
 
   const nowMs = deps.nowMs();
-  const payload = approvalDecidedPayloadFromRouteRequest(pathId, request, nowMs);
+  const decidedBy = approvalDecisionActor(req, deps);
+  if (decidedBy === null) {
+    writeRouteError(res, 403, { error: "approval_actor_unresolved" });
+    return;
+  }
+  const payload = approvalDecidedPayloadFromRouteRequest(pathId, request, nowMs, decidedBy);
   try {
     const result = deps.appender.decideApprovalIdempotent({
       payload,
@@ -302,18 +312,28 @@ function approvalDecidedPayloadFromRouteRequest(
   requestId: ApprovalRequestId,
   request: ApprovalDecisionRequest,
   nowMs: number,
+  decidedBy: SignerIdentity,
 ): ApprovalDecidedAuditPayload {
   const suppliedApprovalToken = request.decision === "approve" ? request.token : undefined;
   return {
     requestId,
     decision: request.decision,
-    decidedBy:
-      suppliedApprovalToken === undefined
-        ? APPROVAL_ROUTE_ACTOR
-        : asSignerIdentity(suppliedApprovalToken.issuedTo),
+    decidedBy,
     decidedAt: new Date(nowMs),
     ...(suppliedApprovalToken === undefined ? {} : { token: suppliedApprovalToken }),
   };
+}
+
+function approvalDecisionActor(
+  req: IncomingMessage,
+  deps: Pick<ApprovalRouteDeps, "tokenAgentIds">,
+): SignerIdentity | null {
+  if (deps.tokenAgentIds === null) return null;
+  const agentId = agentIdForBearer(req, deps.tokenAgentIds);
+  if (agentId === null) return null;
+  // TODO(security): enforce reject/abstain decision capability once approval
+  // roles are wired; this hook only attributes the bearer-bound agent.
+  return asSignerIdentity(agentId);
 }
 
 function parsedRouteIdempotencyKey(

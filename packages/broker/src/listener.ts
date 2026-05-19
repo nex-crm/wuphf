@@ -202,6 +202,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
       : ({
           appender: config.approvals.appender,
           projection: config.approvals.projection,
+          tokenAgentIds: config.approvals.tokenAgentIds ?? tokenAgentIds,
           logger,
           nowMs: () => readBrokerClock(clock),
           emit: (event) => {
