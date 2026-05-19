@@ -21,6 +21,11 @@
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*", "tests/**/*", "vitest.config.ts"],
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "vitest.config.ts",
+    "scripts/generate-nfkc-table.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

@@ -157,17 +157,16 @@ jobs:
         run: bun run packages/protocol/scripts/demo.ts
       - name: Frozen NFKC table drift check
         # The moat normalises NFKC against frozen, version-pinned tables
-        # (src/nfkc-table.generated.ts + testdata/nfkc-table.json). The
-        # generator proves frozenNfkc === the runtime's NFKC for every code
-        # point before writing them. Vitest runs in Node workers (Unicode
-        # 17.0) even under Bun, so nfkc.spec.ts's exhaustive-equivalence tests
-        # skip there — this step is the ONLY automated gate that runs that
-        # proof, on the pinned Bun (Unicode 15.1), and fails if the committed
-        # tables drifted from a fresh regeneration (a hand-edit, or a runtime
-        # whose Unicode version no longer matches the pin).
+        # (src/nfkc-table.generated.ts + testdata/nfkc-table.json), derived
+        # from vendored UCD text. This step regenerates and fails if the
+        # committed tables drifted (a hand-edit, or a stale vendored file).
+        # `--require-runtime-match` makes the generator hard-fail unless this
+        # runner genuinely ships the pinned Unicode version — so its exhaustive
+        # frozenNfkc-vs-runtime proof actually runs here and cannot silently
+        # downgrade to a content-only check if the runner's ICU is bumped.
         working-directory: packages/protocol
         run: |
-          bun run scripts/generate-nfkc-table.ts
+          bun run scripts/generate-nfkc-table.ts --require-runtime-match
           git -C "$GITHUB_WORKSPACE" diff --exit-code -- \
             packages/protocol/src/nfkc-table.generated.ts \
             packages/protocol/testdata/nfkc-table.json

@@ -126,12 +126,14 @@ The artifact has four parts:
 
 The generator derives all three tables from vendored, authoritative Unicode
 Character Database text files (`packages/protocol/scripts/ucd/` —
-`UnicodeData-15.1.0.txt` and `CompositionExclusions-15.1.0.txt`), never from
-the host runtime's `.normalize()`. It is therefore fully deterministic on any
-host, regardless of the Unicode version the runtime ships (Bun reports a stale
-`process.versions.unicode` and uses the platform ICU, so the runtime cannot be
-trusted as the source). Regenerate (only to deliberately bump the pinned
-Unicode version — replace the vendored UCD files first) with
+`UnicodeData-15.1.0.txt` and `CompositionExclusions-15.1.0.txt`, with a
+`SHA256SUMS` next to them — verify the vendored files against unicode.org with
+`shasum -a 256 -c SHA256SUMS`), never from the host runtime's `.normalize()`.
+It is therefore fully deterministic on any host, regardless of the Unicode
+version the runtime ships (Bun reports a stale `process.versions.unicode` and
+uses the platform ICU, so the runtime cannot be trusted as the source).
+Regenerate (only to deliberately bump the pinned Unicode version — replace the
+vendored UCD files and `SHA256SUMS` first) with
 `bun run scripts/generate-nfkc-table.ts` from `packages/protocol/`; it rewrites
 both this file and the embedded `src/nfkc-table.generated.ts`. When run on a
 host whose runtime genuinely ships the pinned version, it additionally

@@ -2,6 +2,7 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { MAX_SANITIZED_JSON_NODES, MAX_SANITIZED_STRING_BYTES } from "../src/budgets.ts";
 import { MOAT_DISALLOWED_RANGES, MOAT_UNICODE_VERSION } from "../src/moat-disallowed-table.ts";
+import { frozenNfkc } from "../src/nfkc.ts";
 import {
   isMoatDisallowedCodePoint,
   SanitizedString,
@@ -436,10 +437,12 @@ describe("SanitizedString", () => {
       fc.assert(
         fc.property(moatStressStringArb, (input) => {
           const out = SanitizedString.fromUnknown(input, opts).value;
-          expect(out).toBe(out.normalize("NFKC"));
+          // Stable under the FROZEN normaliser — production normalises with
+          // frozenNfkc, not the runtime, so the oracle must too.
+          expect(out).toBe(frozenNfkc(out));
           // Stripping plus canonical re-composition is non-increasing in code
           // points: the moat only ever removes, never inserts.
-          expect([...out].length).toBeLessThanOrEqual([...input.normalize("NFKC")].length);
+          expect([...out].length).toBeLessThanOrEqual([...frozenNfkc(input)].length);
         }),
         { numRuns: MOAT_NUM_RUNS },
       );
@@ -1000,10 +1003,10 @@ describe("SanitizedString", () => {
 describe("frozen moat table", () => {
   // The moat classifies against a frozen range table, not the runtime's live
   // `\p{...}` data, so the classification boundary is the same on every
-  // Node/Bun/ICU version. (NFKC normalization is still runtime-coupled — see
-  // the LIMITATION note in sanitized-string.ts.) These tests pin the embedded
-  // table to the cross-language wire artifact testdata/moat-disallowed-table.json
-  // (which the Go reference verifier-reference.go independently checks).
+  // Node/Bun/ICU version. (NFKC normalization is frozen too — via frozenNfkc;
+  // see nfkc.ts.) These tests pin the embedded table to the cross-language
+  // wire artifact testdata/moat-disallowed-table.json (which the Go reference
+  // verifier-reference.go independently checks).
 
   it("matches the cross-language testdata artifact", () => {
     expect(MOAT_UNICODE_VERSION).toBe(moatTableJson.unicodeVersion);
@@ -1119,11 +1122,14 @@ function expectedSanitizeText(
   input: string,
   policy: SanitizedStringPolicy = "strip-zero-width",
 ): string {
-  // Reject lone surrogates on the raw input, before NFKC — production does it
-  // in this order, and the oracle must mirror production so it can never mask
-  // an order-sensitive bug.
+  // Reject lone surrogates on the raw input, before normalising — production
+  // does it in this order, and the oracle must mirror production so it can
+  // never mask an order-sensitive bug. Normalisation uses `frozenNfkc`, not
+  // the runtime's `.normalize("NFKC")`: production is frozen, so the oracle
+  // must be too — otherwise it validates against the wrong NFKC on any host
+  // whose Unicode version differs from the pin.
   rejectLoneSurrogates(input);
-  const normalized = input.normalize("NFKC");
+  const normalized = frozenNfkc(input);
   let out = "";
   for (let i = 0; i < normalized.length; ) {
     const codePoint = normalized.codePointAt(i);
@@ -1135,9 +1141,9 @@ function expectedSanitizeText(
     }
     i += codePoint > 0xffff ? 2 : 1;
   }
-  // Re-normalize after stripping — mirrors production's second NFKC pass that
-  // makes the moat idempotent and its output NFKC-stable.
-  return out.normalize("NFKC");
+  // Re-normalize after stripping — mirrors production's second frozenNfkc pass
+  // that makes the moat idempotent and its output NFKC-stable.
+  return frozenNfkc(out);
 }
 
 function containsBidiOverride(value: string): boolean {

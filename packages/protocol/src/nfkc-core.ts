@@ -55,8 +55,8 @@ export function composeKey(starter: number, second: number): number {
   return starter * 0x110000 + second;
 }
 
-function combiningClassOf(codePoint: number, tables: NfkcTables): number {
-  return tables.combiningClass.get(codePoint) ?? 0;
+function combiningClassOf(codePoint: number, combiningClass: ReadonlyMap<number, number>): number {
+  return combiningClass.get(codePoint) ?? 0;
 }
 
 // Step D — full compatibility decomposition into a flat code-point array.
@@ -104,24 +104,29 @@ function decomposeCodePoint(codePoint: number, tables: NfkcTables, out: number[]
 }
 
 // Step R — canonical ordering. Stably sort each maximal run of non-starters
-// (Canonical_Combining_Class > 0) by ascending combining class.
-function canonicalOrder(codePoints: number[], tables: NfkcTables): void {
+// (Canonical_Combining_Class > 0) by ascending combining class. Exported so the
+// table generator drives the SAME ordering when it builds the frozen NFKD
+// table — no second copy of this algorithm to drift.
+export function canonicalOrder(
+  codePoints: number[],
+  combiningClass: ReadonlyMap<number, number>,
+): void {
   let index = 0;
   while (index < codePoints.length) {
     const codePoint = codePoints[index];
-    if (codePoint === undefined || combiningClassOf(codePoint, tables) === 0) {
+    if (codePoint === undefined || combiningClassOf(codePoint, combiningClass) === 0) {
       index += 1;
       continue;
     }
     let runEnd = index;
     while (runEnd < codePoints.length) {
       const runCodePoint = codePoints[runEnd];
-      if (runCodePoint === undefined || combiningClassOf(runCodePoint, tables) === 0) {
+      if (runCodePoint === undefined || combiningClassOf(runCodePoint, combiningClass) === 0) {
         break;
       }
       runEnd += 1;
     }
-    sortNonStarterRun(codePoints, index, runEnd, tables);
+    sortNonStarterRun(codePoints, index, runEnd, combiningClass);
     index = runEnd;
   }
 }
@@ -135,7 +140,7 @@ function sortNonStarterRun(
   codePoints: number[],
   start: number,
   end: number,
-  tables: NfkcTables,
+  combiningClass: ReadonlyMap<number, number>,
 ): void {
   for (let cursor = start + 1; cursor < end; cursor += 1) {
     const codePoint = codePoints[cursor];
@@ -144,7 +149,7 @@ function sortNonStarterRun(
     if (codePoint === undefined) {
       continue;
     }
-    const codePointClass = combiningClassOf(codePoint, tables);
+    const codePointClass = combiningClassOf(codePoint, combiningClass);
     let probe = cursor - 1;
     while (probe >= start) {
       const probeCodePoint = codePoints[probe];
@@ -153,7 +158,7 @@ function sortNonStarterRun(
       if (probeCodePoint === undefined) {
         break;
       }
-      if (combiningClassOf(probeCodePoint, tables) <= codePointClass) {
+      if (combiningClassOf(probeCodePoint, combiningClass) <= codePointClass) {
         break;
       }
       codePoints[probe + 1] = probeCodePoint;
@@ -208,7 +213,7 @@ function compose(codePoints: readonly number[], tables: NfkcTables): number[] {
   // maximum, so this single value is a sufficient blocked test.
   let lastKeptClass = -1;
   for (const codePoint of codePoints) {
-    const codePointClass = combiningClassOf(codePoint, tables);
+    const codePointClass = combiningClassOf(codePoint, tables.combiningClass);
     const notBlocked = lastKeptClass === -1 || lastKeptClass < codePointClass;
     if (starterIndex >= 0 && notBlocked) {
       const composed = composePair(starterCodePoint, codePoint, tables);
@@ -246,6 +251,6 @@ export function normalizeNfkc(input: string, tables: NfkcTables): string {
     return "";
   }
   const decomposed = decompose(input, tables);
-  canonicalOrder(decomposed, tables);
+  canonicalOrder(decomposed, tables.combiningClass);
   return codePointsToString(compose(decomposed, tables));
 }

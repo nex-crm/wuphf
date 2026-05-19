@@ -20,8 +20,10 @@
 //
 // When run on a host whose runtime genuinely ships the pinned Unicode version,
 // it ALSO cross-checks `frozenNfkc` against `String.prototype.normalize` for
-// every code point as a bonus proof; on a newer runtime that cross-check is
-// skipped (the vendored UCD remains the source of truth).
+// every code point as an exhaustive proof; on a newer runtime that cross-check
+// is skipped (the vendored UCD remains the source of truth). Pass
+// `--require-runtime-match` to make the skip a hard error — the CI drift-check
+// step does, so the exhaustive proof cannot silently stop running.
 //
 // To bump the pinned Unicode version, replace the vendored UCD files and the
 // version constants below; nothing else depends on the host.
@@ -31,7 +33,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { composeKey, type NfkcTables, normalizeNfkc } from "../src/nfkc-core.ts";
+import { canonicalOrder, composeKey, type NfkcTables, normalizeNfkc } from "../src/nfkc-core.ts";
 
 const MAX_CODE_POINT = 0x10ffff;
 const SURROGATE_START = 0xd800;
@@ -170,53 +172,6 @@ function fullyDecompose(
   }
 }
 
-// Stable canonical ordering: sort each maximal run of non-starters by combining
-// class, preserving input order within an equal class. Same algorithm as
-// `canonicalOrder` in nfkc-core.ts (inlined so the generator does not depend on
-// a non-exported helper).
-function canonicalOrderInPlace(
-  codePoints: number[],
-  combiningClass: ReadonlyMap<number, number>,
-): void {
-  let index = 0;
-  while (index < codePoints.length) {
-    const codePoint = codePoints[index];
-    if (codePoint === undefined || combiningClassOf(codePoint, combiningClass) === 0) {
-      index += 1;
-      continue;
-    }
-    let runEnd = index;
-    while (runEnd < codePoints.length) {
-      const runCodePoint = codePoints[runEnd];
-      if (runCodePoint === undefined || combiningClassOf(runCodePoint, combiningClass) === 0) {
-        break;
-      }
-      runEnd += 1;
-    }
-    for (let cursor = index + 1; cursor < runEnd; cursor += 1) {
-      const cursorCodePoint = codePoints[cursor];
-      if (cursorCodePoint === undefined) {
-        continue;
-      }
-      const cursorClass = combiningClassOf(cursorCodePoint, combiningClass);
-      let probe = cursor - 1;
-      while (probe >= index) {
-        const probeCodePoint = codePoints[probe];
-        if (probeCodePoint === undefined) {
-          break;
-        }
-        if (combiningClassOf(probeCodePoint, combiningClass) <= cursorClass) {
-          break;
-        }
-        codePoints[probe + 1] = probeCodePoint;
-        probe -= 1;
-      }
-      codePoints[probe + 1] = cursorCodePoint;
-    }
-    index = runEnd;
-  }
-}
-
 // Build the fully-recursive NFKD decomposition table. Hangul syllables are
 // excluded (the normaliser decomposes them algorithmically).
 function buildDecomposition(
@@ -230,7 +185,7 @@ function buildDecomposition(
     }
     const decomposed: number[] = [];
     fullyDecompose(codePoint, decompositionMappings, decomposed, 0);
-    canonicalOrderInPlace(decomposed, combiningClass);
+    canonicalOrder(decomposed, combiningClass);
     entries.push([codePoint, decomposed]);
   }
   return entries;
@@ -307,6 +262,15 @@ function assertWellFormed(
         );
       }
     }
+    // The stored decomposition must already be canonically ordered — the
+    // normaliser splices it in without re-sorting per-entry. Re-running
+    // canonicalOrder must be a no-op; otherwise a reorder bug ships silently
+    // on hosts where the runtime cross-check is skipped.
+    const reordered = [...parts];
+    canonicalOrder(reordered, tables.combiningClass);
+    if (reordered.join(",") !== parts.join(",")) {
+      throw new Error(`decomposition of U+${codePoint.toString(16)} is not canonically ordered`);
+    }
   }
   for (const [starter, second, composed] of composition) {
     if ((tables.combiningClass.get(starter) ?? 0) !== 0) {
@@ -315,6 +279,15 @@ function assertWellFormed(
           `U+${composed.toString(16)} has a non-starter first element`,
       );
     }
+  }
+  // Every (starter, second) pair must pack to a distinct composeKey — a
+  // collision would silently drop a pair when the Map is built (here and in
+  // nfkc.ts), yielding a normaliser that fails to compose.
+  if (tables.composition.size !== composition.length) {
+    throw new Error(
+      `composition table has ${composition.length} pairs but ${tables.composition.size} ` +
+        `distinct composeKeys — a (starter, second) key collision`,
+    );
   }
 }
 
@@ -615,6 +588,18 @@ function main(): void {
   const tables = buildTables(decomposition, composition, combiningClass);
   assertWellFormed(decomposition, composition, tables);
   const result = verifyAgainstRuntime(tables, unicodeData.combiningClass);
+
+  // `--require-runtime-match` (used by the CI drift-check step) demands that
+  // the exhaustive frozenNfkc-vs-runtime proof actually ran — i.e. the host
+  // genuinely ships the pinned Unicode version. Without it, an ICU bump on the
+  // CI runner would silently downgrade the gate to a content-only diff.
+  if (process.argv.includes("--require-runtime-match") && result.runtimeNewerThanPin) {
+    throw new Error(
+      `--require-runtime-match: the host runtime ships Unicode newer than ` +
+        `${PINNED_UNICODE_VERSION}, so the exhaustive frozenNfkc-vs-runtime proof was skipped. ` +
+        `Run this on a genuine Unicode ${PINNED_UNICODE_VERSION} runtime.`,
+    );
+  }
 
   const tableModulePath = join(packageRoot, "src", "nfkc-table.generated.ts");
   writeFileSync(
