@@ -23,14 +23,17 @@ const meta: Meta = {
   decorators: [
     (Story) => (
       <SidebarContext>
+        {/* Real .sidebar styles minus the `height: 100vh` lock so each
+            module renders at its natural height. Width matches the live
+            sidebar's 240px default. */}
         <aside
           className="sidebar"
           style={{
             width: 240,
-            minHeight: 320,
+            height: "auto",
+            minHeight: 0,
+            overflow: "visible",
             borderRadius: "var(--radius-md)",
-            display: "flex",
-            flexDirection: "column",
           }}
         >
           <Story />
@@ -90,27 +93,15 @@ export const Apps: StoryObj = {
 
 export const Workspace: StoryObj = {
   name: "Workspace summary",
-  render: () => (
-    <div style={{ marginTop: "auto" }}>
-      <WorkspaceSummary />
-    </div>
-  ),
+  render: () => <WorkspaceSummary />,
 };
 
 export const Usage: StoryObj = {
   name: "Usage panel",
-  render: () => (
-    <div style={{ marginTop: "auto" }}>
-      <UsagePanel />
-    </div>
-  ),
+  render: () => <UsagePanel />,
 };
 
 export const ColorPicker: StoryObj = {
   name: "Color picker",
-  render: () => (
-    <div style={{ marginTop: "auto" }}>
-      <SidebarColorPicker />
-    </div>
-  ),
+  render: () => <SidebarColorPicker />,
 };
