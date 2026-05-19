@@ -34,6 +34,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -150,6 +151,54 @@ type signedApprovalTokenFixture struct {
 	Rejected      []signedApprovalTokenRejectedVector `json:"rejected"`
 }
 
+type approvalRequestExpected struct {
+	CanonicalSerialization string `json:"canonicalSerialization"`
+}
+
+type approvalRequestAcceptedVector struct {
+	Name     string                  `json:"name"`
+	Input    json.RawMessage         `json:"input"`
+	Expected approvalRequestExpected `json:"expected"`
+}
+
+type approvalRequestRejectedVector struct {
+	Name          string          `json:"name"`
+	Input         json.RawMessage `json:"input"`
+	ExpectedError string          `json:"expectedError"`
+}
+
+type approvalRequestFixture struct {
+	SchemaVersion int                             `json:"schemaVersion"`
+	Comment       string                          `json:"comment"`
+	Accepted      []approvalRequestAcceptedVector `json:"accepted"`
+	Rejected      []approvalRequestRejectedVector `json:"rejected"`
+}
+
+type routeEnvelopeExpected struct {
+	CanonicalSerialization string `json:"canonicalSerialization"`
+}
+
+type routeEnvelopeAcceptedVector struct {
+	Name     string                `json:"name"`
+	Codec    string                `json:"codec"`
+	Input    json.RawMessage       `json:"input"`
+	Expected routeEnvelopeExpected `json:"expected"`
+}
+
+type routeEnvelopeRejectedVector struct {
+	Name          string          `json:"name"`
+	Codec         string          `json:"codec"`
+	Input         json.RawMessage `json:"input"`
+	ExpectedError string          `json:"expectedError"`
+}
+
+type routeEnvelopeFixture struct {
+	SchemaVersion int                           `json:"schemaVersion"`
+	Comment       string                        `json:"comment"`
+	Accepted      []routeEnvelopeAcceptedVector `json:"accepted"`
+	Rejected      []routeEnvelopeRejectedVector `json:"rejected"`
+}
+
 type agentProviderRoutingEnvelope struct {
 	AgentID string                      `json:"agentId"`
 	Routes  []agentProviderRoutingEntry `json:"routes"`
@@ -239,17 +288,20 @@ func canonicalMerkleRoot(rec merkleRootInput) ([]byte, error) {
 	return canonicalize(projection)
 }
 
-// costPayloadKindSet identifies bodyB64 kinds whose payload itself is
-// expected to be canonical JSON (RFC 8785 JCS). The TS writer guarantees
-// `costAuditPayloadToBytes` emits canonical bytes; this verifier
-// independently decodes, re-parses, and re-canonicalizes the body to
-// confirm a non-TS implementation produces the same bytes. Other kinds
-// (boot_marker, thread_*) carry kind-specific bodies — this verifier
-// does not yet decode them.
-var costPayloadKindSet = map[string]bool{
+// canonicalJsonPayloadKindSet identifies bodyB64 kinds whose payload itself is
+// expected to be canonical JSON (RFC 8785 JCS). The TS writer guarantees the
+// family-specific `*AuditPayloadToBytes` helpers emit canonical bytes; this
+// verifier independently decodes, re-parses, and re-canonicalizes the body to
+// confirm a non-TS implementation produces the same bytes.
+var canonicalJsonPayloadKindSet = map[string]bool{
+	"approval_requested":       true,
+	"approval_decided":         true,
 	"cost_event":               true,
 	"budget_set":               true,
 	"budget_threshold_crossed": true,
+	"thread_created":           true,
+	"thread_spec_edited":       true,
+	"thread_status_changed":    true,
 }
 
 // canonicalizeBodyBytes decodes a base64 body, parses it as JSON, and
@@ -282,6 +334,7 @@ var (
 	sha256HexRE        = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	ulidRE             = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
 	isoUtcRE           = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$`)
+	idempotencyKeyRE   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 	writeIDRE          = regexp.MustCompile(`^write_[A-Za-z0-9_-]{1,122}$`)
 )
 
@@ -298,11 +351,59 @@ var approvalRoleSet = map[string]bool{
 	"host":     true,
 }
 
+var approvalRequestStatusSet = map[string]bool{
+	"pending":   true,
+	"approved":  true,
+	"rejected":  true,
+	"abstained": true,
+}
+
+var approvalDecisionSet = map[string]bool{
+	"approve": true,
+	"reject":  true,
+	"abstain": true,
+}
+
 var riskClassSet = map[string]bool{
 	"low":      true,
 	"medium":   true,
 	"high":     true,
 	"critical": true,
+}
+
+var threadStatusSet = map[string]bool{
+	"open":         true,
+	"in_progress":  true,
+	"needs_review": true,
+	"merged":       true,
+	"closed":       true,
+}
+
+var threadEffectiveStatusSet = map[string]bool{
+	"open":            true,
+	"in_progress":     true,
+	"needs_review":    true,
+	"needs_attention": true,
+	"merged":          true,
+	"closed":          true,
+}
+
+var threadAttentionReasonSet = map[string]bool{
+	"pending_approval": true,
+	"failed":           true,
+	"stalled":          true,
+}
+
+var threadBoardColumnSet = map[string]bool{
+	"running":  true,
+	"review":   true,
+	"needs_me": true,
+	"done":     true,
+}
+
+var threadCurrentSeatSet = map[string]bool{
+	"agent": true,
+	"human": true,
 }
 
 var runnerKindSet = map[string]bool{
@@ -392,6 +493,16 @@ const (
 	maxWebAuthnAssertionFieldBytes  = 16 * 1024
 	maxWebAuthnAssertionBytes       = 16 * 1024
 	maxBudgetThresholdBps           = 10_000
+	maxThreadTitleBytes             = 512
+	maxThreadSpecContentBytes       = 64 * 1024
+	maxThreadExternalRefs           = 32
+	maxThreadExternalRefBytes       = 2 * 1024
+	maxThreadTaskIDs                = 1024
+	maxRouteThreadListItems         = 256
+	maxRouteApprovalListItems       = 256
+	maxRouteErrorCodeBytes          = 128
+	maxRouteErrorMessageBytes       = 8 * 1024
+	maxRouteCursorBytes             = 1024
 )
 
 func loadRunnerFixture() (runnerFixture, error) {
@@ -441,6 +552,40 @@ func loadSignedApprovalTokenFixture() (signedApprovalTokenFixture, error) {
 	}
 	if fx.SchemaVersion != 1 {
 		return signedApprovalTokenFixture{}, fmt.Errorf("unsupported signed-approval-token fixture schemaVersion: %d", fx.SchemaVersion)
+	}
+	return fx, nil
+}
+
+func loadApprovalRequestFixture() (approvalRequestFixture, error) {
+	fixtureBytes, err := os.ReadFile("approval-request-vectors.json")
+	if err != nil {
+		return approvalRequestFixture{}, err
+	}
+	var fx approvalRequestFixture
+	decoder := json.NewDecoder(bytes.NewReader(fixtureBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fx); err != nil {
+		return approvalRequestFixture{}, err
+	}
+	if fx.SchemaVersion != 1 {
+		return approvalRequestFixture{}, fmt.Errorf("unsupported approval-request fixture schemaVersion: %d", fx.SchemaVersion)
+	}
+	return fx, nil
+}
+
+func loadRouteEnvelopeFixture() (routeEnvelopeFixture, error) {
+	fixtureBytes, err := os.ReadFile("route-envelope-vectors.json")
+	if err != nil {
+		return routeEnvelopeFixture{}, err
+	}
+	var fx routeEnvelopeFixture
+	decoder := json.NewDecoder(bytes.NewReader(fixtureBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fx); err != nil {
+		return routeEnvelopeFixture{}, err
+	}
+	if fx.SchemaVersion != 1 {
+		return routeEnvelopeFixture{}, fmt.Errorf("unsupported route-envelope fixture schemaVersion: %d", fx.SchemaVersion)
 	}
 	return fx, nil
 }
@@ -577,6 +722,1313 @@ func validateSignedApprovalTokenRejected(vec signedApprovalTokenRejectedVector) 
 	}
 	if vec.ExpectedError != "" && !strings.Contains(err.Error(), vec.ExpectedError) {
 		return fmt.Errorf("expected error containing %q, got %q", vec.ExpectedError, err.Error())
+	}
+	return nil
+}
+
+func validateApprovalRequestAccepted(vec approvalRequestAcceptedVector) error {
+	parsed, err := parseApprovalRequest(vec.Input)
+	if err != nil {
+		return err
+	}
+	serialized, err := canonicalize(parsed)
+	if err != nil {
+		return err
+	}
+	if string(serialized) != vec.Expected.CanonicalSerialization {
+		return fmt.Errorf("canonicalSerialization mismatch: expected %s, got %s", vec.Expected.CanonicalSerialization, string(serialized))
+	}
+	return nil
+}
+
+func validateApprovalRequestRejected(vec approvalRequestRejectedVector) error {
+	_, err := parseApprovalRequest(vec.Input)
+	if err == nil {
+		return fmt.Errorf("expected reject, got accept")
+	}
+	if vec.ExpectedError != "" && !strings.Contains(err.Error(), vec.ExpectedError) {
+		return fmt.Errorf("expected error containing %q, got %q", vec.ExpectedError, err.Error())
+	}
+	return nil
+}
+
+func validateRouteEnvelopeAccepted(vec routeEnvelopeAcceptedVector) error {
+	parsed, err := parseRouteEnvelope(vec.Codec, vec.Input)
+	if err != nil {
+		return err
+	}
+	serialized, err := canonicalize(parsed)
+	if err != nil {
+		return err
+	}
+	if string(serialized) != vec.Expected.CanonicalSerialization {
+		return fmt.Errorf("canonicalSerialization mismatch: expected %s, got %s", vec.Expected.CanonicalSerialization, string(serialized))
+	}
+	return nil
+}
+
+func validateRouteEnvelopeRejected(vec routeEnvelopeRejectedVector) error {
+	_, err := parseRouteEnvelope(vec.Codec, vec.Input)
+	if err == nil {
+		return fmt.Errorf("expected reject, got accept")
+	}
+	if vec.ExpectedError != "" && !strings.Contains(err.Error(), vec.ExpectedError) {
+		return fmt.Errorf("expected error containing %q, got %q", vec.ExpectedError, err.Error())
+	}
+	return nil
+}
+
+func parseRouteEnvelope(codec string, raw json.RawMessage) (map[string]interface{}, error) {
+	record, err := parseRouteRecord(raw, codec)
+	if err != nil {
+		return nil, err
+	}
+	switch codec {
+	case "threadCreateRequest":
+		return record, validateThreadCreateRequest(record)
+	case "threadSpecEditRequest":
+		return record, validateThreadSpecEditRequest(record)
+	case "threadStatusChangeRequest":
+		return record, validateThreadStatusChangeRequest(record)
+	case "threadMutationResponse":
+		return record, validateThreadMutationResponse(record)
+	case "threadListResponse":
+		return record, validateThreadListResponse(record)
+	case "threadGetResponse":
+		return record, validateThreadGetResponse(record)
+	case "approvalRequestCreateRequest":
+		return record, validateApprovalRequestCreateRequest(record)
+	case "approvalDecisionRequest":
+		return record, validateApprovalDecisionRequest(record)
+	case "approvalRequestCreateResponse":
+		return record, validateApprovalRequestEnvelopeResponse(record, "approvalRequestCreateResponse")
+	case "approvalDecisionResponse":
+		return record, validateApprovalRequestEnvelopeResponse(record, "approvalDecisionResponse")
+	case "approvalView":
+		return record, validateApprovalViewRecord(record, "approvalView")
+	case "approvalListResponse":
+		return record, validateApprovalListResponse(record)
+	case "approvalGetResponse":
+		return record, validateApprovalGetResponse(record)
+	case "threadPinnedApprovalsResponse":
+		return record, validateThreadPinnedApprovalsResponse(record)
+	case "routeError":
+		return record, validateRouteErrorEnvelope(record)
+	default:
+		return nil, fmt.Errorf("routeEnvelope: unsupported codec %q", codec)
+	}
+}
+
+func parseRouteRecord(raw json.RawMessage, path string) (map[string]interface{}, error) {
+	var record map[string]interface{}
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return nil, fmt.Errorf("%s: must be an object: %w", path, err)
+	}
+	if record == nil {
+		return nil, fmt.Errorf("%s: must be an object", path)
+	}
+	return record, nil
+}
+
+func validateThreadCreateRequest(record map[string]interface{}) error {
+	const path = "threadCreateRequest"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion":  true,
+		"title":          true,
+		"specContent":    true,
+		"externalRefs":   true,
+		"idempotencyKey": true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	title, err := requiredStringValue(record, "title", path+".title")
+	if err != nil {
+		return err
+	}
+	if title == "" {
+		return fmt.Errorf("%s.title: must be a non-empty string", path)
+	}
+	if err := validateUtf8Budget(title, maxThreadTitleBytes, "Thread.title bytes"); err != nil {
+		return fmt.Errorf("%s.title: %w", path, err)
+	}
+	if content, ok := record["specContent"]; !ok {
+		return fmt.Errorf("%s.specContent: is required", path)
+	} else if err := validateThreadSpecContent(content, path+".specContent"); err != nil {
+		return err
+	}
+	if externalRefs, ok := record["externalRefs"]; ok {
+		refRecord, ok := externalRefs.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s.externalRefs: must be an object", path)
+		}
+		if err := validateThreadExternalRefsRecord(refRecord, path+".externalRefs"); err != nil {
+			return err
+		}
+	}
+	return validateIdempotencyKeyField(record, "idempotencyKey", path+".idempotencyKey")
+}
+
+func validateThreadSpecEditRequest(record map[string]interface{}) error {
+	const path = "threadSpecEditRequest"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion":   true,
+		"baseRevisionId":  true,
+		"baseContentHash": true,
+		"content":         true,
+		"idempotencyKey":  true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	if err := validateULIDField(record, "baseRevisionId", path+".baseRevisionId", "ThreadSpecRevisionId"); err != nil {
+		return err
+	}
+	if err := validateSha256HexField(record, "baseContentHash", path+".baseContentHash"); err != nil {
+		return err
+	}
+	if content, ok := record["content"]; !ok {
+		return fmt.Errorf("%s.content: is required", path)
+	} else if err := validateThreadSpecContent(content, path+".content"); err != nil {
+		return err
+	}
+	return validateIdempotencyKeyField(record, "idempotencyKey", path+".idempotencyKey")
+}
+
+func validateThreadStatusChangeRequest(record map[string]interface{}) error {
+	const path = "threadStatusChangeRequest"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion":  true,
+		"fromStatus":     true,
+		"toStatus":       true,
+		"idempotencyKey": true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	if err := validateThreadStatusField(record, "fromStatus", path+".fromStatus"); err != nil {
+		return err
+	}
+	if err := validateThreadStatusField(record, "toStatus", path+".toStatus"); err != nil {
+		return err
+	}
+	return validateIdempotencyKeyField(record, "idempotencyKey", path+".idempotencyKey")
+}
+
+func validateThreadMutationResponse(record map[string]interface{}) error {
+	const path = "threadMutationResponse"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"threadId":      true,
+		"headLsn":       true,
+		"revisionId":    true,
+		"contentHash":   true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	if err := validateULIDField(record, "threadId", path+".threadId", "ThreadId"); err != nil {
+		return err
+	}
+	if err := validateEventLsnField(record, "headLsn", path+".headLsn"); err != nil {
+		return err
+	}
+	if err := validateULIDField(record, "revisionId", path+".revisionId", "ThreadSpecRevisionId"); err != nil {
+		return err
+	}
+	return validateSha256HexField(record, "contentHash", path+".contentHash")
+}
+
+func validateThreadListResponse(record map[string]interface{}) error {
+	const path = "threadListResponse"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"threads":       true,
+		"nextCursor":    true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	threads, err := requiredArrayValue(record, "threads", path+".threads")
+	if err != nil {
+		return err
+	}
+	if len(threads) > maxRouteThreadListItems {
+		return fmt.Errorf("%s.threads: length exceeds MAX_ROUTE_THREAD_LIST_ITEMS: %d > %d", path, len(threads), maxRouteThreadListItems)
+	}
+	for index, item := range threads {
+		threadRecord, ok := item.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s.threads/%d: must be an object", path, index)
+		}
+		if err := validateThreadViewRecord(threadRecord, fmt.Sprintf("%s.threads/%d", path, index)); err != nil {
+			return err
+		}
+	}
+	if cursor, ok, err := optionalString(record, "nextCursor", path+".nextCursor"); err != nil {
+		return err
+	} else if ok {
+		if cursor == "" {
+			return fmt.Errorf("%s.nextCursor: must be non-empty when present", path)
+		}
+		if err := validateUtf8Budget(cursor, maxRouteCursorBytes, "RouteListResponse.nextCursor bytes"); err != nil {
+			return fmt.Errorf("%s.nextCursor: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func validateThreadGetResponse(record map[string]interface{}) error {
+	const path = "threadGetResponse"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"thread":        true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	thread, err := requiredObjectValue(record, "thread", path+".thread")
+	if err != nil {
+		return err
+	}
+	return validateThreadViewRecord(thread, path+".thread")
+}
+
+func validateThreadPinnedApprovalsResponse(record map[string]interface{}) error {
+	const path = "threadPinnedApprovalsResponse"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"threadId":      true,
+		"headLsn":       true,
+		"approvals":     true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	if err := validateULIDField(record, "threadId", path+".threadId", "ThreadId"); err != nil {
+		return err
+	}
+	if err := validateEventLsnField(record, "headLsn", path+".headLsn"); err != nil {
+		return err
+	}
+	approvals, err := requiredArrayValue(record, "approvals", path+".approvals")
+	if err != nil {
+		return err
+	}
+	if len(approvals) > maxRouteApprovalListItems {
+		return fmt.Errorf("%s.approvals: length exceeds MAX_ROUTE_APPROVAL_LIST_ITEMS: %d > %d", path, len(approvals), maxRouteApprovalListItems)
+	}
+	for index, item := range approvals {
+		approval, ok := item.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s.approvals/%d: must be an object", path, index)
+		}
+		if err := validateApprovalViewRecord(approval, fmt.Sprintf("%s.approvals/%d", path, index)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateApprovalRequestCreateRequest(record map[string]interface{}) error {
+	const path = "approvalRequestCreateRequest"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion":  true,
+		"claim":          true,
+		"scope":          true,
+		"riskClass":      true,
+		"threadId":       true,
+		"taskId":         true,
+		"receiptId":      true,
+		"idempotencyKey": true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	claim, err := requiredObjectValue(record, "claim", path+".claim")
+	if err != nil {
+		return err
+	}
+	claimKind, claimID, err := validateApprovalClaim(claim, path+".claim")
+	if err != nil {
+		return err
+	}
+	scope, err := requiredObjectValue(record, "scope", path+".scope")
+	if err != nil {
+		return err
+	}
+	scopeKind, scopeClaimID, err := validateApprovalScope(scope, path+".scope")
+	if err != nil {
+		return err
+	}
+	if claimID != scopeClaimID {
+		return fmt.Errorf("%s.scope.claimId: must match claim.claimId", path)
+	}
+	if claimKind != scopeKind {
+		return fmt.Errorf("%s.scope.claimKind: must match claim.kind", path)
+	}
+	if err := validateApprovalClaimScopeBinding(claimKind, claim, scope, path+".scope"); err != nil {
+		return err
+	}
+	riskClass, err := requiredStringValue(record, "riskClass", path+".riskClass")
+	if err != nil {
+		return err
+	}
+	if !riskClassSet[riskClass] {
+		return fmt.Errorf("%s.riskClass: must be a valid risk class", path)
+	}
+	if threadID, ok, err := optionalString(record, "threadId", path+".threadId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(threadID) {
+		return fmt.Errorf("%s.threadId: not a ThreadId", path)
+	}
+	if taskID, ok, err := optionalString(record, "taskId", path+".taskId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(taskID) {
+		return fmt.Errorf("%s.taskId: not a TaskId", path)
+	}
+	if receiptID, ok, err := optionalString(record, "receiptId", path+".receiptId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(receiptID) {
+		return fmt.Errorf("%s.receiptId: not a ReceiptId", path)
+	} else if claimKind == "receipt_co_sign" {
+		if !ok || receiptID != claim["receiptId"] {
+			return fmt.Errorf("%s.receiptId: must match claim.receiptId", path)
+		}
+		if riskClass != claim["riskClass"] {
+			return fmt.Errorf("%s.riskClass: must match claim.riskClass", path)
+		}
+	}
+	return validateIdempotencyKeyField(record, "idempotencyKey", path+".idempotencyKey")
+}
+
+func validateApprovalDecisionRequest(record map[string]interface{}) error {
+	const path = "approvalDecisionRequest"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion":  true,
+		"decision":       true,
+		"token":          true,
+		"idempotencyKey": true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	decision, err := requiredStringValue(record, "decision", path+".decision")
+	if err != nil {
+		return err
+	}
+	if !approvalDecisionSet[decision] {
+		return fmt.Errorf("%s.decision: must be a valid approval decision", path)
+	}
+	tokenValue, hasToken := record["token"]
+	if decision == "approve" && !hasToken {
+		return fmt.Errorf("%s.token: is required when decision is approve", path)
+	}
+	if hasToken {
+		token, ok := tokenValue.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s.token: must be an object", path)
+		}
+		if err := validateSignedApprovalTokenRecord(token, path+".token"); err != nil {
+			return err
+		}
+	}
+	return validateIdempotencyKeyField(record, "idempotencyKey", path+".idempotencyKey")
+}
+
+func validateApprovalRequestEnvelopeResponse(record map[string]interface{}, path string) error {
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion":   true,
+		"approvalRequest": true,
+		"headLsn":         true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	approvalRequest, err := requiredObjectValue(record, "approvalRequest", path+".approvalRequest")
+	if err != nil {
+		return err
+	}
+	if err := validateApprovalRequestRecord(approvalRequest); err != nil {
+		return err
+	}
+	return validateEventLsnField(record, "headLsn", path+".headLsn")
+}
+
+func validateApprovalListResponse(record map[string]interface{}) error {
+	const path = "approvalListResponse"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"approvals":     true,
+		"nextCursor":    true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	approvals, err := requiredArrayValue(record, "approvals", path+".approvals")
+	if err != nil {
+		return err
+	}
+	if len(approvals) > maxRouteApprovalListItems {
+		return fmt.Errorf("%s.approvals: length exceeds MAX_ROUTE_APPROVAL_LIST_ITEMS: %d > %d", path, len(approvals), maxRouteApprovalListItems)
+	}
+	for index, item := range approvals {
+		approval, ok := item.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s.approvals/%d: must be an object", path, index)
+		}
+		if err := validateApprovalViewRecord(approval, fmt.Sprintf("%s.approvals/%d", path, index)); err != nil {
+			return err
+		}
+	}
+	if cursor, ok, err := optionalString(record, "nextCursor", path+".nextCursor"); err != nil {
+		return err
+	} else if ok {
+		if cursor == "" {
+			return fmt.Errorf("%s.nextCursor: must be non-empty when present", path)
+		}
+		if err := validateUtf8Budget(cursor, maxRouteCursorBytes, "RouteListResponse.nextCursor bytes"); err != nil {
+			return fmt.Errorf("%s.nextCursor: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func validateApprovalGetResponse(record map[string]interface{}) error {
+	const path = "approvalGetResponse"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"approval":      true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	approval, err := requiredObjectValue(record, "approval", path+".approval")
+	if err != nil {
+		return err
+	}
+	return validateApprovalViewRecord(approval, path+".approval")
+}
+
+func validateApprovalViewRecord(record map[string]interface{}, path string) error {
+	if err := knownKeys(record, path, map[string]bool{
+		"id":              true,
+		"claim":           true,
+		"scope":           true,
+		"riskClass":       true,
+		"threadId":        true,
+		"taskId":          true,
+		"receiptId":       true,
+		"requestedBy":     true,
+		"requestedAt":     true,
+		"status":          true,
+		"decisionSummary": true,
+		"schemaVersion":   true,
+	}); err != nil {
+		return err
+	}
+	if err := requiredExactNumber(record, "schemaVersion", path+"/schemaVersion", 1); err != nil {
+		return err
+	}
+	if err := validateULIDField(record, "id", path+".id", "ApprovalRequestId"); err != nil {
+		return err
+	}
+	claim, err := requiredObjectValue(record, "claim", path+".claim")
+	if err != nil {
+		return err
+	}
+	claimKind, claimID, err := validateApprovalClaim(claim, path+".claim")
+	if err != nil {
+		return err
+	}
+	scope, err := requiredObjectValue(record, "scope", path+".scope")
+	if err != nil {
+		return err
+	}
+	scopeKind, scopeClaimID, err := validateApprovalScope(scope, path+".scope")
+	if err != nil {
+		return err
+	}
+	if claimID != scopeClaimID {
+		return fmt.Errorf("%s.scope.claimId: must match claim.claimId", path)
+	}
+	if claimKind != scopeKind {
+		return fmt.Errorf("%s.scope.claimKind: must match claim.kind", path)
+	}
+	if err := validateApprovalClaimScopeBinding(claimKind, claim, scope, path+".scope"); err != nil {
+		return err
+	}
+	riskClass, err := requiredStringValue(record, "riskClass", path+".riskClass")
+	if err != nil {
+		return err
+	}
+	if !riskClassSet[riskClass] {
+		return fmt.Errorf("%s.riskClass: must be a valid risk class", path)
+	}
+	if threadID, ok, err := optionalString(record, "threadId", path+".threadId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(threadID) {
+		return fmt.Errorf("%s.threadId: not a ThreadId", path)
+	}
+	if taskID, ok, err := optionalString(record, "taskId", path+".taskId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(taskID) {
+		return fmt.Errorf("%s.taskId: not a TaskId", path)
+	}
+	if receiptID, ok, err := optionalString(record, "receiptId", path+".receiptId"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(receiptID) {
+		return fmt.Errorf("%s.receiptId: not a ReceiptId", path)
+	} else if claimKind == "receipt_co_sign" && (!ok || receiptID != claim["receiptId"]) {
+		return fmt.Errorf("%s.receiptId: must match claim.receiptId", path)
+	}
+	if claimKind == "receipt_co_sign" && riskClass != claim["riskClass"] {
+		return fmt.Errorf("%s.riskClass: must match claim.riskClass", path)
+	}
+	requestedBy, err := requiredStringValue(record, "requestedBy", path+".requestedBy")
+	if err != nil {
+		return err
+	}
+	if err := validateSignerIdentity(requestedBy, path+".requestedBy"); err != nil {
+		return err
+	}
+	if _, err := requiredTimestampMillis(record, "requestedAt", path+".requestedAt"); err != nil {
+		return err
+	}
+	status, err := requiredStringValue(record, "status", path+".status")
+	if err != nil {
+		return err
+	}
+	if !approvalRequestStatusSet[status] {
+		return fmt.Errorf("%s.status: must be a valid approval request status", path)
+	}
+	summaryValue, hasSummary := record["decisionSummary"]
+	if status == "pending" && hasSummary {
+		return fmt.Errorf("%s/decisionSummary: must be absent when status is pending", path)
+	}
+	if status != "pending" && !hasSummary {
+		return fmt.Errorf("%s/decisionSummary: is required when status is not pending", path)
+	}
+	if hasSummary {
+		summary, ok := summaryValue.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s/decisionSummary: must be an object", path)
+		}
+		return validateApprovalDecisionSummaryRecord(summary, status, path+"/decisionSummary")
+	}
+	return nil
+}
+
+func validateApprovalDecisionSummaryRecord(summary map[string]interface{}, status string, path string) error {
+	if err := knownKeys(summary, path, map[string]bool{
+		"decision":  true,
+		"decidedBy": true,
+		"decidedAt": true,
+	}); err != nil {
+		return err
+	}
+	decision, err := requiredStringValue(summary, "decision", path+".decision")
+	if err != nil {
+		return err
+	}
+	if !approvalDecisionSet[decision] {
+		return fmt.Errorf("%s.decision: must be a valid approval decision", path)
+	}
+	expectedStatus := map[string]string{"approve": "approved", "reject": "rejected", "abstain": "abstained"}[decision]
+	if status != expectedStatus {
+		return fmt.Errorf("%s/decision: must match status", path)
+	}
+	decidedBy, err := requiredStringValue(summary, "decidedBy", path+".decidedBy")
+	if err != nil {
+		return err
+	}
+	if err := validateSignerIdentity(decidedBy, path+".decidedBy"); err != nil {
+		return err
+	}
+	_, err = requiredTimestampMillis(summary, "decidedAt", path+".decidedAt")
+	return err
+}
+
+func validateRouteErrorEnvelope(record map[string]interface{}) error {
+	const path = "routeError"
+	if err := knownKeys(record, path, map[string]bool{
+		"error":        true,
+		"message":      true,
+		"retryAfterMs": true,
+	}); err != nil {
+		return err
+	}
+	errorCode, err := requiredStringValue(record, "error", path+".error")
+	if err != nil {
+		return err
+	}
+	if errorCode == "" {
+		return fmt.Errorf("%s.error: must be a non-empty string", path)
+	}
+	if err := validateUtf8Budget(errorCode, maxRouteErrorCodeBytes, "RouteError.error bytes"); err != nil {
+		return fmt.Errorf("%s.error: %w", path, err)
+	}
+	if message, ok, err := optionalString(record, "message", path+".message"); err != nil {
+		return err
+	} else if ok {
+		if err := validateUtf8Budget(message, maxRouteErrorMessageBytes, "RouteError.message bytes"); err != nil {
+			return fmt.Errorf("%s.message: %w", path, err)
+		}
+	}
+	if _, ok := record["retryAfterMs"]; ok {
+		if err := requiredNonNegativeInteger(record, "retryAfterMs", path+".retryAfterMs", maxSafeInteger); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateThreadRecord(record map[string]interface{}, path string) error {
+	if err := knownKeys(record, path, map[string]bool{
+		"thread_id":     true,
+		"title":         true,
+		"status":        true,
+		"spec":          true,
+		"external_refs": true,
+		"task_ids":      true,
+		"created_by":    true,
+		"created_at":    true,
+		"updated_at":    true,
+		"closed_at":     true,
+	}); err != nil {
+		return err
+	}
+	threadID, err := requiredStringValue(record, "thread_id", path+"/thread_id")
+	if err != nil {
+		return err
+	}
+	if !ulidRE.MatchString(threadID) {
+		return fmt.Errorf("%s/thread_id: not a ThreadId", path)
+	}
+	title, err := requiredStringValue(record, "title", path+"/title")
+	if err != nil {
+		return err
+	}
+	if title == "" {
+		return fmt.Errorf("%s/title: must be a non-empty string", path)
+	}
+	if err := validateUtf8Budget(title, maxThreadTitleBytes, path+"/title"); err != nil {
+		return err
+	}
+	status, err := requiredStringValue(record, "status", path+"/status")
+	if err != nil {
+		return err
+	}
+	if !threadStatusSet[status] {
+		return fmt.Errorf("%s/status: must be a valid thread status", path)
+	}
+	spec, err := requiredObjectValue(record, "spec", path+"/spec")
+	if err != nil {
+		return err
+	}
+	if err := validateThreadSpecRevisionRecord(spec, path+"/spec", threadID); err != nil {
+		return err
+	}
+	externalRefs, err := requiredObjectValue(record, "external_refs", path+"/external_refs")
+	if err != nil {
+		return err
+	}
+	if err := validateThreadExternalRefsRecord(externalRefs, path+"/external_refs"); err != nil {
+		return err
+	}
+	taskIDs, err := requiredArrayValue(record, "task_ids", path+"/task_ids")
+	if err != nil {
+		return err
+	}
+	if len(taskIDs) > maxThreadTaskIDs {
+		return fmt.Errorf("%s/task_ids: length exceeds MAX_THREAD_TASK_IDS: %d > %d", path, len(taskIDs), maxThreadTaskIDs)
+	}
+	seenTaskIDs := map[string]bool{}
+	for index, item := range taskIDs {
+		taskID, ok := item.(string)
+		if !ok {
+			return fmt.Errorf("%s/task_ids/%d: must be a string", path, index)
+		}
+		if !ulidRE.MatchString(taskID) {
+			return fmt.Errorf("%s/task_ids/%d: must be an uppercase ULID TaskId", path, index)
+		}
+		if seenTaskIDs[taskID] {
+			return fmt.Errorf("%s/task_ids/%d: must be unique", path, index)
+		}
+		seenTaskIDs[taskID] = true
+	}
+	createdBy, err := requiredStringValue(record, "created_by", path+"/created_by")
+	if err != nil {
+		return err
+	}
+	if err := validateSignerIdentity(createdBy, path+"/created_by"); err != nil {
+		return err
+	}
+	if _, err := requiredTimestampMillis(record, "created_at", path+"/created_at"); err != nil {
+		return err
+	}
+	if _, err := requiredTimestampMillis(record, "updated_at", path+"/updated_at"); err != nil {
+		return err
+	}
+	if closedAt, ok, err := optionalString(record, "closed_at", path+"/closed_at"); err != nil {
+		return err
+	} else if ok {
+		if err := validateCanonicalTimestamp(closedAt, path+"/closed_at"); err != nil {
+			return err
+		}
+		if status != "merged" && status != "closed" {
+			return fmt.Errorf("%s/closed_at: must be absent unless status is terminal", path)
+		}
+	}
+	return nil
+}
+
+func validateThreadViewRecord(record map[string]interface{}, path string) error {
+	if err := knownKeys(record, path, map[string]bool{
+		"thread_id":            true,
+		"title":                true,
+		"status":               true,
+		"spec":                 true,
+		"external_refs":        true,
+		"task_ids":             true,
+		"created_by":           true,
+		"created_at":           true,
+		"updated_at":           true,
+		"closed_at":            true,
+		"effectiveStatus":      true,
+		"attentionReason":      true,
+		"boardColumn":          true,
+		"currentSeat":          true,
+		"pendingApprovalCount": true,
+	}); err != nil {
+		return err
+	}
+	if err := validateThreadRecord(threadRecordSubset(record), path); err != nil {
+		return err
+	}
+	effectiveStatus, err := requiredStringValue(record, "effectiveStatus", path+".effectiveStatus")
+	if err != nil {
+		return err
+	}
+	if !threadEffectiveStatusSet[effectiveStatus] {
+		return fmt.Errorf("%s.effectiveStatus: must be a valid thread effective status", path)
+	}
+	attentionReason, hasAttentionReason, err := optionalString(record, "attentionReason", path+".attentionReason")
+	if err != nil {
+		return err
+	}
+	if hasAttentionReason && !threadAttentionReasonSet[attentionReason] {
+		return fmt.Errorf("%s.attentionReason: must be a valid thread attention reason", path)
+	}
+	if effectiveStatus == "needs_attention" && !hasAttentionReason {
+		return fmt.Errorf("%s.attentionReason: is required when effectiveStatus is needs_attention", path)
+	}
+	if effectiveStatus != "needs_attention" && hasAttentionReason {
+		return fmt.Errorf("%s.attentionReason: must be absent unless effectiveStatus is needs_attention", path)
+	}
+	boardColumn, err := requiredStringValue(record, "boardColumn", path+".boardColumn")
+	if err != nil {
+		return err
+	}
+	if !threadBoardColumnSet[boardColumn] {
+		return fmt.Errorf("%s.boardColumn: must be a valid thread board column", path)
+	}
+	if boardColumn != boardColumnForEffectiveStatus(effectiveStatus) {
+		return fmt.Errorf("%s.boardColumn: must match effectiveStatus", path)
+	}
+	currentSeat, err := requiredStringValue(record, "currentSeat", path+".currentSeat")
+	if err != nil {
+		return err
+	}
+	if !threadCurrentSeatSet[currentSeat] {
+		return fmt.Errorf("%s.currentSeat: must be a valid thread current seat", path)
+	}
+	status, err := requiredStringValue(record, "status", path+"/status")
+	if err != nil {
+		return err
+	}
+	expectedSeat := "agent"
+	if effectiveStatus == "needs_attention" || status == "needs_review" {
+		expectedSeat = "human"
+	}
+	if currentSeat != expectedSeat {
+		return fmt.Errorf("%s.currentSeat: must match effectiveStatus and status", path)
+	}
+	return requiredNonNegativeInteger(record, "pendingApprovalCount", path+".pendingApprovalCount", maxSafeInteger)
+}
+
+func threadRecordSubset(record map[string]interface{}) map[string]interface{} {
+	subset := map[string]interface{}{}
+	for _, key := range []string{
+		"thread_id",
+		"title",
+		"status",
+		"spec",
+		"external_refs",
+		"task_ids",
+		"created_by",
+		"created_at",
+		"updated_at",
+		"closed_at",
+	} {
+		if value, ok := record[key]; ok {
+			subset[key] = value
+		}
+	}
+	return subset
+}
+
+func boardColumnForEffectiveStatus(status string) string {
+	switch status {
+	case "needs_attention":
+		return "needs_me"
+	case "needs_review":
+		return "review"
+	case "merged", "closed":
+		return "done"
+	default:
+		return "running"
+	}
+}
+
+func validateThreadSpecRevisionRecord(record map[string]interface{}, path string, expectedThreadID string) error {
+	if err := knownKeys(record, path, map[string]bool{
+		"revision_id":      true,
+		"thread_id":        true,
+		"base_revision_id": true,
+		"content":          true,
+		"content_hash":     true,
+		"authored_by":      true,
+		"authored_at":      true,
+	}); err != nil {
+		return err
+	}
+	if err := validateULIDField(record, "revision_id", path+"/revision_id", "ThreadSpecRevisionId"); err != nil {
+		return err
+	}
+	threadID, err := requiredStringValue(record, "thread_id", path+"/thread_id")
+	if err != nil {
+		return err
+	}
+	if !ulidRE.MatchString(threadID) {
+		return fmt.Errorf("%s/thread_id: not a ThreadId", path)
+	}
+	if threadID != expectedThreadID {
+		return fmt.Errorf("%s/thread_id: must match parent thread_id", path)
+	}
+	if baseRevisionID, ok, err := optionalString(record, "base_revision_id", path+"/base_revision_id"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(baseRevisionID) {
+		return fmt.Errorf("%s/base_revision_id: not a ThreadSpecRevisionId", path)
+	}
+	content, ok := record["content"]
+	if !ok {
+		return fmt.Errorf("%s/content: is required", path)
+	}
+	contentHash, err := requiredStringValue(record, "content_hash", path+"/content_hash")
+	if err != nil {
+		return err
+	}
+	if !sha256HexRE.MatchString(contentHash) {
+		return fmt.Errorf("%s/content_hash: not a Sha256Hex", path)
+	}
+	derived, err := deriveThreadSpecContentHash(content, path+"/content")
+	if err != nil {
+		return err
+	}
+	if contentHash != derived {
+		return fmt.Errorf("%s/content_hash: must match sha256(canonical(content))", path)
+	}
+	authoredBy, err := requiredStringValue(record, "authored_by", path+"/authored_by")
+	if err != nil {
+		return err
+	}
+	if err := validateSignerIdentity(authoredBy, path+"/authored_by"); err != nil {
+		return err
+	}
+	_, err = requiredTimestampMillis(record, "authored_at", path+"/authored_at")
+	return err
+}
+
+func validateThreadExternalRefsRecord(record map[string]interface{}, path string) error {
+	if err := knownKeys(record, path, map[string]bool{
+		"source_urls": true,
+		"entity_ids":  true,
+	}); err != nil {
+		return err
+	}
+	if err := validateExternalRefArrayField(record, "source_urls", path+"/source_urls"); err != nil {
+		return err
+	}
+	return validateExternalRefArrayField(record, "entity_ids", path+"/entity_ids")
+}
+
+func validateExternalRefArrayField(record map[string]interface{}, key string, path string) error {
+	items, err := requiredArrayValue(record, key, path)
+	if err != nil {
+		return err
+	}
+	if len(items) > maxThreadExternalRefs {
+		return fmt.Errorf("%s: length exceeds MAX_THREAD_EXTERNAL_REFS: %d > %d", path, len(items), maxThreadExternalRefs)
+	}
+	seen := map[string]bool{}
+	for index, item := range items {
+		value, ok := item.(string)
+		if !ok {
+			return fmt.Errorf("%s/%d: must be a string", path, index)
+		}
+		if value == "" {
+			return fmt.Errorf("%s/%d: must be a non-empty string", path, index)
+		}
+		if err := validateUtf8Budget(value, maxThreadExternalRefBytes, fmt.Sprintf("%s/%d", path, index)); err != nil {
+			return err
+		}
+		if seen[value] {
+			return fmt.Errorf("%s/%d: must be unique", path, index)
+		}
+		seen[value] = true
+	}
+	return nil
+}
+
+func validateOptionalRouteSchemaVersion(record map[string]interface{}, path string) error {
+	value, ok := record["schemaVersion"]
+	if !ok {
+		record["schemaVersion"] = float64(1)
+		return nil
+	}
+	numberValue, ok := value.(float64)
+	if !ok || numberValue != float64(int64(numberValue)) {
+		return fmt.Errorf("%s.schemaVersion: must be an integer", path)
+	}
+	if numberValue > 1 {
+		return fmt.Errorf("%s.schemaVersion: unsupported schemaVersion", path)
+	}
+	if numberValue != 1 {
+		return fmt.Errorf("%s.schemaVersion: must be 1", path)
+	}
+	return nil
+}
+
+func validateIdempotencyKeyField(record map[string]interface{}, key string, path string) error {
+	value, err := requiredStringValue(record, key, path)
+	if err != nil {
+		return err
+	}
+	if !idempotencyKeyRE.MatchString(value) {
+		return fmt.Errorf("%s: not an IdempotencyKey", path)
+	}
+	return nil
+}
+
+func validateULIDField(record map[string]interface{}, key string, path string, brand string) error {
+	value, err := requiredStringValue(record, key, path)
+	if err != nil {
+		return err
+	}
+	if !ulidRE.MatchString(value) {
+		return fmt.Errorf("%s: not a %s", path, brand)
+	}
+	return nil
+}
+
+func validateThreadStatusField(record map[string]interface{}, key string, path string) error {
+	value, err := requiredStringValue(record, key, path)
+	if err != nil {
+		return err
+	}
+	if !threadStatusSet[value] {
+		return fmt.Errorf("%s: must be a valid thread status", path)
+	}
+	return nil
+}
+
+func validateEventLsnField(record map[string]interface{}, key string, path string) error {
+	value, err := requiredStringValue(record, key, path)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(value, "v1:") {
+		return fmt.Errorf("%s: must be an EventLsn", path)
+	}
+	seq := strings.TrimPrefix(value, "v1:")
+	if seq == "" {
+		return fmt.Errorf("%s: must be an EventLsn", path)
+	}
+	if len(seq) > 1 && strings.HasPrefix(seq, "0") {
+		return fmt.Errorf("%s: must be an EventLsn", path)
+	}
+	for _, r := range seq {
+		if r < '0' || r > '9' {
+			return fmt.Errorf("%s: must be an EventLsn", path)
+		}
+	}
+	parsed, err := strconv.ParseInt(seq, 10, 64)
+	if err != nil || parsed < 0 || parsed > maxSafeInteger {
+		return fmt.Errorf("%s: must be an EventLsn", path)
+	}
+	return nil
+}
+
+func validateThreadSpecContent(value interface{}, path string) error {
+	_, err := deriveThreadSpecContentHash(value, path)
+	return err
+}
+
+func deriveThreadSpecContentHash(value interface{}, path string) (string, error) {
+	canonical, err := canonicalize(value)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	if len(canonical) > maxThreadSpecContentBytes {
+		return "", fmt.Errorf("%s: ThreadSpecRevision.content bytes: exceeds %d UTF-8 bytes", path, maxThreadSpecContentBytes)
+	}
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func parseApprovalRequest(raw json.RawMessage) (map[string]interface{}, error) {
+	var record map[string]interface{}
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return nil, fmt.Errorf("approvalRequest: must be an object: %w", err)
+	}
+	if record == nil {
+		return nil, fmt.Errorf("approvalRequest: must be an object")
+	}
+	if err := validateApprovalRequestRecord(record); err != nil {
+		return nil, err
+	}
+	return record, nil
+}
+
+func validateApprovalRequestRecord(record map[string]interface{}) error {
+	if err := knownKeys(record, "approvalRequest", map[string]bool{
+		"request_id":     true,
+		"claim":          true,
+		"scope":          true,
+		"risk_class":     true,
+		"thread_id":      true,
+		"task_id":        true,
+		"receipt_id":     true,
+		"requested_by":   true,
+		"requested_at":   true,
+		"status":         true,
+		"decision":       true,
+		"schema_version": true,
+	}); err != nil {
+		return err
+	}
+	if err := requiredExactNumber(record, "schema_version", "approvalRequest/schema_version", 1); err != nil {
+		return err
+	}
+	requestID, err := requiredStringValue(record, "request_id", "approvalRequest/request_id")
+	if err != nil {
+		return err
+	}
+	if !ulidRE.MatchString(requestID) {
+		return fmt.Errorf("approvalRequest/request_id: not an ApprovalRequestId")
+	}
+	claim, err := requiredObjectValue(record, "claim", "approvalRequest/claim")
+	if err != nil {
+		return err
+	}
+	claimKind, claimID, err := validateApprovalClaim(claim, "approvalRequest/claim")
+	if err != nil {
+		return err
+	}
+	scope, err := requiredObjectValue(record, "scope", "approvalRequest/scope")
+	if err != nil {
+		return err
+	}
+	scopeKind, scopeClaimID, err := validateApprovalScope(scope, "approvalRequest/scope")
+	if err != nil {
+		return err
+	}
+	if claimID != scopeClaimID {
+		return fmt.Errorf("approvalRequest/scope/claimId: must match claim.claimId")
+	}
+	if claimKind != scopeKind {
+		return fmt.Errorf("approvalRequest/scope/claimKind: must match claim.kind")
+	}
+	if err := validateApprovalClaimScopeBinding(claimKind, claim, scope, "approvalRequest/scope"); err != nil {
+		return err
+	}
+	riskClass, err := requiredStringValue(record, "risk_class", "approvalRequest/risk_class")
+	if err != nil {
+		return err
+	}
+	if !riskClassSet[riskClass] {
+		return fmt.Errorf("approvalRequest/risk_class: must be a valid risk class")
+	}
+	if threadID, ok, err := optionalString(record, "thread_id", "approvalRequest/thread_id"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(threadID) {
+		return fmt.Errorf("approvalRequest/thread_id: not a ThreadId")
+	}
+	if taskID, ok, err := optionalString(record, "task_id", "approvalRequest/task_id"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(taskID) {
+		return fmt.Errorf("approvalRequest/task_id: not a TaskId")
+	}
+	if receiptID, ok, err := optionalString(record, "receipt_id", "approvalRequest/receipt_id"); err != nil {
+		return err
+	} else if ok && !ulidRE.MatchString(receiptID) {
+		return fmt.Errorf("approvalRequest/receipt_id: not a ReceiptId")
+	}
+	requestedBy, err := requiredStringValue(record, "requested_by", "approvalRequest/requested_by")
+	if err != nil {
+		return err
+	}
+	if err := validateSignerIdentity(requestedBy, "approvalRequest/requested_by"); err != nil {
+		return err
+	}
+	if _, err := requiredTimestampMillis(record, "requested_at", "approvalRequest/requested_at"); err != nil {
+		return err
+	}
+	status, err := requiredStringValue(record, "status", "approvalRequest/status")
+	if err != nil {
+		return err
+	}
+	if !approvalRequestStatusSet[status] {
+		return fmt.Errorf("approvalRequest/status: must be a valid approval request status")
+	}
+	if claimKind == "receipt_co_sign" {
+		receiptID, ok, err := optionalString(record, "receipt_id", "approvalRequest/receipt_id")
+		if err != nil {
+			return err
+		}
+		if !ok || receiptID != claim["receiptId"] {
+			return fmt.Errorf("approvalRequest/receiptId: must match claim.receiptId")
+		}
+		if riskClass != claim["riskClass"] {
+			return fmt.Errorf("approvalRequest/riskClass: must match claim.riskClass")
+		}
+	}
+	decisionValue, hasDecision := record["decision"]
+	if status == "pending" && hasDecision {
+		return fmt.Errorf("approvalRequest/decision: must be absent when status is pending")
+	}
+	if status != "pending" && !hasDecision {
+		return fmt.Errorf("approvalRequest/decision: is required when status is not pending")
+	}
+	if hasDecision {
+		decision, ok := decisionValue.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("approvalRequest/decision: must be an object")
+		}
+		return validateApprovalDecisionRecord(decision, status, claim, scope)
+	}
+	return nil
+}
+
+func validateApprovalDecisionRecord(decision map[string]interface{}, status string, requestClaim map[string]interface{}, requestScope map[string]interface{}) error {
+	if err := knownKeys(decision, "approvalRequest/decision", map[string]bool{
+		"decision":   true,
+		"decided_by": true,
+		"decided_at": true,
+		"token":      true,
+	}); err != nil {
+		return err
+	}
+	decisionValue, err := requiredStringValue(decision, "decision", "approvalRequest/decision/decision")
+	if err != nil {
+		return err
+	}
+	if !approvalDecisionSet[decisionValue] {
+		return fmt.Errorf("approvalRequest/decision/decision: must be a valid approval decision")
+	}
+	expectedStatus := map[string]string{"approve": "approved", "reject": "rejected", "abstain": "abstained"}[decisionValue]
+	if status != expectedStatus {
+		return fmt.Errorf("approvalRequest/decision/decision: must match status")
+	}
+	decidedBy, err := requiredStringValue(decision, "decided_by", "approvalRequest/decision/decided_by")
+	if err != nil {
+		return err
+	}
+	if err := validateSignerIdentity(decidedBy, "approvalRequest/decision/decided_by"); err != nil {
+		return err
+	}
+	decidedAtMs, err := requiredTimestampMillis(decision, "decided_at", "approvalRequest/decision/decided_at")
+	if err != nil {
+		return err
+	}
+	tokenValue, hasToken := decision["token"]
+	if decisionValue == "approve" && !hasToken {
+		return fmt.Errorf("approvalRequest/decision/token: is required when decision is approve")
+	}
+	if !hasToken {
+		return nil
+	}
+	token, ok := tokenValue.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("approvalRequest/decision/token: must be an object")
+	}
+	if err := validateSignedApprovalTokenRecord(token, "approvalRequest/decision/token"); err != nil {
+		return err
+	}
+	tokenClaim, err := requiredObjectValue(token, "claim", "approvalRequest/decision/token/claim")
+	if err != nil {
+		return err
+	}
+	tokenScope, err := requiredObjectValue(token, "scope", "approvalRequest/decision/token/scope")
+	if err != nil {
+		return err
+	}
+	if err := requireCanonicalEqual(tokenClaim, requestClaim, "approvalRequest/decision/token/claim", "must match request claim"); err != nil {
+		return err
+	}
+	if err := requireCanonicalEqual(tokenScope, requestScope, "approvalRequest/decision/token/scope", "must match request scope"); err != nil {
+		return err
+	}
+	notBefore, err := requiredSafeInteger(token, "notBefore", "approvalRequest/decision/token/notBefore")
+	if err != nil {
+		return err
+	}
+	expiresAt, err := requiredSafeInteger(token, "expiresAt", "approvalRequest/decision/token/expiresAt")
+	if err != nil {
+		return err
+	}
+	if decidedAtMs < notBefore || decidedAtMs >= expiresAt {
+		return fmt.Errorf("approvalRequest/decision/decidedAt: must be within token validity window")
+	}
+	return nil
+}
+
+func requireCanonicalEqual(left interface{}, right interface{}, path string, message string) error {
+	leftBytes, err := canonicalize(left)
+	if err != nil {
+		return err
+	}
+	rightBytes, err := canonicalize(right)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(leftBytes, rightBytes) {
+		return fmt.Errorf("%s: %s", path, message)
 	}
 	return nil
 }
@@ -967,6 +2419,16 @@ func validateAgentID(value string, path string) error {
 	}
 	if !agentIDRE.MatchString(value) {
 		return fmt.Errorf("%s: not an AgentId", path)
+	}
+	return nil
+}
+
+func validateSignerIdentity(value string, path string) error {
+	if value == "" {
+		return fmt.Errorf("%s: must be a bounded non-empty SignerIdentity", path)
+	}
+	if err := validateUtf8Budget(value, 256, path); err != nil {
+		return err
 	}
 	return nil
 }
@@ -2035,6 +3497,21 @@ func requiredSafeInteger(record map[string]interface{}, key string, path string)
 	return int64(numberValue), nil
 }
 
+func requiredTimestampMillis(record map[string]interface{}, key string, path string) (int64, error) {
+	value, err := requiredStringValue(record, key, path)
+	if err != nil {
+		return 0, err
+	}
+	if err := validateCanonicalTimestamp(value, path); err != nil {
+		return 0, err
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return 0, fmt.Errorf("%s: must be a valid ISO8601 UTC millisecond timestamp", path)
+	}
+	return parsed.UnixNano() / int64(time.Millisecond), nil
+}
+
 func requiredNonNegativeInteger(record map[string]interface{}, key string, path string, max float64) error {
 	value, ok := record[key]
 	if !ok {
@@ -2060,6 +3537,18 @@ func requiredObjectValue(record map[string]interface{}, key string, path string)
 		return nil, fmt.Errorf("%s: must be an object", path)
 	}
 	return objectValue, nil
+}
+
+func requiredArrayValue(record map[string]interface{}, key string, path string) ([]interface{}, error) {
+	value, ok := record[key]
+	if !ok {
+		return nil, fmt.Errorf("%s: is required", path)
+	}
+	arrayValue, ok := value.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("%s: must be an array", path)
+	}
+	return arrayValue, nil
 }
 
 func validateUtf8Budget(value string, maxBytes int, path string) error {
@@ -2294,6 +3783,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "could not load signed-approval-token fixture: %v\n", err)
 		os.Exit(2)
 	}
+	approvalRequestFx, err := loadApprovalRequestFixture()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not load approval-request fixture: %v\n", err)
+		os.Exit(2)
+	}
+	routeEnvelopeFx, err := loadRouteEnvelopeFixture()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not load route-envelope fixture: %v\n", err)
+		os.Exit(2)
+	}
 	moatFx, err := loadMoatTableFixture()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "could not load moat-disallowed-table fixture: %v\n", err)
@@ -2318,8 +3817,8 @@ func main() {
 	frozenMoatDisallowedRanges = moatFx.DisallowedRanges
 
 	fmt.Printf("%s@wuphf/protocol — Go reference verifier%s\n", colorBold, colorReset)
-	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d signed-approval-token accept vectors, %d signed-approval-token reject vectors, %d runner accept vectors, %d runner reject vectors, %d agent-provider-routing accept vectors, %d agent-provider-routing reject vectors, moat table Unicode %s (%d ranges, %d vectors), nfkc table Unicode %s (%d normalization vectors)%s\n\n",
-		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(signedApprovalTokenFx.Accepted), len(signedApprovalTokenFx.Rejected), len(runnerFx.Vectors), len(runnerFx.RejectVectors), len(agentProviderRoutingFx.Accepted), len(agentProviderRoutingFx.Rejected), moatFx.UnicodeVersion, len(moatFx.DisallowedRanges), len(moatFx.ClassificationVectors), nfkcFx.UnicodeVersion, len(nfkcFx.NormalizationVectors), colorReset)
+	fmt.Printf("%sLoaded fixture schemaVersion=%d, %d audit-event vectors, %d merkle-root vectors, %d signed-approval-token accept vectors, %d signed-approval-token reject vectors, %d approval-request accept vectors, %d approval-request reject vectors, %d route-envelope accept vectors, %d route-envelope reject vectors, %d runner accept vectors, %d runner reject vectors, %d agent-provider-routing accept vectors, %d agent-provider-routing reject vectors, moat table Unicode %s (%d ranges, %d vectors), nfkc table Unicode %s (%d normalization vectors)%s\n\n",
+		colorDim, fx.SchemaVersion, len(fx.Vectors), len(fx.MerkleRootVectors), len(signedApprovalTokenFx.Accepted), len(signedApprovalTokenFx.Rejected), len(approvalRequestFx.Accepted), len(approvalRequestFx.Rejected), len(routeEnvelopeFx.Accepted), len(routeEnvelopeFx.Rejected), len(runnerFx.Vectors), len(runnerFx.RejectVectors), len(agentProviderRoutingFx.Accepted), len(agentProviderRoutingFx.Rejected), moatFx.UnicodeVersion, len(moatFx.DisallowedRanges), len(moatFx.ClassificationVectors), nfkcFx.UnicodeVersion, len(nfkcFx.NormalizationVectors), colorReset)
 
 	failed := 0
 
@@ -2355,10 +3854,10 @@ func main() {
 			failed++
 			continue
 		}
-		// For cost-payload kinds, also confirm the bodyB64 itself is canonical
+		// For typed JSON payload kinds, also confirm the bodyB64 itself is canonical
 		// JSON: an independent canonicalizer must reproduce identical bytes.
 		// This locks the body-bytes contract that the audit chain relies on.
-		if costPayloadKindSet[vec.Input.Payload.Kind] {
+		if canonicalJsonPayloadKindSet[vec.Input.Payload.Kind] {
 			decoded, canonical, err := canonicalizeBodyBytes(vec.Input.Payload.BodyB64)
 			if err != nil {
 				fmt.Printf("  %sFAIL%s %s: body canonicalize error: %v\n",
@@ -2456,13 +3955,63 @@ func main() {
 		fmt.Printf("  %sPASS%s signed-approval-token/%s rejected\n", colorGreen, colorReset, vec.Name)
 	}
 
+	for _, vec := range approvalRequestFx.Accepted {
+		if err := validateApprovalRequestAccepted(vec); err != nil {
+			fmt.Printf("  %sFAIL%s approval-request/%s: expected accept, got %v\n", colorRed, colorReset, vec.Name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s approval-request/%s accepted\n", colorGreen, colorReset, vec.Name)
+	}
+
+	for _, vec := range approvalRequestFx.Rejected {
+		if err := validateApprovalRequestRejected(vec); err != nil {
+			fmt.Printf("  %sFAIL%s approval-request/%s: %v\n", colorRed, colorReset, vec.Name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s approval-request/%s rejected\n", colorGreen, colorReset, vec.Name)
+	}
+
+	for _, vec := range routeEnvelopeFx.Accepted {
+		if err := validateRouteEnvelopeAccepted(vec); err != nil {
+			fmt.Printf("  %sFAIL%s route-envelope/%s: expected accept, got %v\n", colorRed, colorReset, vec.Name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s route-envelope/%s accepted\n", colorGreen, colorReset, vec.Name)
+	}
+
+	for _, vec := range routeEnvelopeFx.Rejected {
+		if err := validateRouteEnvelopeRejected(vec); err != nil {
+			fmt.Printf("  %sFAIL%s route-envelope/%s: %v\n", colorRed, colorReset, vec.Name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("  %sPASS%s route-envelope/%s rejected\n", colorGreen, colorReset, vec.Name)
+	}
+
 	failed += verifyMoatTable(moatFx)
 	failed += verifyNfkcTable(nfkcFx, frozenNfkcTables)
 
 	fmt.Println()
+	totalVectors := len(fx.Vectors) +
+		len(fx.MerkleRootVectors) +
+		len(signedApprovalTokenFx.Accepted) +
+		len(signedApprovalTokenFx.Rejected) +
+		len(approvalRequestFx.Accepted) +
+		len(approvalRequestFx.Rejected) +
+		len(routeEnvelopeFx.Accepted) +
+		len(routeEnvelopeFx.Rejected) +
+		len(runnerFx.Vectors) +
+		len(runnerFx.RejectVectors) +
+		len(agentProviderRoutingFx.Accepted) +
+		len(agentProviderRoutingFx.Rejected) +
+		len(moatFx.ClassificationVectors) +
+		len(nfkcFx.NormalizationVectors)
 	if failed == 0 {
 		fmt.Printf("%s%sAll %d vectors match — wire contract is cross-language portable.%s\n",
-			colorBold, colorGreen, len(fx.Vectors)+len(fx.MerkleRootVectors)+len(signedApprovalTokenFx.Accepted)+len(signedApprovalTokenFx.Rejected)+len(runnerFx.Vectors)+len(runnerFx.RejectVectors)+len(agentProviderRoutingFx.Accepted)+len(agentProviderRoutingFx.Rejected)+len(moatFx.ClassificationVectors)+len(nfkcFx.NormalizationVectors), colorReset)
+			colorBold, colorGreen, totalVectors, colorReset)
 		os.Exit(0)
 	}
 	fmt.Printf("%s%s%d vector(s) failed — TypeScript writer and Go reference disagree.%s\n",

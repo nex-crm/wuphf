@@ -100,6 +100,7 @@ export type {
   AgentSlug,
   ApprovalEvent,
   ApprovalId,
+  ApprovalRequestId,
   ApprovalRole,
   BrokerTokenVerdict,
   CommitRef,
@@ -137,6 +138,7 @@ export type {
 export {
   asAgentSlug,
   asApprovalId,
+  asApprovalRequestId,
   asApprovalRole,
   asIdempotencyKey,
   asProviderKind,
@@ -149,6 +151,7 @@ export {
   asWriteId,
   isAgentSlug,
   isApprovalId,
+  isApprovalRequestId,
   isApprovalRole,
   isIdempotencyKey,
   isProviderKind,

@@ -9,6 +9,7 @@ import { lsnFromV1Number } from "../src/event-lsn.ts";
 import {
   asAgentId,
   asApprovalClaimId,
+  asApprovalRequestId,
   asApprovalTokenId,
   asCredentialHandleId,
   asCredentialScope,
@@ -26,6 +27,8 @@ import {
 } from "../src/index.ts";
 import {
   ALLOWED_LOOPBACK_HOSTS,
+  type ApprovalInvalidationPayload,
+  type ApprovalStreamEvent,
   type ApprovalSubmitResponse,
   apiBootstrapFromJson,
   apiBootstrapToJson,
@@ -59,6 +62,7 @@ import {
   type StreamEventKind,
   type ThreadInvalidationPayload,
   type ThreadStreamEvent,
+  validateApprovalStreamEvent,
   validateApprovalSubmitRequest,
   validateThreadStreamEvent,
   WS_FRAME_TYPE_VALUES,
@@ -1434,6 +1438,52 @@ describe("stream and WebSocket frame runtime guards", () => {
     ).toEqual({
       ok: false,
       errors: [{ path: "/payload/headLsn", message: "parseLsn: malformed v1 LSN: v1:01" }],
+    });
+  });
+
+  it("validates approval stream events as invalidation-only payloads", () => {
+    const payload: ApprovalInvalidationPayload = {
+      requestId: asApprovalRequestId("01HRQ7KZ7D4E6F8G9H0J1K2M3N"),
+      threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+      headLsn: lsnFromV1Number(43),
+    };
+    const event: ApprovalStreamEvent = {
+      id: "evt-approval-requested",
+      kind: "approval.requested",
+      emittedAt: "2026-05-08T18:00:00.000Z",
+      payload,
+    };
+
+    expect(validateApprovalStreamEvent(event)).toEqual({ ok: true });
+    expect(validateApprovalStreamEvent({ ...event, kind: "thread.updated" })).toEqual({
+      ok: false,
+      errors: [{ path: "/kind", message: "must be an approval stream event kind" }],
+    });
+    expect(
+      validateApprovalStreamEvent({
+        ...event,
+        payload: {
+          ...event.payload,
+          claim: "secret",
+        },
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ path: "/payload/claim", message: "is not allowed" }],
+    });
+    expect(
+      validateApprovalStreamEvent({ ...event, payload: { ...payload, threadId: undefined } }),
+    ).toEqual({ ok: true });
+    expect(
+      validateApprovalStreamEvent({
+        ...event,
+        payload: { ...payload, requestId: "not-a-request" },
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [
+        { path: "/payload/requestId", message: "must be an uppercase ULID ApprovalRequestId" },
+      ],
     });
   });
 

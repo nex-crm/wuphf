@@ -128,6 +128,11 @@ export const MAX_APPROVAL_TOKEN_LIFETIME_MS = 30 * 60 * 1000;
 export const MAX_APPROVAL_TOKEN_ID_BYTES = 26;
 
 /**
+ * Approval request ids are ULID-shaped projection handles: 26 ASCII bytes.
+ */
+export const MAX_APPROVAL_REQUEST_ID_BYTES = 26;
+
+/**
  * Claim ids are broker-local replay/accounting handles, not payload storage.
  * 128 bytes matches receipt-local ids while keeping signed claim keys compact.
  */
@@ -374,6 +379,35 @@ export const MAX_RUNNER_STDIO_CHUNK_BYTES = 64 * 1024;
 export const MAX_RUNNER_ERROR_BYTES = 8 * 1024;
 
 // ────────────────────────────────────────────────────────────────────────────
+// Route envelope budgets (consumed by packages/protocol/src/route-envelopes.ts)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Thread list routes are projections, not export endpoints. Keep one response
+ * bounded so callers page broader thread history through broker storage.
+ */
+export const MAX_ROUTE_THREAD_LIST_ITEMS = 256;
+
+/**
+ * Approval list routes are read-model projections, not export endpoints. Keep
+ * them page-bounded so response validation cannot materialize arbitrary broker
+ * history in one envelope.
+ */
+export const MAX_ROUTE_APPROVAL_LIST_ITEMS = 256;
+
+/**
+ * Route error codes are stable machine labels; messages are human diagnostics.
+ */
+export const MAX_ROUTE_ERROR_CODE_BYTES = 128;
+export const MAX_ROUTE_ERROR_MESSAGE_BYTES = 8 * 1024;
+
+/**
+ * Route list cursors are opaque pagination tokens. Keep them compact so list
+ * responses cannot smuggle unbounded transport state.
+ */
+export const MAX_ROUTE_CURSOR_BYTES = 1024;
+
+// ────────────────────────────────────────────────────────────────────────────
 // Credential IPC budgets (consumed by packages/protocol/src/credential-ipc.ts)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -543,6 +577,10 @@ export function validateApprovalTokenIdBudget(value: string): BudgetValidationRe
   return validateUtf8StringBudget(value, MAX_APPROVAL_TOKEN_ID_BYTES, "ApprovalTokenId bytes");
 }
 
+export function validateApprovalRequestIdBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_REQUEST_ID_BYTES, "ApprovalRequestId bytes");
+}
+
 export function validateApprovalClaimIdBudget(value: string): BudgetValidationResult {
   return validateUtf8StringBudget(value, MAX_APPROVAL_CLAIM_ID_BYTES, "ApprovalClaimId bytes");
 }
@@ -606,6 +644,22 @@ export function validateWebAuthnAssertionBudget(canonicalJson: string): BudgetVa
     canonicalJson,
     MAX_WEBAUTHN_ASSERTION_BYTES,
     "WebAuthnAssertion canonical JSON bytes",
+  );
+}
+
+export function validateRouteErrorCodeBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_ROUTE_ERROR_CODE_BYTES, "RouteError.error bytes");
+}
+
+export function validateRouteErrorMessageBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_ROUTE_ERROR_MESSAGE_BYTES, "RouteError.message bytes");
+}
+
+export function validateRouteCursorBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    value,
+    MAX_ROUTE_CURSOR_BYTES,
+    "RouteListResponse.nextCursor bytes",
   );
 }
 

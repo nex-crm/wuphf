@@ -135,6 +135,15 @@ export class ReceiptStoreUnavailableError extends Error {
 }
 
 /**
+ * Error thrown when a V2 receipt names a thread that does not exist in the
+ * durable thread projection at the time of the write. Routes catch this as a
+ * client error; out-of-thread V2 receipts with no `threadId` remain valid.
+ */
+export class ReceiptThreadNotFoundError extends Error {
+  override readonly name = "ReceiptThreadNotFoundError";
+}
+
+/**
  * Error thrown by `list()` when `filter.cursor` is structurally invalid
  * (malformed base64url or doesn't decode to the expected `lsn:<n>` shape).
  * The HTTP route catches and responds 400. Intentionally carries NO

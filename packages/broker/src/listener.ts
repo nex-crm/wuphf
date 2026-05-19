@@ -7,7 +7,14 @@
 //   POST /api/receipts                    — bearer required. Body: receipt JSON.
 //                                           201 on insert, 409 on id collision.
 //   GET  /api/receipts/:id                — bearer required. 200 on hit, 404 on miss.
-//   GET  /api/threads/:tid/receipts       — bearer required. List receipts in a thread.
+//   GET  /api/v1/threads/:tid/receipts    — bearer required. List receipts in a thread.
+//   GET  /api/threads/:tid/receipts       — bearer required. One-release alias.
+//   GET  /api/v1/threads                  — bearer required. List folded threads.
+//   GET  /api/v1/threads/:id              — bearer required. Read one folded thread.
+//   GET  /api/v1/threads/:id/pinned-approvals — bearer required. Read pending approvals.
+//   POST /api/v1/threads                  — bearer required. Create thread.
+//   PATCH /api/v1/threads/:id/spec        — bearer required. Append spec revision.
+//   PATCH /api/v1/threads/:id/status      — bearer required. Append status transition.
 //   GET  /api/v1/cost/summary             — bearer required. Current cost projection.
 //   GET  /api/v1/cost/budgets             — bearer required. List budgets.
 //   GET  /api/v1/cost/budgets/:id         — bearer required. Fetch one budget.
@@ -16,6 +23,10 @@
 //   POST /api/v1/cost/budgets             — bearer + operator capability required.
 //   DELETE /api/v1/cost/budgets/:id       — bearer + operator capability required.
 //   POST /api/v1/cost/idempotency/prune   — bearer + operator capability required.
+//   POST /api/v1/approvals                — bearer required. Append approval.requested.
+//   GET  /api/v1/approvals                — bearer required. List folded approvals.
+//   GET  /api/v1/approvals/:id            — bearer required. Fetch one folded approval.
+//   POST /api/v1/approvals/:id/decision   — bearer required. Append approval.decided.
 //   GET  /api/agents/:id/provider-routing — bearer required. Per-agent provider routes.
 //   PUT  /api/agents/:id/provider-routing — bearer required. Replace provider routes.
 //   POST /api/webauthn/registration/challenge — bearer + agent map required.
@@ -54,6 +65,8 @@ import { WebSocketServer } from "ws";
 
 import { handleAgentProviderRoutingRoute } from "./agent-provider-routing/route.ts";
 import type { AgentProviderRoutingStore } from "./agent-provider-routing/types.ts";
+import { DEFAULT_APPROVAL_IDEMPOTENCY_TTL_MS } from "./approvals/idempotency.ts";
+import { type ApprovalRouteDeps, handleApprovalRoute } from "./approvals/routes.ts";
 import { extractBearerFromHeader, tokenMatches } from "./auth.ts";
 import { DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS } from "./cost-ledger/idempotency.ts";
 import { type CostRouteDeps, handleCostRoute } from "./cost-ledger/routes.ts";
@@ -62,8 +75,9 @@ import { InMemoryReceiptStore, type ReceiptStore } from "./receipt-store.ts";
 import { handleReceiptCreate, handleReceiptGet, handleThreadReceiptsList } from "./receipts.ts";
 import { createRunnerRouteState, type RunnerRouteState } from "./runners/route.ts";
 import { createStaticHandler, type StaticHandler } from "./serve-static.ts";
-import { startSseSession } from "./sse.ts";
+import { createSseHub, type SseHub } from "./sse.ts";
 import { attachTerminalUpgrade } from "./terminal-ws.ts";
+import { handleThreadRoute, type ThreadRouteDeps } from "./threads/routes.ts";
 import { generateApiToken } from "./token.ts";
 import { type BrokerConfig, type BrokerHandle, type BrokerLogger, NOOP_LOGGER } from "./types.ts";
 import { createSimpleWebAuthnCeremony } from "./webauthn/ceremony.ts";
@@ -92,11 +106,27 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   const token: ApiToken = config.token ?? generateApiToken();
   const clock = config.clock ?? SYSTEM_CLOCK;
   const staticHandler = createStaticHandler(config.renderer ?? null);
+  const sseHub = createSseHub();
   const trustedOrigins = normalizeTrustedOrigins(config.trustedOrigins);
-  // Default to an in-memory store when the host doesn't supply one. Branch
-  // 6 hosts will pass a durable event-log-backed store; this default keeps
-  // the package self-contained for tests and dev runs.
-  const receiptStore: ReceiptStore = config.receiptStore ?? new InMemoryReceiptStore();
+  if (
+    config.threads !== undefined &&
+    config.receiptStore !== undefined &&
+    config.receiptStore !== config.threads.receiptStore
+  ) {
+    throw new Error("createBroker: receiptStore must match threads.receiptStore");
+  }
+  if (
+    config.threads !== undefined &&
+    config.approvals !== undefined &&
+    !config.threads.sharesApprovalProvenance(config.approvals.appender, config.approvals.projection)
+  ) {
+    throw new Error("createBroker: approvals must share threads storage provenance");
+  }
+  // Default to an in-memory store when the host doesn't supply one. Thread
+  // routes carry their own cohesive store handle so receipt indexing cannot
+  // be wired to a different database from the thread projection.
+  const receiptStore: ReceiptStore =
+    config.threads?.receiptStore ?? config.receiptStore ?? new InMemoryReceiptStore();
   const agentProviderRoutingStore = config.runners?.agentProviderRoutingStore ?? null;
   // Reuse the same bearer→agent binding map that runner spawn uses so a
   // bearer pinned to agent_alpha cannot read or PUT agent_beta's routing.
@@ -189,6 +219,21 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
           logger,
           nowMs: () => Date.now(),
         } satisfies CostRouteDeps);
+  const approvals =
+    config.approvals === undefined
+      ? null
+      : ({
+          appender: config.approvals.appender,
+          projection: config.approvals.projection,
+          tokenAgentIds: config.approvals.tokenAgentIds ?? tokenAgentIds,
+          defaultThreadId: config.threads?.inboxThreadId ?? null,
+          logger,
+          nowMs: () => readBrokerClock(clock),
+          emit: (event) => {
+            sseHub.emit({ id: event.id, event: event.kind, data: event });
+          },
+          emitThreadEvent: (event) => sseHub.emitThreadEvent(event),
+        } satisfies ApprovalRouteDeps);
   if (config.cost !== undefined && config.cost.operatorToken === undefined) {
     // TODO(security): require operatorToken once every host has a separate
     // operator capability minting path.
@@ -198,6 +243,21 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   }
   if (cost !== null) {
     pruneCostIdempotencyOnStartup(cost, logger);
+  }
+  const threads =
+    config.threads === undefined
+      ? null
+      : ({
+          appender: config.threads.appender,
+          state: config.threads.state,
+          receiptIndex: config.threads.receiptIndex,
+          approvals: config.approvals?.projection ?? null,
+          logger,
+          nowMs: () => readBrokerClock(clock),
+          emitThreadEvent: (event) => sseHub.emitThreadEvent(event),
+        } satisfies ThreadRouteDeps);
+  if (approvals !== null) {
+    pruneApprovalIdempotencyOnStartup(approvals, logger);
   }
   if (webauthn !== null) {
     await pruneWebAuthnOnStartup(webauthn, logger);
@@ -215,10 +275,13 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
     routeRequest(req, res, {
       token,
       staticHandler,
+      sseHub,
       logger,
       trustedOrigins,
       receiptStore,
       cost,
+      threads,
+      approvals,
       runnerRoutes,
       agentProviderRoutingStore,
       tokenAgentIds,
@@ -257,7 +320,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
     // listeners and `wss.close` only run once; subsequent callers wait on
     // the same promise.
     if (stopInflight === null) {
-      stopInflight = doStop(server, wss, logger, runnerRoutes);
+      stopInflight = doStop(server, wss, logger, runnerRoutes, sseHub);
     }
     return stopInflight;
   };
@@ -273,10 +336,13 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
 interface RouteDeps {
   readonly token: ApiToken;
   readonly staticHandler: StaticHandler;
+  readonly sseHub: SseHub;
   readonly logger: BrokerLogger;
   readonly trustedOrigins: ReadonlySet<string>;
   readonly receiptStore: ReceiptStore;
   readonly cost: CostRouteDeps | null;
+  readonly threads: ThreadRouteDeps | null;
+  readonly approvals: ApprovalRouteDeps | null;
   readonly runnerRoutes: RunnerRouteState | null;
   readonly agentProviderRoutingStore: AgentProviderRoutingStore | null;
   readonly tokenAgentIds: ReadonlyMap<ApiToken, AgentId> | null;
@@ -373,7 +439,7 @@ async function routeRequest(
       res.end();
       return;
     }
-    handleEvents(res);
+    handleEvents(res, deps.sseHub);
     return;
   }
   // POST /api/receipts is the create endpoint; GET /api/receipts/:id is the
@@ -398,7 +464,10 @@ async function routeRequest(
     });
     return;
   }
-  if (pathname.startsWith("/api/threads/") && pathname.endsWith("/receipts")) {
+  if (
+    (pathname.startsWith("/api/v1/threads/") || pathname.startsWith("/api/threads/")) &&
+    pathname.endsWith("/receipts")
+  ) {
     if (req.method !== "GET" && req.method !== "HEAD") {
       methodNotAllowed(res);
       return;
@@ -415,6 +484,20 @@ async function routeRequest(
   // falls through to the 404 catch-all below.
   if (deps.cost !== null && pathname.startsWith("/api/v1/cost/")) {
     const handled = await handleCostRoute(req, res, pathname, deps.cost);
+    if (handled) return;
+  }
+  if (
+    deps.threads !== null &&
+    (pathname === "/api/v1/threads" || pathname.startsWith("/api/v1/threads/"))
+  ) {
+    const handled = await handleThreadRoute(req, res, pathname, deps.threads);
+    if (handled) return;
+  }
+  if (
+    deps.approvals !== null &&
+    (pathname === "/api/v1/approvals" || pathname.startsWith("/api/v1/approvals/"))
+  ) {
+    const handled = await handleApprovalRoute(req, res, pathname, deps.approvals);
     if (handled) return;
   }
   if (deps.agentProviderRoutingStore !== null && deps.tokenAgentIds !== null) {
@@ -549,8 +632,8 @@ function handleHealth(res: ServerResponse): void {
   res.end(body);
 }
 
-function handleEvents(res: ServerResponse): void {
-  startSseSession(res);
+function handleEvents(res: ServerResponse, sseHub: SseHub): void {
+  sseHub.startSession(res);
 }
 
 function authorize(
@@ -589,6 +672,30 @@ function pruneCostIdempotencyOnStartup(cost: CostRouteDeps, logger: BrokerLogger
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+function pruneApprovalIdempotencyOnStartup(
+  approvals: Pick<ApprovalRouteDeps, "appender" | "nowMs">,
+  logger: BrokerLogger,
+): void {
+  try {
+    const olderThanMs = DEFAULT_APPROVAL_IDEMPOTENCY_TTL_MS;
+    const cutoffMs = approvals.nowMs() - olderThanMs;
+    const pruned = approvals.appender.pruneIdempotencyOlderThan(cutoffMs);
+    logger.info("approval_idempotency_pruned", { pruned, olderThanMs, cutoffMs });
+  } catch (err) {
+    logger.warn("approval_idempotency_prune_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function readBrokerClock(clock: Clock): number {
+  const nowMs = clock.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+    throw new Error(`createBroker: clock returned invalid timestamp: ${nowMs}`);
+  }
+  return nowMs;
 }
 
 async function pruneWebAuthnOnStartup(
@@ -635,10 +742,17 @@ function classifyApiRoute(pathname: string): string {
   if (pathname === "/api/events") return "events";
   if (pathname === "/api/receipts") return "receipts";
   if (pathname.startsWith("/api/receipts/")) return "receipt";
-  if (pathname.startsWith("/api/threads/") && pathname.endsWith("/receipts")) {
+  if (
+    (pathname.startsWith("/api/v1/threads/") || pathname.startsWith("/api/threads/")) &&
+    pathname.endsWith("/receipts")
+  ) {
     return "thread_receipts";
   }
   if (pathname.startsWith("/api/v1/cost/")) return "cost";
+  if (pathname === "/api/v1/threads" || pathname.startsWith("/api/v1/threads/")) return "threads";
+  if (pathname === "/api/v1/approvals" || pathname.startsWith("/api/v1/approvals/")) {
+    return "approvals";
+  }
   if (pathname.startsWith("/api/agents/") && pathname.endsWith("/provider-routing")) {
     return "agent_provider_routing";
   }
@@ -844,8 +958,10 @@ async function doStop(
   wss: WebSocketServer,
   logger: BrokerLogger,
   runnerRoutes: RunnerRouteState | null,
+  sseHub: SseHub,
 ): Promise<void> {
   await runnerRoutes?.stop();
+  sseHub.closeAll();
   if (!server.listening) {
     logger.info("listener_stop_noop");
     return;

@@ -23,7 +23,7 @@ packages/broker/
 │   │   └── 001_initial.sql                   # schema
 │   ├── sqlite-receipt-store.ts               # public via `@wuphf/broker/sqlite` subpath
 │   ├── receipt-store.ts                      # ReceiptStore interface + InMemory impl + cursor helpers
-│   ├── receipts.ts                           # cursor handling on /api/threads/:tid/receipts
+│   ├── receipts.ts                           # cursor handling on /api/v1/threads/:tid/receipts
 │   ├── listener.ts                           # routes
 │   └── index.ts                              # `@wuphf/broker` root surface (does NOT re-export SqliteReceiptStore)
 ├── tests/
@@ -244,7 +244,7 @@ list(filter?: ListFilter): Promise<ListPage>;
 
 **Ordering**: LSN ascending. For the in-memory store, LSN is replaced by insertion order (1-indexed). Same wire shape.
 
-## HTTP wire change — `GET /api/threads/:tid/receipts`
+## HTTP wire change — `GET /api/v1/threads/:tid/receipts`
 
 ### Query parameters
 
@@ -261,7 +261,7 @@ The default-limit choice: the store's `DEFAULT_LIST_LIMIT = 100` only applies to
 - **`Link` header added** when more pages exist:
 
   ```http
-  Link: </api/threads/<tid>/receipts?cursor=<base64url>&limit=<n>>; rel="next"
+  Link: </api/v1/threads/<tid>/receipts?cursor=<base64url>&limit=<n>>; rel="next"
   ```
 
   No `Link` header on the last page. Clients that ignore the header degrade to "first page only" behavior — no breakage.

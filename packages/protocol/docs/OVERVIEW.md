@@ -36,11 +36,14 @@ flowchart LR
     shared[ipc-shared]
     rvalidator[receipt-validator]
     receipt[receipt]
+    signed[signed-approval-token]
+    approval[approval-request]
     audit[audit-event]
     thread[thread]
   end
   subgraph T["top-level envelopes"]
     ipc[ipc]
+    route[route-envelopes]
     index[index]
   end
   sha256 --> brand
@@ -69,6 +72,14 @@ flowchart LR
   receipt --> rvalidator
   receipt --> sanitized
   receipt --> sha256
+  signed --> budgets
+  signed --> jcs
+  signed --> receipt
+  signed --> utils
+  approval --> jcs
+  approval --> receipt
+  approval --> signed
+  approval --> utils
   thread --> budgets
   thread --> jcs
   thread --> receipt
@@ -76,6 +87,7 @@ flowchart LR
   thread --> sha256
   audit --> budgets
   audit --> jcs
+  audit --> approval
   audit --> lsn
   audit --> receipt
   audit --> thread
@@ -88,20 +100,33 @@ flowchart LR
   ipc --> literals
   ipc --> utils
   ipc --> sha256
+  route --> approval
+  route --> budgets
+  route --> jcs
+  route --> lsn
+  route --> receipt
+  route --> signed
+  route --> thread
+  route --> utils
   index --> audit
   index --> budgets
   index --> jcs
   index --> frozen
   index --> ipc
+  index --> route
   index --> receipt
   index --> sanitized
+  index --> approval
+  index --> signed
   index --> thread
 ```
 
 Detailed docs: [moat primitives](modules/moat-primitives.md),
 [budgets](modules/budgets.md), [receipt](modules/receipt.md),
+[approval request](modules/approval-request.md),
 [audit-event](modules/audit-event.md), [ipc](modules/ipc.md), and
-[thread](modules/thread.md).
+[thread](modules/thread.md). Route HTTP body codecs are documented in
+[route-envelopes](modules/route-envelopes.md).
 
 ## 3. The moat composition
 
@@ -174,6 +199,14 @@ sequenceDiagram
   `ThreadExternalRefs`; spec content hashes are re-derived as
   `sha256(canonical(content))`; status folds use audit order, not wall-clock
   time.
+- ApprovalRequest JSON shape: snake_case codecs for pending/decided approval
+  projections; claim/scope/token values compose `SignedApprovalToken`
+  primitives, and status/decision coupling is re-derived at decode.
+- Route envelopes: versioned camelCase HTTP request/response bodies for
+  `/api/v1/threads` and `/api/v1/approvals`, wrapping existing `Thread`,
+  `ApprovalRequest`, and command primitives. Serializers emit protocol-owned
+  JSON including OCC mutation metadata `{ threadId, headLsn, revisionId,
+  contentHash }`; decoders reject unknown keys and over-budget route strings.
 - Approval token signed envelope: `SignedApprovalToken` binds a discriminated
   `claim`, role-bearing `scope`, caller-supplied epoch-ms validity window,
   `issuedTo`, and structured WebAuthn `signature`. Changing claim keys, scope
@@ -251,6 +284,10 @@ graph TB
 - Thread protocol shape: add brands, budgets, snake_case codecs, validators,
   receipt V1/V2 coverage, thread audit-event vectors, stream invalidation
   kinds, demo scenarios, and module docs in one slice.
+- Approval request protocol shape: add the `ApprovalRequestId` brand,
+  snake_case artifact codec, full-content `approval_requested` /
+  `approval_decided` audit payloads, invalidation-only stream kinds, demo
+  scenarios, testdata vectors, Go verifier coverage, and module docs together.
 - `ProviderKind`: add one tuple value, keep the brand closed, update exhaustive
   switches, validator/codec tests, and docs.
 - IPC envelope: add type, codec/validator, unknown-key tuple, demo case,

@@ -52,6 +52,20 @@ vectors cover unknown keys, missing scope role, claim/scope mismatch, lifetime
 cap enforcement, malformed assertion bytes, and moat sanitization of Unicode
 15.1 `Default_Ignorable_Code_Point` ranges.
 
+## Route Envelope Vectors
+
+`route-envelope-vectors.json` pins the protocol-owned HTTP body codecs for
+`/api/v1/threads`, `/api/v1/approvals`, and shared route errors. Accepted
+vectors must parse with strict known-key rejection, reuse nested `Thread`,
+`ApprovalRequest`, `ApprovalClaim`, `ApprovalScope`, and
+`SignedApprovalToken` codecs, and serialize to the listed canonical JSON bytes.
+Thread list/get vectors use `ThreadView` fields for effective status, board
+column, current seat, and pending approval count; pinned approval vectors use
+token-redacted `ApprovalView[]`.
+Rejected vectors cover unknown top-level route keys, unsupported future
+`schemaVersion`, approval decisions that approve without a token, and route
+error message budget overflow.
+
 ## Audit Event Golden Vectors
 
 `audit-event-vectors.json` is the cross-language fixture for WUPHF audit-chain
@@ -70,6 +84,8 @@ To regenerate after an intentional wire-contract change, update the vector
 values and run `bunx vitest run tests/audit-event.spec.ts` from
 `packages/protocol/`. The test file at `../tests/audit-event.spec.ts` reads
 this fixture and verifies the package serializer and hash function against it.
+The fixture includes typed canonical body bytes for thread, cost, and approval
+audit payload families, including `approval_requested` and `approval_decided`.
 
 ## Moat Disallowed Code-Point Table
 
@@ -158,14 +174,15 @@ This is a deliberate, infrequent chore. In one PR:
 ## Cross-language verification
 
 `verifier-reference.go` is a stdlib-only Go reference implementation of the
-audit-chain, runner, agent-provider-routing, signed-approval-token, moat-table,
-and frozen-NFKC wire contracts. It loads `audit-event-vectors.json`,
-`runner-vectors.json`, `agent-provider-routing-vectors.json`,
-`signed-approval-token-vectors.json`, `moat-disallowed-table.json`, and
-`nfkc-table.json`, recomputes each canonical serialization and eventHash,
-binary-searches the moat ranges, re-normalizes with the frozen NFKC tables, and
-verifies accept/reject, classification, and normalization behavior against the
-bundled vectors. Run it from this directory:
+audit-chain, runner, agent-provider-routing, signed-approval-token,
+approval-request, route-envelope, moat-table, and frozen-NFKC wire contracts. It
+loads `audit-event-vectors.json`, `runner-vectors.json`,
+`agent-provider-routing-vectors.json`, `signed-approval-token-vectors.json`,
+`approval-request-vectors.json`, `route-envelope-vectors.json`,
+`moat-disallowed-table.json`, and `nfkc-table.json`, recomputes each canonical
+serialization and eventHash, binary-searches the moat ranges, re-normalizes with
+the frozen NFKC tables, and verifies accept/reject, classification, and
+normalization behavior against the bundled vectors. Run it from this directory:
 
 ```bash
 cd packages/protocol/testdata

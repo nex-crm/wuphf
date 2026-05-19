@@ -8,8 +8,10 @@ import {
   SanitizedString,
   sha256Hex,
 } from "@wuphf/protocol";
+import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-
+import { openDatabase, runMigrations } from "../src/event-log/index.ts";
+import { constructSqliteReceiptStoreForTesting } from "../src/internal/sqlite-receipt-store-testing.ts";
 import {
   encodeListCursor,
   InMemoryReceiptStore,
@@ -82,9 +84,15 @@ function hasClose(store: ReceiptStore): store is ReceiptStore & { readonly close
   return typeof candidate.close === "function";
 }
 
-function runReceiptStoreContractTests(factory: () => Promise<ReceiptStore>): void {
+interface StoreFactoryOptions {
+  readonly seedThreads?: boolean;
+}
+
+function runReceiptStoreContractTests(
+  factory: (options?: StoreFactoryOptions) => Promise<ReceiptStore>,
+): void {
   it("put + get round-trips a receipt", async () => {
-    const store = await factory();
+    const store = await factory({ seedThreads: true });
     try {
       const receipt = minimalReceiptV1(receiptIdAt(1));
 
@@ -96,7 +104,7 @@ function runReceiptStoreContractTests(factory: () => Promise<ReceiptStore>): voi
   });
 
   it("duplicate put returns existed:true and does not overwrite", async () => {
-    const store = await factory();
+    const store = await factory({ seedThreads: true });
     try {
       const first = minimalReceiptV1(receiptIdAt(1));
       const second = { ...first, model: "different" };
@@ -175,7 +183,7 @@ function runReceiptStoreContractTests(factory: () => Promise<ReceiptStore>): voi
   });
 
   it("threadId filter returns only that thread in LSN order", async () => {
-    const store = await factory();
+    const store = await factory({ seedThreads: true });
     try {
       const a1 = minimalReceiptV2(receiptIdAt(1), THREAD_A);
       const b1 = minimalReceiptV2(receiptIdAt(2), THREAD_B);
@@ -194,7 +202,7 @@ function runReceiptStoreContractTests(factory: () => Promise<ReceiptStore>): voi
   });
 
   it("threadId filter excludes V1 receipts", async () => {
-    const store = await factory();
+    const store = await factory({ seedThreads: true });
     try {
       const v1 = minimalReceiptV1(receiptIdAt(1));
       const v2 = minimalReceiptV2(receiptIdAt(2), THREAD_A);
@@ -227,12 +235,38 @@ function runReceiptStoreContractTests(factory: () => Promise<ReceiptStore>): voi
   });
 }
 
+function sqliteReceiptStoreFactory(options: StoreFactoryOptions = {}): ReceiptStore {
+  if (options.seedThreads !== true) {
+    return SqliteReceiptStore.open({ path: ":memory:" });
+  }
+  const db = openDatabase({ path: ":memory:" });
+  runMigrations(db);
+  seedThreadRows(db, THREAD_A, THREAD_B);
+  return constructSqliteReceiptStoreForTesting(db);
+}
+
+function seedThreadRows(db: Database.Database, ...threadIds: readonly string[]): void {
+  const appendEvent = db.prepare<[Buffer], { readonly lsn: number }>(
+    "INSERT INTO event_log (ts_ms, type, payload) VALUES (0, 'thread.created', ?) RETURNING lsn",
+  );
+  const insertThread = db.prepare<[string, number, string]>(
+    `INSERT INTO threads
+       (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms, external_refs)
+     VALUES (?, 'receipt store parity thread', 'open', ?, 'broker', 0, 0, ?)`,
+  );
+  for (const threadId of threadIds) {
+    const row = appendEvent.get(Buffer.from(`{"threadId":"${threadId}"}`, "utf8"));
+    if (row === undefined) throw new Error("seed thread event insert returned no row");
+    insertThread.run(threadId, row.lsn, '{"source_urls":[],"entity_ids":[]}');
+  }
+}
+
 describe("ReceiptStore parity", () => {
   describe("InMemoryReceiptStore", () => {
     runReceiptStoreContractTests(async () => new InMemoryReceiptStore());
   });
 
   describe("SqliteReceiptStore", () => {
-    runReceiptStoreContractTests(async () => SqliteReceiptStore.open({ path: ":memory:" }));
+    runReceiptStoreContractTests(async (options) => sqliteReceiptStoreFactory(options));
   });
 });

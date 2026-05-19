@@ -100,7 +100,7 @@ check_no_process_env_in_src() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────
-# Check 4 — Demo MUST import only from `../src/index.ts`.
+# Check 4 — Demo MUST import only from `../src/index.ts` / `../../src/index.ts`.
 #
 # Lesson 12 (lessons-learned): demo importing from `src/<sub>.ts` is a
 # fake gate — it lets the demo claim coverage that index.ts doesn't
@@ -108,15 +108,15 @@ check_no_process_env_in_src() {
 # ─────────────────────────────────────────────────────────────────────────
 check_demo_imports_index_only() {
   local violators
-  violators=$(grep -nE 'from "\.\./src/' scripts/demo.ts 2>/dev/null \
-    | grep -vE '"\.\./src/index\.ts"' \
+  violators=$(grep -rnE --include='*.ts' 'from ['\''"]\.\./(\.\./)?src/' scripts/demo.ts scripts/demo/ 2>/dev/null \
+    | grep -vE 'from ['\''"]\.\./(\.\./)?src/index\.ts['\''"]' \
     || true)
   if [ -n "$violators" ]; then
-    fail "scripts/demo.ts imports from non-index source files:"
+    fail "scripts/demo.ts or scripts/demo/*.ts imports from non-index source files:"
     printf '    %s\n' "$violators" >&2
     return 1
   fi
-  pass "demo imports only from ../src/index.ts"
+  pass "demo imports only from ../src/index.ts or ../../src/index.ts"
 }
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ check_index_value_exports_have_coverage() {
   local missing=()
   while IFS= read -r symbol; do
     [ -z "$symbol" ] && continue
-    if ! grep -rqE "\b${symbol}\b" tests/ scripts/demo.ts 2>/dev/null; then
+    if ! grep -rqE "\b${symbol}\b" tests/ scripts/demo.ts scripts/demo/ 2>/dev/null; then
       missing+=("$symbol")
     fi
   done < <(awk '
@@ -155,7 +155,7 @@ check_index_value_exports_have_coverage() {
     }
   ' src/index.ts | sort -u)
   if [ "${#missing[@]}" -gt 0 ]; then
-    fail "value exports from src/index.ts with no reference in tests/ or scripts/demo.ts (${#missing[@]}):"
+    fail "value exports from src/index.ts with no reference in tests/, scripts/demo.ts, or scripts/demo/ (${#missing[@]}):"
     printf '    %s\n' "${missing[@]}" >&2
     return 1
   fi

@@ -2,9 +2,11 @@
 
 import type { AgentId, ApiToken, BrokerPort } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
+import type { ApprovalAppender, ApprovalProjection } from "./approvals/index.ts";
 import type { CostLedger } from "./cost-ledger/index.ts";
 import type { ReceiptStore } from "./receipt-store.ts";
 import type { RunnerRouteConfig } from "./runners/route.ts";
+import type { ThreadSubsystem } from "./threads/index.ts";
 import type { Clock, WebAuthnPolicyConfig, WebAuthnStore } from "./webauthn/types.ts";
 
 export interface BrokerLogger {
@@ -108,6 +110,30 @@ export interface BrokerConfig {
      * routes. Read routes continue to use the broker bearer only.
      */
     readonly operatorToken?: ApiToken;
+  };
+  /**
+   * Optional thread foundation routes. When supplied, `/api/v1/threads*`
+   * routes are mounted. Hosts construct the cohesive handle via
+   * `createThreadSubsystem(db, eventLog, receiptStore)` so command appends,
+   * projection reads, replay, and receipt indexing share one SQLite
+   * provenance.
+   */
+  readonly threads?: ThreadSubsystem;
+  /**
+   * Optional explicit approvals feature. When supplied,
+   * `/api/v1/approvals` routes are mounted. Hosts construct these deps via
+   * `createApprovalSubsystem(db, eventLog)`.
+   * Decisions are attributed to the bearer-bound agent in `tokenAgentIds`;
+   * when omitted, the listener falls back to the runner bearer map if one
+   * is configured.
+   *
+   * The broker does NOT own the database — closing the broker does not
+   * close `db`. Host owns lifecycle.
+   */
+  readonly approvals?: {
+    readonly appender: ApprovalAppender;
+    readonly projection: ApprovalProjection;
+    readonly tokenAgentIds?: ReadonlyMap<ApiToken, AgentId>;
   };
   /**
    * Optional agent runner routes. When supplied, POST /api/runners and

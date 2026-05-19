@@ -25,6 +25,7 @@ Constants:
 | `MAX_AUDIT_CHAIN_BATCH_SIZE` | `src/budgets.ts:41` | 10,000 records per verifier step. 10x forces huge materialized batches; 0.1x adds avoidable I/O overhead. Failure rejects the batch before record serialization. |
 | `MAX_AUDIT_EVENT_BODY_BYTES` | `src/budgets.ts:48` | 1 MiB opaque body. 10x expands base64/JCS/hash memory; 0.1x rejects large receipt/tool payloads. Failure stops event serialization. |
 | `MAX_APPROVAL_TOKEN_LIFETIME_MS` | `src/budgets.ts:55` | 30 minutes, policy cap. 10x leaves bearer capabilities stale; 0.1x is too short for human review. Failure rejects token claims. |
+| `MAX_APPROVAL_REQUEST_ID_BYTES` | `src/budgets.ts` | 26-byte ULID request id cap. Failure stops approval request decoding before brand construction. |
 | `MAX_RECEIPT_FILES_CHANGED` | `src/budgets.ts:62` | 10,000 file paths. 10x lets generated trees dominate receipts; 0.1x rejects large refactors. Failure stops receipt validation. |
 | `MAX_RECEIPT_COMMITS` | `src/budgets.ts:69` | 1,024 commits. 10x turns one receipt into a commit log; 0.1x rejects long rebases. Failure stops receipt validation. |
 | `MAX_RECEIPT_WRITES` | `src/budgets.ts:76` | 256 external writes. 10x creates a runaway side-effect ledger; 0.1x blocks bulk operations. Failure stops receipt validation. |
@@ -42,6 +43,7 @@ Functions:
 | `validateFrozenArgsBudget` | `src/budgets.ts:156` | Checks `FrozenArgs.canonicalJson` bytes without re-canonicalizing. |
 | `validateSanitizedStringBudget` | `src/budgets.ts:164` | Checks sanitized UTF-8 bytes without re-sanitizing. |
 | `validateAuditEventBodyBudget` | `src/budgets.ts:172` | Checks raw `Uint8Array.byteLength` before base64/JCS serialization. |
+| `validateApprovalRequestIdBudget` | `src/budgets.ts` | Checks `ApprovalRequestId` bytes before ULID branding. |
 | `validateApprovalTokenLifetime` | `src/budgets.ts:181` | Enforces the 30-minute token lifetime policy. |
 
 ## 3. Behavior contract
