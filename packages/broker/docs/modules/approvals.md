@@ -27,7 +27,8 @@ accepted only while the folded approval is `pending`; a second decision returns
 
 Migration `006_approvals.sql` creates `pending_approvals`, a disposable folded
 state table keyed by `approval_id`. The row stores canonical JSON for `claim`,
-`scope`, and any supplied `SignedApprovalToken`, plus `head_lsn`,
+`scope`, any supplied `SignedApprovalToken`, and the approve token's `token_id`,
+plus `head_lsn`,
 requester/decider identities, timestamps, and optional `thread_id`, `task_id`,
 and `receipt_id`.
 

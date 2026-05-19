@@ -85,6 +85,7 @@ interface ApprovalDbRow {
   readonly decidedAtMs: number | null;
   readonly decision: string | null;
   readonly token: string | null;
+  readonly tokenId: string | null;
 }
 
 interface ApprovalEventDbRow {
@@ -145,6 +146,7 @@ type DecisionUpdateParams = [
   number,
   ApprovalDecision,
   string | null,
+  string | null,
   string,
 ];
 
@@ -155,8 +157,8 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
   const upsertRequestedStmt = db.prepare<RequestUpsertParams>(
     `INSERT INTO pending_approvals
        (approval_id, status, head_lsn, claim, scope, risk_class, thread_id, task_id, receipt_id,
-        requested_by, requested_at_ms, decided_by, decided_at_ms, decision, token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
+        requested_by, requested_at_ms, decided_by, decided_at_ms, decision, token, token_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)
      ON CONFLICT (approval_id) DO UPDATE SET
        status = excluded.status,
        head_lsn = excluded.head_lsn,
@@ -171,11 +173,13 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
        decided_by = NULL,
        decided_at_ms = NULL,
        decision = NULL,
-       token = NULL`,
+       token = NULL,
+       token_id = NULL`,
   );
   const updateDecidedStmt = db.prepare<DecisionUpdateParams>(
     `UPDATE pending_approvals
-     SET status = ?, head_lsn = ?, decided_by = ?, decided_at_ms = ?, decision = ?, token = ?
+     SET status = ?, head_lsn = ?, decided_by = ?, decided_at_ms = ?, decision = ?, token = ?,
+         token_id = ?
      WHERE approval_id = ?`,
   );
   const clearStmt = db.prepare<[]>("DELETE FROM pending_approvals");
@@ -211,6 +215,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
     lsn: number,
   ): FoldedApprovalRow | null => {
     const tokenJson = tokenColumn(payload);
+    const tokenId = approvalTokenIdColumn(payload);
     updateDecidedStmt.run(
       statusForDecision(payload.decision),
       lsn,
@@ -218,6 +223,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       dateToMs(payload.decidedAt, "approval.decidedAt"),
       payload.decision,
       tokenJson,
+      tokenId,
       payload.requestId,
     );
     const row = selectByIdStmt.get(payload.requestId);
@@ -400,7 +406,7 @@ function approvalSelectSql(where: string): string {
                  task_id AS taskId, receipt_id AS receiptId,
                  requested_by AS requestedBy, requested_at_ms AS requestedAtMs,
                  decided_by AS decidedBy, decided_at_ms AS decidedAtMs,
-                 decision, token
+                 decision, token, token_id AS tokenId
           FROM pending_approvals ${where}`;
 }
 
@@ -441,6 +447,11 @@ function tokenColumn(payload: ApprovalDecidedAuditPayload): string | null {
   const suppliedWireApprovalToken = wire.token;
   if (suppliedWireApprovalToken === undefined) return null;
   return canonicalJSON(suppliedWireApprovalToken);
+}
+
+function approvalTokenIdColumn(payload: ApprovalDecidedAuditPayload): string | null {
+  const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
+  return suppliedApprovalToken?.tokenId ?? null;
 }
 
 function rowToFolded(row: ApprovalDbRow): FoldedApprovalRow {

@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import {
   ApprovalIdempotencyConflictError,
   ApprovalRequestAlreadyDecidedError,
+  ApprovalTokenAlreadyUsedError,
   createApprovalAppender,
   createApprovalProjection,
   parseApprovalIdempotencyKey,
@@ -157,13 +158,14 @@ function projectionSnapshot(db: ReturnType<typeof openDatabase>): string {
         readonly decidedAtMs: number | null;
         readonly decision: string | null;
         readonly token: string | null;
+        readonly tokenId: string | null;
       }
     >(
       `SELECT approval_id AS approvalId, status, head_lsn AS headLsn, claim, scope,
               risk_class AS riskClass, thread_id AS threadId, task_id AS taskId,
               receipt_id AS receiptId, requested_by AS requestedBy,
               requested_at_ms AS requestedAtMs, decided_by AS decidedBy,
-              decided_at_ms AS decidedAtMs, decision, token
+              decided_at_ms AS decidedAtMs, decision, token, token_id AS tokenId
        FROM pending_approvals ORDER BY approval_id ASC`,
     )
     .all();
@@ -214,6 +216,33 @@ describe("approval projection and appender", () => {
       expect(() => {
         db.exec("UPDATE pending_approvals SET status = 'rejected' WHERE approval_id IS NOT NULL");
       }).toThrow();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects reusing one approval token across multiple approvals", () => {
+    const { db, projection, appender } = setup();
+    try {
+      const firstRequest = requestedPayload(REQUEST_ID);
+      const secondRequest = { ...firstRequest, requestId: SECOND_REQUEST_ID };
+      const sharedToken = signedApprovalTokenFixture(firstRequest);
+      appender.requestApproval(firstRequest);
+      appender.requestApproval(secondRequest);
+
+      appender.decideApproval({
+        ...decidedPayload("approve", REQUEST_ID),
+        token: sharedToken,
+      });
+      expect(() =>
+        appender.decideApproval({
+          ...decidedPayload("approve", SECOND_REQUEST_ID),
+          token: sharedToken,
+        }),
+      ).toThrow(ApprovalTokenAlreadyUsedError);
+
+      expect(eventCount(db, "approval.decided")).toBe(1);
+      expect(projection.getById(SECOND_REQUEST_ID)?.approval.status).toBe("pending");
     } finally {
       db.close();
     }

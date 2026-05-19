@@ -521,6 +521,59 @@ describe("/api/v1/approvals routes", () => {
     expect(eventCount(fix.db, "approval.decided")).toBe(1);
   });
 
+  it("returns 409 when an approve token is reused on another approval", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const sharedRequest = requestedPayload(REQUEST_ID);
+    const sharedToken = signedApprovalTokenFixture(sharedRequest);
+    const first = approvalRequestCreateResponseFromJson(
+      (await (
+        await fetch(`${fix.broker.url}/api/v1/approvals`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: requestBody(sharedRequest, asIdempotencyKey("approval-token-reuse-01")),
+        })
+      ).json()) as unknown,
+    ).approvalRequest;
+    const second = approvalRequestCreateResponseFromJson(
+      (await (
+        await fetch(`${fix.broker.url}/api/v1/approvals`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: requestBody(sharedRequest, asIdempotencyKey("approval-token-reuse-02")),
+        })
+      ).json()) as unknown,
+    ).approvalRequest;
+
+    const firstDecision = await fetch(`${fix.broker.url}/api/v1/approvals/${first.id}/decision`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: decisionBody(
+        {
+          ...decidedPayload("approve", first.id),
+          token: sharedToken,
+        },
+        asIdempotencyKey("approval-token-reuse-decision-01"),
+      ),
+    });
+    expect(firstDecision.status).toBe(201);
+
+    const secondDecision = await fetch(`${fix.broker.url}/api/v1/approvals/${second.id}/decision`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: decisionBody(
+        {
+          ...decidedPayload("approve", second.id),
+          token: sharedToken,
+        },
+        asIdempotencyKey("approval-token-reuse-decision-02"),
+      ),
+    });
+    expect(secondDecision.status).toBe(409);
+    expect(await secondDecision.json()).toEqual({ error: "approval_token_reused" });
+    expect(eventCount(fix.db, "approval.decided")).toBe(1);
+    expect(fix.projection.getById(second.id)?.approval.status).toBe("pending");
+  });
+
   it("rejects decisions when the bearer cannot be resolved to an agent", async () => {
     await teardown(fix);
     fix = await buildFixture({ tokenAgentIds: new Map() });

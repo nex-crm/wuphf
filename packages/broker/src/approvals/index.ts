@@ -13,6 +13,7 @@ export {
   ApprovalRequestAlreadyDecidedError,
   ApprovalRequestAlreadyExistsError,
   ApprovalRequestNotFoundError,
+  ApprovalTokenAlreadyUsedError,
   createApprovalAppender,
 } from "./appender.ts";
 export type {

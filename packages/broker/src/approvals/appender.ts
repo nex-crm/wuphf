@@ -10,6 +10,7 @@ import {
   type ApprovalRequest,
   type ApprovalRequestedAuditPayload,
   type ApprovalRequestId,
+  type ApprovalTokenId,
   approvalAuditPayloadToBytes,
   approvalRequestToJson,
   type EventLsn,
@@ -89,6 +90,13 @@ export class ApprovalDecisionInvalidError extends Error {
   override readonly name = "ApprovalDecisionInvalidError";
 }
 
+export class ApprovalTokenAlreadyUsedError extends Error {
+  override readonly name = "ApprovalTokenAlreadyUsedError";
+  constructor(readonly tokenId: ApprovalTokenId) {
+    super(`approval token already used: ${tokenId}`);
+  }
+}
+
 export class ApprovalIdempotencyConflictError extends Error {
   override readonly name = "ApprovalIdempotencyConflictError";
 }
@@ -100,11 +108,21 @@ interface IdempotencyRow {
   readonly requestFingerprint: string | null;
 }
 
+interface TokenUsageRow {
+  readonly approvalId: string;
+}
+
 export function createApprovalAppender(
   db: Database.Database,
   eventLog: EventLog,
   projection: ApprovalProjection,
 ): ApprovalAppender {
+  const tokenUsageStmt = db.prepare<[string, string], TokenUsageRow>(
+    `SELECT approval_id AS approvalId
+     FROM pending_approvals
+     WHERE token_id = ? AND approval_id != ?
+     LIMIT 1`,
+  );
   const idempotencyLookupStmt = db.prepare<[string, string], IdempotencyRow>(
     `SELECT status_code AS statusCode, response_payload AS responsePayload,
             created_at_lsn AS createdAtLsn, request_fingerprint AS requestFingerprint
@@ -122,6 +140,15 @@ export function createApprovalAppender(
   const pruneIdempotencyStmt = db.prepare<[number]>(
     `DELETE FROM command_idempotency WHERE created_at_ms < ?`,
   );
+
+  const assertApprovalTokenUnused = (payload: ApprovalDecidedAuditPayload): void => {
+    const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
+    if (suppliedApprovalToken === undefined) return;
+    const existing = tokenUsageStmt.get(suppliedApprovalToken.tokenId, payload.requestId);
+    if (existing !== undefined) {
+      throw new ApprovalTokenAlreadyUsedError(suppliedApprovalToken.tokenId);
+    }
+  };
 
   const requestApprovalInner = (payload: ApprovalRequestedAuditPayload): ApprovalAppendResult => {
     const existing = foldApprovalFromLog(db, payload.requestId);
@@ -155,6 +182,7 @@ export function createApprovalAppender(
     if (folded.status === "pending") {
       throw new Error("approval decision did not produce a terminal status");
     }
+    assertApprovalTokenUnused(payload);
     try {
       approvalRequestToJson(folded);
     } catch (err) {
