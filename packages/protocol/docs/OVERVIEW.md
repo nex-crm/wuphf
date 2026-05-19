@@ -42,6 +42,7 @@ flowchart LR
   end
   subgraph T["top-level envelopes"]
     ipc[ipc]
+    route[route-envelopes]
     index[index]
   end
   sha256 --> brand
@@ -96,11 +97,20 @@ flowchart LR
   ipc --> literals
   ipc --> utils
   ipc --> sha256
+  route --> approval
+  route --> budgets
+  route --> jcs
+  route --> lsn
+  route --> receipt
+  route --> signed
+  route --> thread
+  route --> utils
   index --> audit
   index --> budgets
   index --> jcs
   index --> frozen
   index --> ipc
+  index --> route
   index --> receipt
   index --> sanitized
   index --> approval
@@ -112,7 +122,8 @@ Detailed docs: [moat primitives](modules/moat-primitives.md),
 [budgets](modules/budgets.md), [receipt](modules/receipt.md),
 [approval request](modules/approval-request.md),
 [audit-event](modules/audit-event.md), [ipc](modules/ipc.md), and
-[thread](modules/thread.md).
+[thread](modules/thread.md). Route HTTP body codecs are documented in
+[route-envelopes](modules/route-envelopes.md).
 
 ## 3. The moat composition
 
@@ -188,6 +199,11 @@ sequenceDiagram
 - ApprovalRequest JSON shape: snake_case codecs for pending/decided approval
   projections; claim/scope/token values compose `SignedApprovalToken`
   primitives, and status/decision coupling is re-derived at decode.
+- Route envelopes: versioned camelCase HTTP request/response bodies for
+  `/api/v1/threads` and `/api/v1/approvals`, wrapping existing `Thread`,
+  `ApprovalRequest`, and command primitives. Serializers emit protocol-owned
+  JSON including OCC mutation metadata `{ threadId, headLsn, revisionId,
+  contentHash }`; decoders reject unknown keys and over-budget route strings.
 - Approval token signed envelope: `SignedApprovalToken` binds a discriminated
   `claim`, role-bearing `scope`, caller-supplied epoch-ms validity window,
   `issuedTo`, and structured WebAuthn `signature`. Changing claim keys, scope

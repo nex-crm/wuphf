@@ -394,6 +394,12 @@ export const MAX_ROUTE_THREAD_LIST_ITEMS = 256;
 export const MAX_ROUTE_ERROR_CODE_BYTES = 128;
 export const MAX_ROUTE_ERROR_MESSAGE_BYTES = 8 * 1024;
 
+/**
+ * Route list cursors are opaque pagination tokens. Keep them compact so list
+ * responses cannot smuggle unbounded transport state.
+ */
+export const MAX_ROUTE_CURSOR_BYTES = 1024;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Credential IPC budgets (consumed by packages/protocol/src/credential-ipc.ts)
 // ────────────────────────────────────────────────────────────────────────────
@@ -640,6 +646,14 @@ export function validateRouteErrorCodeBudget(value: string): BudgetValidationRes
 
 export function validateRouteErrorMessageBudget(value: string): BudgetValidationResult {
   return validateUtf8StringBudget(value, MAX_ROUTE_ERROR_MESSAGE_BYTES, "RouteError.message bytes");
+}
+
+export function validateRouteCursorBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(
+    value,
+    MAX_ROUTE_CURSOR_BYTES,
+    "RouteListResponse.nextCursor bytes",
+  );
 }
 
 export function validateApprovalTokenLifetime(value: {
