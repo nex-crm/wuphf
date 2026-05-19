@@ -13,7 +13,17 @@ import { IssuesGroup } from "./IssuesGroup";
 /**
  * Each story mounts the REAL sidebar sub-component inside a sidebar shell,
  * with React Query seeded by SidebarContext. No mocks of the DOM.
+ *
+ * .sidebar-collapsible normally uses `flex: 1 1 0` to fill the remaining
+ * height of the 100vh sidebar. In an isolated story the sidebar collapses
+ * to content height, so flex:1 1 0 resolves to 0 and the collapsible body
+ * disappears. Story-only override: `flex: none` + `display: block` so the
+ * list renders at its natural content height.
  */
+const collapsibleNaturalHeight = {
+  flex: "none",
+  display: "block",
+} as const;
 const meta: Meta = {
   title: "Sidebar/Modules",
   parameters: {
@@ -56,23 +66,27 @@ export const InboxModule: StoryObj = {
 
 export const Agents: StoryObj = {
   render: () => (
-    <div className="sidebar-section is-team">
-      <div className="sidebar-section-title">Agents</div>
-      <div className="sidebar-collapsible is-open">
+    <>
+      <div className="sidebar-section is-team">
+        <div className="sidebar-section-title">Agents</div>
+      </div>
+      <div className="sidebar-collapsible is-open" style={collapsibleNaturalHeight}>
         <AgentList />
       </div>
-    </div>
+    </>
   ),
 };
 
 export const Channels: StoryObj = {
   render: () => (
-    <div className="sidebar-section">
-      <div className="sidebar-section-title">Channels</div>
-      <div className="sidebar-collapsible is-open">
+    <>
+      <div className="sidebar-section">
+        <div className="sidebar-section-title">Channels</div>
+      </div>
+      <div className="sidebar-collapsible is-open" style={collapsibleNaturalHeight}>
         <ChannelList />
       </div>
-    </div>
+    </>
   ),
 };
 
@@ -82,12 +96,14 @@ export const Issues: StoryObj = {
 
 export const Apps: StoryObj = {
   render: () => (
-    <div className="sidebar-section">
-      <div className="sidebar-section-title">Tools</div>
-      <div className="sidebar-collapsible is-open">
+    <>
+      <div className="sidebar-section">
+        <div className="sidebar-section-title">Tools</div>
+      </div>
+      <div className="sidebar-collapsible is-open" style={collapsibleNaturalHeight}>
         <AppList />
       </div>
-    </div>
+    </>
   ),
 };
 
