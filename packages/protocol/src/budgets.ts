@@ -389,6 +389,13 @@ export const MAX_RUNNER_ERROR_BYTES = 8 * 1024;
 export const MAX_ROUTE_THREAD_LIST_ITEMS = 256;
 
 /**
+ * Approval list routes are read-model projections, not export endpoints. Keep
+ * them page-bounded so response validation cannot materialize arbitrary broker
+ * history in one envelope.
+ */
+export const MAX_ROUTE_APPROVAL_LIST_ITEMS = 256;
+
+/**
  * Route error codes are stable machine labels; messages are human diagnostics.
  */
 export const MAX_ROUTE_ERROR_CODE_BYTES = 128;

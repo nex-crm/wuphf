@@ -102,6 +102,10 @@ const broker = await createBroker({ port: 0, threads });
 | GET | `/api/v1/cost/budgets/:id` | bearer | Returns one projected budget, or 404 on malformed/missing id. |
 | GET | `/api/v1/cost/summary` | bearer | Returns current cost projections: agent spend, budgets, and threshold crossings. |
 | GET | `/api/v1/cost/replay-check` | bearer | Replays cost events and compares projections. 200 when `ok: true`; 500 with structured discrepancies when drift or unparseable cost payloads are found. |
+| POST | `/api/v1/approvals` | bearer | Body: `ApprovalRequestCreateRequest` route envelope from `@wuphf/protocol` with `idempotencyKey`. Appends `approval.requested`, creates a `pending` folded `ApprovalRequest`, returns `ApprovalRequestCreateResponse`, and emits an `approval.requested` SSE invalidation. If `idempotencyKey` is an `ApprovalRequestId` ULID the broker uses it as the request id; otherwise it derives a stable request id from that key. |
+| GET | `/api/v1/approvals` | bearer | Lists token-redacted approval views as `ApprovalListResponse`. Supports `?status=pending\|approved\|rejected\|abstained`, `?threadId=<ThreadId>`, `?taskId=<TaskId>`, `?limit=<n>` capped to the protocol maximum, and `?cursor=<EventLsn>` pagination. |
+| GET | `/api/v1/approvals/:id` | bearer | Returns one token-redacted approval view as `ApprovalGetResponse`, or 404 on malformed/missing id. |
+| POST | `/api/v1/approvals/:id/decision` | bearer | Body: `ApprovalDecisionRequest` route envelope from `@wuphf/protocol` with `idempotencyKey`. `approve` requires a `SignedApprovalToken`; `reject`/`abstain` do not carry one. Appends `approval.decided`, validates the folded terminal approval through the protocol codec, records the supplied approve token without WebAuthn verification, returns `ApprovalDecisionResponse`, emits `approval.decided`, and returns 409 if already decided. Malformed JSON returns 400; route-envelope or approval-command validation failures return 422. |
 | GET | `/api/agents/:agentId/provider-routing` | bearer | Returns the per-agent provider-routing config via `agentProviderRoutingToJsonValue`. Mounted when `createBroker({ runners: { agentProviderRoutingStore } })` is supplied. |
 | PUT | `/api/agents/:agentId/provider-routing` | bearer | Replaces all routes for the agent. Body parses through `agentProviderRoutingWriteRequestFromJson`; the body `agentId` must match the path `agentId`. |
 | POST | `/api/webauthn/registration/challenge` | bearer + agent map + enrollable role | Broker control-plane route. Body `{ role }`; the role must be allowed by `webauthn.enrollableRoles` for the bearer-mapped agent. Returns `{ challengeId, creationOptions }` where `creationOptions` is the W3C `PublicKeyCredentialCreationOptions` JSON from `@simplewebauthn/server`. Mounted when `createBroker({ webauthn })` is supplied. Store writes map `SQLITE_BUSY`/`LOCKED` to 503 + `Retry-After`, `SQLITE_FULL` to 507, and storage-unavailable errors to `503 {"error":"storage_error"}`. |
@@ -163,6 +167,10 @@ GET /api/v1/threads/01ARZ3NDEKTSV4RRFFQ69G5FAZ/receipts?cursor=bHNuOjI&limit=2
     `http://localhost:<port>/` and the broker appends
     `http://localhost:<port>` to WebAuthn `allowedOrigins` so the RP ID
     `localhost` matches the page origin.
+13. **Pending approvals are explicit backend events.** The broker appends
+    `approval.requested` / `approval.decided` events and projects
+    `pending_approvals`; it does not derive pending approvals from
+    `receipt.approvals[]`.
 
 ## Spec anchors
 

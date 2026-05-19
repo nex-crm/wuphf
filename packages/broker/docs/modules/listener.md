@@ -22,12 +22,13 @@ flowchart LR
   auth --> dispatch{"pathname"}
   dispatch -- "/api-token" --> bootstrap["GET/HEAD only · bootstrap JSON"]
   dispatch -- "/api/health" --> health["GET/HEAD only · {ok:true}"]
-  dispatch -- "/api/events" --> events["GET/HEAD only · SSE ready + thread invalidations"]
+  dispatch -- "/api/events" --> events["GET/HEAD only · SSE ready + invalidations"]
   dispatch -- "POST /api/receipts" --> create["receiptFromJson → ReceiptStore.put<br/>201 / 400 / 409 / 413 / 415 / 503 / 507"]
   dispatch -- "GET /api/receipts/:id" --> read["ReceiptStore.get<br/>200 / 404"]
   dispatch -- "GET /api/v1/threads/:tid/receipts" --> list["ReceiptStore.list({threadId, cursor?, limit?})<br/>200 JSON array (+ Link rel=next when more pages)<br/>400 on invalid cursor/limit"]
   dispatch -- "/api/v1/cost/*" --> cost["cost ledger routes<br/>read: bearer<br/>mutate: bearer + operator capability"]
   dispatch -- "/api/v1/threads*" --> threads["thread routes<br/>folded projection reads · idempotent commands · SSE invalidations"]
+  dispatch -- "/api/v1/approvals*" --> approvals["approval routes<br/>request · list · get · decide"]
   dispatch -- "/api/agents/:id/provider-routing" --> routing["provider-routing routes<br/>GET read · PUT replace"]
   dispatch -- "/api/webauthn/*" --> webauthn["WebAuthn control-plane routes<br/>registration · cosign"]
   dispatch -- "/api/runners*" --> runners["runner routes<br/>POST spawn · GET events SSE<br/>bearer maps to AgentId"]
@@ -99,6 +100,27 @@ See [threads.md](./threads.md) for projection storage, idempotency, and replay
 details. Thread SSE events are invalidation-only and use the committed event LSN
 as the SSE `id`; clients must refetch on `ready`, reconnect, and every
 thread invalidation. Last-Event-ID backfill from `event_log` is still a TODO.
+
+### Approval routes
+
+When `createBroker({ approvals })` is supplied, the listener mounts explicit
+approval state under `/api/v1/approvals`. Without an approvals config, those
+paths behave like unknown authenticated API routes and return 404. Writes use
+the approval route-envelope `idempotencyKey` carried in the request body. POST
+responses and route errors are emitted through the approval route-envelope
+codecs; folded approvals returned by GET routes are emitted through
+`ApprovalListResponse` / `ApprovalGetResponse` codecs so stored decision
+tokens are redacted from read responses.
+
+| Method | Path | Auth | Contract |
+|---|---|---|---|
+| POST | `/api/v1/approvals` | bearer | Parses `ApprovalRequestCreateRequest`, appends `approval.requested`, projects a pending `ApprovalRequest`, returns `ApprovalRequestCreateResponse`, and emits `approval.requested` on `/api/events`. |
+| GET | `/api/v1/approvals` | bearer | Lists token-redacted approval views. Optional filters: `status`, `threadId`, `taskId`, plus capped `limit` and `cursor` pagination. |
+| GET | `/api/v1/approvals/:id` | bearer | Fetches one token-redacted approval view, or 404 for malformed/missing ids. |
+| POST | `/api/v1/approvals/:id/decision` | bearer | Parses `ApprovalDecisionRequest`, requires a token for `approve`, rejects non-pending approvals with 409, records the approve token without WebAuthn verification, and emits `approval.decided`. |
+
+See [approvals.md](./approvals.md) for the projection schema, projection rebuild,
+and SSE payload contract.
 
 ### Agent provider-routing routes
 

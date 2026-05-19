@@ -4,6 +4,10 @@ import {
   approvalDecisionRequestToJsonValue,
   approvalDecisionResponseFromJson,
   approvalDecisionResponseToJsonValue,
+  approvalGetResponseFromJson,
+  approvalGetResponseToJsonValue,
+  approvalListResponseFromJson,
+  approvalListResponseToJsonValue,
   approvalRequestCreateRequestFromJson,
   approvalRequestCreateRequestToJsonValue,
   approvalRequestCreateResponseFromJson,
@@ -11,6 +15,8 @@ import {
   approvalRequestFromJsonValue,
   approvalRequestToJson,
   approvalRequestToJsonValue,
+  approvalViewFromJson,
+  approvalViewToJsonValue,
   asApprovalRequestId,
   asIdempotencyKey,
   asSignerIdentity,
@@ -164,6 +170,26 @@ export function runApprovalRouteScenarios(): void {
   const pendingApprovalRequestWire = { ...approvalRequestWire, status: "pending" };
   Reflect.deleteProperty(pendingApprovalRequestWire, "decision");
   const pendingApprovalRequest = approvalRequestFromJsonValue(pendingApprovalRequestWire);
+  const approvalViewWire = {
+    schemaVersion: 1,
+    id: approvalRequest.id,
+    claim: approvalEvidence.signedToken.claim,
+    scope: approvalEvidence.signedToken.scope,
+    riskClass: approvalRequest.riskClass,
+    threadId: routeThreadId,
+    taskId: approvalReceipt.taskId,
+    receiptId: approvalReceipt.id,
+    requestedBy: approvalRequest.requestedBy,
+    requestedAt: approvalRequest.requestedAt.toISOString(),
+    status: approvalRequest.status,
+    decisionSummary: {
+      decision: "approve",
+      decidedBy: asSignerIdentity("approver@example.com"),
+      decidedAt: "2026-05-08T18:05:00.000Z",
+    },
+  };
+  const pendingApprovalViewWire = { ...approvalViewWire, status: "pending" };
+  Reflect.deleteProperty(pendingApprovalViewWire, "decisionSummary");
 
   expectCodecRoundTrip(
     "thread create request route envelope",
@@ -275,6 +301,49 @@ export function runApprovalRouteScenarios(): void {
     },
     approvalDecisionResponseFromJson,
     approvalDecisionResponseToJsonValue,
+  );
+  expectCodecRoundTrip(
+    "approval view route envelope redacts decision token",
+    approvalViewWire,
+    approvalViewFromJson,
+    approvalViewToJsonValue,
+  );
+  expectEqual(
+    "approval view JSON has no token field",
+    JSON.stringify(approvalViewToJsonValue(approvalViewFromJson(approvalViewWire))).includes(
+      "tokenId",
+    ),
+    false,
+  );
+  expectThrows(
+    () =>
+      approvalViewFromJson({
+        ...approvalViewWire,
+        decisionSummary: {
+          ...approvalViewWire.decisionSummary,
+          token: signedApprovalTokenToJsonValue(approvalEvidence.signedToken),
+        },
+      }),
+    /decisionSummary\/token.*not allowed/,
+  );
+  expectCodecRoundTrip(
+    "approval list response route envelope",
+    {
+      schemaVersion: 1,
+      approvals: [approvalViewWire, pendingApprovalViewWire],
+      nextCursor: "bHNuOjQz",
+    },
+    approvalListResponseFromJson,
+    approvalListResponseToJsonValue,
+  );
+  expectCodecRoundTrip(
+    "approval get response route envelope",
+    {
+      schemaVersion: 1,
+      approval: approvalViewWire,
+    },
+    approvalGetResponseFromJson,
+    approvalGetResponseToJsonValue,
   );
   expectCodecRoundTrip(
     "route error envelope",
