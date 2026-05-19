@@ -52,10 +52,13 @@ export type {
 export {
   ApprovalDecisionInvalidError,
   ApprovalIdempotencyConflictError,
+  ApprovalPendingLimitExceededError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalRequestAlreadyExistsError,
   ApprovalRequestNotFoundError,
+  ApprovalThreadNotFoundError,
   ApprovalTokenAlreadyUsedError,
+  ApprovalTokenIssuedToMismatchError,
   createApprovalAppender,
 } from "./appender.ts";
 export type {
@@ -72,6 +75,7 @@ export type {
   ApprovalListFilter,
   ApprovalListPage,
   ApprovalListPageOptions,
+  ApprovalPendingByThreadSnapshot,
   ApprovalProjection,
   ApprovalProjectionEvent,
   ApprovalProjectionRebuildResult,

@@ -452,6 +452,7 @@ async function routeRequest(
       receiptStore: deps.receiptStore,
       webauthnStore: deps.webauthn?.store ?? null,
       logger: deps.logger,
+      emitThreadEvent: (event) => deps.sseHub.emitThreadEvent(event),
     });
     return;
   }

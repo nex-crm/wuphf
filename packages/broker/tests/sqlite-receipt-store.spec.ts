@@ -163,7 +163,7 @@ describe("SqliteReceiptStore", () => {
     try {
       const receipt = minimalReceiptV2(receiptIdAt(1), THREAD_A);
 
-      await expect(store.put(receipt)).resolves.toEqual({ existed: false });
+      await expect(store.put(receipt)).resolves.toMatchObject({ existed: false });
       await expect(store.get(receipt.id)).resolves.toEqual(receipt);
       await expect(store.list({ threadId: asThreadId(THREAD_A) })).resolves.toMatchObject({
         items: [receipt],
@@ -193,8 +193,8 @@ describe("SqliteReceiptStore", () => {
       const first = minimalReceiptV1(receiptIdAt(1));
       const second = { ...first, model: "different" };
 
-      expect(await store.put(first)).toEqual({ existed: false });
-      expect(await store.put(second)).toEqual({ existed: true });
+      expect(await store.put(first)).toMatchObject({ existed: false });
+      expect(await store.put(second)).toEqual({ existed: true, lsn: null });
 
       expect(await store.get(first.id)).toEqual(first);
       expect(countRows(db, "event_log")).toBe(1);
@@ -336,7 +336,7 @@ describe("SqliteReceiptStore", () => {
       const second = minimalReceiptV2(receiptIdAt(2), THREAD_A);
 
       expect(await secondStore.get(first.id)).toEqual(first);
-      expect(await secondStore.put(second)).toEqual({ existed: false });
+      expect(await secondStore.put(second)).toMatchObject({ existed: false });
       expect(maxEventLogLsn(secondDb)).toBe(4);
       expect((await secondStore.list()).items.map((receipt) => receipt.id)).toEqual([
         first.id,
@@ -398,7 +398,7 @@ describe("SqliteReceiptStore", () => {
     try {
       const r = minimalReceiptV1(receiptIdAt(1));
       await store.put(r);
-      expect(await store.put(r)).toEqual({ existed: true });
+      expect(await store.put(r)).toEqual({ existed: true, lsn: null });
     } finally {
       store.close();
     }

@@ -51,6 +51,11 @@ export interface ApprovalListPage {
   readonly nextCursor?: EventLsn;
 }
 
+export interface ApprovalPendingByThreadSnapshot {
+  readonly rows: readonly FoldedApprovalRow[];
+  readonly headLsn: EventLsn | null;
+}
+
 export interface ApprovalProjectionEvent {
   readonly lsn: number;
   readonly type: EventType | string;
@@ -72,6 +77,7 @@ export interface ApprovalProjection {
   countPendingByThread(threadId: ThreadId): number;
   listPendingByThread(threadId: ThreadId): readonly FoldedApprovalRow[];
   latestHeadLsnByThread(threadId: ThreadId): EventLsn | null;
+  pendingByThreadSnapshot(threadId: ThreadId): ApprovalPendingByThreadSnapshot;
 }
 
 interface ApprovalDbRow {
@@ -266,6 +272,22 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       return { eventsApplied, highestLsn: lsnFromV1Number(highestLsn) };
     },
   );
+  const pendingByThreadSnapshotTransaction = db.transaction(
+    (threadId: ThreadId): ApprovalPendingByThreadSnapshot => {
+      const rows = listRows(
+        db,
+        { threadId, status: "pending" },
+        {
+          limit: MAX_ROUTE_APPROVAL_LIST_ITEMS,
+        },
+      ).map(rowToFolded);
+      const headLsn = latestHeadLsnByThreadStmt.get(threadId)?.headLsn ?? null;
+      return {
+        rows,
+        headLsn: headLsn === null ? null : lsnFromV1Number(headLsn),
+      };
+    },
+  );
 
   return {
     sharesProvenance(candidateDb: Database.Database, _eventLog: EventLog): boolean {
@@ -321,6 +343,9 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       const row = latestHeadLsnByThreadStmt.get(threadId);
       if (row === undefined || row.headLsn === null) return null;
       return lsnFromV1Number(row.headLsn);
+    },
+    pendingByThreadSnapshot(threadId: ThreadId): ApprovalPendingByThreadSnapshot {
+      return pendingByThreadSnapshotTransaction.deferred(threadId);
     },
   };
 }

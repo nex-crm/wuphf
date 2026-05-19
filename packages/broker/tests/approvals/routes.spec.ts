@@ -486,6 +486,7 @@ describe("/api/v1/approvals routes", () => {
     const requestedText = await readUntil(reader, "event: approval.requested");
     const requestedEvent = parseApprovalSse(requestedText, "approval.requested");
     expect(validateApprovalStreamEvent(requestedEvent).ok).toBe(true);
+    expect(requestedEvent.id).toBe("v1:1");
     expect(requestedEvent.payload.requestId).toBe(createdApproval.id);
     expect(requestedEvent.payload.threadId).toBe(THREAD_ID);
     expect(requestedEvent.payload.headLsn).toBe("v1:1");
@@ -502,6 +503,7 @@ describe("/api/v1/approvals routes", () => {
     const decidedText = await readUntil(reader, "event: approval.decided");
     const decidedEvent = parseApprovalSse(decidedText, "approval.decided");
     expect(validateApprovalStreamEvent(decidedEvent).ok).toBe(true);
+    expect(decidedEvent.id).toBe("v1:2");
     expect(decidedEvent.payload.headLsn).toBe("v1:2");
     controller.abort();
   });

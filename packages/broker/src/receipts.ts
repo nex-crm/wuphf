@@ -19,6 +19,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   asReceiptId,
   asThreadId,
+  type EventLsn,
   type ReceiptId,
   type ReceiptSnapshot,
   receiptFromJson,
@@ -30,6 +31,7 @@ import {
   InvalidListCursorError,
   InvalidListLimitError,
   MAX_LIST_LIMIT,
+  type ReceiptPutResult,
   type ReceiptStore,
   ReceiptStoreBusyError,
   ReceiptStoreFullError,
@@ -66,6 +68,13 @@ interface ReceiptRouteDeps {
   readonly receiptStore: ReceiptStore;
   readonly webauthnStore: WebAuthnStore | null;
   readonly logger: BrokerLogger;
+  readonly emitThreadEvent?: (event: ReceiptThreadStreamEvent) => void;
+}
+
+interface ReceiptThreadStreamEvent {
+  readonly kind: "thread.updated";
+  readonly threadId: ThreadId;
+  readonly headLsn: EventLsn;
 }
 
 export async function handleReceiptCreate(
@@ -182,7 +191,7 @@ export async function handleReceiptCreate(
     throw err;
   }
 
-  let result: { readonly existed: boolean };
+  let result: ReceiptPutResult;
   try {
     result = await deps.receiptStore.put(receipt);
   } catch (err) {
@@ -205,6 +214,13 @@ export async function handleReceiptCreate(
     deps.logger.info("receipt_put_conflict", { receiptId: receipt.id });
     writeJsonResponse(res, 409, JSON.stringify({ error: "receipt_id_exists", id: receipt.id }));
     return;
+  }
+  if (receipt.schemaVersion === 2 && receipt.threadId !== undefined) {
+    deps.emitThreadEvent?.({
+      kind: "thread.updated",
+      threadId: receipt.threadId,
+      headLsn: result.lsn,
+    });
   }
 
   deps.logger.info("receipt_put_ok", { receiptId: receipt.id });

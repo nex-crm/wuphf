@@ -550,11 +550,13 @@ describe("thread appender and projection", () => {
     });
 
     const live = snapshotThreadProjection(fix.db);
+    fix.state.rebuildFromLog(fix.eventLog);
+    expect(snapshotThreadProjection(fix.db)).toEqual(live);
     fix.subsystem.rebuildFromLog(0);
     expect(snapshotThreadProjection(fix.db)).toEqual(live);
   });
 
-  it("receipt list order provides the deterministic thread receipt index source", async () => {
+  it("paginates and rebuilds the direct thread receipt index", async () => {
     const fix = setup();
     appendCreate(fix);
     const taskA = "01MRZ3NDEKTSV4RRFFQ69G5FM0";
@@ -578,7 +580,59 @@ describe("thread appender and projection", () => {
       taskIds: [taskA, taskB],
     };
     expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
+    const first = fix.subsystem.receiptIndex.list(asThreadId(THREAD_ID), { limit: 2 });
+    expect(first.items.map((item) => item.receiptId)).toEqual([
+      "01PRZ3NDEKTSV4RRFFQ69G5FP0",
+      "01QRZ3NDEKTSV4RRFFQ69G5FQ0",
+    ]);
+    expect(first.nextCursor).not.toBeNull();
+    if (first.nextCursor === null) throw new Error("missing receipt index cursor");
+    const second = fix.subsystem.receiptIndex.list(asThreadId(THREAD_ID), {
+      cursor: first.nextCursor,
+      limit: 2,
+    });
+    expect(second.items.map((item) => item.receiptId)).toEqual(["01RRZ3NDEKTSV4RRFFQ69G5FR0"]);
+    expect(fix.subsystem.receiptIndex.latestForThread(asThreadId(THREAD_ID))?.receiptId).toBe(
+      "01RRZ3NDEKTSV4RRFFQ69G5FR0",
+    );
+    fix.subsystem.receiptIndex.rebuildFromLog(fix.eventLog, 0);
+    expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
     fix.subsystem.rebuildFromLog(0);
     expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
+  });
+
+  it("keeps thread state and receipt index intact when full rebuild replay fails", async () => {
+    const fix = setup();
+    appendCreate(fix);
+    await fix.receiptStore.put(
+      minimalReceiptV2("01PRZ3NDEKTSV4RRFFQ69G5FP0", "01MRZ3NDEKTSV4RRFFQ69G5FM0"),
+    );
+    const live = snapshotThreadProjection(fix.db);
+    const liveReceiptRows = fix.db
+      .prepare<[], { readonly count: number }>("SELECT COUNT(*) AS count FROM thread_receipts")
+      .get()?.count;
+
+    fix.eventLog.append({
+      type: "thread.status_changed",
+      payload: Buffer.from(
+        threadAuditPayloadToBytes("thread_status_changed", {
+          threadId: asThreadId(OTHER_THREAD_ID),
+          fromStatus: "open",
+          toStatus: "closed",
+          changedBy: SIGNER,
+          changedAt: new Date("2026-05-18T10:30:00.000Z"),
+        }),
+      ),
+    });
+
+    expect(() => fix.subsystem.rebuildFromLog(0)).toThrow(
+      /thread projection status change referenced a missing thread/,
+    );
+    expect(snapshotThreadProjection(fix.db)).toEqual(live);
+    expect(
+      fix.db
+        .prepare<[], { readonly count: number }>("SELECT COUNT(*) AS count FROM thread_receipts")
+        .get()?.count,
+    ).toBe(liveReceiptRows);
   });
 });

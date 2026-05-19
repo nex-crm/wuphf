@@ -97,11 +97,17 @@ export interface ThreadApprovalQuery {
   countPendingByThread(threadId: ThreadId): number;
   listPendingByThread(threadId: ThreadId): readonly ThreadApprovalQueryRow[];
   latestHeadLsnByThread(threadId: ThreadId): EventLsn | null;
+  pendingByThreadSnapshot(threadId: ThreadId): ThreadApprovalQuerySnapshot;
 }
 
 export interface ThreadApprovalQueryRow {
   readonly approval: ApprovalRequest;
   readonly headLsn: EventLsn;
+}
+
+export interface ThreadApprovalQuerySnapshot {
+  readonly rows: readonly ThreadApprovalQueryRow[];
+  readonly headLsn: EventLsn | null;
 }
 
 export interface ThreadRouteStreamEvent {
@@ -239,15 +245,17 @@ function handleThreadPinnedApprovalsGet(
     return;
   }
   try {
-    const approvals = deps.approvals?.listPendingByThread(threadId) ?? [];
-    const approvalHeadLsn = deps.approvals?.latestHeadLsnByThread(threadId) ?? null;
+    const snapshot = deps.approvals?.pendingByThreadSnapshot(threadId) ?? {
+      rows: [],
+      headLsn: null,
+    };
     writeJsonValue(
       res,
       200,
       threadPinnedApprovalsResponseToJsonValue({
         threadId,
-        headLsn: maxHeadLsn(row.headLsn, approvals, approvalHeadLsn),
-        approvals: approvals.map((approval) => approvalViewFromApproval(approval.approval)),
+        headLsn: maxHeadLsn(row.headLsn, snapshot.rows, snapshot.headLsn),
+        approvals: snapshot.rows.map((approval) => approvalViewFromApproval(approval.approval)),
       }),
     );
   } catch (err) {

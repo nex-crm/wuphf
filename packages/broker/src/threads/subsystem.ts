@@ -29,6 +29,7 @@ const SYSTEM_INBOX_EXTERNAL_REFS: ThreadExternalRefs = Object.freeze({
   sourceUrls: Object.freeze([]),
   entityIds: Object.freeze([]),
 });
+const THREAD_REBUILD_BATCH_SIZE = 500;
 
 export interface ThreadSubsystem {
   readonly appender: ThreadAppender;
@@ -52,6 +53,30 @@ export function createThreadSubsystem(
   const receiptIndex = createThreadReceiptIndexStore(db);
   const appender = createThreadAppender(db, eventLog, state);
   ensureSystemInboxThread(appender, state);
+  const rebuildTransaction = db.transaction((fromLsn: number): void => {
+    if (!Number.isSafeInteger(fromLsn) || fromLsn < 0) {
+      throw new Error(
+        `rebuildFromLog: fromLsn must be a non-negative safe integer, got ${fromLsn}`,
+      );
+    }
+    if (fromLsn === 0) {
+      receiptIndex.clear();
+      state.clear();
+    }
+    let cursor = fromLsn;
+    for (;;) {
+      const batch = eventLog.readFromLsn(cursor, THREAD_REBUILD_BATCH_SIZE);
+      if (batch.length === 0) break;
+      for (const record of batch) {
+        state.applyEvent(record);
+        receiptIndex.applyEvent(record);
+      }
+      const last = batch.at(-1);
+      if (last === undefined) break;
+      cursor = last.lsn;
+      if (batch.length < THREAD_REBUILD_BATCH_SIZE) break;
+    }
+  });
   return {
     appender,
     state,
@@ -62,11 +87,7 @@ export function createThreadSubsystem(
       return appender.sharesProvenance(db, eventLog) && projection.sharesProvenance(db, eventLog);
     },
     rebuildFromLog(fromLsn = 0): void {
-      if (fromLsn === 0) {
-        receiptIndex.clear();
-      }
-      state.rebuildFromLog(eventLog, fromLsn);
-      receiptIndex.rebuildFromLog(eventLog, fromLsn);
+      rebuildTransaction.immediate(fromLsn);
       ensureSystemInboxThread(appender, state);
     },
   };

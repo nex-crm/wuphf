@@ -539,9 +539,8 @@ function emitApprovalInvalidation(
   headLsn: EventLsn,
   deps: ApprovalRouteDeps,
 ): void {
-  const localLsn = parseLsn(headLsn).localLsn;
   const event: ApprovalStreamEvent = {
-    id: `approval_${localLsn}`,
+    id: headLsn,
     kind,
     emittedAt: new Date(deps.nowMs()).toISOString(),
     payload: {
