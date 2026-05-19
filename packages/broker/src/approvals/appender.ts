@@ -213,6 +213,8 @@ export function createApprovalAppender(
       );
     }
     assertThreadReferenceExists(payload);
+    // TODO(approval-overcap-repair): add repair or quarantine for upgraded DBs
+    // already over this cap; pinned snapshots fail closed until then.
     if (
       payload.threadId !== undefined &&
       projection.countPendingByThread(payload.threadId) >= MAX_ROUTE_APPROVAL_LIST_ITEMS

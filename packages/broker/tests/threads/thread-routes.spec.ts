@@ -1,6 +1,8 @@
 import { request as httpRequest, type OutgoingHttpHeaders } from "node:http";
 
 import {
+  type ApprovalRequestedAuditPayload,
+  approvalAuditPayloadToBytes,
   approvalDecisionRequestToJsonValue,
   approvalDecisionResponseFromJson,
   approvalRequestCreateRequestToJsonValue,
@@ -14,6 +16,7 @@ import {
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
+  asSignerIdentity,
   asTaskId,
   asThreadId,
   type EventLsn,
@@ -211,6 +214,41 @@ function approvalRequestBody(args: {
       idempotencyKey: asIdempotencyKey(args.requestId),
     }),
   );
+}
+
+function approvalRequestedPayload(args: {
+  readonly requestId: ReturnType<typeof asApprovalRequestId>;
+  readonly threadId: ReturnType<typeof asThreadId>;
+  readonly taskId?: ReturnType<typeof asTaskId>;
+}): ApprovalRequestedAuditPayload {
+  const claim = {
+    schemaVersion: 1,
+    claimId: APPROVAL_CLAIM_ID,
+    kind: "receipt_co_sign",
+    receiptId: APPROVAL_RECEIPT_ID,
+    frozenArgsHash: APPROVAL_FROZEN_ARGS_HASH,
+    riskClass: "critical",
+  } as const;
+  const scope = {
+    mode: "single_use",
+    claimId: APPROVAL_CLAIM_ID,
+    claimKind: "receipt_co_sign",
+    role: asApprovalRole("approver"),
+    maxUses: 1,
+    receiptId: APPROVAL_RECEIPT_ID,
+    frozenArgsHash: APPROVAL_FROZEN_ARGS_HASH,
+  } as const;
+  return {
+    requestId: args.requestId,
+    claim,
+    scope,
+    riskClass: "critical",
+    threadId: args.threadId,
+    ...(args.taskId === undefined ? {} : { taskId: args.taskId }),
+    receiptId: APPROVAL_RECEIPT_ID,
+    requestedBy: asSignerIdentity("broker"),
+    requestedAt: new Date("2026-05-18T10:00:00.000Z"),
+  };
 }
 
 function approvalDecisionBody(idempotencyKey = APPROVAL_DECISION_KEY): string {
@@ -1103,6 +1141,40 @@ describe("/api/v1/threads routes", () => {
     expect(
       threadPinnedApprovalsResponseFromJson((await pinned.json()) as unknown).approvals,
     ).toHaveLength(MAX_ROUTE_APPROVAL_LIST_ITEMS);
+  });
+
+  it("fails pinned approvals loudly when a rebuilt projection is already over cap", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    await createThread(fixture);
+
+    for (let index = 0; index <= MAX_ROUTE_APPROVAL_LIST_ITEMS; index += 1) {
+      const payload = approvalRequestedPayload({
+        requestId: indexedApprovalRequestId(5_000 + index),
+        threadId: asThreadId(THREAD_ID),
+        taskId: APPROVAL_TASK_ID,
+      });
+      const bytes = Buffer.from(approvalAuditPayloadToBytes("approval_requested", payload));
+      const lsn = fixture.eventLog.append({ type: "approval.requested", payload: bytes });
+      fixture.approvalProjection.applyEvent({
+        lsn,
+        type: "approval.requested",
+        payload: bytes,
+      });
+    }
+    expect(fixture.approvalProjection.countPendingByThread(asThreadId(THREAD_ID))).toBe(
+      MAX_ROUTE_APPROVAL_LIST_ITEMS + 1,
+    );
+
+    const pinned = await fetch(
+      `${fixture.broker.url}/api/v1/threads/${THREAD_ID}/pinned-approvals`,
+      {
+        headers: authHeaders(),
+      },
+    );
+    expect(pinned.status).toBe(500);
+    expect(routeErrorFromJson((await pinned.json()) as unknown).error).toBe(
+      "pinned_approvals_overflow",
+    );
   });
 
   it("rejects approval requests for missing threads when approval storage is shared", async () => {

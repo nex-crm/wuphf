@@ -82,6 +82,7 @@ export type {
   FoldedApprovalRow,
 } from "./projections.ts";
 export {
+  ApprovalPendingSnapshotOverflowError,
   approvalFromRequested,
   approvalWithDecision,
   createApprovalProjection,

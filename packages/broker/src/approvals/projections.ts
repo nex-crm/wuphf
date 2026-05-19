@@ -80,6 +80,20 @@ export interface ApprovalProjection {
   pendingByThreadSnapshot(threadId: ThreadId): ApprovalPendingByThreadSnapshot;
 }
 
+export class ApprovalPendingSnapshotOverflowError extends Error {
+  readonly threadId: ThreadId;
+  readonly count: number;
+
+  constructor(threadId: ThreadId, count: number) {
+    super(
+      `thread ${threadId} has ${count} pending approvals; refusing partial pinned approvals snapshot`,
+    );
+    this.name = "ApprovalPendingSnapshotOverflowError";
+    this.threadId = threadId;
+    this.count = count;
+  }
+}
+
 interface ApprovalDbRow {
   readonly approvalId: string;
   readonly status: string;
@@ -278,12 +292,16 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
         db,
         { threadId, status: "pending" },
         {
-          limit: MAX_ROUTE_APPROVAL_LIST_ITEMS,
+          limit: MAX_ROUTE_APPROVAL_LIST_ITEMS + 1,
         },
-      ).map(rowToFolded);
+      );
+      if (rows.length > MAX_ROUTE_APPROVAL_LIST_ITEMS) {
+        const count = countPendingByThreadStmt.get(threadId)?.count ?? rows.length;
+        throw new ApprovalPendingSnapshotOverflowError(threadId, count);
+      }
       const headLsn = latestHeadLsnByThreadStmt.get(threadId)?.headLsn ?? null;
       return {
-        rows,
+        rows: rows.map(rowToFolded),
         headLsn: headLsn === null ? null : lsnFromV1Number(headLsn),
       };
     },

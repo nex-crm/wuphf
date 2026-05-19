@@ -39,6 +39,7 @@ import {
   validateThread,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
+import { ApprovalPendingSnapshotOverflowError } from "../approvals/index.ts";
 import { approvalViewFromApproval } from "../approvals/view.ts";
 import {
   InvalidListCursorError,
@@ -266,6 +267,15 @@ function handleThreadPinnedApprovalsGet(
       }),
     );
   } catch (err) {
+    if (err instanceof ApprovalPendingSnapshotOverflowError) {
+      deps.logger.error("thread_pinned_approvals_rejected", {
+        reason: "pinned_approvals_overflow",
+        threadId: err.threadId,
+        count: err.count,
+      });
+      writeRouteError(res, 500, "pinned_approvals_overflow", err.message);
+      return;
+    }
     if (writeStorageErrorResponse(res, err, deps.logger, "thread_pinned_approvals_rejected")) {
       return;
     }
