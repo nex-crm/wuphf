@@ -16,6 +16,10 @@
 //   POST /api/v1/cost/budgets             — bearer + operator capability required.
 //   DELETE /api/v1/cost/budgets/:id       — bearer + operator capability required.
 //   POST /api/v1/cost/idempotency/prune   — bearer + operator capability required.
+//   POST /api/v1/approvals                — bearer required. Append approval.requested.
+//   GET  /api/v1/approvals                — bearer required. List folded approvals.
+//   GET  /api/v1/approvals/:id            — bearer required. Fetch one folded approval.
+//   POST /api/v1/approvals/:id/decision   — bearer required. Append approval.decided.
 //   GET  /api/agents/:id/provider-routing — bearer required. Per-agent provider routes.
 //   PUT  /api/agents/:id/provider-routing — bearer required. Replace provider routes.
 //   POST /api/webauthn/registration/challenge — bearer + agent map required.
@@ -54,6 +58,8 @@ import { WebSocketServer } from "ws";
 
 import { handleAgentProviderRoutingRoute } from "./agent-provider-routing/route.ts";
 import type { AgentProviderRoutingStore } from "./agent-provider-routing/types.ts";
+import { DEFAULT_APPROVAL_IDEMPOTENCY_TTL_MS } from "./approvals/idempotency.ts";
+import { type ApprovalRouteDeps, handleApprovalRoute } from "./approvals/routes.ts";
 import { extractBearerFromHeader, tokenMatches } from "./auth.ts";
 import { DEFAULT_COMMAND_IDEMPOTENCY_TTL_MS } from "./cost-ledger/idempotency.ts";
 import { type CostRouteDeps, handleCostRoute } from "./cost-ledger/routes.ts";
@@ -62,7 +68,7 @@ import { InMemoryReceiptStore, type ReceiptStore } from "./receipt-store.ts";
 import { handleReceiptCreate, handleReceiptGet, handleThreadReceiptsList } from "./receipts.ts";
 import { createRunnerRouteState, type RunnerRouteState } from "./runners/route.ts";
 import { createStaticHandler, type StaticHandler } from "./serve-static.ts";
-import { startSseSession } from "./sse.ts";
+import { createSseHub, type SseHub } from "./sse.ts";
 import { attachTerminalUpgrade } from "./terminal-ws.ts";
 import { generateApiToken } from "./token.ts";
 import { type BrokerConfig, type BrokerHandle, type BrokerLogger, NOOP_LOGGER } from "./types.ts";
@@ -92,6 +98,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   const token: ApiToken = config.token ?? generateApiToken();
   const clock = config.clock ?? SYSTEM_CLOCK;
   const staticHandler = createStaticHandler(config.renderer ?? null);
+  const sseHub = createSseHub();
   const trustedOrigins = normalizeTrustedOrigins(config.trustedOrigins);
   // Default to an in-memory store when the host doesn't supply one. Branch
   // 6 hosts will pass a durable event-log-backed store; this default keeps
@@ -189,6 +196,18 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
           logger,
           nowMs: () => Date.now(),
         } satisfies CostRouteDeps);
+  const approvals =
+    config.approvals === undefined
+      ? null
+      : ({
+          appender: config.approvals.appender,
+          projection: config.approvals.projection,
+          logger,
+          nowMs: () => readBrokerClock(clock),
+          emit: (event) => {
+            sseHub.emit({ id: event.id, event: event.kind, data: event });
+          },
+        } satisfies ApprovalRouteDeps);
   if (config.cost !== undefined && config.cost.operatorToken === undefined) {
     // TODO(security): require operatorToken once every host has a separate
     // operator capability minting path.
@@ -198,6 +217,9 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   }
   if (cost !== null) {
     pruneCostIdempotencyOnStartup(cost, logger);
+  }
+  if (approvals !== null) {
+    pruneApprovalIdempotencyOnStartup(approvals, logger);
   }
   if (webauthn !== null) {
     await pruneWebAuthnOnStartup(webauthn, logger);
@@ -215,10 +237,12 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
     routeRequest(req, res, {
       token,
       staticHandler,
+      sseHub,
       logger,
       trustedOrigins,
       receiptStore,
       cost,
+      approvals,
       runnerRoutes,
       agentProviderRoutingStore,
       tokenAgentIds,
@@ -273,10 +297,12 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
 interface RouteDeps {
   readonly token: ApiToken;
   readonly staticHandler: StaticHandler;
+  readonly sseHub: SseHub;
   readonly logger: BrokerLogger;
   readonly trustedOrigins: ReadonlySet<string>;
   readonly receiptStore: ReceiptStore;
   readonly cost: CostRouteDeps | null;
+  readonly approvals: ApprovalRouteDeps | null;
   readonly runnerRoutes: RunnerRouteState | null;
   readonly agentProviderRoutingStore: AgentProviderRoutingStore | null;
   readonly tokenAgentIds: ReadonlyMap<ApiToken, AgentId> | null;
@@ -373,7 +399,7 @@ async function routeRequest(
       res.end();
       return;
     }
-    handleEvents(res);
+    handleEvents(res, deps);
     return;
   }
   // POST /api/receipts is the create endpoint; GET /api/receipts/:id is the
@@ -415,6 +441,13 @@ async function routeRequest(
   // falls through to the 404 catch-all below.
   if (deps.cost !== null && pathname.startsWith("/api/v1/cost/")) {
     const handled = await handleCostRoute(req, res, pathname, deps.cost);
+    if (handled) return;
+  }
+  if (
+    deps.approvals !== null &&
+    (pathname === "/api/v1/approvals" || pathname.startsWith("/api/v1/approvals/"))
+  ) {
+    const handled = await handleApprovalRoute(req, res, pathname, deps.approvals);
     if (handled) return;
   }
   if (deps.agentProviderRoutingStore !== null && deps.tokenAgentIds !== null) {
@@ -549,8 +582,8 @@ function handleHealth(res: ServerResponse): void {
   res.end(body);
 }
 
-function handleEvents(res: ServerResponse): void {
-  startSseSession(res);
+function handleEvents(res: ServerResponse, deps: Pick<RouteDeps, "sseHub">): void {
+  deps.sseHub.startSession(res);
 }
 
 function authorize(
@@ -589,6 +622,30 @@ function pruneCostIdempotencyOnStartup(cost: CostRouteDeps, logger: BrokerLogger
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+function pruneApprovalIdempotencyOnStartup(
+  approvals: Pick<ApprovalRouteDeps, "appender" | "nowMs">,
+  logger: BrokerLogger,
+): void {
+  try {
+    const olderThanMs = DEFAULT_APPROVAL_IDEMPOTENCY_TTL_MS;
+    const cutoffMs = approvals.nowMs() - olderThanMs;
+    const pruned = approvals.appender.pruneIdempotencyOlderThan(cutoffMs);
+    logger.info("approval_idempotency_pruned", { pruned, olderThanMs, cutoffMs });
+  } catch (err) {
+    logger.warn("approval_idempotency_prune_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function readBrokerClock(clock: Clock): number {
+  const nowMs = clock.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+    throw new Error(`createBroker: clock returned invalid timestamp: ${nowMs}`);
+  }
+  return nowMs;
 }
 
 async function pruneWebAuthnOnStartup(
@@ -639,6 +696,9 @@ function classifyApiRoute(pathname: string): string {
     return "thread_receipts";
   }
   if (pathname.startsWith("/api/v1/cost/")) return "cost";
+  if (pathname === "/api/v1/approvals" || pathname.startsWith("/api/v1/approvals/")) {
+    return "approvals";
+  }
   if (pathname.startsWith("/api/agents/") && pathname.endsWith("/provider-routing")) {
     return "agent_provider_routing";
   }

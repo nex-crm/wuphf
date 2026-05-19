@@ -1,0 +1,50 @@
+PRAGMA foreign_keys = ON;
+
+-- §15.B D2: pending approvals are explicit backend events, projected into a
+-- disposable folded-state table. "Pending" is a status filter over this table,
+-- not a derivation from receipt.approvals[].
+CREATE TABLE approval_requests (
+  approval_id      TEXT PRIMARY KEY,
+  status           TEXT NOT NULL,
+  head_lsn         INTEGER NOT NULL,
+  claim            TEXT NOT NULL,
+  scope            TEXT NOT NULL,
+  risk_class       TEXT NOT NULL,
+  thread_id        TEXT,
+  task_id          TEXT,
+  receipt_id       TEXT,
+  requested_by     TEXT NOT NULL,
+  requested_at_ms  INTEGER NOT NULL,
+  decided_by       TEXT,
+  decided_at_ms    INTEGER,
+  decision         TEXT,
+  token            TEXT,
+  FOREIGN KEY (head_lsn) REFERENCES event_log(lsn) ON DELETE RESTRICT,
+  CHECK (status IN ('pending', 'approved', 'rejected', 'abstained')),
+  CHECK (
+    (status = 'pending' AND decided_by IS NULL AND decided_at_ms IS NULL AND decision IS NULL)
+    OR
+    (status != 'pending' AND decided_by IS NOT NULL AND decided_at_ms IS NOT NULL AND decision IS NOT NULL)
+  ),
+  CHECK (
+    (decision IS NULL AND status = 'pending')
+    OR (decision = 'approve' AND status = 'approved')
+    OR (decision = 'reject' AND status = 'rejected')
+    OR (decision = 'abstain' AND status = 'abstained')
+  )
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX approval_requests_status
+  ON approval_requests(status);
+
+-- TODO(PR3): add a thread FK once the thread_state table lands. In this PR,
+-- thread/task/receipt ids are opaque optional references.
+CREATE INDEX approval_requests_thread
+  ON approval_requests(thread_id)
+  WHERE thread_id IS NOT NULL;
+
+CREATE INDEX approval_requests_task
+  ON approval_requests(task_id)
+  WHERE task_id IS NOT NULL;
+
+PRAGMA user_version = 6;

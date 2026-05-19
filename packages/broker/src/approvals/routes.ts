@@ -1,0 +1,538 @@
+// HTTP routes for explicit approval requests.
+//
+// Mounted under `/api/v1/approvals` when the host supplies an approvals
+// config block. The listener owns loopback and bearer checks before this
+// dispatcher runs.
+
+import type { IncomingMessage, ServerResponse } from "node:http";
+
+import {
+  APPROVAL_REQUEST_STATUS_VALUES,
+  type ApprovalDecidedAuditPayload,
+  type ApprovalRequest,
+  type ApprovalRequestedAuditPayload,
+  type ApprovalRequestId,
+  type ApprovalRequestStatus,
+  type ApprovalStreamEvent,
+  approvalAuditPayloadFromJsonValue,
+  approvalRequestToJson,
+  approvalRequestToJsonValue,
+  asApprovalRequestId,
+  asTaskId,
+  asThreadId,
+  type EventLsn,
+  parseLsn,
+  validateApprovalStreamEvent,
+} from "@wuphf/protocol";
+import BetterSqlite3 from "better-sqlite3";
+
+import type { BrokerLogger } from "../types.ts";
+import {
+  type ApprovalAppender,
+  ApprovalRequestAlreadyDecidedError,
+  ApprovalRequestAlreadyExistsError,
+  ApprovalRequestNotFoundError,
+} from "./appender.ts";
+import {
+  type ApprovalCommand,
+  type ApprovalIdempotencyParseError,
+  type ParsedApprovalIdempotencyKey,
+  parseApprovalIdempotencyKey,
+} from "./idempotency.ts";
+import type { ApprovalListFilter, ApprovalProjection } from "./projections.ts";
+
+const MAX_APPROVAL_BODY_BYTES = 256 * 1024;
+const APPROVAL_STATUS_SET: ReadonlySet<string> = new Set<string>(APPROVAL_REQUEST_STATUS_VALUES);
+
+export interface ApprovalRouteDeps {
+  readonly appender: ApprovalAppender;
+  readonly projection: ApprovalProjection;
+  readonly logger: BrokerLogger;
+  readonly nowMs: () => number;
+  readonly emit: (event: ApprovalStreamEvent) => void;
+}
+
+export async function handleApprovalRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathname: string,
+  deps: ApprovalRouteDeps,
+): Promise<boolean> {
+  if (pathname === "/api/v1/approvals") {
+    if (req.method === "POST") {
+      await handleApprovalRequestPost(req, res, deps);
+      return true;
+    }
+    if (req.method === "GET" || req.method === "HEAD") {
+      handleApprovalList(req, res, deps);
+      return true;
+    }
+    methodNotAllowed(res, "GET, POST");
+    return true;
+  }
+
+  const decisionId = approvalDecisionIdFromPathname(pathname);
+  if (decisionId !== null) {
+    if (req.method !== "POST") {
+      methodNotAllowed(res, "POST");
+      return true;
+    }
+    await handleApprovalDecisionPost(req, res, deps, decisionId);
+    return true;
+  }
+
+  if (pathname.startsWith("/api/v1/approvals/")) {
+    const id = approvalIdFromPathname(pathname);
+    if (id === null) {
+      notFound(res);
+      return true;
+    }
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      methodNotAllowed(res, "GET");
+      return true;
+    }
+    handleApprovalGet(res, deps, id);
+    return true;
+  }
+
+  return false;
+}
+
+async function handleApprovalRequestPost(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ApprovalRouteDeps,
+): Promise<void> {
+  const idem = requireIdempotency(req, res, deps, "approval.requested", "approval_request");
+  if (!idem.ok) return;
+  if (!ensureJsonContentType(req, res)) return;
+
+  let body: string;
+  try {
+    body = await readBody(req, res, MAX_APPROVAL_BODY_BYTES);
+  } catch {
+    return;
+  }
+
+  let payload: ApprovalRequestedAuditPayload;
+  try {
+    payload = approvalAuditPayloadFromJsonValue(
+      "approval_requested",
+      JSON.parse(body) as unknown,
+    ) as ApprovalRequestedAuditPayload;
+  } catch (err) {
+    invalidPayload(res, deps, "approval_request", err);
+    return;
+  }
+
+  try {
+    const result = deps.appender.requestApprovalIdempotent({
+      payload,
+      idempotency: idem.key,
+      nowMs: deps.nowMs(),
+      render: (applied) => ({
+        statusCode: 201,
+        payload: Buffer.from(approvalRequestToJson(applied.approval), "utf8"),
+      }),
+    });
+    writeJsonRaw(res, result.statusCode, result.payload, result.replayed);
+    if (!result.replayed && result.approval !== null && result.lsn !== null) {
+      emitApprovalInvalidation("approval.requested", result.approval, result.lsn, deps);
+    }
+  } catch (err) {
+    if (err instanceof ApprovalRequestAlreadyExistsError) {
+      writeJson(res, 409, { error: "approval_request_exists" });
+      return;
+    }
+    if (writeSqliteErrorResponse(res, err, deps.logger, "approval_request_rejected")) return;
+    throw err;
+  }
+}
+
+async function handleApprovalDecisionPost(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ApprovalRouteDeps,
+  pathId: ApprovalRequestId,
+): Promise<void> {
+  const idem = requireIdempotency(req, res, deps, "approval.decided", "approval_decision");
+  if (!idem.ok) return;
+  if (!ensureJsonContentType(req, res)) return;
+
+  let body: string;
+  try {
+    body = await readBody(req, res, MAX_APPROVAL_BODY_BYTES);
+  } catch {
+    return;
+  }
+
+  let payload: ApprovalDecidedAuditPayload;
+  try {
+    payload = approvalAuditPayloadFromJsonValue(
+      "approval_decided",
+      JSON.parse(body) as unknown,
+    ) as ApprovalDecidedAuditPayload;
+  } catch (err) {
+    invalidPayload(res, deps, "approval_decision", err);
+    return;
+  }
+  if (payload.requestId !== pathId) {
+    writeJson(res, 400, { error: "approval_request_id_mismatch" });
+    return;
+  }
+
+  try {
+    const result = deps.appender.decideApprovalIdempotent({
+      payload,
+      idempotency: idem.key,
+      nowMs: deps.nowMs(),
+      render: (applied) => ({
+        statusCode: 201,
+        payload: Buffer.from(approvalRequestToJson(applied.approval), "utf8"),
+      }),
+    });
+    writeJsonRaw(res, result.statusCode, result.payload, result.replayed);
+    if (!result.replayed && result.approval !== null && result.lsn !== null) {
+      emitApprovalInvalidation("approval.decided", result.approval, result.lsn, deps);
+    }
+  } catch (err) {
+    if (err instanceof ApprovalRequestNotFoundError) {
+      notFound(res);
+      return;
+    }
+    if (err instanceof ApprovalRequestAlreadyDecidedError) {
+      writeJson(res, 409, { error: "approval_not_pending" });
+      return;
+    }
+    if (writeSqliteErrorResponse(res, err, deps.logger, "approval_decision_rejected")) return;
+    throw err;
+  }
+}
+
+function handleApprovalList(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ApprovalRouteDeps,
+): void {
+  const parsed = parseListFilter(req);
+  if (!parsed.ok) {
+    writeJson(res, 400, { error: parsed.error });
+    return;
+  }
+  try {
+    const approvals = deps.projection
+      .list(parsed.filter)
+      .map((row) => approvalRequestToJsonValue(row.approval));
+    writeJson(res, 200, { approvals });
+  } catch (err) {
+    if (writeSqliteErrorResponse(res, err, deps.logger, "approval_list_rejected")) return;
+    throw err;
+  }
+}
+
+function handleApprovalGet(
+  res: ServerResponse,
+  deps: ApprovalRouteDeps,
+  id: ApprovalRequestId,
+): void {
+  try {
+    const row = deps.projection.getById(id);
+    if (row === null) {
+      notFound(res);
+      return;
+    }
+    writeJson(res, 200, approvalRequestToJsonValue(row.approval));
+  } catch (err) {
+    if (writeSqliteErrorResponse(res, err, deps.logger, "approval_get_rejected")) return;
+    throw err;
+  }
+}
+
+type IdempotencyRouteResult =
+  | { readonly ok: true; readonly key: ParsedApprovalIdempotencyKey }
+  | { readonly ok: false };
+
+function requireIdempotency(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: Pick<ApprovalRouteDeps, "logger">,
+  command: ApprovalCommand,
+  routeName: string,
+): IdempotencyRouteResult {
+  const parsed = parseApprovalIdempotencyKey(req.headers["idempotency-key"]?.toString(), command);
+  if (!parsed.ok) {
+    writeIdempotencyError(res, parsed.error, deps.logger, routeName);
+    return { ok: false };
+  }
+  return { ok: true, key: parsed.key };
+}
+
+function parseListFilter(
+  req: IncomingMessage,
+):
+  | { readonly ok: true; readonly filter: ApprovalListFilter }
+  | { readonly ok: false; readonly error: string } {
+  const url = new URL(req.url ?? "", "http://127.0.0.1");
+  const filter: {
+    status?: ApprovalRequestStatus;
+    threadId?: ReturnType<typeof asThreadId>;
+    taskId?: ReturnType<typeof asTaskId>;
+  } = {};
+
+  const status = singleQueryParam(url.searchParams, "status");
+  if (status === "multiple") return { ok: false, error: "invalid_status" };
+  if (status !== undefined) {
+    if (!APPROVAL_STATUS_SET.has(status)) return { ok: false, error: "invalid_status" };
+    filter.status = status as ApprovalRequestStatus;
+  }
+
+  const threadId = singleQueryParam(url.searchParams, "threadId");
+  if (threadId === "multiple") return { ok: false, error: "invalid_thread_id" };
+  if (threadId !== undefined) {
+    try {
+      filter.threadId = asThreadId(threadId);
+    } catch {
+      return { ok: false, error: "invalid_thread_id" };
+    }
+  }
+
+  const taskId = singleQueryParam(url.searchParams, "taskId");
+  if (taskId === "multiple") return { ok: false, error: "invalid_task_id" };
+  if (taskId !== undefined) {
+    try {
+      filter.taskId = asTaskId(taskId);
+    } catch {
+      return { ok: false, error: "invalid_task_id" };
+    }
+  }
+
+  return { ok: true, filter };
+}
+
+function singleQueryParam(params: URLSearchParams, key: string): string | "multiple" | undefined {
+  const values = params.getAll(key);
+  if (values.length === 0) return undefined;
+  if (values.length > 1) return "multiple";
+  return values[0] ?? "";
+}
+
+function approvalIdFromPathname(pathname: string): ApprovalRequestId | null {
+  const prefix = "/api/v1/approvals/";
+  const encoded = pathname.slice(prefix.length);
+  if (encoded.length === 0 || encoded.includes("/")) return null;
+  try {
+    return asApprovalRequestId(decodeURIComponent(encoded));
+  } catch {
+    return null;
+  }
+}
+
+function approvalDecisionIdFromPathname(pathname: string): ApprovalRequestId | null {
+  const prefix = "/api/v1/approvals/";
+  const suffix = "/decision";
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null;
+  const encoded = pathname.slice(prefix.length, pathname.length - suffix.length);
+  if (encoded.length === 0 || encoded.includes("/")) return null;
+  try {
+    return asApprovalRequestId(decodeURIComponent(encoded));
+  } catch {
+    return null;
+  }
+}
+
+function emitApprovalInvalidation(
+  kind: "approval.requested" | "approval.decided",
+  approval: ApprovalRequest,
+  headLsn: EventLsn,
+  deps: ApprovalRouteDeps,
+): void {
+  const localLsn = parseLsn(headLsn).localLsn;
+  const event: ApprovalStreamEvent = {
+    id: `approval_${localLsn}`,
+    kind,
+    emittedAt: new Date(deps.nowMs()).toISOString(),
+    payload: {
+      requestId: approval.id,
+      ...(approval.threadId === undefined ? {} : { threadId: approval.threadId }),
+      headLsn,
+    },
+  };
+  const validation = validateApprovalStreamEvent(event);
+  if (!validation.ok) {
+    throw new Error(`invalid approval stream event: ${JSON.stringify(validation.errors)}`);
+  }
+  deps.emit(event);
+}
+
+function invalidPayload(
+  res: ServerResponse,
+  deps: Pick<ApprovalRouteDeps, "logger">,
+  routeName: string,
+  err: unknown,
+): void {
+  const reason = err instanceof Error ? err.message : "validation_failed";
+  deps.logger.warn(`${routeName}_rejected`, { reason: "invalid_payload" });
+  writeJson(res, 400, { error: "invalid_payload", reason });
+}
+
+function writeIdempotencyError(
+  res: ServerResponse,
+  err: ApprovalIdempotencyParseError,
+  logger: BrokerLogger,
+  routeName: string,
+): void {
+  logger.warn(`${routeName}_rejected`, { reason: `idempotency_${err.code}` });
+  if (err.code === "missing") {
+    writeJson(res, 400, { error: "idempotency_key_required" });
+    return;
+  }
+  writeJson(res, 400, { error: "idempotency_key_invalid", reason: err });
+}
+
+function ensureJsonContentType(req: IncomingMessage, res: ServerResponse): boolean {
+  const contentType = req.headers["content-type"];
+  if (typeof contentType !== "string" || !isJsonMediaType(contentType)) {
+    writeJson(res, 415, { error: "unsupported_media_type" });
+    return false;
+  }
+  return true;
+}
+
+function isJsonMediaType(value: string): boolean {
+  const semi = value.indexOf(";");
+  const head = (semi === -1 ? value : value.slice(0, semi)).trim().toLowerCase();
+  return head === "application/json";
+}
+
+function readBody(req: IncomingMessage, res: ServerResponse, maxBytes: number): Promise<string> {
+  return new Promise((resolveFn, rejectFn) => {
+    let receivedBytes = 0;
+    const chunks: Buffer[] = [];
+    let settled = false;
+    const finish = (run: () => void): void => {
+      if (settled) return;
+      settled = true;
+      run();
+    };
+    req.on("data", (chunk: Buffer) => {
+      receivedBytes += chunk.length;
+      if (receivedBytes > maxBytes) {
+        req.pause();
+        if (!res.writableEnded) {
+          res.writeHead(413, { "Content-Type": "text/plain", Connection: "close" });
+          res.end("body_too_large");
+        }
+        finish(() => rejectFn(new Error("body_too_large")));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => finish(() => resolveFn(Buffer.concat(chunks).toString("utf8"))));
+    req.on("error", (err) => finish(() => rejectFn(err)));
+    req.on("close", () => finish(() => rejectFn(new Error("body_read_aborted"))));
+  });
+}
+
+function writeSqliteErrorResponse(
+  res: ServerResponse,
+  err: unknown,
+  logger: BrokerLogger,
+  rejectedEvent: string,
+): boolean {
+  if (!isSqliteError(err)) return false;
+  if (isSqliteBusyError(err)) {
+    logger.warn(rejectedEvent, { reason: "store_busy" });
+    writeJson(res, 503, { error: "store_busy" }, { "Retry-After": "1" });
+    return true;
+  }
+  if (isSqliteFullError(err)) {
+    logger.warn(rejectedEvent, { reason: "store_full" });
+    writeJson(res, 507, { error: "store_full" });
+    return true;
+  }
+  if (isSqliteUnavailableError(err)) {
+    logger.error(rejectedEvent, { reason: "storage_error" });
+    writeJson(res, 503, { error: "storage_error" });
+    return true;
+  }
+  return false;
+}
+
+interface SqliteErrorWithCode extends Error {
+  readonly code: string;
+}
+
+function isSqliteError(err: unknown): err is SqliteErrorWithCode {
+  return err instanceof BetterSqlite3.SqliteError;
+}
+
+function isSqliteFullError(err: SqliteErrorWithCode): boolean {
+  return err.code === "SQLITE_FULL";
+}
+
+function isSqliteBusyError(err: SqliteErrorWithCode): boolean {
+  return (
+    err.code === "SQLITE_BUSY" ||
+    err.code === "SQLITE_LOCKED" ||
+    err.code.startsWith("SQLITE_BUSY_") ||
+    err.code.startsWith("SQLITE_LOCKED_")
+  );
+}
+
+function isSqliteUnavailableError(err: SqliteErrorWithCode): boolean {
+  return (
+    err.code === "SQLITE_READONLY" ||
+    err.code === "SQLITE_CANTOPEN" ||
+    err.code === "SQLITE_CORRUPT" ||
+    err.code.startsWith("SQLITE_READONLY_") ||
+    err.code.startsWith("SQLITE_IOERR") ||
+    err.code.startsWith("SQLITE_CANTOPEN_") ||
+    err.code.startsWith("SQLITE_CORRUPT_")
+  );
+}
+
+function writeJson(
+  res: ServerResponse,
+  status: number,
+  bodyValue: unknown,
+  extraHeaders: Record<string, string> = {},
+): void {
+  const body = JSON.stringify(bodyValue);
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Length": String(Buffer.byteLength(body, "utf8")),
+    ...extraHeaders,
+  });
+  res.end(body);
+}
+
+function writeJsonRaw(
+  res: ServerResponse,
+  status: number,
+  payload: Buffer,
+  replayed: boolean,
+): void {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Length": String(payload.byteLength),
+    ...(replayed ? { "Idempotent-Replay": "true" } : {}),
+  });
+  res.end(payload);
+}
+
+function notFound(res: ServerResponse): void {
+  writeJson(res, 404, { error: "not_found" });
+}
+
+function methodNotAllowed(res: ServerResponse, allow: string): void {
+  const body = JSON.stringify({ error: "method_not_allowed" });
+  res.writeHead(405, {
+    Allow: allow,
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Length": String(Buffer.byteLength(body, "utf8")),
+  });
+  res.end(body);
+}

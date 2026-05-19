@@ -26,6 +26,17 @@ export interface SseSession {
   close(): void;
 }
 
+export interface SseEvent {
+  readonly id: string;
+  readonly event: string;
+  readonly data: unknown;
+}
+
+export interface SseHub {
+  startSession(res: ServerResponse, opts?: SseSessionOptions): SseSession;
+  emit(event: SseEvent): void;
+}
+
 export interface SseSessionOptions {
   /**
    * Override the keepalive interval. Tests pass a small value to assert the
@@ -42,6 +53,43 @@ export interface SseSessionOptions {
    * (`broker_<seq>`); tests pass a fixed value to assert framing.
    */
   readonly idForReady?: string;
+}
+
+export function createSseHub(): SseHub {
+  const clients = new Set<ServerResponse>();
+  return {
+    startSession(res: ServerResponse, opts: SseSessionOptions = {}): SseSession {
+      const session = startSseSession(res, opts);
+      clients.add(res);
+      const remove = (): void => {
+        clients.delete(res);
+      };
+      res.on("close", remove);
+      res.on("error", remove);
+      return {
+        close(): void {
+          remove();
+          res.off("close", remove);
+          res.off("error", remove);
+          session.close();
+        },
+      };
+    },
+    emit(event: SseEvent): void {
+      const frame = formatEvent(event);
+      for (const res of clients) {
+        if (res.writableEnded) {
+          clients.delete(res);
+          continue;
+        }
+        try {
+          res.write(frame);
+        } catch {
+          clients.delete(res);
+        }
+      }
+    },
+  };
 }
 
 export function startSseSession(res: ServerResponse, opts: SseSessionOptions = {}): SseSession {
@@ -90,12 +138,6 @@ export function startSseSession(res: ServerResponse, opts: SseSessionOptions = {
   res.on("error", close);
 
   return { close };
-}
-
-interface SseEvent {
-  readonly id: string;
-  readonly event: string;
-  readonly data: Readonly<Record<string, unknown>>;
 }
 
 function formatEvent(event: SseEvent): string {

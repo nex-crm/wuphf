@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent-provider-routing": "./src/agent-provider-routing/index.ts",
+    "./approvals": "./src/approvals/index.ts",
     "./cost-ledger": "./src/cost-ledger/index.ts",
     "./sqlite": "./src/sqlite-receipt-store.ts",
     "./webauthn": "./src/webauthn/index.ts"

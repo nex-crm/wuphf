@@ -27,6 +27,7 @@ flowchart LR
   dispatch -- "GET /api/receipts/:id" --> read["ReceiptStore.get<br/>200 / 404"]
   dispatch -- "GET /api/threads/:tid/receipts" --> list["ReceiptStore.list({threadId, cursor?, limit?})<br/>200 JSON array (+ Link rel=next when more pages)<br/>400 on invalid cursor/limit"]
   dispatch -- "/api/v1/cost/*" --> cost["cost ledger routes<br/>read: bearer<br/>mutate: bearer + operator capability"]
+  dispatch -- "/api/v1/approvals*" --> approvals["approval routes<br/>request · list · get · decide"]
   dispatch -- "/api/agents/:id/provider-routing" --> routing["provider-routing routes<br/>GET read · PUT replace"]
   dispatch -- "/api/webauthn/*" --> webauthn["WebAuthn control-plane routes<br/>registration · cosign"]
   dispatch -- "/api/runners*" --> runners["runner routes<br/>POST spawn · GET events SSE<br/>bearer maps to AgentId"]
@@ -78,6 +79,25 @@ unknown authenticated API routes and return 404.
 
 See [cost-ledger.md](./cost-ledger.md) for the full route table, idempotency
 keys, replay-check discrepancy contract, and public subpath exports.
+
+### Approval routes
+
+When `createBroker({ approvals })` is supplied, the listener mounts explicit
+approval state under `/api/v1/approvals`. Without an approvals config, those
+paths behave like unknown authenticated API routes and return 404. Writes use
+the same `cmd_<command>_<ULID>` idempotency shape as the cost ledger, and every
+folded approval returned to the renderer is emitted through
+`approvalRequestToJsonValue`.
+
+| Method | Path | Auth | Contract |
+|---|---|---|---|
+| POST | `/api/v1/approvals` | bearer | Parses `ApprovalRequestedAuditPayload`, appends `approval.requested`, projects a pending `ApprovalRequest`, returns that protocol wire shape, and emits `approval.requested` on `/api/events`. |
+| GET | `/api/v1/approvals` | bearer | Lists folded approvals. Optional filters: `status`, `threadId`, `taskId`. |
+| GET | `/api/v1/approvals/:id` | bearer | Fetches one folded approval, or 404 for malformed/missing ids. |
+| POST | `/api/v1/approvals/:id/decision` | bearer | Parses `ApprovalDecidedAuditPayload`, requires path/body `requestId` match, rejects non-pending approvals with 409, records any supplied token without WebAuthn verification, and emits `approval.decided`. |
+
+See [approvals.md](./approvals.md) for the projection schema, replay rebuild,
+and SSE payload contract.
 
 ### Agent provider-routing routes
 

@@ -2,6 +2,7 @@
 
 import type { AgentId, ApiToken, BrokerPort } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
+import type { ApprovalAppender, ApprovalProjection } from "./approvals/index.ts";
 import type { CostLedger } from "./cost-ledger/index.ts";
 import type { ReceiptStore } from "./receipt-store.ts";
 import type { RunnerRouteConfig } from "./runners/route.ts";
@@ -108,6 +109,20 @@ export interface BrokerConfig {
      * routes. Read routes continue to use the broker bearer only.
      */
     readonly operatorToken?: ApiToken;
+  };
+  /**
+   * Optional explicit approvals feature. When supplied,
+   * `/api/v1/approvals` routes are mounted. Hosts construct these deps via
+   * `createApprovalProjection(db)` and
+   * `createApprovalAppender(db, eventLog, projection)`.
+   *
+   * The broker does NOT own the database — closing the broker does not
+   * close `db`. Host owns lifecycle.
+   */
+  readonly approvals?: {
+    readonly appender: ApprovalAppender;
+    readonly projection: ApprovalProjection;
+    readonly db: Database.Database;
   };
   /**
    * Optional agent runner routes. When supplied, POST /api/runners and
