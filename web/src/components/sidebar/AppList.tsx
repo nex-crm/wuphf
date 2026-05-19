@@ -28,6 +28,7 @@ import {
   useCurrentApp,
   useFallbackChannelSlug,
 } from "../../routes/useCurrentRoute";
+import { SidebarItem } from "./SidebarItem";
 
 // Notebooks and reviews render inside the Wiki app shell via tabs, so the
 // 'Wiki' sidebar entry lights up for any of those three currentApp values.
@@ -86,24 +87,29 @@ export function AppList() {
               ? WIKI_SURFACE_APPS.has(currentApp ?? "")
               : currentApp === app.id;
           return (
-            <button
-              type="button"
+            <SidebarItem
               key={app.id}
-              className={`sidebar-item${isActive ? " active" : ""}`}
+              icon={
+                Icon ? (
+                  <Icon className="sidebar-item-icon" />
+                ) : (
+                  <span className="sidebar-item-emoji">{app.icon}</span>
+                )
+              }
+              label={app.name}
+              active={isActive}
               onClick={() => navigateToSidebarApp(app.id)}
-            >
-              {Icon ? (
-                <Icon className="sidebar-item-icon" />
-              ) : (
-                <span className="sidebar-item-emoji">{app.icon}</span>
-              )}
-              <span style={{ flex: 1 }}>{app.name}</span>
-              {badge !== null && (
-                <span className="sidebar-badge" aria-label={`${badge} pending`}>
-                  {badge}
-                </span>
-              )}
-            </button>
+              badge={
+                badge !== null ? (
+                  <span
+                    className="sidebar-badge"
+                    aria-label={`${badge} pending`}
+                  >
+                    {badge}
+                  </span>
+                ) : undefined
+              }
+            />
           );
         })}
       </div>

@@ -6,12 +6,17 @@ import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
+import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
 import { InboxButton } from "../sidebar/InboxButton";
 import { IssuesGroup } from "../sidebar/IssuesGroup";
-import { RecentObjectsPanel } from "../sidebar/RecentObjectsPanel";
+import {
+  RecentObjectsPanel,
+  hasRecentObjects,
+} from "../sidebar/RecentObjectsPanel";
+import { SidebarSectionHeader } from "../sidebar/SidebarSectionHeader";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { WorkspaceSummary } from "../sidebar/WorkspaceSummary";
 import { CollapsedSidebar } from "./CollapsedSidebar";
@@ -21,45 +26,6 @@ export const SIDEBAR_DEFAULT_WIDTH = 280;
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 420;
 export const SIDEBAR_WIDTH_STORAGE_KEY = "wuphf-sidebar-width";
-
-function SectionToggle({
-  label,
-  open,
-  onToggle,
-}: {
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="sidebar-section-title sidebar-section-toggle"
-      onClick={onToggle}
-      aria-expanded={open}
-    >
-      <span>{label}</span>
-      <svg
-        aria-hidden="true"
-        focusable="false"
-        style={{
-          width: 10,
-          height: 10,
-          transform: open ? "rotate(90deg)" : "rotate(0deg)",
-          transition: "transform 0.15s",
-        }}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="m9 18 6-6-6-6" />
-      </svg>
-    </button>
-  );
-}
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function Sidebar() {
@@ -71,9 +37,14 @@ export function Sidebar() {
   const toggleSidebarIssues = useAppStore((s) => s.toggleSidebarIssues);
   const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
   const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
+  const sidebarRecentOpen = useAppStore((s) => s.sidebarRecentOpen);
+  const toggleSidebarRecent = useAppStore((s) => s.toggleSidebarRecent);
+  const showRecent = hasRecentObjects();
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const currentApp = useCurrentApp();
+  const route = useCurrentRoute();
+  const issuesListActive = route.kind === "issues-list";
 
   const resize = useResizablePane({
     storageKey: SIDEBAR_WIDTH_STORAGE_KEY,
@@ -135,72 +106,106 @@ export function Sidebar() {
             <InboxButton />
           </div>
 
-          <div
-            className={`sidebar-section is-team${sidebarAgentsOpen ? "" : " is-collapsed"}`}
-          >
-            <SectionToggle
-              label="Agents"
-              open={sidebarAgentsOpen}
-              onToggle={toggleSidebarAgents}
-            />
-          </div>
-          <div
-            className={`sidebar-collapsible${sidebarAgentsOpen ? " is-open" : ""}`}
-          >
-            <AgentList />
-          </div>
+          <div className="sidebar-scroll">
+            <div
+              className={`sidebar-section is-team${sidebarAgentsOpen ? "" : " is-collapsed"}`}
+            >
+              <SidebarSectionHeader
+                label="Agents"
+                open={sidebarAgentsOpen}
+                onToggle={toggleSidebarAgents}
+              />
+              <div
+                className={`sidebar-collapsible${sidebarAgentsOpen ? " is-open" : ""}`}
+              >
+                <AgentList />
+              </div>
+            </div>
 
-          <div
-            className={`sidebar-section${sidebarChannelsOpen ? "" : " is-collapsed"}`}
-          >
-            <SectionToggle
-              label="Channels"
-              open={sidebarChannelsOpen}
-              onToggle={toggleSidebarChannels}
-            />
-          </div>
-          <div
-            className={`sidebar-collapsible${sidebarChannelsOpen ? " is-open" : ""}`}
-          >
-            <ChannelList />
-          </div>
+            <div
+              className={`sidebar-section${sidebarChannelsOpen ? "" : " is-collapsed"}`}
+            >
+              <SidebarSectionHeader
+                label="Channels"
+                open={sidebarChannelsOpen}
+                onToggle={toggleSidebarChannels}
+              />
+              <div
+                className={`sidebar-collapsible${sidebarChannelsOpen ? " is-open" : ""}`}
+              >
+                <ChannelList />
+              </div>
+            </div>
 
-          {/* Phase 3 — Issues group (between Channels and Tools, per spec Surface 2 layout). */}
-          <div
-            className={`sidebar-section${sidebarIssuesOpen ? "" : " is-collapsed"}`}
-          >
-            <IssuesGroup
-              open={sidebarIssuesOpen}
-              onToggle={toggleSidebarIssues}
-            />
-          </div>
-          <div
-            className={`sidebar-collapsible${sidebarIssuesOpen ? " is-open" : ""}`}
-          >
-            {/* Issue list rows are rendered inside IssuesGroup when open */}
-          </div>
+            {/* Phase 3 — Issues group (between Channels and Tools, per spec Surface 2 layout). */}
+            <div
+              className={`sidebar-section${sidebarIssuesOpen ? "" : " is-collapsed"}`}
+              data-testid="issues-group-header"
+            >
+              <SidebarSectionHeader
+                label="Issues"
+                open={sidebarIssuesOpen}
+                onToggle={toggleSidebarIssues}
+                actions={
+                  <button
+                    type="button"
+                    className={`sidebar-section-action${issuesListActive ? " active" : ""}`}
+                    onClick={() => void router.navigate({ to: "/issues" })}
+                    title="View all issues"
+                    data-testid="issues-sidebar-view-all"
+                  >
+                    View all
+                  </button>
+                }
+              />
+              <div
+                className={`sidebar-collapsible${sidebarIssuesOpen ? " is-open" : ""}`}
+              >
+                <IssuesGroup open={sidebarIssuesOpen} />
+              </div>
+            </div>
 
-          <div
-            className={`sidebar-section${sidebarAppsOpen ? "" : " is-collapsed"}`}
-          >
-            <SectionToggle
-              label="Tools"
-              open={sidebarAppsOpen}
-              onToggle={toggleSidebarApps}
-            />
-          </div>
-          <div
-            className={`sidebar-collapsible${sidebarAppsOpen ? " is-open" : ""}`}
-          >
-            <AppList />
-          </div>
+            <div
+              className={`sidebar-section${sidebarAppsOpen ? "" : " is-collapsed"}`}
+            >
+              <SidebarSectionHeader
+                label="Tools"
+                open={sidebarAppsOpen}
+                onToggle={toggleSidebarApps}
+              />
+              <div
+                className={`sidebar-collapsible${sidebarAppsOpen ? " is-open" : ""}`}
+              >
+                <AppList />
+              </div>
+            </div>
 
-          {/* Phase 2 onboarding preview overlay — shows staged channels/agents
-              forming as the user answers CEO questions. Hidden once onboarded. */}
-          <SidebarPreviewOverlay />
+            {/* Phase 2 onboarding preview overlay — shows staged channels/agents
+                forming as the user answers CEO questions. Hidden once onboarded. */}
+            <SidebarPreviewOverlay />
 
-          <RecentObjectsPanel />
-          <WorkspaceSummary />
+            {showRecent && (
+              <div
+                className={`sidebar-section${sidebarRecentOpen ? "" : " is-collapsed"}`}
+              >
+                <SidebarSectionHeader
+                  label="Recent"
+                  open={sidebarRecentOpen}
+                  onToggle={toggleSidebarRecent}
+                />
+                <div
+                  className={`sidebar-collapsible${sidebarRecentOpen ? " is-open" : ""}`}
+                >
+                  <RecentObjectsPanel />
+                </div>
+              </div>
+            )}
+          </div>
+          {/* WorkspaceSummary intentionally not rendered here — the stats
+              it shows (agents active, tasks open, tokens) are redundant
+              with the Agents/Issues sections and the Usage footer. The
+              component file is preserved so it can be re-used inside a
+              future Usage popover or Settings surface. */}
           <UsagePanel />
         </>
       )}

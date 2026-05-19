@@ -2233,6 +2233,7 @@ html[data-theme="noir-gold"] {
   padding: 3px 6px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
   color: var(--text-secondary);
   display: inline-block;
 }

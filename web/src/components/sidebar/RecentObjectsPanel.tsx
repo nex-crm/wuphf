@@ -1,16 +1,16 @@
 /**
- * RecentObjectsPanel — "Recently visited" list in the sidebar.
- *
- * Shows the last N items the user opened (from localStorage via
- * useRecentObjects). Each item renders as a clickable link using the
- * href from resolveObjectRoute so it works even after a full reload.
- *
- * Phase 5 PR 2 — app navigation refresh.
+ * RecentObjectsPanel — "Recent" list body, rendered inside a unified
+ * sidebar section (header lives in Sidebar.tsx). Returns null when there's
+ * nothing recent so the wrapping section stays hidden.
  */
 
 import { readRecentObjects } from "../../hooks/useRecentObjects";
 
 const DISPLAY_COUNT = 8;
+
+export function hasRecentObjects(): boolean {
+  return readRecentObjects().length > 0;
+}
 
 export function RecentObjectsPanel() {
   // Read synchronously — the list only changes on navigation, and the
@@ -22,20 +22,17 @@ export function RecentObjectsPanel() {
   }
 
   return (
-    <div className="recent-objects">
-      <div className="sidebar-section-title recent-objects-title">Recent</div>
-      <div className="recent-objects-list">
+    <div className="sidebar-scroll-wrap is-recent">
+      <div className="sidebar-recent" data-testid="sidebar-recent-list">
         {items.map((item) => (
           <a
             key={`${item.ref.kind}:${item.href}`}
             href={item.href}
-            className="sidebar-item recent-objects-item"
+            className="sidebar-item"
             title={item.label}
           >
             <RecentObjectIcon kind={item.ref.kind} />
-            <span className="recent-objects-label">
-              {humanLabel(item.label)}
-            </span>
+            <span className="sidebar-item-label">{humanLabel(item.label)}</span>
           </a>
         ))}
       </div>

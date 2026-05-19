@@ -23,7 +23,7 @@ import { getOfficeTasks, type Task } from "../../api/tasks";
 import { router } from "../../lib/router";
 import type { LifecycleState } from "../../lib/types/lifecycle";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
-import { SidebarItemLabel } from "./SidebarItemLabel";
+import { SidebarItem } from "./SidebarItem";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -71,64 +71,18 @@ function isOpenIssue(task: Task): boolean {
   return !TERMINAL_STATES.has(taskToState(task));
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────
-
-function SectionToggle({
-  label,
-  open,
-  onToggle,
-}: {
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="sidebar-section-title sidebar-section-toggle"
-      onClick={onToggle}
-      aria-expanded={open}
-    >
-      <span>{label}</span>
-      <svg
-        aria-hidden="true"
-        focusable="false"
-        style={{
-          width: 10,
-          height: 10,
-          transform: open ? "rotate(90deg)" : "rotate(0deg)",
-          transition: "transform 0.15s",
-        }}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="m9 18 6-6-6-6" />
-      </svg>
-    </button>
-  );
-}
-
 // ── Main component ─────────────────────────────────────────────────────
 
 interface IssuesGroupProps {
   open: boolean;
-  onToggle: () => void;
 }
 
 /**
- * Renders the Issues sidebar section header + optional issue list.
- *
- * The header row always renders (toggle + New issue button). The list
- * only renders when `open === true`. Using this pattern instead of the
- * separate sidebar-collapsible div in Sidebar.tsx allows the "+New" button
- * to remain visible even when collapsed — same UX as ChannelList's "+ New
- * Channel" button inside the scroll area.
+ * Renders the Issues sidebar list body. The section header lives in
+ * Sidebar.tsx alongside the other section headers so all four sections
+ * (Agents, Channels, Issues, Tools) share the same structure.
  */
-export function IssuesGroup({ open, onToggle }: IssuesGroupProps) {
+export function IssuesGroup({ open }: IssuesGroupProps) {
   const route = useCurrentRoute();
   const activeIssueId = route.kind === "issue-detail" ? route.issueId : null;
 
@@ -143,101 +97,53 @@ export function IssuesGroup({ open, onToggle }: IssuesGroupProps) {
 
   const openIssues = (query.data?.tasks ?? []).filter(isOpenIssue);
 
+  // Always render the body — the parent .sidebar-collapsible owns the
+  // open/close animation via grid-template-rows + overflow:hidden. If we
+  // returned null when closed, the collapse would snap instantly because
+  // there'd be no content to animate from.
   return (
-    <>
-      {/* Section header — toggle only. The "New issue" + "View all"
-          affordances live inside the collapsible list so they share the
-          row chrome with the other sidebar lists. */}
-      <div className="sidebar-section" data-testid="issues-group-header">
-        <SectionToggle label="Issues" open={open} onToggle={onToggle} />
-      </div>
-
-      {/* Collapsible list */}
-      {open && (
-        <div
-          className="sidebar-collapsible is-open is-issues"
-          data-testid="issues-group-list"
-        >
-          {openIssues.length === 0 ? (
-            <p
-              className="sidebar-empty-hint"
-              style={{
-                color: "var(--text-tertiary)",
-                padding: "4px 12px",
-                fontSize: 12,
-              }}
-              data-testid="issues-sidebar-empty"
-            >
-              No issues yet.
-            </p>
-          ) : (
-            openIssues.slice(0, 20).map((task) => (
-              <button
-                key={task.id}
-                type="button"
-                className={`sidebar-item${activeIssueId === task.id ? " active" : ""}`}
-                onClick={() =>
-                  void router.navigate({
-                    to: "/issues/$issueId",
-                    params: { issueId: task.id },
-                  })
-                }
-                aria-label={task.title}
-                title={task.title}
-                data-testid="issues-sidebar-row"
-              >
-                <span
-                  style={{
-                    color: "currentColor",
-                    width: 18,
-                    textAlign: "center",
-                    flexShrink: 0,
-                    display: "inline-block",
-                    fontSize: 11,
-                  }}
-                >
-                  #
-                </span>
-                <SidebarItemLabel>{task.title}</SidebarItemLabel>
-              </button>
-            ))
-          )}
-          {/* New issue — matches the "+ New channel" button at the bottom
-              of ChannelList for consistent affordance shape. */}
-          <button
-            type="button"
-            className="sidebar-item sidebar-add-btn"
-            title="New issue"
-            onClick={() => void router.navigate({ to: "/issues/new" })}
-            data-testid="issues-sidebar-new-btn"
+    <div className="sidebar-scroll-wrap is-issues">
+      <div className="sidebar-issues" data-testid="issues-group-list">
+        {openIssues.length === 0 ? (
+          <p
+            className="sidebar-empty-hint"
+            style={{
+              color: "var(--text-tertiary)",
+              padding: "4px 10px",
+              fontSize: 12,
+            }}
+            data-testid="issues-sidebar-empty"
           >
-            <span
-              style={{ width: 18, textAlign: "center", flexShrink: 0 }}
-            >
-              +
-            </span>
-            <span>New issue</span>
-          </button>
-          {/* View all issues link */}
-          <button
-            type="button"
-            className={`sidebar-item sidebar-add-btn${route.kind === "issues-list" ? " active" : ""}`}
-            onClick={() => void router.navigate({ to: "/issues" })}
-            title="View all issues"
-            data-testid="issues-sidebar-view-all"
-          >
-            <span
-              style={{
-                width: 18,
-                textAlign: "center",
-                flexShrink: 0,
-                display: "inline-block",
-              }}
+            No issues yet.
+          </p>
+        ) : (
+          openIssues.slice(0, 20).map((task) => (
+            <SidebarItem
+              key={task.id}
+              icon="#"
+              label={task.title}
+              active={activeIssueId === task.id}
+              onClick={() =>
+                void router.navigate({
+                  to: "/issues/$issueId",
+                  params: { issueId: task.id },
+                })
+              }
+              aria-label={task.title}
+              title={task.title}
+              data-testid="issues-sidebar-row"
             />
-            <span style={{ color: "var(--text-tertiary)" }}>View all</span>
-          </button>
-        </div>
-      )}
-    </>
+          ))
+        )}
+        <SidebarItem
+          variant="add"
+          icon="+"
+          label="New issue"
+          onClick={() => void router.navigate({ to: "/issues/new" })}
+          title="New issue"
+          data-testid="issues-sidebar-new-btn"
+        />
+      </div>
+    </div>
   );
 }

@@ -1,7 +1,7 @@
 // biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Badge mirrors AppList — aria-label on the span surfaces the pending count to assistive tech.
 import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell } from "iconoir-react";
+import { Mail } from "iconoir-react";
 
 import { getInboxItems } from "../../api/lifecycle";
 import { playInboxDing } from "../../lib/notificationSound";
@@ -72,7 +72,7 @@ export function InboxButton() {
       className={`sidebar-item${isActive ? " active" : ""}`}
       onClick={() => navigateToSidebarApp("inbox")}
     >
-      <Bell className="sidebar-item-icon" />
+      <Mail className="sidebar-item-icon" />
       <span style={{ flex: 1 }}>Inbox</span>
       {count > 0 ? (
         <span

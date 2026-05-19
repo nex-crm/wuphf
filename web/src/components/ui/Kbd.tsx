@@ -14,6 +14,27 @@ interface KbdProps {
   className?: string;
 }
 
+// Mac/cmd-style modifier glyphs render visually small in most UI fonts vs
+// alphanumerics — they're cleaner as a slightly larger inline glyph so a
+// chord like "⌘1" reads with balanced weight on both sides.
+const GLYPH_PATTERN = /(⌘|⌥|⌃|⇧|⏎|⌫|⌦|⎋|↑|↓|←|→|⇪|⇥|⏏|⏯)/g;
+
+function decorateGlyphs(node: ReactNode): ReactNode {
+  if (typeof node !== "string") return node;
+  const parts = node.split(GLYPH_PATTERN);
+  if (parts.length === 1) return node;
+  return parts.map((part, i) =>
+    GLYPH_PATTERN.test(part) ? (
+      // biome-ignore lint/suspicious/noArrayIndexKey: stable position in split output.
+      <span key={i} className="kbd-glyph">
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
+}
+
 export function Kbd({
   children,
   size = "md",
@@ -22,7 +43,7 @@ export function Kbd({
 }: KbdProps) {
   const cls =
     `kbd kbd-${size} ${variant === "inverse" ? "kbd-inverse" : ""} ${className}`.trim();
-  return <kbd className={cls}>{children}</kbd>;
+  return <kbd className={cls}>{decorateGlyphs(children)}</kbd>;
 }
 
 /**
