@@ -31,6 +31,7 @@ const SYSTEM_INBOX_EXTERNAL_REFS: ThreadExternalRefs = Object.freeze({
 });
 
 export interface ThreadSubsystem {
+  readonly db: Database.Database;
   readonly appender: ThreadAppender;
   readonly state: ThreadStateStore;
   readonly receiptIndex: ThreadReceiptIndexStore;
@@ -53,6 +54,7 @@ export function createThreadSubsystem(
   const appender = createThreadAppender(db, eventLog, state);
   ensureSystemInboxThread(appender, state);
   return {
+    db,
     appender,
     state,
     receiptIndex,

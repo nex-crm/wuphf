@@ -31,6 +31,7 @@ import {
   threadListResponseToJsonValue,
   threadMutationResponseToJsonValue,
   threadPinnedApprovalsResponseToJsonValue,
+  threadReplayCheckReportToJsonValue,
   threadSpecContentHash,
   threadSpecEditRequestFromJson,
   threadSpecEditRequestToJsonValue,
@@ -69,6 +70,7 @@ import {
   threadStateRowToThread,
 } from "./projections.ts";
 import type { ThreadReceiptIndexStore } from "./receipt-index.ts";
+import { runThreadReplayCheck } from "./replay-check/index.ts";
 
 const MAX_THREAD_BODY_BYTES = 512 * 1_024;
 const THREAD_EFFECTIVE_STATUS_SET: ReadonlySet<string> = new Set<string>(
@@ -82,6 +84,7 @@ const EMPTY_EXTERNAL_REFS: ThreadExternalRefs = Object.freeze({
 });
 
 export interface ThreadRouteDeps {
+  readonly db: BetterSqlite3.Database;
   readonly appender: ThreadAppender;
   readonly state: ThreadStateStore;
   readonly receiptIndex: ThreadReceiptIndexStore;
@@ -129,6 +132,14 @@ export async function handleThreadRoute(
 
   if (!pathname.startsWith("/api/v1/threads/")) {
     return false;
+  }
+  if (pathname === "/api/v1/threads/replay-check") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      methodNotAllowed(res, "GET, HEAD");
+      return true;
+    }
+    handleThreadReplayCheck(res, deps);
+    return true;
   }
   const suffix = pathname.slice("/api/v1/threads/".length);
   const parts = suffix.split("/");
@@ -245,6 +256,16 @@ function handleThreadPinnedApprovalsGet(
     if (writeStorageErrorResponse(res, err, deps.logger, "thread_pinned_approvals_rejected")) {
       return;
     }
+    throw err;
+  }
+}
+
+function handleThreadReplayCheck(res: ServerResponse, deps: ThreadRouteDeps): void {
+  try {
+    const report = runThreadReplayCheck(deps.db);
+    writeJsonValue(res, report.ok ? 200 : 500, threadReplayCheckReportToJsonValue(report));
+  } catch (err) {
+    if (writeStorageErrorResponse(res, err, deps.logger, "thread_replay_check_rejected")) return;
     throw err;
   }
 }

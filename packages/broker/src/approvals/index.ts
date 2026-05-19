@@ -84,4 +84,9 @@ export {
   foldApprovalFromLog,
   statusForDecision,
 } from "./projections.ts";
-export { rebuildApprovalsProjectionFromLog } from "./rebuild/index.ts";
+export type { ApprovalProjectionSnapshotRow, ApprovalReplayEventRow } from "./rebuild/index.ts";
+export {
+  rebuildApprovalsProjectionFromLog,
+  replayApprovalsProjectionSnapshot,
+  snapshotApprovalsProjection,
+} from "./rebuild/index.ts";

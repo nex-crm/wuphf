@@ -36,6 +36,6 @@ export type {
 } from "./receipt-index.ts";
 export { createThreadReceiptIndexStore } from "./receipt-index.ts";
 export type { ThreadProjectionSnapshotRow } from "./replay-check/index.ts";
-export { snapshotThreadProjection } from "./replay-check/index.ts";
+export { runThreadReplayCheck, snapshotThreadProjection } from "./replay-check/index.ts";
 export type { ThreadSubsystem } from "./subsystem.ts";
 export { createThreadSubsystem, SYSTEM_INBOX_THREAD_ID } from "./subsystem.ts";

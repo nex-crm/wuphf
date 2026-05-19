@@ -10,6 +10,7 @@
 //   GET  /api/v1/threads/:tid/receipts    — bearer required. List receipts in a thread.
 //   GET  /api/threads/:tid/receipts       — bearer required. One-release alias.
 //   GET  /api/v1/threads                  — bearer required. List folded threads.
+//   GET  /api/v1/threads/replay-check     — bearer required. Projection drift report.
 //   GET  /api/v1/threads/:id              — bearer required. Read one folded thread.
 //   GET  /api/v1/threads/:id/pinned-approvals — bearer required. Read pending approvals.
 //   POST /api/v1/threads                  — bearer required. Create thread.
@@ -248,6 +249,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
     config.threads === undefined
       ? null
       : ({
+          db: config.threads.db,
           appender: config.threads.appender,
           state: config.threads.state,
           receiptIndex: config.threads.receiptIndex,

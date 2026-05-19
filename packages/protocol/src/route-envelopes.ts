@@ -73,6 +73,14 @@ export type RouteEnvelopeSchemaVersion = 1;
 export const ROUTE_ENVELOPE_SCHEMA_VERSION = 1 satisfies RouteEnvelopeSchemaVersion;
 export { validateApprovalView } from "./approval-view-validator.ts";
 export type {
+  ThreadReplayCheckDiscrepancy,
+  ThreadReplayCheckReport,
+} from "./route-envelopes-thread-replay-check.ts";
+export {
+  threadReplayCheckReportFromJson,
+  threadReplayCheckReportToJsonValue,
+} from "./route-envelopes-thread-replay-check.ts";
+export type {
   ThreadAttentionReason,
   ThreadBoardColumn,
   ThreadCurrentSeat,

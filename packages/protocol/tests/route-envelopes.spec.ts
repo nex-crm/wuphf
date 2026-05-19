@@ -65,6 +65,7 @@ import {
   type ThreadListResponse,
   type ThreadMutationResponse,
   type ThreadPinnedApprovalsResponse,
+  type ThreadReplayCheckReport,
   type ThreadSpecEditRequest,
   type ThreadStatusChangeRequest,
   type ThreadView,
@@ -78,6 +79,8 @@ import {
   threadMutationResponseToJsonValue,
   threadPinnedApprovalsResponseFromJson,
   threadPinnedApprovalsResponseToJsonValue,
+  threadReplayCheckReportFromJson,
+  threadReplayCheckReportToJsonValue,
   threadSpecContentHash,
   threadSpecEditRequestFromJson,
   threadSpecEditRequestToJsonValue,
@@ -277,6 +280,30 @@ describe("route-envelope codecs", () => {
       headLsn: lsnFromV1Number(44),
       approvals: [pendingView],
     };
+    const replayCheck: ThreadReplayCheckReport = {
+      schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+      ok: false,
+      highestLsn: lsnFromV1Number(45),
+      eventsScanned: 3,
+      discrepancies: [
+        {
+          kind: "thread_state_field_mismatch",
+          threadId: THREAD_ID,
+          field: "status",
+          replayed: "open",
+          stored: "closed",
+        },
+        {
+          kind: "thread_log_invariant_violation",
+          lsn: lsnFromV1Number(44),
+          eventType: "thread.status_changed",
+          threadId: THREAD_ID,
+          reason: "status fromStatus does not match folded status",
+          expected: "open",
+          actual: "needs_review",
+        },
+      ],
+    };
 
     expect(
       roundTrip(
@@ -354,6 +381,9 @@ describe("route-envelope codecs", () => {
         threadPinnedApprovalsResponseFromJson,
       ),
     ).toStrictEqual(pinnedApprovals);
+    expect(
+      roundTrip(replayCheck, threadReplayCheckReportToJsonValue, threadReplayCheckReportFromJson),
+    ).toStrictEqual(replayCheck);
     expect(validateApprovalView(approvedView).ok).toBe(true);
 
     const viewJson = approvalViewToJsonValue(approvedView) as JsonObject & {
@@ -900,6 +930,7 @@ describe("route-envelope conformance vectors", () => {
         "approvalListResponse",
         "approvalGetResponse",
         "threadPinnedApprovalsResponse",
+        "threadReplayCheckReport",
         "routeError",
       ]),
     );
@@ -963,6 +994,7 @@ type RouteEnvelopeCodec =
   | "approvalListResponse"
   | "approvalGetResponse"
   | "threadPinnedApprovalsResponse"
+  | "threadReplayCheckReport"
   | "routeError";
 
 type JsonObject = Record<string, unknown>;
@@ -1036,6 +1068,10 @@ function routeEnvelopeCanonicalSerialization(codec: RouteEnvelopeCodec, input: u
     case "threadPinnedApprovalsResponse":
       return canonicalJSON(
         threadPinnedApprovalsResponseToJsonValue(threadPinnedApprovalsResponseFromJson(input)),
+      );
+    case "threadReplayCheckReport":
+      return canonicalJSON(
+        threadReplayCheckReportToJsonValue(threadReplayCheckReportFromJson(input)),
       );
     case "routeError":
       return canonicalJSON(routeErrorToJsonValue(routeErrorFromJson(input)));
@@ -1179,6 +1215,17 @@ function strictKnownKeyCases(): readonly {
         approvals: [view],
       }) as JsonObject,
       parse: threadPinnedApprovalsResponseFromJson,
+    },
+    {
+      name: "threadReplayCheckReport",
+      input: threadReplayCheckReportToJsonValue({
+        schemaVersion: 1,
+        ok: true,
+        highestLsn: HEAD_LSN,
+        eventsScanned: 0,
+        discrepancies: [],
+      }) as JsonObject,
+      parse: threadReplayCheckReportFromJson,
     },
     {
       name: "routeError",
