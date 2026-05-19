@@ -1,8 +1,17 @@
 import { request as httpRequest, type OutgoingHttpHeaders } from "node:http";
 
 import {
+  approvalDecisionRequestToJsonValue,
+  approvalDecisionResponseFromJson,
+  approvalRequestCreateRequestToJsonValue,
+  approvalRequestCreateResponseFromJson,
+  asAgentId,
   asAgentSlug,
   asApiToken,
+  asApprovalClaimId,
+  asApprovalRequestId,
+  asApprovalRole,
+  asIdempotencyKey,
   asProviderKind,
   asReceiptId,
   asTaskId,
@@ -11,11 +20,20 @@ import {
   type ReceiptSnapshot,
   SanitizedString,
   sha256Hex,
+  threadGetResponseFromJson,
+  threadListResponseFromJson,
+  threadPinnedApprovalsResponseFromJson,
   threadSpecContentHash,
   validateThreadStreamEvent,
 } from "@wuphf/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  type ApprovalAppender,
+  type ApprovalProjection,
+  createApprovalSubsystem,
+} from "../../src/approvals/index.ts";
+import type { EventLog } from "../../src/event-log/index.ts";
 import { createEventLog, openDatabase, runMigrations } from "../../src/event-log/index.ts";
 import { type BrokerHandle, createBroker } from "../../src/index.ts";
 import { constructSqliteReceiptStoreForTesting } from "../../src/internal/sqlite-receipt-store-testing.ts";
@@ -23,6 +41,7 @@ import { MAX_LIST_LIMIT } from "../../src/receipt-store.ts";
 import type { SqliteReceiptStore } from "../../src/sqlite-receipt-store.ts";
 import {
   createThreadSubsystem,
+  SYSTEM_INBOX_THREAD_ID,
   type ThreadAppender,
   type ThreadStateStore,
   type ThreadSubsystem,
@@ -36,6 +55,13 @@ const SPEC_REVISION_ID = "01CRZ3NDEKTSV4RRFFQ69G5FC0";
 const SPEC_KEY = SPEC_REVISION_ID;
 const STATUS_KEY = "01ERZ3NDEKTSV4RRFFQ69G5FE0";
 const TERMINAL_KEY = "01FRZ3NDEKTSV4RRFFQ69G5FF0";
+const APPROVAL_REQUEST_ID = asApprovalRequestId("01MRZ3NDEKTSV4RRFFQ69G5FM0");
+const INBOX_APPROVAL_REQUEST_ID = asApprovalRequestId("01NRZ3NDEKTSV4RRFFQ69G5FN0");
+const APPROVAL_DECISION_KEY = asIdempotencyKey("thread-approval-decision-01");
+const APPROVAL_RECEIPT_ID = asReceiptId("01PRZ3NDEKTSV4RRFFQ69G5FP0");
+const APPROVAL_TASK_ID = asTaskId("01QRZ3NDEKTSV4RRFFQ69G5FQ0");
+const APPROVAL_CLAIM_ID = asApprovalClaimId("claim_thread_route");
+const APPROVAL_FROZEN_ARGS_HASH = sha256Hex("thread-route-approval-frozen-args");
 const INITIAL_CONTENT = { goal: "route threads", version: 1 };
 const ULID_TIME_PREFIX = "01ZRZ3NDEK";
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -43,10 +69,13 @@ const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 interface Fixture {
   readonly broker: BrokerHandle;
   readonly db: ReturnType<typeof openDatabase>;
+  readonly eventLog: EventLog;
   readonly subsystem: ThreadSubsystem;
   readonly state: ThreadStateStore;
   readonly appender: ThreadAppender;
   readonly receiptStore: SqliteReceiptStore;
+  readonly approvalAppender: ApprovalAppender;
+  readonly approvalProjection: ApprovalProjection;
 }
 
 interface RawResponse {
@@ -81,13 +110,29 @@ async function setup(): Promise<Fixture> {
   const eventLog = createEventLog(db);
   const receiptStore = constructSqliteReceiptStoreForTesting(db, eventLog);
   const subsystem = createThreadSubsystem(db, eventLog, receiptStore);
+  const approvals = createApprovalSubsystem(db, eventLog);
   const { state, appender } = subsystem;
   const broker = await createBroker({
     port: 0,
     token: TOKEN,
     threads: subsystem,
+    approvals: {
+      appender: approvals.appender,
+      projection: approvals.projection,
+      tokenAgentIds: new Map([[TOKEN, asAgentId("agent_alpha")]]),
+    },
   });
-  return { broker, db, subsystem, state, appender, receiptStore };
+  return {
+    broker,
+    db,
+    eventLog,
+    subsystem,
+    state,
+    appender,
+    receiptStore,
+    approvalAppender: approvals.appender,
+    approvalProjection: approvals.projection,
+  };
 }
 
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
@@ -126,6 +171,74 @@ function statusBody(fromStatus = "open", toStatus = "closed", idempotencyKey = S
     toStatus,
     idempotencyKey,
   };
+}
+
+function approvalRequestBody(args: {
+  readonly requestId: ReturnType<typeof asApprovalRequestId>;
+  readonly threadId?: ReturnType<typeof asThreadId>;
+  readonly taskId?: ReturnType<typeof asTaskId>;
+}): string {
+  const claim = {
+    schemaVersion: 1,
+    claimId: APPROVAL_CLAIM_ID,
+    kind: "receipt_co_sign",
+    receiptId: APPROVAL_RECEIPT_ID,
+    frozenArgsHash: APPROVAL_FROZEN_ARGS_HASH,
+    riskClass: "critical",
+  } as const;
+  const scope = {
+    mode: "single_use",
+    claimId: APPROVAL_CLAIM_ID,
+    claimKind: "receipt_co_sign",
+    role: asApprovalRole("approver"),
+    maxUses: 1,
+    receiptId: APPROVAL_RECEIPT_ID,
+    frozenArgsHash: APPROVAL_FROZEN_ARGS_HASH,
+  } as const;
+  return JSON.stringify(
+    approvalRequestCreateRequestToJsonValue({
+      schemaVersion: 1,
+      claim,
+      scope,
+      riskClass: "critical",
+      ...(args.threadId === undefined ? {} : { threadId: args.threadId }),
+      ...(args.taskId === undefined ? {} : { taskId: args.taskId }),
+      receiptId: APPROVAL_RECEIPT_ID,
+      idempotencyKey: asIdempotencyKey(args.requestId),
+    }),
+  );
+}
+
+function approvalDecisionBody(idempotencyKey = APPROVAL_DECISION_KEY): string {
+  return JSON.stringify(
+    approvalDecisionRequestToJsonValue({
+      schemaVersion: 1,
+      decision: "reject",
+      idempotencyKey,
+    }),
+  );
+}
+
+async function createApproval(
+  fix: Fixture,
+  args: {
+    readonly requestId?: ReturnType<typeof asApprovalRequestId>;
+    readonly threadId?: ReturnType<typeof asThreadId>;
+    readonly taskId?: ReturnType<typeof asTaskId>;
+  } = {},
+) {
+  const requestId = args.requestId ?? APPROVAL_REQUEST_ID;
+  const res = await fetch(`${fix.broker.url}/api/v1/approvals`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: approvalRequestBody({
+      requestId,
+      ...(args.threadId === undefined ? {} : { threadId: args.threadId }),
+      ...(args.taskId === undefined ? {} : { taskId: args.taskId }),
+    }),
+  });
+  expect(res.status).toBe(201);
+  return approvalRequestCreateResponseFromJson((await res.json()) as unknown);
 }
 
 async function createThread(fix: Fixture): Promise<{ readonly headLsn: EventLsn }> {
@@ -186,7 +299,11 @@ function rawRequest(args: {
   });
 }
 
-function minimalReceiptV1(id: string, taskId: string): ReceiptSnapshot {
+function minimalReceiptV1(
+  id: string,
+  taskId: string,
+  status: ReceiptSnapshot["status"] = "ok",
+): ReceiptSnapshot {
   return {
     id: asReceiptId(id),
     agentSlug: asAgentSlug("agent"),
@@ -195,7 +312,7 @@ function minimalReceiptV1(id: string, taskId: string): ReceiptSnapshot {
     triggerRef: "message",
     startedAt: new Date("2026-05-18T09:00:00.000Z"),
     finishedAt: new Date("2026-05-18T09:01:00.000Z"),
-    status: "ok",
+    status,
     providerKind: asProviderKind("anthropic"),
     model: "claude-opus-4-7",
     promptHash: sha256Hex("prompt"),
@@ -212,16 +329,20 @@ function minimalReceiptV1(id: string, taskId: string): ReceiptSnapshot {
     cacheCreationTokens: 0,
     costUsd: 0,
     finalMessage: SanitizedString.fromUnknown(""),
-    error: SanitizedString.fromUnknown(""),
+    error: SanitizedString.fromUnknown(status === "error" ? "receipt failed" : ""),
     notebookWrites: [],
     wikiWrites: [],
     schemaVersion: 1,
   };
 }
 
-function minimalReceiptV2(id: string, taskId: string): ReceiptSnapshot {
+function minimalReceiptV2(
+  id: string,
+  taskId: string,
+  status: ReceiptSnapshot["status"] = "ok",
+): ReceiptSnapshot {
   return {
-    ...minimalReceiptV1(id, taskId),
+    ...minimalReceiptV1(id, taskId, status),
     schemaVersion: 2,
     threadId: asThreadId(THREAD_ID),
   };
@@ -248,6 +369,20 @@ async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, needle
   throw new Error(`SSE stream did not include ${needle}`);
 }
 
+function parseThreadSse(
+  text: string,
+  kind: "thread.created" | "thread.updated" | "thread.pinned_approvals.changed",
+) {
+  const blocks = text.split("\n\n");
+  for (const block of blocks) {
+    if (!block.includes(`event: ${kind}`)) continue;
+    const dataLine = block.split("\n").find((line) => line.startsWith("data: "));
+    if (dataLine === undefined) throw new Error(`missing data line for ${kind}`);
+    return JSON.parse(dataLine.slice("data: ".length)) as unknown;
+  }
+  throw new Error(`missing SSE event ${kind}`);
+}
+
 function nextLinkPath(headers: Headers): string {
   const link = headers.get("link");
   if (link === null) throw new Error("missing Link header");
@@ -264,6 +399,7 @@ describe("/api/v1/threads routes", () => {
     const routeChecks = [
       fetch(`${fixture.broker.url}/api/v1/threads`),
       fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`),
+      fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/pinned-approvals`),
       fetch(`${fixture.broker.url}/api/v1/threads`, {
         method: "POST",
         body: JSON.stringify(createBody()),
@@ -278,7 +414,7 @@ describe("/api/v1/threads routes", () => {
       }),
     ];
     const responses = await Promise.all(routeChecks);
-    expect(responses.map((res) => res.status)).toEqual([401, 401, 401, 401, 401]);
+    expect(responses.map((res) => res.status)).toEqual([401, 401, 401, 401, 401, 401]);
   });
 
   it("runs the loopback Host guard before every thread route", async () => {
@@ -295,6 +431,13 @@ describe("/api/v1/threads routes", () => {
       rawRequest({
         port: fixture.broker.port,
         path: `/api/v1/threads/${THREAD_ID}`,
+        method: "GET",
+        hostHeader: "evil.example.com",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/pinned-approvals`,
         method: "GET",
         hostHeader: "evil.example.com",
         authorization: `Bearer ${TOKEN}`,
@@ -324,7 +467,7 @@ describe("/api/v1/threads routes", () => {
         body: JSON.stringify(statusBody()),
       }),
     ]);
-    expect(checks.map((res) => res.status)).toEqual([403, 403, 403, 403, 403]);
+    expect(checks.map((res) => res.status)).toEqual([403, 403, 403, 403, 403, 403]);
   });
 
   it("creates, lists, reads, edits spec, changes status, and derives receipt indexes", async () => {
@@ -340,25 +483,26 @@ describe("/api/v1/threads routes", () => {
       headers: authHeaders(),
     });
     expect(list.status).toBe(200);
-    const listBody = (await list.json()) as {
-      readonly threads: readonly { readonly thread_id: string }[];
-    };
-    expect(listBody.threads.map((thread) => thread.thread_id)).toEqual([THREAD_ID]);
+    const listBody = threadListResponseFromJson((await list.json()) as unknown);
+    expect(listBody.threads.map((thread) => thread.id)).toEqual([
+      SYSTEM_INBOX_THREAD_ID,
+      THREAD_ID,
+    ]);
+    expect(listBody.threads.map((thread) => thread.effectiveStatus)).toEqual(["open", "open"]);
+    expect(listBody.threads.map((thread) => thread.boardColumn)).toEqual(["running", "running"]);
 
     const get = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`, {
       headers: authHeaders(),
     });
     expect(get.status).toBe(200);
-    const getBody = (await get.json()) as {
-      readonly thread: {
-        readonly status: string;
-        readonly spec: { readonly revision_id: string };
-        readonly task_ids: readonly string[];
-      };
-    };
+    const getBody = threadGetResponseFromJson((await get.json()) as unknown);
     expect(getBody.thread.status).toBe("open");
-    expect(getBody.thread.spec.revision_id).toBe(CREATE_REVISION_ID);
-    expect(getBody.thread.task_ids).toEqual([taskA, taskB]);
+    expect(getBody.thread.effectiveStatus).toBe("open");
+    expect(getBody.thread.boardColumn).toBe("running");
+    expect(getBody.thread.currentSeat).toBe("agent");
+    expect(getBody.thread.pendingApprovalCount).toBe(0);
+    expect(getBody.thread.spec.revisionId).toBe(CREATE_REVISION_ID);
+    expect(getBody.thread.taskIds).toEqual([taskA, taskB]);
 
     const spec = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/spec`, {
       method: "PATCH",
@@ -502,7 +646,7 @@ describe("/api/v1/threads routes", () => {
         "SELECT COUNT(*) AS count FROM event_log WHERE type = 'thread.spec_edited'",
       )
       .get();
-    expect(count?.count).toBe(2);
+    expect(count?.count).toBe(3);
   });
 
   it("replays duplicate idempotency keys without duplicate thread events", async () => {
@@ -529,7 +673,161 @@ describe("/api/v1/threads routes", () => {
         "SELECT COUNT(*) AS count FROM event_log WHERE type IN ('thread.created', 'thread.spec_edited')",
       )
       .get();
-    expect(count?.count).toBe(2);
+    expect(count?.count).toBe(4);
+  });
+
+  it("returns pinned approvals and derives effective status from the read-time query", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    await createThread(fixture);
+    const created = await createApproval(fixture, {
+      threadId: asThreadId(THREAD_ID),
+      taskId: APPROVAL_TASK_ID,
+    });
+
+    const pinned = await fetch(
+      `${fixture.broker.url}/api/v1/threads/${THREAD_ID}/pinned-approvals`,
+      {
+        headers: authHeaders(),
+      },
+    );
+    expect(pinned.status).toBe(200);
+    const pinnedBody = threadPinnedApprovalsResponseFromJson((await pinned.json()) as unknown);
+    expect(pinnedBody.threadId).toBe(THREAD_ID);
+    expect(pinnedBody.headLsn).toBe(created.headLsn);
+    expect(pinnedBody.approvals.map((approval) => approval.id)).toEqual([APPROVAL_REQUEST_ID]);
+    expect(pinnedBody.approvals[0]?.status).toBe("pending");
+    expect(JSON.stringify(pinnedBody)).not.toContain("token");
+
+    const attention = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`, {
+      headers: authHeaders(),
+    });
+    const attentionBody = threadGetResponseFromJson((await attention.json()) as unknown).thread;
+    expect(attentionBody.effectiveStatus).toBe("needs_attention");
+    expect(attentionBody.attentionReason).toBe("pending_approval");
+    expect(attentionBody.boardColumn).toBe("needs_me");
+    expect(attentionBody.currentSeat).toBe("human");
+    expect(attentionBody.pendingApprovalCount).toBe(1);
+
+    const byEffective = await fetch(`${fixture.broker.url}/api/v1/threads?status=needs_attention`, {
+      headers: authHeaders(),
+    });
+    expect(
+      threadListResponseFromJson((await byEffective.json()) as unknown).threads.map(
+        (thread) => thread.id,
+      ),
+    ).toEqual([THREAD_ID]);
+
+    const byColumn = await fetch(`${fixture.broker.url}/api/v1/threads?status=needs_me`, {
+      headers: authHeaders(),
+    });
+    expect(
+      threadListResponseFromJson((await byColumn.json()) as unknown).threads.map(
+        (thread) => thread.id,
+      ),
+    ).toEqual([THREAD_ID]);
+
+    const liveView = {
+      effectiveStatus: attentionBody.effectiveStatus,
+      attentionReason: attentionBody.attentionReason,
+      boardColumn: attentionBody.boardColumn,
+      currentSeat: attentionBody.currentSeat,
+      pendingApprovalCount: attentionBody.pendingApprovalCount,
+    };
+    fixture.approvalProjection.rebuildFromLog(fixture.eventLog);
+    fixture.subsystem.rebuildFromLog(0);
+    const replayed = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`, {
+      headers: authHeaders(),
+    });
+    const replayedThread = threadGetResponseFromJson((await replayed.json()) as unknown).thread;
+    expect({
+      effectiveStatus: replayedThread.effectiveStatus,
+      attentionReason: replayedThread.attentionReason,
+      boardColumn: replayedThread.boardColumn,
+      currentSeat: replayedThread.currentSeat,
+      pendingApprovalCount: replayedThread.pendingApprovalCount,
+    }).toEqual(liveView);
+
+    const decided = await fetch(
+      `${fixture.broker.url}/api/v1/approvals/${APPROVAL_REQUEST_ID}/decision`,
+      {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: approvalDecisionBody(),
+      },
+    );
+    expect(decided.status).toBe(201);
+    const decidedBody = approvalDecisionResponseFromJson((await decided.json()) as unknown);
+
+    const afterDecision = await fetch(
+      `${fixture.broker.url}/api/v1/threads/${THREAD_ID}/pinned-approvals`,
+      {
+        headers: authHeaders(),
+      },
+    );
+    const afterDecisionBody = threadPinnedApprovalsResponseFromJson(
+      (await afterDecision.json()) as unknown,
+    );
+    expect(afterDecisionBody.headLsn).toBe(decidedBody.headLsn);
+    expect(afterDecisionBody.approvals).toEqual([]);
+
+    const cleared = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`, {
+      headers: authHeaders(),
+    });
+    const clearedThread = threadGetResponseFromJson((await cleared.json()) as unknown).thread;
+    expect(clearedThread.effectiveStatus).toBe("open");
+    expect(clearedThread.boardColumn).toBe("running");
+    expect(clearedThread.currentSeat).toBe("agent");
+    expect(clearedThread.pendingApprovalCount).toBe(0);
+  });
+
+  it("defaults threadless approval requests to the system inbox thread", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const created = await createApproval(fixture, {
+      requestId: INBOX_APPROVAL_REQUEST_ID,
+      taskId: APPROVAL_TASK_ID,
+    });
+    expect(created.approvalRequest.threadId).toBe(SYSTEM_INBOX_THREAD_ID);
+
+    const pinned = await fetch(
+      `${fixture.broker.url}/api/v1/threads/${SYSTEM_INBOX_THREAD_ID}/pinned-approvals`,
+      {
+        headers: authHeaders(),
+      },
+    );
+    expect(pinned.status).toBe(200);
+    const pinnedBody = threadPinnedApprovalsResponseFromJson((await pinned.json()) as unknown);
+    expect(pinnedBody.headLsn).toBe(created.headLsn);
+    expect(pinnedBody.approvals.map((approval) => approval.id)).toEqual([
+      INBOX_APPROVAL_REQUEST_ID,
+    ]);
+  });
+
+  it("derives receipt error and stalled effective statuses from the latest thread receipt", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    await createThread(fixture);
+    await fixture.receiptStore.put(
+      minimalReceiptV2("01VRZ3NDEKTSV4RRFFQ69G5FV0", APPROVAL_TASK_ID, "error"),
+    );
+    const failed = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`, {
+      headers: authHeaders(),
+    });
+    const failedThread = threadGetResponseFromJson((await failed.json()) as unknown).thread;
+    expect(failedThread.effectiveStatus).toBe("needs_attention");
+    expect(failedThread.attentionReason).toBe("failed");
+    expect(failedThread.boardColumn).toBe("needs_me");
+    expect(failedThread.currentSeat).toBe("human");
+
+    await fixture.receiptStore.put(
+      minimalReceiptV2("01WRZ3NDEKTSV4RRFFQ69G5FW0", APPROVAL_TASK_ID, "stalled"),
+    );
+    const stalled = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`, {
+      headers: authHeaders(),
+    });
+    const stalledThread = threadGetResponseFromJson((await stalled.json()) as unknown).thread;
+    expect(stalledThread.effectiveStatus).toBe("needs_attention");
+    expect(stalledThread.attentionReason).toBe("stalled");
+    expect(stalledThread.boardColumn).toBe("needs_me");
+    expect(stalledThread.currentSeat).toBe("human");
   });
 
   it("emits validated invalidation-only SSE events for thread mutations", async () => {
@@ -556,9 +854,9 @@ describe("/api/v1/threads routes", () => {
     const event = JSON.parse(dataLine.slice("data: ".length)) as unknown;
     expect(validateThreadStreamEvent(event).ok).toBe(true);
     expect(event).toMatchObject({
-      id: "v1:2",
+      id: "v1:4",
       kind: "thread.created",
-      payload: { threadId: THREAD_ID, headLsn: "v1:2" },
+      payload: { threadId: THREAD_ID, headLsn: "v1:4" },
     });
 
     const spec = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/spec`, {
@@ -577,9 +875,57 @@ describe("/api/v1/threads routes", () => {
     const updatedEvent = JSON.parse(updatedDataLine.slice("data: ".length)) as unknown;
     expect(validateThreadStreamEvent(updatedEvent).ok).toBe(true);
     expect(updatedEvent).toMatchObject({
-      id: "v1:3",
+      id: "v1:5",
       kind: "thread.updated",
-      payload: { threadId: THREAD_ID, headLsn: "v1:3" },
+      payload: { threadId: THREAD_ID, headLsn: "v1:5" },
+    });
+  });
+
+  it("emits thread pinned-approvals invalidations on approval request and decision", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const controller = new AbortController();
+    const events = await fetch(`${fixture.broker.url}/api/events`, {
+      headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream" },
+      signal: controller.signal,
+    });
+    expect(events.status).toBe(200);
+    const reader = events.body?.getReader();
+    expect(reader).toBeDefined();
+    if (reader === undefined) throw new Error("missing SSE reader");
+    await readUntil(reader, "event: ready");
+
+    await createThread(fixture);
+    await readUntil(reader, "event: thread.created");
+
+    const created = await createApproval(fixture, {
+      threadId: asThreadId(THREAD_ID),
+      taskId: APPROVAL_TASK_ID,
+    });
+    const requestedText = await readUntil(reader, "event: thread.pinned_approvals.changed");
+    const requestedEvent = parseThreadSse(requestedText, "thread.pinned_approvals.changed");
+    expect(validateThreadStreamEvent(requestedEvent).ok).toBe(true);
+    expect(requestedEvent).toMatchObject({
+      kind: "thread.pinned_approvals.changed",
+      payload: { threadId: THREAD_ID, headLsn: created.headLsn },
+    });
+
+    const decided = await fetch(
+      `${fixture.broker.url}/api/v1/approvals/${APPROVAL_REQUEST_ID}/decision`,
+      {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: approvalDecisionBody(),
+      },
+    );
+    expect(decided.status).toBe(201);
+    const decidedBody = approvalDecisionResponseFromJson((await decided.json()) as unknown);
+    const decidedText = await readUntil(reader, "event: thread.pinned_approvals.changed");
+    controller.abort();
+    const decidedEvent = parseThreadSse(decidedText, "thread.pinned_approvals.changed");
+    expect(validateThreadStreamEvent(decidedEvent).ok).toBe(true);
+    expect(decidedEvent).toMatchObject({
+      kind: "thread.pinned_approvals.changed",
+      payload: { threadId: THREAD_ID, headLsn: decidedBody.headLsn },
     });
   });
 });

@@ -43,6 +43,19 @@ External writes carry `writeId`. A `receipt_co_sign` token with `claim.writeId` 
 `{ request_id, claim, scope, risk_class, thread_id?, task_id?, receipt_id?, requested_by, requested_at, status, decision?, schema_version: 1 }`.
 `status: "pending"` requires `decision` to be absent; `approved`, `rejected`, and `abstained` require a matching decision record. Audit replay uses full `approval_requested` and `approval_decided` payloads, and renderer invalidation uses `approval.requested` / `approval.decided` stream events with `{ requestId, threadId?, headLsn }`.
 
+## Thread route view wire shape
+
+Thread route reads return `ThreadView`, which extends `Thread` with
+`effectiveStatus`, optional `attentionReason`, `boardColumn`, `currentSeat`,
+and `pendingApprovalCount`. The closed value arrays
+`THREAD_EFFECTIVE_STATUS_VALUES`, `THREAD_ATTENTION_REASON_VALUES`,
+`THREAD_BOARD_COLUMN_VALUES`, and `THREAD_CURRENT_SEAT_VALUES` define the wire
+sets. `threadPinnedApprovalsResponseFromJson` /
+`threadPinnedApprovalsResponseToJsonValue` encode `{ threadId, headLsn,
+approvals }` where approvals are token-redacted `ApprovalView[]`.
+`thread.pinned_approvals.changed` is the thread SSE invalidation kind for this
+read model.
+
 ## Resource budgets
 
 Protocol-level resource caps live in `src/budgets.ts` and are exported from `src/index.ts` so downstream consumers can enforce the same contract. The receipt cap is 10 MiB serialized; per-blob caps are 1 MiB for `FrozenArgs` canonical JSON, `SanitizedString` UTF-8 text, and each audit event body before base64/JCS serialization; `EventLsn` strings are capped at 256 bytes before format parsing. Receipt arrays are bounded (`toolCalls` 1,024; `filesChanged`, `sourceReads`, `notebookWrites`, and `wikiWrites` 10,000; `commits` 1,024; `writes` 256; `approvals` 64). Approval request ids and approval token ids are ULID-capped at 26 bytes; approval tokens are capped at a 30-minute lifetime; approval claim canonical JSON is capped at 64 KiB, scope canonical JSON at 8 KiB, and WebAuthn assertions at 16 KiB total with 16 KiB per assertion field. These numbers keep normal large tasks viable while preventing runaway receipts, blobs, event bodies, approval submissions, and stale capabilities from exhausting verifier memory.

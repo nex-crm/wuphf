@@ -381,6 +381,38 @@ describe("approval projection and appender", () => {
     }
   });
 
+  it("queries pinned approvals as pending rows scoped to a thread", () => {
+    const { db, projection, appender } = setup();
+    try {
+      const otherThreadId = asThreadId("01FRZ3NDEKTSV4RRFFQ69G5FA4");
+      appender.requestApproval(requestedPayload(REQUEST_ID));
+      appender.requestApproval({
+        ...requestedPayload(SECOND_REQUEST_ID),
+        threadId: otherThreadId,
+      });
+      expect(projection.countPendingByThread(THREAD_ID)).toBe(1);
+      expect(projection.listPendingByThread(THREAD_ID).map((row) => row.approval.id)).toEqual([
+        REQUEST_ID,
+      ]);
+      expect(projection.latestHeadLsnByThread(THREAD_ID)).toBe("v1:1");
+
+      appender.decideApproval(decidedPayload("reject", REQUEST_ID));
+      expect(projection.countPendingByThread(THREAD_ID)).toBe(0);
+      expect(projection.listPendingByThread(THREAD_ID)).toEqual([]);
+      expect(projection.latestHeadLsnByThread(THREAD_ID)).toBe("v1:3");
+      expect(projection.countPendingByThread(otherThreadId)).toBe(1);
+
+      const indexes = db
+        .prepare<[], { readonly name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'pending_approvals_thread_status'",
+        )
+        .all();
+      expect(indexes.map((row) => row.name)).toEqual(["pending_approvals_thread_status"]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("rebuilds pending_approvals from the event log byte-equivalent to live projection", () => {
     const { db, eventLog, projection, appender } = setup();
     try {

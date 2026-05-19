@@ -13,8 +13,11 @@ flowchart LR
   decision["approval_decided audit payload"] --> decided["event_log: approval.decided"]
   decided --> projection
   projection --> routes["/api/v1/approvals REST reads"]
+  projection --> pinned["/api/v1/threads/:id/pinned-approvals"]
   requested --> sse["/api/events approval.requested invalidation"]
   decided --> sse2["/api/events approval.decided invalidation"]
+  requested --> threadSse["/api/events thread.pinned_approvals.changed"]
+  decided --> threadSse
 ```
 
 Both commands run inside one `BEGIN IMMEDIATE` transaction: fold the request
@@ -40,8 +43,10 @@ Status is coupled to decision server-side:
 | `reject` | `rejected` |
 | `abstain` | `abstained` |
 
-The table has indexes on `status`, `thread_id`, and `task_id`. `thread_id` is
-opaque in this PR; PR 3 wires the thread join once `thread_state` exists.
+The table has indexes on `status`, `thread_id`, `task_id`, and the hot
+`(thread_id, status)` pinned-approval lookup. Pinned approvals are not a stored
+table; thread routes query this projection for rows where `thread_id` matches
+and `status = 'pending'`.
 
 ## Routes
 
@@ -60,7 +65,10 @@ route envelope: `requestedAt` / `decidedAt` from the broker clock and
 `requestedBy` as `broker`. Decisions require a bearer-bound agent identity and
 stamp `decidedBy` to that agent. If a create `idempotencyKey` is itself an
 `ApprovalRequestId` ULID, that value becomes the request id; otherwise the
-broker derives a stable request id from the key.
+broker derives a stable request id from the key. When the listener has both
+threads and approvals mounted, a create request without `threadId` receives the
+deterministic system inbox thread id before append, so downstream approval
+reads do not special-case `NULL` thread scope.
 
 SQLite storage errors follow the receipt route contract:
 `SQLITE_BUSY`/`SQLITE_LOCKED` returns `503 {"error":"store_busy"}` with
@@ -89,8 +97,11 @@ writing:
 }
 ```
 
-`approval.decided` uses the same payload shape. Consumers should treat these as
-cache invalidations and re-query the folded approval if they need full state.
+`approval.decided` uses the same payload shape. For thread-scoped approvals,
+the route also emits `thread.pinned_approvals.changed` with `{ threadId,
+headLsn }` so thread boards can invalidate the effective-status and pinned list
+caches. Consumers should treat these as cache invalidations and re-query the
+folded approval or thread view if they need full state.
 
 ## Public Subpath
 

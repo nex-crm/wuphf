@@ -37,7 +37,7 @@ import { createApprovalAppender, createApprovalProjection } from "../src/approva
 import { createEventLog, runMigrations } from "../src/event-log/index.ts";
 import { createBroker } from "../src/index.ts";
 import { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
-import { createThreadSubsystem } from "../src/threads/index.ts";
+import { createThreadSubsystem, SYSTEM_INBOX_THREAD_ID } from "../src/threads/index.ts";
 
 const tmp = mkdtempSync(join(tmpdir(), "wuphf-branch-10-"));
 const dbPath = join(tmp, "broker.db");
@@ -55,9 +55,10 @@ const threads = createThreadSubsystem(db, eventLog, receiptStore);
 const token = asApiToken("demo-token-with-enough-entropy-AAAAAAAAA");
 const agentId = asAgentId("agent_alice_001");
 const approvalRequestId = asApprovalRequestId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+const inboxApprovalRequestId = asApprovalRequestId("01ARZ3NDEKTSV4RRFFQ69G5FAW");
 const unknownApprovalRequestId = asApprovalRequestId("01ARZ3NDEKTSV4RRFFQ69G5FAZ");
 const receiptId = asReceiptId("01BRZ3NDEKTSV4RRFFQ69G5FA0");
-const approvalThreadId = asThreadId("01CRZ3NDEKTSV4RRFFQ69G5FA1");
+const approvalThreadId = asThreadId("01BRZ3NDEKTSV4RRFFQ69G5FB0");
 const taskId = asTaskId("01DRZ3NDEKTSV4RRFFQ69G5FA2");
 const claimId = asApprovalClaimId("claim_demo");
 const frozenArgsHash = asSha256Hex("c".repeat(64));
@@ -163,6 +164,17 @@ const approvalRequestBody = JSON.stringify(
     taskId,
     receiptId,
     idempotencyKey: asIdempotencyKey(approvalRequestId),
+  }),
+);
+const inboxApprovalRequestBody = JSON.stringify(
+  approvalRequestCreateRequestToJsonValue({
+    schemaVersion: 1,
+    claim: approvalClaim,
+    scope: approvalScope,
+    riskClass: "high",
+    taskId,
+    receiptId,
+    idempotencyKey: asIdempotencyKey(inboxApprovalRequestId),
   }),
 );
 const approvalDecisionBody = JSON.stringify(
@@ -275,7 +287,57 @@ console.log(
   `curl -s -i -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${staleThreadSpecEditBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/spec" | head -1`,
 );
 console.log("");
-console.log("# 12. Close thread, then prove out-of-terminal transition returns 422");
+console.log("# 12. Read folded projection with effective-status fields");
+console.log(
+  `curl -s -H "Authorization: Bearer ${broker.token}" \\\n     "${broker.url}/api/v1/threads/${threadId}"; echo`,
+);
+console.log("");
+console.log("# 13. Create an explicit pending approval request scoped to the thread");
+console.log(
+  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${approvalRequestBody}' \\\n     "${broker.url}/api/v1/approvals"; echo`,
+);
+console.log("");
+console.log("# 14. Read the thread's pinned approvals");
+console.log(
+  `curl -s -H "Authorization: Bearer ${broker.token}" \\\n     "${broker.url}/api/v1/threads/${threadId}/pinned-approvals"; echo`,
+);
+console.log("");
+console.log("# 15. Read the thread view again: effectiveStatus is needs_attention");
+console.log(
+  `curl -s -H "Authorization: Bearer ${broker.token}" \\\n     "${broker.url}/api/v1/threads/${threadId}"; echo`,
+);
+console.log("");
+console.log("# 16. Filter the board by needs_me");
+console.log(
+  `curl -s -H "Authorization: Bearer ${broker.token}" \\\n     "${broker.url}/api/v1/threads?status=needs_me"; echo`,
+);
+console.log("");
+console.log("# 17. List pending approvals through the approvals route");
+console.log(
+  `curl -s -H "Authorization: Bearer ${broker.token}" \\\n     "${broker.url}/api/v1/approvals?status=pending&threadId=${approvalThreadId}&taskId=${taskId}"; echo`,
+);
+console.log("");
+console.log("# 18. Decide the approval");
+console.log(
+  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${approvalDecisionBody}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision"; echo`,
+);
+console.log("");
+console.log("# 19. Pinned approvals are empty after the decision");
+console.log(
+  `curl -s -H "Authorization: Bearer ${broker.token}" \\\n     "${broker.url}/api/v1/threads/${threadId}/pinned-approvals"; echo`,
+);
+console.log("");
+console.log("# 20. Create a threadless approval request: it defaults to the inbox thread");
+console.log(
+  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${inboxApprovalRequestBody}' \\\n     "${broker.url}/api/v1/approvals"; echo`,
+);
+console.log("");
+console.log("# 21. Read the inbox thread's pinned approvals");
+console.log(
+  `curl -s -H "Authorization: Bearer ${broker.token}" \\\n     "${broker.url}/api/v1/threads/${SYSTEM_INBOX_THREAD_ID}/pinned-approvals"; echo`,
+);
+console.log("");
+console.log("# 22. Close thread, then prove out-of-terminal transition returns 422");
 console.log(
   `curl -s -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${closeThreadBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/status"; echo`,
 );
@@ -283,37 +345,17 @@ console.log(
   `curl -s -i -X PATCH -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${outOfTerminalThreadBody}' \\\n     "${broker.url}/api/v1/threads/${threadId}/status" | head -1`,
 );
 console.log("");
-console.log("# 13. Read folded projection");
-console.log(
-  `curl -s -H "Authorization: Bearer ${broker.token}" \\\n     "${broker.url}/api/v1/threads/${threadId}"; echo`,
-);
-console.log("");
-console.log("# 14. Create an explicit pending approval request");
-console.log(
-  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${approvalRequestBody}' \\\n     "${broker.url}/api/v1/approvals"; echo`,
-);
-console.log("");
-console.log("# 15. List pending approvals");
-console.log(
-  `curl -s -H "Authorization: Bearer ${broker.token}" \\\n     "${broker.url}/api/v1/approvals?status=pending&threadId=${approvalThreadId}&taskId=${taskId}"; echo`,
-);
-console.log("");
-console.log("# 16. Decide the approval");
-console.log(
-  `curl -s -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${approvalDecisionBody}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision"; echo`,
-);
-console.log("");
-console.log("# 17. Decide twice with a fresh key → 409");
+console.log("# 23. Decide twice with a fresh key → 409");
 console.log(
   `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '{"schemaVersion":1,"decision":"reject","idempotencyKey":"approval-decision-02"}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision" | head -1`,
 );
 console.log("");
-console.log("# 18. Unknown approval id → 404");
+console.log("# 24. Unknown approval id → 404");
 console.log(
   `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '${unknownApprovalDecisionBody}' \\\n     "${broker.url}/api/v1/approvals/${unknownApprovalRequestId}/decision" | head -1`,
 );
 console.log("");
-console.log("# 19. Missing decision field → 400");
+console.log("# 25. Missing decision field → 422");
 console.log(
   `curl -s -i -X POST -H "Authorization: Bearer ${broker.token}" \\\n     -H "Content-Type: application/json" \\\n     -d '{"schemaVersion":1,"idempotencyKey":"approval-decision-missing"}' \\\n     "${broker.url}/api/v1/approvals/${approvalRequestId}/decision" | head -1`,
 );

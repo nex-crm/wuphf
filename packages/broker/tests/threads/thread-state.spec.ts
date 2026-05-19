@@ -30,6 +30,7 @@ import type { SqliteReceiptStore } from "../../src/sqlite-receipt-store.ts";
 import {
   createThreadSubsystem,
   parseThreadIdempotencyKey,
+  SYSTEM_INBOX_THREAD_ID,
   snapshotThreadProjection,
   type ThreadAppender,
   type ThreadCommand,
@@ -329,7 +330,7 @@ describe("thread appender and projection", () => {
     );
     expect(attempts.filter((r) => r === "accepted").length).toBe(1);
     expect(attempts.filter((r) => r === "conflict").length).toBe(7);
-    expect(countEvents(fix, "thread.spec_edited")).toBe(2);
+    expect(countEvents(fix, "thread.spec_edited")).toBe(3);
 
     const specRows = fix.db
       .prepare<[], { readonly payload: Buffer }>(
@@ -343,7 +344,7 @@ describe("thread appender and projection", () => {
       ) as ThreadSpecEditedAuditPayload;
       return payload.baseRevisionId ?? null;
     });
-    expect(baseRevisionIds).toEqual([null, baseRevisionId]);
+    expect(baseRevisionIds).toEqual([null, null, baseRevisionId]);
   });
 
   it("rejects spec revision id reuse across threads", () => {
@@ -459,9 +460,10 @@ describe("thread appender and projection", () => {
     expect(first.replayed).toBe(false);
     expect(second.replayed).toBe(true);
     expect(second.payload.toString("utf8")).toBe(first.payload.toString("utf8"));
-    expect(countEvents(fix, "thread.created")).toBe(1);
-    expect(countEvents(fix, "thread.spec_edited")).toBe(1);
-    expect(fix.state.list()).toHaveLength(1);
+    expect(countEvents(fix, "thread.created")).toBe(2);
+    expect(countEvents(fix, "thread.spec_edited")).toBe(2);
+    expect(fix.state.list()).toHaveLength(2);
+    expect(fix.state.getById(SYSTEM_INBOX_THREAD_ID)?.title).toBe("Inbox");
 
     const edit = specEditCommand({
       baseRevisionId: "01CRZ3NDEKTSV4RRFFQ69G5FC0",
@@ -471,7 +473,7 @@ describe("thread appender and projection", () => {
     const editSecond = appendSpecEdit(fix, edit, EDIT_KEY, INITIAL_CONTENT);
     expect(editFirst.replayed).toBe(false);
     expect(editSecond.replayed).toBe(true);
-    expect(countEvents(fix, "thread.spec_edited")).toBe(2);
+    expect(countEvents(fix, "thread.spec_edited")).toBe(3);
   });
 
   it("rebuilds thread projection from the event log byte-equal to live rows", () => {
@@ -490,14 +492,14 @@ describe("thread appender and projection", () => {
     const createdRows = eventPayloadBytes(fix, "thread.created");
     const specRows = eventPayloadBytes(fix, "thread.spec_edited");
     const statusRows = eventPayloadBytes(fix, "thread.status_changed");
-    expectThreadPayloadBytes(createdRows[0] ?? Buffer.alloc(0), "thread_created", {
+    expectThreadPayloadBytes(createdRows[1] ?? Buffer.alloc(0), "thread_created", {
       threadId: create.threadId,
       title: create.title,
       createdBy: create.createdBy,
       createdAt: create.createdAt,
       externalRefs: create.externalRefs,
     });
-    expectThreadPayloadBytes(specRows[0] ?? Buffer.alloc(0), "thread_spec_edited", {
+    expectThreadPayloadBytes(specRows[1] ?? Buffer.alloc(0), "thread_spec_edited", {
       threadId: create.threadId,
       revisionId: asThreadSpecRevisionId("01CRZ3NDEKTSV4RRFFQ69G5FC0"),
       content: create.content,
@@ -505,7 +507,7 @@ describe("thread appender and projection", () => {
       authoredBy: create.createdBy,
       authoredAt: create.createdAt,
     });
-    expectThreadPayloadBytes(specRows[1] ?? Buffer.alloc(0), "thread_spec_edited", {
+    expectThreadPayloadBytes(specRows[2] ?? Buffer.alloc(0), "thread_spec_edited", {
       threadId: edit.threadId,
       revisionId: edit.revisionId,
       baseRevisionId: edit.baseRevisionId,

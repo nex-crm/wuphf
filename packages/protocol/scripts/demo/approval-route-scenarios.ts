@@ -28,6 +28,7 @@ import {
   routeErrorToJsonValue,
   signedApprovalTokenToJsonValue,
   type Thread,
+  type ThreadView,
   threadCreateRequestFromJson,
   threadCreateRequestToJsonValue,
   threadGetResponseFromJson,
@@ -36,12 +37,14 @@ import {
   threadListResponseToJsonValue,
   threadMutationResponseFromJson,
   threadMutationResponseToJsonValue,
+  threadPinnedApprovalsResponseFromJson,
+  threadPinnedApprovalsResponseToJsonValue,
   threadSpecContentHash,
   threadSpecEditRequestFromJson,
   threadSpecEditRequestToJsonValue,
   threadStatusChangeRequestFromJson,
   threadStatusChangeRequestToJsonValue,
-  threadToJson,
+  threadViewToJsonValue,
 } from "../../src/index.ts";
 import { buildValidReceipt } from "./fixtures.ts";
 import { expectCodecRoundTrip, expectEqual, expectThrows, header, nonNull } from "./harness.ts";
@@ -166,7 +169,15 @@ export function runApprovalRouteScenarios(): void {
     createdAt: routeCreatedAt,
     updatedAt: routeUpdatedAt,
   };
-  const routeThreadJson = JSON.parse(threadToJson(routeThread));
+  const routeThreadView: ThreadView = {
+    ...routeThread,
+    effectiveStatus: "needs_attention",
+    attentionReason: "pending_approval",
+    boardColumn: "needs_me",
+    currentSeat: "human",
+    pendingApprovalCount: 1,
+  };
+  const routeThreadViewJson = threadViewToJsonValue(routeThreadView);
   const pendingApprovalRequestWire = { ...approvalRequestWire, status: "pending" };
   Reflect.deleteProperty(pendingApprovalRequestWire, "decision");
   const pendingApprovalRequest = approvalRequestFromJsonValue(pendingApprovalRequestWire);
@@ -241,7 +252,7 @@ export function runApprovalRouteScenarios(): void {
     "thread list response route envelope",
     {
       schemaVersion: 1,
-      threads: [routeThreadJson],
+      threads: [routeThreadViewJson],
       nextCursor: "bHNuOjQy",
     },
     threadListResponseFromJson,
@@ -251,7 +262,7 @@ export function runApprovalRouteScenarios(): void {
     "thread get response route envelope",
     {
       schemaVersion: 1,
-      thread: routeThreadJson,
+      thread: routeThreadViewJson,
     },
     threadGetResponseFromJson,
     threadGetResponseToJsonValue,
@@ -344,6 +355,17 @@ export function runApprovalRouteScenarios(): void {
     },
     approvalGetResponseFromJson,
     approvalGetResponseToJsonValue,
+  );
+  expectCodecRoundTrip(
+    "thread pinned approvals response route envelope",
+    {
+      schemaVersion: 1,
+      threadId: routeThreadId,
+      headLsn: lsnFromV1Number(44),
+      approvals: [pendingApprovalViewWire],
+    },
+    threadPinnedApprovalsResponseFromJson,
+    threadPinnedApprovalsResponseToJsonValue,
   );
   expectCodecRoundTrip(
     "route error envelope",

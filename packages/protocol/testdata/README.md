@@ -59,6 +59,9 @@ cap enforcement, malformed assertion bytes, and moat sanitization of Unicode
 vectors must parse with strict known-key rejection, reuse nested `Thread`,
 `ApprovalRequest`, `ApprovalClaim`, `ApprovalScope`, and
 `SignedApprovalToken` codecs, and serialize to the listed canonical JSON bytes.
+Thread list/get vectors use `ThreadView` fields for effective status, board
+column, current seat, and pending approval count; pinned approval vectors use
+token-redacted `ApprovalView[]`.
 Rejected vectors cover unknown top-level route keys, unsupported future
 `schemaVersion`, approval decisions that approve without a token, and route
 error message budget overflow.

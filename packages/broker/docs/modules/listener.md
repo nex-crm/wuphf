@@ -90,8 +90,9 @@ loopback guard and default `/api/*` bearer gate.
 
 | Method | Path | Auth | Contract |
 |---|---|---|---|
-| GET | `/api/v1/threads` | bearer | Lists folded thread projections with optional `?status=` filter through `threadListResponseToJsonValue`; `Thread.task_ids` comes from the bounded `thread_receipts` index. |
-| GET | `/api/v1/threads/:id` | bearer | Fetches one folded projection through `threadGetResponseToJsonValue`; full receipt enumeration stays behind the paginated receipts route. |
+| GET | `/api/v1/threads` | bearer | Lists folded thread views with optional `?status=` filter by stored/effective status or board column through `threadListResponseToJsonValue`; `Thread.task_ids` comes from the bounded `thread_receipts` index. |
+| GET | `/api/v1/threads/:id` | bearer | Fetches one folded thread view through `threadGetResponseToJsonValue`; full receipt enumeration stays behind the paginated receipts route. |
+| GET | `/api/v1/threads/:id/pinned-approvals` | bearer | Returns token-redacted pending approvals scoped to the thread through `threadPinnedApprovalsResponseToJsonValue`. |
 | POST | `/api/v1/threads` | bearer | Parses `threadCreateRequestFromJson`, appends `thread.created` and the initial `thread.spec_edited` in one SQLite transaction, returns `threadMutationResponseToJsonValue`, and emits `thread.created` SSE. |
 | PATCH | `/api/v1/threads/:id/spec` | bearer | Parses `threadSpecEditRequestFromJson` and validates OCC against the keyed `threads` projection under the appender lock; stale `baseRevisionId`/`baseContentHash` returns 409 and accepted edits emit `thread.updated` SSE. |
 | PATCH | `/api/v1/threads/:id/status` | bearer | Parses `threadStatusChangeRequestFromJson` and validates status against the keyed projection under the appender lock; `fromStatus` mismatch returns 409 and terminal exits return 422. Accepted changes emit `thread.updated` SSE. |
@@ -99,7 +100,9 @@ loopback guard and default `/api/*` bearer gate.
 See [threads.md](./threads.md) for projection storage, idempotency, and replay
 details. Thread SSE events are invalidation-only and use the committed event LSN
 as the SSE `id`; clients must refetch on `ready`, reconnect, and every
-thread invalidation. Last-Event-ID backfill from `event_log` is still a TODO.
+thread invalidation. Approval request/decision routes emit
+`thread.pinned_approvals.changed` for thread-scoped approvals. Last-Event-ID
+backfill from `event_log` is still a TODO.
 
 ### Approval routes
 
@@ -114,10 +117,10 @@ tokens are redacted from read responses.
 
 | Method | Path | Auth | Contract |
 |---|---|---|---|
-| POST | `/api/v1/approvals` | bearer | Parses `ApprovalRequestCreateRequest`, appends `approval.requested`, projects a pending `ApprovalRequest`, returns `ApprovalRequestCreateResponse`, and emits `approval.requested` on `/api/events`. |
+| POST | `/api/v1/approvals` | bearer | Parses `ApprovalRequestCreateRequest`, defaults missing `threadId` to the system inbox thread when thread routes are mounted, appends `approval.requested`, projects a pending `ApprovalRequest`, returns `ApprovalRequestCreateResponse`, and emits `approval.requested` plus thread pinned invalidation when scoped. |
 | GET | `/api/v1/approvals` | bearer | Lists token-redacted approval views. Optional filters: `status`, `threadId`, `taskId`, plus capped `limit` and `cursor` pagination. |
 | GET | `/api/v1/approvals/:id` | bearer | Fetches one token-redacted approval view, or 404 for malformed/missing ids. |
-| POST | `/api/v1/approvals/:id/decision` | bearer | Parses `ApprovalDecisionRequest`, requires a token for `approve`, rejects non-pending approvals with 409, records the approve token without WebAuthn verification, and emits `approval.decided`. |
+| POST | `/api/v1/approvals/:id/decision` | bearer | Parses `ApprovalDecisionRequest`, requires a token for `approve`, rejects non-pending approvals with 409, records the approve token without WebAuthn verification, and emits `approval.decided` plus thread pinned invalidation when scoped. |
 
 See [approvals.md](./approvals.md) for the projection schema, projection rebuild,
 and SSE payload contract.
