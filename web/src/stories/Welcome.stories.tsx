@@ -91,9 +91,8 @@ export const Intro: StoryObj = {
       </Section>
 
       <Section title="Sidebar">
-        <Item href="?path=/story/sidebar-anatomy--anatomy" label="Anatomy" desc="Labeled diagram of the 10 sidebar parts" />
-        <Item href="?path=/story/sidebar-modules--workspace-header" label="Modules" desc="Each section in isolation — header, agents, channels, apps, usage, color picker" />
-        <Item href="?path=/story/sidebar-full-view--expanded" label="Full view" desc="Assembled sidebar in expanded / collapsed / heavy-unread states" />
+        <Item href="?path=/story/sidebar-modules--inbox-module" label="Modules" desc="Each section in isolation — inbox, agents, channels, issues, apps, usage, color picker" />
+        <Item href="?path=/story/sidebar-full-view--expanded" label="Full view" desc="Real Sidebar component mounted with seeded data — expanded / on app route / heavy unread" />
       </Section>
 
       <Section title="Features">

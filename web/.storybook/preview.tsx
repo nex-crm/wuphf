@@ -76,7 +76,7 @@ const preview: Preview = {
           ],
           "Patterns",
           "Sidebar",
-          ["Anatomy", "Modules", "Full view"],
+          ["Modules", "Full view"],
           "Features",
           ["Agents", "Notebook", "Wiki"],
           "Pages",
