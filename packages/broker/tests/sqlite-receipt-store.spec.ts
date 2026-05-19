@@ -15,7 +15,7 @@ import {
 import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openDatabase, runMigrations } from "../src/event-log/index.ts";
+import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
 import { constructSqliteReceiptStoreForTesting } from "../src/internal/sqlite-receipt-store-testing.ts";
 import {
   InvalidListCursorError,
@@ -23,7 +23,7 @@ import {
   ReceiptStoreFullError,
   ReceiptThreadNotFoundError,
 } from "../src/receipt-store.ts";
-import type { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
+import { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
 
 const TASK_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const THREAD_A = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
@@ -158,6 +158,20 @@ function receiptIdAt(index: number): string {
 }
 
 describe("SqliteReceiptStore", () => {
+  it("can be constructed from an existing database and reports empty reads", async () => {
+    const db = openDatabase({ path: ":memory:" });
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const store = SqliteReceiptStore.fromDatabase(db, eventLog);
+    try {
+      expect(store.sharesProvenance(db, eventLog)).toBe(true);
+      expect(store.size()).toBe(0);
+      await expect(store.get(asReceiptId(receiptIdAt(1)))).resolves.toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+
   it("put returns existed:false, then get and list immediately include the receipt", async () => {
     const { store } = openStoreWithThreads();
     try {

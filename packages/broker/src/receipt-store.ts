@@ -137,7 +137,8 @@ export class ReceiptStoreUnavailableError extends Error {
 /**
  * Error thrown when a V2 receipt names a thread that does not exist in the
  * durable thread projection at the time of the write. Routes catch this as a
- * client error; out-of-thread V2 receipts with no `threadId` remain valid.
+ * client error; out-of-thread V2 receipts with no `threadId` remain valid
+ * unless the host explicitly maps them to a default thread.
  */
 export class ReceiptThreadNotFoundError extends Error {
   override readonly name = "ReceiptThreadNotFoundError";

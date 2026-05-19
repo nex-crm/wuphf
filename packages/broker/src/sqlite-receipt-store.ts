@@ -37,10 +37,12 @@ export interface SqliteReceiptStoreConfig {
    * rows. Defaults to `DEFAULT_SQLITE_MAX_RECEIPTS` (100_000).
    */
   readonly maxReceipts?: number;
+  readonly defaultThreadId?: ThreadId;
 }
 
 export interface SqliteReceiptStoreFromDatabaseConfig {
   readonly maxReceipts?: number;
+  readonly defaultThreadId?: ThreadId;
 }
 
 interface ReceiptExistsRow {
@@ -80,13 +82,19 @@ export class SqliteReceiptStore implements ReceiptStore {
   private readonly putTransaction: Database.Transaction<
     (receipt: ReceiptSnapshot) => { readonly existed: boolean }
   >;
+  private defaultThreadId: ThreadId | null;
   private closed = false;
 
   static open(config: SqliteReceiptStoreConfig): SqliteReceiptStore {
     const db = openDatabase(config);
     try {
       runMigrations(db);
-      return new SqliteReceiptStore(db, undefined, config.maxReceipts);
+      return new SqliteReceiptStore(
+        db,
+        undefined,
+        config.maxReceipts,
+        config.defaultThreadId ?? null,
+      );
     } catch (err) {
       db.close();
       throw err;
@@ -98,15 +106,17 @@ export class SqliteReceiptStore implements ReceiptStore {
     eventLog: EventLog,
     config: SqliteReceiptStoreFromDatabaseConfig = {},
   ): SqliteReceiptStore {
-    return new SqliteReceiptStore(db, eventLog, config.maxReceipts);
+    return new SqliteReceiptStore(db, eventLog, config.maxReceipts, config.defaultThreadId ?? null);
   }
 
   private constructor(
     private readonly db: Database.Database,
     eventLog: EventLog = createEventLog(db),
     maxReceipts: number | undefined = undefined,
+    defaultThreadId: ThreadId | null = null,
   ) {
     this.eventLog = eventLog;
+    this.defaultThreadId = defaultThreadId;
     const requestedMax = maxReceipts ?? DEFAULT_SQLITE_MAX_RECEIPTS;
     if (!Number.isInteger(requestedMax) || requestedMax <= 0) {
       throw new Error(
@@ -151,7 +161,7 @@ export class SqliteReceiptStore implements ReceiptStore {
         throw new ReceiptStoreFullError(`SqliteReceiptStore at capacity (${this.maxReceipts})`);
       }
 
-      const threadId = projectionThreadId(receipt);
+      const threadId = projectionThreadId(receipt, this.defaultThreadId);
       if (threadId !== null && this.threadExistsStmt.get(threadId) === undefined) {
         throw new ReceiptThreadNotFoundError(`thread ${threadId} not found`);
       }
@@ -168,6 +178,10 @@ export class SqliteReceiptStore implements ReceiptStore {
 
   sharesProvenance(db: Database.Database, eventLog: EventLog): boolean {
     return this.db === db && this.eventLog === eventLog;
+  }
+
+  setDefaultThreadIdForThreadlessReceipts(threadId: ThreadId): void {
+    this.defaultThreadId = threadId;
   }
 
   async put(receipt: ReceiptSnapshot): Promise<{ readonly existed: boolean }> {
@@ -280,11 +294,12 @@ function classifySqliteReadError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
-function projectionThreadId(receipt: ReceiptSnapshot): ThreadId | null {
-  if (receipt.schemaVersion === 2 && receipt.threadId !== undefined) {
-    return receipt.threadId;
-  }
-  return null;
+function projectionThreadId(
+  receipt: ReceiptSnapshot,
+  defaultThreadId: ThreadId | null,
+): ThreadId | null {
+  if (receipt.schemaVersion !== 2) return null;
+  return receipt.threadId ?? defaultThreadId;
 }
 
 function isReceiptIdConstraintError(err: unknown): boolean {

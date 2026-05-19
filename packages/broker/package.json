@@ -21,6 +21,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "ci:thread-replay-check": "vitest run tests/threads/thread-state.spec.ts tests/threads/thread-routes.spec.ts --testNamePattern replay-check",
+    "ci:thread-invariants": "vitest run tests/threads/effective-status.spec.ts tests/threads/thread-state.spec.ts tests/threads/thread-routes.spec.ts tests/threads/thread-routes-unit.spec.ts",
     "lint": "biome check src/ tests/ scripts/",
     "lint:fix": "biome check --write src/ tests/ scripts/",
     "format": "biome format --write src/ tests/ scripts/",

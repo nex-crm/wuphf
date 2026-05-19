@@ -53,6 +53,7 @@ export function createThreadSubsystem(
   const receiptIndex = createThreadReceiptIndexStore(db);
   const appender = createThreadAppender(db, eventLog, state);
   ensureSystemInboxThread(appender, state);
+  receiptStore.setDefaultThreadIdForThreadlessReceipts(SYSTEM_INBOX_THREAD_ID);
   return {
     db,
     appender,
