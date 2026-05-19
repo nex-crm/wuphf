@@ -40,6 +40,7 @@ import {
   parseLsn,
   routeErrorToJsonValue,
   type SignerIdentity,
+  type ThreadId,
   validateApprovalStreamEvent,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
@@ -68,9 +69,17 @@ export interface ApprovalRouteDeps {
   readonly appender: ApprovalAppender;
   readonly projection: ApprovalProjection;
   readonly tokenAgentIds: ReadonlyMap<ApiToken, AgentId> | null;
+  readonly defaultThreadId: ThreadId | null;
   readonly logger: BrokerLogger;
   readonly nowMs: () => number;
   readonly emit: (event: ApprovalStreamEvent) => void;
+  readonly emitThreadEvent: (event: ApprovalThreadStreamEvent) => void;
+}
+
+export interface ApprovalThreadStreamEvent {
+  readonly kind: "thread.pinned_approvals.changed";
+  readonly threadId: ThreadId;
+  readonly headLsn: EventLsn;
 }
 
 export async function handleApprovalRoute(
@@ -147,7 +156,7 @@ async function handleApprovalRequestPost(
   }
 
   const nowMs = deps.nowMs();
-  const payload = approvalRequestedPayloadFromRouteRequest(request, nowMs);
+  const payload = approvalRequestedPayloadFromRouteRequest(request, nowMs, deps.defaultThreadId);
   try {
     const result = deps.appender.requestApprovalIdempotent({
       payload,
@@ -171,6 +180,7 @@ async function handleApprovalRequestPost(
     writeJsonRaw(res, result.statusCode, result.payload, result.replayed);
     if (!result.replayed && result.approval !== null && result.lsn !== null) {
       emitApprovalInvalidation("approval.requested", result.approval, result.lsn, deps);
+      emitThreadPinnedApprovalsInvalidation(result.approval, result.lsn, deps);
     }
   } catch (err) {
     if (err instanceof ApprovalRequestAlreadyExistsError) {
@@ -244,6 +254,7 @@ async function handleApprovalDecisionPost(
     writeJsonRaw(res, result.statusCode, result.payload, result.replayed);
     if (!result.replayed && result.approval !== null && result.lsn !== null) {
       emitApprovalInvalidation("approval.decided", result.approval, result.lsn, deps);
+      emitThreadPinnedApprovalsInvalidation(result.approval, result.lsn, deps);
     }
   } catch (err) {
     if (err instanceof ApprovalDecisionInvalidError) {
@@ -325,13 +336,15 @@ function handleApprovalGet(
 function approvalRequestedPayloadFromRouteRequest(
   request: ApprovalRequestCreateRequest,
   nowMs: number,
+  defaultThreadId: ThreadId | null,
 ): ApprovalRequestedAuditPayload {
+  const threadId = request.threadId ?? defaultThreadId ?? undefined;
   return {
     requestId: approvalRequestIdFromIdempotencyKey(request.idempotencyKey),
     claim: request.claim,
     scope: request.scope,
     riskClass: request.riskClass,
-    ...(request.threadId === undefined ? {} : { threadId: request.threadId }),
+    ...(threadId === undefined ? {} : { threadId }),
     ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
     ...(request.receiptId === undefined ? {} : { receiptId: request.receiptId }),
     requestedBy: APPROVAL_ROUTE_ACTOR,
@@ -527,6 +540,19 @@ function emitApprovalInvalidation(
     throw new Error(`invalid approval stream event: ${JSON.stringify(validation.errors)}`);
   }
   deps.emit(event);
+}
+
+function emitThreadPinnedApprovalsInvalidation(
+  approval: ApprovalRequest,
+  headLsn: EventLsn,
+  deps: Pick<ApprovalRouteDeps, "emitThreadEvent">,
+): void {
+  if (approval.threadId === undefined) return;
+  deps.emitThreadEvent({
+    kind: "thread.pinned_approvals.changed",
+    threadId: approval.threadId,
+    headLsn,
+  });
 }
 
 function approvalViewFromApproval(approval: ApprovalRequest): ApprovalView {

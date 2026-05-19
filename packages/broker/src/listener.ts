@@ -219,11 +219,13 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
           appender: config.approvals.appender,
           projection: config.approvals.projection,
           tokenAgentIds: config.approvals.tokenAgentIds ?? tokenAgentIds,
+          defaultThreadId: config.threads?.inboxThreadId ?? null,
           logger,
           nowMs: () => readBrokerClock(clock),
           emit: (event) => {
             sseHub.emit({ id: event.id, event: event.kind, data: event });
           },
+          emitThreadEvent: (event) => sseHub.emitThreadEvent(event),
         } satisfies ApprovalRouteDeps);
   if (config.cost !== undefined && config.cost.operatorToken === undefined) {
     // TODO(security): require operatorToken once every host has a separate

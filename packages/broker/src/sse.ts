@@ -44,7 +44,7 @@ export interface SseEvent {
 }
 
 export interface ThreadSseEmitArgs {
-  readonly kind: "thread.created" | "thread.updated";
+  readonly kind: "thread.created" | "thread.updated" | "thread.pinned_approvals.changed";
   readonly threadId: ThreadId;
   readonly headLsn: EventLsn;
 }
