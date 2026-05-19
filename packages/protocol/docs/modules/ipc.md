@@ -23,8 +23,9 @@ Types in `ipc.ts`:
 - `BrokerHttpResponse<T>` and `BrokerError`: success/error response envelope.
 - `ApprovalSubmitRequest` and `ApprovalSubmitResponse`: approval submission
   contract.
-- `StreamEventKind`, `StreamEvent<TPayload>`, `ThreadStreamEvent`, and
-  `ThreadInvalidationPayload`: closed SSE projection types.
+- `StreamEventKind`, `StreamEvent<TPayload>`, `ThreadStreamEvent`,
+  `ThreadInvalidationPayload`, `ApprovalStreamEvent`, and
+  `ApprovalInvalidationPayload`: closed SSE projection types.
 - `BackpressureFrame`, `WsFrame`, and `WsFrameType`: closed WebSocket frame
   types.
 - `AllowedLoopbackHost`: loopback Host allowlist brand.

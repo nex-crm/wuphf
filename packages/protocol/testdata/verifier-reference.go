@@ -241,17 +241,20 @@ func canonicalMerkleRoot(rec merkleRootInput) ([]byte, error) {
 	return canonicalize(projection)
 }
 
-// costPayloadKindSet identifies bodyB64 kinds whose payload itself is
-// expected to be canonical JSON (RFC 8785 JCS). The TS writer guarantees
-// `costAuditPayloadToBytes` emits canonical bytes; this verifier
-// independently decodes, re-parses, and re-canonicalizes the body to
-// confirm a non-TS implementation produces the same bytes. Other kinds
-// (boot_marker, thread_*) carry kind-specific bodies — this verifier
-// does not yet decode them.
-var costPayloadKindSet = map[string]bool{
+// canonicalJsonPayloadKindSet identifies bodyB64 kinds whose payload itself is
+// expected to be canonical JSON (RFC 8785 JCS). The TS writer guarantees the
+// family-specific `*AuditPayloadToBytes` helpers emit canonical bytes; this
+// verifier independently decodes, re-parses, and re-canonicalizes the body to
+// confirm a non-TS implementation produces the same bytes.
+var canonicalJsonPayloadKindSet = map[string]bool{
+	"approval_requested":       true,
+	"approval_decided":         true,
 	"cost_event":               true,
 	"budget_set":               true,
 	"budget_threshold_crossed": true,
+	"thread_created":           true,
+	"thread_spec_edited":       true,
+	"thread_status_changed":    true,
 }
 
 // canonicalizeBodyBytes decodes a base64 body, parses it as JSON, and
@@ -1948,10 +1951,10 @@ func main() {
 			failed++
 			continue
 		}
-		// For cost-payload kinds, also confirm the bodyB64 itself is canonical
+		// For typed JSON payload kinds, also confirm the bodyB64 itself is canonical
 		// JSON: an independent canonicalizer must reproduce identical bytes.
 		// This locks the body-bytes contract that the audit chain relies on.
-		if costPayloadKindSet[vec.Input.Payload.Kind] {
+		if canonicalJsonPayloadKindSet[vec.Input.Payload.Kind] {
 			decoded, canonical, err := canonicalizeBodyBytes(vec.Input.Payload.BodyB64)
 			if err != nil {
 				fmt.Printf("  %sFAIL%s %s: body canonicalize error: %v\n",

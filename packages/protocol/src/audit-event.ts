@@ -17,6 +17,11 @@
 // is locked here, exposed via golden vectors in testdata/audit-event-vectors.json.
 
 import { createHash } from "node:crypto";
+import {
+  type ApprovalAuditEventKind,
+  approvalAuditPayloadFromJsonValue,
+  validateApprovalAuditPayloadForKind,
+} from "./approval-request.ts";
 import type { Brand } from "./brand.ts";
 import {
   MAX_AUDIT_CHAIN_BATCH_SIZE,
@@ -51,7 +56,7 @@ export const AUDIT_EVENT_KIND_VALUES = [
   "receipt_updated",
   "receipt_finalized",
   "approval_requested",
-  "approval_decision",
+  "approval_decided",
   "cost_event",
   "budget_set",
   "budget_threshold_crossed",
@@ -91,9 +96,9 @@ export const PAYLOAD_KIND_METADATA = {
     description: "A write approval request was presented.",
     bodySchemaRef: "wuphf.audit.payload.approval_requested.v1",
   },
-  approval_decision: {
+  approval_decided: {
     description: "A reviewer accepted, rejected, or abstained on an approval.",
-    bodySchemaRef: "wuphf.audit.payload.approval_decision.v1",
+    bodySchemaRef: "wuphf.audit.payload.approval_decided.v1",
   },
   cost_event: {
     description: "Token or cost accounting changed.",
@@ -155,6 +160,10 @@ const THREAD_AUDIT_EVENT_KIND_SET: ReadonlySet<string> = new Set<string>([
   "thread_spec_edited",
   "thread_status_changed",
 ]);
+const APPROVAL_AUDIT_EVENT_KIND_SET: ReadonlySet<string> = new Set<string>([
+  "approval_requested",
+  "approval_decided",
+]);
 const COST_AUDIT_EVENT_KIND_SET: ReadonlySet<string> = new Set<string>([
   "cost_event",
   "budget_set",
@@ -183,6 +192,9 @@ export function validateAuditEventPayloadBody(
   kind: AuditEventKind,
   payload: unknown,
 ): ReceiptValidationResult {
+  if (isApprovalAuditEventKind(kind)) {
+    return validateApprovalAuditPayloadForKind(kind, payload);
+  }
   if (isThreadAuditEventKind(kind)) {
     return validateThreadAuditPayloadForKind(kind, payload);
   }
@@ -547,6 +559,7 @@ function validateAuditEventRecordShape(record: AuditEventRecord): void {
     throw new Error(`serializeAuditEventRecordForHash: ${bodyBudget.reason}`);
   }
   validateThreadAuditEventBodyBytes(record.payload.kind, record.payload.body);
+  validateApprovalAuditEventBodyBytes(record.payload.kind, record.payload.body);
   validateCostAuditEventBodyBytes(record.payload.kind, record.payload.body);
 }
 
@@ -560,6 +573,10 @@ function assertAuditEventPayloadKind(kind: unknown): asserts kind is AuditEventK
 
 function isThreadAuditEventKind(kind: AuditEventKind): kind is ThreadAuditEventKind {
   return THREAD_AUDIT_EVENT_KIND_SET.has(kind);
+}
+
+function isApprovalAuditEventKind(kind: AuditEventKind): kind is ApprovalAuditEventKind {
+  return APPROVAL_AUDIT_EVENT_KIND_SET.has(kind);
 }
 
 function isCostAuditEventKind(kind: AuditEventKind): kind is CostAuditEventKind {
@@ -627,6 +644,40 @@ function validateThreadAuditEventBodyBytes(kind: AuditEventKind, body: Uint8Arra
   }
   try {
     threadAuditPayloadFromJsonValue(kind, parsed);
+  } catch (err) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body invalid for ${kind}: ${errorMessage(err)}`,
+    );
+  }
+}
+
+function validateApprovalAuditEventBodyBytes(kind: AuditEventKind, body: Uint8Array): void {
+  if (!isApprovalAuditEventKind(kind)) return;
+  let parsed: unknown;
+  let decoded: string;
+  try {
+    decoded = UTF8_DECODER.decode(body);
+    parsed = JSON.parse(decoded);
+  } catch (err) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body must be JSON for ${kind}: ${errorMessage(err)}`,
+    );
+  }
+  let canonical: string;
+  try {
+    canonical = canonicalJSON(parsed);
+  } catch (err) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body invalid canonical JSON for ${kind}: ${errorMessage(err)}`,
+    );
+  }
+  if (canonical !== decoded) {
+    throw new Error(
+      `serializeAuditEventRecordForHash: payload.body must be canonical JSON for ${kind}`,
+    );
+  }
+  try {
+    approvalAuditPayloadFromJsonValue(kind, parsed);
   } catch (err) {
     throw new Error(
       `serializeAuditEventRecordForHash: payload.body invalid for ${kind}: ${errorMessage(err)}`,

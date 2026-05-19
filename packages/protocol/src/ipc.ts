@@ -18,7 +18,9 @@
 import type { Brand } from "./brand.ts";
 import { type EventLsn, parseLsn } from "./event-lsn.ts";
 import {
+  type ApprovalRequestId,
   type IdempotencyKey,
+  isApprovalRequestId,
   isIdempotencyKey,
   isReceiptId,
   isThreadId,
@@ -576,6 +578,39 @@ function validateThreadInvalidationPayloadValue(
   });
 }
 
+function validateApprovalInvalidationPayloadValue(
+  value: unknown,
+  path: string,
+  errors: ApprovalStreamEventValidationError[],
+): void {
+  if (!isRecord(value)) {
+    addError(errors, path, "must be an object");
+    return;
+  }
+  validateThreadStreamEventKnownKeys(value, path, APPROVAL_INVALIDATION_PAYLOAD_KEYS, errors);
+  validateRequiredThreadStreamEventField(value, "requestId", path, errors, (field, fieldPath) => {
+    if (!isApprovalRequestId(field)) {
+      addError(errors, fieldPath, "must be an uppercase ULID ApprovalRequestId");
+    }
+  });
+  validateOptionalThreadStreamEventField(value, "threadId", path, errors, (field, fieldPath) => {
+    if (!isThreadId(field)) {
+      addError(errors, fieldPath, "must be an uppercase ULID ThreadId");
+    }
+  });
+  validateRequiredThreadStreamEventField(value, "headLsn", path, errors, (field, fieldPath) => {
+    if (typeof field !== "string") {
+      addError(errors, fieldPath, "must be an EventLsn string");
+      return;
+    }
+    try {
+      parseLsn(field as EventLsn);
+    } catch (err) {
+      addError(errors, fieldPath, err instanceof Error ? err.message : "must be a valid EventLsn");
+    }
+  });
+}
+
 function validateThreadStreamEventKnownKeys(
   record: Readonly<Record<string, unknown>>,
   path: string,
@@ -723,12 +758,23 @@ export interface ThreadInvalidationPayload {
   readonly headLsn: EventLsn;
 }
 
+export interface ApprovalInvalidationPayload {
+  readonly requestId: ApprovalRequestId;
+  readonly threadId?: ThreadId | undefined;
+  readonly headLsn: EventLsn;
+}
+
 export type ThreadStreamEventKind =
   | "thread.created"
   | "thread.updated"
   | "thread.pinned_approvals.changed";
 
-type NonThreadStreamEventKind = Exclude<StreamEventKind, ThreadStreamEventKind>;
+export type ApprovalStreamEventKind = "approval.requested" | "approval.decided";
+
+type NonInvalidationStreamEventKind = Exclude<
+  StreamEventKind,
+  ThreadStreamEventKind | ApprovalStreamEventKind
+>;
 
 interface StreamEventBase {
   readonly id: string;
@@ -741,10 +787,16 @@ export type ThreadStreamEvent = StreamEventBase & {
   readonly payload: ThreadInvalidationPayload;
 };
 
+export type ApprovalStreamEvent = StreamEventBase & {
+  readonly kind: ApprovalStreamEventKind;
+  readonly payload: ApprovalInvalidationPayload;
+};
+
 export type StreamEvent<TPayload = unknown> =
+  | ApprovalStreamEvent
   | ThreadStreamEvent
   | (StreamEventBase & {
-      readonly kind: NonThreadStreamEventKind;
+      readonly kind: NonInvalidationStreamEventKind;
       readonly payload: TPayload;
     });
 
@@ -752,6 +804,37 @@ export type ThreadStreamEventValidationError = ReceiptValidationError;
 export type ThreadStreamEventValidationResult =
   | { ok: true }
   | { ok: false; errors: ThreadStreamEventValidationError[] };
+
+export type ApprovalStreamEventValidationError = ReceiptValidationError;
+export type ApprovalStreamEventValidationResult =
+  | { ok: true }
+  | { ok: false; errors: ApprovalStreamEventValidationError[] };
+
+const APPROVAL_STREAM_EVENT_KIND_VALUES = [
+  "approval.requested",
+  "approval.decided",
+] as const satisfies readonly ApprovalStreamEventKind[];
+const APPROVAL_STREAM_EVENT_KIND_SET: ReadonlySet<string> = new Set<string>(
+  APPROVAL_STREAM_EVENT_KIND_VALUES,
+);
+const APPROVAL_STREAM_EVENT_KEYS_TUPLE = [
+  "id",
+  "kind",
+  "emittedAt",
+  "receiptId",
+  "payload",
+] as const satisfies readonly (keyof ApprovalStreamEvent)[];
+const APPROVAL_STREAM_EVENT_KEYS: ReadonlySet<string> = new Set<string>(
+  APPROVAL_STREAM_EVENT_KEYS_TUPLE,
+);
+const APPROVAL_INVALIDATION_PAYLOAD_KEYS_TUPLE = [
+  "requestId",
+  "threadId",
+  "headLsn",
+] as const satisfies readonly (keyof ApprovalInvalidationPayload)[];
+const APPROVAL_INVALIDATION_PAYLOAD_KEYS: ReadonlySet<string> = new Set<string>(
+  APPROVAL_INVALIDATION_PAYLOAD_KEYS_TUPLE,
+);
 
 const THREAD_STREAM_EVENT_KIND_VALUES = [
   "thread.created",
@@ -813,6 +896,44 @@ export function validateThreadStreamEvent(input: unknown): ThreadStreamEventVali
   });
   validateRequiredThreadStreamEventField(input, "payload", "", errors, (value, path) => {
     validateThreadInvalidationPayloadValue(value, path, errors);
+  });
+  return errors.length === 0 ? { ok: true } : { ok: false, errors };
+}
+
+export function validateApprovalStreamEvent(input: unknown): ApprovalStreamEventValidationResult {
+  const errors: ApprovalStreamEventValidationError[] = [];
+  if (!isRecord(input)) {
+    addError(errors, "", "must be an object");
+    return { ok: false, errors };
+  }
+  validateThreadStreamEventKnownKeys(input, "", APPROVAL_STREAM_EVENT_KEYS, errors);
+  validateRequiredThreadStreamEventField(input, "id", "", errors, (value, path) => {
+    if (typeof value !== "string" || value.length === 0) {
+      addError(errors, path, "must be a non-empty string");
+    }
+  });
+  validateRequiredThreadStreamEventField(input, "kind", "", errors, (value, path) => {
+    if (typeof value !== "string" || !APPROVAL_STREAM_EVENT_KIND_SET.has(value)) {
+      addError(errors, path, "must be an approval stream event kind");
+    }
+  });
+  validateRequiredThreadStreamEventField(input, "emittedAt", "", errors, (value, path) => {
+    if (typeof value !== "string" || !ISO_DATE_RE.test(value)) {
+      addError(errors, path, "must be an ISO 8601 string");
+      return;
+    }
+    const date = new Date(value);
+    if (!Number.isFinite(date.valueOf()) || date.toISOString() !== value) {
+      addError(errors, path, "must be a valid ISO 8601 instant");
+    }
+  });
+  validateOptionalThreadStreamEventField(input, "receiptId", "", errors, (value, path) => {
+    if (!isReceiptId(value)) {
+      addError(errors, path, "must be an uppercase ULID ReceiptId");
+    }
+  });
+  validateRequiredThreadStreamEventField(input, "payload", "", errors, (value, path) => {
+    validateApprovalInvalidationPayloadValue(value, path, errors);
   });
   return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }

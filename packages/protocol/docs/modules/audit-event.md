@@ -61,13 +61,17 @@ Classes: none.
 5. The projection MUST be RFC 8785 JCS via `canonicalJSON`, then UTF-8 encoded before hashing.
 6. Writers and verifiers MUST both reject payload kinds outside `AUDIT_EVENT_KIND_VALUES`; verifier rejection may surface as `serialization_threw` because verification recomputes through the serializer.
 7. Writers and verifiers MUST reject non-`Uint8Array` bodies and bodies over `MAX_AUDIT_EVENT_BODY_BYTES`.
-8. `verifyChainIncremental` MUST reject any single batch over `MAX_AUDIT_CHAIN_BATCH_SIZE` before serializing records.
-9. `verifyChain` MUST be a convenience wrapper for materialized arrays; it verifies in bounded incremental slices and returns the first failure.
-10. `verifyChainIncremental` MUST be resumable only from a prior successful `ChainVerifierState`. Callers MUST preserve `expectedPrev`, `expectedSeq`, `lastSeen`, and `recordsVerified` exactly between batches; the state is not a signed checkpoint.
-11. Chain order MUST start at `GENESIS_LSN`, advance with `nextLsn`, and never use wall-clock time for ordering or uniqueness.
-12. Each `ChainFailureCode` MUST identify the first failed validation step: `batch_too_large`, `missing_record`, `seq_gap`, `prev_hash_mismatch`, `serialization_threw`, `event_hash_mismatch`, or `lsn_threw`.
-13. `MerkleRootRecord` MUST remain distinct from `AuditEventRecord`: it is the signed checkpoint JSON shape for Merkle roots, while the audit event chain commits opaque event payload bytes.
-14. Merkle root codecs MUST reject unknown keys, invalid `EventLsn`, non-lowercase SHA-256 root hashes, invalid `Date`, empty key IDs or cert chains, and empty or malformed base64 signatures.
+8. Thread, cost, and approval audit payload families MUST carry canonical JSON
+   body bytes produced by their family-specific `*AuditPayloadToBytes` helper;
+   approval replay depends on full `approval_requested` and `approval_decided`
+   bodies, not hash-only summaries.
+9. `verifyChainIncremental` MUST reject any single batch over `MAX_AUDIT_CHAIN_BATCH_SIZE` before serializing records.
+10. `verifyChain` MUST be a convenience wrapper for materialized arrays; it verifies in bounded incremental slices and returns the first failure.
+11. `verifyChainIncremental` MUST be resumable only from a prior successful `ChainVerifierState`. Callers MUST preserve `expectedPrev`, `expectedSeq`, `lastSeen`, and `recordsVerified` exactly between batches; the state is not a signed checkpoint.
+12. Chain order MUST start at `GENESIS_LSN`, advance with `nextLsn`, and never use wall-clock time for ordering or uniqueness.
+13. Each `ChainFailureCode` MUST identify the first failed validation step: `batch_too_large`, `missing_record`, `seq_gap`, `prev_hash_mismatch`, `serialization_threw`, `event_hash_mismatch`, or `lsn_threw`.
+14. `MerkleRootRecord` MUST remain distinct from `AuditEventRecord`: it is the signed checkpoint JSON shape for Merkle roots, while the audit event chain commits opaque event payload bytes.
+15. Merkle root codecs MUST reject unknown keys, invalid `EventLsn`, non-lowercase SHA-256 root hashes, invalid `Date`, empty key IDs or cert chains, and empty or malformed base64 signatures.
 
 ## 4. Diagrams
 

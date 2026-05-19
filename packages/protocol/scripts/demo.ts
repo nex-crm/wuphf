@@ -15,15 +15,20 @@
 import { inspect } from "node:util";
 
 import {
+  type ApprovalRequest,
   type AuditEventRecord,
   apiBootstrapFromJson,
   apiBootstrapToJson,
+  approvalRequestFromJsonValue,
+  approvalRequestToJson,
+  approvalRequestToJsonValue,
   approvalSubmitRequestFromJson,
   asAgentId,
   asAgentSlug,
   asApiToken,
   asApprovalClaimId,
   asApprovalId,
+  asApprovalRequestId,
   asApprovalRole,
   asApprovalTokenId,
   asBudgetId,
@@ -1249,6 +1254,59 @@ header(31, "ApprovalRole helpers keep the closed enum importable at runtime");
 expectEqual("asApprovalRole accepts a known role", asApprovalRole("approver"), "approver");
 expectEqual("isApprovalRole rejects unknown roles", isApprovalRole("custom"), false);
 expectThrows(() => asApprovalRole("custom"), /ApprovalRole/);
+
+header(32, "ApprovalRequest artifact folds pending and decided approval state");
+const approvalReceipt = buildValidReceipt();
+const approvalEvidence = nonNull(approvalReceipt.approvals[0], "approvalReceipt.approvals[0]");
+const approvalRequest: ApprovalRequest = {
+  id: asApprovalRequestId("01HRQ7KZ7D4E6F8G9H0J1K2M3N"),
+  claim: approvalEvidence.signedToken.claim,
+  scope: approvalEvidence.signedToken.scope,
+  riskClass: "high",
+  threadId: asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+  taskId: approvalReceipt.taskId,
+  receiptId: approvalReceipt.id,
+  requestedBy: asSignerIdentity("fran@example.com"),
+  requestedAt: new Date("2026-05-08T18:00:00.000Z"),
+  status: "approved",
+  decision: {
+    decision: "approve",
+    decidedBy: asSignerIdentity("approver@example.com"),
+    decidedAt: new Date("2026-05-08T18:05:00.000Z"),
+    token: approvalEvidence.signedToken,
+  },
+  schemaVersion: 1,
+};
+const approvalRequestWire = approvalRequestToJsonValue(approvalRequest);
+expectEqual(
+  "approval request round-trips through canonical JSON",
+  canonicalJSON(approvalRequestToJsonValue(approvalRequestFromJsonValue(approvalRequestWire))),
+  canonicalJSON(approvalRequestWire),
+);
+expectEqual(
+  "approval request JSON stays canonical",
+  approvalRequestToJson(approvalRequest),
+  canonicalJSON(approvalRequestWire),
+);
+expectThrows(
+  () => approvalRequestFromJsonValue({ ...approvalRequestWire, shadow: true }),
+  /shadow.*not allowed/,
+);
+expectThrows(
+  () =>
+    approvalRequestFromJsonValue({
+      ...approvalRequestWire,
+      request_id: "A".repeat(27),
+    }),
+  /ApprovalRequestId bytes/,
+);
+const approvedWithoutDecision = { ...approvalRequestWire };
+Reflect.deleteProperty(approvedWithoutDecision, "decision");
+expectThrows(() => approvalRequestFromJsonValue(approvedWithoutDecision), /decision.*required/);
+expectThrows(
+  () => approvalRequestFromJsonValue({ ...approvalRequestWire, status: "pending" }),
+  /decision.*absent/,
+);
 
 // ──────────────────────────────────────────────────────────────────────────
 console.log("");

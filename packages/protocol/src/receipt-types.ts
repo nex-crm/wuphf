@@ -6,9 +6,11 @@ import type { Brand } from "./brand.ts";
 import {
   MAX_AGENT_SLUG_BYTES,
   MAX_APPROVAL_ID_BYTES,
+  MAX_APPROVAL_REQUEST_ID_BYTES,
   MAX_LOCAL_ID_BYTES,
   MAX_TOOL_CALL_ID_BYTES,
   MAX_WRITE_ID_BYTES,
+  validateApprovalRequestIdBudget,
   validateSignerIdentityBudget,
 } from "./budgets.ts";
 import type { FrozenArgs } from "./frozen-args.ts";
@@ -33,6 +35,7 @@ export type WriteId = Brand<string, "WriteId">;
 export type IdempotencyKey = Brand<string, "IdempotencyKey">;
 export type ThreadId = Brand<string, "ThreadId">;
 export type ThreadSpecRevisionId = Brand<string, "ThreadSpecRevisionId">;
+export type ApprovalRequestId = Brand<string, "ApprovalRequestId">;
 export type SignerIdentity = Brand<string, "SignerIdentity">;
 export type ApprovalRole = (typeof APPROVAL_ROLE_VALUES)[number];
 
@@ -384,6 +387,21 @@ export function asThreadSpecRevisionId(s: string): ThreadSpecRevisionId {
 
 export function isThreadSpecRevisionId(value: unknown): value is ThreadSpecRevisionId {
   return typeof value === "string" && ULID_RE.test(value);
+}
+
+export function asApprovalRequestId(s: string): ApprovalRequestId {
+  const budget = validateApprovalRequestIdBudget(s);
+  if (!budget.ok) throw new Error(`not an ApprovalRequestId: ${budget.reason}`);
+  if (!ULID_RE.test(s)) throw new Error("not an ApprovalRequestId ULID");
+  return s as ApprovalRequestId;
+}
+
+export function isApprovalRequestId(value: unknown): value is ApprovalRequestId {
+  return (
+    typeof value === "string" &&
+    value.length <= MAX_APPROVAL_REQUEST_ID_BYTES &&
+    ULID_RE.test(value)
+  );
 }
 
 export function asSignerIdentity(s: string): SignerIdentity {

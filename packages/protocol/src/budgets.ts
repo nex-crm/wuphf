@@ -128,6 +128,11 @@ export const MAX_APPROVAL_TOKEN_LIFETIME_MS = 30 * 60 * 1000;
 export const MAX_APPROVAL_TOKEN_ID_BYTES = 26;
 
 /**
+ * Approval request ids are ULID-shaped projection handles: 26 ASCII bytes.
+ */
+export const MAX_APPROVAL_REQUEST_ID_BYTES = 26;
+
+/**
  * Claim ids are broker-local replay/accounting handles, not payload storage.
  * 128 bytes matches receipt-local ids while keeping signed claim keys compact.
  */
@@ -541,6 +546,10 @@ export function validateMerkleRootCertChainBudget(certChainPem: string): BudgetV
 
 export function validateApprovalTokenIdBudget(value: string): BudgetValidationResult {
   return validateUtf8StringBudget(value, MAX_APPROVAL_TOKEN_ID_BYTES, "ApprovalTokenId bytes");
+}
+
+export function validateApprovalRequestIdBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_APPROVAL_REQUEST_ID_BYTES, "ApprovalRequestId bytes");
 }
 
 export function validateApprovalClaimIdBudget(value: string): BudgetValidationResult {

@@ -70,6 +70,8 @@ To regenerate after an intentional wire-contract change, update the vector
 values and run `bunx vitest run tests/audit-event.spec.ts` from
 `packages/protocol/`. The test file at `../tests/audit-event.spec.ts` reads
 this fixture and verifies the package serializer and hash function against it.
+The fixture includes typed canonical body bytes for thread, cost, and approval
+audit payload families, including `approval_requested` and `approval_decided`.
 
 ## Cross-language verification
 
