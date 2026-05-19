@@ -83,6 +83,8 @@ export type {
 } from "./projections.ts";
 export {
   ApprovalPendingSnapshotOverflowError,
+  ApprovalReplayPendingLimitExceededError,
+  ApprovalReplayThreadNotFoundError,
   approvalFromRequested,
   approvalWithDecision,
   createApprovalProjection,

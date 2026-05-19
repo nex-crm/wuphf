@@ -14,6 +14,7 @@ import {
   asThreadId,
   asTimestampMs,
   canonicalJSON,
+  MAX_ROUTE_APPROVAL_LIST_ITEMS,
   type SignedApprovalToken,
   signedApprovalTokenFromJson,
   signedApprovalTokenToJsonValue,
@@ -22,6 +23,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   ApprovalIdempotencyConflictError,
+  ApprovalReplayPendingLimitExceededError,
+  ApprovalReplayThreadNotFoundError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalTokenAlreadyUsedError,
   createApprovalAppender,
@@ -37,6 +40,8 @@ const RECEIPT_ID = asReceiptId("01BRZ3NDEKTSV4RRFFQ69G5FA0");
 const THREAD_ID = asThreadId("01CRZ3NDEKTSV4RRFFQ69G5FA1");
 const TASK_ID = asTaskId("01DRZ3NDEKTSV4RRFFQ69G5FA2");
 const OPERATOR = asSignerIdentity("operator@example.com");
+const ULID_TIME_PREFIX = "01ZRZ3NDEK";
+const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 function setup() {
   const db = openDatabase({ path: ":memory:" });
@@ -135,6 +140,30 @@ function eventCount(db: ReturnType<typeof openDatabase>, type: string): number {
       )
       .get(type)?.n ?? 0
   );
+}
+
+function indexedApprovalRequestId(index: number): ReturnType<typeof asApprovalRequestId> {
+  let value = index;
+  let suffix = "";
+  for (let i = 0; i < 16; i += 1) {
+    suffix = ULID_ALPHABET[value % ULID_ALPHABET.length] + suffix;
+    value = Math.floor(value / ULID_ALPHABET.length);
+  }
+  return asApprovalRequestId(`${ULID_TIME_PREFIX}${suffix}`);
+}
+
+function insertThreadProjectionRow(
+  db: ReturnType<typeof openDatabase>,
+  eventLog: ReturnType<typeof createEventLog>,
+  threadId = THREAD_ID,
+): void {
+  const lsn = eventLog.append({ type: "thread.created", payload: Buffer.from("{}") });
+  db.prepare<[string, number, string, string], void>(
+    `INSERT INTO threads
+       (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms,
+        external_refs)
+     VALUES (?, 'Replay thread', 'open', ?, ?, 0, 0, ?)`,
+  ).run(threadId, lsn, OPERATOR, canonicalJSON({ source_urls: [], entity_ids: [] }));
 }
 
 function projectionSnapshot(db: ReturnType<typeof openDatabase>): string {
@@ -416,7 +445,7 @@ describe("approval projection and appender", () => {
   it("rebuilds pending_approvals from the event log byte-equivalent to live projection", () => {
     const { db, eventLog, projection, appender } = setup();
     try {
-      appender.requestApproval(requestedPayload(REQUEST_ID));
+      appender.requestApproval(requestedPayload(REQUEST_ID, { thread: false, task: false }));
       appender.decideApproval(decidedPayload("abstain", REQUEST_ID));
       appender.requestApproval(requestedPayload(SECOND_REQUEST_ID, { thread: false, task: false }));
 
@@ -433,10 +462,49 @@ describe("approval projection and appender", () => {
     }
   });
 
+  it("projection replay rejects requested events for missing threads", () => {
+    const { db, eventLog, projection, appender } = setup();
+    try {
+      appender.requestApproval(requestedPayload(REQUEST_ID, { thread: false, task: false }));
+      const live = projectionSnapshot(db);
+      const bytes = approvalAuditPayloadToBytes(
+        "approval_requested",
+        requestedPayload(SECOND_REQUEST_ID, { task: false }),
+      );
+      eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
+
+      expect(() => projection.rebuildFromLog(eventLog)).toThrow(ApprovalReplayThreadNotFoundError);
+      expect(projectionSnapshot(db)).toBe(live);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("projection replay rejects per-thread pending approval overflow", () => {
+    const { db, eventLog, projection } = setup();
+    try {
+      insertThreadProjectionRow(db, eventLog);
+      for (let index = 0; index <= MAX_ROUTE_APPROVAL_LIST_ITEMS; index += 1) {
+        const bytes = approvalAuditPayloadToBytes(
+          "approval_requested",
+          requestedPayload(indexedApprovalRequestId(index), { task: false }),
+        );
+        eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
+      }
+
+      expect(() => projection.rebuildFromLog(eventLog)).toThrow(
+        ApprovalReplayPendingLimitExceededError,
+      );
+      expect(projection.countPendingByThread(THREAD_ID)).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("projection replay rejects forged duplicate decision events", () => {
     const { db, eventLog, projection, appender } = setup();
     try {
-      appender.requestApproval(requestedPayload());
+      appender.requestApproval(requestedPayload(REQUEST_ID, { thread: false, task: false }));
       const rejectBytes = approvalAuditPayloadToBytes("approval_decided", decidedPayload("reject"));
       const approveBytes = approvalAuditPayloadToBytes(
         "approval_decided",
@@ -455,7 +523,10 @@ describe("approval projection and appender", () => {
   it("projection replay rejects duplicate requested events", () => {
     const { db, eventLog, projection } = setup();
     try {
-      const bytes = approvalAuditPayloadToBytes("approval_requested", requestedPayload());
+      const bytes = approvalAuditPayloadToBytes(
+        "approval_requested",
+        requestedPayload(REQUEST_ID, { thread: false, task: false }),
+      );
       eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
       eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
 
