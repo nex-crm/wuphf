@@ -91,7 +91,7 @@ function decidedPayload(
   return {
     requestId,
     decision,
-    decidedBy: asSignerIdentity("approver@example.com"),
+    decidedBy: asSignerIdentity("agent_alpha"),
     decidedAt: new Date("2026-05-18T10:01:00.000Z"),
     ...(token === undefined ? {} : { token }),
   };

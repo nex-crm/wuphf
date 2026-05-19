@@ -654,6 +654,27 @@ describe("/api/v1/approvals routes", () => {
     expect(fix.projection.getById(second.id)?.approval.status).toBe("pending");
   });
 
+  it("rejects approve tokens issued to a different bearer-bound agent", async () => {
+    await teardown(fix);
+    fix = await buildFixture({
+      tokenAgentIds: new Map([[TOKEN, asAgentId("agent_beta")]]),
+    });
+    const created = approvalRequestCreateResponseFromJson(
+      (await (await postApproval(fix)).json()) as unknown,
+    ).approvalRequest;
+
+    const decided = await fetch(`${fix.broker.url}/api/v1/approvals/${created.id}/decision`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: decisionBody(decidedPayload("approve", created.id)),
+    });
+
+    expect(decided.status).toBe(403);
+    expect(await decided.json()).toEqual({ error: "approval_token_actor_mismatch" });
+    expect(eventCount(fix.db, "approval.decided")).toBe(0);
+    expect(fix.projection.getById(created.id)?.approval.status).toBe("pending");
+  });
+
   it("rejects decisions when the bearer cannot be resolved to an agent", async () => {
     await teardown(fix);
     fix = await buildFixture({ tokenAgentIds: new Map() });

@@ -66,6 +66,7 @@ export interface IdempotentApprovalDecisionArgs {
 
 export interface ApprovalAppender {
   sharesProvenance(db: Database.Database, eventLog: EventLog): boolean;
+  enableThreadReferenceValidation(): void;
   requestApproval(payload: ApprovalRequestedAuditPayload): ApprovalAppendResult;
   decideApproval(payload: ApprovalDecidedAuditPayload): ApprovalAppendResult;
   requestApprovalIdempotent(args: IdempotentApprovalRequestArgs): IdempotentApprovalAppendResult;
@@ -175,7 +176,7 @@ export function createApprovalAppender(
   const threadExistsStmt = db.prepare<[ThreadId], ExistsRow>(
     "SELECT 1 AS present FROM threads WHERE thread_id = ?",
   );
-  const enforceThreadReferences = false;
+  let enforceThreadReferences = false;
 
   const assertApprovalTokenUnused = (payload: ApprovalDecidedAuditPayload): void => {
     const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
@@ -244,6 +245,7 @@ export function createApprovalAppender(
       throw new Error("approval decision did not produce a terminal status");
     }
     assertApprovalTokenUnused(payload);
+    assertApprovalTokenIssuedToDecider(payload);
     try {
       approvalRequestToJson(folded);
     } catch (err) {
@@ -331,6 +333,9 @@ export function createApprovalAppender(
   return {
     sharesProvenance(candidateDb: Database.Database, candidateEventLog: EventLog): boolean {
       return candidateDb === db && candidateEventLog === eventLog;
+    },
+    enableThreadReferenceValidation(): void {
+      enforceThreadReferences = true;
     },
     requestApproval(payload: ApprovalRequestedAuditPayload): ApprovalAppendResult {
       return requestApprovalTransaction.immediate(payload);

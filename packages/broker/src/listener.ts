@@ -122,6 +122,9 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   ) {
     throw new Error("createBroker: approvals must share threads storage provenance");
   }
+  if (config.threads !== undefined && config.approvals !== undefined) {
+    config.approvals.appender.enableThreadReferenceValidation();
+  }
   // Default to an in-memory store when the host doesn't supply one. Thread
   // routes carry their own cohesive store handle so receipt indexing cannot
   // be wired to a different database from the thread projection.

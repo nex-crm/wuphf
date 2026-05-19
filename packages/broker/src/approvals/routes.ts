@@ -57,6 +57,7 @@ import {
   ApprovalRequestNotFoundError,
   ApprovalThreadNotFoundError,
   ApprovalTokenAlreadyUsedError,
+  ApprovalTokenIssuedToMismatchError,
 } from "./appender.ts";
 import type { ApprovalCommand, ParsedApprovalIdempotencyKey } from "./idempotency.ts";
 import type { ApprovalListFilter, ApprovalProjection } from "./projections.ts";
@@ -281,6 +282,10 @@ async function handleApprovalDecisionPost(
     }
     if (err instanceof ApprovalTokenAlreadyUsedError) {
       writeRouteError(res, 409, { error: "approval_token_reused" });
+      return;
+    }
+    if (err instanceof ApprovalTokenIssuedToMismatchError) {
+      writeRouteError(res, 403, { error: "approval_token_actor_mismatch" });
       return;
     }
     if (err instanceof ApprovalIdempotencyConflictError) {
