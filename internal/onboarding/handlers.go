@@ -871,6 +871,9 @@ var legalPhaseTransitions = map[string]map[string]bool{
 		PhaseIdentity: true,
 	},
 	PhaseIdentity: {
+		PhaseWebsite: true,
+	},
+	PhaseWebsite: {
 		PhaseScan:      true,
 		PhaseBlueprint: true, // skip scan if no website
 	},

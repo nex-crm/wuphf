@@ -50,7 +50,7 @@ import { buildValidReceipt } from "./fixtures.ts";
 import { expectCodecRoundTrip, expectEqual, expectThrows, header, nonNull } from "./harness.ts";
 
 export function runApprovalRouteScenarios(): void {
-  header(32, "ApprovalRequest artifact folds pending and decided approval state");
+  header(33, "ApprovalRequest artifact folds pending and decided approval state");
   const approvalReceipt = buildValidReceipt();
   const approvalEvidence = nonNull(approvalReceipt.approvals[0], "approvalReceipt.approvals[0]");
   const approvalRequest: ApprovalRequest = {
@@ -137,7 +137,7 @@ export function runApprovalRouteScenarios(): void {
     /receiptId.*must match claim\.receiptId/,
   );
 
-  header(33, "Route-envelope codecs own thread and approval HTTP bodies");
+  header(34, "Route-envelope codecs own thread and approval HTTP bodies");
   const routeThreadId = asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAY");
   const routeRevision1 = asThreadSpecRevisionId("01BRZ3NDEKTSV4RRFFQ69G5FA0");
   const routeRevision2 = asThreadSpecRevisionId("01BRZ3NDEKTSV4RRFFQ69G5FA1");

@@ -56,21 +56,11 @@ export function AppList() {
   // surface (apps, wiki, notebooks).
   const currentChannel = useFallbackChannelSlug();
 
-  const { data: requestsData } = useQuery({
-    queryKey: ["requests-badge", currentChannel],
-    queryFn: () => getRequests(currentChannel),
-    refetchInterval: 5_000,
-  });
-
   const { data: reviewsData } = useQuery({
     queryKey: ["reviews-badge"],
     queryFn: fetchReviews,
     refetchInterval: 15_000,
   });
-
-  const pendingCount = (requestsData?.requests ?? []).filter(
-    (r) => !r.status || r.status === "open" || r.status === "pending",
-  ).length;
 
   const pendingReviewsCount = (reviewsData ?? []).filter(
     (r) =>
@@ -86,7 +76,6 @@ export function AppList() {
       <div className="sidebar-apps" ref={overflowRef}>
         {SIDEBAR_APPS.filter((app) => app.id !== "settings").map((app) => {
           let badge: number | null = null;
-          if (app.id === "requests" && pendingCount > 0) badge = pendingCount;
           if (app.id === "wiki" && pendingReviewsCount > 0)
             badge = pendingReviewsCount;
           const Icon = APP_ICONS[app.id];

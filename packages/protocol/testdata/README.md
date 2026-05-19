@@ -87,16 +87,102 @@ this fixture and verifies the package serializer and hash function against it.
 The fixture includes typed canonical body bytes for thread, cost, and approval
 audit payload families, including `approval_requested` and `approval_decided`.
 
+## Moat Disallowed Code-Point Table
+
+`moat-disallowed-table.json` is the frozen Unicode classification the
+`SanitizedString` `allowlist` ("moat") policy rejects: the union of `\p{C}`
+(Cc, Cf, Cn, Co, Cs) and `\p{Default_Ignorable_Code_Point}`, captured once at a
+pinned Unicode version.
+
+The moat does **not** evaluate `\p{...}` at runtime — those property escapes
+resolve against the host runtime's Unicode data, which differs across versions
+(Node 24 ships Unicode 17; Bun 1.3 ships 15.1). A signer and a verifier on
+different runtimes would disagree on the boundary. Freezing the table makes the
+moat boundary a fixed cross-language contract.
+
+The artifact has two parts:
+
+- `disallowedRanges` — sorted, non-overlapping, non-adjacent inclusive
+  `[start, end]` code-point ranges. Tab/LF/CR are `Cc` and therefore listed
+  here; the sanitizer applies the tab/LF/CR carve-out on top of this raw table.
+- `classificationVectors` — a curated corpus spanning every rejected class
+  (Cc/Cf/Cn/Co/Cs and default-ignorables) plus range-edge probes. Every
+  language port must classify each vector as listed.
+
+Regenerate (only to deliberately bump the pinned Unicode version) with
+`bun run scripts/generate-moat-table.ts` from `packages/protocol/`; it rewrites
+both this file and the embedded `src/moat-disallowed-table.ts`. The TypeScript
+test `tests/sanitized-string.spec.ts` pins the embedded table to this artifact.
+
+## NFKC Normalization Table
+
+`nfkc-table.json` is the frozen Unicode NFKC normalization data the
+`SanitizedString` moat normalizes against — before and after the strip.
+
+`String.prototype.normalize("NFKC")` resolves against the host runtime's
+Unicode data, which differs across versions. The moat does **not** call it: a
+signer on Bun 1.3 (Unicode 15.1) and a verifier on Node 24 (Unicode 17.0)
+would otherwise produce different sanitized bytes (e.g. `U+A7F1` folds to `S`
+under 17.0 but is unchanged under 15.1). Freezing the tables makes the
+sanitized output a fixed cross-language contract — classification *and*
+normalization.
+
+The artifact has four parts:
+
+- `decomposition` — `{ "cp", "to" }` rows mapping a code point to its
+  fully-recursive NFKD decomposition. Hangul syllables are omitted; they are
+  decomposed algorithmically.
+- `composition` — `[starter, second, composite]` canonical composition pairs
+  (non-Hangul).
+- `combiningClass` — `[codePoint, class]` for every non-zero
+  Canonical_Combining_Class.
+- `normalizationVectors` — a curated `{ input, expected, name }` corpus. Every
+  language port must reproduce `expected`. `tests/nfkc.spec.ts` and
+  `verifier-reference.go` both check it.
+
+The generator derives all three tables from vendored, authoritative Unicode
+Character Database text files (`packages/protocol/scripts/ucd/` —
+`UnicodeData-15.1.0.txt` and `CompositionExclusions-15.1.0.txt`), never from
+the host runtime's `.normalize()`. It is therefore fully deterministic on any
+host, regardless of the Unicode version the runtime ships (Bun reports a stale
+`process.versions.unicode` and uses the platform ICU, so the runtime cannot be
+trusted as the source). Those two files are the moat's NFKC root of trust;
+`scripts/check-invariants.sh` (check 9) pins their SHA-256 hashes and fails if
+either is altered.
+
+### Bumping the pinned Unicode version
+
+This is a deliberate, infrequent chore. In one PR:
+
+1. Replace both files in `scripts/ucd/` with the new version's
+   `UnicodeData.txt` / `CompositionExclusions.txt` from unicode.org, renamed to
+   match the version (e.g. `UnicodeData-16.0.0.txt`).
+2. In `scripts/generate-nfkc-table.ts` update `PINNED_UNICODE_VERSION`, the two
+   `*_FILE` constants, and `POST_PIN_SENTINEL` (a code point assigned in the
+   *next* Unicode version but unassigned in the new pin — used to detect a
+   host runtime newer than the pin).
+3. In `scripts/check-invariants.sh` (check 9) update the two pinned SHA-256
+   hashes; in `testdata/verifier-reference.go` update the `unicodeVersion`
+   assertion.
+4. Run `bun run scripts/generate-nfkc-table.ts` from `packages/protocol/` — it
+   rewrites this file and `src/nfkc-table.generated.ts`. When run on a host
+   whose runtime genuinely ships the pinned version it additionally
+   cross-checks `frozenNfkc` against `String.prototype.normalize("NFKC")` for
+   every code point; `--require-runtime-match` (used by CI) makes that
+   cross-check mandatory.
+
 ## Cross-language verification
 
 `verifier-reference.go` is a stdlib-only Go reference implementation of the
 audit-chain, runner, agent-provider-routing, signed-approval-token,
-approval-request, and route-envelope wire contracts. It loads
-`audit-event-vectors.json`, `runner-vectors.json`,
+approval-request, route-envelope, moat-table, and frozen-NFKC wire contracts. It
+loads `audit-event-vectors.json`, `runner-vectors.json`,
 `agent-provider-routing-vectors.json`, `signed-approval-token-vectors.json`,
-`approval-request-vectors.json`, and `route-envelope-vectors.json`, recomputes
-each canonical serialization and eventHash, and verifies accept/reject behavior
-against the bundled vectors. Run it from this directory:
+`approval-request-vectors.json`, `route-envelope-vectors.json`,
+`moat-disallowed-table.json`, and `nfkc-table.json`, recomputes each canonical
+serialization and eventHash, binary-searches the moat ranges, re-normalizes with
+the frozen NFKC tables, and verifies accept/reject, classification, and
+normalization behavior against the bundled vectors. Run it from this directory:
 
 ```bash
 cd packages/protocol/testdata

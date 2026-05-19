@@ -13,7 +13,7 @@
 // arbitraries to be convinced the moat fires on the right inputs.
 
 import { runApprovalRouteScenarios } from "./demo/approval-route-scenarios.ts";
-import { runCoreScenarios } from "./demo/core-scenarios.ts";
+import { runCoreScenarios, runFrozenNfkcScenario } from "./demo/core-scenarios.ts";
 import { runCostScenarios } from "./demo/cost-scenarios.ts";
 import { runCredentialRunnerScenarios } from "./demo/credential-runner-scenarios.ts";
 import { ANSI, printSummaryAndExit } from "./demo/harness.ts";
@@ -29,6 +29,7 @@ runIpcScenarios();
 runThreadScenarios();
 runCostScenarios();
 runCredentialRunnerScenarios();
+runFrozenNfkcScenario();
 runApprovalRouteScenarios();
 touchPublicSurfaceSentinels();
 

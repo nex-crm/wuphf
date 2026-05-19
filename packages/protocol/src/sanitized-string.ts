@@ -5,6 +5,8 @@ import {
   MAX_SANITIZED_STRING_BYTES,
   validateSanitizedJsonNodeBudget,
 } from "./budgets.ts";
+import { MOAT_DISALLOWED_RANGES } from "./moat-disallowed-table.ts";
+import { frozenNfkc } from "./nfkc.ts";
 
 // SanitizedString policies trade off renderer permissiveness vs. moat width.
 // Every policy STRIPS the offending code points after NFKC — it does not
@@ -41,6 +43,13 @@ const SANITIZED_STRING_POLICY_VALUES = ["strip-zero-width", "allow-zwj", "allowl
 export type SanitizedStringPolicy = (typeof SANITIZED_STRING_POLICY_VALUES)[number];
 
 const SANITIZED_STRING_POLICIES: ReadonlySet<string> = new Set(SANITIZED_STRING_POLICY_VALUES);
+
+// Compiler-enforced narrowing: a plain `Set.has` returns `boolean` and does
+// not narrow, which would force an `as SanitizedStringPolicy` assertion at the
+// security boundary. This predicate localizes the one runtime check.
+function isSanitizedStringPolicy(value: string): value is SanitizedStringPolicy {
+  return SANITIZED_STRING_POLICIES.has(value);
+}
 
 export interface SanitizedStringOptions {
   readonly policy?: SanitizedStringPolicy | undefined;
@@ -89,7 +98,7 @@ function resolveSanitizedStringPolicy(options: SanitizedStringOptions): Sanitize
   if (typeof rawPolicy !== "string") {
     throw new Error("SanitizedString: policy must be a string");
   }
-  if (!SANITIZED_STRING_POLICIES.has(rawPolicy)) {
+  if (!isSanitizedStringPolicy(rawPolicy)) {
     throw new Error(
       `SanitizedString: unknown policy ${JSON.stringify(rawPolicy)} (expected one of ${[
         ...SANITIZED_STRING_POLICIES,
@@ -98,9 +107,7 @@ function resolveSanitizedStringPolicy(options: SanitizedStringOptions): Sanitize
         .join(", ")})`,
     );
   }
-  // Membership in SANITIZED_STRING_POLICIES verified above; the Set is typed
-  // `ReadonlySet<string>` so `.has` does not narrow `rawPolicy` on its own.
-  return rawPolicy as SanitizedStringPolicy;
+  return rawPolicy;
 }
 
 const MAX_DEPTH = 64;
@@ -490,7 +497,7 @@ function parseArrayIndexKey(key: string): number | undefined {
 
 function sanitizeText(input: string, options: SanitizedStringOptions): string {
   rejectLoneSurrogates(input);
-  const normalized = input.normalize("NFKC");
+  const normalized = frozenNfkc(input);
   let out = "";
 
   for (let i = 0; i < normalized.length; ) {
@@ -504,18 +511,34 @@ function sanitizeText(input: string, options: SanitizedStringOptions): string {
     i += codePoint > 0xffff ? 2 : 1;
   }
 
-  return out;
+  // Re-normalize after stripping. Removing a code point can make its
+  // neighbours adjacent in a way NFKC would compose: stripping U+034F
+  // COMBINING GRAPHEME JOINER from `a U+034F U+0301` leaves `a U+0301`, which
+  // NFKC composes to `á`. Without this second pass `sanitizeText` is not
+  // idempotent and its output is not NFKC-stable — fatal for the cosign path,
+  // which re-sanitizes under `allowlist` at its own trust boundary and
+  // compares bytes.
+  //
+  // Why no second strip pass: NFKC *decomposition* can surface a disallowed
+  // code point (e.g. U+3164 HANGUL FILLER decomposes to U+1160 HANGUL
+  // JUNGSEONG FILLER, a default-ignorable) — but that happens in the FIRST
+  // `frozenNfkc` pass above, so the strip loop removes it. This second pass
+  // runs on already-stripped, already-NFKC text; it only canonically
+  // *composes* neighbours the strip made adjacent, and a canonical composite
+  // is never a `\p{C}` / default-ignorable code point (guarded by the
+  // "no composition composite is moat-disallowed" test in nfkc.spec.ts). So
+  // the second pass introduces nothing the strip would need to catch.
+  return frozenNfkc(out);
 }
 
-// Pre-compiled to avoid rebuilding on every code point under the allowlist
-// policy. The moat rejects two overlapping-but-distinct Unicode sets:
+// The moat rejects two overlapping-but-distinct Unicode sets:
 //
 //   \p{C}                          — Cc (control), Cf (format), Cn
 //                                    (unassigned), Co (private use), Cs
 //                                    (surrogate). Non-textual categories.
 //   \p{Default_Ignorable_Code_Point} — code points Unicode marks as safe to
 //                                    render as nothing: variation selectors
-//                                    (U+FE00-0F, U+E0100-EF1EF), the Hangul
+//                                    (U+FE00-0F, U+E0100-E01EF), the Hangul
 //                                    fillers U+115F/U+1160/U+3164, U+034F
 //                                    COMBINING GRAPHEME JOINER, U+17B4/B5,
 //                                    Mongolian variation selectors, etc.
@@ -525,10 +548,46 @@ function sanitizeText(input: string, options: SanitizedStringOptions): string {
 // weaponized for homograph / hidden-payload attacks. A signed write payload
 // must contain neither.
 //
+// CRITICAL: the moat does NOT test `\p{...}` at runtime. Those property
+// escapes resolve against the host runtime's Unicode data, which differs
+// across versions (Node 24 ships Unicode 17; Bun 1.3 ships 15.1) — so the
+// runtime regex would classify the same code point differently on different
+// runtimes. Instead the moat binary-searches a FROZEN range table captured
+// once at a pinned Unicode version, so the CLASSIFICATION boundary is
+// runtime-independent. See scripts/generate-moat-table.ts and
+// testdata/moat-disallowed-table.json (the cross-language wire artifact +
+// Go reference). Regenerate deliberately to bump the pinned version.
+//
+// NFKC normalization is frozen the same way: `sanitizeText` calls
+// `frozenNfkc` (src/nfkc.ts), which normalizes against version-pinned tables
+// generated by scripts/generate-nfkc-table.ts — never `String.prototype.
+// normalize("NFKC")`, whose result depends on the runtime's Unicode version.
+// So the full sanitized output — classification AND normalization — is
+// byte-identical on every runtime, which is what the cosign trust boundary
+// (it re-sanitizes under `allowlist` and compares bytes) relies on.
+//
 // Exported (not via `index.ts`, so not public package API) so the test
-// oracle can import the one true pattern instead of hand-copying it — a
-// copied literal can silently drift from this one.
-export const MOAT_DISALLOWED_RE = /[\p{C}\p{Default_Ignorable_Code_Point}]/u;
+// oracle can import the one true predicate instead of hand-rolling one.
+export function isMoatDisallowedCodePoint(codePoint: number): boolean {
+  let lo = 0;
+  let hi = MOAT_DISALLOWED_RANGES.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    const range = MOAT_DISALLOWED_RANGES[mid];
+    if (range === undefined) {
+      break;
+    }
+    const [rangeStart, rangeEnd] = range;
+    if (codePoint < rangeStart) {
+      hi = mid - 1;
+    } else if (codePoint > rangeEnd) {
+      lo = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
 
 function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOptions): boolean {
   if (codePoint <= 0x1f && codePoint !== 0x09 && codePoint !== 0x0a && codePoint !== 0x0d) {
@@ -582,7 +641,7 @@ function isDisallowedCodePoint(codePoint: number, options: SanitizedStringOption
     codePoint !== 0x09 &&
     codePoint !== 0x0a &&
     codePoint !== 0x0d &&
-    MOAT_DISALLOWED_RE.test(String.fromCodePoint(codePoint))
+    isMoatDisallowedCodePoint(codePoint)
   ) {
     return true;
   }

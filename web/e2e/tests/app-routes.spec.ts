@@ -12,11 +12,8 @@ const APP_CASES = [
     label: "Console",
     content: /wuphf office|Slash/i,
   },
-  {
-    app: "tasks",
-    label: "Tasks",
-    content: /Loading tasks|No tasks yet|Office tasks|Could not load tasks/i,
-  },
+  // Tasks sidebar entry was retired; /#/apps/tasks now redirects to
+  // /#/issues. Coverage for that redirect lives in route-matrix.spec.ts.
   // Phase 2b retired the standalone RequestsApp surface; /apps/requests
   // now redirects to /inbox. Coverage moved to the unified-inbox E2E.
   {
@@ -61,8 +58,7 @@ async function expectAppRoute(
   app: (typeof APP_CASES)[number]["app"],
   content: RegExp,
 ): Promise<void> {
-  const expectedHash = app === "tasks" ? "#/(apps/)?tasks" : `#/apps/${app}`;
-  await expect(page).toHaveURL(new RegExp(`${expectedHash}$`));
+  await expect(page).toHaveURL(new RegExp(`#/apps/${app}$`));
   const appPage = page.getByTestId(`app-page-${app}`);
   await expect(appPage).toBeVisible({
     timeout: 10_000,
@@ -101,23 +97,22 @@ test.describe("app route isolation", () => {
       ).toContainText(appCase.label);
     }
 
+    // Switch between two real sidebar apps to confirm app-route swapping
+    // still works. Tasks was retired (now redirects to /issues) so the
+    // round-trip uses Console ↔ Graph instead.
     await page.goto("/#/apps/console");
     await waitForReactMount(page);
     await page
-      .locator(".sidebar-apps .sidebar-item", { hasText: "Tasks" })
+      .locator(".sidebar-apps .sidebar-item", { hasText: "Graph" })
       .click();
-    await expectAppRoute(
-      page,
-      "tasks",
-      /Loading tasks|No tasks yet|Office tasks|Could not load tasks/i,
-    );
+    await expectAppRoute(page, "graph", /Entity Graph/i);
     await expect(page.getByTestId("console-app")).toHaveCount(0);
 
     await page
       .locator(".sidebar-apps .sidebar-item", { hasText: "Console" })
       .click();
     await expectAppRoute(page, "console", /wuphf office|Slash/i);
-    await expect(page.getByTestId("tasks-app")).toHaveCount(0);
+    await expect(page.getByTestId("app-page-graph")).toHaveCount(0);
 
     await expectNoReactErrors(page, getErrors, "while switching app routes");
   });

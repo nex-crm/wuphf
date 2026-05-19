@@ -28,6 +28,7 @@ const currentStateVersion = 2
 const (
 	PhaseGreet     = "greet"
 	PhaseIdentity  = "identity"
+	PhaseWebsite   = "website"
 	PhaseScan      = "scan"
 	PhaseBlueprint = "blueprint"
 	PhaseTeam      = "team"
@@ -102,8 +103,8 @@ type State struct {
 	// v2 chat-mode additions (Phase 2+).
 
 	// Phase is the current phase cursor in the deterministic CEO conversation
-	// state machine. Legal values: greet | identity | scan | blueprint | team |
-	// seed | bridge | draft | approve | kickoff | complete.
+	// state machine. Legal values: greet | identity | website | scan |
+	// blueprint | team | seed | bridge | draft | approve | kickoff | complete.
 	Phase string `json:"phase,omitempty"`
 
 	// CEODMChannelID is the reserved channel slug for the CEO onboarding DM

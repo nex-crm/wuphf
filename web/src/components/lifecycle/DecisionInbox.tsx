@@ -43,6 +43,43 @@ interface DecisionInboxProps {
   onOpenItem?: (item: InboxItem) => void;
 }
 
+type InboxFilter = "all" | "decisions" | "requests" | "reviews" | "approved";
+
+const FILTER_ORDER: readonly InboxFilter[] = [
+  "all",
+  "decisions",
+  "requests",
+  "reviews",
+  "approved",
+];
+
+const FILTER_LABEL: Record<InboxFilter, string> = {
+  all: "All",
+  decisions: "Decisions",
+  requests: "Requests",
+  reviews: "Reviews",
+  approved: "Approved",
+};
+
+const DECISION_STATES = new Set([
+  "decision",
+  "review",
+  "changes_requested",
+  "blocked_on_pr_merge",
+]);
+
+function itemMatchesFilter(item: InboxItem, filter: InboxFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "requests") return item.kind === "request";
+  if (filter === "reviews") return item.kind === "review";
+  if (item.kind !== "task") return false;
+  const state = item.task?.state ?? "";
+  if (filter === "approved")
+    return state === "approved" || state === "rejected";
+  // "decisions" bucket — task states that need a human call.
+  return DECISION_STATES.has(state);
+}
+
 const LOADING_TIMEOUT_MS = 500;
 
 /**
@@ -69,6 +106,7 @@ export function DecisionInbox({
 }: DecisionInboxProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [showLoadingText, setShowLoadingText] = useState(false);
+  const [filter, setFilter] = useState<InboxFilter>("all");
 
   const seed: UnifiedInboxResponse | undefined = initialItems
     ? {
@@ -106,7 +144,27 @@ export function DecisionInbox({
     return () => window.clearTimeout(t);
   }, [isLoading]);
 
-  const items = useMemo(() => query.data?.items ?? [], [query.data]);
+  const allItems = useMemo(() => query.data?.items ?? [], [query.data]);
+  const items = useMemo(
+    () => allItems.filter((it) => itemMatchesFilter(it, filter)),
+    [allItems, filter],
+  );
+  const filterCounts = useMemo(() => {
+    const counts: Record<InboxFilter, number> = {
+      all: allItems.length,
+      decisions: 0,
+      requests: 0,
+      reviews: 0,
+      approved: 0,
+    };
+    for (const it of allItems) {
+      for (const f of FILTER_ORDER) {
+        if (f === "all") continue;
+        if (itemMatchesFilter(it, f)) counts[f] += 1;
+      }
+    }
+    return counts;
+  }, [allItems]);
 
   // Auto-select the top item on first mount + when selection gets
   // stale (e.g. approved item vanishes from the list).
@@ -160,7 +218,9 @@ export function DecisionInbox({
   if (isLoading) {
     return (
       <Shell>
-        <ListPane>{renderLoadingRows(showLoadingText)}</ListPane>
+        <ListPane filter={filter} counts={filterCounts} onFilter={setFilter}>
+          {renderLoadingRows(showLoadingText)}
+        </ListPane>
         <DetailEmptyPane message="Loading…" />
       </Shell>
     );
@@ -169,7 +229,7 @@ export function DecisionInbox({
   if (query.isError || forceState === "error") {
     return (
       <Shell>
-        <ListPane>
+        <ListPane filter={filter} counts={filterCounts} onFilter={setFilter}>
           <div className="inbox-error-banner" role="alert">
             <span className="banner-dot" aria-hidden="true" />
             <div className="body">Can't reach the broker.</div>
@@ -188,25 +248,27 @@ export function DecisionInbox({
   }
 
   if (items.length === 0 || forceState === "empty") {
+    const noItemsAtAll = allItems.length === 0 || forceState === "empty";
+    const headline = noItemsAtAll ? "Inbox zero." : "Nothing in this filter.";
+    const body = noItemsAtAll
+      ? "Nothing waiting on you. Agents will email you when they need something."
+      : "Switch to All to see other inbox items.";
     return (
       <Shell>
-        <ListPane>
+        <ListPane filter={filter} counts={filterCounts} onFilter={setFilter}>
           <div className="inbox-empty inbox-empty--inline">
-            <h2>Inbox zero.</h2>
-            <p>
-              Nothing waiting on you. Agents will email you when they need
-              something.
-            </p>
+            <h2>{headline}</h2>
+            <p>{body}</p>
           </div>
         </ListPane>
-        <DetailEmptyPane message="Inbox zero." />
+        <DetailEmptyPane message={headline} />
       </Shell>
     );
   }
 
   return (
     <Shell>
-      <ListPane>
+      <ListPane filter={filter} counts={filterCounts} onFilter={setFilter}>
         <ul
           className="inbox-mail-list"
           aria-label="Inbox"
@@ -253,12 +315,49 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ListPane({ children }: { children: React.ReactNode }) {
+function ListPane({
+  children,
+  filter,
+  counts,
+  onFilter,
+}: {
+  children: React.ReactNode;
+  filter?: InboxFilter;
+  counts?: Record<InboxFilter, number>;
+  onFilter?: (next: InboxFilter) => void;
+}) {
   return (
     <aside className="inbox-mail-pane" aria-label="Inbox">
       <header className="inbox-mail-header">
         <h1 className="inbox-mail-title">Inbox</h1>
       </header>
+      {filter && counts && onFilter ? (
+        // Toggle-button group, not ARIA tabs. The chips don't gate a
+        // separate tabpanel — they re-filter the inbox list directly —
+        // so role="tab"/"tablist" without aria-controls + arrow-key
+        // navigation would be a half-implemented pattern. aria-pressed
+        // gives screen readers the right "toggled" semantics.
+        <div
+          className="inbox-filter-bar"
+          role="group"
+          aria-label="Inbox filter"
+          data-testid="inbox-filter-bar"
+        >
+          {FILTER_ORDER.map((f) => (
+            <button
+              key={f}
+              type="button"
+              className="inbox-filter-chip"
+              aria-pressed={f === filter}
+              onClick={() => onFilter(f)}
+              data-testid={`inbox-filter-${f}`}
+            >
+              {FILTER_LABEL[f]}
+              <span className="inbox-filter-chip-count">{counts[f]}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="inbox-mail-scroll">{children}</div>
     </aside>
   );
@@ -339,7 +438,7 @@ function DetailPane({ item }: { item: InboxItem }) {
               </div>
             }
           >
-            <DecisionPacketRoute taskId={item.taskId} />
+            <DecisionPacketRoute taskId={item.taskId} fallbackItem={item} />
           </Suspense>
         </main>
       );

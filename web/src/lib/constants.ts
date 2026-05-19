@@ -10,8 +10,6 @@ export const SIDEBAR_APPS = [
   { id: "overview", icon: "\uD83C\uDFE0", name: "Overview" },
   { id: "wiki", icon: "\uD83D\uDCD6", name: "Wiki" },
   { id: "console", icon: ">", name: "Console" },
-  { id: "tasks", icon: "\u2705", name: "Tasks" },
-  { id: "requests", icon: "\uD83D\uDCCB", name: "Requests" },
   { id: "graph", icon: "\uD83D\uDD78", name: "Graph" },
   { id: "policies", icon: "\uD83D\uDEE1", name: "Policies" },
   { id: "calendar", icon: "\uD83D\uDCC5", name: "Calendar" },

@@ -27,10 +27,25 @@ import { SidebarItemLabel } from "./SidebarItemLabel";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
+const KNOWN_LIFECYCLE_STATES: ReadonlySet<LifecycleState> = new Set<LifecycleState>([
+  "drafting",
+  "intake",
+  "ready",
+  "running",
+  "review",
+  "decision",
+  "blocked_on_pr_merge",
+  "changes_requested",
+  "approved",
+  "rejected",
+]);
+
 function taskToState(task: Task): LifecycleState {
   if (task.pipeline_stage === "draft") return "drafting";
   const raw = (task as unknown as Record<string, unknown>).lifecycle_state;
-  if (typeof raw === "string" && raw) return raw as LifecycleState;
+  if (typeof raw === "string" && KNOWN_LIFECYCLE_STATES.has(raw as LifecycleState)) {
+    return raw as LifecycleState;
+  }
   switch (task.status) {
     case "open":
       return "intake";
@@ -139,7 +154,7 @@ export function IssuesGroup({ open, onToggle }: IssuesGroupProps) {
         <button
           type="button"
           className="sidebar-icon-btn issues-new-icon-btn"
-          title="New issue (Phase 4)"
+          title="New issue"
           aria-label="New issue"
           onClick={() => void router.navigate({ to: "/issues/new" })}
           data-testid="issues-sidebar-new-btn"

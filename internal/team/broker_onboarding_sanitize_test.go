@@ -274,6 +274,7 @@ func TestCeoDeterministicMessagesNeverCallLLM(t *testing.T) {
 	phase2Phases := []string{
 		onboarding.PhaseGreet,
 		onboarding.PhaseIdentity,
+		onboarding.PhaseWebsite,
 		onboarding.PhaseScan,
 		onboarding.PhaseBlueprint,
 		onboarding.PhaseTeam,
@@ -468,8 +469,9 @@ func TestPhase2TransitionTableValidation(t *testing.T) {
 		// Legal Phase 2 transitions.
 		{"", onboarding.PhaseGreet, true},
 		{onboarding.PhaseGreet, onboarding.PhaseIdentity, true},
-		{onboarding.PhaseIdentity, onboarding.PhaseScan, true},
-		{onboarding.PhaseIdentity, onboarding.PhaseBlueprint, true},
+		{onboarding.PhaseIdentity, onboarding.PhaseWebsite, true},
+		{onboarding.PhaseWebsite, onboarding.PhaseScan, true},
+		{onboarding.PhaseWebsite, onboarding.PhaseBlueprint, true},
 		{onboarding.PhaseScan, onboarding.PhaseBlueprint, true},
 		{onboarding.PhaseBlueprint, onboarding.PhaseTeam, true},
 		{onboarding.PhaseBlueprint, onboarding.PhaseSeed, true},
@@ -480,6 +482,8 @@ func TestPhase2TransitionTableValidation(t *testing.T) {
 		// Invalid jumps (must be rejected with 400 by the handler).
 		{"", onboarding.PhaseSeed, false},
 		{onboarding.PhaseGreet, onboarding.PhaseSeed, false},
+		{onboarding.PhaseIdentity, onboarding.PhaseScan, false},      // must go through PhaseWebsite first
+		{onboarding.PhaseIdentity, onboarding.PhaseBlueprint, false}, // must go through PhaseWebsite first
 		{onboarding.PhaseIdentity, onboarding.PhaseComplete, false},
 		{onboarding.PhaseComplete, onboarding.PhaseGreet, false}, // cannot restart
 	}
@@ -491,6 +495,42 @@ func TestPhase2TransitionTableValidation(t *testing.T) {
 				t.Errorf("IsLegalTransition(%q, %q) = %v, want %v", tc.from, tc.to, allowed, tc.allowed)
 			}
 		})
+	}
+}
+
+// TestPhaseWebsiteEmitsWebsiteURLFormField verifies that entering PhaseWebsite
+// produces a ceo_form_field card targeting the website_url field — the
+// missing link that re-enables the website scan + reveal animation.
+func TestPhaseWebsiteEmitsWebsiteURLFormField(t *testing.T) {
+	state := &onboarding.State{
+		Version: 2,
+		FormAnswers: onboarding.FormAnswers{
+			CompanyName: "Acme",
+			Description: "Subscription billing for indie SaaS",
+		},
+	}
+
+	msgs := ceoDeterministicMessages(onboarding.PhaseWebsite, state)
+	if len(msgs) != 1 {
+		t.Fatalf("PhaseWebsite: expected 1 message, got %d", len(msgs))
+	}
+	got := msgs[0]
+	if got.Kind != "ceo_form_field" {
+		t.Errorf("PhaseWebsite Kind = %q, want %q", got.Kind, "ceo_form_field")
+	}
+	if got.SuggestionPayload == nil {
+		t.Fatal("PhaseWebsite SuggestionPayload is nil")
+	}
+
+	var decoded map[string]interface{}
+	if err := json.Unmarshal(*got.SuggestionPayload, &decoded); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if field, _ := decoded["field"].(string); field != "website_url" {
+		t.Errorf("PhaseWebsite payload.field = %q, want %q", field, "website_url")
+	}
+	if optional, _ := decoded["optional"].(bool); !optional {
+		t.Error("PhaseWebsite payload.optional should be true — scan must be skippable")
 	}
 }
 
