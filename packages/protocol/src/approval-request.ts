@@ -430,6 +430,7 @@ function validateApprovalRequestValue(
     pointer(path, "scope"),
     errors,
   );
+  validateReceiptCoSignRequestFieldsValue(value, path, errors);
 
   const status = recordValue(value, "status");
   const decision = recordValue(value, "decision");
@@ -447,6 +448,7 @@ function validateApprovalRequestValue(
     ) {
       addError(errors, pointer(pointer(path, "decision"), "decision"), "must match status");
     }
+    validateDecisionTokenBindingValue(value, decision, path, errors);
   }
 }
 
@@ -871,6 +873,91 @@ function validateClaimScopeBindingValue(
     "frozenArgsHash",
     errors,
   );
+}
+
+function validateReceiptCoSignRequestFieldsValue(
+  value: Readonly<Record<string, unknown>>,
+  path: string,
+  errors: ApprovalValidationError[],
+): void {
+  const decoded = decodeApprovalClaimScopePair(
+    recordValue(value, "claim"),
+    recordValue(value, "scope"),
+  );
+  if (decoded === undefined || decoded.claim.kind !== "receipt_co_sign") return;
+  const receiptId = recordValue(value, "receiptId");
+  if (receiptId !== decoded.claim.receiptId) {
+    addError(errors, pointer(path, "receiptId"), "must match claim.receiptId");
+  }
+  const riskClass = recordValue(value, "riskClass");
+  if (riskClass !== decoded.claim.riskClass) {
+    addError(errors, pointer(path, "riskClass"), "must match claim.riskClass");
+  }
+}
+
+function validateDecisionTokenBindingValue(
+  request: Readonly<Record<string, unknown>>,
+  decision: Readonly<Record<string, unknown>>,
+  path: string,
+  errors: ApprovalValidationError[],
+): void {
+  const decisionPath = pointer(path, "decision");
+  const decisionValue = recordValue(decision, "decision");
+  const token = recordValue(decision, "token");
+  if (decisionValue === "approve" && token === undefined) {
+    addError(errors, pointer(decisionPath, "token"), "is required when decision is approve");
+    return;
+  }
+  if (token === undefined) return;
+
+  const decodedRequest = decodeApprovalClaimScopePair(
+    recordValue(request, "claim"),
+    recordValue(request, "scope"),
+  );
+  const decodedToken = decodeSignedApprovalTokenForValidation(token);
+  if (decodedRequest === undefined || decodedToken === undefined) return;
+
+  if (
+    canonicalJSON(approvalClaimToJsonValue(decodedToken.claim)) !==
+    canonicalJSON(approvalClaimToJsonValue(decodedRequest.claim))
+  ) {
+    addError(errors, pointer(pointer(decisionPath, "token"), "claim"), "must match request claim");
+  }
+  if (
+    canonicalJSON(approvalScopeToJsonValue(decodedToken.scope)) !==
+    canonicalJSON(approvalScopeToJsonValue(decodedRequest.scope))
+  ) {
+    addError(errors, pointer(pointer(decisionPath, "token"), "scope"), "must match request scope");
+  }
+
+  const decidedAt = recordValue(decision, "decidedAt");
+  if (!(decidedAt instanceof Date) || Number.isNaN(decidedAt.getTime())) return;
+  const decidedAtMs = decidedAt.getTime();
+  if (decidedAtMs < decodedToken.notBefore || decidedAtMs >= decodedToken.expiresAt) {
+    addError(errors, pointer(decisionPath, "decidedAt"), "must be within token validity window");
+  }
+}
+
+function decodeApprovalClaimScopePair(
+  claim: unknown,
+  scope: unknown,
+): { readonly claim: ApprovalClaim; readonly scope: ApprovalScope } | undefined {
+  try {
+    return {
+      claim: approvalClaimFromJson(claim, "approvalRequest.claim"),
+      scope: approvalScopeFromJson(scope, "approvalRequest.scope"),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeSignedApprovalTokenForValidation(token: unknown): SignedApprovalToken | undefined {
+  try {
+    return signedApprovalTokenFromJson(token, "approvalRequest.decision.token");
+  } catch {
+    return undefined;
+  }
 }
 
 function validateSame(

@@ -379,6 +379,22 @@ export const MAX_RUNNER_STDIO_CHUNK_BYTES = 64 * 1024;
 export const MAX_RUNNER_ERROR_BYTES = 8 * 1024;
 
 // ────────────────────────────────────────────────────────────────────────────
+// Route envelope budgets (consumed by packages/protocol/src/route-envelopes.ts)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Thread list routes are projections, not export endpoints. Keep one response
+ * bounded so callers page broader thread history through broker storage.
+ */
+export const MAX_ROUTE_THREAD_LIST_ITEMS = 256;
+
+/**
+ * Route error codes are stable machine labels; messages are human diagnostics.
+ */
+export const MAX_ROUTE_ERROR_CODE_BYTES = 128;
+export const MAX_ROUTE_ERROR_MESSAGE_BYTES = 8 * 1024;
+
+// ────────────────────────────────────────────────────────────────────────────
 // Credential IPC budgets (consumed by packages/protocol/src/credential-ipc.ts)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -616,6 +632,14 @@ export function validateWebAuthnAssertionBudget(canonicalJson: string): BudgetVa
     MAX_WEBAUTHN_ASSERTION_BYTES,
     "WebAuthnAssertion canonical JSON bytes",
   );
+}
+
+export function validateRouteErrorCodeBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_ROUTE_ERROR_CODE_BYTES, "RouteError.error bytes");
+}
+
+export function validateRouteErrorMessageBudget(value: string): BudgetValidationResult {
+  return validateUtf8StringBudget(value, MAX_ROUTE_ERROR_MESSAGE_BYTES, "RouteError.message bytes");
 }
 
 export function validateApprovalTokenLifetime(value: {
