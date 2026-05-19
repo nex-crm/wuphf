@@ -41,6 +41,11 @@ const SURROGATE_END = 0xdfff;
 const HANGUL_S_BASE = 0xac00;
 const HANGUL_S_COUNT = 11172;
 
+// Wire-shape version of testdata/nfkc-table.json — bump only when the artifact
+// STRUCTURE changes (a new field, a row shape change), independent of the
+// Unicode data version. The Go reference rejects an unrecognised value.
+const NFKC_TABLE_SCHEMA_VERSION = 1;
+
 // The pinned Unicode version. The vendored UCD files below are for this
 // version; both artifacts are stamped with it.
 const PINNED_UNICODE_VERSION = "15.1";
@@ -51,6 +56,9 @@ const COMPOSITION_EXCLUSIONS_FILE = "ucd/CompositionExclusions-15.1.0.txt";
 // Legacy Computing Supplement). Used only to detect whether the host runtime
 // ships data newer than the pin, so the optional runtime cross-check knows
 // whether a mismatch is expected drift or a genuine bug.
+// MUST be re-chosen when bumping PINNED_UNICODE_VERSION: pick a code point
+// assigned in the version AFTER the new pin but unassigned in the new pin
+// (see the bump checklist in testdata/README.md).
 const POST_PIN_SENTINEL = 0x1ccd6;
 
 type DecompositionEntry = readonly [number, readonly number[]];
@@ -220,6 +228,9 @@ function buildComposition(
     }
     entries.push([starter, second, codePoint]);
   }
+  // Sort by the (starter, second) lookup key so the emitted array is ordered
+  // like the cp-sorted `decomposition` / `combiningClass` arrays.
+  entries.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
   return entries;
 }
 
@@ -545,6 +556,7 @@ function renderJsonArtifact(
     .join(",\n");
   return `{
   "description": ${JSON.stringify(description)},
+  "schemaVersion": ${NFKC_TABLE_SCHEMA_VERSION},
   "unicodeVersion": ${JSON.stringify(PINNED_UNICODE_VERSION)},
   "generatedBy": "packages/protocol/scripts/generate-nfkc-table.ts",
   "decomposition": [
@@ -595,9 +607,13 @@ function main(): void {
   // CI runner would silently downgrade the gate to a content-only diff.
   if (process.argv.includes("--require-runtime-match") && result.runtimeNewerThanPin) {
     throw new Error(
-      `--require-runtime-match: the host runtime ships Unicode newer than ` +
-        `${PINNED_UNICODE_VERSION}, so the exhaustive frozenNfkc-vs-runtime proof was skipped. ` +
-        `Run this on a genuine Unicode ${PINNED_UNICODE_VERSION} runtime.`,
+      `--require-runtime-match: this host's runtime ships Unicode newer than the pinned ` +
+        `${PINNED_UNICODE_VERSION}, so the exhaustive frozenNfkc-vs-runtime proof could not run.\n` +
+        `  The committed frozen tables are NOT affected — they derive from the vendored UCD\n` +
+        `  files and are still correct. This is a CI-runner maintenance signal: the runner's\n` +
+        `  ICU has moved past the pin. Resolve by either pinning the CI job to a runtime that\n` +
+        `  ships Unicode ${PINNED_UNICODE_VERSION}, or bumping the pinned Unicode version (see the\n` +
+        `  "Bumping the pinned Unicode version" checklist in packages/protocol/testdata/README.md).`,
     );
   }
 

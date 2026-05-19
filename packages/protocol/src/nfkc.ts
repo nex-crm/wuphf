@@ -32,6 +32,21 @@ const NFKC_TABLES: NfkcTables = {
   combiningClass: new Map(NFKC_COMBINING_CLASS_ENTRIES),
 };
 
+// Defence in depth: a `composeKey` collision would silently drop a pair when
+// the Map is built above, yielding a normaliser that fails to compose. The
+// generator's `assertWellFormed` proves no collision at table-generation time;
+// this re-checks the COMMITTED table at module load, so a hand-edit cannot
+// slip past.
+/* v8 ignore next 6 -- unreachable with the committed table (the generator's
+   assertWellFormed proves no composeKey collision); this guard only fires on a
+   corrupt hand-edit, so it has no covering test by design. */
+if (NFKC_TABLES.composition.size !== NFKC_COMPOSITION_ENTRIES.length) {
+  throw new Error(
+    "nfkc-table.generated.ts: composition entries collide on a composeKey — " +
+      "regenerate with scripts/generate-nfkc-table.ts",
+  );
+}
+
 // Normalise `input` to Unicode Normalization Form KC against the frozen
 // Unicode 15.1 tables. Pure: never calls `String.prototype.normalize`, so the
 // result does not depend on the host runtime's Unicode version.

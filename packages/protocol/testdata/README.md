@@ -126,19 +126,34 @@ The artifact has four parts:
 
 The generator derives all three tables from vendored, authoritative Unicode
 Character Database text files (`packages/protocol/scripts/ucd/` —
-`UnicodeData-15.1.0.txt` and `CompositionExclusions-15.1.0.txt`, with a
-`SHA256SUMS` next to them — verify the vendored files against unicode.org with
-`shasum -a 256 -c SHA256SUMS`), never from the host runtime's `.normalize()`.
-It is therefore fully deterministic on any host, regardless of the Unicode
-version the runtime ships (Bun reports a stale `process.versions.unicode` and
-uses the platform ICU, so the runtime cannot be trusted as the source).
-Regenerate (only to deliberately bump the pinned Unicode version — replace the
-vendored UCD files and `SHA256SUMS` first) with
-`bun run scripts/generate-nfkc-table.ts` from `packages/protocol/`; it rewrites
-both this file and the embedded `src/nfkc-table.generated.ts`. When run on a
-host whose runtime genuinely ships the pinned version, it additionally
-cross-checks `frozenNfkc` against `String.prototype.normalize("NFKC")` for
-every code point as a bonus proof.
+`UnicodeData-15.1.0.txt` and `CompositionExclusions-15.1.0.txt`), never from
+the host runtime's `.normalize()`. It is therefore fully deterministic on any
+host, regardless of the Unicode version the runtime ships (Bun reports a stale
+`process.versions.unicode` and uses the platform ICU, so the runtime cannot be
+trusted as the source). Those two files are the moat's NFKC root of trust;
+`scripts/check-invariants.sh` (check 9) pins their SHA-256 hashes and fails if
+either is altered.
+
+### Bumping the pinned Unicode version
+
+This is a deliberate, infrequent chore. In one PR:
+
+1. Replace both files in `scripts/ucd/` with the new version's
+   `UnicodeData.txt` / `CompositionExclusions.txt` from unicode.org, renamed to
+   match the version (e.g. `UnicodeData-16.0.0.txt`).
+2. In `scripts/generate-nfkc-table.ts` update `PINNED_UNICODE_VERSION`, the two
+   `*_FILE` constants, and `POST_PIN_SENTINEL` (a code point assigned in the
+   *next* Unicode version but unassigned in the new pin — used to detect a
+   host runtime newer than the pin).
+3. In `scripts/check-invariants.sh` (check 9) update the two pinned SHA-256
+   hashes; in `testdata/verifier-reference.go` update the `unicodeVersion`
+   assertion.
+4. Run `bun run scripts/generate-nfkc-table.ts` from `packages/protocol/` — it
+   rewrites this file and `src/nfkc-table.generated.ts`. When run on a host
+   whose runtime genuinely ships the pinned version it additionally
+   cross-checks `frozenNfkc` against `String.prototype.normalize("NFKC")` for
+   every code point; `--require-runtime-match` (used by CI) makes that
+   cross-check mandatory.
 
 ## Cross-language verification
 

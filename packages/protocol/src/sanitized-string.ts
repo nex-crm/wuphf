@@ -517,9 +517,17 @@ function sanitizeText(input: string, options: SanitizedStringOptions): string {
   // NFKC composes to `á`. Without this second pass `sanitizeText` is not
   // idempotent and its output is not NFKC-stable — fatal for the cosign path,
   // which re-sanitizes under `allowlist` at its own trust boundary and
-  // compares bytes. NFKC never introduces a `\p{C}` / default-ignorable code
-  // point, so a second strip pass is unnecessary; the no-survivor and
-  // idempotence property tests guard that invariant.
+  // compares bytes.
+  //
+  // Why no second strip pass: NFKC *decomposition* can surface a disallowed
+  // code point (e.g. U+3164 HANGUL FILLER decomposes to U+1160 HANGUL
+  // JUNGSEONG FILLER, a default-ignorable) — but that happens in the FIRST
+  // `frozenNfkc` pass above, so the strip loop removes it. This second pass
+  // runs on already-stripped, already-NFKC text; it only canonically
+  // *composes* neighbours the strip made adjacent, and a canonical composite
+  // is never a `\p{C}` / default-ignorable code point (guarded by the
+  // "no composition composite is moat-disallowed" test in nfkc.spec.ts). So
+  // the second pass introduces nothing the strip would need to catch.
   return frozenNfkc(out);
 }
 

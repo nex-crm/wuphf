@@ -243,6 +243,39 @@ check_nfkc_table_artifacts_consistent() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────
+# Check 9 — Vendored UCD files match pinned SHA-256 hashes.
+#
+# scripts/generate-nfkc-table.ts derives the ENTIRE frozen NFKC table from
+# scripts/ucd/UnicodeData-15.1.0.txt and CompositionExclusions-15.1.0.txt —
+# those two files are the moat's NFKC root of trust. The expected hashes are
+# pinned HERE, in reviewed code: tampering a vendored UCD file then also
+# requires editing this script — a small, scrutinised diff, not a skimmed
+# multi-MB blob diff. The hashes are the published Unicode 15.1.0 UCD digests,
+# verifiable against https://www.unicode.org/Public/15.1.0/ucd/.
+# Bumping the pinned Unicode version updates both the files and these hashes.
+# ─────────────────────────────────────────────────────────────────────────
+check_vendored_ucd_hashes() {
+  local ok=1 actual
+  local expect_unicodedata="2fc713e6a31a87c4850a37fe2caffa4218180fadb5de86b43a143ddb4581fb86"
+  local expect_exclusions="59d2d9e3dfdf0a999cf9dae11d594f053631222679a2f5710315ea07f7fe82af"
+  actual=$(shasum -a 256 scripts/ucd/UnicodeData-15.1.0.txt 2>/dev/null | cut -d' ' -f1)
+  if [ "$actual" != "$expect_unicodedata" ]; then
+    fail "scripts/ucd/UnicodeData-15.1.0.txt SHA-256 mismatch (got ${actual:-missing})"
+    ok=0
+  fi
+  actual=$(shasum -a 256 scripts/ucd/CompositionExclusions-15.1.0.txt 2>/dev/null | cut -d' ' -f1)
+  if [ "$actual" != "$expect_exclusions" ]; then
+    fail "scripts/ucd/CompositionExclusions-15.1.0.txt SHA-256 mismatch (got ${actual:-missing})"
+    ok=0
+  fi
+  if [ "$ok" -eq 1 ]; then
+    pass "vendored UCD files match pinned SHA-256 hashes"
+  else
+    return 1
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────
 # Run all checks; collect violations rather than fast-fail so a
 # contributor sees every issue per run.
 # ─────────────────────────────────────────────────────────────────────────
@@ -255,6 +288,7 @@ check_index_value_exports_have_coverage || true
 check_no_date_now_or_date_parse || true
 check_no_runtime_normalize_in_src || true
 check_nfkc_table_artifacts_consistent || true
+check_vendored_ucd_hashes || true
 
 if [ "$violations" -gt 0 ]; then
   echo ""

@@ -236,12 +236,30 @@ function compose(codePoints: readonly number[], tables: NfkcTables): number[] {
   return out;
 }
 
+// Build a string from code points in 8K-element chunks. A per-code-point
+// `out += String.fromCodePoint(cp)` is the dominant cost on a large all-ASCII
+// payload (rope churn); chunked spread is ~6× faster. The chunk bounds the
+// argument-count of the spread well within engine limits.
 function codePointsToString(codePoints: readonly number[]): string {
+  const chunkSize = 8192;
   let out = "";
-  for (const codePoint of codePoints) {
-    out += String.fromCodePoint(codePoint);
+  for (let start = 0; start < codePoints.length; start += chunkSize) {
+    out += String.fromCodePoint(...codePoints.slice(start, start + chunkSize));
   }
   return out;
+}
+
+// True iff every UTF-16 unit is < 0x80. A pure-ASCII string is already in
+// NFKC in EVERY Unicode version — no ASCII code point decomposes, carries a
+// non-zero combining class, or is the second element of a composition pair —
+// so it is a sound, version-independent fast-path skip of the pipeline.
+function isPureAscii(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) >= 0x80) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Normalise `input` to NFKC against the supplied frozen tables. Pure: no
@@ -249,6 +267,11 @@ function codePointsToString(codePoints: readonly number[]): string {
 export function normalizeNfkc(input: string, tables: NfkcTables): string {
   if (input.length === 0) {
     return "";
+  }
+  // Fast path — see isPureAscii. The overwhelmingly common moat input (IDs,
+  // slugs, JSON keys, ASCII prose) skips decompose/order/compose entirely.
+  if (isPureAscii(input)) {
+    return input;
   }
   const decomposed = decompose(input, tables);
   canonicalOrder(decomposed, tables.combiningClass);

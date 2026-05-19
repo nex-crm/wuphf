@@ -1161,6 +1161,7 @@ type nfkcVector struct {
 
 type nfkcTableFixture struct {
 	Description          string            `json:"description"`
+	SchemaVersion        int               `json:"schemaVersion"`
 	UnicodeVersion       string            `json:"unicodeVersion"`
 	GeneratedBy          string            `json:"generatedBy"`
 	Decomposition        []nfkcDecompEntry `json:"decomposition"`
@@ -1234,7 +1235,21 @@ func (t nfkcTables) ccc(r rune) int {
 	return t.combiningClass[r]
 }
 
-// decomposeRune appends the full compatibility decomposition of r to out.
+// isPureASCII reports whether every byte of s is < 0x80. A pure-ASCII string
+// is already in NFKC in every Unicode version, so frozenNFKC can return it
+// unchanged — matching the TS fast path in nfkc-core.ts.
+func isPureASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// decomposeRune appends the full compatibility decomposition of r to out. The
+// table stores fully-recursive NFKD (the TS generator's assertWellFormed
+// proves it), so a single splice — no recursion here — is complete.
 func (t nfkcTables) decomposeRune(r rune, out []rune) []rune {
 	if r >= hangulSBase && r < hangulSBase+hangulSCount {
 		syllableIndex := int(r) - hangulSBase
@@ -1329,7 +1344,10 @@ func (t nfkcTables) frozenNFKC(input string) string {
 	if len(input) == 0 {
 		return ""
 	}
-	var cps []rune
+	if isPureASCII(input) {
+		return input // already NFKC — matches the TS fast path
+	}
+	cps := make([]rune, 0, len(input))
 	for _, r := range input {
 		cps = t.decomposeRune(r, cps)
 	}
@@ -2284,6 +2302,14 @@ func main() {
 	nfkcFx, err := loadNfkcTableFixture()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "could not load nfkc-table fixture: %v\n", err)
+		os.Exit(2)
+	}
+	if nfkcFx.SchemaVersion != 1 {
+		fmt.Fprintf(os.Stderr, "unsupported nfkc-table schemaVersion: %d\n", nfkcFx.SchemaVersion)
+		os.Exit(2)
+	}
+	if nfkcFx.UnicodeVersion != "15.1" {
+		fmt.Fprintf(os.Stderr, "unexpected nfkc-table unicodeVersion: %s\n", nfkcFx.UnicodeVersion)
 		os.Exit(2)
 	}
 	// Loaded before any sanitizeAllowlistText call below — it normalises via

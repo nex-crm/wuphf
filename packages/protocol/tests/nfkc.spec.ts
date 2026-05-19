@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { frozenNfkc } from "../src/nfkc.ts";
-import { NFKC_UNICODE_VERSION } from "../src/nfkc-table.generated.ts";
+import { NFKC_COMPOSITION_ENTRIES, NFKC_UNICODE_VERSION } from "../src/nfkc-table.generated.ts";
 import { isMoatDisallowedCodePoint } from "../src/sanitized-string.ts";
 import nfkcTableJson from "../testdata/nfkc-table.json";
 
@@ -102,9 +102,10 @@ interface NormalizationVector {
 const normalizationVectors: readonly NormalizationVector[] = nfkcTableJson.normalizationVectors;
 
 describe("frozenNfkc", () => {
-  it("pins the tables to a known Unicode version", () => {
+  it("pins the tables to a known Unicode version and wire schema", () => {
     expect(NFKC_UNICODE_VERSION).toBe("15.1");
     expect(nfkcTableJson.unicodeVersion).toBe(NFKC_UNICODE_VERSION);
+    expect(nfkcTableJson.schemaVersion).toBe(1);
   });
 
   describe("cross-language vectors", () => {
@@ -201,31 +202,23 @@ describe("frozenNfkc", () => {
       );
     });
 
-    it("never introduces a moat-disallowed code point", () => {
-      // `sanitizeText` strips moat-disallowed code points ONCE, between two
-      // `frozenNfkc` passes, and relies on the second pass not re-introducing
-      // one. NFKC compatibility/canonical mappings only ever expand to
-      // letters, marks, digits, and punctuation — never `\p{C}` or
-      // default-ignorables. This pins that: any disallowed code point in the
-      // output must have been present in the input, never created by NFKC.
-      fc.assert(
-        fc.property(nfkcStringArb, (input) => {
-          const inputCodePoints = new Set<number>();
-          for (const character of input) {
-            const codePoint = character.codePointAt(0);
-            if (codePoint !== undefined) {
-              inputCodePoints.add(codePoint);
-            }
-          }
-          for (const character of frozenNfkc(input)) {
-            const codePoint = character.codePointAt(0);
-            if (codePoint !== undefined && isMoatDisallowedCodePoint(codePoint)) {
-              expect(inputCodePoints.has(codePoint)).toBe(true);
-            }
-          }
-        }),
-        { numRuns: NUM_RUNS },
-      );
+    it("composes only to non-disallowed code points", () => {
+      // `sanitizeText` strips moat-disallowed code points ONCE, then runs
+      // `frozenNfkc` again. NFKC *decomposition* CAN surface a disallowed code
+      // point (U+3164 HANGUL FILLER → U+1160, a default-ignorable) — but that
+      // happens in the first pass, before the strip. The second pass runs on
+      // already-stripped text and only canonically COMPOSES; so the single
+      // strip pass is sound iff no canonical composite is itself moat-
+      // disallowed. Verify the composition table directly.
+      expect(NFKC_COMPOSITION_ENTRIES.length).toBeGreaterThan(0);
+      for (const entry of NFKC_COMPOSITION_ENTRIES) {
+        const composite = entry[2];
+        expect(isMoatDisallowedCodePoint(composite)).toBe(false);
+      }
+      // Hangul composition is algorithmic — L+V/LV+T compose to syllables in
+      // U+AC00..U+D7A3, which are letters, never moat-disallowed.
+      expect(isMoatDisallowedCodePoint(0xac00)).toBe(false);
+      expect(isMoatDisallowedCodePoint(0xd7a3)).toBe(false);
     });
   });
 });
