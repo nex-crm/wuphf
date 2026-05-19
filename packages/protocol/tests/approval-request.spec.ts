@@ -349,6 +349,204 @@ describe("ApprovalRequest protocol artifact", () => {
       errors: [{ path: "/scope/frozenArgsHash", message: "must match claim.frozenArgsHash" }],
     });
   });
+
+  it("throws before serializing invalid in-memory requests and audit payloads", () => {
+    const pendingWithDecision = approvalRequestFixture({
+      status: "pending",
+      decision: decisionRecordFixture(),
+    });
+    expect(() => approvalRequestToJson(pendingWithDecision)).toThrow(
+      /\/decision: must be absent when status is pending/,
+    );
+
+    const invalidRequestedPayload = {
+      ...approvalRequestedPayloadFixture(),
+      scope: {
+        ...approvalRequestedPayloadFixture().scope,
+        frozenArgsHash: sha256Hex("approval-request-different-hash"),
+      },
+    };
+    expect(() =>
+      approvalAuditPayloadToBytes("approval_requested", invalidRequestedPayload),
+    ).toThrow(/\/scope\/frozenArgsHash: must match claim\.frozenArgsHash/);
+
+    const unknownKind = "approval_removed" as never;
+    expect(() =>
+      approvalAuditPayloadToJsonValue(unknownKind, approvalRequestedPayloadFixture()),
+    ).toThrow(/unknown ApprovalAuditEventKind: approval_removed/);
+    expect(() => approvalAuditPayloadFromJsonValue(unknownKind, {})).toThrow(
+      /unknown ApprovalAuditEventKind: approval_removed/,
+    );
+    expect(() => validateApprovalAuditPayloadForKind(unknownKind, {})).toThrow(
+      /unknown ApprovalAuditEventKind: approval_removed/,
+    );
+  });
+
+  it("returns structured validation errors for non-object validator boundaries", () => {
+    expect(validateApprovalRequest("not-an-object")).toEqual({
+      ok: false,
+      errors: [{ path: "", message: "must be an object" }],
+    });
+    expect(validateApprovalDecisionRecord("not-an-object")).toEqual({
+      ok: false,
+      errors: [{ path: "", message: "must be an object" }],
+    });
+    expect(validateApprovalRequestedAuditPayload("not-an-object")).toEqual({
+      ok: false,
+      errors: [{ path: "", message: "must be an object" }],
+    });
+    expect(validateApprovalDecidedAuditPayload("not-an-object")).toEqual({
+      ok: false,
+      errors: [{ path: "", message: "must be an object" }],
+    });
+  });
+
+  it("rejects accessor and undefined fields without invoking getters", () => {
+    let idGetterCalled = false;
+    const requiredAccessor = { ...approvalRequestFixture() } as Record<string, unknown>;
+    Object.defineProperty(requiredAccessor, "id", {
+      enumerable: true,
+      get() {
+        idGetterCalled = true;
+        return REQUEST_ID;
+      },
+    });
+    expect(validateApprovalRequest(requiredAccessor)).toEqual({
+      ok: false,
+      errors: [{ path: "/id", message: "must be a data property" }],
+    });
+    expect(idGetterCalled).toBe(false);
+
+    expect(validateApprovalRequest({ ...approvalRequestFixture(), id: undefined })).toEqual({
+      ok: false,
+      errors: [{ path: "/id", message: "is required" }],
+    });
+
+    const nonReceiptCase = nonReceiptClaimScopeCases()[0];
+    if (nonReceiptCase === undefined) throw new Error("missing non-receipt approval case");
+    const nonReceiptRequest = approvalRequestFixture({
+      claim: nonReceiptCase.claim,
+      scope: nonReceiptCase.scope,
+      status: "pending",
+      decision: undefined,
+      receiptId: undefined,
+    });
+
+    let threadGetterCalled = false;
+    const optionalAccessor = { ...nonReceiptRequest } as Record<string, unknown>;
+    Object.defineProperty(optionalAccessor, "threadId", {
+      enumerable: true,
+      get() {
+        threadGetterCalled = true;
+        return THREAD_ID;
+      },
+    });
+    expect(validateApprovalRequest(optionalAccessor)).toEqual({
+      ok: false,
+      errors: [{ path: "/threadId", message: "must be a data property" }],
+    });
+    expect(threadGetterCalled).toBe(false);
+    expect(validateApprovalRequest({ ...nonReceiptRequest, threadId: undefined })).toEqual({
+      ok: true,
+    });
+  });
+
+  it("rejects malformed approval request wire values at scalar boundaries", () => {
+    const validWire = mutableJson(approvalRequestToJsonValue(approvalRequestFixture()));
+
+    expect(() => approvalRequestFromJsonValue({ ...validWire, risk_class: "severe" })).toThrow(
+      /approvalRequest\.risk_class: must be one of/,
+    );
+    expect(() => approvalRequestFromJsonValue({ ...validWire, status: "done" })).toThrow(
+      /approvalRequest\.status: must be one of/,
+    );
+    expect(() =>
+      approvalRequestFromJsonValue({
+        ...validWire,
+        decision: { ...(validWire.decision as Record<string, unknown>), decision: "maybe" },
+      }),
+    ).toThrow(/approvalRequest\.decision\.decision: must be one of/);
+    expect(() => approvalRequestFromJsonValue({ ...validWire, schema_version: 2 })).toThrow(
+      /approvalRequest\.schema_version: must be 1/,
+    );
+    expect(() => approvalRequestFromJsonValue({ ...validWire, requested_by: "" })).toThrow(
+      /approvalRequest\.requested_by: not a SignerIdentity: must be non-empty/,
+    );
+    expect(() =>
+      approvalRequestFromJsonValue({ ...validWire, requested_at: "2026-05-08T18:00:00Z" }),
+    ).toThrow(/approvalRequest\.requested_at: must be an ISO 8601 string/);
+    expect(() =>
+      approvalRequestFromJsonValue({ ...validWire, requested_at: "2026-02-30T18:00:00.000Z" }),
+    ).toThrow(/approvalRequest\.requested_at: must be a valid ISO 8601 instant/);
+  });
+
+  it("rejects malformed approval audit payload wire values", () => {
+    const requestedPayload = approvalRequestedPayloadFixture();
+    expect(() =>
+      approvalAuditPayloadFromJsonValue("approval_requested", {
+        ...approvalAuditPayloadToJsonValue("approval_requested", requestedPayload),
+        threadId: 42,
+      }),
+    ).toThrow(/approvalRequestedAuditPayload\.threadId: must be a string/);
+    expect(() =>
+      approvalAuditPayloadFromJsonValue("approval_requested", {
+        ...approvalAuditPayloadToJsonValue("approval_requested", requestedPayload),
+        requestedAt: "2026-05-08T18:00:00Z",
+      }),
+    ).toThrow(/approvalRequestedAuditPayload\.requestedAt: must be an ISO 8601 string/);
+
+    const decidedPayload = approvalDecidedPayloadFixture();
+    expect(() =>
+      approvalAuditPayloadFromJsonValue("approval_decided", {
+        ...approvalAuditPayloadToJsonValue("approval_decided", decidedPayload),
+        decision: "maybe",
+      }),
+    ).toThrow(/approvalDecidedAuditPayload\.decision: must be one of/);
+    expect(() =>
+      approvalAuditPayloadFromJsonValue("approval_decided", {
+        ...approvalAuditPayloadToJsonValue("approval_decided", decidedPayload),
+        decidedAt: "2026-02-30T18:00:00.000Z",
+      }),
+    ).toThrow(/approvalDecidedAuditPayload\.decidedAt: must be a valid ISO 8601 instant/);
+  });
+
+  it("reports claim and scope identity mismatches before per-kind field checks", () => {
+    const nonReceiptCase = nonReceiptClaimScopeCases()[0];
+    if (nonReceiptCase === undefined) throw new Error("missing non-receipt approval case");
+    expect(
+      validateApprovalRequest(
+        approvalRequestFixture({
+          claim: nonReceiptCase.claim,
+          scope: { ...nonReceiptCase.scope, claimId: asApprovalClaimId("claim_cost_02") },
+          status: "pending",
+          decision: undefined,
+          receiptId: undefined,
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      errors: [{ path: "/scope/claimId", message: "must match claim.claimId" }],
+    });
+
+    expect(
+      validateApprovalRequest(
+        approvalRequestFixture({
+          claim: nonReceiptCase.claim,
+          scope: receiptCoSignScopeFixture(receiptCoSignClaimFixture()),
+          status: "pending",
+          decision: undefined,
+          receiptId: undefined,
+        }),
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errors: expect.arrayContaining([
+          { path: "/scope/claimKind", message: "must match claim.kind" },
+        ]),
+      }),
+    );
+  });
 });
 
 describe("ApprovalRequest conformance vectors", () => {

@@ -29,7 +29,10 @@ import {
   asApprovalClaimId,
   asApprovalRequestId,
   asApprovalTokenId,
+  asCredentialHandleId,
+  asCredentialScope,
   asIdempotencyKey,
+  asProviderKind,
   asReceiptId,
   asSignerIdentity,
   asTaskId,
@@ -575,6 +578,274 @@ describe("route-envelope codecs", () => {
       }),
     ).toThrow(/attentionReason.*absent/);
   });
+
+  it("rejects malformed thread route views at each derived status boundary", () => {
+    const reviewView = threadViewFixture({
+      status: "needs_review",
+      effectiveStatus: "needs_review",
+      attentionReason: undefined,
+      boardColumn: "review",
+      currentSeat: "human",
+      pendingApprovalCount: 0,
+    });
+    const mergedView = threadViewFixture({
+      status: "merged",
+      effectiveStatus: "merged",
+      attentionReason: undefined,
+      boardColumn: "done",
+      currentSeat: "agent",
+      pendingApprovalCount: 0,
+    });
+    const closedView = threadViewFixture({
+      status: "closed",
+      effectiveStatus: "closed",
+      attentionReason: undefined,
+      boardColumn: "done",
+      currentSeat: "agent",
+      pendingApprovalCount: 0,
+    });
+
+    expect(threadViewFromJson(threadViewToJsonValue(reviewView))).toStrictEqual(
+      withoutAttentionReason(reviewView),
+    );
+    expect(threadViewFromJson(threadViewToJsonValue(mergedView))).toStrictEqual(
+      withoutAttentionReason(mergedView),
+    );
+    expect(threadViewFromJson(threadViewToJsonValue(closedView))).toStrictEqual(
+      withoutAttentionReason(closedView),
+    );
+
+    const validWire = threadViewToJsonValue(threadViewFixture()) as JsonObject;
+    expect(() => threadViewFromJson({ ...validWire, effectiveStatus: "blocked" })).toThrow(
+      /effectiveStatus.*must be one of/,
+    );
+    expect(() => threadViewFromJson({ ...validWire, attentionReason: "waiting" })).toThrow(
+      /attentionReason.*must be one of/,
+    );
+    expect(() => threadViewFromJson({ ...validWire, boardColumn: "later" })).toThrow(
+      /boardColumn.*must be one of/,
+    );
+    expect(() => threadViewFromJson({ ...validWire, currentSeat: "operator" })).toThrow(
+      /currentSeat.*must be one of/,
+    );
+    expect(() =>
+      threadViewFromJson({
+        ...validWire,
+        effectiveStatus: "needs_attention",
+        attentionReason: undefined,
+      }),
+    ).toThrow(/attentionReason.*required/);
+    expect(() => threadViewFromJson({ ...validWire, boardColumn: "running" })).toThrow(
+      /boardColumn.*match effectiveStatus/,
+    );
+    expect(() => threadViewFromJson({ ...validWire, currentSeat: "agent" })).toThrow(
+      /currentSeat.*match effectiveStatus and status/,
+    );
+    expect(() => threadViewFromJson({ ...validWire, pendingApprovalCount: 1.5 })).toThrow(
+      /pendingApprovalCount.*non-negative safe integer/,
+    );
+    expect(() =>
+      threadViewToJsonValue({
+        ...threadViewFixture(),
+        pendingApprovalCount: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    ).toThrow(/pendingApprovalCount.*non-negative safe integer/);
+    expect(() => threadListResponseFromJson({ schemaVersion: 1, threads: "not-an-array" })).toThrow(
+      /threadListResponse\.threads: must be an array/,
+    );
+  });
+
+  it("rejects accessor and missing scalar fields without invoking route getters", () => {
+    const missingThread = { ...threadViewToJsonValue(threadViewFixture()) } as JsonObject;
+    Reflect.deleteProperty(missingThread, "title");
+    expect(() => threadViewFromJson(missingThread)).toThrow(/threadView\.title: is required/);
+
+    const undefinedThread = {
+      ...threadViewToJsonValue(threadViewFixture()),
+      currentSeat: undefined,
+    };
+    expect(() => threadViewFromJson(undefinedThread)).toThrow(
+      /threadView\.currentSeat: is required/,
+    );
+
+    let closedAtGetterCalled = false;
+    const accessorThread = { ...threadViewToJsonValue(threadViewFixture()) } as JsonObject;
+    Object.defineProperty(accessorThread, "closed_at", {
+      enumerable: true,
+      get() {
+        closedAtGetterCalled = true;
+        return UPDATED_AT.toISOString();
+      },
+    });
+    expect(() => threadViewFromJson(accessorThread)).toThrow(
+      /threadView\.closed_at: must be a data property/,
+    );
+    expect(closedAtGetterCalled).toBe(false);
+
+    expect(() =>
+      threadViewFromJson({ ...threadViewToJsonValue(threadViewFixture()), title: 42 }),
+    ).toThrow(/thread\.title: must be a string/);
+  });
+
+  it("rejects route envelope scalar and schema-version edge cases", () => {
+    expect(() =>
+      threadCreateRequestFromJson({
+        schemaVersion: 1.5,
+        title: "Approval request protocol",
+        specContent: specContentFixture(),
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/threadCreateRequest\.schemaVersion: must be an integer/);
+    expect(() =>
+      threadCreateRequestFromJson({
+        schemaVersion: 0,
+        title: "Approval request protocol",
+        specContent: specContentFixture(),
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/threadCreateRequest\.schemaVersion: must be 1/);
+
+    const approvalWire = approvalViewToJsonValue(approvalViewFixture()) as JsonObject;
+    expect(() => approvalViewFromJson({ ...approvalWire, schemaVersion: 1.5 })).toThrow(
+      /approvalView\.schemaVersion: must be an integer/,
+    );
+    expect(() => approvalViewFromJson({ ...approvalWire, schemaVersion: 2 })).toThrow(
+      /approvalView\.schemaVersion: must be 1/,
+    );
+    expect(() =>
+      approvalViewToJsonValue({
+        ...approvalViewFixture(),
+        status: "pending",
+      }),
+    ).toThrow(/decisionSummary.*must be absent/);
+
+    expect(() =>
+      threadMutationResponseFromJson({
+        schemaVersion: 1,
+        headLsn: HEAD_LSN,
+        revisionId: REVISION_1,
+        contentHash: threadSpecContentHash(specContentFixture()),
+      }),
+    ).toThrow(/threadMutationResponse\.threadId: is required/);
+    expect(() =>
+      threadMutationResponseFromJson({
+        schemaVersion: 1,
+        threadId: THREAD_ID,
+        headLsn: "v1:not-a-number",
+        revisionId: REVISION_1,
+        contentHash: threadSpecContentHash(specContentFixture()),
+      }),
+    ).toThrow(/threadMutationResponse\.headLsn/);
+    expect(() =>
+      threadSpecEditRequestFromJson({
+        schemaVersion: 1,
+        baseRevisionId: REVISION_1,
+        baseContentHash: "not-a-sha",
+        content: specContentFixture(),
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/threadSpecEditRequest\.baseContentHash/);
+    expect(() =>
+      threadStatusChangeRequestFromJson({
+        schemaVersion: 1,
+        fromStatus: "blocked",
+        toStatus: "open",
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/threadStatusChangeRequest\.fromStatus.*must be one of/);
+    expect(() =>
+      threadCreateRequestFromJson({
+        schemaVersion: 1,
+        title: "",
+        specContent: specContentFixture(),
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/threadCreateRequest\.title: must be a non-empty string/);
+    expect(() =>
+      threadCreateRequestFromJson({
+        schemaVersion: 1,
+        title: "Approval request protocol",
+        specContent: specContentFixture(),
+        idempotencyKey: "",
+      }),
+    ).toThrow(/threadCreateRequest\.idempotencyKey/);
+    expect(() => routeErrorFromJson({ error: "store_busy", message: 42 })).toThrow(
+      /routeError\.message: must be a string/,
+    );
+    expect(() => routeErrorFromJson({ error: "store_busy", retryAfterMs: 1.5 })).toThrow(
+      /routeError\.retryAfterMs: must be a non-negative safe integer/,
+    );
+    expect(() =>
+      threadListResponseFromJson({
+        schemaVersion: 1,
+        threads: [threadViewToJsonValue(threadViewFixture())],
+        nextCursor: "",
+      }),
+    ).toThrow(/threadListResponse\.nextCursor: must be non-empty/);
+    expect(() =>
+      threadListResponseFromJson({
+        schemaVersion: 1,
+        threads: [threadViewToJsonValue(threadViewFixture())],
+        nextCursor: 42,
+      }),
+    ).toThrow(/threadListResponse\.nextCursor: must be a string/);
+    expect(() =>
+      approvalListResponseFromJson({ schemaVersion: 1, approvals: "not-an-array" }),
+    ).toThrow(/approvalListResponse\.approvals: must be an array/);
+  });
+
+  it("rejects approval route creation binding drift for every claim kind", () => {
+    const { claim: costClaim, scope: costScope } = costApprovalPair();
+    expect(() =>
+      approvalRequestCreateRequestFromJson({
+        schemaVersion: 1,
+        claim: costClaim,
+        scope: { ...costScope, costCeilingId: "budget-prod-02" },
+        riskClass: "medium",
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/scope\.costCeilingId: must match claim\.costCeilingId/);
+
+    const { claim: endpointClaim, scope: endpointScope } = endpointApprovalPair();
+    expect(() =>
+      approvalRequestCreateRequestFromJson({
+        schemaVersion: 1,
+        claim: endpointClaim,
+        scope: { ...endpointScope, providerKind: asProviderKind("anthropic") },
+        riskClass: "medium",
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/scope\.providerKind: must match claim\.providerKind/);
+
+    const { claim: credentialClaim, scope: credentialScope } = credentialApprovalPair();
+    expect(() =>
+      approvalRequestCreateRequestFromJson({
+        schemaVersion: 1,
+        claim: credentialClaim,
+        scope: {
+          ...credentialScope,
+          granteeAgentId: asAgentId("agent_gamma"),
+        },
+        riskClass: "medium",
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/scope\.granteeAgentId: must match claim\.granteeAgentId/);
+
+    const receiptClaim = receiptCoSignClaimFixture();
+    expect(() =>
+      approvalRequestCreateRequestFromJson({
+        schemaVersion: 1,
+        claim: receiptClaim,
+        scope: {
+          ...receiptCoSignScopeFixture(receiptClaim),
+          frozenArgsHash: sha256Hex("route-envelope-different-hash"),
+        },
+        riskClass: "high",
+        receiptId: RECEIPT_ID,
+        idempotencyKey: IDEMPOTENCY_KEY,
+      }),
+    ).toThrow(/scope\.frozenArgsHash: must match claim\.frozenArgsHash/);
+  });
 });
 
 describe("route-envelope conformance vectors", () => {
@@ -935,6 +1206,12 @@ function threadViewFixture(overrides: Partial<ThreadView> = {}): ThreadView {
   };
 }
 
+function withoutAttentionReason(view: ThreadView): ThreadView {
+  const expected = { ...view };
+  Reflect.deleteProperty(expected, "attentionReason");
+  return expected;
+}
+
 function approvalRequestFixture(overrides: FixtureOverrides = {}): ApprovalRequest {
   const claim = overrides.claim ?? receiptCoSignClaimFixture();
   const scope = overrides.scope ?? receiptCoSignScopeFor(claim);
@@ -1071,6 +1348,60 @@ function costApprovalPair(): {
       maxUses: 1,
       agentId: claim.agentId,
       costCeilingId: claim.costCeilingId,
+    },
+  };
+}
+
+function endpointApprovalPair(): {
+  readonly claim: Extract<ApprovalClaim, { readonly kind: "endpoint_allowlist_extension" }>;
+  readonly scope: Extract<ApprovalScope, { readonly claimKind: "endpoint_allowlist_extension" }>;
+} {
+  const claim: Extract<ApprovalClaim, { readonly kind: "endpoint_allowlist_extension" }> = {
+    schemaVersion: 1,
+    claimId: asApprovalClaimId("claim_endpoint_01"),
+    kind: "endpoint_allowlist_extension",
+    agentId: asAgentId("agent_alpha"),
+    providerKind: asProviderKind("openai"),
+    endpointOrigin: "https://api.openai.example",
+    reason: "Temporary allowlist expansion.",
+  };
+  return {
+    claim,
+    scope: {
+      mode: "single_use",
+      claimId: claim.claimId,
+      claimKind: claim.kind,
+      role: "host",
+      maxUses: 1,
+      agentId: claim.agentId,
+      providerKind: claim.providerKind,
+      endpointOrigin: claim.endpointOrigin,
+    },
+  };
+}
+
+function credentialApprovalPair(): {
+  readonly claim: Extract<ApprovalClaim, { readonly kind: "credential_grant_to_agent" }>;
+  readonly scope: Extract<ApprovalScope, { readonly claimKind: "credential_grant_to_agent" }>;
+} {
+  const claim: Extract<ApprovalClaim, { readonly kind: "credential_grant_to_agent" }> = {
+    schemaVersion: 1,
+    claimId: asApprovalClaimId("claim_credential_01"),
+    kind: "credential_grant_to_agent",
+    granteeAgentId: asAgentId("agent_beta"),
+    credentialHandleId: asCredentialHandleId("cred_0123456789ABCDEFGHIJKLMNOPQRSTUV"),
+    credentialScope: asCredentialScope("openai"),
+  };
+  return {
+    claim,
+    scope: {
+      mode: "single_use",
+      claimId: claim.claimId,
+      claimKind: claim.kind,
+      role: "approver",
+      maxUses: 1,
+      granteeAgentId: claim.granteeAgentId,
+      credentialHandleId: claim.credentialHandleId,
     },
   };
 }
