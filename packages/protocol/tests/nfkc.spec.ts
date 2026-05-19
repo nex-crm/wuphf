@@ -7,14 +7,16 @@ import nfkcTableJson from "../testdata/nfkc-table.json";
 
 const NUM_RUNS = 2000;
 
-// The Unicode version of the runtime executing this file. `frozenNfkc` is
-// runtime-independent by construction; `String.prototype.normalize("NFKC")` is
-// not, so the direct-equivalence checks below only hold when the runtime ships
-// the same Unicode version the frozen tables are pinned to. CI runs Bun 1.3
-// (Unicode 15.1), the pinned version, so they run there; off-version runs are
-// recorded as an explicit, visible skip rather than a silent pass.
-const { unicode: RUNTIME_UNICODE_VERSION } = process.versions;
-const runtimeMatchesPin = RUNTIME_UNICODE_VERSION === NFKC_UNICODE_VERSION;
+// NOTE on what this file does NOT test: the exhaustive proof that `frozenNfkc`
+// equals the runtime's `String.prototype.normalize("NFKC")` for every code
+// point. That comparison is only meaningful on a runtime shipping the pinned
+// Unicode version (15.1), and Vitest executes specs in Node workers (Unicode
+// 17.0) even under Bun — so an in-suite equivalence test could never run. The
+// proof lives in scripts/generate-nfkc-table.ts (`verifyAgainstRuntime`, over
+// all 1,112,064 code points) and is gated on every PR by the "Frozen NFKC
+// table drift check" CI step, which regenerates on the pinned Bun and fails on
+// any drift. The tests below are all runtime-independent: they pin `frozenNfkc`
+// to the frozen tables, not to the host's Unicode data.
 
 // A string contains a lone surrogate if any UTF-16 unit is an unpaired half.
 function hasLoneSurrogate(value: string): boolean {
@@ -224,31 +226,6 @@ describe("frozenNfkc", () => {
         }),
         { numRuns: NUM_RUNS },
       );
-    });
-  });
-
-  describe("equivalence with the pinned Unicode runtime", () => {
-    // `frozenNfkc` must reproduce `String.prototype.normalize("NFKC")` exactly
-    // on the runtime whose Unicode version the tables are pinned to. This is
-    // the same proof the generator runs before writing the tables; re-running
-    // it here guards the COMMITTED tables against a hand-edit.
-    it.skipIf(!runtimeMatchesPin)("matches the runtime over the property corpus", () => {
-      fc.assert(
-        fc.property(nfkcStringArb, (input) => {
-          expect(frozenNfkc(input)).toBe(input.normalize("NFKC"));
-        }),
-        { numRuns: NUM_RUNS },
-      );
-    });
-
-    it.skipIf(!runtimeMatchesPin)("matches the runtime for every single code point", () => {
-      for (let codePoint = 0; codePoint <= 0x10ffff; codePoint += 1) {
-        if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
-          continue; // a lone surrogate cannot form a well-formed string
-        }
-        const source = String.fromCodePoint(codePoint);
-        expect(frozenNfkc(source)).toBe(source.normalize("NFKC"));
-      }
     });
   });
 });

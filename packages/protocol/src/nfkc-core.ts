@@ -69,8 +69,11 @@ function decompose(input: string, tables: NfkcTables): number[] {
   // unchanged as non-decomposing, class-0 code points.
   for (const character of input) {
     const codePoint = character.codePointAt(0);
+    /* v8 ignore next 3 -- unreachable: `for...of` always yields a non-empty
+       character, so `codePointAt(0)` is always defined; the guard exists only
+       to satisfy `noUncheckedIndexedAccess` without a forbidden `!`/`as`. */
     if (codePoint === undefined) {
-      continue; // unreachable: `for...of` always yields a non-empty character
+      continue;
     }
     decomposeCodePoint(codePoint, tables, out);
   }
@@ -136,6 +139,8 @@ function sortNonStarterRun(
 ): void {
   for (let cursor = start + 1; cursor < end; cursor += 1) {
     const codePoint = codePoints[cursor];
+    /* v8 ignore next 3 -- unreachable: `cursor < end <= codePoints.length`, so
+       the index is in bounds; the guard satisfies `noUncheckedIndexedAccess`. */
     if (codePoint === undefined) {
       continue;
     }
@@ -143,6 +148,8 @@ function sortNonStarterRun(
     let probe = cursor - 1;
     while (probe >= start) {
       const probeCodePoint = codePoints[probe];
+      /* v8 ignore next 3 -- unreachable: `start <= probe < cursor`, so the
+         index is in bounds; the guard satisfies `noUncheckedIndexedAccess`. */
       if (probeCodePoint === undefined) {
         break;
       }
