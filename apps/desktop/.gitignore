@@ -6,3 +6,5 @@ coverage/
 .DS_Store
 .vite-electron-renderer/
 *.tsbuildinfo
+test-results/
+playwright-report/
