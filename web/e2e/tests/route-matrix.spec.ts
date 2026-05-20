@@ -152,11 +152,9 @@ test.describe("canonical route matrix", () => {
       await expect(p.getByTestId("notebook-surface")).toBeVisible();
     });
 
-    // Phase 2b: /#/reviews now redirects to /inbox instead of mounting
-    // ReviewQueueKanban. Verify the URL change, not the briefly-mounted
-    // InboxRedirect testid (it unmounts as soon as the redirect fires).
-    await page.goto("/#/reviews");
-    await expect(page).toHaveURL(/#\/inbox$/, { timeout: 10_000 });
+    await expectCanonicalRoute(page, "/#/reviews", async (p) => {
+      await expect(p.getByTestId("review-queue-surface")).toBeVisible();
+    });
   });
 
   test("dropped legacy aliases and unknown routes render not found", async ({

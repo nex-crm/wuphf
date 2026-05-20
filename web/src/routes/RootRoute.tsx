@@ -127,6 +127,9 @@ const DecisionPacketRoute = lazy(() =>
 );
 const CitedAnswer = lazy(() => import("../components/wiki/CitedAnswer"));
 const Wiki = lazy(() => import("../components/wiki/Wiki"));
+const ReviewQueueKanban = lazy(
+  () => import("../components/review/ReviewQueueKanban"),
+);
 // Phase 3 — Issues surface.
 const IssuesList = lazy(() =>
   import("../components/lifecycle/IssuesList").then((m) => ({
@@ -365,7 +368,7 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
             onNavigateWiki={(path) => navigateWikiArticle(path || null)}
           />
         )}
-        {current === "reviews" && <InboxRedirect />}
+        {current === "reviews" && <ReviewQueueKanban />}
       </div>
     </div>
   );
@@ -373,10 +376,10 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
 
 /**
  * InboxRedirect navigates the user from the deprecated /apps/requests
- * and /reviews surfaces to the unified Inbox. Phase 2 collapsed both
- * surfaces into one Decision Inbox; Phase 2b deletes the heavy
- * RequestsApp + ReviewQueueKanban components and routes the deep
- * links through this stub so existing bookmarks keep working.
+ * surface to the unified Inbox. Phase 2 collapsed Requests into the
+ * Decision Inbox; this stub keeps existing /apps/requests bookmarks
+ * working. (The Reviews tab inside Wiki is its own surface again —
+ * see ReviewQueueKanban.)
  */
 function InboxRedirect() {
   useEffect(() => {

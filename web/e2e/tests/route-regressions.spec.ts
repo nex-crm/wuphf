@@ -94,7 +94,11 @@ test.describe("PR #634 review pins", () => {
     // useEffect fires, so racing toBeVisible against the redirect is
     // flaky. URL change is the stable assertion.
     await expect(page).toHaveURL(/#\/inbox$/, { timeout: 5_000 });
-    await expectNoReactErrors(page, getErrors, "during legacy requests redirect");
+    await expectNoReactErrors(
+      page,
+      getErrors,
+      "during legacy requests redirect",
+    );
   });
 
   test("AgentPanel hides the per-channel toggle when no conversation channel is active", async ({
@@ -258,8 +262,7 @@ test.describe("PR #634 review pins", () => {
       { route: "/#/wiki", label: "Wiki" },
       { route: "/#/wiki/lookup?q=test", label: "Wiki" },
       { route: "/#/notebooks", label: "Notebooks" },
-      // /#/reviews was retired in Phase 2b; the route now redirects to
-      // /inbox so it no longer has its own breadcrumb label.
+      { route: "/#/reviews", label: "Reviews" },
     ];
 
     for (const { route, label } of surfaces) {
