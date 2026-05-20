@@ -644,6 +644,124 @@ describe("route-envelope codecs", () => {
     ).toThrow(/replayed/);
   });
 
+  it("rejects replay-check reports with strict scalar, accessor, and budget errors", () => {
+    const base = threadReplayCheckReportToJsonValue({
+      ok: true,
+      highestLsn: HEAD_LSN,
+      eventsScanned: 0,
+      discrepancies: [],
+    });
+    const withoutSchemaVersion = { ...base };
+    Reflect.deleteProperty(withoutSchemaVersion, "schemaVersion");
+
+    expect(threadReplayCheckReportFromJson(withoutSchemaVersion)).toStrictEqual({
+      schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+      ok: true,
+      highestLsn: HEAD_LSN,
+      eventsScanned: 0,
+      discrepancies: [],
+    });
+    expect(() => threadReplayCheckReportFromJson({ ...base, schemaVersion: "1" })).toThrow(
+      /threadReplayCheckReport\.schemaVersion: must be an integer/,
+    );
+    expect(() => threadReplayCheckReportFromJson({ ...base, schemaVersion: 1.5 })).toThrow(
+      /threadReplayCheckReport\.schemaVersion: must be an integer/,
+    );
+
+    const missingOk = { ...base };
+    Reflect.deleteProperty(missingOk, "ok");
+    expect(() => threadReplayCheckReportFromJson(missingOk)).toThrow(
+      /threadReplayCheckReport\.ok: is required/,
+    );
+
+    let okGetterCalled = false;
+    const okAccessor = { ...base };
+    Object.defineProperty(okAccessor, "ok", {
+      enumerable: true,
+      get() {
+        okGetterCalled = true;
+        return true;
+      },
+    });
+    expect(() => threadReplayCheckReportFromJson(okAccessor)).toThrow(
+      /threadReplayCheckReport\.ok: must be a data property/,
+    );
+    expect(okGetterCalled).toBe(false);
+
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [{ kind: "approval_replay_failed", reason: 42 }],
+      }),
+    ).toThrow(/threadReplayCheckReport\.discrepancies\/0\.reason: must be a string/);
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [
+          {
+            kind: "event_payload_unparseable",
+            lsn: HEAD_LSN,
+            eventType: "",
+            reason: "empty event type",
+          },
+        ],
+      }),
+    ).toThrow(/threadReplayCheckReport\.discrepancies\/0\.eventType: must be a non-empty string/);
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [{ kind: "thread_state_row_missing", threadId: "not-a-ulid" }],
+      }),
+    ).toThrow(/threadReplayCheckReport\.discrepancies\/0\.threadId/);
+
+    let expectedGetterCalled = false;
+    const invariantWithAccessor: JsonObject = {
+      kind: "thread_log_invariant_violation",
+      lsn: HEAD_LSN,
+      eventType: "thread.status_changed",
+      reason: "status mismatch",
+    };
+    Object.defineProperty(invariantWithAccessor, "expected", {
+      enumerable: true,
+      get() {
+        expectedGetterCalled = true;
+        return "open";
+      },
+    });
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [invariantWithAccessor],
+      }),
+    ).toThrow(/threadReplayCheckReport\.discrepancies\/0\.expected: must be a data property/);
+    expect(expectedGetterCalled).toBe(false);
+
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [
+          {
+            kind: "approval_replay_failed",
+            reason: "x".repeat(MAX_ROUTE_ERROR_MESSAGE_BYTES + 1),
+          },
+        ],
+      }),
+    ).toThrow(/RouteError\.message bytes/);
+    expect(() =>
+      threadReplayCheckReportToJsonValue({
+        ok: false,
+        highestLsn: HEAD_LSN,
+        eventsScanned: 1,
+        discrepancies: [
+          {
+            kind: "approval_replay_failed",
+            reason: "x".repeat(MAX_ROUTE_ERROR_MESSAGE_BYTES + 1),
+          },
+        ],
+      }),
+    ).toThrow(/RouteError\.message bytes/);
+  });
+
   it("rejects unknown keys at every route-envelope boundary", () => {
     for (const item of strictKnownKeyCases()) {
       expect(
