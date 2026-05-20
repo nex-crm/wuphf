@@ -102,4 +102,7 @@ export {
   foldApprovalFromLog,
   statusForDecision,
 } from "./projections.ts";
-export { rebuildApprovalsProjectionFromLog } from "./rebuild/index.ts";
+export {
+  ApprovalRebuildThreadProjectionNotReadyError,
+  rebuildApprovalsProjectionFromLog,
+} from "./rebuild/index.ts";

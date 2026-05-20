@@ -18,11 +18,13 @@ import {
   type SignedApprovalToken,
   signedApprovalTokenFromJson,
   signedApprovalTokenToJsonValue,
+  threadAuditPayloadToBytes,
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
   ApprovalIdempotencyConflictError,
+  ApprovalRebuildThreadProjectionNotReadyError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalThreadNotFoundError,
   ApprovalTokenAlreadyUsedError,
@@ -33,6 +35,7 @@ import {
   rebuildApprovalsProjectionFromLog,
 } from "../../src/approvals/index.ts";
 import { createEventLog, openDatabase, runMigrations } from "../../src/event-log/index.ts";
+import { createThreadStateStore } from "../../src/threads/index.ts";
 
 const REQUEST_ID = asApprovalRequestId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 const SECOND_REQUEST_ID = asApprovalRequestId("01ARZ3NDEKTSV4RRFFQ69G5FAW");
@@ -183,13 +186,27 @@ function insertThreadProjectionRow(
   eventLog: ReturnType<typeof createEventLog>,
   threadId = THREAD_ID,
 ): void {
-  const lsn = eventLog.append({ type: "thread.created", payload: Buffer.from("{}") });
+  const lsn = appendThreadCreatedEvent(eventLog, threadId);
   db.prepare<[string, number, string, string], void>(
     `INSERT INTO threads
        (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms,
         external_refs)
      VALUES (?, 'Replay thread', 'open', ?, ?, 0, 0, ?)`,
   ).run(threadId, lsn, OPERATOR, canonicalJSON({ source_urls: [], entity_ids: [] }));
+}
+
+function appendThreadCreatedEvent(
+  eventLog: ReturnType<typeof createEventLog>,
+  threadId = THREAD_ID,
+): number {
+  const bytes = threadAuditPayloadToBytes("thread_created", {
+    threadId,
+    title: "Replay thread",
+    createdBy: OPERATOR,
+    createdAt: new Date("2026-05-18T09:00:00.000Z"),
+    externalRefs: { sourceUrls: [], entityIds: [] },
+  });
+  return eventLog.append({ type: "thread.created", payload: Buffer.from(bytes) });
 }
 
 function projectionSnapshot(db: ReturnType<typeof openDatabase>): string {
@@ -539,12 +556,41 @@ describe("approval projection and appender", () => {
 
       const live = projectionSnapshot(db);
       db.exec("DELETE FROM pending_approvals");
-      const rebuilt = rebuildApprovalsProjectionFromLog(db, eventLog);
+      const rebuilt = rebuildApprovalsProjectionFromLog(db, eventLog, createThreadStateStore(db));
       expect(rebuilt.eventsApplied).toBe(3);
       expect(projectionSnapshot(db)).toBe(live);
       expect(projection.list({ status: "pending" }).map((row) => row.approval.id)).toEqual([
         SECOND_REQUEST_ID,
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rebuild helper requires the thread projection to be rebuilt first", () => {
+    const { db, eventLog } = setup();
+    try {
+      const threadLsn = appendThreadCreatedEvent(eventLog);
+      const approvalBytes = approvalAuditPayloadToBytes(
+        "approval_requested",
+        requestedPayload(REQUEST_ID, { thread: true, task: false }),
+      );
+      eventLog.append({ type: "approval.requested", payload: Buffer.from(approvalBytes) });
+
+      expect(() =>
+        rebuildApprovalsProjectionFromLog(db, eventLog, createThreadStateStore(db)),
+      ).toThrowError(
+        expect.objectContaining({
+          name: "ApprovalRebuildThreadProjectionNotReadyError",
+          expectedThreadCount: 1,
+          actualThreadCount: 0,
+          expectedHeadLsn: `v1:${threadLsn}`,
+          actualHeadLsn: "v1:0",
+        }),
+      );
+      expect(() =>
+        rebuildApprovalsProjectionFromLog(db, eventLog, createThreadStateStore(db)),
+      ).toThrow(ApprovalRebuildThreadProjectionNotReadyError);
     } finally {
       db.close();
     }
