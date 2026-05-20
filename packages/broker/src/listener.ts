@@ -156,9 +156,10 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   // be wired to a different database from the thread projection.
   const baseReceiptStore: ReceiptStore =
     config.threads?.receiptStore ?? config.receiptStore ?? new InMemoryReceiptStore();
-  const receiptStore = withThreadReceiptInvalidations(baseReceiptStore, (event) =>
-    sseHub.emitThreadEvent(event),
-  );
+  const receiptStore =
+    config.threads === undefined
+      ? baseReceiptStore
+      : withThreadReceiptInvalidations(baseReceiptStore, (event) => sseHub.emitThreadEvent(event));
   const agentProviderRoutingStore = config.runners?.agentProviderRoutingStore ?? null;
   // Reuse the same bearer→agent binding map that runner spawn uses so a
   // bearer pinned to agent_alpha cannot read or PUT agent_beta's routing.

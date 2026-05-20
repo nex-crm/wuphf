@@ -20,7 +20,6 @@ import {
   runnerSpawnRequestToJsonValue,
   SanitizedString,
   sha256Hex,
-  validateThreadStreamEvent,
 } from "@wuphf/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -34,6 +33,7 @@ const runnerId2 = asRunnerId("run_1123456789ABCDEFGHIJKLMNOPQRSTUV");
 const runnerId3 = asRunnerId("run_2123456789ABCDEFGHIJKLMNOPQRSTUV");
 const runnerThreadId = asThreadId("01TRZ3NDEKTSV4RRFFQ69G5FT0");
 const runnerTaskId = asTaskId("01TRZ3NDEKTSV4RRFFQ69G5FT1");
+const SSE_NEGATIVE_TIMEOUT_MS = 100;
 
 function spawnRequest(agent = agentId): RunnerSpawnRequest {
   return {
@@ -154,42 +154,38 @@ describe("runner routes", () => {
     expect(spawnedRequest?.cwd).toBe(await realpath(projectDir));
   });
 
-  it("emits thread.updated invalidations for runner-written threaded receipts", async () => {
+  it("does not emit thread.updated invalidations for runner-written threaded receipts without threads", async () => {
     receiptToWriteOnSpawn = minimalReceiptV2("01VRZ3NDEKTSV4RRFFQ69G5FV0", runnerTaskId, "ok");
     const workspaceRoot = await makeWorkspaceRoot();
     const handle = await startBroker(workspaceRoot);
     const controller = new AbortController();
-    const events = await fetch(`${handle.url}/api/events`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "text/event-stream",
-      },
-      signal: controller.signal,
-    });
-    expect(events.status).toBe(200);
-    const reader = events.body?.getReader();
-    if (reader === undefined) throw new Error("missing SSE body");
-    await readUntil(reader, "event: ready");
+    try {
+      const events = await fetch(`${handle.url}/api/events`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "text/event-stream",
+        },
+        signal: controller.signal,
+      });
+      expect(events.status).toBe(200);
+      const reader = events.body?.getReader();
+      if (reader === undefined) throw new Error("missing SSE body");
+      await readUntil(reader, "event: ready");
 
-    const res = await fetch(`${handle.url}/api/runners`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(runnerSpawnRequestToJsonValue(spawnRequest())),
-    });
+      const res = await fetch(`${handle.url}/api/runners`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(runnerSpawnRequestToJsonValue(spawnRequest())),
+      });
 
-    expect(res.status).toBe(201);
-    const text = await readUntil(reader, "event: thread.updated");
-    controller.abort();
-    const event = parseThreadSse(text, "thread.updated");
-    expect(validateThreadStreamEvent(event).ok).toBe(true);
-    expect(event).toMatchObject({
-      id: "v1:1",
-      kind: "thread.updated",
-      payload: { threadId: runnerThreadId, headLsn: "v1:1" },
-    });
+      expect(res.status).toBe(201);
+      await expectNoThreadUpdated(reader);
+    } finally {
+      controller.abort();
+    }
   });
 
   it.each([
@@ -637,6 +633,38 @@ async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, needle
   throw new Error(`SSE stream did not include ${needle}`);
 }
 
+async function readUntilWithin(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  needle: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<null>((resolve) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      resolve(null);
+    }, timeoutMs);
+  });
+  const readPromise = readUntil(reader, needle).catch((err: unknown) => {
+    if (timedOut) return null;
+    throw err;
+  });
+  try {
+    return await Promise.race([readPromise, timeoutPromise]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+async function expectNoThreadUpdated(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<void> {
+  await expect(
+    readUntilWithin(reader, "event: thread.updated", SSE_NEGATIVE_TIMEOUT_MS),
+  ).resolves.toBeNull();
+}
+
 function takeBufferedSse(
   text: string,
   needle: string,
@@ -653,15 +681,4 @@ function takeBufferedSse(
     }
     cursor = nextCursor;
   }
-}
-
-function parseThreadSse(text: string, kind: "thread.updated") {
-  const blocks = text.split("\n\n");
-  for (const block of blocks) {
-    if (!block.includes(`event: ${kind}`)) continue;
-    const dataLine = block.split("\n").find((line) => line.startsWith("data: "));
-    if (dataLine === undefined) throw new Error(`missing data line for ${kind}`);
-    return JSON.parse(dataLine.slice("data: ".length)) as unknown;
-  }
-  throw new Error(`missing SSE event ${kind}`);
 }

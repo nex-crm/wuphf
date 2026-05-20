@@ -4,7 +4,7 @@ import {
   asProviderKind,
   asReceiptId,
   asTaskId,
-  type asThreadId,
+  asThreadId,
   type EventLsn,
   MAX_ROUTE_THREAD_LIST_ITEMS,
   type ReceiptSnapshot,
@@ -261,7 +261,11 @@ async function expectNoThreadUpdated(
 }
 
 async function openSse(fix: Fixture, controller: AbortController) {
-  const events = await fetch(`${fix.broker.url}/api/events`, {
+  return await openSseForBroker(fix.broker, controller);
+}
+
+async function openSseForBroker(broker: BrokerHandle, controller: AbortController) {
+  const events = await fetch(`${broker.url}/api/events`, {
     headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream" },
     signal: controller.signal,
   });
@@ -389,6 +393,31 @@ describe("thread triangulation route coverage", () => {
       await expectNoThreadUpdated(reader);
     } finally {
       controller.abort();
+    }
+  });
+
+  it("does not emit thread.updated invalidations for threaded V2 receipts without threads mounted", async () => {
+    const broker = await createBroker({ port: 0, token: TOKEN });
+    const controller = new AbortController();
+    try {
+      const reader = await openSseForBroker(broker, controller);
+      const receipt = minimalReceiptV2(
+        indexedUlid(50_000),
+        asThreadId(indexedUlid(50_001)),
+        asTaskId(indexedUlid(50_002)),
+        "ok",
+      );
+
+      const created = await fetch(`${broker.url}/api/receipts`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: receiptToJson(receipt),
+      });
+      expect(created.status).toBe(201);
+      await expectNoThreadUpdated(reader);
+    } finally {
+      controller.abort();
+      await broker.stop();
     }
   });
 });
