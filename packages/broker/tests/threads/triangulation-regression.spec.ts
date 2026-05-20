@@ -238,20 +238,34 @@ describe("PR #918 triangulation regressions", () => {
   // and fails closed.
   it("rebuild fails closed on an orphan-thread approval event", async () => {
     const fix = fixture as Fixture;
-    appendApprovalRequestedToLog(fix.eventLog, buildApprovalPayload(ORPHAN_THREAD, 1));
+    const { lsn } = appendApprovalRequestedToLog(
+      fix.eventLog,
+      buildApprovalPayload(ORPHAN_THREAD, 1),
+    );
     expect(() => fix.approvals.rebuildFromLog(fix.eventLog)).toThrowError(
-      expect.objectContaining({ name: "ApprovalReplayThreadNotFoundError" }),
+      expect.objectContaining({ name: "ApprovalReplayThreadNotFoundError", lsn }),
     );
   });
 
   it("rebuild fails closed on per-thread cap overflow", async () => {
     const fix = fixture as Fixture;
     const a = await createThread(fix, THREAD_A);
+    let overflowLsn: number | null = null;
     for (let i = 0; i <= MAX_ROUTE_APPROVAL_LIST_ITEMS; i += 1) {
-      appendApprovalRequestedToLog(fix.eventLog, buildApprovalPayload(a.id, 1000 + i));
+      const { lsn } = appendApprovalRequestedToLog(
+        fix.eventLog,
+        buildApprovalPayload(a.id, 1000 + i),
+      );
+      if (i === MAX_ROUTE_APPROVAL_LIST_ITEMS) {
+        overflowLsn = lsn;
+      }
     }
+    if (overflowLsn === null) throw new Error("overflow event was not appended");
     expect(() => fix.approvals.rebuildFromLog(fix.eventLog)).toThrowError(
-      expect.objectContaining({ name: "ApprovalReplayPendingLimitExceededError" }),
+      expect.objectContaining({
+        name: "ApprovalReplayPendingLimitExceededError",
+        lsn: overflowLsn,
+      }),
     );
   });
 

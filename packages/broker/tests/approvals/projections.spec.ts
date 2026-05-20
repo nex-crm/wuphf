@@ -23,8 +23,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   ApprovalIdempotencyConflictError,
-  ApprovalReplayPendingLimitExceededError,
-  ApprovalReplayThreadNotFoundError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalThreadNotFoundError,
   ApprovalTokenAlreadyUsedError,
@@ -561,9 +559,11 @@ describe("approval projection and appender", () => {
         "approval_requested",
         requestedPayload(SECOND_REQUEST_ID, { thread: true, task: false }),
       );
-      eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
+      const lsn = eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
 
-      expect(() => projection.rebuildFromLog(eventLog)).toThrow(ApprovalReplayThreadNotFoundError);
+      expect(() => projection.rebuildFromLog(eventLog)).toThrowError(
+        expect.objectContaining({ name: "ApprovalReplayThreadNotFoundError", lsn }),
+      );
       expect(projectionSnapshot(db)).toBe(live);
     } finally {
       db.close();
@@ -574,16 +574,24 @@ describe("approval projection and appender", () => {
     const { db, eventLog, projection } = setup();
     try {
       insertThreadProjectionRow(db, eventLog);
+      let overflowLsn: number | null = null;
       for (let index = 0; index <= MAX_ROUTE_APPROVAL_LIST_ITEMS; index += 1) {
         const bytes = approvalAuditPayloadToBytes(
           "approval_requested",
           requestedPayload(indexedApprovalRequestId(index), { thread: true, task: false }),
         );
-        eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
+        const lsn = eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
+        if (index === MAX_ROUTE_APPROVAL_LIST_ITEMS) {
+          overflowLsn = lsn;
+        }
       }
+      if (overflowLsn === null) throw new Error("overflow event was not appended");
 
-      expect(() => projection.rebuildFromLog(eventLog)).toThrow(
-        ApprovalReplayPendingLimitExceededError,
+      expect(() => projection.rebuildFromLog(eventLog)).toThrowError(
+        expect.objectContaining({
+          name: "ApprovalReplayPendingLimitExceededError",
+          lsn: overflowLsn,
+        }),
       );
       expect(projection.countPendingByThread(THREAD_ID)).toBe(0);
     } finally {
