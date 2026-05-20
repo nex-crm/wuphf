@@ -59,31 +59,40 @@ func writeFile(t *testing.T, path, body string) {
 }
 
 // waitForHEADChange polls until the short HEAD SHA differs from `prev`,
-// returning the new SHA. Fails the test on timeout.
+// returning the new SHA. Fails the test on timeout. Uses select/time.After
+// rather than Sleep so the deadline is structural; fsnotify + git commit
+// are OS-driven so a software clock can't replace real time here.
 func waitForHEADChange(t *testing.T, repo *Repo, prev string, timeout time.Duration) string {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	deadlineCh := time.After(timeout)
+	for {
 		sha, err := repo.HeadSHA(context.Background())
 		if err == nil && sha != "" && sha != prev {
 			return sha
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-deadlineCh:
+			t.Fatalf("HEAD did not advance from %q within %s", prev, timeout)
+			return ""
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
-	t.Fatalf("HEAD did not advance from %q within %s", prev, timeout)
-	return ""
 }
 
 // requireHEADStable asserts that HEAD does not advance within window.
 func requireHEADStable(t *testing.T, repo *Repo, prev string, window time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(window)
-	for time.Now().Before(deadline) {
+	deadlineCh := time.After(window)
+	for {
 		sha, err := repo.HeadSHA(context.Background())
 		if err == nil && sha != prev {
 			t.Fatalf("HEAD advanced unexpectedly: %s → %s", prev, sha)
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-deadlineCh:
+			return
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 }
 
@@ -169,7 +178,7 @@ func TestObsidianWatcher_DebounceCoalescesRapidWrites(t *testing.T) {
 	full := filepath.Join(repo.Root(), filepath.FromSlash(rel))
 	for i := 0; i < 5; i++ {
 		writeFile(t, full, "# Burst\n\nversion "+string(rune('a'+i))+"\n")
-		time.Sleep(40 * time.Millisecond)
+		<-time.After(40 * time.Millisecond)
 	}
 
 	newSHA := waitForHEADChange(t, repo, prev, 3*time.Second)
@@ -258,7 +267,7 @@ func TestObsidianWatcher_StopDuringPendingDebounce(t *testing.T) {
 
 	// Give fsnotify time to deliver the event and arm the timer, then
 	// stop the watcher before the trailing edge.
-	time.Sleep(150 * time.Millisecond)
+	<-time.After(150 * time.Millisecond)
 	if err := watcher.Stop(); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
