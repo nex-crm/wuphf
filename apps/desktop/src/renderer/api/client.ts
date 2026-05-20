@@ -1,8 +1,11 @@
+import { type RouteError, routeErrorFromJson } from "@wuphf/protocol/browser";
 import { useMemo } from "react";
+
 import type { ApiToken, BrokerUrl } from "../bootstrap/types.ts";
 import { useReadyBrokerBootstrap } from "../bootstrap/useBrokerBootstrap.ts";
 
 export type JsonCodec<T> = (value: unknown) => T;
+export type JsonEncoder<T> = (value: T) => unknown;
 export type FetchLike = typeof fetch;
 
 export interface BrokerApiSession {
@@ -12,16 +15,23 @@ export interface BrokerApiSession {
 
 export interface BrokerApiClient {
   getJson<T>(path: string, codec: JsonCodec<T>): Promise<T>;
-  postJson<T>(path: string, body: unknown, codec: JsonCodec<T>): Promise<T>;
+  postJson<TReq, TRes>(
+    path: string,
+    request: TReq,
+    requestToJsonValue: JsonEncoder<TReq>,
+    responseFromJson: JsonCodec<TRes>,
+  ): Promise<TRes>;
 }
 
 export class BrokerHttpError extends Error {
   readonly status: number;
+  readonly routeError: RouteError | null;
 
-  constructor(status: number) {
+  constructor(status: number, routeError: RouteError | null = null) {
     super(`Broker request failed with HTTP ${String(status)}`);
     this.name = "BrokerHttpError";
     this.status = status;
+    this.routeError = routeError;
   }
 }
 
@@ -43,10 +53,10 @@ export function createBrokerApiClient(
 ): BrokerApiClient {
   return {
     getJson: (path, codec) => fetchBrokerJson(session, fetchImpl, path, codec),
-    postJson: (path, body, codec) =>
-      fetchBrokerJson(session, fetchImpl, path, codec, {
+    postJson: (path, request, requestToJsonValue, responseFromJson) =>
+      fetchBrokerJson(session, fetchImpl, path, responseFromJson, {
         method: "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify(requestToJsonValue(request)),
       }),
   };
 }
@@ -63,9 +73,17 @@ export async function fetchBrokerJson<T>(
     headers: authorizedHeaders(session.bearer, init),
   });
   if (!response.ok) {
-    throw new BrokerHttpError(response.status);
+    throw new BrokerHttpError(response.status, await decodeRouteError(response));
   }
   return codec(await response.json());
+}
+
+async function decodeRouteError(response: Response): Promise<RouteError | null> {
+  try {
+    return routeErrorFromJson(await response.json());
+  } catch {
+    return null;
+  }
 }
 
 function authorizedHeaders(bearer: ApiToken, init: RequestInit): Headers {

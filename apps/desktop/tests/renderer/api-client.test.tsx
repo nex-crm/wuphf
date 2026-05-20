@@ -61,11 +61,18 @@ describe("broker API client", () => {
     );
   });
 
-  it("posts JSON with bearer auth and content type", async () => {
+  it("posts JSON through a required request encoder with bearer auth and content type", async () => {
+    interface CreateThreadRequest {
+      readonly title: string;
+    }
+
+    const encodeThreadRequest = vi.fn((request: CreateThreadRequest) => ({
+      encodedTitle: request.title,
+    }));
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
       expect(String(input)).toBe(`${VALID_BROKER_URL}/api/v1/threads`);
       expect(init?.method).toBe("POST");
-      expect(init?.body).toBe(JSON.stringify({ title: "Renderer foundation" }));
+      expect(init?.body).toBe(JSON.stringify({ encodedTitle: "Renderer foundation" }));
       const headers = init?.headers;
       if (!(headers instanceof Headers)) {
         throw new Error("Expected Headers instance");
@@ -83,23 +90,32 @@ describe("broker API client", () => {
       fetchMock,
     );
 
-    const response = await client.postJson("/api/v1/threads", { title: "Renderer foundation" }, (value) => {
-      if (typeof value !== "object" || value === null || !("ok" in value)) {
-        throw new Error("bad response");
-      }
-      return value as { readonly ok: true };
-    });
+    const response = await client.postJson(
+      "/api/v1/threads",
+      { title: "Renderer foundation" },
+      encodeThreadRequest,
+      (value) => {
+        if (typeof value !== "object" || value === null || !("ok" in value)) {
+          throw new Error("bad response");
+        }
+        return value as { readonly ok: true };
+      },
+    );
 
+    expect(encodeThreadRequest).toHaveBeenCalledWith({ title: "Renderer foundation" });
     expect(response.ok).toBe(true);
   });
 
-  it("surfaces non-ok broker responses as typed HTTP errors", async () => {
+  it("surfaces decoded route error envelopes on non-ok broker responses", async () => {
     const client = createBrokerApiClient(
       {
         brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
         bearer: apiTokenFromBootstrap(VALID_TOKEN),
       },
-      () => Promise.resolve(jsonResponse({ error: "busy" }, 503)),
+      () =>
+        Promise.resolve(
+          jsonResponse({ error: "busy", message: "broker busy", retryAfterMs: 250 }, 503),
+        ),
     );
 
     try {
@@ -108,8 +124,28 @@ describe("broker API client", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(BrokerHttpError);
       expect(error).toMatchObject({ status: 503 });
+      expect(error).toHaveProperty("routeError", {
+        error: "busy",
+        message: "broker busy",
+        retryAfterMs: 250,
+      });
       expect(error).toHaveProperty("message", "Broker request failed with HTTP 503");
     }
+  });
+
+  it("keeps HTTP errors when a non-ok body is not JSON", async () => {
+    const client = createBrokerApiClient(
+      {
+        brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
+        bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      },
+      () => Promise.resolve(new Response("not-json", { status: 502 })),
+    );
+
+    await expect(client.getJson("/api/v1/threads", (value) => value)).rejects.toMatchObject({
+      status: 502,
+      routeError: null,
+    });
   });
 
   it("builds a hook client from ready bootstrap state", async () => {
