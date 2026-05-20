@@ -65,7 +65,7 @@ type ObsidianWatcher struct {
 	identityFn ObsidianWatcherIdentity
 	normalizer ObsidianLooseLinkResolver
 	embedFn    ObsidianEmbedIngester
-	debounceMs time.Duration
+	debounce   time.Duration
 	writeTTL   time.Duration
 	timers     map[string]*time.Timer
 	recent     map[string]time.Time
@@ -83,12 +83,12 @@ type ObsidianWatcher struct {
 // watcher does nothing until Start is called.
 func NewObsidianWatcher(repo *Repo, worker *WikiWorker) *ObsidianWatcher {
 	return &ObsidianWatcher{
-		repo:       repo,
-		worker:     worker,
-		debounceMs: defaultObsidianDebounce,
-		writeTTL:   defaultObsidianWriteFilter,
-		timers:     make(map[string]*time.Timer),
-		recent:     make(map[string]time.Time),
+		repo:     repo,
+		worker:   worker,
+		debounce: defaultObsidianDebounce,
+		writeTTL: defaultObsidianWriteFilter,
+		timers:   make(map[string]*time.Timer),
+		recent:   make(map[string]time.Time),
 	}
 }
 
@@ -134,7 +134,7 @@ func (w *ObsidianWatcher) SetDebounceForTest(d time.Duration) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if d > 0 {
-		w.debounceMs = d
+		w.debounce = d
 	}
 }
 
@@ -291,7 +291,7 @@ func (w *ObsidianWatcher) schedule(ctx context.Context, rel string) {
 			w.pending.Done()
 		}
 	}
-	d := w.debounceMs
+	d := w.debounce
 	w.pending.Add(1)
 	w.timers[rel] = time.AfterFunc(d, func() {
 		defer w.pending.Done()

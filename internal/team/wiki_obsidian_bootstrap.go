@@ -149,9 +149,6 @@ func writeObsidianGitignore(path string) error {
 		buf.WriteString(line)
 		buf.WriteByte('\n')
 	}
-	if len(lines) > 0 && lines[len(lines)-1] != "" {
-		// Trailing newline already covered by the loop above; nothing extra.
-	}
 	for _, entry := range missing {
 		buf.WriteString(entry)
 		buf.WriteByte('\n')
