@@ -1,7 +1,8 @@
+import type { StorybookConfig } from "@storybook/react-vite";
+import { mergeConfig } from "vite";
+
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import type { StorybookConfig } from "@storybook/react-vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,14 +17,14 @@ const config: StorybookConfig = {
   typescript: {
     reactDocgen: "react-docgen-typescript",
   },
-  viteFinal: async (vite) => {
-    vite.resolve = vite.resolve ?? {};
-    vite.resolve.alias = {
-      ...(vite.resolve.alias ?? {}),
-      "@": path.resolve(__dirname, "../src"),
-    };
-    return vite;
-  },
+  viteFinal: async (vite) =>
+    mergeConfig(vite, {
+      resolve: {
+        alias: {
+          "@": path.resolve(__dirname, "../src"),
+        },
+      },
+    }),
 };
 
 export default config;

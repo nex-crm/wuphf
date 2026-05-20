@@ -1,5 +1,4 @@
-import { useState } from "react";
-
+import { useEffect, useRef, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { ShredWarningCopy } from "./ShredWarning";
@@ -20,6 +19,15 @@ export const Critical: Story = {
     function Wrapper() {
       const [open, setOpen] = useState(true);
       const [busy, setBusy] = useState(false);
+      const shredTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+      useEffect(() => {
+        return () => {
+          if (shredTimerRef.current !== null) {
+            clearTimeout(shredTimerRef.current);
+            shredTimerRef.current = null;
+          }
+        };
+      }, []);
       return (
         <div style={{ minHeight: 400, padding: 24 }}>
           <button
@@ -40,10 +48,11 @@ export const Critical: Story = {
               onCancel={() => setOpen(false)}
               onConfirm={() => {
                 setBusy(true);
-                setTimeout(() => {
+                shredTimerRef.current = setTimeout(() => {
                   setBusy(false);
                   setOpen(false);
                   showNotice("Shredded", "error");
+                  shredTimerRef.current = null;
                 }, 600);
               }}
             />

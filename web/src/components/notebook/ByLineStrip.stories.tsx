@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import type { NotebookEntryStatus } from "../../api/notebook";
-
 import ByLineStrip from "./ByLineStrip";
 
 const meta: Meta<typeof ByLineStrip> = {
@@ -11,7 +10,7 @@ const meta: Meta<typeof ByLineStrip> = {
   args: {
     authorSlug: "atlas",
     status: "draft" satisfies NotebookEntryStatus,
-    lastEditedTs: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+    lastEditedTs: "2026-05-19T12:00:00.000Z",
     revisions: 3,
   },
   argTypes: {

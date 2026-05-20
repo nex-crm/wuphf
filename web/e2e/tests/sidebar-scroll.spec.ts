@@ -50,8 +50,29 @@ async function fulfillJson(route: Route, body: unknown): Promise<void> {
   });
 }
 
+const crowdedIssues = Array.from({ length: 12 }, (_, index) => {
+  const n = index + 1;
+  return {
+    id: `issue-${n}`,
+    title: `Issue ${n}`,
+    status: "open",
+    pipeline_stage: "intake",
+    lifecycle_state: "intake",
+  };
+});
+
+const crowdedRecent = Array.from({ length: 8 }, (_, index) => {
+  const n = index + 1;
+  return {
+    ref: { kind: "wiki-page", path: `recent-page-${n}` },
+    label: `Recent page ${n}`,
+    href: `/wiki/recent-page-${n}`,
+    visitedAtMs: 1_700_000_000_000 + n,
+  };
+});
+
 async function stubCrowdedSidebarData(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.addInitScript((recent) => {
     localStorage.setItem(
       "wuphf-sidebar-sections",
       JSON.stringify({
@@ -62,8 +83,9 @@ async function stubCrowdedSidebarData(page: Page): Promise<void> {
         recent: true,
       }),
     );
+    localStorage.setItem("wuphf-recent-objects", JSON.stringify(recent));
     localStorage.removeItem("wuphf-sidebar-bg");
-  });
+  }, crowdedRecent);
 
   await page.route("**/api/office-members*", (route) =>
     fulfillJson(route, { members: crowdedMembers }),
@@ -76,6 +98,9 @@ async function stubCrowdedSidebarData(page: Page): Promise<void> {
   );
   await page.route(/\/api\/review\/list(?:\?|$)/, (route) =>
     fulfillJson(route, { reviews: [] }),
+  );
+  await page.route(/\/api\/tasks(?:\?|$)/, (route) =>
+    fulfillJson(route, { tasks: crowdedIssues }),
   );
 }
 
@@ -154,14 +179,22 @@ async function expectWheelCanReach(
   for (const target of targets) {
     for (let i = 0; i < 24; i += 1) {
       const isInView = await target.evaluate((el) => {
+        const container = el.closest(".sidebar-scroll");
+        if (container === null) return false;
+        const containerRect = container.getBoundingClientRect();
         const rect = el.getBoundingClientRect();
-        return rect.top >= 0 && rect.bottom <= window.innerHeight;
+        return (
+          rect.top >= containerRect.top && rect.bottom <= containerRect.bottom
+        );
       });
       if (isInView) break;
       await page.mouse.wheel(0, 600);
       await waitForScrollSettle(scroll);
       const current = await scrollMetrics(scroll);
-      if (current.scrollTop + current.clientHeight >= current.scrollHeight - 2) {
+      if (
+        current.scrollTop + current.clientHeight >=
+        current.scrollHeight - 2
+      ) {
         break;
       }
     }
@@ -205,7 +238,14 @@ test.describe("left sidebar scrolling", () => {
         page.getByRole("button", { name: "Channel 24" }),
         page.locator(".sidebar-channels .sidebar-add-btn"),
       ]);
+      await expectWheelCanReach(page, "Issues", [
+        page.locator(".sidebar-issues .sidebar-item").first(),
+        page.locator(".sidebar-issues .sidebar-add-btn"),
+      ]);
       await expectWheelCanReach(page, "Apps", [appItems.last()]);
+      await expectWheelCanReach(page, "Recent", [
+        page.locator(".sidebar-recent .sidebar-item").first(),
+      ]);
 
       await expectNoReactErrors(page, getErrors, "while scrolling the sidebar");
     });

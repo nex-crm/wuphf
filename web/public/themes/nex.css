@@ -102,11 +102,11 @@ html[data-theme="nex"] {
 
   /* ── Typography ── */
   --font-sans:
-    "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
-  --font-logo: "Newsreader", Georgia, "Times New Roman", serif;
+    "Geist Sans", "-apple-system", "BlinkMacSystemFont", "Segoe UI", sans-serif;
+  --font-serif: "Newsreader", "Georgia", "Times New Roman", serif;
+  --font-logo: "Newsreader", "Georgia", "Times New Roman", serif;
   --font-mono:
-    "Geist Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    "Geist Mono", "SFMono-Regular", "Menlo", "Monaco", "Consolas", monospace;
 
   /* ── Radii ── */
   --radius-sm: 4px;

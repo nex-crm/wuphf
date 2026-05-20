@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-
 import type { Decorator, Preview } from "@storybook/react-vite";
 
 import { DEFAULT_THEME, THEMES, type Theme } from "../src/lib/themes";
@@ -26,8 +25,8 @@ import "../src/styles/rich-artifacts.css";
 const THEME_LINK_ID = "wuphf-theme-link";
 
 function applyTheme(theme: Theme) {
-  document.documentElement.setAttribute("data-theme", theme);
   const def = THEMES.find((t) => t.id === theme) ?? THEMES[0];
+  document.documentElement.setAttribute("data-theme", def.id);
   let link = document.getElementById(THEME_LINK_ID) as HTMLLinkElement | null;
   if (!link) {
     link = document.createElement("link");

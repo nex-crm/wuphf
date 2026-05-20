@@ -43,11 +43,11 @@
   --nb-green-bg: rgba(106, 139, 82, 0.1);
 
   --nb-display: "Covered By Your Grace", "Comic Sans MS", cursive;
-  --nb-body-serif: "Geist Sans", Georgia, serif;
+  --nb-body-serif: "Geist Sans", "Georgia", serif;
   --nb-chrome:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    "-apple-system", "BlinkMacSystemFont", "SF Pro Text", "Segoe UI", "Roboto",
     sans-serif;
-  --nb-mono: "Geist Mono", SFMono-Regular, Menlo, monospace;
+  --nb-mono: "Geist Mono", "SFMono-Regular", "Menlo", monospace;
 
   --nb-sidebar-width: 260px;
   --nb-article-max: 780px;

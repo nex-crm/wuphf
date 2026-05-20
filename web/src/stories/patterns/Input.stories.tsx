@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 const meta: Meta = {
@@ -38,13 +39,13 @@ export const States: StoryObj = {
         <input className="input" placeholder="Type something" />
       </Labeled>
       <Labeled label="Disabled">
-        <input className="input" defaultValue="atlas" disabled />
+        <input className="input" defaultValue="atlas" disabled={true} />
       </Labeled>
       <Labeled label="Error">
         <input
           className="input has-error"
           defaultValue="not-an-email"
-          aria-invalid
+          aria-invalid={true}
         />
       </Labeled>
     </div>
@@ -93,13 +94,7 @@ export const Textarea: StoryObj = {
   ),
 };
 
-function Labeled({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function Labeled({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <span

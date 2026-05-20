@@ -27,12 +27,17 @@ export const Examples: StoryObj = {
       <button type="button" className="btn btn-primary" style={{ width: 120 }}>
         Primary
       </button>
-      <button type="button" className="btn btn-secondary" style={{ width: 120 }}>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        style={{ width: 120 }}
+      >
         Secondary
       </button>
       <input className="input" placeholder="Tab to focus" />
       <a
         href="#"
+        onClick={(e) => e.preventDefault()}
         style={{
           color: "var(--accent)",
           fontSize: 13,

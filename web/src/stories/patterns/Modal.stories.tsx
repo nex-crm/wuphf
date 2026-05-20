@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Xmark } from "iconoir-react";
-
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { Xmark } from "iconoir-react";
 
 const meta: Meta = {
   title: "Patterns/Modal shell",
@@ -28,6 +27,9 @@ export const Default: StoryObj = {
             <div className="modal-backdrop" onClick={() => setOpen(false)}>
               <div
                 className="modal-shell"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="modal-shell-story-title"
                 style={{ padding: 24 }}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -42,6 +44,7 @@ export const Default: StoryObj = {
                 >
                   <div>
                     <h2
+                      id="modal-shell-story-title"
                       style={{
                         margin: 0,
                         fontSize: 17,
@@ -116,8 +119,8 @@ export const Guidance: StoryObj = {
       <h2 style={{ margin: 0, marginBottom: 8, fontSize: 18 }}>Modal shell</h2>
       <p style={{ margin: "0 0 16px", color: "var(--text-secondary)" }}>
         Pair <code>.modal-backdrop</code> with <code>.modal-shell</code> for
-        every dialog. The backdrop owns the scrim + z-index; the shell owns
-        the card geometry, max-width, and elevation. Don't compose them
+        every dialog. The backdrop owns the scrim + z-index; the shell owns the
+        card geometry, max-width, and elevation. Don't compose them
         independently.
       </p>
       <pre
@@ -153,8 +156,8 @@ export const Guidance: StoryObj = {
           <code>onClick</code> if the dialog is gated (typed phrase, payment).
         </li>
         <li>
-          Use <code>SidePanel</code> (a right-aligned variant) for "view
-          full" surfaces; modals are for decisions and confirmations.
+          Use <code>SidePanel</code> (a right-aligned variant) for "view full"
+          surfaces; modals are for decisions and confirmations.
         </li>
       </ul>
     </div>

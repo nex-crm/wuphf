@@ -1,9 +1,7 @@
 import { useEffect } from "react";
-
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { useAppStore } from "../../stores/app";
-
 import { AgentEventPill, AgentEventTickProvider } from "./AgentEventPill";
 
 const meta: Meta<typeof AgentEventPill> = {
@@ -54,9 +52,13 @@ function seedSnapshot(snap: {
 }
 
 function useSeed(snap: Parameters<typeof seedSnapshot>[0]) {
+  // Key the effect on the serialized snapshot so a fresh object literal at
+  // each call site does not retrigger seeding on every render.
+  const snapKey = JSON.stringify(snap);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: snap is intentionally tracked via snapKey
   useEffect(() => {
     seedSnapshot(snap);
-  }, [snap]);
+  }, [snapKey]);
 }
 
 export const Halo: Story = {
