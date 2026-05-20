@@ -5,7 +5,7 @@ import {
   RouterProvider,
   type RouterHistory,
 } from "@tanstack/react-router";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { lazy, Suspense } from "react";
 
 import { BrokerBootstrapProvider } from "../bootstrap/BrokerBootstrapProvider.tsx";
 import { desktopQueryClient } from "../query/queryClient.ts";
@@ -14,6 +14,13 @@ import { rootRoute } from "./routes/__root.tsx";
 import { indexRoute } from "./routes/index.tsx";
 
 const routeTree = rootRoute.addChildren([indexRoute]);
+const ReactQueryDevtools = import.meta.env.DEV
+  ? lazy(() =>
+      import("@tanstack/react-query-devtools").then((module) => ({
+        default: module.ReactQueryDevtools,
+      })),
+    )
+  : null;
 
 export function createAppRouter(history: RouterHistory = createHashHistory()) {
   return createRouter({ routeTree, history });
@@ -35,7 +42,11 @@ export function App({
       <BrokerStreamStateProvider>
         <BrokerBootstrapProvider>
           <RouterProvider router={routerInstance} />
-          {import.meta.env.DEV && <ReactQueryDevtools buttonPosition="bottom-left" />}
+          {ReactQueryDevtools !== null && (
+            <Suspense fallback={null}>
+              <ReactQueryDevtools buttonPosition="bottom-left" />
+            </Suspense>
+          )}
         </BrokerBootstrapProvider>
       </BrokerStreamStateProvider>
     </QueryClientProvider>
