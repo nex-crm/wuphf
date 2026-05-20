@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { HomeSimple, ServerConnection } from "iconoir-react";
+import { HomeSimple, ServerConnection, ViewColumns3 } from "iconoir-react";
 
 import { useBrokerBootstrap } from "../bootstrap/useBrokerBootstrap.ts";
 import { StatusBadge, type StatusBadgeTone } from "../ui/StatusBadge.tsx";
@@ -27,6 +27,13 @@ export function AppShell({ children }: AppShellProps) {
           >
             <HomeSimple aria-hidden="true" height={17} width={17} />
             Status
+          </a>
+          <a
+            className="flex h-9 items-center gap-2 rounded-md px-2 text-sm text-foreground hover:bg-muted"
+            href="#/threads"
+          >
+            <ViewColumns3 aria-hidden="true" height={17} width={17} />
+            Work
           </a>
         </nav>
         <div className="mt-6">

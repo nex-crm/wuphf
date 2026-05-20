@@ -12,8 +12,9 @@ import { desktopQueryClient } from "../query/queryClient.ts";
 import { BrokerStreamStateProvider } from "../sse/useBrokerEvents.ts";
 import { rootRoute } from "./routes/__root.tsx";
 import { indexRoute } from "./routes/index.tsx";
+import { threadsRoute } from "./routes/threads.tsx";
 
-const routeTree = rootRoute.addChildren([indexRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, threadsRoute]);
 const ReactQueryDevtools = import.meta.env.DEV
   ? lazy(() =>
       import("@tanstack/react-query-devtools").then((module) => ({
