@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, session } from "electron";
 
 import { BrokerSupervisor } from "./broker.ts";
+import { installDynamicRendererCsp } from "./csp.ts";
 import { registerIpcHandlers } from "./ipc/register-handlers.ts";
 import { createLogger, type LogPayload } from "./logger.ts";
 import { installSessionPermissionPolicy } from "./permissions.ts";
@@ -90,6 +91,10 @@ app
     // clipboard/displayCapture outside the IPC allowlist. WebAuthn is allowed
     // only for loopback renderer origins.
     installSessionPermissionPolicy(session.defaultSession, { logger });
+    installDynamicRendererCsp(
+      session.defaultSession,
+      () => brokerSupervisor.getSnapshot().brokerUrl,
+    );
 
     try {
       registerIpcHandlers(brokerSupervisor, { logger: ipcLogger });

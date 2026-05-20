@@ -109,6 +109,9 @@ const electronMock = vi.hoisted(() => {
     defaultSession: {
       setPermissionRequestHandler: vi.fn<(handler: unknown) => void>(),
       setPermissionCheckHandler: vi.fn<(handler: unknown) => void>(),
+      webRequest: {
+        onHeadersReceived: vi.fn<(listener: unknown) => void>(),
+      },
     },
     showErrorBox: vi.fn<(title: string, content: string) => void>(),
     handle: vi.fn<(channel: string, handler: unknown) => void>(),
@@ -249,6 +252,7 @@ describe("main bootstrap", () => {
     electronMock.browserWindowConstructorSpy.mockClear();
     electronMock.defaultSession.setPermissionRequestHandler.mockClear();
     electronMock.defaultSession.setPermissionCheckHandler.mockClear();
+    electronMock.defaultSession.webRequest.onHeadersReceived.mockClear();
     loggerMock.calls.length = 0;
     loggerMock.createLogger.mockClear();
     cleanupProcessListeners();
@@ -377,6 +381,7 @@ describe("main bootstrap", () => {
 
     expect(electronMock.defaultSession.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
     expect(electronMock.defaultSession.setPermissionCheckHandler).toHaveBeenCalledTimes(1);
+    expect(electronMock.defaultSession.webRequest.onHeadersReceived).toHaveBeenCalledTimes(1);
 
     // Ordering invariant: both permission handlers MUST be installed BEFORE
     // any BrowserWindow is constructed. A regression that flipped the order
@@ -388,15 +393,19 @@ describe("main bootstrap", () => {
       electronMock.defaultSession.setPermissionCheckHandler.mock.invocationCallOrder[0];
     const constructorCallOrder =
       electronMock.browserWindowConstructorSpy.mock.invocationCallOrder[0];
+    const cspCallOrder =
+      electronMock.defaultSession.webRequest.onHeadersReceived.mock.invocationCallOrder[0];
     if (
       requestHandlerCallOrder === undefined ||
       checkHandlerCallOrder === undefined ||
+      cspCallOrder === undefined ||
       constructorCallOrder === undefined
     ) {
-      throw new Error("Expected request/check/constructor to all be invoked");
+      throw new Error("Expected request/check/CSP/constructor to all be invoked");
     }
     expect(requestHandlerCallOrder).toBeLessThan(constructorCallOrder);
     expect(checkHandlerCallOrder).toBeLessThan(constructorCallOrder);
+    expect(cspCallOrder).toBeLessThan(constructorCallOrder);
 
     const requestHandler = electronMock.defaultSession.setPermissionRequestHandler.mock
       .calls[0]?.[0] as

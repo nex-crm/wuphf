@@ -1,9 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"],
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client", "@testing-library/jest-dom"]
   },
-  "include": ["tests/**/*.ts", "src/**/*.ts", "vitest.config.ts"],
+  "include": ["tests/**/*.ts", "tests/**/*.tsx", "src/**/*.ts", "src/**/*.tsx", "vitest.config.ts"],
   "exclude": ["node_modules", "out", "dist"]
 }

@@ -78,6 +78,17 @@ else
   fi
 fi
 
+while IFS= read -r match; do
+  file_path="${match%%:*}"
+  if [[ "${file_path}" == "${root_dir}/src/renderer/index.html" ]]; then
+    continue
+  fi
+  if [[ "${file_path}" == "${root_dir}/src/main/csp.ts" ]]; then
+    continue
+  fi
+  record_violation "${match}: Content-Security-Policy must be set only by renderer HTML or src/main/csp.ts"
+done < <(grep -RInF "Content-Security-Policy" "${root_dir}/src" --include '*.ts' --include '*.html' || true)
+
 if [[ "${#violations[@]}" -gt 0 ]]; then
   printf 'Invariant check failed:\n' >&2
   for violation in "${violations[@]}"; do
