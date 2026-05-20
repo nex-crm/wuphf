@@ -536,11 +536,6 @@ jobs:
       # would execute with CI privileges.
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # ratchet:golangci/golangci-lint-action@v9.2.0
         with:
-          # Pinned to v2.12.2 — v2.11.4 bundles a staticcheck build that
-          # raises SA5011 false positives on the `if x == nil { t.Fatal }; use(x)`
-          # pattern (it doesn't model testing.T.Fatal as terminating). v2.12.2
-          # reports 0 issues on the same tree. Pinned (not floating) so a
-          # future regression cannot flip pass/fail without a config change.
           version: v2.12.2
           args: --timeout=5m
       - name: Cache govulncheck binary
