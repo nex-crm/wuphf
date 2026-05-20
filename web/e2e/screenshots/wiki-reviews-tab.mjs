@@ -5,8 +5,6 @@
 // Run via the wrapper:
 //   web/e2e/screenshots/publish.sh wiki-reviews-tab <pr-number>
 
-import process from "node:process";
-
 import {
   bootShell,
   installCommonMocks,
@@ -14,6 +12,7 @@ import {
   shotElement,
   shotPage,
 } from "./lib.mjs";
+import process from "node:process";
 
 const OUT = process.env.WUPHF_SCREENSHOTS_OUT;
 if (!OUT) {
@@ -43,8 +42,14 @@ await page.evaluate(() => {
 await page.waitForSelector('[data-testid="review-queue-surface"]', {
   timeout: 10_000,
 });
-// Let the wiki-tabs badge fetch settle so the chrome stops flashing.
-await page.waitForTimeout(500);
+// Wait for the fetch to resolve (loading spinner detaches) and the
+// 5-column grid to mount before capturing — avoids transitional
+// frames on slow runners.
+await page.waitForSelector(".nb-loading", {
+  state: "detached",
+  timeout: 10_000,
+});
+await page.waitForSelector(".nb-review-columns", { timeout: 10_000 });
 
 // 1. Full Wiki shell — Reviews tab active, 5-column empty Kanban below.
 await shotPage(page, OUT, "01-wiki-reviews-tab-active");

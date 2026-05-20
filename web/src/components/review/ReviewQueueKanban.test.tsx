@@ -42,11 +42,7 @@ describe("<ReviewQueueKanban>", () => {
   it("renders five state columns with their cards", async () => {
     vi.spyOn(api, "fetchReviews").mockResolvedValue(MOCK_REVIEWS);
     render(<ReviewQueueKanban />);
-    await waitFor(() =>
-      expect(
-        screen.getByRole("heading", { name: "Reviews" }),
-      ).toBeInTheDocument(),
-    );
+    await screen.findByText("Pending one");
     expect(
       screen.getByRole("heading", { name: "Pending" }),
     ).toBeInTheDocument();

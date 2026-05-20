@@ -107,13 +107,27 @@ export default function ReviewQueueKanban() {
 
   return (
     <div className="notebook-surface" data-testid="review-queue-surface">
-      <a href="#nb-review-main" className="nb-skip-link">
+      {/* Skip link uses programmatic focus instead of href="#nb-review-main"
+       * because the app runs under hash-history routing — an anchor hash would
+       * clobber /#/reviews and navigate the user off the surface. */}
+      <button
+        type="button"
+        className="nb-skip-link"
+        onClick={() => {
+          const main = document.getElementById("nb-review-main");
+          if (main instanceof HTMLElement) {
+            main.focus();
+            main.scrollIntoView({ block: "start" });
+          }
+        }}
+      >
         Skip to review queue
-      </a>
+      </button>
       <main
         id="nb-review-main"
         className="nb-review-queue"
         aria-label="Review queue"
+        tabIndex={-1}
       >
         <header className="nb-review-queue-header">
           <h1 className="nb-review-queue-title">Reviews</h1>
