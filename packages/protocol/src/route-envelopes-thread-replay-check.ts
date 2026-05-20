@@ -1,7 +1,7 @@
 import { MAX_ROUTE_THREAD_LIST_ITEMS, validateRouteErrorMessageBudget } from "./budgets.ts";
 import { canonicalJSON, type JsonValue } from "./canonical-json.ts";
 import { type EventLsn, parseLsn } from "./event-lsn.ts";
-import { asThreadId, type ThreadId } from "./receipt.ts";
+import { asThreadId, type ThreadId } from "./receipt-types.ts";
 import { assertKnownKeys, hasOwn, omitUndefined, requireRecord } from "./receipt-utils.ts";
 
 const ROUTE_ENVELOPE_SCHEMA_VERSION = 1;

@@ -30,6 +30,8 @@ export {
   threadMutationResponseToJsonValue,
   threadPinnedApprovalsResponseFromJson,
   threadPinnedApprovalsResponseToJsonValue,
+  threadReplayCheckReportFromJson,
+  threadReplayCheckReportToJsonValue,
   threadSpecEditRequestFromJson,
   threadSpecEditRequestToJsonValue,
   threadStatusChangeRequestFromJson,
