@@ -33,8 +33,12 @@ describe("query helpers", () => {
         getJson(path);
         return { ok: true } as T;
       },
-      async postJson<T>(): Promise<T> {
-        return { ok: true } as T;
+      async postJson<TReq, TRes>(
+        _path: string,
+        _request: TReq,
+        _requestToJsonValue: (value: TReq) => unknown,
+      ): Promise<TRes> {
+        return { ok: true } as TRes;
       },
     };
 
