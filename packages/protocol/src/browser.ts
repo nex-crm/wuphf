@@ -1,13 +1,12 @@
 import { type EventLsn, parseLsn } from "./event-lsn.ts";
-import type {
-  ApprovalStreamEventValidationResult,
-  ThreadStreamEventValidationResult,
-} from "./ipc.ts";
 import {
+  type ApprovalRequestId,
   isApprovalRequestId,
   isReceiptId,
   isThreadId,
+  type ReceiptId,
   type ReceiptValidationError,
+  type ThreadId,
 } from "./receipt-types.ts";
 
 export type {
@@ -39,16 +38,6 @@ export {
   nextLsn,
   parseLsn,
 } from "./event-lsn.ts";
-export type {
-  ApprovalStreamEvent,
-  ApprovalStreamEventKind,
-  ApprovalStreamEventValidationError,
-  ApprovalStreamEventValidationResult,
-  ThreadStreamEvent,
-  ThreadStreamEventKind,
-  ThreadStreamEventValidationError,
-  ThreadStreamEventValidationResult,
-} from "./ipc.ts";
 export {
   APPROVAL_DECISION_VALUES,
   APPROVAL_ROLE_VALUES,
@@ -241,6 +230,46 @@ const APPROVAL_INVALIDATION_PAYLOAD_KEYS: ReadonlySet<string> = new Set([
   "threadId",
   "headLsn",
 ]);
+
+export interface ThreadInvalidationPayload {
+  readonly threadId: ThreadId;
+  readonly headLsn: EventLsn;
+}
+
+export interface ApprovalInvalidationPayload {
+  readonly requestId: ApprovalRequestId;
+  readonly threadId?: ThreadId | undefined;
+  readonly headLsn: EventLsn;
+}
+
+export type ThreadStreamEventKind = (typeof THREAD_STREAM_EVENT_KIND_VALUES)[number];
+export type ApprovalStreamEventKind = (typeof APPROVAL_STREAM_EVENT_KIND_VALUES)[number];
+
+interface StreamEventBase {
+  readonly id: string;
+  readonly emittedAt: string;
+  readonly receiptId?: ReceiptId | undefined;
+}
+
+export type ThreadStreamEvent = StreamEventBase & {
+  readonly kind: ThreadStreamEventKind;
+  readonly payload: ThreadInvalidationPayload;
+};
+
+export type ApprovalStreamEvent = StreamEventBase & {
+  readonly kind: ApprovalStreamEventKind;
+  readonly payload: ApprovalInvalidationPayload;
+};
+
+export type ThreadStreamEventValidationError = ReceiptValidationError;
+export type ThreadStreamEventValidationResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly errors: readonly ThreadStreamEventValidationError[] };
+
+export type ApprovalStreamEventValidationError = ReceiptValidationError;
+export type ApprovalStreamEventValidationResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly errors: readonly ApprovalStreamEventValidationError[] };
 
 export function validateThreadStreamEvent(input: unknown): ThreadStreamEventValidationResult {
   const errors: ReceiptValidationError[] = [];

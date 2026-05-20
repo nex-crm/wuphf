@@ -1,3 +1,5 @@
+import type { ApprovalRequestId, ThreadId } from "@wuphf/protocol/browser";
+
 import { getApproval, listApprovals } from "../api/approvals.ts";
 import type { BrokerApiClient } from "../api/client.ts";
 import { getThread, getThreadPinnedApprovals, listThreads } from "../api/threads.ts";
@@ -5,15 +7,16 @@ import { getThread, getThreadPinnedApprovals, listThreads } from "../api/threads
 export const threadQueryKeys = {
   all: ["threads"] as const,
   list: () => [...threadQueryKeys.all, "list"] as const,
-  detail: (threadId: string) => [...threadQueryKeys.all, "detail", threadId] as const,
-  pinnedApprovals: (threadId: string) =>
+  detail: (threadId: ThreadId) => [...threadQueryKeys.all, "detail", threadId] as const,
+  pinnedApprovals: (threadId: ThreadId) =>
     [...threadQueryKeys.detail(threadId), "pinned-approvals"] as const,
 };
 
 export const approvalQueryKeys = {
   all: ["approvals"] as const,
   list: () => [...approvalQueryKeys.all, "list"] as const,
-  detail: (approvalId: string) => [...approvalQueryKeys.all, "detail", approvalId] as const,
+  detail: (approvalId: ApprovalRequestId) =>
+    [...approvalQueryKeys.all, "detail", approvalId] as const,
 };
 
 export function threadListQuery(client: BrokerApiClient) {
@@ -23,14 +26,14 @@ export function threadListQuery(client: BrokerApiClient) {
   };
 }
 
-export function threadDetailQuery(client: BrokerApiClient, threadId: string) {
+export function threadDetailQuery(client: BrokerApiClient, threadId: ThreadId) {
   return {
     queryKey: threadQueryKeys.detail(threadId),
     queryFn: () => getThread(client, threadId),
   };
 }
 
-export function threadPinnedApprovalsQuery(client: BrokerApiClient, threadId: string) {
+export function threadPinnedApprovalsQuery(client: BrokerApiClient, threadId: ThreadId) {
   return {
     queryKey: threadQueryKeys.pinnedApprovals(threadId),
     queryFn: () => getThreadPinnedApprovals(client, threadId),
@@ -44,7 +47,7 @@ export function approvalListQuery(client: BrokerApiClient) {
   };
 }
 
-export function approvalDetailQuery(client: BrokerApiClient, approvalId: string) {
+export function approvalDetailQuery(client: BrokerApiClient, approvalId: ApprovalRequestId) {
   return {
     queryKey: approvalQueryKeys.detail(approvalId),
     queryFn: () => getApproval(client, approvalId),

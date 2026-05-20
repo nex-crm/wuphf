@@ -1,3 +1,4 @@
+import { asApprovalRequestId, asThreadId } from "@wuphf/protocol/browser";
 import { describe, expect, it, vi } from "vitest";
 
 import type { BrokerApiClient } from "../../src/renderer/api/client.ts";
@@ -13,17 +14,20 @@ import {
 import { createDesktopQueryClient } from "../../src/renderer/query/queryClient.ts";
 
 describe("query helpers", () => {
+  const threadId = asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  const approvalId = asApprovalRequestId("01CRZ3NDEKTSV4RRFFQ69G5FAV");
+
   it("builds stable thread and approval keys", () => {
     expect(threadQueryKeys.list()).toEqual(["threads", "list"]);
-    expect(threadQueryKeys.detail("thread-1")).toEqual(["threads", "detail", "thread-1"]);
-    expect(threadQueryKeys.pinnedApprovals("thread-1")).toEqual([
+    expect(threadQueryKeys.detail(threadId)).toEqual(["threads", "detail", threadId]);
+    expect(threadQueryKeys.pinnedApprovals(threadId)).toEqual([
       "threads",
       "detail",
-      "thread-1",
+      threadId,
       "pinned-approvals",
     ]);
     expect(approvalQueryKeys.list()).toEqual(["approvals", "list"]);
-    expect(approvalQueryKeys.detail("approval-1")).toEqual(["approvals", "detail", "approval-1"]);
+    expect(approvalQueryKeys.detail(approvalId)).toEqual(["approvals", "detail", approvalId]);
   });
 
   it("binds query functions to the broker client", async () => {
@@ -43,16 +47,16 @@ describe("query helpers", () => {
     };
 
     await threadListQuery(client).queryFn();
-    await threadDetailQuery(client, "thread-1").queryFn();
-    await threadPinnedApprovalsQuery(client, "thread-1").queryFn();
+    await threadDetailQuery(client, threadId).queryFn();
+    await threadPinnedApprovalsQuery(client, threadId).queryFn();
     await approvalListQuery(client).queryFn();
-    await approvalDetailQuery(client, "approval-1").queryFn();
+    await approvalDetailQuery(client, approvalId).queryFn();
 
     expect(getJson).toHaveBeenCalledWith("/api/v1/threads");
-    expect(getJson).toHaveBeenCalledWith("/api/v1/threads/thread-1");
-    expect(getJson).toHaveBeenCalledWith("/api/v1/threads/thread-1/pinned-approvals");
+    expect(getJson).toHaveBeenCalledWith(`/api/v1/threads/${threadId}`);
+    expect(getJson).toHaveBeenCalledWith(`/api/v1/threads/${threadId}/pinned-approvals`);
     expect(getJson).toHaveBeenCalledWith("/api/v1/approvals");
-    expect(getJson).toHaveBeenCalledWith("/api/v1/approvals/approval-1");
+    expect(getJson).toHaveBeenCalledWith(`/api/v1/approvals/${approvalId}`);
   });
 
   it("uses the desktop query defaults", () => {
