@@ -85,6 +85,7 @@ export function RequestItem({
 
       {isPending && options.length > 0 ? (
         <RequestActions
+          key={request.id}
           request={request}
           options={options}
           onAnswer={onAnswer}
@@ -107,8 +108,12 @@ interface RequestActionsProps {
 }
 
 function RequestActions({ request, options, onAnswer }: RequestActionsProps) {
+  // Caller passes `key={request.id}` so the subtree fully remounts on
+  // request switch, so text-entry state can't leak from one request to the
+  // next without us needing an explicit reset effect here.
   const [textOption, setTextOption] = useState<InterviewOption | null>(null);
   const [customText, setCustomText] = useState("");
+
   const submitText = () => {
     const text = customText.trim();
     if (!(textOption && text)) return;

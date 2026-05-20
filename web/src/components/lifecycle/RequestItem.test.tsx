@@ -5,17 +5,26 @@ import type { AgentRequest } from "../../api/client";
 import { RequestItem } from "./RequestItem";
 
 describe("<RequestItem>", () => {
-  it("collects text before answering legacy direct-answer interviews", () => {
-    const request: AgentRequest = {
-      id: "request-200",
+  function makeInterviewRequest(
+    id: string,
+    options: AgentRequest["options"] = [
+      { id: "answer_directly", label: "Answer directly" },
+    ],
+  ): AgentRequest {
+    return {
+      id,
       from: "research",
       question: "What should we ask next?",
       title: "Human interview",
       blocking: false,
       status: "pending",
-      options: [{ id: "answer_directly", label: "Answer directly" }],
+      options,
       kind: "interview",
     };
+  }
+
+  it("collects text before answering legacy direct-answer interviews", () => {
+    const request = makeInterviewRequest("request-200");
     const onAnswer = vi.fn();
 
     render(
@@ -34,5 +43,40 @@ describe("<RequestItem>", () => {
       "answer_directly",
       "Ask whether they already use a workaround.",
     );
+  });
+
+  it("resets text mode when the request changes", () => {
+    const firstRequest = makeInterviewRequest("request-201");
+    const secondRequest = makeInterviewRequest("request-202", [
+      { id: "accept", label: "Accept" },
+    ]);
+    const onAnswer = vi.fn();
+
+    const { rerender } = render(
+      <RequestItem
+        request={firstRequest}
+        isPending={true}
+        onAnswer={onAnswer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Answer directly/i }));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Stale text from the first request." },
+    });
+
+    rerender(
+      <RequestItem
+        request={secondRequest}
+        isPending={true}
+        onAnswer={onAnswer}
+      />,
+    );
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Accept/i }));
+
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer).toHaveBeenCalledWith("accept");
   });
 });
