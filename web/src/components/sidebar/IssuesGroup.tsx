@@ -27,23 +27,27 @@ import { SidebarItem } from "./SidebarItem";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-const KNOWN_LIFECYCLE_STATES: ReadonlySet<LifecycleState> = new Set<LifecycleState>([
-  "drafting",
-  "intake",
-  "ready",
-  "running",
-  "review",
-  "decision",
-  "blocked_on_pr_merge",
-  "changes_requested",
-  "approved",
-  "rejected",
-]);
+const KNOWN_LIFECYCLE_STATES: ReadonlySet<LifecycleState> =
+  new Set<LifecycleState>([
+    "drafting",
+    "intake",
+    "ready",
+    "running",
+    "review",
+    "decision",
+    "blocked_on_pr_merge",
+    "changes_requested",
+    "approved",
+    "rejected",
+  ]);
 
 function taskToState(task: Task): LifecycleState {
   if (task.pipeline_stage === "draft") return "drafting";
-  const raw = (task as unknown as Record<string, unknown>).lifecycle_state;
-  if (typeof raw === "string" && KNOWN_LIFECYCLE_STATES.has(raw as LifecycleState)) {
+  const raw = task.lifecycle_state;
+  if (
+    typeof raw === "string" &&
+    KNOWN_LIFECYCLE_STATES.has(raw as LifecycleState)
+  ) {
     return raw as LifecycleState;
   }
   switch (task.status) {

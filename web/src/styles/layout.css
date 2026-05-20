@@ -457,7 +457,6 @@ html[data-theme="nex"]
   flex-shrink: 0;
 }
 
-
 /* Hairline between adjacent sections — matches `.usage-toggle`'s border-top.
    Sections are direct siblings inside .sidebar-scroll now. */
 .sidebar-section + .sidebar-section {
@@ -491,8 +490,9 @@ html[data-theme="nex"]
   padding-bottom: 4px;
   /* `padding-bottom` collapses to 0 when the section is collapsed (see
      `.sidebar-section.is-collapsed` rule below). `box-shadow` fades in
-     when the IntersectionObserver flips `data-stuck="true"`. Both
-     animate on the shared collapsible timing so nothing jumps. */
+     when the shared sticky-pin registry flips `data-stuck="true"` (see
+     web/src/components/sidebar/stickyPinRegistry.ts). Both animate on
+     the shared collapsible timing so nothing jumps. */
   transition:
     padding-bottom 200ms cubic-bezier(0.4, 0, 0.2, 1),
     box-shadow 150ms ease-out;

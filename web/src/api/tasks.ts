@@ -91,6 +91,13 @@ export interface Task {
   task_type?: string;
   pipeline_id?: string;
   pipeline_stage?: string;
+  /**
+   * Broker lifecycle position. Optional on the wire because not every
+   * Task source emits it yet; consumers should fall back to `status`.
+   * Kept as `string` (not the LifecycleState union) so an unknown value
+   * from a newer broker doesn't silently fail JSON parsing.
+   */
+  lifecycle_state?: string;
   execution_mode?: string;
   review_state?: string;
   source_signal_id?: string;

@@ -95,9 +95,12 @@ export function ConfirmHost() {
       }}
       role="dialog"
       aria-modal="true"
+      aria-labelledby="confirm-dialog-title"
     >
       <div className="confirm-card card">
-        <h3 className="confirm-title">{opts.title || "Are you sure?"}</h3>
+        <h3 id="confirm-dialog-title" className="confirm-title">
+          {opts.title || "Are you sure?"}
+        </h3>
         <p className="confirm-message">{opts.message}</p>
         {opts.details ? (
           <div className="confirm-details">{opts.details}</div>

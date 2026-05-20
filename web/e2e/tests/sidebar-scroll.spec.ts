@@ -249,5 +249,81 @@ test.describe("left sidebar scrolling", () => {
 
       await expectNoReactErrors(page, getErrors, "while scrolling the sidebar");
     });
+
+    test(`section header pins data-stuck when scrolled past at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      const getErrors = collectReactErrors(page);
+      await page.setViewportSize(viewport);
+      await stubCrowdedSidebarData(page);
+
+      await page.goto("/");
+      await waitForReactMount(page);
+
+      const scroll = page.locator(".sidebar-scroll");
+      await expect(scroll).toBeVisible();
+      // Each section's title bar is the sticky chrome; we want to assert
+      // that scrolling far enough flips data-stuck on the title bar of a
+      // later section (Tools) which only pins once Channels has fully
+      // slid behind it.
+      const channelsTitleBar = page
+        .locator(".sidebar-section", { has: page.getByText("Channels") })
+        .locator(".sidebar-section-title-bar");
+      await expect(channelsTitleBar).toBeVisible();
+      // Pre-scroll: no headers should be stuck except possibly the very
+      // first (Agents). Channels is mid-list, so it should read false.
+      await expect(channelsTitleBar).toHaveAttribute("data-stuck", "false");
+
+      // Scroll far enough that Channels' header has reached the top of
+      // .sidebar-scroll. The crowded fixture has 24 agents above it; a
+      // generous wheel push lands us safely past that.
+      await scroll.hover();
+      for (let i = 0; i < 12; i += 1) {
+        const stuck = await channelsTitleBar.getAttribute("data-stuck");
+        if (stuck === "true") break;
+        await page.mouse.wheel(0, 800);
+        await waitForScrollSettle(scroll);
+      }
+      await expect(channelsTitleBar).toHaveAttribute("data-stuck", "true");
+
+      await expectNoReactErrors(
+        page,
+        getErrors,
+        "while asserting sticky pin behavior",
+      );
+    });
+
+    test(`collapsed section body is removed from a11y tree and tab order at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      const getErrors = collectReactErrors(page);
+      await page.setViewportSize(viewport);
+      await stubCrowdedSidebarData(page);
+
+      await page.goto("/");
+      await waitForReactMount(page);
+
+      // Collapse the Channels section.
+      const channelsToggle = page
+        .locator(".sidebar-section", { has: page.getByText("Channels") })
+        .locator("button.sidebar-section-toggle");
+      await expect(channelsToggle).toHaveAttribute("aria-expanded", "true");
+      await channelsToggle.click();
+      await expect(channelsToggle).toHaveAttribute("aria-expanded", "false");
+
+      // The collapsible body should be marked inert and aria-hidden so
+      // screen readers skip it and Tab can't land on its buttons.
+      const channelsBody = page
+        .locator(".sidebar-section", { has: page.getByText("Channels") })
+        .locator(".sidebar-collapsible");
+      await expect(channelsBody).toHaveAttribute("aria-hidden", "true");
+      await expect(channelsBody).toHaveAttribute("inert", "");
+
+      await expectNoReactErrors(
+        page,
+        getErrors,
+        "while asserting collapsed-section a11y",
+      );
+    });
   }
 });

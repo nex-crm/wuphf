@@ -11,7 +11,9 @@
  * own section box.
  */
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
+
+import { registerStickyHeader } from "./stickyPinRegistry";
 
 interface SidebarSectionHeaderProps {
   label: string;
@@ -47,43 +49,21 @@ export function SidebarSectionHeader({
   actions,
   testId,
 }: SidebarSectionHeaderProps) {
-  // Detect when the sticky title bar is actually pinned to the top of
-  // the scroll container so CSS can fade in a light shadow underneath
-  // it. Compare the title bar's top against the scroll container's top
-  // on every scroll — a 1px tolerance because sub-pixel rounding can
-  // leave a fractional gap. Cheap, deterministic; IO with a sticky
-  // child has known quirks across browsers.
+  // Pin detection lives in stickyPinRegistry so we share one scroll
+  // listener (rAF-batched, one root-rect read per frame) across all
+  // mounted section headers instead of attaching N listeners that each
+  // re-read the scroll root.
   const tbRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const titleBar = tbRef.current;
     if (!titleBar) return;
     const scrollRoot = titleBar.closest<HTMLElement>(".sidebar-scroll");
     if (!scrollRoot) return;
-    const update = () => {
-      const tbTop = titleBar.getBoundingClientRect().top;
-      const rootTop = scrollRoot.getBoundingClientRect().top;
-      titleBar.dataset.stuck = tbTop - rootTop < 1 ? "true" : "false";
-    };
-    // Initial layout may not be settled when the effect runs; rAF after
-    // commit gives the sticky pin a chance to resolve before measurement.
-    const raf = requestAnimationFrame(update);
-    scrollRoot.addEventListener("scroll", update, { passive: true });
-    // Recompute on layout changes (section open/close, viewport resize).
-    const ro = new ResizeObserver(update);
-    ro.observe(scrollRoot);
-    return () => {
-      cancelAnimationFrame(raf);
-      scrollRoot.removeEventListener("scroll", update);
-      ro.disconnect();
-    };
+    return registerStickyHeader(scrollRoot, titleBar);
   }, []);
 
   return (
-    <div
-      ref={tbRef}
-      className="sidebar-section-title-bar"
-      data-testid={testId}
-    >
+    <div ref={tbRef} className="sidebar-section-title-bar" data-testid={testId}>
       <button
         type="button"
         className="sidebar-section-title sidebar-section-toggle"

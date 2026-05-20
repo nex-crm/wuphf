@@ -2,21 +2,20 @@ import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
 
 import { useResizablePane } from "../../hooks/useResizablePane";
 import { router } from "../../lib/router";
-import { useCurrentApp } from "../../routes/useCurrentRoute";
+import { useCurrentApp, useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
-import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
 import { InboxButton } from "../sidebar/InboxButton";
 import { IssuesGroup } from "../sidebar/IssuesGroup";
 import {
-  RecentObjectsPanel,
   hasRecentObjects,
+  RecentObjectsPanel,
 } from "../sidebar/RecentObjectsPanel";
-import { SidebarSectionHeader } from "../sidebar/SidebarSectionHeader";
+import { SidebarSection } from "../sidebar/SidebarSection";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { WorkspaceSummary } from "../sidebar/WorkspaceSummary";
 import { CollapsedSidebar } from "./CollapsedSidebar";
@@ -59,9 +58,9 @@ export function Sidebar() {
   // property rather than `width:` directly so the mobile media queries
   // (which clamp the sidebar to 240px / full overlay) can still win
   // — inline `width` would beat them with normal cascade rules.
-  const asideStyle = (sidebarCollapsed
-    ? null
-    : { "--sidebar-resize-width": `${resize.width}px` }) as React.CSSProperties | null;
+  const asideStyle = (
+    sidebarCollapsed ? null : { "--sidebar-resize-width": `${resize.width}px` }
+  ) as React.CSSProperties | null;
 
   return (
     <aside
@@ -107,98 +106,64 @@ export function Sidebar() {
           </div>
 
           <div className="sidebar-scroll">
-            <div
-              className={`sidebar-section is-team${sidebarAgentsOpen ? "" : " is-collapsed"}`}
+            <SidebarSection
+              label="Agents"
+              variant="team"
+              open={sidebarAgentsOpen}
+              onToggle={toggleSidebarAgents}
             >
-              <SidebarSectionHeader
-                label="Agents"
-                open={sidebarAgentsOpen}
-                onToggle={toggleSidebarAgents}
-              />
-              <div
-                className={`sidebar-collapsible${sidebarAgentsOpen ? " is-open" : ""}`}
-              >
-                <AgentList />
-              </div>
-            </div>
+              <AgentList />
+            </SidebarSection>
 
-            <div
-              className={`sidebar-section${sidebarChannelsOpen ? "" : " is-collapsed"}`}
+            <SidebarSection
+              label="Channels"
+              open={sidebarChannelsOpen}
+              onToggle={toggleSidebarChannels}
             >
-              <SidebarSectionHeader
-                label="Channels"
-                open={sidebarChannelsOpen}
-                onToggle={toggleSidebarChannels}
-              />
-              <div
-                className={`sidebar-collapsible${sidebarChannelsOpen ? " is-open" : ""}`}
-              >
-                <ChannelList />
-              </div>
-            </div>
+              <ChannelList />
+            </SidebarSection>
 
             {/* Phase 3 — Issues group (between Channels and Tools, per spec Surface 2 layout). */}
-            <div
-              className={`sidebar-section${sidebarIssuesOpen ? "" : " is-collapsed"}`}
+            <SidebarSection
+              label="Issues"
+              open={sidebarIssuesOpen}
+              onToggle={toggleSidebarIssues}
               data-testid="issues-group-header"
+              headerActions={
+                <button
+                  type="button"
+                  className={`sidebar-section-action${issuesListActive ? " active" : ""}`}
+                  onClick={() => void router.navigate({ to: "/issues" })}
+                  title="View all issues"
+                  data-testid="issues-sidebar-view-all"
+                >
+                  View all
+                </button>
+              }
             >
-              <SidebarSectionHeader
-                label="Issues"
-                open={sidebarIssuesOpen}
-                onToggle={toggleSidebarIssues}
-                actions={
-                  <button
-                    type="button"
-                    className={`sidebar-section-action${issuesListActive ? " active" : ""}`}
-                    onClick={() => void router.navigate({ to: "/issues" })}
-                    title="View all issues"
-                    data-testid="issues-sidebar-view-all"
-                  >
-                    View all
-                  </button>
-                }
-              />
-              <div
-                className={`sidebar-collapsible${sidebarIssuesOpen ? " is-open" : ""}`}
-              >
-                <IssuesGroup open={sidebarIssuesOpen} />
-              </div>
-            </div>
+              <IssuesGroup open={sidebarIssuesOpen} />
+            </SidebarSection>
 
-            <div
-              className={`sidebar-section${sidebarAppsOpen ? "" : " is-collapsed"}`}
+            <SidebarSection
+              label="Tools"
+              open={sidebarAppsOpen}
+              onToggle={toggleSidebarApps}
             >
-              <SidebarSectionHeader
-                label="Tools"
-                open={sidebarAppsOpen}
-                onToggle={toggleSidebarApps}
-              />
-              <div
-                className={`sidebar-collapsible${sidebarAppsOpen ? " is-open" : ""}`}
-              >
-                <AppList />
-              </div>
-            </div>
+              <AppList />
+            </SidebarSection>
 
             {/* Phase 2 onboarding preview overlay — shows staged channels/agents
                 forming as the user answers CEO questions. Hidden once onboarded. */}
             <SidebarPreviewOverlay />
 
             {showRecent && (
-              <div
-                className={`sidebar-section${sidebarRecentOpen ? "" : " is-collapsed"}`}
+              <SidebarSection
+                label="Recent"
+                open={sidebarRecentOpen}
+                onToggle={toggleSidebarRecent}
               >
-                <SidebarSectionHeader
-                  label="Recent"
-                  open={sidebarRecentOpen}
-                  onToggle={toggleSidebarRecent}
-                />
-                <div
-                  className={`sidebar-collapsible${sidebarRecentOpen ? " is-open" : ""}`}
-                >
-                  <RecentObjectsPanel />
-                </div>
-              </div>
+                <RecentObjectsPanel />
+              </SidebarSection>
             )}
           </div>
           {/* WorkspaceSummary intentionally not rendered here — the stats

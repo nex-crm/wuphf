@@ -34,6 +34,10 @@ export function SidebarSection({
   const sectionClass = `sidebar-section${variant === "team" ? " is-team" : ""}${
     open ? "" : " is-collapsed"
   }`;
+  // `inert` removes the collapsed subtree from focus order and the
+  // accessibility tree. Without it the grid-template-rows: 0fr collapse
+  // is purely visual — keyboard Tab still lands on hidden buttons and
+  // screen readers still announce hidden labels.
   return (
     <div className={sectionClass} data-testid={testId}>
       <SidebarSectionHeader
@@ -42,7 +46,11 @@ export function SidebarSection({
         onToggle={onToggle}
         actions={headerActions}
       />
-      <div className={`sidebar-collapsible${open ? " is-open" : ""}`}>
+      <div
+        className={`sidebar-collapsible${open ? " is-open" : ""}`}
+        inert={!open}
+        aria-hidden={!open}
+      >
         {children}
       </div>
     </div>
