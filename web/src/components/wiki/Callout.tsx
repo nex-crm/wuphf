@@ -47,8 +47,7 @@ function resolveType(raw: unknown): CalloutType {
 export function CalloutBlockquote(props: BlockquoteProps): ReactElement {
   const record = props as Record<string, unknown>;
   if (record["data-callout"] !== "true") {
-    const { children, className } = props;
-    return <blockquote className={className}>{children}</blockquote>;
+    return <blockquote {...props} />;
   }
   const type = resolveType(record["data-callout-type"]);
   const title =

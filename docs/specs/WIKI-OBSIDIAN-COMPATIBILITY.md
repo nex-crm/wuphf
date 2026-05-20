@@ -56,7 +56,7 @@ Everything Obsidian needs to render lives under `team/` and matches the brief la
 | `playbooks/.compiled/**` | derived | archivist | hidden |
 | `entities/.graph.jsonl` | adjacency log | archivist | hidden |
 
-**Lazy directory creation.** `customers/` is not created by `Repo.ensureLayoutLocked` (`internal/team/wiki_git.go:209`); it is created on demand when the first customer brief is filed. Obsidian handles a missing directory gracefully — wikilinks to it surface as broken until the first file lands. This is the documented pattern; do not pre-seed `customers/` just to satisfy Obsidian.
+**Lazy directory creation.** `customers/` is not created by `Repo.ensureLayoutLocked` (see `internal/team/wiki_git.go`); it is created on demand when the first customer brief is filed. Obsidian handles a missing directory gracefully — wikilinks to it surface as broken until the first file lands. This is the documented pattern; do not pre-seed `customers/` just to satisfy Obsidian.
 
 ---
 
@@ -88,7 +88,7 @@ Not bootstrapped (user-specific, gitignored):
 
 ## 5. Wikilink contract — kinded form is canonical
 
-WUPHF emits and stores wikilinks in their **kinded form**: `[[kind/slug]]` or `[[kind/slug|Display]]`. The parser at `internal/team/entity_graph.go:87` accepts `people|companies|customers` as kinds. This form is canonical because:
+WUPHF emits and stores wikilinks in their **kinded form**: `[[kind/slug]]` or `[[kind/slug|Display]]`. The `ExtractRefs` parser (`kindedWikilinkPattern` in `internal/team/entity_graph.go`) accepts `people|companies|customers` as kinds. This form is canonical because:
 
 1. It is unambiguous — `[[people/acme]]` and `[[companies/acme]]` are distinct entities even when slugs collide.
 2. It resolves natively in Obsidian when the vault root is `team/` — `[[people/nazz]]` → `<vault>/people/nazz.md`.
@@ -101,7 +101,7 @@ WUPHF emits and stores wikilinks in their **kinded form**: `[[kind/slug]]` or `[
 - Commits the normalization under the `archivist` identity with message `wiki: normalize wikilinks in {slug}`.
 - Runs only on brief bodies under `team/**/*.md`. Artifacts under `inbox/raw/` are immutable and preserve verbatim text.
 
-**Bare slug ambiguity.** A bare `[[acme]]` whose slug collides across kinds is left unresolved. The `ExtractRefs` parser receives a `known(slug)` callback that returns `("", false)` for ambiguous slugs (`internal/team/entity_graph.go:125-146`), and no edge is created. This is the basename-collision guard required for Obsidian compatibility — see the regression test in `entity_graph_test.go`.
+**Bare slug ambiguity.** A bare `[[acme]]` whose slug collides across kinds is left unresolved. The `ExtractRefs` parser receives a `known(slug)` callback that returns `("", false)` for ambiguous slugs (the bare-slug second pass in `internal/team/entity_graph.go`), and no edge is created. This is the basename-collision guard required for Obsidian compatibility — see `TestExtractRefs_BasenameCollisionAcrossKinds` in `entity_graph_test.go`.
 
 ---
 
@@ -112,7 +112,7 @@ WUPHF emits and stores wikilinks in their **kinded form**: `[[kind/slug]]` or `[
 The Phase 3 reconciliation:
 
 1. **fsnotify watcher on the vault root.** Debounce 1.5s. Commit batches under the user's configured per-human git identity (same resolution used by WikiWorker; falls back to a "needs-attribution" queue if unresolved — never commits as `archivist` for human writes).
-2. **Advisory `flock` in `Repo.Commit`.** WikiWorker takes an OS-level advisory lock on the target file for the duration of write + commit. Obsidian's editor respects advisory locks on most platforms; on platforms where it does not, the watcher's debounce window absorbs interleaved writes.
+2. **Advisory `flock` in `Repo.Commit` — for WUPHF processes only.** `Repo.Commit` takes an OS-level POSIX advisory lock on the target file for the duration of write + commit. This serializes WUPHF's own writers against each other: the in-process `WikiWorker`, the `ObsidianWatcher`, and any sibling `wuphf` CLI process (e.g. `wuphf memory migrate`) hitting the same wiki cannot interleave their commits. **The flock does not coordinate with Obsidian's editor** — Obsidian writes vault files as plain disk I/O without acquiring POSIX advisory locks, by design (it must coexist with Dropbox, Syncthing, git, and a long tail of external tools). Coordination with Obsidian's writes relies on the other three items in this list: the debounce window in (1) absorbs Obsidian's typical write rhythm, Obsidian's atomic temp-file + rename pattern keeps disk reads from ever observing a partial write, and the sentinel in (3) prevents synthesis from stomping a concurrent human edit.
 3. **`last_human_edit_ts` frontmatter sentinel.** The synthesizer checks `last_human_edit_ts > last_synthesized_ts` and switches from rewrite mode to append-section mode. User edits to the brief body are never stomped; synthesis-derived content lands in `## What we've learned` instead.
 4. **Worker-originated write filter in the watcher.** The watcher tracks paths the worker has written within the last 5 seconds and ignores fsnotify events on them. Without this, every worker commit would trigger a watcher commit and the system would loop.
 

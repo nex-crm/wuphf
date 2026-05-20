@@ -204,11 +204,16 @@ func (w *ObsidianWatcher) Stop() error {
 		_ = w.watcher.Close()
 	}
 	<-w.doneCh
-	// Cancel any timers that fired the dispatch goroutine but did not yet
-	// land in pending.Add — we hold the lock so no new ones can spawn.
+	// Cancel any timers that have not yet fired. A timer.Stop() returning
+	// true means the AfterFunc callback never ran, so we own the Add() that
+	// was paired with it and must call Done() here. Returning false means
+	// the callback has already started or completed; its own deferred
+	// Done() in the AfterFunc wrapper will run.
 	w.mu.Lock()
 	for k, t := range w.timers {
-		t.Stop()
+		if t.Stop() {
+			w.pending.Done()
+		}
 		delete(w.timers, k)
 	}
 	w.mu.Unlock()
@@ -268,6 +273,13 @@ func (w *ObsidianWatcher) handleEvent(ctx context.Context, ev fsnotify.Event) {
 
 // schedule debounces commits per-path. The latest write wins: a new event
 // during an existing window resets the timer.
+//
+// The pending WaitGroup is incremented HERE (under the lock), not inside the
+// AfterFunc callback, so the Add is sequenced before any Wait in Stop(). The
+// callback owns its own Done() via the defer in the AfterFunc wrapper. When
+// an existing timer is replaced and Stop() returns true (callback never
+// ran), schedule() pays the Done() for the cancelled timer before adding
+// the new one.
 func (w *ObsidianWatcher) schedule(ctx context.Context, rel string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -275,21 +287,23 @@ func (w *ObsidianWatcher) schedule(ctx context.Context, rel string) {
 		return
 	}
 	if existing, ok := w.timers[rel]; ok {
-		existing.Stop()
+		if existing.Stop() {
+			w.pending.Done()
+		}
 	}
 	d := w.debounceMs
+	w.pending.Add(1)
 	w.timers[rel] = time.AfterFunc(d, func() {
+		defer w.pending.Done()
 		w.fire(ctx, rel)
 	})
 }
 
 // fire runs at the trailing edge of a debounce window. It rechecks the
 // worker-write TTL, resolves the author, and synchronously calls
-// Repo.Commit. Errors are logged.
+// Repo.Commit. Errors are logged. The pending WaitGroup is managed by the
+// caller (schedule's AfterFunc wrapper).
 func (w *ObsidianWatcher) fire(ctx context.Context, rel string) {
-	w.pending.Add(1)
-	defer w.pending.Done()
-
 	w.mu.Lock()
 	delete(w.timers, rel)
 	if !w.running.Load() {
@@ -469,15 +483,21 @@ func isObsidianIgnoredPath(rel string) bool {
 // subtree entirely. Mirrors isObsidianIgnoredPath at the directory level so
 // the initial recursive watch never registers ignored trees.
 func isObsidianIgnoredDir(rel string) bool {
+	// Nested directories under team/.obsidian (themes/, plugins/,
+	// snippets/, ...) are all user-owned config we never observe. Skip
+	// them so the recursive walk doesn't register watches it'll never
+	// use. team/.obsidian itself is intentionally NOT skipped — fsnotify
+	// on Linux delivers file-level Writes via the parent directory's
+	// watch, which is how we see app.json edits.
+	if strings.HasPrefix(rel, "team/.obsidian/") {
+		return true
+	}
 	switch rel {
 	case "team/playbooks/.compiled":
 		return true
 	case "team/inbox/raw":
 		return true
 	case "team/.obsidian":
-		// We still want to surface team/.obsidian/app.json edits, but
-		// fsnotify on Linux reports file-level Writes via the parent
-		// directory's watch. Add the dir and filter inside handleEvent.
 		return false
 	}
 	return false
