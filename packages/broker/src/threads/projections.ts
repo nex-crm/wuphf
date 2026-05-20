@@ -50,17 +50,6 @@ export interface ThreadStateStore {
   getById(threadId: ThreadId): ThreadStateRow | null;
   hasSpecRevision(revisionId: string): boolean;
   list(filter?: { readonly status?: ThreadStatus }): readonly ThreadStateRow[];
-  listPage(page: ThreadStatePageOptions): ThreadStatePage;
-}
-
-export interface ThreadStatePageOptions {
-  readonly limit: number;
-  readonly afterHeadLsn?: number;
-}
-
-export interface ThreadStatePage {
-  readonly rows: readonly ThreadStateRow[];
-  readonly nextCursor?: EventLsn;
 }
 
 interface ThreadDbRow {
@@ -171,24 +160,6 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
             spec_authored_at_ms AS specAuthoredAtMs,
             external_refs AS externalRefs
      FROM threads ORDER BY head_lsn ASC`,
-  );
-  const listPageStmt = db.prepare<[number, number], ThreadDbRow>(
-    `SELECT thread_id AS threadId,
-            title,
-            status,
-            head_lsn AS headLsn,
-            created_by AS createdBy,
-            created_at_ms AS createdAtMs,
-            updated_at_ms AS updatedAtMs,
-            closed_at_ms AS closedAtMs,
-            spec_revision_id AS specRevisionId,
-            spec_base_revision_id AS specBaseRevisionId,
-            spec_content AS specContent,
-            spec_content_hash AS specContentHash,
-            spec_authored_by AS specAuthoredBy,
-            spec_authored_at_ms AS specAuthoredAtMs,
-            external_refs AS externalRefs
-     FROM threads WHERE head_lsn > ? ORDER BY head_lsn ASC LIMIT ?`,
   );
   const listByStatusStmt = db.prepare<[string], ThreadDbRow>(
     `SELECT thread_id AS threadId,
@@ -307,20 +278,6 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
       const rows =
         filter?.status === undefined ? listAllStmt.all() : listByStatusStmt.all(filter.status);
       return rows.map(toThreadStateRow);
-    },
-    listPage(page: ThreadStatePageOptions): ThreadStatePage {
-      if (!Number.isSafeInteger(page.limit) || page.limit < 1) {
-        throw new Error("thread state page limit must be a positive safe integer");
-      }
-      const rows = listPageStmt.all(page.afterHeadLsn ?? 0, page.limit + 1);
-      const selectedRows = rows.length > page.limit ? rows.slice(0, page.limit) : rows;
-      const lastRow = selectedRows.at(-1);
-      return {
-        rows: selectedRows.map(toThreadStateRow),
-        ...(rows.length > page.limit && lastRow !== undefined
-          ? { nextCursor: lsnFromV1Number(lastRow.headLsn) }
-          : {}),
-      };
     },
   };
 }

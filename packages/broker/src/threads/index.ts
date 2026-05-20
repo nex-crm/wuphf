@@ -23,8 +23,6 @@ export {
 export type { ParsedIdempotencyKey, ThreadCommand } from "./idempotency.ts";
 export { parseThreadIdempotencyKey, THREAD_COMMAND_VALUES } from "./idempotency.ts";
 export type {
-  ThreadStatePage,
-  ThreadStatePageOptions,
   ThreadStateRow,
   ThreadStateStore,
 } from "./projections.ts";

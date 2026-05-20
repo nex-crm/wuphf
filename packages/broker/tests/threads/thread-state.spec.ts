@@ -305,9 +305,6 @@ describe("thread appender and projection", () => {
         record("state.list");
         return fix.state.list(filter);
       },
-      listPage(page) {
-        return fix.state.listPage(page);
-      },
     };
     const receiptIndex: ThreadReceiptIndexStore = {
       applyEvent(recordEvent) {
