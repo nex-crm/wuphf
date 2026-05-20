@@ -216,20 +216,6 @@ const THREAD_STREAM_EVENT_KIND_VALUES = [
   "thread.pinned_approvals.changed",
 ] as const;
 const APPROVAL_STREAM_EVENT_KIND_VALUES = ["approval.requested", "approval.decided"] as const;
-const THREAD_STREAM_EVENT_KEYS: ReadonlySet<string> = new Set([
-  "id",
-  "kind",
-  "emittedAt",
-  "receiptId",
-  "payload",
-]);
-const APPROVAL_STREAM_EVENT_KEYS: ReadonlySet<string> = THREAD_STREAM_EVENT_KEYS;
-const THREAD_INVALIDATION_PAYLOAD_KEYS: ReadonlySet<string> = new Set(["threadId", "headLsn"]);
-const APPROVAL_INVALIDATION_PAYLOAD_KEYS: ReadonlySet<string> = new Set([
-  "requestId",
-  "threadId",
-  "headLsn",
-]);
 
 export interface ThreadInvalidationPayload {
   readonly threadId: ThreadId;
@@ -260,6 +246,44 @@ export type ApprovalStreamEvent = StreamEventBase & {
   readonly kind: ApprovalStreamEventKind;
   readonly payload: ApprovalInvalidationPayload;
 };
+
+// Key allowlists are declared as `as const satisfies readonly (keyof T)[]`
+// so a typo (or a renamed/removed field on the type) fails typecheck
+// rather than silently weakening unknown-key validation at runtime.
+const THREAD_STREAM_EVENT_KEYS_TUPLE = [
+  "id",
+  "kind",
+  "emittedAt",
+  "receiptId",
+  "payload",
+] as const satisfies readonly (keyof ThreadStreamEvent)[];
+const THREAD_STREAM_EVENT_KEYS: ReadonlySet<string> = new Set(THREAD_STREAM_EVENT_KEYS_TUPLE);
+
+const APPROVAL_STREAM_EVENT_KEYS_TUPLE = [
+  "id",
+  "kind",
+  "emittedAt",
+  "receiptId",
+  "payload",
+] as const satisfies readonly (keyof ApprovalStreamEvent)[];
+const APPROVAL_STREAM_EVENT_KEYS: ReadonlySet<string> = new Set(APPROVAL_STREAM_EVENT_KEYS_TUPLE);
+
+const THREAD_INVALIDATION_PAYLOAD_KEYS_TUPLE = [
+  "threadId",
+  "headLsn",
+] as const satisfies readonly (keyof ThreadInvalidationPayload)[];
+const THREAD_INVALIDATION_PAYLOAD_KEYS: ReadonlySet<string> = new Set(
+  THREAD_INVALIDATION_PAYLOAD_KEYS_TUPLE,
+);
+
+const APPROVAL_INVALIDATION_PAYLOAD_KEYS_TUPLE = [
+  "requestId",
+  "threadId",
+  "headLsn",
+] as const satisfies readonly (keyof ApprovalInvalidationPayload)[];
+const APPROVAL_INVALIDATION_PAYLOAD_KEYS: ReadonlySet<string> = new Set(
+  APPROVAL_INVALIDATION_PAYLOAD_KEYS_TUPLE,
+);
 
 export type ThreadStreamEventValidationError = ReceiptValidationError;
 export type ThreadStreamEventValidationResult =

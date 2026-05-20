@@ -70,16 +70,19 @@ describe("IndexRoute", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     installWindowApi(api);
 
-    const { unmount } = renderWithProviders(<IndexRoute />, readyBootstrapState());
-    unmount();
+    try {
+      const { unmount } = renderWithProviders(<IndexRoute />, readyBootstrapState());
+      unmount();
 
-    await act(async () => {
-      version.resolve({ version: "9.9.9-test" });
-      await version.promise;
-    });
+      await act(async () => {
+        version.resolve({ version: "9.9.9-test" });
+        await version.promise;
+      });
 
-    expect(consoleError).not.toHaveBeenCalled();
-    consoleError.mockRestore();
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
 

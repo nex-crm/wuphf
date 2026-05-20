@@ -20,9 +20,16 @@ export function IndexRoute() {
 
   useEffect(() => {
     let active = true;
-    void window.wuphf.getAppVersion().then((response) => {
-      if (active) setVersion(response.version);
-    });
+    void window.wuphf
+      .getAppVersion()
+      .then((response) => {
+        if (active) setVersion(response.version);
+      })
+      .catch(() => {
+        // Swallow: the version chip is a nice-to-have. An IPC failure
+        // here should not crash the renderer or surface as an unhandled
+        // rejection; the chip simply stays hidden.
+      });
     return () => {
       active = false;
     };
