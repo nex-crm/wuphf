@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -99,6 +99,46 @@ describe("BrokerBootstrapProvider", () => {
     expect(await screen.findByText("Broker bootstrap failed")).toBeInTheDocument();
   });
 
+  it("does not update state after unmount when bootstrap resolves", async () => {
+    const status = deferred<Awaited<ReturnType<WuphfDesktopApi["getBrokerStatus"]>>>();
+    const token = deferred<Response>();
+    const health = deferred<Response>();
+    const desktopApi = createDesktopApi({
+      getBrokerStatus: vi.fn<WuphfDesktopApi["getBrokerStatus"]>(() => status.promise),
+    });
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = String(input);
+      if (url.endsWith("/api-token")) return token.promise;
+      if (url.endsWith("/api/health")) return health.promise;
+      return Promise.reject(new Error(`unexpected fetch ${url}`));
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const { unmount } = render(
+      <BrokerBootstrapProvider desktopApi={desktopApi} fetchImpl={fetchMock}>
+        <BootstrapProbe />
+      </BrokerBootstrapProvider>,
+    );
+    unmount();
+
+    await act(async () => {
+      status.resolve({
+        status: "alive",
+        pid: 1234,
+        restartCount: 0,
+        brokerUrl: VALID_BROKER_URL,
+      });
+      await status.promise;
+      token.resolve(jsonResponse({ token: VALID_TOKEN, broker_url: VALID_BROKER_URL }));
+      await token.promise;
+      health.resolve(jsonResponse({ ok: true }));
+      await health.promise;
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it("rejects non-ok token and health responses", async () => {
     const desktopApi = createDesktopApi();
 
@@ -119,6 +159,22 @@ describe("BrokerBootstrapProvider", () => {
     ).rejects.toThrow("broker health 503");
   });
 });
+
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve: ((value: T) => void) | null = null;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  if (resolve === null) {
+    throw new Error("deferred resolver was not initialized");
+  }
+  return { promise, resolve };
+}
 
 function BootstrapProbe() {
   const bootstrap = useBrokerBootstrap();

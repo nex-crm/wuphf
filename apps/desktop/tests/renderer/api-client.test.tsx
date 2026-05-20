@@ -1,15 +1,17 @@
 // @vitest-environment happy-dom
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  type BrokerApiClient,
   BrokerHttpError,
   createBrokerApiClient,
   useBrokerApiClient,
 } from "../../src/renderer/api/client.ts";
 import { listThreads } from "../../src/renderer/api/threads.ts";
 import { BrokerBootstrapContext } from "../../src/renderer/bootstrap/useBrokerBootstrap.ts";
+import { parseBootstrap } from "../../src/renderer/bootstrap.ts";
 import {
   VALID_BOOTSTRAP,
   jsonResponse,
@@ -19,6 +21,10 @@ import {
 } from "./test-utils.tsx";
 
 describe("broker API client", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("sends bearer auth to the broker origin and decodes thread responses", async () => {
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
       expect(String(input)).toBe(`${VALID_BROKER_URL}/api/v1/threads`);
@@ -146,23 +152,61 @@ describe("broker API client", () => {
   });
 
   it("builds a hook client from ready bootstrap state", async () => {
-    let capturedClient: ReturnType<typeof useBrokerApiClient> | null = null;
+    const uniqueBootstrap = parseBootstrap({
+      token: "B".repeat(16),
+      broker_url: "http://127.0.0.1:60001",
+    });
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      const requestUrl = new URL(String(input));
+      expect(requestUrl.href).toBe(`${uniqueBootstrap.brokerUrl}/api/v1/threads?cursor=abc`);
+      expect(requestUrl.search).not.toContain(uniqueBootstrap.token);
+      const headers = init?.headers;
+      if (!(headers instanceof Headers)) {
+        throw new Error("Expected Headers instance");
+      }
+      expect(headers.get("Authorization")).toBe(`Bearer ${uniqueBootstrap.token}`);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const capturedClient: { current: BrokerApiClient | null } = { current: null };
 
     function Probe() {
-      capturedClient = useBrokerApiClient();
+      capturedClient.current = useBrokerApiClient();
       return <p>client ready</p>;
     }
 
     render(
-      <BrokerBootstrapContext.Provider value={readyBootstrapState()}>
+      <BrokerBootstrapContext.Provider
+        value={readyBootstrapState({
+          brokerUrl: uniqueBootstrap.brokerUrl,
+          bearer: uniqueBootstrap.token,
+          brokerStatus: {
+            status: "alive",
+            pid: 1234,
+            restartCount: 0,
+            brokerUrl: uniqueBootstrap.brokerUrl,
+          },
+        })}
+      >
         <Probe />
       </BrokerBootstrapContext.Provider>,
     );
 
     expect(screen.getByText("client ready")).toBeInTheDocument();
-    expect(capturedClient).not.toBeNull();
+    const client = expectBrokerClient(capturedClient.current);
+    await expect(
+      client.getJson("/api/v1/threads?cursor=abc", (value: unknown) => value),
+    ).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+function expectBrokerClient(client: BrokerApiClient | null): BrokerApiClient {
+  if (client === null) {
+    throw new Error("expected hook client");
+  }
+  return client;
+}
 
 function threadListWire(): unknown {
   const threadId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
