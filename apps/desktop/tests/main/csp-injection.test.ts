@@ -20,6 +20,14 @@ describe("dynamic renderer CSP injection", () => {
     });
   });
 
+  it("sets a CSP header when the response has no existing headers", () => {
+    const listener = createDynamicRendererCspHeadersReceivedListener(() => null);
+
+    expect(invokeListener(listener, undefined).responseHeaders).toEqual({
+      "Content-Security-Policy": [BASE_RENDERER_CSP],
+    });
+  });
+
   it("appends the current broker origin to connect-src", () => {
     const brokerUrl = "http://127.0.0.1:54321";
     const response = driveCspCallback({
@@ -37,6 +45,21 @@ describe("dynamic renderer CSP injection", () => {
     expect(response.responseHeaders?.["Content-Security-Policy"]).toEqual([
       "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' http://127.0.0.1:54321; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; worker-src 'none'",
     ]);
+  });
+
+  it("accepts loopback host aliases only", () => {
+    expect(rendererCspForBrokerUrl("http://localhost:54321")).toContain(
+      "connect-src 'self' http://localhost:54321",
+    );
+    expect(rendererCspForBrokerUrl("http://[::1]:54321")).toContain(
+      "connect-src 'self' http://[::1]:54321",
+    );
+    expect(() => rendererCspForBrokerUrl("http://127.0.0.1")).toThrow(
+      "Refusing to add non-loopback broker URL to CSP",
+    );
+    expect(() => rendererCspForBrokerUrl("http://127.0.0.1:54321/")).toThrow(
+      "Refusing to add non-loopback broker URL to CSP",
+    );
   });
 
   it("re-derives the CSP when the broker restarts on a new port", () => {
@@ -81,7 +104,7 @@ function driveCspCallback(args: {
 
 function invokeListener(
   listener: CspListener,
-  responseHeaders: Record<string, string[]> = {},
+  responseHeaders: Record<string, string[]> | undefined = {},
 ): HeadersReceivedResponse {
   let response: HeadersReceivedResponse | null = null;
   listener(createDetails(responseHeaders), (value) => {
@@ -94,9 +117,9 @@ function invokeListener(
 }
 
 function createDetails(
-  responseHeaders: Record<string, string[]>,
+  responseHeaders: Record<string, string[]> | undefined,
 ): OnHeadersReceivedListenerDetails {
-  return {
+  const base = {
     id: 1,
     url: "http://localhost:5173/",
     method: "GET",
@@ -105,6 +128,6 @@ function createDetails(
     timestamp: 1,
     statusLine: "HTTP/1.1 200 OK",
     statusCode: 200,
-    responseHeaders,
-  };
+  } satisfies Omit<OnHeadersReceivedListenerDetails, "responseHeaders">;
+  return responseHeaders === undefined ? base : { ...base, responseHeaders };
 }

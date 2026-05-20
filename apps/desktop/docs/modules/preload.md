@@ -28,7 +28,7 @@ flowchart LR
 | `showItemInFolder` | `wuphf:show-item-in-folder` | `{ path: string }` | `{ ok: true }` or `{ ok: false, error: string }` | Reveals a path in the OS file manager. Path is supplied by the renderer; main does not return file contents. |
 | `getAppVersion` | `wuphf:get-app-version` | `{}` | `{ version: string }` | Returns Electron `app.getVersion()`; the binary's own version string is not user data. |
 | `getPlatform` | `wuphf:get-platform` | `{}` | `{ platform: DesktopPlatform, arch: string }` | Returns `process.platform` and `process.arch`. Static OS facts, not user data. |
-| `getBrokerStatus` | `wuphf:get-broker-status` | `{}` | `{ status, pid, restartCount }` where status is `starting`, `alive`, `unresponsive`, `dead`, or `unknown` | Returns only broker utility-process lifecycle state. It does not expose broker data. |
+| `getBrokerStatus` | `wuphf:get-broker-status` | `{}` | `{ status, pid, restartCount, brokerUrl }` where status is `starting`, `alive`, `unresponsive`, `dead`, or `unknown` and `brokerUrl` is the current loopback origin or `null` | Returns only broker utility-process lifecycle state and the listener origin needed for HTTP bootstrap. It does not expose broker data or bearer tokens. |
 
 Every main-process handler validates the payload shape at the IPC boundary.
 Unknown keys are rejected so the contract cannot silently drift.
