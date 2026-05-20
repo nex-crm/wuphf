@@ -31,7 +31,6 @@ export const THREAD_BOARD_COLUMN_SET: ReadonlySet<string> = new Set<string>(
 
 export interface ThreadApprovalQuery {
   countPendingByThread(threadId: ThreadId): number;
-  listPendingByThread(threadId: ThreadId): readonly ThreadApprovalQueryRow[];
   latestHeadLsnByThread(threadId: ThreadId): EventLsn | null;
   pendingByThreadSnapshot(threadId: ThreadId): ThreadApprovalQuerySnapshot;
 }

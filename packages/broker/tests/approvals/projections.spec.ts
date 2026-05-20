@@ -508,14 +508,14 @@ describe("approval projection and appender", () => {
         threadId: otherThreadId,
       });
       expect(projection.countPendingByThread(THREAD_ID)).toBe(1);
-      expect(projection.listPendingByThread(THREAD_ID).map((row) => row.approval.id)).toEqual([
-        REQUEST_ID,
-      ]);
+      expect(
+        projection.pendingByThreadSnapshot(THREAD_ID).rows.map((row) => row.approval.id),
+      ).toEqual([REQUEST_ID]);
       expect(projection.latestHeadLsnByThread(THREAD_ID)).toBe("v1:3");
 
       appender.decideApproval(decidedPayload("reject", REQUEST_ID));
       expect(projection.countPendingByThread(THREAD_ID)).toBe(0);
-      expect(projection.listPendingByThread(THREAD_ID)).toEqual([]);
+      expect(projection.pendingByThreadSnapshot(THREAD_ID).rows).toEqual([]);
       expect(projection.latestHeadLsnByThread(THREAD_ID)).toBe("v1:5");
       expect(projection.countPendingByThread(otherThreadId)).toBe(1);
 

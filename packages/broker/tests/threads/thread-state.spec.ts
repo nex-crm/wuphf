@@ -336,9 +336,6 @@ describe("thread appender and projection", () => {
         record("approvals.countPendingByThread");
         return 0;
       },
-      listPendingByThread() {
-        return [];
-      },
       latestHeadLsnByThread() {
         record("approvals.latestHeadLsnByThread");
         return null;

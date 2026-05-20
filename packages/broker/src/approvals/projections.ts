@@ -75,7 +75,6 @@ export interface ApprovalProjection {
   list(filter?: ApprovalListFilter): readonly FoldedApprovalRow[];
   listPage(filter: ApprovalListFilter | undefined, page: ApprovalListPageOptions): ApprovalListPage;
   countPendingByThread(threadId: ThreadId): number;
-  listPendingByThread(threadId: ThreadId): readonly FoldedApprovalRow[];
   latestHeadLsnByThread(threadId: ThreadId): EventLsn | null;
   pendingByThreadSnapshot(threadId: ThreadId): ApprovalPendingByThreadSnapshot;
 }
@@ -413,15 +412,6 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
     },
     countPendingByThread(threadId: ThreadId): number {
       return pendingCountByThread(threadId);
-    },
-    listPendingByThread(threadId: ThreadId): readonly FoldedApprovalRow[] {
-      return listRows(
-        db,
-        { threadId, status: "pending" },
-        {
-          limit: MAX_ROUTE_APPROVAL_LIST_ITEMS,
-        },
-      ).map(rowToFolded);
     },
     latestHeadLsnByThread(threadId: ThreadId): EventLsn | null {
       const row = latestHeadLsnByThreadStmt.get(threadId);
