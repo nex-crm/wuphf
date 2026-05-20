@@ -61,6 +61,15 @@ export interface BrokerConfig {
   readonly trustedOrigins?: readonly string[];
   readonly logger?: BrokerLogger;
   /**
+   * Optional SSE capacity tuning. Production hosts should normally omit this
+   * and use the package defaults; stress tests can lower the writable-byte
+   * threshold to deterministically exercise invalidation drop/re-query paths.
+   */
+  readonly sse?: {
+    readonly maxSessions?: number;
+    readonly maxWritableLength?: number;
+  };
+  /**
    * Clock used by time-expiring broker control-plane state. Tests pass a fake
    * clock so expiry assertions are deterministic; production defaults to the
    * system wall clock.
@@ -122,7 +131,8 @@ export interface BrokerConfig {
   /**
    * Optional explicit approvals feature. When supplied,
    * `/api/v1/approvals` routes are mounted. Hosts construct these deps via
-   * `createApprovalSubsystem(db, eventLog)`.
+   * `createApprovalSubsystem(db, eventLog, { threadRefValidator })` when
+   * approvals can name threads.
    * Decisions are attributed to the bearer-bound agent in `tokenAgentIds`;
    * when omitted, the listener falls back to the runner bearer map if one
    * is configured.

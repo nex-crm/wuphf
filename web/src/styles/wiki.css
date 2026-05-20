@@ -368,6 +368,82 @@
   color: var(--wk-text);
 }
 
+/* ─── Obsidian-flavored callouts (WIKI-OBSIDIAN-COMPATIBILITY §7.1) ─── */
+.wk-callout {
+  margin: 0 0 20px;
+  padding: 12px 14px 12px 16px;
+  background: var(--wk-paper-dark);
+  border: 1px solid var(--wk-border);
+  border-left: 3px solid var(--wk-border-strong);
+  border-radius: 3px;
+  font-family: var(--wk-body-serif);
+  color: var(--wk-text);
+}
+.wk-callout-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wk-text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.wk-callout-title {
+  font-family: var(--wk-chrome);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--wk-text-muted);
+}
+.wk-callout-body {
+  font-family: var(--wk-body-serif);
+  font-size: 16px;
+  line-height: 1.6;
+}
+.wk-callout-body > :last-child {
+  margin-bottom: 0;
+}
+.wk-callout-folded > details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.wk-callout-folded > details > summary::-webkit-details-marker {
+  display: none;
+}
+.wk-callout-folded > details > summary::before {
+  content: "▸";
+  display: inline-block;
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-text-muted);
+  margin-right: 6px;
+  transition: transform 120ms ease;
+}
+.wk-callout-folded > details[open] > summary::before {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .wk-callout-folded > details > summary::before {
+    transition: none;
+  }
+}
+/* Per-type left-border tints. `--amber` is reserved for the live-edit pulse,
+ * so `warning` falls back to a darker neutral instead. `caution` uses the
+ * broken-wikilink red family. All other types share the calm slate border
+ * picked up from the base `.wk-callout` rule above. */
+.wk-callout-warning {
+  border-left-color: var(--wk-text-muted);
+}
+.wk-callout-important {
+  border-left-color: var(--wk-text);
+}
+.wk-callout-caution {
+  border-left-color: var(--wk-wikilink-broken);
+}
+
 /* ─── Hatnote ─── */
 .wk-hatnote {
   font-family: var(--wk-body-serif);

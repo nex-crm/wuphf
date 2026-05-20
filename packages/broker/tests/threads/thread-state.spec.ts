@@ -1,5 +1,11 @@
 import {
+  type ApprovalDecidedAuditPayload,
+  type ApprovalRequestedAuditPayload,
+  approvalAuditPayloadToBytes,
   asAgentSlug,
+  asApprovalClaimId,
+  asApprovalRequestId,
+  asApprovalRole,
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
@@ -9,7 +15,9 @@ import {
   asThreadSpecRevisionId,
   canonicalJSON,
   type JsonValue,
+  lsnFromV1Number,
   type ReceiptSnapshot,
+  receiptToJson,
   SanitizedString,
   sha256Hex,
   type ThreadCreateCommand,
@@ -29,14 +37,18 @@ import { constructSqliteReceiptStoreForTesting } from "../../src/internal/sqlite
 import type { SqliteReceiptStore } from "../../src/sqlite-receipt-store.ts";
 import {
   createThreadSubsystem,
+  createThreadViewStore,
   parseThreadIdempotencyKey,
+  runThreadReplayCheck,
   SYSTEM_INBOX_THREAD_ID,
   snapshotThreadProjection,
   type ThreadAppender,
+  type ThreadApprovalQuery,
   type ThreadCommand,
   ThreadConflictError,
   ThreadIdempotencyConflictError,
   ThreadNotFoundError,
+  type ThreadReceiptIndexStore,
   type ThreadStateStore,
   type ThreadSubsystem,
   ThreadTerminalTransitionError,
@@ -51,6 +63,7 @@ const STATUS_KEY_2 = "cmd_thread.status.change_01GRZ3NDEKTSV4RRFFQ69G5FG0";
 const STATUS_KEY_3 = "cmd_thread.status.change_01HRZ3NDEKTSV4RRFFQ69G5FH0";
 const SIGNER = asSignerIdentity("operator@example.com");
 const INITIAL_CONTENT: JsonValue = { goal: "ship threads", version: 1 };
+const APPROVAL_CLAIM_ID = asApprovalClaimId("claim_thread_replay_check");
 
 interface Fixture {
   readonly db: ReturnType<typeof openDatabase>;
@@ -275,7 +288,129 @@ function minimalReceiptV2(id: string, taskId: string, threadId = THREAD_ID): Rec
   };
 }
 
+function minimalThreadlessReceiptV2(id: string, taskId: string): ReceiptSnapshot {
+  return {
+    ...minimalReceiptV1(id, taskId),
+    schemaVersion: 2,
+  };
+}
+
+function approvalRequestedPayload(args: {
+  readonly requestId: string;
+  readonly threadId?: string;
+  readonly taskId?: string;
+  readonly receiptId?: string;
+}): ApprovalRequestedAuditPayload {
+  const receiptId = asReceiptId(args.receiptId ?? "01PRZ3NDEKTSV4RRFFQ69G5FP0");
+  const frozenArgsHash = sha256Hex(`frozen-${args.requestId}`);
+  return {
+    requestId: asApprovalRequestId(args.requestId),
+    claim: {
+      schemaVersion: 1,
+      claimId: APPROVAL_CLAIM_ID,
+      kind: "receipt_co_sign",
+      receiptId,
+      frozenArgsHash,
+      riskClass: "critical",
+    },
+    scope: {
+      mode: "single_use",
+      claimId: APPROVAL_CLAIM_ID,
+      claimKind: "receipt_co_sign",
+      role: asApprovalRole("approver"),
+      maxUses: 1,
+      receiptId,
+      frozenArgsHash,
+    },
+    riskClass: "critical",
+    ...(args.threadId === undefined ? {} : { threadId: asThreadId(args.threadId) }),
+    ...(args.taskId === undefined ? {} : { taskId: asTaskId(args.taskId) }),
+    receiptId,
+    requestedBy: SIGNER,
+    requestedAt: new Date("2026-05-18T10:30:00.000Z"),
+  };
+}
+
 describe("thread appender and projection", () => {
+  it("derives thread list views inside one read transaction", () => {
+    const fix = setup();
+    const observed: { readonly name: string; readonly inTransaction: boolean }[] = [];
+    const record = (name: string): void => {
+      observed.push({ name, inTransaction: fix.db.inTransaction });
+    };
+    const state: ThreadStateStore = {
+      applyEvent(recordEvent) {
+        fix.state.applyEvent(recordEvent);
+      },
+      clear() {
+        fix.state.clear();
+      },
+      rebuildFromLog(eventLog, fromLsn) {
+        fix.state.rebuildFromLog(eventLog, fromLsn);
+      },
+      getById(threadId) {
+        return fix.state.getById(threadId);
+      },
+      hasSpecRevision(revisionId) {
+        return fix.state.hasSpecRevision(revisionId);
+      },
+      list(filter) {
+        record("state.list");
+        return fix.state.list(filter);
+      },
+    };
+    const receiptIndex: ThreadReceiptIndexStore = {
+      applyEvent(recordEvent) {
+        fix.subsystem.receiptIndex.applyEvent(recordEvent);
+      },
+      clear() {
+        fix.subsystem.receiptIndex.clear();
+      },
+      rebuildFromLog(eventLog, fromLsn) {
+        fix.subsystem.receiptIndex.rebuildFromLog(eventLog, fromLsn);
+      },
+      list(threadId, filter) {
+        return fix.subsystem.receiptIndex.list(threadId, filter);
+      },
+      refsForThread(threadId) {
+        record("receiptIndex.refsForThread");
+        return fix.subsystem.receiptIndex.refsForThread(threadId);
+      },
+      latestForThread(threadId) {
+        record("receiptIndex.latestForThread");
+        return fix.subsystem.receiptIndex.latestForThread(threadId);
+      },
+    };
+    const approvals: ThreadApprovalQuery = {
+      countPendingByThread() {
+        record("approvals.countPendingByThread");
+        return 0;
+      },
+      latestHeadLsnByThread() {
+        record("approvals.latestHeadLsnByThread");
+        return null;
+      },
+      pendingByThreadSnapshot() {
+        return { rows: [], headLsn: null };
+      },
+    };
+    const views = createThreadViewStore(fix.db, state, receiptIndex);
+
+    const page = views.listThreadViews({ limit: 10, approvals });
+
+    expect(page.threads.map((thread) => thread.id)).toContain(SYSTEM_INBOX_THREAD_ID);
+    expect(observed.map((entry) => entry.name)).toEqual(
+      expect.arrayContaining([
+        "state.list",
+        "receiptIndex.refsForThread",
+        "receiptIndex.latestForThread",
+        "approvals.countPendingByThread",
+        "approvals.latestHeadLsnByThread",
+      ]),
+    );
+    expect(observed.every((entry) => entry.inTransaction)).toBe(true);
+  });
+
   it("stores spec content hash from canonical content and replays latest spec payload bytes", () => {
     const fix = setup();
     appendCreate(fix);
@@ -550,11 +685,412 @@ describe("thread appender and projection", () => {
     });
 
     const live = snapshotThreadProjection(fix.db);
+    fix.state.rebuildFromLog(fix.eventLog);
+    expect(snapshotThreadProjection(fix.db)).toEqual(live);
     fix.subsystem.rebuildFromLog(0);
     expect(snapshotThreadProjection(fix.db)).toEqual(live);
   });
 
-  it("receipt list order provides the deterministic thread receipt index source", async () => {
+  it("replay-check reports ok for synchronized thread projections", () => {
+    const fix = setup();
+    appendCreate(fix);
+    appendSpecEdit(
+      fix,
+      specEditCommand({
+        baseRevisionId: "01CRZ3NDEKTSV4RRFFQ69G5FC0",
+        content: { edit: "replay-check" },
+      }),
+      EDIT_KEY,
+      INITIAL_CONTENT,
+    );
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(true);
+    expect(report.discrepancies).toEqual([]);
+    expect(report.eventsScanned).toBeGreaterThan(0);
+  });
+
+  it("replay-check detects live thread projection drift", () => {
+    const fix = setup();
+    appendCreate(fix);
+    fix.db
+      .prepare("UPDATE threads SET title = ? WHERE thread_id = ?")
+      .run("Drifted title", THREAD_ID);
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toContainEqual({
+      kind: "thread_state_field_mismatch",
+      threadId: THREAD_ID,
+      field: "title",
+      replayed: "Thread foundation",
+      stored: "Drifted title",
+    });
+  });
+
+  it("replay-check reports unparseable events and approval replay failures", () => {
+    const fix = setup();
+    appendCreate(fix);
+    const malformedLsn = fix.eventLog.append({
+      type: "thread.spec_edited",
+      payload: Buffer.from("{}"),
+    });
+    const decided: ApprovalDecidedAuditPayload = {
+      requestId: asApprovalRequestId("01MRZ3NDEKTSV4RRFFQ69G5FM0"),
+      decision: "reject",
+      decidedBy: SIGNER,
+      decidedAt: new Date("2026-05-18T10:35:00.000Z"),
+    };
+    fix.eventLog.append({
+      type: "approval.decided",
+      payload: Buffer.from(approvalAuditPayloadToBytes("approval_decided", decided)),
+    });
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "event_payload_unparseable",
+          lsn: lsnFromV1Number(malformedLsn),
+          eventType: "thread.spec_edited",
+        }),
+        expect.objectContaining({
+          kind: "approval_replay_failed",
+        }),
+      ]),
+    );
+  });
+
+  it("replay-check rejects forged spec content hashes from the event log", () => {
+    const fix = setup();
+    appendCreate(fix);
+    const forgedLsn = fix.eventLog.append({
+      type: "thread.spec_edited",
+      payload: Buffer.from(
+        JSON.stringify({
+          threadId: THREAD_ID,
+          revisionId: "01YRZ3NDEKTSV4RRFFQ69G5FY0",
+          baseRevisionId: "01CRZ3NDEKTSV4RRFFQ69G5FC0",
+          content: { forged: true },
+          contentHash: sha256Hex("forged-spec-content"),
+          authoredBy: SIGNER,
+          authoredAt: "2026-05-18T10:34:00.000Z",
+        }),
+      ),
+    });
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toContainEqual(
+      expect.objectContaining({
+        kind: "event_payload_unparseable",
+        lsn: lsnFromV1Number(forgedLsn),
+        eventType: "thread.spec_edited",
+        reason: expect.stringContaining("contentHash"),
+      }),
+    );
+  });
+
+  it("replay-check rejects V1 receipt events that smuggle a thread id", () => {
+    const fix = setup();
+    appendCreate(fix);
+    const wire = JSON.parse(
+      receiptToJson(minimalReceiptV1("01PRZ3NDEKTSV4RRFFQ69G5FP0", "01MRZ3NDEKTSV4RRFFQ69G5FM0")),
+    ) as Record<string, unknown> & { threadId?: unknown };
+    wire.threadId = THREAD_ID;
+    const malformedLsn = fix.eventLog.append({
+      type: "receipt.put",
+      payload: Buffer.from(JSON.stringify(wire)),
+    });
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toContainEqual(
+      expect.objectContaining({
+        kind: "event_payload_unparseable",
+        lsn: lsnFromV1Number(malformedLsn),
+        eventType: "receipt.put",
+        reason: expect.stringContaining("threadId"),
+      }),
+    );
+  });
+
+  it("replay-check detects forged spec revision chain invariants", () => {
+    const fix = setup();
+    appendCreate(fix);
+    const missingThread: ThreadSpecEditedAuditPayload = {
+      threadId: asThreadId(OTHER_THREAD_ID),
+      revisionId: asThreadSpecRevisionId("01JRZ3NDEKTSV4RRFFQ69G5FJ0"),
+      content: { missing: true },
+      contentHash: threadSpecContentHash({ missing: true }),
+      authoredBy: SIGNER,
+      authoredAt: new Date("2026-05-18T10:31:00.000Z"),
+    };
+    const duplicateRevision: ThreadSpecEditedAuditPayload = {
+      threadId: asThreadId(THREAD_ID),
+      revisionId: asThreadSpecRevisionId("01CRZ3NDEKTSV4RRFFQ69G5FC0"),
+      baseRevisionId: asThreadSpecRevisionId("01CRZ3NDEKTSV4RRFFQ69G5FC0"),
+      content: { duplicate: true },
+      contentHash: threadSpecContentHash({ duplicate: true }),
+      authoredBy: SIGNER,
+      authoredAt: new Date("2026-05-18T10:32:00.000Z"),
+    };
+    const staleBase: ThreadSpecEditedAuditPayload = {
+      threadId: asThreadId(THREAD_ID),
+      revisionId: asThreadSpecRevisionId("01KRZ3NDEKTSV4RRFFQ69G5FK0"),
+      baseRevisionId: asThreadSpecRevisionId("01BRZ3NDEKTSV4RRFFQ69G5FB0"),
+      content: { stale: true },
+      contentHash: threadSpecContentHash({ stale: true }),
+      authoredBy: SIGNER,
+      authoredAt: new Date("2026-05-18T10:33:00.000Z"),
+    };
+    for (const payload of [missingThread, duplicateRevision, staleBase]) {
+      fix.eventLog.append({
+        type: "thread.spec_edited",
+        payload: Buffer.from(threadAuditPayloadToBytes("thread_spec_edited", payload)),
+      });
+    }
+
+    const reasons = runThreadReplayCheck(fix.db)
+      .discrepancies.filter((discrepancy) => discrepancy.kind === "thread_log_invariant_violation")
+      .map((discrepancy) => discrepancy.reason);
+    expect(reasons).toEqual(
+      expect.arrayContaining([
+        "spec edit references a missing thread",
+        "duplicate spec revision id",
+        "spec base revision does not match head",
+      ]),
+    );
+  });
+
+  it("replay-check detects forged status-fold drift in the event log", () => {
+    const fix = setup();
+    appendCreate(fix);
+    appendStatus(fix, statusCommand({ fromStatus: "open", toStatus: "in_progress" }), STATUS_KEY);
+    const payload: ThreadStatusChangedAuditPayload = {
+      threadId: asThreadId(THREAD_ID),
+      fromStatus: "open",
+      toStatus: "closed",
+      changedBy: SIGNER,
+      changedAt: new Date("2026-05-18T10:20:00.000Z"),
+    };
+    const lsn = fix.eventLog.append({
+      type: "thread.status_changed",
+      payload: Buffer.from(threadAuditPayloadToBytes("thread_status_changed", payload)),
+    });
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toContainEqual({
+      kind: "thread_log_invariant_violation",
+      lsn: lsnFromV1Number(lsn),
+      eventType: "thread.status_changed",
+      reason: "status fromStatus does not match fold",
+      threadId: THREAD_ID,
+      expected: "in_progress",
+      actual: "open",
+    });
+  });
+
+  it("replay-check detects forged missing and terminal status events", () => {
+    const fix = setup();
+    appendCreate(fix);
+    appendStatus(fix, statusCommand({ fromStatus: "open", toStatus: "closed" }), STATUS_KEY);
+    const missingThread: ThreadStatusChangedAuditPayload = {
+      threadId: asThreadId(OTHER_THREAD_ID),
+      fromStatus: "open",
+      toStatus: "closed",
+      changedBy: SIGNER,
+      changedAt: new Date("2026-05-18T10:21:00.000Z"),
+    };
+    const terminalOut: ThreadStatusChangedAuditPayload = {
+      threadId: asThreadId(THREAD_ID),
+      fromStatus: "open",
+      toStatus: "closed",
+      changedBy: SIGNER,
+      changedAt: new Date("2026-05-18T10:22:00.000Z"),
+    };
+    for (const payload of [missingThread, terminalOut]) {
+      fix.eventLog.append({
+        type: "thread.status_changed",
+        payload: Buffer.from(threadAuditPayloadToBytes("thread_status_changed", payload)),
+      });
+    }
+
+    const reasons = runThreadReplayCheck(fix.db)
+      .discrepancies.filter((discrepancy) => discrepancy.kind === "thread_log_invariant_violation")
+      .map((discrepancy) => discrepancy.reason);
+    expect(reasons).toEqual(
+      expect.arrayContaining([
+        "status change references a missing thread",
+        "status transition out of terminal state",
+      ]),
+    );
+  });
+
+  it("replay-check detects forged receipt/thread foreign-key drift in the event log", () => {
+    const fix = setup();
+    appendCreate(fix);
+    const receipt = minimalReceiptV2(
+      "01PRZ3NDEKTSV4RRFFQ69G5FP0",
+      "01MRZ3NDEKTSV4RRFFQ69G5FM0",
+      OTHER_THREAD_ID,
+    );
+    const lsn = fix.eventLog.append({
+      type: "receipt.put",
+      payload: Buffer.from(receiptToJson(receipt)),
+    });
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toContainEqual({
+      kind: "thread_log_invariant_violation",
+      lsn: lsnFromV1Number(lsn),
+      eventType: "receipt.put",
+      reason: "receipt references a missing thread",
+      threadId: OTHER_THREAD_ID,
+      actual: receipt.id,
+    });
+  });
+
+  it("replay-check detects task ids assigned to multiple threads", async () => {
+    const fix = setup();
+    appendCreate(fix);
+    appendCreate(fix, "cmd_thread.create_01SRZ3NDEKTSV4RRFFQ69G5FS0", OTHER_THREAD_ID);
+    const taskId = "01MRZ3NDEKTSV4RRFFQ69G5FM0";
+    await fix.receiptStore.put(minimalReceiptV2("01PRZ3NDEKTSV4RRFFQ69G5FP0", taskId));
+    await fix.receiptStore.put(
+      minimalReceiptV2("01QRZ3NDEKTSV4RRFFQ69G5FQ0", taskId, OTHER_THREAD_ID),
+    );
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toContainEqual({
+      kind: "thread_log_invariant_violation",
+      lsn: expect.any(String),
+      eventType: "receipt.put",
+      reason: "task id assigned to multiple threads",
+      threadId: OTHER_THREAD_ID,
+      expected: THREAD_ID,
+      actual: OTHER_THREAD_ID,
+    });
+  });
+
+  it("replay-check detects missing and ghost thread projection rows", () => {
+    const fix = setup();
+    appendCreate(fix);
+    fix.db
+      .prepare(
+        `INSERT INTO threads
+           SELECT ? AS thread_id, title, status, head_lsn, created_by, created_at_ms,
+                  updated_at_ms, closed_at_ms, spec_revision_id, spec_base_revision_id,
+                  spec_content, spec_content_hash, spec_authored_by, spec_authored_at_ms,
+                  external_refs
+             FROM threads
+            WHERE thread_id = ?`,
+      )
+      .run(OTHER_THREAD_ID, THREAD_ID);
+    fix.db.pragma("foreign_keys = OFF");
+    fix.db.prepare("DELETE FROM thread_spec_revisions WHERE thread_id = ?").run(THREAD_ID);
+    fix.db.prepare("DELETE FROM threads WHERE thread_id = ?").run(THREAD_ID);
+    fix.db.pragma("foreign_keys = ON");
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toEqual(
+      expect.arrayContaining([
+        { kind: "thread_state_row_missing", threadId: THREAD_ID },
+        { kind: "thread_state_row_ghost", threadId: OTHER_THREAD_ID },
+      ]),
+    );
+  });
+
+  it("replay-check detects invalid live status effective projection drift", () => {
+    const fix = setup();
+    appendCreate(fix);
+    fix.db.pragma("ignore_check_constraints = ON");
+    fix.db
+      .prepare("UPDATE threads SET status = ? WHERE thread_id = ?")
+      .run("bad_status", THREAD_ID);
+    fix.db.pragma("ignore_check_constraints = OFF");
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toContainEqual({
+      kind: "thread_effective_status_mismatch",
+      threadId: THREAD_ID,
+      field: "effectiveStatus",
+      replayed: "open",
+      stored: "invalid_status",
+    });
+  });
+
+  it("replay-check reports approvals that cannot be pinned to a thread", () => {
+    const fix = setup();
+    appendCreate(fix);
+    const payload = approvalRequestedPayload({
+      requestId: "01MRZ3NDEKTSV4RRFFQ69G5FM0",
+      taskId: "01NRZ3NDEKTSV4RRFFQ69G5FN0",
+    });
+    fix.eventLog.append({
+      type: "approval.requested",
+      payload: Buffer.from(approvalAuditPayloadToBytes("approval_requested", payload)),
+    });
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toContainEqual({
+      kind: "thread_log_invariant_violation",
+      lsn: expect.any(String),
+      eventType: "approval.requested",
+      reason: "approval has no thread id",
+      actual: payload.requestId,
+    });
+  });
+
+  it("replay-check detects live receipt index drift", async () => {
+    const fix = setup();
+    appendCreate(fix);
+    const receiptId = "01PRZ3NDEKTSV4RRFFQ69G5FP0";
+    const taskId = "01MRZ3NDEKTSV4RRFFQ69G5FM0";
+    await fix.receiptStore.put(minimalReceiptV2(receiptId, taskId));
+    fix.db.prepare("DELETE FROM thread_receipts WHERE receipt_id = ?").run(receiptId);
+
+    const report = runThreadReplayCheck(fix.db);
+    expect(report.ok).toBe(false);
+    expect(report.discrepancies).toContainEqual({
+      kind: "thread_receipt_index_mismatch",
+      threadId: THREAD_ID,
+      field: "receiptIds",
+      replayed: [receiptId],
+      stored: [],
+    });
+    expect(report.discrepancies).toContainEqual({
+      kind: "thread_receipt_index_mismatch",
+      threadId: THREAD_ID,
+      field: "taskIds",
+      replayed: [taskId],
+      stored: [],
+    });
+  });
+
+  it("maps threadless V2 receipts to the system inbox thread index", async () => {
+    const fix = setup();
+    const receiptId = "01PRZ3NDEKTSV4RRFFQ69G5FP0";
+    const taskId = "01MRZ3NDEKTSV4RRFFQ69G5FM0";
+    await fix.receiptStore.put(minimalThreadlessReceiptV2(receiptId, taskId));
+
+    const page = await fix.receiptStore.list({ threadId: SYSTEM_INBOX_THREAD_ID });
+    expect(page.items.map((receipt) => receipt.id)).toEqual([receiptId]);
+    expect(fix.subsystem.receiptIndex.refsForThread(SYSTEM_INBOX_THREAD_ID)).toEqual({
+      receiptIds: [receiptId],
+      taskIds: [taskId],
+    });
+    expect(runThreadReplayCheck(fix.db).ok).toBe(true);
+  });
+
+  it("paginates and rebuilds the deterministic thread receipt index source", async () => {
     const fix = setup();
     appendCreate(fix);
     const taskA = "01MRZ3NDEKTSV4RRFFQ69G5FM0";
@@ -578,7 +1114,59 @@ describe("thread appender and projection", () => {
       taskIds: [taskA, taskB],
     };
     expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
+    const first = fix.subsystem.receiptIndex.list(asThreadId(THREAD_ID), { limit: 2 });
+    expect(first.items.map((item) => item.receiptId)).toEqual([
+      "01PRZ3NDEKTSV4RRFFQ69G5FP0",
+      "01QRZ3NDEKTSV4RRFFQ69G5FQ0",
+    ]);
+    expect(first.nextCursor).not.toBeNull();
+    if (first.nextCursor === null) throw new Error("missing receipt index cursor");
+    const second = fix.subsystem.receiptIndex.list(asThreadId(THREAD_ID), {
+      cursor: first.nextCursor,
+      limit: 2,
+    });
+    expect(second.items.map((item) => item.receiptId)).toEqual(["01RRZ3NDEKTSV4RRFFQ69G5FR0"]);
+    expect(fix.subsystem.receiptIndex.latestForThread(asThreadId(THREAD_ID))?.receiptId).toBe(
+      "01RRZ3NDEKTSV4RRFFQ69G5FR0",
+    );
+    fix.subsystem.receiptIndex.rebuildFromLog(fix.eventLog, 0);
+    expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
     fix.subsystem.rebuildFromLog(0);
     expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
+  });
+
+  it("keeps thread state and receipt index intact when full rebuild replay fails", async () => {
+    const fix = setup();
+    appendCreate(fix);
+    await fix.receiptStore.put(
+      minimalReceiptV2("01PRZ3NDEKTSV4RRFFQ69G5FP0", "01MRZ3NDEKTSV4RRFFQ69G5FM0"),
+    );
+    const live = snapshotThreadProjection(fix.db);
+    const liveReceiptRows = fix.db
+      .prepare<[], { readonly count: number }>("SELECT COUNT(*) AS count FROM thread_receipts")
+      .get()?.count;
+
+    fix.eventLog.append({
+      type: "thread.status_changed",
+      payload: Buffer.from(
+        threadAuditPayloadToBytes("thread_status_changed", {
+          threadId: asThreadId(OTHER_THREAD_ID),
+          fromStatus: "open",
+          toStatus: "closed",
+          changedBy: SIGNER,
+          changedAt: new Date("2026-05-18T10:30:00.000Z"),
+        }),
+      ),
+    });
+
+    expect(() => fix.subsystem.rebuildFromLog(0)).toThrow(
+      /thread projection status change referenced a missing thread/,
+    );
+    expect(snapshotThreadProjection(fix.db)).toEqual(live);
+    expect(
+      fix.db
+        .prepare<[], { readonly count: number }>("SELECT COUNT(*) AS count FROM thread_receipts")
+        .get()?.count,
+    ).toBe(liveReceiptRows);
   });
 });

@@ -521,6 +521,20 @@
       }
     },
     {
+      "name": "thread replay check report",
+      "codec": "threadReplayCheckReport",
+      "input": {
+        "schemaVersion": 1,
+        "ok": true,
+        "highestLsn": "v1:42",
+        "eventsScanned": 0,
+        "discrepancies": []
+      },
+      "expected": {
+        "canonicalSerialization": "{\"discrepancies\":[],\"eventsScanned\":0,\"highestLsn\":\"v1:42\",\"ok\":true,\"schemaVersion\":1}"
+      }
+    },
+    {
       "name": "route error",
       "codec": "routeError",
       "input": {

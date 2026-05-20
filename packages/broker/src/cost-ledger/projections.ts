@@ -273,7 +273,9 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
   const pruneIdempotencyStmt = db.prepare<[number]>(
-    `DELETE FROM command_idempotency WHERE created_at_ms < ?`,
+    `DELETE FROM command_idempotency
+     WHERE created_at_ms < ?
+       AND command IN ('cost.event', 'cost.budget.set', 'cost.budget.tombstone')`,
   );
 
   // Inner (non-transactional) append helpers. The public `appendX`

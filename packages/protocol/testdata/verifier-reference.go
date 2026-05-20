@@ -812,6 +812,8 @@ func parseRouteEnvelope(codec string, raw json.RawMessage) (map[string]interface
 		return record, validateApprovalGetResponse(record)
 	case "threadPinnedApprovalsResponse":
 		return record, validateThreadPinnedApprovalsResponse(record)
+	case "threadReplayCheckReport":
+		return record, validateThreadReplayCheckReport(record)
 	case "routeError":
 		return record, validateRouteErrorEnvelope(record)
 	default:
@@ -1403,6 +1405,180 @@ func validateRouteErrorEnvelope(record map[string]interface{}) error {
 		if err := requiredNonNegativeInteger(record, "retryAfterMs", path+".retryAfterMs", maxSafeInteger); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateThreadReplayCheckReport(record map[string]interface{}) error {
+	const path = "threadReplayCheckReport"
+	if err := knownKeys(record, path, map[string]bool{
+		"schemaVersion": true,
+		"ok":            true,
+		"highestLsn":    true,
+		"eventsScanned": true,
+		"discrepancies": true,
+	}); err != nil {
+		return err
+	}
+	if err := validateOptionalRouteSchemaVersion(record, path); err != nil {
+		return err
+	}
+	if value, ok := record["ok"]; !ok {
+		return fmt.Errorf("%s.ok: is required", path)
+	} else if _, ok := value.(bool); !ok {
+		return fmt.Errorf("%s.ok: must be a boolean", path)
+	}
+	if err := validateEventLsnField(record, "highestLsn", path+".highestLsn"); err != nil {
+		return err
+	}
+	if err := requiredNonNegativeInteger(record, "eventsScanned", path+".eventsScanned", maxSafeInteger); err != nil {
+		return err
+	}
+	discrepancies, err := requiredArrayValue(record, "discrepancies", path+".discrepancies")
+	if err != nil {
+		return err
+	}
+	maxDiscrepancies := maxRouteThreadListItems * 8
+	if len(discrepancies) > maxDiscrepancies {
+		return fmt.Errorf("%s.discrepancies: length exceeds MAX_THREAD_REPLAY_CHECK_DISCREPANCIES: %d > %d", path, len(discrepancies), maxDiscrepancies)
+	}
+	for index, item := range discrepancies {
+		discrepancy, ok := item.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("%s.discrepancies/%d: must be an object", path, index)
+		}
+		if err := validateThreadReplayCheckDiscrepancy(discrepancy, fmt.Sprintf("%s.discrepancies/%d", path, index)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateThreadReplayCheckDiscrepancy(record map[string]interface{}, path string) error {
+	if err := knownKeys(record, path, map[string]bool{
+		"kind":      true,
+		"lsn":       true,
+		"eventType": true,
+		"reason":    true,
+		"threadId":  true,
+		"field":     true,
+		"replayed":  true,
+		"stored":    true,
+		"expected":  true,
+		"actual":    true,
+	}); err != nil {
+		return err
+	}
+	kind, err := requiredStringValue(record, "kind", path+".kind")
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case "event_payload_unparseable":
+		if err := validateEventLsnField(record, "lsn", path+".lsn"); err != nil {
+			return err
+		}
+		if err := validateRequiredReplayString(record, "eventType", path+".eventType"); err != nil {
+			return err
+		}
+		return validateRequiredReplayReason(record, path)
+	case "approval_replay_failed":
+		return validateRequiredReplayReason(record, path)
+	case "thread_state_row_missing", "thread_state_row_ghost":
+		return validateULIDField(record, "threadId", path+".threadId", "ThreadId")
+	case "thread_state_field_mismatch":
+		if err := validateULIDField(record, "threadId", path+".threadId", "ThreadId"); err != nil {
+			return err
+		}
+		if err := validateRequiredReplayString(record, "field", path+".field"); err != nil {
+			return err
+		}
+		return validateReplayStoredPair(record, path)
+	case "thread_receipt_index_mismatch":
+		if err := validateULIDField(record, "threadId", path+".threadId", "ThreadId"); err != nil {
+			return err
+		}
+		if err := validateReplayEnumField(record, "field", path+".field", map[string]bool{"receiptIds": true, "taskIds": true, "latestReceiptStatus": true}); err != nil {
+			return err
+		}
+		return validateReplayStoredPair(record, path)
+	case "thread_pinned_approvals_mismatch":
+		if err := validateULIDField(record, "threadId", path+".threadId", "ThreadId"); err != nil {
+			return err
+		}
+		return validateReplayStoredPair(record, path)
+	case "thread_effective_status_mismatch":
+		if err := validateULIDField(record, "threadId", path+".threadId", "ThreadId"); err != nil {
+			return err
+		}
+		if err := validateReplayEnumField(record, "field", path+".field", map[string]bool{
+			"effectiveStatus":      true,
+			"attentionReason":      true,
+			"boardColumn":          true,
+			"currentSeat":          true,
+			"pendingApprovalCount": true,
+		}); err != nil {
+			return err
+		}
+		return validateReplayStoredPair(record, path)
+	case "thread_log_invariant_violation":
+		if err := validateEventLsnField(record, "lsn", path+".lsn"); err != nil {
+			return err
+		}
+		if err := validateRequiredReplayString(record, "eventType", path+".eventType"); err != nil {
+			return err
+		}
+		if err := validateRequiredReplayReason(record, path); err != nil {
+			return err
+		}
+		if _, ok := record["threadId"]; ok {
+			return validateULIDField(record, "threadId", path+".threadId", "ThreadId")
+		}
+		return nil
+	default:
+		return fmt.Errorf("%s.kind: unknown thread replay-check discrepancy kind %s", path, kind)
+	}
+}
+
+func validateReplayStoredPair(record map[string]interface{}, path string) error {
+	if _, ok := record["replayed"]; !ok {
+		return fmt.Errorf("%s.replayed: is required", path)
+	}
+	if _, ok := record["stored"]; !ok {
+		return fmt.Errorf("%s.stored: is required", path)
+	}
+	return nil
+}
+
+func validateRequiredReplayString(record map[string]interface{}, key string, path string) error {
+	value, err := requiredStringValue(record, key, path)
+	if err != nil {
+		return err
+	}
+	if value == "" {
+		return fmt.Errorf("%s: must be a non-empty string", path)
+	}
+	return nil
+}
+
+func validateRequiredReplayReason(record map[string]interface{}, path string) error {
+	reason, err := requiredStringValue(record, "reason", path+".reason")
+	if err != nil {
+		return err
+	}
+	if err := validateUtf8Budget(reason, maxRouteErrorMessageBytes, "RouteError.message bytes"); err != nil {
+		return fmt.Errorf("%s.reason: %w", path, err)
+	}
+	return nil
+}
+
+func validateReplayEnumField(record map[string]interface{}, key string, path string, allowed map[string]bool) error {
+	value, err := requiredStringValue(record, key, path)
+	if err != nil {
+		return err
+	}
+	if !allowed[value] {
+		return fmt.Errorf("%s: unsupported field %s", path, value)
 	}
 	return nil
 }

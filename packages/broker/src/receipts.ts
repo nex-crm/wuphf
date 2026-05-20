@@ -30,6 +30,7 @@ import {
   InvalidListCursorError,
   InvalidListLimitError,
   MAX_LIST_LIMIT,
+  type ReceiptPutResult,
   type ReceiptStore,
   ReceiptStoreBusyError,
   ReceiptStoreFullError,
@@ -182,7 +183,7 @@ export async function handleReceiptCreate(
     throw err;
   }
 
-  let result: { readonly existed: boolean };
+  let result: ReceiptPutResult;
   try {
     result = await deps.receiptStore.put(receipt);
   } catch (err) {
@@ -206,7 +207,6 @@ export async function handleReceiptCreate(
     writeJsonResponse(res, 409, JSON.stringify({ error: "receipt_id_exists", id: receipt.id }));
     return;
   }
-
   deps.logger.info("receipt_put_ok", { receiptId: receipt.id });
   writeJsonResponse(res, 201, receiptToJson(receipt), {
     Location: `/api/receipts/${encodeURIComponent(receipt.id)}`,

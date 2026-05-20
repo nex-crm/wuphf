@@ -22,7 +22,10 @@ export {
 } from "./effective-status.ts";
 export type { ParsedIdempotencyKey, ThreadCommand } from "./idempotency.ts";
 export { parseThreadIdempotencyKey, THREAD_COMMAND_VALUES } from "./idempotency.ts";
-export type { ThreadStateRow, ThreadStateStore } from "./projections.ts";
+export type {
+  ThreadStateRow,
+  ThreadStateStore,
+} from "./projections.ts";
 export {
   createThreadStateStore,
   threadAuditKindForEventType,
@@ -36,6 +39,21 @@ export type {
 } from "./receipt-index.ts";
 export { createThreadReceiptIndexStore } from "./receipt-index.ts";
 export type { ThreadProjectionSnapshotRow } from "./replay-check/index.ts";
-export { snapshotThreadProjection } from "./replay-check/index.ts";
+export { runThreadReplayCheck, snapshotThreadProjection } from "./replay-check/index.ts";
 export type { ThreadSubsystem } from "./subsystem.ts";
 export { createThreadSubsystem, SYSTEM_INBOX_THREAD_ID } from "./subsystem.ts";
+export type {
+  ThreadApprovalQuery,
+  ThreadApprovalQueryRow,
+  ThreadApprovalQuerySnapshot,
+  ThreadListViewArgs,
+  ThreadListViewPage,
+  ThreadStatusFilter,
+  ThreadViewStore,
+} from "./views.ts";
+export {
+  createThreadViewStore,
+  THREAD_BOARD_COLUMN_SET,
+  THREAD_EFFECTIVE_STATUS_SET,
+  threadViewFromRow,
+} from "./views.ts";

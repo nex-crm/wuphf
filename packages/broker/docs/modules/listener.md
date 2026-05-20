@@ -91,6 +91,7 @@ loopback guard and default `/api/*` bearer gate.
 | Method | Path | Auth | Contract |
 |---|---|---|---|
 | GET | `/api/v1/threads` | bearer | Lists folded thread views with optional `?status=` filter by stored/effective status or board column through `threadListResponseToJsonValue`; `Thread.task_ids` comes from the bounded `thread_receipts` index. |
+| GET | `/api/v1/threads/replay-check` | bearer | Runs the read-only replay-check drift detector through `threadReplayCheckReportToJsonValue`; the literal route is registered before the `:id` route so `replay-check` cannot be parsed as a thread id. |
 | GET | `/api/v1/threads/:id` | bearer | Fetches one folded thread view through `threadGetResponseToJsonValue`; full receipt enumeration stays behind the paginated receipts route. |
 | GET | `/api/v1/threads/:id/pinned-approvals` | bearer | Returns token-redacted pending approvals scoped to the thread through `threadPinnedApprovalsResponseToJsonValue`. |
 | POST | `/api/v1/threads` | bearer | Parses `threadCreateRequestFromJson`, appends `thread.created` and the initial `thread.spec_edited` in one SQLite transaction, returns `threadMutationResponseToJsonValue`, and emits `thread.created` SSE. |
@@ -98,9 +99,12 @@ loopback guard and default `/api/*` bearer gate.
 | PATCH | `/api/v1/threads/:id/status` | bearer | Parses `threadStatusChangeRequestFromJson` and validates status against the keyed projection under the appender lock; `fromStatus` mismatch returns 409 and terminal exits return 422. Accepted changes emit `thread.updated` SSE. |
 
 See [threads.md](./threads.md) for projection storage, idempotency, and replay
-details. Thread SSE events are invalidation-only and use the committed event LSN
-as the SSE `id`; clients must refetch on `ready`, reconnect, and every
-thread invalidation. Approval request/decision routes emit
+details. `GET /api/v1/threads/replay-check` runs inside one `BEGIN DEFERRED`
+SQLite transaction, replays the authoritative log into memory, and compares it
+with the live disposable tables plus read-time effective-status derivation.
+Thread SSE events are invalidation-only and use the committed event LSN as the
+SSE `id`; clients must refetch on `ready`, reconnect, and every thread
+invalidation. Approval request/decision routes emit
 `thread.pinned_approvals.changed` for thread-scoped approvals. Last-Event-ID
 backfill from `event_log` is still a TODO.
 

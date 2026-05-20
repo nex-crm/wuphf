@@ -237,6 +237,14 @@ jobs:
         if: ${{ steps.broker-changes.outputs.changed == 'true' }}
         working-directory: packages/broker
         run: bun run test
+      - name: Thread replay-check drift detector
+        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
+        working-directory: packages/broker
+        run: bun run ci:thread-replay-check
+      - name: Vitest coverage gate
+        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
+        working-directory: packages/broker
+        run: bun run test:coverage
       - name: Broker invariant checks
         # No non-loopback bind constants, no electron imports, all
         # @wuphf/protocol imports go through the package root, etc.
@@ -536,7 +544,7 @@ jobs:
       # would execute with CI privileges.
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # ratchet:golangci/golangci-lint-action@v9.2.0
         with:
-          version: v2.11.4
+          version: v2.12.2
           args: --timeout=5m
       - name: Cache govulncheck binary
         # The version below is pinned, so the compiled binary at
