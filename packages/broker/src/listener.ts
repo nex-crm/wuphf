@@ -283,6 +283,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
           appender: config.threads.appender,
           state: config.threads.state,
           receiptIndex: config.threads.receiptIndex,
+          views: config.threads.views,
           approvals: config.approvals?.projection ?? null,
           logger,
           nowMs: () => readBrokerClock(clock),

@@ -16,6 +16,7 @@ import { createThreadAppender, type ThreadAppender } from "./appender.ts";
 import type { ParsedIdempotencyKey } from "./idempotency.ts";
 import { createThreadStateStore, type ThreadStateStore } from "./projections.ts";
 import { createThreadReceiptIndexStore, type ThreadReceiptIndexStore } from "./receipt-index.ts";
+import { createThreadViewStore, type ThreadViewStore } from "./views.ts";
 
 export const SYSTEM_INBOX_THREAD_ID: ThreadId = asThreadId("00000000000000000000000001");
 
@@ -35,6 +36,7 @@ export interface ThreadSubsystem {
   readonly appender: ThreadAppender;
   readonly state: ThreadStateStore;
   readonly receiptIndex: ThreadReceiptIndexStore;
+  readonly views: ThreadViewStore;
   readonly receiptStore: SqliteReceiptStore;
   readonly inboxThreadId: ThreadId;
   sharesApprovalProvenance(appender: ApprovalAppender, projection: ApprovalProjection): boolean;
@@ -51,6 +53,7 @@ export function createThreadSubsystem(
   }
   const state = createThreadStateStore(db);
   const receiptIndex = createThreadReceiptIndexStore(db);
+  const views = createThreadViewStore(db, state, receiptIndex);
   const appender = createThreadAppender(db, eventLog, state);
   ensureSystemInboxThread(appender, state);
   const rebuildTransaction = db.transaction((fromLsn: number): void => {
@@ -81,6 +84,7 @@ export function createThreadSubsystem(
     appender,
     state,
     receiptIndex,
+    views,
     receiptStore,
     inboxThreadId: SYSTEM_INBOX_THREAD_ID,
     sharesApprovalProvenance(appender: ApprovalAppender, projection: ApprovalProjection): boolean {

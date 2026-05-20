@@ -44,3 +44,18 @@ export type { ThreadProjectionSnapshotRow } from "./replay-check/index.ts";
 export { snapshotThreadProjection } from "./replay-check/index.ts";
 export type { ThreadSubsystem } from "./subsystem.ts";
 export { createThreadSubsystem, SYSTEM_INBOX_THREAD_ID } from "./subsystem.ts";
+export type {
+  ThreadApprovalQuery,
+  ThreadApprovalQueryRow,
+  ThreadApprovalQuerySnapshot,
+  ThreadListViewArgs,
+  ThreadListViewPage,
+  ThreadStatusFilter,
+  ThreadViewStore,
+} from "./views.ts";
+export {
+  createThreadViewStore,
+  THREAD_BOARD_COLUMN_SET,
+  THREAD_EFFECTIVE_STATUS_SET,
+  threadViewFromRow,
+} from "./views.ts";

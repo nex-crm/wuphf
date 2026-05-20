@@ -29,14 +29,17 @@ import { constructSqliteReceiptStoreForTesting } from "../../src/internal/sqlite
 import type { SqliteReceiptStore } from "../../src/sqlite-receipt-store.ts";
 import {
   createThreadSubsystem,
+  createThreadViewStore,
   parseThreadIdempotencyKey,
   SYSTEM_INBOX_THREAD_ID,
   snapshotThreadProjection,
   type ThreadAppender,
+  type ThreadApprovalQuery,
   type ThreadCommand,
   ThreadConflictError,
   ThreadIdempotencyConflictError,
   ThreadNotFoundError,
+  type ThreadReceiptIndexStore,
   type ThreadStateStore,
   type ThreadSubsystem,
   ThreadTerminalTransitionError,
@@ -276,6 +279,91 @@ function minimalReceiptV2(id: string, taskId: string, threadId = THREAD_ID): Rec
 }
 
 describe("thread appender and projection", () => {
+  it("derives thread list views inside one read transaction", () => {
+    const fix = setup();
+    const observed: { readonly name: string; readonly inTransaction: boolean }[] = [];
+    const record = (name: string): void => {
+      observed.push({ name, inTransaction: fix.db.inTransaction });
+    };
+    const state: ThreadStateStore = {
+      applyEvent(recordEvent) {
+        fix.state.applyEvent(recordEvent);
+      },
+      clear() {
+        fix.state.clear();
+      },
+      rebuildFromLog(eventLog, fromLsn) {
+        fix.state.rebuildFromLog(eventLog, fromLsn);
+      },
+      getById(threadId) {
+        return fix.state.getById(threadId);
+      },
+      hasSpecRevision(revisionId) {
+        return fix.state.hasSpecRevision(revisionId);
+      },
+      list(filter) {
+        record("state.list");
+        return fix.state.list(filter);
+      },
+      listPage(page) {
+        return fix.state.listPage(page);
+      },
+    };
+    const receiptIndex: ThreadReceiptIndexStore = {
+      applyEvent(recordEvent) {
+        fix.subsystem.receiptIndex.applyEvent(recordEvent);
+      },
+      clear() {
+        fix.subsystem.receiptIndex.clear();
+      },
+      rebuildFromLog(eventLog, fromLsn) {
+        fix.subsystem.receiptIndex.rebuildFromLog(eventLog, fromLsn);
+      },
+      list(threadId, filter) {
+        return fix.subsystem.receiptIndex.list(threadId, filter);
+      },
+      refsForThread(threadId) {
+        record("receiptIndex.refsForThread");
+        return fix.subsystem.receiptIndex.refsForThread(threadId);
+      },
+      latestForThread(threadId) {
+        record("receiptIndex.latestForThread");
+        return fix.subsystem.receiptIndex.latestForThread(threadId);
+      },
+    };
+    const approvals: ThreadApprovalQuery = {
+      countPendingByThread() {
+        record("approvals.countPendingByThread");
+        return 0;
+      },
+      listPendingByThread() {
+        return [];
+      },
+      latestHeadLsnByThread() {
+        record("approvals.latestHeadLsnByThread");
+        return null;
+      },
+      pendingByThreadSnapshot() {
+        return { rows: [], headLsn: null };
+      },
+    };
+    const views = createThreadViewStore(fix.db, state, receiptIndex);
+
+    const page = views.listThreadViews({ limit: 10, approvals });
+
+    expect(page.threads.map((thread) => thread.id)).toContain(SYSTEM_INBOX_THREAD_ID);
+    expect(observed.map((entry) => entry.name)).toEqual(
+      expect.arrayContaining([
+        "state.list",
+        "receiptIndex.refsForThread",
+        "receiptIndex.latestForThread",
+        "approvals.countPendingByThread",
+        "approvals.latestHeadLsnByThread",
+      ]),
+    );
+    expect(observed.every((entry) => entry.inTransaction)).toBe(true);
+  });
+
   it("stores spec content hash from canonical content and replays latest spec payload bytes", () => {
     const fix = setup();
     appendCreate(fix);

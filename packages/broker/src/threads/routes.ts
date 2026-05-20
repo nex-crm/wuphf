@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
-  type ApprovalRequest,
   asIdempotencyKey,
   asSignerIdentity,
   asThreadId,
@@ -14,9 +13,6 @@ import {
   routeErrorToJsonValue,
   type Sha256Hex,
   type SignerIdentity,
-  THREAD_BOARD_COLUMN_VALUES,
-  THREAD_EFFECTIVE_STATUS_VALUES,
-  type Thread,
   type ThreadBoardColumn,
   type ThreadCreateCommand,
   type ThreadEffectiveStatus,
@@ -24,7 +20,6 @@ import {
   type ThreadId,
   type ThreadSpecEditCommand,
   type ThreadStatusChangeCommand,
-  type ThreadView,
   threadCreateRequestFromJson,
   threadCreateRequestToJsonValue,
   threadGetResponseToJsonValue,
@@ -36,7 +31,6 @@ import {
   threadSpecEditRequestToJsonValue,
   threadStatusChangeRequestFromJson,
   threadStatusChangeRequestToJsonValue,
-  validateThread,
 } from "@wuphf/protocol";
 import BetterSqlite3 from "better-sqlite3";
 import { ApprovalPendingSnapshotOverflowError } from "../approvals/index.ts";
@@ -57,26 +51,26 @@ import {
   ThreadNotFoundError,
   ThreadTerminalTransitionError,
 } from "./appender.ts";
-import { deriveThreadEffectiveStatus } from "./effective-status.ts";
 import {
   type IdempotencyParseError,
   type ParsedIdempotencyKey,
   parseThreadIdempotencyKey,
   type ThreadCommand,
 } from "./idempotency.ts";
-import {
-  type ThreadStateRow,
-  type ThreadStateStore,
-  threadStateRowToThread,
-} from "./projections.ts";
+import type { ThreadStateStore } from "./projections.ts";
 import type { ThreadReceiptIndexStore } from "./receipt-index.ts";
+import {
+  THREAD_BOARD_COLUMN_SET,
+  THREAD_EFFECTIVE_STATUS_SET,
+  type ThreadApprovalQuery,
+  type ThreadApprovalQueryRow,
+  type ThreadStatusFilter,
+  type ThreadViewStore,
+  threadViewFromRow,
+} from "./views.ts";
 
 const MAX_THREAD_BODY_BYTES = 512 * 1_024;
 const DEFAULT_THREAD_LIST_LIMIT = MAX_ROUTE_THREAD_LIST_ITEMS;
-const THREAD_EFFECTIVE_STATUS_SET: ReadonlySet<string> = new Set<string>(
-  THREAD_EFFECTIVE_STATUS_VALUES,
-);
-const THREAD_BOARD_COLUMN_SET: ReadonlySet<string> = new Set<string>(THREAD_BOARD_COLUMN_VALUES);
 const ROUTE_SIGNER: SignerIdentity = asSignerIdentity("broker");
 const EMPTY_EXTERNAL_REFS: ThreadExternalRefs = Object.freeze({
   sourceUrls: Object.freeze([]),
@@ -87,43 +81,17 @@ export interface ThreadRouteDeps {
   readonly appender: ThreadAppender;
   readonly state: ThreadStateStore;
   readonly receiptIndex: ThreadReceiptIndexStore;
+  readonly views: ThreadViewStore;
   readonly approvals: ThreadApprovalQuery | null;
   readonly logger: BrokerLogger;
   readonly nowMs: () => number;
   readonly emitThreadEvent: (event: ThreadRouteStreamEvent) => void;
 }
 
-export interface ThreadApprovalQuery {
-  countPendingByThread(threadId: ThreadId): number;
-  listPendingByThread(threadId: ThreadId): readonly ThreadApprovalQueryRow[];
-  latestHeadLsnByThread(threadId: ThreadId): EventLsn | null;
-  pendingByThreadSnapshot(threadId: ThreadId): ThreadApprovalQuerySnapshot;
-}
-
-export interface ThreadApprovalQueryRow {
-  readonly approval: ApprovalRequest;
-  readonly headLsn: EventLsn;
-}
-
-export interface ThreadApprovalQuerySnapshot {
-  readonly rows: readonly ThreadApprovalQueryRow[];
-  readonly headLsn: EventLsn | null;
-}
-
 export interface ThreadRouteStreamEvent {
   readonly kind: "thread.created" | "thread.updated" | "thread.pinned_approvals.changed";
   readonly threadId: ThreadId;
   readonly headLsn: EventLsn;
-}
-
-interface ThreadListViewPage {
-  readonly threads: readonly ThreadView[];
-  readonly nextCursor?: EventLsn;
-}
-
-interface ThreadListViewItem {
-  readonly thread: ThreadView;
-  readonly viewLsn: number;
 }
 
 export async function handleThreadRoute(
@@ -194,8 +162,9 @@ function handleThreadList(req: IncomingMessage, res: ServerResponse, deps: Threa
     return;
   }
   try {
-    const page = listThreadViewPage(deps, {
+    const page = deps.views.listThreadViews({
       limit: query.limit,
+      approvals: deps.approvals,
       ...(query.filter === undefined ? {} : { filter: query.filter }),
       ...(query.afterViewLsn === undefined ? {} : { afterViewLsn: query.afterViewLsn }),
     });
@@ -529,75 +498,6 @@ function threadRouteStreamEventFromApplied(applied: {
   };
 }
 
-function threadViewFromRow(row: ThreadStateRow, deps: ThreadRouteDeps): ThreadView {
-  return threadViewItemFromRow(row, deps).thread;
-}
-
-function listThreadViewPage(
-  deps: ThreadRouteDeps,
-  args: {
-    readonly limit: number;
-    readonly filter?: ThreadStatusFilter;
-    readonly afterViewLsn?: number;
-  },
-): ThreadListViewPage {
-  if (!Number.isSafeInteger(args.limit) || args.limit < 1) {
-    throw new Error("thread view page limit must be a positive safe integer");
-  }
-  const afterViewLsn = args.afterViewLsn ?? 0;
-  const candidates = deps.state
-    .list()
-    .map((row) => threadViewItemFromRow(row, deps))
-    .filter((item) => item.viewLsn > afterViewLsn)
-    .filter((item) => threadMatchesStatusFilter(item.thread, args.filter))
-    .sort((left, right) => left.viewLsn - right.viewLsn);
-  const visibleItems = candidates.slice(0, args.limit);
-  const last = visibleItems.at(-1);
-  return {
-    threads: visibleItems.map((item) => item.thread),
-    ...(candidates.length > args.limit && last !== undefined
-      ? { nextCursor: lsnFromV1Number(last.viewLsn) }
-      : {}),
-  };
-}
-
-function threadViewItemFromRow(row: ThreadStateRow, deps: ThreadRouteDeps): ThreadListViewItem {
-  const refs = deps.receiptIndex.refsForThread(row.id);
-  const thread = threadStateRowToThread(row, refs.taskIds);
-  assertThreadValid(thread);
-  const pendingApprovalCount = deps.approvals?.countPendingByThread(row.id) ?? 0;
-  const latestReceipt = deps.receiptIndex.latestForThread(row.id);
-  const approvalHeadLsn = deps.approvals?.latestHeadLsnByThread(row.id) ?? null;
-  const viewLsn = Math.max(
-    parseLsn(row.headLsn).localLsn,
-    latestReceipt?.lsn ?? 0,
-    approvalHeadLsn === null ? 0 : parseLsn(approvalHeadLsn).localLsn,
-  );
-  return {
-    viewLsn,
-    thread: {
-      ...thread,
-      ...deriveThreadEffectiveStatus({
-        storedStatus: row.status,
-        pendingApprovalCount,
-        latestReceiptStatus: latestReceipt?.status,
-      }),
-      pendingApprovalCount,
-    },
-  };
-}
-
-function assertThreadValid(thread: Thread): void {
-  const threadValidation = validateThread(thread);
-  if (!threadValidation.ok) {
-    throw new Error(
-      `thread projection failed validation: ${threadValidation.errors
-        .map((error) => `${error.path}: ${error.message}`)
-        .join("; ")}`,
-    );
-  }
-}
-
 function parseThreadListQuery(params: URLSearchParams):
   | {
       readonly ok: true;
@@ -677,16 +577,6 @@ function singleQueryParam(params: URLSearchParams, key: string): string | "multi
   if (values.length === 0) return undefined;
   if (values.length > 1) return "multiple";
   return values[0] ?? "";
-}
-
-type ThreadStatusFilter =
-  | { readonly kind: "effective_status"; readonly value: ThreadEffectiveStatus }
-  | { readonly kind: "board_column"; readonly value: ThreadBoardColumn };
-
-function threadMatchesStatusFilter(thread: ThreadView, filter: ThreadStatusFilter | undefined) {
-  if (filter === undefined) return true;
-  if (filter.kind === "effective_status") return thread.effectiveStatus === filter.value;
-  return thread.boardColumn === filter.value;
 }
 
 function maxHeadLsn(
