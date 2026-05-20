@@ -12,6 +12,7 @@ import {
   type BrokerBootstrapReady,
   type BrokerBootstrapState,
 } from "../../src/renderer/bootstrap/types.ts";
+import { BrokerStreamStateProvider } from "../../src/renderer/sse/useBrokerEvents.ts";
 import type { WuphfDesktopApi } from "../../src/shared/api-contract.ts";
 
 export const VALID_TOKEN = "A".repeat(16);
@@ -71,7 +72,9 @@ export function renderWithProviders(
   });
   const result = render(
     <QueryClientProvider client={queryClient}>
-      <BrokerBootstrapContext.Provider value={bootstrap}>{ui}</BrokerBootstrapContext.Provider>
+      <BrokerStreamStateProvider>
+        <BrokerBootstrapContext.Provider value={bootstrap}>{ui}</BrokerBootstrapContext.Provider>
+      </BrokerStreamStateProvider>
     </QueryClientProvider>,
   );
   return { ...result, queryClient };

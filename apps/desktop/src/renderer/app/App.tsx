@@ -9,6 +9,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 
 import { BrokerBootstrapProvider } from "../bootstrap/BrokerBootstrapProvider.tsx";
 import { desktopQueryClient } from "../query/queryClient.ts";
+import { BrokerStreamStateProvider } from "../sse/useBrokerEvents.ts";
 import { rootRoute } from "./routes/__root.tsx";
 import { indexRoute } from "./routes/index.tsx";
 
@@ -31,10 +32,12 @@ export function App({
 }: AppProps) {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrokerBootstrapProvider>
-        <RouterProvider router={routerInstance} />
-        {import.meta.env.DEV && <ReactQueryDevtools buttonPosition="bottom-left" />}
-      </BrokerBootstrapProvider>
+      <BrokerStreamStateProvider>
+        <BrokerBootstrapProvider>
+          <RouterProvider router={routerInstance} />
+          {import.meta.env.DEV && <ReactQueryDevtools buttonPosition="bottom-left" />}
+        </BrokerBootstrapProvider>
+      </BrokerStreamStateProvider>
     </QueryClientProvider>
   );
 }
