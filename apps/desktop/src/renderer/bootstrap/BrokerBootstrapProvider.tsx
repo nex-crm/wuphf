@@ -4,8 +4,6 @@ import { parseBootstrap } from "../bootstrap.ts";
 import type { WuphfDesktopApi } from "../../shared/api-contract.ts";
 import { BrokerBootstrapContext } from "./useBrokerBootstrap.ts";
 import {
-  apiTokenFromBootstrap,
-  brokerUrlFromBootstrap,
   type BrokerBootstrapReady,
   type BrokerBootstrapState,
 } from "./types.ts";
@@ -99,8 +97,8 @@ export async function loadBrokerBootstrap(
     throw new Error(`api-token ${String(tokenResponse.status)}`);
   }
   const parsed = parseBootstrap(await tokenResponse.json());
-  const bearer = apiTokenFromBootstrap(parsed.token);
-  const brokerUrl = brokerUrlFromBootstrap(parsed.brokerUrl);
+  const bearer = parsed.token;
+  const brokerUrl = parsed.brokerUrl;
 
   const healthResponse = await fetchImpl(`${brokerUrl}/api/health`, {
     headers: { Authorization: `Bearer ${bearer}` },

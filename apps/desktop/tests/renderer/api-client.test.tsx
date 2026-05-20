@@ -11,10 +11,7 @@ import {
 import { listThreads } from "../../src/renderer/api/threads.ts";
 import { BrokerBootstrapContext } from "../../src/renderer/bootstrap/useBrokerBootstrap.ts";
 import {
-  apiTokenFromBootstrap,
-  brokerUrlFromBootstrap,
-} from "../../src/renderer/bootstrap/types.ts";
-import {
+  VALID_BOOTSTRAP,
   jsonResponse,
   readyBootstrapState,
   VALID_BROKER_URL,
@@ -35,8 +32,8 @@ describe("broker API client", () => {
     });
     const client = createBrokerApiClient(
       {
-        brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-        bearer: apiTokenFromBootstrap(VALID_TOKEN),
+        brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+        bearer: VALID_BOOTSTRAP.token,
       },
       fetchMock,
     );
@@ -49,8 +46,8 @@ describe("broker API client", () => {
 
   it("rejects API paths that escape the broker origin", async () => {
     const client = createBrokerApiClient({
-      brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-      bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+      bearer: VALID_BOOTSTRAP.token,
     });
 
     await expect(client.getJson("https://example.com/api", (value) => value)).rejects.toThrow(
@@ -84,8 +81,8 @@ describe("broker API client", () => {
     });
     const client = createBrokerApiClient(
       {
-        brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-        bearer: apiTokenFromBootstrap(VALID_TOKEN),
+        brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+        bearer: VALID_BOOTSTRAP.token,
       },
       fetchMock,
     );
@@ -109,8 +106,8 @@ describe("broker API client", () => {
   it("surfaces decoded route error envelopes on non-ok broker responses", async () => {
     const client = createBrokerApiClient(
       {
-        brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-        bearer: apiTokenFromBootstrap(VALID_TOKEN),
+        brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+        bearer: VALID_BOOTSTRAP.token,
       },
       () =>
         Promise.resolve(
@@ -136,8 +133,8 @@ describe("broker API client", () => {
   it("keeps HTTP errors when a non-ok body is not JSON", async () => {
     const client = createBrokerApiClient(
       {
-        brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-        bearer: apiTokenFromBootstrap(VALID_TOKEN),
+        brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+        bearer: VALID_BOOTSTRAP.token,
       },
       () => Promise.resolve(new Response("not-json", { status: 502 })),
     );

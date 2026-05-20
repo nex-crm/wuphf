@@ -37,11 +37,3 @@ export type BrokerBootstrapState =
   | BrokerBootstrapLoading
   | BrokerBootstrapReady
   | BrokerBootstrapError;
-
-export function apiTokenFromBootstrap(value: string): ApiToken {
-  return value as ApiToken;
-}
-
-export function brokerUrlFromBootstrap(value: string): BrokerUrl {
-  return value as BrokerUrl;
-}

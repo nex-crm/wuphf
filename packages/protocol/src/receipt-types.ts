@@ -13,11 +13,16 @@ import {
   validateApprovalRequestIdBudget,
   validateSignerIdentityBudget,
 } from "./budgets.ts";
-import type { FrozenArgs } from "./frozen-args.ts";
 import { APPROVAL_ROLE_VALUES } from "./receipt-literals.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
 import type { Sha256Hex } from "./sha256.ts";
 import type { SignedApprovalToken } from "./signed-approval-token.ts";
+
+export interface FrozenArgs {
+  readonly canonicalJson: string;
+  readonly hash: Sha256Hex;
+  equals(other: FrozenArgs): boolean;
+}
 
 export type ReceiptId = Brand<string, "ReceiptId">;
 export type AgentSlug = Brand<string, "AgentSlug">;

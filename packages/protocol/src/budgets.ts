@@ -1,7 +1,10 @@
-import type { FrozenArgs } from "./frozen-args.ts";
 import type { SanitizedString } from "./sanitized-string.ts";
 
 export type BudgetValidationResult = { ok: true } | { ok: false; reason: string };
+
+interface FrozenArgsBudgetView {
+  readonly canonicalJson: string;
+}
 
 /**
  * A single receipt larger than 10 MiB can force parsers, canonicalizers, and
@@ -476,7 +479,7 @@ export function validateReceiptBudget(receipt: unknown): BudgetValidationResult 
   return { ok: true };
 }
 
-export function validateFrozenArgsBudget(frozen: FrozenArgs): BudgetValidationResult {
+export function validateFrozenArgsBudget(frozen: FrozenArgsBudgetView): BudgetValidationResult {
   const canonicalJson = stringProperty(frozen, "canonicalJson");
   if (canonicalJson === undefined) return { ok: true };
   return validateUtf8StringBudget(

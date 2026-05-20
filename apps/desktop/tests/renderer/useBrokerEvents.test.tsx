@@ -13,10 +13,7 @@ import {
 } from "../../src/renderer/sse/useBrokerEvents.ts";
 import { BrokerBootstrapContext } from "../../src/renderer/bootstrap/useBrokerBootstrap.ts";
 import {
-  apiTokenFromBootstrap,
-  brokerUrlFromBootstrap,
-} from "../../src/renderer/bootstrap/types.ts";
-import {
+  VALID_BOOTSTRAP,
   readyBootstrapState,
   renderWithProviders,
   VALID_BROKER_URL,
@@ -42,8 +39,8 @@ describe("useBrokerEvents", () => {
     });
 
     await consumeBrokerEvents({
-      brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-      bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+      bearer: VALID_BOOTSTRAP.token,
       queryClient,
       signal: new AbortController().signal,
       fetchImpl: fetchMock,
@@ -146,8 +143,8 @@ describe("useBrokerEvents", () => {
     const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(sseResponse("")));
 
     await consumeBrokerEvents({
-      brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-      bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+      bearer: VALID_BOOTSTRAP.token,
       queryClient,
       signal: new AbortController().signal,
       fetchImpl: fetchMock,
@@ -215,8 +212,8 @@ describe("useBrokerEvents", () => {
     });
 
     await consumeBrokerEvents({
-      brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-      bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+      bearer: VALID_BOOTSTRAP.token,
       queryClient,
       signal: new AbortController().signal,
       fetchImpl: fetchMock,
@@ -235,8 +232,8 @@ describe("useBrokerEvents", () => {
     const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(sseResponse("")));
 
     await consumeBrokerEvents({
-      brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-      bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+      bearer: VALID_BOOTSTRAP.token,
       queryClient,
       signal: controller.signal,
       fetchImpl: fetchMock,
@@ -250,8 +247,8 @@ describe("useBrokerEvents", () => {
     const states: BrokerStreamState[] = [];
 
     await consumeBrokerEvents({
-      brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-      bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+      bearer: VALID_BOOTSTRAP.token,
       queryClient,
       signal: new AbortController().signal,
       fetchImpl: () => Promise.reject("closed"),
@@ -269,8 +266,8 @@ describe("useBrokerEvents", () => {
     const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(sseResponse("")));
 
     await consumeBrokerEvents({
-      brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-      bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+      bearer: VALID_BOOTSTRAP.token,
       queryClient,
       signal: controller.signal,
       fetchImpl: fetchMock,
@@ -327,16 +324,16 @@ describe("useBrokerEvents", () => {
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
     await consumeBrokerEvents({
-      brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-      bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+      bearer: VALID_BOOTSTRAP.token,
       queryClient,
       signal: new AbortController().signal,
       fetchImpl: () => Promise.resolve({ ok: false, status: 503, body: null } as Response),
       reconnect: { maxReconnectAttempts: 0 },
     });
     await consumeBrokerEvents({
-      brokerUrl: brokerUrlFromBootstrap(VALID_BROKER_URL),
-      bearer: apiTokenFromBootstrap(VALID_TOKEN),
+      brokerUrl: VALID_BOOTSTRAP.brokerUrl,
+      bearer: VALID_BOOTSTRAP.token,
       queryClient,
       signal: new AbortController().signal,
       fetchImpl: () => Promise.resolve({ ok: true, status: 200, body: null } as Response),

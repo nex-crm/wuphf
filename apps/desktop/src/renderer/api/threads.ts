@@ -1,5 +1,6 @@
 import type {
   ThreadGetResponse,
+  ThreadId,
   ThreadListResponse,
   ThreadPinnedApprovalsResponse,
 } from "@wuphf/protocol/browser";
@@ -15,7 +16,7 @@ export function listThreads(client: BrokerApiClient): Promise<ThreadListResponse
   return client.getJson("/api/v1/threads", threadListResponseFromJson);
 }
 
-export function getThread(client: BrokerApiClient, threadId: string): Promise<ThreadGetResponse> {
+export function getThread(client: BrokerApiClient, threadId: ThreadId): Promise<ThreadGetResponse> {
   return client.getJson(
     `/api/v1/threads/${encodeURIComponent(threadId)}`,
     threadGetResponseFromJson,
@@ -24,7 +25,7 @@ export function getThread(client: BrokerApiClient, threadId: string): Promise<Th
 
 export function getThreadPinnedApprovals(
   client: BrokerApiClient,
-  threadId: string,
+  threadId: ThreadId,
 ): Promise<ThreadPinnedApprovalsResponse> {
   return client.getJson(
     `/api/v1/threads/${encodeURIComponent(threadId)}/pinned-approvals`,
