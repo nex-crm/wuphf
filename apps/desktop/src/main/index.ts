@@ -94,6 +94,7 @@ app
     installDynamicRendererCsp(
       session.defaultSession,
       () => brokerSupervisor.getSnapshot().brokerUrl,
+      { isPackaged: app.isPackaged },
     );
 
     try {
@@ -110,13 +111,19 @@ app
     }
 
     // The broker utility process opens durable SQLite stores under userData
-    // when these env vars are set. We set them unconditionally for packaged
-    // + dev paths so receipts, WebAuthn credentials, and pending challenges
-    // persist across restarts.
+    // when these env vars are set. Packaged builds force the path so receipts,
+    // WebAuthn credentials, and pending challenges persist across restarts.
+    // In dev we respect a pre-set value (including empty string, which keeps
+    // the broker on the in-memory store) so developers can sidestep native
+    // better-sqlite3 ABI rebuilds while iterating on the renderer.
     // `app.getPath("userData")` is safe inside `whenReady`.
     const userDataDir = app.getPath("userData");
-    process.env[RECEIPT_STORE_PATH_ENV] = join(userDataDir, "event-log.sqlite");
-    process.env[WEBAUTHN_STORE_PATH_ENV] = join(userDataDir, "webauthn.sqlite");
+    if (app.isPackaged || typeof process.env[RECEIPT_STORE_PATH_ENV] !== "string") {
+      process.env[RECEIPT_STORE_PATH_ENV] = join(userDataDir, "event-log.sqlite");
+    }
+    if (app.isPackaged || typeof process.env[WEBAUTHN_STORE_PATH_ENV] !== "string") {
+      process.env[WEBAUTHN_STORE_PATH_ENV] = join(userDataDir, "webauthn.sqlite");
+    }
 
     logger.info("broker_start_requested");
     brokerSupervisor.start();
