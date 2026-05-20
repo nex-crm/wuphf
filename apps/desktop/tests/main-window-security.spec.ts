@@ -1,9 +1,8 @@
 import { isIP } from "node:net";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseBootstrap } from "../src/renderer/bootstrap.ts";
-import type { GetBrokerStatusResponse, WuphfDesktopApi } from "../src/shared/api-contract.ts";
 
 interface MockBrowserWindowInstance {
   readonly options: unknown;
@@ -120,64 +119,6 @@ describe("parseBootstrap", () => {
     });
 
     expect(() => parseBootstrap(arrayBootstrap)).toThrow("api-token response is not an object");
-  });
-});
-
-describe("renderer broker bootstrap probe", () => {
-  afterEach(() => {
-    vi.clearAllTimers();
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  });
-
-  it("probes again after a broker restart publishes a new URL", async () => {
-    const firstBrokerUrl = "http://127.0.0.1:54321";
-    const secondBrokerUrl = "http://127.0.0.1:54322";
-    let brokerUrl: string | null = firstBrokerUrl;
-    let restartCount = 0;
-    const getBrokerStatus = vi.fn<WuphfDesktopApi["getBrokerStatus"]>(() =>
-      Promise.resolve(createBrokerStatus(brokerUrl, restartCount)),
-    );
-    const fetchMock = vi.fn<typeof fetch>((input) => {
-      const url = String(input);
-      if (url.endsWith("/api-token")) {
-        const responseBrokerUrl = url.slice(0, -"/api-token".length);
-        return Promise.resolve(
-          jsonResponse({
-            token: VALID_BOOTSTRAP_TOKEN,
-            broker_url: responseBrokerUrl,
-          }),
-        );
-      }
-      if (url.endsWith("/api/health")) {
-        return Promise.resolve(jsonResponse({ ok: true }));
-      }
-      return Promise.reject(new Error(`unexpected fetch ${url}`));
-    });
-    const { module } = await importRendererHarness({
-      api: { getBrokerStatus },
-      fetch: fetchMock,
-    });
-
-    await flushRendererTasks();
-    expect(fetchMock).toHaveBeenCalledWith(`${firstBrokerUrl}/api-token`);
-
-    fetchMock.mockClear();
-    brokerUrl = null;
-    restartCount = 1;
-    await module.refreshBrokerStatus();
-    await flushRendererTasks();
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    brokerUrl = secondBrokerUrl;
-    restartCount = 2;
-    await module.refreshBrokerStatus();
-    await flushRendererTasks();
-
-    expect(fetchMock).toHaveBeenCalledWith(`${secondBrokerUrl}/api-token`);
-    expect(fetchMock).toHaveBeenCalledWith(`${secondBrokerUrl}/api/health`, {
-      headers: { Authorization: `Bearer ${VALID_BOOTSTRAP_TOKEN}` },
-    });
   });
 });
 
@@ -574,115 +515,4 @@ function getWillFrameNavigateHandler(
   // signature mismatch — the runtime callable stored by vi.fn is the
   // exact handler that window.ts registered.
   return call[1] as unknown as WillFrameNavigateHandler;
-}
-
-interface RendererElementStub {
-  className: string;
-  textContent: string;
-  type: string;
-  readonly append: ReturnType<typeof vi.fn<(...children: RendererElementStub[]) => void>>;
-  readonly addEventListener: ReturnType<typeof vi.fn<(event: string, handler: () => void) => void>>;
-}
-
-interface RendererDocumentStub {
-  title: string;
-  readonly querySelector: ReturnType<
-    typeof vi.fn<(selector: string) => RendererElementStub | null>
-  >;
-  readonly createElement: ReturnType<typeof vi.fn<(tagName: string) => RendererElementStub>>;
-}
-
-type RendererMainModule = typeof import("../src/renderer/main.ts");
-type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
-
-interface RendererImportOptions {
-  readonly api?: Partial<WuphfDesktopApi>;
-  readonly fetch?: FetchMock;
-}
-
-interface RendererHarness {
-  readonly module: RendererMainModule;
-  readonly api: WuphfDesktopApi;
-  readonly fetchMock: FetchMock;
-}
-
-async function importRendererHarness(
-  options: RendererImportOptions = {},
-): Promise<RendererHarness> {
-  vi.resetModules();
-  vi.useFakeTimers();
-  const root = createRendererElementStub();
-  const documentStub: RendererDocumentStub = {
-    title: "",
-    querySelector: vi.fn<(selector: string) => RendererElementStub | null>(() => root),
-    createElement: vi.fn<(tagName: string) => RendererElementStub>(() =>
-      createRendererElementStub(),
-    ),
-  };
-  const defaultApi: WuphfDesktopApi = {
-    openExternal: vi.fn<WuphfDesktopApi["openExternal"]>(() => Promise.resolve({ ok: true })),
-    showItemInFolder: vi.fn<WuphfDesktopApi["showItemInFolder"]>(() =>
-      Promise.resolve({ ok: true }),
-    ),
-    getAppVersion: vi.fn<WuphfDesktopApi["getAppVersion"]>(() =>
-      Promise.resolve({ version: "test" }),
-    ),
-    getPlatform: vi.fn<WuphfDesktopApi["getPlatform"]>(() =>
-      Promise.resolve({ platform: "linux", arch: "x64" }),
-    ),
-    getBrokerStatus: vi.fn<WuphfDesktopApi["getBrokerStatus"]>(() =>
-      Promise.resolve({ status: "dead", pid: null, restartCount: 0, brokerUrl: null }),
-    ),
-  };
-  const api: WuphfDesktopApi = { ...defaultApi, ...options.api };
-  const fetchMock = options.fetch ?? vi.fn<typeof fetch>();
-
-  vi.stubGlobal("document", documentStub);
-  vi.stubGlobal("window", {
-    wuphf: api,
-    location: { origin: "http://localhost:5173" },
-  });
-  vi.stubGlobal("fetch", fetchMock);
-
-  return {
-    module: await import("../src/renderer/main.ts"),
-    api,
-    fetchMock,
-  };
-}
-
-function createRendererElementStub(): RendererElementStub {
-  return {
-    className: "",
-    textContent: "",
-    type: "",
-    append: vi.fn<(...children: RendererElementStub[]) => void>(),
-    addEventListener: vi.fn<(event: string, handler: () => void) => void>(),
-  };
-}
-
-function createBrokerStatus(
-  brokerUrl: string | null,
-  restartCount: number,
-): GetBrokerStatusResponse {
-  return {
-    status: brokerUrl === null ? "dead" : "alive",
-    pid: brokerUrl === null ? null : 1234,
-    restartCount,
-    brokerUrl,
-  };
-}
-
-function jsonResponse(value: unknown): Response {
-  return {
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve(value),
-  } as Response;
-}
-
-async function flushRendererTasks(): Promise<void> {
-  for (let index = 0; index < 10; index += 1) {
-    await Promise.resolve();
-  }
 }

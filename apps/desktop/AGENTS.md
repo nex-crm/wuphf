@@ -10,7 +10,10 @@ For the repo-wide base rules (lint, secrets, branch + PR discipline) see the roo
 
 - **Main process** (`src/main/`) — Electron entry. Owns BrowserWindow, app lifecycle, broker spawn via `utilityProcess.fork()`. Has full Node + Electron API access.
 - **Preload** (`src/preload/`) — Runs in a sandboxed renderer-adjacent context. Exposes a **typed allowlist of OS verbs only** to the renderer via `contextBridge.exposeInMainWorld`. Never exposes app data, broker state, file paths, or `ipcRenderer` directly.
-- **Renderer** (`src/renderer/`) — Untrusted web content. Treats every `window.*` API as the surface of attack. Reaches the broker over **loopback HTTP/SSE** (not IPC) — that wiring lands in `feat/broker-loopback-listener`; in this package the renderer just shows broker liveness.
+- **Renderer** (`src/renderer/`) — Untrusted web content. Treats every
+  `window.*` API as the surface of attack. Reaches the broker over
+  **loopback HTTP/SSE** (not IPC); the React shell owns bootstrap, routing,
+  query caching, and the first broker-liveness route.
 - **Shared** (`src/shared/`) — The single source of truth for the contextBridge contract. Imported by preload (to expose) and by renderer (as the `window.<api>` type). Never touches Node APIs.
 
 The broker — when it lands in `feat/broker-loopback-listener` — is a separate process. This package only spawns/kills it and reports liveness. The broker's protocol surface is `@wuphf/protocol`, which this package re-exports nothing from at runtime.
@@ -74,7 +77,10 @@ The demo is the verification deliverable — `bun run desktop:dev` must boot a w
 ## What this package is NOT for
 
 - **Not for the broker itself.** The broker process implementation lives in a future package (`@wuphf/broker` or `apps/broker`). This package only spawns/kills it.
-- **Not for the renderer UI.** The full UI lands later — when it does, it imports from `web/` (the existing Vite app) or a new `apps/desktop-renderer/` and is loaded into the BrowserWindow this package owns. Until then, the renderer is a one-pane status view.
+- **Not for arbitrary web UI.** The renderer in this package is the trusted
+  desktop shell surface. Shared product UI can move here deliberately, but app
+  data still comes from the broker over loopback HTTP/SSE rather than IPC or
+  main-process filesystem reads.
 - **Not for auto-update.** Auto-update wiring lives in `feat/installer-pipeline` (Sparkle for Mac, electron-updater for Win). This package only knows about its own version string.
 - **Not for code-signing.** Same — that's installer-pipeline.
 

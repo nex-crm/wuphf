@@ -2,7 +2,7 @@
   "name": "@wuphf/desktop",
   "version": "0.0.0",
   "private": true,
-  "description": "WUPHF v1 desktop shell — Electron main + preload + minimal renderer. Sandboxed renderer, contextBridge typed allowlist (OS verbs only), utilityProcess.fork() broker spawning. No app-data IPC; the renderer reaches the broker over loopback HTTP/SSE in a later branch.",
+  "description": "WUPHF v1 desktop shell — Electron main + preload + React renderer. Sandboxed renderer, contextBridge typed allowlist (OS verbs only), utilityProcess.fork() broker spawning. No app-data IPC; the renderer reaches the broker over loopback HTTP/SSE.",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
