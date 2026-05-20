@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   BASE_RENDERER_CSP,
   createDynamicRendererCspHeadersReceivedListener,
+  DEV_RENDERER_CSP,
   rendererCspForBrokerUrl,
 } from "../../src/main/csp.ts";
 
@@ -89,6 +90,29 @@ describe("dynamic renderer CSP injection", () => {
 
   it("refuses malformed broker URLs", () => {
     expect(() => rendererCspForBrokerUrl("not a url")).toThrow("Invalid broker URL for CSP");
+  });
+
+  it("returns the dev CSP variant when isPackaged is false", () => {
+    expect(rendererCspForBrokerUrl(null, { isPackaged: false })).toBe(DEV_RENDERER_CSP);
+    expect(DEV_RENDERER_CSP).toContain("'unsafe-inline'");
+    expect(DEV_RENDERER_CSP).toContain("'unsafe-eval'");
+    expect(DEV_RENDERER_CSP).toContain("ws://localhost:5173");
+  });
+
+  it("appends the broker origin to the dev CSP connect-src", () => {
+    const csp = rendererCspForBrokerUrl("http://127.0.0.1:54321", { isPackaged: false });
+    expect(csp).toContain("connect-src 'self' http://127.0.0.1:54321 ws://localhost:5173");
+  });
+
+  it("threads isPackaged through the headers-received listener", () => {
+    const listener = createDynamicRendererCspHeadersReceivedListener(
+      () => "http://127.0.0.1:54321",
+      { isPackaged: false },
+    );
+    const response = invokeListener(listener);
+    expect(response.responseHeaders?.["Content-Security-Policy"]).toEqual([
+      rendererCspForBrokerUrl("http://127.0.0.1:54321", { isPackaged: false }),
+    ]);
   });
 });
 
