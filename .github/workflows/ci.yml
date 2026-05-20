@@ -237,6 +237,10 @@ jobs:
         if: ${{ steps.broker-changes.outputs.changed == 'true' }}
         working-directory: packages/broker
         run: bun run test
+      - name: Vitest coverage gate
+        if: ${{ steps.broker-changes.outputs.changed == 'true' }}
+        working-directory: packages/broker
+        run: bun run test:coverage
       - name: Broker invariant checks
         # No non-loopback bind constants, no electron imports, all
         # @wuphf/protocol imports go through the package root, etc.

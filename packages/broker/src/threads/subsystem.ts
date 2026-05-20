@@ -16,6 +16,7 @@ import { createThreadAppender, type ThreadAppender } from "./appender.ts";
 import type { ParsedIdempotencyKey } from "./idempotency.ts";
 import { createThreadStateStore, type ThreadStateStore } from "./projections.ts";
 import { createThreadReceiptIndexStore, type ThreadReceiptIndexStore } from "./receipt-index.ts";
+import { createThreadViewStore, type ThreadViewStore } from "./views.ts";
 
 export const SYSTEM_INBOX_THREAD_ID: ThreadId = asThreadId("00000000000000000000000001");
 
@@ -29,11 +30,13 @@ const SYSTEM_INBOX_EXTERNAL_REFS: ThreadExternalRefs = Object.freeze({
   sourceUrls: Object.freeze([]),
   entityIds: Object.freeze([]),
 });
+const THREAD_REBUILD_BATCH_SIZE = 500;
 
 export interface ThreadSubsystem {
   readonly appender: ThreadAppender;
   readonly state: ThreadStateStore;
   readonly receiptIndex: ThreadReceiptIndexStore;
+  readonly views: ThreadViewStore;
   readonly receiptStore: SqliteReceiptStore;
   readonly inboxThreadId: ThreadId;
   sharesApprovalProvenance(appender: ApprovalAppender, projection: ApprovalProjection): boolean;
@@ -50,23 +53,45 @@ export function createThreadSubsystem(
   }
   const state = createThreadStateStore(db);
   const receiptIndex = createThreadReceiptIndexStore(db);
+  const views = createThreadViewStore(db, state, receiptIndex);
   const appender = createThreadAppender(db, eventLog, state);
   ensureSystemInboxThread(appender, state);
+  const rebuildTransaction = db.transaction((fromLsn: number): void => {
+    if (!Number.isSafeInteger(fromLsn) || fromLsn < 0) {
+      throw new Error(
+        `rebuildFromLog: fromLsn must be a non-negative safe integer, got ${fromLsn}`,
+      );
+    }
+    if (fromLsn === 0) {
+      receiptIndex.clear();
+      state.clear();
+    }
+    let cursor = fromLsn;
+    for (;;) {
+      const batch = eventLog.readFromLsn(cursor, THREAD_REBUILD_BATCH_SIZE);
+      if (batch.length === 0) break;
+      for (const record of batch) {
+        state.applyEvent(record);
+        receiptIndex.applyEvent(record);
+      }
+      const last = batch.at(-1);
+      if (last === undefined) break;
+      cursor = last.lsn;
+      if (batch.length < THREAD_REBUILD_BATCH_SIZE) break;
+    }
+  });
   return {
     appender,
     state,
     receiptIndex,
+    views,
     receiptStore,
     inboxThreadId: SYSTEM_INBOX_THREAD_ID,
     sharesApprovalProvenance(appender: ApprovalAppender, projection: ApprovalProjection): boolean {
       return appender.sharesProvenance(db, eventLog) && projection.sharesProvenance(db, eventLog);
     },
     rebuildFromLog(fromLsn = 0): void {
-      if (fromLsn === 0) {
-        receiptIndex.clear();
-      }
-      state.rebuildFromLog(eventLog, fromLsn);
-      receiptIndex.rebuildFromLog(eventLog, fromLsn);
+      rebuildTransaction.immediate(fromLsn);
       ensureSystemInboxThread(appender, state);
     },
   };

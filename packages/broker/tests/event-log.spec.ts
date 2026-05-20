@@ -142,6 +142,14 @@ describe("event log", () => {
           )
           .get()?.name,
       ).toBe("webauthn_consumed_tokens_expires_at_ms_idx");
+      expect(
+        second
+          .prepare<[], { readonly table: string; readonly from: string; readonly to: string }>(
+            "PRAGMA foreign_key_list('pending_approvals')",
+          )
+          .all()
+          .map((row) => ({ table: row.table, from: row.from, to: row.to })),
+      ).toContainEqual({ table: "threads", from: "thread_id", to: "thread_id" });
     } finally {
       second.close();
     }

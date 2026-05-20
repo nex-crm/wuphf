@@ -366,6 +366,16 @@ describe("idempotency", () => {
         payload: Buffer.from(JSON.stringify({ lsn: applied.lsn }), "utf8"),
       }),
     });
+    db.prepare<[string, string, number], void>(
+      `INSERT INTO command_idempotency
+         (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
+       VALUES (?, ?, 201, x'7B7D', NULL, ?)`,
+    ).run("old-approval", "approval.requested", 1_000);
+    db.prepare<[string, string, number], void>(
+      `INSERT INTO command_idempotency
+         (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
+       VALUES (?, ?, 201, x'7B7D', NULL, ?)`,
+    ).run("old-thread", "thread.create", 1_000);
 
     expect(ledger.pruneIdempotencyOlderThan(3_000)).toBe(1);
 
@@ -374,7 +384,11 @@ describe("idempotency", () => {
         "SELECT idempotency_key AS idempotencyKey FROM command_idempotency ORDER BY idempotency_key ASC",
       )
       .all();
-    expect(idempotencyRows).toEqual([{ idempotencyKey: freshKey.key.raw }]);
+    expect(idempotencyRows).toEqual([
+      { idempotencyKey: freshKey.key.raw },
+      { idempotencyKey: "old-approval" },
+      { idempotencyKey: "old-thread" },
+    ]);
 
     const eventCountAfterPrune = db
       .prepare<[], { readonly n: number }>(

@@ -28,7 +28,13 @@
 // to honor this rule. `SqliteReceiptStore` sidesteps this by storing
 // canonical bytes and re-parsing on read.
 
-import type { ReceiptId, ReceiptSnapshot, ThreadId } from "@wuphf/protocol";
+import {
+  type EventLsn,
+  lsnFromV1Number,
+  type ReceiptId,
+  type ReceiptSnapshot,
+  type ThreadId,
+} from "@wuphf/protocol";
 
 /**
  * Filter + pagination arguments for `ReceiptStore.list`.
@@ -79,7 +85,7 @@ export interface ReceiptStore {
    * HTTP `201 Location:` contract promises an immediately fetchable
    * receipt, and clients race the 201 response against follow-up reads.
    */
-  put(receipt: ReceiptSnapshot): Promise<{ readonly existed: boolean }>;
+  put(receipt: ReceiptSnapshot): Promise<ReceiptPutResult>;
   /**
    * Read by id. Returns null when not found.
    */
@@ -102,6 +108,10 @@ export interface ReceiptStore {
    */
   size(): number;
 }
+
+export type ReceiptPutResult =
+  | { readonly existed: true; readonly lsn: null }
+  | { readonly existed: false; readonly lsn: EventLsn };
 
 /**
  * Error thrown when the store has reached its configured receipt cap or
@@ -308,9 +318,9 @@ export class InMemoryReceiptStore implements ReceiptStore {
     this.maxReceipts = requested;
   }
 
-  async put(receipt: ReceiptSnapshot): Promise<{ readonly existed: boolean }> {
+  async put(receipt: ReceiptSnapshot): Promise<ReceiptPutResult> {
     if (this.byId.has(receipt.id)) {
-      return { existed: true };
+      return { existed: true, lsn: null };
     }
     // Cap check runs AFTER the `has` check so a duplicate POST against a
     // store at capacity still returns 409 (the correct semantic) rather
@@ -328,7 +338,7 @@ export class InMemoryReceiptStore implements ReceiptStore {
         existing.add(receipt.id);
       }
     }
-    return { existed: false };
+    return { existed: false, lsn: lsnFromV1Number(lsn) };
   }
 
   async get(id: ReceiptId): Promise<ReceiptSnapshot | null> {

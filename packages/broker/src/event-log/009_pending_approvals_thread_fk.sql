@@ -1,14 +1,7 @@
 PRAGMA foreign_keys = ON;
 
--- Approval commands share the cost-ledger command_idempotency table. Approval
--- route idempotency is additionally bound to the target resource and canonical
--- request body so key reuse cannot replay a response for a different approval.
-ALTER TABLE command_idempotency
-  ADD COLUMN request_fingerprint TEXT;
+ALTER TABLE pending_approvals RENAME TO pending_approvals_old;
 
--- §15.B D2: pending approvals are explicit backend events, projected into a
--- disposable folded-state table. "Pending" is a status filter over this table,
--- not a derivation from receipt.approvals[].
 CREATE TABLE pending_approvals (
   approval_id      TEXT PRIMARY KEY,
   status           TEXT NOT NULL,
@@ -27,6 +20,7 @@ CREATE TABLE pending_approvals (
   token            TEXT,
   token_id         TEXT,
   FOREIGN KEY (head_lsn) REFERENCES event_log(lsn) ON DELETE RESTRICT,
+  FOREIGN KEY (thread_id) REFERENCES threads(thread_id) ON DELETE RESTRICT,
   CHECK (token_id IS NULL OR (length(token_id) = 26 AND token_id NOT GLOB '*[^0-9A-HJKMNP-TV-Z]*')),
   CHECK (status IN ('pending', 'approved', 'rejected', 'abstained')),
   CHECK (
@@ -47,11 +41,48 @@ CREATE TABLE pending_approvals (
   )
 ) STRICT, WITHOUT ROWID;
 
+INSERT INTO pending_approvals (
+  approval_id,
+  status,
+  head_lsn,
+  claim,
+  scope,
+  risk_class,
+  thread_id,
+  task_id,
+  receipt_id,
+  requested_by,
+  requested_at_ms,
+  decided_by,
+  decided_at_ms,
+  decision,
+  token,
+  token_id
+)
+SELECT
+  approval_id,
+  status,
+  head_lsn,
+  claim,
+  scope,
+  risk_class,
+  thread_id,
+  task_id,
+  receipt_id,
+  requested_by,
+  requested_at_ms,
+  decided_by,
+  decided_at_ms,
+  decision,
+  token,
+  token_id
+FROM pending_approvals_old;
+
+DROP TABLE pending_approvals_old;
+
 CREATE INDEX pending_approvals_status
   ON pending_approvals(status);
 
--- Thread/task/receipt ids are optional cross-subsystem references. The
--- approval appender validates thread_id when thread state shares provenance.
 CREATE INDEX pending_approvals_thread
   ON pending_approvals(thread_id)
   WHERE thread_id IS NOT NULL;
@@ -64,4 +95,9 @@ CREATE UNIQUE INDEX pending_approvals_token_id
   ON pending_approvals(token_id)
   WHERE token_id IS NOT NULL;
 
-PRAGMA user_version = 7;
+CREATE INDEX pending_approvals_thread_status
+  ON pending_approvals(thread_id, status)
+  WHERE thread_id IS NOT NULL;
+
+PRAGMA foreign_key_check;
+PRAGMA user_version = 9;

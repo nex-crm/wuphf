@@ -45,6 +45,7 @@ export interface ThreadStateRow {
 
 export interface ThreadStateStore {
   applyEvent(record: EventLogRecord): void;
+  clear(): void;
   rebuildFromLog(eventLog: EventLog, fromLsn?: number): void;
   getById(threadId: ThreadId): ThreadStateRow | null;
   hasSpecRevision(revisionId: string): boolean;
@@ -258,6 +259,10 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
   return {
     applyEvent(record: EventLogRecord): void {
       applyEventInner(record);
+    },
+    clear(): void {
+      clearSpecRevisionsStmt.run();
+      clearThreadsStmt.run();
     },
     rebuildFromLog(eventLog: EventLog, fromLsn = 0): void {
       rebuildTransaction.immediate(eventLog, fromLsn);
