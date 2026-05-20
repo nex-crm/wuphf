@@ -5,6 +5,12 @@
   "description": "WUPHF v1 desktop shell — Electron main + preload + React renderer. Sandboxed renderer, contextBridge typed allowlist (OS verbs only), utilityProcess.fork() broker spawning. No app-data IPC; the renderer reaches the broker over loopback HTTP/SSE.",
   "type": "module",
   "main": "./out/main/index.js",
+  "dependencyOverrideNotes": {
+    "vite": "Keeps desktop Vitest's Vite dependency on the same major as the desktop build toolchain."
+  },
+  "overrides": {
+    "vite": "8.0.12"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.preload.json && tsc --noEmit -p tsconfig.renderer.json",
     "lint": "biome check src/ tests/ scripts/",

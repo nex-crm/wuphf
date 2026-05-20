@@ -64,5 +64,7 @@ describe("query helpers", () => {
 
     expect(queryClient.getDefaultOptions().queries?.staleTime).toBe(2_000);
     expect(queryClient.getDefaultOptions().queries?.retry).toBe(1);
+    expect(queryClient.getDefaultOptions().queries?.refetchOnReconnect).toBe(false);
+    expect(queryClient.getDefaultOptions().queries?.refetchOnWindowFocus).toBe(false);
   });
 });

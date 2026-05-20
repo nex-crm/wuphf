@@ -6,6 +6,9 @@ export function createDesktopQueryClient(): QueryClient {
       queries: {
         staleTime: 2_000,
         retry: 1,
+        // SSE invalidations are the desktop freshness source; individual queries can opt in.
+        refetchOnReconnect: false,
+        refetchOnWindowFocus: false,
       },
     },
   });
