@@ -22,6 +22,7 @@ import {
   canonicalJSON,
   FrozenArgs,
   type JsonValue,
+  lsnFromV1Number,
   type ReceiptSnapshot,
   receiptToJson,
   SanitizedString,
@@ -1140,7 +1141,7 @@ describe("receipts API", () => {
     it("GET /api/receipts/:id maps ReceiptStoreBusyError to 503 + Retry-After", async () => {
       const store: ReceiptStore = {
         async put() {
-          return { existed: false };
+          return { existed: false, lsn: lsnFromV1Number(1) };
         },
         async get() {
           throw new ReceiptStoreBusyError("test busy");
@@ -1166,7 +1167,7 @@ describe("receipts API", () => {
     it("GET /api/receipts/:id maps ReceiptStoreUnavailableError to 503 storage_error", async () => {
       const store: ReceiptStore = {
         async put() {
-          return { existed: false };
+          return { existed: false, lsn: lsnFromV1Number(1) };
         },
         async get() {
           throw new ReceiptStoreUnavailableError("test readonly");
@@ -1192,7 +1193,7 @@ describe("receipts API", () => {
     it("GET /api/threads/:tid/receipts maps storage errors to 503", async () => {
       const store: ReceiptStore = {
         async put() {
-          return { existed: false };
+          return { existed: false, lsn: lsnFromV1Number(1) };
         },
         async get() {
           return null;

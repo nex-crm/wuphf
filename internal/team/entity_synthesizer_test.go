@@ -315,3 +315,248 @@ func waitForBriefCount(t *testing.T, pub *entityPublisherStub, n int, timeout ti
 	}
 	t.Fatalf("timed out waiting for %d brief events; got %d", n, pub.briefCount())
 }
+
+// seedBrief writes content at the brief's canonical path under the
+// archivist identity. Used by sentinel/tags tests to set up a pre-existing
+// frontmatter shape before invoking synthesis.
+func seedBrief(t *testing.T, worker *WikiWorker, kind EntityKind, slug, body, msg string) {
+	t.Helper()
+	if _, _, err := worker.Enqueue(context.Background(), ArchivistAuthor, briefPath(kind, slug), body, "replace", msg); err != nil {
+		t.Fatalf("seed brief: %v", err)
+	}
+}
+
+func TestSentinel_NoHumanEditFullRewrite(t *testing.T) {
+	stub := func(ctx context.Context, sys, user string) (string, error) {
+		return "# Acme\n\nFresh body from LLM.\n", nil
+	}
+	synth, factLog, worker, pub, teardown := newSynthFixture(t, stub)
+	defer teardown()
+	ctx := context.Background()
+
+	seedBrief(t, worker, EntityKindCompanies, "acme",
+		"---\nkind: company\nlast_synthesized_ts: 2024-01-01T00:00:00Z\n---\n\n# Acme\n\nOld body.\n",
+		"seed acme brief")
+
+	_, _ = factLog.Append(ctx, EntityKindCompanies, "acme", "Founded 1999.", "", "pm")
+	_, _ = synth.EnqueueSynthesis(EntityKindCompanies, "acme", "pm")
+	waitForBriefCount(t, pub, 1, 3*time.Second)
+
+	got, err := readArticle(worker.Repo(), "team/companies/acme.md")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	body := string(got)
+	if !strings.Contains(body, "Fresh body from LLM") {
+		t.Errorf("expected full rewrite with LLM body; got: %s", body)
+	}
+	if strings.Contains(body, "Old body") {
+		t.Errorf("old body should be gone in full rewrite; got: %s", body)
+	}
+	if strings.Contains(body, whatWeLearnedHeading) {
+		t.Errorf("rewrite mode must not emit learned section; got: %s", body)
+	}
+}
+
+func TestSentinel_HumanEditedSwitchesToAppendMode(t *testing.T) {
+	stub := func(ctx context.Context, sys, user string) (string, error) {
+		return "Synth-derived insight body.\n", nil
+	}
+	synth, factLog, worker, pub, teardown := newSynthFixture(t, stub)
+	defer teardown()
+	ctx := context.Background()
+
+	seedBrief(t, worker, EntityKindCompanies, "acme",
+		"---\nkind: company\nlast_synthesized_ts: 2024-01-01T00:00:00Z\nlast_human_edit_ts: 2025-06-01T12:00:00Z\n---\n\n# Acme\n\nHuman-authored prose that must survive.\n",
+		"seed acme brief")
+
+	_, _ = factLog.Append(ctx, EntityKindCompanies, "acme", "Acme raised Series C.", "", "pm")
+	_, _ = synth.EnqueueSynthesis(EntityKindCompanies, "acme", "pm")
+	waitForBriefCount(t, pub, 1, 3*time.Second)
+
+	got, err := readArticle(worker.Repo(), "team/companies/acme.md")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	body := string(got)
+	if !strings.Contains(body, "Human-authored prose that must survive") {
+		t.Errorf("user body was stomped; got: %s", body)
+	}
+	if !strings.Contains(body, whatWeLearnedHeading) {
+		t.Errorf("expected %q section; got: %s", whatWeLearnedHeading, body)
+	}
+	if !strings.Contains(body, "Synth-derived insight body") {
+		t.Errorf("expected LLM content under learned section; got: %s", body)
+	}
+	// last_synthesized_ts must advance away from the seeded value.
+	if strings.Contains(body, "last_synthesized_ts: 2024-01-01T00:00:00Z") {
+		t.Errorf("last_synthesized_ts must be updated post-synthesis; got: %s", body)
+	}
+}
+
+func TestSentinel_StaleHumanEditTriggersFullRewrite(t *testing.T) {
+	stub := func(ctx context.Context, sys, user string) (string, error) {
+		return "# Acme\n\nReplacement body.\n", nil
+	}
+	synth, factLog, worker, pub, teardown := newSynthFixture(t, stub)
+	defer teardown()
+	ctx := context.Background()
+
+	// Human edit predates the last synthesis — sentinel is stale, full rewrite is safe.
+	seedBrief(t, worker, EntityKindCompanies, "acme",
+		"---\nkind: company\nlast_synthesized_ts: 2025-06-01T12:00:00Z\nlast_human_edit_ts: 2024-01-01T00:00:00Z\n---\n\n# Acme\n\nStale user body.\n",
+		"seed acme brief")
+
+	_, _ = factLog.Append(ctx, EntityKindCompanies, "acme", "f1", "", "pm")
+	_, _ = synth.EnqueueSynthesis(EntityKindCompanies, "acme", "pm")
+	waitForBriefCount(t, pub, 1, 3*time.Second)
+
+	got, _ := readArticle(worker.Repo(), "team/companies/acme.md")
+	body := string(got)
+	if !strings.Contains(body, "Replacement body") {
+		t.Errorf("expected full rewrite when sentinel is stale; got: %s", body)
+	}
+	if strings.Contains(body, "Stale user body") {
+		t.Errorf("stale body should be gone; got: %s", body)
+	}
+	if strings.Contains(body, whatWeLearnedHeading) {
+		t.Errorf("stale sentinel must not trigger learned section; got: %s", body)
+	}
+}
+
+func TestSentinel_EmptyBriefFullCreation(t *testing.T) {
+	stub := func(ctx context.Context, sys, user string) (string, error) {
+		return "# Acme\n\nFresh creation.\n", nil
+	}
+	synth, factLog, worker, pub, teardown := newSynthFixture(t, stub)
+	defer teardown()
+	ctx := context.Background()
+
+	_, _ = factLog.Append(ctx, EntityKindCompanies, "acme", "Founded 1999.", "", "pm")
+	_, _ = synth.EnqueueSynthesis(EntityKindCompanies, "acme", "pm")
+	waitForBriefCount(t, pub, 1, 3*time.Second)
+
+	got, _ := readArticle(worker.Repo(), "team/companies/acme.md")
+	body := string(got)
+	if !strings.Contains(body, "Fresh creation") {
+		t.Errorf("expected fresh body on first synthesis; got: %s", body)
+	}
+	if strings.Contains(body, whatWeLearnedHeading) {
+		t.Errorf("first synthesis must not produce learned section; got: %s", body)
+	}
+}
+
+func TestTags_DerivedFromKindAndSignals(t *testing.T) {
+	stub := func(ctx context.Context, sys, user string) (string, error) {
+		return "# Sarah\n\nbody\n", nil
+	}
+	synth, factLog, worker, pub, teardown := newSynthFixture(t, stub)
+	defer teardown()
+	ctx := context.Background()
+
+	seedBrief(t, worker, EntityKindPeople, "sarah",
+		"---\nkind: person\nsignals:\n  job_title: VP Sales\n  domain: https://acme.com/x\n---\n\n# Sarah\n\nseeded body\n",
+		"seed sarah brief")
+
+	_, _ = factLog.Append(ctx, EntityKindPeople, "sarah", "She closed an $80k deal.", "", "pm")
+	_, _ = synth.EnqueueSynthesis(EntityKindPeople, "sarah", "pm")
+	waitForBriefCount(t, pub, 1, 3*time.Second)
+
+	got, _ := readArticle(worker.Repo(), "team/people/sarah.md")
+	body := string(got)
+	for _, want := range []string{"person", "vp-sales", "acme.com"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected derived tag %q in tags line; body: %s", want, body)
+		}
+	}
+	// Sanity: should be a `tags:` line.
+	if !strings.Contains(body, "tags:") {
+		t.Errorf("expected tags frontmatter; got: %s", body)
+	}
+}
+
+func TestTags_PreservesUserAddedTags(t *testing.T) {
+	stub := func(ctx context.Context, sys, user string) (string, error) {
+		return "# Sarah\n\nbody\n", nil
+	}
+	synth, factLog, worker, pub, teardown := newSynthFixture(t, stub)
+	defer teardown()
+	ctx := context.Background()
+
+	seedBrief(t, worker, EntityKindPeople, "sarah",
+		"---\nkind: person\ntags: [confidential, hot-lead]\nsignals:\n  job_title: VP Sales\n  domain: acme.com\n---\n\n# Sarah\n\nbody\n",
+		"seed sarah brief")
+
+	_, _ = factLog.Append(ctx, EntityKindPeople, "sarah", "f1", "", "pm")
+	_, _ = synth.EnqueueSynthesis(EntityKindPeople, "sarah", "pm")
+	waitForBriefCount(t, pub, 1, 3*time.Second)
+
+	got, _ := readArticle(worker.Repo(), "team/people/sarah.md")
+	body := string(got)
+	for _, want := range []string{"confidential", "hot-lead", "person", "vp-sales", "acme.com"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected tag %q to survive merge; body: %s", want, body)
+		}
+	}
+}
+
+func TestTags_CapAtEightDerived(t *testing.T) {
+	derived := []string{"d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9", "d10"}
+	body := "---\nkind: person\n---\n\n# X\n"
+	out := applyTagsFrontmatter(body, derived)
+
+	// All 10 derived would exceed the cap; only 8 must be present.
+	for i := 1; i <= 8; i++ {
+		want := "d" + itoaTag(i)
+		if !strings.Contains(out, want) {
+			t.Errorf("expected derived tag %q within cap; got: %s", want, out)
+		}
+	}
+	for _, dropped := range []string{"d9", "d10"} {
+		if strings.Contains(out, dropped) {
+			t.Errorf("derived tag %q must have been capped; got: %s", dropped, out)
+		}
+	}
+}
+
+func TestTags_IdempotentNormalization(t *testing.T) {
+	body := "---\nkind: person\nsignals:\n  job_title: VP Sales\n  domain: acme.com\n---\n\n# X\n"
+	derived := deriveTagsFromBrief(body)
+
+	once := applyTagsFrontmatter(body, derived)
+	twice := applyTagsFrontmatter(once, deriveTagsFromBrief(once))
+
+	if once != twice {
+		t.Errorf("non-idempotent: \nonce:  %s\ntwice: %s", once, twice)
+	}
+	// No duplicate occurrences inside the tags line.
+	for _, line := range strings.Split(twice, "\n") {
+		if !strings.HasPrefix(line, "tags:") {
+			continue
+		}
+		seen := map[string]int{}
+		inner := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(line, "tags:")), "["), "]")
+		for _, p := range strings.Split(inner, ",") {
+			seen[strings.TrimSpace(p)]++
+		}
+		for tag, n := range seen {
+			if n > 1 {
+				t.Errorf("duplicate tag %q (count=%d) in: %s", tag, n, line)
+			}
+		}
+	}
+}
+
+// itoaTag — tiny local int-to-string to avoid pulling strconv into test
+// imports just for the cap test.
+func itoaTag(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var digits []byte
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	return string(digits)
+}

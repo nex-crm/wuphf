@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 interface Migration {
   readonly version: number;
@@ -44,6 +44,10 @@ const MIGRATIONS: readonly Migration[] = [
       new URL("./008_pending_approvals_thread_status_index.sql", import.meta.url),
       "utf8",
     ),
+  },
+  {
+    version: 9,
+    sql: readFileSync(new URL("./009_pending_approvals_thread_fk.sql", import.meta.url), "utf8"),
   },
 ];
 

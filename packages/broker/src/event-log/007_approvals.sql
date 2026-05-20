@@ -50,8 +50,8 @@ CREATE TABLE pending_approvals (
 CREATE INDEX pending_approvals_status
   ON pending_approvals(status);
 
--- TODO(PR3): add a thread FK once the thread_state table lands. In this PR,
--- thread/task/receipt ids are opaque optional references.
+-- Thread/task/receipt ids are optional cross-subsystem references. The
+-- approval appender validates thread_id when thread state shares provenance.
 CREATE INDEX pending_approvals_thread
   ON pending_approvals(thread_id)
   WHERE thread_id IS NOT NULL;

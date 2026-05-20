@@ -325,6 +325,7 @@ describe("createAgentRunnerForBroker", () => {
       "https://eastus.openai.azure.com/openai/deployments/demo/chat/completions",
       ["https://*.openai.azure.com"],
     ],
+    ["exact private origin", "https://192.168.1.10/v1/chat/completions", ["https://192.168.1.10"]],
   ])("allows openai-compatible endpoints that match the %s allowlist", async (_name, endpoint, endpointAllowlist) => {
     const runner = await createAgentRunnerForBroker(
       openAICompatRequest(endpoint),
@@ -345,7 +346,28 @@ describe("createAgentRunnerForBroker", () => {
 
   it.each([
     ["not allowlisted", "https://evil.test/v1/chat/completions", ["https://api.openai.com"]],
+    ["malformed endpoint", "not a url", ["https://api.openai.com"]],
     ["loopback wildcard", "http://127.0.0.1:8080/v1/chat/completions", ["http://*"]],
+    ["ftp scheme", "ftp://api.openai.com/v1/chat/completions", ["ftp://api.openai.com"]],
+    ["invalid exact allowlist entry", "https://api.openai.com/v1/chat/completions", ["not a url"]],
+    [
+      "overlong wildcard pattern",
+      "https://api.openai.com/v1/chat/completions",
+      [`https://${"*".repeat(257)}.example.com`],
+    ],
+    [
+      "too many wildcard segments",
+      "https://api.openai.com/v1/chat/completions",
+      [`https://${Array.from({ length: 11 }, () => "*").join(".")}.example.com`],
+    ],
+    ["private ipv4 wildcard", "https://192.168.1.10/v1/chat/completions", ["https://*"]],
+    ["link-local ipv4 wildcard", "https://169.254.1.2/v1/chat/completions", ["https://*"]],
+    ["ula ipv6 wildcard", "https://[fc00::1]/v1/chat/completions", ["https://*"]],
+    [
+      "ipv4-mapped private ipv6 wildcard",
+      "https://[::ffff:192.168.1.10]/v1/chat/completions",
+      ["https://*"],
+    ],
     ["file scheme", "file:///etc/passwd", ["file://*"]],
   ])("rejects openai-compatible endpoints: %s", async (_name, endpoint, endpointAllowlist) => {
     await expect(

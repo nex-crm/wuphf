@@ -61,6 +61,7 @@ import {
   type BrokerPort,
   isApprovalRole,
   MAX_APPROVAL_TOKEN_LIFETIME_MS,
+  type ReceiptSnapshot,
 } from "@wuphf/protocol";
 import { WebSocketServer } from "ws";
 
@@ -76,7 +77,7 @@ import { InMemoryReceiptStore, type ReceiptStore } from "./receipt-store.ts";
 import { handleReceiptCreate, handleReceiptGet, handleThreadReceiptsList } from "./receipts.ts";
 import { createRunnerRouteState, type RunnerRouteState } from "./runners/route.ts";
 import { createStaticHandler, type StaticHandler } from "./serve-static.ts";
-import { createSseHub, type SseHub } from "./sse.ts";
+import { createSseHub, type SseHub, type ThreadSseEmitArgs } from "./sse.ts";
 import { attachTerminalUpgrade } from "./terminal-ws.ts";
 import { handleThreadRoute, type ThreadRouteDeps } from "./threads/routes.ts";
 import { generateApiToken } from "./token.ts";
@@ -102,6 +103,34 @@ import {
 const LOOPBACK_HOST = "127.0.0.1";
 const BROWSER_WEBAUTHN_HOST = "localhost";
 
+function withThreadReceiptInvalidations(
+  receiptStore: ReceiptStore,
+  emitThreadEvent: (event: ThreadSseEmitArgs) => void,
+): ReceiptStore {
+  return {
+    async put(receipt: ReceiptSnapshot) {
+      const result = await receiptStore.put(receipt);
+      if (!result.existed && receipt.schemaVersion === 2 && receipt.threadId !== undefined) {
+        emitThreadEvent({
+          kind: "thread.updated",
+          threadId: receipt.threadId,
+          headLsn: result.lsn,
+        });
+      }
+      return result;
+    },
+    get(id) {
+      return receiptStore.get(id);
+    },
+    list(filter) {
+      return receiptStore.list(filter);
+    },
+    size() {
+      return receiptStore.size();
+    },
+  };
+}
+
 export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHandle> {
   const logger: BrokerLogger = config.logger ?? NOOP_LOGGER;
   const token: ApiToken = config.token ?? generateApiToken();
@@ -126,8 +155,12 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
   // Default to an in-memory store when the host doesn't supply one. Thread
   // routes carry their own cohesive store handle so receipt indexing cannot
   // be wired to a different database from the thread projection.
-  const receiptStore: ReceiptStore =
+  const baseReceiptStore: ReceiptStore =
     config.threads?.receiptStore ?? config.receiptStore ?? new InMemoryReceiptStore();
+  const receiptStore =
+    config.threads === undefined
+      ? baseReceiptStore
+      : withThreadReceiptInvalidations(baseReceiptStore, (event) => sseHub.emitThreadEvent(event));
   const agentProviderRoutingStore = config.runners?.agentProviderRoutingStore ?? null;
   // Reuse the same bearer→agent binding map that runner spawn uses so a
   // bearer pinned to agent_alpha cannot read or PUT agent_beta's routing.
@@ -253,6 +286,7 @@ export async function createBroker(config: BrokerConfig = {}): Promise<BrokerHan
           appender: config.threads.appender,
           state: config.threads.state,
           receiptIndex: config.threads.receiptIndex,
+          views: config.threads.views,
           approvals: config.approvals?.projection ?? null,
           logger,
           nowMs: () => readBrokerClock(clock),

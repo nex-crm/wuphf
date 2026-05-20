@@ -165,7 +165,7 @@ export function runThreadReplayCheck(db: Database.Database): ThreadReplayCheckRe
     const replayedThreads = new Map<string, ReplayedThreadState>();
     const acceptedRevisionIds = new Map<string, number>();
     const taskThreadIds = new Map<string, string>();
-    const approvalRows: ApprovalReplayEventRow[] = [];
+    const approvalReplayRows: ApprovalReplayEventRow[] = [];
     const discrepancies: ThreadReplayCheckDiscrepancy[] = [];
     let cursor = 0;
     let scanned = 0;
@@ -175,8 +175,14 @@ export function runThreadReplayCheck(db: Database.Database): ThreadReplayCheckRe
       if (rows.length === 0) break;
       for (const row of rows) {
         scanned += 1;
-        if (row.type === "approval.requested" || row.type === "approval.decided") {
-          approvalRows.push(row);
+        if (
+          row.type === "thread.created" ||
+          row.type === "thread.spec_edited" ||
+          row.type === "thread.status_changed" ||
+          row.type === "approval.requested" ||
+          row.type === "approval.decided"
+        ) {
+          approvalReplayRows.push(row);
         }
         applyReplayEvent(row, replayedThreads, acceptedRevisionIds, taskThreadIds, discrepancies);
       }
@@ -186,7 +192,7 @@ export function runThreadReplayCheck(db: Database.Database): ThreadReplayCheckRe
 
     let replayedApprovalRows: readonly ApprovalProjectionSnapshotRow[] = [];
     try {
-      replayedApprovalRows = replayApprovalsProjectionSnapshot(approvalRows);
+      replayedApprovalRows = replayApprovalsProjectionSnapshot(approvalReplayRows);
     } catch (err) {
       discrepancies.push({
         kind: "approval_replay_failed",

@@ -15,7 +15,9 @@ import {
   approvalRequestToJson,
   type EventLsn,
   lsnFromV1Number,
+  MAX_ROUTE_APPROVAL_LIST_ITEMS,
   parseLsn,
+  type ThreadId,
 } from "@wuphf/protocol";
 import type Database from "better-sqlite3";
 
@@ -71,6 +73,10 @@ export interface ApprovalAppender {
   pruneIdempotencyOlderThan(cutoffMs: number): number;
 }
 
+export interface ApprovalAppenderOptions {
+  readonly threadRefValidator?: (threadId: ThreadId) => boolean;
+}
+
 export class ApprovalRequestAlreadyExistsError extends Error {
   override readonly name = "ApprovalRequestAlreadyExistsError";
 }
@@ -86,8 +92,32 @@ export class ApprovalRequestAlreadyDecidedError extends Error {
   }
 }
 
+export class ApprovalPendingLimitExceededError extends Error {
+  override readonly name = "ApprovalPendingLimitExceededError";
+  constructor(readonly threadId: ThreadId) {
+    super(`thread ${threadId} already has ${MAX_ROUTE_APPROVAL_LIST_ITEMS} pending approvals`);
+  }
+}
+
+export class ApprovalThreadNotFoundError extends Error {
+  override readonly name = "ApprovalThreadNotFoundError";
+  constructor(readonly threadId: ThreadId) {
+    super(`thread not found: ${threadId}`);
+  }
+}
+
 export class ApprovalDecisionInvalidError extends Error {
   override readonly name = "ApprovalDecisionInvalidError";
+}
+
+export class ApprovalTokenIssuedToMismatchError extends Error {
+  override readonly name = "ApprovalTokenIssuedToMismatchError";
+  constructor(
+    readonly issuedTo: string,
+    readonly decidedBy: string,
+  ) {
+    super(`approval token issued to ${issuedTo}, not ${decidedBy}`);
+  }
 }
 
 export class ApprovalTokenAlreadyUsedError extends Error {
@@ -116,6 +146,7 @@ export function createApprovalAppender(
   db: Database.Database,
   eventLog: EventLog,
   projection: ApprovalProjection,
+  options: ApprovalAppenderOptions = {},
 ): ApprovalAppender {
   const tokenUsageStmt = db.prepare<[string, string], TokenUsageRow>(
     `SELECT approval_id AS approvalId
@@ -142,6 +173,7 @@ export function createApprovalAppender(
      WHERE created_at_ms < ?
        AND command IN ('approval.requested', 'approval.decided')`,
   );
+  const threadRefValidator = options.threadRefValidator ?? null;
 
   const assertApprovalTokenUnused = (payload: ApprovalDecidedAuditPayload): void => {
     const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
@@ -152,12 +184,39 @@ export function createApprovalAppender(
     }
   };
 
+  const assertThreadReferenceExists = (payload: ApprovalRequestedAuditPayload): void => {
+    if (payload.threadId === undefined) return;
+    if (threadRefValidator === null || !threadRefValidator(payload.threadId)) {
+      throw new ApprovalThreadNotFoundError(payload.threadId);
+    }
+  };
+
+  const assertApprovalTokenIssuedToDecider = (payload: ApprovalDecidedAuditPayload): void => {
+    const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
+    if (suppliedApprovalToken === undefined) return;
+    if (String(suppliedApprovalToken.issuedTo) !== String(payload.decidedBy)) {
+      throw new ApprovalTokenIssuedToMismatchError(
+        String(suppliedApprovalToken.issuedTo),
+        String(payload.decidedBy),
+      );
+    }
+  };
+
   const requestApprovalInner = (payload: ApprovalRequestedAuditPayload): ApprovalAppendResult => {
     const existing = projection.getById(payload.requestId);
     if (existing !== null) {
       throw new ApprovalRequestAlreadyExistsError(
         `approval request already exists: ${payload.requestId}`,
       );
+    }
+    assertThreadReferenceExists(payload);
+    // TODO(approval-overcap-repair): add repair or quarantine for upgraded DBs
+    // already over this cap; pinned snapshots fail closed until then.
+    if (
+      payload.threadId !== undefined &&
+      projection.countPendingByThread(payload.threadId) >= MAX_ROUTE_APPROVAL_LIST_ITEMS
+    ) {
+      throw new ApprovalPendingLimitExceededError(payload.threadId);
     }
     const bytes = approvalAuditPayloadToBytes("approval_requested", payload);
     const lsn = eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
@@ -185,6 +244,7 @@ export function createApprovalAppender(
       throw new Error("approval decision did not produce a terminal status");
     }
     assertApprovalTokenUnused(payload);
+    assertApprovalTokenIssuedToDecider(payload);
     try {
       approvalRequestToJson(folded);
     } catch (err) {

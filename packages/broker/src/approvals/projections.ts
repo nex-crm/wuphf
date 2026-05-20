@@ -20,6 +20,7 @@ import {
   canonicalJSON,
   type EventLsn,
   lsnFromV1Number,
+  MAX_ROUTE_APPROVAL_LIST_ITEMS,
   type TaskId,
   type ThreadId,
 } from "@wuphf/protocol";
@@ -50,6 +51,11 @@ export interface ApprovalListPage {
   readonly nextCursor?: EventLsn;
 }
 
+export interface ApprovalPendingByThreadSnapshot {
+  readonly rows: readonly FoldedApprovalRow[];
+  readonly headLsn: EventLsn | null;
+}
+
 export interface ApprovalProjectionEvent {
   readonly lsn: number;
   readonly type: EventType | string;
@@ -69,8 +75,48 @@ export interface ApprovalProjection {
   list(filter?: ApprovalListFilter): readonly FoldedApprovalRow[];
   listPage(filter: ApprovalListFilter | undefined, page: ApprovalListPageOptions): ApprovalListPage;
   countPendingByThread(threadId: ThreadId): number;
-  listPendingByThread(threadId: ThreadId): readonly FoldedApprovalRow[];
   latestHeadLsnByThread(threadId: ThreadId): EventLsn | null;
+  pendingByThreadSnapshot(threadId: ThreadId): ApprovalPendingByThreadSnapshot;
+}
+
+export class ApprovalPendingSnapshotOverflowError extends Error {
+  readonly threadId: ThreadId;
+  readonly count: number;
+
+  constructor(threadId: ThreadId, count: number) {
+    super(
+      `thread ${threadId} has ${count} pending approvals; refusing partial pinned approvals snapshot`,
+    );
+    this.name = "ApprovalPendingSnapshotOverflowError";
+    this.threadId = threadId;
+    this.count = count;
+  }
+}
+
+export class ApprovalReplayThreadNotFoundError extends Error {
+  readonly threadId: ThreadId;
+  readonly lsn: number;
+
+  constructor(threadId: ThreadId, lsn: number) {
+    super(`approval.requested at ${lsnFromV1Number(lsn)} references missing thread ${threadId}`);
+    this.name = "ApprovalReplayThreadNotFoundError";
+    this.threadId = threadId;
+    this.lsn = lsn;
+  }
+}
+
+export class ApprovalReplayPendingLimitExceededError extends Error {
+  readonly threadId: ThreadId;
+  readonly lsn: number;
+
+  constructor(threadId: ThreadId, lsn: number) {
+    super(
+      `approval.requested at ${lsnFromV1Number(lsn)} exceeds ${MAX_ROUTE_APPROVAL_LIST_ITEMS} pending approvals for thread ${threadId}`,
+    );
+    this.name = "ApprovalReplayPendingLimitExceededError";
+    this.threadId = threadId;
+    this.lsn = lsn;
+  }
 }
 
 interface ApprovalDbRow {
@@ -104,6 +150,10 @@ interface CountRow {
 
 interface MaxLsnRow {
   readonly headLsn: number | null;
+}
+
+interface ExistsRow {
+  readonly present: 1;
 }
 
 interface ApprovalRequestJsonFields {
@@ -185,11 +235,40 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
   const latestHeadLsnByThreadStmt = db.prepare<[string], MaxLsnRow>(
     "SELECT MAX(head_lsn) AS headLsn FROM pending_approvals WHERE thread_id = ?",
   );
+  const threadExistsStmt = db.prepare<[string], ExistsRow>(
+    "SELECT 1 AS present FROM threads WHERE thread_id = ?",
+  );
+
+  const pendingCountByThread = (threadId: ThreadId): number => {
+    const row = countPendingByThreadStmt.get(threadId);
+    if (row === undefined) {
+      throw new Error(`pending approval count query returned no row for ${threadId}`);
+    }
+    return row.count;
+  };
+
+  const assertReplayRequestedInvariants = (
+    payload: ApprovalRequestedAuditPayload,
+    lsn: number,
+  ): void => {
+    const threadId = payload.threadId;
+    if (threadId === undefined) return;
+    if (threadExistsStmt.get(threadId) === undefined) {
+      throw new ApprovalReplayThreadNotFoundError(threadId, lsn);
+    }
+    if (pendingCountByThread(threadId) >= MAX_ROUTE_APPROVAL_LIST_ITEMS) {
+      throw new ApprovalReplayPendingLimitExceededError(threadId, lsn);
+    }
+  };
 
   const applyRequested = (
     payload: ApprovalRequestedAuditPayload,
     lsn: number,
+    options: { readonly replay: boolean },
   ): FoldedApprovalRow => {
+    if (options.replay) {
+      assertReplayRequestedInvariants(payload, lsn);
+    }
     const approval = approvalFromRequested(payload);
     const wire = approvalRequestToJsonValue(approval) as unknown as ApprovalRequestJsonFields;
     insertRequestedStmt.run(
@@ -239,7 +318,16 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
     const decoded = parseApprovalEvent(event);
     if (decoded === null) return null;
     if (decoded.kind === "approval_requested") {
-      return applyRequested(decoded.payload, event.lsn);
+      return applyRequested(decoded.payload, event.lsn, { replay: false });
+    }
+    return applyDecided(decoded.payload, event.lsn);
+  };
+
+  const applyReplayEvent = (event: ApprovalProjectionEvent): FoldedApprovalRow | null => {
+    const decoded = parseApprovalEvent(event);
+    if (decoded === null) return null;
+    if (decoded.kind === "approval_requested") {
+      return applyRequested(decoded.payload, event.lsn, { replay: true });
     }
     return applyDecided(decoded.payload, event.lsn);
   };
@@ -250,19 +338,41 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       let cursor = 0;
       let eventsApplied = 0;
       let highestLsn = 0;
+      // TODO(approval-replay-repair): add offline repair or quarantine for
+      // logs that fail replay-time approval invariants.
       for (;;) {
         const rows = eventLog.readFromLsn(cursor, APPROVAL_EVENT_BATCH_SIZE);
         if (rows.length === 0) break;
         for (const row of rows) {
           cursor = row.lsn;
           highestLsn = Math.max(highestLsn, row.lsn);
-          if (applyEvent(row) !== null) {
+          if (applyReplayEvent(row) !== null) {
             eventsApplied += 1;
           }
         }
         if (rows.length < APPROVAL_EVENT_BATCH_SIZE) break;
       }
       return { eventsApplied, highestLsn: lsnFromV1Number(highestLsn) };
+    },
+  );
+  const pendingByThreadSnapshotTransaction = db.transaction(
+    (threadId: ThreadId): ApprovalPendingByThreadSnapshot => {
+      const rows = listRows(
+        db,
+        { threadId, status: "pending" },
+        {
+          limit: MAX_ROUTE_APPROVAL_LIST_ITEMS + 1,
+        },
+      );
+      if (rows.length > MAX_ROUTE_APPROVAL_LIST_ITEMS) {
+        const count = pendingCountByThread(threadId);
+        throw new ApprovalPendingSnapshotOverflowError(threadId, count);
+      }
+      const headLsn = latestHeadLsnByThreadStmt.get(threadId)?.headLsn ?? null;
+      return {
+        rows: rows.map(rowToFolded),
+        headLsn: headLsn === null ? null : lsnFromV1Number(headLsn),
+      };
     },
   );
 
@@ -301,19 +411,15 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       };
     },
     countPendingByThread(threadId: ThreadId): number {
-      const row = countPendingByThreadStmt.get(threadId);
-      if (row === undefined) {
-        throw new Error(`pending approval count query returned no row for ${threadId}`);
-      }
-      return row.count;
-    },
-    listPendingByThread(threadId: ThreadId): readonly FoldedApprovalRow[] {
-      return listRows(db, { threadId, status: "pending" }).map(rowToFolded);
+      return pendingCountByThread(threadId);
     },
     latestHeadLsnByThread(threadId: ThreadId): EventLsn | null {
       const row = latestHeadLsnByThreadStmt.get(threadId);
       if (row === undefined || row.headLsn === null) return null;
       return lsnFromV1Number(row.headLsn);
+    },
+    pendingByThreadSnapshot(threadId: ThreadId): ApprovalPendingByThreadSnapshot {
+      return pendingByThreadSnapshotTransaction.deferred(threadId);
     },
   };
 }

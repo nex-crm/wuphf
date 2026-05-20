@@ -1,4 +1,5 @@
 import {
+  lsnFromV1Number,
   type ReceiptId,
   type ReceiptSnapshot,
   receiptFromJson,
@@ -14,6 +15,7 @@ import {
   encodeListCursor,
   type ListFilter,
   type ListPage,
+  type ReceiptPutResult,
   type ReceiptStore,
   ReceiptStoreBusyError,
   ReceiptStoreFullError,
@@ -80,7 +82,7 @@ export class SqliteReceiptStore implements ReceiptStore {
   >;
   private readonly countStmt: Database.Statement<[], CountRow>;
   private readonly putTransaction: Database.Transaction<
-    (receipt: ReceiptSnapshot) => { readonly existed: boolean }
+    (receipt: ReceiptSnapshot) => ReceiptPutResult
   >;
   private defaultThreadId: ThreadId | null;
   private closed = false;
@@ -149,7 +151,7 @@ export class SqliteReceiptStore implements ReceiptStore {
     this.countStmt = db.prepare<[], CountRow>("SELECT COUNT(*) AS count FROM receipts_projection");
     this.putTransaction = db.transaction((receipt: ReceiptSnapshot) => {
       if (this.receiptExistsStmt.get(receipt.id) !== undefined) {
-        return { existed: true };
+        return { existed: true, lsn: null };
       }
       // Cap check runs AFTER the existence check (mirrors the in-memory
       // store): a duplicate POST against a store at capacity still
@@ -172,7 +174,7 @@ export class SqliteReceiptStore implements ReceiptStore {
       if (threadId !== null) {
         this.insertThreadReceiptStmt.run(threadId, receipt.id, receipt.taskId, lsn);
       }
-      return { existed: false };
+      return { existed: false, lsn: lsnFromV1Number(lsn) };
     });
   }
 
@@ -184,12 +186,12 @@ export class SqliteReceiptStore implements ReceiptStore {
     this.defaultThreadId = threadId;
   }
 
-  async put(receipt: ReceiptSnapshot): Promise<{ readonly existed: boolean }> {
+  async put(receipt: ReceiptSnapshot): Promise<ReceiptPutResult> {
     try {
       return this.putTransaction.immediate(receipt);
     } catch (err) {
       if (isReceiptIdConstraintError(err)) {
-        return { existed: true };
+        return { existed: true, lsn: null };
       }
       // SQLITE_FULL = filesystem out of space (or page-cache limit hit).
       // Surface as `ReceiptStoreFullError` so the HTTP route reuses the

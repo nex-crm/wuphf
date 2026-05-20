@@ -65,7 +65,7 @@ describe("InMemoryReceiptStore", () => {
     const store = new InMemoryReceiptStore();
     const r = minimalReceiptV1("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     const result = await store.put(r);
-    expect(result).toEqual({ existed: false });
+    expect(result).toMatchObject({ existed: false });
     expect(await store.get(r.id)).toBe(r);
   });
 
@@ -75,7 +75,7 @@ describe("InMemoryReceiptStore", () => {
     const r2 = { ...r1, model: "different" };
     await store.put(r1);
     const second = await store.put(r2);
-    expect(second).toEqual({ existed: true });
+    expect(second).toEqual({ existed: true, lsn: null });
     expect(await store.get(r1.id)).toBe(r1);
   });
 
@@ -275,7 +275,7 @@ describe("InMemoryReceiptStore", () => {
     const store = new InMemoryReceiptStore({ maxReceipts: 1 });
     const r = minimalReceiptV1("01ARZ3NDEKTSV4RRFFQ69G5FAV");
     await store.put(r);
-    expect(await store.put(r)).toEqual({ existed: true });
+    expect(await store.put(r)).toEqual({ existed: true, lsn: null });
   });
 
   it("rejects non-positive or non-integer maxReceipts at construction", () => {

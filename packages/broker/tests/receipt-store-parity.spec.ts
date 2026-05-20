@@ -96,7 +96,7 @@ function runReceiptStoreContractTests(
     try {
       const receipt = minimalReceiptV1(receiptIdAt(1));
 
-      expect(await store.put(receipt)).toEqual({ existed: false });
+      expect(await store.put(receipt)).toMatchObject({ existed: false });
       expect(await store.get(receipt.id)).toEqual(receipt);
     } finally {
       closeStore(store);
@@ -110,7 +110,7 @@ function runReceiptStoreContractTests(
       const second = { ...first, model: "different" };
 
       await store.put(first);
-      expect(await store.put(second)).toEqual({ existed: true });
+      expect(await store.put(second)).toEqual({ existed: true, lsn: null });
       expect(await store.get(first.id)).toEqual(first);
     } finally {
       closeStore(store);

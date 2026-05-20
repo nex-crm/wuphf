@@ -1,6 +1,8 @@
 import { request as httpRequest, type OutgoingHttpHeaders } from "node:http";
 
 import {
+  type ApprovalRequestedAuditPayload,
+  approvalAuditPayloadToBytes,
   approvalDecisionRequestToJsonValue,
   approvalDecisionResponseFromJson,
   approvalRequestCreateRequestToJsonValue,
@@ -14,14 +16,19 @@ import {
   asIdempotencyKey,
   asProviderKind,
   asReceiptId,
+  asSignerIdentity,
   asTaskId,
   asThreadId,
   type EventLsn,
+  MAX_ROUTE_APPROVAL_LIST_ITEMS,
   type ReceiptSnapshot,
+  receiptToJson,
+  routeErrorFromJson,
   SanitizedString,
   sha256Hex,
   threadGetResponseFromJson,
   threadListResponseFromJson,
+  threadMutationResponseFromJson,
   threadPinnedApprovalsResponseFromJson,
   threadReplayCheckReportFromJson,
   threadSpecContentHash,
@@ -111,7 +118,9 @@ async function setup(): Promise<Fixture> {
   const eventLog = createEventLog(db);
   const receiptStore = constructSqliteReceiptStoreForTesting(db, eventLog);
   const subsystem = createThreadSubsystem(db, eventLog, receiptStore);
-  const approvals = createApprovalSubsystem(db, eventLog);
+  const approvals = createApprovalSubsystem(db, eventLog, {
+    threadRefValidator: (threadId) => subsystem.state.getById(threadId) !== null,
+  });
   const { state, appender } = subsystem;
   const broker = await createBroker({
     port: 0,
@@ -210,6 +219,41 @@ function approvalRequestBody(args: {
   );
 }
 
+function approvalRequestedPayload(args: {
+  readonly requestId: ReturnType<typeof asApprovalRequestId>;
+  readonly threadId: ReturnType<typeof asThreadId>;
+  readonly taskId?: ReturnType<typeof asTaskId>;
+}): ApprovalRequestedAuditPayload {
+  const claim = {
+    schemaVersion: 1,
+    claimId: APPROVAL_CLAIM_ID,
+    kind: "receipt_co_sign",
+    receiptId: APPROVAL_RECEIPT_ID,
+    frozenArgsHash: APPROVAL_FROZEN_ARGS_HASH,
+    riskClass: "critical",
+  } as const;
+  const scope = {
+    mode: "single_use",
+    claimId: APPROVAL_CLAIM_ID,
+    claimKind: "receipt_co_sign",
+    role: asApprovalRole("approver"),
+    maxUses: 1,
+    receiptId: APPROVAL_RECEIPT_ID,
+    frozenArgsHash: APPROVAL_FROZEN_ARGS_HASH,
+  } as const;
+  return {
+    requestId: args.requestId,
+    claim,
+    scope,
+    riskClass: "critical",
+    threadId: args.threadId,
+    ...(args.taskId === undefined ? {} : { taskId: args.taskId }),
+    receiptId: APPROVAL_RECEIPT_ID,
+    requestedBy: asSignerIdentity("broker"),
+    requestedAt: new Date("2026-05-18T10:00:00.000Z"),
+  };
+}
+
 function approvalDecisionBody(idempotencyKey = APPROVAL_DECISION_KEY): string {
   return JSON.stringify(
     approvalDecisionRequestToJsonValue({
@@ -249,11 +293,9 @@ async function createThread(fix: Fixture): Promise<{ readonly headLsn: EventLsn 
     body: JSON.stringify(createBody()),
   });
   expect(res.status).toBe(201);
-  const body = (await res.json()) as {
-    readonly headLsn: EventLsn;
-    readonly revisionId: string;
-    readonly contentHash: string;
-  };
+  const body = threadMutationResponseFromJson((await res.json()) as unknown);
+  expect(body.threadId).toBe(THREAD_ID);
+  expect(body.headLsn).toBe("v1:4");
   expect(body.revisionId).toBe(CREATE_REVISION_ID);
   expect(body.contentHash).toBe(threadSpecContentHash(INITIAL_CONTENT));
   return body;
@@ -357,6 +399,10 @@ function indexedReceiptId(index: number): string {
     value = Math.floor(value / ULID_ALPHABET.length);
   }
   return `${ULID_TIME_PREFIX}${suffix}`;
+}
+
+function indexedApprovalRequestId(index: number): ReturnType<typeof asApprovalRequestId> {
+  return asApprovalRequestId(indexedReceiptId(index));
 }
 
 const sseReaderBuffers = new WeakMap<ReadableStreamDefaultReader<Uint8Array>, string>();
@@ -513,6 +559,107 @@ describe("/api/v1/threads routes", () => {
     expect(checks.map((res) => res.status)).toEqual([403, 403, 403, 403, 403, 403, 403, 403]);
   });
 
+  it("returns structured errors for unsupported thread methods and bad paths", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const checks = await Promise.all([
+      rawRequest({
+        port: fixture.broker.port,
+        path: "/api/v1/threads",
+        method: "PUT",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}`,
+        method: "POST",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/pinned-approvals`,
+        method: "POST",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/spec`,
+        method: "GET",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/status`,
+        method: "GET",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+      rawRequest({
+        port: fixture.broker.port,
+        path: `/api/v1/threads/${THREAD_ID}/unknown`,
+        method: "GET",
+        authorization: `Bearer ${TOKEN}`,
+      }),
+    ]);
+    expect(checks.map((res) => res.status)).toEqual([405, 405, 405, 405, 405, 404]);
+    expect(checks.map((res) => routeErrorFromJson(JSON.parse(res.body) as unknown).error)).toEqual([
+      "method_not_allowed",
+      "method_not_allowed",
+      "method_not_allowed",
+      "method_not_allowed",
+      "method_not_allowed",
+      "not_found",
+    ]);
+  });
+
+  it("returns the unified v1 route validation contract for thread mutations", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const unsupportedMedia = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "text/plain" }),
+      body: JSON.stringify(createBody()),
+    });
+    expect(unsupportedMedia.status).toBe(415);
+    expect(routeErrorFromJson((await unsupportedMedia.json()) as unknown).error).toBe(
+      "unsupported_media_type",
+    );
+
+    const malformedJson = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{",
+    });
+    expect(malformedJson.status).toBe(400);
+    expect(routeErrorFromJson((await malformedJson.json()) as unknown).error).toBe("invalid_json");
+
+    const invalidCreate = await fetch(`${fixture.broker.url}/api/v1/threads`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...createBody(), title: "" }),
+    });
+    expect(invalidCreate.status).toBe(422);
+    expect(routeErrorFromJson((await invalidCreate.json()) as unknown).error).toBe(
+      "invalid_payload",
+    );
+
+    await createThread(fixture);
+    const invalidSpec = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/spec`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...specBody(), baseRevisionId: "not-a-revision" }),
+    });
+    expect(invalidSpec.status).toBe(422);
+    expect(routeErrorFromJson((await invalidSpec.json()) as unknown).error).toBe("invalid_payload");
+
+    const invalidStatus = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/status`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...statusBody(), toStatus: "not-a-status" }),
+    });
+    expect(invalidStatus.status).toBe(422);
+    expect(routeErrorFromJson((await invalidStatus.json()) as unknown).error).toBe(
+      "invalid_payload",
+    );
+  });
+
   it("rejects approval deps that do not share thread storage provenance", async () => {
     const db = openDatabase({ path: ":memory:" });
     runMigrations(db);
@@ -583,9 +730,14 @@ describe("/api/v1/threads routes", () => {
       body: JSON.stringify(specBody()),
     });
     expect(spec.status).toBe(200);
-    expect((await spec.json()) as unknown).toMatchObject({
+    const specMutation = threadMutationResponseFromJson((await spec.json()) as unknown);
+    const editedContentHash = threadSpecContentHash({ goal: "route threads", version: 2 });
+    expect(specMutation).toEqual({
+      schemaVersion: 1,
+      threadId: asThreadId(THREAD_ID),
+      headLsn: "v1:8",
       revisionId: SPEC_REVISION_ID,
-      contentHash: threadSpecContentHash({ goal: "route threads", version: 2 }),
+      contentHash: editedContentHash,
     });
 
     const status = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}/status`, {
@@ -594,6 +746,13 @@ describe("/api/v1/threads routes", () => {
       body: JSON.stringify(statusBody("open", "closed")),
     });
     expect(status.status).toBe(200);
+    expect(threadMutationResponseFromJson((await status.json()) as unknown)).toEqual({
+      schemaVersion: 1,
+      threadId: asThreadId(THREAD_ID),
+      headLsn: "v1:9",
+      revisionId: SPEC_REVISION_ID,
+      contentHash: editedContentHash,
+    });
 
     const closed = await fetch(`${fixture.broker.url}/api/v1/threads?status=closed`, {
       headers: authHeaders(),
@@ -913,8 +1072,9 @@ describe("/api/v1/threads routes", () => {
       currentSeat: attentionBody.currentSeat,
       pendingApprovalCount: attentionBody.pendingApprovalCount,
     };
-    fixture.approvalProjection.rebuildFromLog(fixture.eventLog);
+    fixture.db.exec("DELETE FROM pending_approvals");
     fixture.subsystem.rebuildFromLog(0);
+    fixture.approvalProjection.rebuildFromLog(fixture.eventLog);
     const replayed = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`, {
       headers: authHeaders(),
     });
@@ -958,6 +1118,144 @@ describe("/api/v1/threads routes", () => {
     expect(clearedThread.boardColumn).toBe("running");
     expect(clearedThread.currentSeat).toBe("agent");
     expect(clearedThread.pendingApprovalCount).toBe(0);
+  });
+
+  it("paginates thread lists by the filtered effective view LSN", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const created = await createThread(fixture);
+    await createApproval(fixture, {
+      threadId: asThreadId(THREAD_ID),
+      taskId: APPROVAL_TASK_ID,
+    });
+
+    const first = await fetch(
+      `${fixture.broker.url}/api/v1/threads?status=needs_attention&limit=1`,
+      {
+        headers: authHeaders(),
+      },
+    );
+    expect(first.status).toBe(200);
+    const firstBody = threadListResponseFromJson((await first.json()) as unknown);
+    expect(firstBody.threads.map((thread) => thread.id)).toEqual([THREAD_ID]);
+    expect(firstBody.nextCursor).toBeUndefined();
+
+    const second = await fetch(
+      `${fixture.broker.url}/api/v1/threads?status=needs_attention&limit=1&cursor=${created.headLsn}`,
+      {
+        headers: authHeaders(),
+      },
+    );
+    expect(second.status).toBe(200);
+    const secondBody = threadListResponseFromJson((await second.json()) as unknown);
+    expect(secondBody.threads.map((thread) => thread.id)).toEqual([THREAD_ID]);
+    expect(secondBody.nextCursor).toBeUndefined();
+  });
+
+  it.each([
+    ["invalid status", "status=not_a_status", "invalid_status"],
+    ["duplicate status", "status=open&status=closed", "invalid_status"],
+    ["invalid limit", "limit=abc", "invalid_limit"],
+    ["zero limit", "limit=0", "invalid_limit"],
+    ["duplicate limit", "limit=1&limit=2", "invalid_limit"],
+    ["invalid cursor", "cursor=not-an-lsn", "invalid_cursor"],
+    ["duplicate cursor", "cursor=v1:1&cursor=v1:2", "invalid_cursor"],
+  ])("rejects %s on the thread list route", async (_name, query, error) => {
+    if (fixture === null) throw new Error("fixture missing");
+    const res = await fetch(`${fixture.broker.url}/api/v1/threads?${query}`, {
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(400);
+    expect(routeErrorFromJson((await res.json()) as unknown).error).toBe(error);
+  });
+
+  it("rejects approval requests once a thread reaches the pinned approvals cap", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    await createThread(fixture);
+
+    for (let index = 0; index < MAX_ROUTE_APPROVAL_LIST_ITEMS; index += 1) {
+      await createApproval(fixture, {
+        requestId: indexedApprovalRequestId(2_000 + index),
+        threadId: asThreadId(THREAD_ID),
+        taskId: APPROVAL_TASK_ID,
+      });
+    }
+
+    const overCap = await fetch(`${fixture.broker.url}/api/v1/approvals`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: approvalRequestBody({
+        requestId: indexedApprovalRequestId(3_000),
+        threadId: asThreadId(THREAD_ID),
+        taskId: APPROVAL_TASK_ID,
+      }),
+    });
+    expect(overCap.status).toBe(409);
+    expect(await overCap.json()).toEqual({ error: "pending_approval_limit_exceeded" });
+    expect(fixture.approvalProjection.countPendingByThread(asThreadId(THREAD_ID))).toBe(
+      MAX_ROUTE_APPROVAL_LIST_ITEMS,
+    );
+
+    const pinned = await fetch(
+      `${fixture.broker.url}/api/v1/threads/${THREAD_ID}/pinned-approvals`,
+      {
+        headers: authHeaders(),
+      },
+    );
+    expect(pinned.status).toBe(200);
+    expect(
+      threadPinnedApprovalsResponseFromJson((await pinned.json()) as unknown).approvals,
+    ).toHaveLength(MAX_ROUTE_APPROVAL_LIST_ITEMS);
+  });
+
+  it("fails pinned approvals loudly when a rebuilt projection is already over cap", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    await createThread(fixture);
+
+    for (let index = 0; index <= MAX_ROUTE_APPROVAL_LIST_ITEMS; index += 1) {
+      const payload = approvalRequestedPayload({
+        requestId: indexedApprovalRequestId(5_000 + index),
+        threadId: asThreadId(THREAD_ID),
+        taskId: APPROVAL_TASK_ID,
+      });
+      const bytes = Buffer.from(approvalAuditPayloadToBytes("approval_requested", payload));
+      const lsn = fixture.eventLog.append({ type: "approval.requested", payload: bytes });
+      fixture.approvalProjection.applyEvent({
+        lsn,
+        type: "approval.requested",
+        payload: bytes,
+      });
+    }
+    expect(fixture.approvalProjection.countPendingByThread(asThreadId(THREAD_ID))).toBe(
+      MAX_ROUTE_APPROVAL_LIST_ITEMS + 1,
+    );
+
+    const pinned = await fetch(
+      `${fixture.broker.url}/api/v1/threads/${THREAD_ID}/pinned-approvals`,
+      {
+        headers: authHeaders(),
+      },
+    );
+    expect(pinned.status).toBe(500);
+    expect(routeErrorFromJson((await pinned.json()) as unknown).error).toBe(
+      "pinned_approvals_overflow",
+    );
+  });
+
+  it("rejects approval requests for missing threads when approval storage is shared", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const missingThreadId = asThreadId("01YRZ3NDEKTSV4RRFFQ69G5FY0");
+    const res = await fetch(`${fixture.broker.url}/api/v1/approvals`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: approvalRequestBody({
+        requestId: indexedApprovalRequestId(4_000),
+        threadId: missingThreadId,
+        taskId: APPROVAL_TASK_ID,
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(routeErrorFromJson((await res.json()) as unknown).error).toBe("thread_not_found");
+    expect(fixture.approvalProjection.countPendingByThread(missingThreadId)).toBe(0);
   });
 
   it("defaults threadless approval requests to the system inbox thread", async () => {
@@ -1055,6 +1353,39 @@ describe("/api/v1/threads routes", () => {
     const updatedEvent = JSON.parse(updatedDataLine.slice("data: ".length)) as unknown;
     expect(validateThreadStreamEvent(updatedEvent).ok).toBe(true);
     expect(updatedEvent).toMatchObject({
+      id: "v1:5",
+      kind: "thread.updated",
+      payload: { threadId: THREAD_ID, headLsn: "v1:5" },
+    });
+  });
+
+  it("emits thread.updated invalidations for new threaded receipts", async () => {
+    if (fixture === null) throw new Error("fixture missing");
+    const controller = new AbortController();
+    const events = await fetch(`${fixture.broker.url}/api/events`, {
+      headers: { Authorization: `Bearer ${TOKEN}`, Accept: "text/event-stream" },
+      signal: controller.signal,
+    });
+    expect(events.status).toBe(200);
+    const reader = events.body?.getReader();
+    expect(reader).toBeDefined();
+    if (reader === undefined) throw new Error("missing SSE reader");
+    await readUntil(reader, "event: ready");
+
+    await createThread(fixture);
+    await readUntil(reader, "event: thread.created");
+    const receipt = minimalReceiptV2("01YRZ3NDEKTSV4RRFFQ69G5FY0", APPROVAL_TASK_ID, "error");
+    const posted = await fetch(`${fixture.broker.url}/api/receipts`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: receiptToJson(receipt),
+    });
+    expect(posted.status).toBe(201);
+    const text = await readUntil(reader, "event: thread.updated");
+    controller.abort();
+    const event = parseThreadSse(text, "thread.updated");
+    expect(validateThreadStreamEvent(event).ok).toBe(true);
+    expect(event).toMatchObject({
       id: "v1:5",
       kind: "thread.updated",
       payload: { threadId: THREAD_ID, headLsn: "v1:5" },

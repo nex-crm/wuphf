@@ -92,7 +92,12 @@ async function main(): Promise<void> {
     const eventLog = createEventLog(db);
     receiptStore = SqliteReceiptStore.fromDatabase(db, eventLog);
     const threads = createThreadSubsystem(db, eventLog, receiptStore);
-    const approvals = createApprovalSubsystem(db, eventLog);
+    const threadExistsStmt = db.prepare<[string], { readonly present: 1 }>(
+      "SELECT 1 AS present FROM threads WHERE thread_id = ?",
+    );
+    const approvals = createApprovalSubsystem(db, eventLog, {
+      threadRefValidator: (threadId) => threadExistsStmt.get(threadId) !== undefined,
+    });
     const tokenAgentIds = new Map([[TOKEN, AGENT_ID]]);
     const clock = { now: () => BASE_CLOCK_MS + clockTick++ };
 

@@ -37,15 +37,18 @@ import { constructSqliteReceiptStoreForTesting } from "../../src/internal/sqlite
 import type { SqliteReceiptStore } from "../../src/sqlite-receipt-store.ts";
 import {
   createThreadSubsystem,
+  createThreadViewStore,
   parseThreadIdempotencyKey,
   runThreadReplayCheck,
   SYSTEM_INBOX_THREAD_ID,
   snapshotThreadProjection,
   type ThreadAppender,
+  type ThreadApprovalQuery,
   type ThreadCommand,
   ThreadConflictError,
   ThreadIdempotencyConflictError,
   ThreadNotFoundError,
+  type ThreadReceiptIndexStore,
   type ThreadStateStore,
   type ThreadSubsystem,
   ThreadTerminalTransitionError,
@@ -329,6 +332,85 @@ function approvalRequestedPayload(args: {
 }
 
 describe("thread appender and projection", () => {
+  it("derives thread list views inside one read transaction", () => {
+    const fix = setup();
+    const observed: { readonly name: string; readonly inTransaction: boolean }[] = [];
+    const record = (name: string): void => {
+      observed.push({ name, inTransaction: fix.db.inTransaction });
+    };
+    const state: ThreadStateStore = {
+      applyEvent(recordEvent) {
+        fix.state.applyEvent(recordEvent);
+      },
+      clear() {
+        fix.state.clear();
+      },
+      rebuildFromLog(eventLog, fromLsn) {
+        fix.state.rebuildFromLog(eventLog, fromLsn);
+      },
+      getById(threadId) {
+        return fix.state.getById(threadId);
+      },
+      hasSpecRevision(revisionId) {
+        return fix.state.hasSpecRevision(revisionId);
+      },
+      list(filter) {
+        record("state.list");
+        return fix.state.list(filter);
+      },
+    };
+    const receiptIndex: ThreadReceiptIndexStore = {
+      applyEvent(recordEvent) {
+        fix.subsystem.receiptIndex.applyEvent(recordEvent);
+      },
+      clear() {
+        fix.subsystem.receiptIndex.clear();
+      },
+      rebuildFromLog(eventLog, fromLsn) {
+        fix.subsystem.receiptIndex.rebuildFromLog(eventLog, fromLsn);
+      },
+      list(threadId, filter) {
+        return fix.subsystem.receiptIndex.list(threadId, filter);
+      },
+      refsForThread(threadId) {
+        record("receiptIndex.refsForThread");
+        return fix.subsystem.receiptIndex.refsForThread(threadId);
+      },
+      latestForThread(threadId) {
+        record("receiptIndex.latestForThread");
+        return fix.subsystem.receiptIndex.latestForThread(threadId);
+      },
+    };
+    const approvals: ThreadApprovalQuery = {
+      countPendingByThread() {
+        record("approvals.countPendingByThread");
+        return 0;
+      },
+      latestHeadLsnByThread() {
+        record("approvals.latestHeadLsnByThread");
+        return null;
+      },
+      pendingByThreadSnapshot() {
+        return { rows: [], headLsn: null };
+      },
+    };
+    const views = createThreadViewStore(fix.db, state, receiptIndex);
+
+    const page = views.listThreadViews({ limit: 10, approvals });
+
+    expect(page.threads.map((thread) => thread.id)).toContain(SYSTEM_INBOX_THREAD_ID);
+    expect(observed.map((entry) => entry.name)).toEqual(
+      expect.arrayContaining([
+        "state.list",
+        "receiptIndex.refsForThread",
+        "receiptIndex.latestForThread",
+        "approvals.countPendingByThread",
+        "approvals.latestHeadLsnByThread",
+      ]),
+    );
+    expect(observed.every((entry) => entry.inTransaction)).toBe(true);
+  });
+
   it("stores spec content hash from canonical content and replays latest spec payload bytes", () => {
     const fix = setup();
     appendCreate(fix);
@@ -603,6 +685,8 @@ describe("thread appender and projection", () => {
     });
 
     const live = snapshotThreadProjection(fix.db);
+    fix.state.rebuildFromLog(fix.eventLog);
+    expect(snapshotThreadProjection(fix.db)).toEqual(live);
     fix.subsystem.rebuildFromLog(0);
     expect(snapshotThreadProjection(fix.db)).toEqual(live);
   });
@@ -1006,7 +1090,7 @@ describe("thread appender and projection", () => {
     expect(runThreadReplayCheck(fix.db).ok).toBe(true);
   });
 
-  it("receipt list order provides the deterministic thread receipt index source", async () => {
+  it("paginates and rebuilds the deterministic thread receipt index source", async () => {
     const fix = setup();
     appendCreate(fix);
     const taskA = "01MRZ3NDEKTSV4RRFFQ69G5FM0";
@@ -1030,7 +1114,59 @@ describe("thread appender and projection", () => {
       taskIds: [taskA, taskB],
     };
     expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
+    const first = fix.subsystem.receiptIndex.list(asThreadId(THREAD_ID), { limit: 2 });
+    expect(first.items.map((item) => item.receiptId)).toEqual([
+      "01PRZ3NDEKTSV4RRFFQ69G5FP0",
+      "01QRZ3NDEKTSV4RRFFQ69G5FQ0",
+    ]);
+    expect(first.nextCursor).not.toBeNull();
+    if (first.nextCursor === null) throw new Error("missing receipt index cursor");
+    const second = fix.subsystem.receiptIndex.list(asThreadId(THREAD_ID), {
+      cursor: first.nextCursor,
+      limit: 2,
+    });
+    expect(second.items.map((item) => item.receiptId)).toEqual(["01RRZ3NDEKTSV4RRFFQ69G5FR0"]);
+    expect(fix.subsystem.receiptIndex.latestForThread(asThreadId(THREAD_ID))?.receiptId).toBe(
+      "01RRZ3NDEKTSV4RRFFQ69G5FR0",
+    );
+    fix.subsystem.receiptIndex.rebuildFromLog(fix.eventLog, 0);
+    expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
     fix.subsystem.rebuildFromLog(0);
     expect(fix.subsystem.receiptIndex.refsForThread(asThreadId(THREAD_ID))).toEqual(liveRefs);
+  });
+
+  it("keeps thread state and receipt index intact when full rebuild replay fails", async () => {
+    const fix = setup();
+    appendCreate(fix);
+    await fix.receiptStore.put(
+      minimalReceiptV2("01PRZ3NDEKTSV4RRFFQ69G5FP0", "01MRZ3NDEKTSV4RRFFQ69G5FM0"),
+    );
+    const live = snapshotThreadProjection(fix.db);
+    const liveReceiptRows = fix.db
+      .prepare<[], { readonly count: number }>("SELECT COUNT(*) AS count FROM thread_receipts")
+      .get()?.count;
+
+    fix.eventLog.append({
+      type: "thread.status_changed",
+      payload: Buffer.from(
+        threadAuditPayloadToBytes("thread_status_changed", {
+          threadId: asThreadId(OTHER_THREAD_ID),
+          fromStatus: "open",
+          toStatus: "closed",
+          changedBy: SIGNER,
+          changedAt: new Date("2026-05-18T10:30:00.000Z"),
+        }),
+      ),
+    });
+
+    expect(() => fix.subsystem.rebuildFromLog(0)).toThrow(
+      /thread projection status change referenced a missing thread/,
+    );
+    expect(snapshotThreadProjection(fix.db)).toEqual(live);
+    expect(
+      fix.db
+        .prepare<[], { readonly count: number }>("SELECT COUNT(*) AS count FROM thread_receipts")
+        .get()?.count,
+    ).toBe(liveReceiptRows);
   });
 });

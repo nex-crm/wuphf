@@ -15,7 +15,9 @@ import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import type { PluggableList } from "unified";
 
+import { CalloutBlockquote } from "../components/wiki/Callout";
 import ImageEmbed from "../components/wiki/ImageEmbed";
+import { calloutRemarkPlugin } from "../components/wiki/parseCallout";
 import { wikiLinkRemarkPlugin } from "./wikilink";
 
 export interface WikiMarkdownOptions {
@@ -32,11 +34,11 @@ export interface WikiMarkdownOptions {
   onNavigate?: (slug: string) => void;
 }
 
-/** Remark plugins — remark-gfm + wikilinks. */
+/** Remark plugins — remark-gfm + wikilinks + Obsidian callouts. */
 export function buildRemarkPlugins(
   resolver: (slug: string) => boolean,
 ): PluggableList {
-  return [remarkGfm, wikiLinkRemarkPlugin(resolver)];
+  return [remarkGfm, wikiLinkRemarkPlugin(resolver), calloutRemarkPlugin()];
 }
 
 /** Rehype plugins — slug + autolink headings for TOC anchors. */
@@ -57,6 +59,7 @@ export function buildMarkdownComponents(
 ): Partial<Components> {
   const { onNavigate } = options;
   return {
+    blockquote: CalloutBlockquote,
     a: (props: AnchorProps): ReactElement => {
       const record = props as Record<string, unknown>;
       const isWikilink = record["data-wikilink"] === "true";

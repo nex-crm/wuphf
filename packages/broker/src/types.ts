@@ -131,7 +131,8 @@ export interface BrokerConfig {
   /**
    * Optional explicit approvals feature. When supplied,
    * `/api/v1/approvals` routes are mounted. Hosts construct these deps via
-   * `createApprovalSubsystem(db, eventLog)`.
+   * `createApprovalSubsystem(db, eventLog, { threadRefValidator })` when
+   * approvals can name threads.
    * Decisions are attributed to the bearer-bound agent in `tokenAgentIds`;
    * when omitted, the listener falls back to the runner bearer map if one
    * is configured.

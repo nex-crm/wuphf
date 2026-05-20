@@ -233,6 +233,103 @@ describe("/api/v1/cost routes", () => {
     expect(postBody.limitMicroUsd).toBe(0);
   });
 
+  it("GET /budgets lists current budgets", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const setRes = await fetch(`${fix.broker.url}/api/v1/cost/budgets`, {
+      method: "POST",
+      headers: mutationHeaders({
+        "Idempotency-Key": `cmd_cost.budget.set_${RECEIPT_ID}`,
+      }),
+      body: JSON.stringify(budgetSetJson(5_000_000)),
+    });
+    expect(setRes.status).toBe(201);
+
+    const list = await fetch(`${fix.broker.url}/api/v1/cost/budgets`, {
+      headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+    });
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      readonly budgets: readonly { readonly budgetId: string; readonly thresholdsBps: number[] }[];
+    };
+    expect(body.budgets).toEqual([
+      expect.objectContaining({
+        budgetId: BUDGET_ID,
+        scope: "global",
+        limitMicroUsd: 5_000_000,
+        thresholdsBps: [5_000, 10_000],
+        tombstoned: false,
+      }),
+    ]);
+  });
+
+  it("returns structured errors for unsupported cost methods and bad budget ids", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const checks = await Promise.all([
+      fetch(`${fix.broker.url}/api/v1/cost/events`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      }),
+      fetch(`${fix.broker.url}/api/v1/cost/budgets`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      }),
+      fetch(`${fix.broker.url}/api/v1/cost/budgets/not-a-budget`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      }),
+      fetch(`${fix.broker.url}/api/v1/cost/budgets/not-a-budget`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      }),
+      fetch(`${fix.broker.url}/api/v1/cost/summary`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      }),
+      fetch(`${fix.broker.url}/api/v1/cost/replay-check`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      }),
+      fetch(`${fix.broker.url}/api/v1/cost/idempotency/prune`, {
+        headers: { Authorization: `Bearer ${FIXED_TOKEN}` },
+      }),
+    ]);
+    expect(checks.map((response) => response.status)).toEqual([405, 405, 404, 405, 405, 405, 405]);
+  });
+
+  it("rejects malformed cost mutation envelopes before appending", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const unsupported = await fetch(`${fix.broker.url}/api/v1/cost/events`, {
+      method: "POST",
+      headers: mutationHeaders({
+        "Content-Type": "text/plain",
+        "Idempotency-Key": `cmd_cost.event_${RECEIPT_ID}`,
+      }),
+      body: JSON.stringify(costEventJson(1_000_000)),
+    });
+    expect(unsupported.status).toBe(415);
+    expect(((await unsupported.json()) as { readonly error: string }).error).toBe(
+      "unsupported_media_type",
+    );
+
+    const invalidEvent = await fetch(`${fix.broker.url}/api/v1/cost/events`, {
+      method: "POST",
+      headers: mutationHeaders({ "Idempotency-Key": `cmd_cost.event_${RECEIPT_ID}` }),
+      body: "{",
+    });
+    expect(invalidEvent.status).toBe(400);
+    expect(((await invalidEvent.json()) as { readonly error: string }).error).toBe(
+      "invalid_payload",
+    );
+
+    const invalidBudget = await fetch(`${fix.broker.url}/api/v1/cost/budgets`, {
+      method: "POST",
+      headers: mutationHeaders({ "Idempotency-Key": `cmd_cost.budget.set_${RECEIPT_ID}` }),
+      body: JSON.stringify([]),
+    });
+    expect(invalidBudget.status).toBe(400);
+    expect(((await invalidBudget.json()) as { readonly error: string }).error).toBe(
+      "invalid_payload",
+    );
+  });
+
   it("DELETE without X-Operator-Identity returns 400", async () => {
     if (fix === null) throw new Error("fixture missing");
     // Seed a budget so the DELETE has a real row to act on.

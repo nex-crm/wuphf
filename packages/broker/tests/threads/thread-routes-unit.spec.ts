@@ -30,6 +30,7 @@ import {
 import type { ThreadStateRow, ThreadStateStore } from "../../src/threads/projections.ts";
 import type { ThreadReceiptIndexStore } from "../../src/threads/receipt-index.ts";
 import { handleThreadRoute, type ThreadRouteDeps } from "../../src/threads/routes.ts";
+import { createThreadViewStore } from "../../src/threads/views.ts";
 import type { BrokerLogger } from "../../src/types.ts";
 
 const THREAD_ID = asThreadId("01ARZ3NDEKTSV4RRFFQ69G5FA0");
@@ -79,10 +80,10 @@ describe("handleThreadRoute unit error paths", () => {
         "/api/v1/threads",
         "POST",
         fix,
-        400,
+        422,
         true,
         JSON.stringify({ ...createBody(), idempotencyKey: "" }),
-        { error: "invalid_thread_command" },
+        { error: "invalid_payload" },
       );
       await expectRoute(
         "/api/v1/threads",
@@ -97,22 +98,22 @@ describe("handleThreadRoute unit error paths", () => {
         "/api/v1/threads",
         "POST",
         fix,
-        400,
+        422,
         true,
         JSON.stringify({
           ...createBody(),
           idempotencyKey: "cmd_thread.status.change_01CRZ3NDEKTSV4RRFFQ69G5FC0",
         }),
-        { error: "invalid_thread_command" },
+        { error: "invalid_payload" },
       );
       await expectRoute(
         `/api/v1/threads/${THREAD_ID}/spec`,
         "PATCH",
         fix,
-        400,
+        422,
         true,
         JSON.stringify({ ...specBody(), idempotencyKey: "" }),
-        { error: "invalid_thread_command" },
+        { error: "invalid_payload" },
       );
       await expectRoute(
         `/api/v1/threads/${THREAD_ID}/status`,
@@ -151,8 +152,8 @@ describe("handleThreadRoute unit error paths", () => {
         path: `/api/v1/threads/${THREAD_ID}/spec`,
         body: JSON.stringify(specBody()),
         error: new ThreadCommandValidationError([{ path: "/content", message: "bad" }]),
-        status: 400,
-        routeError: "invalid_thread_command",
+        status: 422,
+        routeError: "invalid_payload",
       },
       {
         name: "missing thread",
@@ -348,6 +349,11 @@ function deps(
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
   const row = overrides.row ?? threadRow();
+  const state = stateStore({
+    row,
+    ...(overrides.stateError === undefined ? {} : { error: overrides.stateError }),
+  });
+  const receiptIndex = receiptIndexStore(overrides.receiptIndexError);
   return {
     db,
     appender: {
@@ -403,11 +409,9 @@ function deps(
         };
       },
     },
-    state: stateStore({
-      row,
-      ...(overrides.stateError === undefined ? {} : { error: overrides.stateError }),
-    }),
-    receiptIndex: receiptIndexStore(overrides.receiptIndexError),
+    state,
+    receiptIndex,
+    views: createThreadViewStore(db, state, receiptIndex),
     approvals: approvalQuery(overrides.approvalsError),
     logger: LOGGER,
     nowMs: () => CREATED_AT.getTime(),
@@ -425,6 +429,7 @@ function stateStore(
   const row = args.row ?? threadRow();
   return {
     applyEvent: () => undefined,
+    clear: () => undefined,
     rebuildFromLog: () => undefined,
     getById(threadId) {
       if (args.error !== undefined) throw args.error;
@@ -497,9 +502,12 @@ function approvalQuery(error?: Error): ThreadRouteDeps["approvals"] {
       if (error !== undefined) throw error;
       return 1;
     },
-    listPendingByThread() {
+    pendingByThreadSnapshot() {
       if (error !== undefined) throw error;
-      return [{ approval: request, headLsn: lsnFromV1Number(5) }];
+      return {
+        rows: [{ approval: request, headLsn: lsnFromV1Number(5) }],
+        headLsn: lsnFromV1Number(5),
+      };
     },
     latestHeadLsnByThread() {
       if (error !== undefined) throw error;

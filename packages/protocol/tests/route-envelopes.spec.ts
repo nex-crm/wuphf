@@ -65,6 +65,7 @@ import {
   type ThreadListResponse,
   type ThreadMutationResponse,
   type ThreadPinnedApprovalsResponse,
+  type ThreadReplayCheckDiscrepancy,
   type ThreadReplayCheckReport,
   type ThreadSpecEditRequest,
   type ThreadStatusChangeRequest,
@@ -407,6 +408,224 @@ describe("route-envelope codecs", () => {
     expect(routeErrorToJsonValue(minimal)).not.toHaveProperty("message");
     expect(routeErrorToJsonValue(minimal)).not.toHaveProperty("retryAfterMs");
     expect(roundTrip(minimal, routeErrorToJsonValue, routeErrorFromJson)).toStrictEqual(minimal);
+  });
+
+  it("round-trips every thread replay-check discrepancy shape", () => {
+    const discrepancies: readonly ThreadReplayCheckDiscrepancy[] = [
+      {
+        kind: "event_payload_unparseable",
+        lsn: lsnFromV1Number(40),
+        eventType: "thread.spec_edited",
+        reason: "contentHash did not match canonical content",
+      },
+      { kind: "approval_replay_failed", reason: "approval.decided has no pending request" },
+      { kind: "thread_state_row_missing", threadId: THREAD_ID },
+      { kind: "thread_state_row_ghost", threadId: THREAD_ID },
+      {
+        kind: "thread_state_field_mismatch",
+        threadId: THREAD_ID,
+        field: "title",
+        replayed: "Thread foundation",
+        stored: "Drifted title",
+      },
+      {
+        kind: "thread_receipt_index_mismatch",
+        threadId: THREAD_ID,
+        field: "receiptIds",
+        replayed: [RECEIPT_ID],
+        stored: [],
+      },
+      {
+        kind: "thread_receipt_index_mismatch",
+        threadId: THREAD_ID,
+        field: "latestReceiptStatus",
+        replayed: "ok",
+        stored: null,
+      },
+      {
+        kind: "thread_pinned_approvals_mismatch",
+        threadId: THREAD_ID,
+        replayed: { approvalIds: [REQUEST_ID], headLsn: lsnFromV1Number(41) },
+        stored: { approvalIds: [], headLsn: null },
+      },
+      ...[
+        "effectiveStatus",
+        "attentionReason",
+        "boardColumn",
+        "currentSeat",
+        "pendingApprovalCount",
+      ].map(
+        (field) =>
+          ({
+            kind: "thread_effective_status_mismatch",
+            threadId: THREAD_ID,
+            field,
+            replayed: field === "pendingApprovalCount" ? 1 : "needs_review",
+            stored: field === "pendingApprovalCount" ? 0 : null,
+          }) as ThreadReplayCheckDiscrepancy,
+      ),
+      {
+        kind: "thread_log_invariant_violation",
+        lsn: lsnFromV1Number(42),
+        eventType: "thread.status_changed",
+        reason: "status fromStatus does not match fold",
+      },
+      {
+        kind: "thread_log_invariant_violation",
+        lsn: lsnFromV1Number(43),
+        eventType: "receipt.put",
+        reason: "task id assigned to multiple threads",
+        threadId: THREAD_ID,
+        expected: THREAD_ID,
+        actual: "01BRZ3NDEKTSV4RRFFQ69G5FB0",
+      },
+    ];
+    const report: ThreadReplayCheckReport = {
+      ok: false,
+      highestLsn: lsnFromV1Number(43),
+      eventsScanned: 17,
+      discrepancies,
+    };
+
+    const json = threadReplayCheckReportToJsonValue(report) as {
+      readonly discrepancies: readonly Readonly<Record<string, unknown>>[];
+    };
+    expect(json.discrepancies.at(-2)).not.toHaveProperty("threadId");
+    expect(json.discrepancies.at(-2)).not.toHaveProperty("expected");
+    expect(json.discrepancies.at(-2)).not.toHaveProperty("actual");
+    expect(threadReplayCheckReportFromJson(json)).toStrictEqual({
+      schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+      ...report,
+    });
+  });
+
+  it("rejects malformed thread replay-check reports", () => {
+    const base = threadReplayCheckReportToJsonValue({
+      ok: true,
+      highestLsn: HEAD_LSN,
+      eventsScanned: 0,
+      discrepancies: [],
+    });
+    const tooManyDiscrepancies = Array.from(
+      { length: MAX_ROUTE_THREAD_LIST_ITEMS * 8 + 1 },
+      () => ({ kind: "thread_state_row_missing", threadId: THREAD_ID }),
+    );
+
+    expect(threadReplayCheckReportFromJson(base)).toStrictEqual({
+      schemaVersion: ROUTE_ENVELOPE_SCHEMA_VERSION,
+      ok: true,
+      highestLsn: HEAD_LSN,
+      eventsScanned: 0,
+      discrepancies: [],
+    });
+    expect(() => threadReplayCheckReportFromJson({ ...base, schemaVersion: 2 })).toThrow(
+      /unsupported schemaVersion/,
+    );
+    expect(() => threadReplayCheckReportFromJson({ ...base, schemaVersion: 0 })).toThrow(
+      /schemaVersion.*must be 1/,
+    );
+    expect(() => threadReplayCheckReportFromJson({ ...base, ok: "true" })).toThrow(
+      /ok: must be a boolean/,
+    );
+    expect(() => threadReplayCheckReportFromJson({ ...base, eventsScanned: -1 })).toThrow(
+      /eventsScanned: must be a non-negative safe integer/,
+    );
+    expect(() => threadReplayCheckReportFromJson({ ...base, highestLsn: "not-an-lsn" })).toThrow(
+      /highestLsn/,
+    );
+    expect(() => threadReplayCheckReportFromJson({ ...base, discrepancies: {} })).toThrow(
+      /discrepancies: must be an array/,
+    );
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: tooManyDiscrepancies,
+      }),
+    ).toThrow(/length exceeds MAX_THREAD_REPLAY_CHECK_DISCREPANCIES/);
+    expect(() =>
+      threadReplayCheckReportToJsonValue({
+        ok: false,
+        highestLsn: HEAD_LSN,
+        eventsScanned: 0,
+        discrepancies: tooManyDiscrepancies as readonly ThreadReplayCheckDiscrepancy[],
+      }),
+    ).toThrow(/length exceeds MAX_THREAD_REPLAY_CHECK_DISCREPANCIES/);
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [{ kind: "unknown" }],
+      }),
+    ).toThrow(/unknown thread replay-check discrepancy kind/);
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [
+          {
+            kind: "thread_receipt_index_mismatch",
+            threadId: THREAD_ID,
+            field: "notAField",
+            replayed: [],
+            stored: [],
+          },
+        ],
+      }),
+    ).toThrow(/unsupported field/);
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [
+          {
+            kind: "thread_effective_status_mismatch",
+            threadId: THREAD_ID,
+            field: "notAField",
+            replayed: null,
+            stored: null,
+          },
+        ],
+      }),
+    ).toThrow(/unsupported field/);
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [
+          {
+            kind: "thread_log_invariant_violation",
+            lsn: HEAD_LSN,
+            eventType: "thread.created",
+            reason: "bad",
+            threadId: 42,
+          },
+        ],
+      }),
+    ).toThrow(/threadId: must be a string/);
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [
+          {
+            kind: "thread_state_field_mismatch",
+            threadId: THREAD_ID,
+            field: "title",
+            replayed: undefined,
+            stored: "title",
+          },
+        ],
+      }),
+    ).toThrow(/replayed: is required/);
+    expect(() =>
+      threadReplayCheckReportFromJson({
+        ...base,
+        discrepancies: [
+          {
+            kind: "thread_state_field_mismatch",
+            threadId: THREAD_ID,
+            field: "title",
+            replayed: () => undefined,
+            stored: "title",
+          },
+        ],
+      }),
+    ).toThrow(/replayed/);
   });
 
   it("rejects unknown keys at every route-envelope boundary", () => {

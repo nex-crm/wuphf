@@ -22,12 +22,12 @@ export default defineConfig({
       reportsDirectory: "coverage",
       thresholds: {
         // Ratcheted up after R11 added 198 spec-driven tests.
-        // Measured: 97.05 lines / 97.05 statements / 99.62 functions / 89.79 branches.
+        // Measured: 98.11 lines / 98.11 statements / 99.74 functions / 90.08 branches.
         // Aspirational target: 98/98/98/98.
         lines: 97,
         statements: 97,
         functions: 99,
-        branches: 89,
+        branches: 90,
       },
     },
   },

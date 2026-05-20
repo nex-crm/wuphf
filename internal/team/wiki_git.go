@@ -228,7 +228,7 @@ func (r *Repo) ensureLayoutLocked() error {
 			}
 		}
 	}
-	return nil
+	return r.ensureObsidianVaultLocked()
 }
 
 // Commit writes content for slug @ path, stages, and commits with a per-commit
@@ -270,6 +270,15 @@ func (r *Repo) Commit(ctx context.Context, slug, relPath, content, mode, message
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
 		return "", 0, fmt.Errorf("wiki: mkdir %s: %w", filepath.Dir(fullPath), err)
 	}
+
+	// OS-level advisory lock spans write + git commit so an Obsidian editor
+	// cannot interleave its own write between our os.WriteFile and the staged
+	// commit (WIKI-OBSIDIAN-COMPATIBILITY §6.2).
+	lockFile, err := acquireArticleLock(fullPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("wiki: acquire article lock: %w", err)
+	}
+	defer releaseArticleLock(lockFile)
 
 	var bytesWritten int
 	switch mode {
