@@ -713,6 +713,16 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 	if created.Request.Blocking || created.Request.Required {
 		t.Fatalf("human interviews must be non-blocking, got %+v", created.Request)
 	}
+	var answerDirectly *interviewOption
+	for i := range created.Request.Options {
+		if created.Request.Options[i].ID == "answer_directly" {
+			answerDirectly = &created.Request.Options[i]
+			break
+		}
+	}
+	if answerDirectly == nil || !answerDirectly.RequiresText || strings.TrimSpace(answerDirectly.TextHint) == "" {
+		t.Fatalf("expected answer_directly to require text, got %+v", answerDirectly)
+	}
 	if b.HasBlockingRequest() {
 		t.Fatal("human interview should not count as a blocking request")
 	}

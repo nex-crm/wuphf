@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentRequest } from "../../api/client";
@@ -29,9 +29,11 @@ vi.mock("../../api/client", async () => {
         },
       ],
     }),
+    answerRequest: vi.fn().mockResolvedValue({}),
   };
 });
 
+import * as clientMod from "../../api/client";
 import { InterviewBar } from "./InterviewBar";
 
 function wrap(ui: ReactNode) {
@@ -263,5 +265,41 @@ describe("<InterviewBar> approval UX", () => {
 
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.getByText("Approve the new plan?")).toBeInTheDocument();
+  });
+
+  it("collects text for legacy direct-answer interviews", async () => {
+    const legacyInterview: AgentRequest = {
+      id: "request-legacy-interview",
+      from: "research",
+      channel: "general",
+      kind: "interview",
+      status: "pending",
+      question: "What should we ask next?",
+      options: [{ id: "answer_directly", label: "Answer directly" }],
+      blocking: false,
+      created_at: "2026-05-06T00:00:00Z",
+    };
+    const answerSpy = vi.mocked(clientMod.answerRequest);
+    answerSpy.mockClear();
+
+    setPending([legacyInterview]);
+    render(wrap(<InterviewBar />));
+
+    fireEvent.click(screen.getByRole("button", { name: /Answer directly/i }));
+    const textbox = screen.getByRole("textbox");
+    fireEvent.change(textbox, {
+      target: { value: "Ask whether the buyer has budget authority." },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Send as Answer directly/i }),
+    );
+
+    await waitFor(() => {
+      expect(answerSpy).toHaveBeenCalledWith(
+        "request-legacy-interview",
+        "answer_directly",
+        "Ask whether the buyer has budget authority.",
+      );
+    });
   });
 });

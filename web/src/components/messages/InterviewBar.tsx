@@ -15,6 +15,10 @@ import {
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
 import { parseApprovalContext } from "../../lib/parseApprovalContext";
+import {
+  requestOptionNeedsText,
+  requestOptionTextHint,
+} from "../../lib/requestOptions";
 import { useAppStore } from "../../stores/app";
 import { SkillCompareView } from "../apps/SkillCompareView";
 import { useOnboardingDMContext } from "../onboarding/OnboardingDMRoute";
@@ -203,7 +207,7 @@ export function InterviewBar() {
   };
 
   const handleOption = (option: InterviewOption) => {
-    if (option.requires_text) {
+    if (requestOptionNeedsText(current, option)) {
       setTextMode({ option });
       setCustomText("");
       return;
@@ -345,7 +349,7 @@ export function InterviewBar() {
             <textarea
               ref={textareaRef}
               className="interview-bar-textarea"
-              placeholder={textMode.option.text_hint || "Type your answer..."}
+              placeholder={requestOptionTextHint(current, textMode.option)}
               value={customText}
               onChange={(e) => setCustomText(e.target.value)}
               onKeyDown={(e) => {
@@ -401,7 +405,7 @@ export function InterviewBar() {
               >
                 <span className="interview-bar-opt-num">{i + 1}</span>
                 <span className="interview-bar-opt-label">{opt.label}</span>
-                {opt.requires_text ? (
+                {requestOptionNeedsText(current, opt) ? (
                   <span className="interview-bar-text-hint"> · type</span>
                 ) : null}
               </button>

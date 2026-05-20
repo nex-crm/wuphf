@@ -621,8 +621,8 @@ function RequestBody({
       <RequestItem
         request={fullRequest}
         isPending={isPending}
-        onAnswer={(choiceId) => {
-          void answerRequest(fullRequest.id, choiceId).then(() => {
+        onAnswer={(choiceId, customText) => {
+          void answerRequest(fullRequest.id, choiceId, customText).then(() => {
             void queryClient.invalidateQueries({ queryKey: ["requests"] });
             void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
           });

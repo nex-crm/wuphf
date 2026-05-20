@@ -65,7 +65,7 @@ func requestOptionDefaults(kind string) ([]interviewOption, string) {
 		}, "balanced"
 	case "interview":
 		return []interviewOption{
-			{ID: "answer_directly", Label: "Answer directly", Description: "Respond in your own words below."},
+			{ID: "answer_directly", Label: "Answer directly", Description: "Respond in your own words below.", RequiresText: true, TextHint: "Type your answer for the team."},
 			{ID: "need_more_context", Label: "Need more context", Description: "Ask the office to bring back more context before you decide.", RequiresText: true, TextHint: "Type what context is missing or what should be clarified next."},
 		}, "answer_directly"
 	case "freeform", "secret":
