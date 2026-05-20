@@ -27,6 +27,7 @@ import {
   ApprovalReplayThreadNotFoundError,
   ApprovalRequestAlreadyDecidedError,
   ApprovalTokenAlreadyUsedError,
+  ApprovalTokenIssuedToMismatchError,
   createApprovalAppender,
   createApprovalProjection,
   parseApprovalIdempotencyKey,
@@ -107,6 +108,13 @@ function decidedPayloadWithToken(): ApprovalDecidedAuditPayload {
   return {
     ...decidedPayload("approve"),
     token: signedApprovalTokenFixture(requested),
+  };
+}
+
+function mismatchedTokenDecisionPayload(): ApprovalDecidedAuditPayload {
+  return {
+    ...decidedPayloadWithToken(),
+    decidedBy: asSignerIdentity("agent_beta"),
   };
 }
 
@@ -271,6 +279,56 @@ describe("approval projection and appender", () => {
 
       expect(eventCount(db, "approval.decided")).toBe(1);
       expect(projection.getById(SECOND_REQUEST_ID)?.approval.status).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects direct approval decisions when the token was issued to a different actor", () => {
+    const { db, projection, appender } = setup();
+    try {
+      appender.requestApproval(requestedPayload());
+      const before = projectionSnapshot(db);
+
+      expect(() => appender.decideApproval(mismatchedTokenDecisionPayload())).toThrow(
+        ApprovalTokenIssuedToMismatchError,
+      );
+
+      expect(eventCount(db, "approval.decided")).toBe(0);
+      expect(projectionSnapshot(db)).toBe(before);
+      expect(projection.getById(REQUEST_ID)?.approval.status).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects idempotent approval decisions when the token was issued to a different actor", () => {
+    const { db, projection, appender } = setup();
+    try {
+      appender.requestApproval(requestedPayload());
+      const before = projectionSnapshot(db);
+      const decisionKey = parseApprovalIdempotencyKey(
+        "cmd_approval.decided_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "approval.decided",
+      );
+      expect(decisionKey.ok).toBe(true);
+      if (!decisionKey.ok) return;
+
+      expect(() =>
+        appender.decideApprovalIdempotent({
+          payload: mismatchedTokenDecisionPayload(),
+          idempotency: decisionKey.key,
+          requestFingerprint: requestFingerprint("approval.decided"),
+          nowMs: 1_700_000_000_000,
+          render: () => {
+            throw new Error("decision render must not run when token actor mismatches");
+          },
+        }),
+      ).toThrow(ApprovalTokenIssuedToMismatchError);
+
+      expect(eventCount(db, "approval.decided")).toBe(0);
+      expect(projectionSnapshot(db)).toBe(before);
+      expect(projection.getById(REQUEST_ID)?.approval.status).toBe("pending");
     } finally {
       db.close();
     }
