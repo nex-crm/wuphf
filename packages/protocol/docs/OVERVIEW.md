@@ -257,7 +257,7 @@ graph TB
 8. `ExternalWrite` is discriminated: [receipt](modules/receipt.md).
 9. No `any`, ignores, or `ts-ignore`: [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [budgets](modules/budgets.md).
 10. Bounded operations are required: [budgets](modules/budgets.md).
-11. Public API changes only through `index.ts`: [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [budgets](modules/budgets.md), [thread](modules/thread.md).
+11. Public API changes through `index.ts` (default entry) and `browser.ts` (renderer-safe subpath): [moat primitives](modules/moat-primitives.md), [receipt](modules/receipt.md), [ipc](modules/ipc.md), [audit-event](modules/audit-event.md), [budgets](modules/budgets.md), [thread](modules/thread.md).
 12. Runtime TS surface is camelCase: [ipc](modules/ipc.md), [receipt](modules/receipt.md).
 13. Dates mark time only: [receipt](modules/receipt.md), [audit-event](modules/audit-event.md).
 14. Coverage ratchets upward: every module's tests, especially [receipt](modules/receipt.md) and [audit-event](modules/audit-event.md), must keep the gate green.
