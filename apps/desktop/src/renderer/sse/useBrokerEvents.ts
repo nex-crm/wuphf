@@ -238,11 +238,17 @@ async function readSseFrames(
     for (;;) {
       const chunk = await reader.read();
       if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true }).replace(/\r\n/g, "\n");
+      // Normalize CRLF on the *accumulated* buffer rather than per
+      // chunk. If `\r` ends one decoded chunk and `\n` starts the next,
+      // per-chunk replacement leaves `\r\n` in the buffer and the frame
+      // splitter misses the boundary.
+      buffer += decoder.decode(chunk.value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
       buffer = drainFrames(buffer, onFrame, options.frameByteLimit);
       assertFrameByteLimit(buffer, options.frameByteLimit);
     }
-    buffer += decoder.decode().replace(/\r\n/g, "\n");
+    buffer += decoder.decode();
+    buffer = buffer.replace(/\r\n/g, "\n");
     drainFrames(`${buffer}\n\n`, onFrame, options.frameByteLimit);
   } catch (error) {
     try {

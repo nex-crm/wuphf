@@ -92,27 +92,59 @@ describe("dynamic renderer CSP injection", () => {
     expect(() => rendererCspForBrokerUrl("not a url")).toThrow("Invalid broker URL for CSP");
   });
 
-  it("returns the dev CSP variant when isPackaged is false", () => {
-    expect(rendererCspForBrokerUrl(null, { isPackaged: false })).toBe(DEV_RENDERER_CSP);
+  it("returns the dev CSP variant only when explicitly asked", () => {
+    expect(rendererCspForBrokerUrl(null, { isDevRequest: true })).toBe(DEV_RENDERER_CSP);
     expect(DEV_RENDERER_CSP).toContain("'unsafe-inline'");
     expect(DEV_RENDERER_CSP).toContain("'unsafe-eval'");
     expect(DEV_RENDERER_CSP).toContain("ws://localhost:5173");
   });
 
   it("appends the broker origin to the dev CSP connect-src", () => {
-    const csp = rendererCspForBrokerUrl("http://127.0.0.1:54321", { isPackaged: false });
+    const csp = rendererCspForBrokerUrl("http://127.0.0.1:54321", { isDevRequest: true });
     expect(csp).toContain("connect-src 'self' http://127.0.0.1:54321 ws://localhost:5173");
   });
 
-  it("threads isPackaged through the headers-received listener", () => {
+  it("uses dev CSP only for responses served from the validated dev origin", () => {
     const listener = createDynamicRendererCspHeadersReceivedListener(
       () => "http://127.0.0.1:54321",
-      { isPackaged: false },
+      { devRendererOrigin: "http://localhost:5173" },
     );
-    const response = invokeListener(listener);
-    expect(response.responseHeaders?.["Content-Security-Policy"]).toEqual([
-      rendererCspForBrokerUrl("http://127.0.0.1:54321", { isPackaged: false }),
-    ]);
+
+    // Response served from the dev server -> dev CSP.
+    const devResponse = invokeListener(listener, {}, "http://localhost:5173/main.tsx");
+    expect(devResponse.responseHeaders?.["Content-Security-Policy"]?.[0]).toContain(
+      "'unsafe-inline'",
+    );
+
+    // Response served from the broker (e.g. `electron-vite preview` or
+    // packaged-style load against the broker's static handler) MUST get
+    // the strict CSP — `!app.isPackaged` is not enough on its own.
+    const brokerResponse = invokeListener(listener, {}, "http://127.0.0.1:54321/index.html");
+    expect(brokerResponse.responseHeaders?.["Content-Security-Policy"]?.[0]).not.toContain(
+      "'unsafe-inline'",
+    );
+    expect(brokerResponse.responseHeaders?.["Content-Security-Policy"]?.[0]).toContain(
+      "script-src 'self';",
+    );
+  });
+
+  it("refuses dev CSP when devRendererOrigin is null", () => {
+    const listener = createDynamicRendererCspHeadersReceivedListener(
+      () => "http://127.0.0.1:54321",
+      { devRendererOrigin: null },
+    );
+    const response = invokeListener(listener, {}, "http://localhost:5173/main.tsx");
+    expect(response.responseHeaders?.["Content-Security-Policy"]?.[0]).not.toContain(
+      "'unsafe-inline'",
+    );
+  });
+
+  it("rejects a non-loopback devRendererOrigin and falls back to strict", () => {
+    const listener = createDynamicRendererCspHeadersReceivedListener(() => null, {
+      devRendererOrigin: "http://evil.example.com:80",
+    });
+    const response = invokeListener(listener, {}, "http://evil.example.com:80/main.tsx");
+    expect(response.responseHeaders?.["Content-Security-Policy"]).toEqual([BASE_RENDERER_CSP]);
   });
 });
 
@@ -129,9 +161,10 @@ function driveCspCallback(args: {
 function invokeListener(
   listener: CspListener,
   responseHeaders: Record<string, string[]> | undefined = {},
+  url: string = "http://localhost:5173/",
 ): HeadersReceivedResponse {
   let response: HeadersReceivedResponse | null = null;
-  listener(createDetails(responseHeaders), (value) => {
+  listener(createDetails(responseHeaders, url), (value) => {
     response = value;
   });
   if (response === null) {
@@ -142,10 +175,11 @@ function invokeListener(
 
 function createDetails(
   responseHeaders: Record<string, string[]> | undefined,
+  url: string,
 ): OnHeadersReceivedListenerDetails {
   const base = {
     id: 1,
-    url: "http://localhost:5173/",
+    url,
     method: "GET",
     resourceType: "mainFrame",
     referrer: "",

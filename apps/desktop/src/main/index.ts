@@ -40,8 +40,19 @@ if (app.isPackaged) {
 // origin through to the broker subprocess so it can add it to the
 // /api-token trusted-origins allowlist (and only there — `/api/*` still
 // require bearer auth and are unaffected by this).
-const devRendererOrigin = devOriginFromEnv(process.env[ELECTRON_RENDERER_URL_ENV]);
-if (!app.isPackaged && devRendererOrigin !== null) {
+//
+// Packaged builds MUST NOT inherit a pre-existing `WUPHF_DEV_RENDERER_ORIGIN`
+// from the parent environment, even if one was set by a wrapper script or
+// CI runner. Clear it unconditionally before deriving the dev origin so
+// no surrounding context can extend the broker's trusted-origin set in a
+// shipped binary.
+if (app.isPackaged) {
+  delete process.env[DEV_RENDERER_ORIGIN_ENV];
+}
+const devRendererOrigin = app.isPackaged
+  ? null
+  : devOriginFromEnv(process.env[ELECTRON_RENDERER_URL_ENV]);
+if (devRendererOrigin !== null) {
   process.env[DEV_RENDERER_ORIGIN_ENV] = devRendererOrigin;
 }
 
@@ -94,7 +105,7 @@ app
     installDynamicRendererCsp(
       session.defaultSession,
       () => brokerSupervisor.getSnapshot().brokerUrl,
-      { isPackaged: app.isPackaged },
+      { devRendererOrigin },
     );
 
     try {

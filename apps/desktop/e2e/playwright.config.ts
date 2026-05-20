@@ -1,5 +1,10 @@
 import { defineConfig } from "@playwright/test";
 
+// Indirection so `useLiteralKeys` (biome) is satisfied while
+// `noPropertyAccessFromIndexSignature` (TypeScript) still rejects
+// `process.env.CI` direct access.
+const CI_ENV = "CI";
+
 // End-to-end harness for `apps/desktop`. Boots the real Electron main
 // process — which in turn forks the broker utility process — and drives
 // the renderer via Playwright's Chromium runtime. The purpose is to
@@ -22,8 +27,8 @@ export default defineConfig({
   // Electron tests share `localhost:5173` (vite dev) and the user-data
   // directory; serializing keeps them deterministic.
   fullyParallel: false,
-  forbidOnly: !!process.env.CI,
+  forbidOnly: !!process.env[CI_ENV],
   retries: 0,
   workers: 1,
-  reporter: process.env.CI ? [["github"], ["list"]] : "list",
+  reporter: process.env[CI_ENV] ? [["github"], ["list"]] : "list",
 });

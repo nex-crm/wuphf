@@ -81,7 +81,7 @@ an authoritative header injected by the main process in `src/main/csp.ts`:
   so a broker restart on a new ephemeral port immediately changes the allowed
   origin without rewriting HTML on disk.
 - `frame-ancestors 'none'` and `object-src 'none'` — no embedding, no plugins.
-- `base-uri 'self'` — block `<base href>` redirection of relative URLs.
+- `base-uri 'none'` — block `<base href>` redirection of relative URLs.
 
 The renderer's `<meta http-equiv="Content-Security-Policy">` tag remains a
 strict fallback. The Electron `webRequest.onHeadersReceived` header is

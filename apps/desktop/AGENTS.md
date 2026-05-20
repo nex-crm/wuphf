@@ -77,10 +77,12 @@ The demo is the verification deliverable — `bun run desktop:dev` must boot a w
 ## What this package is NOT for
 
 - **Not for the broker itself.** The broker process implementation lives in a future package (`@wuphf/broker` or `apps/broker`). This package only spawns/kills it.
-- **Not for arbitrary web UI.** The renderer in this package is the trusted
-  desktop shell surface. Shared product UI can move here deliberately, but app
-  data still comes from the broker over loopback HTTP/SSE rather than IPC or
-  main-process filesystem reads.
+- **Not for arbitrary web UI.** The renderer in this package is the packaged
+  desktop shell — first-party code, but still treated as untrusted web content
+  by main: sandboxed, contextIsolated, with a closed contextBridge allowlist.
+  Shared product UI can move here deliberately, but app data still comes from
+  the broker over loopback HTTP/SSE rather than IPC or main-process filesystem
+  reads.
 - **Not for auto-update.** Auto-update wiring lives in `feat/installer-pipeline` (Sparkle for Mac, electron-updater for Win). This package only knows about its own version string.
 - **Not for code-signing.** Same — that's installer-pipeline.
 

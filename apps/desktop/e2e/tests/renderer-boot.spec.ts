@@ -72,10 +72,18 @@ test("renderer displays broker URL fetched from the broker subprocess", async ()
 
     // Cross-check with main: the URL the renderer shows must equal
     // what the supervisor reports through the IPC bridge. If they
-    // diverge, the renderer is painting stale state.
-    const ipcBrokerUrl = await window.evaluate(
-      async () => (await window.wuphf.getBrokerStatus()).brokerUrl,
-    );
+    // diverge, the renderer is painting stale state. The cast is
+    // local because the Playwright Page doesn't know about the
+    // contextBridge allowlist injected by the preload script.
+    const ipcBrokerUrl = await window.evaluate<string | null>(async () => {
+      interface BridgeWindow {
+        readonly wuphf: {
+          getBrokerStatus(): Promise<{ readonly brokerUrl: string | null }>;
+        };
+      }
+      const bridge = window as unknown as BridgeWindow;
+      return (await bridge.wuphf.getBrokerStatus()).brokerUrl;
+    });
     expect(ipcBrokerUrl).toBe(brokerUrlText);
   } finally {
     await app.close();
