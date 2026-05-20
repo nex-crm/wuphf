@@ -66,12 +66,15 @@ export interface IdempotentApprovalDecisionArgs {
 
 export interface ApprovalAppender {
   sharesProvenance(db: Database.Database, eventLog: EventLog): boolean;
-  enableThreadReferenceValidation(): void;
   requestApproval(payload: ApprovalRequestedAuditPayload): ApprovalAppendResult;
   decideApproval(payload: ApprovalDecidedAuditPayload): ApprovalAppendResult;
   requestApprovalIdempotent(args: IdempotentApprovalRequestArgs): IdempotentApprovalAppendResult;
   decideApprovalIdempotent(args: IdempotentApprovalDecisionArgs): IdempotentApprovalAppendResult;
   pruneIdempotencyOlderThan(cutoffMs: number): number;
+}
+
+export interface ApprovalAppenderOptions {
+  readonly threadRefValidator?: (threadId: ThreadId) => boolean;
 }
 
 export class ApprovalRequestAlreadyExistsError extends Error {
@@ -139,14 +142,11 @@ interface TokenUsageRow {
   readonly approvalId: string;
 }
 
-interface ExistsRow {
-  readonly present: 1;
-}
-
 export function createApprovalAppender(
   db: Database.Database,
   eventLog: EventLog,
   projection: ApprovalProjection,
+  options: ApprovalAppenderOptions = {},
 ): ApprovalAppender {
   const tokenUsageStmt = db.prepare<[string, string], TokenUsageRow>(
     `SELECT approval_id AS approvalId
@@ -173,10 +173,7 @@ export function createApprovalAppender(
      WHERE created_at_ms < ?
        AND command IN ('approval.requested', 'approval.decided')`,
   );
-  const threadExistsStmt = db.prepare<[ThreadId], ExistsRow>(
-    "SELECT 1 AS present FROM threads WHERE thread_id = ?",
-  );
-  let enforceThreadReferences = false;
+  const threadRefValidator = options.threadRefValidator ?? null;
 
   const assertApprovalTokenUnused = (payload: ApprovalDecidedAuditPayload): void => {
     const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
@@ -188,8 +185,8 @@ export function createApprovalAppender(
   };
 
   const assertThreadReferenceExists = (payload: ApprovalRequestedAuditPayload): void => {
-    if (!enforceThreadReferences || payload.threadId === undefined) return;
-    if (threadExistsStmt.get(payload.threadId) === undefined) {
+    if (payload.threadId === undefined) return;
+    if (threadRefValidator === null || !threadRefValidator(payload.threadId)) {
       throw new ApprovalThreadNotFoundError(payload.threadId);
     }
   };
@@ -335,9 +332,6 @@ export function createApprovalAppender(
   return {
     sharesProvenance(candidateDb: Database.Database, candidateEventLog: EventLog): boolean {
       return candidateDb === db && candidateEventLog === eventLog;
-    },
-    enableThreadReferenceValidation(): void {
-      enforceThreadReferences = true;
     },
     requestApproval(payload: ApprovalRequestedAuditPayload): ApprovalAppendResult {
       return requestApprovalTransaction.immediate(payload);

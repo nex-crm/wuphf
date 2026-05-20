@@ -27,6 +27,7 @@ import {
   asTaskId,
   asThreadId,
   asTimestampMs,
+  canonicalJSON,
   routeErrorFromJson,
   type SignedApprovalToken,
   signedApprovalTokenFromJson,
@@ -61,6 +62,7 @@ interface FixtureOverrides {
   readonly appender?: (base: ApprovalAppender) => ApprovalAppender;
   readonly projection?: (base: ApprovalProjection) => ApprovalProjection;
   readonly tokenAgentIds?: ReadonlyMap<typeof TOKEN, ReturnType<typeof asAgentId>>;
+  readonly threadIds?: readonly ReturnType<typeof asThreadId>[];
 }
 
 interface Fixture {
@@ -101,7 +103,7 @@ function requestedPayload(
     claim,
     scope,
     riskClass: "critical",
-    threadId: overrides.threadId ?? THREAD_ID,
+    ...(overrides.threadId === undefined ? {} : { threadId: overrides.threadId }),
     taskId: overrides.taskId ?? TASK_ID,
     receiptId: RECEIPT_ID,
     requestedBy: asSignerIdentity("operator@example.com"),
@@ -150,9 +152,19 @@ async function buildFixture(overrides?: FixtureOverrides): Promise<Fixture> {
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
   const eventLog = createEventLog(db);
+  const threadIds = overrides?.threadIds ?? [];
+  for (const threadId of threadIds) {
+    insertThreadProjectionRow(db, eventLog, threadId);
+  }
+  const threadExistsStmt = db.prepare<[string], { readonly present: 1 }>(
+    "SELECT 1 AS present FROM threads WHERE thread_id = ?",
+  );
   const { appender: baseAppender, projection: baseProjection } = createApprovalSubsystem(
     db,
     eventLog,
+    threadIds.length === 0
+      ? {}
+      : { threadRefValidator: (threadId) => threadExistsStmt.get(threadId) !== undefined },
   );
   const projection = overrides?.projection?.(baseProjection) ?? baseProjection;
   const appender = overrides?.appender?.(baseAppender) ?? baseAppender;
@@ -167,6 +179,25 @@ async function buildFixture(overrides?: FixtureOverrides): Promise<Fixture> {
     },
   });
   return { db, broker, appender, projection };
+}
+
+function insertThreadProjectionRow(
+  db: ReturnType<typeof openDatabase>,
+  eventLog: ReturnType<typeof createEventLog>,
+  threadId: ReturnType<typeof asThreadId>,
+): void {
+  const lsn = eventLog.append({ type: "thread.created", payload: Buffer.from("{}") });
+  db.prepare<[string, number, string, string], void>(
+    `INSERT INTO threads
+       (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms,
+        external_refs)
+     VALUES (?, 'Approval route thread', 'open', ?, ?, 0, 0, ?)`,
+  ).run(
+    threadId,
+    lsn,
+    asSignerIdentity("operator@example.com"),
+    canonicalJSON({ source_urls: [], entity_ids: [] }),
+  );
 }
 
 async function teardown(fix: Fixture | null): Promise<void> {
@@ -410,6 +441,8 @@ describe("/api/v1/approvals routes", () => {
   });
 
   it("filters approvals by status, thread, and task across mixed rows", async () => {
+    await teardown(fix);
+    fix = await buildFixture({ threadIds: [THREAD_ID, OTHER_THREAD_ID] });
     if (fix === null) throw new Error("fixture missing");
     const fixture = fix;
     const firstPayload = requestedPayload(FILTER_REQUEST_ID_1, {
@@ -485,6 +518,19 @@ describe("/api/v1/approvals routes", () => {
     ).toEqual([first.id, second.id]);
   });
 
+  it("rejects explicit thread IDs when the appender has no thread validator", async () => {
+    if (fix === null) throw new Error("fixture missing");
+    const res = await fetch(`${fix.broker.url}/api/v1/approvals`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: requestBody(requestedPayload(REQUEST_ID, { threadId: THREAD_ID })),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "thread_not_found" });
+    expect(eventCount(fix.db, "approval.requested")).toBe(0);
+  });
+
   it("uses a ULID create idempotency key as the approval request id", async () => {
     if (fix === null) throw new Error("fixture missing");
 
@@ -518,7 +564,7 @@ describe("/api/v1/approvals routes", () => {
     expect(validateApprovalStreamEvent(requestedEvent).ok).toBe(true);
     expect(requestedEvent.id).toBe("v1:1");
     expect(requestedEvent.payload.requestId).toBe(createdApproval.id);
-    expect(requestedEvent.payload.threadId).toBe(THREAD_ID);
+    expect(requestedEvent.payload.threadId).toBeUndefined();
     expect(requestedEvent.payload.headLsn).toBe("v1:1");
 
     const decided = await fetch(

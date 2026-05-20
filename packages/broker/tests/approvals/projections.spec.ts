@@ -26,6 +26,7 @@ import {
   ApprovalReplayPendingLimitExceededError,
   ApprovalReplayThreadNotFoundError,
   ApprovalRequestAlreadyDecidedError,
+  ApprovalThreadNotFoundError,
   ApprovalTokenAlreadyUsedError,
   ApprovalTokenIssuedToMismatchError,
   createApprovalAppender,
@@ -53,9 +54,28 @@ function setup() {
   return { db, eventLog, projection, appender };
 }
 
+function setupWithThreadValidator(
+  threadIds: readonly ReturnType<typeof asThreadId>[] = [THREAD_ID],
+) {
+  const db = openDatabase({ path: ":memory:" });
+  runMigrations(db);
+  const eventLog = createEventLog(db);
+  for (const threadId of threadIds) {
+    insertThreadProjectionRow(db, eventLog, threadId);
+  }
+  const threadExistsStmt = db.prepare<[string], { readonly present: 1 }>(
+    "SELECT 1 AS present FROM threads WHERE thread_id = ?",
+  );
+  const projection = createApprovalProjection(db);
+  const appender = createApprovalAppender(db, eventLog, projection, {
+    threadRefValidator: (threadId) => threadExistsStmt.get(threadId) !== undefined,
+  });
+  return { db, eventLog, projection, appender };
+}
+
 function requestedPayload(
   requestId = REQUEST_ID,
-  opts: { readonly thread?: boolean; readonly task?: boolean } = { thread: true, task: true },
+  opts: { readonly thread?: boolean; readonly task?: boolean } = { thread: false, task: true },
 ): ApprovalRequestedAuditPayload {
   const claimId = asApprovalClaimId(`claim_${requestId.slice(-6).toLowerCase()}`);
   const claim = {
@@ -217,6 +237,18 @@ function requestFingerprint(
 }
 
 describe("approval projection and appender", () => {
+  it("rejects explicit thread references when constructed without a thread validator", () => {
+    const { db, appender } = setup();
+    try {
+      expect(() =>
+        appender.requestApproval(requestedPayload(REQUEST_ID, { thread: true, task: false })),
+      ).toThrow(ApprovalThreadNotFoundError);
+      expect(eventCount(db, "approval.requested")).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("folds request then decision in LSN order and rejects a second decision", () => {
     const { db, projection, appender } = setup();
     try {
@@ -469,24 +501,24 @@ describe("approval projection and appender", () => {
   });
 
   it("queries pinned approvals as pending rows scoped to a thread", () => {
-    const { db, projection, appender } = setup();
+    const otherThreadId = asThreadId("01FRZ3NDEKTSV4RRFFQ69G5FA4");
+    const { db, projection, appender } = setupWithThreadValidator([THREAD_ID, otherThreadId]);
     try {
-      const otherThreadId = asThreadId("01FRZ3NDEKTSV4RRFFQ69G5FA4");
-      appender.requestApproval(requestedPayload(REQUEST_ID));
+      appender.requestApproval(requestedPayload(REQUEST_ID, { thread: true }));
       appender.requestApproval({
-        ...requestedPayload(SECOND_REQUEST_ID),
+        ...requestedPayload(SECOND_REQUEST_ID, { thread: true }),
         threadId: otherThreadId,
       });
       expect(projection.countPendingByThread(THREAD_ID)).toBe(1);
       expect(projection.listPendingByThread(THREAD_ID).map((row) => row.approval.id)).toEqual([
         REQUEST_ID,
       ]);
-      expect(projection.latestHeadLsnByThread(THREAD_ID)).toBe("v1:1");
+      expect(projection.latestHeadLsnByThread(THREAD_ID)).toBe("v1:3");
 
       appender.decideApproval(decidedPayload("reject", REQUEST_ID));
       expect(projection.countPendingByThread(THREAD_ID)).toBe(0);
       expect(projection.listPendingByThread(THREAD_ID)).toEqual([]);
-      expect(projection.latestHeadLsnByThread(THREAD_ID)).toBe("v1:3");
+      expect(projection.latestHeadLsnByThread(THREAD_ID)).toBe("v1:5");
       expect(projection.countPendingByThread(otherThreadId)).toBe(1);
 
       const indexes = db
@@ -527,7 +559,7 @@ describe("approval projection and appender", () => {
       const live = projectionSnapshot(db);
       const bytes = approvalAuditPayloadToBytes(
         "approval_requested",
-        requestedPayload(SECOND_REQUEST_ID, { task: false }),
+        requestedPayload(SECOND_REQUEST_ID, { thread: true, task: false }),
       );
       eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
 
@@ -545,7 +577,7 @@ describe("approval projection and appender", () => {
       for (let index = 0; index <= MAX_ROUTE_APPROVAL_LIST_ITEMS; index += 1) {
         const bytes = approvalAuditPayloadToBytes(
           "approval_requested",
-          requestedPayload(indexedApprovalRequestId(index), { task: false }),
+          requestedPayload(indexedApprovalRequestId(index), { thread: true, task: false }),
         );
         eventLog.append({ type: "approval.requested", payload: Buffer.from(bytes) });
       }

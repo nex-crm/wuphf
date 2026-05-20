@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 import type { EventLog as ApprovalEventLog } from "../event-log/index.ts";
 import {
   type ApprovalAppender as ApprovalAppenderInstance,
+  type ApprovalAppenderOptions,
   createApprovalAppender,
 } from "./appender.ts";
 import {
@@ -31,19 +32,29 @@ export interface ApprovalSubsystem {
   readonly projection: ApprovalProjectionInstance;
 }
 
+export interface ApprovalSubsystemOptions {
+  readonly threadRefValidator?: ApprovalAppenderOptions["threadRefValidator"];
+}
+
 export function createApprovalSubsystem(
   db: Database.Database,
   eventLog: ApprovalEventLog,
+  options: ApprovalSubsystemOptions = {},
 ): ApprovalSubsystem {
   const projection = createApprovalProjection(db);
   return {
-    appender: createApprovalAppender(db, eventLog, projection),
+    appender: createApprovalAppender(db, eventLog, projection, {
+      ...(options.threadRefValidator === undefined
+        ? {}
+        : { threadRefValidator: options.threadRefValidator }),
+    }),
     projection,
   };
 }
 
 export type {
   ApprovalAppender,
+  ApprovalAppenderOptions,
   ApprovalAppendResult,
   IdempotentApprovalAppendResult,
   IdempotentApprovalDecisionArgs,

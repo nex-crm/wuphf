@@ -56,7 +56,9 @@ async function setup(): Promise<Fixture> {
   const eventLog = createEventLog(db);
   const receiptStore = constructSqliteReceiptStoreForTesting(db, eventLog);
   const threads = createThreadSubsystem(db, eventLog, receiptStore);
-  const approvals = createApprovalSubsystem(db, eventLog);
+  const approvals = createApprovalSubsystem(db, eventLog, {
+    threadRefValidator: (threadId) => threads.state.getById(threadId) !== null,
+  });
   const broker = await createBroker({
     port: 0,
     token: TOKEN,

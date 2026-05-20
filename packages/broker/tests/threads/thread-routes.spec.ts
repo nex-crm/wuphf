@@ -117,7 +117,9 @@ async function setup(): Promise<Fixture> {
   const eventLog = createEventLog(db);
   const receiptStore = constructSqliteReceiptStoreForTesting(db, eventLog);
   const subsystem = createThreadSubsystem(db, eventLog, receiptStore);
-  const approvals = createApprovalSubsystem(db, eventLog);
+  const approvals = createApprovalSubsystem(db, eventLog, {
+    threadRefValidator: (threadId) => subsystem.state.getById(threadId) !== null,
+  });
   const { state, appender } = subsystem;
   const broker = await createBroker({
     port: 0,
@@ -1009,8 +1011,9 @@ describe("/api/v1/threads routes", () => {
       currentSeat: attentionBody.currentSeat,
       pendingApprovalCount: attentionBody.pendingApprovalCount,
     };
-    fixture.approvalProjection.rebuildFromLog(fixture.eventLog);
+    fixture.db.exec("DELETE FROM pending_approvals");
     fixture.subsystem.rebuildFromLog(0);
+    fixture.approvalProjection.rebuildFromLog(fixture.eventLog);
     const replayed = await fetch(`${fixture.broker.url}/api/v1/threads/${THREAD_ID}`, {
       headers: authHeaders(),
     });

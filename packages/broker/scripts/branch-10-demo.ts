@@ -47,10 +47,12 @@ const db = new BetterSqlite3(dbPath);
 runMigrations(db);
 const eventLog = createEventLog(db);
 const approvalProjection = createApprovalProjection(db);
-const approvalAppender = createApprovalAppender(db, eventLog, approvalProjection);
 const agentProviderRoutingStore = createAgentProviderRoutingStore(db);
 const receiptStore = SqliteReceiptStore.fromDatabase(db, eventLog);
 const threads = createThreadSubsystem(db, eventLog, receiptStore);
+const approvalAppender = createApprovalAppender(db, eventLog, approvalProjection, {
+  threadRefValidator: (threadId) => threads.state.getById(threadId) !== null,
+});
 
 const token = asApiToken("demo-token-with-enough-entropy-AAAAAAAAA");
 const agentId = asAgentId("agent_alice_001");
