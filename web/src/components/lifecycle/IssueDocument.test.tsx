@@ -34,6 +34,7 @@ vi.mock("../../api/lifecycle", () => lifecycleApi);
 
 const BASE_DOC: IssueDocumentType = {
   taskId: "task-001",
+  channel: "issue-specs",
   title: "Stripe webhook handler",
   lifecycleState: "drafting",
   spec: {
@@ -246,7 +247,7 @@ describe("<IssueDocument>", () => {
     await waitFor(() => {
       expect(lifecycleApi.postTaskComment).toHaveBeenCalledWith(
         "task-001",
-        "general",
+        "issue-specs",
         "Please confirm the webhook retry policy.",
       );
     });
@@ -353,6 +354,7 @@ describe("normalizeIssueDocument", () => {
     );
 
     expect(doc.title).toBe("Pull unread emails");
+    expect(doc.channel).toBe("email-ops");
     expect(doc.ownerSlug).toBe("contact-intel");
     expect(doc.lifecycleState).toBe("blocked_on_pr_merge");
     expect(doc.spec.goal).toBe("Profiles exist for each sender.");

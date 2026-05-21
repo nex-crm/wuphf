@@ -24,6 +24,7 @@ import {
   ShareAndroid,
   Shield,
   SidebarExpand,
+  TaskList,
   Terminal,
 } from "iconoir-react";
 
@@ -47,7 +48,7 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   wiki: BookStack,
   console: Terminal,
   tasks: CheckCircle,
-  requests: ClipboardCheck,
+  requests: TaskList,
   graph: ShareAndroid,
   policies: Shield,
   calendar: Calendar,

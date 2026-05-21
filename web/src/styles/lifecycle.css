@@ -3689,7 +3689,8 @@ html[data-theme="noir-gold"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .issues-list-skeleton-row {
+  .issues-list-skeleton-row,
+  .issue-doc-skeleton {
     animation: none;
   }
 }

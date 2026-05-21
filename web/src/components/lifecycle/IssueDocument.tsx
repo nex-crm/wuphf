@@ -89,6 +89,7 @@ export interface IssueDocument {
   lifecycleState: LifecycleState;
   spec: IssueSpec;
   comments: IssueComment[];
+  channel: string;
   ownerSlug?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -306,6 +307,18 @@ function resolveAliasedField(
   );
 }
 
+function resolveIssueChannel(
+  packet: Record<string, unknown>,
+  taskRecord: Record<string, unknown> | undefined,
+  taskHint: Task | undefined,
+): string {
+  return (
+    resolveAliasedField(packet, taskRecord, "channel", "channel")?.trim() ||
+    taskHint?.channel?.trim() ||
+    "general"
+  );
+}
+
 /** Normalize the raw API response into a clean IssueDocument. */
 export function normalizeIssueDocument(
   raw: unknown,
@@ -334,6 +347,7 @@ export function normalizeIssueDocument(
     lifecycleState,
     spec,
     comments,
+    channel: resolveIssueChannel(r, taskRecord, taskHint),
     ownerSlug:
       resolveAliasedField(r, taskRecord, "ownerSlug", "owner") ??
       taskHint?.owner,
@@ -690,6 +704,7 @@ function useDraftStream(taskId: string, enabled: boolean): DraftAccumulator {
 
 interface CommentsTimelineProps {
   taskId: string;
+  channel: string;
   comments: IssueComment[];
   isDrafting: boolean;
   timelineRef: React.RefObject<HTMLDivElement | null>;
@@ -698,6 +713,7 @@ interface CommentsTimelineProps {
 
 function CommentsTimeline({
   taskId,
+  channel,
   comments,
   isDrafting,
   timelineRef,
@@ -708,7 +724,7 @@ function CommentsTimeline({
   const trimmedComment = commentBody.trim();
 
   const commentMutation = useMutation({
-    mutationFn: (body: string) => postTaskComment(taskId, "general", body),
+    mutationFn: (body: string) => postTaskComment(taskId, channel, body),
     onSuccess: () => {
       setCommentBody("");
       setCommentError(null);
@@ -1084,6 +1100,7 @@ export function IssueDocument({
         {/* Comments timeline */}
         <CommentsTimeline
           taskId={taskId}
+          channel={doc.channel}
           comments={doc.comments}
           isDrafting={isDrafting}
           timelineRef={timelineRef}
