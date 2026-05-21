@@ -38,17 +38,22 @@ const CEO_ONBOARDING_CHANNEL = directChannelSlug(CEO_AGENT_SLUG);
 
 /**
  * Phase → human-readable label for the wizard header. Order matches the
- * deterministic state machine in broker_onboarding_phase2.go. The labels
- * are intentionally short — they replace the dot-progress indicator the
- * old wizard used so the user can see where they are without leaving the
- * conversation.
+ * deterministic state machine in broker_onboarding_phase2.go.
+ *
+ * No `Step N of M · …` counter: the scratch path skips team-trim and the
+ * skip-website path skips scan, so any fixed denominator lies to the user
+ * (see #939). Each label just names what the CEO is doing in this beat —
+ * "feels like a colleague" beats "feels like a form".
  */
 const PHASE_LABELS: Record<string, string> = {
-  greet: "Step 1 of 5 · Office name",
-  identity: "Step 2 of 5 · Who you are",
-  blueprint: "Step 3 of 5 · Pick a starting blueprint",
-  team: "Step 4 of 5 · Confirm the team",
-  bridge: "Step 5 of 5 · First task",
+  greet: "Office name",
+  identity: "What you do",
+  website: "Website",
+  scan: "Scanning your site",
+  blueprint: "Pick a starter",
+  team: "Confirm the team",
+  seed: "Setting up your office",
+  bridge: "First task",
   draft: "Drafting your first issue",
   approve: "Review and approve",
   kickoff: "Starting your office",
@@ -57,7 +62,7 @@ const PHASE_LABELS: Record<string, string> = {
 
 function phaseLabel(phase: string | undefined): string {
   if (!phase) return "Loading…";
-  return PHASE_LABELS[phase] ?? `Phase: ${phase}`;
+  return PHASE_LABELS[phase] ?? phase;
 }
 
 function parsePendingSuggestion(raw: unknown): CeoSuggestion | null {
