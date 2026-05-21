@@ -20,12 +20,13 @@ func (c brokerCompleter) Complete(ctx context.Context, prompt string) (string, e
 func (b *Broker) runCompanySeedJob(cfg config.Config) {
 	wikiRoot := filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki")
 	input := operations.CompanySeedInput{
-		WebsiteURL: cfg.CompanyWebsite,
-		FilePaths:  cfg.CompanyFilePaths,
-		OwnerName:  cfg.OwnerName,
-		OwnerRole:  cfg.OwnerRole,
-		Completer:  brokerCompleter{},
-		WikiRoot:   wikiRoot,
+		WebsiteURL:  cfg.CompanyWebsite,
+		FilePaths:   cfg.CompanyFilePaths,
+		CompanyName: cfg.CompanyName,
+		OwnerName:   cfg.OwnerName,
+		OwnerRole:   cfg.OwnerRole,
+		Completer:   brokerCompleter{},
+		WikiRoot:    wikiRoot,
 	}
 	ctx, cancel := context.WithTimeout(b.lifecycleCtx, 120*time.Second)
 	defer cancel()

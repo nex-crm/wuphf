@@ -77,11 +77,12 @@ func (b *Broker) runScanPhase(dmSlug string) {
 	}
 
 	input := operations.CompanySeedInput{
-		WebsiteURL: websiteURL,
-		OwnerName:  s.FormAnswers.OwnerName,
-		OwnerRole:  s.FormAnswers.OwnerRole,
-		Completer:  brokerCompleter{},
-		WikiRoot:   wikiRoot,
+		WebsiteURL:  websiteURL,
+		CompanyName: s.FormAnswers.CompanyName,
+		OwnerName:   s.FormAnswers.OwnerName,
+		OwnerRole:   s.FormAnswers.OwnerRole,
+		Completer:   brokerCompleter{},
+		WikiRoot:    wikiRoot,
 	}
 
 	ctx, cancel := context.WithTimeout(b.lifecycleCtx, scanTimeout)
