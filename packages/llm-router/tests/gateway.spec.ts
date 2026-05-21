@@ -82,11 +82,9 @@ describe("gateway happy path", () => {
 
     // The §15.A invariant: event_log holds exactly one cost.event row at
     // the LSN we returned.
-    const row = fix.db
-      .prepare<[number], { readonly lsn: number; readonly type: string }>(
-        "SELECT lsn, type FROM event_log WHERE lsn = ?",
-      )
-      .get(1);
+    const row = fix.db.prepare("SELECT lsn, type FROM event_log WHERE lsn = ?").get(1) as
+      | { readonly lsn: number; readonly type: string }
+      | undefined;
     expect(row?.type).toBe("cost.event");
     expect(row?.lsn).toBe(1);
   });
@@ -115,10 +113,8 @@ describe("dedupe", () => {
       expect(r2.costMicroUsd).toBe(r1.costMicroUsd);
 
       const eventCount = fix.db
-        .prepare<[], { readonly n: number }>(
-          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-        )
-        .get();
+        .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+        .get() as { readonly n: number } | undefined;
       expect(eventCount?.n).toBe(1);
     } finally {
       fix.db.close();
@@ -471,12 +467,10 @@ describe("audit row records served model id (#827)", () => {
         { model: "alias-model", prompt: "p", maxOutputTokens: 8 },
       );
       const row = db
-        .prepare<[], { readonly payload: Buffer }>(
-          "SELECT payload FROM event_log WHERE type = 'cost.event' LIMIT 1",
-        )
-        .get();
+        .prepare("SELECT payload FROM event_log WHERE type = 'cost.event' LIMIT 1")
+        .get() as { readonly payload: Uint8Array } | undefined;
       if (row === undefined) throw new Error("no cost.event row");
-      const parsed = JSON.parse(row.payload.toString("utf8")) as { model: string };
+      const parsed = JSON.parse(new TextDecoder().decode(row.payload)) as { model: string };
       expect(parsed.model).toBe("alias-model-2025-04-12-snapshot");
     } finally {
       db.close();
@@ -496,12 +490,10 @@ describe("audit row records served model id (#827)", () => {
     try {
       await gateway.complete(CTX, REQ);
       const row = db
-        .prepare<[], { readonly payload: Buffer }>(
-          "SELECT payload FROM event_log WHERE type = 'cost.event' LIMIT 1",
-        )
-        .get();
+        .prepare("SELECT payload FROM event_log WHERE type = 'cost.event' LIMIT 1")
+        .get() as { readonly payload: Uint8Array } | undefined;
       if (row === undefined) throw new Error("no cost.event row");
-      const parsed = JSON.parse(row.payload.toString("utf8")) as { model: string };
+      const parsed = JSON.parse(new TextDecoder().decode(row.payload)) as { model: string };
       expect(parsed.model).toBe(STUB_MODEL_FIXED_COST);
     } finally {
       db.close();
@@ -549,10 +541,8 @@ describe("gateway rejects runaway cost estimate before ledger append (#824)", ()
       ).rejects.toThrow(/exceeds per-event cap/);
       // No cost_event written for the over-cap call.
       const count = db
-        .prepare<[], { readonly n: number }>(
-          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-        )
-        .get();
+        .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+        .get() as { readonly n: number } | undefined;
       expect(count?.n).toBe(0);
     } finally {
       db.close();
@@ -608,10 +598,8 @@ describe("concurrent-call coalescing + reservation atomicity (PR #834 round-1 BL
       expect(r1.dedupeReplay).toBe(false);
       // Exactly one cost_event row was written.
       const count = db
-        .prepare<[], { readonly n: number }>(
-          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-        )
-        .get();
+        .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+        .get() as { readonly n: number } | undefined;
       expect(count?.n).toBe(1);
     } finally {
       db.close();
@@ -647,10 +635,8 @@ describe("concurrent-call coalescing + reservation atomicity (PR #834 round-1 BL
       await expect(p1).rejects.toThrow();
       await expect(p2).rejects.toThrow();
       const count = db
-        .prepare<[], { readonly n: number }>(
-          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-        )
-        .get();
+        .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+        .get() as { readonly n: number } | undefined;
       expect(count?.n).toBe(0);
     } finally {
       db.close();

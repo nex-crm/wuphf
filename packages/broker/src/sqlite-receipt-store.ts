@@ -1,15 +1,24 @@
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   lsnFromV1Number,
   type ReceiptId,
   type ReceiptSnapshot,
   receiptFromJson,
   receiptToJson,
+  type TaskId,
   type ThreadId,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
-import BetterSqlite3 from "better-sqlite3";
 
 import { createEventLog, type EventLog, openDatabase, runMigrations } from "./event-log/index.ts";
+import {
+  isSqliteBusyError,
+  isSqliteConstraintError,
+  isSqliteFullError,
+  isSqliteUnavailableError,
+  sqliteErrorLabel,
+} from "./internal/sqlite-errors.ts";
+import { createTransaction, type TransactionFn } from "./internal/sqlite-transaction.ts";
+import { type TypedStatement, typed } from "./internal/typed-statement.ts";
 import {
   decodeListCursor,
   encodeListCursor,
@@ -30,6 +39,7 @@ import {
 // client's disk-fill DoS. Hosts can raise or lower via
 // `SqliteReceiptStore.open({ path, maxReceipts })`.
 const DEFAULT_SQLITE_MAX_RECEIPTS = 100_000;
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
 export interface SqliteReceiptStoreConfig {
   readonly path: string;
@@ -53,7 +63,7 @@ interface ReceiptExistsRow {
 
 interface ProjectionPayloadRow {
   readonly lsn: number;
-  readonly payload: Buffer;
+  readonly payload: Uint8Array;
 }
 
 interface CountRow {
@@ -64,26 +74,24 @@ interface ExistsRow {
   readonly present: 1;
 }
 
-type ProjectionInsertParams = [ReceiptId, ThreadId | null, number, number, Buffer];
-type ThreadReceiptInsertParams = [ThreadId, ReceiptId, string, number];
-
 export class SqliteReceiptStore implements ReceiptStore {
   private readonly eventLog: EventLog;
   private readonly maxReceipts: number;
-  private readonly receiptExistsStmt: Database.Statement<[ReceiptId], ReceiptExistsRow>;
-  private readonly threadExistsStmt: Database.Statement<[ThreadId], ExistsRow>;
-  private readonly insertProjectionStmt: Database.Statement<ProjectionInsertParams>;
-  private readonly insertThreadReceiptStmt: Database.Statement<ThreadReceiptInsertParams>;
-  private readonly getPayloadStmt: Database.Statement<[ReceiptId], ProjectionPayloadRow>;
-  private readonly listAllStmt: Database.Statement<[number, number], ProjectionPayloadRow>;
-  private readonly listThreadStmt: Database.Statement<
-    [ThreadId, number, number],
-    ProjectionPayloadRow
+  private readonly receiptExistsStmt: StatementSync;
+  private readonly threadExistsStmt: StatementSync;
+  private readonly insertProjectionStmt: TypedStatement<
+    [ReceiptId, ThreadId | null, number, number, Uint8Array],
+    never
   >;
-  private readonly countStmt: Database.Statement<[], CountRow>;
-  private readonly putTransaction: Database.Transaction<
-    (receipt: ReceiptSnapshot) => ReceiptPutResult
+  private readonly insertThreadReceiptStmt: TypedStatement<
+    [ThreadId, ReceiptId, TaskId | undefined, number],
+    never
   >;
+  private readonly getPayloadStmt: StatementSync;
+  private readonly listAllStmt: StatementSync;
+  private readonly listThreadStmt: StatementSync;
+  private readonly countStmt: StatementSync;
+  private readonly putTransaction: TransactionFn<[ReceiptSnapshot], ReceiptPutResult>;
   private defaultThreadId: ThreadId | null;
   private closed = false;
 
@@ -104,7 +112,7 @@ export class SqliteReceiptStore implements ReceiptStore {
   }
 
   static fromDatabase(
-    db: Database.Database,
+    db: DatabaseSync,
     eventLog: EventLog,
     config: SqliteReceiptStoreFromDatabaseConfig = {},
   ): SqliteReceiptStore {
@@ -112,7 +120,7 @@ export class SqliteReceiptStore implements ReceiptStore {
   }
 
   private constructor(
-    private readonly db: Database.Database,
+    private readonly db: DatabaseSync,
     eventLog: EventLog = createEventLog(db),
     maxReceipts: number | undefined = undefined,
     defaultThreadId: ThreadId | null = null,
@@ -126,31 +134,36 @@ export class SqliteReceiptStore implements ReceiptStore {
       );
     }
     this.maxReceipts = requestedMax;
-    this.receiptExistsStmt = db.prepare<[ReceiptId], ReceiptExistsRow>(
+    this.receiptExistsStmt = db.prepare(
       "SELECT 1 AS present FROM receipts_projection WHERE receipt_id = ?",
     );
-    this.threadExistsStmt = db.prepare<[ThreadId], ExistsRow>(
-      "SELECT 1 AS present FROM threads WHERE thread_id = ?",
+    this.threadExistsStmt = db.prepare("SELECT 1 AS present FROM threads WHERE thread_id = ?");
+    this.insertProjectionStmt = typed<
+      [ReceiptId, ThreadId | null, number, number, Uint8Array],
+      never
+    >(
+      db.prepare(
+        "INSERT INTO receipts_projection (receipt_id, thread_id, schema_version, lsn, payload) VALUES (?, ?, ?, ?, ?)",
+      ),
     );
-    this.insertProjectionStmt = db.prepare<ProjectionInsertParams>(
-      "INSERT INTO receipts_projection (receipt_id, thread_id, schema_version, lsn, payload) VALUES (?, ?, ?, ?, ?)",
+    this.insertThreadReceiptStmt = typed<[ThreadId, ReceiptId, TaskId | undefined, number], never>(
+      db.prepare(
+        `INSERT INTO thread_receipts (thread_id, receipt_id, task_id, lsn)
+         VALUES (?, ?, ?, ?)`,
+      ),
     );
-    this.insertThreadReceiptStmt = db.prepare<ThreadReceiptInsertParams>(
-      `INSERT INTO thread_receipts (thread_id, receipt_id, task_id, lsn)
-       VALUES (?, ?, ?, ?)`,
-    );
-    this.getPayloadStmt = db.prepare<[ReceiptId], ProjectionPayloadRow>(
+    this.getPayloadStmt = db.prepare(
       "SELECT lsn, payload FROM receipts_projection WHERE receipt_id = ?",
     );
-    this.listAllStmt = db.prepare<[number, number], ProjectionPayloadRow>(
+    this.listAllStmt = db.prepare(
       "SELECT lsn, payload FROM receipts_projection WHERE lsn > ? ORDER BY lsn ASC LIMIT ?",
     );
-    this.listThreadStmt = db.prepare<[ThreadId, number, number], ProjectionPayloadRow>(
+    this.listThreadStmt = db.prepare(
       "SELECT lsn, payload FROM receipts_projection WHERE thread_id = ? AND lsn > ? ORDER BY lsn ASC LIMIT ?",
     );
-    this.countStmt = db.prepare<[], CountRow>("SELECT COUNT(*) AS count FROM receipts_projection");
-    this.putTransaction = db.transaction((receipt: ReceiptSnapshot) => {
-      if (this.receiptExistsStmt.get(receipt.id) !== undefined) {
+    this.countStmt = db.prepare("SELECT COUNT(*) AS count FROM receipts_projection");
+    this.putTransaction = createTransaction(db, (receipt: ReceiptSnapshot) => {
+      if ((this.receiptExistsStmt.get(receipt.id) as ReceiptExistsRow | undefined) !== undefined) {
         return { existed: true, lsn: null };
       }
       // Cap check runs AFTER the existence check (mirrors the in-memory
@@ -158,13 +171,16 @@ export class SqliteReceiptStore implements ReceiptStore {
       // returns 409, not 507. The count query inside the
       // `BEGIN IMMEDIATE` transaction is serialized against concurrent
       // writers, so the check + insert are atomic.
-      const countRow = this.countStmt.get();
+      const countRow = this.countStmt.get() as CountRow | undefined;
       if (countRow !== undefined && countRow.count >= this.maxReceipts) {
         throw new ReceiptStoreFullError(`SqliteReceiptStore at capacity (${this.maxReceipts})`);
       }
 
       const threadId = projectionThreadId(receipt, this.defaultThreadId);
-      if (threadId !== null && this.threadExistsStmt.get(threadId) === undefined) {
+      if (
+        threadId !== null &&
+        (this.threadExistsStmt.get(threadId) as ExistsRow | undefined) === undefined
+      ) {
         throw new ReceiptThreadNotFoundError(`thread ${threadId} not found`);
       }
 
@@ -178,7 +194,7 @@ export class SqliteReceiptStore implements ReceiptStore {
     });
   }
 
-  sharesProvenance(db: Database.Database, eventLog: EventLog): boolean {
+  sharesProvenance(db: DatabaseSync, eventLog: EventLog): boolean {
     return this.db === db && this.eventLog === eventLog;
   }
 
@@ -209,9 +225,7 @@ export class SqliteReceiptStore implements ReceiptStore {
       }
       if (isSqliteUnavailableError(err)) {
         throw new ReceiptStoreUnavailableError(
-          `SqliteReceiptStore: storage error (${
-            err instanceof BetterSqlite3.SqliteError ? err.code : "unknown"
-          })`,
+          `SqliteReceiptStore: storage error (${sqliteErrorLabel(err)})`,
         );
       }
       throw err;
@@ -221,14 +235,14 @@ export class SqliteReceiptStore implements ReceiptStore {
   async get(id: ReceiptId): Promise<ReceiptSnapshot | null> {
     let row: ProjectionPayloadRow | undefined;
     try {
-      row = this.getPayloadStmt.get(id);
+      row = this.getPayloadStmt.get(id) as ProjectionPayloadRow | undefined;
     } catch (err) {
       throw classifySqliteReadError(err);
     }
     if (row === undefined) {
       return null;
     }
-    return receiptFromJson(row.payload.toString("utf8"));
+    return receiptFromJson(utf8Decoder.decode(row.payload));
   }
 
   async list(filter?: ListFilter): Promise<ListPage> {
@@ -238,13 +252,17 @@ export class SqliteReceiptStore implements ReceiptStore {
     try {
       rows =
         filter?.threadId === undefined
-          ? this.listAllStmt.all(afterLsn, limit + 1)
-          : this.listThreadStmt.all(filter.threadId, afterLsn, limit + 1);
+          ? (this.listAllStmt.all(afterLsn, limit + 1) as unknown as ProjectionPayloadRow[])
+          : (this.listThreadStmt.all(
+              filter.threadId,
+              afterLsn,
+              limit + 1,
+            ) as unknown as ProjectionPayloadRow[]);
     } catch (err) {
       throw classifySqliteReadError(err);
     }
     const visibleRows = rows.slice(0, limit);
-    const items = visibleRows.map((row) => receiptFromJson(row.payload.toString("utf8")));
+    const items = visibleRows.map((row) => receiptFromJson(utf8Decoder.decode(row.payload)));
     const lastRow = visibleRows.at(-1);
 
     return {
@@ -257,7 +275,7 @@ export class SqliteReceiptStore implements ReceiptStore {
   size(): number {
     let row: CountRow | undefined;
     try {
-      row = this.countStmt.get();
+      row = this.countStmt.get() as CountRow | undefined;
     } catch (err) {
       throw classifySqliteReadError(err);
     }
@@ -288,9 +306,7 @@ function classifySqliteReadError(err: unknown): Error {
   }
   if (isSqliteUnavailableError(err)) {
     return new ReceiptStoreUnavailableError(
-      `SqliteReceiptStore: storage error (${
-        err instanceof BetterSqlite3.SqliteError ? err.code : "unknown"
-      })`,
+      `SqliteReceiptStore: storage error (${sqliteErrorLabel(err)})`,
     );
   }
   return err instanceof Error ? err : new Error(String(err));
@@ -306,41 +322,8 @@ function projectionThreadId(
 
 function isReceiptIdConstraintError(err: unknown): boolean {
   return (
-    err instanceof BetterSqlite3.SqliteError &&
-    (err.code === "SQLITE_CONSTRAINT_PRIMARYKEY" || err.code === "SQLITE_CONSTRAINT_UNIQUE") &&
+    isSqliteConstraintError(err) &&
+    err instanceof Error &&
     err.message.includes("receipts_projection.receipt_id")
-  );
-}
-
-function isSqliteFullError(err: unknown): boolean {
-  return err instanceof BetterSqlite3.SqliteError && err.code === "SQLITE_FULL";
-}
-
-function isSqliteBusyError(err: unknown): boolean {
-  if (!(err instanceof BetterSqlite3.SqliteError)) return false;
-  // SQLITE_BUSY / SQLITE_LOCKED + extended-code variants. The base
-  // codes also surface as extended codes like `SQLITE_BUSY_SNAPSHOT`.
-  return (
-    err.code === "SQLITE_BUSY" ||
-    err.code === "SQLITE_LOCKED" ||
-    err.code.startsWith("SQLITE_BUSY_") ||
-    err.code.startsWith("SQLITE_LOCKED_")
-  );
-}
-
-function isSqliteUnavailableError(err: unknown): boolean {
-  if (!(err instanceof BetterSqlite3.SqliteError)) return false;
-  // Persistent / operator-intervention failure modes: read-only DB,
-  // I/O errors at any layer, corruption, can't-open. SQLITE_FULL is
-  // handled separately because it maps to 507 (out of space, distinct
-  // from "store is broken").
-  return (
-    err.code === "SQLITE_READONLY" ||
-    err.code === "SQLITE_CANTOPEN" ||
-    err.code === "SQLITE_CORRUPT" ||
-    err.code.startsWith("SQLITE_READONLY_") ||
-    err.code.startsWith("SQLITE_IOERR") ||
-    err.code.startsWith("SQLITE_CANTOPEN_") ||
-    err.code.startsWith("SQLITE_CORRUPT_")
   );
 }

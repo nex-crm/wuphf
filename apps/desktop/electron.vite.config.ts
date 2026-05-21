@@ -13,13 +13,8 @@ const rootDir = dirname(fileURLToPath(import.meta.url));
 // on startup.
 const WORKSPACE_BUNDLE = ["@wuphf/broker", "@wuphf/protocol"];
 
-// Packages that MUST stay external in the main bundle even after
-// inlining the workspace deps. `better-sqlite3` is a transitive of
-// `@wuphf/broker` and pulls native bindings via `bindings()` — the
-// resolver looks for its sibling `.node` file in `node_modules/
-// better-sqlite3/`, so the JS wrapper must remain a runtime require
-// rather than getting flattened into our chunk.
-const NATIVE_EXTERNAL = ["better-sqlite3"];
+// `@wuphf/broker` now uses Node's stdlib `node:sqlite`; no native npm
+// SQLite binding needs to remain as a runtime external.
 
 export default defineConfig({
   main: {
@@ -27,7 +22,6 @@ export default defineConfig({
     build: {
       outDir: "out/main",
       rollupOptions: {
-        external: NATIVE_EXTERNAL,
         input: {
           index: resolve(rootDir, "src/main/index.ts"),
           "broker-entry": resolve(rootDir, "src/main/broker-entry.ts"),

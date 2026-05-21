@@ -1,6 +1,6 @@
 // Public surface of `@wuphf/broker/approvals`.
 
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 import type { EventLog as ApprovalEventLog } from "../event-log/index.ts";
 import {
@@ -37,7 +37,7 @@ export interface ApprovalSubsystemOptions {
 }
 
 export function createApprovalSubsystem(
-  db: Database.Database,
+  db: DatabaseSync,
   eventLog: ApprovalEventLog,
   options: ApprovalSubsystemOptions = {},
 ): ApprovalSubsystem {

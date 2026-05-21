@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
+import type { DatabaseSync } from "node:sqlite";
 import {
   asAgentSlug,
   asProviderKind,
@@ -12,7 +12,6 @@ import {
   SanitizedString,
   sha256Hex,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
@@ -76,14 +75,14 @@ function minimalReceiptV2(id: string, threadIdStr: string): ReceiptSnapshot {
   return { ...minimalReceiptV1(id), threadId: asThreadId(threadIdStr), schemaVersion: 2 };
 }
 
-function openStore(): { readonly db: Database.Database; readonly store: SqliteReceiptStore } {
+function openStore(): { readonly db: DatabaseSync; readonly store: SqliteReceiptStore } {
   const db = openDatabase({ path: ":memory:" });
   runMigrations(db);
   return { db, store: constructSqliteReceiptStoreForTesting(db) };
 }
 
 function openStoreWithThreads(): {
-  readonly db: Database.Database;
+  readonly db: DatabaseSync;
   readonly store: SqliteReceiptStore;
 } {
   const db = openDatabase({ path: ":memory:" });
@@ -108,38 +107,40 @@ const COUNT_ROWS_TABLES = {
   receipts_projection: "receipts_projection",
 } as const;
 
-function countRows(db: Database.Database, tableName: keyof typeof COUNT_ROWS_TABLES): number {
+function countRows(db: DatabaseSync, tableName: keyof typeof COUNT_ROWS_TABLES): number {
   const safeTable = COUNT_ROWS_TABLES[tableName];
-  const row = db
-    .prepare<[], { readonly count: number }>(`SELECT COUNT(*) AS count FROM ${safeTable}`)
-    .get();
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM ${safeTable}`).get() as
+    | { readonly count: number }
+    | undefined;
   if (row === undefined) {
     throw new Error(`count query returned no row for ${safeTable}`);
   }
   return row.count;
 }
 
-function maxEventLogLsn(db: Database.Database): number {
-  const row = db
-    .prepare<[], { readonly lsn: number }>("SELECT COALESCE(MAX(lsn), 0) AS lsn FROM event_log")
-    .get();
+function maxEventLogLsn(db: DatabaseSync): number {
+  const row = db.prepare("SELECT COALESCE(MAX(lsn), 0) AS lsn FROM event_log").get() as
+    | { readonly lsn: number }
+    | undefined;
   if (row === undefined) {
     throw new Error("max lsn query returned no row");
   }
   return row.lsn;
 }
 
-function seedThreadRows(db: Database.Database, ...threadIds: readonly string[]): void {
-  const appendEvent = db.prepare<[Buffer], { readonly lsn: number }>(
+function seedThreadRows(db: DatabaseSync, ...threadIds: readonly string[]): void {
+  const appendEvent = db.prepare(
     "INSERT INTO event_log (ts_ms, type, payload) VALUES (0, 'thread.created', ?) RETURNING lsn",
   );
-  const insertThread = db.prepare<[string, number, string]>(
+  const insertThread = db.prepare(
     `INSERT INTO threads
        (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms, external_refs)
      VALUES (?, 'receipt store test thread', 'open', ?, 'broker', 0, 0, ?)`,
   );
   for (const threadId of threadIds) {
-    const row = appendEvent.get(Buffer.from(`{"threadId":"${threadId}"}`, "utf8"));
+    const row = appendEvent.get(Buffer.from(`{"threadId":"${threadId}"}`, "utf8")) as
+      | { readonly lsn: number }
+      | undefined;
     if (row === undefined) {
       throw new Error("seed thread event insert returned no row");
     }

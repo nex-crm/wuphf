@@ -42,9 +42,13 @@ import {
   type ThreadId,
   validateApprovalStreamEvent,
 } from "@wuphf/protocol";
-import BetterSqlite3 from "better-sqlite3";
 
 import { agentIdForBearer } from "../auth.ts";
+import {
+  isSqliteBusyError,
+  isSqliteFullError,
+  isSqliteUnavailableError,
+} from "../internal/sqlite-errors.ts";
 import type { BrokerLogger } from "../types.ts";
 import {
   type ApprovalAppender,
@@ -650,7 +654,6 @@ function writeSqliteErrorResponse(
   logger: BrokerLogger,
   rejectedEvent: string,
 ): boolean {
-  if (!isSqliteError(err)) return false;
   if (isSqliteBusyError(err)) {
     logger.warn(rejectedEvent, { reason: "store_busy" });
     writeRouteError(res, 503, { error: "store_busy", retryAfterMs: 1000 }, { "Retry-After": "1" });
@@ -667,39 +670,6 @@ function writeSqliteErrorResponse(
     return true;
   }
   return false;
-}
-
-interface SqliteErrorWithCode extends Error {
-  readonly code: string;
-}
-
-function isSqliteError(err: unknown): err is SqliteErrorWithCode {
-  return err instanceof BetterSqlite3.SqliteError;
-}
-
-function isSqliteFullError(err: SqliteErrorWithCode): boolean {
-  return err.code === "SQLITE_FULL";
-}
-
-function isSqliteBusyError(err: SqliteErrorWithCode): boolean {
-  return (
-    err.code === "SQLITE_BUSY" ||
-    err.code === "SQLITE_LOCKED" ||
-    err.code.startsWith("SQLITE_BUSY_") ||
-    err.code.startsWith("SQLITE_LOCKED_")
-  );
-}
-
-function isSqliteUnavailableError(err: SqliteErrorWithCode): boolean {
-  return (
-    err.code === "SQLITE_READONLY" ||
-    err.code === "SQLITE_CANTOPEN" ||
-    err.code === "SQLITE_CORRUPT" ||
-    err.code.startsWith("SQLITE_READONLY_") ||
-    err.code.startsWith("SQLITE_IOERR") ||
-    err.code.startsWith("SQLITE_CANTOPEN_") ||
-    err.code.startsWith("SQLITE_CORRUPT_")
-  );
 }
 
 function writeJson(

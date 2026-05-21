@@ -1,3 +1,4 @@
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   type AgentId,
   type AgentProviderRouting,
@@ -12,9 +13,9 @@ import {
   RUNNER_KIND_VALUES,
   type RunnerKind,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import { type OpenDatabaseArgs, openDatabase, runMigrations } from "../event-log/index.ts";
+import { createTransaction, type TransactionFn } from "../internal/sqlite-transaction.ts";
 import type { AgentProviderRoutingStore } from "./types.ts";
 
 export interface SqliteAgentProviderRoutingStoreConfig extends OpenDatabaseArgs {}
@@ -29,19 +30,17 @@ interface RoutingEntryDbRow {
   readonly providerKind: string;
 }
 
-type InsertRouteParams = [AgentId, RunnerKind, CredentialScope, ProviderKind];
-
 const KIND_ORDER: ReadonlyMap<RunnerKind, number> = new Map(
   RUNNER_KIND_VALUES.map((kind, index) => [kind, index] as const),
 );
 
 export class SqliteAgentProviderRoutingStore implements AgentProviderRoutingStore {
   private readonly closeDatabase: boolean;
-  private readonly listRoutesStmt: Database.Statement<[AgentId], RoutingEntryDbRow>;
-  private readonly getEntryStmt: Database.Statement<[AgentId, RunnerKind], RoutingEntryDbRow>;
-  private readonly deleteAgentStmt: Database.Statement<[AgentId]>;
-  private readonly insertRouteStmt: Database.Statement<InsertRouteParams>;
-  private readonly putTransaction: Database.Transaction<(config: AgentProviderRouting) => void>;
+  private readonly listRoutesStmt: StatementSync;
+  private readonly getEntryStmt: StatementSync;
+  private readonly deleteAgentStmt: StatementSync;
+  private readonly insertRouteStmt: StatementSync;
+  private readonly putTransaction: TransactionFn<[AgentProviderRouting], void>;
   private closed = false;
 
   static open(config: SqliteAgentProviderRoutingStoreConfig): SqliteAgentProviderRoutingStore {
@@ -56,33 +55,31 @@ export class SqliteAgentProviderRoutingStore implements AgentProviderRoutingStor
   }
 
   constructor(
-    private readonly db: Database.Database,
+    private readonly db: DatabaseSync,
     options: SqliteAgentProviderRoutingStoreOptions = {},
   ) {
     this.closeDatabase = options.closeDatabase ?? false;
-    this.listRoutesStmt = db.prepare<[AgentId], RoutingEntryDbRow>(
+    this.listRoutesStmt = db.prepare(
       `SELECT runner_kind AS kind,
               credential_scope AS credentialScope,
               provider_kind AS providerKind
        FROM agent_provider_routing
        WHERE agent_id = ?`,
     );
-    this.getEntryStmt = db.prepare<[AgentId, RunnerKind], RoutingEntryDbRow>(
+    this.getEntryStmt = db.prepare(
       `SELECT runner_kind AS kind,
               credential_scope AS credentialScope,
               provider_kind AS providerKind
        FROM agent_provider_routing
        WHERE agent_id = ? AND runner_kind = ?`,
     );
-    this.deleteAgentStmt = db.prepare<[AgentId]>(
-      "DELETE FROM agent_provider_routing WHERE agent_id = ?",
-    );
-    this.insertRouteStmt = db.prepare<InsertRouteParams>(
+    this.deleteAgentStmt = db.prepare("DELETE FROM agent_provider_routing WHERE agent_id = ?");
+    this.insertRouteStmt = db.prepare(
       `INSERT INTO agent_provider_routing
          (agent_id, runner_kind, credential_scope, provider_kind)
        VALUES (?, ?, ?, ?)`,
     );
-    this.putTransaction = db.transaction((config: AgentProviderRouting) => {
+    this.putTransaction = createTransaction(db, (config: AgentProviderRouting) => {
       this.deleteAgentStmt.run(config.agentId);
       for (const route of config.routes) {
         this.insertRouteStmt.run(
@@ -98,7 +95,9 @@ export class SqliteAgentProviderRoutingStore implements AgentProviderRoutingStor
   async get(agentId: AgentId): Promise<AgentProviderRouting> {
     this.assertOpen();
     const validAgentId = validateAgentId(agentId, "agentProviderRoutingStore.get.agentId");
-    const routes = this.listRoutesStmt.all(validAgentId).map(rowToEntry).sort(compareEntriesByKind);
+    const routes = (this.listRoutesStmt.all(validAgentId) as unknown as RoutingEntryDbRow[])
+      .map(rowToEntry)
+      .sort(compareEntriesByKind);
     return { agentId: validAgentId, routes };
   }
 
@@ -112,7 +111,7 @@ export class SqliteAgentProviderRoutingStore implements AgentProviderRoutingStor
     this.assertOpen();
     const validAgentId = validateAgentId(agentId, "agentProviderRoutingStore.getEntry.agentId");
     const validKind = validateRunnerKind(kind, "agentProviderRoutingStore.getEntry.kind");
-    const row = this.getEntryStmt.get(validAgentId, validKind);
+    const row = this.getEntryStmt.get(validAgentId, validKind) as RoutingEntryDbRow | undefined;
     if (row === undefined) {
       return null;
     }
@@ -145,7 +144,7 @@ export class SqliteAgentProviderRoutingStore implements AgentProviderRoutingStor
   }
 }
 
-export function createAgentProviderRoutingStore(db: Database.Database): AgentProviderRoutingStore {
+export function createAgentProviderRoutingStore(db: DatabaseSync): AgentProviderRoutingStore {
   return new SqliteAgentProviderRoutingStore(db);
 }
 

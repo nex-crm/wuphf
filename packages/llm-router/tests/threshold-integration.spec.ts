@@ -109,10 +109,8 @@ describe("gateway → ledger → threshold reactor integration", () => {
     // The event_log must contain: 1 budget_set + 6 cost_event + 2
     // threshold-crossed = 9 cost.* events.
     const counts = db
-      .prepare<[], { readonly type: string; readonly n: number }>(
-        "SELECT type, COUNT(*) AS n FROM event_log GROUP BY type ORDER BY type",
-      )
-      .all();
+      .prepare("SELECT type, COUNT(*) AS n FROM event_log GROUP BY type ORDER BY type")
+      .all() as unknown as ReadonlyArray<{ readonly type: string; readonly n: number }>;
     const byType = new Map(counts.map((row) => [row.type, row.n]));
     expect(byType.get("cost.event")).toBe(6);
     expect(byType.get("cost.budget.set")).toBe(1);

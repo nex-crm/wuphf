@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
+import type { DatabaseSync } from "node:sqlite";
 import {
   type AgentProviderRouting,
   type AgentProviderRoutingEntry,
@@ -9,7 +9,6 @@ import {
   asCredentialScope,
   asProviderKind,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -86,8 +85,8 @@ function route(
   };
 }
 
-function insertRawRoute(db: Database.Database, rawRoute: RawRoute): void {
-  db.prepare<RawRoute>(
+function insertRawRoute(db: DatabaseSync, rawRoute: RawRoute): void {
+  db.prepare(
     `INSERT INTO agent_provider_routing
        (agent_id, runner_kind, credential_scope, provider_kind)
      VALUES (?, ?, ?, ?)`,
@@ -102,6 +101,11 @@ function expectRawRouteCheckFailure(rawRoute: RawRoute, constraint: string): voi
   } finally {
     db.close();
   }
+}
+
+function userVersion(db: DatabaseSync): number {
+  return (db.prepare("PRAGMA user_version").get() as { readonly user_version: number })
+    .user_version;
 }
 
 describe("SqliteAgentProviderRoutingStore", () => {
@@ -251,14 +255,13 @@ describe("SqliteAgentProviderRoutingStore", () => {
     try {
       runMigrations(db);
 
-      expect(db.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
-      expect(
-        db
-          .prepare<[], { readonly name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_provider_routing'",
-          )
-          .get()?.name,
-      ).toBe("agent_provider_routing");
+      expect(userVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
+      const row = db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_provider_routing'",
+        )
+        .get() as { readonly name: string } | undefined;
+      expect(row?.name).toBe("agent_provider_routing");
     } finally {
       db.close();
     }
@@ -276,7 +279,7 @@ describe("SqliteAgentProviderRoutingStore", () => {
     try {
       runMigrations(first);
       first
-        .prepare<[string, string, string, string]>(
+        .prepare(
           `INSERT INTO agent_provider_routing
              (agent_id, runner_kind, credential_scope, provider_kind)
            VALUES (?, ?, ?, ?)`,
@@ -289,13 +292,10 @@ describe("SqliteAgentProviderRoutingStore", () => {
     const second = openDatabase({ path });
     try {
       runMigrations(second);
-      expect(
-        second
-          .prepare<[], { readonly count: number }>(
-            "SELECT COUNT(*) AS count FROM agent_provider_routing",
-          )
-          .get()?.count,
-      ).toBe(1);
+      const row = second.prepare("SELECT COUNT(*) AS count FROM agent_provider_routing").get() as
+        | { readonly count: number }
+        | undefined;
+      expect(row?.count).toBe(1);
     } finally {
       second.close();
     }

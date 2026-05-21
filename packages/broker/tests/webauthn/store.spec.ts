@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import {
   type ApprovalClaim,
   type ApprovalRole,
@@ -13,8 +14,6 @@ import {
   type ReceiptCoSignScope,
   sha256Hex,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
-import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDatabase, runMigrations } from "../../src/event-log/index.ts";
@@ -32,7 +31,7 @@ import {
 
 const agentId = asAgentId("agent_alpha");
 
-let db: Database.Database | null = null;
+let db: DatabaseSync | null = null;
 
 afterEach(() => {
   if (db !== null) {
@@ -274,7 +273,7 @@ function createTestStore(): WebAuthnStore {
   return createWebAuthnStore(db);
 }
 
-function requiredDb(): Database.Database {
+function requiredDb(): DatabaseSync {
   if (db === null) {
     throw new Error("test database is not open");
   }
@@ -442,5 +441,38 @@ function hashClaimScopeForTest(
 }
 
 function sqliteError(code: string): Error {
-  return new BetterSqlite3.SqliteError("test sqlite error", code);
+  return Object.assign(new Error("test sqlite error"), {
+    code: "ERR_SQLITE_ERROR",
+    errcode: sqliteErrcode(code),
+    errstr: code,
+  });
+}
+
+function sqliteErrcode(code: string): number {
+  switch (code) {
+    case "SQLITE_BUSY":
+      return 5;
+    case "SQLITE_LOCKED":
+      return 6;
+    case "SQLITE_BUSY_SNAPSHOT":
+      return 517;
+    case "SQLITE_LOCKED_SHAREDCACHE":
+      return 262;
+    case "SQLITE_FULL":
+      return 13;
+    case "SQLITE_READONLY":
+      return 8;
+    case "SQLITE_CANTOPEN":
+      return 14;
+    case "SQLITE_CORRUPT":
+      return 11;
+    case "SQLITE_IOERR_READ":
+      return 266;
+    case "SQLITE_NOTADB":
+      return 26;
+    case "SQLITE_PERM":
+      return 3;
+    default:
+      throw new Error(`unknown sqlite test code: ${code}`);
+  }
 }

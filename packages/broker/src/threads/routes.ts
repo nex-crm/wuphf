@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { DatabaseSync } from "node:sqlite";
 
 import {
   asIdempotencyKey,
@@ -33,9 +34,14 @@ import {
   threadStatusChangeRequestFromJson,
   threadStatusChangeRequestToJsonValue,
 } from "@wuphf/protocol";
-import BetterSqlite3 from "better-sqlite3";
 import { ApprovalPendingSnapshotOverflowError } from "../approvals/index.ts";
 import { approvalViewFromApproval } from "../approvals/view.ts";
+import {
+  isSqliteBusyError,
+  isSqliteConstraintError,
+  isSqliteFullError,
+  isSqliteUnavailableError,
+} from "../internal/sqlite-errors.ts";
 import {
   InvalidListCursorError,
   InvalidListLimitError,
@@ -80,7 +86,7 @@ const EMPTY_EXTERNAL_REFS: ThreadExternalRefs = Object.freeze({
 });
 
 export interface ThreadRouteDeps {
-  readonly db: BetterSqlite3.Database;
+  readonly db: DatabaseSync;
   readonly appender: ThreadAppender;
   readonly state: ThreadStateStore;
   readonly receiptIndex: ThreadReceiptIndexStore;
@@ -719,36 +725,9 @@ function writeSqliteErrorResponse(
 
 function isCommandIdempotencyConstraintError(err: unknown): boolean {
   return (
-    err instanceof BetterSqlite3.SqliteError &&
-    (err.code === "SQLITE_CONSTRAINT_PRIMARYKEY" || err.code === "SQLITE_CONSTRAINT_UNIQUE") &&
+    isSqliteConstraintError(err) &&
+    err instanceof Error &&
     err.message.includes("command_idempotency.idempotency_key")
-  );
-}
-
-function isSqliteFullError(err: unknown): boolean {
-  return err instanceof BetterSqlite3.SqliteError && err.code === "SQLITE_FULL";
-}
-
-function isSqliteBusyError(err: unknown): boolean {
-  if (!(err instanceof BetterSqlite3.SqliteError)) return false;
-  return (
-    err.code === "SQLITE_BUSY" ||
-    err.code === "SQLITE_LOCKED" ||
-    err.code.startsWith("SQLITE_BUSY_") ||
-    err.code.startsWith("SQLITE_LOCKED_")
-  );
-}
-
-function isSqliteUnavailableError(err: unknown): boolean {
-  if (!(err instanceof BetterSqlite3.SqliteError)) return false;
-  return (
-    err.code === "SQLITE_READONLY" ||
-    err.code === "SQLITE_CANTOPEN" ||
-    err.code === "SQLITE_CORRUPT" ||
-    err.code.startsWith("SQLITE_READONLY_") ||
-    err.code.startsWith("SQLITE_IOERR") ||
-    err.code.startsWith("SQLITE_CANTOPEN_") ||
-    err.code.startsWith("SQLITE_CORRUPT_")
   );
 }
 

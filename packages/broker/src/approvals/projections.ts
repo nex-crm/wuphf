@@ -4,6 +4,7 @@
 // source of truth; writes apply one event incrementally in the append
 // transaction, and replay can rebuild the table from LSN 0.
 
+import type { DatabaseSync } from "node:sqlite";
 import {
   APPROVAL_REQUEST_SCHEMA_VERSION,
   type ApprovalAuditPayload,
@@ -24,9 +25,9 @@ import {
   type TaskId,
   type ThreadId,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import type { EventLog, EventLogRecord, EventType } from "../event-log/index.ts";
+import { createTransaction } from "../internal/sqlite-transaction.ts";
 
 const APPROVAL_EVENT_BATCH_SIZE = 1_000;
 
@@ -59,7 +60,7 @@ export interface ApprovalPendingByThreadSnapshot {
 export interface ApprovalProjectionEvent {
   readonly lsn: number;
   readonly type: EventType | string;
-  readonly payload: Buffer;
+  readonly payload: Uint8Array;
 }
 
 export interface ApprovalProjectionRebuildResult {
@@ -68,7 +69,7 @@ export interface ApprovalProjectionRebuildResult {
 }
 
 export interface ApprovalProjection {
-  sharesProvenance(db: Database.Database, eventLog: EventLog): boolean;
+  sharesProvenance(db: DatabaseSync, eventLog: EventLog): boolean;
   applyEvent(event: ApprovalProjectionEvent): FoldedApprovalRow | null;
   rebuildFromLog(eventLog: EventLog): ApprovalProjectionRebuildResult;
   getById(id: ApprovalRequestId): FoldedApprovalRow | null;
@@ -141,7 +142,7 @@ interface ApprovalDbRow {
 interface ApprovalEventDbRow {
   readonly lsn: number;
   readonly type: string;
-  readonly payload: Buffer;
+  readonly payload: Uint8Array;
 }
 
 interface CountRow {
@@ -187,60 +188,31 @@ interface ApprovalRequestWireForRow {
   decision?: ApprovalDecisionWireForRow;
 }
 
-type RequestUpsertParams = [
-  string,
-  string,
-  number,
-  string,
-  string,
-  string,
-  string | null,
-  string | null,
-  string | null,
-  string,
-  number,
-];
-
-type DecisionUpdateParams = [
-  ApprovalRequestStatus,
-  number,
-  string,
-  number,
-  ApprovalDecision,
-  string | null,
-  string | null,
-  string,
-];
-
-export function createApprovalProjection(db: Database.Database): ApprovalProjection {
-  const selectByIdStmt = db.prepare<[string], ApprovalDbRow>(
-    approvalSelectSql("WHERE approval_id = ?"),
-  );
-  const insertRequestedStmt = db.prepare<RequestUpsertParams>(
+export function createApprovalProjection(db: DatabaseSync): ApprovalProjection {
+  const selectByIdStmt = db.prepare(approvalSelectSql("WHERE approval_id = ?"));
+  const insertRequestedStmt = db.prepare(
     `INSERT INTO pending_approvals
        (approval_id, status, head_lsn, claim, scope, risk_class, thread_id, task_id, receipt_id,
         requested_by, requested_at_ms, decided_by, decided_at_ms, decision, token, token_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)`,
   );
-  const updateDecidedStmt = db.prepare<DecisionUpdateParams>(
+  const updateDecidedStmt = db.prepare(
     `UPDATE pending_approvals
      SET status = ?, head_lsn = ?, decided_by = ?, decided_at_ms = ?, decision = ?, token = ?,
          token_id = ?
      WHERE approval_id = ? AND status = 'pending'`,
   );
-  const clearStmt = db.prepare<[]>("DELETE FROM pending_approvals");
-  const countPendingByThreadStmt = db.prepare<[string], CountRow>(
+  const clearStmt = db.prepare("DELETE FROM pending_approvals");
+  const countPendingByThreadStmt = db.prepare(
     "SELECT COUNT(*) AS count FROM pending_approvals WHERE thread_id = ? AND status = 'pending'",
   );
-  const latestHeadLsnByThreadStmt = db.prepare<[string], MaxLsnRow>(
+  const latestHeadLsnByThreadStmt = db.prepare(
     "SELECT MAX(head_lsn) AS headLsn FROM pending_approvals WHERE thread_id = ?",
   );
-  const threadExistsStmt = db.prepare<[string], ExistsRow>(
-    "SELECT 1 AS present FROM threads WHERE thread_id = ?",
-  );
+  const threadExistsStmt = db.prepare("SELECT 1 AS present FROM threads WHERE thread_id = ?");
 
   const pendingCountByThread = (threadId: ThreadId): number => {
-    const row = countPendingByThreadStmt.get(threadId);
+    const row = countPendingByThreadStmt.get(threadId) as CountRow | undefined;
     if (row === undefined) {
       throw new Error(`pending approval count query returned no row for ${threadId}`);
     }
@@ -253,7 +225,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
   ): void => {
     const threadId = payload.threadId;
     if (threadId === undefined) return;
-    if (threadExistsStmt.get(threadId) === undefined) {
+    if ((threadExistsStmt.get(threadId) as ExistsRow | undefined) === undefined) {
       throw new ApprovalReplayThreadNotFoundError(threadId, lsn);
     }
     if (pendingCountByThread(threadId) >= MAX_ROUTE_APPROVAL_LIST_ITEMS) {
@@ -284,7 +256,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       approval.requestedBy,
       dateToMs(approval.requestedAt, "approval.requestedAt"),
     );
-    const row = selectByIdStmt.get(approval.id);
+    const row = selectByIdStmt.get(approval.id) as ApprovalDbRow | undefined;
     if (row === undefined) {
       throw new Error("pending_approvals insert produced no row");
     }
@@ -307,7 +279,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
     if (result.changes !== 1) {
       throw new Error(`approval.decided has no pending request: ${payload.requestId}`);
     }
-    const row = selectByIdStmt.get(payload.requestId);
+    const row = selectByIdStmt.get(payload.requestId) as ApprovalDbRow | undefined;
     if (row === undefined) {
       throw new Error(`approval.decided update produced no row: ${payload.requestId}`);
     }
@@ -332,7 +304,8 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
     return applyDecided(decoded.payload, event.lsn);
   };
 
-  const rebuildTransaction = db.transaction(
+  const rebuildTransaction = createTransaction(
+    db,
     (eventLog: EventLog): ApprovalProjectionRebuildResult => {
       clearStmt.run();
       let cursor = 0;
@@ -355,7 +328,8 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       return { eventsApplied, highestLsn: lsnFromV1Number(highestLsn) };
     },
   );
-  const pendingByThreadSnapshotTransaction = db.transaction(
+  const pendingByThreadSnapshotTransaction = createTransaction(
+    db,
     (threadId: ThreadId): ApprovalPendingByThreadSnapshot => {
       const rows = listRows(
         db,
@@ -368,7 +342,8 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
         const count = pendingCountByThread(threadId);
         throw new ApprovalPendingSnapshotOverflowError(threadId, count);
       }
-      const headLsn = latestHeadLsnByThreadStmt.get(threadId)?.headLsn ?? null;
+      const headLsn =
+        (latestHeadLsnByThreadStmt.get(threadId) as MaxLsnRow | undefined)?.headLsn ?? null;
       return {
         rows: rows.map(rowToFolded),
         headLsn: headLsn === null ? null : lsnFromV1Number(headLsn),
@@ -377,7 +352,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
   );
 
   return {
-    sharesProvenance(candidateDb: Database.Database, _eventLog: EventLog): boolean {
+    sharesProvenance(candidateDb: DatabaseSync, _eventLog: EventLog): boolean {
       return candidateDb === db;
     },
     applyEvent,
@@ -385,7 +360,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       return rebuildTransaction.immediate(eventLog);
     },
     getById(id: ApprovalRequestId): FoldedApprovalRow | null {
-      const row = selectByIdStmt.get(id);
+      const row = selectByIdStmt.get(id) as ApprovalDbRow | undefined;
       return row === undefined ? null : rowToFolded(row);
     },
     list(filter?: ApprovalListFilter): readonly FoldedApprovalRow[] {
@@ -414,7 +389,7 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
       return pendingCountByThread(threadId);
     },
     latestHeadLsnByThread(threadId: ThreadId): EventLsn | null {
-      const row = latestHeadLsnByThreadStmt.get(threadId);
+      const row = latestHeadLsnByThreadStmt.get(threadId) as MaxLsnRow | undefined;
       if (row === undefined || row.headLsn === null) return null;
       return lsnFromV1Number(row.headLsn);
     },
@@ -425,16 +400,16 @@ export function createApprovalProjection(db: Database.Database): ApprovalProject
 }
 
 export function foldApprovalFromLog(
-  db: Database.Database,
+  db: DatabaseSync,
   requestId: ApprovalRequestId,
 ): FoldedApprovalRow | null {
   const rows = db
-    .prepare<[], ApprovalEventDbRow>(
+    .prepare(
       `SELECT lsn, type, payload FROM event_log
        WHERE type IN ('approval.requested', 'approval.decided')
        ORDER BY lsn ASC`,
     )
-    .all();
+    .all() as unknown as ApprovalEventDbRow[];
   let folded: FoldedApprovalRow | null = null;
   for (const row of rows) {
     const decoded = parseApprovalEvent(row);
@@ -502,7 +477,7 @@ export function statusForDecision(
 }
 
 function listRows(
-  db: Database.Database,
+  db: DatabaseSync,
   filter: ApprovalListFilter | undefined,
   page?: ApprovalListPageOptions,
 ): ApprovalDbRow[] {
@@ -528,10 +503,8 @@ function listRows(
   const limit = page === undefined ? "" : " LIMIT ?";
   if (page !== undefined) params.push(page.limit);
   return db
-    .prepare<(number | string)[], ApprovalDbRow>(
-      `${approvalSelectSql(where)} ORDER BY head_lsn ASC${limit}`,
-    )
-    .all(...params);
+    .prepare(`${approvalSelectSql(where)} ORDER BY head_lsn ASC${limit}`)
+    .all(...params) as unknown as ApprovalDbRow[];
 }
 
 function approvalSelectSql(where: string): string {
@@ -555,7 +528,7 @@ function parseApprovalEvent(
       kind: "approval_requested",
       payload: approvalAuditPayloadFromJsonValue(
         "approval_requested",
-        JSON.parse(event.payload.toString("utf8")) as unknown,
+        JSON.parse(new TextDecoder().decode(event.payload)) as unknown,
       ) as ApprovalRequestedAuditPayload,
     };
   }
@@ -564,7 +537,7 @@ function parseApprovalEvent(
       kind: "approval_decided",
       payload: approvalAuditPayloadFromJsonValue(
         "approval_decided",
-        JSON.parse(event.payload.toString("utf8")) as unknown,
+        JSON.parse(new TextDecoder().decode(event.payload)) as unknown,
       ) as ApprovalDecidedAuditPayload,
     };
   }

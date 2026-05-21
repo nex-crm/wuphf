@@ -11,6 +11,7 @@ import {
   type CostEventAuditPayload,
   costAuditPayloadToBytes,
   lsnFromV1Number,
+  MAX_BUDGET_LIMIT_MICRO_USD,
   parseLsn,
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
@@ -20,6 +21,7 @@ import {
   type ReplayDiscrepancy,
   runReplayCheck,
 } from "../src/cost-ledger/index.ts";
+import { processCostEventForCrossings } from "../src/cost-ledger/reactor.ts";
 import {
   __createBudgetCandidateIndexesForTesting,
   __replayCheckTesting,
@@ -86,10 +88,8 @@ describe("cost ledger projections", () => {
     expect(result.newCrossings).toEqual([]);
 
     const eventCount = db
-      .prepare<[], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-      )
-      .get();
+      .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+      .get() as { readonly n: number } | undefined;
     expect(eventCount?.n).toBe(1);
 
     const agentRow = ledger.getAgentSpend("primary", "2026-05-08");
@@ -126,20 +126,18 @@ describe("cost ledger projections", () => {
       ledger.appendCostEvent(buildCostEvent(opts));
     }
     const eventSum = db
-      .prepare<[], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-      )
-      .get();
+      .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+      .get() as { readonly n: number } | undefined;
     expect(eventSum?.n).toBe(20);
     const agentSum = ledger
       .listAgentSpend()
       .reduce((acc, row) => acc + (row.totalMicroUsd as number), 0);
     const taskSum =
-      db
-        .prepare<[], { readonly s: number }>(
-          "SELECT COALESCE(SUM(total_micro_usd), 0) AS s FROM cost_by_task",
-        )
-        .get()?.s ?? 0;
+      (
+        db.prepare("SELECT COALESCE(SUM(total_micro_usd), 0) AS s FROM cost_by_task").get() as
+          | { readonly s: number }
+          | undefined
+      )?.s ?? 0;
     // Expected: sum of all 20 amounts = 20*100_000 + (0+1+...+19) = 2_000_190
     const expected = 20 * 100_000 + (19 * 20) / 2;
     expect(agentSum).toBe(expected);
@@ -169,10 +167,8 @@ describe("cost ledger budget projection", () => {
     expect(row?.tombstoned).toBe(true);
     expect(row?.limitMicroUsd as number).toBe(0);
     const eventCount = db
-      .prepare<[], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.budget.set'",
-      )
-      .get();
+      .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.budget.set'")
+      .get() as { readonly n: number } | undefined;
     expect(eventCount?.n).toBe(2);
   });
 
@@ -212,6 +208,25 @@ describe("BudgetThresholdReactor", () => {
     // Fourth event: same threshold doesn't re-fire under same budget_set LSN.
     const fourth = ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 100_000 }));
     expect(fourth.newCrossings).toEqual([]);
+  });
+
+  it("reads lifetime aggregates past Number.MAX_SAFE_INTEGER without RangeError", () => {
+    const { db, eventLog, ledger } = setup();
+    ledger.appendBudgetSet(buildBudgetSet({ limitMicroUsd: 1_000_000, thresholdsBps: [5_000] }));
+    db.prepare(
+      `INSERT INTO cost_by_agent (agent_slug, day_utc, total_micro_usd, last_lsn)
+       VALUES (?, ?, ?, ?)`,
+    ).run("primary", "2026-05-08", 2n ** 60n, 1);
+
+    const crossings = processCostEventForCrossings(db, eventLog, {
+      costEventLsn: 1,
+      agentSlug: "primary",
+      taskId: undefined,
+      occurredAt: new Date("2026-05-08T10:00:00.000Z"),
+    });
+
+    expect(crossings).toHaveLength(1);
+    expect(crossings[0]?.observedMicroUsd as number).toBe(MAX_BUDGET_LIMIT_MICRO_USD);
   });
 
   it("raising a budget re-arms thresholds (new budget_set LSN, new crossing rows)", () => {
@@ -322,18 +337,18 @@ describe("idempotency", () => {
 
     // Only one event_log row.
     const count = db
-      .prepare<[], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-      )
-      .get();
+      .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+      .get() as { readonly n: number } | undefined;
     expect(count?.n).toBe(1);
 
     // Idempotency row exists with the response bytes.
     const idemRow = db
-      .prepare<[string], { readonly statusCode: number; readonly responsePayload: Buffer }>(
+      .prepare(
         "SELECT status_code AS statusCode, response_payload AS responsePayload FROM command_idempotency WHERE idempotency_key = ?",
       )
-      .get(parsed.key.raw);
+      .get(parsed.key.raw) as
+      | { readonly statusCode: number; readonly responsePayload: Uint8Array }
+      | undefined;
     expect(idemRow?.statusCode).toBe(201);
     expect(Buffer.from(idemRow?.responsePayload ?? Buffer.alloc(0)).toString()).toBe(
       r1.payload.toString(),
@@ -366,12 +381,12 @@ describe("idempotency", () => {
         payload: Buffer.from(JSON.stringify({ lsn: applied.lsn }), "utf8"),
       }),
     });
-    db.prepare<[string, string, number], void>(
+    db.prepare(
       `INSERT INTO command_idempotency
          (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
        VALUES (?, ?, 201, x'7B7D', NULL, ?)`,
     ).run("old-approval", "approval.requested", 1_000);
-    db.prepare<[string, string, number], void>(
+    db.prepare(
       `INSERT INTO command_idempotency
          (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
        VALUES (?, ?, 201, x'7B7D', NULL, ?)`,
@@ -380,7 +395,7 @@ describe("idempotency", () => {
     expect(ledger.pruneIdempotencyOlderThan(3_000)).toBe(1);
 
     const idempotencyRows = db
-      .prepare<[], { readonly idempotencyKey: string }>(
+      .prepare(
         "SELECT idempotency_key AS idempotencyKey FROM command_idempotency ORDER BY idempotency_key ASC",
       )
       .all();
@@ -391,10 +406,8 @@ describe("idempotency", () => {
     ]);
 
     const eventCountAfterPrune = db
-      .prepare<[], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-      )
-      .get();
+      .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+      .get() as { readonly n: number } | undefined;
     expect(eventCountAfterPrune?.n).toBe(2);
     expect(ledger.getAgentSpend("primary", "2026-05-08")?.totalMicroUsd as number).toBe(3_000_000);
 
@@ -409,10 +422,8 @@ describe("idempotency", () => {
     });
     expect(reapplied.replayed).toBe(false);
     const eventCountAfterReapply = db
-      .prepare<[], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-      )
-      .get();
+      .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+      .get() as { readonly n: number } | undefined;
     expect(eventCountAfterReapply?.n).toBe(3);
   });
 });
@@ -472,7 +483,7 @@ describe("replay-check", () => {
     // Inject a stray crossing row that points to the existing budget_set
     // event LSN (so the FK is satisfied), but with a threshold the
     // event_log has no matching `cost.budget.threshold.crossed` for.
-    db.prepare<[string, number, number, number, number, number]>(
+    db.prepare(
       `INSERT INTO cost_threshold_crossings
          (budget_id, budget_set_lsn, threshold_bps, crossed_at_lsn, observed_micro_usd, limit_micro_usd)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -570,12 +581,10 @@ describe("replay-check", () => {
     // Overwrite the second cost.event payload with garbage JSON so the
     // codec rejects it. (We pick the highest cost.event LSN.)
     const tamperedLsn = db
-      .prepare<[], { readonly lsn: number }>(
-        "SELECT MAX(lsn) AS lsn FROM event_log WHERE type = 'cost.event'",
-      )
-      .get();
+      .prepare("SELECT MAX(lsn) AS lsn FROM event_log WHERE type = 'cost.event'")
+      .get() as { readonly lsn: number } | undefined;
     if (tamperedLsn === undefined) throw new Error("no cost.event row to tamper");
-    db.prepare<[Buffer, number]>("UPDATE event_log SET payload = ? WHERE lsn = ?").run(
+    db.prepare("UPDATE event_log SET payload = ? WHERE lsn = ?").run(
       Buffer.from('{"not":"a valid cost event"}', "utf8"),
       tamperedLsn.lsn,
     );
@@ -648,7 +657,7 @@ describe("replay-check oracle (#836)", () => {
       type: "cost.budget.threshold.crossed",
       payload: Buffer.from(bytes),
     });
-    db.prepare<[string, number, number, number, number, number]>(
+    db.prepare(
       `INSERT INTO cost_threshold_crossings
          (budget_id, budget_set_lsn, threshold_bps, crossed_at_lsn, observed_micro_usd, limit_micro_usd)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -691,7 +700,7 @@ describe("replay-check oracle (#836)", () => {
       crossedAt: new Date("2026-05-08T10:00:00.000Z"),
     };
     const tamperedBytes = costAuditPayloadToBytes("budget_threshold_crossed", tamperedPayload);
-    db.prepare<[Buffer, string]>("UPDATE event_log SET payload = ? WHERE type = ?").run(
+    db.prepare("UPDATE event_log SET payload = ? WHERE type = ?").run(
       Buffer.from(tamperedBytes),
       "cost.budget.threshold.crossed",
     );
@@ -729,7 +738,7 @@ describe("replay-check oracle (#836)", () => {
       crossedAt: new Date("2026-05-08T10:00:00.000Z"),
     };
     const tamperedBytes = costAuditPayloadToBytes("budget_threshold_crossed", tamperedPayload);
-    db.prepare<[Buffer, string]>("UPDATE event_log SET payload = ? WHERE type = ?").run(
+    db.prepare("UPDATE event_log SET payload = ? WHERE type = ?").run(
       Buffer.from(tamperedBytes),
       "cost.budget.threshold.crossed",
     );
@@ -823,16 +832,14 @@ describe("replay-check oracle (#836)", () => {
     // event. A future regression that skipped the second epoch would
     // still pass `ok === true` if no spurious entry fires.
     const crossingCount = db
-      .prepare<[], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.budget.threshold.crossed'",
-      )
-      .get();
+      .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.budget.threshold.crossed'")
+      .get() as { readonly n: number } | undefined;
     expect(crossingCount?.n).toBe(2);
     const projectionRows = db
-      .prepare<[], { readonly budgetSetLsn: number }>(
+      .prepare(
         "SELECT budget_set_lsn AS budgetSetLsn FROM cost_threshold_crossings ORDER BY budget_set_lsn ASC",
       )
-      .all();
+      .all() as unknown as { readonly budgetSetLsn: number }[];
     expect(projectionRows.length).toBe(2);
     expect(projectionRows[0]?.budgetSetLsn).not.toBe(projectionRows[1]?.budgetSetLsn);
   });
@@ -1031,7 +1038,7 @@ describe("replay-check oracle round-2 fixes (#841)", () => {
       crossedAt: new Date("2026-05-08T10:00:00.000Z"),
     };
     const tamperedBytes = costAuditPayloadToBytes("budget_threshold_crossed", tamperedPayload);
-    db.prepare<[Buffer, string]>("UPDATE event_log SET payload = ? WHERE type = ?").run(
+    db.prepare("UPDATE event_log SET payload = ? WHERE type = ?").run(
       Buffer.from(tamperedBytes),
       "cost.budget.threshold.crossed",
     );
@@ -1066,7 +1073,7 @@ describe("replay-check oracle round-2 fixes (#841)", () => {
       crossedAt: new Date("2099-12-31T23:59:59.000Z"), // future timestamp
     };
     const tamperedBytes = costAuditPayloadToBytes("budget_threshold_crossed", tamperedPayload);
-    db.prepare<[Buffer, string]>("UPDATE event_log SET payload = ? WHERE type = ?").run(
+    db.prepare("UPDATE event_log SET payload = ? WHERE type = ?").run(
       Buffer.from(tamperedBytes),
       "cost.budget.threshold.crossed",
     );
@@ -1109,7 +1116,7 @@ describe("replay-check oracle round-2 fixes (#841)", () => {
       type: "cost.budget.threshold.crossed",
       payload: Buffer.from(strayBytes),
     });
-    db.prepare<[string, number, number, number, number, number]>(
+    db.prepare(
       `INSERT INTO cost_threshold_crossings
          (budget_id, budget_set_lsn, threshold_bps, crossed_at_lsn, observed_micro_usd, limit_micro_usd)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -1145,7 +1152,7 @@ describe("replay-check oracle round-2 fixes (PR #841 r2)", () => {
       crossedAt: new Date("2026-05-08T10:00:00.000Z"),
     };
     const tamperedBytes = costAuditPayloadToBytes("budget_threshold_crossed", tamperedPayload);
-    db.prepare<[Buffer, string]>("UPDATE event_log SET payload = ? WHERE type = ?").run(
+    db.prepare("UPDATE event_log SET payload = ? WHERE type = ?").run(
       Buffer.from(tamperedBytes),
       "cost.budget.threshold.crossed",
     );
@@ -1301,7 +1308,7 @@ describe("replay-check oracle round-3 fixes (PR #841 r3)", () => {
       crossedAt: new Date("2026-05-08T10:00:00.000Z"),
     };
     const tamperedBytes = costAuditPayloadToBytes("budget_threshold_crossed", tamperedPayload);
-    db.prepare<[Buffer, string]>("UPDATE event_log SET payload = ? WHERE type = ?").run(
+    db.prepare("UPDATE event_log SET payload = ? WHERE type = ?").run(
       Buffer.from(tamperedBytes),
       "cost.budget.threshold.crossed",
     );
@@ -1350,7 +1357,7 @@ describe("replay-check oracle round-3 fixes (PR #841 r3)", () => {
       crossedAt: new Date("2026-05-08T10:00:00.000Z"),
     };
     const tamperedBytes = costAuditPayloadToBytes("budget_threshold_crossed", tamperedPayload);
-    db.prepare<[Buffer, string]>("UPDATE event_log SET payload = ? WHERE type = ?").run(
+    db.prepare("UPDATE event_log SET payload = ? WHERE type = ?").run(
       Buffer.from(tamperedBytes),
       "cost.budget.threshold.crossed",
     );
@@ -1521,7 +1528,7 @@ describe("replay-check aggregate paths round-4 (PR #845 r4 triangulation)", () =
   // `MAX_BUDGET_LIMIT_MICRO_USD` it forges the brand; past
   // `Number.MAX_SAFE_INTEGER` (or a hostile projection row at that
   // boundary) it silently rounds. The accumulators are now bigint, the
-  // SQLite reads use `.safeIntegers(true)`, and the discrepancies emit
+  // SQLite reads use `.setReadBigInts(true)`, and the discrepancies emit
   // decimal strings.
   //
   // End-to-end coverage past 2^53 is blocked by the protocol per-event
@@ -1644,7 +1651,7 @@ describe("replay-check aggregate paths round-4 (PR #845 r4 triangulation)", () =
     // The security lens's specific concern: stored projection rows are
     // hostile input. A row past 2^53 used to round through JS number
     // and the diagnostic would carry the rounded value. With
-    // `.safeIntegers(true)` the bigint flows straight to the string
+    // `.setReadBigInts(true)` the bigint flows straight to the string
     // emission. Use 2^53 + 17 — outside JS-number exact range.
     const { db, ledger } = setup();
     ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 1_000_000 }));

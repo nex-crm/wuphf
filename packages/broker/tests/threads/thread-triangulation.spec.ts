@@ -244,10 +244,8 @@ async function postReceipt(fix: Fixture, receipt: ReceiptSnapshot): Promise<Resp
 
 function latestReceiptPutLsn(fix: Fixture): EventLsn {
   const row = fix.db
-    .prepare<[], { readonly lsn: number }>(
-      "SELECT lsn FROM event_log WHERE type = 'receipt.put' ORDER BY lsn DESC LIMIT 1",
-    )
-    .get();
+    .prepare("SELECT lsn FROM event_log WHERE type = 'receipt.put' ORDER BY lsn DESC LIMIT 1")
+    .get() as { readonly lsn: number } | undefined;
   if (row === undefined) throw new Error("missing receipt.put event");
   return `v1:${row.lsn}` as EventLsn;
 }
