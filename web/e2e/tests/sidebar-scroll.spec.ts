@@ -61,18 +61,8 @@ const crowdedIssues = Array.from({ length: 12 }, (_, index) => {
   };
 });
 
-const crowdedRecent = Array.from({ length: 8 }, (_, index) => {
-  const n = index + 1;
-  return {
-    ref: { kind: "wiki-page", path: `recent-page-${n}` },
-    label: `Recent page ${n}`,
-    href: `/wiki/recent-page-${n}`,
-    visitedAtMs: 1_700_000_000_000 + n,
-  };
-});
-
 async function stubCrowdedSidebarData(page: Page): Promise<void> {
-  await page.addInitScript((recent) => {
+  await page.addInitScript(() => {
     localStorage.setItem(
       "wuphf-sidebar-sections",
       JSON.stringify({
@@ -80,12 +70,10 @@ async function stubCrowdedSidebarData(page: Page): Promise<void> {
         channels: true,
         issues: true,
         apps: true,
-        recent: true,
       }),
     );
-    localStorage.setItem("wuphf-recent-objects", JSON.stringify(recent));
     localStorage.removeItem("wuphf-sidebar-bg");
-  }, crowdedRecent);
+  });
 
   await page.route("**/api/office-members*", (route) =>
     fulfillJson(route, { members: crowdedMembers }),
@@ -243,9 +231,6 @@ test.describe("left sidebar scrolling", () => {
         page.locator(".sidebar-issues .sidebar-add-btn"),
       ]);
       await expectWheelCanReach(page, "Apps", [appItems.last()]);
-      await expectWheelCanReach(page, "Recent", [
-        page.locator(".sidebar-recent .sidebar-item").first(),
-      ]);
 
       await expectNoReactErrors(page, getErrors, "while scrolling the sidebar");
     });

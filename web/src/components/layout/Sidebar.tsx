@@ -11,13 +11,8 @@ import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
 import { InboxButton } from "../sidebar/InboxButton";
 import { IssuesGroup } from "../sidebar/IssuesGroup";
-import {
-  hasRecentObjects,
-  RecentObjectsPanel,
-} from "../sidebar/RecentObjectsPanel";
 import { SidebarSection } from "../sidebar/SidebarSection";
 import { UsagePanel } from "../sidebar/UsagePanel";
-import { WorkspaceSummary } from "../sidebar/WorkspaceSummary";
 import { CollapsedSidebar } from "./CollapsedSidebar";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 
@@ -26,7 +21,6 @@ export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 420;
 export const SIDEBAR_WIDTH_STORAGE_KEY = "wuphf-sidebar-width";
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function Sidebar() {
   const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
   const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
@@ -36,9 +30,6 @@ export function Sidebar() {
   const toggleSidebarIssues = useAppStore((s) => s.toggleSidebarIssues);
   const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
   const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
-  const sidebarRecentOpen = useAppStore((s) => s.sidebarRecentOpen);
-  const toggleSidebarRecent = useAppStore((s) => s.toggleSidebarRecent);
-  const showRecent = hasRecentObjects();
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const currentApp = useCurrentApp();
@@ -155,16 +146,6 @@ export function Sidebar() {
             {/* Phase 2 onboarding preview overlay — shows staged channels/agents
                 forming as the user answers CEO questions. Hidden once onboarded. */}
             <SidebarPreviewOverlay />
-
-            {showRecent && (
-              <SidebarSection
-                label="Recent"
-                open={sidebarRecentOpen}
-                onToggle={toggleSidebarRecent}
-              >
-                <RecentObjectsPanel />
-              </SidebarSection>
-            )}
           </div>
           {/* WorkspaceSummary intentionally not rendered here — the stats
               it shows (agents active, tasks open, tokens) are redundant

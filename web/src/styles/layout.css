@@ -1221,8 +1221,7 @@ html[data-theme="nex"]
 }
 
 .sidebar-channels,
-.sidebar-issues,
-.sidebar-recent {
+.sidebar-issues {
   /* No side padding — items carry their own gutter via .sidebar-item. */
   padding: 0 0 4px;
   /* Section bodies hug their content — the sidebar root owns scroll. */
@@ -1261,7 +1260,6 @@ html[data-theme="nex"]
 .sidebar-agents,
 .sidebar-channels,
 .sidebar-issues,
-.sidebar-recent,
 .sidebar-apps {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
@@ -2532,33 +2530,6 @@ html[data-theme="nex"]
   outline-offset: 1px;
   opacity: 1;
   pointer-events: auto;
-}
-
-/* Recent is a quiet navigation aid — items and their icons sit muted
-   by default so the section reads as "lookback shelf" rather than the
-   loud Channels/Issues lists above. Hover/focus/active brings them
-   forward to confirm they're interactive. */
-.sidebar-recent .sidebar-item {
-  opacity: 0.5;
-  transition: opacity var(--duration-base, 0.15s);
-}
-.sidebar-recent .sidebar-item:hover,
-.sidebar-recent .sidebar-item:focus-visible,
-.sidebar-recent .sidebar-item.active {
-  opacity: 1;
-}
-.recent-objects-icon {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  color: currentcolor;
-  opacity: 0.4;
-  transition: opacity var(--duration-base, 0.15s);
-}
-.sidebar-recent .sidebar-item:hover .recent-objects-icon,
-.sidebar-recent .sidebar-item:focus-visible .recent-objects-icon,
-.sidebar-recent .sidebar-item.active .recent-objects-icon {
-  opacity: 1;
 }
 
 /* ─── DM Banner ─── */

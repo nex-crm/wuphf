@@ -1,15 +1,7 @@
-import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { CSSProperties, ReactNode } from "react";
 import { useState } from "react";
-import {
-  BookStack,
-  CheckCircle,
-  HomeSimple,
-  Page,
-  Settings as SettingsIcon,
-  Terminal,
-  User,
-} from "iconoir-react";
+import type { Meta, StoryObj } from "@storybook/react-vite";
+import { BookStack, HomeSimple, Terminal } from "iconoir-react";
 
 import { Kbd, MOD_KEY } from "../ui/Kbd";
 import { SidebarItem } from "./SidebarItem";
@@ -69,8 +61,18 @@ const badge = (n: number) => <span className="sidebar-badge">{n}</span>;
 function ChannelsBody() {
   return (
     <div className="sidebar-channels">
-      <SidebarItem icon="#" label="architecture" active shortcut={shortcut(1)} />
-      <SidebarItem icon="#" label="deploys" badge={badge(2)} shortcut={shortcut(2)} />
+      <SidebarItem
+        icon="#"
+        label="architecture"
+        active={true}
+        shortcut={shortcut(1)}
+      />
+      <SidebarItem
+        icon="#"
+        label="deploys"
+        badge={badge(2)}
+        shortcut={shortcut(2)}
+      />
       <SidebarItem icon="#" label="wiki" shortcut={shortcut(3)} />
       <SidebarItem variant="add" icon="+" label="New Channel" />
     </div>
@@ -81,7 +83,7 @@ function IssuesBody() {
   return (
     <div className="sidebar-issues">
       <SidebarItem icon="#" label="Auth token rotation" />
-      <SidebarItem icon="#" label="Calendar sync drift" active />
+      <SidebarItem icon="#" label="Calendar sync drift" active={true} />
       <SidebarItem variant="add" icon="+" label="New issue" />
     </div>
   );
@@ -90,42 +92,20 @@ function IssuesBody() {
 function ToolsBody() {
   return (
     <div className="sidebar-apps">
-      <SidebarItem icon={<HomeSimple className="sidebar-item-icon" />} label="Overview" active />
+      <SidebarItem
+        icon={<HomeSimple className="sidebar-item-icon" />}
+        label="Overview"
+        active={true}
+      />
       <SidebarItem
         icon={<BookStack className="sidebar-item-icon" />}
         label="Wiki"
         badge={badge(2)}
       />
-      <SidebarItem icon={<Terminal className="sidebar-item-icon" />} label="Console" />
-    </div>
-  );
-}
-
-function RecentBody() {
-  return (
-    <div className="sidebar-scroll-wrap is-recent">
-      <div className="sidebar-recent">
-        <SidebarItem
-          icon={<CheckCircle className="sidebar-item-icon" />}
-          label="bookkeeping-invoicing-service-3"
-        />
-        <SidebarItem
-          icon={<CheckCircle className="sidebar-item-icon" />}
-          label="bookkeeping-invoicing-service-4"
-        />
-        <SidebarItem
-          icon={<Page className="sidebar-item-icon" />}
-          label="people/nazz"
-        />
-        <SidebarItem
-          icon={<User className="sidebar-item-icon" />}
-          label="atlas"
-        />
-        <SidebarItem
-          icon={<SettingsIcon className="sidebar-item-icon" />}
-          label="Workspace"
-        />
-      </div>
+      <SidebarItem
+        icon={<Terminal className="sidebar-item-icon" />}
+        label="Console"
+      />
     </div>
   );
 }
@@ -163,7 +143,7 @@ export const WithHeaderAction: Story = {
   render: () => (
     <SidebarSection
       label="Issues"
-      open
+      open={true}
       onToggle={() => {}}
       headerActions={viewAllAction}
     >
@@ -206,9 +186,6 @@ export const Variants: Story = {
       </StatefulSection>
       <StatefulSection label="Tools">
         <ToolsBody />
-      </StatefulSection>
-      <StatefulSection label="Recent">
-        <RecentBody />
       </StatefulSection>
     </div>
   ),

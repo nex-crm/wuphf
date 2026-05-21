@@ -67,7 +67,6 @@ interface SidebarSectionsState {
   // Phase 3 — Issues group added between Channels and Tools.
   issues: boolean;
   apps: boolean;
-  recent: boolean;
 }
 
 const SIDEBAR_SECTIONS_KEY = "wuphf-sidebar-sections";
@@ -78,7 +77,6 @@ const _storedSidebarSections = ((): SidebarSectionsState => {
     channels: true,
     issues: true,
     apps: true,
-    recent: true,
   };
   try {
     const raw = localStorage.getItem(SIDEBAR_SECTIONS_KEY);
@@ -89,7 +87,6 @@ const _storedSidebarSections = ((): SidebarSectionsState => {
       channels: parsed.channels ?? def.channels,
       issues: parsed.issues ?? def.issues,
       apps: parsed.apps ?? def.apps,
-      recent: parsed.recent ?? def.recent,
     };
   } catch {
     return def;
@@ -135,8 +132,6 @@ export interface AppStore {
   toggleSidebarIssues: () => void;
   sidebarAppsOpen: boolean;
   toggleSidebarApps: () => void;
-  sidebarRecentOpen: boolean;
-  toggleSidebarRecent: () => void;
   sidebarCollapsed: boolean;
   toggleSidebarCollapsed: () => void;
 
@@ -260,7 +255,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       channels: get().sidebarChannelsOpen,
       issues: get().sidebarIssuesOpen,
       apps: get().sidebarAppsOpen,
-      recent: get().sidebarRecentOpen,
     });
   },
   sidebarChannelsOpen: _storedSidebarSections.channels,
@@ -272,7 +266,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       channels: next,
       issues: get().sidebarIssuesOpen,
       apps: get().sidebarAppsOpen,
-      recent: get().sidebarRecentOpen,
     });
   },
   sidebarIssuesOpen: _storedSidebarSections.issues,
@@ -284,7 +277,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       channels: get().sidebarChannelsOpen,
       issues: next,
       apps: get().sidebarAppsOpen,
-      recent: get().sidebarRecentOpen,
     });
   },
   sidebarAppsOpen: _storedSidebarSections.apps,
@@ -296,19 +288,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       channels: get().sidebarChannelsOpen,
       issues: get().sidebarIssuesOpen,
       apps: next,
-      recent: get().sidebarRecentOpen,
-    });
-  },
-  sidebarRecentOpen: _storedSidebarSections.recent,
-  toggleSidebarRecent: () => {
-    const next = !get().sidebarRecentOpen;
-    set({ sidebarRecentOpen: next });
-    persistSidebarSections({
-      agents: get().sidebarAgentsOpen,
-      channels: get().sidebarChannelsOpen,
-      issues: get().sidebarIssuesOpen,
-      apps: get().sidebarAppsOpen,
-      recent: next,
     });
   },
   sidebarCollapsed: false,

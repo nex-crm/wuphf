@@ -1,8 +1,5 @@
-import { useEffect } from "react";
-
 import { useChannels } from "../../hooks/useChannels";
 import { deriveBreadcrumbs } from "../../hooks/useObjectBreadcrumb";
-import { useRecordRecentObject } from "../../hooks/useRecentObjects";
 import { appTitle } from "../../lib/constants";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
@@ -59,80 +56,13 @@ function headerTitleAndDesc(
   }
 }
 
-/**
- * Derive an ObjectRef for the current route to record in recent-objects.
- * Returns null for routes that aren't discrete navigable objects (channels,
- * wiki catalog, etc.) or for the "unknown" sentinel.
- */
-function routeToObjectRef(
-  route: ReturnType<typeof useCurrentRoute>,
-): Parameters<ReturnType<typeof useRecordRecentObject>>[0] | null {
-  switch (route.kind) {
-    case "dm":
-      return { kind: "agent", slug: route.agentSlug };
-    case "task-detail":
-      return { kind: "task", id: route.taskId };
-    case "wiki-article":
-      return { kind: "wiki-page", path: route.articlePath };
-    case "app":
-      if (route.appId === "settings") {
-        return { kind: "settings-section", section: "workspace" };
-      }
-      if (
-        route.appId === "providers" ||
-        route.appId === "team" ||
-        route.appId === "workspace" ||
-        route.appId === "skills"
-      ) {
-        return {
-          kind: "settings-section",
-          section: route.appId as "providers" | "team" | "workspace" | "skills",
-        };
-      }
-      return null;
-    case "notebook-entry":
-      return null; // notebook entries are draft surfaces, not canonical objects
-    case "task-decision":
-      return { kind: "task", id: route.taskId };
-    case "task-board":
-    case "wiki":
-    case "wiki-lookup":
-    case "notebook-catalog":
-    case "notebook-agent":
-    case "reviews":
-    case "inbox":
-    case "channel":
-    // Phase 3 — Issues surface (not discrete navigable objects for recent-objects)
-    case "issues-list":
-    case "issue-new":
-    case "unknown":
-      return null;
-    case "issue-detail":
-      return { kind: "task", id: route.issueId };
-    default: {
-      const _exhaustive: never = route;
-      void _exhaustive;
-      return null;
-    }
-  }
-}
-
 export function ChannelHeader() {
   const route = useCurrentRoute();
   const setSearchOpen = useAppStore((s) => s.setSearchOpen);
   const { data: channels = [] } = useChannels();
-  const recordRecent = useRecordRecentObject();
 
   const { title, desc } = headerTitleAndDesc(route, channels);
   const breadcrumbItems = deriveBreadcrumbs(route);
-
-  // Record navigations to discrete objects in the recent-objects list.
-  useEffect(() => {
-    const ref = routeToObjectRef(route);
-    if (ref) {
-      recordRecent(ref);
-    }
-  }, [route, recordRecent]);
 
   return (
     <div className="channel-header">
