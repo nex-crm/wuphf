@@ -5,7 +5,6 @@ import { AgentList } from "./AgentList";
 import { AppList } from "./AppList";
 import { ChannelList } from "./ChannelList";
 import { InboxButton } from "./InboxButton";
-import { IssuesGroup } from "./IssuesGroup";
 import { UsagePanel } from "./UsagePanel";
 import { WorkspaceSummary } from "./WorkspaceSummary";
 
@@ -90,22 +89,6 @@ export const Channels: StoryObj = {
         style={collapsibleNaturalHeight}
       >
         <ChannelList />
-      </div>
-    </>
-  ),
-};
-
-export const Issues: StoryObj = {
-  render: () => (
-    <>
-      <div className="sidebar-section">
-        <div className="sidebar-section-title">Issues</div>
-      </div>
-      <div
-        className="sidebar-collapsible is-open"
-        style={collapsibleNaturalHeight}
-      >
-        <IssuesGroup open={true} />
       </div>
     </>
   ),

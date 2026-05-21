@@ -382,6 +382,74 @@ describe("@wuphf/protocol/browser", () => {
       ],
     );
   });
+
+  it("validates browser stream invalidation events", () => {
+    expect(browserProtocol.validateThreadStreamEvent(threadStreamEventFixture())).toStrictEqual({
+      ok: true,
+    });
+    expect(browserProtocol.validateApprovalStreamEvent(approvalStreamEventFixture())).toStrictEqual(
+      {
+        ok: true,
+      },
+    );
+    expect(
+      browserProtocol.validateApprovalStreamEvent({
+        ...approvalStreamEventFixture(),
+        receiptId: undefined,
+        payload: {
+          ...approvalStreamEventFixture().payload,
+          threadId: undefined,
+        },
+      }),
+    ).toStrictEqual({ ok: true });
+  });
+
+  it("reports browser stream validation errors with concrete paths", () => {
+    expect(browserProtocol.validateThreadStreamEvent("not-an-event")).toStrictEqual({
+      ok: false,
+      errors: [{ path: "", message: "must be an object" }],
+    });
+    expectValidationErrors(
+      browserProtocol.validateThreadStreamEvent({
+        ...threadStreamEventFixture(),
+        extra: true,
+        id: "",
+        kind: "approval.requested",
+        emittedAt: "not-an-instant",
+        receiptId: "not-a-receipt-id",
+        payload: {
+          extra: true,
+          threadId: "not-a-thread-id",
+          headLsn: "not-an-lsn",
+        },
+      }),
+      [
+        { path: "/extra", message: "is not allowed" },
+        { path: "/id", message: "must be a non-empty string" },
+        { path: "/kind", message: "must be a thread stream event kind" },
+        { path: "/emittedAt", message: "must be an ISO 8601 string" },
+        { path: "/receiptId", message: "must be an uppercase ULID ReceiptId" },
+        { path: "/payload/extra", message: "is not allowed" },
+        { path: "/payload/threadId", message: "must be an uppercase ULID ThreadId" },
+      ],
+    );
+    expectValidationErrors(
+      browserProtocol.validateApprovalStreamEvent({
+        ...approvalStreamEventFixture(),
+        payload: null,
+      }),
+      [{ path: "/payload", message: "must be an object" }],
+    );
+
+    const accessorEvent: Record<string, unknown> = { ...threadStreamEventFixture() };
+    Object.defineProperty(accessorEvent, "id", {
+      enumerable: true,
+      get: () => "stream-1",
+    });
+    expectValidationErrors(browserProtocol.validateThreadStreamEvent(accessorEvent), [
+      { path: "/id", message: "must be a data property" },
+    ]);
+  });
 });
 
 function expectValidationErrors(result: unknown, errors: unknown[]): void {
@@ -400,6 +468,9 @@ const REVISION_ID = browserProtocol.asThreadSpecRevisionId("01BRZ3NDEKTSV4RRFFQ6
 const SIGNER = browserProtocol.asSignerIdentity("renderer@example.com");
 const CONTENT_HASH = browserProtocol.asSha256Hex("a".repeat(64));
 const DATE = new Date("2026-05-08T18:00:00.000Z");
+const HEAD_LSN = browserProtocol.lsnFromV1Number(12);
+const RECEIPT_ID = browserProtocol.asReceiptId("01CRZ3NDEKTSV4RRFFQ69G5FA1");
+const APPROVAL_REQUEST_ID = browserProtocol.asApprovalRequestId("01DRZ3NDEKTSV4RRFFQ69G5FA2");
 const CLOSED_AT_WIRE_KEY = "closed_at";
 
 function threadFixture(): Thread {
@@ -420,6 +491,33 @@ function threadFixture(): Thread {
     createdBy: SIGNER,
     createdAt: DATE,
     updatedAt: DATE,
+  };
+}
+
+function threadStreamEventFixture(): browserProtocol.ThreadStreamEvent {
+  return {
+    id: "stream-thread-1",
+    kind: "thread.created",
+    emittedAt: DATE.toISOString(),
+    receiptId: RECEIPT_ID,
+    payload: {
+      threadId: THREAD_ID,
+      headLsn: HEAD_LSN,
+    },
+  };
+}
+
+function approvalStreamEventFixture(): browserProtocol.ApprovalStreamEvent {
+  return {
+    id: "stream-approval-1",
+    kind: "approval.requested",
+    emittedAt: DATE.toISOString(),
+    receiptId: RECEIPT_ID,
+    payload: {
+      requestId: APPROVAL_REQUEST_ID,
+      threadId: THREAD_ID,
+      headLsn: HEAD_LSN,
+    },
   };
 }
 

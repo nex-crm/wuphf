@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, session } from "electron";
 
 import { BrokerSupervisor } from "./broker.ts";
+import { installDynamicRendererCsp } from "./csp.ts";
 import { registerIpcHandlers } from "./ipc/register-handlers.ts";
 import { createLogger, type LogPayload } from "./logger.ts";
 import { installSessionPermissionPolicy } from "./permissions.ts";
@@ -39,8 +40,19 @@ if (app.isPackaged) {
 // origin through to the broker subprocess so it can add it to the
 // /api-token trusted-origins allowlist (and only there — `/api/*` still
 // require bearer auth and are unaffected by this).
-const devRendererOrigin = devOriginFromEnv(process.env[ELECTRON_RENDERER_URL_ENV]);
-if (!app.isPackaged && devRendererOrigin !== null) {
+//
+// Packaged builds MUST NOT inherit a pre-existing `WUPHF_DEV_RENDERER_ORIGIN`
+// from the parent environment, even if one was set by a wrapper script or
+// CI runner. Clear it unconditionally before deriving the dev origin so
+// no surrounding context can extend the broker's trusted-origin set in a
+// shipped binary.
+if (app.isPackaged) {
+  delete process.env[DEV_RENDERER_ORIGIN_ENV];
+}
+const devRendererOrigin = app.isPackaged
+  ? null
+  : devOriginFromEnv(process.env[ELECTRON_RENDERER_URL_ENV]);
+if (devRendererOrigin !== null) {
   process.env[DEV_RENDERER_ORIGIN_ENV] = devRendererOrigin;
 }
 
@@ -90,6 +102,11 @@ app
     // clipboard/displayCapture outside the IPC allowlist. WebAuthn is allowed
     // only for loopback renderer origins.
     installSessionPermissionPolicy(session.defaultSession, { logger });
+    installDynamicRendererCsp(
+      session.defaultSession,
+      () => brokerSupervisor.getSnapshot().brokerUrl,
+      { devRendererOrigin },
+    );
 
     try {
       registerIpcHandlers(brokerSupervisor, { logger: ipcLogger });
@@ -105,13 +122,19 @@ app
     }
 
     // The broker utility process opens durable SQLite stores under userData
-    // when these env vars are set. We set them unconditionally for packaged
-    // + dev paths so receipts, WebAuthn credentials, and pending challenges
-    // persist across restarts.
+    // when these env vars are set. Packaged builds force the path so receipts,
+    // WebAuthn credentials, and pending challenges persist across restarts.
+    // In dev we respect a pre-set value (including empty string, which keeps
+    // the broker on the in-memory store) so developers can iterate on the
+    // renderer without paying disk I/O.
     // `app.getPath("userData")` is safe inside `whenReady`.
     const userDataDir = app.getPath("userData");
-    process.env[RECEIPT_STORE_PATH_ENV] = join(userDataDir, "event-log.sqlite");
-    process.env[WEBAUTHN_STORE_PATH_ENV] = join(userDataDir, "webauthn.sqlite");
+    if (app.isPackaged || typeof process.env[RECEIPT_STORE_PATH_ENV] !== "string") {
+      process.env[RECEIPT_STORE_PATH_ENV] = join(userDataDir, "event-log.sqlite");
+    }
+    if (app.isPackaged || typeof process.env[WEBAUTHN_STORE_PATH_ENV] !== "string") {
+      process.env[WEBAUTHN_STORE_PATH_ENV] = join(userDataDir, "webauthn.sqlite");
+    }
 
     logger.info("broker_start_requested");
     brokerSupervisor.start();

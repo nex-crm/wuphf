@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "moduleResolution": "bundler"
+  },
+  "include": ["e2e/**/*.ts"],
+  "exclude": ["node_modules", "out", "dist"]
+}

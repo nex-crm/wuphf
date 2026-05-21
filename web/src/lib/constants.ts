@@ -1,6 +1,6 @@
 // Sidebar TOOLS entries (labels, ids, order) live in
 // `routes/routeRegistry.ts`. This file historically re-exported a
-// duplicate `SIDEBAR_APPS` list \u2014 that was deleted to keep the registry
+// duplicate `SIDEBAR_APPS` list — that was deleted to keep the registry
 // the single source of truth. Resolve labels through `APP_LABELS` /
 // `SIDEBAR_TOOLS` and read the displayed order from `SIDEBAR_TOOLS`.
 import {

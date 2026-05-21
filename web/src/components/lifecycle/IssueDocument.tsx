@@ -22,7 +22,8 @@ import ReactMarkdown from "react-markdown";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { get, sseURL } from "../../api/client";
-import { postDecision } from "../../api/lifecycle";
+import { postDecision, postTaskComment } from "../../api/lifecycle";
+import { getOfficeTasks, type Task } from "../../api/tasks";
 import {
   messageMarkdownComponents,
   messageRemarkPlugins,
@@ -88,6 +89,7 @@ export interface IssueDocument {
   lifecycleState: LifecycleState;
   spec: IssueSpec;
   comments: IssueComment[];
+  channel: string;
   ownerSlug?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -157,13 +159,70 @@ function strField(
 }
 
 /** Normalize spec sub-object from raw broker response. */
-function normalizeSpec(rawSpec: Record<string, unknown>): IssueSpec {
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function taskStatusToLifecycleState(task: Task | undefined): LifecycleState {
+  if (task?.pipeline_stage === "draft") return "drafting";
+  const state = task?.lifecycle_state ?? task?.status;
+  switch (state) {
+    case "drafting":
+    case "intake":
+    case "ready":
+    case "running":
+    case "review":
+    case "decision":
+    case "blocked_on_pr_merge":
+    case "changes_requested":
+    case "approved":
+    case "rejected":
+      return state as LifecycleState;
+    case "open":
+      return "intake";
+    case "in_progress":
+      return "running";
+    case "done":
+      return "approved";
+    case "blocked":
+      return "blocked_on_pr_merge";
+    default:
+      return "intake";
+  }
+}
+
+function normalizeAcceptanceCriteria(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const lines = value
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      const row = recordValue(item);
+      const statement = row ? strField(row, "statement") : undefined;
+      return statement?.trim() ?? "";
+    })
+    .filter(Boolean)
+    .map((statement) => `- ${statement}`);
+  return lines.length > 0 ? lines.join("\n") : undefined;
+}
+
+function normalizeSpec(
+  rawSpec: Record<string, unknown>,
+  taskHint?: Task,
+): IssueSpec {
   return {
-    goal: strField(rawSpec, "goal"),
-    context: strField(rawSpec, "context"),
-    approach: strField(rawSpec, "approach"),
+    goal:
+      strField(rawSpec, "goal") ??
+      strField(rawSpec, "targetOutcome") ??
+      taskHint?.details ??
+      taskHint?.description ??
+      strField(rawSpec, "problem"),
+    context: strField(rawSpec, "context") ?? strField(rawSpec, "problem"),
+    approach: strField(rawSpec, "approach") ?? strField(rawSpec, "assignment"),
     acceptance:
-      strField(rawSpec, "acceptance") ?? strField(rawSpec, "targetOutcome"),
+      strField(rawSpec, "acceptance") ??
+      normalizeAcceptanceCriteria(rawSpec.acceptanceCriteria),
   };
 }
 
@@ -182,34 +241,107 @@ function normalizeComment(c: unknown, idx: number): IssueComment {
   return { id, author, isAgent, body, appendedAt };
 }
 
+function resolveIssueTaskId(
+  packet: Record<string, unknown>,
+  taskRecord: Record<string, unknown> | undefined,
+  taskHint: Task | undefined,
+): string {
+  return (
+    strField(packet, "taskId", "id") ??
+    (taskRecord ? strField(taskRecord, "taskId", "id") : undefined) ??
+    taskHint?.id ??
+    ""
+  );
+}
+
+function resolveIssueTitle(
+  packet: Record<string, unknown>,
+  taskRecord: Record<string, unknown> | undefined,
+  spec: Record<string, unknown>,
+  taskHint: Task | undefined,
+  taskId: string,
+): string {
+  const fallbackTitle = taskId || "(untitled)";
+  return (
+    strField(packet, "title") ??
+    (taskRecord ? strField(taskRecord, "title") : undefined) ??
+    taskHint?.title ??
+    strField(spec, "assignment") ??
+    fallbackTitle
+  );
+}
+
+function resolveIssueLifecycleState(
+  packet: Record<string, unknown>,
+  taskHint: Task | undefined,
+): LifecycleState {
+  const rawState = strField(packet, "lifecycleState", "lifecycle_state");
+  return rawState
+    ? (rawState as LifecycleState)
+    : taskStatusToLifecycleState(taskHint);
+}
+
+function normalizeIssueComments(
+  packet: Record<string, unknown>,
+  spec: Record<string, unknown>,
+): IssueComment[] {
+  const rawComments: unknown[] = Array.isArray(packet.comments)
+    ? packet.comments
+    : Array.isArray(packet.feedback)
+      ? packet.feedback
+      : Array.isArray(spec.feedback)
+        ? spec.feedback
+        : [];
+  return rawComments.map(normalizeComment);
+}
+
+function resolveAliasedField(
+  packet: Record<string, unknown>,
+  taskRecord: Record<string, unknown> | undefined,
+  camel: string,
+  snake: string,
+): string | undefined {
+  return (
+    strField(packet, camel, snake) ??
+    (taskRecord ? strField(taskRecord, camel, snake) : undefined)
+  );
+}
+
+function resolveIssueChannel(
+  packet: Record<string, unknown>,
+  taskRecord: Record<string, unknown> | undefined,
+  taskHint: Task | undefined,
+): string {
+  const channel =
+    resolveAliasedField(packet, taskRecord, "channel", "channel")?.trim() ||
+    taskHint?.channel?.trim();
+  if (!channel) {
+    throw new Error("issue channel is missing");
+  }
+  return channel;
+}
+
 /** Normalize the raw API response into a clean IssueDocument. */
-function normalizeIssueDocument(raw: unknown): IssueDocument {
+export function normalizeIssueDocument(
+  raw: unknown,
+  taskHint?: Task,
+): IssueDocument {
   if (!raw || typeof raw !== "object") {
     throw new Error("invalid issue document response");
   }
   const r = raw as Record<string, unknown>;
+  const taskRecord = recordValue(r.task);
+  const rawSpec = recordValue(r.spec) ?? {};
 
   // The broker returns tasks with snake_case keys at the top level;
-  // spec sub-fields and comments use camelCase (Go json tags on the
-  // Task struct). Normalise both forms at the boundary.
-  const taskId = strField(r, "taskId", "id") ?? "";
-  const title = strField(r, "title") ?? "(untitled)";
-  const rawState = strField(r, "lifecycleState", "lifecycle_state");
-  const lifecycleState: LifecycleState =
-    (rawState as LifecycleState | undefined) ?? "intake";
-
-  const rawSpec =
-    r.spec && typeof r.spec === "object"
-      ? (r.spec as Record<string, unknown>)
-      : {};
-  const spec = normalizeSpec(rawSpec);
-
-  const rawComments: unknown[] = Array.isArray(r.comments)
-    ? r.comments
-    : Array.isArray(r.feedback)
-      ? r.feedback
-      : [];
-  const comments = rawComments.map(normalizeComment);
+  // /tasks/<id> returns the decision-packet shape. Normalise both
+  // forms at the boundary so the document route can render direct
+  // links and list-to-detail navigations consistently.
+  const taskId = resolveIssueTaskId(r, taskRecord, taskHint);
+  const title = resolveIssueTitle(r, taskRecord, rawSpec, taskHint, taskId);
+  const lifecycleState = resolveIssueLifecycleState(r, taskHint);
+  const spec = normalizeSpec(rawSpec, taskHint);
+  const comments = normalizeIssueComments(r, rawSpec);
 
   return {
     taskId,
@@ -217,9 +349,16 @@ function normalizeIssueDocument(raw: unknown): IssueDocument {
     lifecycleState,
     spec,
     comments,
-    ownerSlug: strField(r, "ownerSlug", "owner"),
-    createdAt: strField(r, "createdAt", "created_at"),
-    updatedAt: strField(r, "updatedAt", "updated_at"),
+    channel: resolveIssueChannel(r, taskRecord, taskHint),
+    ownerSlug:
+      resolveAliasedField(r, taskRecord, "ownerSlug", "owner") ??
+      taskHint?.owner,
+    createdAt:
+      resolveAliasedField(r, taskRecord, "createdAt", "created_at") ??
+      taskHint?.created_at,
+    updatedAt:
+      resolveAliasedField(r, taskRecord, "updatedAt", "updated_at") ??
+      taskHint?.updated_at,
   };
 }
 
@@ -228,8 +367,12 @@ async function fetchIssueDocument(taskId: string): Promise<IssueDocument> {
   // presentation projection; we re-use the same endpoint as the Decision
   // Packet (which GET /tasks/<id> already serves) and normalise at the
   // boundary.
-  const raw = await get<unknown>(`/tasks/${encodeURIComponent(taskId)}`);
-  return normalizeIssueDocument(raw);
+  const [raw, tasksResponse] = await Promise.all([
+    get<unknown>(`/tasks/${encodeURIComponent(taskId)}`),
+    getOfficeTasks({ includeDone: true }).catch(() => undefined),
+  ]);
+  const taskHint = tasksResponse?.tasks.find((task) => task.id === taskId);
+  return normalizeIssueDocument(raw, taskHint);
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────
@@ -292,7 +435,10 @@ function SpecSummaryCard({
     .map((s) => s.trim().split("\n")[0] ?? "");
 
   return (
-    <div className="issue-spec-summary" aria-label="Spec summary (collapsed)">
+    <section
+      className="issue-spec-summary"
+      aria-label="Spec summary (collapsed)"
+    >
       <div className="issue-spec-summary-lines" aria-hidden="true">
         {lines.length > 0 ? (
           lines.map((line, i) => (
@@ -315,7 +461,7 @@ function SpecSummaryCard({
       >
         Expand spec
       </button>
-    </div>
+    </section>
   );
 }
 
@@ -337,7 +483,7 @@ function CommentItem({ comment }: CommentItemProps) {
           size={24}
           className="issue-comment-avatar"
         />
-        <span className="issue-comment-author" aria-label={`Author: ${label}`}>
+        <span className="issue-comment-author" title={label}>
           {comment.author}
         </span>
         <time
@@ -369,6 +515,7 @@ function IssueDocumentSkeleton() {
       data-testid="issue-document-loading"
       aria-busy="true"
       aria-label="Loading issue"
+      role="status"
     >
       <div className="issue-doc-header issue-doc-header--sticky">
         <div className="issue-doc-skeleton issue-doc-skeleton--pill" />
@@ -558,16 +705,47 @@ function useDraftStream(taskId: string, enabled: boolean): DraftAccumulator {
 // ── Comments timeline sub-component ───────────────────────────────────
 
 interface CommentsTimelineProps {
+  taskId: string;
+  channel: string;
   comments: IssueComment[];
   isDrafting: boolean;
   timelineRef: React.RefObject<HTMLDivElement | null>;
+  onCommentPosted: () => void;
 }
 
 function CommentsTimeline({
+  taskId,
+  channel,
   comments,
   isDrafting,
   timelineRef,
+  onCommentPosted,
 }: CommentsTimelineProps) {
+  const [commentBody, setCommentBody] = useState("");
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const trimmedComment = commentBody.trim();
+
+  const commentMutation = useMutation({
+    mutationFn: (body: string) => postTaskComment(taskId, channel, body),
+    onSuccess: () => {
+      setCommentBody("");
+      setCommentError(null);
+      onCommentPosted();
+    },
+    onError: (err: unknown) => {
+      setCommentError(
+        err instanceof Error ? err.message : "Could not post comment.",
+      );
+    },
+  });
+
+  function submitComment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!trimmedComment || commentMutation.isPending) return;
+    setCommentError(null);
+    commentMutation.mutate(trimmedComment);
+  }
+
   return (
     <section
       className="issue-doc-comments"
@@ -600,6 +778,45 @@ function CommentsTimeline({
           Anyone can comment — execution starts after Approve &amp; Start.
         </p>
       ) : null}
+      <form
+        className="issue-comment-form"
+        onSubmit={submitComment}
+        data-testid="issue-comment-form"
+      >
+        <label className="issue-comment-form-label" htmlFor="issue-comment">
+          Add a comment
+        </label>
+        <textarea
+          id="issue-comment"
+          className="issue-comment-input"
+          value={commentBody}
+          onChange={(event) => {
+            setCommentBody(event.target.value);
+            if (commentError) setCommentError(null);
+          }}
+          placeholder="Ask a question, clarify scope, or leave review notes."
+          rows={4}
+          disabled={commentMutation.isPending}
+          data-testid="issue-comment-input"
+        />
+        {commentError ? (
+          <p
+            className="issue-comment-error"
+            role="alert"
+            data-testid="issue-comment-error"
+          >
+            {commentError}
+          </p>
+        ) : null}
+        <button
+          type="submit"
+          className="issue-comment-submit"
+          disabled={!trimmedComment || commentMutation.isPending}
+          data-testid="issue-comment-submit"
+        >
+          {commentMutation.isPending ? "Posting…" : "Comment"}
+        </button>
+      </form>
     </section>
   );
 }
@@ -757,6 +974,7 @@ export function IssueDocument({
     ? COLLAPSED_STATES.has(doc.lifecycleState)
     : false;
   const defaultExpanded = !shouldAutoCollapse;
+  const hasDoc = Boolean(doc);
 
   const [specExpanded, setSpecExpanded] = useState<boolean>(() =>
     readSpecExpanded(taskId, defaultExpanded),
@@ -765,11 +983,10 @@ export function IssueDocument({
   // When the document loads for the first time and auto-collapse is
   // active, apply the stored preference or default to collapsed.
   useEffect(() => {
-    if (!doc) return;
+    if (!hasDoc) return;
     const stored = readSpecExpanded(taskId, defaultExpanded);
     setSpecExpanded(stored);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, shouldAutoCollapse]);
+  }, [taskId, defaultExpanded, hasDoc]);
 
   // Persist spec expand/collapse on change.
   function toggleSpec() {
@@ -838,10 +1055,7 @@ export function IssueDocument({
       data-lifecycle-state={doc.lifecycleState}
     >
       {/* Sticky header: status pill + title */}
-      <header
-        className="issue-doc-header issue-doc-header--sticky"
-        aria-label="Issue header"
-      >
+      <header className="issue-doc-header issue-doc-header--sticky">
         <div className="issue-doc-header-row">
           <LifecycleStatePill state={doc.lifecycleState} />
           <h2 className="issue-doc-title">{doc.title}</h2>
@@ -887,9 +1101,16 @@ export function IssueDocument({
 
         {/* Comments timeline */}
         <CommentsTimeline
+          taskId={taskId}
+          channel={doc.channel}
           comments={doc.comments}
           isDrafting={isDrafting}
           timelineRef={timelineRef}
+          onCommentPosted={() => {
+            void queryClient.invalidateQueries({ queryKey: ["issue", taskId] });
+            void queryClient.invalidateQueries({ queryKey: ["issues"] });
+            void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
+          }}
         />
       </div>
     </div>

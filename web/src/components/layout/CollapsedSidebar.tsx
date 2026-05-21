@@ -13,11 +13,11 @@ import {
 import { getUsage } from "../../api/platform";
 import { formatTokens, formatUSD } from "../../lib/format";
 import { useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
 import { AgentList } from "../sidebar/AgentList";
 import { ChannelList } from "../sidebar/ChannelList";
-import { IssuesGroup } from "../sidebar/IssuesGroup";
 
-type Popover = "team" | "channels" | "issues" | "recent" | "usage" | null;
+type Popover = "team" | "channels" | "recent" | "usage" | null;
 type HintState = { label: string; y: number } | null;
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -114,14 +114,11 @@ export function CollapsedSidebar() {
         </button>
         <button
           type="button"
-          className={`sidebar-icon-btn${popover === "issues" ? " is-open" : ""}`}
+          className="sidebar-icon-btn"
           aria-label="Issues"
-          aria-haspopup="dialog"
-          aria-expanded={popover === "issues"}
-          onMouseEnter={() => openPopover("issues")}
-          onMouseLeave={scheduleClose}
-          onFocus={() => openPopover("issues")}
-          onBlur={scheduleClose}
+          onClick={() => void router.navigate({ to: "/issues" })}
+          onMouseEnter={(e) => showHint(e, "Issues")}
+          onMouseLeave={hideHint}
         >
           <ChatBubbleWarning />
         </button>
@@ -163,16 +160,13 @@ export function CollapsedSidebar() {
                   ? "Agents"
                   : popover === "channels"
                     ? "Channels"
-                    : popover === "issues"
-                      ? "Issues"
-                      : popover === "recent"
-                        ? "Recent"
-                        : "Usage"}
+                    : popover === "recent"
+                      ? "Recent"
+                      : "Usage"}
               </div>
               <div className="sidebar-rail-popover-body">
                 {popover === "team" ? <AgentList /> : null}
                 {popover === "channels" ? <ChannelList /> : null}
-                {popover === "issues" ? <IssuesGroup open /> : null}
                 {popover === "recent" ? (
                   <div className="rail-popover-empty">
                     No recent items yet.

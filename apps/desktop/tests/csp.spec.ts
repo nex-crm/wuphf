@@ -1,19 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
+import { BASE_RENDERER_CSP } from "../src/main/csp.ts";
+
 describe("renderer Content-Security-Policy", () => {
-  it("matches the AGENTS.md rule 7 directive set", async () => {
-    const [html, agents] = await Promise.all([
-      readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8"),
-      readFile(new URL("../AGENTS.md", import.meta.url), "utf8"),
-    ]);
+  it("keeps the meta tag as a strict fallback without a broker port", async () => {
+    const html = await readFile(new URL("../src/renderer/index.html", import.meta.url), "utf8");
 
     const htmlDirectives = parseCsp(extractHtmlCsp(html));
-    const agentsDirectives = parseCsp(extractAgentsCsp(agents));
 
-    expect(htmlDirectives).toEqual(agentsDirectives);
+    expect(extractHtmlCsp(html)).toBe(BASE_RENDERER_CSP);
     expect(htmlDirectives).toMatchObject({
-      "connect-src": ["'self'", "http://127.0.0.1:0"],
+      "connect-src": ["'self'"],
       "base-uri": ["'none'"],
       "form-action": ["'none'"],
       "object-src": ["'none'"],
@@ -29,14 +27,6 @@ function extractHtmlCsp(html: string): string {
   );
   if (match?.[1] === undefined) {
     throw new Error("Expected renderer index.html to contain a CSP meta tag");
-  }
-  return match[1];
-}
-
-function extractAgentsCsp(agents: string): string {
-  const match = agents.match(/\*\*CSP is strict\.\*\*.*?containing `([^`]+)`/s);
-  if (match?.[1] === undefined) {
-    throw new Error("Expected AGENTS.md rule 7 to contain the CSP string");
   }
   return match[1];
 }

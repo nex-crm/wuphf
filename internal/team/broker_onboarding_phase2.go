@@ -176,6 +176,15 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 		}
 		b.ensureNotebookDirsForRoster()
 		b.materializeBlueprintWiki(loaded)
+		// materializeBlueprintWiki only regenerates the index when its
+		// transactional materializer wrote new bytes. The seed boundary
+		// must still guarantee a fresh index/all.md — for example when the
+		// blueprint wiki was already on disk from a prior run but the
+		// index was rebuilt empty by a clean-boot reconcile. Call here
+		// unconditionally so the post-seed snapshot is always correct.
+		regenCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		b.regenWikiIndexAfterSeed(regenCtx, "blueprint seed")
+		cancel()
 		return nil
 	}
 	// Scratch path: minimal seed (#general + about/ wiki stubs + CEO).
@@ -192,6 +201,11 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 	// rather than an empty one. Best-effort: failures are logged inside the
 	// helper and do not fail the seed phase.
 	b.materializeScratchWikiStubs(s)
+	// Stubs land via atomicWrite (not the WikiWorker), so force an index
+	// regen here so /index/all.md reflects the new about/ files.
+	regenCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	b.regenWikiIndexAfterSeed(regenCtx, "scratch seed")
+	cancel()
 	return nil
 }
 
@@ -218,7 +232,8 @@ func (b *Broker) ensureOnboardingFirstIssueDraft(s *onboarding.State) error {
 			Details:       prompt,
 			Owner:         "ceo",
 			CreatedBy:     "human",
-			TaskType:      inferTaskType("ceo", onboardingFirstIssueTitle(prompt), prompt),
+			TaskType:      "issue",
+			PipelineID:    "issue",
 			ExecutionMode: "office",
 			CreatedAt:     now,
 			UpdatedAt:     now,
@@ -402,6 +417,36 @@ func (b *Broker) materializeScratchWikiStubs(s *onboarding.State) {
 		log.Printf("onboarding: scratch wiki commit: %v", err)
 	} else if sha != "" {
 		log.Printf("onboarding: scratch wiki stubs committed %s", sha)
+	}
+}
+
+// regenWikiIndexAfterSeed regenerates wiki/index/all.md so it reflects any
+// articles that landed on disk at a seed or scan boundary. It is the single
+// chokepoint for "files appeared outside the WikiWorker's per-commit
+// reconcile path" — for example, operations.SeedCompanyContext writes
+// team/about/{README,owner,company}.md directly to disk, and
+// materializeScratchWikiStubs writes scratch stubs via writeWikiStubIfAbsent.
+// Neither path passes through (*WikiWorker).Enqueue, so the per-commit
+// IndexRegen in (*Repo).Commit never fires and the boot-reconcile snapshot
+// of index/all.md goes stale.
+//
+// Idempotent: safe to call multiple times. Best-effort: errors are logged,
+// not returned, so a transient I/O blip on the index does not fail the
+// surrounding seed/scan boundary. Returns silently when the markdown
+// backend is not active (worker or repo nil).
+//
+// See nex-crm/wuphf#941.
+func (b *Broker) regenWikiIndexAfterSeed(ctx context.Context, reason string) {
+	worker := b.WikiWorker()
+	if worker == nil {
+		return
+	}
+	repo := worker.Repo()
+	if repo == nil {
+		return
+	}
+	if err := repo.IndexRegen(ctx); err != nil {
+		log.Printf("onboarding: wiki index regen after %s: %v", reason, err)
 	}
 }
 

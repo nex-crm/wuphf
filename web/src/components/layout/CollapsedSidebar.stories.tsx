@@ -116,19 +116,6 @@ export const ChannelsPopover: StoryObj = {
   ),
 };
 
-export const IssuesPopover: StoryObj = {
-  name: "Popover — Issues",
-  render: () => (
-    <SidebarContext initialUrl="/channels/architecture">
-      <Frame>
-        <HoverWhenMounted selector='aside.sidebar-collapsed button[aria-label="Issues"]'>
-          <CollapsedSidebar />
-        </HoverWhenMounted>
-      </Frame>
-    </SidebarContext>
-  ),
-};
-
 export const RecentPopover: StoryObj = {
   name: "Popover — Recent (empty state)",
   render: () => (

@@ -1,8 +1,8 @@
 /**
  * IssueNewForm — manual issue draft creation surface (/issues/new).
  *
- * Lets a human file an issue without going through the CEO chat. The
- * resulting task starts in the broker's intake bucket so the owner agent
+ * Lets a human file a spec-level issue without going through the CEO chat.
+ * The resulting task starts in the broker's intake bucket so the owner agent
  * can pick it up; on success we hand the user straight to the new issue's
  * detail surface so they can iterate from there.
  */
@@ -54,6 +54,7 @@ export function IssueNewForm() {
             title: trimmedTitle,
             assignee: assignee.trim() || "human",
             details: details.trim() || undefined,
+            task_type: "issue",
           },
         ],
         { channel: channel.trim() || DEFAULT_CHANNEL, createdBy: "human" },
@@ -90,10 +91,10 @@ export function IssueNewForm() {
         onSubmit={handleSubmit}
         noValidate={true}
       >
-        <h2 className="issue-new-form-heading">File a new issue</h2>
+        <h2 className="issue-new-form-heading">File an issue spec</h2>
         <p className="issue-new-form-hint">
-          The owner agent picks this up from intake. Drop the details now or let
-          them ask follow-up questions in the channel.
+          Use this for project-sized work. Smaller execution tasks should be cut
+          from the spec after intake.
         </p>
 
         <div className="issue-new-form-field">
@@ -104,7 +105,7 @@ export function IssueNewForm() {
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="What needs to happen?"
+            placeholder="What larger outcome should the team spec?"
             required={true}
             data-testid="issue-new-title"
           />
@@ -116,7 +117,7 @@ export function IssueNewForm() {
             id="issue-new-details"
             value={details}
             onChange={(e) => setDetails(e.target.value)}
-            placeholder="Acceptance criteria, links, constraints…"
+            placeholder="Context, desired outcome, constraints, acceptance criteria..."
             data-testid="issue-new-details"
           />
         </div>
@@ -177,7 +178,7 @@ export function IssueNewForm() {
             disabled={submitting}
             data-testid="issue-new-submit"
           >
-            {submitting ? "Filing…" : "File issue"}
+            {submitting ? "Filing..." : "File issue spec"}
           </button>
         </div>
       </form>
