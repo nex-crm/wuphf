@@ -56,6 +56,15 @@ import WikiMaintenanceAssistant from "./WikiMaintenanceAssistant";
 const STALENESS_STALE_DAYS = 30;
 const STALENESS_AGING_DAYS = 7;
 
+/**
+ * If the article fetch has not resolved within this window we treat the
+ * loader as stalled and surface a retry-able error state. Picked to be
+ * comfortably longer than a healthy local broker response (~tens of ms)
+ * while still short enough that a hung request stops looking like a
+ * permanent "Loading article…" placeholder.
+ */
+export const WIKI_ARTICLE_FETCH_TIMEOUT_MS = 5_000;
+
 // StalenessIndicator shows a small badge when an article has not been accessed
 // by anyone (human or agent) in a while. "Agents only" signals an article
 // actively used for context but never opened by a human.
@@ -193,23 +202,97 @@ type MarkdownComponents = ReturnType<typeof buildMarkdownComponents>;
 type DetectedEntity = { kind: EntityKind; slug: string };
 type DetectedPlaybook = NonNullable<ReturnType<typeof detectPlaybook>>;
 
+interface ArticleFetchState {
+  article: WikiArticleT | null;
+  loading: boolean;
+  error: string | null;
+  /**
+   * True once the fetch has been outstanding longer than
+   * WIKI_ARTICLE_FETCH_TIMEOUT_MS. The fetch itself is not aborted — if
+   * the broker eventually answers we still take the response — but the
+   * UI swaps the loading placeholder for a retry-able error state so
+   * the user is never stuck on an indefinite "Loading article…" hang.
+   */
+  timedOut: boolean;
+  retry: () => void;
+}
+
+/**
+ * Drives the article-fetch lifecycle for the wiki right pane. Owns the
+ * timeout that flips the placeholder into an error state and the
+ * retry-nonce that re-runs the fetch when the user clicks Retry.
+ */
+function useArticleFetch(
+  path: string,
+  externalRefreshNonce: number,
+  refreshNonce: number,
+): ArticleFetchState {
+  const [article, setArticle] = useState<WikiArticleT | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void externalRefreshNonce;
+    void refreshNonce;
+    void retryNonce;
+    setLoading(true);
+    setError(null);
+    setTimedOut(false);
+    const timeoutId = globalThis.setTimeout(() => {
+      if (cancelled) return;
+      setTimedOut(true);
+    }, WIKI_ARTICLE_FETCH_TIMEOUT_MS);
+    fetchArticle(path)
+      .then((a) => {
+        if (cancelled) return;
+        setArticle(a);
+        setTimedOut(false);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load article");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+        globalThis.clearTimeout(timeoutId);
+      });
+    return () => {
+      cancelled = true;
+      globalThis.clearTimeout(timeoutId);
+    };
+  }, [path, externalRefreshNonce, refreshNonce, retryNonce]);
+  return {
+    article,
+    loading,
+    error,
+    timedOut,
+    retry: () => setRetryNonce((n) => n + 1),
+  };
+}
+
 export default function WikiArticle({
   path,
   catalog,
   onNavigate,
   externalRefreshNonce = 0,
 }: WikiArticleProps) {
-  const [article, setArticle] = useState<WikiArticleT | null>(null);
   const [tab, setTab] = useState<HatBarTab>("article");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const {
+    article,
+    loading,
+    error,
+    timedOut,
+    retry: handleRetry,
+  } = useArticleFetch(path, externalRefreshNonce, refreshNonce);
   const [historyCommits, setHistoryCommits] = useState<
     WikiHistoryCommit[] | null
   >(null);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState(false);
   const [liveAgent, setLiveAgent] = useState<string | null>(null);
-  const [refreshNonce, setRefreshNonce] = useState(0);
   const [humans, setHumans] = useState<HumanIdentity[]>([]);
   const [visualArtifact, setVisualArtifact] =
     useState<RichArtifactDetail | null>(null);
@@ -233,31 +316,6 @@ export default function WikiArticle({
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    // These nonce values are explicit refetch triggers. The effect body only
-    // needs their change notification, not their numeric value.
-    void externalRefreshNonce;
-    void refreshNonce;
-    setLoading(true);
-    setError(null);
-    fetchArticle(path)
-      .then((a) => {
-        if (cancelled) return;
-        setArticle(a);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load article");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [path, externalRefreshNonce, refreshNonce]);
 
   useEffect(() => {
     let cancelled = false;
@@ -365,9 +423,31 @@ export default function WikiArticle({
     [resolver, onNavigate],
   );
 
-  if (loading) return <div className="wk-loading">Loading article…</div>;
-  if (error) return <div className="wk-error">Error: {error}</div>;
-  if (!article) return <div className="wk-error">Article not found.</div>;
+  if (loading && !timedOut) {
+    return (
+      <div className="wk-loading" role="status" aria-busy="true">
+        Loading article…
+      </div>
+    );
+  }
+  if (loading && timedOut) {
+    return (
+      <ArticleErrorState
+        message="Still waiting on the broker. The request has not responded in 5 seconds."
+        onRetry={handleRetry}
+      />
+    );
+  }
+  if (error) {
+    return (
+      <ArticleErrorState message={`Error: ${error}`} onRetry={handleRetry} />
+    );
+  }
+  if (!article) {
+    return (
+      <ArticleErrorState message="Article not found." onRetry={handleRetry} />
+    );
+  }
 
   const toc = buildTocFromMarkdown(article.content);
   const entity = detectEntity(article.path);
@@ -466,6 +546,28 @@ export default function WikiArticle({
         />
       )}
     </>
+  );
+}
+
+function ArticleErrorState({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="wk-error" role="alert">
+      <p className="wk-error-msg">{message}</p>
+      <button
+        type="button"
+        className="wk-retry-btn"
+        onClick={onRetry}
+        aria-label="Retry loading article"
+      >
+        Retry
+      </button>
+    </div>
   );
 }
 
