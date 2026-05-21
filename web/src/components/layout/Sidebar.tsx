@@ -1,24 +1,42 @@
-import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
+import { SidebarCollapse } from "iconoir-react";
 
+import { useWorkspacesList } from "../../api/workspaces";
 import { useResizablePane } from "../../hooks/useResizablePane";
 import { router } from "../../lib/router";
-import { useCurrentApp, useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
 import { AgentList } from "../sidebar/AgentList";
-import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
-import { InboxButton } from "../sidebar/InboxButton";
 import { IssuesGroup } from "../sidebar/IssuesGroup";
 import { SidebarSection } from "../sidebar/SidebarSection";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { CollapsedSidebar } from "./CollapsedSidebar";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 
+// Mirrors the WORKSPACE_PALETTE in WorkspaceRail so the sidebar chip
+// matches the rail icon for the same workspace.
+const WORKSPACE_CHIP_PALETTE = [
+  "#069de4",
+  "#9f4dbf",
+  "#e0833e",
+  "#3aa76d",
+  "#e25c7a",
+  "#5a7bd9",
+  "#d4a017",
+  "#4cb6ad",
+];
+function workspaceChipBg(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return WORKSPACE_CHIP_PALETTE[hash % WORKSPACE_CHIP_PALETTE.length];
+}
+
 export const SIDEBAR_DEFAULT_WIDTH = 280;
-export const SIDEBAR_MIN_WIDTH = 180;
-export const SIDEBAR_MAX_WIDTH = 420;
+export const SIDEBAR_MIN_WIDTH = 240;
+export const SIDEBAR_MAX_WIDTH = 360;
 export const SIDEBAR_WIDTH_STORAGE_KEY = "wuphf-sidebar-width";
 
 export function Sidebar() {
@@ -28,13 +46,8 @@ export function Sidebar() {
   const toggleSidebarChannels = useAppStore((s) => s.toggleSidebarChannels);
   const sidebarIssuesOpen = useAppStore((s) => s.sidebarIssuesOpen);
   const toggleSidebarIssues = useAppStore((s) => s.toggleSidebarIssues);
-  const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
-  const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
-  const currentApp = useCurrentApp();
-  const route = useCurrentRoute();
-  const issuesListActive = route.kind === "issues-list";
 
   const resize = useResizablePane({
     storageKey: SIDEBAR_WIDTH_STORAGE_KEY,
@@ -43,6 +56,18 @@ export function Sidebar() {
     maxWidth: SIDEBAR_MAX_WIDTH,
     edge: "right",
   });
+
+  const { data: workspacesData } = useWorkspacesList();
+  const activeWorkspace = workspacesData?.workspaces.find(
+    (w) => w.is_active || w.name === workspacesData?.active,
+  );
+  const workspaceTitle =
+    activeWorkspace?.company_name?.trim() ||
+    activeWorkspace?.name ||
+    "WUPHF";
+  const workspaceChipColor = activeWorkspace
+    ? workspaceChipBg(activeWorkspace.name)
+    : null;
 
   // Collapsed rail keeps its fixed CSS width; only the expanded sidebar
   // honors the user's drag. We hand the dragged width to CSS as a custom
@@ -63,7 +88,19 @@ export function Sidebar() {
       ) : (
         <>
           <div className="sidebar-header">
-            <span className="sidebar-logo">WUPHF</span>
+            <span
+              className={`sidebar-logo${activeWorkspace ? " is-workspace" : ""}`}
+              title={activeWorkspace?.name}
+              style={
+                workspaceChipColor
+                  ? ({
+                      "--workspace-chip-bg": workspaceChipColor,
+                    } as React.CSSProperties)
+                  : undefined
+              }
+            >
+              {workspaceTitle}
+            </span>
             <TeamMemberBadge />
             <div className="sidebar-header-actions">
               <button
@@ -75,26 +112,11 @@ export function Sidebar() {
               >
                 <SidebarCollapse />
               </button>
-              <button
-                type="button"
-                className={`sidebar-icon-btn${currentApp === "settings" ? " active" : ""}`}
-                aria-label="Open settings"
-                title="Settings"
-                onClick={() =>
-                  router.navigate({
-                    to: "/apps/$appId",
-                    params: { appId: "settings" },
-                  })
-                }
-              >
-                <SettingsIcon />
-              </button>
             </div>
           </div>
 
-          <div className="sidebar-primary">
-            <InboxButton />
-          </div>
+          {/* Inbox moved to the WorkspaceRail (above Tools); kept the
+              shell quiet so Agents anchors the top of the scroll list. */}
 
           <div className="sidebar-scroll">
             <SidebarSection
@@ -114,7 +136,6 @@ export function Sidebar() {
               <ChannelList />
             </SidebarSection>
 
-            {/* Phase 3 — Issues group (between Channels and Tools, per spec Surface 2 layout). */}
             <SidebarSection
               label="Issues"
               open={sidebarIssuesOpen}
@@ -123,7 +144,7 @@ export function Sidebar() {
               headerActions={
                 <button
                   type="button"
-                  className={`sidebar-section-action${issuesListActive ? " active" : ""}`}
+                  className="sidebar-section-action"
                   onClick={() => void router.navigate({ to: "/issues" })}
                   title="View all issues"
                   data-testid="issues-sidebar-view-all"
@@ -133,14 +154,6 @@ export function Sidebar() {
               }
             >
               <IssuesGroup open={sidebarIssuesOpen} />
-            </SidebarSection>
-
-            <SidebarSection
-              label="Tools"
-              open={sidebarAppsOpen}
-              onToggle={toggleSidebarApps}
-            >
-              <AppList />
             </SidebarSection>
 
             {/* Phase 2 onboarding preview overlay — shows staged channels/agents

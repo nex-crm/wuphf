@@ -122,30 +122,8 @@ function SidebarAgentRow({
         </div>
         <span className={`status-dot ${ac.dotClass}`} />
       </button>
-      <button
-        type="button"
-        className="sidebar-agent-peek-trigger"
-        aria-haspopup="dialog"
-        aria-expanded={peek.isOpen}
-        aria-controls={`agent-peek-${agent.slug}`}
-        aria-label={`Recent activity for ${displayName}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          peek.toggle();
-        }}
-        data-testid={`peek-trigger-${agent.slug}`}
-      >
-        <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
-          <path
-            d="M2 1 L6 4 L2 7"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
+      {/* Chevron peek-trigger removed; AgentEventPeek opens via other
+          surface affordances (status pill / DM entry). */}
       <AgentEventPeek
         slug={agent.slug}
         agentName={displayName}
