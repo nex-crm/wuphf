@@ -202,6 +202,13 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.3.13"
+      # Broker tests run under Vitest, which spawns workers on the system Node
+      # binary (not bun). The broker storage layer uses `node:sqlite` (stable
+      # in Node 22.13+, experimental from 22.5+), so we explicitly pin a Node
+      # that ships it — setup-bun's bundled Node is older and lacks the module.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "22.x"
       - name: Detect broker changes
         id: broker-changes
         env:
@@ -264,6 +271,11 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.3.13"
+      # llm-router imports broker types; transitively touches `node:sqlite`.
+      # See broker job for the runtime explanation.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "22.x"
       - name: Detect llm-router changes
         id: llm-router-changes
         env:
@@ -312,6 +324,11 @@ jobs:
           # threshold flag correctly (1.2.16 fails on moderate even when level=high).
           # Rest of repo can bump in a follow-up.
           bun-version: "1.3.13"
+      # Desktop tests import @wuphf/broker, which uses `node:sqlite`. Vitest
+      # spawns workers on system Node; pin a Node that ships the module.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6.4.0
+        with:
+          node-version: "22.x"
       - name: Detect desktop changes
         id: desktop-changes
         env:
