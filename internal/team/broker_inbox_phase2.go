@@ -122,8 +122,18 @@ func (b *Broker) inboxItemsForActor(actor requestActor, filter InboxFilter) ([]I
 	if b == nil {
 		return nil, nil
 	}
+	// Unread is a per-actor cursor-driven filter, not a lifecycle
+	// bucket. Unwrap it to all-states here so the bucket walk below
+	// returns everything authorized; the /inbox/items handler then
+	// post-filters against the caller's cursor. inboxFilterToStates
+	// itself rejects InboxFilterUnread so the legacy task-only
+	// /tasks/inbox path cannot silently degrade to filter=all.
+	bucketFilter := filter
+	if bucketFilter == InboxFilterUnread {
+		bucketFilter = InboxFilterAll
+	}
 	// Validate the filter up-front so a bad value short-circuits.
-	if _, err := inboxFilterToStates(filter); err != nil {
+	if _, err := inboxFilterToStates(bucketFilter); err != nil {
 		return nil, err
 	}
 
@@ -132,8 +142,8 @@ func (b *Broker) inboxItemsForActor(actor requestActor, filter InboxFilter) ([]I
 	// to that bucket. InboxFilterAll keeps every row. This matches
 	// the existing Inbox(filter) semantics; the new fan-out merges
 	// requests + reviews on top.
-	if filter != InboxFilterAll {
-		states, _ := inboxFilterToStates(filter)
+	if bucketFilter != InboxFilterAll {
+		states, _ := inboxFilterToStates(bucketFilter)
 		allowed := make(map[LifecycleState]struct{}, len(states))
 		for _, s := range states {
 			allowed[s] = struct{}{}
@@ -158,16 +168,18 @@ func (b *Broker) inboxItemsForActor(actor requestActor, filter InboxFilter) ([]I
 	sort.SliceStable(rows, func(i, j int) bool {
 		// Attention-first: items the user can act on now (decision,
 		// request, review) bubble to the top. Within the same priority
-		// tier, sort by CreatedAt desc. This stops approved /
-		// blocked-on-pr-merge tasks from burying the work that needs
-		// the user's eyes.
+		// tier, sort by most-recent-activity descending — UpdatedAt
+		// when present (so an old task that just transitioned bubbles
+		// up), falling back to CreatedAt for artifacts that don't
+		// carry a separate update timestamp. This honors the
+		// "most-recent-activity descending" contract on the function.
 		pi := inboxItemPriority(rows[i])
 		pj := inboxItemPriority(rows[j])
 		if pi != pj {
 			return pi < pj
 		}
-		ti := parseBrokerTimestamp(rows[i].CreatedAt)
-		tj := parseBrokerTimestamp(rows[j].CreatedAt)
+		ti := inboxItemActivityTime(rows[i])
+		tj := inboxItemActivityTime(rows[j])
 		switch {
 		case ti.IsZero() && tj.IsZero():
 			return false
@@ -180,6 +192,16 @@ func (b *Broker) inboxItemsForActor(actor requestActor, filter InboxFilter) ([]I
 		}
 	})
 	return rows, nil
+}
+
+// inboxItemActivityTime returns the timestamp the inbox sort uses for
+// "most recent activity": UpdatedAt when set, otherwise CreatedAt. Both
+// fields are RFC3339 strings on the wire.
+func inboxItemActivityTime(item InboxItem) time.Time {
+	if ts := parseBrokerTimestamp(item.UpdatedAt); !ts.IsZero() {
+		return ts
+	}
+	return parseBrokerTimestamp(item.CreatedAt)
 }
 
 // inboxItemPriority returns a sort key: lower = more attention-y.

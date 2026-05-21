@@ -8,6 +8,7 @@ package team
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -580,6 +581,80 @@ func TestHandleTaskResume_RejectsMalformedJSON(t *testing.T) {
 	b.mu.Unlock()
 	if state != LifecycleStateBlockedOnPRMerge {
 		t.Fatalf("state should remain blocked after 400; got %s", state)
+	}
+}
+
+// TestHandleInboxItems_SortsByUpdatedAtDescending guards the contract
+// that recently-updated items surface first regardless of their
+// CreatedAt. An older task that just transitioned must outrank a newer
+// task that has not been touched since creation.
+func TestHandleInboxItems_SortsByUpdatedAtDescending(t *testing.T) {
+	b := newTestBrokerForReview(t)
+	now := time.Now().UTC()
+	older := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	newer := now.Add(-1 * time.Hour).Format(time.RFC3339)
+	justNow := now.Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		// task-old was created longest ago AND just transitioned now.
+		{ID: "task-old-but-active", Title: "Old, just updated", CreatedAt: older, UpdatedAt: justNow, Reviewers: []string{"owner"}},
+		// task-fresh was created more recently but has not moved.
+		{ID: "task-fresh-but-quiet", Title: "Newer, untouched", CreatedAt: newer, UpdatedAt: newer, Reviewers: []string{"owner"}},
+	}
+	for _, id := range []string{"task-old-but-active", "task-fresh-but-quiet"} {
+		if _, err := b.transitionLifecycleLocked(id, LifecycleStateDecision, "seed"); err != nil {
+			b.mu.Unlock()
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	// The lifecycle transition above stamps UpdatedAt with the wall
+	// clock for both, so reset the fixture timestamps explicitly to
+	// recreate the "old created, just-updated" vs "newer created,
+	// untouched" contrast the sort is meant to honor.
+	for i := range b.tasks {
+		switch b.tasks[i].ID {
+		case "task-old-but-active":
+			b.tasks[i].UpdatedAt = justNow
+			b.tasks[i].CreatedAt = older
+		case "task-fresh-but-quiet":
+			b.tasks[i].UpdatedAt = newer
+			b.tasks[i].CreatedAt = newer
+		}
+	}
+	b.mu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/inbox/items", b.requireAuth(b.handleInboxItems))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/inbox/items?filter=all", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("inbox request: %v", err)
+	}
+	defer resp.Body.Close()
+	var payload unifiedInboxResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Items) < 2 {
+		t.Fatalf("expected at least 2 items; got %d", len(payload.Items))
+	}
+	if payload.Items[0].TaskID != "task-old-but-active" {
+		t.Fatalf("most-recent-activity item = %q, want task-old-but-active; full order = %+v", payload.Items[0].TaskID, payload.Items)
+	}
+}
+
+// TestInboxFilterToStates_RejectsUnreadOnLegacyPath documents the
+// guard that prevents /tasks/inbox?filter=unread from silently behaving
+// like filter=all. The legacy task-only path has no cursor context, so
+// the unread filter must be rejected at the bucket layer. The new
+// /inbox/items handler unwraps unread to all-states before this call.
+func TestInboxFilterToStates_RejectsUnreadOnLegacyPath(t *testing.T) {
+	if _, err := inboxFilterToStates(InboxFilterUnread); !errors.Is(err, ErrInboxFilterUnknown) {
+		t.Fatalf("inboxFilterToStates(unread) err = %v, want ErrInboxFilterUnknown", err)
 	}
 }
 

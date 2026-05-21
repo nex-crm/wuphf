@@ -160,12 +160,17 @@ func inboxFilterToStates(filter InboxFilter) ([]LifecycleState, error) {
 		return []LifecycleState{LifecycleStateBlockedOnPRMerge}, nil
 	case InboxFilterApproved:
 		return []LifecycleState{LifecycleStateApproved}, nil
-	case InboxFilterAll, InboxFilterUnread:
-		// Unread is post-filtered against the caller's cursor in
-		// inboxItemsForActor; from the lifecycle-bucket perspective it
-		// behaves as InboxFilterAll. ErrInboxFilterUnknown stays
-		// reserved for genuinely unknown strings.
+	case InboxFilterAll:
 		return CanonicalLifecycleStates(), nil
+	case InboxFilterUnread:
+		// Unread is a per-actor cursor-driven filter; the legacy
+		// task-only Inbox/inboxForActor path has no cursor context and
+		// would silently degrade to filter=all. The unified
+		// /inbox/items handler unwraps unread to all-states + a
+		// post-filter before calling here, so the only callers that
+		// can reach this branch are legacy entry points — return
+		// ErrInboxFilterUnknown for them.
+		return nil, ErrInboxFilterUnknown
 	default:
 		return nil, ErrInboxFilterUnknown
 	}
