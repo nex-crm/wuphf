@@ -47,6 +47,11 @@ func (b *Broker) runCompanySeedJob(cfg config.Config) {
 		log.Printf("broker: company seed warning: %s", w)
 	}
 	log.Printf("broker: company seed complete, wrote %d articles", len(result.ArticlesWritten))
+	// SeedCompanyContext writes team/about/*.md directly to disk via
+	// atomicWrite, bypassing the WikiWorker's per-commit IndexRegen. Regen
+	// here so the post-seed snapshot of index/all.md reflects the new
+	// articles (and the always-written README). (#941)
+	b.regenWikiIndexAfterSeed(ctx, "boot company seed")
 	// Persist extracted profile fields back to config.
 	b.configMu.Lock()
 	defer b.configMu.Unlock()

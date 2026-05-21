@@ -108,6 +108,13 @@ func (b *Broker) runScanPhase(dmSlug string) {
 		return
 	}
 
+	// SeedCompanyContext writes team/about/{README,owner,company}.md
+	// directly to disk via atomicWrite — it does not pass through the
+	// WikiWorker, so (*Repo).Commit's per-commit IndexRegen never fires
+	// for these files. Regenerate index/all.md here so the post-scan
+	// snapshot reflects the README path that always lands. (#941)
+	b.regenWikiIndexAfterSeed(ctx, "website scan")
+
 	b.postScanChipUpdate(dmSlug, websiteURL, "done", "Wiki updated ✓")
 
 	// Stagger one chat bubble per article written. Each bubble is a plain
