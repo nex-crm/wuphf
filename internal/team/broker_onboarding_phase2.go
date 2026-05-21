@@ -171,7 +171,7 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 		b.materializeBlueprintWiki(loaded)
 		return nil
 	}
-	// Scratch path: minimal seed (#general + 2 wiki stubs + CEO).
+	// Scratch path: minimal seed (#general + about/ wiki stubs + CEO).
 	b.mu.Lock()
 	seedErr := b.seedMinimalScratchLocked(s)
 	b.mu.Unlock()
@@ -179,6 +179,12 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 		return seedErr
 	}
 	b.ensureNotebookDirsForRoster()
+	// Materialize the about/ skeleton outside the broker lock. Mirrors the
+	// website-scan path's team/about/{README,company,owner}.md so the
+	// skip-website user lands in an office with a populated wiki section
+	// rather than an empty one. Best-effort: failures are logged inside the
+	// helper and do not fail the seed phase.
+	b.materializeScratchWikiStubs(s)
 	return nil
 }
 
@@ -241,10 +247,12 @@ func (b *Broker) seedMinimalScratchLocked(s *onboarding.State) error {
 	return b.saveLocked()
 }
 
-// materializeScratchWikiStubs writes the two minimal wiki stubs for the
-// scratch path: README.md and team-charter.md. These are placeholders
-// with FormAnswers-derived content; the website scan may later populate
-// README.md with scraped facts.
+// materializeScratchWikiStubs writes the team/about/ skeleton for the
+// skip-website scratch path: README.md, company.md, owner.md. These mirror
+// the files SeedCompanyContext writes on the with-website path so users
+// land in a populated wiki section regardless of which onboarding branch
+// they took. The README body is shared via operations.AboutReadmeContent;
+// company.md and owner.md are placeholder stubs an agent can enrich later.
 //
 // Caller must NOT hold b.mu. Best-effort: errors are logged, not returned,
 // so a file I/O failure does not fail the seed phase.
@@ -256,64 +264,83 @@ func (b *Broker) materializeScratchWikiStubs(s *onboarding.State) {
 	}
 	wikiRoot := filepath.Join(home, ".wuphf", "wiki")
 
-	companyName := strings.TrimSpace(s.FormAnswers.CompanyName)
-	if companyName == "" {
-		companyName = "Your Company"
+	var (
+		companyName string
+		description string
+		ownerName   string
+		ownerRole   string
+	)
+	if s != nil {
+		companyName = s.FormAnswers.CompanyName
+		description = s.FormAnswers.Description
+		ownerName = s.FormAnswers.OwnerName
+		ownerRole = s.FormAnswers.OwnerRole
 	}
-	description := strings.TrimSpace(s.FormAnswers.Description)
-
-	readmeContent := fmt.Sprintf("# %s\n\n%s\n\n_Populated by the onboarding website scan._\n",
-		companyName, description)
-	charterContent := fmt.Sprintf("# Team Charter\n\n## Company\n%s\n\n## Mission\n_Add your mission statement here._\n\n## Principles\n_Add your team principles here._\n",
-		companyName)
 
 	stubs := []struct {
 		path    string
 		content string
 	}{
-		{"README.md", readmeContent},
-		{"team-charter.md", charterContent},
+		{filepath.Join("team", "about", "README.md"), operations.AboutReadmeContent()},
+		{filepath.Join("team", "about", "company.md"), operations.AboutScratchCompanyMD(companyName, description)},
+		{filepath.Join("team", "about", "owner.md"), operations.AboutScratchOwnerMD(ownerName, ownerRole)},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	worker := b.WikiWorker()
+	wrote := false
 	for _, stub := range stubs {
 		fullPath := filepath.Join(wikiRoot, stub.path)
-		if err := writeWikiStubIfAbsent(ctx, fullPath, stub.content); err != nil {
+		created, err := writeWikiStubIfAbsent(ctx, fullPath, stub.content)
+		if err != nil {
 			log.Printf("onboarding: scratch wiki stub %s: %v", stub.path, err)
+			continue
+		}
+		if created {
+			wrote = true
 		}
 	}
 
-	if worker != nil && worker.Repo() != nil {
-		repo := worker.Repo()
-		if err := repo.IndexRegen(ctx); err != nil {
-			log.Printf("onboarding: scratch wiki index regen: %v", err)
-		}
-		sha, err := repo.CommitBootstrap(ctx, "wuphf: materialize scratch wiki stubs")
-		if err != nil {
-			log.Printf("onboarding: scratch wiki commit: %v", err)
-		} else if sha != "" {
-			log.Printf("onboarding: scratch wiki stubs committed %s", sha)
-		}
+	if !wrote {
+		return
+	}
+
+	worker := b.WikiWorker()
+	if worker == nil || worker.Repo() == nil {
+		// Non-markdown backend (e.g. memory in tests). Files stay on disk;
+		// RecoverDirtyTree on the next markdown-backend launch will fold
+		// them in. Same fallback shape as materializeBlueprintWiki.
+		return
+	}
+	repo := worker.Repo()
+	if err := repo.IndexRegen(ctx); err != nil {
+		log.Printf("onboarding: scratch wiki index regen: %v", err)
+	}
+	sha, err := repo.CommitBootstrap(ctx, "wuphf: materialize scratch wiki about/ skeleton")
+	if err != nil {
+		log.Printf("onboarding: scratch wiki commit: %v", err)
+	} else if sha != "" {
+		log.Printf("onboarding: scratch wiki stubs committed %s", sha)
 	}
 }
 
 // writeWikiStubIfAbsent writes content to path only when the file does not
-// already exist. Uses O_CREATE|O_EXCL for atomic existence check.
-func writeWikiStubIfAbsent(_ context.Context, path, content string) error {
+// already exist. Uses O_CREATE|O_EXCL for atomic existence check. Returns
+// (true, nil) when the file was newly created, (false, nil) when it already
+// existed, and (false, err) on any other I/O failure.
+func writeWikiStubIfAbsent(_ context.Context, path, content string) (bool, error) {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false, fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
-			return nil // file already exists; leave it
+			return false, nil // file already exists; leave it
 		}
-		return fmt.Errorf("create %s: %w", path, err)
+		return false, fmt.Errorf("create %s: %w", path, err)
 	}
 	defer func() {
 		// Best-effort close on a freshly created file we already
@@ -322,9 +349,9 @@ func writeWikiStubIfAbsent(_ context.Context, path, content string) error {
 		_ = f.Close()
 	}()
 	if _, err := f.WriteString(content); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+		return false, fmt.Errorf("write %s: %w", path, err)
 	}
-	return nil
+	return true, nil
 }
 
 // ceoMessagePayload is the internal representation of a CEO deterministic

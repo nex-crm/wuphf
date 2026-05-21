@@ -447,3 +447,44 @@ const aboutReadmeContent = `# About This Team
 - [company.md](company.md) — what this company does
 - [owner.md](owner.md) — who is running this workspace
 `
+
+// AboutReadmeContent returns the canonical README body for the team/about/
+// wiki section. Exported so the scratch-path seeder (which does not run the
+// website-scan pipeline) can drop the same shared skeleton README that
+// SeedCompanyContext writes on the with-website path.
+func AboutReadmeContent() string { return aboutReadmeContent }
+
+// AboutScratchCompanyMD returns a placeholder team/about/company.md body for
+// the skip-website scratch path. It seeds whatever onboarding captured
+// (company name + short description) so the wiki has a usable starting
+// article; agents enriching this article later can replace the body in place.
+func AboutScratchCompanyMD(companyName, description string) string {
+	name := strings.TrimSpace(companyName)
+	if name == "" {
+		name = "Company"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", name))
+	if d := strings.TrimSpace(description); d != "" {
+		sb.WriteString(fmt.Sprintf("%s\n\n", d))
+	}
+	sb.WriteString("_No website was scanned during onboarding. Fill in details about the company here, or ask an agent to research and enrich this article._\n")
+	return sb.String()
+}
+
+// AboutScratchOwnerMD returns a placeholder team/about/owner.md body for the
+// skip-website scratch path. Mirrors the buildOwnerMD shape used by the
+// website-scan path so the two surfaces stay structurally identical.
+func AboutScratchOwnerMD(ownerName, ownerRole string) string {
+	name := strings.TrimSpace(ownerName)
+	if name == "" {
+		name = "Owner"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", name))
+	if r := strings.TrimSpace(ownerRole); r != "" {
+		sb.WriteString(fmt.Sprintf("**Role:** %s\n\n", r))
+	}
+	sb.WriteString("_Add details about who is running this workspace here._\n")
+	return sb.String()
+}
