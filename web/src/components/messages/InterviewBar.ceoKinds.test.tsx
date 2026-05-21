@@ -540,7 +540,7 @@ describe("CeoCardSection", () => {
     });
   });
 
-  it("keeps the start-issue bridge chip from entering an unwired draft phase", async () => {
+  it("starts the issue-draft phase from the start-issue bridge chip", async () => {
     const suggestion: CeoSuggestion = {
       id: "sug-bridge-start",
       phase: "bridge",
@@ -557,9 +557,37 @@ describe("CeoCardSection", () => {
 
     await waitFor(() =>
       expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
-        phase: "complete",
+        phase: "draft",
       }),
     );
+  });
+
+  it("persists the first issue prompt and advances to approve", async () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-first-issue",
+      phase: "draft",
+      kind: "ceo_form_field",
+      payload: {
+        field: "task_prompt",
+        label: "What should the team tackle first?",
+      },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.change(screen.getByLabelText("What should the team tackle first?"), {
+      target: { value: "Build Stripe webhooks" },
+    });
+    fireEvent.click(screen.getByText("Submit"));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/answer", {
+        field: "task_prompt",
+        value: "Build Stripe webhooks",
+      }),
+    );
+    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+      phase: "approve",
+    });
   });
 
   it("renders a ceo_chip_row card", () => {

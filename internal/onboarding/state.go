@@ -58,6 +58,7 @@ type FormAnswers struct {
 	BlueprintID  string   `json:"blueprint_id,omitempty"` // empty = scratch path
 	PickedAgents []string `json:"picked_agents,omitempty"`
 	ScanComplete bool     `json:"scan_complete,omitempty"`
+	TaskPrompt   string   `json:"task_prompt,omitempty"`
 }
 
 // Suggestion is an idempotent re-emittable CEO message card. The ID is

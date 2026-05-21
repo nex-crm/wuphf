@@ -77,6 +77,30 @@ func TestHandleStateMethodNotAllowed(t *testing.T) {
 	})
 }
 
+func TestHandleAnswerPersistsTaskPrompt(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"task_prompt","value":"Build Stripe webhooks\nwith retries"}`)),
+		)
+		w := httptest.NewRecorder()
+
+		HandleAnswer(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want %d body=%s", w.Code, http.StatusOK, w.Body.String())
+		}
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if s.FormAnswers.TaskPrompt != "Build Stripe webhooks with retries" {
+			t.Fatalf("task prompt = %q", s.FormAnswers.TaskPrompt)
+		}
+	})
+}
+
 // TestHandleProgressPOSTPersists verifies that a POST to /onboarding/progress
 // with step+answers persists the partial state.
 func TestHandleProgressPOSTPersists(t *testing.T) {

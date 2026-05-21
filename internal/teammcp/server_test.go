@@ -1015,6 +1015,51 @@ func TestHandleTeamTaskReturnsWorktreeGuidance(t *testing.T) {
 	}
 }
 
+func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+	ensureBrokerMembers(t, ctx, "eng")
+
+	result, _, err := handleTeamTask(ctx, nil, TeamTaskArgs{
+		Action:  "create",
+		Channel: "general",
+		Title:   "Investigate webhook retries",
+		Details: "The agent detected this as follow-up implementation work.",
+		MySlug:  "eng",
+	})
+	if err != nil {
+		t.Fatalf("handleTeamTask: %v", err)
+	}
+	text := textFromResult(t, result)
+	if !strings.Contains(text, "Task task-") || !strings.Contains(text, "is now in_progress @eng") {
+		t.Fatalf("expected self-owned in-progress task result, got %q", text)
+	}
+
+	var tasks brokerTasksResponse
+	if err := brokerGetJSON(ctx, "/tasks?channel=general&include_done=true", &tasks); err != nil {
+		t.Fatalf("fetch tasks: %v", err)
+	}
+	if len(tasks.Tasks) != 1 {
+		t.Fatalf("expected one task, got %+v", tasks.Tasks)
+	}
+	task := tasks.Tasks[0]
+	if task.Title != "Investigate webhook retries" {
+		t.Fatalf("expected created fallback task, got %+v", task)
+	}
+	if task.Owner != "eng" || task.CreatedBy != "eng" || task.Status != "in_progress" {
+		t.Fatalf("expected caller-owned in-progress task, got %+v", task)
+	}
+}
+
 func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_NO_NEX", "1")

@@ -1081,6 +1081,8 @@ func applyFormAnswer(s *State, field string, value interface{}) error {
 			return fmt.Errorf("scan_complete must be a boolean")
 		}
 		s.FormAnswers.ScanComplete = b
+	case "task_prompt":
+		s.FormAnswers.TaskPrompt = sanitizeStr(value)
 	default:
 		return fmt.Errorf("unknown field %q", field)
 	}

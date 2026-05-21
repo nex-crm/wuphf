@@ -71,11 +71,18 @@ func (b *Broker) advancePhase(s *onboarding.State, next string) error {
 		}
 	}
 
+	if next == onboarding.PhaseDraft || next == onboarding.PhaseApprove {
+		if err := b.ensureOnboardingFirstIssueDraft(s); err != nil {
+			return fmt.Errorf("onboarding: first issue draft: %w", err)
+		}
+	}
+
 	// Build the deterministic CEO message for this phase.
 	msgs := ceoDeterministicMessages(next, s)
 	if len(msgs) == 0 {
-		// Phase 4 phases (draft/approve/kickoff) are not wired in Phase 2.
-		// Log and return without error so the transition still persists.
+		// LLM-backed phases may emit their own messages while creating
+		// issue drafts. Return without treating the absence of a template
+		// as an error.
 		log.Printf("onboarding: no deterministic messages for phase %q (Phase 4 not yet wired)", next)
 		return nil
 	}
@@ -180,6 +187,79 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 	}
 	b.ensureNotebookDirsForRoster()
 	return nil
+}
+
+func (b *Broker) ensureOnboardingFirstIssueDraft(s *onboarding.State) error {
+	if b == nil || s == nil {
+		return nil
+	}
+	prompt := strings.TrimSpace(s.FormAnswers.TaskPrompt)
+	if prompt == "" {
+		return nil
+	}
+
+	taskID := strings.TrimSpace(s.FirstIssueID)
+	changedState := false
+
+	b.mu.Lock()
+	if taskID == "" || b.findTaskByIDLocked(taskID) == nil {
+		now := time.Now().UTC().Format(time.RFC3339)
+		b.counter++
+		task := teamTask{
+			ID:            fmt.Sprintf("task-%d", b.counter),
+			Channel:       "general",
+			Title:         onboardingFirstIssueTitle(prompt),
+			Details:       prompt,
+			Owner:         "ceo",
+			CreatedBy:     "human",
+			TaskType:      inferTaskType("ceo", onboardingFirstIssueTitle(prompt), prompt),
+			ExecutionMode: "office",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		if err := b.applyLifecycleStateLocked(&task, LifecycleStateDrafting); err != nil {
+			b.mu.Unlock()
+			return err
+		}
+		syncTaskMemoryWorkflow(&task, now)
+		b.scheduleTaskLifecycleLocked(&task)
+		b.tasks = append(b.tasks, task)
+		taskID = task.ID
+		s.FirstIssueID = taskID
+		changedState = true
+		b.appendActionLocked("task_created", "office", task.Channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
+		if err := b.saveLocked(); err != nil {
+			b.mu.Unlock()
+			return err
+		}
+	}
+	b.mu.Unlock()
+
+	if s.PendingSuggestion != nil && s.PendingSuggestion.Phase == onboarding.PhaseDraft {
+		s.PendingSuggestion = nil
+		changedState = true
+	}
+	if changedState {
+		if err := onboarding.Save(s); err != nil {
+			return err
+		}
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := b.draftIssueLocked(b.wikiPromotionContext(), taskID, prompt, nil); err != nil {
+		return err
+	}
+	return b.saveLocked()
+}
+
+func onboardingFirstIssueTitle(prompt string) string {
+	title := strings.TrimSpace(prompt)
+	title = strings.TrimSuffix(title, ".")
+	if title == "" {
+		return "First issue"
+	}
+	return truncate(title, 96)
 }
 
 // seedMinimalScratchLocked seeds the absolute minimum for the scratch path:
@@ -468,6 +548,21 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 					{"id": "start_issue", "label": "Start an issue", "action": "transition", "phase": "draft"},
 					{"id": "look_around", "label": "Look around first", "action": "transition", "phase": "complete"},
 				},
+			}),
+		}}
+
+	case onboarding.PhaseDraft:
+		if s != nil && strings.TrimSpace(s.FormAnswers.TaskPrompt) != "" {
+			return nil
+		}
+		return []ceoMessagePayload{{
+			Kind:         "ceo_form_field",
+			Content:      "What should the team tackle first?",
+			SuggestionID: "first-issue-prompt",
+			SuggestionPayload: mustMarshalRaw(map[string]interface{}{
+				"field":       "task_prompt",
+				"label":       "What should the team tackle first?",
+				"placeholder": "Example: Build a Stripe webhook handler that verifies signatures and updates subscriptions.",
 			}),
 		}}
 
