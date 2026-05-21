@@ -68,13 +68,6 @@ test.describe("canonical route matrix", () => {
         await expect(page).toHaveURL(/#\/inbox$/, { timeout: 10_000 });
         continue;
       }
-      // Tasks was retired in favor of the Issues kanban; /#/apps/tasks
-      // now redirects to /#/issues. Verify the redirect, not a panel.
-      if (appId === "tasks") {
-        await page.goto(`/#/apps/${appId}`);
-        await expect(page).toHaveURL(/#\/issues$/, { timeout: 10_000 });
-        continue;
-      }
       await expectCanonicalRoute(page, `/#/apps/${appId}`, async (p) => {
         await expect(p.getByTestId(`app-page-${appId}`)).toBeVisible({
           timeout: 10_000,
@@ -83,37 +76,37 @@ test.describe("canonical route matrix", () => {
     }
   });
 
-  test("legacy task URLs redirect to the Issues surface", async ({ page }) => {
-    // /tasks → /issues. Verifying the redirect URL itself is enough — the
-    // seeded broker may render the kanban, the empty state, or the loading
-    // skeleton depending on timing, and `.or()` chains can trip Playwright
-    // strict mode when more than one testid matches. The not-found surface
-    // testid would mean the redirect failed; assert it's absent.
+  test("task URLs mount the Tasks surface", async ({ page }) => {
+    // /tasks renders the TasksApp kanban directly. The seeded broker may
+    // render the kanban, the empty state, or the loading skeleton depending
+    // on timing, so assert the app-panel test id rather than a specific
+    // sub-surface. The not-found surface testid would mean routing failed.
     await page.goto("/#/tasks");
-    await expect(page).toHaveURL(/#\/issues$/, { timeout: 10_000 });
+    await expect(page.getByTestId("app-page-tasks")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(page.getByTestId("route-not-found")).toHaveCount(0);
 
-    // /tasks/$id and /apps/tasks/$id → /issues/$id
+    // /tasks/$id and /apps/tasks/$id both mount the TasksApp detail view.
     for (const route of ["/#/tasks/task-7", "/#/apps/tasks/task-7"]) {
       await page.goto(route);
-      await expect(page).toHaveURL(/#\/issues\/task-7$/, { timeout: 10_000 });
-      await expect(page.getByTestId("issue-document-panel")).toBeVisible({
+      await expect(page.getByTestId("app-page-tasks")).toBeVisible({
         timeout: 10_000,
       });
+      await expect(page.getByTestId("route-not-found")).toHaveCount(0);
     }
   });
 
-  test("legacy workbench URLs redirect through to the issue detail", async ({
+  test("legacy workbench URLs redirect through to the task detail", async ({
     page,
   }) => {
     const getErrors = collectReactErrors(page);
     await gotoRoute(page, "/#/apps/workbench/pm/tasks/task-7");
 
-    // workbench → /tasks/task-7 (legacy redirect) → /issues/task-7
-    // (lifecycle redirect). E2E just cares about the final URL.
-    await expect(page).toHaveURL(/#\/issues\/task-7$/, { timeout: 10_000 });
+    // workbench → /tasks/task-7 (legacy redirect) → TasksApp detail.
+    await expect(page).toHaveURL(/#\/tasks\/task-7$/, { timeout: 10_000 });
     await expect(page.getByTestId("route-not-found")).toHaveCount(0);
-    await expect(page.getByTestId("issue-document-panel")).toBeVisible({
+    await expect(page.getByTestId("app-page-tasks")).toBeVisible({
       timeout: 10_000,
     });
     await expectNoReactErrors(

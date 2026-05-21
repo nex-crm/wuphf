@@ -75,6 +75,7 @@ const SIDEBAR_TOOL_EMOJIS: Partial<
 > = {
   overview: "🏠",
   issues: "#",
+  tasks: "✓",
   wiki: "📖",
   console: ">",
   graph: "🕸",
@@ -112,6 +113,7 @@ export interface SidebarTool {
 export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
   { id: "overview", kind: "app-panel" },
   { id: "issues", kind: "first-class" },
+  { id: "tasks", kind: "app-panel" },
   { id: "wiki", kind: "first-class" },
   { id: "console", kind: "app-panel" },
   { id: "graph", kind: "app-panel" },

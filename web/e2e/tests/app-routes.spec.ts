@@ -12,8 +12,11 @@ const APP_CASES = [
     label: "Console",
     content: /wuphf office|Slash/i,
   },
-  // Tasks sidebar entry was retired; /#/apps/tasks now redirects to
-  // /#/issues. Coverage for that redirect lives in route-matrix.spec.ts.
+  {
+    app: "tasks",
+    label: "Tasks",
+    content: /Office tasks|No tasks|Loading|Could not load/i,
+  },
   // Phase 2b retired the standalone RequestsApp surface; /apps/requests
   // now redirects to /inbox. Coverage moved to the unified-inbox E2E.
   {
@@ -29,7 +32,8 @@ const APP_CASES = [
   {
     app: "calendar",
     label: "Calendar",
-    content: /Loading calendar|Could not load calendar|Nothing scheduled|Mon|Tue|Wed/i,
+    content:
+      /Loading calendar|Could not load calendar|Nothing scheduled|Mon|Tue|Wed/i,
   },
   {
     app: "skills",
@@ -98,8 +102,7 @@ test.describe("app route isolation", () => {
     }
 
     // Switch between two real sidebar apps to confirm app-route swapping
-    // still works. Tasks was retired (now redirects to /issues) so the
-    // round-trip uses Console ↔ Graph instead.
+    // still works.
     await page.goto("/#/apps/console");
     await waitForReactMount(page);
     await page

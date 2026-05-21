@@ -119,6 +119,11 @@ const SkillsApp = lazy(() =>
     default: m.SkillsApp,
   })),
 );
+const TasksApp = lazy(() =>
+  import("../components/apps/TasksApp").then((m) => ({
+    default: m.TasksApp,
+  })),
+);
 const Notebook = lazy(() => import("../components/notebook/Notebook"));
 const DecisionInbox = lazy(() =>
   import("../components/lifecycle/DecisionInbox").then((m) => ({
@@ -297,7 +302,7 @@ function navigateNotebookEntry(
 }
 
 const APP_PANELS = {
-  tasks: IssuesRedirect,
+  tasks: TasksApp,
   requests: InboxRedirect,
   graph: GraphApp,
   policies: PoliciesApp,
@@ -452,47 +457,13 @@ function InboxRedirect() {
 }
 
 /**
- * IssueDetailRedirect routes legacy `/tasks/$taskId` URLs to the
- * canonical issue detail surface so bookmarks keep working without
- * resurfacing the deprecated TasksApp modal.
- */
-function IssueDetailRedirect({ issueId }: { issueId: string }) {
-  useEffect(() => {
-    void router.navigate({
-      to: "/issues/$issueId",
-      params: { issueId },
-      replace: true,
-    });
-  }, [issueId]);
-  return (
-    <div
-      className="app-panel active"
-      data-testid="legacy-redirect-issue-detail"
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flex: 1,
-          color: "var(--text-tertiary)",
-          fontSize: 14,
-        }}
-      >
-        Redirecting to issue…
-      </div>
-    </div>
-  );
-}
-
-/**
  * FirstClassAppRedirect navigates the user from a `/apps/$id` URL whose
  * `$id` is a first-class app (wiki, inbox) to that app's canonical
  * dedicated route. Users who type a sidebar-label-style URL by hand
  * (e.g. `/#/apps/wiki`) used to hit "Page not found" because first-class
  * apps live at `/wiki` and `/inbox`, not under `/apps`. Mirrors
- * `InboxRedirect` and `IssuesRedirect` so the route ↔ sidebar mapping is
- * forgiving without the route registry sprouting alias entries.
+ * `InboxRedirect` so the route ↔ sidebar mapping is forgiving without
+ * the route registry sprouting alias entries.
  */
 function FirstClassAppRedirect({ appId }: { appId: FirstClassAppId }) {
   useEffect(() => {
@@ -523,35 +494,6 @@ function FirstClassAppRedirect({ appId }: { appId: FirstClassAppId }) {
   );
 }
 
-/**
- * IssuesRedirect navigates the user from the deprecated /apps/tasks
- * surface to the unified Issues list. Tasks-as-a-sidebar-app was
- * replaced by the Issues group + dedicated /issues route; this stub
- * keeps existing bookmarks working without surfacing the old
- * TasksApp kanban inside the apps panel.
- */
-function IssuesRedirect() {
-  useEffect(() => {
-    void router.navigate({ to: "/issues", replace: true });
-  }, []);
-  return (
-    <div className="app-panel active" data-testid="legacy-redirect-issues">
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flex: 1,
-          color: "var(--text-tertiary)",
-          fontSize: 14,
-        }}
-      >
-        Redirecting to Issues…
-      </div>
-    </div>
-  );
-}
-
 function UnknownAppPanel({ appId }: { appId: string }) {
   return (
     <div className="app-panel active" data-testid={`app-page-${appId}`}>
@@ -572,7 +514,6 @@ function UnknownAppPanel({ appId }: { appId: string }) {
 }
 
 function AppPanel({ appId }: { appId: AppPanelId }) {
-  if (appId === "tasks") return <IssuesRedirect />;
   const Panel = APP_PANELS[appId];
   return (
     <div className="app-panel active" data-testid={`app-page-${appId}`}>
@@ -643,9 +584,17 @@ function MainContent() {
       }
       return <AppPanel appId={route.appId} />;
     case "task-board":
-      return <IssuesRedirect />;
+      return (
+        <div className="app-panel active" data-testid="app-page-tasks">
+          <TasksApp />
+        </div>
+      );
     case "task-detail":
-      return <IssueDetailRedirect issueId={route.taskId} />;
+      return (
+        <div className="app-panel active" data-testid="app-page-tasks">
+          <TasksApp taskId={route.taskId} />
+        </div>
+      );
     case "wiki":
     case "wiki-article":
       return <WikiSurface current="wiki" route={route} />;
