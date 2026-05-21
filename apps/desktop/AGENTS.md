@@ -10,7 +10,10 @@ For the repo-wide base rules (lint, secrets, branch + PR discipline) see the roo
 
 - **Main process** (`src/main/`) — Electron entry. Owns BrowserWindow, app lifecycle, broker spawn via `utilityProcess.fork()`. Has full Node + Electron API access.
 - **Preload** (`src/preload/`) — Runs in a sandboxed renderer-adjacent context. Exposes a **typed allowlist of OS verbs only** to the renderer via `contextBridge.exposeInMainWorld`. Never exposes app data, broker state, file paths, or `ipcRenderer` directly.
-- **Renderer** (`src/renderer/`) — Untrusted web content. Treats every `window.*` API as the surface of attack. Reaches the broker over **loopback HTTP/SSE** (not IPC) — that wiring lands in `feat/broker-loopback-listener`; in this package the renderer just shows broker liveness.
+- **Renderer** (`src/renderer/`) — Untrusted web content. Treats every
+  `window.*` API as the surface of attack. Reaches the broker over
+  **loopback HTTP/SSE** (not IPC); the React shell owns bootstrap, routing,
+  query caching, and the first broker-liveness route.
 - **Shared** (`src/shared/`) — The single source of truth for the contextBridge contract. Imported by preload (to expose) and by renderer (as the `window.<api>` type). Never touches Node APIs.
 
 The broker — when it lands in `feat/broker-loopback-listener` — is a separate process. This package only spawns/kills it and reports liveness. The broker's protocol surface is `@wuphf/protocol`, which this package re-exports nothing from at runtime.
@@ -25,7 +28,7 @@ The broker — when it lands in `feat/broker-loopback-listener` — is a separat
 4. **The contextBridge allowlist is closed.** Adding a new IPC channel requires (a) a new entry in `src/shared/api-contract.ts`, (b) a new test in `tests/preload-allowlist.spec.ts` asserting it's exposed, (c) an `IPC_ALLOWLIST_RATIONALE` justification with a one-line "why this is an OS verb, not app data" comment. Reviewers reject any new entry that smells like app data.
 5. **`ipcMain.handle` channels mirror the contract.** Every channel name in `src/main/ipc/` must appear in `src/shared/api-contract.ts`. Every channel handler validates its payload at the boundary using a runtime guard (no implicit trust of arguments). CI greps for `ipcMain.handle` calls and asserts the channel name is on the allowlist.
 6. **No `nodeIntegration` flag is ever set true, anywhere.** Same for `contextIsolation: false`. CI greps for both literal patterns and fails.
-7. **CSP is strict.** The renderer HTML ships with a `<meta http-equiv="Content-Security-Policy">` containing `default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' http://127.0.0.1:0; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; worker-src 'none'`. No `'unsafe-inline'`, no `'unsafe-eval'`, no remote script sources. The `connect-src` loopback entry is a reserved placeholder that does not match a real local service; `feat/broker-loopback-listener` must replace it with the concrete broker port in the same branch that introduces the listener.
+7. **CSP is strict.** The renderer HTML ships with a `<meta http-equiv="Content-Security-Policy">` containing `default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; worker-src 'none'`. No `'unsafe-inline'`, no `'unsafe-eval'`, no remote script sources. The main process installs `session.defaultSession.webRequest.onHeadersReceived` through `src/main/csp.ts`; that dynamic header is the only source allowed to append the concrete broker origin to `connect-src`.
 8. **No remote URLs.** `BrowserWindow.loadURL` only accepts `file://` (production) or `http://localhost:<vite-dev-port>` (dev). Any other origin is a bug. The `will-navigate` and `setWindowOpenHandler` events are wired to deny any non-allowlisted target.
 9. **Broker spawn uses `utilityProcess.fork()` only.** Not `child_process.spawn`, not `child_process.fork`. The utility process gets `serviceName: "wuphf-broker"`, `stdio: "pipe"`, no inherited env vars beyond the explicit allowlist. On `app.before-quit`, the broker gets a cooperative parentPort shutdown request with a 5s grace; POSIX cleanup uses Electron's handle-bound `UtilityProcess.kill()`, while Windows also runs `taskkill /pid <pid> /T` and escalates to `/F` after the grace window. Crash-restart uses exponential backoff where the first wait is 250ms (capped at 60s, max 5 consecutive retries before surfacing a fatal-error window).
 10. **No app data IPC.** The broker owns `~/.wuphf/`. The renderer reaches it over loopback HTTP. The main process **never** reads from `~/.wuphf/` and never proxies app data through IPC. CI greps for `~/.wuphf` and `homedir()` in `src/main/` (and bans both outside an explicit allowlist file).
@@ -74,7 +77,12 @@ The demo is the verification deliverable — `bun run desktop:dev` must boot a w
 ## What this package is NOT for
 
 - **Not for the broker itself.** The broker process implementation lives in a future package (`@wuphf/broker` or `apps/broker`). This package only spawns/kills it.
-- **Not for the renderer UI.** The full UI lands later — when it does, it imports from `web/` (the existing Vite app) or a new `apps/desktop-renderer/` and is loaded into the BrowserWindow this package owns. Until then, the renderer is a one-pane status view.
+- **Not for arbitrary web UI.** The renderer in this package is the packaged
+  desktop shell — first-party code, but still treated as untrusted web content
+  by main: sandboxed, contextIsolated, with a closed contextBridge allowlist.
+  Shared product UI can move here deliberately, but app data still comes from
+  the broker over loopback HTTP/SSE rather than IPC or main-process filesystem
+  reads.
 - **Not for auto-update.** Auto-update wiring lives in `feat/installer-pipeline` (Sparkle for Mac, electron-updater for Win). This package only knows about its own version string.
 - **Not for code-signing.** Same — that's installer-pipeline.
 

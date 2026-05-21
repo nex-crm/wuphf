@@ -13,20 +13,105 @@ import {
   WEBAUTHN_STORE_PATH_ENV,
 } from "../src/main/broker-entry-runtime.ts";
 
+type MockDatabase = {
+  readonly path: string;
+  open: boolean;
+  migrationCalls: number;
+  closeCalls: number;
+  close(): void;
+};
+
+type MockEventLog = {
+  readonly db: MockDatabase;
+};
+
 const sqliteMock = vi.hoisted(() => {
-  const stores: Array<{ path: string; closeCalls: number; close(): void }> = [];
-  const open = vi.fn((config: { readonly path: string }) => {
+  const stores: Array<{
+    db: MockDatabase;
+    eventLog: MockEventLog;
+    closeCalls: number;
+    close(): void;
+    sharesProvenance(db: MockDatabase, eventLog: MockEventLog): boolean;
+    setDefaultThreadIdForThreadlessReceipts(threadId: string): void;
+  }> = [];
+  const fromDatabase = vi.fn((db: MockDatabase, eventLog: MockEventLog) => {
     const store = {
-      path: config.path,
+      db,
+      eventLog,
       closeCalls: 0,
       close(): void {
         this.closeCalls += 1;
       },
+      sharesProvenance(candidateDb: MockDatabase, candidateEventLog: MockEventLog): boolean {
+        return candidateDb === db && candidateEventLog === eventLog;
+      },
+      setDefaultThreadIdForThreadlessReceipts: () => undefined,
     };
     stores.push(store);
     return store;
   });
-  return { open, stores };
+  return { fromDatabase, stores };
+});
+
+const eventLogMock = vi.hoisted(() => {
+  const databases: MockDatabase[] = [];
+  const eventLogs: MockEventLog[] = [];
+  const openDatabase = vi.fn((config: { readonly path: string }) => {
+    const db: MockDatabase = {
+      path: config.path,
+      open: true,
+      migrationCalls: 0,
+      closeCalls: 0,
+      close(): void {
+        this.closeCalls += 1;
+        this.open = false;
+      },
+    };
+    databases.push(db);
+    return db;
+  });
+  const runMigrations = vi.fn((db: MockDatabase) => {
+    db.migrationCalls += 1;
+  });
+  const createEventLog = vi.fn((db: MockDatabase) => {
+    const eventLog = { db };
+    eventLogs.push(eventLog);
+    return eventLog;
+  });
+  return { createEventLog, databases, eventLogs, openDatabase, runMigrations };
+});
+
+const threadsMock = vi.hoisted(() => {
+  const subsystems: Array<{
+    readonly db: MockDatabase;
+    readonly eventLog: MockEventLog;
+    readonly receiptStore: (typeof sqliteMock.stores)[number];
+  }> = [];
+  const createThreadSubsystem = vi.fn(
+    (
+      db: MockDatabase,
+      eventLog: MockEventLog,
+      receiptStore: (typeof sqliteMock.stores)[number],
+    ) => {
+      const subsystem = {
+        db,
+        eventLog,
+        receiptStore,
+        appender: {},
+        state: {},
+        receiptIndex: {},
+        views: {
+          listThreadViews: () => ({ threads: [] }),
+        },
+        inboxThreadId: "00000000000000000000000001",
+        sharesApprovalProvenance: () => true,
+        rebuildFromLog: () => undefined,
+      };
+      subsystems.push(subsystem);
+      return subsystem;
+    },
+  );
+  return { createThreadSubsystem, subsystems };
 });
 
 const webauthnMock = vi.hoisted(() => {
@@ -115,8 +200,18 @@ const webauthnMock = vi.hoisted(() => {
 
 vi.mock("@wuphf/broker/sqlite", () => ({
   SqliteReceiptStore: {
-    open: sqliteMock.open,
+    fromDatabase: sqliteMock.fromDatabase,
   },
+}));
+
+vi.mock("@wuphf/broker/event-log", () => ({
+  createEventLog: eventLogMock.createEventLog,
+  openDatabase: eventLogMock.openDatabase,
+  runMigrations: eventLogMock.runMigrations,
+}));
+
+vi.mock("@wuphf/broker/threads", () => ({
+  createThreadSubsystem: threadsMock.createThreadSubsystem,
 }));
 
 vi.mock("@wuphf/broker/webauthn", () => ({
@@ -146,10 +241,49 @@ describe("desktop broker entry runtime", () => {
       rmSync(tempDir, { recursive: true, force: true });
       tempDir = null;
     }
-    sqliteMock.open.mockClear();
-    sqliteMock.stores.length = 0;
     webauthnMock.open.mockClear();
     webauthnMock.stores.length = 0;
+    eventLogMock.openDatabase.mockClear();
+    eventLogMock.runMigrations.mockClear();
+    eventLogMock.createEventLog.mockClear();
+    eventLogMock.databases.length = 0;
+    eventLogMock.eventLogs.length = 0;
+    sqliteMock.fromDatabase.mockClear();
+    sqliteMock.stores.length = 0;
+    threadsMock.createThreadSubsystem.mockClear();
+    threadsMock.subsystems.length = 0;
+  });
+
+  it("mounts threads routes from the receipt-store database when a receipt path is provided", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "wuphf-desktop-threads-"));
+    const receiptStorePath = join(tempDir, "event-log.sqlite");
+    runtime = await startDesktopBrokerFromEnv({
+      env: {
+        [RECEIPT_STORE_PATH_ENV]: receiptStorePath,
+      },
+      logger,
+    });
+
+    const res = await fetch(`${runtime.broker.url}/api/v1/threads`, {
+      headers: {
+        Authorization: `Bearer ${runtime.broker.token}`,
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ schemaVersion: 1, threads: [] });
+    expect(eventLogMock.openDatabase).toHaveBeenCalledWith({ path: receiptStorePath });
+    expect(eventLogMock.runMigrations).toHaveBeenCalledWith(eventLogMock.databases[0]);
+    expect(eventLogMock.createEventLog).toHaveBeenCalledWith(eventLogMock.databases[0]);
+    expect(sqliteMock.fromDatabase).toHaveBeenCalledWith(
+      eventLogMock.databases[0],
+      eventLogMock.eventLogs[0],
+    );
+    expect(threadsMock.createThreadSubsystem).toHaveBeenCalledWith(
+      eventLogMock.databases[0],
+      eventLogMock.eventLogs[0],
+      sqliteMock.stores[0],
+    );
   });
 
   it("mounts WebAuthn registration routes with the desktop operator policy", async () => {
@@ -180,7 +314,16 @@ describe("desktop broker entry runtime", () => {
     expect(body.creationOptions.rp.id).toBe("localhost");
     expect(body.creationOptions.user.displayName).toBe("approver for operator");
 
-    expect(sqliteMock.open).toHaveBeenCalledWith({ path: receiptStorePath });
+    expect(eventLogMock.openDatabase).toHaveBeenCalledWith({ path: receiptStorePath });
+    expect(sqliteMock.fromDatabase).toHaveBeenCalledWith(
+      eventLogMock.databases[0],
+      eventLogMock.eventLogs[0],
+    );
+    expect(threadsMock.createThreadSubsystem).toHaveBeenCalledWith(
+      eventLogMock.databases[0],
+      eventLogMock.eventLogs[0],
+      sqliteMock.stores[0],
+    );
     expect(webauthnMock.open).toHaveBeenCalledWith({ path: webauthnStorePath });
     expect(webauthnMock.stores[0]?.startupPruneCalls).toBe(1);
     expect(webauthnMock.stores[0]?.savedRegistrationChallenges).toEqual([
@@ -194,7 +337,7 @@ describe("desktop broker entry runtime", () => {
   it("starts without optional stores and leaves WebAuthn routes unmounted", async () => {
     runtime = await startDesktopBrokerFromEnv({ env: {}, logger });
 
-    const res = await fetch(`${runtime.broker.url}/api/webauthn/registration/challenge`, {
+    const webauthnRes = await fetch(`${runtime.broker.url}/api/webauthn/registration/challenge`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${runtime.broker.token}`,
@@ -202,9 +345,17 @@ describe("desktop broker entry runtime", () => {
       },
       body: JSON.stringify({ role: "approver" }),
     });
+    const threadsRes = await fetch(`${runtime.broker.url}/api/v1/threads`, {
+      headers: {
+        Authorization: `Bearer ${runtime.broker.token}`,
+      },
+    });
 
-    expect(res.status).toBe(404);
-    expect(sqliteMock.open).not.toHaveBeenCalled();
+    expect(webauthnRes.status).toBe(404);
+    expect(threadsRes.status).toBe(404);
+    expect(eventLogMock.openDatabase).not.toHaveBeenCalled();
+    expect(sqliteMock.fromDatabase).not.toHaveBeenCalled();
+    expect(threadsMock.createThreadSubsystem).not.toHaveBeenCalled();
     expect(webauthnMock.open).not.toHaveBeenCalled();
   });
 
@@ -219,7 +370,9 @@ describe("desktop broker entry runtime", () => {
       }),
     ).rejects.toThrow(/renderer dist directory does not exist/);
 
-    expect(sqliteMock.open).not.toHaveBeenCalled();
+    expect(eventLogMock.openDatabase).not.toHaveBeenCalled();
+    expect(sqliteMock.fromDatabase).not.toHaveBeenCalled();
+    expect(threadsMock.createThreadSubsystem).not.toHaveBeenCalled();
     expect(webauthnMock.open).not.toHaveBeenCalled();
   });
 });
