@@ -34,7 +34,6 @@ import {
   signedApprovalTokenToJsonValue,
   validateApprovalStreamEvent,
 } from "@wuphf/protocol";
-import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ApprovalAppender, ApprovalProjection } from "../../src/approvals/index.ts";
@@ -156,9 +155,7 @@ async function buildFixture(overrides?: FixtureOverrides): Promise<Fixture> {
   for (const threadId of threadIds) {
     insertThreadProjectionRow(db, eventLog, threadId);
   }
-  const threadExistsStmt = db.prepare<[string], { readonly present: 1 }>(
-    "SELECT 1 AS present FROM threads WHERE thread_id = ?",
-  );
+  const threadExistsStmt = db.prepare("SELECT 1 AS present FROM threads WHERE thread_id = ?");
   const { appender: baseAppender, projection: baseProjection } = createApprovalSubsystem(
     db,
     eventLog,
@@ -187,7 +184,7 @@ function insertThreadProjectionRow(
   threadId: ReturnType<typeof asThreadId>,
 ): void {
   const lsn = eventLog.append({ type: "thread.created", payload: Buffer.from("{}") });
-  db.prepare<[string, number, string, string], void>(
+  db.prepare(
     `INSERT INTO threads
        (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms,
         external_refs)
@@ -258,16 +255,41 @@ async function postApproval(fix: Fixture, idempotencyKey = REQUEST_KEY) {
 
 function eventCount(db: ReturnType<typeof openDatabase>, type: string): number {
   return (
-    db
-      .prepare<[string], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = ?",
-      )
-      .get(type)?.n ?? 0
+    (
+      db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = ?").get(type) as
+        | { readonly n: number }
+        | undefined
+    )?.n ?? 0
   );
 }
 
 function sqliteError(code: string): Error {
-  return new BetterSqlite3.SqliteError("test sqlite error", code);
+  return Object.assign(new Error("test sqlite error"), {
+    code: "ERR_SQLITE_ERROR",
+    errcode: sqliteErrcode(code),
+    errstr: code,
+  });
+}
+
+function sqliteErrcode(code: string): number {
+  switch (code) {
+    case "SQLITE_BUSY":
+      return 5;
+    case "SQLITE_LOCKED":
+      return 6;
+    case "SQLITE_FULL":
+      return 13;
+    case "SQLITE_READONLY":
+      return 8;
+    case "SQLITE_CANTOPEN":
+      return 14;
+    case "SQLITE_CORRUPT":
+      return 11;
+    case "SQLITE_IOERR_READ":
+      return 266;
+    default:
+      throw new Error(`unknown sqlite test code: ${code}`);
+  }
 }
 
 function rawRequest(args: {

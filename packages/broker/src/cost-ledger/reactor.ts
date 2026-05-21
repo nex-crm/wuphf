@@ -35,6 +35,7 @@
 // use integer math throughout (multiplication may exceed 2^53 — see the note
 // inside `crossesThreshold` for the bound check).
 
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   asAgentSlug,
   asBudgetId,
@@ -46,7 +47,6 @@ import {
   lsnFromV1Number,
   type MicroUsd,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import type { EventLog } from "../event-log/index.ts";
 
@@ -107,11 +107,11 @@ export const BUDGET_THRESHOLD_REACTOR_NAME = "budget_threshold";
  * threshold_bps asc) so the caller can log/emit them.
  */
 export function processCostEventForCrossings(
-  db: Database.Database,
+  db: DatabaseSync,
   eventLog: EventLog,
   input: ReactorInput,
 ): readonly NewCrossing[] {
-  const selectAffectedBudgets = db.prepare<[string, string | null], BudgetRow>(
+  const selectAffectedBudgets = db.prepare(
     `SELECT budget_id AS budgetId, scope, subject_id AS subjectId,
             limit_micro_usd AS limitMicroUsd, thresholds_bps AS thresholdsBps,
             set_at_lsn AS setAtLsn, tombstoned
@@ -124,27 +124,27 @@ export function processCostEventForCrossings(
        )
      ORDER BY budget_id ASC`,
   );
-  const agentLifetimeStmt = db.prepare<[string], AggregateRow>(
+  const agentLifetimeStmt = db.prepare(
     "SELECT COALESCE(SUM(total_micro_usd), 0) AS total FROM cost_by_agent WHERE agent_slug = ?",
   );
-  const globalLifetimeStmt = db.prepare<[], AggregateRow>(
+  const globalLifetimeStmt = db.prepare(
     "SELECT COALESCE(SUM(total_micro_usd), 0) AS total FROM cost_by_agent",
   );
-  const taskLifetimeStmt = db.prepare<[string], AggregateRow>(
+  const taskLifetimeStmt = db.prepare(
     "SELECT COALESCE(total_micro_usd, 0) AS total FROM cost_by_task WHERE task_id = ?",
   );
-  const existingThresholdsStmt = db.prepare<[string, number], ExistingThresholdRow>(
+  const existingThresholdsStmt = db.prepare(
     `SELECT threshold_bps AS thresholdBps
      FROM cost_threshold_crossings
      WHERE budget_id = ? AND budget_set_lsn = ?`,
   );
-  const insertCrossingStmt = db.prepare<[string, number, number, number, number, number]>(
+  const insertCrossingStmt = db.prepare(
     `INSERT INTO cost_threshold_crossings
        (budget_id, budget_set_lsn, threshold_bps, crossed_at_lsn, observed_micro_usd, limit_micro_usd)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT DO NOTHING`,
   );
-  const upsertCursorStmt = db.prepare<[string, number, number]>(
+  const upsertCursorStmt = db.prepare(
     `INSERT INTO reactor_cursors (reactor_name, last_processed_lsn, updated_at_ms)
      VALUES (?, ?, ?)
      ON CONFLICT (reactor_name) DO UPDATE SET
@@ -153,7 +153,7 @@ export function processCostEventForCrossings(
   );
 
   const taskKey = input.taskId ?? null;
-  const candidates = selectAffectedBudgets.all(input.agentSlug, taskKey);
+  const candidates = selectAffectedBudgets.all(input.agentSlug, taskKey) as unknown as BudgetRow[];
   const results: NewCrossing[] = [];
 
   for (const budget of candidates) {
@@ -167,7 +167,12 @@ export function processCostEventForCrossings(
     );
     if (observed === 0 && budget.limitMicroUsd === 0) continue;
     const existing = new Set<number>(
-      existingThresholdsStmt.all(budget.budgetId, budget.setAtLsn).map((row) => row.thresholdBps),
+      (
+        existingThresholdsStmt.all(
+          budget.budgetId,
+          budget.setAtLsn,
+        ) as unknown as ExistingThresholdRow[]
+      ).map((row) => row.thresholdBps),
     );
     const thresholds = parseThresholds(budget);
     for (const thresholdBps of thresholds) {
@@ -229,12 +234,12 @@ interface ReactorCursorDbRow {
  * `/replay-check` route to confirm the reactor has caught up to the latest
  * cost_event in event_log.
  */
-export function readReactorCursor(db: Database.Database): ReactorState | null {
-  const stmt = db.prepare<[string], ReactorCursorDbRow>(
+export function readReactorCursor(db: DatabaseSync): ReactorState | null {
+  const stmt = db.prepare(
     `SELECT last_processed_lsn AS lastProcessedLsn, updated_at_ms AS updatedAtMs
      FROM reactor_cursors WHERE reactor_name = ?`,
   );
-  const row = stmt.get(BUDGET_THRESHOLD_REACTOR_NAME);
+  const row = stmt.get(BUDGET_THRESHOLD_REACTOR_NAME) as ReactorCursorDbRow | undefined;
   if (row === undefined) return null;
   return {
     lastProcessedLsn: lsnFromV1Number(row.lastProcessedLsn),
@@ -260,19 +265,19 @@ function isApplicable(budget: BudgetRow, input: ReactorInput): boolean {
 function lifetimeFor(
   budget: BudgetRow,
   input: ReactorInput,
-  agentStmt: Database.Statement<[string], AggregateRow>,
-  globalStmt: Database.Statement<[], AggregateRow>,
-  taskStmt: Database.Statement<[string], AggregateRow>,
+  agentStmt: StatementSync,
+  globalStmt: StatementSync,
+  taskStmt: StatementSync,
 ): number {
   if (budget.scope === "global") {
-    return globalStmt.get()?.total ?? 0;
+    return (globalStmt.get() as AggregateRow | undefined)?.total ?? 0;
   }
   if (budget.scope === "agent") {
-    return agentStmt.get(input.agentSlug)?.total ?? 0;
+    return (agentStmt.get(input.agentSlug) as AggregateRow | undefined)?.total ?? 0;
   }
   // task
   if (input.taskId === undefined) return 0;
-  return taskStmt.get(input.taskId)?.total ?? 0;
+  return (taskStmt.get(input.taskId) as AggregateRow | undefined)?.total ?? 0;
 }
 
 function parseThresholds(row: BudgetRow): readonly number[] {

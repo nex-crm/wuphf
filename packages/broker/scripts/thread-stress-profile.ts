@@ -92,9 +92,7 @@ async function main(): Promise<void> {
     const eventLog = createEventLog(db);
     receiptStore = SqliteReceiptStore.fromDatabase(db, eventLog);
     const threads = createThreadSubsystem(db, eventLog, receiptStore);
-    const threadExistsStmt = db.prepare<[string], { readonly present: 1 }>(
-      "SELECT 1 AS present FROM threads WHERE thread_id = ?",
-    );
+    const threadExistsStmt = db.prepare("SELECT 1 AS present FROM threads WHERE thread_id = ?");
     const approvals = createApprovalSubsystem(db, eventLog, {
       threadRefValidator: (threadId) => threadExistsStmt.get(threadId) !== undefined,
     });
@@ -651,11 +649,11 @@ function assertReplayCheckOk(db: ReturnType<typeof openDatabase>, label: string)
 
 function countEvents(db: ReturnType<typeof openDatabase>, type: string): number {
   return (
-    db
-      .prepare<[string], { readonly count: number }>(
-        "SELECT COUNT(*) AS count FROM event_log WHERE type = ?",
-      )
-      .get(type)?.count ?? 0
+    (
+      db.prepare("SELECT COUNT(*) AS count FROM event_log WHERE type = ?").get(type) as
+        | { readonly count: number }
+        | undefined
+    )?.count ?? 0
   );
 }
 

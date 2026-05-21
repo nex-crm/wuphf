@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import {
   type EventLsn,
   lsnFromV1Number,
@@ -6,10 +7,9 @@ import {
   type ThreadId,
   threadAuditPayloadFromJsonValue,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
-import BetterSqlite3 from "better-sqlite3";
 
 import { createEventLog, type EventLog, runMigrations } from "../../event-log/index.ts";
+import { createTransaction } from "../../internal/sqlite-transaction.ts";
 import {
   createThreadStateStore,
   type ThreadStateStore,
@@ -42,7 +42,7 @@ export interface ApprovalReplayEventRow {
   readonly lsn: number;
   readonly tsMs: number;
   readonly type: string;
-  readonly payload: Buffer;
+  readonly payload: Uint8Array;
 }
 
 const THREAD_PROJECTION_CHECK_BATCH_SIZE = 500;
@@ -73,7 +73,7 @@ export class ApprovalRebuildThreadProjectionNotReadyError extends Error {
 }
 
 export function rebuildApprovalsProjectionFromLog(
-  db: Database.Database,
+  db: DatabaseSync,
   eventLog: EventLog,
   threadStateStore: ThreadStateStore,
 ): ApprovalProjectionRebuildResult {
@@ -82,10 +82,10 @@ export function rebuildApprovalsProjectionFromLog(
 }
 
 export function snapshotApprovalsProjection(
-  db: Database.Database,
+  db: DatabaseSync,
 ): readonly ApprovalProjectionSnapshotRow[] {
   return db
-    .prepare<[], ApprovalProjectionSnapshotRow>(
+    .prepare(
       `SELECT approval_id AS approvalId, status, head_lsn AS headLsn, claim, scope,
               risk_class AS riskClass, thread_id AS threadId, task_id AS taskId,
               receipt_id AS receiptId, requested_by AS requestedBy,
@@ -94,19 +94,19 @@ export function snapshotApprovalsProjection(
        FROM pending_approvals
        ORDER BY approval_id ASC`,
     )
-    .all();
+    .all() as unknown as ApprovalProjectionSnapshotRow[];
 }
 
 export function replayApprovalsProjectionSnapshot(
   rows: readonly ApprovalReplayEventRow[],
 ): readonly ApprovalProjectionSnapshotRow[] {
-  const replayDb = new BetterSqlite3(":memory:");
+  const replayDb = new DatabaseSync(":memory:");
   try {
     runMigrations(replayDb);
-    const insertEventStmt = replayDb.prepare<[number, number, string, Buffer]>(
+    const insertEventStmt = replayDb.prepare(
       "INSERT INTO event_log (lsn, ts_ms, type, payload) VALUES (?, ?, ?, ?)",
     );
-    const insertEvents = replayDb.transaction(() => {
+    const insertEvents = createTransaction(replayDb, () => {
       for (const row of rows) {
         insertEventStmt.run(row.lsn, row.tsMs, row.type, Buffer.from(row.payload));
       }
@@ -151,7 +151,7 @@ function expectedThreadProjectionState(eventLog: EventLog): {
       if (kind === null) continue;
       headLsn = record.lsn;
       if (kind === "thread_created") {
-        const parsed = JSON.parse(record.payload.toString("utf8")) as unknown;
+        const parsed = JSON.parse(new TextDecoder().decode(record.payload)) as unknown;
         const payload = threadAuditPayloadFromJsonValue(kind, parsed) as ThreadCreatedAuditPayload;
         threadIds.add(payload.threadId);
       }

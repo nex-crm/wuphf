@@ -926,10 +926,8 @@ describe("/api/v1/threads routes", () => {
     expect(statuses.filter((status) => status === 200)).toHaveLength(1);
     expect(statuses.filter((status) => status === 409)).toHaveLength(9);
     const count = fixture.db
-      .prepare<[], { readonly count: number }>(
-        "SELECT COUNT(*) AS count FROM event_log WHERE type = 'thread.spec_edited'",
-      )
-      .get();
+      .prepare("SELECT COUNT(*) AS count FROM event_log WHERE type = 'thread.spec_edited'")
+      .get() as { readonly count: number } | undefined;
     expect(count?.count).toBe(3);
   });
 
@@ -953,10 +951,10 @@ describe("/api/v1/threads routes", () => {
     expect(await second.text()).toBe(firstText);
 
     const count = fixture.db
-      .prepare<[], { readonly count: number }>(
+      .prepare(
         "SELECT COUNT(*) AS count FROM event_log WHERE type IN ('thread.created', 'thread.spec_edited')",
       )
-      .get();
+      .get() as { readonly count: number } | undefined;
     expect(count?.count).toBe(4);
   });
 
@@ -983,10 +981,10 @@ describe("/api/v1/threads routes", () => {
     expect(await second.text()).toBe(firstText);
 
     const count = fixture.db
-      .prepare<[], { readonly count: number }>(
+      .prepare(
         "SELECT COUNT(*) AS count FROM event_log WHERE type IN ('thread.created', 'thread.spec_edited')",
       )
-      .get();
+      .get() as { readonly count: number } | undefined;
     expect(count?.count).toBe(4);
   });
 
@@ -1008,10 +1006,10 @@ describe("/api/v1/threads routes", () => {
     expect((await second.json()) as unknown).toEqual({ error: "idempotency_key_conflict" });
 
     const count = fixture.db
-      .prepare<[], { readonly count: number }>(
+      .prepare(
         "SELECT COUNT(*) AS count FROM event_log WHERE type IN ('thread.created', 'thread.spec_edited')",
       )
-      .get();
+      .get() as { readonly count: number } | undefined;
     expect(count?.count).toBe(4);
   });
 

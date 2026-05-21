@@ -1,5 +1,6 @@
 import { type IncomingHttpHeaders, type OutgoingHttpHeaders, request } from "node:http";
 import { isIP } from "node:net";
+import type { DatabaseSync } from "node:sqlite";
 
 import type {
   AuthenticationResponseJSON,
@@ -41,7 +42,6 @@ import {
   sha256Hex,
   signedApprovalTokenFromJson,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDatabase, runMigrations } from "../../src/event-log/index.ts";
@@ -66,7 +66,7 @@ const agentId = asAgentId("agent_alpha");
 const otherAgentId = asAgentId("agent_beta");
 
 let broker: BrokerHandle | null = null;
-let db: Database.Database | null = null;
+let db: DatabaseSync | null = null;
 
 const agentScopedClaimFixtureCases: readonly [
   string,
@@ -1071,7 +1071,7 @@ function createTestWebAuthnStore(): WebAuthnStore {
   return createWebAuthnStore(db);
 }
 
-function requiredDb(): Database.Database {
+function requiredDb(): DatabaseSync {
   if (db === null) {
     throw new Error("test database is not open");
   }

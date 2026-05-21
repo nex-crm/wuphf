@@ -1,9 +1,40 @@
 import { defineConfig } from "vitest/config";
 
+// Vitest 2 on local Node 22 strips `node:` from experimental builtins that
+// are absent from `module.builtinModules`; keep production imports direct.
+function nodeSqliteVitestPlugin() {
+  const virtualId = "\0broker-node-sqlite";
+  return {
+    name: "broker-node-sqlite",
+    enforce: "pre" as const,
+    resolveId(id: string) {
+      if (id === "node:sqlite" || id === "sqlite") {
+        return virtualId;
+      }
+      return undefined;
+    },
+    load(id: string) {
+      if (id !== virtualId) {
+        return undefined;
+      }
+
+      return [
+        'const sqlite = require("node:sqlite");',
+        "export const DatabaseSync = sqlite.DatabaseSync;",
+        "export const StatementSync = sqlite.StatementSync;",
+        "export const backup = sqlite.backup;",
+        "export const constants = sqlite.constants;",
+        "export default sqlite;",
+      ].join("\n");
+    },
+  };
+}
+
 // One-way ratchet: each PR must hold or improve every metric. Lower a number
 // only by adding a docs commit that explains why; never to make a red PR
 // green. Aspirational floor 98/98/98/98.
 export default defineConfig({
+  plugins: [nodeSqliteVitestPlugin()],
   test: {
     include: ["tests/**/*.spec.ts"],
     environment: "node",

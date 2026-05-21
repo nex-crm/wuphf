@@ -14,7 +14,7 @@ Replace the in-memory `ReceiptStore` with a durable, event-log-backed implementa
 
 ```text
 packages/broker/
-├── package.json                              # better-sqlite3 dep
+├── package.json                              # broker package metadata
 ├── src/
 │   ├── event-log/                            # internal — append, replay, migrations
 │   │   ├── index.ts                          # internal re-exports
@@ -93,12 +93,10 @@ The broker package exposes two import paths:
 
 - `@wuphf/broker` (the root) — `createBroker`, `ReceiptStore`,
   `InMemoryReceiptStore`, `ListFilter`/`ListPage` types, cursor + limit
-  helpers and error classes, and the broker config types. No native
-  binding is loaded by importing the root.
+  helpers and error classes, and the broker config types.
 - `@wuphf/broker/sqlite` — `SqliteReceiptStore` and
-  `SqliteReceiptStoreConfig`. Importing this subpath evaluates
-  `better-sqlite3`'s native binding, so hosts that don't need the
-  durable store skip the cost by not importing it.
+  `SqliteReceiptStoreConfig`. This subpath uses Node's built-in
+  `node:sqlite` module for the durable store.
 
 `SqliteReceiptStore`'s constructor is `private`; the only supported
 construction path is `SqliteReceiptStore.open(config)` so
@@ -125,7 +123,7 @@ to mirror the TypeScript class structure.
 ### `event-log/event-log.ts`
 
 ```ts
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 export type EventType = "receipt.put";   // branch-6 only event; expand later
 
@@ -143,8 +141,8 @@ export interface AppendArgs {
 
 export interface EventLog {
   /**
-   * Append-only. Returns the assigned LSN. Synchronous — better-sqlite3
-   * does not expose an async API and the broker is the sole writer.
+   * Append-only. Returns the assigned LSN. Synchronous — node:sqlite
+   * exposes a sync API and the broker is the sole writer.
    *
    * MUST be invoked inside a containing transaction when the caller is
    * also writing to a projection table (see SqliteReceiptStore.put).
@@ -168,21 +166,21 @@ export interface OpenDatabaseArgs {
   readonly path: string;
 }
 
-export function openDatabase(args: OpenDatabaseArgs): Database.Database;
-export function createEventLog(db: Database.Database): EventLog;
+export function openDatabase(args: OpenDatabaseArgs): DatabaseSync;
+export function createEventLog(db: DatabaseSync): EventLog;
 ```
 
 ### `event-log/migrations.ts`
 
 ```ts
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 
 /**
  * Apply all forward-only migrations whose number > current `PRAGMA user_version`.
  * Runs each migration in its own transaction; sets `user_version` on success.
  * Throws on first failure — caller MUST treat the DB as uninitialized.
  */
-export function runMigrations(db: Database.Database): void;
+export function runMigrations(db: DatabaseSync): void;
 
 export const CURRENT_SCHEMA_VERSION: number;  // = 1
 ```
@@ -190,7 +188,7 @@ export const CURRENT_SCHEMA_VERSION: number;  // = 1
 ### `sqlite-receipt-store.ts`
 
 ```ts
-import type Database from "better-sqlite3";
+import type { DatabaseSync } from "node:sqlite";
 import type { ReceiptSnapshot } from "@wuphf/protocol";
 import type { ReceiptStore } from "./receipt-store.ts";
 

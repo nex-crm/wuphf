@@ -18,10 +18,11 @@
 // Read-only: this function never writes. It is safe to call on a live
 // broker; the entire check runs inside a single `BEGIN DEFERRED`
 // transaction so concurrent writers can commit but won't be observed
-// mid-check. better-sqlite3's WAL does NOT give per-statement
+// mid-check. SQLite WAL does NOT give per-statement
 // snapshots on its own — the explicit transaction is what produces
 // the consistent read view.
 
+import type { DatabaseSync } from "node:sqlite";
 import {
   type AuditEventKind,
   type BudgetSetAuditPayload,
@@ -31,7 +32,7 @@ import {
   lsnFromV1Number,
   parseLsn,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
+import { createTransaction } from "../../internal/sqlite-transaction.ts";
 import { compareAgentDays, compareTasks } from "./aggregate-comparators.ts";
 import { createBudgetCandidateIndexes, replaceBudgetInIndex } from "./budget-candidate-index.ts";
 import { compareBudgets } from "./budget-comparator.ts";
@@ -71,13 +72,13 @@ const BATCH_SIZE = 1_000;
 interface CostEventBatchRow {
   readonly lsn: number;
   readonly type: string;
-  readonly payload: Buffer;
+  readonly payload: Uint8Array;
 }
 
 interface AgentDayDbRow {
   readonly agentSlug: string;
   readonly dayUtc: string;
-  // Aggregate totals are read with `.safeIntegers(true)` so a hostile
+  // Aggregate totals are read with `.setReadBigInts(true)` so a hostile
   // INTEGER value in the projection (past `Number.MAX_SAFE_INTEGER`)
   // doesn't silently round in the diagnostic — the "diagnostic of last
   // resort" preserves exact bytes from the row.
@@ -108,34 +109,30 @@ function eventTypeToKind(type: string): AuditEventKind | "other" {
   return "other";
 }
 
-export function runReplayCheck(db: Database.Database): ReplayCheckReport {
-  const readBatchStmt = db.prepare<[number, number], CostEventBatchRow>(
+export function runReplayCheck(db: DatabaseSync): ReplayCheckReport {
+  const readBatchStmt = db.prepare(
     `SELECT lsn, type, payload FROM event_log
      WHERE lsn > ? AND type IN ('cost.event', 'cost.budget.set', 'cost.budget.threshold.crossed')
      ORDER BY lsn ASC
      LIMIT ?`,
   );
-  const highestLsnStmt = db.prepare<[], HighestLsnRow>(
-    "SELECT COALESCE(MAX(lsn), 0) AS lsn FROM event_log",
-  );
-  // `safeIntegers(true)` makes better-sqlite3 return INTEGER columns
+  const highestLsnStmt = db.prepare("SELECT COALESCE(MAX(lsn), 0) AS lsn FROM event_log");
+  // `setReadBigInts(true)` makes node:sqlite return INTEGER columns
   // as bigint instead of JS number. Required for the aggregate-totals
   // path: cumulative spend past `Number.MAX_SAFE_INTEGER` (or a hostile
   // projection row past that boundary) would silently round and the
   // diagnostic would report the rounded value instead of the bytes
   // actually in the row.
-  const listAgentDaysStmt = db
-    .prepare<[], AgentDayDbRow>(
-      `SELECT agent_slug AS agentSlug, day_utc AS dayUtc, total_micro_usd AS totalMicroUsd
+  const listAgentDaysStmt = db.prepare(
+    `SELECT agent_slug AS agentSlug, day_utc AS dayUtc, total_micro_usd AS totalMicroUsd
      FROM cost_by_agent`,
-    )
-    .safeIntegers(true);
-  const listTasksStmt = db
-    .prepare<[], TaskDbRow>(
-      `SELECT task_id AS taskId, total_micro_usd AS totalMicroUsd FROM cost_by_task`,
-    )
-    .safeIntegers(true);
-  const listBudgetsStmt = db.prepare<[], BudgetDbRow>(
+  );
+  listAgentDaysStmt.setReadBigInts(true);
+  const listTasksStmt = db.prepare(
+    `SELECT task_id AS taskId, total_micro_usd AS totalMicroUsd FROM cost_by_task`,
+  );
+  listTasksStmt.setReadBigInts(true);
+  const listBudgetsStmt = db.prepare(
     `SELECT budget_id AS budgetId, scope, subject_id AS subjectId,
             limit_micro_usd AS limitMicroUsd, thresholds_bps AS thresholdsBps,
             set_at_lsn AS setAtLsn, tombstoned
@@ -146,7 +143,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   // bytes instead of silently rounding through JS `number`. The other
   // INTEGER columns are bounded (LSNs, thresholdBps, limitMicroUsd ≤
   // MicroUsd brand) and stay as `number` for ergonomic compares.
-  const listCrossingsStmt = db.prepare<[], ThresholdCrossingDbRow>(
+  const listCrossingsStmt = db.prepare(
     `SELECT budget_id AS budgetId, budget_set_lsn AS budgetSetLsn,
             threshold_bps AS thresholdBps, crossed_at_lsn AS crossedAtLsn,
             CAST(observed_micro_usd AS TEXT) AS observedMicroUsd,
@@ -155,14 +152,14 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
   );
 
   // Run all reads inside a single SQLite snapshot so concurrent
-  // writers can't shift state mid-check. better-sqlite3's WAL does
+  // writers can't shift state mid-check. SQLite WAL does
   // not give per-statement snapshots; only an explicit transaction
   // does. `.deferred()` acquires a SHARED lock on first read and
   // holds it through the rest of the function; concurrent writers
   // can still
   // commit but this function won't observe them, so replay-vs-stored
   // can't mix snapshots.
-  const txn = db.transaction((): ReplayCheckReport => {
+  const txn = createTransaction(db, (): ReplayCheckReport => {
     // Aggregate accumulators run in bigint to mirror the lifetime-oracle
     // fix. `total_micro_usd` is cumulative; past `Number.MAX_SAFE_INTEGER`
     // a `number` accumulator silently rounds, and the diagnostic (which
@@ -223,7 +220,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     let cursor = 0;
     let scanned = 0;
     for (;;) {
-      const rows = readBatchStmt.all(cursor, BATCH_SIZE);
+      const rows = readBatchStmt.all(cursor, BATCH_SIZE) as unknown as CostEventBatchRow[];
       if (rows.length === 0) break;
       for (const row of rows) {
         const kind = eventTypeToKind(row.type);
@@ -231,7 +228,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
           if (kind === "cost_event") {
             const parsed = costAuditPayloadFromJsonValue(
               kind,
-              JSON.parse(row.payload.toString("utf8")),
+              JSON.parse(new TextDecoder().decode(row.payload)),
             ) as CostEventAuditPayload;
             const occurredAtMs = parsed.occurredAt.getTime();
             costEventOccurredAtMs.set(row.lsn, occurredAtMs);
@@ -301,7 +298,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
           } else if (kind === "budget_set") {
             const parsed = costAuditPayloadFromJsonValue(
               kind,
-              JSON.parse(row.payload.toString("utf8")),
+              JSON.parse(new TextDecoder().decode(row.payload)),
             ) as BudgetSetAuditPayload;
             const previous = replayedBudgets.get(parsed.budgetId);
             const replayedBudget: ReplayedBudget = {
@@ -318,7 +315,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
           } else if (kind === "budget_threshold_crossed") {
             const parsed = costAuditPayloadFromJsonValue(
               kind,
-              JSON.parse(row.payload.toString("utf8")),
+              JSON.parse(new TextDecoder().decode(row.payload)),
             ) as BudgetThresholdCrossedAuditPayload;
             const budgetSetLsnInt = parseLsn(parsed.budgetSetLsn).localLsn;
             const crossedAtLsnInt = parseLsn(parsed.crossedAtLsn).localLsn;
@@ -361,25 +358,25 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     const discrepancies: ReplayDiscrepancy[] = [...inlineDiscrepancies];
 
     const storedAgentDays = new Map<string, bigint>();
-    for (const row of listAgentDaysStmt.all()) {
+    for (const row of listAgentDaysStmt.all() as unknown as AgentDayDbRow[]) {
       storedAgentDays.set(agentDayKey(row.agentSlug, row.dayUtc), row.totalMicroUsd);
     }
     compareAgentDays(replayedAgentDays, storedAgentDays, discrepancies);
 
     const storedTasks = new Map<string, bigint>();
-    for (const row of listTasksStmt.all()) {
+    for (const row of listTasksStmt.all() as unknown as TaskDbRow[]) {
       storedTasks.set(row.taskId, row.totalMicroUsd);
     }
     compareTasks(replayedTasks, storedTasks, discrepancies);
 
     const storedBudgets = new Map<string, BudgetDbRow>();
-    for (const row of listBudgetsStmt.all()) {
+    for (const row of listBudgetsStmt.all() as unknown as BudgetDbRow[]) {
       storedBudgets.set(row.budgetId, row);
     }
     compareBudgets(replayedBudgets, storedBudgets, discrepancies);
 
     const storedCrossings = new Map<string, ThresholdCrossingDbRow>();
-    for (const row of listCrossingsStmt.all()) {
+    for (const row of listCrossingsStmt.all() as unknown as ThresholdCrossingDbRow[]) {
       storedCrossings.set(crossingKey(row.budgetId, row.budgetSetLsn, row.thresholdBps), row);
     }
     compareCrossings(replayedCrossings, storedCrossings, discrepancies);
@@ -403,7 +400,7 @@ export function runReplayCheck(db: Database.Database): ReplayCheckReport {
     detectDelayedEmissions(replayedCrossings, expectedCrossings, discrepancies);
     compareExpectedAndLoggedCrossings(expectedCrossings, replayedCrossings, discrepancies);
 
-    const highest = highestLsnStmt.get()?.lsn ?? 0;
+    const highest = (highestLsnStmt.get() as HighestLsnRow | undefined)?.lsn ?? 0;
     return {
       ok: discrepancies.length === 0,
       highestLsn: lsnFromV1Number(highest),

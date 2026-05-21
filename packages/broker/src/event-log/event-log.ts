@@ -1,5 +1,4 @@
-import type Database from "better-sqlite3";
-import BetterSqlite3 from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 
 export type EventType =
   | "receipt.put"
@@ -54,16 +53,16 @@ interface EventLogRow {
   readonly lsn: number;
   readonly tsMs: number;
   readonly type: string;
-  readonly payload: Buffer;
+  readonly payload: Uint8Array;
 }
 
 interface HighestLsnRow {
   readonly lsn: number;
 }
 
-export function openDatabase(args: OpenDatabaseArgs): Database.Database {
-  const db = new BetterSqlite3(args.path);
-  db.pragma("journal_mode = WAL");
+export function openDatabase(args: OpenDatabaseArgs): DatabaseSync {
+  const db = new DatabaseSync(args.path);
+  db.exec("PRAGMA journal_mode = WAL");
   // `synchronous = FULL` because the broker returns HTTP 201 on
   // POST /api/receipts AFTER `store.put` resolves; the client races
   // the 201 against follow-up reads. `synchronous = NORMAL` would
@@ -71,26 +70,24 @@ export function openDatabase(args: OpenDatabaseArgs): Database.Database {
   // though the client believed the write was durable. FULL pays one
   // fsync per commit — on the receipt-write hot path that's one
   // fsync per agent run, well below the dominant LLM latency.
-  db.pragma("synchronous = FULL");
-  db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000");
+  db.exec("PRAGMA synchronous = FULL");
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
   return db;
 }
 
-export function createEventLog(db: Database.Database): EventLog {
-  const appendStmt = db.prepare<[number, EventType, Buffer], InsertedLsnRow>(
+export function createEventLog(db: DatabaseSync): EventLog {
+  const appendStmt = db.prepare(
     "INSERT INTO event_log (ts_ms, type, payload) VALUES (?, ?, ?) RETURNING lsn",
   );
-  const readFromLsnStmt = db.prepare<[number, number], EventLogRow>(
+  const readFromLsnStmt = db.prepare(
     "SELECT lsn, ts_ms AS tsMs, type, payload FROM event_log WHERE lsn > ? ORDER BY lsn ASC LIMIT ?",
   );
-  const highestLsnStmt = db.prepare<[], HighestLsnRow>(
-    "SELECT COALESCE(MAX(lsn), 0) AS lsn FROM event_log",
-  );
+  const highestLsnStmt = db.prepare("SELECT COALESCE(MAX(lsn), 0) AS lsn FROM event_log");
 
   return {
     append(args: AppendArgs): number {
-      const row = appendStmt.get(Date.now(), args.type, args.payload);
+      const row = appendStmt.get(Date.now(), args.type, args.payload) as InsertedLsnRow | undefined;
       if (row === undefined) {
         throw new Error("event_log append returned no LSN");
       }
@@ -104,11 +101,13 @@ export function createEventLog(db: Database.Database): EventLog {
       if (!Number.isInteger(limit) || limit < 0) {
         throw new Error(`limit must be a non-negative integer, got ${limit}`);
       }
-      return readFromLsnStmt.all(fromLsn, limit).map(rowToEventLogRecord);
+      return (readFromLsnStmt.all(fromLsn, limit) as unknown as EventLogRow[]).map(
+        rowToEventLogRecord,
+      );
     },
 
     highestLsn(): number {
-      const row = highestLsnStmt.get();
+      const row = highestLsnStmt.get() as HighestLsnRow | undefined;
       if (row === undefined) {
         throw new Error("event_log highestLsn query returned no row");
       }

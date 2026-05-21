@@ -1,7 +1,7 @@
 // Public broker types. No I/O here — implementations live in sibling modules.
 
+import type { DatabaseSync } from "node:sqlite";
 import type { AgentId, ApiToken, BrokerPort } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 import type { ApprovalAppender, ApprovalProjection } from "./approvals/index.ts";
 import type { CostLedger } from "./cost-ledger/index.ts";
 import type { ReceiptStore } from "./receipt-store.ts";
@@ -113,7 +113,7 @@ export interface BrokerConfig {
    */
   readonly cost?: {
     readonly ledger: CostLedger;
-    readonly db: Database.Database;
+    readonly db: DatabaseSync;
     /**
      * Additional bearer-like capability required for cost-ledger mutation
      * routes. Read routes continue to use the broker bearer only.

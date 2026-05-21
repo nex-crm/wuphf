@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -12,6 +13,19 @@ import {
 } from "../src/event-log/index.ts";
 
 const tempDirs: string[] = [];
+
+function userVersion(db: DatabaseSync): number {
+  return (db.prepare("PRAGMA user_version").get() as { readonly user_version: number })
+    .user_version;
+}
+
+function sqliteMasterName(db: DatabaseSync, type: string, name: string): string | undefined {
+  return (
+    db.prepare("SELECT name FROM sqlite_master WHERE type = ? AND name = ?").get(type, name) as
+      | { readonly name: string }
+      | undefined
+  )?.name;
+}
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
@@ -84,14 +98,8 @@ describe("event log", () => {
     const first = openDatabase({ path });
     try {
       runMigrations(first);
-      expect(first.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
-      expect(
-        first
-          .prepare<[], { readonly name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'event_log'",
-          )
-          .get()?.name,
-      ).toBe("event_log");
+      expect(userVersion(first)).toBe(CURRENT_SCHEMA_VERSION);
+      expect(sqliteMasterName(first, "table", "event_log")).toBe("event_log");
     } finally {
       first.close();
     }
@@ -99,55 +107,28 @@ describe("event log", () => {
     const second = openDatabase({ path });
     try {
       runMigrations(second);
-      expect(second.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+      expect(userVersion(second)).toBe(CURRENT_SCHEMA_VERSION);
+      expect(sqliteMasterName(second, "table", "receipts_projection")).toBe("receipts_projection");
+      expect(sqliteMasterName(second, "table", "webauthn_registered_credentials")).toBe(
+        "webauthn_registered_credentials",
+      );
+      expect(sqliteMasterName(second, "table", "webauthn_challenges")).toBe("webauthn_challenges");
+      expect(sqliteMasterName(second, "table", "webauthn_consumed_tokens")).toBe(
+        "webauthn_consumed_tokens",
+      );
+      expect(sqliteMasterName(second, "index", "webauthn_challenges_expires_at_ms_idx")).toBe(
+        "webauthn_challenges_expires_at_ms_idx",
+      );
+      expect(sqliteMasterName(second, "index", "webauthn_consumed_tokens_expires_at_ms_idx")).toBe(
+        "webauthn_consumed_tokens_expires_at_ms_idx",
+      );
       expect(
         second
-          .prepare<[], { readonly name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'receipts_projection'",
-          )
-          .get()?.name,
-      ).toBe("receipts_projection");
-      expect(
-        second
-          .prepare<[], { readonly name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webauthn_registered_credentials'",
-          )
-          .get()?.name,
-      ).toBe("webauthn_registered_credentials");
-      expect(
-        second
-          .prepare<[], { readonly name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webauthn_challenges'",
-          )
-          .get()?.name,
-      ).toBe("webauthn_challenges");
-      expect(
-        second
-          .prepare<[], { readonly name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webauthn_consumed_tokens'",
-          )
-          .get()?.name,
-      ).toBe("webauthn_consumed_tokens");
-      expect(
-        second
-          .prepare<[], { readonly name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'webauthn_challenges_expires_at_ms_idx'",
-          )
-          .get()?.name,
-      ).toBe("webauthn_challenges_expires_at_ms_idx");
-      expect(
-        second
-          .prepare<[], { readonly name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'webauthn_consumed_tokens_expires_at_ms_idx'",
-          )
-          .get()?.name,
-      ).toBe("webauthn_consumed_tokens_expires_at_ms_idx");
-      expect(
-        second
-          .prepare<[], { readonly table: string; readonly from: string; readonly to: string }>(
-            "PRAGMA foreign_key_list('pending_approvals')",
-          )
+          .prepare("PRAGMA foreign_key_list('pending_approvals')")
           .all()
+          .map(
+            (row) => row as { readonly table: string; readonly from: string; readonly to: string },
+          )
           .map((row) => ({ table: row.table, from: row.from, to: row.to })),
       ).toContainEqual({ table: "threads", from: "thread_id", to: "thread_id" });
     } finally {
