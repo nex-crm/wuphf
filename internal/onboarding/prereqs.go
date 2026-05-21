@@ -29,6 +29,26 @@ type PrereqResult struct {
 
 	// InstallURL is the canonical install page for this binary.
 	InstallURL string `json:"install_url,omitempty"`
+
+	// SessionProbed is true when the runtime supports a session-status
+	// subcommand and the probe ran to completion (regardless of result).
+	// False means "we did not attempt the probe" — either because the
+	// binary has no session, or no probe is wired for this runtime.
+	// Issue #932: distinguishes "we asked and got no session" (block the
+	// tile, show a sign-in CTA) from "we don't know" (let the user click
+	// and learn from the agent loop, the legacy behavior).
+	SessionProbed bool `json:"session_probed,omitempty"`
+
+	// SignedIn is true when the runtime reports an active auth session.
+	// Only meaningful when SessionProbed is true. For CLI runtimes
+	// (claude, codex, opencode) this is the result of the per-runtime
+	// session-status subcommand; see runtimeSessionProbes in prereqs.go.
+	SignedIn bool `json:"signed_in,omitempty"`
+
+	// SignInCommand is the suggested shell command for the user to run
+	// when SessionProbed is true and SignedIn is false. Frontend renders
+	// this in a copy-to-clipboard "Sign in" CTA. Empty when irrelevant.
+	SignInCommand string `json:"sign_in_command,omitempty"`
 }
 
 // prereqSpec defines static metadata for each required binary.
@@ -106,7 +126,124 @@ func CheckOne(name string) PrereqResult {
 	if err == nil {
 		r.Version = parseVersion(string(out))
 	}
+
+	// Issue #932: session-status probe. Run the per-runtime auth-status
+	// subcommand. The goal is to distinguish "claude installed" (current
+	// behavior) from "claude installed AND signed in" — the latter is the
+	// actually-load-bearing state for an agent loop's first LLM call.
+	//
+	// Probe failure modes are intentionally lenient: a non-zero exit, parse
+	// error, or timeout all set SignedIn=false (which the SPA renders as
+	// a "sign in" CTA) rather than blocking the user. The cost of a false
+	// negative is a friction-y but recoverable click; the cost of a false
+	// positive (current behavior) is letting the user complete onboarding
+	// only to fail on the first agent call.
+	probe, ok := runtimeSessionProbes[name]
+	if ok && probe != nil {
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer probeCancel()
+		signedIn := probe(probeCtx, path)
+		r.SessionProbed = true
+		r.SignedIn = signedIn
+		if !signedIn {
+			r.SignInCommand = sessionSignInCommands[name]
+		}
+	}
 	return r
+}
+
+// runtimeSessionProbes maps a binary name to the per-runtime session probe.
+// The probe returns true only when the runtime reports an active auth
+// session; any non-zero exit, parse error, or timeout returns false. CLIs
+// without a session-status surface (cursor, windsurf) have no entry — the
+// frontend renders them with SessionProbed=false and treats picking as
+// always-allowed.
+var runtimeSessionProbes = map[string]func(ctx context.Context, path string) bool{
+	"claude":   probeClaudeSession,
+	"codex":    probeCodexSession,
+	"opencode": probeOpencodeSession,
+}
+
+// sessionSignInCommands maps a binary name to the shell command the user
+// should run to sign in. Returned to the SPA so the "Sign in" CTA can
+// copy the command to the clipboard. Keep these in sync with the CLI
+// surface — these are documented login flows, not best-guesses.
+var sessionSignInCommands = map[string]string{
+	"claude":   "claude auth login",
+	"codex":    "codex login",
+	"opencode": "opencode auth login",
+}
+
+// probeClaudeSession runs `claude auth status` and reports whether the
+// CLI is signed in. Claude Code emits a JSON document on stdout with a
+// `loggedIn` boolean; non-zero exit, malformed JSON, or `loggedIn: false`
+// all return false.
+func probeClaudeSession(ctx context.Context, path string) bool {
+	out, err := exec.CommandContext(ctx, path, "auth", "status").Output()
+	if err != nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(string(out)))
+	// Claude Code emits structured JSON; this substring match avoids a
+	// JSON parser dependency for a tiny payload. The negative case
+	// `"loggedin": false` is matched first so it doesn't false-positive
+	// on the substring `"loggedin": true`.
+	if strings.Contains(text, `"loggedin": false`) || strings.Contains(text, `"loggedin":false`) {
+		return false
+	}
+	return strings.Contains(text, `"loggedin": true`) || strings.Contains(text, `"loggedin":true`)
+}
+
+// probeCodexSession runs `codex login status` and reports whether the
+// CLI is signed in. Codex prints a single line like "Logged in using
+// ChatGPT" / "Logged in using API key" on success; a "not logged in" or
+// equivalent message on failure. Exit code is 0 in both cases (as of
+// codex 0.55), so we have to text-classify.
+func probeCodexSession(ctx context.Context, path string) bool {
+	out, err := exec.CommandContext(ctx, path, "login", "status").CombinedOutput()
+	if err != nil {
+		// Some codex versions exit non-zero on "not logged in" — that's
+		// still an unambiguous unauthenticated state.
+		return false
+	}
+	text := strings.ToLower(string(out))
+	if strings.Contains(text, "not logged in") ||
+		strings.Contains(text, "no auth") ||
+		strings.Contains(text, "no credentials") {
+		return false
+	}
+	return strings.Contains(text, "logged in")
+}
+
+// probeOpencodeSession runs `opencode providers list` and reports whether
+// any provider has stored credentials. The CLI prints a banner with a
+// count like "0 credentials" / "2 credentials". Zero-count or parse
+// failure → not signed in.
+func probeOpencodeSession(ctx context.Context, path string) bool {
+	out, err := exec.CommandContext(ctx, path, "providers", "list").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	text := strings.ToLower(string(out))
+	if strings.Contains(text, "0 credentials") {
+		return false
+	}
+	// Match "<N> credential" where N >= 1. The trailing space (or "s")
+	// disambiguates from "0 credentials".
+	for _, n := range []string{"1 credential", "2 credential", "3 credential", "4 credential", "5 credential", "6 credential", "7 credential", "8 credential", "9 credential"} {
+		if strings.Contains(text, n) {
+			return true
+		}
+	}
+	// Fallback: any provider name in the rendered table implies a session.
+	// Suppress noise from the "Credentials ~/.local/share/..." header by
+	// requiring a known provider label.
+	for _, name := range []string{"anthropic", "openai", "google", "mistral", "groq", "openrouter"} {
+		if strings.Contains(text, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseVersion trims whitespace and returns the first non-empty line from

@@ -22,15 +22,30 @@ import { RUNTIMES } from "./runtimes";
 // `onComplete` is invoked after runtime config is saved and the deterministic
 // CEO onboarding state machine has entered the greet phase. RootRoute then
 // renders the Shell around the CEO DM instead of marking onboarding complete.
+//
+// `phaseAlreadyComplete` flag (issue #979): if the broker reports phase=complete
+// at click time the user is in a "session-loss" recovery state — they have
+// finished onboarding before but the SPA's boot-time /onboarding/state fetch
+// failed and dumped them back here. Bypass POST /onboarding/transition entirely
+// (the broker would reject "complete → greet" with a 400 invalid transition)
+// and signal the caller to route straight to the office.
 
 interface PrePickScreenProps {
-  onComplete: () => void;
+  onComplete: (info?: { phaseAlreadyComplete?: boolean }) => void;
 }
 
 interface RuntimeCardState {
   spec: RuntimeSpec;
   detected: PrereqResult | undefined;
   available: boolean;
+  /**
+   * Issue #932: when the broker session-probed this runtime and it
+   * reported no active session, `signedIn` is explicitly false. When
+   * the runtime supports no probe, `signedIn` is undefined — fall back
+   * to legacy "Detected" behavior.
+   */
+  signedIn: boolean | undefined;
+  signInCommand: string | undefined;
 }
 
 interface RuntimeCardProps {
@@ -40,19 +55,32 @@ interface RuntimeCardProps {
   anySubmitting: boolean;
   onPick: (spec: RuntimeSpec) => void;
   onInstall: (url: string) => void;
+  onCopySignIn: (command: string) => void;
 }
 
 function cardStatusLabel({
   prereqsLoaded,
   available,
   version,
+  signedIn,
 }: {
   prereqsLoaded: boolean;
   available: boolean;
   version: string | undefined;
+  signedIn: boolean | undefined;
 }): string {
   if (!prereqsLoaded) return "Checking…";
   if (!available) return "Not installed";
+  // Issue #932: when the runtime supports a session probe and we got a
+  // definite "not signed in", surface that as the primary status. The user
+  // would otherwise complete onboarding believing they were connected,
+  // then hit "Not logged in" on the agent loop's first call.
+  if (signedIn === false) {
+    return version ? `Not signed in · ${version}` : "Not signed in";
+  }
+  if (signedIn === true) {
+    return version ? `Signed in · ${version}` : "Signed in";
+  }
   return version ? `Detected · ${version}` : "Detected";
 }
 
@@ -63,33 +91,52 @@ function RuntimeCard({
   anySubmitting,
   onPick,
   onInstall,
+  onCopySignIn,
 }: RuntimeCardProps) {
-  const { spec, detected, available } = state;
+  const { spec, detected, available, signedIn, signInCommand } = state;
   const statusLabel = isSubmitting
     ? "Starting your office…"
     : cardStatusLabel({
         prereqsLoaded,
         available,
         version: detected?.version,
+        signedIn,
       });
+  // Issue #932: if the runtime is installed but the broker probed and found
+  // no active session, block picking and surface a "Sign in" CTA. Clicking
+  // copies the suggested command (e.g. `claude auth login`) to the
+  // clipboard so the user can paste it into a terminal. We do not launch
+  // a terminal — that's platform-specific and brittle.
+  const isUnauthed = available && signedIn === false;
   const installHint =
     !available && prereqsLoaded ? (
       <div className="pre-pick-card-install">Install &rarr;</div>
+    ) : null;
+  const signInHint =
+    isUnauthed && prereqsLoaded ? (
+      <div className="pre-pick-card-install">Copy sign-in command</div>
     ) : null;
   return (
     <button
       key={spec.label}
       type="button"
-      className={`pre-pick-card${available ? " available" : " missing"}`}
+      className={`pre-pick-card${available ? " available" : " missing"}${isUnauthed ? " unauthed" : ""}`}
       data-testid={`pre-pick-card-${spec.provider}`}
+      data-signed-in={signedIn === undefined ? "unknown" : String(signedIn)}
       // CodeRabbit fix (PR #889): guard against clicks during prereq detection
       // and any in-flight submission. Both disable conditions must hold.
+      // Issue #932: don't fully disable when unauthed — we still want clicks
+      // to fire the sign-in CTA. The pick path early-returns instead.
       disabled={anySubmitting || !prereqsLoaded}
       onClick={() => {
         // Belt-and-suspenders guard: early-return if prereqs haven't settled.
         if (!prereqsLoaded) return;
         if (!available) {
           onInstall(spec.installUrl);
+          return;
+        }
+        if (isUnauthed && signInCommand) {
+          onCopySignIn(signInCommand);
           return;
         }
         onPick(spec);
@@ -101,6 +148,7 @@ function RuntimeCard({
       </div>
       <div className="pre-pick-card-status">{statusLabel}</div>
       {installHint}
+      {signInHint}
     </button>
   );
 }
@@ -249,10 +297,18 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
     () =>
       DISPATCHABLE_RUNTIMES.map((spec) => {
         const detected = prereqs.find((p) => p.name === spec.binary);
+        // Issue #932: signedIn is undefined when the broker didn't probe
+        // this runtime (no session-status subcommand wired). Cards
+        // distinguish that "unknown" case from a definite "not signed in".
+        const signedIn = detected?.session_probed
+          ? Boolean(detected?.signed_in)
+          : undefined;
         return {
           spec,
           detected,
           available: Boolean(detected?.found),
+          signedIn,
+          signInCommand: detected?.sign_in_command,
         };
       }),
     [prereqs],
@@ -273,6 +329,23 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
     setApiKeys((prev) => ({ ...prev, [key]: value }));
   }
 
+  // Issue #979 guard: best-effort probe of /onboarding/state at click time.
+  // If the broker reports phase=complete, the SPA is in a session-loss
+  // recovery state — POSTing /onboarding/transition with phase=greet would
+  // be rejected as "invalid transition" and leave the user stuck on the
+  // picker. Endpoint errors fall through to the normal pick path so a
+  // fresh install still works without runtime-dependent probe success.
+  async function probePhaseAlreadyComplete(): Promise<boolean> {
+    try {
+      const state = await get<{ onboarded?: boolean; phase?: string }>(
+        "/onboarding/state",
+      );
+      return state?.onboarded === true || state?.phase === "complete";
+    } catch {
+      return false;
+    }
+  }
+
   async function commitChoice(
     provider: RuntimeSpec["provider"] | string,
     runtimeLabel: string,
@@ -280,6 +353,13 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
     setSubmitError("");
     setSubmitting(runtimeLabel);
     try {
+      if (await probePhaseAlreadyComplete()) {
+        // Recovery path: skip /config and /onboarding/transition entirely
+        // and signal the caller to route into the office.
+        onComplete({ phaseAlreadyComplete: true });
+        return;
+      }
+
       const isCli = isCliProvider(provider);
       // Skip path ("I'll add one later") must NOT persist anything the user
       // typed into the form sections — the contract is "sandbox until you
@@ -315,6 +395,23 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
+  // Issue #932: copy the suggested sign-in command (e.g. `claude auth login`)
+  // to the clipboard when the user clicks an un-signed-in runtime tile.
+  // navigator.clipboard.writeText resolves only in secure contexts; on the
+  // null fallback we still surface the command via setSubmitError so the
+  // user can copy it manually.
+  function handleCopySignIn(command: string): void {
+    setSubmitError("");
+    const message = `Run \`${command}\` in a terminal, then click the tile again.`;
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(command).catch(() => {
+        // Clipboard denied (e.g. iframe without permission) — fall through
+        // to the inline message below.
+      });
+    }
+    setSubmitError(message);
+  }
+
   const anySubmitting = Boolean(submitting);
 
   return (
@@ -340,6 +437,7 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
               anySubmitting={anySubmitting}
               onPick={(spec) => void commitChoice(spec.provider, spec.label)}
               onInstall={openInstallPage}
+              onCopySignIn={handleCopySignIn}
             />
           ))}
         </div>
