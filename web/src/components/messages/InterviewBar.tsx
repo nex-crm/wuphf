@@ -730,12 +730,20 @@ export function CeoCardSection() {
     await submitAnswer(field, "");
   };
 
+  // Key the inner card on the suggestion id so React forcibly unmounts the
+  // previous card when the broker swaps it. The useEffect above resets the
+  // local stage when the id changes, but keying is defense in depth: it
+  // guarantees no stale child state (focus, in-flight submit handler closure,
+  // sub-component refs) leaks from one suggestion into the next. The
+  // failure-mode this guards against is the scan-chip → blueprint-pick swap
+  // after a scan failure (see useBrokerEvents.ts onboarding-state invalidate).
   return (
     <section
       className="ceo-card-section"
       aria-label="CEO question"
       data-testid="ceo-card-section"
       data-kind={pendingSuggestion.kind}
+      data-suggestion-id={pendingSuggestion.id}
     >
       {renderCeoCard(
         pendingSuggestion,
@@ -845,8 +853,15 @@ function renderCeoCard(
   onSkip: (field: string) => Promise<void>,
   onStageChange?: (next: CardStage) => void,
 ): ReactNode {
+  // Key on the suggestion id so React unmounts and remounts the card when the
+  // broker swaps the pending suggestion (e.g. ceo_scan_chip → ceo_chip_row
+  // after a scan failure). Without the key React would reconcile the same
+  // StructuredMessageCard instance across kinds and any child-level state
+  // (focus, controlled inputs, sub-component refs) could leak from one
+  // suggestion into the next.
   return (
     <StructuredMessageCard
+      key={suggestion.id}
       suggestion={suggestion}
       stage={stage}
       committedValue={committedValue}

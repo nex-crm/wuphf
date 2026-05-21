@@ -131,6 +131,17 @@ export function useBrokerEvents(enabled: boolean) {
       void queryClient.invalidateQueries({ queryKey: ["thread-messages"] });
       void queryClient.invalidateQueries({ queryKey: ["office-members"] });
       void queryClient.invalidateQueries({ queryKey: ["channel-members"] });
+      // Refresh onboarding state on every message: the deterministic CEO
+      // wizard (broker_onboarding_phase2.advancePhase + advanceAfterScan)
+      // mutates s.PendingSuggestion in lockstep with the CEO DM message it
+      // appends, but those mutations have no dedicated SSE event yet. Without
+      // this nudge the chat surface can sit on a stale pending suggestion for
+      // up to the 3s poll interval — most visibly after a scan failure, where
+      // the read-only scan chip would otherwise stay pinned in the composer
+      // slot while the broker has already moved on to PhaseBlueprint. The
+      // query has no observers outside onboarding, so the invalidate is a
+      // no-op on the regular shell surfaces. Closes nex-crm/wuphf#936.
+      void queryClient.invalidateQueries({ queryKey: ["onboarding-state"] });
     });
     source.addEventListener("activity", (event) => {
       // CRITICAL REGRESSION: cache invalidation MUST keep firing — other
