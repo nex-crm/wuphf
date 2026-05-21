@@ -13,11 +13,22 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { IssueDocument as IssueDocumentType } from "./IssueDocument";
-import { IssueDocument } from "./IssueDocument";
+import { IssueDocument, normalizeIssueDocument } from "./IssueDocument";
+
+const lifecycleApi = vi.hoisted(() => ({
+  postDecision: vi.fn(() =>
+    Promise.resolve({ taskId: "task-001", action: "approve", status: "ok" }),
+  ),
+  postTaskComment: vi.fn(() =>
+    Promise.resolve({ taskId: "task-001", status: "ok", author: "human" }),
+  ),
+}));
+
+vi.mock("../../api/lifecycle", () => lifecycleApi);
 
 // ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -104,6 +115,8 @@ describe("<IssueDocument>", () => {
   });
 
   afterEach(() => {
+    lifecycleApi.postDecision.mockClear();
+    lifecycleApi.postTaskComment.mockClear();
     vi.restoreAllMocks();
   });
 
@@ -213,6 +226,35 @@ describe("<IssueDocument>", () => {
     expect(authors).toEqual(["ceo", "engineer", "human"]);
   });
 
+  it("renders a human comment form", () => {
+    renderDoc(BASE_DOC);
+    expect(screen.getByTestId("issue-comment-form")).toBeInTheDocument();
+    expect(screen.getByLabelText(/add a comment/i)).toBeInTheDocument();
+    expect(screen.getByTestId("issue-comment-submit")).toBeDisabled();
+  });
+
+  it("posts a human comment and clears the editor", async () => {
+    renderDoc(BASE_DOC);
+    const input = screen.getByTestId("issue-comment-input");
+    fireEvent.change(input, {
+      target: { value: "Please confirm the webhook retry policy." },
+    });
+    const submit = screen.getByTestId("issue-comment-submit");
+    expect(submit).not.toBeDisabled();
+    fireEvent.click(submit);
+
+    await waitFor(() => {
+      expect(lifecycleApi.postTaskComment).toHaveBeenCalledWith(
+        "task-001",
+        "general",
+        "Please confirm the webhook retry policy.",
+      );
+    });
+    await waitFor(() => {
+      expect(input).toHaveValue("");
+    });
+  });
+
   // ── Collapse on approved ─────────────────────────────────────────────
 
   it("auto-collapses spec sections when state is approved", () => {
@@ -272,6 +314,55 @@ describe("<IssueDocument>", () => {
     const collapseBtn = screen.getByRole("button", { name: /collapse spec/i });
     fireEvent.click(collapseBtn);
     expect(screen.getByLabelText(/spec summary/i)).toBeInTheDocument();
+  });
+});
+
+describe("normalizeIssueDocument", () => {
+  it("normalizes the broker decision-packet shape with task metadata fallback", () => {
+    const doc = normalizeIssueDocument(
+      {
+        taskId: "task-5",
+        lifecycleState: "blocked_on_pr_merge",
+        spec: {
+          problem: "Unread email context is missing.",
+          targetOutcome: "Profiles exist for each sender.",
+          assignment: "Pull unread email context and seed wiki profiles.",
+          acceptanceCriteria: [
+            { statement: "Unread senders are listed." },
+            { statement: "Each sender has a wiki profile." },
+          ],
+          feedback: [
+            {
+              appendedAt: "2026-05-21T03:15:42Z",
+              author: "ceo",
+              body: "Inspecting task-5 state for self-heal diagnosis.",
+            },
+          ],
+        },
+        updatedAt: "2026-05-21T03:23:41Z",
+      },
+      {
+        id: "task-5",
+        channel: "email-ops",
+        title: "Pull unread emails",
+        details: "Seed one profile per sender.",
+        owner: "contact-intel",
+        status: "blocked",
+        lifecycle_state: "blocked_on_pr_merge",
+      },
+    );
+
+    expect(doc.title).toBe("Pull unread emails");
+    expect(doc.ownerSlug).toBe("contact-intel");
+    expect(doc.lifecycleState).toBe("blocked_on_pr_merge");
+    expect(doc.spec.goal).toBe("Profiles exist for each sender.");
+    expect(doc.spec.context).toBe("Unread email context is missing.");
+    expect(doc.spec.approach).toBe(
+      "Pull unread email context and seed wiki profiles.",
+    );
+    expect(doc.spec.acceptance).toContain("Unread senders are listed.");
+    expect(doc.comments).toHaveLength(1);
+    expect(doc.comments[0]?.body).toContain("self-heal diagnosis");
   });
 });
 
