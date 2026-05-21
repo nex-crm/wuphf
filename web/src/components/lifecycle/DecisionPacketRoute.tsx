@@ -291,11 +291,6 @@ function pendingStateExplainer(state: string, details?: string): string {
   }
 }
 
-function jumpToTask(taskId: string) {
-  if (typeof window === "undefined") return;
-  window.location.hash = `#/task/${encodeURIComponent(taskId)}`;
-}
-
 function PacketPending({
   item,
   onRetry,
@@ -373,16 +368,24 @@ function PacketPending({
                   }}
                 >
                   {blockedOn.map((blockerId) => (
-                    <button
+                    // Real anchor links so middle-click / cmd-click /
+                    // "copy link" / screen-reader announce all behave
+                    // the way users expect for navigation. A button
+                    // with a click handler would force keyboard-only
+                    // open via Enter and break copy-link entirely.
+                    <a
                       key={blockerId}
-                      type="button"
+                      href={`#/task/${encodeURIComponent(blockerId)}`}
                       className="retry"
                       data-testid="packet-pending-blocker"
-                      style={{ padding: "2px 8px", fontSize: 12 }}
-                      onClick={() => jumpToTask(blockerId)}
+                      style={{
+                        padding: "2px 8px",
+                        fontSize: 12,
+                        textDecoration: "none",
+                      }}
                     >
                       {blockerId}
-                    </button>
+                    </a>
                   ))}
                 </dd>
               </>

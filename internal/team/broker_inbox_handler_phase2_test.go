@@ -477,6 +477,112 @@ func TestHandleTaskResume(t *testing.T) {
 	}
 }
 
+// TestHandleTaskResume_NonReviewerForbidden locks the authorization
+// contract: a human session whose slug is NOT in the task's Reviewers
+// list cannot resume the task. The broker-token happy path is exercised
+// in TestHandleTaskResume above; this case fills the other half of the
+// auth matrix.
+func TestHandleTaskResume_NonReviewerForbidden(t *testing.T) {
+	b := newTestBrokerForReview(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "task-blocked", Title: "Blocked", CreatedAt: now, UpdatedAt: now, Reviewers: []string{"mira"}, status: "blocked"},
+	}
+	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlockedOnPRMerge, "seed"); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("seed: %v", err)
+	}
+	b.mu.Unlock()
+
+	// Mint a human session for Alex — not in the Reviewers list.
+	inviteToken, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, _, err := b.acceptHumanInvite(inviteToken, "Alex", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tasks/", b.requireAuth(b.handleTaskByID))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/tasks/task-blocked/resume", strings.NewReader(`{}`))
+	req.AddCookie(&http.Cookie{Name: humanSessionCookie, Value: sessionToken})
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("resume request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-reviewer status = %d, want 403", resp.StatusCode)
+	}
+
+	// Lifecycle state must not have moved — auth gate runs before the
+	// ResumeTask call, so the task should still be blocked.
+	b.mu.Lock()
+	state := LifecycleStateUnknown
+	for _, task := range b.tasks {
+		if task.ID == "task-blocked" {
+			state = task.LifecycleState
+		}
+	}
+	b.mu.Unlock()
+	if state != LifecycleStateBlockedOnPRMerge {
+		t.Fatalf("state should remain blocked after 403; got %s", state)
+	}
+}
+
+// TestHandleTaskResume_RejectsMalformedJSON guards the decoder
+// hardening: a non-empty body that fails to parse must yield 400 and
+// must not mutate the task.
+func TestHandleTaskResume_RejectsMalformedJSON(t *testing.T) {
+	b := newTestBrokerForReview(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "task-blocked", Title: "Blocked", CreatedAt: now, UpdatedAt: now, Reviewers: []string{"owner"}, status: "blocked"},
+	}
+	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlockedOnPRMerge, "seed"); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("seed: %v", err)
+	}
+	b.mu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tasks/", b.requireAuth(b.handleTaskByID))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/tasks/task-blocked/resume", strings.NewReader(`{not json}`))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("resume request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("malformed body status = %d, want 400", resp.StatusCode)
+	}
+
+	b.mu.Lock()
+	state := LifecycleStateUnknown
+	for _, task := range b.tasks {
+		if task.ID == "task-blocked" {
+			state = task.LifecycleState
+		}
+	}
+	b.mu.Unlock()
+	if state != LifecycleStateBlockedOnPRMerge {
+		t.Fatalf("state should remain blocked after 400; got %s", state)
+	}
+}
+
 func TestHandleInboxItems_BadFilterReturns400(t *testing.T) {
 	b := newTestBroker(t)
 	mux := http.NewServeMux()

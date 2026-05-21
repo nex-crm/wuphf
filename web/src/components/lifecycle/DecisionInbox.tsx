@@ -304,12 +304,17 @@ export function DecisionInbox({
                       : -1
                   }
                   onSelect={(item) => {
+                    // Focus-driven: track selection only. No side
+                    // effects — arrow-key nav must not silently mark
+                    // every passed-over row as read.
+                    setSelectedKey(itemKey(item));
+                  }}
+                  onOpen={(item) => {
+                    // User-initiated open (click / Enter / Space). Mark
+                    // as read here so the cursor only advances on
+                    // genuine intent, not keyboard hover.
                     setSelectedKey(itemKey(item));
                     onOpenItem?.(item);
-                    // Mark-as-read on open. The cursor is per-actor on
-                    // the broker so the next /inbox/items refresh will
-                    // drop the IsUnread flag for everything older than
-                    // now. Best-effort — the helper swallows errors.
                     if (item.isUnread === true) {
                       void postInboxCursor();
                     }
@@ -390,11 +395,13 @@ function MailRow({
   isSelected,
   tabIndex,
   onSelect,
+  onOpen,
 }: {
   item: InboxItem;
   isSelected: boolean;
   tabIndex: number;
   onSelect: (item: InboxItem) => void;
+  onOpen: (item: InboxItem) => void;
 }) {
   const from = senderForItem(item);
   const subject = item.title;
@@ -411,7 +418,7 @@ function MailRow({
       data-kind={item.kind}
       data-unread={isUnread ? "true" : "false"}
       tabIndex={tabIndex}
-      onClick={() => onSelect(item)}
+      onClick={() => onOpen(item)}
       onFocus={() => onSelect(item)}
       aria-label={`${isUnread ? "Unread " : ""}Open ${kindLabel} from ${from}: ${subject}`}
     >

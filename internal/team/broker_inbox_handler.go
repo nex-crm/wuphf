@@ -29,6 +29,7 @@ package team
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -251,12 +252,15 @@ func (b *Broker) handleTaskResume(w http.ResponseWriter, r *http.Request, actor 
 		return
 	}
 	var body struct {
-		Actor  string `json:"actor"`
 		Reason string `json:"reason"`
 	}
-	// Body is optional; ignore decode errors so an empty-POST resume
-	// from a UI button without a JSON payload still works.
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	// Body is optional — the UI button posts with no payload when no
+	// reason is provided. Treat EOF as a valid empty body; reject any
+	// other decode error so malformed JSON cannot silently mutate state.
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+		return
+	}
 
 	// Auth: snapshot reviewers under the lock so the check races no
 	// reviewer-routing write. Broker token bypasses the reviewer set.
@@ -274,9 +278,13 @@ func (b *Broker) handleTaskResume(w http.ResponseWriter, r *http.Request, actor 
 		return
 	}
 
-	actorSlug := strings.TrimSpace(body.Actor)
-	if actorSlug == "" {
-		actorSlug = strings.TrimSpace(actor.Slug)
+	// Derive actor identity from auth context only. The body used to
+	// accept an "actor" field; that would let any caller spoof the
+	// audit trail on a task they otherwise have permission to resume,
+	// so drop the field outright.
+	actorSlug := strings.TrimSpace(actor.Slug)
+	if actor.Kind == requestActorKindBroker {
+		actorSlug = "owner"
 	}
 	if actorSlug == "" {
 		actorSlug = "human"

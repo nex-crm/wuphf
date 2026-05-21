@@ -654,6 +654,19 @@ html[data-theme="noir-gold"] {
   color: var(--text);
 }
 
+/*
+ * The selected-row subject rule below this block sets font-weight: 500,
+ * which would dim a row that is BOTH selected and unread. Re-assert the
+ * unread boldness at higher specificity so a freshly selected unread
+ * row still reads as unread until the cursor write lands and the next
+ * inbox refresh drops the flag.
+ */
+.inbox-mail-row[data-selected="true"][data-unread="true"] .inbox-mail-row-from,
+.inbox-mail-row[data-selected="true"][data-unread="true"]
+  .inbox-mail-row-subject {
+  font-weight: 700;
+}
+
 .inbox-mail-row:hover {
   background: var(--overlay-soft);
 }
