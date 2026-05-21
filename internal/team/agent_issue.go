@@ -277,6 +277,11 @@ func (b *Broker) postSystemAuthError(agentSlug, targetChannel, replyTo, safeDeta
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	agentSlug = strings.TrimSpace(agentSlug)
+	if agentSlug == "" {
+		agentSlug = "agent"
+	}
+
 	channel := normalizeChannelSlug(targetChannel)
 	if channel == "" {
 		channel = "general"
@@ -290,6 +295,13 @@ func (b *Broker) postSystemAuthError(agentSlug, targetChannel, replyTo, safeDeta
 		if b.findChannelLocked(channel) == nil {
 			return channelMessage{}, agentIssueRecord{}, false, fmt.Errorf("channel not found")
 		}
+	}
+	// Channel ACL gate, mirroring ReportAgentIssue. Without this, an agent
+	// could surface a system-auth banner into a channel it has no business
+	// in (e.g. another agent's DM) just because the LLM happened to fail
+	// while resolving it.
+	if !b.canAccessChannelLocked(agentSlug, channel) {
+		return channelMessage{}, agentIssueRecord{}, false, fmt.Errorf("channel access denied")
 	}
 
 	// Dedup: if the most recent message in the channel is already a

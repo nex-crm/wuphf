@@ -270,6 +270,37 @@ describe("PrePickScreen", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/codex login/);
   });
 
+  // Regression guard for CodeRabbit #985 (#3284960848 + #3284960843): even
+  // when sign_in_command is missing from the prereq payload, an un-signed-in
+  // tile must still block the pick. Falling through to onPick would land
+  // the user in an office that fails on the first agent LLM call.
+  it("blocks pick when signed_in=false and sign_in_command is missing", async () => {
+    mockPrereqs(
+      { codex: true },
+      {},
+      { codex: { session_probed: true, signed_in: false } },
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      writable: true,
+      value: { writeText },
+    });
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+
+    const card = await screen.findByTestId("pre-pick-card-codex");
+    await waitFor(() => expect(card).not.toBeDisabled());
+    fireEvent.click(card);
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/onboarding/transition"),
+    ).toBeUndefined();
+    // Clipboard not touched when there's no command to copy.
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
   it("renders Signed in label when session_probed=true and signed_in=true", async () => {
     mockPrereqs(
       { claude: true },

@@ -135,8 +135,16 @@ function RuntimeCard({
           onInstall(spec.installUrl);
           return;
         }
-        if (isUnauthed && signInCommand) {
-          onCopySignIn(signInCommand);
+        // Auth gate: when the runtime probed and reported NOT signed in,
+        // never fall through to onPick — even if sign_in_command is
+        // missing/empty. Falling through would advance onboarding to an
+        // un-authed runtime, which the agent loop's first LLM call would
+        // immediately reject. Copy the command when we have it; otherwise
+        // just no-op (the inline "not signed in" hint stays visible).
+        if (isUnauthed) {
+          if (signInCommand) {
+            onCopySignIn(signInCommand);
+          }
           return;
         }
         onPick(spec);

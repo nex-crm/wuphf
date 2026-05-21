@@ -79,7 +79,12 @@ var prereqSpecs = map[string]prereqSpec{
 // would mean worst-case wall-clock = 7 × 10s = 70s, far past any sane HTTP
 // budget. Concurrent probes cap wall-clock at max(probe), well under the
 // client timeout. Order of `names` is preserved in the returned slice.
-func CheckAll() []PrereqResult {
+//
+// ctx is the parent (request-scoped) context; per-probe timeouts derive from
+// it so a cancelled HTTP request stops in-flight subprocess probes instead
+// of leaking them. Pass context.Background() only from tests or boot paths
+// that have no request lifecycle.
+func CheckAll(ctx context.Context) []PrereqResult {
 	names := []string{"node", "git", "claude", "codex", "opencode", "cursor", "windsurf"}
 	results := make([]PrereqResult, len(names))
 	var wg sync.WaitGroup
@@ -87,7 +92,7 @@ func CheckAll() []PrereqResult {
 	for i, name := range names {
 		go func(i int, name string) {
 			defer wg.Done()
-			results[i] = CheckOne(name)
+			results[i] = CheckOne(ctx, name)
 		}(i, name)
 	}
 	wg.Wait()
@@ -98,7 +103,10 @@ func CheckAll() []PrereqResult {
 // CLI install directories, then invokes `<name> --version` to capture the
 // version string. If resolution fails the binary is considered absent and the
 // version field is left empty.
-func CheckOne(name string) PrereqResult {
+//
+// ctx is the parent (request-scoped) context; per-call timeouts derive from
+// it so probe subprocesses can't outlive a cancelled HTTP request.
+func CheckOne(ctx context.Context, name string) PrereqResult {
 	spec := prereqSpecs[name]
 	r := PrereqResult{
 		Name:       name,
@@ -120,9 +128,9 @@ func CheckOne(name string) PrereqResult {
 	// calls, and a 3s window was flaky on a developer laptop running the
 	// pre-push hook. This is a one-shot `--version` probe, not a hot path;
 	// the timeout is a floor on machine health, not on binary response time.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "--version").Output()
+	versionCtx, versionCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer versionCancel()
+	out, err := exec.CommandContext(versionCtx, path, "--version").Output()
 	if err == nil {
 		r.Version = parseVersion(string(out))
 	}
@@ -140,7 +148,7 @@ func CheckOne(name string) PrereqResult {
 	// only to fail on the first agent call.
 	probe, ok := runtimeSessionProbes[name]
 	if ok && probe != nil {
-		probeCtx, probeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		probeCtx, probeCancel := context.WithTimeout(ctx, 3*time.Second)
 		defer probeCancel()
 		signedIn := probe(probeCtx, path)
 		r.SessionProbed = true

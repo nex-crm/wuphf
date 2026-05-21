@@ -44,7 +44,12 @@ func TestReportAgentIssueRoutesAuthErrorThroughSystemCard(t *testing.T) {
 func TestReportAgentIssueAuthErrorIdentifiesCodex(t *testing.T) {
 	b := newTestBroker(t)
 
-	msg, _, posted, err := b.ReportAgentIssue("eng", "general", "", "Codex CLI requires login. Run `codex login` or use /provider to choose a different provider.")
+	// "ceo" is the agent slug; the test asserts on provider=codex detected
+	// from the message text (the Codex CLI's auth-error string), not on the
+	// agent's identity. Using "ceo" keeps the canAccessChannelLocked gate
+	// happy in a fresh broker where non-built-in agents aren't channel
+	// members yet.
+	msg, _, posted, err := b.ReportAgentIssue("ceo", "general", "", "Codex CLI requires login. Run `codex login` or use /provider to choose a different provider.")
 	if err != nil {
 		t.Fatalf("ReportAgentIssue: %v", err)
 	}
@@ -89,6 +94,27 @@ func TestReportAgentIssueAuthErrorDedupesWithinChannel(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected exactly one system_auth_error banner, got %d", count)
+	}
+}
+
+// TestReportAgentIssueAuthErrorEnforcesChannelACL regression-guards
+// the CodeRabbit finding on PR #985: the system-auth fork must respect
+// canAccessChannelLocked just like the legacy agent_issue path, so an
+// agent that isn't a member of a channel can't surface an auth banner
+// in it via the auth fork.
+func TestReportAgentIssueAuthErrorEnforcesChannelACL(t *testing.T) {
+	b := newTestBroker(t)
+	// "eng" is not a built-in, not channel ceo/system/nex/human, and not
+	// a member of the default #general channel created at boot.
+	_, _, posted, err := b.ReportAgentIssue("eng", "general", "", "Claude CLI requires login. Run `claude login`.")
+	if err == nil {
+		t.Fatal("expected ACL denial on auth-fork path for non-member agent")
+	}
+	if !strings.Contains(err.Error(), "channel access denied") {
+		t.Errorf("expected channel-access-denied error, got %v", err)
+	}
+	if posted {
+		t.Error("expected posted=false when ACL denies")
 	}
 }
 
