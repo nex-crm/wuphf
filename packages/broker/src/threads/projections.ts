@@ -27,6 +27,7 @@ import {
 
 import type { EventLog, EventLogRecord, EventType } from "../event-log/index.ts";
 import { createTransaction } from "../internal/sqlite-transaction.ts";
+import { typed } from "../internal/typed-statement.ts";
 
 const THREAD_EVENT_BATCH_SIZE = 500;
 const THREAD_STATUS_SET: ReadonlySet<string> = new Set<string>(THREAD_STATUS_VALUES);
@@ -90,13 +91,22 @@ type DecodedThreadEvent =
     };
 
 export function createThreadStateStore(db: DatabaseSync): ThreadStateStore {
-  const insertCreatedStmt = db.prepare(
-    `INSERT INTO threads
+  const insertCreatedStmt = typed<
+    [ThreadId, string, "open", number, SignerIdentity, number, number, string],
+    never
+  >(
+    db.prepare(
+      `INSERT INTO threads
        (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms, external_refs)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ),
   );
-  const updateSpecStmt = db.prepare(
-    `UPDATE threads SET
+  const updateSpecStmt = typed<
+    [number, number, string, string | null, string, Sha256Hex, SignerIdentity, number, ThreadId],
+    never
+  >(
+    db.prepare(
+      `UPDATE threads SET
        head_lsn = ?,
        updated_at_ms = ?,
        spec_revision_id = ?,
@@ -106,18 +116,23 @@ export function createThreadStateStore(db: DatabaseSync): ThreadStateStore {
        spec_authored_by = ?,
        spec_authored_at_ms = ?
      WHERE thread_id = ?`,
+    ),
   );
-  const updateStatusStmt = db.prepare(
-    `UPDATE threads SET
+  const updateStatusStmt = typed<[ThreadStatus, number, number, number | null, ThreadId], never>(
+    db.prepare(
+      `UPDATE threads SET
        status = ?,
        head_lsn = ?,
        updated_at_ms = ?,
        closed_at_ms = ?
      WHERE thread_id = ?`,
+    ),
   );
-  const insertSpecRevisionStmt = db.prepare(
-    `INSERT INTO thread_spec_revisions (revision_id, thread_id, lsn)
+  const insertSpecRevisionStmt = typed<[string, ThreadId, number], never>(
+    db.prepare(
+      `INSERT INTO thread_spec_revisions (revision_id, thread_id, lsn)
      VALUES (?, ?, ?)`,
+    ),
   );
   const hasSpecRevisionStmt = db.prepare(
     "SELECT 1 AS present FROM thread_spec_revisions WHERE revision_id = ?",

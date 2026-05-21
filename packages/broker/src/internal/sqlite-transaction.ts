@@ -13,9 +13,34 @@ export function createTransaction<TArgs extends readonly unknown[], TResult>(
   db: DatabaseSync,
   fn: (...args: TArgs) => TResult,
 ): TransactionFn<TArgs, TResult> {
+  let savepointCounter = 0;
   const run =
     (variant: TransactionVariant) =>
     (...args: TArgs): TResult => {
+      if (db.isTransaction) {
+        const savepoint = `wuphf_tx_${savepointCounter}`;
+        savepointCounter += 1;
+        // Nested transaction variants are moot: SQLite savepoints are deferred.
+        db.exec(`SAVEPOINT ${savepoint}`);
+        try {
+          const result = fn(...args);
+          db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+          return result;
+        } catch (err) {
+          try {
+            db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+          } catch {
+            // Preserve the original callback/release error.
+          }
+          try {
+            db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+          } catch {
+            // Preserve the original callback/release error.
+          }
+          throw err;
+        }
+      }
+
       const beginSql = variant === "deferred" ? "BEGIN" : `BEGIN ${variant.toUpperCase()}`;
       db.exec(beginSql);
       let committed = false;

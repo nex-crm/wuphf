@@ -45,6 +45,7 @@ import {
   costAuditPayloadToBytes,
   type EventLsn,
   lsnFromV1Number,
+  MAX_BUDGET_LIMIT_MICRO_USD,
   type MicroUsd,
 } from "@wuphf/protocol";
 
@@ -77,7 +78,7 @@ interface BudgetRow {
 }
 
 interface AggregateRow {
-  readonly total: number;
+  readonly total: bigint;
 }
 
 interface ExistingThresholdRow {
@@ -127,12 +128,15 @@ export function processCostEventForCrossings(
   const agentLifetimeStmt = db.prepare(
     "SELECT COALESCE(SUM(total_micro_usd), 0) AS total FROM cost_by_agent WHERE agent_slug = ?",
   );
+  agentLifetimeStmt.setReadBigInts(true);
   const globalLifetimeStmt = db.prepare(
     "SELECT COALESCE(SUM(total_micro_usd), 0) AS total FROM cost_by_agent",
   );
+  globalLifetimeStmt.setReadBigInts(true);
   const taskLifetimeStmt = db.prepare(
     "SELECT COALESCE(total_micro_usd, 0) AS total FROM cost_by_task WHERE task_id = ?",
   );
+  taskLifetimeStmt.setReadBigInts(true);
   const existingThresholdsStmt = db.prepare(
     `SELECT threshold_bps AS thresholdBps
      FROM cost_threshold_crossings
@@ -165,7 +169,7 @@ export function processCostEventForCrossings(
       globalLifetimeStmt,
       taskLifetimeStmt,
     );
-    if (observed === 0 && budget.limitMicroUsd === 0) continue;
+    if (observed === 0n && budget.limitMicroUsd === 0) continue;
     const existing = new Set<number>(
       (
         existingThresholdsStmt.all(
@@ -178,11 +182,12 @@ export function processCostEventForCrossings(
     for (const thresholdBps of thresholds) {
       if (existing.has(thresholdBps)) continue;
       if (!crossesThreshold(observed, budget.limitMicroUsd, thresholdBps)) continue;
+      const observedMicroUsd = observedForEmit(observed);
       const crossingPayload: BudgetThresholdCrossedAuditPayload = {
         budgetId: asBudgetId(budget.budgetId),
         budgetSetLsn: lsnFromV1Number(budget.setAtLsn),
         thresholdBps,
-        observedMicroUsd: asMicroUsd(observed),
+        observedMicroUsd,
         limitMicroUsd: asMicroUsd(budget.limitMicroUsd),
         crossedAtLsn: lsnFromV1Number(input.costEventLsn),
         crossedAt: input.occurredAt,
@@ -197,14 +202,14 @@ export function processCostEventForCrossings(
         budget.setAtLsn,
         thresholdBps,
         input.costEventLsn,
-        observed,
+        observedMicroUsd,
         budget.limitMicroUsd,
       );
       results.push({
         budgetId: budget.budgetId,
         budgetSetLsn: budget.setAtLsn,
         thresholdBps,
-        observedMicroUsd: asMicroUsd(observed),
+        observedMicroUsd,
         limitMicroUsd: asMicroUsd(budget.limitMicroUsd),
         crossingEventLsn: crossingLsn,
       });
@@ -268,16 +273,16 @@ function lifetimeFor(
   agentStmt: StatementSync,
   globalStmt: StatementSync,
   taskStmt: StatementSync,
-): number {
+): bigint {
   if (budget.scope === "global") {
-    return (globalStmt.get() as AggregateRow | undefined)?.total ?? 0;
+    return (globalStmt.get() as AggregateRow | undefined)?.total ?? 0n;
   }
   if (budget.scope === "agent") {
-    return (agentStmt.get(input.agentSlug) as AggregateRow | undefined)?.total ?? 0;
+    return (agentStmt.get(input.agentSlug) as AggregateRow | undefined)?.total ?? 0n;
   }
   // task
-  if (input.taskId === undefined) return 0;
-  return (taskStmt.get(input.taskId) as AggregateRow | undefined)?.total ?? 0;
+  if (input.taskId === undefined) return 0n;
+  return (taskStmt.get(input.taskId) as AggregateRow | undefined)?.total ?? 0n;
 }
 
 function parseThresholds(row: BudgetRow): readonly number[] {
@@ -315,7 +320,17 @@ function parseThresholds(row: BudgetRow): readonly number[] {
  * the full documented range — the cost over plain Number is one
  * coercion per threshold per cost event, negligible.
  */
-function crossesThreshold(observed: number, limit: number, thresholdBps: number): boolean {
+function crossesThreshold(observed: bigint, limit: number, thresholdBps: number): boolean {
   if (limit === 0) return false;
-  return BigInt(observed) * 10_000n >= BigInt(limit) * BigInt(thresholdBps);
+  return observed * 10_000n >= BigInt(limit) * BigInt(thresholdBps);
+}
+
+// Threshold semantics only need to report "at or above every valid budget";
+// the public protocol field is bounded to MAX_BUDGET_LIMIT_MICRO_USD.
+function observedForEmit(observed: bigint): MicroUsd {
+  const maxPublicObserved = BigInt(MAX_BUDGET_LIMIT_MICRO_USD);
+  if (observed >= maxPublicObserved) {
+    return asMicroUsd(MAX_BUDGET_LIMIT_MICRO_USD);
+  }
+  return asMicroUsd(Number(observed));
 }

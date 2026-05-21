@@ -68,6 +68,7 @@ export type { ReplayCheckReport, ReplayDiscrepancy } from "./discrepancy.ts";
 // agent-day key encoder are only used during the scan loop.
 
 const BATCH_SIZE = 1_000;
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
 interface CostEventBatchRow {
   readonly lsn: number;
@@ -228,7 +229,7 @@ export function runReplayCheck(db: DatabaseSync): ReplayCheckReport {
           if (kind === "cost_event") {
             const parsed = costAuditPayloadFromJsonValue(
               kind,
-              JSON.parse(new TextDecoder().decode(row.payload)),
+              JSON.parse(utf8Decoder.decode(row.payload)),
             ) as CostEventAuditPayload;
             const occurredAtMs = parsed.occurredAt.getTime();
             costEventOccurredAtMs.set(row.lsn, occurredAtMs);
@@ -298,7 +299,7 @@ export function runReplayCheck(db: DatabaseSync): ReplayCheckReport {
           } else if (kind === "budget_set") {
             const parsed = costAuditPayloadFromJsonValue(
               kind,
-              JSON.parse(new TextDecoder().decode(row.payload)),
+              JSON.parse(utf8Decoder.decode(row.payload)),
             ) as BudgetSetAuditPayload;
             const previous = replayedBudgets.get(parsed.budgetId);
             const replayedBudget: ReplayedBudget = {
@@ -315,7 +316,7 @@ export function runReplayCheck(db: DatabaseSync): ReplayCheckReport {
           } else if (kind === "budget_threshold_crossed") {
             const parsed = costAuditPayloadFromJsonValue(
               kind,
-              JSON.parse(new TextDecoder().decode(row.payload)),
+              JSON.parse(utf8Decoder.decode(row.payload)),
             ) as BudgetThresholdCrossedAuditPayload;
             const budgetSetLsnInt = parseLsn(parsed.budgetSetLsn).localLsn;
             const crossedAtLsnInt = parseLsn(parsed.crossedAtLsn).localLsn;

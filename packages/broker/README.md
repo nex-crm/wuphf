@@ -26,6 +26,10 @@ implementations:
   `createThreadSubsystem(db, eventLog, receiptStore)` when thread routes are
   mounted.
 
+SQLite BLOB reads exposed by approval projection/replay helpers are `Uint8Array`
+values. Treat them as generic bytes and decode with `TextDecoder` when text is
+needed; do not rely on Node `Buffer`-specific methods at those boundaries.
+
 ## API
 
 ```ts

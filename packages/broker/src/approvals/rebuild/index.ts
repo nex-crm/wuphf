@@ -108,7 +108,7 @@ export function replayApprovalsProjectionSnapshot(
     );
     const insertEvents = createTransaction(replayDb, () => {
       for (const row of rows) {
-        insertEventStmt.run(row.lsn, row.tsMs, row.type, Buffer.from(row.payload));
+        insertEventStmt.run(row.lsn, row.tsMs, row.type, row.payload);
       }
     });
     insertEvents.immediate();

@@ -23,6 +23,7 @@ import {
 
 import type { EventLog } from "../event-log/index.ts";
 import { createTransaction } from "../internal/sqlite-transaction.ts";
+import { typed } from "../internal/typed-statement.ts";
 import type { ParsedApprovalIdempotencyKey } from "./idempotency.ts";
 import {
   type ApprovalProjection,
@@ -161,16 +162,23 @@ export function createApprovalAppender(
      FROM command_idempotency
      WHERE idempotency_key = ? AND command = ?`,
   );
-  const idempotencyInsertStmt = db.prepare(
-    `INSERT INTO command_idempotency
+  const idempotencyInsertStmt = typed<
+    [string, string, number, Buffer, number | null, number, string],
+    never
+  >(
+    db.prepare(
+      `INSERT INTO command_idempotency
        (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms,
         request_fingerprint)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ),
   );
-  const pruneIdempotencyStmt = db.prepare(
-    `DELETE FROM command_idempotency
+  const pruneIdempotencyStmt = typed<[number], never>(
+    db.prepare(
+      `DELETE FROM command_idempotency
      WHERE created_at_ms < ?
        AND command IN ('approval.requested', 'approval.decided')`,
+    ),
   );
   const threadRefValidator = options.threadRefValidator ?? null;
 

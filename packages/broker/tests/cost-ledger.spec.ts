@@ -11,6 +11,7 @@ import {
   type CostEventAuditPayload,
   costAuditPayloadToBytes,
   lsnFromV1Number,
+  MAX_BUDGET_LIMIT_MICRO_USD,
   parseLsn,
 } from "@wuphf/protocol";
 import { describe, expect, it } from "vitest";
@@ -20,6 +21,7 @@ import {
   type ReplayDiscrepancy,
   runReplayCheck,
 } from "../src/cost-ledger/index.ts";
+import { processCostEventForCrossings } from "../src/cost-ledger/reactor.ts";
 import {
   __createBudgetCandidateIndexesForTesting,
   __replayCheckTesting,
@@ -206,6 +208,25 @@ describe("BudgetThresholdReactor", () => {
     // Fourth event: same threshold doesn't re-fire under same budget_set LSN.
     const fourth = ledger.appendCostEvent(buildCostEvent({ amountMicroUsd: 100_000 }));
     expect(fourth.newCrossings).toEqual([]);
+  });
+
+  it("reads lifetime aggregates past Number.MAX_SAFE_INTEGER without RangeError", () => {
+    const { db, eventLog, ledger } = setup();
+    ledger.appendBudgetSet(buildBudgetSet({ limitMicroUsd: 1_000_000, thresholdsBps: [5_000] }));
+    db.prepare(
+      `INSERT INTO cost_by_agent (agent_slug, day_utc, total_micro_usd, last_lsn)
+       VALUES (?, ?, ?, ?)`,
+    ).run("primary", "2026-05-08", 2n ** 60n, 1);
+
+    const crossings = processCostEventForCrossings(db, eventLog, {
+      costEventLsn: 1,
+      agentSlug: "primary",
+      taskId: undefined,
+      occurredAt: new Date("2026-05-08T10:00:00.000Z"),
+    });
+
+    expect(crossings).toHaveLength(1);
+    expect(crossings[0]?.observedMicroUsd as number).toBe(MAX_BUDGET_LIMIT_MICRO_USD);
   });
 
   it("raising a budget re-arms thresholds (new budget_set LSN, new crossing rows)", () => {

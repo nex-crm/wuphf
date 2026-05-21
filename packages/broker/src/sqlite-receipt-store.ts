@@ -5,6 +5,7 @@ import {
   type ReceiptSnapshot,
   receiptFromJson,
   receiptToJson,
+  type TaskId,
   type ThreadId,
 } from "@wuphf/protocol";
 
@@ -17,6 +18,7 @@ import {
   sqliteErrorLabel,
 } from "./internal/sqlite-errors.ts";
 import { createTransaction, type TransactionFn } from "./internal/sqlite-transaction.ts";
+import { type TypedStatement, typed } from "./internal/typed-statement.ts";
 import {
   decodeListCursor,
   encodeListCursor,
@@ -37,6 +39,7 @@ import {
 // client's disk-fill DoS. Hosts can raise or lower via
 // `SqliteReceiptStore.open({ path, maxReceipts })`.
 const DEFAULT_SQLITE_MAX_RECEIPTS = 100_000;
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
 export interface SqliteReceiptStoreConfig {
   readonly path: string;
@@ -76,8 +79,14 @@ export class SqliteReceiptStore implements ReceiptStore {
   private readonly maxReceipts: number;
   private readonly receiptExistsStmt: StatementSync;
   private readonly threadExistsStmt: StatementSync;
-  private readonly insertProjectionStmt: StatementSync;
-  private readonly insertThreadReceiptStmt: StatementSync;
+  private readonly insertProjectionStmt: TypedStatement<
+    [ReceiptId, ThreadId | null, number, number, Uint8Array],
+    never
+  >;
+  private readonly insertThreadReceiptStmt: TypedStatement<
+    [ThreadId, ReceiptId, TaskId | undefined, number],
+    never
+  >;
   private readonly getPayloadStmt: StatementSync;
   private readonly listAllStmt: StatementSync;
   private readonly listThreadStmt: StatementSync;
@@ -129,12 +138,19 @@ export class SqliteReceiptStore implements ReceiptStore {
       "SELECT 1 AS present FROM receipts_projection WHERE receipt_id = ?",
     );
     this.threadExistsStmt = db.prepare("SELECT 1 AS present FROM threads WHERE thread_id = ?");
-    this.insertProjectionStmt = db.prepare(
-      "INSERT INTO receipts_projection (receipt_id, thread_id, schema_version, lsn, payload) VALUES (?, ?, ?, ?, ?)",
+    this.insertProjectionStmt = typed<
+      [ReceiptId, ThreadId | null, number, number, Uint8Array],
+      never
+    >(
+      db.prepare(
+        "INSERT INTO receipts_projection (receipt_id, thread_id, schema_version, lsn, payload) VALUES (?, ?, ?, ?, ?)",
+      ),
     );
-    this.insertThreadReceiptStmt = db.prepare(
-      `INSERT INTO thread_receipts (thread_id, receipt_id, task_id, lsn)
-       VALUES (?, ?, ?, ?)`,
+    this.insertThreadReceiptStmt = typed<[ThreadId, ReceiptId, TaskId | undefined, number], never>(
+      db.prepare(
+        `INSERT INTO thread_receipts (thread_id, receipt_id, task_id, lsn)
+         VALUES (?, ?, ?, ?)`,
+      ),
     );
     this.getPayloadStmt = db.prepare(
       "SELECT lsn, payload FROM receipts_projection WHERE receipt_id = ?",
@@ -226,7 +242,7 @@ export class SqliteReceiptStore implements ReceiptStore {
     if (row === undefined) {
       return null;
     }
-    return receiptFromJson(new TextDecoder().decode(row.payload));
+    return receiptFromJson(utf8Decoder.decode(row.payload));
   }
 
   async list(filter?: ListFilter): Promise<ListPage> {
@@ -246,7 +262,7 @@ export class SqliteReceiptStore implements ReceiptStore {
       throw classifySqliteReadError(err);
     }
     const visibleRows = rows.slice(0, limit);
-    const items = visibleRows.map((row) => receiptFromJson(new TextDecoder().decode(row.payload)));
+    const items = visibleRows.map((row) => receiptFromJson(utf8Decoder.decode(row.payload)));
     const lastRow = visibleRows.at(-1);
 
     return {

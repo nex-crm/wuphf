@@ -8,7 +8,7 @@ function nodeSqliteVitestPlugin() {
     name: "broker-node-sqlite",
     enforce: "pre" as const,
     resolveId(id: string) {
-      if (id === "node:sqlite" || id === "sqlite") {
+      if (id === "node:sqlite") {
         return virtualId;
       }
       return undefined;

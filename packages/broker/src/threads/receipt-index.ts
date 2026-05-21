@@ -20,6 +20,7 @@ import {
 } from "../receipt-store.ts";
 
 const RECEIPT_EVENT_BATCH_SIZE = 500;
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
 export interface ThreadReceiptIndexEntry {
   readonly receiptId: ReceiptId;
@@ -141,7 +142,7 @@ export function createThreadReceiptIndexStore(db: DatabaseSync): ThreadReceiptIn
 
   const applyEventInner = (record: EventLogRecord): void => {
     if (record.type !== "receipt.put") return;
-    const receipt = receiptFromJson(new TextDecoder().decode(record.payload));
+    const receipt = receiptFromJson(utf8Decoder.decode(record.payload));
     applyReplayReceipt(receipt, record.lsn);
   };
 
@@ -191,7 +192,7 @@ export function createThreadReceiptIndexStore(db: DatabaseSync): ThreadReceiptIn
     latestForThread(threadId: ThreadId): ThreadLatestReceipt | null {
       const row = latestStmt.get(threadId) as ThreadLatestReceiptRow | undefined;
       if (row === undefined) return null;
-      const receipt = receiptFromJson(new TextDecoder().decode(row.payload));
+      const receipt = receiptFromJson(utf8Decoder.decode(row.payload));
       return {
         receiptId: row.receiptId as ReceiptId,
         taskId: row.taskId as TaskId,

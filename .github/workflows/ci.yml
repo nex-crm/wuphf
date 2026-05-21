@@ -379,9 +379,8 @@ jobs:
         #    which Node 22 strip-only TS would crash on at runtime
         #    (e.g. parameter properties on `SqliteReceiptStore`'s private
         #    constructor).
-        # 2. `better-sqlite3` getting inlined — its `bindings()` loader
-        #    needs the JS wrapper at its npm location to find the `.node`
-        #    sibling.
+        # 2. `node:sqlite` getting rewritten away from the Electron 42
+        #    stdlib builtin import.
         if: ${{ steps.desktop-changes.outputs.changed == 'true' }}
         working-directory: apps/desktop
         run: bun run check:build-externals

@@ -1,5 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
+import { typed } from "../internal/typed-statement.ts";
+
 export type EventType =
   | "receipt.put"
   | "cost.event"
@@ -77,8 +79,8 @@ export function openDatabase(args: OpenDatabaseArgs): DatabaseSync {
 }
 
 export function createEventLog(db: DatabaseSync): EventLog {
-  const appendStmt = db.prepare(
-    "INSERT INTO event_log (ts_ms, type, payload) VALUES (?, ?, ?) RETURNING lsn",
+  const appendStmt = typed<[number, EventType, Buffer], InsertedLsnRow>(
+    db.prepare("INSERT INTO event_log (ts_ms, type, payload) VALUES (?, ?, ?) RETURNING lsn"),
   );
   const readFromLsnStmt = db.prepare(
     "SELECT lsn, ts_ms AS tsMs, type, payload FROM event_log WHERE lsn > ? ORDER BY lsn ASC LIMIT ?",
@@ -121,6 +123,7 @@ function rowToEventLogRecord(row: EventLogRow): EventLogRecord {
     lsn: row.lsn,
     tsMs: row.tsMs,
     type: toEventType(row.type),
+    // Public EventLogRecord still promises Buffer, so normalize sqlite BLOBs here.
     payload: Buffer.from(row.payload),
   };
 }
