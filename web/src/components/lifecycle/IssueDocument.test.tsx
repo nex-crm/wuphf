@@ -366,6 +366,17 @@ describe("normalizeIssueDocument", () => {
     expect(doc.comments).toHaveLength(1);
     expect(doc.comments[0]?.body).toContain("self-heal diagnosis");
   });
+
+  it("rejects issue documents without a channel", () => {
+    expect(() =>
+      normalizeIssueDocument({
+        taskId: "task-5",
+        title: "Pull unread emails",
+        lifecycleState: "drafting",
+        spec: {},
+      }),
+    ).toThrow("issue channel is missing");
+  });
 });
 
 // ── Phase 4: Approve & Start button ───────────────────────────────────

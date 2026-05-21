@@ -312,11 +312,13 @@ function resolveIssueChannel(
   taskRecord: Record<string, unknown> | undefined,
   taskHint: Task | undefined,
 ): string {
-  return (
+  const channel =
     resolveAliasedField(packet, taskRecord, "channel", "channel")?.trim() ||
-    taskHint?.channel?.trim() ||
-    "general"
-  );
+    taskHint?.channel?.trim();
+  if (!channel) {
+    throw new Error("issue channel is missing");
+  }
+  return channel;
 }
 
 /** Normalize the raw API response into a clean IssueDocument. */

@@ -3,14 +3,13 @@
 // Run via:
 //   web/e2e/screenshots/publish.sh issue-document-comments <pr-number>
 
-import process from "node:process";
-
 import {
   DEFAULT_BASE,
   installCommonMocks,
   launchBrowser,
   shotPage,
 } from "./lib.mjs";
+import process from "node:process";
 
 const OUT = process.env.WUPHF_SCREENSHOTS_OUT;
 if (!OUT) {
@@ -44,7 +43,9 @@ const DECISION_PACKET = {
       "Add CSV export for account audit logs, including actor, action, target, and timestamp.",
     acceptanceCriteria: [
       { statement: "Workspace admins can download a CSV from settings." },
-      { statement: "The export includes actor, action, target, and timestamp." },
+      {
+        statement: "The export includes actor, action, target, and timestamp.",
+      },
       { statement: "Non-admin users cannot access the export endpoint." },
     ],
     feedback: [
@@ -59,17 +60,20 @@ const DECISION_PACKET = {
   updatedAt: "2026-05-21T04:40:00Z",
 };
 
-async function installIssueMocks(context) {
-  await installCommonMocks(context, {
+async function installIssueMocks(browserContext) {
+  await installCommonMocks(browserContext, {
     extra: async (ctx) => {
       await ctx.route(/\/api\/tasks(?:[/?]|$)/, (route) => {
         const url = route.request().url();
         const match = url.match(/\/tasks\/([^?/]+)(\?|$)/);
-        if (match) {
+        if (match && match[1] === TASK_ID) {
           return route.fulfill({
             contentType: "application/json",
             body: JSON.stringify(DECISION_PACKET),
           });
+        }
+        if (match) {
+          return route.continue();
         }
         return route.fulfill({
           contentType: "application/json",
@@ -80,12 +84,14 @@ async function installIssueMocks(context) {
   });
 }
 
-async function bootIssue(page) {
-  await page.goto(`${DEFAULT_BASE}/#/issues/${TASK_ID}`, { waitUntil: "load" });
-  await page.waitForSelector("[data-testid='issue-comment-form']", {
+async function bootIssue(issuePage) {
+  await issuePage.goto(`${DEFAULT_BASE}/#/issues/${TASK_ID}`, {
+    waitUntil: "load",
+  });
+  await issuePage.waitForSelector("[data-testid='issue-comment-form']", {
     timeout: 10_000,
   });
-  await page.waitForTimeout(400);
+  await issuePage.waitForTimeout(400);
 }
 
 const { browser, context, page } = await launchBrowser({
