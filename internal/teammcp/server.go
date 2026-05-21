@@ -60,16 +60,28 @@ func Run(ctx context.Context) error {
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
+func adminDirectWikiWriteBypassEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("WUPHF_ENABLE_AGENT_WIKI_WRITE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 // registerSharedMemoryTools registers the active shared-memory / wiki tool
-// set on the server. Markdown-backend installs expose team_wiki_* tools;
-// nex/gbrain installs expose the legacy team_memory_* tools; `none` skips
-// them entirely. Both tool sets NEVER coexist — agents see exactly one.
+// set on the server. Markdown-backend installs expose notebook tools and
+// team_wiki_* tools; nex/gbrain installs expose the legacy team_memory_* tools;
+// `none` skips them entirely. team_wiki_write stays available for explicit
+// human delegation, but the handler requires a human_request acknowledgement
+// so agent-authored scratch knowledge starts in notebooks and reaches the wiki
+// through review.
 func registerSharedMemoryTools(server *mcp.Server) {
 	switch config.ResolveMemoryBackend("") {
 	case config.MemoryBackendMarkdown:
 		mcp.AddTool(server, officeWriteTool(
 			"team_wiki_write",
-			"Write directly to the canonical team wiki git repo. Use this for already-approved canonical edits, bootstrap/admin updates, or explicit human requests. For agent-authored working notes, observations, draft playbooks, and proposed new wiki knowledge, write to notebook_write first and submit with notebook_promote so the review gate runs. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article. Images are supported via standard markdown: embed a remote URL with `![alt text](https://example.com/diagram.png)` and the wiki renderer will show it inline. Use images you found on the web while researching the article; do not upload bytes — only reference URLs.",
+			"Write directly to the canonical team wiki only when the human explicitly asked you to write the article, playbook, or canonical page to the wiki. You must pass human_request with the exact human instruction authorizing the direct write. Otherwise write your working knowledge to notebook_write first and submit notebook_promote for review. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article.",
 		), handleTeamWikiWrite)
 		mcp.AddTool(server, readOnlyTool(
 			"team_wiki_read",

@@ -16,6 +16,9 @@ import (
 // Queue saturation surfaces as a tool error so the agent sees it and retries
 // on the next turn — no hidden retries.
 func handleTeamWikiWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiWriteArgs) (*mcp.CallToolResult, any, error) {
+	if strings.TrimSpace(args.HumanRequest) == "" && !adminDirectWikiWriteBypassEnabled() {
+		return toolError(fmt.Errorf("team_wiki_write requires human_request with the exact human instruction authorizing a direct wiki write; otherwise use notebook_write first, then notebook_promote for review")), nil, nil
+	}
 	slug, err := resolveSlug(args.MySlug)
 	if err != nil {
 		return toolError(err), nil, nil
