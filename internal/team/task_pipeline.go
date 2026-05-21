@@ -15,6 +15,7 @@ type taskPipelineTemplate struct {
 }
 
 var taskPipelineTemplates = map[string]taskPipelineTemplate{
+	"issue":     {ID: "issue", OpenStage: "draft", ActiveStage: "breakdown", ReviewStage: "approve", DoneStage: "approved"},
 	"feature":   {ID: "feature", OpenStage: "triage", ActiveStage: "implement", ReviewStage: "review", DoneStage: "ship", ReviewRequired: true},
 	"bugfix":    {ID: "bugfix", OpenStage: "triage", ActiveStage: "fix", ReviewStage: "review", DoneStage: "verify", ReviewRequired: true},
 	"research":  {ID: "research", OpenStage: "question", ActiveStage: "investigate", ReviewStage: "synthesize", DoneStage: "recommend"},

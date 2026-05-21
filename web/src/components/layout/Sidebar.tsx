@@ -2,7 +2,7 @@ import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
 
 import { useResizablePane } from "../../hooks/useResizablePane";
 import { router } from "../../lib/router";
-import { useCurrentApp, useCurrentRoute } from "../../routes/useCurrentRoute";
+import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
@@ -10,7 +10,6 @@ import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
 import { ChannelList } from "../sidebar/ChannelList";
 import { InboxButton } from "../sidebar/InboxButton";
-import { IssuesGroup } from "../sidebar/IssuesGroup";
 import { SidebarSection } from "../sidebar/SidebarSection";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { CollapsedSidebar } from "./CollapsedSidebar";
@@ -26,15 +25,11 @@ export function Sidebar() {
   const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
   const sidebarChannelsOpen = useAppStore((s) => s.sidebarChannelsOpen);
   const toggleSidebarChannels = useAppStore((s) => s.toggleSidebarChannels);
-  const sidebarIssuesOpen = useAppStore((s) => s.sidebarIssuesOpen);
-  const toggleSidebarIssues = useAppStore((s) => s.toggleSidebarIssues);
   const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
   const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const currentApp = useCurrentApp();
-  const route = useCurrentRoute();
-  const issuesListActive = route.kind === "issues-list";
 
   const resize = useResizablePane({
     storageKey: SIDEBAR_WIDTH_STORAGE_KEY,
@@ -112,27 +107,6 @@ export function Sidebar() {
               onToggle={toggleSidebarChannels}
             >
               <ChannelList />
-            </SidebarSection>
-
-            {/* Phase 3 — Issues group (between Channels and Tools, per spec Surface 2 layout). */}
-            <SidebarSection
-              label="Issues"
-              open={sidebarIssuesOpen}
-              onToggle={toggleSidebarIssues}
-              data-testid="issues-group-header"
-              headerActions={
-                <button
-                  type="button"
-                  className={`sidebar-section-action${issuesListActive ? " active" : ""}`}
-                  onClick={() => void router.navigate({ to: "/issues" })}
-                  title="View all issues"
-                  data-testid="issues-sidebar-view-all"
-                >
-                  View all
-                </button>
-              }
-            >
-              <IssuesGroup open={sidebarIssuesOpen} />
             </SidebarSection>
 
             <SidebarSection

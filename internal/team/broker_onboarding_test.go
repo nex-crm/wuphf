@@ -147,6 +147,9 @@ func TestOnboardingDraftPhaseCreatesFirstIssueFromTaskPrompt(t *testing.T) {
 	if task.ID != state.FirstIssueID || task.LifecycleState != LifecycleStateDrafting {
 		t.Fatalf("unexpected first issue task: %+v", task)
 	}
+	if task.TaskType != "issue" || task.PipelineID != "issue" {
+		t.Fatalf("expected first issue to be issue spec task, got type=%q pipeline=%q", task.TaskType, task.PipelineID)
+	}
 	if task.IssueDraftSpec == nil || task.IssueDraftSpec.Goal != "Fake goal from CLI subprocess." {
 		t.Fatalf("expected drafted issue spec, got %+v", task.IssueDraftSpec)
 	}

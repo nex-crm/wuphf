@@ -18,7 +18,6 @@ import {
   Terminal,
 } from "iconoir-react";
 
-import { getRequests } from "../../api/client";
 import { fetchReviews } from "../../api/notebook";
 import { useOverflow } from "../../hooks/useOverflow";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
@@ -26,10 +25,7 @@ import {
   SIDEBAR_TOOLS,
   WIKI_SURFACE_APP_IDS,
 } from "../../routes/routeRegistry";
-import {
-  useCurrentApp,
-  useFallbackChannelSlug,
-} from "../../routes/useCurrentRoute";
+import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { SidebarItem } from "./SidebarItem";
 
 // Notebooks and reviews render inside the Wiki app shell via tabs, so the
@@ -38,6 +34,7 @@ const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   overview: HomeSimple,
+  issues: ClipboardCheck,
   studio: Play,
   wiki: BookStack,
   console: Terminal,
@@ -55,11 +52,6 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 
 export function AppList() {
   const currentApp = useCurrentApp();
-  // The Requests badge uses the channel-scoped /requests endpoint. Read
-  // the last-visited channel here so the badge reflects the user's
-  // working channel even while they're parked on a non-conversation
-  // surface (apps, wiki, notebooks).
-  const currentChannel = useFallbackChannelSlug();
 
   const { data: reviewsData } = useQuery({
     queryKey: ["reviews-badge"],

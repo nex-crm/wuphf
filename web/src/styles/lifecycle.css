@@ -3512,7 +3512,7 @@ html[data-theme="noir-gold"] {
 
 .issues-kanban {
   display: grid;
-  grid-template-columns: repeat(6, minmax(180px, 1fr));
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
   gap: 12px;
   flex: 1;
   min-height: 0;
@@ -3567,7 +3567,10 @@ html[data-theme="noir-gold"] {
   gap: 8px;
   overflow-y: auto;
   flex: 1;
+  list-style: none;
+  margin: 0;
   min-height: 0;
+  padding: 0;
 }
 
 .issues-kanban-column-empty {
@@ -3581,12 +3584,18 @@ html[data-theme="noir-gold"] {
   background: var(--bg-card, var(--bg-primary, #fff));
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
+  color: inherit;
   padding: 10px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
+  font: inherit;
   gap: 8px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+  width: 100%;
 }
 
 .issues-kanban-card:hover,
@@ -3670,8 +3679,13 @@ html[data-theme="noir-gold"] {
 }
 
 @keyframes issues-skel {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

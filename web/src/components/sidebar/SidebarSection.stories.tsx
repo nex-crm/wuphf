@@ -79,16 +79,6 @@ function ChannelsBody() {
   );
 }
 
-function IssuesBody() {
-  return (
-    <div className="sidebar-issues">
-      <SidebarItem icon="#" label="Auth token rotation" />
-      <SidebarItem icon="#" label="Calendar sync drift" active={true} />
-      <SidebarItem variant="add" icon="+" label="New issue" />
-    </div>
-  );
-}
-
 function ToolsBody() {
   return (
     <div className="sidebar-apps">
@@ -142,12 +132,12 @@ export const Collapsed: Story = {
 export const WithHeaderAction: Story = {
   render: () => (
     <SidebarSection
-      label="Issues"
+      label="Channels"
       open={true}
       onToggle={() => {}}
       headerActions={viewAllAction}
     >
-      <IssuesBody />
+      <ChannelsBody />
     </SidebarSection>
   ),
 };
@@ -180,9 +170,6 @@ export const Variants: Story = {
     <div>
       <StatefulSection label="Channels">
         <ChannelsBody />
-      </StatefulSection>
-      <StatefulSection label="Issues" headerActions={viewAllAction}>
-        <IssuesBody />
       </StatefulSection>
       <StatefulSection label="Tools">
         <ToolsBody />

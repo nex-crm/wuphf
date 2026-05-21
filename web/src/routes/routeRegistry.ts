@@ -15,7 +15,7 @@ export const APP_PANEL_IDS = [
 
 export type AppPanelId = (typeof APP_PANEL_IDS)[number];
 
-export const FIRST_CLASS_APP_IDS = ["wiki", "inbox"] as const;
+export const FIRST_CLASS_APP_IDS = ["wiki", "inbox", "issues"] as const;
 export type FirstClassAppId = (typeof FIRST_CLASS_APP_IDS)[number];
 
 export const WIKI_SURFACE_APP_IDS = ["wiki", "notebooks", "reviews"] as const;
@@ -46,9 +46,10 @@ export function sidebarAppRouteKind(
  * truth instead of duplicating the string in a sidebar constant.
  */
 export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
-  // First-class surfaces (live at `/wiki` and `/inbox`, not `/apps/$id`).
+  // First-class surfaces (live at dedicated routes, not `/apps/$id`).
   wiki: "Wiki",
   inbox: "Inbox",
+  issues: "Issues",
   // Routed app panels under `/apps/$appId`.
   activity: "Activity",
   calendar: "Calendar",
@@ -73,6 +74,7 @@ const SIDEBAR_TOOL_EMOJIS: Partial<
   Record<AppPanelId | FirstClassAppId, string>
 > = {
   overview: "🏠",
+  issues: "#",
   wiki: "📖",
   console: ">",
   graph: "🕸",
@@ -109,6 +111,7 @@ export interface SidebarTool {
  */
 export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
   { id: "overview", kind: "app-panel" },
+  { id: "issues", kind: "first-class" },
   { id: "wiki", kind: "first-class" },
   { id: "console", kind: "app-panel" },
   { id: "graph", kind: "app-panel" },

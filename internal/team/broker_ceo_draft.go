@@ -85,6 +85,7 @@ Rules (non-negotiable):
 - Do NOT introduce yourself or explain your role.
 - Do NOT use preamble or filler phrases.
 - Write declaratively. Short sentences. Low word count.
+- Treat an issue as a project-sized spec that can later be broken into smaller execution tasks, not as a tiny one-step todo.
 - Output ONLY valid JSON in the exact schema provided.
 - Reflect the user's intent precisely. Do not invent requirements they didn't ask for.
 - If wiki context is provided, use it to ground the spec. Do not make up facts.`
@@ -102,7 +103,7 @@ Available agents in this office: %s
   "acceptance": "<3-5 testable acceptance criteria>"
 }
 
-Write as if you are filing a Linear issue. Be specific, not generic.`
+Write as if you are filing a project-sized Linear issue spec. Be specific, not generic.`
 
 // issueDraftLLMResponse is the expected JSON shape from the LLM.
 type issueDraftLLMResponse struct {

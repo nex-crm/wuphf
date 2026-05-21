@@ -1220,8 +1220,7 @@ html[data-theme="nex"]
   }
 }
 
-.sidebar-channels,
-.sidebar-issues {
+.sidebar-channels {
   /* No side padding — items carry their own gutter via .sidebar-item. */
   padding: 0 0 4px;
   /* Section bodies hug their content — the sidebar root owns scroll. */
@@ -1231,18 +1230,6 @@ html[data-theme="nex"]
   gap: 1px;
   overflow: visible;
   margin-bottom: 8px;
-}
-.sidebar-issues .sidebar-add-btn,
-.sidebar-issues .sidebar-view-all {
-  padding: 6px 10px;
-  gap: 10px;
-  font-size: 11px;
-  margin-top: 2px;
-}
-.sidebar-issues .sidebar-add-btn > span:first-child,
-.sidebar-issues .sidebar-view-all > span:first-child {
-  width: 18px;
-  font-size: 14px;
 }
 .sidebar-apps {
   /* No side padding — items carry their own gutter via .sidebar-item. */
@@ -1259,7 +1246,6 @@ html[data-theme="nex"]
 /* Minimal hover-reveal scrollbars for sidebar scroll regions. */
 .sidebar-agents,
 .sidebar-channels,
-.sidebar-issues,
 .sidebar-apps {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
