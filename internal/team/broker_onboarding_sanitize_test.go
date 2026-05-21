@@ -283,7 +283,6 @@ func TestCeoDeterministicMessagesNeverCallLLM(t *testing.T) {
 		onboarding.PhaseComplete,
 	}
 	phase4Phases := []string{
-		onboarding.PhaseDraft,
 		onboarding.PhaseApprove,
 		onboarding.PhaseKickoff,
 	}
@@ -323,6 +322,13 @@ func TestCeoDeterministicMessagesNeverCallLLM(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("draft_phase_prompts_for_first_issue", func(t *testing.T) {
+		msgs := ceoDeterministicMessages(onboarding.PhaseDraft, state)
+		if len(msgs) != 1 || msgs[0].Kind != "ceo_form_field" {
+			t.Fatalf("draft phase should prompt for first issue, got %+v", msgs)
+		}
+	})
 }
 
 // TestAdvancePhasePostsSanitizedMessages is an integration-level test that

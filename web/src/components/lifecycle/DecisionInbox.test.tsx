@@ -1,10 +1,33 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  type AgentRequest,
+  answerRequest,
+  getRequests,
+} from "../../api/client";
 import type { InboxItem } from "../../lib/types/inbox";
 import { DecisionInbox } from "./DecisionInbox";
+
+vi.mock("../../api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/client")>();
+  return {
+    ...actual,
+    answerRequest: vi.fn(),
+    getRequests: vi.fn(),
+  };
+});
+
+vi.mock("../../routes/useCurrentRoute", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../routes/useCurrentRoute")>();
+  return {
+    ...actual,
+    useFallbackChannelSlug: () => "general",
+  };
+});
 
 function wrap(ui: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -49,6 +72,18 @@ const ADA_REQUEST: InboxItem = {
   },
 };
 
+const ADA_FULL_REQUEST: AgentRequest = {
+  id: "req-1",
+  kind: "approval",
+  from: "ada",
+  channel: "general",
+  title: "Bump Postgres to 17?",
+  question: "Bump Postgres to 17 in staging?",
+  status: "pending",
+  blocking: false,
+  options: [{ id: "approve", label: "Approve" }],
+};
+
 const WREN_REVIEW: InboxItem = {
   kind: "review",
   reviewId: "rev-1",
@@ -64,6 +99,11 @@ const WREN_REVIEW: InboxItem = {
 };
 
 describe("<DecisionInbox> (mail-style)", () => {
+  beforeEach(() => {
+    vi.mocked(getRequests).mockResolvedValue({ requests: [ADA_FULL_REQUEST] });
+    vi.mocked(answerRequest).mockResolvedValue({});
+  });
+
   it("renders one row per item with sender + subject", () => {
     render(
       wrap(
@@ -106,5 +146,22 @@ describe("<DecisionInbox> (mail-style)", () => {
   it("shows the empty state when there are no items", () => {
     render(wrap(<DecisionInbox initialItems={[]} forceState="empty" />));
     expect(screen.getAllByText(/inbox zero/i).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows a deterministic error when answering a request fails", async () => {
+    vi.mocked(answerRequest).mockRejectedValueOnce(
+      new Error("Broker unavailable"),
+    );
+
+    render(wrap(<DecisionInbox initialItems={[ADA_REQUEST]} />));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    await waitFor(() => {
+      expect(answerRequest).toHaveBeenCalledWith("req-1", "approve", undefined);
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Broker unavailable",
+    );
   });
 });

@@ -115,6 +115,12 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 		payload["owner"] = mySlug
 	case "assign":
 		payload["owner"] = strings.TrimSpace(args.Owner)
+	case "create":
+		owner := strings.TrimSpace(args.Owner)
+		if owner == "" {
+			owner = mySlug
+		}
+		payload["owner"] = owner
 	default:
 		if owner := strings.TrimSpace(args.Owner); owner != "" {
 			payload["owner"] = owner

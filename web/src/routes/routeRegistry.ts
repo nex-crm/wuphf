@@ -1,5 +1,3 @@
-import { SIDEBAR_APPS } from "../lib/constants";
-
 export const APP_PANEL_IDS = [
   "activity",
   "calendar",
@@ -29,6 +27,10 @@ export function isAppPanelId(value: string): value is AppPanelId {
   return APP_PANEL_ID_SET.has(value);
 }
 
+export function isFirstClassAppId(value: string): value is FirstClassAppId {
+  return FIRST_CLASS_APP_ID_SET.has(value);
+}
+
 export function sidebarAppRouteKind(
   id: string,
 ): "app-panel" | "first-class" | null {
@@ -36,6 +38,92 @@ export function sidebarAppRouteKind(
   if (FIRST_CLASS_APP_ID_SET.has(id)) return "first-class";
   return null;
 }
+
+/**
+ * Human-readable labels for every routed sidebar surface. Keyed by every
+ * `AppPanelId` and every `FirstClassAppId`, so the sidebar TOOLS list and
+ * any other route-driven UI can resolve a label from a single source of
+ * truth instead of duplicating the string in a sidebar constant.
+ */
+export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
+  // First-class surfaces (live at `/wiki` and `/inbox`, not `/apps/$id`).
+  wiki: "Wiki",
+  inbox: "Inbox",
+  // Routed app panels under `/apps/$appId`.
+  activity: "Activity",
+  calendar: "Calendar",
+  console: "Console",
+  graph: "Graph",
+  "health-check": "Access & Health",
+  overview: "Overview",
+  policies: "Policies",
+  receipts: "Receipts",
+  requests: "Requests",
+  settings: "Settings",
+  skills: "Skills",
+  tasks: "Tasks",
+};
+
+/**
+ * Emoji fallback icons rendered when a `SidebarTool` has no iconoir-react
+ * mapping in the rendering component. Lookups for unknown ids fall back
+ * to a generic glyph at the call site.
+ */
+const SIDEBAR_TOOL_EMOJIS: Partial<
+  Record<AppPanelId | FirstClassAppId, string>
+> = {
+  overview: "🏠",
+  wiki: "📖",
+  console: ">",
+  graph: "🕸",
+  policies: "🛡",
+  calendar: "📅",
+  skills: "⚡",
+  activity: "📦",
+  receipts: "🧾",
+  "health-check": "📶",
+  settings: "⚙",
+};
+
+export interface SidebarTool {
+  /** Either an `AppPanelId` or a `FirstClassAppId`. */
+  id: AppPanelId | FirstClassAppId;
+  /** Display label resolved from `APP_LABELS`. */
+  label: string;
+  /** Whether this entry routes to `/apps/$id` or to a dedicated path. */
+  kind: "app-panel" | "first-class";
+  /** Optional emoji glyph for callers without an icon mapping. */
+  icon?: string;
+}
+
+/**
+ * Ordered list of sidebar TOOLS entries. The renderer (`AppList`,
+ * `CollapsedSidebar`) maps over this array directly — labels and order
+ * are owned here, not duplicated in `lib/constants.ts`.
+ *
+ * `settings` lives at the bottom because `AppList`/`CollapsedSidebar`
+ * render it separately (it's filtered out of the TOOLS section and
+ * mounted in a fixed slot). It is kept in the array so the route
+ * registry stays the single source of truth for which ids are valid
+ * sidebar destinations.
+ */
+export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
+  { id: "overview", kind: "app-panel" },
+  { id: "wiki", kind: "first-class" },
+  { id: "console", kind: "app-panel" },
+  { id: "graph", kind: "app-panel" },
+  { id: "policies", kind: "app-panel" },
+  { id: "calendar", kind: "app-panel" },
+  { id: "skills", kind: "app-panel" },
+  { id: "activity", kind: "app-panel" },
+  { id: "receipts", kind: "app-panel" },
+  { id: "health-check", kind: "app-panel" },
+  { id: "settings", kind: "app-panel" },
+].map((entry) => ({
+  ...entry,
+  label: APP_LABELS[entry.id as AppPanelId | FirstClassAppId],
+  icon: SIDEBAR_TOOL_EMOJIS[entry.id as AppPanelId | FirstClassAppId],
+})) as readonly SidebarTool[];
 
 export const ROUTE_PATHS = {
   index: "/",
@@ -179,4 +267,6 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
   { key: "issueNew", path: ROUTE_PATHS.issueNew, params: [], search: [] },
 ] as const;
 
-export const SIDEBAR_APP_IDS = SIDEBAR_APPS.map((app) => app.id);
+export const SIDEBAR_APP_IDS: readonly string[] = SIDEBAR_TOOLS.map(
+  (tool) => tool.id,
+);

@@ -642,7 +642,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 	}
 	wireBrokerWorkspaces(l)
 
-	fmt.Printf("Launching %s (%d agents)... the cast is assembling.\n", l.PackName(), l.AgentCount())
+	fmt.Printf("Launching %s... the cast is assembling.\n", l.PackName())
 
 	if err := l.Launch(); err != nil {
 		fmt.Fprintf(os.Stderr, "error launching team: %v\n", err)
@@ -734,7 +734,7 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 		tunnelController.SetBroker(b)
 		b.SetWebTunnelController(tunnelController.start, tunnelController.status, tunnelController.stop)
 	})
-	fmt.Printf("Launching %s web view (%d agents)... the browser is the office now.\n", l.PackName(), l.AgentCount())
+	fmt.Printf("Launching %s web view... the browser is the office now.\n", l.PackName())
 	if err := l.LaunchWeb(webPort); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

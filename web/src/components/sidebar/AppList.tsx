@@ -21,9 +21,11 @@ import {
 import { getRequests } from "../../api/client";
 import { fetchReviews } from "../../api/notebook";
 import { useOverflow } from "../../hooks/useOverflow";
-import { SIDEBAR_APPS } from "../../lib/constants";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
-import { WIKI_SURFACE_APP_IDS } from "../../routes/routeRegistry";
+import {
+  SIDEBAR_TOOLS,
+  WIKI_SURFACE_APP_IDS,
+} from "../../routes/routeRegistry";
 import {
   useCurrentApp,
   useFallbackChannelSlug,
@@ -77,28 +79,28 @@ export function AppList() {
   return (
     <div className="sidebar-scroll-wrap is-apps">
       <div className="sidebar-apps" ref={overflowRef}>
-        {SIDEBAR_APPS.filter((app) => app.id !== "settings").map((app) => {
+        {SIDEBAR_TOOLS.filter((tool) => tool.id !== "settings").map((tool) => {
           let badge: number | null = null;
-          if (app.id === "wiki" && pendingReviewsCount > 0)
+          if (tool.id === "wiki" && pendingReviewsCount > 0)
             badge = pendingReviewsCount;
-          const Icon = APP_ICONS[app.id];
+          const Icon = APP_ICONS[tool.id];
           const isActive =
-            app.id === "wiki"
+            tool.id === "wiki"
               ? WIKI_SURFACE_APPS.has(currentApp ?? "")
-              : currentApp === app.id;
+              : currentApp === tool.id;
           return (
             <SidebarItem
-              key={app.id}
+              key={tool.id}
               icon={
                 Icon ? (
                   <Icon className="sidebar-item-icon" />
                 ) : (
-                  <span className="sidebar-item-emoji">{app.icon}</span>
+                  <span className="sidebar-item-emoji">{tool.icon}</span>
                 )
               }
-              label={app.name}
+              label={tool.label}
               active={isActive}
-              onClick={() => navigateToSidebarApp(app.id)}
+              onClick={() => navigateToSidebarApp(tool.id)}
               badge={
                 badge !== null ? (
                   <span

@@ -93,7 +93,7 @@ async function installIssueMocks(context, tasks = []) {
     extra: async (ctx) => {
       // Override the default onboarded=true stub to keep it onboarded.
       // The issues surface is a normal Shell route; no special onboarding state.
-      await ctx.route("**/api/tasks**", (r) => {
+      await ctx.route(/\/api\/tasks(?:[/?]|$)/, (r) => {
         const url = r.request().url();
         // /tasks/<id> — single task fetch
         const match = url.match(/\/tasks\/([^?/]+)(\?|$)/);

@@ -21,6 +21,7 @@ export interface OnboardingFormAnswers {
   blueprint_id?: string;
   picked_agents?: string[];
   scan_complete?: boolean;
+  task_prompt?: string;
 }
 
 export interface OnboardingState {

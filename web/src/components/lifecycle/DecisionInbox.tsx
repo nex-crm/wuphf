@@ -587,6 +587,7 @@ function RequestBody({
 }) {
   const queryClient = useQueryClient();
   const channel = useFallbackChannelSlug();
+  const [answerError, setAnswerError] = useState<string | null>(null);
   const requestsQuery = useQuery({
     queryKey: ["requests", channel],
     queryFn: () => getRequests(channel),
@@ -616,17 +617,35 @@ function RequestBody({
     fullRequest.status === "open" ||
     fullRequest.status === "pending";
 
+  const handleAnswer = async (choiceId: string, customText?: string) => {
+    setAnswerError(null);
+    try {
+      await answerRequest(fullRequest.id, choiceId, customText);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["requests"] }),
+        queryClient.invalidateQueries({ queryKey: ["lifecycle"] }),
+      ]);
+    } catch (err) {
+      setAnswerError(
+        err instanceof Error ? err.message : "Could not answer request.",
+      );
+    }
+  };
+
   return (
     <div className="inbox-mail-detail-body inbox-mail-detail-body--embed">
+      {answerError ? (
+        <div className="inbox-error-banner" role="alert">
+          <span className="banner-dot" aria-hidden="true" />
+          <div className="body">{answerError}</div>
+        </div>
+      ) : null}
       <RequestItem
         request={fullRequest}
         isPending={isPending}
-        onAnswer={(choiceId, customText) => {
-          void answerRequest(fullRequest.id, choiceId, customText).then(() => {
-            void queryClient.invalidateQueries({ queryKey: ["requests"] });
-            void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
-          });
-        }}
+        onAnswer={(choiceId, customText) =>
+          void handleAnswer(choiceId, customText)
+        }
       />
     </div>
   );
