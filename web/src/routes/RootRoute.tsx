@@ -36,7 +36,12 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
 import { useAppStore } from "../stores/app";
-import { type AppPanelId, isAppPanelId } from "./routeRegistry";
+import {
+  type AppPanelId,
+  type FirstClassAppId,
+  isAppPanelId,
+  isFirstClassAppId,
+} from "./routeRegistry";
 import {
   type CurrentRoute,
   useChannelSlug,
@@ -438,6 +443,44 @@ function IssueDetailRedirect({ issueId }: { issueId: string }) {
 }
 
 /**
+ * FirstClassAppRedirect navigates the user from a `/apps/$id` URL whose
+ * `$id` is a first-class app (wiki, inbox) to that app's canonical
+ * dedicated route. Users who type a sidebar-label-style URL by hand
+ * (e.g. `/#/apps/wiki`) used to hit "Page not found" because first-class
+ * apps live at `/wiki` and `/inbox`, not under `/apps`. Mirrors
+ * `InboxRedirect` and `IssuesRedirect` so the route ↔ sidebar mapping is
+ * forgiving without the route registry sprouting alias entries.
+ */
+function FirstClassAppRedirect({ appId }: { appId: FirstClassAppId }) {
+  useEffect(() => {
+    if (appId === "wiki") {
+      void router.navigate({ to: "/wiki", replace: true });
+    } else {
+      void router.navigate({ to: "/inbox", replace: true });
+    }
+  }, [appId]);
+  return (
+    <div
+      className="app-panel active"
+      data-testid={`legacy-redirect-first-class-${appId}`}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flex: 1,
+          color: "var(--text-tertiary)",
+          fontSize: 14,
+        }}
+      >
+        Redirecting…
+      </div>
+    </div>
+  );
+}
+
+/**
  * IssuesRedirect navigates the user from the deprecated /apps/tasks
  * surface to the unified Issues list. Tasks-as-a-sidebar-app was
  * replaced by the Issues group + dedicated /issues route; this stub
@@ -544,6 +587,14 @@ function MainContent() {
         <DMView agentSlug={route.agentSlug} channelSlug={route.channelSlug} />
       );
     case "app":
+      // `/apps/wiki` and `/apps/inbox` are not app-panel routes — the
+      // sidebar navigates to `/wiki` and `/inbox` directly — but users
+      // who type a sidebar-label-style URL by hand should not hit
+      // "Page not found". Forward them to the canonical first-class
+      // route instead.
+      if (isFirstClassAppId(route.appId)) {
+        return <FirstClassAppRedirect appId={route.appId} />;
+      }
       if (!isAppPanelId(route.appId)) {
         return <UnknownAppPanel appId={route.appId} />;
       }
