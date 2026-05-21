@@ -4,8 +4,8 @@
 // Branch-4 entry: spawns @wuphf/broker on a loopback ephemeral port and
 // reports `{ ready, brokerUrl }` back to the supervisor. The runtime helper
 // opens durable SQLite-backed receipt + WebAuthn stores only when their env
-// paths are plumbed by Electron main, keeping native better-sqlite3 loading
-// lazy for headless tests.
+// paths are plumbed by Electron main, keeping `node:sqlite` access lazy for
+// headless tests.
 
 import type { BrokerLogger } from "@wuphf/broker";
 

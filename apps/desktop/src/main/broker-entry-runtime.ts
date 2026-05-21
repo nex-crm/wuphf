@@ -1,12 +1,11 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-
+import type { DatabaseSync } from "node:sqlite";
 import { type BrokerHandle, type BrokerLogger, createBroker } from "@wuphf/broker";
 import type { SqliteReceiptStore } from "@wuphf/broker/sqlite";
 import type { ThreadSubsystem } from "@wuphf/broker/threads";
 import type { SqliteWebAuthnStore } from "@wuphf/broker/webauthn";
 import { type AgentId, type ApiToken, type ApprovalRole, asAgentId } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 export const RENDERER_DIST_ENV = "WUPHF_RENDERER_DIST";
 export const DEV_RENDERER_ORIGIN_ENV = "WUPHF_DEV_RENDERER_ORIGIN";
@@ -39,7 +38,7 @@ interface WebAuthnRuntimeConfig {
 }
 
 interface ReceiptRuntimeConfig {
-  readonly db: Database.Database;
+  readonly db: DatabaseSync;
   readonly store: SqliteReceiptStore;
   readonly threads: ThreadSubsystem;
 }
@@ -179,13 +178,13 @@ function closeStore(store: { close(): void } | null): void {
   }
 }
 
-function closeDatabase(db: Database.Database): void {
+function closeDatabase(db: DatabaseSync): void {
   try {
-    if (db.open) {
-      db.close();
-    }
+    db.close();
   } catch {
     // Store shutdown is best effort for the same reason as closeStore.
+    // node:sqlite's DatabaseSync.close() throws if already closed; swallow
+    // because shutdown must not mask the original startup error.
   }
 }
 

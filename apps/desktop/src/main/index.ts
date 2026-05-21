@@ -125,8 +125,8 @@ app
     // when these env vars are set. Packaged builds force the path so receipts,
     // WebAuthn credentials, and pending challenges persist across restarts.
     // In dev we respect a pre-set value (including empty string, which keeps
-    // the broker on the in-memory store) so developers can sidestep native
-    // better-sqlite3 ABI rebuilds while iterating on the renderer.
+    // the broker on the in-memory store) so developers can iterate on the
+    // renderer without paying disk I/O.
     // `app.getPath("userData")` is safe inside `whenReady`.
     const userDataDir = app.getPath("userData");
     if (app.isPackaged || typeof process.env[RECEIPT_STORE_PATH_ENV] !== "string") {

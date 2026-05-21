@@ -9,9 +9,9 @@ const CI_ENV = "CI";
 // process — which in turn forks the broker utility process — and drives
 // the renderer via Playwright's Chromium runtime. The purpose is to
 // catch "tests pass but the app does not boot" regressions that unit
-// tests cannot see: the broker resolves `better-sqlite3` from
-// `out/main/`, reads its `.sql` migrations, the renderer probes
-// `/api-token` and `/api/health`, and the DOM mounts.
+// tests cannot see: the broker opens its `node:sqlite` database,
+// applies `.sql` migrations, the renderer probes `/api-token` and
+// `/api/health`, and the DOM mounts.
 //
 // We do not run these in CI by default — they require the packaged
 // `out/` directory and an Electron binary download. Run locally with
