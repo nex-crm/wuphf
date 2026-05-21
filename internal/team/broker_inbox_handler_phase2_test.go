@@ -240,6 +240,243 @@ func TestHandleTaskDecision_NoCommentLeavesFeedbackEmpty(t *testing.T) {
 	}
 }
 
+// TestHandleInboxItems_StampsUnreadAndCounts confirms /inbox/items
+// computes IsUnread from the actor's cursor and reflects the same count
+// in payload.Counts.Unread. With no cursor written, every item is
+// unread; after the cursor moves past the items' UpdatedAt, all items
+// flip to read.
+func TestHandleInboxItems_StampsUnreadAndCounts(t *testing.T) {
+	b := newTestBrokerForReview(t)
+	now := time.Now().UTC()
+	older := now.Add(-time.Hour).Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "task-a", Title: "Refactor", CreatedAt: older, UpdatedAt: older, Reviewers: []string{"owner"}},
+	}
+	if _, err := b.transitionLifecycleLocked("task-a", LifecycleStateDecision, "seed"); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("seed: %v", err)
+	}
+	b.mu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/inbox/items", b.requireAuth(b.handleInboxItems))
+	mux.HandleFunc("/inbox/cursor", b.requireAuth(b.handleInboxCursor))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	get := func() unifiedInboxResponse {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/inbox/items?filter=all", nil)
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer resp.Body.Close()
+		var payload unifiedInboxResponse
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return payload
+	}
+
+	// No cursor → every authorized item reads as unread, count matches.
+	before := get()
+	if len(before.Items) != 1 {
+		t.Fatalf("seed item count = %d, want 1", len(before.Items))
+	}
+	if !before.Items[0].IsUnread {
+		t.Fatal("item should be unread before any cursor is written")
+	}
+	if before.Counts.Unread != 1 {
+		t.Fatalf("counts.unread = %d, want 1", before.Counts.Unread)
+	}
+
+	// Advance the cursor past the items' UpdatedAt; everything goes
+	// to read and the counts unread drops to zero.
+	body := strings.NewReader(`{"lastSeenAt":"` + now.Add(time.Minute).UTC().Format(time.RFC3339Nano) + `"}`)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/inbox/cursor", body)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("cursor post: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("cursor status = %d, want 204", resp.StatusCode)
+	}
+
+	after := get()
+	if after.Items[0].IsUnread {
+		t.Fatal("item should be read after cursor advances")
+	}
+	if after.Counts.Unread != 0 {
+		t.Fatalf("counts.unread after = %d, want 0", after.Counts.Unread)
+	}
+}
+
+// TestHandleInboxItems_UnreadFilterTrimsReadItems exercises the
+// post-fetch trim that powers the "Unread" sidebar filter.
+func TestHandleInboxItems_UnreadFilterTrimsReadItems(t *testing.T) {
+	b := newTestBrokerForReview(t)
+	now := time.Now().UTC()
+	older := now.Add(-time.Hour).Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "task-old", Title: "Older", CreatedAt: older, UpdatedAt: older, Reviewers: []string{"owner"}},
+		{ID: "task-new", Title: "Newer", CreatedAt: now.Format(time.RFC3339), UpdatedAt: now.Format(time.RFC3339), Reviewers: []string{"owner"}},
+	}
+	if _, err := b.transitionLifecycleLocked("task-old", LifecycleStateDecision, "seed"); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("seed old: %v", err)
+	}
+	if _, err := b.transitionLifecycleLocked("task-new", LifecycleStateDecision, "seed"); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("seed new: %v", err)
+	}
+	b.mu.Unlock()
+
+	// Cursor between the two: task-old becomes read, task-new stays unread.
+	b.SetInboxCursor(inboxCursorOwnerKey, InboxCursor{LastSeenAt: now.Add(-30 * time.Minute)})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/inbox/items", b.requireAuth(b.handleInboxItems))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/inbox/items?filter=unread", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	var payload unifiedInboxResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("unread filter items = %d, want 1; got %+v", len(payload.Items), payload.Items)
+	}
+	if payload.Items[0].TaskID != "task-new" {
+		t.Fatalf("unread item taskId = %q, want task-new", payload.Items[0].TaskID)
+	}
+}
+
+// TestHandleInboxItems_TaskRowCarriesBlockerAndDetails confirms the
+// blocked-card payload extension (details + blockedOn) actually surfaces
+// on /inbox/items so the PacketPending fallback can render real info.
+func TestHandleInboxItems_TaskRowCarriesBlockerAndDetails(t *testing.T) {
+	b := newTestBrokerForReview(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{
+			ID:        "task-blocked",
+			Title:     "Waits on upstream",
+			Details:   "Automatic timeout recovery: @mira timed out after 5m.",
+			CreatedAt: now,
+			UpdatedAt: now,
+			Reviewers: []string{"owner"},
+			BlockedOn: []string{"task-upstream"},
+		},
+	}
+	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlockedOnPRMerge, "seed"); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("seed: %v", err)
+	}
+	b.mu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/inbox/items", b.requireAuth(b.handleInboxItems))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/inbox/items?filter=all", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	var payload unifiedInboxResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Items) != 1 || payload.Items[0].TaskRow == nil {
+		t.Fatalf("expected 1 task item with task row; got %+v", payload.Items)
+	}
+	row := payload.Items[0].TaskRow
+	if row.Details == "" || !strings.Contains(row.Details, "timed out") {
+		t.Fatalf("row details should carry the broker reason; got %q", row.Details)
+	}
+	if len(row.BlockedOn) != 1 || row.BlockedOn[0] != "task-upstream" {
+		t.Fatalf("row.BlockedOn = %v, want [task-upstream]", row.BlockedOn)
+	}
+	if row.UpdatedAt == "" {
+		t.Fatal("row.UpdatedAt must be populated for the unread cursor to work")
+	}
+}
+
+// TestHandleTaskResume covers the POST /tasks/{id}/resume route that
+// the blocked-card "Resume" button posts to. Verifies the lifecycle
+// transitions away from blocked_on_pr_merge and that the JSON envelope
+// carries changed=true.
+func TestHandleTaskResume(t *testing.T) {
+	b := newTestBrokerForReview(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "task-blocked", Title: "Blocked", CreatedAt: now, UpdatedAt: now, Reviewers: []string{"owner"}, status: "blocked"},
+	}
+	if _, err := b.transitionLifecycleLocked("task-blocked", LifecycleStateBlockedOnPRMerge, "seed"); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("seed: %v", err)
+	}
+	b.mu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tasks/", b.requireAuth(b.handleTaskByID))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/tasks/task-blocked/resume", strings.NewReader(`{"reason":"manual ping"}`))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("resume request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var envelope struct {
+		Changed bool `json:"changed"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !envelope.Changed {
+		t.Fatal("first resume should report changed=true")
+	}
+
+	b.mu.Lock()
+	state := LifecycleStateUnknown
+	for _, task := range b.tasks {
+		if task.ID == "task-blocked" {
+			state = task.LifecycleState
+		}
+	}
+	b.mu.Unlock()
+	if state == LifecycleStateBlockedOnPRMerge {
+		t.Fatalf("task should have left blocked state after resume; still %s", state)
+	}
+}
+
 func TestHandleInboxItems_BadFilterReturns400(t *testing.T) {
 	b := newTestBroker(t)
 	mux := http.NewServeMux()

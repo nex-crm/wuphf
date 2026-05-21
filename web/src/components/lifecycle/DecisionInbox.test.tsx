@@ -148,6 +148,33 @@ describe("<DecisionInbox> (mail-style)", () => {
     expect(screen.getAllByText(/inbox zero/i).length).toBeGreaterThanOrEqual(1);
   });
 
+  it("flags unread rows with data-unread + bold subject", () => {
+    const unreadItem: InboxItem = { ...MIRA_TASK, isUnread: true };
+    const readItem: InboxItem = {
+      ...ADA_REQUEST,
+      isUnread: false,
+    };
+    render(wrap(<DecisionInbox initialItems={[unreadItem, readItem]} />));
+    const rows = screen.getAllByRole("button", { name: /^Open|^Unread Open/ });
+    expect(rows[0]).toHaveAttribute("data-unread", "true");
+    expect(rows[1]).toHaveAttribute("data-unread", "false");
+  });
+
+  it("Unread filter chip narrows the list to unread items only", () => {
+    const unreadItem: InboxItem = { ...MIRA_TASK, isUnread: true };
+    const readItem: InboxItem = {
+      ...ADA_REQUEST,
+      isUnread: false,
+    };
+    render(wrap(<DecisionInbox initialItems={[unreadItem, readItem]} />));
+    fireEvent.click(screen.getByTestId("inbox-filter-unread"));
+    // After filter is applied the read request row should disappear.
+    expect(screen.queryAllByText(/Bump Postgres to 17/i).length).toBe(0);
+    expect(
+      screen.getAllByText(/Refactor agent-rail event pill state/i).length,
+    ).toBeGreaterThan(0);
+  });
+
   it("shows a deterministic error when answering a request fails", async () => {
     vi.mocked(answerRequest).mockRejectedValueOnce(
       new Error("Broker unavailable"),

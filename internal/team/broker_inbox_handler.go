@@ -104,6 +104,9 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			case "block":
 				b.handleTaskBlock(w, r, actor, taskID)
 				return
+			case "resume":
+				b.handleTaskResume(w, r, actor, taskID)
+				return
 			case "decision":
 				b.handleTaskDecision(w, r, actor, taskID)
 				return
@@ -225,6 +228,73 @@ func (b *Broker) handleTaskBlock(w http.ResponseWriter, r *http.Request, actor r
 		return
 	}
 	writeJSON(w, http.StatusOK, task)
+}
+
+// handleTaskResume serves POST /tasks/{id}/resume. Body shape:
+//
+//	{"actor": "<slug>", "reason": "<text>"}
+//
+// Manually clears a blocked_on_pr_merge (or otherwise paused) task so
+// the owner agent picks it up again. Wraps Broker.ResumeTask, which the
+// watchdog scheduler also calls on retry. Humans with reviewer access on
+// the task may resume it; everyone else gets 403. The action is
+// idempotent — a re-issued resume on an already-running task returns
+// 200 with changed=false in the response body.
+func (b *Broker) handleTaskResume(w http.ResponseWriter, r *http.Request, actor requestActor, id string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task id required"})
+		return
+	}
+	var body struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	// Body is optional; ignore decode errors so an empty-POST resume
+	// from a UI button without a JSON payload still works.
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	// Auth: snapshot reviewers under the lock so the check races no
+	// reviewer-routing write. Broker token bypasses the reviewer set.
+	b.mu.Lock()
+	task := b.findTaskByIDLocked(id)
+	if task == nil {
+		b.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	reviewers := append([]string(nil), task.Reviewers...)
+	b.mu.Unlock()
+	if !taskAccessAllowed(actor, reviewers) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+
+	actorSlug := strings.TrimSpace(body.Actor)
+	if actorSlug == "" {
+		actorSlug = strings.TrimSpace(actor.Slug)
+	}
+	if actorSlug == "" {
+		actorSlug = "human"
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if reason == "" {
+		reason = "Manual resume from inbox."
+	}
+	resumed, changed, err := b.ResumeTask(id, actorSlug, reason)
+	if err != nil {
+		log.Printf("broker: resume task %q: %v", id, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"task":    resumed,
+		"changed": changed,
+	})
 }
 
 // handleTaskDecision serves POST /tasks/{id}/decision. Body shape:

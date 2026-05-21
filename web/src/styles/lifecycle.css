@@ -619,9 +619,9 @@ html[data-theme="noir-gold"] {
 
 .inbox-mail-row {
   display: grid;
-  grid-template-columns: 3px 1fr;
-  gap: 14px;
-  padding: 12px 16px 12px 0;
+  grid-template-columns: 12px 3px 1fr;
+  gap: 6px 14px;
+  padding: 12px 16px 12px 4px;
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--border);
@@ -632,6 +632,26 @@ html[data-theme="noir-gold"] {
   width: 100%;
   color: inherit;
   transition: background var(--duration-base);
+}
+
+.inbox-mail-row-unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cyan-500);
+  align-self: center;
+  justify-self: center;
+  visibility: hidden;
+}
+
+.inbox-mail-row-unread-dot[data-visible="true"] {
+  visibility: visible;
+}
+
+.inbox-mail-row[data-unread="true"] .inbox-mail-row-from,
+.inbox-mail-row[data-unread="true"] .inbox-mail-row-subject {
+  font-weight: 700;
+  color: var(--text);
 }
 
 .inbox-mail-row:hover {

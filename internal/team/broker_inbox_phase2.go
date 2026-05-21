@@ -56,12 +56,22 @@ type InboxItem struct {
 	Title     string        `json:"title"`
 	Channel   string        `json:"channel,omitempty"`
 	CreatedAt string        `json:"createdAt,omitempty"`
-	ElapsedMs int64         `json:"elapsedMs,omitempty"`
+	// UpdatedAt is the RFC3339 timestamp of the most recent activity
+	// on the underlying artifact. Mirrors InboxRow.UpdatedAt for tasks;
+	// for requests/reviews the row falls back to the artifact's own
+	// last-mutation timestamp. The unread cursor compares against this.
+	UpdatedAt string `json:"updatedAt,omitempty"`
+	ElapsedMs int64  `json:"elapsedMs,omitempty"`
 	// AgentSlug is the agent who owns / sent / submitted this item.
 	// Phase 3 uses this to group items into per-agent threads. Empty
 	// when the item has no agent attribution (e.g. system-generated
 	// tasks the harness can't trace back to a single agent).
 	AgentSlug string `json:"agentSlug,omitempty"`
+	// IsUnread is true when the item's latest activity post-dates the
+	// caller's InboxCursor.LastSeenAt (or the cursor is zero). Computed
+	// by the /inbox/items handler from the caller's cursor; the broker
+	// inbox helpers never set this field.
+	IsUnread bool `json:"isUnread,omitempty"`
 	// Per-kind enrichments. Populated only when Kind matches.
 	TaskRow *InboxRow    `json:"task,omitempty"`
 	Request *RequestPeek `json:"request,omitempty"`
@@ -249,6 +259,7 @@ func (b *Broker) tasksForInbox(actor requestActor) []InboxItem {
 			Title:     row.Title,
 			Channel:   task.Channel,
 			CreatedAt: task.CreatedAt,
+			UpdatedAt: task.UpdatedAt,
 			ElapsedMs: row.ElapsedMs,
 			AgentSlug: normalizeReviewerSlug(task.Owner),
 			TaskRow:   &row,
@@ -289,12 +300,17 @@ func (b *Broker) requestsForInbox(actor requestActor) []InboxItem {
 		if title == "" {
 			title = strings.TrimSpace(req.Question)
 		}
+		updatedAt := strings.TrimSpace(req.UpdatedAt)
+		if updatedAt == "" {
+			updatedAt = req.CreatedAt
+		}
 		out = append(out, InboxItem{
 			Kind:      InboxItemKindRequest,
 			RequestID: req.ID,
 			Title:     title,
 			Channel:   req.Channel,
 			CreatedAt: req.CreatedAt,
+			UpdatedAt: updatedAt,
 			AgentSlug: normalizeReviewerSlug(req.From),
 			Request: &RequestPeek{
 				Kind:     req.Kind,
@@ -348,11 +364,16 @@ func (b *Broker) reviewsForInbox(actor requestActor) []InboxItem {
 		if t := strings.TrimSpace(p.Rationale); t != "" {
 			title = t
 		}
+		updatedAt := p.CreatedAt.UTC().Format(time.RFC3339)
+		if !p.UpdatedAt.IsZero() {
+			updatedAt = p.UpdatedAt.UTC().Format(time.RFC3339)
+		}
 		out = append(out, InboxItem{
 			Kind:      InboxItemKindReview,
 			ReviewID:  p.ID,
 			Title:     title,
 			CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339),
+			UpdatedAt: updatedAt,
 			AgentSlug: normalizeReviewerSlug(p.SourceSlug),
 			Review: &ReviewPeek{
 				State:        string(p.State),
@@ -441,4 +462,20 @@ func (b *Broker) InboxCursor(humanSlug string) InboxCursor {
 // equality checks across the inbox subsystem stay consistent.
 func normalizeInboxHumanSlug(slug string) string {
 	return strings.ToLower(strings.TrimSpace(slug))
+}
+
+// inboxCursorKeyForActor returns the per-actor key used to look up and
+// write the inbox cursor. Broker/owner tokens carry no Slug field, so
+// without a synthetic key the single most common caller (a local user
+// running `wuphf` against their own broker) would never accumulate any
+// read state. Map the broker actor to the reserved "__owner__" key so
+// the owner gets unread tracking on equal terms with tunnel-human
+// sessions.
+const inboxCursorOwnerKey = "__owner__"
+
+func inboxCursorKeyForActor(actor requestActor) string {
+	if actor.Kind == requestActorKindBroker {
+		return inboxCursorOwnerKey
+	}
+	return normalizeInboxHumanSlug(actor.Slug)
 }

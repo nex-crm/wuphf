@@ -15,7 +15,11 @@ import {
   answerRequest,
   getRequests,
 } from "../../api/client";
-import { getInboxItems, type UnifiedInboxResponse } from "../../api/lifecycle";
+import {
+  getInboxItems,
+  postInboxCursor,
+  type UnifiedInboxResponse,
+} from "../../api/lifecycle";
 import {
   fetchReviews,
   type ReviewItem,
@@ -43,10 +47,17 @@ interface DecisionInboxProps {
   onOpenItem?: (item: InboxItem) => void;
 }
 
-type InboxFilter = "all" | "decisions" | "requests" | "reviews" | "approved";
+type InboxFilter =
+  | "all"
+  | "unread"
+  | "decisions"
+  | "requests"
+  | "reviews"
+  | "approved";
 
 const FILTER_ORDER: readonly InboxFilter[] = [
   "all",
+  "unread",
   "decisions",
   "requests",
   "reviews",
@@ -55,6 +66,7 @@ const FILTER_ORDER: readonly InboxFilter[] = [
 
 const FILTER_LABEL: Record<InboxFilter, string> = {
   all: "All",
+  unread: "Unread",
   decisions: "Decisions",
   requests: "Requests",
   reviews: "Reviews",
@@ -70,6 +82,7 @@ const DECISION_STATES = new Set([
 
 function itemMatchesFilter(item: InboxItem, filter: InboxFilter): boolean {
   if (filter === "all") return true;
+  if (filter === "unread") return item.isUnread === true;
   if (filter === "requests") return item.kind === "request";
   if (filter === "reviews") return item.kind === "review";
   if (item.kind !== "task") return false;
@@ -116,6 +129,7 @@ export function DecisionInbox({
           running: 0,
           blocked: 0,
           approvedToday: 0,
+          unread: initialItems.filter((it) => it.isUnread === true).length,
         },
         refreshedAt: new Date().toISOString(),
       }
@@ -152,6 +166,7 @@ export function DecisionInbox({
   const filterCounts = useMemo(() => {
     const counts: Record<InboxFilter, number> = {
       all: allItems.length,
+      unread: 0,
       decisions: 0,
       requests: 0,
       reviews: 0,
@@ -291,6 +306,13 @@ export function DecisionInbox({
                   onSelect={(item) => {
                     setSelectedKey(itemKey(item));
                     onOpenItem?.(item);
+                    // Mark-as-read on open. The cursor is per-actor on
+                    // the broker so the next /inbox/items refresh will
+                    // drop the IsUnread flag for everything older than
+                    // now. Best-effort — the helper swallows errors.
+                    if (item.isUnread === true) {
+                      void postInboxCursor();
+                    }
                   }}
                 />
               </li>
@@ -380,17 +402,24 @@ function MailRow({
   const elapsed = formatElapsed(item.createdAt);
   const kindLabel = kindShortLabel(item.kind);
 
+  const isUnread = item.isUnread === true;
   return (
     <button
       type="button"
       className="inbox-mail-row"
       data-selected={isSelected ? "true" : "false"}
       data-kind={item.kind}
+      data-unread={isUnread ? "true" : "false"}
       tabIndex={tabIndex}
       onClick={() => onSelect(item)}
       onFocus={() => onSelect(item)}
-      aria-label={`Open ${kindLabel} from ${from}: ${subject}`}
+      aria-label={`${isUnread ? "Unread " : ""}Open ${kindLabel} from ${from}: ${subject}`}
     >
+      <span
+        className="inbox-mail-row-unread-dot"
+        aria-hidden="true"
+        data-visible={isUnread ? "true" : "false"}
+      />
       <span className="inbox-mail-row-rail" aria-hidden="true" />
       <span className="inbox-mail-row-main">
         <span className="inbox-mail-row-line">
@@ -546,7 +575,7 @@ function stateExplainer(state: string): string {
     case "review":
       return "Reviewers are grading the work. Decision details surface once enough grades land.";
     case "blocked_on_pr_merge":
-      return "Waiting on an upstream PR merge before this task can land.";
+      return "The owner agent is paused. Resume to retry, or reject to drop the task.";
     case "changes_requested":
       return "You asked for changes. The owner agent is iterating.";
     case "approved":
