@@ -43,10 +43,16 @@ type Completer interface {
 type CompanySeedInput struct {
 	WebsiteURL string
 	FilePaths  []string
-	OwnerName  string
-	OwnerRole  string
-	Completer  Completer
-	WikiRoot   string
+	// CompanyName is the user-supplied company name from onboarding
+	// (FormAnswers.CompanyName / config.CompanyName). Used to personalise
+	// the placeholder company.md so the seeded team/about/README links never
+	// dangle on day one even before the LLM extraction (which can fail or
+	// be skipped) has populated a real CompanyProfile. May be empty.
+	CompanyName string
+	OwnerName   string
+	OwnerRole   string
+	Completer   Completer
+	WikiRoot    string
 }
 
 // CompanySeedResult summarizes what SeedCompanyContext did.
@@ -129,6 +135,25 @@ func SeedCompanyContext(ctx context.Context, input CompanySeedInput) (*CompanySe
 	readmePath := filepath.Join(input.WikiRoot, "team", "about", "README.md")
 	if _, err := os.Stat(readmePath); os.IsNotExist(err) {
 		if err := atomicWrite(input.WikiRoot, "team/about/README.md", []byte(aboutReadmeContent)); err != nil {
+			return nil, err
+		}
+	}
+
+	// 4a. Seed placeholder company.md and owner.md so the links the README
+	// just promised always resolve. Both files are written skip-if-exists so
+	// a real article populated by a prior seed (or by steps 5 and 7 below in
+	// this run) is never overwritten. See issue #946.
+	companyPath := filepath.Join(input.WikiRoot, "team", "about", "company.md")
+	if _, err := os.Stat(companyPath); os.IsNotExist(err) {
+		if err := atomicWrite(input.WikiRoot, "team/about/company.md",
+			[]byte(buildCompanyPlaceholderMD(input.CompanyName))); err != nil {
+			return nil, err
+		}
+	}
+	ownerPath := filepath.Join(input.WikiRoot, "team", "about", "owner.md")
+	if _, err := os.Stat(ownerPath); os.IsNotExist(err) {
+		if err := atomicWrite(input.WikiRoot, "team/about/owner.md",
+			[]byte(buildOwnerPlaceholderMD(input.OwnerName, input.OwnerRole))); err != nil {
 			return nil, err
 		}
 	}
@@ -418,6 +443,44 @@ func buildCompanyMD(profile CompanyProfile) string {
 			}
 		}
 	}
+	return sb.String()
+}
+
+// buildCompanyPlaceholderMD renders the initial company.md body written when
+// the team/about/ section is first seeded, so the link from README.md always
+// resolves even before LLM extraction has populated a real CompanyProfile.
+// It is overwritten by buildCompanyMD as soon as a real profile is available.
+//
+// The TODO comment is intentional — it tells the next human or agent reader
+// that this file is a stub waiting to be filled in. See issue #946.
+func buildCompanyPlaceholderMD(name string) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "This company"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", displayName))
+	sb.WriteString("<!-- TODO: replace this placeholder with a short description of what the company does, who it serves, and what the current focus is. The CEO-onboarding scan or any agent with `wiki.write` permission can rewrite this file. -->\n\n")
+	sb.WriteString("This article will hold a short description of what the company does, who it serves, and what the current focus is. It is a placeholder so the link from `README.md` resolves on day one; the scan or any agent can rewrite it with the real profile.\n")
+	return sb.String()
+}
+
+// buildOwnerPlaceholderMD renders the initial owner.md body written when the
+// team/about/ section is first seeded. Mirrors buildCompanyPlaceholderMD: it
+// exists so the link from README.md never dangles, and is overwritten by
+// buildOwnerMD once a real name or role is collected.
+func buildOwnerPlaceholderMD(name, role string) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "Workspace owner"
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", displayName))
+	if r := strings.TrimSpace(role); r != "" {
+		sb.WriteString(fmt.Sprintf("**Role:** %s\n\n", r))
+	}
+	sb.WriteString("<!-- TODO: replace this placeholder with a short profile of the person running this workspace — name, role, and how agents should escalate to them. -->\n\n")
+	sb.WriteString("This article will hold a short profile of the person running this workspace and how agents should escalate to them. It is a placeholder so the link from `README.md` resolves on day one.\n")
 	return sb.String()
 }
 

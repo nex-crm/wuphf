@@ -36,7 +36,12 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
 import { useAppStore } from "../stores/app";
-import { type AppPanelId, isAppPanelId } from "./routeRegistry";
+import {
+  type AppPanelId,
+  type FirstClassAppId,
+  isAppPanelId,
+  isFirstClassAppId,
+} from "./routeRegistry";
 import {
   type CurrentRoute,
   useChannelSlug,
@@ -327,6 +332,26 @@ interface WikiSurfaceProps {
   route: CurrentRoute;
 }
 
+/**
+ * When a wiki splat path collides with a sibling Wiki-surface tab
+ * (`/wiki/notebooks`, `/wiki/reviews`), redirect to the canonical
+ * top-level route instead of trying to load a non-existent article.
+ * `/wiki/notebooks` used to leave the right pane stuck on
+ * "Loading article…" because fetchArticle would 404 across all
+ * candidate paths and the loader never reconciled — see issue #935.
+ */
+function wikiTabRedirectTarget(
+  articlePath: string | null,
+): "/notebooks" | "/reviews" | null {
+  if (articlePath === "notebooks" || articlePath === "notebooks/") {
+    return "/notebooks";
+  }
+  if (articlePath === "reviews" || articlePath === "reviews/") {
+    return "/reviews";
+  }
+  return null;
+}
+
 function WikiSurface({ current, route }: WikiSurfaceProps) {
   // Pam's onActionDone bumps this; Wiki re-fetches article + history when
   // the prop changes. Lifted to the surface so Pam (in the tab bar) can
@@ -334,6 +359,29 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
   const [articleRefreshNonce, setArticleRefreshNonce] = useState(0);
 
   const articlePath = route.kind === "wiki-article" ? route.articlePath : null;
+  const tabRedirect = wikiTabRedirectTarget(articlePath);
+  useEffect(() => {
+    if (!tabRedirect) return;
+    void router.navigate({ to: tabRedirect, replace: true });
+  }, [tabRedirect]);
+  if (tabRedirect) {
+    return (
+      <div className="wiki-shell" data-testid="wiki-tab-redirect">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flex: 1,
+            color: "var(--text-tertiary)",
+            fontSize: 14,
+          }}
+        >
+          Redirecting…
+        </div>
+      </div>
+    );
+  }
   const pamArticlePath = current === "wiki" ? articlePath : null;
   const notebookAgentSlug =
     route.kind === "notebook-agent" || route.kind === "notebook-entry"
@@ -432,6 +480,44 @@ function IssueDetailRedirect({ issueId }: { issueId: string }) {
         }}
       >
         Redirecting to issue…
+      </div>
+    </div>
+  );
+}
+
+/**
+ * FirstClassAppRedirect navigates the user from a `/apps/$id` URL whose
+ * `$id` is a first-class app (wiki, inbox) to that app's canonical
+ * dedicated route. Users who type a sidebar-label-style URL by hand
+ * (e.g. `/#/apps/wiki`) used to hit "Page not found" because first-class
+ * apps live at `/wiki` and `/inbox`, not under `/apps`. Mirrors
+ * `InboxRedirect` and `IssuesRedirect` so the route ↔ sidebar mapping is
+ * forgiving without the route registry sprouting alias entries.
+ */
+function FirstClassAppRedirect({ appId }: { appId: FirstClassAppId }) {
+  useEffect(() => {
+    if (appId === "wiki") {
+      void router.navigate({ to: "/wiki", replace: true });
+    } else {
+      void router.navigate({ to: "/inbox", replace: true });
+    }
+  }, [appId]);
+  return (
+    <div
+      className="app-panel active"
+      data-testid={`legacy-redirect-first-class-${appId}`}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flex: 1,
+          color: "var(--text-tertiary)",
+          fontSize: 14,
+        }}
+      >
+        Redirecting…
       </div>
     </div>
   );
@@ -544,6 +630,14 @@ function MainContent() {
         <DMView agentSlug={route.agentSlug} channelSlug={route.channelSlug} />
       );
     case "app":
+      // `/apps/wiki` and `/apps/inbox` are not app-panel routes — the
+      // sidebar navigates to `/wiki` and `/inbox` directly — but users
+      // who type a sidebar-label-style URL by hand should not hit
+      // "Page not found". Forward them to the canonical first-class
+      // route instead.
+      if (isFirstClassAppId(route.appId)) {
+        return <FirstClassAppRedirect appId={route.appId} />;
+      }
       if (!isAppPanelId(route.appId)) {
         return <UnknownAppPanel appId={route.appId} />;
       }

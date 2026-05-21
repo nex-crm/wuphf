@@ -140,6 +140,68 @@ func TestMigrateToSymmetricAbortsWhenBrokerRunning(t *testing.T) {
 	}
 }
 
+// TestMigrateRespectsConfiguredBrokerPort guards against regressing nex-crm/wuphf#947
+// — when WUPHF_BROKER_PORT points at a non-default port and nothing is
+// listening on either that port or the legacy default, the probe must not
+// fire a false positive.
+func TestMigrateRespectsConfiguredBrokerPort(t *testing.T) {
+	home := withMigrationHome(t)
+	t.Setenv("WUPHF_BROKER_PORT", "7901")
+
+	// Track which ports the probe was asked about so we can assert it read
+	// from the configured-port source instead of a hard-coded 7890.
+	var probed []int
+	orig := brokerRunningFn
+	brokerRunningFn = func(port int) bool {
+		probed = append(probed, port)
+		return false
+	}
+	t.Cleanup(func() { brokerRunningFn = orig })
+
+	oldWuphf := filepath.Join(home, ".wuphf")
+	if err := os.MkdirAll(oldWuphf, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	if err := MigrateToSymmetric(); err != nil {
+		t.Fatalf("MigrateToSymmetric with free configured port: %v", err)
+	}
+
+	if len(probed) == 0 {
+		t.Fatal("expected probe to be invoked at least once")
+	}
+	if probed[0] != 7901 {
+		t.Errorf("probe[0] = %d; want 7901 (configured port via WUPHF_BROKER_PORT)", probed[0])
+	}
+
+	// New path should exist — migration must have run, not aborted with the
+	// false-positive "broker is running" warning.
+	newPath := filepath.Join(home, ".wuphf-spaces", "main", ".wuphf")
+	if _, err := os.Stat(newPath); err != nil {
+		t.Errorf("new path %s missing after migration: %v", newPath, err)
+	}
+}
+
+// TestMigrateProbesLegacyPortAsSafetyNet ensures that when the launching
+// binary uses a non-default port but a legacy broker is still squatting on
+// 7890 against the same ~/.wuphf tree, the migration still aborts. Otherwise
+// the rename would corrupt the legacy broker's state.
+func TestMigrateProbesLegacyPortAsSafetyNet(t *testing.T) {
+	withMigrationHome(t)
+	t.Setenv("WUPHF_BROKER_PORT", "7901")
+
+	orig := brokerRunningFn
+	brokerRunningFn = func(port int) bool {
+		return port == legacyBrokerPort
+	}
+	t.Cleanup(func() { brokerRunningFn = orig })
+
+	err := MigrateToSymmetric()
+	if err == nil {
+		t.Fatal("expected error when legacy-port broker is running, even with non-default configured port")
+	}
+}
+
 func TestMigrateDoesNotRenameSymlink(t *testing.T) {
 	home := withMigrationHome(t)
 

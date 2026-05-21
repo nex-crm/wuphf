@@ -4,8 +4,10 @@
  * The wizard renders outside the office Shell. Pins the structural
  * contract:
  *   - data-phase reflects the current onboarding phase
- *   - phase labels read like a wizard ("Step N of 5 · …") not raw enum
- *     names
+ *   - phase labels read as short human beats ("Office name", "What you
+ *     do", "Pick a starter"), never raw enum names. No step counter
+ *     ("Step N of M") — the scratch path skips phases, so a fixed
+ *     denominator would lie (#939).
  *   - InterviewBar mounts inside the footer so chip / form-field cards
  *     surface as the input zone
  *   - When there's no pending suggestion, a hint banner appears in place
@@ -73,10 +75,35 @@ describe("OnboardingChat", () => {
     expect(screen.getByTestId("interview-bar")).toBeDefined();
   });
 
-  it("translates phase enum into a wizard-style step label", async () => {
+  it("translates phase enum into a short human label, not the raw enum", async () => {
     getMock.mockResolvedValue({ phase: "blueprint", pending_suggestion: null });
     render(<OnboardingChat />, { wrapper });
-    await waitFor(() => expect(screen.getByText(/Step 3 of 5/)).toBeDefined());
+    await waitFor(() =>
+      expect(screen.getByText(/Pick a starter/i)).toBeDefined(),
+    );
+    // Guard against regressing to the inconsistent step counter format.
+    expect(screen.queryByText(/Step \d of \d/)).toBeNull();
+  });
+
+  it("labels the previously-uncovered website phase", async () => {
+    getMock.mockResolvedValue({ phase: "website", pending_suggestion: null });
+    render(<OnboardingChat />, { wrapper });
+    await waitFor(() => expect(screen.getByText(/^Website$/)).toBeDefined());
+  });
+
+  it("labels the previously-uncovered scan phase", async () => {
+    getMock.mockResolvedValue({ phase: "scan", pending_suggestion: null });
+    render(<OnboardingChat />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText(/Scanning your site/i)).toBeDefined(),
+    );
+  });
+
+  it("labels the identity phase as 'What you do', not 'Who you are'", async () => {
+    getMock.mockResolvedValue({ phase: "identity", pending_suggestion: null });
+    render(<OnboardingChat />, { wrapper });
+    await waitFor(() => expect(screen.getByText(/What you do/i)).toBeDefined());
+    expect(screen.queryByText(/Who you are/i)).toBeNull();
   });
 
   it("shows a hint when no pending suggestion is present", async () => {

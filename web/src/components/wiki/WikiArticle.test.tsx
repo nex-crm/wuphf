@@ -200,6 +200,85 @@ describe("<WikiArticle content>", () => {
     await waitFor(() =>
       expect(screen.getByText(/network down/)).toBeInTheDocument(),
     );
+    // The error state must expose a retry affordance so the user is not
+    // stuck on a dead end if the broker recovers.
+    expect(
+      screen.getByRole("button", { name: /retry loading article/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("<WikiArticle loader timeout and retry>", () => {
+  it("transitions Loading article… to an error+retry state on timeout and retries on click", async () => {
+    // Arrange — first call hangs forever to simulate a stalled broker.
+    type Resolve = (v: api.WikiArticle) => void;
+    let firstResolve: Resolve | null = null;
+    const fetchSpy = vi.spyOn(api, "fetchArticle");
+    fetchSpy.mockImplementationOnce(
+      () =>
+        new Promise<api.WikiArticle>((r) => {
+          firstResolve = r as Resolve;
+        }),
+    );
+    // Second call (after Retry) resolves successfully.
+    fetchSpy.mockResolvedValueOnce({
+      path: "team/about/README.md",
+      title: "About",
+      content: "Body after retry.",
+      last_edited_by: "pm",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["pm"],
+      backlinks: [],
+      word_count: 3,
+      categories: [],
+    });
+
+    vi.useFakeTimers();
+    try {
+      render(
+        <WikiArticle
+          path="team/about/README.md"
+          catalog={[]}
+          onNavigate={() => {}}
+        />,
+      );
+      expect(screen.getByText(/Loading article/i)).toBeInTheDocument();
+
+      // Advance past the 5s timeout — loader should flip to the error state.
+      await vi.advanceTimersByTimeAsync(5_001);
+      expect(
+        screen.getByText(/Still waiting on the broker/i),
+      ).toBeInTheDocument();
+      const retry = screen.getByRole("button", {
+        name: /retry loading article/i,
+      });
+      expect(retry).toBeInTheDocument();
+
+      // Click Retry — the second fetch resolves and the article renders.
+      retry.click();
+      // Release the dangling first promise so it cannot stomp later state.
+      const releaseFirst = firstResolve as Resolve | null;
+      releaseFirst?.({
+        path: "team/about/README.md",
+        title: "About",
+        content: "stale",
+        last_edited_by: "pm",
+        last_edited_ts: new Date().toISOString(),
+        revisions: 1,
+        contributors: ["pm"],
+        backlinks: [],
+        word_count: 1,
+        categories: [],
+      });
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() =>
+      expect(screen.getByText(/Body after retry/)).toBeInTheDocument(),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("shows a loading state before the fetch resolves", async () => {
