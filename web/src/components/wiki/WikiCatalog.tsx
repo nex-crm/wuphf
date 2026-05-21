@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { WikiCatalogEntry } from "../../api/wiki";
-import { formatRelativeTime } from "../../lib/format";
+import { formatRelativeTime, pluralize } from "../../lib/format";
 import { resolveGroupOrder } from "../../lib/groupOrder";
 import NewArticleModal from "./NewArticleModal";
 import PixelAvatar from "./PixelAvatar";
@@ -45,7 +45,7 @@ export default function WikiCatalog({
   const stats = useMemo(
     () =>
       [
-        `${articlesCount ?? catalog.length} articles`,
+        `${articlesCount ?? catalog.length} ${pluralize(articlesCount ?? catalog.length, "article")}`,
         typeof commitsCount === "number" ? `${commitsCount} commits` : null,
         typeof agentsCount === "number"
           ? `${agentsCount} agents writing`
