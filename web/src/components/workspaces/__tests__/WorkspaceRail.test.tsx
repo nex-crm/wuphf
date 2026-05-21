@@ -124,30 +124,41 @@ describe("<WorkspaceRail>", () => {
     vi.clearAllMocks();
   });
 
-  it("renders one icon per workspace and the add button", () => {
+  it("renders only the active workspace tile (others live in the switcher modal)", () => {
     setListData([mainWorkspace, demoWorkspace], "main");
     renderRail();
 
     expect(screen.getByTestId("workspace-icon-main")).toBeInTheDocument();
+    // Non-active workspaces are NOT rendered inline; they appear inside the
+    // switcher modal that opens when the active tile is clicked.
     expect(
-      screen.getByTestId("workspace-icon-demo-launch"),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("workspace-add-button")).toBeInTheDocument();
+      screen.queryByTestId("workspace-icon-demo-launch"),
+    ).not.toBeInTheDocument();
   });
 
-  it("marks the active workspace and dims paused entries", () => {
+  it("marks the active workspace tile", () => {
     setListData([mainWorkspace, demoWorkspace], "main");
     renderRail();
 
     const mainIcon = screen.getByTestId("workspace-icon-main");
-    const demoIcon = screen.getByTestId("workspace-icon-demo-launch");
-
     expect(mainIcon.getAttribute("data-active")).toBe("true");
-    expect(demoIcon.getAttribute("data-active")).toBe("false");
-    expect(demoIcon.getAttribute("data-state")).toBe("paused");
   });
 
-  it("navigates to the target broker URL on click for non-active running workspace", () => {
+  it("clicking the active tile opens the switcher modal listing other workspaces", () => {
+    setListData([mainWorkspace, demoWorkspace], "main");
+    renderRail();
+
+    fireEvent.click(screen.getByTestId("workspace-icon-main"));
+
+    expect(
+      screen.getByTestId("workspace-switcher-item-demo-launch"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("workspace-switcher-create"),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking a running workspace in the switcher navigates to its broker URL", () => {
     const running: Workspace = {
       ...demoWorkspace,
       name: "side-project",
@@ -158,16 +169,20 @@ describe("<WorkspaceRail>", () => {
     const navigate = vi.fn();
     renderRail(navigate);
 
-    fireEvent.click(screen.getByTestId("workspace-icon-side-project"));
+    fireEvent.click(screen.getByTestId("workspace-icon-main"));
+    fireEvent.click(screen.getByTestId("workspace-switcher-item-side-project"));
 
     expect(navigate).toHaveBeenCalledWith("http://localhost:7912/");
   });
 
-  it("opens a Resume modal when clicking a paused workspace", () => {
+  it("clicking a paused workspace in the switcher opens the Resume modal", () => {
     setListData([mainWorkspace, demoWorkspace], "main");
     renderRail();
 
-    fireEvent.click(screen.getByTestId("workspace-icon-demo-launch"));
+    fireEvent.click(screen.getByTestId("workspace-icon-main"));
+    fireEvent.click(
+      screen.getByTestId("workspace-switcher-item-demo-launch"),
+    );
 
     expect(screen.getByTestId("workspace-resume-modal")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-resume-confirm")).toBeInTheDocument();
@@ -178,18 +193,20 @@ describe("<WorkspaceRail>", () => {
     const { resumeMutate } = setMutationStubs();
     renderRail();
 
-    fireEvent.click(screen.getByTestId("workspace-icon-demo-launch"));
+    fireEvent.click(screen.getByTestId("workspace-icon-main"));
+    fireEvent.click(
+      screen.getByTestId("workspace-switcher-item-demo-launch"),
+    );
     fireEvent.click(screen.getByTestId("workspace-resume-confirm"));
 
     expect(resumeMutate).toHaveBeenCalledWith({ name: "demo-launch" });
   });
 
-  it("right-click opens a kebab menu with workspace lifecycle actions", () => {
+  it("right-click on the active tile opens the kebab menu with lifecycle actions", () => {
     setListData([mainWorkspace, demoWorkspace], "main");
     renderRail();
 
-    const mainIcon = screen.getByTestId("workspace-icon-main");
-    fireEvent.contextMenu(mainIcon);
+    fireEvent.contextMenu(screen.getByTestId("workspace-icon-main"));
 
     const menu = screen.getByTestId("workspace-menu-main");
     expect(menu).toBeInTheDocument();
@@ -198,99 +215,113 @@ describe("<WorkspaceRail>", () => {
     expect(within(menu).getByText("Shred…")).toBeInTheDocument();
   });
 
-  it("Resume entry appears in kebab for paused workspaces only", () => {
+  it("kebab button on a switcher row opens the kebab without closing the modal", () => {
     setListData([mainWorkspace, demoWorkspace], "main");
     renderRail();
 
-    fireEvent.contextMenu(screen.getByTestId("workspace-icon-demo-launch"));
+    fireEvent.click(screen.getByTestId("workspace-icon-main"));
+    fireEvent.click(screen.getByTestId("workspace-switcher-menu-demo-launch"));
+
+    // Kebab menu visible…
+    expect(
+      screen.getByTestId("workspace-menu-demo-launch"),
+    ).toBeInTheDocument();
+    // …and the switcher modal is still mounted underneath.
+    expect(
+      screen.getByTestId("workspace-switcher-item-demo-launch"),
+    ).toBeInTheDocument();
+  });
+
+  it("Resume entry appears in the kebab for paused workspaces only", () => {
+    setListData([mainWorkspace, demoWorkspace], "main");
+    renderRail();
+
+    fireEvent.click(screen.getByTestId("workspace-icon-main"));
+    fireEvent.click(screen.getByTestId("workspace-switcher-menu-demo-launch"));
+
     const menu = screen.getByTestId("workspace-menu-demo-launch");
     expect(within(menu).getByText("Resume")).toBeInTheDocument();
     expect(within(menu).queryByText("Pause")).toBeNull();
   });
 
-  it("shows the create modal when clicking the add button", () => {
+  it("shows the create modal when clicking the New workspace row in the switcher", () => {
     setListData([mainWorkspace], "main");
     renderRail();
 
-    fireEvent.click(screen.getByTestId("workspace-add-button"));
+    fireEvent.click(screen.getByTestId("workspace-icon-main"));
+    fireEvent.click(screen.getByTestId("workspace-switcher-create"));
 
     expect(screen.getByTestId("create-modal-mock")).toBeInTheDocument();
   });
 
-  it("renders a tooltip on hover with workspace metadata", () => {
-    setListData([mainWorkspace, demoWorkspace], "main");
+  it("renders a tooltip on hover with active workspace metadata", () => {
+    setListData([mainWorkspace], "main");
     renderRail();
 
-    const demoIcon = screen.getByTestId("workspace-icon-demo-launch");
-    fireEvent.mouseEnter(demoIcon.parentElement as Element);
+    const tile = screen.getByTestId("workspace-icon-main");
+    fireEvent.mouseEnter(tile.parentElement as Element);
 
     const tooltip = screen.getByRole("tooltip");
-    // company_name shown as primary label; slug shown below when different
-    expect(tooltip.textContent).toContain("Acme Demo");
-    expect(tooltip.textContent).toContain("demo-launch");
-    expect(tooltip.textContent).toContain("paused");
+    expect(tooltip.textContent).toContain("Nex");
+    expect(tooltip.textContent).toContain("main");
+    expect(tooltip.textContent).toContain("running");
   });
 
   it("falls back to the workspace name when company_name is missing", () => {
     const slugOnlyWorkspace: Workspace = {
-      ...demoWorkspace,
+      ...mainWorkspace,
       company_name: "",
-      state: "running",
     };
-    setListData([mainWorkspace, slugOnlyWorkspace], "main");
+    setListData([slugOnlyWorkspace], "main");
     renderRail();
 
-    const icon = screen.getByTestId("workspace-icon-demo-launch");
-    fireEvent.mouseEnter(icon.parentElement as Element);
+    const tile = screen.getByTestId("workspace-icon-main");
+    fireEvent.mouseEnter(tile.parentElement as Element);
 
     const tooltip = screen.getByRole("tooltip");
-    expect(tooltip.textContent).toContain("demo-launch");
-    expect(tooltip.textContent).not.toContain("Acme Demo");
-    expect(tooltip.textContent).toContain("running");
+    expect(tooltip.textContent).toContain("main");
+    expect(tooltip.textContent).not.toContain("Nex");
   });
 
   it("falls back to the workspace name when company_name is whitespace", () => {
     const whitespaceWorkspace: Workspace = {
-      ...demoWorkspace,
+      ...mainWorkspace,
       company_name: "   ",
-      state: "running",
     };
-    setListData([mainWorkspace, whitespaceWorkspace], "main");
+    setListData([whitespaceWorkspace], "main");
     renderRail();
 
-    const icon = screen.getByTestId("workspace-icon-demo-launch");
-    fireEvent.mouseEnter(icon.parentElement as Element);
+    const tile = screen.getByTestId("workspace-icon-main");
+    fireEvent.mouseEnter(tile.parentElement as Element);
 
     const tooltip = screen.getByRole("tooltip");
-    expect(tooltip.textContent).toContain("demo-launch");
-    expect(tooltip.textContent).not.toContain("Acme Demo");
-    expect(tooltip.textContent).toContain("running");
+    expect(tooltip.textContent).toContain("main");
+    expect(tooltip.textContent).not.toContain("Nex");
   });
 
   it("does not duplicate the label when company_name matches name", () => {
     const sameLabelWorkspace: Workspace = {
-      ...demoWorkspace,
-      company_name: "demo-launch",
-      state: "running",
+      ...mainWorkspace,
+      company_name: "main",
     };
-    setListData([mainWorkspace, sameLabelWorkspace], "main");
+    setListData([sameLabelWorkspace], "main");
     renderRail();
 
-    const icon = screen.getByTestId("workspace-icon-demo-launch");
-    fireEvent.mouseEnter(icon.parentElement as Element);
+    const tile = screen.getByTestId("workspace-icon-main");
+    fireEvent.mouseEnter(tile.parentElement as Element);
 
     const tooltip = screen.getByRole("tooltip");
-    const matches = tooltip.textContent?.match(/demo-launch/g) ?? [];
+    const matches = tooltip.textContent?.match(/\bmain\b/g) ?? [];
     expect(matches).toHaveLength(1);
-    expect(tooltip.textContent).toContain("running");
   });
 
-  it("error-state workspaces show a notice instead of navigating", () => {
+  it("error-state workspaces in the switcher do not navigate", () => {
     setListData([mainWorkspace, errorWorkspace], "main");
     const navigate = vi.fn();
     renderRail(navigate);
 
-    fireEvent.click(screen.getByTestId("workspace-icon-broken"));
+    fireEvent.click(screen.getByTestId("workspace-icon-main"));
+    fireEvent.click(screen.getByTestId("workspace-switcher-item-broken"));
 
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -299,7 +330,8 @@ describe("<WorkspaceRail>", () => {
     setListData([mainWorkspace, demoWorkspace], "main");
     renderRail();
 
-    fireEvent.contextMenu(screen.getByTestId("workspace-icon-demo-launch"));
+    fireEvent.click(screen.getByTestId("workspace-icon-main"));
+    fireEvent.click(screen.getByTestId("workspace-switcher-menu-demo-launch"));
     fireEvent.click(screen.getByTestId("workspace-menu-shred-demo-launch"));
 
     expect(screen.getByTestId("shred-confirm-submit")).toBeInTheDocument();

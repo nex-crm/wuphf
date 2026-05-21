@@ -85,32 +85,35 @@ async function fetchBrokerCommandNames(page: Page): Promise<string[]> {
 }
 
 test.describe("app route isolation", () => {
-  test("each sidebar app renders its own page", async ({ page }) => {
+  test("each app renders its own page and lights up its rail tool", async ({
+    page,
+  }) => {
     const getErrors = collectReactErrors(page);
 
     for (const appCase of APP_CASES) {
       await page.goto(`/#/apps/${appCase.app}`);
       await waitForReactMount(page);
       await expectAppRoute(page, appCase.app, appCase.content);
-      await expect(
-        page.locator(".sidebar-apps .sidebar-item.active"),
-      ).toContainText(appCase.label);
+      // Tools moved from the sidebar to the WorkspaceRail. Primary tools
+      // render inline; secondary tools live behind the More-tools
+      // popover. Both expose the same `workspace-rail-tool-<id>` test id
+      // and flip `aria-current="page"` when active.
+      const railTool = page.getByTestId(`workspace-rail-tool-${appCase.app}`);
+      await expect(railTool).toHaveAttribute("aria-current", "page");
     }
 
-    // Switch between two real sidebar apps to confirm app-route swapping
-    // still works. Tasks was retired (now redirects to /issues) so the
-    // round-trip uses Console ↔ Graph instead.
+    // Switch between two app routes via the rail to confirm app-route
+    // swapping still works end-to-end. Console and Graph are both
+    // secondary tools, so they live in the More-tools popover.
     await page.goto("/#/apps/console");
     await waitForReactMount(page);
-    await page
-      .locator(".sidebar-apps .sidebar-item", { hasText: "Graph" })
-      .click();
+    await page.getByTestId("workspace-rail-more-trigger").click();
+    await page.getByTestId("workspace-rail-tool-graph").click();
     await expectAppRoute(page, "graph", /Entity Graph/i);
     await expect(page.getByTestId("console-app")).toHaveCount(0);
 
-    await page
-      .locator(".sidebar-apps .sidebar-item", { hasText: "Console" })
-      .click();
+    await page.getByTestId("workspace-rail-more-trigger").click();
+    await page.getByTestId("workspace-rail-tool-console").click();
     await expectAppRoute(page, "console", /wuphf office|Slash/i);
     await expect(page.getByTestId("app-page-graph")).toHaveCount(0);
 

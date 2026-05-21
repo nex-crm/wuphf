@@ -193,8 +193,11 @@ test.describe("left sidebar scrolling", () => {
       await expect(
         page.locator("aside.sidebar:not(.sidebar-collapsed)"),
       ).toBeVisible();
+      // Settings is now in the WorkspaceRail footer (left of the sidebar),
+      // not the sidebar header. The sidebar header only has the Collapse
+      // button.
       await expect(
-        page.getByRole("button", { name: "Open settings" }),
+        page.getByTestId("workspace-rail-tool-settings"),
       ).toBeInViewport();
       await expect(
         page.locator(".sidebar-agents button[data-agent-slug]"),
@@ -202,8 +205,8 @@ test.describe("left sidebar scrolling", () => {
       await expect(
         page.locator(".sidebar-channels button.sidebar-item"),
       ).toHaveCount(25);
-      const appItems = page.locator(".sidebar-apps button.sidebar-item");
-      await expect(appItems.first()).toBeVisible();
+      // Tools moved to the WorkspaceRail; .sidebar-apps is gone from the
+      // sidebar entirely.
 
       await expectWheelCanReach(page, "Team", [
         page.locator('.sidebar-agents button[data-agent-slug="agent-24"]'),
@@ -213,7 +216,6 @@ test.describe("left sidebar scrolling", () => {
         page.getByRole("button", { name: "Channel 24" }),
         page.locator(".sidebar-channels .sidebar-add-btn"),
       ]);
-      await expectWheelCanReach(page, "Apps", [appItems.last()]);
 
       await expectNoReactErrors(page, getErrors, "while scrolling the sidebar");
     });
@@ -230,10 +232,9 @@ test.describe("left sidebar scrolling", () => {
 
       const scroll = page.locator(".sidebar-scroll");
       await expect(scroll).toBeVisible();
-      // Each section's title bar is the sticky chrome; we want to assert
-      // that scrolling far enough flips data-stuck on the title bar of a
-      // later section (Tools) which only pins once Channels has fully
-      // slid behind it.
+      // Each section's title bar is the sticky chrome; scrolling far
+      // enough flips data-stuck on the Channels title bar once the
+      // Agents body has scrolled out of view above it.
       const channelsTitleBar = page
         .locator(".sidebar-section", { has: page.getByText("Channels") })
         .locator(".sidebar-section-title-bar");
