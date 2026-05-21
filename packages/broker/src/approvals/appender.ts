@@ -5,6 +5,7 @@
 // updates the projection, and stores the idempotency replay row in one
 // BEGIN IMMEDIATE transaction.
 
+import type { DatabaseSync } from "node:sqlite";
 import {
   type ApprovalDecidedAuditPayload,
   type ApprovalRequest,
@@ -19,9 +20,10 @@ import {
   parseLsn,
   type ThreadId,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import type { EventLog } from "../event-log/index.ts";
+import { createTransaction } from "../internal/sqlite-transaction.ts";
+import { typed } from "../internal/typed-statement.ts";
 import type { ParsedApprovalIdempotencyKey } from "./idempotency.ts";
 import {
   type ApprovalProjection,
@@ -65,7 +67,7 @@ export interface IdempotentApprovalDecisionArgs {
 }
 
 export interface ApprovalAppender {
-  sharesProvenance(db: Database.Database, eventLog: EventLog): boolean;
+  sharesProvenance(db: DatabaseSync, eventLog: EventLog): boolean;
   requestApproval(payload: ApprovalRequestedAuditPayload): ApprovalAppendResult;
   decideApproval(payload: ApprovalDecidedAuditPayload): ApprovalAppendResult;
   requestApprovalIdempotent(args: IdempotentApprovalRequestArgs): IdempotentApprovalAppendResult;
@@ -133,7 +135,7 @@ export class ApprovalIdempotencyConflictError extends Error {
 
 interface IdempotencyRow {
   readonly statusCode: number;
-  readonly responsePayload: Buffer;
+  readonly responsePayload: Uint8Array;
   readonly createdAtLsn: number | null;
   readonly requestFingerprint: string | null;
 }
@@ -143,42 +145,49 @@ interface TokenUsageRow {
 }
 
 export function createApprovalAppender(
-  db: Database.Database,
+  db: DatabaseSync,
   eventLog: EventLog,
   projection: ApprovalProjection,
   options: ApprovalAppenderOptions = {},
 ): ApprovalAppender {
-  const tokenUsageStmt = db.prepare<[string, string], TokenUsageRow>(
+  const tokenUsageStmt = db.prepare(
     `SELECT approval_id AS approvalId
      FROM pending_approvals
      WHERE token_id = ? AND approval_id != ?
      LIMIT 1`,
   );
-  const idempotencyLookupStmt = db.prepare<[string, string], IdempotencyRow>(
+  const idempotencyLookupStmt = db.prepare(
     `SELECT status_code AS statusCode, response_payload AS responsePayload,
             created_at_lsn AS createdAtLsn, request_fingerprint AS requestFingerprint
      FROM command_idempotency
      WHERE idempotency_key = ? AND command = ?`,
   );
-  const idempotencyInsertStmt = db.prepare<
-    [string, string, number, Buffer, number | null, number, string]
+  const idempotencyInsertStmt = typed<
+    [string, string, number, Buffer, number | null, number, string],
+    never
   >(
-    `INSERT INTO command_idempotency
+    db.prepare(
+      `INSERT INTO command_idempotency
        (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms,
         request_fingerprint)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ),
   );
-  const pruneIdempotencyStmt = db.prepare<[number]>(
-    `DELETE FROM command_idempotency
+  const pruneIdempotencyStmt = typed<[number], never>(
+    db.prepare(
+      `DELETE FROM command_idempotency
      WHERE created_at_ms < ?
        AND command IN ('approval.requested', 'approval.decided')`,
+    ),
   );
   const threadRefValidator = options.threadRefValidator ?? null;
 
   const assertApprovalTokenUnused = (payload: ApprovalDecidedAuditPayload): void => {
     const suppliedApprovalToken = payload.decision === "approve" ? payload.token : undefined;
     if (suppliedApprovalToken === undefined) return;
-    const existing = tokenUsageStmt.get(suppliedApprovalToken.tokenId, payload.requestId);
+    const existing = tokenUsageStmt.get(suppliedApprovalToken.tokenId, payload.requestId) as
+      | TokenUsageRow
+      | undefined;
     if (existing !== undefined) {
       throw new ApprovalTokenAlreadyUsedError(suppliedApprovalToken.tokenId);
     }
@@ -268,13 +277,16 @@ export function createApprovalAppender(
     return { lsn: lsnFromV1Number(lsn), approval: applied.approval };
   };
 
-  const requestApprovalTransaction = db.transaction(requestApprovalInner);
-  const decideApprovalTransaction = db.transaction(decideApprovalInner);
+  const requestApprovalTransaction = createTransaction(db, requestApprovalInner);
+  const decideApprovalTransaction = createTransaction(db, decideApprovalInner);
 
-  const requestApprovalIdempotentTransaction = db.transaction(
+  const requestApprovalIdempotentTransaction = createTransaction(
+    db,
     (args: IdempotentApprovalRequestArgs): IdempotentApprovalAppendResult => {
       assertRequestFingerprint(args.requestFingerprint);
-      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
+      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command) as
+        | IdempotencyRow
+        | undefined;
       if (cached !== undefined) {
         assertIdempotencyFingerprint(cached, args.requestFingerprint);
         return idempotentReplay(cached);
@@ -300,10 +312,13 @@ export function createApprovalAppender(
     },
   );
 
-  const decideApprovalIdempotentTransaction = db.transaction(
+  const decideApprovalIdempotentTransaction = createTransaction(
+    db,
     (args: IdempotentApprovalDecisionArgs): IdempotentApprovalAppendResult => {
       assertRequestFingerprint(args.requestFingerprint);
-      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
+      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command) as
+        | IdempotencyRow
+        | undefined;
       if (cached !== undefined) {
         assertIdempotencyFingerprint(cached, args.requestFingerprint);
         return idempotentReplay(cached);
@@ -330,7 +345,7 @@ export function createApprovalAppender(
   );
 
   return {
-    sharesProvenance(candidateDb: Database.Database, candidateEventLog: EventLog): boolean {
+    sharesProvenance(candidateDb: DatabaseSync, candidateEventLog: EventLog): boolean {
       return candidateDb === db && candidateEventLog === eventLog;
     },
     requestApproval(payload: ApprovalRequestedAuditPayload): ApprovalAppendResult {
@@ -349,7 +364,7 @@ export function createApprovalAppender(
       if (!Number.isSafeInteger(cutoffMs)) {
         throw new Error("pruneIdempotencyOlderThan: cutoffMs must be a safe integer");
       }
-      return pruneIdempotencyStmt.run(cutoffMs).changes;
+      return Number(pruneIdempotencyStmt.run(cutoffMs).changes);
     },
   };
 }

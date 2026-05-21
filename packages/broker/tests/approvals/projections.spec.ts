@@ -64,9 +64,7 @@ function setupWithThreadValidator(
   for (const threadId of threadIds) {
     insertThreadProjectionRow(db, eventLog, threadId);
   }
-  const threadExistsStmt = db.prepare<[string], { readonly present: 1 }>(
-    "SELECT 1 AS present FROM threads WHERE thread_id = ?",
-  );
+  const threadExistsStmt = db.prepare("SELECT 1 AS present FROM threads WHERE thread_id = ?");
   const projection = createApprovalProjection(db);
   const appender = createApprovalAppender(db, eventLog, projection, {
     threadRefValidator: (threadId) => threadExistsStmt.get(threadId) !== undefined,
@@ -163,11 +161,11 @@ function signedApprovalTokenFixture(
 
 function eventCount(db: ReturnType<typeof openDatabase>, type: string): number {
   return (
-    db
-      .prepare<[string], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = ?",
-      )
-      .get(type)?.n ?? 0
+    (
+      db.prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = ?").get(type) as
+        | { readonly n: number }
+        | undefined
+    )?.n ?? 0
   );
 }
 
@@ -187,7 +185,7 @@ function insertThreadProjectionRow(
   threadId = THREAD_ID,
 ): void {
   const lsn = appendThreadCreatedEvent(eventLog, threadId);
-  db.prepare<[string, number, string, string], void>(
+  db.prepare(
     `INSERT INTO threads
        (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms,
         external_refs)
@@ -211,27 +209,7 @@ function appendThreadCreatedEvent(
 
 function projectionSnapshot(db: ReturnType<typeof openDatabase>): string {
   const rows = db
-    .prepare<
-      [],
-      {
-        readonly approvalId: string;
-        readonly status: string;
-        readonly headLsn: number;
-        readonly claim: string;
-        readonly scope: string;
-        readonly riskClass: string;
-        readonly threadId: string | null;
-        readonly taskId: string | null;
-        readonly receiptId: string | null;
-        readonly requestedBy: string;
-        readonly requestedAtMs: number;
-        readonly decidedBy: string | null;
-        readonly decidedAtMs: number | null;
-        readonly decision: string | null;
-        readonly token: string | null;
-        readonly tokenId: string | null;
-      }
-    >(
+    .prepare(
       `SELECT approval_id AS approvalId, status, head_lsn AS headLsn, claim, scope,
               risk_class AS riskClass, thread_id AS threadId, task_id AS taskId,
               receipt_id AS receiptId, requested_by AS requestedBy,
@@ -239,8 +217,27 @@ function projectionSnapshot(db: ReturnType<typeof openDatabase>): string {
               decided_at_ms AS decidedAtMs, decision, token, token_id AS tokenId
        FROM pending_approvals ORDER BY approval_id ASC`,
     )
-    .all();
+    .all() as unknown as readonly ApprovalProjectionSnapshotTestRow[];
   return canonicalJSON(rows);
+}
+
+interface ApprovalProjectionSnapshotTestRow {
+  readonly approvalId: string;
+  readonly status: string;
+  readonly headLsn: number;
+  readonly claim: string;
+  readonly scope: string;
+  readonly riskClass: string;
+  readonly threadId: string | null;
+  readonly taskId: string | null;
+  readonly receiptId: string | null;
+  readonly requestedBy: string;
+  readonly requestedAtMs: number;
+  readonly decidedBy: string | null;
+  readonly decidedAtMs: number | null;
+  readonly decision: string | null;
+  readonly token: string | null;
+  readonly tokenId: string | null;
 }
 
 function requestFingerprint(
@@ -442,8 +439,11 @@ describe("approval projection and appender", () => {
       expect(eventCount(db, "approval.requested")).toBe(1);
       expect(eventCount(db, "approval.decided")).toBe(1);
       expect(
-        db.prepare<[], { readonly n: number }>("SELECT COUNT(*) AS n FROM pending_approvals").get()
-          ?.n,
+        (
+          db.prepare("SELECT COUNT(*) AS n FROM pending_approvals").get() as
+            | { readonly n: number }
+            | undefined
+        )?.n,
       ).toBe(1);
     } finally {
       db.close();
@@ -489,13 +489,13 @@ describe("approval projection and appender", () => {
   it("prunes only approval command idempotency rows", () => {
     const { db, appender } = setup();
     try {
-      db.prepare<[string, string, number], void>(
+      db.prepare(
         `INSERT INTO command_idempotency
            (idempotency_key, command, status_code, response_payload, created_at_lsn,
             created_at_ms, request_fingerprint)
          VALUES (?, ?, 201, x'7B7D', NULL, ?, NULL)`,
       ).run("old-approval", "approval.requested", 1_700_000_000_000);
-      db.prepare<[string, string, number], void>(
+      db.prepare(
         `INSERT INTO command_idempotency
            (idempotency_key, command, status_code, response_payload, created_at_lsn,
             created_at_ms, request_fingerprint)
@@ -504,11 +504,9 @@ describe("approval projection and appender", () => {
 
       expect(appender.pruneIdempotencyOlderThan(1_700_000_000_001)).toBe(1);
       expect(
-        db
-          .prepare<[], { readonly command: string }>(
-            "SELECT command FROM command_idempotency ORDER BY command ASC",
-          )
-          .all(),
+        db.prepare("SELECT command FROM command_idempotency ORDER BY command ASC").all() as {
+          readonly command: string;
+        }[],
       ).toEqual([{ command: "cost.event" }]);
     } finally {
       db.close();
@@ -537,10 +535,10 @@ describe("approval projection and appender", () => {
       expect(projection.countPendingByThread(otherThreadId)).toBe(1);
 
       const indexes = db
-        .prepare<[], { readonly name: string }>(
+        .prepare(
           "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'pending_approvals_thread_status'",
         )
-        .all();
+        .all() as { readonly name: string }[];
       expect(indexes.map((row) => row.name)).toEqual(["pending_approvals_thread_status"]);
     } finally {
       db.close();

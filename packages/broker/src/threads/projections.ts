@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import {
   asSha256Hex,
   asSignerIdentity,
@@ -23,9 +24,10 @@ import {
   threadExternalRefsFromJsonValue,
   threadExternalRefsToJsonValue,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import type { EventLog, EventLogRecord, EventType } from "../event-log/index.ts";
+import { createTransaction } from "../internal/sqlite-transaction.ts";
+import { typed } from "../internal/typed-statement.ts";
 
 const THREAD_EVENT_BATCH_SIZE = 500;
 const THREAD_STATUS_SET: ReadonlySet<string> = new Set<string>(THREAD_STATUS_VALUES);
@@ -88,18 +90,23 @@ type DecodedThreadEvent =
       readonly payload: ThreadStatusChangedAuditPayload;
     };
 
-export function createThreadStateStore(db: Database.Database): ThreadStateStore {
-  const insertCreatedStmt = db.prepare<
-    [string, string, string, number, string, number, number, string]
+export function createThreadStateStore(db: DatabaseSync): ThreadStateStore {
+  const insertCreatedStmt = typed<
+    [ThreadId, string, "open", number, SignerIdentity, number, number, string],
+    never
   >(
-    `INSERT INTO threads
+    db.prepare(
+      `INSERT INTO threads
        (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms, external_refs)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ),
   );
-  const updateSpecStmt = db.prepare<
-    [number, number, string, string | null, string, string, string, number, string]
+  const updateSpecStmt = typed<
+    [number, number, string, string | null, string, Sha256Hex, SignerIdentity, number, ThreadId],
+    never
   >(
-    `UPDATE threads SET
+    db.prepare(
+      `UPDATE threads SET
        head_lsn = ?,
        updated_at_ms = ?,
        spec_revision_id = ?,
@@ -109,23 +116,28 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
        spec_authored_by = ?,
        spec_authored_at_ms = ?
      WHERE thread_id = ?`,
+    ),
   );
-  const updateStatusStmt = db.prepare<[string, number, number, number | null, string]>(
-    `UPDATE threads SET
+  const updateStatusStmt = typed<[ThreadStatus, number, number, number | null, ThreadId], never>(
+    db.prepare(
+      `UPDATE threads SET
        status = ?,
        head_lsn = ?,
        updated_at_ms = ?,
        closed_at_ms = ?
      WHERE thread_id = ?`,
+    ),
   );
-  const insertSpecRevisionStmt = db.prepare<[string, string, number]>(
-    `INSERT INTO thread_spec_revisions (revision_id, thread_id, lsn)
+  const insertSpecRevisionStmt = typed<[string, ThreadId, number], never>(
+    db.prepare(
+      `INSERT INTO thread_spec_revisions (revision_id, thread_id, lsn)
      VALUES (?, ?, ?)`,
+    ),
   );
-  const hasSpecRevisionStmt = db.prepare<[string], ExistsRow>(
+  const hasSpecRevisionStmt = db.prepare(
     "SELECT 1 AS present FROM thread_spec_revisions WHERE revision_id = ?",
   );
-  const getByIdStmt = db.prepare<[string], ThreadDbRow>(
+  const getByIdStmt = db.prepare(
     `SELECT thread_id AS threadId,
             title,
             status,
@@ -143,7 +155,7 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
             external_refs AS externalRefs
      FROM threads WHERE thread_id = ?`,
   );
-  const listAllStmt = db.prepare<[], ThreadDbRow>(
+  const listAllStmt = db.prepare(
     `SELECT thread_id AS threadId,
             title,
             status,
@@ -161,7 +173,7 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
             external_refs AS externalRefs
      FROM threads ORDER BY head_lsn ASC`,
   );
-  const listByStatusStmt = db.prepare<[string], ThreadDbRow>(
+  const listByStatusStmt = db.prepare(
     `SELECT thread_id AS threadId,
             title,
             status,
@@ -179,8 +191,8 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
             external_refs AS externalRefs
      FROM threads WHERE status = ? ORDER BY head_lsn ASC`,
   );
-  const clearSpecRevisionsStmt = db.prepare<[]>("DELETE FROM thread_spec_revisions");
-  const clearThreadsStmt = db.prepare<[]>("DELETE FROM threads");
+  const clearSpecRevisionsStmt = db.prepare("DELETE FROM thread_spec_revisions");
+  const clearThreadsStmt = db.prepare("DELETE FROM threads");
 
   const applyEventInner = (record: EventLogRecord): void => {
     const decoded = decodeThreadEvent(record);
@@ -232,7 +244,7 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
     }
   };
 
-  const rebuildTransaction = db.transaction((eventLog: EventLog, fromLsn: number): void => {
+  const rebuildTransaction = createTransaction(db, (eventLog: EventLog, fromLsn: number): void => {
     if (!Number.isSafeInteger(fromLsn) || fromLsn < 0) {
       throw new Error(
         `rebuildFromLog: fromLsn must be a non-negative safe integer, got ${fromLsn}`,
@@ -268,15 +280,17 @@ export function createThreadStateStore(db: Database.Database): ThreadStateStore 
       rebuildTransaction.immediate(eventLog, fromLsn);
     },
     getById(threadId: ThreadId): ThreadStateRow | null {
-      const row = getByIdStmt.get(threadId);
+      const row = getByIdStmt.get(threadId) as ThreadDbRow | undefined;
       return row === undefined ? null : toThreadStateRow(row);
     },
     hasSpecRevision(revisionId: string): boolean {
-      return hasSpecRevisionStmt.get(revisionId) !== undefined;
+      return (hasSpecRevisionStmt.get(revisionId) as ExistsRow | undefined) !== undefined;
     },
     list(filter?: { readonly status?: ThreadStatus }): readonly ThreadStateRow[] {
       const rows =
-        filter?.status === undefined ? listAllStmt.all() : listByStatusStmt.all(filter.status);
+        filter?.status === undefined
+          ? (listAllStmt.all() as unknown as ThreadDbRow[])
+          : (listByStatusStmt.all(filter.status) as unknown as ThreadDbRow[]);
       return rows.map(toThreadStateRow);
     },
   };
@@ -307,7 +321,7 @@ export function threadStateRowToThread(row: ThreadStateRow, taskIds: Thread["tas
 function decodeThreadEvent(record: EventLogRecord): DecodedThreadEvent | null {
   const kind = threadAuditKindForEventType(record.type);
   if (kind === null) return null;
-  const parsed = JSON.parse(record.payload.toString("utf8")) as unknown;
+  const parsed = JSON.parse(new TextDecoder().decode(record.payload)) as unknown;
   const payload = threadAuditPayloadFromJsonValue(kind, parsed);
   if (kind === "thread_created") {
     return { kind, payload: payload as ThreadCreatedAuditPayload };

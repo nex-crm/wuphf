@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
+import type { DatabaseSync } from "node:sqlite";
 
-import type Database from "better-sqlite3";
+import { createTransaction } from "../internal/sqlite-transaction.ts";
 
 export const CURRENT_SCHEMA_VERSION = 9;
 
@@ -51,8 +52,8 @@ const MIGRATIONS: readonly Migration[] = [
   },
 ];
 
-export function runMigrations(db: Database.Database): void {
-  db.pragma("foreign_keys = ON");
+export function runMigrations(db: DatabaseSync): void {
+  db.exec("PRAGMA foreign_keys = ON");
 
   // Read `user_version` AFTER acquiring an EXCLUSIVE write lock and
   // apply pending migrations inside the same transaction. Otherwise
@@ -61,7 +62,7 @@ export function runMigrations(db: Database.Database): void {
   // and one or both fail mid-startup with "table already exists" or
   // lock errors. EXCLUSIVE blocks readers and writers; cheap because
   // migrations only run on schema upgrades.
-  const applyPending = db.transaction(() => {
+  const applyPending = createTransaction(db, () => {
     const currentVersion = readUserVersion(db);
     if (currentVersion > CURRENT_SCHEMA_VERSION) {
       throw new Error(
@@ -71,14 +72,19 @@ export function runMigrations(db: Database.Database): void {
     for (const migration of MIGRATIONS) {
       if (migration.version <= currentVersion) continue;
       db.exec(migration.sql);
-      db.pragma(`user_version = ${migration.version}`);
+      db.exec(`PRAGMA user_version = ${migration.version}`);
     }
   });
   applyPending.exclusive();
 }
 
-function readUserVersion(db: Database.Database): number {
-  const value = db.pragma("user_version", { simple: true });
+interface UserVersionRow {
+  readonly user_version: number;
+}
+
+function readUserVersion(db: DatabaseSync): number {
+  const row = db.prepare("PRAGMA user_version").get() as UserVersionRow | undefined;
+  const value = row?.user_version;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new Error(`Invalid SQLite user_version: ${String(value)}`);
   }

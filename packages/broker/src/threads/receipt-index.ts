@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import {
   MAX_THREAD_TASK_IDS,
   type ReceiptId,
@@ -7,9 +8,9 @@ import {
   type TaskId,
   type ThreadId,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import type { EventLog, EventLogRecord } from "../event-log/index.ts";
+import { createTransaction } from "../internal/sqlite-transaction.ts";
 import {
   decodeListCursor,
   encodeListCursor,
@@ -19,6 +20,7 @@ import {
 } from "../receipt-store.ts";
 
 const RECEIPT_EVENT_BATCH_SIZE = 500;
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
 export interface ThreadReceiptIndexEntry {
   readonly receiptId: ReceiptId;
@@ -59,26 +61,26 @@ interface ThreadReceiptIndexRow {
 }
 
 interface ThreadLatestReceiptRow extends ThreadReceiptIndexRow {
-  readonly payload: Buffer;
+  readonly payload: Uint8Array;
 }
 
 interface ThreadTaskIndexRow {
   readonly taskId: string;
 }
 
-export function createThreadReceiptIndexStore(db: Database.Database): ThreadReceiptIndexStore {
-  const insertStmt = db.prepare<[string, string, string, number]>(
+export function createThreadReceiptIndexStore(db: DatabaseSync): ThreadReceiptIndexStore {
+  const insertStmt = db.prepare(
     `INSERT INTO thread_receipts (thread_id, receipt_id, task_id, lsn)
      VALUES (?, ?, ?, ?)`,
   );
-  const listStmt = db.prepare<[string, number, number], ThreadReceiptIndexRow>(
+  const listStmt = db.prepare(
     `SELECT receipt_id AS receiptId, task_id AS taskId, lsn
      FROM thread_receipts
      WHERE thread_id = ? AND lsn > ?
      ORDER BY lsn ASC
      LIMIT ?`,
   );
-  const taskRefsStmt = db.prepare<[string, number], ThreadTaskIndexRow>(
+  const taskRefsStmt = db.prepare(
     `SELECT task_id AS taskId
      FROM (
        SELECT task_id, MIN(lsn) AS first_lsn
@@ -90,14 +92,14 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
      )
      ORDER BY first_lsn ASC`,
   );
-  const receiptRefsStmt = db.prepare<[string, number], ThreadReceiptIndexRow>(
+  const receiptRefsStmt = db.prepare(
     `SELECT receipt_id AS receiptId, task_id AS taskId, lsn
      FROM thread_receipts
      WHERE thread_id = ?
      ORDER BY lsn ASC
      LIMIT ?`,
   );
-  const latestStmt = db.prepare<[string], ThreadLatestReceiptRow>(
+  const latestStmt = db.prepare(
     `SELECT tr.receipt_id AS receiptId, tr.task_id AS taskId, tr.lsn, rp.payload
      FROM thread_receipts AS tr
      INNER JOIN receipts_projection AS rp ON rp.receipt_id = tr.receipt_id
@@ -105,7 +107,7 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
      ORDER BY tr.lsn DESC
      LIMIT 1`,
   );
-  const clearStmt = db.prepare<[]>("DELETE FROM thread_receipts");
+  const clearStmt = db.prepare("DELETE FROM thread_receipts");
 
   // Replay-only writer. The live receipt.put transaction owns thread_receipts
   // insertion so route writes cannot accidentally double-apply this index.
@@ -115,7 +117,7 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
     insertStmt.run(receipt.threadId, receipt.id, receipt.taskId, lsn);
   };
 
-  const rebuildTransaction = db.transaction((eventLog: EventLog, fromLsn: number): void => {
+  const rebuildTransaction = createTransaction(db, (eventLog: EventLog, fromLsn: number): void => {
     if (!Number.isSafeInteger(fromLsn) || fromLsn < 0) {
       throw new Error(
         `rebuildFromLog: fromLsn must be a non-negative safe integer, got ${fromLsn}`,
@@ -140,7 +142,7 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
 
   const applyEventInner = (record: EventLogRecord): void => {
     if (record.type !== "receipt.put") return;
-    const receipt = receiptFromJson(record.payload.toString("utf8"));
+    const receipt = receiptFromJson(utf8Decoder.decode(record.payload));
     applyReplayReceipt(receipt, record.lsn);
   };
 
@@ -160,7 +162,11 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
     ): ThreadReceiptIndexPage {
       const limit = resolveListLimit(filter?.limit);
       const afterLsn = filter?.cursor === undefined ? 0 : decodeListCursor(filter.cursor);
-      const rows = listStmt.all(threadId, afterLsn, limit + 1);
+      const rows = listStmt.all(
+        threadId,
+        afterLsn,
+        limit + 1,
+      ) as unknown as ThreadReceiptIndexRow[];
       const visibleRows = rows.slice(0, limit);
       const lastRow = visibleRows.at(-1);
       return {
@@ -170,17 +176,23 @@ export function createThreadReceiptIndexStore(db: Database.Database): ThreadRece
       };
     },
     refsForThread(threadId: ThreadId): ThreadReceiptIndexRefs {
-      const receiptRows = receiptRefsStmt.all(threadId, MAX_THREAD_TASK_IDS);
-      const taskRows = taskRefsStmt.all(threadId, MAX_THREAD_TASK_IDS);
+      const receiptRows = receiptRefsStmt.all(
+        threadId,
+        MAX_THREAD_TASK_IDS,
+      ) as unknown as ThreadReceiptIndexRow[];
+      const taskRows = taskRefsStmt.all(
+        threadId,
+        MAX_THREAD_TASK_IDS,
+      ) as unknown as ThreadTaskIndexRow[];
       return {
         receiptIds: receiptRows.map((row) => row.receiptId as ReceiptId),
         taskIds: taskRows.map((row) => row.taskId as TaskId),
       };
     },
     latestForThread(threadId: ThreadId): ThreadLatestReceipt | null {
-      const row = latestStmt.get(threadId);
+      const row = latestStmt.get(threadId) as ThreadLatestReceiptRow | undefined;
       if (row === undefined) return null;
-      const receipt = receiptFromJson(row.payload.toString("utf8"));
+      const receipt = receiptFromJson(utf8Decoder.decode(row.payload));
       return {
         receiptId: row.receiptId as ReceiptId,
         taskId: row.taskId as TaskId,

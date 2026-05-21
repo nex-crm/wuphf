@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { DatabaseSync } from "node:sqlite";
 import { Readable } from "node:stream";
 
 import {
@@ -11,7 +12,6 @@ import {
   type ThreadExternalRefs,
   threadSpecContentHash,
 } from "@wuphf/protocol";
-import type BetterSqlite3 from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { openDatabase, runMigrations } from "../../src/event-log/index.ts";
@@ -251,7 +251,7 @@ describe("handleThreadRoute unit error paths", () => {
         prepare: () => {
           throw new ReceiptStoreFullError("full");
         },
-      } as unknown as BetterSqlite3.Database,
+      } as unknown as DatabaseSync,
     };
     try {
       await expectRoute("/api/v1/threads/replay-check", "GET", replayFull, 507, false, undefined, {

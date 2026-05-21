@@ -21,6 +21,7 @@
 // Integer math throughout (amounts, projections) keeps both invariants
 // decidable across a long-lived ledger.
 
+import type { DatabaseSync } from "node:sqlite";
 import {
   asMicroUsd,
   type BudgetId,
@@ -35,9 +36,9 @@ import {
   type MicroUsd,
   parseLsn,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import type { EventLog } from "../event-log/index.ts";
+import { createTransaction } from "../internal/sqlite-transaction.ts";
 import type { ParsedIdempotencyKey } from "./idempotency.ts";
 import { type NewCrossing, processCostEventForCrossings } from "./reactor.ts";
 
@@ -175,31 +176,36 @@ interface ThresholdCrossingDbRow {
   readonly limitMicroUsd: number;
 }
 
-export function createCostLedger(db: Database.Database, eventLog: EventLog): CostLedger {
-  const upsertAgentSpend = db.prepare<[string, string, number, number]>(
+interface IdempotencyDbRow {
+  readonly statusCode: number;
+  readonly responsePayload: Uint8Array;
+}
+
+export function createCostLedger(db: DatabaseSync, eventLog: EventLog): CostLedger {
+  const upsertAgentSpend = db.prepare(
     `INSERT INTO cost_by_agent (agent_slug, day_utc, total_micro_usd, last_lsn)
      VALUES (?, ?, ?, ?)
      ON CONFLICT (agent_slug, day_utc) DO UPDATE SET
        total_micro_usd = total_micro_usd + excluded.total_micro_usd,
        last_lsn = excluded.last_lsn`,
   );
-  const selectAgentSpend = db.prepare<[string, string], AgentSpendDbRow>(
+  const selectAgentSpend = db.prepare(
     `SELECT agent_slug AS agentSlug, day_utc AS dayUtc,
             total_micro_usd AS totalMicroUsd, last_lsn AS lastLsn
      FROM cost_by_agent WHERE agent_slug = ? AND day_utc = ?`,
   );
-  const upsertTaskSpend = db.prepare<[string, number, number]>(
+  const upsertTaskSpend = db.prepare(
     `INSERT INTO cost_by_task (task_id, total_micro_usd, last_lsn)
      VALUES (?, ?, ?)
      ON CONFLICT (task_id) DO UPDATE SET
        total_micro_usd = total_micro_usd + excluded.total_micro_usd,
        last_lsn = excluded.last_lsn`,
   );
-  const selectTaskSpend = db.prepare<[string], TaskSpendDbRow>(
+  const selectTaskSpend = db.prepare(
     `SELECT task_id AS taskId, total_micro_usd AS totalMicroUsd, last_lsn AS lastLsn
      FROM cost_by_task WHERE task_id = ?`,
   );
-  const upsertBudget = db.prepare<[string, string, string | null, number, string, number, number]>(
+  const upsertBudget = db.prepare(
     `INSERT INTO cost_budgets (budget_id, scope, subject_id, limit_micro_usd, thresholds_bps, set_at_lsn, tombstoned)
      VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (budget_id) DO UPDATE SET
@@ -210,42 +216,42 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
        set_at_lsn = excluded.set_at_lsn,
        tombstoned = excluded.tombstoned`,
   );
-  const selectBudget = db.prepare<[string], BudgetDbRow>(
+  const selectBudget = db.prepare(
     `SELECT budget_id AS budgetId, scope, subject_id AS subjectId,
             limit_micro_usd AS limitMicroUsd, thresholds_bps AS thresholdsBps,
             set_at_lsn AS setAtLsn, tombstoned
      FROM cost_budgets WHERE budget_id = ?`,
   );
-  const listBudgetsStmt = db.prepare<[], BudgetDbRow>(
+  const listBudgetsStmt = db.prepare(
     `SELECT budget_id AS budgetId, scope, subject_id AS subjectId,
             limit_micro_usd AS limitMicroUsd, thresholds_bps AS thresholdsBps,
             set_at_lsn AS setAtLsn, tombstoned
      FROM cost_budgets ORDER BY budget_id ASC`,
   );
-  const listAgentSpendAllStmt = db.prepare<[], AgentSpendDbRow>(
+  const listAgentSpendAllStmt = db.prepare(
     `SELECT agent_slug AS agentSlug, day_utc AS dayUtc,
             total_micro_usd AS totalMicroUsd, last_lsn AS lastLsn
      FROM cost_by_agent ORDER BY day_utc DESC, agent_slug ASC`,
   );
-  const listAgentSpendDayStmt = db.prepare<[string], AgentSpendDbRow>(
+  const listAgentSpendDayStmt = db.prepare(
     `SELECT agent_slug AS agentSlug, day_utc AS dayUtc,
             total_micro_usd AS totalMicroUsd, last_lsn AS lastLsn
      FROM cost_by_agent WHERE day_utc = ? ORDER BY agent_slug ASC`,
   );
-  const insertCrossingStmt = db.prepare<[string, number, number, number, number, number]>(
+  const insertCrossingStmt = db.prepare(
     `INSERT INTO cost_threshold_crossings
        (budget_id, budget_set_lsn, threshold_bps, crossed_at_lsn, observed_micro_usd, limit_micro_usd)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (budget_id, budget_set_lsn, threshold_bps) DO NOTHING`,
   );
-  const listCrossingsAllStmt = db.prepare<[], ThresholdCrossingDbRow>(
+  const listCrossingsAllStmt = db.prepare(
     `SELECT budget_id AS budgetId, budget_set_lsn AS budgetSetLsn,
             threshold_bps AS thresholdBps, crossed_at_lsn AS crossedAtLsn,
             observed_micro_usd AS observedMicroUsd, limit_micro_usd AS limitMicroUsd
      FROM cost_threshold_crossings
      ORDER BY budget_id ASC, budget_set_lsn ASC, threshold_bps ASC`,
   );
-  const listCrossingsForBudgetStmt = db.prepare<[string], ThresholdCrossingDbRow>(
+  const listCrossingsForBudgetStmt = db.prepare(
     `SELECT budget_id AS budgetId, budget_set_lsn AS budgetSetLsn,
             threshold_bps AS thresholdBps, crossed_at_lsn AS crossedAtLsn,
             observed_micro_usd AS observedMicroUsd, limit_micro_usd AS limitMicroUsd
@@ -256,23 +262,17 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
   // Idempotency-row statements (B1 fix). Lookup + insert run inside the
   // SAME transaction as the append so a crash between the two is
   // impossible — a retry sees either both committed or both rolled back.
-  const idempotencyLookupStmt = db.prepare<
-    [string, string],
-    {
-      readonly statusCode: number;
-      readonly responsePayload: Buffer;
-    }
-  >(
+  const idempotencyLookupStmt = db.prepare(
     `SELECT status_code AS statusCode, response_payload AS responsePayload
      FROM command_idempotency
      WHERE idempotency_key = ? AND command = ?`,
   );
-  const idempotencyInsertStmt = db.prepare<[string, string, number, Buffer, number | null, number]>(
+  const idempotencyInsertStmt = db.prepare(
     `INSERT INTO command_idempotency
        (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms)
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
-  const pruneIdempotencyStmt = db.prepare<[number]>(
+  const pruneIdempotencyStmt = db.prepare(
     `DELETE FROM command_idempotency
      WHERE created_at_ms < ?
        AND command IN ('cost.event', 'cost.budget.set', 'cost.budget.tombstone')`,
@@ -287,14 +287,14 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
     const lsn = eventLog.append({ type: "cost.event", payload: Buffer.from(bytes) });
     const dayUtc = isoDateUtc(payload.occurredAt);
     upsertAgentSpend.run(payload.agentSlug, dayUtc, payload.amountMicroUsd as number, lsn);
-    const agentRow = selectAgentSpend.get(payload.agentSlug, dayUtc);
+    const agentRow = selectAgentSpend.get(payload.agentSlug, dayUtc) as AgentSpendDbRow | undefined;
     if (agentRow === undefined) {
       throw new Error("cost_by_agent upsert produced no row (concurrent delete?)");
     }
     let taskTotal: MicroUsd | null = null;
     if (payload.taskId !== undefined) {
       upsertTaskSpend.run(payload.taskId, payload.amountMicroUsd as number, lsn);
-      const taskRow = selectTaskSpend.get(payload.taskId);
+      const taskRow = selectTaskSpend.get(payload.taskId) as TaskSpendDbRow | undefined;
       if (taskRow === undefined) {
         throw new Error("cost_by_task upsert produced no row (concurrent delete?)");
       }
@@ -333,12 +333,15 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
     return { lsn: lsnFromV1Number(lsn), tombstoned };
   };
 
-  const appendCostEventTransaction = db.transaction(appendCostEventInner);
-  const appendBudgetSetTransaction = db.transaction(appendBudgetSetInner);
+  const appendCostEventTransaction = createTransaction(db, appendCostEventInner);
+  const appendBudgetSetTransaction = createTransaction(db, appendBudgetSetInner);
 
-  const appendCostEventIdempotentTransaction = db.transaction(
+  const appendCostEventIdempotentTransaction = createTransaction(
+    db,
     (args: IdempotentCostEventArgs): IdempotentAppendResult => {
-      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
+      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command) as
+        | IdempotencyDbRow
+        | undefined;
       if (cached !== undefined) {
         return {
           replayed: true,
@@ -365,9 +368,12 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
     },
   );
 
-  const appendBudgetSetIdempotentTransaction = db.transaction(
+  const appendBudgetSetIdempotentTransaction = createTransaction(
+    db,
     (args: IdempotentBudgetSetArgs): IdempotentAppendResult => {
-      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
+      const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command) as
+        | IdempotencyDbRow
+        | undefined;
       if (cached !== undefined) {
         return {
           replayed: true,
@@ -393,7 +399,8 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
     },
   );
 
-  const appendThresholdCrossedTransaction = db.transaction(
+  const appendThresholdCrossedTransaction = createTransaction(
+    db,
     (payload: BudgetThresholdCrossedAuditPayload): ThresholdCrossedAppendResult => {
       const bytes = costAuditPayloadToBytes("budget_threshold_crossed", payload);
       const lsn = eventLog.append({
@@ -430,7 +437,7 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
       if (!Number.isSafeInteger(cutoffMs)) {
         throw new Error("pruneIdempotencyOlderThan: cutoffMs must be a safe integer");
       }
-      return pruneIdempotencyStmt.run(cutoffMs).changes;
+      return Number(pruneIdempotencyStmt.run(cutoffMs).changes);
     },
     appendCostEventIdempotent(args: IdempotentCostEventArgs): IdempotentAppendResult {
       return appendCostEventIdempotentTransaction.immediate(args);
@@ -439,32 +446,32 @@ export function createCostLedger(db: Database.Database, eventLog: EventLog): Cos
       return appendBudgetSetIdempotentTransaction.immediate(args);
     },
     getAgentSpend(agentSlug: string, dayUtc: string): AgentSpendRow | null {
-      const row = selectAgentSpend.get(agentSlug, dayUtc);
+      const row = selectAgentSpend.get(agentSlug, dayUtc) as AgentSpendDbRow | undefined;
       return row === undefined ? null : toAgentSpendRow(row);
     },
     listAgentSpend(filter?: { dayUtc?: string }): readonly AgentSpendRow[] {
       const rows =
         filter?.dayUtc !== undefined
-          ? listAgentSpendDayStmt.all(filter.dayUtc)
-          : listAgentSpendAllStmt.all();
+          ? (listAgentSpendDayStmt.all(filter.dayUtc) as unknown as AgentSpendDbRow[])
+          : (listAgentSpendAllStmt.all() as unknown as AgentSpendDbRow[]);
       return rows.map(toAgentSpendRow);
     },
     getTaskSpend(taskId: string): TaskSpendRow | null {
-      const row = selectTaskSpend.get(taskId);
+      const row = selectTaskSpend.get(taskId) as TaskSpendDbRow | undefined;
       return row === undefined ? null : toTaskSpendRow(row);
     },
     getBudget(budgetId: BudgetId): BudgetRow | null {
-      const row = selectBudget.get(budgetId);
+      const row = selectBudget.get(budgetId) as BudgetDbRow | undefined;
       return row === undefined ? null : toBudgetRow(row);
     },
     listBudgets(): readonly BudgetRow[] {
-      return listBudgetsStmt.all().map(toBudgetRow);
+      return (listBudgetsStmt.all() as unknown as BudgetDbRow[]).map(toBudgetRow);
     },
     listThresholdCrossings(budgetId?: BudgetId): readonly ThresholdCrossingRow[] {
       const rows =
         budgetId === undefined
-          ? listCrossingsAllStmt.all()
-          : listCrossingsForBudgetStmt.all(budgetId);
+          ? (listCrossingsAllStmt.all() as unknown as ThresholdCrossingDbRow[])
+          : (listCrossingsForBudgetStmt.all(budgetId) as unknown as ThresholdCrossingDbRow[]);
       return rows.map(toThresholdCrossingRow);
     },
   };

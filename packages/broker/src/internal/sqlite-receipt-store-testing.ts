@@ -10,8 +10,8 @@
 // supported construction path is `SqliteReceiptStore.open(config)` so
 // migrations always run before any read or write.
 
+import type { DatabaseSync } from "node:sqlite";
 import type { ThreadId } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 import type { EventLog } from "../event-log/index.ts";
 import { SqliteReceiptStore } from "../sqlite-receipt-store.ts";
 
@@ -20,14 +20,14 @@ import { SqliteReceiptStore } from "../sqlite-receipt-store.ts";
 // on `SqliteReceiptStore`'s constructor is a TypeScript-level fence;
 // the call below bypasses it deliberately for test-only construction.
 type SqliteReceiptStoreCtor = new (
-  db: Database.Database,
+  db: DatabaseSync,
   eventLog?: EventLog,
   maxReceipts?: number,
   defaultThreadId?: ThreadId | null,
 ) => SqliteReceiptStore;
 
 export function constructSqliteReceiptStoreForTesting(
-  db: Database.Database,
+  db: DatabaseSync,
   eventLog?: EventLog,
   maxReceipts?: number,
   defaultThreadId?: ThreadId | null,

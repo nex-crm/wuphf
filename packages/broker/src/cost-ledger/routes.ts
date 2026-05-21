@@ -22,6 +22,7 @@
 // the acting operator.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { DatabaseSync } from "node:sqlite";
 
 import {
   type ApiToken,
@@ -58,7 +59,7 @@ const DECIMAL_INTEGER_RE = /^(0|[1-9]\d*)$/;
 export interface CostRouteDeps {
   readonly ledger: CostLedger;
   readonly logger: BrokerLogger;
-  readonly db: import("better-sqlite3").Database;
+  readonly db: DatabaseSync;
   readonly operatorToken: ApiToken | null;
   readonly nowMs: () => number;
 }
