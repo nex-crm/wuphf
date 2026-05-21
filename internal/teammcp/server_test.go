@@ -1058,6 +1058,38 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 	if task.Owner != "eng" || task.CreatedBy != "eng" || task.Status != "in_progress" {
 		t.Fatalf("expected caller-owned in-progress task, got %+v", task)
 	}
+
+	result, _, err = handleTeamTask(ctx, nil, TeamTaskArgs{
+		Action:  "create",
+		Channel: "general",
+		Title:   "Whitespace owner fallback",
+		Owner:   "   ",
+		MySlug:  "eng",
+	})
+	if err != nil {
+		t.Fatalf("handleTeamTask whitespace owner: %v", err)
+	}
+	text = textFromResult(t, result)
+	if !strings.Contains(text, "is now in_progress @eng") {
+		t.Fatalf("expected whitespace-owner task to be caller-owned, got %q", text)
+	}
+
+	if err := brokerGetJSON(ctx, "/tasks?channel=general&include_done=true", &tasks); err != nil {
+		t.Fatalf("fetch tasks after whitespace-owner create: %v", err)
+	}
+	foundWhitespace := false
+	for _, task := range tasks.Tasks {
+		if task.Title != "Whitespace owner fallback" {
+			continue
+		}
+		foundWhitespace = true
+		if task.Owner != "eng" || task.CreatedBy != "eng" || task.Status != "in_progress" {
+			t.Fatalf("expected trimmed-empty owner to default to caller, got %+v", task)
+		}
+	}
+	if !foundWhitespace {
+		t.Fatal("expected whitespace-owner fallback task to exist")
+	}
 }
 
 func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {

@@ -101,6 +101,23 @@ func TestHandleAnswerPersistsTaskPrompt(t *testing.T) {
 	})
 }
 
+func TestHandleAnswerRejectsEmptyTaskPrompt(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"task_prompt","value":"  \n\t  "}`)),
+		)
+		w := httptest.NewRecorder()
+
+		HandleAnswer(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status: got %d, want %d body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+		}
+	})
+}
+
 // TestHandleProgressPOSTPersists verifies that a POST to /onboarding/progress
 // with step+answers persists the partial state.
 func TestHandleProgressPOSTPersists(t *testing.T) {

@@ -1082,7 +1082,11 @@ func applyFormAnswer(s *State, field string, value interface{}) error {
 		}
 		s.FormAnswers.ScanComplete = b
 	case "task_prompt":
-		s.FormAnswers.TaskPrompt = sanitizeStr(value)
+		prompt := sanitizeStr(value)
+		if prompt == "" {
+			return fmt.Errorf("task_prompt required")
+		}
+		s.FormAnswers.TaskPrompt = prompt
 	default:
 		return fmt.Errorf("unknown field %q", field)
 	}
