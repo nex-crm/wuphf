@@ -23,7 +23,6 @@ What this will do:
 • Body: Hi Alex, welcome aboard! Looking forward to working with you. -Nazz
 
 Action: GMAIL_SEND_EMAIL via Gmail
-Account: live::gmail::default::abc123
 Channel: #general`;
 
 describe("parseApprovalContext / cross-side contract", () => {
@@ -48,7 +47,7 @@ describe("parseApprovalContext / cross-side contract", () => {
       "Hi Alex, welcome aboard! Looking forward to working with you. -Nazz",
     );
     expect(parsed.footer.action).toBe("GMAIL_SEND_EMAIL via Gmail");
-    expect(parsed.footer.account).toBe("live::gmail::default::abc123");
+    expect(parsed.footer.account).toBeNull();
     expect(parsed.footer.channel).toBe("#general");
   });
 });
@@ -70,7 +69,7 @@ describe("parseApprovalContext", () => {
       },
     ]);
     expect(parsed.footer.action).toBe("GMAIL_SEND_EMAIL via Gmail");
-    expect(parsed.footer.account).toBe("live::gmail::default::abc123");
+    expect(parsed.footer.account).toBeNull();
     expect(parsed.footer.channel).toBe("#general");
   });
 
