@@ -13,6 +13,13 @@ import (
 
 const agentIssueMessageKind = "agent_issue"
 
+// systemAuthErrorMessageKind is the message kind emitted when the agent
+// loop hits a provider auth failure (e.g. "Not logged in - Please run
+// /login"). The SPA renders these as a SystemErrorCard banner (system
+// authored, distinct visual treatment) instead of an agent-authored
+// chat bubble. Issue #933.
+const systemAuthErrorMessageKind = "system_auth_error"
+
 var agentIssueWhitespacePattern = regexp.MustCompile(`\s+`)
 
 type agentIssueClassification struct {
@@ -35,6 +42,16 @@ func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail stri
 		return channelMessage{}, agentIssueRecord{}, false, nil
 	}
 	safeDetail := redactSecretsInText(detail)
+
+	// Issue #933: provider auth failures (e.g. claude returning "Not logged
+	// in - Please run /login") would otherwise post as agent-authored chat
+	// bubbles — visually indistinguishable from in-character agent output
+	// and confusing because the agent isn't speaking. Detect the auth
+	// signal and route through a dedicated system-authored card that
+	// carries a structured payload the SPA renders as a SystemErrorCard.
+	if authProbe := classifyProviderAuthError(safeDetail); authProbe.IsAuthError {
+		return b.postSystemAuthError(agentSlug, targetChannel, replyTo, safeDetail, authProbe)
+	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -176,6 +193,162 @@ func (b *Broker) pruneAgentIssuesByChannelAndAgentLocked(channelSlug, agentSlug 
 	}
 	b.requests = requests
 	b.pendingInterview = firstBlockingRequest(b.requests)
+}
+
+// providerAuthErrorProbe captures the classification + suggested remediation
+// for a detected provider auth failure. Used by ReportAgentIssue to fork
+// into the SystemErrorCard rendering path (issue #933).
+type providerAuthErrorProbe struct {
+	IsAuthError   bool
+	Provider      string
+	SignInCommand string
+}
+
+// classifyProviderAuthError matches detail strings that signal a runtime
+// provider's auth/login surface is the proximate cause (e.g. the Claude
+// CLI's "Not logged in - Please run /login"). Returns Provider="" when
+// the auth signal is detected but the runtime is ambiguous; the SPA
+// renders a generic "Sign in" CTA in that case.
+//
+// Substring matching is intentional — the upstream messages differ across
+// providers and across versions. Mirrors the test surface in
+// internal/provider/claude.go::isClaudeLoginRequired.
+func classifyProviderAuthError(detail string) providerAuthErrorProbe {
+	text := strings.ToLower(strings.TrimSpace(detail))
+	if text == "" {
+		return providerAuthErrorProbe{}
+	}
+	// Auth signal set. Keep this list in sync with isClaudeLoginRequired
+	// in internal/provider/claude.go and the equivalent check in codex.go.
+	authSignals := []string{
+		"not logged in",
+		"please log in",
+		"please run `claude login`",
+		"please run claude login",
+		"please run `codex login`",
+		"please run codex login",
+		"please run /login",
+		"login required",
+		"requires login",
+		"authentication required",
+		"unauthorized",
+		"requires login. run",
+	}
+	matched := false
+	for _, signal := range authSignals {
+		if strings.Contains(text, signal) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return providerAuthErrorProbe{}
+	}
+
+	probe := providerAuthErrorProbe{IsAuthError: true}
+	// Identify the provider from the surrounding text so the SPA can
+	// surface a runtime-specific sign-in CTA. The detection here mirrors
+	// the patterns describeClaude/Codex/Opencode emit through provider
+	// error paths.
+	switch {
+	case strings.Contains(text, "claude"):
+		probe.Provider = "claude-code"
+		probe.SignInCommand = "claude auth login"
+	case strings.Contains(text, "codex"):
+		probe.Provider = "codex"
+		probe.SignInCommand = "codex login"
+	case strings.Contains(text, "opencode"):
+		probe.Provider = "opencode"
+		probe.SignInCommand = "opencode auth login"
+	}
+	return probe
+}
+
+// postSystemAuthError emits a system-authored message with kind
+// systemAuthErrorMessageKind into the target channel. Payload carries the
+// provider name + suggested sign-in command so the SPA's SystemErrorCard
+// can render a copy-to-clipboard CTA. Returns (msg, _, posted=true, nil)
+// on success so the call site doesn't have to special-case dispatch.
+//
+// Idempotency: collapses repeated auth errors from the same provider+
+// channel within a short window. The chat doesn't need three identical
+// banners in a row.
+func (b *Broker) postSystemAuthError(agentSlug, targetChannel, replyTo, safeDetail string, probe providerAuthErrorProbe) (channelMessage, agentIssueRecord, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	channel := normalizeChannelSlug(targetChannel)
+	if channel == "" {
+		channel = "general"
+	}
+	if b.findChannelLocked(channel) == nil {
+		if IsDMSlug(channel) {
+			if dm := b.ensureDMConversationLocked(channel); dm != nil {
+				channel = dm.Slug
+			}
+		}
+		if b.findChannelLocked(channel) == nil {
+			return channelMessage{}, agentIssueRecord{}, false, fmt.Errorf("channel not found")
+		}
+	}
+
+	// Dedup: if the most recent message in the channel is already a
+	// system_auth_error for the same provider, suppress the repeat. The
+	// SPA's existing banner is still up; emitting a duplicate would just
+	// stack identical cards.
+	if probe.Provider != "" {
+		for i := len(b.messages) - 1; i >= 0; i-- {
+			m := b.messages[i]
+			if m.Channel != channel {
+				continue
+			}
+			if m.Kind != systemAuthErrorMessageKind {
+				break
+			}
+			// Last message in channel IS a system_auth_error — check provider.
+			if strings.Contains(string(m.Payload), `"provider":"`+probe.Provider+`"`) {
+				return m, agentIssueRecord{}, false, nil
+			}
+			break
+		}
+	}
+
+	payloadMap := map[string]string{
+		"provider":        probe.Provider,
+		"sign_in_command": probe.SignInCommand,
+		"detail":          truncate(safeDetail, 600),
+		"reporter":        strings.TrimSpace(agentSlug),
+	}
+	payloadBytes, err := json.Marshal(payloadMap)
+	if err != nil {
+		// json.Marshal of a map[string]string never fails in practice,
+		// but if it ever did we'd rather post a degraded banner than
+		// drop the auth signal entirely.
+		payloadBytes = []byte("{}")
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	displayContent := "Sign in required"
+	if probe.Provider != "" {
+		displayContent = "Sign in required for " + probe.Provider
+	}
+
+	b.counter++
+	msg := channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "system",
+		Channel:   channel,
+		Kind:      systemAuthErrorMessageKind,
+		Content:   displayContent,
+		Payload:   payloadBytes,
+		ReplyTo:   strings.TrimSpace(replyTo),
+		Timestamp: now,
+	}
+	msg = b.appendMessageLocked(msg)
+	if err := b.saveLocked(); err != nil {
+		return channelMessage{}, agentIssueRecord{}, false, err
+	}
+	return msg, agentIssueRecord{}, true, nil
 }
 
 func classifyAgentIssue(detail string) agentIssueClassification {
