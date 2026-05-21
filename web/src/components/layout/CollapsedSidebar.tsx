@@ -24,14 +24,17 @@ import {
   ShareAndroid,
   Shield,
   SidebarExpand,
+  TaskList,
   Terminal,
 } from "iconoir-react";
 
 import { getUsage } from "../../api/platform";
-import { SIDEBAR_APPS } from "../../lib/constants";
 import { formatTokens, formatUSD } from "../../lib/format";
 import { navigateToSidebarApp } from "../../lib/sidebarNav";
-import { WIKI_SURFACE_APP_IDS } from "../../routes/routeRegistry";
+import {
+  SIDEBAR_TOOLS,
+  WIKI_SURFACE_APP_IDS,
+} from "../../routes/routeRegistry";
 import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { AgentList } from "../sidebar/AgentList";
@@ -41,10 +44,11 @@ const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
+  issues: ClipboardCheck,
   wiki: BookStack,
   console: Terminal,
   tasks: CheckCircle,
-  requests: ClipboardCheck,
+  requests: TaskList,
   graph: ShareAndroid,
   policies: Shield,
   calendar: Calendar,
@@ -162,28 +166,28 @@ export function CollapsedSidebar() {
       </div>
 
       <div className="sidebar-rail-apps">
-        {SIDEBAR_APPS.filter((a) => a.id !== "settings").map((app) => {
-          const Icon = APP_ICONS[app.id];
+        {SIDEBAR_TOOLS.filter((t) => t.id !== "settings").map((tool) => {
+          const Icon = APP_ICONS[tool.id];
           // Wiki entry lights up for the wiki, notebooks, and reviews surfaces
           // since those three share the Wiki app shell via tabs.
           const isActive =
-            app.id === "wiki"
+            tool.id === "wiki"
               ? WIKI_SURFACE_APPS.has(currentApp ?? "")
-              : currentApp === app.id;
+              : currentApp === tool.id;
           return (
             <button
-              key={app.id}
+              key={tool.id}
               type="button"
               className={`sidebar-icon-btn${isActive ? " active" : ""}`}
-              aria-label={app.name}
-              onClick={() => navigateToSidebarApp(app.id)}
-              onMouseEnter={(e) => showHint(e, app.name)}
+              aria-label={tool.label}
+              onClick={() => navigateToSidebarApp(tool.id)}
+              onMouseEnter={(e) => showHint(e, tool.label)}
               onMouseLeave={hideHint}
             >
               {Icon ? (
                 <Icon />
               ) : (
-                <span className="sidebar-item-emoji">{app.icon}</span>
+                <span className="sidebar-item-emoji">{tool.icon}</span>
               )}
             </button>
           );

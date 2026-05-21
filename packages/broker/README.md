@@ -18,13 +18,17 @@ implementations:
 - `InMemoryReceiptStore` (default) — process-local; lost across restarts.
   Useful for tests and headless smoke runs.
 - `SqliteReceiptStore` from `@wuphf/broker/sqlite` — durable, SQLite
-  event-log-backed. Loads the native `better-sqlite3` binding only when
-  imported, so consumers that only need the in-memory path don't pay the
-  cost. Hosts (e.g. the Electron utility process) wire this in by
+  event-log-backed. Uses Node's built-in `node:sqlite` module, so the
+  storage layer does not carry a native binding. Hosts (e.g. the Electron
+  utility process) wire this in by
   passing `receiptStore: SqliteReceiptStore.open({ path })`, or by using
   `SqliteReceiptStore.fromDatabase(db, eventLog)` with
   `createThreadSubsystem(db, eventLog, receiptStore)` when thread routes are
   mounted.
+
+SQLite BLOB reads exposed by approval projection/replay helpers are `Uint8Array`
+values. Treat them as generic bytes and decode with `TextDecoder` when text is
+needed; do not rely on Node `Buffer`-specific methods at those boundaries.
 
 ## API
 

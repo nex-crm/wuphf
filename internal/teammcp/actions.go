@@ -9,7 +9,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/text/cases"
@@ -238,7 +237,6 @@ type actionApprovalSpec struct {
 //	          • Subject: Welcome
 //	          • Body: Hi Alex, welcome to ...
 //	          Action: GMAIL_SEND_EMAIL via Gmail
-//	          Account: <connection_key>
 //	          Channel: #general
 //
 // The "What this will do" block is only included when at least one
@@ -267,7 +265,6 @@ func buildActionApprovalSpec(slug, channel string, args TeamActionExecuteArgs) a
 	// approval bypass that defeats the entire reason this gate exists.
 	safeActionID := sanitizeContextValue(actionID)
 	safeSummary := sanitizeContextValue(strings.TrimSpace(args.Summary))
-	safeConnection := sanitizeContextValue(strings.TrimSpace(args.ConnectionKey))
 
 	var b strings.Builder
 	if safeSummary != "" {
@@ -284,9 +281,9 @@ func buildActionApprovalSpec(slug, channel string, args TeamActionExecuteArgs) a
 	b.WriteString(safeActionID)
 	b.WriteString(" via ")
 	b.WriteString(platformLabel)
-	if safeConnection != "" {
+	if account := actionApprovalAccountLabel(args.ConnectionKey); account != "" {
 		b.WriteString("\nAccount: ")
-		b.WriteString(safeConnection)
+		b.WriteString(account)
 	}
 	if ch := strings.TrimSpace(channel); ch != "" {
 		b.WriteString("\nChannel: #")
@@ -392,181 +389,6 @@ func platformDisplay(platform string) string {
 		}
 	}
 	return strings.Join(parts, " ")
-}
-
-// payloadFieldOrder is the priority list of payload keys we surface in
-// the approval card, top to bottom. Each entry maps a payload key (any
-// of the synonyms ship together) to the label the human sees. The first
-// match per label wins so synonyms like to/recipient/recipients do not
-// double up.
-var payloadFieldOrder = []struct {
-	Keys  []string
-	Label string
-}{
-	{[]string{"to", "recipient", "recipients", "recipient_email", "user_id"}, "To"},
-	{[]string{"cc"}, "CC"},
-	{[]string{"bcc"}, "BCC"},
-	{[]string{"from", "sender"}, "From"},
-	{[]string{"subject"}, "Subject"},
-	{[]string{"channel", "channel_id"}, "Channel"},
-	{[]string{"thread_ts", "thread_id"}, "Thread"},
-	{[]string{"text", "message", "body", "content", "html_body"}, "Body"},
-	{[]string{"title", "name"}, "Title"},
-	{[]string{"summary", "description"}, "Description"},
-	{[]string{"url", "link"}, "URL"},
-	{[]string{"event_id", "calendar_event_id"}, "Event"},
-	{[]string{"start_time", "start"}, "Starts"},
-	{[]string{"end_time", "end"}, "Ends"},
-	{[]string{"amount", "price"}, "Amount"},
-	{[]string{"currency"}, "Currency"},
-	{[]string{"query", "q"}, "Query"},
-}
-
-// payloadRedactedKeys are field names we never surface in the approval
-// card — the human does not need to see their own credentials to decide
-// whether to approve, and a leaky log is one OS clipboard away from a
-// support ticket.
-var payloadRedactedKeys = map[string]struct{}{
-	"password":      {},
-	"passwd":        {},
-	"secret":        {},
-	"api_key":       {},
-	"access_token":  {},
-	"refresh_token": {},
-	"token":         {},
-	"client_secret": {},
-	"private_key":   {},
-}
-
-// summarizeActionPayload renders a bulleted list of decision-relevant
-// payload fields from args.Data, args.PathVariables, and
-// args.QueryParameters. Long values are clipped, multi-line bodies are
-// flattened, and redacted keys are skipped entirely. Returns an empty
-// string when none of the recognized fields are present.
-func summarizeActionPayload(args TeamActionExecuteArgs) string {
-	type field struct {
-		Label string
-		Value string
-	}
-	var fields []field
-	seen := make(map[string]bool, len(payloadFieldOrder))
-
-	sources := []map[string]any{args.Data, args.PathVariables, args.QueryParameters}
-	for _, entry := range payloadFieldOrder {
-		if seen[entry.Label] {
-			continue
-		}
-		for _, key := range entry.Keys {
-			if _, redacted := payloadRedactedKeys[key]; redacted {
-				continue
-			}
-			value, ok := lookupPayloadValue(sources, key)
-			if !ok {
-				continue
-			}
-			rendered := formatPayloadValue(value)
-			if rendered == "" {
-				continue
-			}
-			fields = append(fields, field{Label: entry.Label, Value: rendered})
-			seen[entry.Label] = true
-			break
-		}
-	}
-
-	if len(fields) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, f := range fields {
-		b.WriteString("• ")
-		b.WriteString(f.Label)
-		b.WriteString(": ")
-		b.WriteString(f.Value)
-		b.WriteString("\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-// lookupPayloadValue checks each source map for the given key and
-// returns the first hit. Comparison is case-insensitive on the key so
-// providers that ship "Subject" or "TO" still match.
-func lookupPayloadValue(sources []map[string]any, key string) (any, bool) {
-	lowered := strings.ToLower(key)
-	for _, src := range sources {
-		if src == nil {
-			continue
-		}
-		if v, ok := src[key]; ok {
-			return v, true
-		}
-		for k, v := range src {
-			if strings.ToLower(k) == lowered {
-				return v, true
-			}
-		}
-	}
-	return nil, false
-}
-
-// payloadValueClipLen is the soft cap on a single payload value we render
-// in the approval card, measured in RUNES (not bytes) so multi-byte
-// characters like CJK or emoji do not get sliced mid-codepoint into
-// invalid UTF-8. Email bodies routinely run thousands of bytes; the
-// human only needs the first sentence to recognize the message.
-const payloadValueClipLen = 240
-
-// formatPayloadValue renders any payload value as a single, clipped
-// string. Arrays become comma-separated lists; structured values fall
-// back to JSON. Internal whitespace is collapsed so multi-line bodies
-// do not break the bulleted list. Truncation is rune-aware: a CJK
-// character at position 240 will not produce a half-glyph and a tofu
-// box on the rendered card.
-func formatPayloadValue(v any) string {
-	raw := payloadValueString(v)
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	raw = strings.Join(strings.Fields(raw), " ")
-	if utf8.RuneCountInString(raw) > payloadValueClipLen {
-		runes := []rune(raw)
-		raw = string(runes[:payloadValueClipLen]) + "…"
-	}
-	return raw
-}
-
-func payloadValueString(v any) string {
-	switch t := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return t
-	case []string:
-		return strings.Join(t, ", ")
-	case []any:
-		parts := make([]string, 0, len(t))
-		for _, item := range t {
-			if s := payloadValueString(item); strings.TrimSpace(s) != "" {
-				parts = append(parts, strings.TrimSpace(s))
-			}
-		}
-		return strings.Join(parts, ", ")
-	case bool:
-		if t {
-			return "true"
-		}
-		return "false"
-	case float64:
-		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.6f", t), "0"), ".")
-	case int, int64:
-		return fmt.Sprintf("%d", t)
-	}
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Sprintf("%v", v)
-	}
-	return string(raw)
 }
 
 var (

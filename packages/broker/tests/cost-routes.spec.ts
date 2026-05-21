@@ -392,9 +392,7 @@ describe("/api/v1/cost routes", () => {
     });
     expect(append.status).toBe(201);
     fix.db
-      .prepare<[number, string]>(
-        "UPDATE command_idempotency SET created_at_ms = ? WHERE idempotency_key = ?",
-      )
+      .prepare("UPDATE command_idempotency SET created_at_ms = ? WHERE idempotency_key = ?")
       .run(1, key);
 
     const res = await fetch(`${fix.broker.url}/api/v1/cost/idempotency/prune`, {
@@ -412,14 +410,12 @@ describe("/api/v1/cost routes", () => {
     expect(Number.isSafeInteger(body.cutoffMs)).toBe(true);
 
     const idempotencyCount = fix.db
-      .prepare<[], { readonly n: number }>("SELECT COUNT(*) AS n FROM command_idempotency")
-      .get();
+      .prepare("SELECT COUNT(*) AS n FROM command_idempotency")
+      .get() as { readonly n: number } | undefined;
     expect(idempotencyCount?.n).toBe(0);
     const eventCount = fix.db
-      .prepare<[], { readonly n: number }>(
-        "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-      )
-      .get();
+      .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+      .get() as { readonly n: number } | undefined;
     expect(eventCount?.n).toBe(1);
   });
 
@@ -589,14 +585,14 @@ describe("/api/v1/cost routes", () => {
     expect(res.status).toBe(201);
 
     const row = fix.db
-      .prepare<[], { readonly payload: Buffer }>(
+      .prepare(
         "SELECT payload FROM event_log WHERE type = 'cost.budget.set' ORDER BY lsn DESC LIMIT 1",
       )
-      .get();
+      .get() as { readonly payload: Uint8Array } | undefined;
     if (row === undefined) throw new Error("missing budget_set event");
     const payload = costAuditPayloadFromJsonValue(
       "budget_set",
-      JSON.parse(row.payload.toString("utf8")) as unknown,
+      JSON.parse(new TextDecoder().decode(row.payload)) as unknown,
     ) as BudgetSetAuditPayload;
     expect(payload.setBy).toBe(OPERATOR_IDENTITY);
     expect(payload.setAt.toISOString()).not.toBe(forgedBody.setAt);
@@ -634,15 +630,13 @@ describe("cost idempotency startup prune", () => {
       cost: { ledger, db, operatorToken: OPERATOR_TOKEN },
     });
     try {
-      const idempotencyCount = db
-        .prepare<[], { readonly n: number }>("SELECT COUNT(*) AS n FROM command_idempotency")
-        .get();
+      const idempotencyCount = db.prepare("SELECT COUNT(*) AS n FROM command_idempotency").get() as
+        | { readonly n: number }
+        | undefined;
       expect(idempotencyCount?.n).toBe(0);
       const eventCount = db
-        .prepare<[], { readonly n: number }>(
-          "SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'",
-        )
-        .get();
+        .prepare("SELECT COUNT(*) AS n FROM event_log WHERE type = 'cost.event'")
+        .get() as { readonly n: number } | undefined;
       expect(eventCount?.n).toBe(1);
     } finally {
       await broker.stop();

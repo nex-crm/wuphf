@@ -71,11 +71,18 @@ func (b *Broker) advancePhase(s *onboarding.State, next string) error {
 		}
 	}
 
+	if next == onboarding.PhaseDraft || next == onboarding.PhaseApprove {
+		if err := b.ensureOnboardingFirstIssueDraft(s); err != nil {
+			return fmt.Errorf("onboarding: first issue draft: %w", err)
+		}
+	}
+
 	// Build the deterministic CEO message for this phase.
 	msgs := ceoDeterministicMessages(next, s)
 	if len(msgs) == 0 {
-		// Phase 4 phases (draft/approve/kickoff) are not wired in Phase 2.
-		// Log and return without error so the transition still persists.
+		// LLM-backed phases may emit their own messages while creating
+		// issue drafts. Return without treating the absence of a template
+		// as an error.
 		log.Printf("onboarding: no deterministic messages for phase %q (Phase 4 not yet wired)", next)
 		return nil
 	}
@@ -169,9 +176,18 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 		}
 		b.ensureNotebookDirsForRoster()
 		b.materializeBlueprintWiki(loaded)
+		// materializeBlueprintWiki only regenerates the index when its
+		// transactional materializer wrote new bytes. The seed boundary
+		// must still guarantee a fresh index/all.md — for example when the
+		// blueprint wiki was already on disk from a prior run but the
+		// index was rebuilt empty by a clean-boot reconcile. Call here
+		// unconditionally so the post-seed snapshot is always correct.
+		regenCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		b.regenWikiIndexAfterSeed(regenCtx, "blueprint seed")
+		cancel()
 		return nil
 	}
-	// Scratch path: minimal seed (#general + 2 wiki stubs + CEO).
+	// Scratch path: minimal seed (#general + about/ wiki stubs + CEO).
 	b.mu.Lock()
 	seedErr := b.seedMinimalScratchLocked(s)
 	b.mu.Unlock()
@@ -179,7 +195,92 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 		return seedErr
 	}
 	b.ensureNotebookDirsForRoster()
+	// Materialize the about/ skeleton outside the broker lock. Mirrors the
+	// website-scan path's team/about/{README,company,owner}.md so the
+	// skip-website user lands in an office with a populated wiki section
+	// rather than an empty one. Best-effort: failures are logged inside the
+	// helper and do not fail the seed phase.
+	b.materializeScratchWikiStubs(s)
+	// Stubs land via atomicWrite (not the WikiWorker), so force an index
+	// regen here so /index/all.md reflects the new about/ files.
+	regenCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	b.regenWikiIndexAfterSeed(regenCtx, "scratch seed")
+	cancel()
 	return nil
+}
+
+func (b *Broker) ensureOnboardingFirstIssueDraft(s *onboarding.State) error {
+	if b == nil || s == nil {
+		return nil
+	}
+	prompt := strings.TrimSpace(s.FormAnswers.TaskPrompt)
+	if prompt == "" {
+		return nil
+	}
+
+	taskID := strings.TrimSpace(s.FirstIssueID)
+	changedState := false
+
+	b.mu.Lock()
+	if taskID == "" || b.findTaskByIDLocked(taskID) == nil {
+		now := time.Now().UTC().Format(time.RFC3339)
+		b.counter++
+		task := teamTask{
+			ID:            fmt.Sprintf("task-%d", b.counter),
+			Channel:       "general",
+			Title:         onboardingFirstIssueTitle(prompt),
+			Details:       prompt,
+			Owner:         "ceo",
+			CreatedBy:     "human",
+			TaskType:      "issue",
+			PipelineID:    "issue",
+			ExecutionMode: "office",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		if err := b.applyLifecycleStateLocked(&task, LifecycleStateDrafting); err != nil {
+			b.mu.Unlock()
+			return err
+		}
+		syncTaskMemoryWorkflow(&task, now)
+		b.scheduleTaskLifecycleLocked(&task)
+		b.tasks = append(b.tasks, task)
+		taskID = task.ID
+		s.FirstIssueID = taskID
+		changedState = true
+		b.appendActionLocked("task_created", "office", task.Channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
+		if err := b.saveLocked(); err != nil {
+			b.mu.Unlock()
+			return err
+		}
+	}
+	b.mu.Unlock()
+
+	if s.PendingSuggestion != nil && s.PendingSuggestion.Phase == onboarding.PhaseDraft {
+		s.PendingSuggestion = nil
+		changedState = true
+	}
+	if changedState {
+		if err := onboarding.Save(s); err != nil {
+			return err
+		}
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := b.draftIssueLocked(b.wikiPromotionContext(), taskID, prompt, nil); err != nil {
+		return err
+	}
+	return b.saveLocked()
+}
+
+func onboardingFirstIssueTitle(prompt string) string {
+	title := strings.TrimSpace(prompt)
+	title = strings.TrimSuffix(title, ".")
+	if title == "" {
+		return "First issue"
+	}
+	return truncate(title, 96)
 }
 
 // seedMinimalScratchLocked seeds the absolute minimum for the scratch path:
@@ -241,10 +342,12 @@ func (b *Broker) seedMinimalScratchLocked(s *onboarding.State) error {
 	return b.saveLocked()
 }
 
-// materializeScratchWikiStubs writes the two minimal wiki stubs for the
-// scratch path: README.md and team-charter.md. These are placeholders
-// with FormAnswers-derived content; the website scan may later populate
-// README.md with scraped facts.
+// materializeScratchWikiStubs writes the team/about/ skeleton for the
+// skip-website scratch path: README.md, company.md, owner.md. These mirror
+// the files SeedCompanyContext writes on the with-website path so users
+// land in a populated wiki section regardless of which onboarding branch
+// they took. The README body is shared via operations.AboutReadmeContent;
+// company.md and owner.md are placeholder stubs an agent can enrich later.
 //
 // Caller must NOT hold b.mu. Best-effort: errors are logged, not returned,
 // so a file I/O failure does not fail the seed phase.
@@ -256,64 +359,113 @@ func (b *Broker) materializeScratchWikiStubs(s *onboarding.State) {
 	}
 	wikiRoot := filepath.Join(home, ".wuphf", "wiki")
 
-	companyName := strings.TrimSpace(s.FormAnswers.CompanyName)
-	if companyName == "" {
-		companyName = "Your Company"
+	var (
+		companyName string
+		description string
+		ownerName   string
+		ownerRole   string
+	)
+	if s != nil {
+		companyName = s.FormAnswers.CompanyName
+		description = s.FormAnswers.Description
+		ownerName = s.FormAnswers.OwnerName
+		ownerRole = s.FormAnswers.OwnerRole
 	}
-	description := strings.TrimSpace(s.FormAnswers.Description)
-
-	readmeContent := fmt.Sprintf("# %s\n\n%s\n\n_Populated by the onboarding website scan._\n",
-		companyName, description)
-	charterContent := fmt.Sprintf("# Team Charter\n\n## Company\n%s\n\n## Mission\n_Add your mission statement here._\n\n## Principles\n_Add your team principles here._\n",
-		companyName)
 
 	stubs := []struct {
 		path    string
 		content string
 	}{
-		{"README.md", readmeContent},
-		{"team-charter.md", charterContent},
+		{filepath.Join("team", "about", "README.md"), operations.AboutReadmeContent()},
+		{filepath.Join("team", "about", "company.md"), operations.AboutScratchCompanyMD(companyName, description)},
+		{filepath.Join("team", "about", "owner.md"), operations.AboutScratchOwnerMD(ownerName, ownerRole)},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	worker := b.WikiWorker()
+	wrote := false
 	for _, stub := range stubs {
 		fullPath := filepath.Join(wikiRoot, stub.path)
-		if err := writeWikiStubIfAbsent(ctx, fullPath, stub.content); err != nil {
+		created, err := writeWikiStubIfAbsent(ctx, fullPath, stub.content)
+		if err != nil {
 			log.Printf("onboarding: scratch wiki stub %s: %v", stub.path, err)
+			continue
+		}
+		if created {
+			wrote = true
 		}
 	}
 
-	if worker != nil && worker.Repo() != nil {
-		repo := worker.Repo()
-		if err := repo.IndexRegen(ctx); err != nil {
-			log.Printf("onboarding: scratch wiki index regen: %v", err)
-		}
-		sha, err := repo.CommitBootstrap(ctx, "wuphf: materialize scratch wiki stubs")
-		if err != nil {
-			log.Printf("onboarding: scratch wiki commit: %v", err)
-		} else if sha != "" {
-			log.Printf("onboarding: scratch wiki stubs committed %s", sha)
-		}
+	if !wrote {
+		return
+	}
+
+	worker := b.WikiWorker()
+	if worker == nil || worker.Repo() == nil {
+		// Non-markdown backend (e.g. memory in tests). Files stay on disk;
+		// RecoverDirtyTree on the next markdown-backend launch will fold
+		// them in. Same fallback shape as materializeBlueprintWiki.
+		return
+	}
+	repo := worker.Repo()
+	if err := repo.IndexRegen(ctx); err != nil {
+		log.Printf("onboarding: scratch wiki index regen: %v", err)
+	}
+	sha, err := repo.CommitBootstrap(ctx, "wuphf: materialize scratch wiki about/ skeleton")
+	if err != nil {
+		log.Printf("onboarding: scratch wiki commit: %v", err)
+	} else if sha != "" {
+		log.Printf("onboarding: scratch wiki stubs committed %s", sha)
+	}
+}
+
+// regenWikiIndexAfterSeed regenerates wiki/index/all.md so it reflects any
+// articles that landed on disk at a seed or scan boundary. It is the single
+// chokepoint for "files appeared outside the WikiWorker's per-commit
+// reconcile path" — for example, operations.SeedCompanyContext writes
+// team/about/{README,owner,company}.md directly to disk, and
+// materializeScratchWikiStubs writes scratch stubs via writeWikiStubIfAbsent.
+// Neither path passes through (*WikiWorker).Enqueue, so the per-commit
+// IndexRegen in (*Repo).Commit never fires and the boot-reconcile snapshot
+// of index/all.md goes stale.
+//
+// Idempotent: safe to call multiple times. Best-effort: errors are logged,
+// not returned, so a transient I/O blip on the index does not fail the
+// surrounding seed/scan boundary. Returns silently when the markdown
+// backend is not active (worker or repo nil).
+//
+// See nex-crm/wuphf#941.
+func (b *Broker) regenWikiIndexAfterSeed(ctx context.Context, reason string) {
+	worker := b.WikiWorker()
+	if worker == nil {
+		return
+	}
+	repo := worker.Repo()
+	if repo == nil {
+		return
+	}
+	if err := repo.IndexRegen(ctx); err != nil {
+		log.Printf("onboarding: wiki index regen after %s: %v", reason, err)
 	}
 }
 
 // writeWikiStubIfAbsent writes content to path only when the file does not
-// already exist. Uses O_CREATE|O_EXCL for atomic existence check.
-func writeWikiStubIfAbsent(_ context.Context, path, content string) error {
+// already exist. Uses O_CREATE|O_EXCL for atomic existence check. Returns
+// (true, nil) when the file was newly created, (false, nil) when it already
+// existed, and (false, err) on any other I/O failure.
+func writeWikiStubIfAbsent(_ context.Context, path, content string) (bool, error) {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false, fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
-			return nil // file already exists; leave it
+			return false, nil // file already exists; leave it
 		}
-		return fmt.Errorf("create %s: %w", path, err)
+		return false, fmt.Errorf("create %s: %w", path, err)
 	}
 	defer func() {
 		// Best-effort close on a freshly created file we already
@@ -322,9 +474,9 @@ func writeWikiStubIfAbsent(_ context.Context, path, content string) error {
 		_ = f.Close()
 	}()
 	if _, err := f.WriteString(content); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+		return false, fmt.Errorf("write %s: %w", path, err)
 	}
-	return nil
+	return true, nil
 }
 
 // ceoMessagePayload is the internal representation of a CEO deterministic
@@ -468,6 +620,21 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 					{"id": "start_issue", "label": "Start an issue", "action": "transition", "phase": "draft"},
 					{"id": "look_around", "label": "Look around first", "action": "transition", "phase": "complete"},
 				},
+			}),
+		}}
+
+	case onboarding.PhaseDraft:
+		if s != nil && strings.TrimSpace(s.FormAnswers.TaskPrompt) != "" {
+			return nil
+		}
+		return []ceoMessagePayload{{
+			Kind:         "ceo_form_field",
+			Content:      "What should the team tackle first?",
+			SuggestionID: "first-issue-prompt",
+			SuggestionPayload: mustMarshalRaw(map[string]interface{}{
+				"field":       "task_prompt",
+				"label":       "What should the team tackle first?",
+				"placeholder": "Example: Build a Stripe webhook handler that verifies signatures and updates subscriptions.",
 			}),
 		}}
 

@@ -1,7 +1,7 @@
 /**
  * IssuesList — /issues surface.
  *
- * Renders all office tasks (back-compat read of GET /tasks?all_channels=true)
+ * Renders issue-spec tasks (back-compat read of GET /tasks?all_channels=true)
  * as a lifecycle kanban. Six columns: Draft / Intake / Running / Review /
  * Approved / Rejected. Each card opens the IssueDocument detail surface at
  * /issues/$issueId.
@@ -20,22 +20,32 @@ import { LifecycleStatePill } from "./LifecycleStatePill";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-const KNOWN_LIFECYCLE_STATES: ReadonlySet<LifecycleState> = new Set<LifecycleState>([
-  "drafting",
-  "intake",
-  "ready",
-  "running",
-  "review",
-  "decision",
-  "blocked_on_pr_merge",
-  "changes_requested",
-  "approved",
-  "rejected",
-]);
+const KNOWN_LIFECYCLE_STATES: ReadonlySet<LifecycleState> =
+  new Set<LifecycleState>([
+    "drafting",
+    "intake",
+    "ready",
+    "running",
+    "review",
+    "decision",
+    "blocked_on_pr_merge",
+    "changes_requested",
+    "approved",
+    "rejected",
+  ]);
 
 function isLifecycleState(value: unknown): value is LifecycleState {
   return (
-    typeof value === "string" && KNOWN_LIFECYCLE_STATES.has(value as LifecycleState)
+    typeof value === "string" &&
+    KNOWN_LIFECYCLE_STATES.has(value as LifecycleState)
+  );
+}
+
+function isIssueSpecTask(task: Task): boolean {
+  return (
+    task.task_type === "issue" ||
+    task.pipeline_id === "issue" ||
+    Boolean(task.issue_draft_spec)
   );
 }
 
@@ -143,20 +153,11 @@ function IssueCard({ task }: { task: Task }) {
     });
   }
 
-  function handleKey(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      navigate();
-    }
-  }
-
   return (
-    <div
+    <button
+      type="button"
       className="issues-kanban-card"
-      role="button"
-      tabIndex={0}
       onClick={navigate}
-      onKeyDown={handleKey}
       data-testid="issue-row"
       aria-label={`Issue: ${task.title}, state: ${state}`}
     >
@@ -170,7 +171,7 @@ function IssueCard({ task }: { task: Task }) {
           <span className="issues-kanban-card-channel">#{task.channel}</span>
         ) : null}
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -226,7 +227,8 @@ function IssuesEmptyState() {
       data-testid="issues-list-empty"
     >
       <p className="issues-empty-copy">
-        No issues yet. When you are ready, type what you want done.
+        No issue specs yet. File larger project work here, then cut it into
+        agent tasks.
       </p>
       <button
         type="button"
@@ -259,7 +261,8 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
     enabled: !initialTasks,
   });
 
-  const tasks = result.data?.tasks ?? [];
+  const allTasks = result.data?.tasks ?? [];
+  const tasks = useMemo(() => allTasks.filter(isIssueSpecTask), [allTasks]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -336,11 +339,7 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
         here too with <section> children that aren't role="listitem" would
         be invalid ARIA, so the wrapper is left as a plain <div>.
       */}
-      <div
-        className="issues-kanban"
-        aria-label="Issues kanban"
-        data-testid="issues-list-rows"
-      >
+      <div className="issues-kanban" data-testid="issues-list-rows">
         {COLUMN_ORDER.map((col) => (
           <section
             key={col}
@@ -357,23 +356,22 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
               </span>
             </header>
             <p className="issues-kanban-column-hint">{COLUMN_HINT[col]}</p>
-            <div className="issues-kanban-column-cards" role="list">
+            <ul className="issues-kanban-column-cards">
               {columns[col].length === 0 ? (
-                <p
+                <li
                   className="issues-kanban-column-empty"
-                  role="listitem"
                   aria-label={`No issues in ${COLUMN_LABEL[col]}`}
                 >
                   —
-                </p>
+                </li>
               ) : (
                 columns[col].map((task) => (
-                  <div role="listitem" key={task.id}>
+                  <li key={task.id}>
                     <IssueCard task={task} />
-                  </div>
+                  </li>
                 ))
               )}
-            </div>
+            </ul>
           </section>
         ))}
       </div>

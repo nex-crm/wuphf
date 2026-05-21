@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -36,11 +37,17 @@ func TestSeedCompanyContext(t *testing.T) {
 	validJSON := `{"company_name":"Acme","description":"B2B SaaS","industry":"SaaS","audience":"Ops teams","goals":"Launch Q3","key_facts":["Fact 1","Fact 2"]}`
 
 	tests := []struct {
-		name                string
-		setup               func(t *testing.T) // optional per-case setup (e.g. env scrubbing)
-		input               func(wikiRoot string) CompanySeedInput
-		wantCompanyMD       bool
-		wantOwnerMD         bool
+		name  string
+		setup func(t *testing.T) // optional per-case setup (e.g. env scrubbing)
+		input func(wikiRoot string) CompanySeedInput
+		// wantRealCompanyMD is true when company.md should hold a real
+		// LLM-derived profile (not the placeholder). The placeholder file
+		// is always written so the README link is never dead — see #946 —
+		// so we no longer assert on file existence directly.
+		wantRealCompanyMD bool
+		// wantRealOwnerMD is true when owner.md should hold a real
+		// owner profile (not the placeholder).
+		wantRealOwnerMD     bool
 		wantOwnerContent    []string // substrings that must appear in owner.md
 		wantReadme          bool
 		wantWarningContains string
@@ -56,9 +63,9 @@ func TestSeedCompanyContext(t *testing.T) {
 					FilePaths: []string{mustTempFile("wuphf-seed-*.txt", "Acme is a B2B SaaS company.")},
 				}
 			},
-			wantCompanyMD: true,
-			wantOwnerMD:   true,
-			wantReadme:    true,
+			wantRealCompanyMD: true,
+			wantRealOwnerMD:   true,
+			wantReadme:        true,
 		},
 		{
 			name: "JSON fence stripping",
@@ -70,8 +77,8 @@ func TestSeedCompanyContext(t *testing.T) {
 					FilePaths: []string{mustTempFile("wuphf-seed-*.txt", "Acme builds software.")},
 				}
 			},
-			wantCompanyMD: true,
-			wantReadme:    true,
+			wantRealCompanyMD: true,
+			wantReadme:        true,
 		},
 		{
 			name: "URL scheme rejected",
@@ -91,9 +98,8 @@ func TestSeedCompanyContext(t *testing.T) {
 					WikiRoot: wikiRoot,
 				}
 			},
-			wantReadme:    true,
-			wantCompanyMD: false,
-			wantOwnerMD:   false,
+			wantReadme: true,
+			// No real content for either file; both should hold the placeholder.
 		},
 		{
 			name: "owner name and role empty",
@@ -104,9 +110,9 @@ func TestSeedCompanyContext(t *testing.T) {
 					FilePaths: []string{mustTempFile("wuphf-seed-*.txt", "Some company content.")},
 				}
 			},
-			wantReadme:    true,
-			wantCompanyMD: true,
-			wantOwnerMD:   false,
+			wantReadme:        true,
+			wantRealCompanyMD: true,
+			// owner.md stays as placeholder (no name / role supplied).
 		},
 		{
 			name: "owner name provided",
@@ -118,7 +124,7 @@ func TestSeedCompanyContext(t *testing.T) {
 				}
 			},
 			wantReadme:       true,
-			wantOwnerMD:      true,
+			wantRealOwnerMD:  true,
 			wantOwnerContent: []string{"Alice", "CEO"},
 		},
 		{
@@ -170,8 +176,42 @@ func TestSeedCompanyContext(t *testing.T) {
 			}
 
 			checkExists(readmePath, tc.wantReadme, "README.md")
-			checkExists(companyPath, tc.wantCompanyMD, "company.md")
-			checkExists(ownerPath, tc.wantOwnerMD, "owner.md")
+
+			// company.md and owner.md are seeded with a placeholder on first
+			// run so the README links never dangle (#946). Whenever the
+			// README itself was written this run, both link targets must
+			// exist too — either as placeholders or as real articles.
+			if tc.wantReadme {
+				checkExists(companyPath, true, "company.md")
+				checkExists(ownerPath, true, "owner.md")
+			}
+
+			// When the LLM extraction succeeds the placeholder must have
+			// been overwritten with real content; the inverse is asserted
+			// implicitly by leaving the placeholder TODO marker in the file.
+			readBody := func(path string) string {
+				t.Helper()
+				data, readErr := os.ReadFile(path)
+				if readErr != nil {
+					t.Fatalf("read %s: %v", path, readErr)
+				}
+				return string(data)
+			}
+			const todoMarker = "<!-- TODO:"
+			if tc.wantReadme {
+				if tc.wantRealCompanyMD && strings.Contains(readBody(companyPath), todoMarker) {
+					t.Errorf("company.md still contains placeholder TODO marker but wantRealCompanyMD=true")
+				}
+				if !tc.wantRealCompanyMD && !strings.Contains(readBody(companyPath), todoMarker) {
+					t.Errorf("company.md missing placeholder TODO marker but wantRealCompanyMD=false")
+				}
+				if tc.wantRealOwnerMD && strings.Contains(readBody(ownerPath), todoMarker) {
+					t.Errorf("owner.md still contains placeholder TODO marker but wantRealOwnerMD=true")
+				}
+				if !tc.wantRealOwnerMD && !strings.Contains(readBody(ownerPath), todoMarker) {
+					t.Errorf("owner.md missing placeholder TODO marker but wantRealOwnerMD=false")
+				}
+			}
 
 			if tc.wantWarningContains != "" {
 				found := false
@@ -186,7 +226,7 @@ func TestSeedCompanyContext(t *testing.T) {
 				}
 			}
 
-			if len(tc.wantOwnerContent) > 0 && tc.wantOwnerMD {
+			if len(tc.wantOwnerContent) > 0 && tc.wantRealOwnerMD {
 				data, err := os.ReadFile(ownerPath)
 				if err != nil {
 					t.Fatalf("read owner.md: %v", err)
@@ -196,6 +236,86 @@ func TestSeedCompanyContext(t *testing.T) {
 					if !strings.Contains(got, want) {
 						t.Errorf("owner.md missing %q, got: %s", want, got)
 					}
+				}
+			}
+		})
+	}
+}
+
+// TestSeedCompanyContext_NoDeadLinksInSeededReadme is the regression guard
+// for issue #946. The seeded team/about/README.md links to company.md and
+// owner.md; both must resolve to files that exist after a first-run seed
+// even when the user has not supplied a website, files, or completer (the
+// minimal scratch path).
+func TestSeedCompanyContext_NoDeadLinksInSeededReadme(t *testing.T) {
+	tests := []struct {
+		name  string
+		input func(wikiRoot string) CompanySeedInput
+	}{
+		{
+			name: "minimal scratch seed — no website, no owner, no completer",
+			input: func(wikiRoot string) CompanySeedInput {
+				return CompanySeedInput{WikiRoot: wikiRoot}
+			},
+		},
+		{
+			name: "scratch seed with company name only",
+			input: func(wikiRoot string) CompanySeedInput {
+				return CompanySeedInput{
+					WikiRoot:    wikiRoot,
+					CompanyName: "Acme",
+				}
+			},
+		},
+		{
+			name: "scratch seed with owner only",
+			input: func(wikiRoot string) CompanySeedInput {
+				return CompanySeedInput{
+					WikiRoot:  wikiRoot,
+					OwnerName: "Alice",
+					OwnerRole: "Founder",
+				}
+			},
+		},
+	}
+
+	// linkRE matches markdown link targets: [label](target).
+	linkRE := regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			wikiRoot := t.TempDir()
+			if _, err := SeedCompanyContext(context.Background(), tc.input(wikiRoot)); err != nil {
+				t.Fatalf("SeedCompanyContext: %v", err)
+			}
+
+			aboutDir := filepath.Join(wikiRoot, "team", "about")
+			readmePath := filepath.Join(aboutDir, "README.md")
+			body, err := os.ReadFile(readmePath)
+			if err != nil {
+				t.Fatalf("read README.md: %v", err)
+			}
+
+			matches := linkRE.FindAllStringSubmatch(string(body), -1)
+			if len(matches) == 0 {
+				t.Fatal("seeded README.md has no markdown links — refusing to silently pass")
+			}
+			for _, m := range matches {
+				target := m[1]
+				// Skip absolute URLs; only validate relative paths.
+				if strings.Contains(target, "://") || strings.HasPrefix(target, "/") {
+					continue
+				}
+				// Strip any trailing anchor.
+				if i := strings.Index(target, "#"); i != -1 {
+					target = target[:i]
+				}
+				if target == "" {
+					continue
+				}
+				resolved := filepath.Join(aboutDir, target)
+				if _, statErr := os.Stat(resolved); statErr != nil {
+					t.Errorf("seeded README links to %q which does not resolve: %v", target, statErr)
 				}
 			}
 		})

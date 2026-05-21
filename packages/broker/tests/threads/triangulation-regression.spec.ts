@@ -3,6 +3,7 @@
 // on the cherry-picked #916 fix round, and asserts the post-fix invariant.
 // Reverting any of GROUPs 2/3/4 will turn one of these red on `bun run test`.
 
+import type { DatabaseSync } from "node:sqlite";
 import {
   type ApprovalRequestedAuditPayload,
   approvalAuditPayloadToBytes,
@@ -21,7 +22,6 @@ import {
   threadListResponseFromJson,
   threadMutationResponseFromJson,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { type ApprovalProjection, createApprovalSubsystem } from "../../src/approvals/index.ts";
@@ -44,7 +44,7 @@ const APPROVAL_REQUEST_ID = "01MRZ3NDEKTSV4RRFFQ69G5FM0";
 
 interface Fixture {
   readonly broker: BrokerHandle;
-  readonly db: Database.Database;
+  readonly db: DatabaseSync;
   readonly eventLog: EventLog;
   readonly approvals: ApprovalProjection;
   readonly receiptStore: SqliteReceiptStore;

@@ -78,6 +78,14 @@ export interface TaskMemoryWorkflow {
   completed_at?: string;
 }
 
+export interface TaskIssueDraftSpec {
+  goal?: string;
+  context?: string;
+  approach?: string;
+  acceptance?: string;
+  drafted_at?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -113,6 +121,7 @@ export interface Task {
   recheck_at?: string;
   created_at?: string;
   updated_at?: string;
+  issue_draft_spec?: TaskIssueDraftSpec;
   memory_workflow?: TaskMemoryWorkflow;
 }
 

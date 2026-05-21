@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import {
   asAgentSlug,
   asProviderKind,
@@ -8,7 +9,6 @@ import {
   SanitizedString,
   sha256Hex,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { openDatabase, runMigrations } from "../src/event-log/index.ts";
 import { constructSqliteReceiptStoreForTesting } from "../src/internal/sqlite-receipt-store-testing.ts";
@@ -245,17 +245,19 @@ function sqliteReceiptStoreFactory(options: StoreFactoryOptions = {}): ReceiptSt
   return constructSqliteReceiptStoreForTesting(db);
 }
 
-function seedThreadRows(db: Database.Database, ...threadIds: readonly string[]): void {
-  const appendEvent = db.prepare<[Buffer], { readonly lsn: number }>(
+function seedThreadRows(db: DatabaseSync, ...threadIds: readonly string[]): void {
+  const appendEvent = db.prepare(
     "INSERT INTO event_log (ts_ms, type, payload) VALUES (0, 'thread.created', ?) RETURNING lsn",
   );
-  const insertThread = db.prepare<[string, number, string]>(
+  const insertThread = db.prepare(
     `INSERT INTO threads
        (thread_id, title, status, head_lsn, created_by, created_at_ms, updated_at_ms, external_refs)
      VALUES (?, 'receipt store parity thread', 'open', ?, 'broker', 0, 0, ?)`,
   );
   for (const threadId of threadIds) {
-    const row = appendEvent.get(Buffer.from(`{"threadId":"${threadId}"}`, "utf8"));
+    const row = appendEvent.get(Buffer.from(`{"threadId":"${threadId}"}`, "utf8")) as
+      | { readonly lsn: number }
+      | undefined;
     if (row === undefined) throw new Error("seed thread event insert returned no row");
     insertThread.run(threadId, row.lsn, '{"source_urls":[],"entity_ids":[]}');
   }

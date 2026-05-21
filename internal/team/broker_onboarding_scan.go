@@ -77,11 +77,12 @@ func (b *Broker) runScanPhase(dmSlug string) {
 	}
 
 	input := operations.CompanySeedInput{
-		WebsiteURL: websiteURL,
-		OwnerName:  s.FormAnswers.OwnerName,
-		OwnerRole:  s.FormAnswers.OwnerRole,
-		Completer:  brokerCompleter{},
-		WikiRoot:   wikiRoot,
+		WebsiteURL:  websiteURL,
+		CompanyName: s.FormAnswers.CompanyName,
+		OwnerName:   s.FormAnswers.OwnerName,
+		OwnerRole:   s.FormAnswers.OwnerRole,
+		Completer:   brokerCompleter{},
+		WikiRoot:    wikiRoot,
 	}
 
 	ctx, cancel := context.WithTimeout(b.lifecycleCtx, scanTimeout)
@@ -106,6 +107,18 @@ func (b *Broker) runScanPhase(dmSlug string) {
 	if !b.phaseStillScan() {
 		return
 	}
+
+	// SeedCompanyContext writes team/about/{README,owner,company}.md
+	// directly to disk via atomicWrite — it does not pass through the
+	// WikiWorker, so (*Repo).Commit's per-commit IndexRegen never fires
+	// for these files. Regenerate index/all.md here so the post-scan
+	// snapshot reflects the README path that always lands. (#941)
+	//
+	// Use a fresh timeout against the broker lifecycle, not the scan ctx,
+	// so a near-deadline scan does not cause regen to silently no-op.
+	regenCtx, regenCancel := context.WithTimeout(b.lifecycleCtx, 15*time.Second)
+	b.regenWikiIndexAfterSeed(regenCtx, "website scan")
+	regenCancel()
 
 	b.postScanChipUpdate(dmSlug, websiteURL, "done", "Wiki updated ✓")
 

@@ -1,6 +1,7 @@
 # @wuphf/desktop
 
-WUPHF v1 desktop shell. Electron 42 minimal application boundary: main process + sandboxed preload + minimal renderer + utility-process broker spawn.
+WUPHF v1 desktop shell. Electron 42 application boundary: main process +
+sandboxed preload + React renderer + utility-process broker spawn.
 
 This package is the **OS-level security boundary** for the rewrite. Everything app-related (receipts, projections, broker state, OAuth tokens) lives behind a separate process the renderer reaches over loopback HTTP. The shell only exposes OS verbs (open external URL, show file in folder, app version, broker liveness).
 
@@ -11,14 +12,11 @@ bun install                    # at repo root, once
 bun run desktop:dev            # boots Electron window
 ```
 
-The window shows a single status pane:
-
-```text
-WUPHF v1 desktop shell
-Broker: alive ✓
-Platform: darwin / arm64
-[ Open repo on GitHub ]   ← click to test allowlisted IPC
-```
+The window boots the React renderer shell. The first route shows broker
+liveness, the app version, and the loopback broker URL once bootstrap has
+completed. App data is fetched from the broker over loopback HTTP/SSE after
+the renderer exchanges `getBrokerStatus().brokerUrl` for an API bearer at
+`/api-token`.
 
 Quit with `Cmd+Q` / `Ctrl+Q`. Broker shutdown is cooperative: the supervisor
 sends a parentPort shutdown message, waits a 5s grace window, uses
@@ -53,9 +51,9 @@ Electron's standard logs directory (`app.getPath("logs")`) as `main.log`,
 ```mermaid
 flowchart LR
     Main["Electron main process<br/>BrowserWindow · lifecycle · broker spawn"]
-    Broker["Broker (stub)<br/>real impl in branch 4<br/>feat/broker-loopback-listener"]
+    Broker["Broker utility process<br/>loopback HTTP/SSE listener"]
     Preload["Preload (sandbox)<br/>contextBridge: 5 OS verbs<br/>src/shared/api-contract.ts"]
-    Renderer["Renderer (untrusted)<br/>one-pane status view"]
+    Renderer["Renderer (untrusted)<br/>React app shell + routes"]
 
     Main -->|utilityProcess.fork| Broker
     Broker -.->|liveness pings| Main
@@ -63,9 +61,11 @@ flowchart LR
     Preload -->|contextBridge.exposeInMainWorld("wuphf")| Renderer
     Renderer -->|window.wuphf.<verb>()| Preload
     Preload -->|ipcRenderer.invoke| Main
+    Renderer -->|/api-token · /api/* · /api/events| Broker
 ```
 
-The renderer **never** touches `~/.wuphf/` or any file under it. Anything app-data-shaped travels over loopback HTTP/SSE in a future branch.
+The renderer **never** touches `~/.wuphf/` or any file under it. Anything
+app-data-shaped travels over loopback HTTP/SSE, not IPC.
 
 ## Read more
 
@@ -77,4 +77,4 @@ The renderer **never** touches `~/.wuphf/` or any file under it. Anything app-da
 
 ## RFC anchors
 
-Architecture: §7.1, §7.3. Branch: §15 row 2 (`feat/desktop-shell-skeleton`, week 0–2). Future renderer wiring: §15 row 4.
+Architecture: §7.1, §7.3. Branch: §15 row 8 (`feat/r1-renderer-foundation`).

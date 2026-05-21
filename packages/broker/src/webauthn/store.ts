@@ -1,3 +1,4 @@
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   type AgentId,
   type ApprovalRole,
@@ -12,12 +13,16 @@ import {
   isApprovalRole,
   type JsonValue,
   type Sha256Hex,
-  type TimestampMs,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
-import BetterSqlite3 from "better-sqlite3";
 
 import { type OpenDatabaseArgs, openDatabase, runMigrations } from "../event-log/index.ts";
+import {
+  isSqliteBusyError,
+  isSqliteFullError,
+  isSqliteUnavailableError,
+  sqliteErrorLabel,
+} from "../internal/sqlite-errors.ts";
+import { createTransaction, type TransactionFn } from "../internal/sqlite-transaction.ts";
 import {
   type ConsumeCosignChallengeArgs,
   type ConsumedWebAuthnTokenRecord,
@@ -86,73 +91,35 @@ interface RoleRow {
   readonly role: string;
 }
 
-type InsertRegistrationChallengeParams = [string, string, ApprovalRole, AgentId, number, number];
-type InsertCosignChallengeParams = [
-  string,
-  string,
-  ApprovalTokenId,
-  ApprovalRole,
-  AgentId,
-  string,
-  string,
-  Sha256Hex,
-  Sha256Hex,
-  TimestampMs,
-  TimestampMs,
-  number,
-];
-type InsertCredentialParams = [string, string, number, ApprovalRole, AgentId, number];
-type MarkChallengeConsumedParams = [number, string];
-type UpdateCredentialCounterParams = [number, string, number];
-type InsertConsumedTokenParams = [
-  ApprovalTokenId,
-  string,
-  WebAuthnTokenOutcome,
-  string,
-  ApprovalRole,
-  Sha256Hex,
-  AgentId,
-  number,
-  number,
-];
-type UpdateConsumedTokenParams = [WebAuthnTokenOutcome, string, ApprovalTokenId];
-type PruneExpiredParams = [number, number];
-
 const TOKEN_OUTCOME_SET: ReadonlySet<string> = new Set(["approval_pending", "approved"]);
 const DEFAULT_PRUNE_EXPIRED_BATCH_ROWS = 100;
 const MAX_PRUNE_EXPIRED_BATCH_ROWS = 1_000;
 
 export class SqliteWebAuthnStore implements WebAuthnStore {
   private readonly closeDatabase: boolean;
-  private readonly insertRegistrationChallengeStmt: Database.Statement<InsertRegistrationChallengeParams>;
-  private readonly insertCosignChallengeStmt: Database.Statement<InsertCosignChallengeParams>;
-  private readonly getChallengeStmt: Database.Statement<[string], ChallengeRow>;
-  private readonly listCredentialsForAgentStmt: Database.Statement<[AgentId], CredentialRow>;
-  private readonly listCredentialsForAgentRoleStmt: Database.Statement<
-    [AgentId, ApprovalRole],
-    CredentialRow
+  private readonly insertRegistrationChallengeStmt: StatementSync;
+  private readonly insertCosignChallengeStmt: StatementSync;
+  private readonly getChallengeStmt: StatementSync;
+  private readonly listCredentialsForAgentStmt: StatementSync;
+  private readonly listCredentialsForAgentRoleStmt: StatementSync;
+  private readonly getCredentialStmt: StatementSync;
+  private readonly insertCredentialStmt: StatementSync;
+  private readonly markChallengeConsumedStmt: StatementSync;
+  private readonly getConsumedTokenStmt: StatementSync;
+  private readonly listSatisfiedRolesStmt: StatementSync;
+  private readonly updateCredentialCounterStmt: StatementSync;
+  private readonly insertConsumedTokenStmt: StatementSync;
+  private readonly updateConsumedTokenStmt: StatementSync;
+  private readonly pruneExpiredConsumedTokensStmt: StatementSync;
+  private readonly pruneExpiredOrphanChallengesStmt: StatementSync;
+  private readonly saveCredentialTransaction: TransactionFn<[SaveCredentialArgs], void>;
+  private readonly consumeCosignTransaction: TransactionFn<
+    [ConsumeCosignChallengeArgs],
+    ConsumedWebAuthnTokenRecord
   >;
-  private readonly getCredentialStmt: Database.Statement<[string], CredentialRow>;
-  private readonly insertCredentialStmt: Database.Statement<InsertCredentialParams>;
-  private readonly markChallengeConsumedStmt: Database.Statement<MarkChallengeConsumedParams>;
-  private readonly getConsumedTokenStmt: Database.Statement<[ApprovalTokenId], ConsumedTokenRow>;
-  private readonly listSatisfiedRolesStmt: Database.Statement<
-    [Sha256Hex, AgentId, number],
-    RoleRow
-  >;
-  private readonly updateCredentialCounterStmt: Database.Statement<UpdateCredentialCounterParams>;
-  private readonly insertConsumedTokenStmt: Database.Statement<InsertConsumedTokenParams>;
-  private readonly updateConsumedTokenStmt: Database.Statement<UpdateConsumedTokenParams>;
-  private readonly pruneExpiredConsumedTokensStmt: Database.Statement<PruneExpiredParams>;
-  private readonly pruneExpiredOrphanChallengesStmt: Database.Statement<PruneExpiredParams>;
-  private readonly saveCredentialTransaction: Database.Transaction<
-    (args: SaveCredentialArgs) => void
-  >;
-  private readonly consumeCosignTransaction: Database.Transaction<
-    (args: ConsumeCosignChallengeArgs) => ConsumedWebAuthnTokenRecord
-  >;
-  private readonly pruneExpiredTransaction: Database.Transaction<
-    (args: Required<PruneExpiredWebAuthnStateArgs>) => PruneExpiredWebAuthnStateResult
+  private readonly pruneExpiredTransaction: TransactionFn<
+    [Required<PruneExpiredWebAuthnStateArgs>],
+    PruneExpiredWebAuthnStateResult
   >;
   private closed = false;
 
@@ -168,23 +135,23 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   }
 
   constructor(
-    private readonly db: Database.Database,
+    private readonly db: DatabaseSync,
     options: SqliteWebAuthnStoreOptions = {},
   ) {
     this.closeDatabase = options.closeDatabase ?? false;
-    this.insertRegistrationChallengeStmt = db.prepare<InsertRegistrationChallengeParams>(
+    this.insertRegistrationChallengeStmt = db.prepare(
       `INSERT INTO webauthn_challenges
         (challenge_id, challenge_type, challenge_b64url, role, agent_id, expires_at_ms, created_at_ms)
        VALUES (?, 'registration', ?, ?, ?, ?, ?)`,
     );
-    this.insertCosignChallengeStmt = db.prepare<InsertCosignChallengeParams>(
+    this.insertCosignChallengeStmt = db.prepare(
       `INSERT INTO webauthn_challenges
         (challenge_id, challenge_type, challenge_b64url, token_id, role, agent_id,
          claim_json, scope_json, claim_scope_hash, approval_group_hash,
          not_before_ms, expires_at_ms, created_at_ms)
        VALUES (?, 'cosign', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    this.getChallengeStmt = db.prepare<[string], ChallengeRow>(
+    this.getChallengeStmt = db.prepare(
       `SELECT challenge_id AS challengeId,
               challenge_type AS challengeType,
               challenge_b64url AS challenge,
@@ -201,7 +168,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
        FROM webauthn_challenges
        WHERE challenge_id = ?`,
     );
-    this.listCredentialsForAgentStmt = db.prepare<[AgentId], CredentialRow>(
+    this.listCredentialsForAgentStmt = db.prepare(
       `SELECT credential_id AS credentialId,
               public_key_b64url AS publicKeyB64url,
               sign_count AS signCount,
@@ -212,7 +179,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
        WHERE agent_id = ?
        ORDER BY role ASC, credential_id ASC`,
     );
-    this.listCredentialsForAgentRoleStmt = db.prepare<[AgentId, ApprovalRole], CredentialRow>(
+    this.listCredentialsForAgentRoleStmt = db.prepare(
       `SELECT credential_id AS credentialId,
               public_key_b64url AS publicKeyB64url,
               sign_count AS signCount,
@@ -223,7 +190,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
        WHERE agent_id = ? AND role = ?
        ORDER BY credential_id ASC`,
     );
-    this.getCredentialStmt = db.prepare<[string], CredentialRow>(
+    this.getCredentialStmt = db.prepare(
       `SELECT credential_id AS credentialId,
               public_key_b64url AS publicKeyB64url,
               sign_count AS signCount,
@@ -233,15 +200,15 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
        FROM webauthn_registered_credentials
        WHERE credential_id = ?`,
     );
-    this.insertCredentialStmt = db.prepare<InsertCredentialParams>(
+    this.insertCredentialStmt = db.prepare(
       `INSERT INTO webauthn_registered_credentials
         (credential_id, public_key_b64url, sign_count, role, agent_id, created_at_ms)
        VALUES (?, ?, ?, ?, ?, ?)`,
     );
-    this.markChallengeConsumedStmt = db.prepare<MarkChallengeConsumedParams>(
+    this.markChallengeConsumedStmt = db.prepare(
       "UPDATE webauthn_challenges SET consumed_at_ms = ? WHERE challenge_id = ? AND consumed_at_ms IS NULL",
     );
-    this.getConsumedTokenStmt = db.prepare<[ApprovalTokenId], ConsumedTokenRow>(
+    this.getConsumedTokenStmt = db.prepare(
       `SELECT t.token_id AS tokenId,
               t.challenge_id AS challengeId,
               t.outcome,
@@ -257,7 +224,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
          ON c.challenge_id = t.challenge_id
        WHERE t.token_id = ?`,
     );
-    this.listSatisfiedRolesStmt = db.prepare<[Sha256Hex, AgentId, number], RoleRow>(
+    this.listSatisfiedRolesStmt = db.prepare(
       `SELECT DISTINCT role
        FROM webauthn_consumed_tokens
        WHERE approval_group_hash = ?
@@ -266,24 +233,24 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
          AND outcome IN ('approval_pending', 'approved')
        ORDER BY role ASC`,
     );
-    this.updateCredentialCounterStmt = db.prepare<UpdateCredentialCounterParams>(
+    this.updateCredentialCounterStmt = db.prepare(
       `UPDATE webauthn_registered_credentials
        SET sign_count = ?
        WHERE credential_id = ?
          AND (sign_count = 0 OR sign_count < ?)`,
     );
-    this.insertConsumedTokenStmt = db.prepare<InsertConsumedTokenParams>(
+    this.insertConsumedTokenStmt = db.prepare(
       `INSERT INTO webauthn_consumed_tokens
         (token_id, challenge_id, outcome, response_json, role, approval_group_hash,
          agent_id, expires_at_ms, consumed_at_ms)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    this.updateConsumedTokenStmt = db.prepare<UpdateConsumedTokenParams>(
+    this.updateConsumedTokenStmt = db.prepare(
       `UPDATE webauthn_consumed_tokens
        SET outcome = ?, response_json = ?
        WHERE token_id = ?`,
     );
-    this.pruneExpiredConsumedTokensStmt = db.prepare<PruneExpiredParams>(
+    this.pruneExpiredConsumedTokensStmt = db.prepare(
       `DELETE FROM webauthn_consumed_tokens
        WHERE token_id IN (
          SELECT token_id
@@ -293,7 +260,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
          LIMIT ?
        )`,
     );
-    this.pruneExpiredOrphanChallengesStmt = db.prepare<PruneExpiredParams>(
+    this.pruneExpiredOrphanChallengesStmt = db.prepare(
       `DELETE FROM webauthn_challenges
        WHERE challenge_id IN (
          SELECT c.challenge_id
@@ -308,7 +275,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
          LIMIT ?
        )`,
     );
-    this.saveCredentialTransaction = db.transaction((args: SaveCredentialArgs) => {
+    this.saveCredentialTransaction = createTransaction(db, (args: SaveCredentialArgs) => {
       this.insertCredentialStmt.run(
         args.credential.credentialId,
         Buffer.from(args.credential.publicKey).toString("base64url"),
@@ -322,8 +289,8 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
         throw new Error("webauthn registration challenge was already consumed");
       }
     });
-    this.consumeCosignTransaction = db.transaction((args: ConsumeCosignChallengeArgs) => {
-      const challenge = this.getChallengeStmt.get(args.challengeId);
+    this.consumeCosignTransaction = createTransaction(db, (args: ConsumeCosignChallengeArgs) => {
+      const challenge = this.getChallengeStmt.get(args.challengeId) as ChallengeRow | undefined;
       if (
         challenge === undefined ||
         challenge.tokenId === null ||
@@ -339,7 +306,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
       const approvalGroupHash = asSha256Hex(challenge.approvalGroupHash);
       const issuedToAgentId = asAgentId(challenge.agentId);
       const expiresAtMs = challenge.expiresAtMs;
-      const existing = this.getConsumedTokenStmt.get(tokenId);
+      const existing = this.getConsumedTokenStmt.get(tokenId) as ConsumedTokenRow | undefined;
       if (existing !== undefined) return consumedTokenFromRow(existing);
       const result = this.markChallengeConsumedStmt.run(args.consumedAtMs, challenge.challengeId);
       if (result.changes !== 1) {
@@ -369,9 +336,13 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
         args.consumedAtMs,
       );
       const satisfiedRoles = sortedUniqueRoles(
-        this.listSatisfiedRolesStmt
-          .all(approvalGroupHash, issuedToAgentId, args.consumedAtMs)
-          .map((row) => roleFromString(row.role, "webauthn_consumed_tokens.role")),
+        (
+          this.listSatisfiedRolesStmt.all(
+            approvalGroupHash,
+            issuedToAgentId,
+            args.consumedAtMs,
+          ) as unknown as RoleRow[]
+        ).map((row) => roleFromString(row.role, "webauthn_consumed_tokens.role")),
       );
       const thresholdMet = satisfiedRoles.length >= args.requiredThreshold;
       const outcome = thresholdMet ? "approved" : "approval_pending";
@@ -396,16 +367,15 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
         consumedAtMs: args.consumedAtMs,
       };
     });
-    this.pruneExpiredTransaction = db.transaction(
+    this.pruneExpiredTransaction = createTransaction(
+      db,
       (args: Required<PruneExpiredWebAuthnStateArgs>) => {
-        const consumedTokens = this.pruneExpiredConsumedTokensStmt.run(
-          args.nowMs,
-          args.maxRows,
-        ).changes;
-        const orphanChallenges = this.pruneExpiredOrphanChallengesStmt.run(
-          args.nowMs,
-          args.maxRows,
-        ).changes;
+        const consumedTokens = Number(
+          this.pruneExpiredConsumedTokensStmt.run(args.nowMs, args.maxRows).changes,
+        );
+        const orphanChallenges = Number(
+          this.pruneExpiredOrphanChallengesStmt.run(args.nowMs, args.maxRows).changes,
+        );
         return { consumedTokens, orphanChallenges };
       },
     );
@@ -466,7 +436,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   async getChallenge(challengeId: string): Promise<WebAuthnChallengeRecord | null> {
     try {
       this.assertOpen();
-      const row = this.getChallengeStmt.get(challengeId);
+      const row = this.getChallengeStmt.get(challengeId) as ChallengeRow | undefined;
       return row === undefined ? null : challengeFromRow(row);
     } catch (err) {
       throw classifySqliteReadError(err, "SqliteWebAuthnStore.getChallenge");
@@ -478,7 +448,9 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   ): Promise<readonly RegisteredWebAuthnCredential[]> {
     try {
       this.assertOpen();
-      return this.listCredentialsForAgentStmt.all(agentId).map(credentialFromRow);
+      return (this.listCredentialsForAgentStmt.all(agentId) as unknown as CredentialRow[]).map(
+        credentialFromRow,
+      );
     } catch (err) {
       throw classifySqliteReadError(err, "SqliteWebAuthnStore.listCredentialsForAgent");
     }
@@ -490,9 +462,12 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   }): Promise<readonly RegisteredWebAuthnCredential[]> {
     try {
       this.assertOpen();
-      return this.listCredentialsForAgentRoleStmt
-        .all(args.agentId, args.role)
-        .map(credentialFromRow);
+      return (
+        this.listCredentialsForAgentRoleStmt.all(
+          args.agentId,
+          args.role,
+        ) as unknown as CredentialRow[]
+      ).map(credentialFromRow);
     } catch (err) {
       throw classifySqliteReadError(err, "SqliteWebAuthnStore.listCredentialsForAgentRole");
     }
@@ -501,7 +476,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   async getCredential(credentialId: string): Promise<RegisteredWebAuthnCredential | null> {
     try {
       this.assertOpen();
-      const row = this.getCredentialStmt.get(credentialId);
+      const row = this.getCredentialStmt.get(credentialId) as CredentialRow | undefined;
       return row === undefined ? null : credentialFromRow(row);
     } catch (err) {
       throw classifySqliteReadError(err, "SqliteWebAuthnStore.getCredential");
@@ -520,7 +495,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   async getConsumedToken(tokenId: ApprovalTokenId): Promise<ConsumedWebAuthnTokenRecord | null> {
     try {
       this.assertOpen();
-      const row = this.getConsumedTokenStmt.get(tokenId);
+      const row = this.getConsumedTokenStmt.get(tokenId) as ConsumedTokenRow | undefined;
       return row === undefined ? null : consumedTokenFromRow(row);
     } catch (err) {
       throw classifySqliteReadError(err, "SqliteWebAuthnStore.getConsumedToken");
@@ -534,9 +509,13 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   }): Promise<readonly ApprovalRole[]> {
     try {
       this.assertOpen();
-      return this.listSatisfiedRolesStmt
-        .all(args.approvalGroupHash, args.issuedToAgentId, args.nowMs)
-        .map((row) => roleFromString(row.role, "webauthn_consumed_tokens.role"));
+      return (
+        this.listSatisfiedRolesStmt.all(
+          args.approvalGroupHash,
+          args.issuedToAgentId,
+          args.nowMs,
+        ) as unknown as RoleRow[]
+      ).map((row) => roleFromString(row.role, "webauthn_consumed_tokens.role"));
     } catch (err) {
       throw classifySqliteReadError(err, "SqliteWebAuthnStore.listSatisfiedRoles");
     }
@@ -571,7 +550,7 @@ export class SqliteWebAuthnStore implements WebAuthnStore {
   }
 }
 
-export function createWebAuthnStore(db: Database.Database): WebAuthnStore {
+export function createWebAuthnStore(db: DatabaseSync): WebAuthnStore {
   return new SqliteWebAuthnStore(db);
 }
 
@@ -706,9 +685,7 @@ function classifySqliteWriteError(err: unknown, operation: string): Error {
   }
   if (isSqliteUnavailableError(err)) {
     return new WebAuthnStoreUnavailableError(
-      `${operation}: storage error (${
-        err instanceof BetterSqlite3.SqliteError ? err.code : "unknown"
-      })`,
+      `${operation}: storage error (${sqliteErrorLabel(err)})`,
     );
   }
   return err instanceof Error ? err : new Error(String(err));
@@ -730,35 +707,6 @@ function classifySqliteReadError(err: unknown, operation: string): Error {
   }
   return new WebAuthnStoreUnavailableError(
     `${operation}: storage error (${err instanceof Error ? err.message : String(err)})`,
-  );
-}
-
-function isSqliteFullError(err: unknown): boolean {
-  return err instanceof BetterSqlite3.SqliteError && err.code === "SQLITE_FULL";
-}
-
-function isSqliteBusyError(err: unknown): boolean {
-  if (!(err instanceof BetterSqlite3.SqliteError)) return false;
-  return (
-    err.code === "SQLITE_BUSY" ||
-    err.code === "SQLITE_LOCKED" ||
-    err.code.startsWith("SQLITE_BUSY_") ||
-    err.code.startsWith("SQLITE_LOCKED_")
-  );
-}
-
-function isSqliteUnavailableError(err: unknown): boolean {
-  if (!(err instanceof BetterSqlite3.SqliteError)) return false;
-  return (
-    err.code === "SQLITE_READONLY" ||
-    err.code === "SQLITE_CANTOPEN" ||
-    err.code === "SQLITE_CORRUPT" ||
-    err.code === "SQLITE_NOTADB" ||
-    err.code === "SQLITE_PERM" ||
-    err.code.startsWith("SQLITE_READONLY_") ||
-    err.code.startsWith("SQLITE_IOERR") ||
-    err.code.startsWith("SQLITE_CANTOPEN_") ||
-    err.code.startsWith("SQLITE_CORRUPT_")
   );
 }
 

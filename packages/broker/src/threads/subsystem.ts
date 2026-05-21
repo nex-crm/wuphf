@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import {
   asIdempotencyKey,
   asSignerIdentity,
@@ -7,10 +8,10 @@ import {
   type ThreadId,
   threadMutationResponseToJsonValue,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import type { ApprovalAppender, ApprovalProjection } from "../approvals/index.ts";
 import type { EventLog } from "../event-log/index.ts";
+import { createTransaction } from "../internal/sqlite-transaction.ts";
 import type { SqliteReceiptStore } from "../sqlite-receipt-store.ts";
 import { createThreadAppender, type ThreadAppender } from "./appender.ts";
 import type { ParsedIdempotencyKey } from "./idempotency.ts";
@@ -33,7 +34,7 @@ const SYSTEM_INBOX_EXTERNAL_REFS: ThreadExternalRefs = Object.freeze({
 const THREAD_REBUILD_BATCH_SIZE = 500;
 
 export interface ThreadSubsystem {
-  readonly db: Database.Database;
+  readonly db: DatabaseSync;
   readonly appender: ThreadAppender;
   readonly state: ThreadStateStore;
   readonly receiptIndex: ThreadReceiptIndexStore;
@@ -45,7 +46,7 @@ export interface ThreadSubsystem {
 }
 
 export function createThreadSubsystem(
-  db: Database.Database,
+  db: DatabaseSync,
   eventLog: EventLog,
   receiptStore: SqliteReceiptStore,
 ): ThreadSubsystem {
@@ -58,7 +59,7 @@ export function createThreadSubsystem(
   const appender = createThreadAppender(db, eventLog, state);
   ensureSystemInboxThread(appender, state);
   receiptStore.setDefaultThreadIdForThreadlessReceipts(SYSTEM_INBOX_THREAD_ID);
-  const rebuildTransaction = db.transaction((fromLsn: number): void => {
+  const rebuildTransaction = createTransaction(db, (fromLsn: number): void => {
     if (!Number.isSafeInteger(fromLsn) || fromLsn < 0) {
       throw new Error(
         `rebuildFromLog: fromLsn must be a non-negative safe integer, got ${fromLsn}`,

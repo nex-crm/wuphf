@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import {
   asThreadSpecRevisionId,
   type EventLsn,
@@ -21,9 +22,9 @@ import {
   validateThreadStatusChangedAuditPayload,
   validateThreadStatusFold,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import type { EventLog, EventLogRecord } from "../event-log/index.ts";
+import { createTransaction } from "../internal/sqlite-transaction.ts";
 import type { ParsedIdempotencyKey } from "./idempotency.ts";
 import type { ThreadStateStore } from "./projections.ts";
 
@@ -113,24 +114,22 @@ export class ThreadIdempotencyConflictError extends Error {
 
 interface IdempotencyRow {
   readonly statusCode: number;
-  readonly responsePayload: Buffer;
+  readonly responsePayload: Uint8Array;
   readonly requestFingerprint: string | null;
 }
 
 export function createThreadAppender(
-  db: Database.Database,
+  db: DatabaseSync,
   eventLog: EventLog,
   threadState: ThreadStateStore,
 ): ThreadAppender {
-  const idempotencyLookupStmt = db.prepare<[string, string], IdempotencyRow>(
+  const idempotencyLookupStmt = db.prepare(
     `SELECT status_code AS statusCode, response_payload AS responsePayload,
             request_fingerprint AS requestFingerprint
      FROM command_idempotency
      WHERE idempotency_key = ? AND command = ?`,
   );
-  const idempotencyInsertStmt = db.prepare<
-    [string, string, number, Buffer, number | null, number, string]
-  >(
+  const idempotencyInsertStmt = db.prepare(
     `INSERT INTO command_idempotency
        (idempotency_key, command, status_code, response_payload, created_at_lsn, created_at_ms,
         request_fingerprint)
@@ -139,7 +138,9 @@ export function createThreadAppender(
 
   const appendCreateInner = (args: ThreadCreateIdempotentArgs): IdempotentThreadAppendResult => {
     assertRequestFingerprint(args.requestFingerprint);
-    const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
+    const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command) as
+      | IdempotencyRow
+      | undefined;
     if (cached !== undefined) {
       assertIdempotencyFingerprint(cached, args.requestFingerprint);
       return idempotentReplay(cached);
@@ -209,7 +210,9 @@ export function createThreadAppender(
     args: ThreadSpecEditIdempotentArgs,
   ): IdempotentThreadAppendResult => {
     assertRequestFingerprint(args.requestFingerprint);
-    const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
+    const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command) as
+      | IdempotencyRow
+      | undefined;
     if (cached !== undefined) {
       assertIdempotencyFingerprint(cached, args.requestFingerprint);
       return idempotentReplay(cached);
@@ -279,7 +282,9 @@ export function createThreadAppender(
     args: ThreadStatusChangeIdempotentArgs,
   ): IdempotentThreadAppendResult => {
     assertRequestFingerprint(args.requestFingerprint);
-    const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command);
+    const cached = idempotencyLookupStmt.get(args.idempotency.raw, args.idempotency.command) as
+      | IdempotencyRow
+      | undefined;
     if (cached !== undefined) {
       assertIdempotencyFingerprint(cached, args.requestFingerprint);
       return idempotentReplay(cached);
@@ -328,9 +333,9 @@ export function createThreadAppender(
     return { replayed: false, statusCode: rendered.statusCode, payload: rendered.payload, applied };
   };
 
-  const appendCreateTransaction = db.transaction(appendCreateInner);
-  const appendSpecEditTransaction = db.transaction(appendSpecEditInner);
-  const appendStatusChangeTransaction = db.transaction(appendStatusChangeInner);
+  const appendCreateTransaction = createTransaction(db, appendCreateInner);
+  const appendSpecEditTransaction = createTransaction(db, appendSpecEditInner);
+  const appendStatusChangeTransaction = createTransaction(db, appendStatusChangeInner);
 
   const appendThreadEvent = (
     type: "thread.created" | "thread.spec_edited" | "thread.status_changed",

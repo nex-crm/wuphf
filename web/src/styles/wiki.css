@@ -1188,6 +1188,27 @@
 .wk-error {
   color: var(--wk-wikilink-broken);
 }
+.wk-error-msg {
+  margin: 0 0 12px;
+}
+.wk-retry-btn {
+  display: inline-block;
+  padding: 6px 14px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-text);
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.wk-retry-btn:hover {
+  background: var(--wk-border-light);
+}
+.wk-retry-btn:focus-visible {
+  outline: 2px solid var(--wk-wikilink);
+  outline-offset: 2px;
+}
 
 /* Subtle spinner used for in-flight modal actions. Sized to sit inline with
  * 13px button text without forcing a layout reflow. Wiki-surface scoped —

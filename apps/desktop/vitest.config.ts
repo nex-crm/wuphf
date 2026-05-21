@@ -2,17 +2,18 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["tests/**/*.spec.ts"],
+    include: ["tests/**/*.{spec,test}.{ts,tsx}"],
     environment: "node",
+    setupFiles: ["./tests/setup.ts"],
     typecheck: {
       enabled: true,
       tsconfig: "tsconfig.tests.json",
     },
     coverage: {
       provider: "v8",
-      include: ["src/**/*.ts"],
+      include: ["src/**/*.{ts,tsx}"],
       exclude: [
-        "src/renderer/**/*.ts",
+        "tests/**",
         "src/main/index.ts",
         // Subprocess entry — runs in a forked utility process, depends on
         // `process.parentPort` + `process.exit`. The broker logic it wires

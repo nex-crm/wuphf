@@ -98,6 +98,15 @@ export function CeoFormField({
           }
         }}
         aria-label={payload.label}
+        // Suppress browser password-manager / autofill popups. The CEO card is
+        // a single-field conversational prompt, not a login or profile form;
+        // 1Password and Chrome were offering credential fills on company
+        // name / website / description (issue #943). The `data-*-ignore`
+        // attributes are vendor escape hatches for 1Password and LastPass,
+        // which sometimes ignore plain `autoComplete="off"`.
+        autoComplete="off"
+        data-1p-ignore="true"
+        data-lpignore="true"
       />
       <div className="ceo-card-actions">
         <button

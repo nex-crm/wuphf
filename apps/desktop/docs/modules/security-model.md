@@ -59,8 +59,8 @@ APIs.
 
 Broker compromise is scoped away from renderer IPC. The shell only starts,
 stops, and reports lifecycle status for the utility process. App data and
-secrets do not cross the contextBridge; the renderer-to-broker data path lands
-over loopback HTTP/SSE in the future broker listener branch.
+secrets do not cross the contextBridge; the renderer reaches the broker over
+loopback HTTP/SSE.
 
 Remote navigation is blocked. Development loads only the exact
 `ELECTRON_RENDERER_URL` value set by electron-vite for the Vite renderer, and
@@ -68,20 +68,24 @@ production loads only the bundled `file://` renderer document.
 
 ## CSP
 
-The broker-served renderer bundle gets a strict CSP from `@wuphf/broker`'s
-static handler (`packages/broker/src/serve-static.ts`):
+The renderer bundle has a strict fallback CSP in `src/renderer/index.html` and
+an authoritative header injected by the main process in `src/main/csp.ts`:
 
 - `default-src 'self'` and `script-src 'self'` — no inline scripts, no remote.
 - `style-src 'self'` — no inline styles. Vite extracts CSS to external
   `<link>` stylesheets at build; dev mode loads through electron-vite and
   does not see this CSP, so HMR is unaffected.
-- `connect-src 'self'` — covers fetch/XHR/WebSocket/EventSource to the same
-  loopback origin. Renderer JS has no network egress beyond the broker.
+- `connect-src 'self'` in the meta tag — safe fallback before broker readiness.
+- `connect-src 'self' <broker-origin>` in the injected header when the broker
+  has published its loopback URL. The header is re-derived for every response,
+  so a broker restart on a new ephemeral port immediately changes the allowed
+  origin without rewriting HTML on disk.
 - `frame-ancestors 'none'` and `object-src 'none'` — no embedding, no plugins.
-- `base-uri 'self'` — block `<base href>` redirection of relative URLs.
+- `base-uri 'none'` — block `<base href>` redirection of relative URLs.
 
-The renderer's `<meta http-equiv="Content-Security-Policy">` tag remains as
-documentation of intent; the server header is authoritative in packaged mode.
+The renderer's `<meta http-equiv="Content-Security-Policy">` tag remains a
+strict fallback. The Electron `webRequest.onHeadersReceived` header is
+authoritative for dev and packaged HTTP responses.
 
 ## Loopback Trust Model
 

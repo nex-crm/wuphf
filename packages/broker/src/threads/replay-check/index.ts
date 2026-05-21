@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import {
   asThreadId,
   canonicalJSON,
@@ -16,7 +17,6 @@ import {
   threadAuditPayloadFromJsonValue,
   threadExternalRefsToJsonValue,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
 import {
   type ApprovalProjectionSnapshotRow,
@@ -24,6 +24,7 @@ import {
   replayApprovalsProjectionSnapshot,
   snapshotApprovalsProjection,
 } from "../../approvals/index.ts";
+import { createTransaction } from "../../internal/sqlite-transaction.ts";
 import { deriveThreadEffectiveStatus } from "../effective-status.ts";
 import { SYSTEM_INBOX_THREAD_ID } from "../subsystem.ts";
 
@@ -61,7 +62,7 @@ interface ReplayEventRow {
   readonly lsn: number;
   readonly tsMs: number;
   readonly type: string;
-  readonly payload: Buffer;
+  readonly payload: Uint8Array;
 }
 
 interface HighestLsnRow {
@@ -73,7 +74,7 @@ interface ThreadReceiptProjectionRow {
   readonly receiptId: string;
   readonly taskId: string;
   readonly lsn: number;
-  readonly payload: Buffer;
+  readonly payload: Uint8Array;
 }
 
 interface ReplayedThreadState {
@@ -116,11 +117,9 @@ interface EffectiveStatusProjection {
   readonly pendingApprovalCount: number;
 }
 
-export function snapshotThreadProjection(
-  db: Database.Database,
-): readonly ThreadProjectionSnapshotRow[] {
+export function snapshotThreadProjection(db: DatabaseSync): readonly ThreadProjectionSnapshotRow[] {
   return db
-    .prepare<[], ThreadProjectionSnapshotRow>(
+    .prepare(
       `SELECT thread_id AS threadId,
               title,
               status,
@@ -139,21 +138,19 @@ export function snapshotThreadProjection(
        FROM threads
        ORDER BY thread_id ASC`,
     )
-    .all();
+    .all() as unknown as ThreadProjectionSnapshotRow[];
 }
 
-export function runThreadReplayCheck(db: Database.Database): ThreadReplayCheckReport {
-  const readBatchStmt = db.prepare<[number, number], ReplayEventRow>(
+export function runThreadReplayCheck(db: DatabaseSync): ThreadReplayCheckReport {
+  const readBatchStmt = db.prepare(
     `SELECT lsn, ts_ms AS tsMs, type, payload
      FROM event_log
      WHERE lsn > ? AND type IN (${THREAD_EVENT_TYPE_SQL})
      ORDER BY lsn ASC
      LIMIT ?`,
   );
-  const highestLsnStmt = db.prepare<[], HighestLsnRow>(
-    "SELECT COALESCE(MAX(lsn), 0) AS lsn FROM event_log",
-  );
-  const listThreadReceiptsStmt = db.prepare<[], ThreadReceiptProjectionRow>(
+  const highestLsnStmt = db.prepare("SELECT COALESCE(MAX(lsn), 0) AS lsn FROM event_log");
+  const listThreadReceiptsStmt = db.prepare(
     `SELECT tr.thread_id AS threadId, tr.receipt_id AS receiptId, tr.task_id AS taskId,
             tr.lsn, rp.payload
      FROM thread_receipts AS tr
@@ -161,7 +158,7 @@ export function runThreadReplayCheck(db: Database.Database): ThreadReplayCheckRe
      ORDER BY tr.thread_id ASC, tr.lsn ASC`,
   );
 
-  const txn = db.transaction((): ThreadReplayCheckReport => {
+  const txn = createTransaction(db, (): ThreadReplayCheckReport => {
     const replayedThreads = new Map<string, ReplayedThreadState>();
     const acceptedRevisionIds = new Map<string, number>();
     const taskThreadIds = new Map<string, string>();
@@ -171,7 +168,7 @@ export function runThreadReplayCheck(db: Database.Database): ThreadReplayCheckRe
     let scanned = 0;
 
     for (;;) {
-      const rows = readBatchStmt.all(cursor, BATCH_SIZE);
+      const rows = readBatchStmt.all(cursor, BATCH_SIZE) as unknown as ReplayEventRow[];
       if (rows.length === 0) break;
       for (const row of rows) {
         scanned += 1;
@@ -207,7 +204,9 @@ export function runThreadReplayCheck(db: Database.Database): ThreadReplayCheckRe
     }
     compareThreadRows(replayedThreadRows, liveThreads, discrepancies);
 
-    const liveReceiptRefs = liveThreadReceiptRefs(listThreadReceiptsStmt.all());
+    const liveReceiptRefs = liveThreadReceiptRefs(
+      listThreadReceiptsStmt.all() as unknown as ThreadReceiptProjectionRow[],
+    );
     const replayedReceiptRefs = new Map<string, ThreadReceiptRefs>();
     for (const row of replayedThreads.values()) {
       replayedReceiptRefs.set(row.threadId, {
@@ -232,7 +231,7 @@ export function runThreadReplayCheck(db: Database.Database): ThreadReplayCheckRe
 
     return {
       ok: discrepancies.length === 0,
-      highestLsn: lsnFromV1Number(highestLsnStmt.get()?.lsn ?? 0),
+      highestLsn: lsnFromV1Number((highestLsnStmt.get() as HighestLsnRow | undefined)?.lsn ?? 0),
       eventsScanned: scanned,
       discrepancies,
     };
@@ -251,7 +250,7 @@ function applyReplayEvent(
     if (row.type === "thread.created") {
       const payload = threadAuditPayloadFromJsonValue(
         "thread_created",
-        JSON.parse(row.payload.toString("utf8")) as unknown,
+        JSON.parse(new TextDecoder().decode(row.payload)) as unknown,
       ) as ThreadCreatedAuditPayload;
       threads.set(payload.threadId, {
         threadId: payload.threadId,
@@ -278,7 +277,7 @@ function applyReplayEvent(
     if (row.type === "thread.spec_edited") {
       const payload = threadAuditPayloadFromJsonValue(
         "thread_spec_edited",
-        JSON.parse(row.payload.toString("utf8")) as unknown,
+        JSON.parse(new TextDecoder().decode(row.payload)) as unknown,
       ) as ThreadSpecEditedAuditPayload;
       applySpecEdit(row, payload, threads, acceptedRevisionIds, discrepancies);
       return;
@@ -286,7 +285,7 @@ function applyReplayEvent(
     if (row.type === "thread.status_changed") {
       const payload = threadAuditPayloadFromJsonValue(
         "thread_status_changed",
-        JSON.parse(row.payload.toString("utf8")) as unknown,
+        JSON.parse(new TextDecoder().decode(row.payload)) as unknown,
       ) as ThreadStatusChangedAuditPayload;
       applyStatusChange(row, payload, threads, discrepancies);
       return;
@@ -379,7 +378,7 @@ function applyReceipt(
   taskThreadIds: Map<string, string>,
   discrepancies: ThreadReplayCheckDiscrepancy[],
 ): void {
-  const receipt = receiptFromJson(row.payload.toString("utf8"));
+  const receipt = receiptFromJson(new TextDecoder().decode(row.payload));
   if (receipt.schemaVersion !== 2) return;
   const threadId = receipt.threadId ?? SYSTEM_INBOX_THREAD_ID;
   const thread = threads.get(threadId);
@@ -471,7 +470,7 @@ function liveThreadReceiptRefs(
     if (!entry.taskIds.includes(row.taskId)) {
       entry.taskIds.push(row.taskId);
     }
-    entry.latestReceiptStatus = receiptFromJson(row.payload.toString("utf8")).status;
+    entry.latestReceiptStatus = receiptFromJson(new TextDecoder().decode(row.payload)).status;
   }
   return out;
 }

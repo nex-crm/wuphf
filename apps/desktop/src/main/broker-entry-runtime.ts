@@ -1,8 +1,9 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-
+import type { DatabaseSync } from "node:sqlite";
 import { type BrokerHandle, type BrokerLogger, createBroker } from "@wuphf/broker";
 import type { SqliteReceiptStore } from "@wuphf/broker/sqlite";
+import type { ThreadSubsystem } from "@wuphf/broker/threads";
 import type { SqliteWebAuthnStore } from "@wuphf/broker/webauthn";
 import { type AgentId, type ApiToken, type ApprovalRole, asAgentId } from "@wuphf/protocol";
 
@@ -36,6 +37,12 @@ interface WebAuthnRuntimeConfig {
   readonly rpId: string;
 }
 
+interface ReceiptRuntimeConfig {
+  readonly db: DatabaseSync;
+  readonly store: SqliteReceiptStore;
+  readonly threads: ThreadSubsystem;
+}
+
 export async function startDesktopBrokerFromEnv(args: {
   readonly env: NodeJS.ProcessEnv;
   readonly logger: BrokerLogger;
@@ -52,11 +59,11 @@ export async function startDesktopBrokerFromEnv(args: {
   const trustedOrigins =
     typeof devOrigin === "string" && devOrigin.length > 0 ? [devOrigin] : undefined;
 
-  let receiptStore: SqliteReceiptStore | null = null;
+  let receipt: ReceiptRuntimeConfig | null = null;
   let webauthn: WebAuthnRuntimeConfig | null = null;
 
   try {
-    receiptStore = await openReceiptStoreFromEnv(env);
+    receipt = await openReceiptRuntimeFromEnv(env);
     webauthn = await openWebAuthnStoreFromEnv(env);
 
     const tokenAgentIds = new Map<ApiToken, AgentId>();
@@ -65,7 +72,7 @@ export async function startDesktopBrokerFromEnv(args: {
       renderer,
       logger,
       ...(trustedOrigins !== undefined ? { trustedOrigins } : {}),
-      ...(receiptStore !== null ? { receiptStore } : {}),
+      ...(receipt !== null ? { receiptStore: receipt.store, threads: receipt.threads } : {}),
       ...(webauthn !== null
         ? {
             webauthn: {
@@ -87,25 +94,44 @@ export async function startDesktopBrokerFromEnv(args: {
     return {
       broker,
       close: async (): Promise<void> => {
-        await closeDesktopBrokerRuntime(broker, receiptStore, webauthn?.store ?? null);
+        await closeDesktopBrokerRuntime(broker, receipt, webauthn?.store ?? null);
       },
     };
   } catch (error) {
-    closeStore(receiptStore);
     closeStore(webauthn?.store ?? null);
+    closeReceiptRuntime(receipt);
     throw error;
   }
 }
 
-async function openReceiptStoreFromEnv(env: NodeJS.ProcessEnv): Promise<SqliteReceiptStore | null> {
+async function openReceiptRuntimeFromEnv(
+  env: NodeJS.ProcessEnv,
+): Promise<ReceiptRuntimeConfig | null> {
   const receiptStorePath = env[RECEIPT_STORE_PATH_ENV];
   if (typeof receiptStorePath !== "string" || receiptStorePath.length === 0) return null;
 
   prepareSqliteStorePath(receiptStorePath);
-  const { SqliteReceiptStore } = await import("@wuphf/broker/sqlite");
-  const store = SqliteReceiptStore.open({ path: receiptStorePath });
-  tightenSqliteStorePermissions(receiptStorePath);
-  return store;
+  const [
+    { createEventLog, openDatabase, runMigrations },
+    { SqliteReceiptStore },
+    { createThreadSubsystem },
+  ] = await Promise.all([
+    import("@wuphf/broker/event-log"),
+    import("@wuphf/broker/sqlite"),
+    import("@wuphf/broker/threads"),
+  ]);
+  const db = openDatabase({ path: receiptStorePath });
+  try {
+    runMigrations(db);
+    const eventLog = createEventLog(db);
+    const store = SqliteReceiptStore.fromDatabase(db, eventLog);
+    const threads = createThreadSubsystem(db, eventLog, store);
+    tightenSqliteStorePermissions(receiptStorePath);
+    return { db, store, threads };
+  } catch (error) {
+    closeDatabase(db);
+    throw error;
+  }
 }
 
 async function openWebAuthnStoreFromEnv(
@@ -125,15 +151,21 @@ async function openWebAuthnStoreFromEnv(
 
 async function closeDesktopBrokerRuntime(
   broker: BrokerHandle,
-  receiptStore: SqliteReceiptStore | null,
+  receipt: ReceiptRuntimeConfig | null,
   webauthnStore: SqliteWebAuthnStore | null,
 ): Promise<void> {
   try {
     await broker.stop();
   } finally {
-    closeStore(receiptStore);
     closeStore(webauthnStore);
+    closeReceiptRuntime(receipt);
   }
+}
+
+function closeReceiptRuntime(receipt: ReceiptRuntimeConfig | null): void {
+  if (receipt === null) return;
+  closeStore(receipt.store);
+  closeDatabase(receipt.db);
 }
 
 function closeStore(store: { close(): void } | null): void {
@@ -143,6 +175,16 @@ function closeStore(store: { close(): void } | null): void {
   } catch {
     // Shutdown is best effort. A close failure must not hide the original
     // startup error or keep the utility process alive during app quit.
+  }
+}
+
+function closeDatabase(db: DatabaseSync): void {
+  try {
+    db.close();
+  } catch {
+    // Store shutdown is best effort for the same reason as closeStore.
+    // node:sqlite's DatabaseSync.close() throws if already closed; swallow
+    // because shutdown must not mask the original startup error.
   }
 }
 

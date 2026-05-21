@@ -95,7 +95,7 @@ async function installIssueMocks(context, tasks = []) {
         });
       });
 
-      await ctx.route("**/api/tasks**", (r) => {
+      await ctx.route(/\/api\/tasks(?:[/?]|$)/, (r) => {
         const url = r.request().url();
         const match = url.match(/\/tasks\/([^?/]+)(\?|$)/);
         if (match) {

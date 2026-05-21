@@ -47,6 +47,13 @@ bun install
 info "bun install (web/)"
 (cd web && bun install)
 
+# ---- bun run build in web/ (so cmd/wuphf can embed web/dist) ----
+# Without this, a fresh clone + `go build ./cmd/wuphf` + `./wuphf` lands on
+# the "WUPHF web UI assets are missing" fallback page. Fail loudly on build
+# error rather than silently producing a broken binary.
+info "bun run build (web/)"
+(cd web && bun run build) || fail "web build failed — run 'cd web && bun run build' to see the error"
+
 # ---- lefthook: install git hooks into .git/hooks ----
 info "lefthook install"
 lefthook install

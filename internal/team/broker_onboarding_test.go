@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 )
 
@@ -93,6 +94,74 @@ func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 	b.mu.Unlock()
 	if lead != "ceo" {
 		t.Errorf("expected BuiltIn lead to be ceo (blueprint's lead_slug), got %q", lead)
+	}
+}
+
+func TestOnboardingDraftPhaseCreatesFirstIssueFromTaskPrompt(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	dir := t.TempDir()
+	fakePath := installFakeClaude(t, dir, "success")
+	withFakeClaude(t, fakePath)
+
+	b := newTestBroker(t)
+	b.mu.Lock()
+	ensureTestMemberAccess(b, "general", "ceo", "CEO")
+	b.mu.Unlock()
+
+	state := &onboarding.State{
+		Version: 2,
+		Phase:   onboarding.PhaseBridge,
+		PendingSuggestion: &onboarding.Suggestion{
+			ID:    "first-issue-prompt",
+			Phase: onboarding.PhaseDraft,
+			Kind:  "ceo_form_field",
+		},
+		FormAnswers: onboarding.FormAnswers{
+			TaskPrompt: "Build a Stripe webhook handler that verifies signatures.",
+		},
+	}
+
+	if err := b.advancePhase(state, onboarding.PhaseDraft); err != nil {
+		t.Fatalf("advancePhase(draft): %v", err)
+	}
+	if state.FirstIssueID == "" {
+		t.Fatal("expected first issue id to be persisted on onboarding state")
+	}
+
+	loaded, err := onboarding.Load()
+	if err != nil {
+		t.Fatalf("load onboarding state: %v", err)
+	}
+	if loaded.FirstIssueID != state.FirstIssueID {
+		t.Fatalf("loaded first issue id = %q, want %q", loaded.FirstIssueID, state.FirstIssueID)
+	}
+	if loaded.PendingSuggestion != nil {
+		t.Fatalf("expected submitted draft suggestion to be cleared, got %+v", loaded.PendingSuggestion)
+	}
+
+	tasks := b.AllTasks()
+	if len(tasks) != 1 {
+		t.Fatalf("expected one first issue task, got %+v", tasks)
+	}
+	task := tasks[0]
+	if task.ID != state.FirstIssueID || task.LifecycleState != LifecycleStateDrafting {
+		t.Fatalf("unexpected first issue task: %+v", task)
+	}
+	if task.TaskType != "issue" || task.PipelineID != "issue" {
+		t.Fatalf("expected first issue to be issue spec task, got type=%q pipeline=%q", task.TaskType, task.PipelineID)
+	}
+	if task.IssueDraftSpec == nil || task.IssueDraftSpec.Goal != "Fake goal from CLI subprocess." {
+		t.Fatalf("expected drafted issue spec, got %+v", task.IssueDraftSpec)
+	}
+
+	var sectionCount int
+	for _, msg := range b.ChannelMessages(onboarding.CEOOnboardingDMSlug) {
+		if msg.Kind == "issue_draft_section" {
+			sectionCount++
+		}
+	}
+	if sectionCount == 0 {
+		t.Fatal("expected issue draft section messages in the CEO DM")
 	}
 }
 

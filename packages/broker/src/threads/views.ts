@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import {
   type ApprovalRequest,
   type EventLsn,
@@ -12,8 +13,8 @@ import {
   type ThreadView,
   validateThread,
 } from "@wuphf/protocol";
-import type Database from "better-sqlite3";
 
+import { createTransaction } from "../internal/sqlite-transaction.ts";
 import { deriveThreadEffectiveStatus } from "./effective-status.ts";
 import {
   type ThreadStateRow,
@@ -76,11 +77,11 @@ interface ThreadViewDeps {
 }
 
 export function createThreadViewStore(
-  db: Database.Database,
+  db: DatabaseSync,
   state: ThreadStateStore,
   receiptIndex: ThreadReceiptIndexStore,
 ): ThreadViewStore {
-  const listThreadViewsTransaction = db.transaction((args: ThreadListViewArgs) =>
+  const listThreadViewsTransaction = createTransaction(db, (args: ThreadListViewArgs) =>
     listThreadViewPage(state, receiptIndex, args),
   );
 

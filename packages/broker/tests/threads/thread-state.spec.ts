@@ -204,21 +204,20 @@ function appendStatus(fix: Fixture, command: ThreadStatusChangeCommand, key: str
 
 function countEvents(fix: Fixture, type: string): number {
   return (
-    fix.db
-      .prepare<[string], { readonly count: number }>(
-        "SELECT COUNT(*) AS count FROM event_log WHERE type = ?",
-      )
-      .get(type)?.count ?? 0
+    (
+      fix.db.prepare("SELECT COUNT(*) AS count FROM event_log WHERE type = ?").get(type) as
+        | { readonly count: number }
+        | undefined
+    )?.count ?? 0
   );
 }
 
 function eventPayloadBytes(fix: Fixture, type: string): readonly Buffer[] {
-  return fix.db
-    .prepare<[string], { readonly payload: Buffer }>(
-      "SELECT payload FROM event_log WHERE type = ? ORDER BY lsn ASC",
-    )
-    .all(type)
-    .map((row) => row.payload);
+  return (
+    fix.db
+      .prepare("SELECT payload FROM event_log WHERE type = ? ORDER BY lsn ASC")
+      .all(type) as unknown as { readonly payload: Uint8Array }[]
+  ).map((row) => Buffer.from(row.payload));
 }
 
 function expectThreadPayloadBytes(
@@ -336,7 +335,7 @@ describe("thread appender and projection", () => {
     const fix = setup();
     const observed: { readonly name: string; readonly inTransaction: boolean }[] = [];
     const record = (name: string): void => {
-      observed.push({ name, inTransaction: fix.db.inTransaction });
+      observed.push({ name, inTransaction: fix.db.isTransaction });
     };
     const state: ThreadStateStore = {
       applyEvent(recordEvent) {
@@ -430,15 +429,15 @@ describe("thread appender and projection", () => {
     expect(row?.spec.content).toEqual(nextContent);
 
     const latestSpec = fix.db
-      .prepare<[], { readonly payload: Buffer }>(
+      .prepare(
         "SELECT payload FROM event_log WHERE type = 'thread.spec_edited' ORDER BY lsn DESC LIMIT 1",
       )
-      .get();
+      .get() as { readonly payload: Uint8Array } | undefined;
     expect(latestSpec).toBeDefined();
     if (latestSpec === undefined) return;
     const payload = threadAuditPayloadFromJsonValue(
       "thread_spec_edited",
-      JSON.parse(latestSpec.payload.toString("utf8")) as unknown,
+      JSON.parse(new TextDecoder().decode(latestSpec.payload)) as unknown,
     ) as ThreadSpecEditedAuditPayload;
     expect(canonicalJSON(row?.spec.content)).toBe(canonicalJSON(payload.content));
   });
@@ -476,14 +475,12 @@ describe("thread appender and projection", () => {
     expect(countEvents(fix, "thread.spec_edited")).toBe(3);
 
     const specRows = fix.db
-      .prepare<[], { readonly payload: Buffer }>(
-        "SELECT payload FROM event_log WHERE type = 'thread.spec_edited' ORDER BY lsn ASC",
-      )
-      .all();
+      .prepare("SELECT payload FROM event_log WHERE type = 'thread.spec_edited' ORDER BY lsn ASC")
+      .all() as unknown as { readonly payload: Uint8Array }[];
     const baseRevisionIds = specRows.map((row) => {
       const payload = threadAuditPayloadFromJsonValue(
         "thread_spec_edited",
-        JSON.parse(row.payload.toString("utf8")) as unknown,
+        JSON.parse(new TextDecoder().decode(row.payload)) as unknown,
       ) as ThreadSpecEditedAuditPayload;
       return payload.baseRevisionId ?? null;
     });
@@ -991,10 +988,10 @@ describe("thread appender and projection", () => {
             WHERE thread_id = ?`,
       )
       .run(OTHER_THREAD_ID, THREAD_ID);
-    fix.db.pragma("foreign_keys = OFF");
+    fix.db.exec("PRAGMA foreign_keys = OFF");
     fix.db.prepare("DELETE FROM thread_spec_revisions WHERE thread_id = ?").run(THREAD_ID);
     fix.db.prepare("DELETE FROM threads WHERE thread_id = ?").run(THREAD_ID);
-    fix.db.pragma("foreign_keys = ON");
+    fix.db.exec("PRAGMA foreign_keys = ON");
 
     const report = runThreadReplayCheck(fix.db);
     expect(report.ok).toBe(false);
@@ -1009,11 +1006,11 @@ describe("thread appender and projection", () => {
   it("replay-check detects invalid live status effective projection drift", () => {
     const fix = setup();
     appendCreate(fix);
-    fix.db.pragma("ignore_check_constraints = ON");
+    fix.db.exec("PRAGMA ignore_check_constraints = ON");
     fix.db
       .prepare("UPDATE threads SET status = ? WHERE thread_id = ?")
       .run("bad_status", THREAD_ID);
-    fix.db.pragma("ignore_check_constraints = OFF");
+    fix.db.exec("PRAGMA ignore_check_constraints = OFF");
 
     const report = runThreadReplayCheck(fix.db);
     expect(report.ok).toBe(false);
@@ -1142,9 +1139,11 @@ describe("thread appender and projection", () => {
       minimalReceiptV2("01PRZ3NDEKTSV4RRFFQ69G5FP0", "01MRZ3NDEKTSV4RRFFQ69G5FM0"),
     );
     const live = snapshotThreadProjection(fix.db);
-    const liveReceiptRows = fix.db
-      .prepare<[], { readonly count: number }>("SELECT COUNT(*) AS count FROM thread_receipts")
-      .get()?.count;
+    const liveReceiptRows = (
+      fix.db.prepare("SELECT COUNT(*) AS count FROM thread_receipts").get() as
+        | { readonly count: number }
+        | undefined
+    )?.count;
 
     fix.eventLog.append({
       type: "thread.status_changed",
@@ -1164,9 +1163,11 @@ describe("thread appender and projection", () => {
     );
     expect(snapshotThreadProjection(fix.db)).toEqual(live);
     expect(
-      fix.db
-        .prepare<[], { readonly count: number }>("SELECT COUNT(*) AS count FROM thread_receipts")
-        .get()?.count,
+      (
+        fix.db.prepare("SELECT COUNT(*) AS count FROM thread_receipts").get() as
+          | { readonly count: number }
+          | undefined
+      )?.count,
     ).toBe(liveReceiptRows);
   });
 });

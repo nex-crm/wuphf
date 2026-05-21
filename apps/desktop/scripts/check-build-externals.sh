@@ -21,12 +21,9 @@
 #   - any `out/{main,preload}/**.js` imports a `@wuphf/*` workspace
 #     package by name (means the workspace dep wasn't bundled), OR
 #   - any output file imports a raw `*.ts` path (means an external's
-#     `exports` field still points to source).
-#
-# It also asserts that `better-sqlite3` IS still an external — its
-# native-binding loader (`bindings()`) walks up the filesystem to find
-# its `.node` sibling, which requires the JS wrapper to live at its
-# npm location rather than getting flattened into our bundle.
+#     `exports` field still points to source), OR
+#   - `node:sqlite` is rewritten to a relative runtime import instead
+#     of remaining a Node builtin import.
 
 set -euo pipefail
 
@@ -89,12 +86,13 @@ if [ -n "${raw_ts_hits}" ]; then
   echo "${raw_ts_hits}" >&2
 fi
 
-# --- Required: better-sqlite3 stays external ---
-# Its `bindings()` loader resolves `.node` via the npm filesystem layout.
-# If the JS wrapper got bundled, the native binding fails to load at
-# runtime even though the build succeeds.
-if ! grep -rqE 'from "better-sqlite3"' "${out_dir}/main"; then
-  report "better-sqlite3 import missing from out/main/ — the wrapper got inlined, and bindings() will fail to locate the .node sibling at runtime."
+# --- Required: node:sqlite stays a builtin import ---
+# `from "node:sqlite"` is correct. A relative import for that builtin means
+# a bundler shim/chunk replaced the Electron 42 stdlib module.
+node_sqlite_relative_hits="$(grep -nE '(from[[:space:]]+"|import\(")\.\.?/[^"]*node:?sqlite' "${output_files[@]}" 2>/dev/null || true)"
+if [ -n "${node_sqlite_relative_hits}" ]; then
+  report "node:sqlite was rewritten to a relative runtime import:"
+  echo "${node_sqlite_relative_hits}" >&2
 fi
 
 if [ "${fail}" -ne 0 ]; then

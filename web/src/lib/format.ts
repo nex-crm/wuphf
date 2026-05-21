@@ -59,3 +59,12 @@ export function formatTokens(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
 }
+
+/** Return the singular form when n === 1, otherwise the plural. */
+export function pluralize(
+  n: number,
+  singular: string,
+  plural = `${singular}s`,
+): string {
+  return n === 1 ? singular : plural;
+}

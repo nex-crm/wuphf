@@ -30,11 +30,10 @@ import {
   asTimestampMs,
   threadSpecContentHash,
 } from "@wuphf/protocol";
-import BetterSqlite3 from "better-sqlite3";
 
 import { createAgentProviderRoutingStore } from "../src/agent-provider-routing/index.ts";
 import { createApprovalAppender, createApprovalProjection } from "../src/approvals/index.ts";
-import { createEventLog, runMigrations } from "../src/event-log/index.ts";
+import { createEventLog, openDatabase, runMigrations } from "../src/event-log/index.ts";
 import { createBroker } from "../src/index.ts";
 import { SqliteReceiptStore } from "../src/sqlite-receipt-store.ts";
 import { createThreadSubsystem, SYSTEM_INBOX_THREAD_ID } from "../src/threads/index.ts";
@@ -43,7 +42,7 @@ const tmp = mkdtempSync(join(tmpdir(), "wuphf-branch-10-"));
 const dbPath = join(tmp, "broker.db");
 
 console.log(`[demo] SQLite DB: ${dbPath}`);
-const db = new BetterSqlite3(dbPath);
+const db = openDatabase({ path: dbPath });
 runMigrations(db);
 const eventLog = createEventLog(db);
 const approvalProjection = createApprovalProjection(db);

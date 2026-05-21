@@ -1,6 +1,8 @@
-interface ParsedBootstrap {
-  readonly token: string;
-  readonly brokerUrl: string;
+import type { ApiToken, BrokerUrl } from "./bootstrap/types.ts";
+
+export interface ParsedBootstrap {
+  readonly token: ApiToken;
+  readonly brokerUrl: BrokerUrl;
 }
 
 // Hand-mirrors the acceptance rules from @wuphf/protocol#apiBootstrapFromJson,
@@ -96,7 +98,7 @@ export function parseBootstrap(value: unknown): ParsedBootstrap {
       "api-token response: broker_url must be a bare loopback origin with no trailing slash, userinfo, path, query, or fragment",
     );
   }
-  return { token, brokerUrl };
+  return { token: token as ApiToken, brokerUrl: brokerUrl as BrokerUrl };
 }
 
 // `URL.hostname` returns bracketed IPv6 (`[::1]` for `http://[::1]:1234`),
