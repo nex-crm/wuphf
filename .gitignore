@@ -29,6 +29,8 @@
 !/docs/architecture/**
 !/docs/dogfood/
 !/docs/dogfood/**
+!/docs/qa/
+!/docs/qa/**
 !/docs/ADD-A-TRANSPORT.md
 /termwright-artifacts/
 .worktrees/
