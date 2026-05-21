@@ -51,7 +51,12 @@ func (b *Broker) runCompanySeedJob(cfg config.Config) {
 	// atomicWrite, bypassing the WikiWorker's per-commit IndexRegen. Regen
 	// here so the post-seed snapshot of index/all.md reflects the new
 	// articles (and the always-written README). (#941)
-	b.regenWikiIndexAfterSeed(ctx, "boot company seed")
+	//
+	// Use a fresh timeout against the broker lifecycle rather than the
+	// (possibly near-deadline) seed ctx so regen always gets a full budget.
+	regenCtx, regenCancel := context.WithTimeout(b.lifecycleCtx, 15*time.Second)
+	b.regenWikiIndexAfterSeed(regenCtx, "boot company seed")
+	regenCancel()
 	// Persist extracted profile fields back to config.
 	b.configMu.Lock()
 	defer b.configMu.Unlock()

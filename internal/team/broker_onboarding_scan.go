@@ -113,7 +113,12 @@ func (b *Broker) runScanPhase(dmSlug string) {
 	// WikiWorker, so (*Repo).Commit's per-commit IndexRegen never fires
 	// for these files. Regenerate index/all.md here so the post-scan
 	// snapshot reflects the README path that always lands. (#941)
-	b.regenWikiIndexAfterSeed(ctx, "website scan")
+	//
+	// Use a fresh timeout against the broker lifecycle, not the scan ctx,
+	// so a near-deadline scan does not cause regen to silently no-op.
+	regenCtx, regenCancel := context.WithTimeout(b.lifecycleCtx, 15*time.Second)
+	b.regenWikiIndexAfterSeed(regenCtx, "website scan")
+	regenCancel()
 
 	b.postScanChipUpdate(dmSlug, websiteURL, "done", "Wiki updated ✓")
 
