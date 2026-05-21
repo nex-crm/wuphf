@@ -82,9 +82,9 @@ describe("gateway happy path", () => {
 
     // The §15.A invariant: event_log holds exactly one cost.event row at
     // the LSN we returned.
-    const row = fix.db
-      .prepare("SELECT lsn, type FROM event_log WHERE lsn = ?")
-      .get(1) as { readonly lsn: number; readonly type: string } | undefined;
+    const row = fix.db.prepare("SELECT lsn, type FROM event_log WHERE lsn = ?").get(1) as
+      | { readonly lsn: number; readonly type: string }
+      | undefined;
     expect(row?.type).toBe("cost.event");
     expect(row?.lsn).toBe(1);
   });
