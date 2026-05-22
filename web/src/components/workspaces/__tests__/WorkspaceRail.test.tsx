@@ -320,8 +320,12 @@ describe("<WorkspaceRail>", () => {
     const tile = screen.getByTestId("workspace-icon-main");
     fireEvent.mouseEnter(tile.parentElement as Element);
 
+    // The tooltip should mention the workspace name exactly once. The
+    // tooltip's textContent concatenates divs with no separator, so
+    // \bword boundaries\b don't help — count raw substring occurrences
+    // instead.
     const tooltip = screen.getByRole("tooltip");
-    const matches = tooltip.textContent?.match(/\bmain\b/g) ?? [];
+    const matches = tooltip.textContent?.match(/main/g) ?? [];
     expect(matches).toHaveLength(1);
   });
 
