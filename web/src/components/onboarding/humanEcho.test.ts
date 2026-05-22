@@ -84,17 +84,15 @@ const executionLineup: CeoExecutionLineupSuggestion = {
   kind: "ceo_execution_lineup",
   payload: {
     suggestion_id: "execution-lineup",
-    agents: [
-      { slug: "engineer", role: "Eng", reason: "ships features" },
-    ],
+    agents: [{ slug: "engineer", role: "Eng", reason: "ships features" }],
   },
 };
 
 describe("humanEchoForCeoAnswer", () => {
   it("echoes a form-field free-text answer verbatim", () => {
-    expect(humanEchoForCeoAnswer(formField, "company_name", "Acme Test QA")).toBe(
-      "Acme Test QA",
-    );
+    expect(
+      humanEchoForCeoAnswer(formField, "company_name", "Acme Test QA"),
+    ).toBe("Acme Test QA");
   });
 
   it("trims whitespace from a form-field answer", () => {
@@ -109,9 +107,9 @@ describe("humanEchoForCeoAnswer", () => {
   });
 
   it("resolves chip-row id into the human-readable label", () => {
-    expect(
-      humanEchoForCeoAnswer(chipRow, "blueprint_id", "niche-crm"),
-    ).toBe("Niche CRM");
+    expect(humanEchoForCeoAnswer(chipRow, "blueprint_id", "niche-crm")).toBe(
+      "Niche CRM",
+    );
   });
 
   it("renders the 'start from scratch' chip even when its id is empty", () => {
@@ -121,9 +119,9 @@ describe("humanEchoForCeoAnswer", () => {
   });
 
   it("falls back to the raw id when chip option is unknown", () => {
-    expect(
-      humanEchoForCeoAnswer(chipRow, "blueprint_id", "unknown-bp"),
-    ).toBe("unknown-bp");
+    expect(humanEchoForCeoAnswer(chipRow, "blueprint_id", "unknown-bp")).toBe(
+      "unknown-bp",
+    );
   });
 
   it("joins picked checklist labels with commas", () => {
@@ -136,9 +134,9 @@ describe("humanEchoForCeoAnswer", () => {
   });
 
   it("handles a team-trim suggestion the same as a checklist", () => {
-    expect(
-      humanEchoForCeoAnswer(teamTrim, "picked_agents", ["designer"]),
-    ).toBe("Designer");
+    expect(humanEchoForCeoAnswer(teamTrim, "picked_agents", ["designer"])).toBe(
+      "Designer",
+    );
   });
 
   it("renders an explicit '(nobody)' when no items are picked", () => {
@@ -154,16 +152,12 @@ describe("humanEchoForCeoAnswer", () => {
   });
 
   it("returns null for scan_complete", () => {
-    expect(
-      humanEchoForCeoAnswer(formField, "scan_complete", true),
-    ).toBeNull();
+    expect(humanEchoForCeoAnswer(formField, "scan_complete", true)).toBeNull();
   });
 
   it("returns null when there is no pending suggestion", () => {
     expect(humanEchoForCeoAnswer(null, "company_name", "Acme")).toBeNull();
-    expect(
-      humanEchoForCeoAnswer(undefined, "company_name", "Acme"),
-    ).toBeNull();
+    expect(humanEchoForCeoAnswer(undefined, "company_name", "Acme")).toBeNull();
   });
 
   it("returns null for the read-only scan chip", () => {

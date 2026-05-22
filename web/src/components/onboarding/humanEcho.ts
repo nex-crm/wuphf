@@ -18,7 +18,15 @@
  * /messages endpoint which already sanitises. We never embed payload markup.
  */
 
-import type { CeoSuggestion } from "./types";
+import type {
+  CeoChecklistSuggestion,
+  CeoChipRowSuggestion,
+  CeoFormFieldSuggestion,
+  CeoSuggestion,
+  CeoTeamTrimSuggestion,
+} from "./types";
+
+const NON_CONVERSATIONAL_FIELDS = new Set(["bridge_choice", "scan_complete"]);
 
 /**
  * Returns the chat-bubble text for the human's just-committed answer, or
@@ -30,55 +38,60 @@ export function humanEchoForCeoAnswer(
   value: unknown,
 ): string | null {
   if (!suggestion) return null;
+  if (NON_CONVERSATIONAL_FIELDS.has(field)) return null;
 
-  // Skip non-user-facing transitions.
-  if (field === "bridge_choice" || field === "scan_complete") return null;
-
-  if (suggestion.kind === "ceo_scan_chip") {
-    // The scan chip is read-only; the broker drives its committed state.
-    return null;
+  switch (suggestion.kind) {
+    case "ceo_form_field":
+      return echoFormField(suggestion, value);
+    case "ceo_chip_row":
+      return echoChipRow(suggestion, value);
+    case "ceo_checklist":
+    case "ceo_team_trim":
+      return echoChecklist(suggestion, value);
+    case "ceo_scan_chip":
+    case "ceo_execution_lineup":
+      // Read-only / confirmation cards — the broker drives the committed
+      // state; there is no human text or chip to mirror.
+      return null;
   }
+}
 
-  if (suggestion.kind === "ceo_chip_row") {
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    if (trimmed === "") {
-      // Empty id (e.g. "Start from scratch") still has a meaningful label.
-      const match = suggestion.payload.options.find((o) => o.id === "");
-      return match ? match.label : null;
-    }
-    const match = suggestion.payload.options.find((o) => o.id === trimmed);
-    return match ? match.label : trimmed;
+function echoFormField(
+  _suggestion: CeoFormFieldSuggestion,
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function echoChipRow(
+  suggestion: CeoChipRowSuggestion,
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    // The "Start from scratch" chip carries id="" but still has a label.
+    const match = suggestion.payload.options.find((o) => o.id === "");
+    return match ? match.label : null;
   }
+  const match = suggestion.payload.options.find((o) => o.id === trimmed);
+  return match ? match.label : trimmed;
+}
 
-  if (
-    suggestion.kind === "ceo_checklist" ||
-    suggestion.kind === "ceo_team_trim"
-  ) {
-    if (!Array.isArray(value)) return null;
-    const labels = value
-      .map((id) => {
-        if (typeof id !== "string") return "";
-        const match = suggestion.payload.items.find((item) => item.id === id);
-        return match ? match.label : id;
-      })
-      .filter((label) => label.trim() !== "");
-    if (labels.length === 0) return "(nobody)";
-    return labels.join(", ");
-  }
-
-  if (suggestion.kind === "ceo_execution_lineup") {
-    // The execution lineup is a confirmation card; the broker handles the
-    // resulting roster mutation. No human-typed value to mirror.
-    return null;
-  }
-
-  // ceo_form_field — the canonical text-bubble case.
-  if (suggestion.kind === "ceo_form_field") {
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    return trimmed === "" ? null : trimmed;
-  }
-
-  return null;
+function echoChecklist(
+  suggestion: CeoChecklistSuggestion | CeoTeamTrimSuggestion,
+  value: unknown,
+): string | null {
+  if (!Array.isArray(value)) return null;
+  const labels = value
+    .map((id) => {
+      if (typeof id !== "string") return "";
+      const match = suggestion.payload.items.find((item) => item.id === id);
+      return match ? match.label : id;
+    })
+    .filter((label) => label.trim() !== "");
+  if (labels.length === 0) return "(nobody)";
+  return labels.join(", ");
 }

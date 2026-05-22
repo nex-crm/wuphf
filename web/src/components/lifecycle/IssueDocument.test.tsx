@@ -227,6 +227,44 @@ describe("<IssueDocument>", () => {
     expect(authors).toEqual(["ceo", "engineer", "human"]);
   });
 
+  // ── Timeline shape (#937) ──────────────────────────────────────────────
+
+  it("renders the timeline as a semantic ordered list (#937)", () => {
+    renderDoc(BASE_DOC);
+    const list = screen.getByTestId("issue-comments-list");
+    expect(list.tagName.toLowerCase()).toBe("ol");
+    expect(list).toHaveAttribute(
+      "aria-label",
+      "Timeline entries (chronological)",
+    );
+    // Each entry is wrapped in an <li> for assistive-tech step counting.
+    expect(list.querySelectorAll("li").length).toBe(BASE_DOC.comments.length);
+  });
+
+  it("labels the timeline section 'Timeline' (#937)", () => {
+    renderDoc(BASE_DOC);
+    expect(
+      screen.getByRole("heading", { name: /timeline/i }),
+    ).toBeInTheDocument();
+    // Aria-label on the section uses the same vocabulary.
+    expect(screen.getByLabelText(/^Timeline$/i)).toBeInTheDocument();
+  });
+
+  it("empty state explains the timeline purpose in drafting state (#937)", () => {
+    renderDoc({ ...BASE_DOC, comments: [] });
+    const empty = screen.getByTestId("issue-comments-empty");
+    expect(empty).toBeInTheDocument();
+    expect(empty.textContent).toMatch(/CEO will start asking questions/i);
+    expect(empty.textContent).toMatch(/Answer inline/i);
+  });
+
+  it("empty state uses a non-drafting copy for approved issues (#937)", () => {
+    renderDoc({ ...APPROVED_DOC, comments: [] });
+    const empty = screen.getByTestId("issue-comments-empty");
+    expect(empty.textContent).toMatch(/Nothing on the timeline yet/i);
+    expect(empty.textContent).toMatch(/Status changes/i);
+  });
+
   it("renders a human comment form", () => {
     renderDoc(BASE_DOC);
     expect(screen.getByTestId("issue-comment-form")).toBeInTheDocument();

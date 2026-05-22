@@ -749,21 +749,40 @@ function CommentsTimeline({
   return (
     <section
       className="issue-doc-comments"
-      aria-label="Comments"
+      aria-label="Timeline"
       aria-live="polite"
       ref={timelineRef}
     >
-      <h3 className="issue-comments-heading">Comments</h3>
+      <h3 className="issue-comments-heading">Timeline</h3>
       {comments.length === 0 ? (
-        <p className="issue-comments-empty" data-testid="issue-comments-empty">
-          No comments yet.
-        </p>
-      ) : (
-        <div className="issue-comments-list" data-testid="issue-comments-list">
-          {comments.map((c) => (
-            <CommentItem key={c.id} comment={c} />
-          ))}
+        <div
+          className="issue-comments-empty"
+          data-testid="issue-comments-empty"
+          role="note"
+        >
+          <p className="issue-comments-empty-title">
+            {isDrafting
+              ? "CEO will start asking questions here."
+              : "Nothing on the timeline yet."}
+          </p>
+          <p className="issue-comments-empty-hint">
+            {isDrafting
+              ? "Answer inline to refine the spec. Each turn from the CEO, the team, and you lands here as a card."
+              : "Status changes, reviewer comments, and human↔CEO replies will appear here as they happen."}
+          </p>
         </div>
+      ) : (
+        <ol
+          className="issue-comments-list"
+          data-testid="issue-comments-list"
+          aria-label="Timeline entries (chronological)"
+        >
+          {comments.map((c) => (
+            <li key={c.id} className="issue-comments-list-item">
+              <CommentItem comment={c} />
+            </li>
+          ))}
+        </ol>
       )}
       {/*
        * Drafting-state comment helper. Lets reviewers know they can

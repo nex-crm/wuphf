@@ -3233,6 +3233,40 @@ html[data-theme="noir-gold"] {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.issue-comments-list-item {
+  list-style: none;
+}
+
+/* Timeline empty state (#937) — stacked title + hint so the user knows
+   the timeline is where the CEO interview turns will land, not just a
+   passive "no comments yet" message. */
+.issue-comments-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-warm, var(--bg-card));
+}
+
+.issue-comments-empty-title {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.issue-comments-empty-hint {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
 }
 
 .issue-comment {

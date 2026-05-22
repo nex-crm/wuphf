@@ -20,8 +20,8 @@
 import { useState } from "react";
 
 import { post } from "../../../api/client";
-import { showNotice } from "../../ui/Toast";
 import type { CeoScanChipPayload, ScanStatus } from "../../onboarding/types";
+import { showNotice } from "../../ui/Toast";
 
 interface CeoScanChipProps {
   payload: CeoScanChipPayload;
@@ -82,15 +82,15 @@ export function CeoScanChip({ payload }: CeoScanChipProps) {
         <span className="ceo-scan-chip-label">{label}</span>
       </div>
       {status === "failed" && payload.error_reason ? (
-        <p
-          className="ceo-scan-chip-reason"
-          data-testid="ceo-scan-chip-reason"
-        >
+        <p className="ceo-scan-chip-reason" data-testid="ceo-scan-chip-reason">
           {payload.error_reason}
         </p>
       ) : null}
       {status === "failed" ? (
-        <div className="ceo-scan-chip-actions" data-testid="ceo-scan-chip-actions">
+        <div
+          className="ceo-scan-chip-actions"
+          data-testid="ceo-scan-chip-actions"
+        >
           <button
             type="button"
             className="btn btn-ghost btn-sm"
