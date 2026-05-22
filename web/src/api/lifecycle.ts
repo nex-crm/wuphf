@@ -306,3 +306,27 @@ export async function postTaskReject(
     created_by: "human",
   });
 }
+
+/**
+ * POST a manual Resume on a blocked task. Clears the
+ * blocked_on_pr_merge state and re-queues the owner agent's lane, so the
+ * task picks up where it left off. Mirrors the watchdog's resume path
+ * but exposes the action to humans from the inbox card.
+ *
+ * The optional reason is written into task.Details for audit. A 200
+ * response with changed=false means the task was not in a resumable
+ * state (already running or already terminal) — the caller should
+ * surface that as an info-toast, not an error.
+ */
+export async function postTaskResume(
+  taskId: string,
+  reason?: string,
+): Promise<{ changed: boolean }> {
+  if (USE_MOCKS) {
+    return Promise.resolve({ changed: true });
+  }
+  const body: { reason?: string } = {};
+  const trimmed = (reason ?? "").trim();
+  if (trimmed) body.reason = trimmed;
+  return post(`/tasks/${encodeURIComponent(taskId)}/resume`, body);
+}
