@@ -43,16 +43,22 @@ vi.mock("../../api/client", async () => {
     await vi.importActual<typeof import("../../api/client")>(
       "../../api/client",
     );
-  return { ...actual, get: vi.fn(), post: vi.fn() };
+  return {
+    ...actual,
+    get: vi.fn(),
+    post: vi.fn(),
+    postMessage: vi.fn(),
+  };
 });
 
 vi.mock("../../hooks/useRequests", () => ({
   useRequests: () => ({ pending: [] }),
 }));
 
-import { post } from "../../api/client";
+import { post, postMessage } from "../../api/client";
 
 const postMock = vi.mocked(post);
+const postMessageMock = vi.mocked(postMessage);
 
 // ── Context helper ────────────────────────────────────────────────────────
 
@@ -76,6 +82,14 @@ function makeWrapper(suggestion: CeoSuggestion | null) {
 beforeEach(() => {
   postMock.mockReset();
   postMock.mockResolvedValue({});
+  postMessageMock.mockReset();
+  postMessageMock.mockResolvedValue({
+    id: "msg-stub",
+    from: "human",
+    channel: "ceo__human",
+    content: "",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 afterEach(() => {
@@ -651,6 +665,101 @@ describe("CeoCardSection", () => {
     };
     render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
     expect(screen.getByTestId("ceo-scan-chip")).toBeInTheDocument();
+  });
+
+  // ── Human-echo (#978) ──────────────────────────────────────────────────
+  //
+  // After the user commits a form-field / chip / checklist answer, the
+  // wizard mirrors that answer back into the CEO DM as a human chat bubble
+  // so the transcript reads like a real conversation. The non-conversational
+  // bridge_choice action is excluded.
+
+  it("echoes a form-field answer into the CEO DM after submit", async () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-echo-form",
+      phase: "greet",
+      kind: "ceo_form_field",
+      payload: { field: "company_name", label: "Office name?" },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Acme Test QA" },
+    });
+    fireEvent.click(screen.getByText("Submit"));
+
+    await waitFor(() =>
+      expect(postMessageMock).toHaveBeenCalledWith(
+        "Acme Test QA",
+        "ceo__human",
+      ),
+    );
+  });
+
+  it("echoes a chip-row choice as its human-readable label", async () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-echo-chip",
+      phase: "blueprint",
+      kind: "ceo_chip_row",
+      payload: {
+        field: "blueprint_id",
+        label: "Pick a template",
+        options: [{ id: "niche-crm", label: "Niche CRM" }],
+      },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.click(screen.getByText("Niche CRM"));
+
+    await waitFor(() =>
+      expect(postMessageMock).toHaveBeenCalledWith("Niche CRM", "ceo__human"),
+    );
+  });
+
+  it("does NOT echo bridge_choice into the CEO DM", async () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-echo-bridge",
+      phase: "bridge",
+      kind: "ceo_chip_row",
+      payload: {
+        field: "bridge_choice",
+        label: "What next?",
+        options: [{ id: "look_around", label: "Look around first" }],
+      },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.click(screen.getByText("Look around first"));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+        phase: "complete",
+      }),
+    );
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("survives an echo postMessage failure without blocking the wizard", async () => {
+    postMessageMock.mockRejectedValueOnce(new Error("network down"));
+    const suggestion: CeoSuggestion = {
+      id: "sug-echo-fail",
+      phase: "greet",
+      kind: "ceo_form_field",
+      payload: { field: "company_name", label: "Office name?" },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Acme" },
+    });
+    fireEvent.click(screen.getByText("Submit"));
+
+    // The transition still fires even though the echo POST failed.
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+        phase: "identity",
+      }),
+    );
   });
 });
 
