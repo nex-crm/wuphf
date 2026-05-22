@@ -6,6 +6,16 @@ import {
   waitForReactMount,
 } from "./_helpers";
 
+// Primary tools render inline as rail icons; secondary tools live behind
+// the More-tools popover and surface their active state through the
+// trigger button instead of the per-app icon.
+const PRIMARY_TOOL_IDS = new Set([
+  "overview",
+  "wiki",
+  "calendar",
+  "skills",
+]);
+
 const APP_CASES = [
   {
     app: "console",
@@ -95,11 +105,19 @@ test.describe("app route isolation", () => {
       await waitForReactMount(page);
       await expectAppRoute(page, appCase.app, appCase.content);
       // Tools moved from the sidebar to the WorkspaceRail. Primary tools
-      // render inline; secondary tools live behind the More-tools
-      // popover. Both expose the same `workspace-rail-tool-<id>` test id
-      // and flip `aria-current="page"` when active.
-      const railTool = page.getByTestId(`workspace-rail-tool-${appCase.app}`);
-      await expect(railTool).toHaveAttribute("aria-current", "page");
+      // (overview / wiki / calendar / skills) render inline and flip
+      // `aria-current="page"`. Secondary tools live behind the
+      // More-tools popover — when one is active, the trigger button
+      // takes the active state instead.
+      if (PRIMARY_TOOL_IDS.has(appCase.app)) {
+        await expect(
+          page.getByTestId(`workspace-rail-tool-${appCase.app}`),
+        ).toHaveAttribute("aria-current", "page");
+      } else {
+        await expect(
+          page.getByTestId("workspace-rail-more-trigger"),
+        ).toHaveAttribute("aria-current", "page");
+      }
     }
 
     // Switch between two app routes via the rail to confirm app-route

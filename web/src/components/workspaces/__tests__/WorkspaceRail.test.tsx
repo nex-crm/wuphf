@@ -23,6 +23,16 @@ vi.mock("../CreateWorkspaceModal", () => ({
     open ? <div data-testid="create-modal-mock">create</div> : null,
 }));
 
+// The Tools column + Footer pull in `useInboxCount` (TanStack Query against
+// /inbox) + the route registry. Those branches aren't what WorkspaceRail's
+// own tests are asserting, and mounting them unmocked makes useQuery throw
+// `Cannot read properties of null (reading 'isServer')` in JSDOM. Stub them
+// out so the tests focus on the switcher/modal/kebab contract.
+vi.mock("../WorkspaceRailTools", () => ({
+  WorkspaceRailTools: () => <div data-testid="workspace-rail-tools-stub" />,
+  WorkspaceRailFooter: () => <div data-testid="workspace-rail-footer-stub" />,
+}));
+
 import {
   usePauseWorkspace,
   useRestoreWorkspace,
