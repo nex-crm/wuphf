@@ -879,6 +879,9 @@ var legalPhaseTransitions = map[string]map[string]bool{
 	},
 	PhaseScan: {
 		PhaseBlueprint: true,
+		// Recovery path after a scan failure: re-enter PhaseWebsite so the
+		// user can supply a different URL. (#934)
+		PhaseWebsite: true,
 	},
 	PhaseBlueprint: {
 		PhaseTeam: true,

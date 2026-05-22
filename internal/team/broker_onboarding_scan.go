@@ -52,13 +52,12 @@ func (b *Broker) runScanPhase(dmSlug string) {
 	s, err := onboarding.Load()
 	if err != nil {
 		// Don't strand the user on a spinning "Scanning…" chip. Post a
-		// generic failed terminal chip + try to advance out of PhaseScan
-		// even though advanceAfterScan will likely hit the same Load
-		// failure — at minimum the chat shows the failure state.
-		// (CodeRabbit on #911.)
+		// failed chip with recovery CTAs — the load failure is local to
+		// our state file and skipping is the only safe path forward.
 		log.Printf("onboarding scan: load state: %v", err)
-		b.postScanChipUpdate(dmSlug, "", "failed", "Couldn’t read onboarding state — skipping the scan.")
-		b.advanceAfterScan("", false)
+		b.postScanChipFailure(dmSlug, "",
+			"Couldn’t read onboarding state.",
+			"Local state file is unreadable; skip the scan to continue.")
 		return
 	}
 	websiteURL := strings.TrimSpace(s.FormAnswers.WebsiteURL)
@@ -94,9 +93,12 @@ func (b *Broker) runScanPhase(dmSlug string) {
 		if scanErr != nil {
 			log.Printf("onboarding scan: %v", scanErr)
 		}
-		b.postScanChipUpdate(dmSlug, websiteURL, "failed",
-			fmt.Sprintf("Couldn’t read %s — skipping the scan.", displayURL(websiteURL)))
-		b.advanceAfterScan(websiteURL, false)
+		reason := scanFailureReason(scanErr, result)
+		// Surface the reason inline on the failed chip so the user knows
+		// what went wrong, and leave them in PhaseScan with recovery CTAs
+		// rather than silently advancing to PhaseBlueprint. (#934)
+		label := fmt.Sprintf("Couldn’t read %s.", displayURL(websiteURL))
+		b.postScanChipFailure(dmSlug, websiteURL, label, reason)
 		return
 	}
 
@@ -164,6 +166,9 @@ func (b *Broker) phaseStillScan() bool {
 // reflecting the terminal status of the scan (done | failed). It is a new
 // message (not an in-place mutation of the original chip) so the existing
 // SSE/append-only message log stays append-only.
+//
+// Used by the success path only. The failure path takes postScanChipFailure,
+// which adds the error_reason field + leaves the user with recovery CTAs.
 func (b *Broker) postScanChipUpdate(dmSlug, websiteURL, status, label string) {
 	rawPayload := mustMarshalRaw(map[string]interface{}{
 		"url":          websiteURL,
@@ -200,6 +205,94 @@ func (b *Broker) postScanChipUpdate(dmSlug, websiteURL, status, label string) {
 	if err := b.saveLocked(); err != nil {
 		log.Printf("onboarding scan: persist chip update: %v", err)
 	}
+}
+
+// postScanChipFailure appends a terminal ceo_scan_chip with status="failed",
+// surfaces the underlying error reason inline, and leaves the user in
+// PhaseScan with recovery CTAs (#934).
+//
+// Unlike the success path, this does NOT call advanceAfterScan: the frontend
+// renders a "Try another URL" CTA (→ POST /onboarding/transition phase=website)
+// and a "Skip and continue" CTA (→ POST /onboarding/transition phase=blueprint)
+// so the user controls the next step. PendingSuggestion is updated to this
+// failed chip so resume re-emits the same recovery UI.
+//
+// The reason string is the verbatim warning surfaced from operations
+// (scanFailureReason); the frontend renders it as plain text under the chip.
+func (b *Broker) postScanChipFailure(dmSlug, websiteURL, label, reason string) {
+	rawPayload := mustMarshalRaw(map[string]interface{}{
+		"url":          websiteURL,
+		"status":       "failed",
+		"failed_label": label,
+		"error_reason": reason,
+	})
+	payload := ceoMessagePayload{
+		Kind:              "ceo_scan_chip",
+		Content:           label,
+		SuggestionID:      "scan-progress-" + urlToSuggestionID(websiteURL) + "-failed",
+		SuggestionPayload: rawPayload,
+	}
+	sanitized, err := sanitizeCEOPayload(payload)
+	if err != nil {
+		log.Printf("onboarding scan: sanitize chip failure: %v", err)
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.counter++
+	b.appendMessageLocked(channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "ceo",
+		Channel:   dmSlug,
+		Kind:      payload.Kind,
+		Content:   payload.Content,
+		Payload:   sanitized,
+		Tagged:    []string{},
+		Timestamp: now,
+	})
+	// Persist the failed chip as the pending suggestion so a tab refresh
+	// resumes on the same recovery UI rather than re-firing a fresh scan.
+	if s, loadErr := onboarding.Load(); loadErr == nil {
+		s.PendingSuggestion = &onboarding.Suggestion{
+			ID:       payload.SuggestionID,
+			Phase:    onboarding.PhaseScan,
+			Kind:     payload.Kind,
+			Payload:  sanitized,
+			IssuedAt: time.Now().UTC(),
+		}
+		if saveErr := onboarding.Save(s); saveErr != nil {
+			log.Printf("onboarding scan: persist failed pending: %v", saveErr)
+		}
+	} else {
+		log.Printf("onboarding scan: load for failed pending: %v", loadErr)
+	}
+	if err := b.saveLocked(); err != nil {
+		log.Printf("onboarding scan: persist chip failure: %v", err)
+	}
+}
+
+// scanFailureReason returns a short, plain-English description of why the
+// website scan failed. It pulls verbatim from operations.CompanySeedResult's
+// warnings array when available (e.g. "URL fetch failed: ...",
+// "LLM extraction failed: ...") and falls back to the raw error otherwise.
+//
+// Per #934's failure-mode guidance, we do NOT invent a new typed taxonomy
+// here — we surface what the underlying layer already produced.
+func scanFailureReason(scanErr error, result *operations.CompanySeedResult) string {
+	if result != nil {
+		for _, w := range result.Warnings {
+			w = strings.TrimSpace(w)
+			if w != "" {
+				return w
+			}
+		}
+	}
+	if scanErr != nil {
+		return scanErr.Error()
+	}
+	return "The scanner returned no readable content."
 }
 
 // postScanArticleLine appends a single CEO text bubble announcing one wiki

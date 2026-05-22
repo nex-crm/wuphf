@@ -160,6 +160,13 @@ export interface CeoScanChipPayload {
   done_label?: string;
   /** Message shown on failure */
   failed_label?: string;
+  /**
+   * Underlying reason for a `failed` status. Plain-English, surfaced from
+   * the Go scan layer (operations.CompanySeedResult.Warnings or the raw
+   * error). Rendered as text under the failed chip so the user can decide
+   * whether to retry with a different URL or skip. (#934)
+   */
+  error_reason?: string;
 }
 
 // ── Card lifecycle state ───────────────────────────────────────────────────

@@ -2501,6 +2501,40 @@
   font-weight: 600;
 }
 
+/* Failure state expands into a stacked card: chip row + reason + CTAs.
+   The `--failed` modifier flips the outer container from inline-flex to a
+   block-level column so the reason and action row layout correctly. (#934) */
+.ceo-scan-chip--failed {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md, 6px);
+  max-width: 420px;
+}
+
+.ceo-scan-chip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ceo-scan-chip-reason {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.ceo-scan-chip-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 /* ─── Sidebar preview overlay (Phase 2 onboarding) ────────────────────────
    Shows during greet/identity/scan/blueprint/team phases.
    Dashed lavender border signals "staged, not committed yet."

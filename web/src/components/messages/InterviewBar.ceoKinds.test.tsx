@@ -420,6 +420,81 @@ describe("CeoScanChip", () => {
     expect(chip.textContent).toContain("read that URL");
   });
 
+  it("surfaces the error reason inline on failure (#934)", () => {
+    const payload: CeoScanChipPayload = {
+      field: "website_url",
+      url: "acme.com",
+      status: "failed",
+      error_reason: "URL fetch failed: 404 Not Found",
+    };
+    render(<CeoScanChip payload={payload} />);
+    expect(screen.getByTestId("ceo-scan-chip-reason")).toHaveTextContent(
+      "URL fetch failed: 404 Not Found",
+    );
+  });
+
+  it("renders Try another URL and Skip CTAs on failure (#934)", () => {
+    const payload: CeoScanChipPayload = {
+      field: "website_url",
+      url: "acme.com",
+      status: "failed",
+    };
+    render(<CeoScanChip payload={payload} />);
+    expect(screen.getByTestId("ceo-scan-chip-retry")).toBeInTheDocument();
+    expect(screen.getByTestId("ceo-scan-chip-skip")).toBeInTheDocument();
+  });
+
+  it("does NOT render CTAs on the scanning or done chip", () => {
+    const scanning: CeoScanChipPayload = {
+      field: "website_url",
+      url: "acme.com",
+      status: "scanning",
+    };
+    const { unmount } = render(<CeoScanChip payload={scanning} />);
+    expect(screen.queryByTestId("ceo-scan-chip-actions")).toBeNull();
+    unmount();
+
+    const done: CeoScanChipPayload = {
+      field: "website_url",
+      url: "acme.com",
+      status: "done",
+    };
+    render(<CeoScanChip payload={done} />);
+    expect(screen.queryByTestId("ceo-scan-chip-actions")).toBeNull();
+  });
+
+  it("clicking Try another URL transitions back to PhaseWebsite (#934)", async () => {
+    postMock.mockResolvedValue({ ok: true, phase: "website" });
+    const payload: CeoScanChipPayload = {
+      field: "website_url",
+      url: "acme.com",
+      status: "failed",
+    };
+    render(<CeoScanChip payload={payload} />);
+    fireEvent.click(screen.getByTestId("ceo-scan-chip-retry"));
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+        phase: "website",
+      }),
+    );
+  });
+
+  it("clicking Skip and continue transitions to PhaseBlueprint (#934)", async () => {
+    postMock.mockResolvedValue({ ok: true, phase: "blueprint" });
+    const payload: CeoScanChipPayload = {
+      field: "website_url",
+      url: "acme.com",
+      status: "failed",
+    };
+    render(<CeoScanChip payload={payload} />);
+    fireEvent.click(screen.getByTestId("ceo-scan-chip-skip"));
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+        phase: "blueprint",
+      }),
+    );
+  });
+
   it("uses custom labels when provided", () => {
     const payload: CeoScanChipPayload = {
       field: "website_url",

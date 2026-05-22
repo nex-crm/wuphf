@@ -559,7 +559,26 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 		}}
 
 	case onboarding.PhaseBlueprint:
-		return []ceoMessagePayload{{
+		out := make([]ceoMessagePayload, 0, 2)
+		// If we arrived here from a failed scan (URL was set but scan never
+		// completed), acknowledge the skip so the user isn't left wondering
+		// why the wiki update line never appeared. (#934)
+		if s != nil {
+			websiteURL := strings.TrimSpace(s.FormAnswers.WebsiteURL)
+			if websiteURL != "" && !s.FormAnswers.ScanComplete {
+				ack := "OK, skipping the scan"
+				if companyName != "" {
+					ack += " — we'll go with what you told me about " + companyName + "."
+				} else {
+					ack += " — we'll work with what you've already told me."
+				}
+				out = append(out, ceoMessagePayload{
+					Kind:    "text",
+					Content: ack,
+				})
+			}
+		}
+		out = append(out, ceoMessagePayload{
 			Kind:         "ceo_chip_row",
 			Content:      "Pick a starter template, or start from scratch:",
 			SuggestionID: "blueprint-pick",
@@ -573,7 +592,8 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 					{"id": "", "label": "Start from scratch"},
 				},
 			}),
-		}}
+		})
+		return out
 
 	case onboarding.PhaseTeam:
 		// The team trim checklist is built from the blueprint's agent roster.
