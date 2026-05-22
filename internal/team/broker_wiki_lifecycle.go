@@ -91,6 +91,12 @@ func (b *Broker) initWikiWorker() {
 	worker := NewWikiWorkerWithIndex(repo, b, idx)
 	worker.Start(lifecycleCtx)
 
+	// Obsidian round-trip: fsnotify watcher that catches external edits to
+	// <wiki-root>/team/ and routes them through Repo.Commit under the
+	// per-human identity. Spec: WIKI-OBSIDIAN-COMPATIBILITY.md §6. Toggle
+	// off with WUPHF_OBSIDIAN_WATCHER=0. Non-fatal on failure.
+	b.ensureObsidianWatcher(lifecycleCtx, worker, idx)
+
 	// Wire the extraction loop: artifact commits → extract_entities_lite →
 	// WikiIndex. DLQ lives under <wiki>/.dlq/. Extractor failures never
 	// fail the commit path — DLQ absorbs everything per §11.13.

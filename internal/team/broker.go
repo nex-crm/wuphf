@@ -134,6 +134,7 @@ type Broker struct {
 	wikiInitErr             error
 	autoNotebookWriter      *AutoNotebookWriter
 	humanWikiWriter         *HumanWikiIntentWriter
+	obsidianWatcher         *ObsidianWatcher
 	demandIndex             *NotebookDemandIndex
 	channelIntentDispatcher *ChannelIntentDispatcher
 	promotionSweep          *PromotionSweep
@@ -716,6 +717,7 @@ func (b *Broker) Stop() {
 	compressor := b.wikiCompressor
 	autoWriter := b.autoNotebookWriter
 	humanWikiWriter := b.humanWikiWriter
+	obsidianWatcher := b.obsidianWatcher
 	channelIntent := b.channelIntentDispatcher
 	promotionSweep := b.promotionSweep
 	b.mu.Unlock()
@@ -736,6 +738,9 @@ func (b *Broker) Stop() {
 	}
 	if humanWikiWriter != nil {
 		humanWikiWriter.Stop(2 * time.Second)
+	}
+	if obsidianWatcher != nil {
+		_ = obsidianWatcher.Stop()
 	}
 	if channelIntent != nil {
 		channelIntent.Stop(2 * time.Second)
