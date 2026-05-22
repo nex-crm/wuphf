@@ -61,7 +61,7 @@ func TestMarkdownKnowledgeToolBlock_ListsCanonicalTools(t *testing.T) {
 	}
 	for _, want := range []string{
 		"human explicitly asked",
-		"Pass human_request",
+		"Pass human_request as the broker message ID",
 		"notebook_write and move through notebook_promote review",
 	} {
 		if !strings.Contains(block, want) {
@@ -76,11 +76,16 @@ func TestMarkdownKnowledgeMemoryBlock_RequiresPromotionDiscipline(t *testing.T) 
 		"notebook_write",
 		"notebook_promote",
 		"team_learning_record",
-		"approved",
+		"typed learning store",
+		"scratch: true",
+		"approved by the reviewer",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("markdownKnowledgeMemoryBlock missing %q", want)
 		}
+	}
+	if strings.Contains(block, "team_learning_record succeeded") {
+		t.Errorf("markdownKnowledgeMemoryBlock must not treat team_learning_record as wiki storage")
 	}
 }
 
@@ -558,18 +563,24 @@ func TestPromptBuilder_RegressionNotebookPromoteStillPresent(t *testing.T) {
 		markdownMemory: true,
 	}
 	ceoPrompt := pb.Build("ceo")
-	if !strings.Contains(ceoPrompt, "submit notebook_promote if it should become canonical wiki knowledge") {
+	if !strings.Contains(ceoPrompt, "submit notebook_promote for reviewer approval if it should become canonical wiki knowledge") {
 		t.Fatalf("CEO prompt regression: original notebook_promote rule 8 missing")
 	}
-	if !strings.Contains(ceoPrompt, "Do not leave durable team knowledge parked only in a notebook unless you explicitly mark it as scratch.") {
+	if !strings.Contains(ceoPrompt, "Do not leave durable team knowledge parked only in a notebook unless the notebook entry frontmatter includes `scratch: true`.") {
 		t.Fatalf("CEO prompt missing notebook promotion follow-through guardrail")
 	}
+	if !strings.Contains(ceoPrompt, "Claim canonical wiki storage only after reviewer approval makes it canonical.") {
+		t.Fatalf("CEO prompt missing reviewer approval claim guardrail")
+	}
 	fePrompt := pb.Build("fe")
-	if !strings.Contains(fePrompt, "submit notebook_promote when they should become canonical") {
+	if !strings.Contains(fePrompt, "submit notebook_promote for reviewer approval when they should become canonical") {
 		t.Fatalf("specialist prompt regression: original notebook_promote rule 12 missing")
 	}
-	if !strings.Contains(fePrompt, "Do not leave durable team knowledge parked only in a notebook unless you explicitly mark it as scratch.") {
+	if !strings.Contains(fePrompt, "Do not leave durable team knowledge parked only in a notebook unless the notebook entry frontmatter includes `scratch: true`.") {
 		t.Fatalf("specialist prompt missing notebook promotion follow-through guardrail")
+	}
+	if !strings.Contains(fePrompt, "Claim canonical wiki storage only after reviewer approval makes it canonical.") {
+		t.Fatalf("specialist prompt missing reviewer approval claim guardrail")
 	}
 }
 

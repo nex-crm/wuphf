@@ -12,16 +12,20 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const humanWikiDelegationMaxAge = 24 * time.Hour
+
 // handleTeamWikiWrite posts the article to the broker's wiki worker queue.
 // Queue saturation surfaces as a tool error so the agent sees it and retries
 // on the next turn — no hidden retries.
 func handleTeamWikiWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiWriteArgs) (*mcp.CallToolResult, any, error) {
-	if strings.TrimSpace(args.HumanRequest) == "" && !adminDirectWikiWriteBypassEnabled() {
-		return toolError(fmt.Errorf("team_wiki_write requires human_request with the exact human instruction authorizing a direct wiki write; otherwise use notebook_write first, then notebook_promote for review")), nil, nil
-	}
 	slug, err := resolveSlug(args.MySlug)
 	if err != nil {
 		return toolError(err), nil, nil
+	}
+	if !adminDirectWikiWriteBypassEnabled() {
+		if err := verifyHumanWikiWriteDelegation(ctx, slug, args.HumanRequest); err != nil {
+			return toolError(err), nil, nil
+		}
 	}
 	path := strings.TrimSpace(args.ArticlePath)
 	if path == "" {
@@ -60,6 +64,84 @@ func handleTeamWikiWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamW
 		"bytes_written": result.BytesWritten,
 	})
 	return textResult(string(payload)), nil, nil
+}
+
+func verifyHumanWikiWriteDelegation(ctx context.Context, slug, humanRequestID string) error {
+	humanRequestID = strings.TrimSpace(humanRequestID)
+	if humanRequestID == "" {
+		return fmt.Errorf("team_wiki_write requires human_request with the broker message ID of the human's direct wiki request; otherwise use notebook_write first, then notebook_promote for review")
+	}
+
+	channels := fetchAccessibleChannels(ctx, slug)
+	if len(channels) == 0 {
+		channels = []brokerChannelSummary{{Slug: resolveChannel("")}}
+	}
+	seen := map[string]bool{}
+	for _, channel := range channels {
+		channelSlug := strings.TrimSpace(channel.Slug)
+		if channelSlug == "" || seen[channelSlug] {
+			continue
+		}
+		seen[channelSlug] = true
+		messages := fetchChannelMessages(ctx, channelSlug, slug, "all", 100)
+		for _, msg := range messages {
+			if strings.TrimSpace(msg.ID) != humanRequestID {
+				continue
+			}
+			return validateHumanWikiWriteDelegation(msg)
+		}
+	}
+	return fmt.Errorf("team_wiki_write human_request %q was not found in recent accessible human messages; pass the broker message ID for the human's wiki request", humanRequestID)
+}
+
+func validateHumanWikiWriteDelegation(msg brokerMessage) error {
+	if !isVerifiedHumanDelegationSender(msg.From) {
+		return fmt.Errorf("team_wiki_write human_request %q is not a human-authored message", msg.ID)
+	}
+	timestamp := strings.TrimSpace(msg.Timestamp)
+	if timestamp == "" {
+		return fmt.Errorf("team_wiki_write human_request %q is missing a timestamp", msg.ID)
+	}
+	createdAt, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		return fmt.Errorf("team_wiki_write human_request %q has an invalid timestamp", msg.ID)
+	}
+	if time.Since(createdAt) > humanWikiDelegationMaxAge {
+		return fmt.Errorf("team_wiki_write human_request %q is expired; ask the human to restate the direct wiki request", msg.ID)
+	}
+	if !hasDirectWikiWriteIntent(msg.Title + "\n" + msg.Content) {
+		return fmt.Errorf("team_wiki_write human_request %q does not explicitly ask for a direct wiki write", msg.ID)
+	}
+	return nil
+}
+
+func isVerifiedHumanDelegationSender(sender string) bool {
+	sender = strings.ToLower(strings.TrimSpace(sender))
+	return sender == "you" || sender == "human" || strings.HasPrefix(sender, "human:")
+}
+
+func hasDirectWikiWriteIntent(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	for _, negation := range []string{"do not", "don't", "dont", "never"} {
+		if strings.Contains(normalized, negation) && strings.Contains(normalized, "wiki") {
+			return false
+		}
+	}
+	hasWikiTarget := strings.Contains(normalized, "wiki") ||
+		strings.Contains(normalized, "kb") ||
+		strings.Contains(normalized, "knowledge base")
+	if !hasWikiTarget {
+		return false
+	}
+	for _, verb := range []string{"write", "add", "put", "save", "record", "preserve", "publish", "create", "update"} {
+		if strings.Contains(normalized, verb) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleTeamWikiRead returns the raw article bytes.

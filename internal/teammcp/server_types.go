@@ -352,7 +352,7 @@ type TeamWikiWriteArgs struct {
 	Mode         string `json:"mode" jsonschema:"One of: create | replace | append_section"`
 	Content      string `json:"content" jsonschema:"Full article content (create/replace) or new section text (append_section)"`
 	CommitMsg    string `json:"commit_message" jsonschema:"Why this change — becomes the git commit message"`
-	HumanRequest string `json:"human_request,omitempty" jsonschema:"Exact human request authorizing this direct wiki write. Required unless WUPHF_ENABLE_AGENT_WIKI_WRITE=true. For agent-authored knowledge not explicitly requested by the human, use notebook_write then notebook_promote instead."`
+	HumanRequest string `json:"human_request,omitempty" jsonschema:"Broker message ID for the recent human-authored request explicitly authorizing this direct wiki write. Required unless WUPHF_ENABLE_AGENT_WIKI_WRITE=true. For agent-authored knowledge not explicitly requested by the human, use notebook_write then notebook_promote instead."`
 }
 
 // TeamWikiReadArgs is the contract for team_wiki_read.
