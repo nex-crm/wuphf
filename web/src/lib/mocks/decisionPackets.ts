@@ -131,6 +131,7 @@ export const POPULATED_INBOX: InboxPayload = {
     running: 7,
     blocked: 2,
     approvedToday: 11,
+    unread: 3,
   },
   refreshedAt: NOW,
 };
@@ -142,6 +143,7 @@ export const EMPTY_INBOX: InboxPayload = {
     running: 7,
     blocked: 2,
     approvedToday: 11,
+    unread: 0,
   },
   refreshedAt: NOW,
 };

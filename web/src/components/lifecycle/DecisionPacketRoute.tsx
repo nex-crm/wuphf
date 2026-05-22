@@ -7,6 +7,7 @@ import {
   postInboxCursor,
   postTaskComment,
   postTaskReject,
+  postTaskResume,
 } from "../../api/lifecycle";
 import type { InboxItem } from "../../lib/types/inbox";
 import type { DecisionPacket } from "../../lib/types/lifecycle";
@@ -158,6 +159,27 @@ export function DecisionPacketRoute({
           item={fallbackItem}
           onRetry={() => query.refetch()}
           onClose={close}
+          onResume={async (reason?: string) => {
+            try {
+              await postTaskResume(taskId, reason);
+              void postInboxCursor();
+              void queryClient.invalidateQueries({
+                queryKey: ["lifecycle", "task", taskId],
+              });
+              void queryClient.invalidateQueries({
+                queryKey: ["lifecycle", "inbox"],
+              });
+              void queryClient.invalidateQueries({
+                queryKey: ["lifecycle", "inbox-items"],
+              });
+              void queryClient.invalidateQueries({
+                queryKey: ["inbox-badge"],
+              });
+            } catch (err) {
+              console.error("postTaskResume failed", err);
+            }
+          }}
+          onReject={(reason: string) => submitReject(reason)}
         />
       );
     }
@@ -239,7 +261,8 @@ function PacketSkeleton({ onClose: _onClose }: { onClose: () => void }) {
   );
 }
 
-function pendingStateExplainer(state: string): string {
+function pendingStateExplainer(state: string, details?: string): string {
+  const trimmed = (details ?? "").trim();
   switch (state) {
     case "decision":
       return "Waiting on a packet write. The owner agent has flagged this for a human call.";
@@ -248,13 +271,23 @@ function pendingStateExplainer(state: string): string {
     case "changes_requested":
       return "Changes were requested. The owner agent is iterating on the spec.";
     case "blocked_on_pr_merge":
-      return "Waiting on an upstream PR merge before this task can land.";
+      // The lifecycle state name is historical — most real blocks are agent
+      // timeouts, agent errors, or cross-task dependencies, not actual PR
+      // merges. Prefer the broker's own reason when present so the human
+      // sees the real "why" instead of the generic framing.
+      return (
+        trimmed ||
+        "The owner agent is paused. Resume to retry, or reject to drop the task."
+      );
     case "approved":
       return "Approved. The packet write is still in flight.";
     case "rejected":
       return "Rejected. The packet write is still in flight.";
     default:
-      return "The owner agent is still working. Full decision packet will surface here once it lands.";
+      return (
+        trimmed ||
+        "The owner agent is still working. Full decision packet will surface here once it lands."
+      );
   }
 }
 
@@ -262,14 +295,21 @@ function PacketPending({
   item,
   onRetry,
   onClose,
+  onResume,
+  onReject,
 }: {
   item: Extract<InboxItem, { kind: "task" }>;
   onRetry: () => void;
   onClose: () => void;
+  onResume?: (reason?: string) => void;
+  onReject?: (reason: string) => void;
 }) {
   const state = item.task?.state ?? "";
-  const explainer = pendingStateExplainer(state);
+  const details = item.task?.details;
+  const blockedOn = item.task?.blockedOn ?? [];
+  const explainer = pendingStateExplainer(state, details);
   const owner = item.agentSlug || item.task?.assignment || "";
+  const isBlocked = state === "blocked_on_pr_merge";
   return (
     <div
       className="packet-shell packet-shell--message"
@@ -277,7 +317,11 @@ function PacketPending({
     >
       <main className="packet-center">
         <div className="packet-error" role="status">
-          <h2>{item.title || "(no subject)"}</h2>
+          <h2>
+            {isBlocked
+              ? `Blocked: ${item.title || "(no subject)"}`
+              : item.title || "(no subject)"}
+          </h2>
           <p>{explainer}</p>
           <dl
             style={{
@@ -312,8 +356,77 @@ function PacketPending({
                 <dd style={{ margin: 0 }}>#{item.channel}</dd>
               </>
             ) : null}
+            {blockedOn.length > 0 ? (
+              <>
+                <dt style={{ color: "var(--text-tertiary)" }}>Blocked on</dt>
+                <dd
+                  style={{
+                    margin: 0,
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                  }}
+                >
+                  {blockedOn.map((blockerId) => (
+                    // Real anchor links so middle-click / cmd-click /
+                    // "copy link" / screen-reader announce all behave
+                    // the way users expect for navigation. A button
+                    // with a click handler would force keyboard-only
+                    // open via Enter and break copy-link entirely.
+                    <a
+                      key={blockerId}
+                      href={`#/task/${encodeURIComponent(blockerId)}`}
+                      className="retry"
+                      data-testid="packet-pending-blocker"
+                      style={{
+                        padding: "2px 8px",
+                        fontSize: 12,
+                        textDecoration: "none",
+                      }}
+                    >
+                      {blockerId}
+                    </a>
+                  ))}
+                </dd>
+              </>
+            ) : null}
           </dl>
-          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              justifyContent: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            {isBlocked && onResume ? (
+              <button
+                type="button"
+                className="retry"
+                data-testid="packet-pending-resume"
+                onClick={() => onResume()}
+              >
+                Resume
+              </button>
+            ) : null}
+            {isBlocked && onReject ? (
+              <button
+                type="button"
+                className="retry"
+                data-testid="packet-pending-reject"
+                onClick={() => {
+                  if (typeof window === "undefined") return;
+                  const reason = window.prompt(
+                    "Reject this task? Reason (required):",
+                    "Manual reject from inbox.",
+                  );
+                  const trimmed = (reason ?? "").trim();
+                  if (trimmed) onReject(trimmed);
+                }}
+              >
+                Reject
+              </button>
+            ) : null}
             <button type="button" className="retry" onClick={onRetry}>
               Refresh
             </button>

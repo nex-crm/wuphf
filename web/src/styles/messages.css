@@ -1487,6 +1487,79 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   color: var(--accent);
 }
 
+/* ─── SystemErrorCard (issue #933) ─── */
+/* Banner-style system-authored card for runtime auth failures. Lives
+   outside the normal message-bubble flow so it reads as system surface,
+   not in-character agent output. */
+.system-error-card {
+  margin: 8px 0 8px 0;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--amber-600, #d97706) 8%, var(--bg-card));
+  border: 1px solid var(--amber-600, #d97706);
+  border-radius: var(--radius-md, 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.system-error-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.system-error-card-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--amber-600, #d97706);
+}
+.system-error-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.system-error-card-detail {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.system-error-card-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.system-error-card-command code {
+  flex: 1;
+  background: transparent;
+  white-space: pre;
+  overflow-x: auto;
+}
+.system-error-card-copy-btn,
+.system-error-card-retry-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  cursor: pointer;
+}
+.system-error-card-copy-btn:hover,
+.system-error-card-retry-btn:hover {
+  background: var(--bg-warm);
+}
+.system-error-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* ─── Feed loading / empty states ─── */
 .messages-loading-label {
   display: flex;

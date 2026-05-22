@@ -43,22 +43,48 @@ afterEach(() => {
   cleanup();
 });
 
-function mockPrereqs(found: Record<string, boolean>) {
-  getMock.mockResolvedValue([
+function mockPrereqs(
+  found: Record<string, boolean>,
+  onboardingState: { onboarded?: boolean; phase?: string } = {},
+  sessions: Record<
+    string,
+    { session_probed?: boolean; signed_in?: boolean; sign_in_command?: string }
+  > = {},
+) {
+  const prereqs = [
     {
       name: "claude",
       required: false,
       found: found.claude ?? false,
       version: "v1.2.3",
+      ...(sessions.claude ?? {}),
     },
     {
       name: "codex",
       required: false,
       found: found.codex ?? false,
       version: "v0.8.1",
+      ...(sessions.codex ?? {}),
     },
-    { name: "opencode", required: false, found: found.opencode ?? false },
-  ]);
+    {
+      name: "opencode",
+      required: false,
+      found: found.opencode ?? false,
+      ...(sessions.opencode ?? {}),
+    },
+  ];
+  // Route the GET mock by path. The /onboarding/state probe added for the
+  // #979 phase-complete guard runs on every click; default it to a fresh
+  // install (no phase set) unless the test overrides it.
+  getMock.mockImplementation(async (path: string) => {
+    if (path === "/onboarding/prereqs") {
+      return prereqs;
+    }
+    if (path === "/onboarding/state") {
+      return onboardingState;
+    }
+    return {};
+  });
 }
 
 describe("PrePickScreen", () => {
@@ -183,6 +209,147 @@ describe("PrePickScreen", () => {
         value: originalOpen,
       });
     }
+  });
+
+  // Issue #932 regression guard: when the broker probes a runtime and
+  // reports it installed but not signed in, the tile must show a
+  // "Not signed in" label, NOT advance onboarding when clicked, and
+  // surface a copy-the-sign-in-command CTA.
+  it("renders Not signed in label when session_probed=true and signed_in=false", async () => {
+    mockPrereqs(
+      { claude: true },
+      {},
+      {
+        claude: {
+          session_probed: true,
+          signed_in: false,
+          sign_in_command: "claude auth login",
+        },
+      },
+    );
+    render(<PrePickScreen onComplete={vi.fn()} />);
+
+    const card = await screen.findByTestId("pre-pick-card-claude-code");
+    await waitFor(() => expect(card.textContent).toMatch(/Not signed in/));
+    expect(card.getAttribute("data-signed-in")).toBe("false");
+  });
+
+  it("does not POST /onboarding/transition when clicking an un-signed-in tile (copies sign-in command instead)", async () => {
+    mockPrereqs(
+      { codex: true },
+      {},
+      {
+        codex: {
+          session_probed: true,
+          signed_in: false,
+          sign_in_command: "codex login",
+        },
+      },
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      writable: true,
+      value: { writeText },
+    });
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+
+    const card = await screen.findByTestId("pre-pick-card-codex");
+    await waitFor(() => expect(card).not.toBeDisabled());
+    fireEvent.click(card);
+
+    // Critical: clicking an unauthed tile must NOT advance onboarding.
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/onboarding/transition"),
+    ).toBeUndefined();
+    // Sign-in command should be copied to clipboard.
+    expect(writeText).toHaveBeenCalledWith("codex login");
+    // And an inline hint should appear with the same command.
+    expect(await screen.findByRole("alert")).toHaveTextContent(/codex login/);
+  });
+
+  // Regression guard for CodeRabbit #985 (#3284960848 + #3284960843): even
+  // when sign_in_command is missing from the prereq payload, an un-signed-in
+  // tile must still block the pick. Falling through to onPick would land
+  // the user in an office that fails on the first agent LLM call.
+  it("blocks pick when signed_in=false and sign_in_command is missing", async () => {
+    mockPrereqs(
+      { codex: true },
+      {},
+      { codex: { session_probed: true, signed_in: false } },
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      writable: true,
+      value: { writeText },
+    });
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+
+    const card = await screen.findByTestId("pre-pick-card-codex");
+    await waitFor(() => expect(card).not.toBeDisabled());
+    fireEvent.click(card);
+
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/onboarding/transition"),
+    ).toBeUndefined();
+    // Clipboard not touched when there's no command to copy.
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("renders Signed in label when session_probed=true and signed_in=true", async () => {
+    mockPrereqs(
+      { claude: true },
+      {},
+      { claude: { session_probed: true, signed_in: true } },
+    );
+    render(<PrePickScreen onComplete={vi.fn()} />);
+
+    const card = await screen.findByTestId("pre-pick-card-claude-code");
+    await waitFor(() => expect(card.textContent).toMatch(/Signed in/));
+    expect(card.getAttribute("data-signed-in")).toBe("true");
+  });
+
+  it("falls back to Detected label when broker did not probe (session_probed undefined)", async () => {
+    mockPrereqs({ claude: true });
+    render(<PrePickScreen onComplete={vi.fn()} />);
+
+    const card = await screen.findByTestId("pre-pick-card-claude-code");
+    await waitFor(() => expect(card.textContent).toMatch(/Detected/));
+    expect(card.getAttribute("data-signed-in")).toBe("unknown");
+  });
+
+  // Issue #979 regression guard: a session-loss recovery that lands the
+  // user back on PrePickScreen with the broker already in phase=complete
+  // must NOT POST /onboarding/transition (broker rejects "complete → greet"
+  // as an invalid transition). PrePickScreen must signal onComplete with
+  // phaseAlreadyComplete=true so RootRoute routes straight to the office.
+  it("skips /onboarding/transition when broker reports phase=complete (session-loss recovery)", async () => {
+    mockPrereqs({ claude: true }, { onboarded: true, phase: "complete" });
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+
+    const card = await screen.findByTestId("pre-pick-card-claude-code");
+    await waitFor(() => expect(card).not.toBeDisabled());
+    fireEvent.click(card);
+
+    await waitFor(() =>
+      expect(onComplete).toHaveBeenCalledWith({ phaseAlreadyComplete: true }),
+    );
+
+    // Critical: the buggy path POSTed phase=greet which the broker rejected
+    // with "invalid transition from \"complete\" to \"greet\"". The fix is to
+    // not POST at all in this state.
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/onboarding/transition"),
+    ).toBeUndefined();
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/config"),
+    ).toBeUndefined();
   });
 
   it("surfaces an error if /onboarding/transition fails and does not invoke onComplete", async () => {
