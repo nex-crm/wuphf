@@ -768,13 +768,62 @@ func (r *Repo) regenerateIndexLocked() error {
 
 // BackupMirror copies the wiki repo to ~/.wuphf/wiki.bak/ skipping git object
 // packs for speed. The worker calls this asynchronously and debounced.
+//
+// First-boot guard: on a freshly initialised wiki the layout is just
+// .gitkeep stubs under team/{people,companies,…}/ — there are no real
+// articles to back up. Creating ~/.wuphf/wiki.bak/ in that case puts a
+// surprising empty directory next to ~/.wuphf/wiki/ on every fresh
+// install. Skip the copy until at least one article exists.
+// Closes #981.
 func (r *Repo) BackupMirror(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if hasArticle, err := teamSubtreeHasArticle(filepath.Join(r.root, "team")); err == nil && !hasArticle {
+		// Nothing to back up yet. The backup mirror will appear after the
+		// first real article write.
+		return nil
+	}
 	if err := copyTree(r.root, r.backupRoot); err != nil {
 		return fmt.Errorf("wiki: backup mirror: %w", err)
 	}
 	return nil
+}
+
+// teamSubtreeHasArticle reports whether teamDir contains at least one *.md
+// article (recursively). Dot-prefixed dirs and files are ignored so .gitkeep
+// and .obsidian-style scaffolding do not count as content. Returns (false,
+// nil) when teamDir does not exist so a never-initialised wiki degrades to
+// "empty".
+func teamSubtreeHasArticle(teamDir string) (bool, error) {
+	found := false
+	walkErr := filepath.Walk(teamDir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return filepath.SkipDir
+			}
+			return err
+		}
+		if info.IsDir() {
+			base := filepath.Base(p)
+			if strings.HasPrefix(base, ".") && p != teamDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := info.Name()
+		if strings.HasPrefix(name, ".") {
+			return nil
+		}
+		if strings.HasSuffix(name, ".md") {
+			found = true
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if walkErr != nil && !os.IsNotExist(walkErr) {
+		return found, walkErr
+	}
+	return found, nil
 }
 
 // RestoreFromBackup swaps the corrupt repo for the backup mirror.
