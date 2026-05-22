@@ -840,10 +840,18 @@ export default function RootRoute() {
       // After they pick, setInCeoOnboarding(true) to enter the CEO DM.
       body = (
         <PrePickScreen
-          onComplete={() => {
-            // PrePickScreen transitions directly to CEO DM.
-            // The broker sets state.Phase = "greet" after /onboarding/transition.
-            // We enter the in-CEO state here so the Shell renders immediately.
+          onComplete={(info) => {
+            // Issue #979: when the broker reports phase=complete at pick time
+            // (session-loss recovery), skip the CEO DM hand-off entirely and
+            // route straight into the office. Otherwise enter the normal CEO
+            // onboarding hand-off: PrePickScreen has just POSTed
+            // /onboarding/transition phase=greet, so the Shell renders the
+            // OnboardingDMRoute around the CEO DM until the broker flips
+            // onboarded=true.
+            if (info?.phaseAlreadyComplete) {
+              setOnboardingComplete(true);
+              return;
+            }
             setInCeoOnboarding(true);
           }}
         />
