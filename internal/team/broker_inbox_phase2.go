@@ -56,12 +56,22 @@ type InboxItem struct {
 	Title     string        `json:"title"`
 	Channel   string        `json:"channel,omitempty"`
 	CreatedAt string        `json:"createdAt,omitempty"`
-	ElapsedMs int64         `json:"elapsedMs,omitempty"`
+	// UpdatedAt is the RFC3339 timestamp of the most recent activity
+	// on the underlying artifact. Mirrors InboxRow.UpdatedAt for tasks;
+	// for requests/reviews the row falls back to the artifact's own
+	// last-mutation timestamp. The unread cursor compares against this.
+	UpdatedAt string `json:"updatedAt,omitempty"`
+	ElapsedMs int64  `json:"elapsedMs,omitempty"`
 	// AgentSlug is the agent who owns / sent / submitted this item.
 	// Phase 3 uses this to group items into per-agent threads. Empty
 	// when the item has no agent attribution (e.g. system-generated
 	// tasks the harness can't trace back to a single agent).
 	AgentSlug string `json:"agentSlug,omitempty"`
+	// IsUnread is true when the item's latest activity post-dates the
+	// caller's InboxCursor.LastSeenAt (or the cursor is zero). Computed
+	// by the /inbox/items handler from the caller's cursor; the broker
+	// inbox helpers never set this field.
+	IsUnread bool `json:"isUnread,omitempty"`
 	// Per-kind enrichments. Populated only when Kind matches.
 	TaskRow *InboxRow    `json:"task,omitempty"`
 	Request *RequestPeek `json:"request,omitempty"`
@@ -112,8 +122,18 @@ func (b *Broker) inboxItemsForActor(actor requestActor, filter InboxFilter) ([]I
 	if b == nil {
 		return nil, nil
 	}
+	// Unread is a per-actor cursor-driven filter, not a lifecycle
+	// bucket. Unwrap it to all-states here so the bucket walk below
+	// returns everything authorized; the /inbox/items handler then
+	// post-filters against the caller's cursor. inboxFilterToStates
+	// itself rejects InboxFilterUnread so the legacy task-only
+	// /tasks/inbox path cannot silently degrade to filter=all.
+	bucketFilter := filter
+	if bucketFilter == InboxFilterUnread {
+		bucketFilter = InboxFilterAll
+	}
 	// Validate the filter up-front so a bad value short-circuits.
-	if _, err := inboxFilterToStates(filter); err != nil {
+	if _, err := inboxFilterToStates(bucketFilter); err != nil {
 		return nil, err
 	}
 
@@ -122,8 +142,8 @@ func (b *Broker) inboxItemsForActor(actor requestActor, filter InboxFilter) ([]I
 	// to that bucket. InboxFilterAll keeps every row. This matches
 	// the existing Inbox(filter) semantics; the new fan-out merges
 	// requests + reviews on top.
-	if filter != InboxFilterAll {
-		states, _ := inboxFilterToStates(filter)
+	if bucketFilter != InboxFilterAll {
+		states, _ := inboxFilterToStates(bucketFilter)
 		allowed := make(map[LifecycleState]struct{}, len(states))
 		for _, s := range states {
 			allowed[s] = struct{}{}
@@ -148,16 +168,18 @@ func (b *Broker) inboxItemsForActor(actor requestActor, filter InboxFilter) ([]I
 	sort.SliceStable(rows, func(i, j int) bool {
 		// Attention-first: items the user can act on now (decision,
 		// request, review) bubble to the top. Within the same priority
-		// tier, sort by CreatedAt desc. This stops approved /
-		// blocked-on-pr-merge tasks from burying the work that needs
-		// the user's eyes.
+		// tier, sort by most-recent-activity descending — UpdatedAt
+		// when present (so an old task that just transitioned bubbles
+		// up), falling back to CreatedAt for artifacts that don't
+		// carry a separate update timestamp. This honors the
+		// "most-recent-activity descending" contract on the function.
 		pi := inboxItemPriority(rows[i])
 		pj := inboxItemPriority(rows[j])
 		if pi != pj {
 			return pi < pj
 		}
-		ti := parseBrokerTimestamp(rows[i].CreatedAt)
-		tj := parseBrokerTimestamp(rows[j].CreatedAt)
+		ti := inboxItemActivityTime(rows[i])
+		tj := inboxItemActivityTime(rows[j])
 		switch {
 		case ti.IsZero() && tj.IsZero():
 			return false
@@ -170,6 +192,16 @@ func (b *Broker) inboxItemsForActor(actor requestActor, filter InboxFilter) ([]I
 		}
 	})
 	return rows, nil
+}
+
+// inboxItemActivityTime returns the timestamp the inbox sort uses for
+// "most recent activity": UpdatedAt when set, otherwise CreatedAt. Both
+// fields are RFC3339 strings on the wire.
+func inboxItemActivityTime(item InboxItem) time.Time {
+	if ts := parseBrokerTimestamp(item.UpdatedAt); !ts.IsZero() {
+		return ts
+	}
+	return parseBrokerTimestamp(item.CreatedAt)
 }
 
 // inboxItemPriority returns a sort key: lower = more attention-y.
@@ -249,6 +281,7 @@ func (b *Broker) tasksForInbox(actor requestActor) []InboxItem {
 			Title:     row.Title,
 			Channel:   task.Channel,
 			CreatedAt: task.CreatedAt,
+			UpdatedAt: task.UpdatedAt,
 			ElapsedMs: row.ElapsedMs,
 			AgentSlug: normalizeReviewerSlug(task.Owner),
 			TaskRow:   &row,
@@ -289,12 +322,17 @@ func (b *Broker) requestsForInbox(actor requestActor) []InboxItem {
 		if title == "" {
 			title = strings.TrimSpace(req.Question)
 		}
+		updatedAt := strings.TrimSpace(req.UpdatedAt)
+		if updatedAt == "" {
+			updatedAt = req.CreatedAt
+		}
 		out = append(out, InboxItem{
 			Kind:      InboxItemKindRequest,
 			RequestID: req.ID,
 			Title:     title,
 			Channel:   req.Channel,
 			CreatedAt: req.CreatedAt,
+			UpdatedAt: updatedAt,
 			AgentSlug: normalizeReviewerSlug(req.From),
 			Request: &RequestPeek{
 				Kind:     req.Kind,
@@ -348,11 +386,16 @@ func (b *Broker) reviewsForInbox(actor requestActor) []InboxItem {
 		if t := strings.TrimSpace(p.Rationale); t != "" {
 			title = t
 		}
+		updatedAt := p.CreatedAt.UTC().Format(time.RFC3339)
+		if !p.UpdatedAt.IsZero() {
+			updatedAt = p.UpdatedAt.UTC().Format(time.RFC3339)
+		}
 		out = append(out, InboxItem{
 			Kind:      InboxItemKindReview,
 			ReviewID:  p.ID,
 			Title:     title,
 			CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339),
+			UpdatedAt: updatedAt,
 			AgentSlug: normalizeReviewerSlug(p.SourceSlug),
 			Review: &ReviewPeek{
 				State:        string(p.State),
@@ -441,4 +484,20 @@ func (b *Broker) InboxCursor(humanSlug string) InboxCursor {
 // equality checks across the inbox subsystem stay consistent.
 func normalizeInboxHumanSlug(slug string) string {
 	return strings.ToLower(strings.TrimSpace(slug))
+}
+
+// inboxCursorKeyForActor returns the per-actor key used to look up and
+// write the inbox cursor. Broker/owner tokens carry no Slug field, so
+// without a synthetic key the single most common caller (a local user
+// running `wuphf` against their own broker) would never accumulate any
+// read state. Map the broker actor to the reserved "__owner__" key so
+// the owner gets unread tracking on equal terms with tunnel-human
+// sessions.
+const inboxCursorOwnerKey = "__owner__"
+
+func inboxCursorKeyForActor(actor requestActor) string {
+	if actor.Kind == requestActorKindBroker {
+		return inboxCursorOwnerKey
+	}
+	return normalizeInboxHumanSlug(actor.Slug)
 }

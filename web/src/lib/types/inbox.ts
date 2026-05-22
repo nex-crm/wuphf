@@ -19,26 +19,33 @@ import type { InboxRow } from "./lifecycle";
 
 export type InboxItemKind = "task" | "request" | "review";
 
-export interface InboxItemTask {
-  kind: "task";
-  taskId: string;
-  title: string;
+interface InboxItemBase {
   channel?: string;
   createdAt?: string;
+  /** RFC3339 timestamp of the latest activity on the underlying artifact. */
+  updatedAt?: string;
   elapsedMs?: number;
   /** Agent who owns / sent / submitted this item. Phase 3+. */
   agentSlug?: string;
+  /**
+   * True when the item's latest activity post-dates the caller's
+   * inbox cursor. Stamped by the broker handler; the frontend does
+   * not compute it locally.
+   */
+  isUnread?: boolean;
+}
+
+export interface InboxItemTask extends InboxItemBase {
+  kind: "task";
+  taskId: string;
+  title: string;
   task: InboxRow;
 }
 
-export interface InboxItemRequest {
+export interface InboxItemRequest extends InboxItemBase {
   kind: "request";
   requestId: string;
   title: string;
-  channel?: string;
-  createdAt?: string;
-  elapsedMs?: number;
-  agentSlug?: string;
   request: {
     kind: string;
     question: string;
@@ -47,14 +54,10 @@ export interface InboxItemRequest {
   };
 }
 
-export interface InboxItemReview {
+export interface InboxItemReview extends InboxItemBase {
   kind: "review";
   reviewId: string;
   title: string;
-  channel?: string;
-  createdAt?: string;
-  elapsedMs?: number;
-  agentSlug?: string;
   review: {
     state: string;
     reviewerSlug: string;

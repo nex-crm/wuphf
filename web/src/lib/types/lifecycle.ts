@@ -34,7 +34,8 @@ export type InboxFilter =
   | "decision_required"
   | "running"
   | "blocked"
-  | "approved";
+  | "approved"
+  | "unread";
 
 /**
  * One acceptance-criterion checkbox. Toggled by the owner agent during
@@ -175,6 +176,20 @@ export interface InboxRow {
   elapsed: string;
   /** True when elapsed should render in red (decision sitting >5m). */
   isUrgent: boolean;
+  /**
+   * Typed-blocker task IDs from teamTask.BlockedOn. Empty for tasks
+   * that are not blocked; populated for blocked_on_pr_merge and any
+   * other state the broker carries a dependency on.
+   */
+  blockedOn?: string[];
+  /**
+   * Free-text reason the broker attached to the task. For blocked
+   * tasks this is the actual "why" (agent timeout, manual block).
+   * Truncated by the broker for inbox payload size.
+   */
+  details?: string;
+  /** RFC3339 timestamp of the task's last mutation. */
+  updatedAt?: string;
 }
 
 /**
@@ -186,6 +201,12 @@ export interface InboxCounts {
   running: number;
   blocked: number;
   approvedToday: number;
+  /**
+   * Number of items whose latest activity post-dates the caller's
+   * InboxCursor.LastSeenAt. Drives the "Unread" sidebar pill and the
+   * top-bar attention badge.
+   */
+  unread: number;
 }
 
 /** Top-level inbox payload returned by the (mocked, soon-real) API. */
@@ -386,4 +407,8 @@ export const FILTER_TO_STATES: Record<
   running: ["drafting", "intake", "ready", "running", "review"],
   blocked: ["blocked_on_pr_merge", "changes_requested", "rejected"],
   approved: ["approved"],
+  // Unread is post-filtered against the actor's cursor on the server,
+  // not against a fixed state set. Leave the state list empty so any
+  // call site that walks states for "unread" produces no false matches.
+  unread: [],
 };
