@@ -22,6 +22,10 @@ import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
+import {
+  parseSystemAuthErrorPayload,
+  SystemErrorCard,
+} from "./cards/SystemErrorCard";
 import MessageArtifactReferences from "./MessageArtifactReferences";
 
 interface MessageBubbleProps {
@@ -114,6 +118,16 @@ export function MessageBubble({
   if (message.content?.startsWith("[STATUS]")) {
     const statusText = message.content.replace(/^\[STATUS\]\s*/, "");
     return <div className="message-status animate-fade">{statusText}</div>;
+  }
+
+  // Issue #933: system-authored auth-failure card. Renders OUTSIDE the
+  // standard message-bubble container so it's visually distinct from
+  // agent chat — banner-style with a sign-in CTA rather than an avatar +
+  // speech bubble. The broker emits these in place of the legacy
+  // agent_issue bubble when a provider returns "Not logged in".
+  if (message.kind === "system_auth_error") {
+    const payload = parseSystemAuthErrorPayload(message.payload);
+    return <SystemErrorCard payload={payload} />;
   }
 
   return (

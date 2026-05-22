@@ -2126,6 +2126,14 @@
   color: var(--green-600, #16a34a);
 }
 
+/* Issue #932: installed-but-not-signed-in state — keep the tile visually
+   present (not the "missing" treatment) but recolor the status as warning so
+   the user can tell the card is in a blocking state without reading the
+   label. */
+.pre-pick-card.available.unauthed .pre-pick-card-status {
+  color: var(--amber-600, #d97706);
+}
+
 .pre-pick-card-install {
   font-size: 12px;
   color: var(--accent);

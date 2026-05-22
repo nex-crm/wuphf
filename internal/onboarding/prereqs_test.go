@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,7 +9,7 @@ import (
 )
 
 func TestCheckOneGitFound(t *testing.T) {
-	r := CheckOne("git")
+	r := CheckOne(context.Background(), "git")
 	if !r.Found {
 		t.Fatal("expected git to be found on PATH in CI/dev environment")
 	}
@@ -24,7 +25,7 @@ func TestCheckOneGitFound(t *testing.T) {
 }
 
 func TestCheckOneNonexistentBinary(t *testing.T) {
-	r := CheckOne("nonexistent-binary-xyz-wuphf")
+	r := CheckOne(context.Background(), "nonexistent-binary-xyz-wuphf")
 	if r.Found {
 		t.Fatal("expected Found=false for nonexistent binary")
 	}
@@ -38,7 +39,7 @@ func TestCheckOneNonexistentBinary(t *testing.T) {
 }
 
 func TestCheckAllReturnsSevenItems(t *testing.T) {
-	results := CheckAll()
+	results := CheckAll(context.Background())
 	if len(results) != 7 {
 		t.Fatalf("CheckAll: got %d results, want 7", len(results))
 	}
@@ -62,7 +63,7 @@ func TestCheckAllRequiredFlags(t *testing.T) {
 		"cursor":   false,
 		"windsurf": false,
 	}
-	for _, r := range CheckAll() {
+	for _, r := range CheckAll(context.Background()) {
 		want, ok := wantRequired[r.Name]
 		if !ok {
 			continue
@@ -83,7 +84,7 @@ func TestCheckAllInstallURLs(t *testing.T) {
 		"cursor":   "https://cursor.com/",
 		"windsurf": "https://codeium.com/windsurf",
 	}
-	for _, r := range CheckAll() {
+	for _, r := range CheckAll(context.Background()) {
 		want, ok := wantURLs[r.Name]
 		if !ok {
 			continue
@@ -96,7 +97,7 @@ func TestCheckAllInstallURLs(t *testing.T) {
 
 func TestCheckOneResultFields(t *testing.T) {
 	// node may or may not be installed; just verify field consistency.
-	r := CheckOne("node")
+	r := CheckOne(context.Background(), "node")
 	if r.Name != "node" {
 		t.Errorf("Name: got %q, want %q", r.Name, "node")
 	}
@@ -125,7 +126,7 @@ func TestCheckOneFindsOpencodeInCommonUserBinWhenPATHIsMinimal(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", filepath.Join(home, "minimal-path"))
 
-	r := CheckOne("opencode")
+	r := CheckOne(context.Background(), "opencode")
 	if !r.Found {
 		t.Fatal("expected fallback opencode to be found")
 	}

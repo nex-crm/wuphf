@@ -24,6 +24,23 @@ export interface PrereqResult {
   ok?: boolean;
   version?: string;
   install_url?: string;
+  /**
+   * True when the broker ran the runtime's session-status subcommand
+   * (claude auth status, codex login status, opencode providers list).
+   * False means "no probe wired" — frontend should fall back to legacy
+   * "Detected" behavior. See issue #932.
+   */
+  session_probed?: boolean;
+  /**
+   * True only when session_probed === true AND the runtime reports an
+   * active auth session.
+   */
+  signed_in?: boolean;
+  /**
+   * Suggested shell command to copy to clipboard when session_probed
+   * is true and signed_in is false (the "Sign in" CTA).
+   */
+  sign_in_command?: string;
 }
 
 export const RUNTIMES: readonly RuntimeSpec[] = [
