@@ -198,6 +198,11 @@ func TestHasDirectWikiWriteIntentUsesWholeWordsAndLocalNegation(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "following negation does not block direct request",
+			text: "Write this playbook to the wiki, not the old draft.",
+			want: true,
+		},
+		{
 			name: "target and verb must be close",
 			text: "Write the full operating memo after reviewing the implementation details, edge cases, rollout risks, owner list, and wiki index.",
 			want: false,

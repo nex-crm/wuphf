@@ -166,12 +166,15 @@ func wordsBetween(text string, left, right []int) int {
 
 func directWikiIntentNegated(text string, negations [][]int, verb, target []int) bool {
 	for _, negation := range negations {
-		if wordsBetween(text, negation, verb) <= directWikiIntentMaxGapWords ||
-			wordsBetween(text, negation, target) <= directWikiIntentMaxGapWords {
+		if negatesMatch(text, negation, verb) || negatesMatch(text, negation, target) {
 			return true
 		}
 	}
 	return false
+}
+
+func negatesMatch(text string, negation, match []int) bool {
+	return negation[0] < match[0] && wordsBetween(text, negation, match) <= directWikiIntentMaxGapWords
 }
 
 // handleTeamWikiRead returns the raw article bytes.
