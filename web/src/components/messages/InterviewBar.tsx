@@ -717,17 +717,22 @@ export function CeoCardSection() {
       // message so a tab reload still shows the transcript. See #978.
       const echo = humanEchoForCeoAnswer(pendingSuggestion, field, value);
       if (echo !== null) {
-        try {
-          await postMessage(echo, directChannelSlug("ceo"));
-          await queryClient.invalidateQueries({
-            queryKey: ["messages", directChannelSlug("ceo")],
+        // Detached: don't await the echo work. The echo is best-effort UI
+        // sugar (mirror the human's answer back in chat); awaiting it
+        // would let a slow/hung /messages call freeze the wizard in
+        // "submitting" even though /onboarding/answer has already
+        // committed the real state. CodeRabbit on PR #988.
+        void postMessage(echo, directChannelSlug("ceo"))
+          .then(() =>
+            queryClient.invalidateQueries({
+              queryKey: ["messages", directChannelSlug("ceo")],
+            }),
+          )
+          .catch((echoErr: unknown) => {
+            // The next CEO message will still arrive; the user just loses
+            // the visible mirror of their own answer for that turn.
+            console.warn("onboarding: failed to echo human answer", echoErr);
           });
-        } catch (echoErr: unknown) {
-          // A failed echo must not block the wizard advancing. The next
-          // CEO message will still arrive; the user just loses the visible
-          // mirror of their own answer for that turn.
-          console.warn("onboarding: failed to echo human answer", echoErr);
-        }
       }
       await advanceOnboardingAfterAnswer(field, value, phase);
       // Refresh onboarding state so the next suggestion appears.

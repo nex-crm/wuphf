@@ -836,6 +836,33 @@ describe("CeoCardSection", () => {
       }),
     );
   });
+
+  // Regression guard for CodeRabbit on PR #988: the echo must be detached
+  // from the submit critical path. If postMessage hangs indefinitely the
+  // wizard must still advance — onboarding state is already committed via
+  // /onboarding/answer; the echo is best-effort UI sugar.
+  it("does not block wizard advance when echo postMessage hangs", async () => {
+    // Never resolves — simulates a hung /messages call.
+    postMessageMock.mockImplementationOnce(() => new Promise(() => {}));
+    const suggestion: CeoSuggestion = {
+      id: "sug-echo-hang",
+      phase: "greet",
+      kind: "ceo_form_field",
+      payload: { field: "company_name", label: "Office name?" },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Acme" },
+    });
+    fireEvent.click(screen.getByText("Submit"));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+        phase: "identity",
+      }),
+    );
+  });
 });
 
 // ── InterviewBar integration ──────────────────────────────────────────────
