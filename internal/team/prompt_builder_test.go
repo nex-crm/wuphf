@@ -59,6 +59,15 @@ func TestMarkdownKnowledgeToolBlock_ListsCanonicalTools(t *testing.T) {
 			t.Errorf("markdownKnowledgeToolBlock missing %q", tool)
 		}
 	}
+	for _, want := range []string{
+		"human explicitly asked",
+		"Pass human_request as the broker message ID",
+		"notebook_write and move through notebook_promote review",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("markdownKnowledgeToolBlock missing direct-wiki guardrail %q", want)
+		}
+	}
 }
 
 func TestMarkdownKnowledgeMemoryBlock_RequiresPromotionDiscipline(t *testing.T) {
@@ -67,11 +76,16 @@ func TestMarkdownKnowledgeMemoryBlock_RequiresPromotionDiscipline(t *testing.T) 
 		"notebook_write",
 		"notebook_promote",
 		"team_learning_record",
-		"approved",
+		"typed learning store",
+		"scratch: true",
+		"approved by the reviewer",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("markdownKnowledgeMemoryBlock missing %q", want)
 		}
+	}
+	if strings.Contains(block, "team_learning_record succeeded") {
+		t.Errorf("markdownKnowledgeMemoryBlock must not treat team_learning_record as wiki storage")
 	}
 }
 
@@ -416,7 +430,7 @@ func TestPromptBuilder_LeadIncludesActivePoliciesSorted(t *testing.T) {
 }
 
 func TestMarkdownKnowledgeToolBlock_HumanRememberAutoRoutingNote(t *testing.T) {
-	// PR 7 edit 1: the team_wiki_write description must warn agents that the
+	// PR 7 edit 1: the memory guidance must warn agents that the
 	// broker auto-routes human "remember this" / "save to wiki" phrases so
 	// they do not duplicate the write. PR 2 originally added this copy; PR 7
 	// keeps it as a regression gate.
@@ -549,12 +563,24 @@ func TestPromptBuilder_RegressionNotebookPromoteStillPresent(t *testing.T) {
 		markdownMemory: true,
 	}
 	ceoPrompt := pb.Build("ceo")
-	if !strings.Contains(ceoPrompt, "submit notebook_promote if it should become canonical wiki knowledge") {
+	if !strings.Contains(ceoPrompt, "submit notebook_promote for reviewer approval to make it canonical wiki knowledge") {
 		t.Fatalf("CEO prompt regression: original notebook_promote rule 8 missing")
 	}
+	if !strings.Contains(ceoPrompt, "Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.") {
+		t.Fatalf("CEO prompt missing notebook promotion follow-through guardrail")
+	}
+	if !strings.Contains(ceoPrompt, "Claim canonical wiki storage only after reviewer approval makes it canonical.") {
+		t.Fatalf("CEO prompt missing reviewer approval claim guardrail")
+	}
 	fePrompt := pb.Build("fe")
-	if !strings.Contains(fePrompt, "submit notebook_promote when they should become canonical") {
+	if !strings.Contains(fePrompt, "submit notebook_promote for reviewer approval when they should become canonical") {
 		t.Fatalf("specialist prompt regression: original notebook_promote rule 12 missing")
+	}
+	if !strings.Contains(fePrompt, "Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.") {
+		t.Fatalf("specialist prompt missing notebook promotion follow-through guardrail")
+	}
+	if !strings.Contains(fePrompt, "Claim canonical wiki storage only after reviewer approval makes it canonical.") {
+		t.Fatalf("specialist prompt missing reviewer approval claim guardrail")
 	}
 }
 

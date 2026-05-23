@@ -238,17 +238,29 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
+	if err := validateNotebookWritePath(body.MySlug, body.SourcePath); err != nil {
+		writeJSON(w, reviewStatusForError(err), map[string]string{"error": err.Error()})
+		return
+	}
 	// Pre-flight: target must not already exist (state machine re-checks
-	// atomically during approve, but rejecting early keeps the common
-	// case from creating a dangling pending review).
+	// atomically during approve, but rejecting early keeps common cases from
+	// creating dangling pending reviews).
 	worker := b.WikiWorker()
-	if worker != nil {
-		if _, err := readArticle(worker.Repo(), body.TargetWikiPath); err == nil {
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": fmt.Sprintf("target wiki path %q already exists", body.TargetWikiPath),
-			})
-			return
-		}
+	if worker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "wiki backend is not active"})
+		return
+	}
+	if _, err := worker.NotebookRead(body.SourcePath); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": fmt.Sprintf("source notebook entry %q not found", body.SourcePath),
+		})
+		return
+	}
+	if _, err := readArticle(worker.Repo(), body.TargetWikiPath); err == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": fmt.Sprintf("target wiki path %q already exists", body.TargetWikiPath),
+		})
+		return
 	}
 	promotion, err := rl.SubmitPromotion(SubmitPromotionRequest{
 		SourceSlug:       body.MySlug,

@@ -6,10 +6,21 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const humanWikiDelegationMaxAge = 24 * time.Hour
+
+const directWikiIntentMaxGapWords = 5
+
+var (
+	directWikiVerbRE     = regexp.MustCompile(`(?i)\b(write|add|put|save|record|preserve|publish|create|update)\b`)
+	directWikiTargetRE   = regexp.MustCompile(`(?i)\b(wiki|kb|knowledge\s+base)\b`)
+	directWikiNegationRE = regexp.MustCompile(`(?i)\b(do not|don't|dont|never)\b`)
 )
 
 // handleTeamWikiWrite posts the article to the broker's wiki worker queue.
@@ -19,6 +30,11 @@ func handleTeamWikiWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamW
 	slug, err := resolveSlug(args.MySlug)
 	if err != nil {
 		return toolError(err), nil, nil
+	}
+	if !adminDirectWikiWriteBypassEnabled() {
+		if err := verifyHumanWikiWriteDelegation(ctx, slug, args.HumanRequest); err != nil {
+			return toolError(err), nil, nil
+		}
 	}
 	path := strings.TrimSpace(args.ArticlePath)
 	if path == "" {
@@ -57,6 +73,108 @@ func handleTeamWikiWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamW
 		"bytes_written": result.BytesWritten,
 	})
 	return textResult(string(payload)), nil, nil
+}
+
+func verifyHumanWikiWriteDelegation(ctx context.Context, slug, humanRequestID string) error {
+	humanRequestID = strings.TrimSpace(humanRequestID)
+	if humanRequestID == "" {
+		return fmt.Errorf("team_wiki_write requires human_request with the broker message ID of the human's direct wiki request; otherwise use notebook_write first, then notebook_promote for review")
+	}
+
+	channels := fetchAccessibleChannels(ctx, slug)
+	if len(channels) == 0 {
+		channels = []brokerChannelSummary{{Slug: resolveChannel("")}}
+	}
+	seen := map[string]bool{}
+	for _, channel := range channels {
+		channelSlug := strings.TrimSpace(channel.Slug)
+		if channelSlug == "" || seen[channelSlug] {
+			continue
+		}
+		seen[channelSlug] = true
+		messages := fetchChannelMessages(ctx, channelSlug, slug, "all", 100)
+		for _, msg := range messages {
+			if strings.TrimSpace(msg.ID) != humanRequestID {
+				continue
+			}
+			return validateHumanWikiWriteDelegation(msg)
+		}
+	}
+	return fmt.Errorf("team_wiki_write human_request %q was not found in recent accessible human messages; pass the broker message ID for the human's wiki request", humanRequestID)
+}
+
+func validateHumanWikiWriteDelegation(msg brokerMessage) error {
+	if !isVerifiedHumanDelegationSender(msg.From) {
+		return fmt.Errorf("team_wiki_write human_request %q is not a human-authored message", msg.ID)
+	}
+	timestamp := strings.TrimSpace(msg.Timestamp)
+	if timestamp == "" {
+		return fmt.Errorf("team_wiki_write human_request %q is missing a timestamp", msg.ID)
+	}
+	createdAt, err := time.Parse(time.RFC3339, timestamp)
+	if err != nil {
+		return fmt.Errorf("team_wiki_write human_request %q has an invalid timestamp", msg.ID)
+	}
+	if time.Since(createdAt) > humanWikiDelegationMaxAge {
+		return fmt.Errorf("team_wiki_write human_request %q is expired; ask the human to restate the direct wiki request", msg.ID)
+	}
+	if !hasDirectWikiWriteIntent(msg.Title + "\n" + msg.Content) {
+		return fmt.Errorf("team_wiki_write human_request %q does not explicitly ask for a direct wiki write", msg.ID)
+	}
+	return nil
+}
+
+func isVerifiedHumanDelegationSender(sender string) bool {
+	sender = strings.ToLower(strings.TrimSpace(sender))
+	return sender == "you" || sender == "human" || strings.HasPrefix(sender, "human:")
+}
+
+func hasDirectWikiWriteIntent(text string) bool {
+	normalized := strings.TrimSpace(text)
+	if normalized == "" {
+		return false
+	}
+	verbs := directWikiVerbRE.FindAllStringIndex(normalized, -1)
+	targets := directWikiTargetRE.FindAllStringIndex(normalized, -1)
+	if len(verbs) == 0 || len(targets) == 0 {
+		return false
+	}
+	negations := directWikiNegationRE.FindAllStringIndex(normalized, -1)
+	for _, verb := range verbs {
+		for _, target := range targets {
+			if wordsBetween(normalized, verb, target) > directWikiIntentMaxGapWords {
+				continue
+			}
+			if directWikiIntentNegated(normalized, negations, verb, target) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func wordsBetween(text string, left, right []int) int {
+	if left[0] > right[0] {
+		left, right = right, left
+	}
+	if left[1] >= right[0] {
+		return 0
+	}
+	return len(strings.Fields(text[left[1]:right[0]]))
+}
+
+func directWikiIntentNegated(text string, negations [][]int, verb, target []int) bool {
+	for _, negation := range negations {
+		if negatesMatch(text, negation, verb) || negatesMatch(text, negation, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func negatesMatch(text string, negation, match []int) bool {
+	return negation[0] < match[0] && wordsBetween(text, negation, match) <= directWikiIntentMaxGapWords
 }
 
 // handleTeamWikiRead returns the raw article bytes.

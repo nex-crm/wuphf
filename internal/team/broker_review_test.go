@@ -218,6 +218,31 @@ func TestPromotionHandlers_AuthRequired(t *testing.T) {
 	}
 }
 
+func TestPromotionHandlers_MissingNotebookSourceReturns404(t *testing.T) {
+	srv, b, teardown := newReviewTestServer(t)
+	defer teardown()
+	token := b.Token()
+
+	res := submitPromotion(t, srv, token, map[string]any{
+		"my_slug":          "pm",
+		"source_path":      "agents/pm/notebook/missing.md",
+		"target_wiki_path": "team/playbooks/missing.md",
+		"rationale":        "canonical",
+	})
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("want 404 for missing notebook source, got %d: %s", res.StatusCode, string(body))
+	}
+	rl := b.ReviewLog()
+	if rl == nil {
+		t.Fatal("review log not initialised")
+	}
+	if got := rl.List("all"); len(got) != 0 {
+		t.Fatalf("missing source should not create a dangling review, got %+v", got)
+	}
+}
+
 func TestPromotionHandlers_MethodNotAllowed(t *testing.T) {
 	srv, b, teardown := newReviewTestServer(t)
 	defer teardown()

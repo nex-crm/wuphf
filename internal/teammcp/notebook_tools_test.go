@@ -149,6 +149,31 @@ func TestHandleTeamNotebookWrite(t *testing.T) {
 	if !strings.Contains(auth.lastAuth, "Bearer test-token") {
 		t.Fatalf("expected auth header, got %q", auth.lastAuth)
 	}
+
+	var payload struct {
+		Path          string `json:"path"`
+		PromotionNext struct {
+			Tool               string `json:"tool"`
+			SourcePath         string `json:"source_path"`
+			TargetWikiPathHint string `json:"target_wiki_path_hint"`
+			When               string `json:"when"`
+		} `json:"promotion_next"`
+	}
+	if err := json.Unmarshal([]byte(toolErrorText(res)), &payload); err != nil {
+		t.Fatalf("decode notebook_write response: %v; body=%q", err, toolErrorText(res))
+	}
+	if payload.PromotionNext.Tool != "notebook_promote" {
+		t.Fatalf("promotion_next.tool = %q", payload.PromotionNext.Tool)
+	}
+	if payload.PromotionNext.SourcePath != "agents/pm/notebook/x.md" {
+		t.Fatalf("promotion_next.source_path = %q", payload.PromotionNext.SourcePath)
+	}
+	if payload.PromotionNext.TargetWikiPathHint != "team/x.md" {
+		t.Fatalf("promotion_next.target_wiki_path_hint = %q", payload.PromotionNext.TargetWikiPathHint)
+	}
+	if !strings.Contains(payload.PromotionNext.When, "reviewer approval") {
+		t.Fatalf("promotion_next.when missing review guidance: %q", payload.PromotionNext.When)
+	}
 }
 
 func TestHandleTeamNotebookWriteSlugMismatchLocal(t *testing.T) {

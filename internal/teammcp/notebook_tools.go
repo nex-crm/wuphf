@@ -142,8 +142,36 @@ func handleTeamNotebookWrite(ctx context.Context, _ *mcp.CallToolRequest, args T
 		"path":          result.Path,
 		"commit_sha":    result.CommitSHA,
 		"bytes_written": result.BytesWritten,
+		"promotion_next": map[string]any{
+			"tool":                  "notebook_promote",
+			"source_path":           result.Path,
+			"target_wiki_path_hint": notebookPromotionTargetHint(result.Path),
+			"when":                  "If this entry is durable enough for the team to rely on, call notebook_promote now so it enters reviewer approval instead of staying in scratch.",
+		},
 	})
 	return textResult(string(payload)), nil, nil
+}
+
+func notebookPromotionTargetHint(sourcePath string) string {
+	base := filepathBase(sourcePath)
+	if strings.HasSuffix(strings.ToLower(base), ".md") {
+		base = base[:len(base)-len(".md")]
+	}
+	if base == "" || base == "." {
+		base = "note"
+	}
+	return "team/" + base + ".md"
+}
+
+func filepathBase(path string) string {
+	path = strings.TrimRight(strings.TrimSpace(path), "/")
+	if path == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(path, "/"); idx >= 0 {
+		return path[idx+1:]
+	}
+	return path
 }
 
 func handleTeamNotebookRead(ctx context.Context, _ *mcp.CallToolRequest, args TeamNotebookReadArgs) (*mcp.CallToolResult, any, error) {
