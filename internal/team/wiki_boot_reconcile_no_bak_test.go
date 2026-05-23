@@ -78,6 +78,33 @@ func TestTeamSubtreeHasArticleIgnoresDotFiles(t *testing.T) {
 	}
 }
 
+// TestTeamSubtreeHasArticleAcceptsUppercaseExtension regression-guards the
+// CodeRabbit fix on PR #987: validateArticlePath accepts .MD/.Md, so the
+// scanner must too — otherwise BackupMirror would skip the snapshot on a
+// wiki that has perfectly valid articles. Closes #987 follow-up.
+func TestTeamSubtreeHasArticleAcceptsUppercaseExtension(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "team")
+	if err := os.MkdirAll(filepath.Join(dir, "people"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, name := range []string{"NAZZ.MD", "alex.Md"} {
+		if err := os.WriteFile(filepath.Join(dir, "people", name), []byte("# N\n"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		has, err := teamSubtreeHasArticle(dir)
+		if err != nil {
+			t.Fatalf("walk after %s: %v", name, err)
+		}
+		if !has {
+			t.Fatalf("expected %s to count as a markdown article", name)
+		}
+		// Clean up between iterations so the next file is the only signal.
+		if err := os.Remove(filepath.Join(dir, "people", name)); err != nil {
+			t.Fatalf("cleanup %s: %v", name, err)
+		}
+	}
+}
+
 // TestTeamSubtreeHasArticleMissingDir treats a never-created team/ as
 // "empty" rather than an error — fresh boot with the worker still
 // initialising should not surface a walk failure.

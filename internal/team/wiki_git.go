@@ -818,7 +818,11 @@ func teamSubtreeHasArticle(teamDir string) (bool, error) {
 		if strings.HasPrefix(name, ".") {
 			return nil
 		}
-		if strings.HasSuffix(name, ".md") {
+		// Case-insensitive match: validateArticlePath accepts mixed-case
+		// extensions (.MD, .Md) so we must too, otherwise BackupMirror
+		// could skip the snapshot for a wiki that has perfectly valid
+		// articles. CodeRabbit on PR #987.
+		if strings.EqualFold(filepath.Ext(name), ".md") {
 			found = true
 			return filepath.SkipDir
 		}
