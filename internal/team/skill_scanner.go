@@ -61,9 +61,19 @@ const agentsDirPrefix = "team/agents/"
 type llmProvider interface {
 	// AskIsSkill classifies an article. existingSkillsSummary is injected
 	// into the user prompt for deduplication (may be empty). enhanceSlug is
-	// non-empty when the LLM returns an "enhance" directive.
+	// non-empty when the LLM returns an "enhance" directive. Returning
+	// ErrLLMNotConfigured signals that no LLM auth is available; the scan
+	// loop bails out of the per-article walk and emits a single summary
+	// log line instead of logging once per article (#980).
 	AskIsSkill(ctx context.Context, articlePath, articleContent, existingSkillsSummary string) (isSkill bool, fm SkillFrontmatter, body, enhanceSlug string, err error)
 }
+
+// ErrLLMNotConfigured is the sentinel a provider returns from AskIsSkill when
+// the underlying LLM CLI is unavailable or unauthenticated. The scanner
+// converts a single occurrence into one summary log and stops the loop —
+// no point asking the same dead provider N times in a row. Tests in
+// skill_scanner_no_auth_test.go pin the behavior.
+var ErrLLMNotConfigured = errors.New("skill_scanner: no LLM configured")
 
 // SkillSpec is the canonical in-memory representation the scanner produces
 // before handing off to writeSkillProposalLocked. It bundles the parsed
@@ -229,6 +239,26 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		llmCalls++
 
 		isSkill, fm, body, enhanceSlug, err := s.provider.AskIsSkill(ctx, c.relPath, c.content, existingSkillsSummary)
+		if errors.Is(err, ErrLLMNotConfigured) {
+			// On the very first call this is almost always an
+			// unauthed/missing LLM CLI — every subsequent article would
+			// just emit the same opaque error. Bail with one summary line
+			// so a freshly-installed unauthed broker doesn't fill the log
+			// with N copies of `exit status 1`. The next scan tick retries
+			// from scratch once the user signs in. Mid-pass occurrences
+			// (llmCalls > 1) might be transient, so we fall through to the
+			// per-article error path. #980.
+			if llmCalls == 1 {
+				remaining := len(candidates) - res.Scanned
+				slog.Warn("skill_scanner: no LLM configured; skipping scan",
+					"articles_remaining", remaining,
+					"hint", "run `claude login` (or your provider's sign-in) to enable",
+					"underlying", err.Error())
+				res.Errors = append(res.Errors, ScanError{Slug: "", Reason: "llm_not_configured"})
+				delete(updatedCache, c.relPath)
+				break
+			}
+		}
 		if err != nil {
 			res.Errors = append(res.Errors, ScanError{Slug: c.relPath, Reason: "llm: " + err.Error()})
 			// Leave the cache entry unset so we retry next pass.
@@ -634,9 +664,21 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 			slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
 			return false, SkillFrontmatter{}, "", "", nil
 		}
-		slog.Warn("skill_scanner: LLM call failed, skipping article",
+		// Only wrap with ErrLLMNotConfigured when the underlying error is a
+		// concrete unauthenticated/unconfigured signal (matched by the same
+		// classifier the SystemErrorCard fork uses in agent_issue.go). A
+		// transient CLI/provider/network failure must NOT trigger the
+		// llmCalls==1 bailout in Scan — that would skip the rest of the
+		// pass even when auth is fine. CodeRabbit on PR #987.
+		//
+		// Both branches keep the per-article diagnostic at DEBUG so the
+		// detail is still accessible when debug logging is enabled. #980.
+		slog.Debug("skill_scanner: LLM call failed, skipping article",
 			"path", articlePath, "err", callErr)
-		return false, SkillFrontmatter{}, "", "", nil
+		if probe := classifyProviderAuthError(callErr.Error()); probe.IsAuthError {
+			return false, SkillFrontmatter{}, "", "", fmt.Errorf("%w: %w", ErrLLMNotConfigured, callErr)
+		}
+		return false, SkillFrontmatter{}, "", "", fmt.Errorf("skill_scanner: %w", callErr)
 	}
 	if callCtx.Err() != nil {
 		slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)

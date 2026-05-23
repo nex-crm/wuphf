@@ -12,7 +12,9 @@ package team
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -171,6 +173,13 @@ type notebookEntry struct {
 // files are skipped.
 func (s *NotebookSignalScanner) collectNotebookEntries(wikiRoot string) ([]notebookEntry, error) {
 	root := filepath.Join(wikiRoot, agentsDirPrefix[:len(agentsDirPrefix)-1])
+	// No agents seeded yet → the agents/ directory simply doesn't exist on
+	// disk. filepath.Walk would surface that as an ENOENT walk-error for the
+	// root path and we'd log one WARN per 30-min cron tick. Return silently
+	// so a quiet first-boot stays quiet. Closes #982.
+	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	var out []notebookEntry
 	walkErr := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
