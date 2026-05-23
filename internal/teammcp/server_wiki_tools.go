@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,14 @@ import (
 )
 
 const humanWikiDelegationMaxAge = 24 * time.Hour
+
+const directWikiIntentMaxGapWords = 5
+
+var (
+	directWikiVerbRE     = regexp.MustCompile(`(?i)\b(write|add|put|save|record|preserve|publish|create|update)\b`)
+	directWikiTargetRE   = regexp.MustCompile(`(?i)\b(wiki|kb|knowledge\s+base)\b`)
+	directWikiNegationRE = regexp.MustCompile(`(?i)\b(do not|don't|dont|never)\b`)
+)
 
 // handleTeamWikiWrite posts the article to the broker's wiki worker queue.
 // Queue saturation surfaces as a tool error so the agent sees it and retries
@@ -121,23 +130,44 @@ func isVerifiedHumanDelegationSender(sender string) bool {
 }
 
 func hasDirectWikiWriteIntent(text string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(text))
+	normalized := strings.TrimSpace(text)
 	if normalized == "" {
 		return false
 	}
-	for _, negation := range []string{"do not", "don't", "dont", "never"} {
-		if strings.Contains(normalized, negation) && strings.Contains(normalized, "wiki") {
-			return false
-		}
-	}
-	hasWikiTarget := strings.Contains(normalized, "wiki") ||
-		strings.Contains(normalized, "kb") ||
-		strings.Contains(normalized, "knowledge base")
-	if !hasWikiTarget {
+	verbs := directWikiVerbRE.FindAllStringIndex(normalized, -1)
+	targets := directWikiTargetRE.FindAllStringIndex(normalized, -1)
+	if len(verbs) == 0 || len(targets) == 0 {
 		return false
 	}
-	for _, verb := range []string{"write", "add", "put", "save", "record", "preserve", "publish", "create", "update"} {
-		if strings.Contains(normalized, verb) {
+	negations := directWikiNegationRE.FindAllStringIndex(normalized, -1)
+	for _, verb := range verbs {
+		for _, target := range targets {
+			if wordsBetween(normalized, verb, target) > directWikiIntentMaxGapWords {
+				continue
+			}
+			if directWikiIntentNegated(normalized, negations, verb, target) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func wordsBetween(text string, left, right []int) int {
+	if left[0] > right[0] {
+		left, right = right, left
+	}
+	if left[1] >= right[0] {
+		return 0
+	}
+	return len(strings.Fields(text[left[1]:right[0]]))
+}
+
+func directWikiIntentNegated(text string, negations [][]int, verb, target []int) bool {
+	for _, negation := range negations {
+		if wordsBetween(text, negation, verb) <= directWikiIntentMaxGapWords ||
+			wordsBetween(text, negation, target) <= directWikiIntentMaxGapWords {
 			return true
 		}
 	}

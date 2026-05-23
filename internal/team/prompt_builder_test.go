@@ -563,10 +563,10 @@ func TestPromptBuilder_RegressionNotebookPromoteStillPresent(t *testing.T) {
 		markdownMemory: true,
 	}
 	ceoPrompt := pb.Build("ceo")
-	if !strings.Contains(ceoPrompt, "submit notebook_promote for reviewer approval if it should become canonical wiki knowledge") {
+	if !strings.Contains(ceoPrompt, "submit notebook_promote for reviewer approval to make it canonical wiki knowledge") {
 		t.Fatalf("CEO prompt regression: original notebook_promote rule 8 missing")
 	}
-	if !strings.Contains(ceoPrompt, "Do not leave durable team knowledge parked only in a notebook unless the notebook entry frontmatter includes `scratch: true`.") {
+	if !strings.Contains(ceoPrompt, "Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.") {
 		t.Fatalf("CEO prompt missing notebook promotion follow-through guardrail")
 	}
 	if !strings.Contains(ceoPrompt, "Claim canonical wiki storage only after reviewer approval makes it canonical.") {
@@ -576,7 +576,7 @@ func TestPromptBuilder_RegressionNotebookPromoteStillPresent(t *testing.T) {
 	if !strings.Contains(fePrompt, "submit notebook_promote for reviewer approval when they should become canonical") {
 		t.Fatalf("specialist prompt regression: original notebook_promote rule 12 missing")
 	}
-	if !strings.Contains(fePrompt, "Do not leave durable team knowledge parked only in a notebook unless the notebook entry frontmatter includes `scratch: true`.") {
+	if !strings.Contains(fePrompt, "Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.") {
 		t.Fatalf("specialist prompt missing notebook promotion follow-through guardrail")
 	}
 	if !strings.Contains(fePrompt, "Claim canonical wiki storage only after reviewer approval makes it canonical.") {

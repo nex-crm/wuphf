@@ -161,6 +161,57 @@ func TestHandleTeamWikiWriteRejectsExpiredHumanRequest(t *testing.T) {
 	}
 }
 
+func TestHasDirectWikiWriteIntentUsesWholeWordsAndLocalNegation(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{
+			name: "human direct wiki request",
+			text: "Please write this playbook directly to the wiki.",
+			want: true,
+		},
+		{
+			name: "wiki target before verb",
+			text: "Wiki this launch checklist and update it for the team.",
+			want: true,
+		},
+		{
+			name: "knowledge base phrase",
+			text: "Save the onboarding decision to the knowledge base.",
+			want: true,
+		},
+		{
+			name: "does not match verb inside another word",
+			text: "This additional context mentions the wiki.",
+			want: false,
+		},
+		{
+			name: "nearby negation blocks intent",
+			text: "Do not write this to the wiki.",
+			want: false,
+		},
+		{
+			name: "distant negation does not block later direct request",
+			text: "Do not write the old draft to the wiki. Instead, save this final playbook to the wiki.",
+			want: true,
+		},
+		{
+			name: "target and verb must be close",
+			text: "Write the full operating memo after reviewing the implementation details, edge cases, rollout risks, owner list, and wiki index.",
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasDirectWikiWriteIntent(tt.text); got != tt.want {
+				t.Fatalf("hasDirectWikiWriteIntent(%q) = %v, want %v", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandleTeamWikiWriteAdminBypassPostsToBroker(t *testing.T) {
 	srv, auth := stubBroker(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
