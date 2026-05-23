@@ -116,3 +116,40 @@ func TestErrLLMNotConfiguredIsWrappable(t *testing.T) {
 		t.Fatalf("wrapped error should match ErrLLMNotConfigured via errors.Is")
 	}
 }
+
+// TestSkillScannerOnlyWrapsAuthErrors locks in the CodeRabbit fix on PR #987:
+// defaultLLMProvider.AskIsSkill must only wrap with ErrLLMNotConfigured when
+// the underlying error is a concrete auth signal. A transient/network/exec
+// failure (e.g. bare "exit status 1") must NOT trigger the llmCalls==1
+// bailout in Scan, otherwise a single hiccup on the first article would skip
+// the rest of the pass even when auth is fine.
+func TestSkillScannerOnlyWrapsAuthErrors(t *testing.T) {
+	authSamples := []string{
+		"Not logged in - Please run /login",
+		"Please run `claude login`",
+		"Codex CLI requires login. Run `codex login`",
+		"authentication required",
+		"Unauthorized",
+	}
+	for _, sample := range authSamples {
+		probe := classifyProviderAuthError(sample)
+		if !probe.IsAuthError {
+			t.Errorf("expected IsAuthError=true for %q", sample)
+		}
+	}
+	nonAuthSamples := []string{
+		"exit status 1",
+		"context deadline exceeded",
+		"connection refused",
+		"unexpected EOF",
+		"signal: killed",
+		"",
+	}
+	for _, sample := range nonAuthSamples {
+		probe := classifyProviderAuthError(sample)
+		if probe.IsAuthError {
+			t.Errorf("expected IsAuthError=false for %q (got Provider=%q SignInCommand=%q)",
+				sample, probe.Provider, probe.SignInCommand)
+		}
+	}
+}

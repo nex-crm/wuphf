@@ -664,17 +664,21 @@ func (p *defaultLLMProvider) AskIsSkill(ctx context.Context, articlePath, articl
 			slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)
 			return false, SkillFrontmatter{}, "", "", nil
 		}
-		// When the LLM provider fails before producing assistant output —
-		// classic symptom of an unauthed/uninstalled CLI — every article
-		// in the pass returns the same opaque error (e.g. bare "exit
-		// status 1"). Surface ErrLLMNotConfigured + the underlying detail
-		// so the scan loop can choose to bail with one summary line
-		// instead of logging per-article. The legacy per-article WARN
-		// downgrades to DEBUG so the diagnostic is still accessible when
-		// debug logging is enabled. #980.
+		// Only wrap with ErrLLMNotConfigured when the underlying error is a
+		// concrete unauthenticated/unconfigured signal (matched by the same
+		// classifier the SystemErrorCard fork uses in agent_issue.go). A
+		// transient CLI/provider/network failure must NOT trigger the
+		// llmCalls==1 bailout in Scan — that would skip the rest of the
+		// pass even when auth is fine. CodeRabbit on PR #987.
+		//
+		// Both branches keep the per-article diagnostic at DEBUG so the
+		// detail is still accessible when debug logging is enabled. #980.
 		slog.Debug("skill_scanner: LLM call failed, skipping article",
 			"path", articlePath, "err", callErr)
-		return false, SkillFrontmatter{}, "", "", fmt.Errorf("%w: %w", ErrLLMNotConfigured, callErr)
+		if probe := classifyProviderAuthError(callErr.Error()); probe.IsAuthError {
+			return false, SkillFrontmatter{}, "", "", fmt.Errorf("%w: %w", ErrLLMNotConfigured, callErr)
+		}
+		return false, SkillFrontmatter{}, "", "", fmt.Errorf("skill_scanner: %w", callErr)
 	}
 	if callCtx.Err() != nil {
 		slog.Warn("skill_scanner: LLM call timed out", "path", articlePath, "timeout", timeout)

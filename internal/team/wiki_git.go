@@ -778,7 +778,11 @@ func (r *Repo) regenerateIndexLocked() error {
 func (r *Repo) BackupMirror(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if hasArticle, err := teamSubtreeHasArticle(filepath.Join(r.root, "team")); err == nil && !hasArticle {
+	hasArticle, err := teamSubtreeHasArticle(filepath.Join(r.root, "team"))
+	if err != nil {
+		return fmt.Errorf("wiki: inspect team subtree for backup: %w", err)
+	}
+	if !hasArticle {
 		// Nothing to back up yet. The backup mirror will appear after the
 		// first real article write.
 		return nil
