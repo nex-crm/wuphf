@@ -2525,7 +2525,8 @@
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.4;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .ceo-scan-chip-actions {

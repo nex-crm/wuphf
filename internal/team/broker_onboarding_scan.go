@@ -220,6 +220,13 @@ func (b *Broker) postScanChipUpdate(dmSlug, websiteURL, status, label string) {
 // The reason string is the verbatim warning surfaced from operations
 // (scanFailureReason); the frontend renders it as plain text under the chip.
 func (b *Broker) postScanChipFailure(dmSlug, websiteURL, label, reason string) {
+	// Ignore stale failure writes once onboarding has moved past PhaseScan.
+	// Otherwise a slow scan returning failure after the user already advanced
+	// (e.g. via "Skip the scan") would resurrect the recovery UI and overwrite
+	// the newer pending suggestion. CodeRabbit on PR #988.
+	if s, loadErr := onboarding.Load(); loadErr == nil && s.Phase != onboarding.PhaseScan {
+		return
+	}
 	rawPayload := mustMarshalRaw(map[string]interface{}{
 		"url":          websiteURL,
 		"status":       "failed",
