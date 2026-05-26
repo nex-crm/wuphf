@@ -637,7 +637,7 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 				"field": "bridge_choice",
 				"label": "All set up. What would you like to do?",
 				"options": []map[string]interface{}{
-					{"id": "start_issue", "label": "Start an issue", "action": "transition", "phase": "draft"},
+					{"id": "start_issue", "label": "Start an issue", "action": "transition", "phase": "complete"},
 					{"id": "look_around", "label": "Look around first", "action": "transition", "phase": "complete"},
 				},
 			}),

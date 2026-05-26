@@ -483,7 +483,6 @@ func TestPhase2TransitionTableValidation(t *testing.T) {
 		{onboarding.PhaseBlueprint, onboarding.PhaseSeed, true},
 		{onboarding.PhaseTeam, onboarding.PhaseSeed, true},
 		{onboarding.PhaseSeed, onboarding.PhaseBridge, true},
-		{onboarding.PhaseBridge, onboarding.PhaseDraft, true},
 		{onboarding.PhaseBridge, onboarding.PhaseComplete, true},
 		// Invalid jumps (must be rejected with 400 by the handler).
 		{"", onboarding.PhaseSeed, false},
@@ -491,6 +490,7 @@ func TestPhase2TransitionTableValidation(t *testing.T) {
 		{onboarding.PhaseIdentity, onboarding.PhaseScan, false},      // must go through PhaseWebsite first
 		{onboarding.PhaseIdentity, onboarding.PhaseBlueprint, false}, // must go through PhaseWebsite first
 		{onboarding.PhaseIdentity, onboarding.PhaseComplete, false},
+		{onboarding.PhaseBridge, onboarding.PhaseDraft, false},   // draft is not wired yet
 		{onboarding.PhaseComplete, onboarding.PhaseGreet, false}, // cannot restart
 	}
 

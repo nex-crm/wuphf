@@ -21,6 +21,10 @@ interface AgentProfilePanelProps {
   onClose: () => void;
 }
 
+function arrayOrEmpty<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <div className="agent-profile-section-title">{children}</div>;
 }
@@ -312,28 +316,36 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
 
   const { data: skills = [] } = useQuery({
     queryKey: ["skills-list"],
-    queryFn: () => getSkillsList("all").then((r) => r.skills ?? []),
+    queryFn: () =>
+      getSkillsList("all").then((r) => arrayOrEmpty<Skill>(r.skills)),
     refetchInterval: 30_000,
   });
 
   const { data: channels = [] } = useQuery({
     queryKey: ["channels"],
-    queryFn: () => getChannels().then((r) => r.channels ?? []),
+    queryFn: () =>
+      getChannels().then((r) =>
+        arrayOrEmpty<{ slug: string; name: string; members?: string[] }>(
+          r.channels,
+        ),
+      ),
     refetchInterval: 30_000,
   });
 
   const { data: allTasks = [] } = useQuery({
     queryKey: ["office-tasks-profile"],
     queryFn: () =>
-      getOfficeTasks({ includeDone: true }).then((r) => r.tasks ?? []),
+      getOfficeTasks({ includeDone: true }).then((r) =>
+        arrayOrEmpty<Task>(r.tasks),
+      ),
     refetchInterval: 30_000,
   });
 
   const { data: runs = [], isLoading: runsLoading } = useQuery({
     queryKey: ["agent-log-tasks", agent.slug],
     queryFn: () =>
-      listAgentLogTasks({ limit: 8, agentSlug: agent.slug }).then(
-        (r) => r.tasks ?? [],
+      listAgentLogTasks({ limit: 8, agentSlug: agent.slug }).then((r) =>
+        arrayOrEmpty<TaskLogSummary>(r.tasks),
       ),
     refetchInterval: 30_000,
   });

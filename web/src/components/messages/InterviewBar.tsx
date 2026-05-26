@@ -790,6 +790,13 @@ function shouldPersistOnboardingAnswer(field: string) {
   return field !== "bridge_choice";
 }
 
+function isScratchBlueprintID(value: unknown) {
+  if (typeof value !== "string") return true;
+  return ["", "__blank_slate__", "from-scratch", "blank-slate"].includes(
+    value.trim(),
+  );
+}
+
 /**
  * Narrows an unknown CEO card value to the union the answer endpoint accepts.
  * Strings pass through; arrays are coerced to string[]; everything else
@@ -827,15 +834,14 @@ async function advanceOnboardingAfterAnswer(
       await post("/onboarding/transition", { phase: "website" });
       return;
     case "blueprint_id":
-      // Strict trimmed-string check: an unknown payload can be a whitespace
-      // string, a number, or any other truthy non-string value. Only a real
-      // blueprint id (non-empty after trim) routes to "team"; everything
-      // else is the scratch path.
-      if (typeof value === "string" && value.trim() !== "") {
-        await post("/onboarding/transition", { phase: "team" });
-      } else {
+      // Only a real blueprint id routes to "team". Empty string is the
+      // current scratch wire value; the named values are legacy/cached-client
+      // sentinels that the backend also normalizes to scratch.
+      if (isScratchBlueprintID(value)) {
         await post("/onboarding/transition", { phase: "seed" });
         await post("/onboarding/transition", { phase: "bridge" });
+      } else {
+        await post("/onboarding/transition", { phase: "team" });
       }
       return;
     case "picked_agents":
