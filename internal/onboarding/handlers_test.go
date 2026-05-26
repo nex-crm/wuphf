@@ -372,6 +372,20 @@ func TestHandleCompleteBackwardCompatWithLegacyClient(t *testing.T) {
 	})
 }
 
+func TestApplyFormAnswerNormalizesScratchBlueprintIDs(t *testing.T) {
+	for _, raw := range []string{blankSlateStarterTemplateID, "from-scratch", "blank-slate"} {
+		t.Run(raw, func(t *testing.T) {
+			s := &State{}
+			if err := applyFormAnswer(s, "blueprint_id", raw); err != nil {
+				t.Fatalf("applyFormAnswer: %v", err)
+			}
+			if s.FormAnswers.BlueprintID != "" {
+				t.Fatalf("BlueprintID: got %q, want empty", s.FormAnswers.BlueprintID)
+			}
+		})
+	}
+}
+
 // TestHandleCompleteReturns500OnCompleteFnError verifies that if
 // completeFn returns an error (e.g. LoadBlueprint failed), the handler
 // returns HTTP 500 so the wizard can surface the error to the user.

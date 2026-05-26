@@ -894,7 +894,6 @@ var legalPhaseTransitions = map[string]map[string]bool{
 		PhaseBridge: true,
 	},
 	PhaseBridge: {
-		PhaseDraft:    true, // "start an issue"
 		PhaseComplete: true, // "look around first"
 	},
 	PhaseDraft: {
@@ -1065,7 +1064,7 @@ func applyFormAnswer(s *State, field string, value interface{}) error {
 	case "owner_role":
 		s.FormAnswers.OwnerRole = sanitizeStr(value)
 	case "blueprint_id":
-		s.FormAnswers.BlueprintID = sanitizeStr(value)
+		s.FormAnswers.BlueprintID = normalizeBlueprintAnswer(sanitizeStr(value))
 	case "picked_agents":
 		raw, ok := value.([]interface{})
 		if !ok {
@@ -1094,6 +1093,15 @@ func applyFormAnswer(s *State, field string, value interface{}) error {
 		return fmt.Errorf("unknown field %q", field)
 	}
 	return nil
+}
+
+func normalizeBlueprintAnswer(value string) string {
+	switch strings.TrimSpace(value) {
+	case blankSlateStarterTemplateID, "from-scratch", "blank-slate":
+		return ""
+	default:
+		return strings.TrimSpace(value)
+	}
 }
 
 // onboardingSanitizeString collapses structural delimiters that could be used

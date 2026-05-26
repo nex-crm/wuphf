@@ -149,6 +149,49 @@ func TestSaveRoundtrip(t *testing.T) {
 	})
 }
 
+func TestLoadRecoversUnwiredDraftPhase(t *testing.T) {
+	withTempHome(t, func(home string) {
+		dir := filepath.Join(home, ".wuphf")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		state := &State{
+			Version: currentStateVersion,
+			Phase:   PhaseDraft,
+			PendingSuggestion: &Suggestion{
+				ID:    "draft-first-issue",
+				Phase: PhaseDraft,
+				Kind:  "ceo_form_field",
+			},
+			Checklist: DefaultChecklist(),
+		}
+		data, err := json.Marshal(state)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "onboarded.json"), data, 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+
+		loaded, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !loaded.Onboarded() {
+			t.Fatal("unwired draft phase should recover to onboarded")
+		}
+		if loaded.Phase != PhaseComplete {
+			t.Fatalf("Phase: got %q, want %q", loaded.Phase, PhaseComplete)
+		}
+		if loaded.CompletedAt == "" {
+			t.Fatal("CompletedAt should be set during recovery")
+		}
+		if loaded.PendingSuggestion != nil {
+			t.Fatal("PendingSuggestion should be cleared during recovery")
+		}
+	})
+}
+
 func TestSaveProgressMergesCorrectly(t *testing.T) {
 	withTempHome(t, func(_ string) {
 		// First save progress for welcome step.
