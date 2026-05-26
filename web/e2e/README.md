@@ -9,6 +9,7 @@ fresh-install and post-onboarding shell phases:
 | `tests/smoke.spec.ts` | post-onboarding shell | `~/.wuphf/onboarded.json` is **seeded** — wuphf serves the shell, with sidebar + agent panel |
 | `tests/app-routes.spec.ts` | post-onboarding shell | seeded shell; app routes must render independently without leaking into each other |
 | `tests/route-matrix.spec.ts` | post-onboarding shell | seeded shell; every canonical route and dropped legacy alias must render the expected surface |
+| `tests/reviews-scroll.spec.ts` | post-onboarding shell | seeded shell; crowded wiki promotion reviews must remain scrollable |
 
 CI runs both in `.github/workflows/ci.yml :: web-e2e` by booting wuphf twice (once with each precondition).
 

@@ -86,4 +86,30 @@ test.describe("wuphf web 1:1 DM", () => {
 
     await expectNoReactErrors(page, getErrors, "during DM open + send");
   });
+
+  test("live stream section collapses without unmounting the stream", async ({
+    page,
+  }) => {
+    const getErrors = collectReactErrors(page);
+
+    await page.goto("/#/dm/ceo");
+    await waitForShellReady(page);
+
+    const liveStream = page.getByTestId("collapsible-live-stream");
+    await expect(liveStream).toBeVisible({ timeout: 10_000 });
+
+    const toggle = liveStream.getByRole("button", { name: /live stream/i });
+    const body = liveStream.locator(".collapsible-section-body");
+
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(body).toBeVisible();
+
+    await toggle.click();
+
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(body).toBeAttached();
+    await expect(body).toBeHidden();
+
+    await expectNoReactErrors(page, getErrors, "while collapsing live stream");
+  });
 });

@@ -3201,6 +3201,9 @@ html[data-theme="nex"]
   flex-direction: column;
   gap: 8px;
 }
+.collapsible-section-body[hidden] {
+  display: none;
+}
 
 .collapsible-count {
   display: inline-flex;
