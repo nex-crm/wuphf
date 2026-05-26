@@ -229,6 +229,21 @@ await page
   .getByTestId("collapsible-live-stream")
   .getByRole("button", { name: /live stream/i })
   .click();
+await page.waitForFunction(
+  () => {
+    const section = document.querySelector(
+      '[data-testid="collapsible-live-stream"]',
+    );
+    const header = section?.querySelector(".collapsible-section-header");
+    const body = section?.querySelector(".collapsible-section-body");
+    return (
+      header?.getAttribute("aria-expanded") === "false" &&
+      body instanceof HTMLElement &&
+      body.hidden
+    );
+  },
+  { timeout: 10_000 },
+);
 await shotPage(page, OUT, "03-dm-live-stream-collapsed");
 await shotElement(
   page,
