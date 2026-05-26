@@ -683,7 +683,7 @@ describe("CeoCardSection", () => {
     });
   });
 
-  it("starts the issue-draft phase from the start-issue bridge chip", async () => {
+  it("completes onboarding from the start-issue bridge chip", async () => {
     const suggestion: CeoSuggestion = {
       id: "sug-bridge-start",
       phase: "bridge",
@@ -700,7 +700,7 @@ describe("CeoCardSection", () => {
 
     await waitFor(() =>
       expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
-        phase: "draft",
+        phase: "complete",
       }),
     );
   });
@@ -717,9 +717,12 @@ describe("CeoCardSection", () => {
     };
     render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
 
-    fireEvent.change(screen.getByLabelText("What should the team tackle first?"), {
-      target: { value: "Build Stripe webhooks" },
-    });
+    fireEvent.change(
+      screen.getByLabelText("What should the team tackle first?"),
+      {
+        target: { value: "Build Stripe webhooks" },
+      },
+    );
     fireEvent.click(screen.getByText("Submit"));
 
     await waitFor(() =>

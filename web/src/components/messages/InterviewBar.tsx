@@ -739,7 +739,7 @@ export function CeoCardSection() {
       await queryClient.invalidateQueries({ queryKey: ["onboarding-state"] });
       setCommittedValue(committedOnboardingValue(value));
       setStage("committed");
-      if (completesOnboarding(field, value)) {
+      if (completesOnboarding(field)) {
         setOnboardingComplete(true);
       }
     } catch (err: unknown) {
@@ -811,8 +811,8 @@ function committedOnboardingValue(
 }
 
 /** Returns true when answering this field terminates the onboarding loop. */
-function completesOnboarding(field: string, value: unknown) {
-  return field === "bridge_choice" && value !== "start_issue";
+function completesOnboarding(field: string) {
+  return field === "bridge_choice";
 }
 
 /**
@@ -849,9 +849,7 @@ async function advanceOnboardingAfterAnswer(
       await post("/onboarding/transition", { phase: "bridge" });
       return;
     case "bridge_choice":
-      await post("/onboarding/transition", {
-        phase: value === "start_issue" ? "draft" : "complete",
-      });
+      await post("/onboarding/transition", { phase: "complete" });
       return;
     case "task_prompt":
       await post("/onboarding/transition", {
