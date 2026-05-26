@@ -4,10 +4,11 @@
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════════════════════════
-   shadcn/ui theme mapped onto NEX design tokens.
-   HSL values derived from web/public/themes/nex.css so that shadcn
-   primitives share the same visual language as the rest of the
-   app. Scoped to [data-theme="nex"] to coexist with other themes.
+   Token bridge: shadcn primitives read their HSL tokens from
+   theme-scoped CSS variables here, so any primitive class like
+   `bg-primary` or `text-foreground` retints automatically when the
+   active theme switches via `data-theme` on <html>. Keep these
+   maps in sync with public/themes/<theme>.css.
    ═══════════════════════════════════════════════════════════════ */
 
 @layer base {
@@ -47,5 +48,69 @@
     --ring: 200 94% 46%;
 
     --radius: 8px;
+  }
+
+  html[data-theme="nex-dark"] {
+    /* Surfaces — derived from public/themes/nex-dark.css */
+    --background: 210 4% 8%; /* #111213 */
+    --foreground: 240 3% 92%; /* #E9EAEB */
+    --card: 210 5% 9%; /* #151617 */
+    --card-foreground: 240 3% 92%;
+    --popover: 210 5% 9%;
+    --popover-foreground: 240 3% 92%;
+
+    --primary: 200 94% 46%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 4% 12%; /* #1E2022 */
+    --secondary-foreground: 240 3% 92%;
+
+    --muted: 210 4% 12%;
+    --muted-foreground: 220 2% 67%; /* #AEB1B2 */
+
+    --accent: 200 94% 46%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 4 76% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 4% 12%;
+    --input: 210 4% 12%;
+    --ring: 200 94% 46%;
+
+    --radius: 8px;
+  }
+
+  html[data-theme="noir-gold"] {
+    /* Surfaces — derived from public/themes/noir-gold.css.
+       Noir palette is near-black with warm gold accents. */
+    --background: 240 11% 4%; /* #0A0A0B */
+    --foreground: 47 71% 87%; /* #F5E9C8 */
+    --card: 230 9% 7%; /* #111113 */
+    --card-foreground: 47 71% 87%;
+    --popover: 230 9% 7%;
+    --popover-foreground: 47 71% 87%;
+
+    /* Brand — warm gold */
+    --primary: 41 79% 45%; /* #B8881E */
+    --primary-foreground: 240 11% 4%;
+
+    --secondary: 225 10% 11%; /* #16171A */
+    --secondary-foreground: 47 71% 87%;
+
+    --muted: 225 8% 14%; /* #1F2024 */
+    --muted-foreground: 38 11% 56%; /* #8A8D92 with warm tint */
+
+    --accent: 47 64% 56%; /* #D9B84A */
+    --accent-foreground: 240 11% 4%;
+
+    --destructive: 4 76% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 7% 17%; /* #2A2C30 */
+    --input: 220 7% 17%;
+    --ring: 47 64% 56%; /* gold focus ring */
+
+    --radius: 6px; /* slightly tighter for noir */
   }
 }

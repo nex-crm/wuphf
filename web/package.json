@@ -32,6 +32,8 @@
     "@milkdown/react": "^7.20.0",
     "@milkdown/transformer": "^7.20.0",
     "@milkdown/utils": "^7.20.0",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-slot": "^1.2.4",
     "@simplewebauthn/browser": "^13",
     "@tanstack/ai": "^0.16.0",
     "@tanstack/ai-anthropic": "^0.8.6",
