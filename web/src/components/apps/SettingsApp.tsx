@@ -5,12 +5,20 @@ import { Refresh, WarningTriangle } from "iconoir-react";
 import {
   type ConfigSnapshot,
   type ConfigUpdate,
+  connectSlackChannel,
+  createSlackAgentApp,
+  disconnectSlackChannel,
   getConfig,
   getLocalProvidersStatus,
+  getOfficeMembers,
+  getSlackStatus,
+  listSlackChannels,
   type LocalProviderStatus,
   resetWorkspace,
   shredWorkspace,
+  type SlackChannel,
   updateConfig,
+  verifySlackInstall,
   type WorkspaceWipeResult,
 } from "../../api/client";
 import { router } from "../../lib/router";
@@ -801,6 +809,375 @@ function KeysSection({ cfg, save }: SectionProps) {
   );
 }
 
+function slackChannelLabel(channel: SlackChannel): string {
+  const privacy = channel.is_private || channel.is_group ? "private" : "public";
+  const membership = channel.is_member ? "joined" : "not joined";
+  return `#${channel.name} (${privacy}, ${membership})`;
+}
+
+function slugFromSlackName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function SlackSection({ save }: SectionProps) {
+  const queryClient = useQueryClient();
+  const [botToken, setBotToken] = useState("");
+  const [appToken, setAppToken] = useState("");
+  const [signingSecret, setSigningSecret] = useState("");
+  const [appConfigToken, setAppConfigToken] = useState("");
+  const [selectedChannelID, setSelectedChannelID] = useState("");
+  const [channelSlug, setChannelSlug] = useState("");
+  const [selectedAgentSlug, setSelectedAgentSlug] = useState("");
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+
+  const statusQuery = useQuery({
+    queryKey: ["slack-status"],
+    queryFn: getSlackStatus,
+    staleTime: 5_000,
+  });
+  const channelsQuery = useQuery({
+    queryKey: ["slack-channels"],
+    queryFn: listSlackChannels,
+    enabled: Boolean(statusQuery.data?.bot_token_set),
+    staleTime: 30_000,
+  });
+  const membersQuery = useQuery({
+    queryKey: ["office-members"],
+    queryFn: getOfficeMembers,
+    staleTime: 10_000,
+  });
+
+  const status = statusQuery.data;
+  const slackChannels = channelsQuery.data?.channels ?? [];
+  const selectedChannel = slackChannels.find((ch) => ch.id === selectedChannelID);
+  const officeMembers = membersQuery.data?.members ?? [];
+
+  const refreshSlack = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["slack-status"] }),
+      queryClient.invalidateQueries({ queryKey: ["slack-channels"] }),
+      queryClient.invalidateQueries({ queryKey: ["config"] }),
+    ]);
+  };
+
+  const saveSlackConfig = async () => {
+    const patch: ConfigUpdate = {};
+    if (botToken.trim()) patch.slack_bot_token = botToken.trim();
+    if (appToken.trim()) patch.slack_app_token = appToken.trim();
+    if (signingSecret.trim()) patch.slack_signing_secret = signingSecret.trim();
+    if (appConfigToken.trim())
+      patch.slack_app_config_token = appConfigToken.trim();
+    if (Object.keys(patch).length === 0) {
+      showNotice("No Slack credentials entered.", "info");
+      return false;
+    }
+    await save(patch);
+    setBotToken("");
+    setAppToken("");
+    setSigningSecret("");
+    setAppConfigToken("");
+    await refreshSlack();
+  };
+
+  const verifySlack = async () => {
+    setBusyAction("verify");
+    try {
+      const result = await verifySlackInstall({
+        bot_token: botToken.trim() || undefined,
+        app_token: appToken.trim() || undefined,
+        signing_secret: signingSecret.trim() || undefined,
+        app_config_token: appConfigToken.trim() || undefined,
+      });
+      if (!result.ok) {
+        showNotice(result.error || "Slack verification failed", "error");
+        return false;
+      }
+      setBotToken("");
+      setAppToken("");
+      setSigningSecret("");
+      setAppConfigToken("");
+      await refreshSlack();
+      showNotice("Slack install verified and saved.", "success");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const mirrorSelectedChannel = async () => {
+    if (!selectedChannel) {
+      showNotice("Pick a Slack channel first.", "error");
+      return;
+    }
+    setBusyAction("mirror");
+    try {
+      await connectSlackChannel({
+        channel_id: selectedChannel.id,
+        channel_name: selectedChannel.name,
+        channel_slug: channelSlug.trim() || slugFromSlackName(selectedChannel.name),
+      });
+      setChannelSlug("");
+      await refreshSlack();
+      showNotice(`Mirroring #${selectedChannel.name}.`, "success");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const disconnectMirror = async (slug: string) => {
+    setBusyAction(`disconnect:${slug}`);
+    try {
+      await disconnectSlackChannel(slug);
+      await refreshSlack();
+      showNotice(`Stopped mirroring #${slug}.`, "success");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const createAgentApp = async () => {
+    if (!selectedAgentSlug) {
+      showNotice("Pick an agent first.", "error");
+      return;
+    }
+    setBusyAction("agent-app");
+    try {
+      const result = await createSlackAgentApp(selectedAgentSlug);
+      const appID = result.agent_app?.app_id;
+      showNotice(
+        appID
+          ? `Created Slack AI app ${appID}.`
+          : "Created Slack AI app.",
+        "success",
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  return (
+    <div>
+      <h2 style={styles.sectionTitle}>Slack</h2>
+      <p style={styles.sectionDesc}>
+        Connect WUPHF to Slack Socket Mode, mirror Slack channels into the
+        office, and create Slack AI app identities for WUPHF agents.
+      </p>
+
+      <div style={styles.groupTitle}>Connection</div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          gap: 8,
+          marginBottom: 16,
+        }}
+      >
+        <span style={styles.keyStatus(Boolean(status?.bot_token_set))}>
+          Bot token {status?.bot_token_set ? "set" : "missing"}
+        </span>
+        <span style={styles.keyStatus(Boolean(status?.app_token_set))}>
+          Socket Mode token {status?.app_token_set ? "set" : "missing"}
+        </span>
+        <span style={styles.keyStatus(Boolean(status?.signing_secret_set))}>
+          Signing secret {status?.signing_secret_set ? "set" : "missing"}
+        </span>
+        <span style={styles.keyStatus(Boolean(status?.app_config_token_set))}>
+          App config token {status?.app_config_token_set ? "set" : "missing"}
+        </span>
+      </div>
+
+      <Field label="Workspace" hint="Slack auth.test">
+        <input
+          style={{ ...styles.input, opacity: 0.7, cursor: "default" }}
+          readOnly={true}
+          placeholder="Verify Slack to populate"
+          value={
+            [status?.team_id, status?.app_id, status?.bot_user_id]
+              .filter(Boolean)
+              .join(" / ") || ""
+          }
+        />
+      </Field>
+
+      <Field label="Bot token" hint="xoxb-, required">
+        <KeyField
+          hasValue={Boolean(status?.bot_token_set)}
+          placeholder="xoxb-..."
+          value={botToken}
+          onChange={setBotToken}
+        />
+      </Field>
+      <Field label="Socket Mode token" hint="xapp-, required for local testing">
+        <KeyField
+          hasValue={Boolean(status?.app_token_set)}
+          placeholder="xapp-..."
+          value={appToken}
+          onChange={setAppToken}
+        />
+      </Field>
+      <Field label="Signing secret" hint="optional for Socket Mode">
+        <KeyField
+          hasValue={Boolean(status?.signing_secret_set)}
+          placeholder="Slack signing secret"
+          value={signingSecret}
+          onChange={setSigningSecret}
+        />
+      </Field>
+      <Field label="App config token" hint="xoxe-, creates per-agent apps">
+        <KeyField
+          hasValue={Boolean(status?.app_config_token_set)}
+          placeholder="xoxe-..."
+          value={appConfigToken}
+          onChange={setAppConfigToken}
+        />
+      </Field>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+        <SaveButton label="Save Slack credentials" onSave={saveSlackConfig} />
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          style={{ alignSelf: "flex-end" }}
+          disabled={busyAction === "verify"}
+          onClick={() => void verifySlack()}
+        >
+          {busyAction === "verify" ? "Verifying..." : "Verify and save"}
+        </button>
+      </div>
+
+      <p
+        style={{
+          fontSize: 12,
+          color: "var(--text-tertiary)",
+          lineHeight: 1.5,
+          margin: "12px 0 24px",
+        }}
+      >
+        Token updates are saved immediately. Restart the local WUPHF broker to
+        restart the Slack Socket Mode transport with new credentials.
+      </p>
+
+      <div style={styles.groupTitle}>Channel mirrors</div>
+      <Field label="Slack channel" hint="Public and private channels visible to the app">
+        <select
+          style={styles.input}
+          value={selectedChannelID}
+          disabled={!status?.bot_token_set || channelsQuery.isLoading}
+          onChange={(e) => {
+            const nextID = e.target.value;
+            setSelectedChannelID(nextID);
+            const next = slackChannels.find((ch) => ch.id === nextID);
+            setChannelSlug(next ? slugFromSlackName(next.name) : "");
+          }}
+        >
+          <option value="">
+            {status?.bot_token_set
+              ? channelsQuery.isLoading
+                ? "Loading channels..."
+                : "Pick a channel"
+              : "Set a Slack bot token first"}
+          </option>
+          {slackChannels.map((channel) => (
+            <option key={channel.id} value={channel.id}>
+              {slackChannelLabel(channel)}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="WUPHF channel slug" hint="Defaults from Slack channel name">
+        <input
+          style={styles.input}
+          placeholder="engineering"
+          value={channelSlug}
+          onChange={(e) => setChannelSlug(e.target.value)}
+        />
+      </Field>
+      <button
+        type="button"
+        className="btn btn-primary btn-sm"
+        disabled={!selectedChannelID || busyAction === "mirror"}
+        onClick={() => void mirrorSelectedChannel()}
+      >
+        {busyAction === "mirror" ? "Mirroring..." : "Mirror channel"}
+      </button>
+
+      <div style={{ marginTop: 14 }}>
+        {(status?.mirrored_channels ?? []).length === 0 ? (
+          <p style={{ color: "var(--text-tertiary)", fontSize: 12 }}>
+            No Slack channels mirrored yet.
+          </p>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>WUPHF</th>
+                <th style={styles.th}>Slack</th>
+                <th style={styles.th}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(status?.mirrored_channels ?? []).map((channel) => (
+                <tr key={channel.slug}>
+                  <td style={styles.tdFlag}>#{channel.slug}</td>
+                  <td style={styles.td}>
+                    {channel.surface?.remote_title || channel.surface?.remote_id}
+                  </td>
+                  <td style={styles.td}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-xs"
+                      disabled={busyAction === `disconnect:${channel.slug}`}
+                      onClick={() => void disconnectMirror(channel.slug)}
+                    >
+                      Disconnect
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agent Slack apps</div>
+      <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+        Create a Slack AI app for an office agent using Slack app manifests.
+        These are bot/app identities, not paid Slack member accounts.
+      </p>
+      <Field label="Agent" hint="Requires app config token">
+        <select
+          style={styles.input}
+          value={selectedAgentSlug}
+          disabled={!status?.app_config_token_set || membersQuery.isLoading}
+          onChange={(e) => setSelectedAgentSlug(e.target.value)}
+        >
+          <option value="">
+            {status?.app_config_token_set
+              ? "Pick an agent"
+              : "Set an app config token first"}
+          </option>
+          {officeMembers.map((member) => (
+            <option key={member.slug} value={member.slug}>
+              {member.name || member.slug} ({member.slug})
+            </option>
+          ))}
+        </select>
+      </Field>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        disabled={!selectedAgentSlug || busyAction === "agent-app"}
+        onClick={() => void createAgentApp()}
+      >
+        {busyAction === "agent-app" ? "Creating..." : "Create Slack AI app"}
+      </button>
+    </div>
+  );
+}
+
 function IntegrationsSection({ cfg, save }: SectionProps) {
   const [actionProvider, setActionProvider] = useState<string>(
     cfg.action_provider ?? "auto",
@@ -1378,6 +1755,7 @@ export function SettingsApp() {
         {section === "image-gen" && <ImageGenSection />}
         {section === "company" && <CompanySection cfg={data} save={save} />}
         {section === "keys" && <KeysSection cfg={data} save={save} />}
+        {section === "slack" && <SlackSection cfg={data} save={save} />}
         {section === "integrations" && (
           <IntegrationsSection cfg={data} save={save} />
         )}

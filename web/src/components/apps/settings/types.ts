@@ -12,6 +12,7 @@ export type SectionId =
   | "image-gen"
   | "company"
   | "keys"
+  | "slack"
   | "integrations"
   | "intervals"
   | "flags"

@@ -527,6 +527,12 @@ export interface Channel {
   type?: string;
   created_by?: string;
   members?: string[];
+  surface?: {
+    provider?: string;
+    remote_id?: string;
+    remote_title?: string;
+    mode?: string;
+  };
 }
 
 export interface DMChannelResponse extends Channel {
@@ -1096,6 +1102,13 @@ export interface ConfigSnapshot {
   one_key_set?: boolean;
   composio_key_set?: boolean;
   telegram_token_set?: boolean;
+  slack_bot_token_set?: boolean;
+  slack_app_token_set?: boolean;
+  slack_signing_secret_set?: boolean;
+  slack_app_config_token_set?: boolean;
+  slack_team_id?: string;
+  slack_app_id?: string;
+  slack_bot_user_id?: string;
   openclaw_token_set?: boolean;
   openclaw_gateway_url?: string;
   config_path?: string;
@@ -1131,6 +1144,13 @@ export type ConfigUpdate = Partial<{
   one_api_key: string;
   composio_api_key: string;
   telegram_bot_token: string;
+  slack_bot_token: string;
+  slack_app_token: string;
+  slack_signing_secret: string;
+  slack_app_config_token: string;
+  slack_team_id: string;
+  slack_app_id: string;
+  slack_bot_user_id: string;
   openclaw_token: string;
   openclaw_gateway_url: string;
 }>;
@@ -1141,6 +1161,86 @@ export function getConfig() {
 
 export function updateConfig(configPatch: ConfigUpdate) {
   return post<{ status: string }>("/config", configPatch);
+}
+
+// ── Slack integration ──
+
+export interface SlackStatus {
+  bot_token_set: boolean;
+  app_token_set: boolean;
+  signing_secret_set: boolean;
+  app_config_token_set: boolean;
+  team_id?: string;
+  app_id?: string;
+  bot_user_id?: string;
+  mirrored_channels?: Channel[];
+}
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+  is_channel?: boolean;
+  is_group?: boolean;
+  is_private?: boolean;
+  is_member?: boolean;
+}
+
+export interface SlackVerifyResponse {
+  ok: boolean;
+  error?: string;
+  team?: string;
+  team_id?: string;
+  app_id?: string;
+  bot_user_id?: string;
+  bot_name?: string;
+}
+
+export interface SlackAgentAppResponse {
+  ok: boolean;
+  agent_app?: {
+    slug?: string;
+    app_id?: string;
+    oauth_authorize_url?: string;
+    signing_secret?: string;
+  };
+}
+
+export function getSlackStatus() {
+  return get<SlackStatus>("/slack/status");
+}
+
+export function verifySlackInstall(args: {
+  bot_token?: string;
+  app_token?: string;
+  signing_secret?: string;
+  app_config_token?: string;
+}) {
+  return post<SlackVerifyResponse>("/slack/verify", args);
+}
+
+export function listSlackChannels() {
+  return get<{ channels: SlackChannel[] }>("/slack/channels");
+}
+
+export function connectSlackChannel(args: {
+  channel_id: string;
+  channel_name?: string;
+  channel_slug?: string;
+}) {
+  return post<{ channel: Channel; channel_slug: string; slack_id: string }>(
+    "/slack/connect",
+    args,
+  );
+}
+
+export function disconnectSlackChannel(channelSlug: string) {
+  return post<{ ok: boolean; changed: boolean }>("/slack/disconnect", {
+    channel_slug: channelSlug,
+  });
+}
+
+export function createSlackAgentApp(slug: string) {
+  return post<SlackAgentAppResponse>("/slack/agent-app", { slug });
 }
 
 // Doctor endpoint — one entry per registered local OpenAI-compatible

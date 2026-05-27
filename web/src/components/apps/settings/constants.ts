@@ -29,6 +29,7 @@ export const SECTION_GROUPS: SectionGroup[] = [
     label: "Credentials",
     items: [
       { id: "keys", Icon: Key, name: "API Keys" },
+      { id: "slack", Icon: Puzzle, name: "Slack" },
       { id: "integrations", Icon: Puzzle, name: "Integrations" },
     ],
   },
