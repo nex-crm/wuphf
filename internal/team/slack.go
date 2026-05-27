@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log"
 	"regexp"
 	"sort"
@@ -100,7 +101,11 @@ func (s *SlackTransport) Send(ctx context.Context, msg transport.Outbound) error
 	payload := map[string]any{
 		"channel": channelID,
 		"text":    msg.Text,
-		"blocks":  slackBlocksForText(msg.Text),
+	}
+	if len(msg.Blocks) > 0 {
+		payload["blocks"] = msg.Blocks
+	} else {
+		payload["blocks"] = slackBlocksForText(msg.Text)
 	}
 	if msg.ThreadKey != "" {
 		payload["thread_ts"] = msg.ThreadKey
@@ -128,6 +133,7 @@ func (s *SlackTransport) FormatOutbound(msg channelMessage) (transport.Outbound,
 		Participant: transport.Participant{AdapterName: s.Name(), Key: msg.ID},
 		Binding:     transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: slackChannelID},
 		Text:        text,
+		Blocks:      slackBlocksForMessage(msg),
 		ThreadKey:   s.slackOutboundThread(msg.ReplyTo),
 	}, true
 }
@@ -539,14 +545,41 @@ func (s *SlackTransport) handleSlashCommand(ctx context.Context, payload slackSl
 		_ = s.postRestrictedChannelReply(ctx, payload.ChannelID, "")
 		return
 	}
-	text := "wuphf " + strings.TrimSpace(payload.Text)
-	s.handleCommandText(ctx, slackCommandContext{
-		UserID:      payload.UserID,
-		UserName:    payload.UserName,
-		ChannelID:   payload.ChannelID,
-		ChannelName: payload.ChannelName,
-		ChannelSlug: channelSlug,
-	}, text)
+	s.handleSlashChannelMessage(ctx, payload, channelSlug)
+}
+
+func (s *SlackTransport) handleSlashChannelMessage(ctx context.Context, payload slackSlashCommandPayload, channelSlug string) {
+	if s.Broker == nil {
+		_ = s.postTextReply(ctx, payload.ChannelID, "", "WUPHF broker is not available.")
+		return
+	}
+	text := strings.TrimSpace(payload.Text)
+	if text == "" {
+		text = "wuphf"
+	}
+	from := "slack:" + firstNonEmpty(payload.UserName, payload.UserID)
+	msg, err := s.Broker.PostInboundSurfaceMessageWithOptions(
+		from,
+		channelSlug,
+		text,
+		slackAdapterName,
+		inboundSurfaceMessageOptions{Tagged: s.taggedOfficeMembers(text)},
+	)
+	if err != nil {
+		_ = s.postTextReply(ctx, payload.ChannelID, "", "WUPHF message failed: "+err.Error())
+		return
+	}
+	echoText := formatSlackSlashEcho(payload, channelSlug, text)
+	resp, err := s.client.postMessage(ctx, map[string]any{
+		"channel": payload.ChannelID,
+		"text":    echoText,
+		"blocks":  slackSlashEchoBlocks(payload, channelSlug, text),
+	})
+	if err != nil {
+		log.Printf("[slack] slash channel echo failed: %v", err)
+		return
+	}
+	s.Broker.recordSlackOutbound(msg.ID, resp.Channel, resp.TS)
 }
 
 func (s *SlackTransport) handleCommandText(ctx context.Context, c slackCommandContext, text string) {
@@ -574,14 +607,18 @@ func (s *SlackTransport) handleCommandText(ctx context.Context, c slackCommandCo
 }
 
 func (s *SlackTransport) postRestrictedChannelReply(ctx context.Context, channelID, threadTS string) error {
+	return s.postTextReply(ctx, channelID, threadTS, slackRestrictedChannelReply)
+}
+
+func (s *SlackTransport) postTextReply(ctx context.Context, channelID, threadTS, text string) error {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
 		return nil
 	}
 	payload := map[string]any{
 		"channel": channelID,
-		"text":    slackRestrictedChannelReply,
-		"blocks":  slackBlocksForText(slackRestrictedChannelReply),
+		"text":    text,
+		"blocks":  slackBlocksForText(text),
 	}
 	if threadTS != "" {
 		payload["thread_ts"] = threadTS
@@ -646,28 +683,288 @@ func formatSlackOutbound(msg channelMessage) string {
 	return sb.String()
 }
 
-func appendSlackChannelFootnote(sb *strings.Builder, msg channelMessage) {
-	channel := normalizeChannelSlug(msg.Channel)
-	if channel == "" {
-		return
+func slackBlocksForMessage(msg channelMessage) []map[string]any {
+	var blocks []map[string]any
+	if header := slackHeaderForMessage(msg); header != "" {
+		blocks = append(blocks, slackHeaderBlock(header))
 	}
-	if strings.TrimSpace(msg.ReplyTo) != "" {
-		sb.WriteString("\n\n_Reply from WUPHF #")
-	} else {
-		sb.WriteString("\n\n_From WUPHF #")
+	if fields := slackFieldsForMessage(msg); len(fields) > 0 {
+		blocks = append(blocks, map[string]any{
+			"type":   "section",
+			"fields": fields,
+		})
 	}
-	sb.WriteString(escapeSlackText(channel))
-	sb.WriteString("_")
+	content := slackMrkdwnFromContent(msg.Content)
+	if content != "" {
+		for _, chunk := range splitSlackStreamText(content, 2900) {
+			blocks = append(blocks, slackSectionBlock(chunk, true))
+			if len(blocks) >= 48 {
+				break
+			}
+		}
+	}
+	if msg.Payload != nil && len(msg.Payload) > 0 {
+		if summary := slackPayloadSummary(msg.Payload); summary != "" && len(blocks) < 48 {
+			blocks = append(blocks, slackSectionBlock(summary, false))
+		}
+	}
+	if footnote := slackChannelFootnote(msg); footnote != "" {
+		blocks = append(blocks, slackContextBlock(footnote))
+	}
+	if len(blocks) == 0 {
+		return slackBlocksForText(formatSlackOutbound(msg))
+	}
+	return blocks
+}
+
+func slackHeaderForMessage(msg channelMessage) string {
+	switch {
+	case isHumanDecisionKind(msg.Kind):
+		return "Decision needed"
+	case msg.Kind == "skill_invocation":
+		return "Skill invoked"
+	case msg.Kind == "skill_proposal":
+		return "Skill proposed"
+	case msg.Kind == "automation":
+		source := firstNonEmpty(msg.SourceLabel, msg.Source, "Automation")
+		return source
+	case msg.Title != "":
+		return msg.Title
+	default:
+		return ""
+	}
+}
+
+func slackFieldsForMessage(msg channelMessage) []map[string]any {
+	var fields []map[string]any
+	if msg.From != "" && msg.From != "system" {
+		fields = append(fields, slackMrkdwnFieldText("*From*\n@"+escapeSlackText(msg.From)))
+	}
+	if msg.Kind != "" {
+		fields = append(fields, slackMrkdwnFieldText("*Type*\n"+escapeSlackText(msg.Kind)))
+	}
+	if msg.Title != "" && msg.Title != slackHeaderForMessage(msg) {
+		fields = append(fields, slackMrkdwnFieldText("*Title*\n"+escapeSlackText(msg.Title)))
+	}
+	if len(msg.Tagged) > 0 {
+		fields = append(fields, slackMrkdwnFieldText("*Tagged*\n"+escapeSlackText("@"+strings.Join(msg.Tagged, " @"))))
+	}
+	if len(fields) > 10 {
+		return fields[:10]
+	}
+	return fields
 }
 
 func slackBlocksForText(text string) []map[string]any {
-	return []map[string]any{{
+	text = strings.TrimSpace(text)
+	if text == "" {
+		text = "Done."
+	}
+	chunks := splitSlackStreamText(text, 2900)
+	if len(chunks) == 0 {
+		chunks = []string{text}
+	}
+	blocks := make([]map[string]any, 0, len(chunks))
+	for _, chunk := range chunks {
+		blocks = append(blocks, slackSectionBlock(chunk, true))
+		if len(blocks) >= 50 {
+			break
+		}
+	}
+	return blocks
+}
+
+func slackSectionBlock(text string, expand bool) map[string]any {
+	block := map[string]any{
 		"type": "section",
+		"text": slackMrkdwnText(truncateSlackText(text, 3000)),
+	}
+	if expand {
+		block["expand"] = true
+	}
+	return block
+}
+
+func slackHeaderBlock(text string) map[string]any {
+	return map[string]any{
+		"type": "header",
 		"text": map[string]any{
-			"type": "mrkdwn",
-			"text": truncateSlackText(text, 2800),
+			"type": "plain_text",
+			"text": truncateSlackText(strings.TrimSpace(text), 150),
 		},
-	}}
+	}
+}
+
+func slackContextBlock(text string) map[string]any {
+	return map[string]any{
+		"type":     "context",
+		"elements": []map[string]any{slackMrkdwnText(text)},
+	}
+}
+
+func slackMrkdwnText(text string) map[string]any {
+	return map[string]any{
+		"type": "mrkdwn",
+		"text": truncateSlackText(text, 3000),
+	}
+}
+
+func slackMrkdwnFieldText(text string) map[string]any {
+	return map[string]any{
+		"type": "mrkdwn",
+		"text": truncateSlackText(text, 2000),
+	}
+}
+
+func formatSlackSlashEcho(payload slackSlashCommandPayload, channelSlug, text string) string {
+	name := firstNonEmpty(payload.UserName, payload.UserID, "Slack")
+	return fmt.Sprintf("*%s via /wuphf*: %s\n\n_From WUPHF #%s_", escapeSlackText(name), slackMrkdwnFromContent(text), escapeSlackText(normalizeChannelSlug(channelSlug)))
+}
+
+func slackSlashEchoBlocks(payload slackSlashCommandPayload, channelSlug, text string) []map[string]any {
+	name := firstNonEmpty(payload.UserName, payload.UserID, "Slack")
+	return []map[string]any{
+		slackSectionBlock(fmt.Sprintf("*%s via /wuphf*\n%s", escapeSlackText(name), slackMrkdwnFromContent(text)), true),
+		slackContextBlock("_Sent to WUPHF #" + escapeSlackText(normalizeChannelSlug(channelSlug)) + "_"),
+	}
+}
+
+func slackMrkdwnFromContent(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	if looksLikeKnownHTML(content) {
+		content = htmlToSlackText(content)
+	}
+	return escapeSlackText(content)
+}
+
+var knownHTMLTagRe = regexp.MustCompile(`(?i)</?(p|br|strong|b|em|i|code|pre|ul|ol|li|blockquote|h[1-6]|div|span)\b`)
+var htmlReplaceRules = []struct {
+	re   *regexp.Regexp
+	with string
+}{
+	{regexp.MustCompile(`(?i)<br\s*/?>`), "\n"},
+	{regexp.MustCompile(`(?i)</p\s*>`), "\n\n"},
+	{regexp.MustCompile(`(?i)<p\b[^>]*>`), ""},
+	{regexp.MustCompile(`(?i)</?strong\b[^>]*>`), "*"},
+	{regexp.MustCompile(`(?i)</?b\b[^>]*>`), "*"},
+	{regexp.MustCompile(`(?i)</?em\b[^>]*>`), "_"},
+	{regexp.MustCompile(`(?i)</?i\b[^>]*>`), "_"},
+	{regexp.MustCompile("(?is)<pre\\b[^>]*>"), "```"},
+	{regexp.MustCompile(`(?i)</pre\s*>`), "```"},
+	{regexp.MustCompile("(?is)<code\\b[^>]*>"), "`"},
+	{regexp.MustCompile(`(?i)</code\s*>`), "`"},
+	{regexp.MustCompile(`(?i)<li\b[^>]*>`), "\n• "},
+	{regexp.MustCompile(`(?i)</li\s*>`), ""},
+	{regexp.MustCompile(`(?i)</h[1-6]\s*>`), "*\n"},
+	{regexp.MustCompile(`(?i)<h[1-6]\b[^>]*>`), "*"},
+	{regexp.MustCompile(`(?i)</(div|ul|ol|blockquote)\s*>`), "\n"},
+	{regexp.MustCompile(`(?i)<(div|ul|ol|blockquote)\b[^>]*>`), ""},
+	{regexp.MustCompile(`(?i)</?span\b[^>]*>`), ""},
+}
+var anyHTMLTagRe = regexp.MustCompile(`(?s)<[^>]+>`)
+
+func looksLikeKnownHTML(content string) bool {
+	return knownHTMLTagRe.MatchString(content)
+}
+
+func htmlToSlackText(content string) string {
+	for _, rule := range htmlReplaceRules {
+		content = rule.re.ReplaceAllString(content, rule.with)
+	}
+	content = anyHTMLTagRe.ReplaceAllString(content, "")
+	content = html.UnescapeString(content)
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func slackPayloadSummary(payload json.RawMessage) string {
+	var value any
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return ""
+	}
+	object, ok := value.(map[string]any)
+	if !ok || len(object) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := []string{"*Card details*"}
+	for _, key := range keys {
+		if len(lines) >= 7 {
+			break
+		}
+		rendered := slackRenderPayloadValue(object[key])
+		if rendered == "" {
+			continue
+		}
+		lines = append(lines, "• *"+escapeSlackText(key)+"*: "+escapeSlackText(rendered))
+	}
+	if len(lines) == 1 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
+func slackRenderPayloadValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return truncateSlackText(strings.TrimSpace(v), 140)
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case float64:
+		return fmt.Sprintf("%g", v)
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if s := slackRenderPayloadValue(item); s != "" {
+				parts = append(parts, s)
+			}
+			if len(parts) >= 3 {
+				break
+			}
+		}
+		return strings.Join(parts, ", ")
+	case map[string]any:
+		if label, ok := v["label"].(string); ok {
+			return truncateSlackText(strings.TrimSpace(label), 140)
+		}
+		if title, ok := v["title"].(string); ok {
+			return truncateSlackText(strings.TrimSpace(title), 140)
+		}
+	}
+	return ""
+}
+
+func appendSlackChannelFootnote(sb *strings.Builder, msg channelMessage) {
+	footnote := slackChannelFootnote(msg)
+	if footnote == "" {
+		return
+	}
+	sb.WriteString("\n\n")
+	sb.WriteString(footnote)
+}
+
+func slackChannelFootnote(msg channelMessage) string {
+	channel := normalizeChannelSlug(msg.Channel)
+	if channel == "" {
+		return ""
+	}
+	if strings.TrimSpace(msg.ReplyTo) != "" {
+		return "_Reply from WUPHF #" + escapeSlackText(channel) + "_"
+	}
+	return "_From WUPHF #" + escapeSlackText(channel) + "_"
 }
 
 func escapeSlackText(s string) string {

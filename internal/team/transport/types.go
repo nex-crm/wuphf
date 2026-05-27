@@ -131,6 +131,10 @@ type Outbound struct {
 	Binding Binding
 	// Text is the message body to deliver.
 	Text string
+	// Blocks is an optional adapter-specific rich rendering payload. Only
+	// transports that support native message blocks should read it; plain-text
+	// transports ignore it and use Text.
+	Blocks []map[string]any
 	// ThreadKey is echoed from the inbound [Message.ThreadKey]. Adapters that
 	// support threading use this to send a threaded reply; adapters that do not
 	// support threading ignore it.

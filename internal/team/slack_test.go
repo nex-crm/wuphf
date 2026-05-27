@@ -86,6 +86,44 @@ func TestSlackSlashCommandRequiresMappedChannel(t *testing.T) {
 	}
 }
 
+func TestSlackSlashCommandPostsMappedChannelMessageAndTagsAgent(t *testing.T) {
+	b := newTestBroker(t)
+	var posted map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+			t.Fatalf("decode slack request: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"channel":"Cprivate","ts":"333.000"}`))
+	}))
+	defer srv.Close()
+
+	slack := NewSlackTransport(b, "xoxb-test", "xapp-test", "Ubot")
+	slack.client.baseURL = srv.URL
+	slack.setSlackChannelMap("Cprivate", "general")
+	slack.handleSlashCommand(context.Background(), slackSlashCommandPayload{
+		Text:        "@ceo please triage this",
+		ChannelID:   "Cprivate",
+		ChannelName: "wuphf-office-private",
+		UserID:      "U1",
+		UserName:    "najm",
+	})
+
+	messages := b.ChannelMessages("general")
+	got := messages[len(messages)-1]
+	if got.From != "slack:najm" || got.Content != "@ceo please triage this" {
+		t.Fatalf("message = %+v", got)
+	}
+	if !containsString(got.Tagged, "ceo") {
+		t.Fatalf("tagged = %+v, want ceo", got.Tagged)
+	}
+	if posted["channel"] != "Cprivate" {
+		t.Fatalf("posted payload = %+v", posted)
+	}
+	if gotID := b.slackMessageIDForTimestamp("Cprivate", "333.000"); gotID != got.ID {
+		t.Fatalf("slack receipt resolved %q, want %q", gotID, got.ID)
+	}
+}
+
 func TestSlackAppMentionPostsNormalMappedChannelMessage(t *testing.T) {
 	b := newTestBroker(t)
 	slack := NewSlackTransport(b, "xoxb-test", "xapp-test", "Ubot")
@@ -200,6 +238,34 @@ func TestSlackOutboundIncludesWUPHFChannelFootnote(t *testing.T) {
 	})
 	if !strings.Contains(got, "_Reply from WUPHF #wuphf-office_") {
 		t.Fatalf("missing channel footnote: %q", got)
+	}
+}
+
+func TestSlackBlocksRenderDecisionAndHTMLContent(t *testing.T) {
+	blocks := slackBlocksForMessage(channelMessage{
+		From:    "ceo",
+		Channel: "wuphf-office",
+		Kind:    "interview",
+		Title:   "Launch approval",
+		Content: "<p><strong>Ship?</strong></p><ul><li>Run checks</li><li>Notify team</li></ul>",
+		ReplyTo: "msg-root",
+	})
+	if len(blocks) < 4 {
+		t.Fatalf("blocks = %+v", blocks)
+	}
+	header, _ := blocks[0]["text"].(map[string]any)
+	if header["text"] != "Decision needed" {
+		t.Fatalf("header = %+v", blocks[0])
+	}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := string(raw)
+	for _, want := range []string{"*Ship?*", "• Run checks", "_Reply from WUPHF #wuphf-office_", `"expand":true`} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("blocks missing %q: %s", want, rendered)
+		}
 	}
 }
 
