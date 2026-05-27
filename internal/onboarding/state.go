@@ -240,7 +240,29 @@ func Load() (*State, error) {
 	if len(s.Checklist) == 0 {
 		s.Checklist = DefaultChecklist()
 	}
+	if recoverUnwiredPhase(&s) {
+		if writeErr := Save(&s); writeErr != nil {
+			log.Printf("onboarding: unwired phase recovery persist failed: %v", writeErr)
+		}
+	}
 	return &s, nil
+}
+
+func recoverUnwiredPhase(s *State) bool {
+	if s == nil || s.CompletedAt != "" {
+		return false
+	}
+	switch s.Phase {
+	case PhaseDraft, PhaseApprove, PhaseKickoff:
+	default:
+		return false
+	}
+	log.Printf("onboarding: recovering from unwired phase %q by completing onboarding", s.Phase)
+	s.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+	s.Phase = PhaseComplete
+	s.PendingSuggestion = nil
+	s.Version = currentStateVersion
+	return true
 }
 
 // migrateV1ToV2 upgrades a v1 State in-place to v2.

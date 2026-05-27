@@ -58,15 +58,28 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	// office name = Alex?" right after Alex was accepted as company_name).
 	// Mute the CEO agent until onboarding completes; other agents are
 	// unaffected.
-	if s, err := onboarding.Load(); err == nil && s != nil && s.Phase != "" && s.Phase != onboarding.PhaseComplete && !s.Onboarded() {
-		filteredCEO := immediate[:0]
-		for _, t := range immediate {
-			if t.Slug == "ceo" {
-				continue
-			}
-			filteredCEO = append(filteredCEO, t)
+	// Cheap pre-check: only pay the onboarding.Load() cost if a "ceo"
+	// target is actually in the immediate slice. The notify path is hot;
+	// most messages have no CEO recipient and shouldn't read the
+	// on-disk onboarding state (CodeRabbit finding on #995).
+	hasCEOTarget := false
+	for _, t := range immediate {
+		if t.Slug == "ceo" {
+			hasCEOTarget = true
+			break
 		}
-		immediate = filteredCEO
+	}
+	if hasCEOTarget {
+		if s, err := onboarding.Load(); err == nil && s != nil && s.Phase != "" && s.Phase != onboarding.PhaseComplete && !s.Onboarded() {
+			filteredCEO := immediate[:0]
+			for _, t := range immediate {
+				if t.Slug == "ceo" {
+					continue
+				}
+				filteredCEO = append(filteredCEO, t)
+			}
+			immediate = filteredCEO
+		}
 	}
 
 	// Debounce: use shorter cooldown for human/CEO messages, longer for agent-originated

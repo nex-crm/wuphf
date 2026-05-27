@@ -343,6 +343,11 @@ function CollapsibleSection({
   children,
 }: CollapsibleSectionProps) {
   const panelId = `${testId}-panel`;
+  // Separate id for the summary button — the region's aria-labelledby
+  // needs to point at this (not at its own panelId), or screen readers
+  // hear the region labelling itself instead of the heading text
+  // (CodeRabbit finding on #995).
+  const summaryId = `${testId}-summary`;
   return (
     <div
       className="pre-pick-section pre-pick-section--collapsible"
@@ -351,6 +356,7 @@ function CollapsibleSection({
     >
       <button
         type="button"
+        id={summaryId}
         className="pre-pick-section-summary"
         aria-expanded={open}
         aria-controls={panelId}
@@ -376,7 +382,7 @@ function CollapsibleSection({
         id={panelId}
         className="pre-pick-section-panel"
         role="region"
-        aria-labelledby={panelId}
+        aria-labelledby={summaryId}
         aria-hidden={!open}
       >
         <div className="pre-pick-section-panel-inner">{children}</div>
@@ -591,63 +597,63 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
           className="pre-pick-collapsible-group"
           data-testid="pre-pick-collapsible-group"
         >
-        {/* ── Section 2: API keys ──────────────────────────────────────── */}
-        <CollapsibleSection
-          testId="pre-pick-api-keys"
-          heading="API keys"
-          open={openSections.apiKeys}
-          onToggle={() => toggleSection("apiKeys")}
-        >
-          <p className="pre-pick-section-hint">
-            Use CLI login or paste a key. CLI login is the primary path -- keys
-            are a fallback or alternative.
-          </p>
-          <div className="key-group">
-            {API_KEY_FIELDS.map((field) => (
-              <PrePickApiKeyRow
-                key={field.key}
-                field={field}
-                value={apiKeys[field.key] ?? ""}
-                onChange={(v) => handleApiKeyChange(field.key, v)}
-              />
-            ))}
-          </div>
-        </CollapsibleSection>
+          {/* ── Section 2: API keys ──────────────────────────────────────── */}
+          <CollapsibleSection
+            testId="pre-pick-api-keys"
+            heading="API keys"
+            open={openSections.apiKeys}
+            onToggle={() => toggleSection("apiKeys")}
+          >
+            <p className="pre-pick-section-hint">
+              Use CLI login or paste a key. CLI login is the primary path --
+              keys are a fallback or alternative.
+            </p>
+            <div className="key-group">
+              {API_KEY_FIELDS.map((field) => (
+                <PrePickApiKeyRow
+                  key={field.key}
+                  field={field}
+                  value={apiKeys[field.key] ?? ""}
+                  onChange={(v) => handleApiKeyChange(field.key, v)}
+                />
+              ))}
+            </div>
+          </CollapsibleSection>
 
-        {/* ── Section 3: Local provider picker ────────────────────────── */}
-        <CollapsibleSection
-          testId="pre-pick-local-section"
-          heading="Local model"
-          open={openSections.local}
-          onToggle={() => toggleSection("local")}
-        >
-          <p className="pre-pick-section-hint">
-            Run inference on this machine. No cloud key required.
-          </p>
-          <LocalProviderPicker
-            selected={localProvider}
-            onSelect={(kind) => setLocalProvider(kind)}
-          />
-        </CollapsibleSection>
+          {/* ── Section 3: Local provider picker ────────────────────────── */}
+          <CollapsibleSection
+            testId="pre-pick-local-section"
+            heading="Local model"
+            open={openSections.local}
+            onToggle={() => toggleSection("local")}
+          >
+            <p className="pre-pick-section-hint">
+              Run inference on this machine. No cloud key required.
+            </p>
+            <LocalProviderPicker
+              selected={localProvider}
+              onSelect={(kind) => setLocalProvider(kind)}
+            />
+          </CollapsibleSection>
 
-        {/* ── Section 4: OpenAI-compatible endpoint ───────────────────── */}
-        <CollapsibleSection
-          testId="pre-pick-oai-section"
-          heading="Custom endpoint"
-          open={openSections.custom}
-          onToggle={() => toggleSection("custom")}
-        >
-          <p className="pre-pick-section-hint">
-            Any server that speaks the OpenAI REST protocol (OpenClaw, LiteLLM,
-            vLLM, etc.).
-          </p>
-          <OpenAICompatibleInput
-            endpointUrl={oaiUrl}
-            apiKey={oaiKey}
-            onChangeUrl={setOaiUrl}
-            onChangeKey={setOaiKey}
-          />
-        </CollapsibleSection>
+          {/* ── Section 4: OpenAI-compatible endpoint ───────────────────── */}
+          <CollapsibleSection
+            testId="pre-pick-oai-section"
+            heading="Custom endpoint"
+            open={openSections.custom}
+            onToggle={() => toggleSection("custom")}
+          >
+            <p className="pre-pick-section-hint">
+              Any server that speaks the OpenAI REST protocol (OpenClaw,
+              LiteLLM, vLLM, etc.).
+            </p>
+            <OpenAICompatibleInput
+              endpointUrl={oaiUrl}
+              apiKey={oaiKey}
+              onChangeUrl={setOaiUrl}
+              onChangeKey={setOaiKey}
+            />
+          </CollapsibleSection>
         </div>
 
         {/* ── Submit from form sections ────────────────────────────────── */}

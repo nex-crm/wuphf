@@ -747,9 +747,9 @@ export function CeoCardSection() {
     // any swap during the await cleanly transitions to the new card.
     setCommittedValue(committedOnboardingValue(value));
     setStage("committed");
-    if (completesOnboarding(field, value)) {
-      setOnboardingComplete(true);
-    }
+    // setOnboardingComplete moved AFTER the network resolves (see
+    // post-await block below) so a failed /transition rolls back
+    // cleanly. CodeRabbit #995 finding.
 
     try {
       // /onboarding/answer + /onboarding/transition both return the full
@@ -780,6 +780,13 @@ export function CeoCardSection() {
       const advanced = await advanceOnboardingAfterAnswer(field, value, phase);
       if (advanced) latest = advanced;
 
+      // Now that the network has resolved successfully, it's safe to
+      // signal onboarding completion. Before this point a failed
+      // transition would have left the app thinking onboarding was
+      // done while the broker disagreed (CodeRabbit finding).
+      if (completesOnboarding(field)) {
+        setOnboardingComplete(true);
+      }
       if (latest) {
         queryClient.setQueryData<OnboardingState>(["onboarding-state"], latest);
       }
@@ -833,6 +840,13 @@ function shouldPersistOnboardingAnswer(field: string) {
   return field !== "bridge_choice";
 }
 
+function isScratchBlueprintID(value: unknown) {
+  if (typeof value !== "string") return true;
+  return ["", "__blank_slate__", "from-scratch", "blank-slate"].includes(
+    value.trim(),
+  );
+}
+
 /**
  * Narrows an unknown CEO card value to the union the answer endpoint accepts.
  * Strings pass through; arrays are coerced to string[]; everything else
@@ -847,8 +861,8 @@ function committedOnboardingValue(
 }
 
 /** Returns true when answering this field terminates the onboarding loop. */
-function completesOnboarding(field: string, value: unknown) {
-  return field === "bridge_choice" && value !== "start_issue";
+function completesOnboarding(field: string) {
+  return field === "bridge_choice";
 }
 
 /**
@@ -873,20 +887,25 @@ async function advanceOnboardingAfterAnswer(
     case "description":
       return await transition("website");
     case "blueprint_id":
-      // Strict trimmed-string check: an unknown payload can be a whitespace
-      // string, a number, or any other truthy non-string value. Only a real
-      // blueprint id (non-empty after trim) routes to "team"; everything
-      // else is the scratch path.
-      if (typeof value === "string" && value.trim() !== "") {
-        return await transition("team");
+      // Only a real blueprint id routes to "team". Empty string is the
+      // current scratch wire value; named values like "from-scratch" /
+      // "blank-slate" are legacy/cached-client sentinels normalised to
+      // scratch on the backend. Uses `isScratchBlueprintID` (from #992)
+      // for the semantic check, wrapped in our `transition()` helper so
+      // the returned state flows into setQueryData.
+      if (isScratchBlueprintID(value)) {
+        await transition("seed");
+        return await transition("bridge");
       }
-      await transition("seed");
-      return await transition("bridge");
+      return await transition("team");
     case "picked_agents":
       await transition("seed");
       return await transition("bridge");
     case "bridge_choice":
-      return await transition(value === "start_issue" ? "draft" : "complete");
+      // #992 collapsed "start an issue" into the same complete path —
+      // the dedicated draft phase was the source of stuck-onboarding
+      // recovery bugs. Always advance to complete here.
+      return await transition("complete");
     case "task_prompt":
       return await transition("approve");
     case "website_url":

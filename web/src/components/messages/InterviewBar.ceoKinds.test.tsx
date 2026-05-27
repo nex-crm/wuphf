@@ -603,6 +603,60 @@ describe("CeoCardSection", () => {
     });
   });
 
+  it("advances the empty blueprint id as the scratch path", async () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-blueprint-scratch",
+      phase: "blueprint",
+      kind: "ceo_chip_row",
+      payload: {
+        field: "blueprint_id",
+        label: "Pick a template:",
+        options: [{ id: "", label: "Start from scratch" }],
+      },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.click(screen.getByText("Start from scratch"));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/answer", {
+        field: "blueprint_id",
+        value: "",
+      }),
+    );
+    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+      phase: "seed",
+    });
+    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+      phase: "bridge",
+    });
+  });
+
+  it("advances legacy scratch blueprint ids as the scratch path", async () => {
+    const suggestion: CeoSuggestion = {
+      id: "sug-blueprint-legacy-scratch",
+      phase: "blueprint",
+      kind: "ceo_chip_row",
+      payload: {
+        field: "blueprint_id",
+        label: "Pick a template:",
+        options: [{ id: "from-scratch", label: "Start from scratch" }],
+      },
+    };
+    render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
+
+    fireEvent.click(screen.getByText("Start from scratch"));
+
+    await waitFor(() =>
+      expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+        phase: "seed",
+      }),
+    );
+    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
+      phase: "bridge",
+    });
+  });
+
   it("transitions bridge choices without posting them as form answers", async () => {
     const suggestion: CeoSuggestion = {
       id: "sug-bridge",
@@ -629,7 +683,7 @@ describe("CeoCardSection", () => {
     });
   });
 
-  it("starts the issue-draft phase from the start-issue bridge chip", async () => {
+  it("completes onboarding from the start-issue bridge chip", async () => {
     const suggestion: CeoSuggestion = {
       id: "sug-bridge-start",
       phase: "bridge",
@@ -646,7 +700,7 @@ describe("CeoCardSection", () => {
 
     await waitFor(() =>
       expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
-        phase: "draft",
+        phase: "complete",
       }),
     );
   });
@@ -663,9 +717,12 @@ describe("CeoCardSection", () => {
     };
     render(<CeoCardSection />, { wrapper: makeWrapper(suggestion) });
 
-    fireEvent.change(screen.getByLabelText("What should the team tackle first?"), {
-      target: { value: "Build Stripe webhooks" },
-    });
+    fireEvent.change(
+      screen.getByLabelText("What should the team tackle first?"),
+      {
+        target: { value: "Build Stripe webhooks" },
+      },
+    );
     fireEvent.click(screen.getByText("Submit"));
 
     await waitFor(() =>

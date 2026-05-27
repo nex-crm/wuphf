@@ -120,6 +120,42 @@ describe("<AgentProfilePanel>", () => {
     expect(screen.getByText("No recent tasks")).toBeInTheDocument();
   });
 
+  it("treats malformed list responses as empty lists", async () => {
+    getSkillsListMock.mockResolvedValue({ skills: { broken: true } });
+    getChannelsMock.mockResolvedValue({ channels: { broken: true } });
+    getOfficeTasksMock.mockResolvedValue({ tasks: { broken: true } });
+    listAgentLogTasksMock.mockResolvedValue({ tasks: { broken: true } });
+
+    render(wrap(<AgentProfilePanel agent={baseAgent} onClose={vi.fn()} />));
+
+    await waitFor(() => {
+      expect(screen.getByText("No skills yet")).toBeInTheDocument();
+    });
+    expect(screen.getByText("No channels")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("No runs yet")).toBeInTheDocument();
+    });
+    expect(screen.getByText("No recent tasks")).toBeInTheDocument();
+  });
+
+  it("filters malformed entries from list responses", async () => {
+    getSkillsListMock.mockResolvedValue({ skills: [null] });
+    getChannelsMock.mockResolvedValue({ channels: [null] });
+    getOfficeTasksMock.mockResolvedValue({ tasks: [null] });
+    listAgentLogTasksMock.mockResolvedValue({ tasks: [null] });
+
+    render(wrap(<AgentProfilePanel agent={baseAgent} onClose={vi.fn()} />));
+
+    await waitFor(() => {
+      expect(screen.getByText("No skills yet")).toBeInTheDocument();
+    });
+    expect(screen.getByText("No channels")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("No runs yet")).toBeInTheDocument();
+    });
+    expect(screen.getByText("No recent tasks")).toBeInTheDocument();
+  });
+
   it("renders skills owned by this agent", async () => {
     getSkillsListMock.mockResolvedValue({
       skills: [

@@ -2752,7 +2752,9 @@
   padding: 0;
   margin: 0;
   overflow: hidden;
-  clip: rect(0 0 0 0);
+  /* `clip-path` replaces the deprecated `clip` property — same
+     visually-hidden semantics, satisfies Stylelint. */
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }
@@ -3449,7 +3451,7 @@ html[data-theme^="nex"] .onboarding-chat .message {
    still honour opacity/translate — fall back to a plain fade-up via
    keyframe so those users still get a smooth entrance. */
 @supports not (interpolate-size: allow-keywords) {
-  @keyframes onboardingMessageEnter {
+  @keyframes onboarding-message-enter {
     from {
       opacity: 0;
       transform: translateY(14px);
@@ -3461,8 +3463,8 @@ html[data-theme^="nex"] .onboarding-chat .message {
   }
   .onboarding-chat .message.animate-fade,
   .onboarding-chat .ceo-card {
-    animation: onboardingMessageEnter var(--wizard-duration) var(--wizard-ease)
-      both;
+    animation: onboarding-message-enter var(--wizard-duration)
+      var(--wizard-ease) both;
     overflow: visible;
   }
 }
@@ -3485,7 +3487,7 @@ html[data-theme^="nex"] .onboarding-chat .message {
    -3px` and brighten 0.45 → 1 → 0.45 without ever vanishing. The wave
    is staggered 180ms per dot so the three dots read as a travelling
    pulse rather than three blinking dots. */
-@keyframes onboardingTypingEnter {
+@keyframes onboarding-typing-enter {
   from {
     opacity: 0;
     transform: translateY(10px);
@@ -3495,7 +3497,7 @@ html[data-theme^="nex"] .onboarding-chat .message {
     transform: translateY(0);
   }
 }
-@keyframes onboardingTypingWave {
+@keyframes onboarding-typing-wave {
   0%,
   100% {
     transform: translateY(0);
@@ -3514,7 +3516,7 @@ html[data-theme^="nex"] .onboarding-chat .message {
    staggered 180ms per dot so the three dots read as a travelling
    pulse rather than three blinking dots. */
 .onboarding-chat .typing-dot {
-  animation: onboardingTypingWave 1.6s var(--wizard-ease) infinite;
+  animation: onboarding-typing-wave 1.6s var(--wizard-ease) infinite;
   transform-origin: center;
 }
 
@@ -3609,7 +3611,7 @@ html[data-theme^="nex"] .onboarding-chat .message {
   border-radius: 50%;
   background: var(--text-tertiary, currentColor);
   opacity: 0.45;
-  animation: onboardingThinkingPulse 1100ms ease-in-out infinite;
+  animation: onboarding-thinking-pulse 1100ms ease-in-out infinite;
 }
 .onboarding-chat .onboarding-thinking-dot:nth-child(2) {
   animation-delay: 140ms;
@@ -3617,7 +3619,7 @@ html[data-theme^="nex"] .onboarding-chat .message {
 .onboarding-chat .onboarding-thinking-dot:nth-child(3) {
   animation-delay: 280ms;
 }
-@keyframes onboardingThinkingPulse {
+@keyframes onboarding-thinking-pulse {
   0%,
   100% {
     transform: scale(0.85);
@@ -3699,7 +3701,7 @@ html[data-theme^="nex"] .onboarding-chat .message {
      Anchored at top so it grows downward, not centered. */
   overflow: visible;
   transform-origin: top center;
-  animation: onboardingSlotGrow 500ms ease-in-out both;
+  animation: onboarding-slot-grow 500ms ease-in-out both;
 }
 /* Backlog (server-replayed) messages render at full size from the
    start — they were already in the channel before the wizard
@@ -3708,7 +3710,7 @@ html[data-theme^="nex"] .onboarding-chat .message {
 .onboarding-slot-instant {
   animation: none;
 }
-@keyframes onboardingSlotGrow {
+@keyframes onboarding-slot-grow {
   from {
     max-height: 0;
     opacity: 0;
