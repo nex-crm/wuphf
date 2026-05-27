@@ -969,8 +969,17 @@ func (b *Broker) EnsureDirectChannel(agentSlug string) (string, error) {
 	return ch.Slug, nil
 }
 
+type inboundSurfaceMessageOptions struct {
+	Tagged  []string
+	ReplyTo string
+}
+
 // PostInboundSurfaceMessage posts a message from an external surface into the broker channel.
 func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider string) (channelMessage, error) {
+	return b.PostInboundSurfaceMessageWithOptions(from, channel, content, provider, inboundSurfaceMessageOptions{})
+}
+
+func (b *Broker) PostInboundSurfaceMessageWithOptions(from, channel, content, provider string, opts inboundSurfaceMessageOptions) (channelMessage, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	channel = normalizeChannelSlug(channel)
@@ -986,6 +995,15 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 			return channelMessage{}, fmt.Errorf("%w: %s", ErrChannelNotFound, channel)
 		}
 	}
+	tagged := uniqueSlugs(opts.Tagged)
+	for _, taggedSlug := range tagged {
+		if isHumanMessageSender(taggedSlug) || taggedSlug == "system" {
+			continue
+		}
+		if b.findMemberLocked(taggedSlug) == nil {
+			return channelMessage{}, fmt.Errorf("unknown tagged member: %s", taggedSlug)
+		}
+	}
 	b.counter++
 	msg := channelMessage{
 		ID:          fmt.Sprintf("msg-%d", b.counter),
@@ -995,9 +1013,19 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 		Source:      provider,
 		SourceLabel: provider,
 		Content:     strings.TrimSpace(content),
+		Tagged:      tagged,
+		ReplyTo:     strings.TrimSpace(opts.ReplyTo),
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 	msg = b.appendMessageLocked(msg)
+	if len(msg.Tagged) > 0 {
+		if b.lastTaggedAt == nil {
+			b.lastTaggedAt = make(map[string]time.Time)
+		}
+		for _, slug := range msg.Tagged {
+			b.lastTaggedAt[slug] = time.Now()
+		}
+	}
 	// Mark as already delivered so it doesn't bounce back to the same surface
 	if b.externalDelivered == nil {
 		b.externalDelivered = make(map[string]struct{})

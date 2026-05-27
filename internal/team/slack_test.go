@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/internal/team/transport"
 )
 
 func TestSlackConnectCreatesMirroredChannel(t *testing.T) {
@@ -84,6 +86,76 @@ func TestSlackSlashCommandRequiresMappedChannel(t *testing.T) {
 	}
 }
 
+func TestSlackAppMentionPostsNormalMappedChannelMessage(t *testing.T) {
+	b := newTestBroker(t)
+	slack := NewSlackTransport(b, "xoxb-test", "xapp-test", "Ubot")
+	slack.setSlackChannelMap("Cprivate", "general")
+	host := newFakeHost()
+
+	slack.handleEventCallback(context.Background(), host, slackEventPayload{
+		Event: json.RawMessage(`{
+			"type":"app_mention",
+			"channel":"Cprivate",
+			"user":"U1",
+			"text":"<@Ubot> agent create qa Quality Agent",
+			"ts":"111.000"
+		}`),
+	})
+
+	host.mu.Lock()
+	defer host.mu.Unlock()
+	if len(host.messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(host.messages))
+	}
+	msg := host.messages[0]
+	if msg.Text != "agent create qa Quality Agent" {
+		t.Fatalf("message text = %q", msg.Text)
+	}
+	if msg.Binding.ChannelSlug != "general" || msg.ExternalChannelID != "Cprivate" {
+		t.Fatalf("message binding/external = %+v", msg)
+	}
+	for _, member := range b.OfficeMembers() {
+		if member.Slug == "qa" {
+			t.Fatalf("app mention dispatched as command and created member: %+v", member)
+		}
+	}
+}
+
+func TestSlackInboundMentionsAgentsAndResolvesThreadReply(t *testing.T) {
+	b := newTestBroker(t)
+	b.recordSlackOutbound("msg-root", "Cprivate", "111.000")
+	slack := NewSlackTransport(b, "xoxb-test", "xapp-test", "Ubot")
+	slack.setSlackChannelMap("Cprivate", "general")
+	host := newFakeHost()
+
+	slack.handleEventCallback(context.Background(), host, slackEventPayload{
+		Event: json.RawMessage(`{
+			"type":"message",
+			"channel":"Cprivate",
+			"user":"U1",
+			"text":"@ceo please take this",
+			"ts":"222.000",
+			"thread_ts":"111.000"
+		}`),
+	})
+
+	host.mu.Lock()
+	defer host.mu.Unlock()
+	if len(host.messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(host.messages))
+	}
+	msg := host.messages[0]
+	if msg.ReplyTo != "msg-root" {
+		t.Fatalf("reply_to = %q, want msg-root", msg.ReplyTo)
+	}
+	if !containsString(msg.Tagged, "ceo") {
+		t.Fatalf("tagged = %+v, want ceo", msg.Tagged)
+	}
+	if msg.ThreadKey != "111.000" {
+		t.Fatalf("thread key = %q, want Slack thread root", msg.ThreadKey)
+	}
+}
+
 func TestSlackAgentManifestUsesAgentsAndAIAppSurface(t *testing.T) {
 	manifest := slackAgentManifestForMember(officeMember{Slug: "qa", Name: "Quality Agent", Role: "Checks WUPHF work"})
 	data, err := json.Marshal(manifest)
@@ -116,5 +188,47 @@ func TestSlackOutboundEscapesMarkup(t *testing.T) {
 	})
 	if strings.Contains(got, "<this>") || !strings.Contains(got, "&lt;this&gt; &amp; report") {
 		t.Fatalf("escaped output = %q", got)
+	}
+}
+
+func TestSlackOutboundIncludesWUPHFChannelFootnote(t *testing.T) {
+	got := formatSlackOutbound(channelMessage{
+		From:    "qa",
+		Channel: "wuphf-office",
+		ReplyTo: "msg-root",
+		Content: "done",
+	})
+	if !strings.Contains(got, "_Reply from WUPHF #wuphf-office_") {
+		t.Fatalf("missing channel footnote: %q", got)
+	}
+}
+
+func TestBrokerTransportRecordsSlackInboundThreadReceipt(t *testing.T) {
+	b := newTestBroker(t)
+	host := &brokerTransportHost{broker: b}
+	err := host.ReceiveMessage(context.Background(), transport.Message{
+		Participant: transport.Participant{
+			AdapterName: slackAdapterName,
+			Key:         "U1",
+			DisplayName: "slack:U1",
+			Human:       true,
+		},
+		Binding:           transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: "general"},
+		Text:              "@ceo thread this",
+		ExternalID:        "222.000",
+		ExternalChannelID: "Cprivate",
+		Tagged:            []string{"ceo"},
+		ReplyTo:           "msg-root",
+	})
+	if err != nil {
+		t.Fatalf("ReceiveMessage: %v", err)
+	}
+	messages := b.ChannelMessages("general")
+	got := messages[len(messages)-1]
+	if got.ReplyTo != "msg-root" || !containsString(got.Tagged, "ceo") {
+		t.Fatalf("message = %+v", got)
+	}
+	if gotID := b.slackMessageIDForTimestamp("Cprivate", "222.000"); gotID != got.ID {
+		t.Fatalf("slack receipt resolved %q, want %q", gotID, got.ID)
 	}
 }

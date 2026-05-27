@@ -61,6 +61,22 @@ func (b *Broker) slackOutboundTimestamp(messageID string) string {
 	return b.slackOutbound[messageID].Timestamp
 }
 
+func (b *Broker) slackMessageIDForTimestamp(channelID, ts string) string {
+	channelID = strings.TrimSpace(channelID)
+	ts = strings.TrimSpace(ts)
+	if channelID == "" || ts == "" {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for messageID, receipt := range b.slackOutbound {
+		if strings.TrimSpace(receipt.ChannelID) == channelID && strings.TrimSpace(receipt.Timestamp) == ts {
+			return messageID
+		}
+	}
+	return ""
+}
+
 func (b *Broker) pruneSlackReceiptsLocked() {
 	pruneStringMapByOldest(b.slackEvents, maxSlackReceiptEntries)
 	if len(b.slackOutbound) <= maxSlackReceiptEntries {

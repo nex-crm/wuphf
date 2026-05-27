@@ -41,17 +41,24 @@ type brokerTransportHost struct {
 // the office by calling PostInboundSurfaceMessage. Returns
 // transport.ErrBindingChannelMissing if the declared channel does not exist.
 func (h *brokerTransportHost) ReceiveMessage(_ context.Context, msg transport.Message) error {
-	_, err := h.broker.PostInboundSurfaceMessage(
+	created, err := h.broker.PostInboundSurfaceMessageWithOptions(
 		msg.Participant.DisplayName,
 		msg.Binding.ChannelSlug,
 		msg.Text,
 		msg.Participant.AdapterName,
+		inboundSurfaceMessageOptions{
+			Tagged:  msg.Tagged,
+			ReplyTo: msg.ReplyTo,
+		},
 	)
 	if err != nil {
 		if errors.Is(err, ErrChannelNotFound) {
 			return &transport.BindingChannelMissingError{ChannelSlug: msg.Binding.ChannelSlug}
 		}
 		return fmt.Errorf("transport: ReceiveMessage: %w", err)
+	}
+	if msg.Participant.AdapterName == slackAdapterName {
+		h.broker.recordSlackOutbound(created.ID, msg.ExternalChannelID, msg.ExternalID)
 	}
 	return nil
 }

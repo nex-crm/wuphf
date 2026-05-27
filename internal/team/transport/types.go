@@ -101,6 +101,16 @@ type Message struct {
 	// guarantee at-most-once delivery may leave this empty; the Host will not
 	// apply deduplication.
 	ExternalID string
+	// ExternalChannelID is an opaque adapter-specific channel identifier. Most
+	// transports can leave it empty; threaded bridges use it to correlate
+	// external thread roots back to broker message IDs.
+	ExternalChannelID string
+	// Tagged carries explicit office member slugs addressed by the external
+	// surface, such as raw @agent text typed in Slack.
+	Tagged []string
+	// ReplyTo points at the broker message this external message replies to
+	// when the adapter can resolve the external thread root.
+	ReplyTo string
 	// ThreadKey is optional and opaque to the contract. Adapters that support
 	// threading (e.g. Telegram reply-to message_id) populate this field; it
 	// travels with the message so the Host can echo it back on [Outbound] for

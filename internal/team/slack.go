@@ -317,7 +317,7 @@ func (s *SlackTransport) handleEventCallback(ctx context.Context, host transport
 	}
 	channelSlug := s.slackChannelSlug(event.Channel)
 	text := normalizeSlackInboundText(event.Text, s.BotUserID)
-	if strings.HasPrefix(strings.TrimSpace(strings.ToLower(text)), "wuphf ") {
+	if event.Type != "app_mention" && strings.HasPrefix(strings.TrimSpace(strings.ToLower(text)), "wuphf ") {
 		s.handleCommandText(ctx, slackCommandContext{
 			UserID:      event.User,
 			ChannelID:   event.Channel,
@@ -329,14 +329,18 @@ func (s *SlackTransport) handleEventCallback(ctx context.Context, host transport
 	if channelSlug == "" {
 		return
 	}
+	replyTo := s.slackReplyToForEvent(event)
 	p := transport.Participant{AdapterName: s.Name(), Key: event.User, DisplayName: "slack:" + event.User, Human: true}
 	_ = host.UpsertParticipant(ctx, p, transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: channelSlug})
 	_ = host.ReceiveMessage(ctx, transport.Message{
-		Participant: p,
-		Binding:     transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: channelSlug},
-		Text:        text,
-		ExternalID:  event.Timestamp,
-		ThreadKey:   firstNonEmpty(event.ThreadTS, event.Timestamp),
+		Participant:       p,
+		Binding:           transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: channelSlug},
+		Text:              text,
+		ExternalID:        event.Timestamp,
+		ExternalChannelID: event.Channel,
+		Tagged:            s.taggedOfficeMembers(text),
+		ReplyTo:           replyTo,
+		ThreadKey:         firstNonEmpty(event.ThreadTS, event.Timestamp),
 	})
 }
 
@@ -367,6 +371,32 @@ func (s *SlackTransport) handleAssistantThreadStarted(ctx context.Context, threa
 		"text":      "Ask WUPHF to list agents, mirror the current channel, search wiki content, or show active work.",
 		"blocks":    slackBlocksForText("Ask WUPHF to list agents, mirror the current channel, search wiki content, or show active work."),
 	})
+}
+
+func (s *SlackTransport) slackReplyToForEvent(event slackMessageEvent) string {
+	if s.Broker == nil || strings.TrimSpace(event.ThreadTS) == "" || event.ThreadTS == event.Timestamp {
+		return ""
+	}
+	return s.Broker.slackMessageIDForTimestamp(event.Channel, event.ThreadTS)
+}
+
+func (s *SlackTransport) taggedOfficeMembers(text string) []string {
+	if s.Broker == nil {
+		return nil
+	}
+	mentioned := extractMentionedSlugs(text)
+	if len(mentioned) == 0 {
+		return nil
+	}
+	s.Broker.mu.Lock()
+	defer s.Broker.mu.Unlock()
+	tagged := make([]string, 0, len(mentioned))
+	for _, slug := range mentioned {
+		if s.Broker.findMemberLocked(slug) != nil {
+			tagged = append(tagged, slug)
+		}
+	}
+	return tagged
 }
 
 func (s *SlackTransport) handleAssistantThreadContextChanged(ctx context.Context, thread slackAssistantThread) {
@@ -597,6 +627,7 @@ func formatSlackOutbound(msg channelMessage) string {
 		sb.WriteString("_")
 		sb.WriteString(escapeSlackText(msg.Content))
 		sb.WriteString("_")
+		appendSlackChannelFootnote(&sb, msg)
 		return sb.String()
 	default:
 		if msg.From != "" {
@@ -611,7 +642,22 @@ func formatSlackOutbound(msg channelMessage) string {
 		sb.WriteString("] ")
 	}
 	sb.WriteString(escapeSlackText(msg.Content))
+	appendSlackChannelFootnote(&sb, msg)
 	return sb.String()
+}
+
+func appendSlackChannelFootnote(sb *strings.Builder, msg channelMessage) {
+	channel := normalizeChannelSlug(msg.Channel)
+	if channel == "" {
+		return
+	}
+	if strings.TrimSpace(msg.ReplyTo) != "" {
+		sb.WriteString("\n\n_Reply from WUPHF #")
+	} else {
+		sb.WriteString("\n\n_From WUPHF #")
+	}
+	sb.WriteString(escapeSlackText(channel))
+	sb.WriteString("_")
 }
 
 func slackBlocksForText(text string) []map[string]any {
