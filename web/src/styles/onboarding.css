@@ -3640,11 +3640,11 @@ html[data-theme^="nex"] .onboarding-chat .message {
    drives the blur-on-lock muted state via [data-input-locked] on the
    chat root. */
 .onboarding-card-shell {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg, 12px);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;

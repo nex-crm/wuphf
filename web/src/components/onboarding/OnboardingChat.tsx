@@ -373,21 +373,31 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
   }, [messages, revealedIds, pendingMsg, pendingState]);
 
   // Track scroll position + overflow + auto-pin to bottom on stream growth.
+  // `wasAtBottomRef` is the source of truth: we only auto-pin if the user
+  // was at the bottom right before the growth, so a deliberate scroll-up
+  // to re-read history is preserved across new messages.
+  const wasAtBottomRef = useRef(true);
   useEffect(() => {
     const el = streamRef.current;
     if (!el) return;
     const isAtBottom = () =>
-      el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
-    const onScroll = () => setAtBottom(isAtBottom());
-    const onResize = () => {
+      el.scrollHeight - el.scrollTop - el.clientHeight <= 4;
+    const onScroll = () => {
+      const at = isAtBottom();
+      wasAtBottomRef.current = at;
+      setAtBottom(at);
+    };
+    const pinIfNeeded = () => {
       setHasOverflow(el.scrollHeight - el.clientHeight > 2);
-      el.scrollTop = el.scrollHeight;
-      setAtBottom(true);
+      if (wasAtBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+        setAtBottom(true);
+      }
     };
     onScroll();
-    onResize();
+    pinIfNeeded();
     el.addEventListener("scroll", onScroll, { passive: true });
-    const observer = new ResizeObserver(onResize);
+    const observer = new ResizeObserver(pinIfNeeded);
     observer.observe(el);
     const stream = el.firstElementChild;
     if (stream) observer.observe(stream);
@@ -396,6 +406,28 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
       observer.disconnect();
     };
   }, []);
+
+  // rAF pin loop while anything is animating. CSS `max-height` transitions
+  // on the slot don't fire ResizeObserver on every frame, so scrollTop
+  // lags the animated height and the message settles above the fold. Re-
+  // pin every frame for the duration of the longest reveal step, but only
+  // if the user was at the bottom (preserves scroll-back).
+  useEffect(() => {
+    if (pendingState === "idle" && !postHumanDelay) return;
+    let rafId = 0;
+    const stopAt = performance.now() + ANIMATION_MS + 200;
+    const tick = (now: number) => {
+      const el = streamRef.current;
+      if (el && wasAtBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+      if (now < stopAt) {
+        rafId = requestAnimationFrame(tick);
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [pendingState, postHumanDelay, displayList.length]);
 
   const phase = state?.phase;
   const pendingSuggestion = parsePendingSuggestion(state?.pending_suggestion);
