@@ -2186,7 +2186,6 @@
 
 .pre-pick-secondary-button:hover:not(:disabled) {
   color: var(--text);
-  border-color: var(--border);
 }
 
 .pre-pick-secondary-button:focus-visible {
@@ -2456,6 +2455,15 @@
   min-height: 40px;
   padding: 0 18px;
   font-size: var(--text-sm);
+  /* +8px down from the items above — gives the primary action room
+     to breathe instead of sitting flush with the last chip/checkbox. */
+  margin-top: 8px;
+}
+/* Suppress the global `.btn:hover` translateY(-1px) lift inside the
+   wizard footer — the wizard's primary actions stay put on hover so
+   the muted/locked footer doesn't "twitch" when the mouse drifts over. */
+.onboarding-chat .ceo-card-submit.btn:not(:disabled):hover {
+  transform: none;
 }
 
 .ceo-card-section {
@@ -3008,7 +3016,7 @@
 .onboarding-chat-back:hover {
   background: var(--bg);
   color: var(--text);
-  transform: translateX(-2px);
+  /* No translate — hover stays still, only colour shifts. */
 }
 
 .onboarding-chat-back-label {
@@ -3682,6 +3690,33 @@ html[data-theme^="nex"] .onboarding-chat .message {
    text as markdown, not split spans — so the reveal is a single fade. */
 .onboarding-message-slot {
   position: relative;
+  /* Entrance: slot grows from 0 to natural height over 500 ms. The
+     `overflow: visible` makes the bubble content paint at its natural
+     position from frame 1, so the surrounding stream shifts down
+     smoothly while the bubble "inflates." 600px is a generous cap
+     that covers any single-bubble height; the `both` fill mode pins
+     it there at the end so subsequent layout doesn't snap back.
+     Anchored at top so it grows downward, not centered. */
+  overflow: visible;
+  transform-origin: top center;
+  animation: onboardingSlotGrow 500ms ease-in-out both;
+}
+/* Backlog (server-replayed) messages render at full size from the
+   start — they were already in the channel before the wizard
+   mounted, so animating them would look like a redundant replay.
+   The `instant` prop on OnboardingMessageSlot writes this class. */
+.onboarding-slot-instant {
+  animation: none;
+}
+@keyframes onboardingSlotGrow {
+  from {
+    max-height: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 600px;
+    opacity: 1;
+  }
 }
 
 /* Thinking state — the dot overlay is rendered conditionally and has no

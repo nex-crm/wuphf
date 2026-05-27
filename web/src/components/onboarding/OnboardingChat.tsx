@@ -26,7 +26,7 @@ import { useOnboardingState } from "./useOnboardingState";
 const ANIMATION_MS = 600;
 const THINK_MS = 500;
 const GAP_MS = 300;
-const POST_HUMAN_MS = 700;
+const POST_HUMAN_MS = 200;
 const WORD_FADE_MS = 600;
 const WORD_STAGGER_MS = 90;
 const WIZARD_EASE = "cubic-bezier(0.2, 0, 0.8, 1)";
@@ -297,27 +297,16 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
     const nextCeo = messages.find((m) => !revealedIds.has(m.id));
     if (!nextCeo || isHumanSender(nextCeo.from)) return;
 
-    // Consecutive CEO messages skip thinking — flow back-to-back.
-    let lastRevealedWasCeo = false;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (revealedIds.has(m.id)) {
-        lastRevealedWasCeo = !isHumanSender(m.from);
-        break;
-      }
-    }
-
-    if (lastRevealedWasCeo) {
-      const gapTimer = window.setTimeout(
-        () => {
-          setPendingMsg(nextCeo);
-          setPendingState("revealing");
-        },
-        Math.round(GAP_MS / 2),
-      );
-      return () => window.clearTimeout(gapTimer);
-    }
-
+    // Every CEO message goes through thinking → revealing. We used to
+    // skip thinking for "consecutive CEO" messages (when the last
+    // revealed was also CEO), but that branch fired incorrectly when
+    // the CEO message arrived in `messages` before the human echo
+    // had finished posting: the just-revealed previous CEO message
+    // looked like a CEO→CEO transition, so the next CEO popped in
+    // with no thinking dots even though it was a real reply to a
+    // human submit. Removing the skip means every CEO gets the
+    // dots — slightly more motion for true CEO→CEO bursts (scan
+    // → wiki updated → pick template) but consistent rhythm overall.
     const gapTimer = window.setTimeout(() => {
       setPendingMsg(nextCeo);
       setPendingState("thinking");
@@ -507,14 +496,33 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
     !isFirstGreet &&
     (pendingState !== "idle" || postHumanDelay || hasUnrevealedMessages);
 
-  // Blur active element on lock so a focused input can't sneak typing through.
+  // Blur active element on lock so a focused input can't sneak typing
+  // through. When the lock RELEASES, jump focus into the footer's first
+  // focusable element (text input for form-field cards, first chip for
+  // chip-row / checklist, etc.) so the user can keep typing without
+  // clicking back into the field every turn.
   useEffect(() => {
-    if (inputLocked && typeof document !== "undefined") {
+    if (typeof document === "undefined") return;
+    if (inputLocked) {
       const active = document.activeElement as HTMLElement | null;
       if (active && typeof active.blur === "function") {
         active.blur();
       }
+      return;
     }
+    // Lock just released. Wait a frame for the muted-state CSS
+    // transition to start and for the card to become interactive
+    // (pointer-events flips off via [data-input-locked] attribute),
+    // then focus the first input/button inside the footer.
+    const id = requestAnimationFrame(() => {
+      const shell = document.querySelector(".onboarding-card-shell");
+      if (!shell) return;
+      const target = shell.querySelector<HTMLElement>(
+        'input:not([disabled]),textarea:not([disabled]),[role="option"]:not([disabled]),button:not([disabled]):not(.ceo-card-skip)',
+      );
+      target?.focus();
+    });
+    return () => cancelAnimationFrame(id);
   }, [inputLocked]);
 
   return (
