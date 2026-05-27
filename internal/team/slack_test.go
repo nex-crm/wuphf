@@ -58,7 +58,9 @@ func TestSlackAgentManifestUsesAgentsAndAIAppSurface(t *testing.T) {
 	}
 	raw := string(data)
 	for _, want := range []string{
-		`"agent_view"`,
+		`"assistant_view"`,
+		`"assistant_description"`,
+		`"suggested_prompts"`,
 		`"assistant:write"`,
 		`"chat:write"`,
 		`"im:history"`,

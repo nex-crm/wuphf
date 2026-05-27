@@ -110,8 +110,18 @@ func slackAgentManifestForMember(member officeMember) map[string]any {
 				"display_name":  truncateManifestText(name, 80),
 				"always_online": true,
 			},
-			"agent_view": map[string]any{
-				"description": truncateManifestText(description, 260),
+			"assistant_view": map[string]any{
+				"assistant_description": truncateManifestText(description, 300),
+				"suggested_prompts": []map[string]string{
+					{
+						"title":   "Start office work",
+						"message": "What should I work on next?",
+					},
+					{
+						"title":   "Summarize context",
+						"message": "Summarize the WUPHF context for this channel.",
+					},
+				},
 			},
 		},
 		"oauth_config": map[string]any{
