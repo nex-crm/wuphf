@@ -16,6 +16,7 @@ import (
 )
 
 const slackAdapterName = "slack"
+const slackRestrictedChannelReply = "WUPHF is only enabled in Slack channels mapped from Settings > Slack. Use a private mapped channel to access this office."
 
 var _ transport.Transport = (*SlackTransport)(nil)
 
@@ -139,6 +140,10 @@ func (s *SlackTransport) slackChannelSlug(channelID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ChannelMap[channelID]
+}
+
+func (s *SlackTransport) assistantContextChannelSlug(c slackAssistantThreadContext) string {
+	return s.slackChannelSlug(c.ChannelID)
 }
 
 func (s *SlackTransport) slackChannelIDForSlug(channelSlug string) string {
@@ -339,6 +344,10 @@ func (s *SlackTransport) handleAssistantThreadStarted(ctx context.Context, threa
 	if thread.ChannelID == "" || thread.ThreadTS == "" {
 		return
 	}
+	if s.assistantContextChannelSlug(thread.Context) == "" {
+		_ = s.postRestrictedChannelReply(ctx, thread.ChannelID, thread.ThreadTS)
+		return
+	}
 	s.rememberAssistantContext(thread.ChannelID, thread.ThreadTS, thread.Context)
 	prompts := []slackAssistantPrompt{
 		{Title: "List agents", Message: "agent list"},
@@ -362,6 +371,10 @@ func (s *SlackTransport) handleAssistantThreadStarted(ctx context.Context, threa
 
 func (s *SlackTransport) handleAssistantThreadContextChanged(ctx context.Context, thread slackAssistantThread) {
 	if thread.ChannelID == "" || thread.ThreadTS == "" {
+		return
+	}
+	if s.assistantContextChannelSlug(thread.Context) == "" {
+		_ = s.postRestrictedChannelReply(ctx, thread.ChannelID, thread.ThreadTS)
 		return
 	}
 	s.rememberAssistantContext(thread.ChannelID, thread.ThreadTS, thread.Context)
@@ -413,13 +426,23 @@ func (s *SlackTransport) handleAssistantMessage(ctx context.Context, event slack
 		log.Printf("[slack] set assistant status failed: %v", err)
 	}
 	context := s.getAssistantContext(event.Channel, threadTS)
+	channelSlug := s.assistantContextChannelSlug(context)
+	if channelSlug == "" {
+		reply := slackRestrictedChannelReply
+		if err := s.streamAssistantReply(ctx, event.Channel, threadTS, reply); err != nil {
+			log.Printf("[slack] assistant restricted reply failed: %v", err)
+			_ = s.postRestrictedChannelReply(ctx, event.Channel, threadTS)
+		}
+		_ = s.client.setAssistantStatus(ctx, event.Channel, threadTS, "")
+		return
+	}
 	reply := s.dispatchSlackbotCommand(ctx, slackCommandContext{
 		UserID:    event.User,
 		ChannelID: event.Channel,
 		ThreadTS:  threadTS,
 		// For AI app DMs, ChannelSlug is the referring Slack channel when Slack
-		// supplies one; otherwise commands operate at office scope.
-		ChannelSlug: s.slackChannelSlug(context.ChannelID),
+		// supplies one, but only if that channel is mapped in Settings > Slack.
+		ChannelSlug: channelSlug,
 	}, normalizeSlackInboundText(event.Text, s.BotUserID))
 	if title := assistantTitleForText(event.Text); title != "" {
 		if err := s.client.setAssistantTitle(ctx, event.Channel, threadTS, title); err != nil {
@@ -483,7 +506,8 @@ func (s *SlackTransport) streamAssistantReply(ctx context.Context, channelID, th
 func (s *SlackTransport) handleSlashCommand(ctx context.Context, payload slackSlashCommandPayload) {
 	channelSlug := s.slackChannelSlug(payload.ChannelID)
 	if channelSlug == "" {
-		channelSlug = normalizeChannelSlug(payload.ChannelName)
+		_ = s.postRestrictedChannelReply(ctx, payload.ChannelID, "")
+		return
 	}
 	text := "wuphf " + strings.TrimSpace(payload.Text)
 	s.handleCommandText(ctx, slackCommandContext{
@@ -496,6 +520,12 @@ func (s *SlackTransport) handleSlashCommand(ctx context.Context, payload slackSl
 }
 
 func (s *SlackTransport) handleCommandText(ctx context.Context, c slackCommandContext, text string) {
+	if strings.TrimSpace(c.ChannelSlug) == "" {
+		if c.ChannelID != "" {
+			_ = s.postRestrictedChannelReply(ctx, c.ChannelID, c.ThreadTS)
+		}
+		return
+	}
 	reply := s.dispatchSlackbotCommand(ctx, c, text)
 	if strings.TrimSpace(reply) == "" {
 		return
@@ -511,6 +541,23 @@ func (s *SlackTransport) handleCommandText(ctx context.Context, c slackCommandCo
 	if _, err := s.client.postMessage(ctx, payload); err != nil {
 		log.Printf("[slack] command response failed: %v", err)
 	}
+}
+
+func (s *SlackTransport) postRestrictedChannelReply(ctx context.Context, channelID, threadTS string) error {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return nil
+	}
+	payload := map[string]any{
+		"channel": channelID,
+		"text":    slackRestrictedChannelReply,
+		"blocks":  slackBlocksForText(slackRestrictedChannelReply),
+	}
+	if threadTS != "" {
+		payload["thread_ts"] = threadTS
+	}
+	_, err := s.client.postMessage(ctx, payload)
+	return err
 }
 
 func (s *SlackTransport) markHealth(state transport.HealthState, err error) {

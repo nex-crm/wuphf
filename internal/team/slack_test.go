@@ -50,6 +50,40 @@ func TestSlackAgentCreateCommandCreatesOfficeMember(t *testing.T) {
 	}
 }
 
+func TestSlackSlashCommandRequiresMappedChannel(t *testing.T) {
+	b := newTestBroker(t)
+	var posted string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode slack request: %v", err)
+		}
+		if text, _ := body["text"].(string); text != "" {
+			posted = text
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"channel":"Cpublic","ts":"1.0"}`))
+	}))
+	defer srv.Close()
+
+	slack := NewSlackTransport(b, "xoxb-test", "xapp-test", "Ubot")
+	slack.client.baseURL = srv.URL
+	slack.handleSlashCommand(context.Background(), slackSlashCommandPayload{
+		Text:        "agent create qa Quality Agent",
+		ChannelID:   "Cpublic",
+		ChannelName: "new-channel",
+		UserID:      "U1",
+	})
+
+	if !strings.Contains(posted, "only enabled in Slack channels mapped") {
+		t.Fatalf("posted reply = %q", posted)
+	}
+	for _, member := range b.OfficeMembers() {
+		if member.Slug == "qa" {
+			t.Fatalf("unmapped Slack channel created member: %+v", member)
+		}
+	}
+}
+
 func TestSlackAgentManifestUsesAgentsAndAIAppSurface(t *testing.T) {
 	manifest := slackAgentManifestForMember(officeMember{Slug: "qa", Name: "Quality Agent", Role: "Checks WUPHF work"})
 	data, err := json.Marshal(manifest)
