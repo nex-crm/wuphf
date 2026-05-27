@@ -107,11 +107,13 @@ type Broker struct {
 	watchdogs               []watchdogAlert
 	scheduler               []schedulerJob
 	skills                  []teamSkill
-	skillDescEmbeddings     map[string][]float32         // slug → description embedding vector; guarded by mu
-	sharedMemory            map[string]map[string]string // namespace → key → value
-	lastTaggedAt            map[string]time.Time         // when each agent was last @mentioned
-	lastPaneSnapshot        map[string]string            // last captured pane content per agent (for change detection)
-	seenTelegramGroups      map[int64]string             // chat_id -> title, populated by transport
+	skillDescEmbeddings     map[string][]float32            // slug → description embedding vector; guarded by mu
+	sharedMemory            map[string]map[string]string    // namespace → key → value
+	lastTaggedAt            map[string]time.Time            // when each agent was last @mentioned
+	lastPaneSnapshot        map[string]string               // last captured pane content per agent (for change detection)
+	seenTelegramGroups      map[int64]string                // chat_id -> title, populated by transport
+	slackEvents             map[string]string               // Slack event/envelope IDs already accepted
+	slackOutbound           map[string]slackOutboundReceipt // WUPHF message ID -> Slack channel/ts
 	counter                 int
 	notificationSince       string
 	insightsSince           string
@@ -366,6 +368,8 @@ func NewBrokerAt(statePath string) *Broker {
 		userInboxCursors:    make(map[string]InboxCursor),
 		memberPresence:      make(map[string]memberPresenceRecord),
 		presenceKeyToSlug:   make(map[string]string),
+		slackEvents:         make(map[string]string),
+		slackOutbound:       make(map[string]slackOutboundReceipt),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
 		rateLimitRequests:   defaultRateLimitRequestsPerWindow,
@@ -618,6 +622,12 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/verify", b.requireAuth(b.handleTelegramVerify))
 	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
 	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
+	mux.HandleFunc("/slack/verify", b.requireAuth(b.handleSlackVerify))
+	mux.HandleFunc("/slack/channels", b.requireAuth(b.handleSlackChannels))
+	mux.HandleFunc("/slack/connect", b.requireAuth(b.handleSlackConnect))
+	mux.HandleFunc("/slack/disconnect", b.requireAuth(b.handleSlackDisconnect))
+	mux.HandleFunc("/slack/status", b.requireAuth(b.handleSlackStatus))
+	mux.HandleFunc("/slack/agent-app", b.requireAuth(b.handleSlackAgentApp))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))

@@ -74,6 +74,39 @@ func RegisterTransports(b *Broker) (func(), error) {
 		}
 	}
 
+	slackBotToken := config.ResolveSlackBotToken()
+	slackAppToken := config.ResolveSlackAppToken()
+	if slackBotToken != "" || slackAppToken != "" {
+		if slackBotToken == "" || slackAppToken == "" {
+			log.Printf("[transport] slack: both bot token and app token are required — skipping")
+		} else {
+			cfg, _ := config.Load()
+			t := NewSlackTransport(b, slackBotToken, slackAppToken, cfg.SlackBotUserID)
+			host := &brokerTransportHost{broker: b}
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			dispatchDone := make(chan struct{})
+			stops = append(stops, func() {
+				cancel()
+				<-done
+				<-dispatchDone
+			})
+			go func() {
+				defer close(done)
+				if err := t.Run(ctx, host); err != nil && ctx.Err() == nil {
+					log.Printf("[transport] slack: exited with error: %v", err)
+				}
+			}()
+			go func() {
+				defer close(dispatchDone)
+				if err := runOutboundDispatcher(ctx, b, t.Name(), t.FormatOutbound, t.Send); err != nil && ctx.Err() == nil {
+					log.Printf("[transport] slack: outbound dispatcher exited: %v", err)
+				}
+			}()
+			log.Printf("[transport] slack: started (%d mirrored channel(s), ai-app=true)", t.slackChannelCount())
+		}
+	}
+
 	// OpenClaw: opt-in when members exist or a gateway URL is configured.
 	bridge, ocErr := BuildOpenclawBridgeFromConfig(b)
 	if ocErr != nil {

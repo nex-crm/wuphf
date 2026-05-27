@@ -129,6 +129,14 @@ func (b *Broker) loadState() error {
 	b.requests = state.Requests
 	b.humanInvites = state.HumanInvites
 	b.humanSessions = state.HumanSessions
+	b.slackEvents = state.SlackEvents
+	if b.slackEvents == nil {
+		b.slackEvents = make(map[string]string)
+	}
+	b.slackOutbound = state.SlackOutbound
+	if b.slackOutbound == nil {
+		b.slackOutbound = make(map[string]slackOutboundReceipt)
+	}
 	b.actions = state.Actions
 	b.signals = state.Signals
 	b.decisions = state.Decisions
@@ -292,6 +300,8 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		Skills:            b.skills,
 		HumanInvites:      b.humanInvites,
 		HumanSessions:     b.humanSessions,
+		SlackEvents:       b.slackEvents,
+		SlackOutbound:     b.slackOutbound,
 		SharedMemory:      b.sharedMemory,
 		Counter:           b.counter,
 		NotificationSince: b.notificationSince,

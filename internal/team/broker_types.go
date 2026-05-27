@@ -72,6 +72,13 @@ type channelMessage struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+type slackOutboundReceipt struct {
+	MessageID string `json:"message_id"`
+	ChannelID string `json:"channel_id"`
+	Timestamp string `json:"timestamp"`
+	CreatedAt string `json:"created_at"`
+}
+
 type agentIssueRecord struct {
 	ID                string `json:"id"`
 	Agent             string `json:"agent"`
@@ -625,31 +632,33 @@ type teamSkill struct {
 }
 
 type brokerState struct {
-	ChannelStore      json.RawMessage              `json:"channel_store,omitempty"`
-	Messages          []channelMessage             `json:"messages"`
-	AgentIssues       []agentIssueRecord           `json:"agent_issues,omitempty"`
-	Members           []officeMember               `json:"members,omitempty"`
-	Channels          []teamChannel                `json:"channels,omitempty"`
-	SessionMode       string                       `json:"session_mode,omitempty"`
-	OneOnOneAgent     string                       `json:"one_on_one_agent,omitempty"`
-	FocusMode         bool                         `json:"focus_mode,omitempty"`
-	Tasks             []teamTask                   `json:"tasks,omitempty"`
-	Requests          []humanInterview             `json:"requests,omitempty"`
-	Actions           []officeActionLog            `json:"actions,omitempty"`
-	Signals           []officeSignalRecord         `json:"signals,omitempty"`
-	Decisions         []officeDecisionRecord       `json:"decisions,omitempty"`
-	Watchdogs         []watchdogAlert              `json:"watchdogs,omitempty"`
-	Scheduler         []schedulerJob               `json:"scheduler,omitempty"`
-	Skills            []teamSkill                  `json:"skills,omitempty"`
-	HumanInvites      []humanInvite                `json:"human_invites,omitempty"`
-	HumanSessions     []humanSession               `json:"human_sessions,omitempty"`
-	SharedMemory      map[string]map[string]string `json:"shared_memory,omitempty"`
-	Counter           int                          `json:"counter"`
-	NotificationSince string                       `json:"notification_since,omitempty"`
-	InsightsSince     string                       `json:"insights_since,omitempty"`
-	PendingInterview  *humanInterview              `json:"pending_interview,omitempty"`
-	Usage             teamUsageState               `json:"usage,omitempty"`
-	Policies          []officePolicy               `json:"policies,omitempty"`
+	ChannelStore      json.RawMessage                 `json:"channel_store,omitempty"`
+	Messages          []channelMessage                `json:"messages"`
+	AgentIssues       []agentIssueRecord              `json:"agent_issues,omitempty"`
+	Members           []officeMember                  `json:"members,omitempty"`
+	Channels          []teamChannel                   `json:"channels,omitempty"`
+	SessionMode       string                          `json:"session_mode,omitempty"`
+	OneOnOneAgent     string                          `json:"one_on_one_agent,omitempty"`
+	FocusMode         bool                            `json:"focus_mode,omitempty"`
+	Tasks             []teamTask                      `json:"tasks,omitempty"`
+	Requests          []humanInterview                `json:"requests,omitempty"`
+	Actions           []officeActionLog               `json:"actions,omitempty"`
+	Signals           []officeSignalRecord            `json:"signals,omitempty"`
+	Decisions         []officeDecisionRecord          `json:"decisions,omitempty"`
+	Watchdogs         []watchdogAlert                 `json:"watchdogs,omitempty"`
+	Scheduler         []schedulerJob                  `json:"scheduler,omitempty"`
+	Skills            []teamSkill                     `json:"skills,omitempty"`
+	HumanInvites      []humanInvite                   `json:"human_invites,omitempty"`
+	HumanSessions     []humanSession                  `json:"human_sessions,omitempty"`
+	SlackEvents       map[string]string               `json:"slack_events,omitempty"`
+	SlackOutbound     map[string]slackOutboundReceipt `json:"slack_outbound,omitempty"`
+	SharedMemory      map[string]map[string]string    `json:"shared_memory,omitempty"`
+	Counter           int                             `json:"counter"`
+	NotificationSince string                          `json:"notification_since,omitempty"`
+	InsightsSince     string                          `json:"insights_since,omitempty"`
+	PendingInterview  *humanInterview                 `json:"pending_interview,omitempty"`
+	Usage             teamUsageState                  `json:"usage,omitempty"`
+	Policies          []officePolicy                  `json:"policies,omitempty"`
 }
 
 type usageTotals struct {

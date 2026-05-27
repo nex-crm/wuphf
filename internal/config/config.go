@@ -66,6 +66,13 @@ type Config struct {
 	TaskReminderMinutes int      `json:"task_reminder_minutes,omitempty"`
 	TaskRecheckMinutes  int      `json:"task_recheck_minutes,omitempty"`
 	TelegramBotToken    string   `json:"telegram_bot_token,omitempty"`
+	SlackBotToken       string   `json:"slack_bot_token,omitempty"`
+	SlackAppToken       string   `json:"slack_app_token,omitempty"`
+	SlackSigningSecret  string   `json:"slack_signing_secret,omitempty"`
+	SlackAppConfigToken string   `json:"slack_app_config_token,omitempty"`
+	SlackTeamID         string   `json:"slack_team_id,omitempty"`
+	SlackAppID          string   `json:"slack_app_id,omitempty"`
+	SlackBotUserID      string   `json:"slack_bot_user_id,omitempty"`
 	CompanyName         string   `json:"company_name,omitempty"`
 	CompanyDescription  string   `json:"company_description,omitempty"`
 	CompanyGoals        string   `json:"company_goals,omitempty"`
@@ -600,6 +607,54 @@ func SaveTelegramBotToken(token string) {
 	cfg, _ := Load()
 	cfg.TelegramBotToken = strings.TrimSpace(token)
 	_ = Save(cfg)
+}
+
+// ResolveSlackBotToken returns the Slack bot token from env > config.
+func ResolveSlackBotToken() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_SLACK_BOT_TOKEN")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("SLACK_BOT_TOKEN")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.SlackBotToken)
+}
+
+// ResolveSlackAppToken returns the Slack Socket Mode app token from env > config.
+func ResolveSlackAppToken() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_SLACK_APP_TOKEN")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("SLACK_APP_TOKEN")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.SlackAppToken)
+}
+
+// ResolveSlackSigningSecret returns the Slack signing secret from env > config.
+func ResolveSlackSigningSecret() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_SLACK_SIGNING_SECRET")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("SLACK_SIGNING_SECRET")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.SlackSigningSecret)
+}
+
+// ResolveSlackAppConfigToken returns the optional Slack app configuration token from env > config.
+func ResolveSlackAppConfigToken() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_SLACK_APP_CONFIG_TOKEN")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("SLACK_APP_CONFIG_TOKEN")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.SlackAppConfigToken)
 }
 
 // CompanyContextBlock returns a prompt fragment with company context for agent

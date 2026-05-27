@@ -183,6 +183,11 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"one_key_set":          config.ResolveOneSecret() != "",
 			"composio_key_set":     config.ResolveComposioAPIKey() != "",
 			"telegram_token_set":   config.ResolveTelegramBotToken() != "",
+			"slack_bot_token_set":  config.ResolveSlackBotToken() != "",
+			"slack_app_token_set":  config.ResolveSlackAppToken() != "",
+			"slack_team_id":        cfg.SlackTeamID,
+			"slack_app_id":         cfg.SlackAppID,
+			"slack_bot_user_id":    cfg.SlackBotUserID,
 			"openclaw_token_set":   config.ResolveOpenclawToken() != "",
 			"openclaw_gateway_url": config.ResolveOpenclawGatewayURL(),
 			// Config file path (informational)
@@ -223,6 +228,13 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			OneAPIKey       *string `json:"one_api_key,omitempty"`
 			ComposioAPIKey  *string `json:"composio_api_key,omitempty"`
 			TelegramToken   *string `json:"telegram_bot_token,omitempty"`
+			SlackBotToken   *string `json:"slack_bot_token,omitempty"`
+			SlackAppToken   *string `json:"slack_app_token,omitempty"`
+			SlackSignSecret *string `json:"slack_signing_secret,omitempty"`
+			SlackConfigTok  *string `json:"slack_app_config_token,omitempty"`
+			SlackTeamID     *string `json:"slack_team_id,omitempty"`
+			SlackAppID      *string `json:"slack_app_id,omitempty"`
+			SlackBotUserID  *string `json:"slack_bot_user_id,omitempty"`
 			OpenclawToken   *string `json:"openclaw_token,omitempty"`
 			OpenclawGateway *string `json:"openclaw_gateway_url,omitempty"`
 			// ProviderEndpoints is a partial-update map: keys present in
@@ -450,6 +462,34 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.TelegramToken != nil {
 			cfg.TelegramBotToken = strings.TrimSpace(*body.TelegramToken)
+			changed = true
+		}
+		if body.SlackBotToken != nil {
+			cfg.SlackBotToken = strings.TrimSpace(*body.SlackBotToken)
+			changed = true
+		}
+		if body.SlackAppToken != nil {
+			cfg.SlackAppToken = strings.TrimSpace(*body.SlackAppToken)
+			changed = true
+		}
+		if body.SlackSignSecret != nil {
+			cfg.SlackSigningSecret = strings.TrimSpace(*body.SlackSignSecret)
+			changed = true
+		}
+		if body.SlackConfigTok != nil {
+			cfg.SlackAppConfigToken = strings.TrimSpace(*body.SlackConfigTok)
+			changed = true
+		}
+		if body.SlackTeamID != nil {
+			cfg.SlackTeamID = strings.TrimSpace(*body.SlackTeamID)
+			changed = true
+		}
+		if body.SlackAppID != nil {
+			cfg.SlackAppID = strings.TrimSpace(*body.SlackAppID)
+			changed = true
+		}
+		if body.SlackBotUserID != nil {
+			cfg.SlackBotUserID = strings.TrimSpace(*body.SlackBotUserID)
 			changed = true
 		}
 		if body.OpenclawToken != nil {
@@ -1429,6 +1469,23 @@ func (b *Broker) SurfaceChannels(provider string) []teamChannel {
 			cp.Surface = &s
 			out = append(out, cp)
 		}
+	}
+	return out
+}
+
+func (b *Broker) Channels() []teamChannel {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]teamChannel, 0, len(b.channels))
+	for _, ch := range b.channels {
+		cp := ch
+		cp.Members = append([]string(nil), ch.Members...)
+		cp.Disabled = append([]string(nil), ch.Disabled...)
+		if ch.Surface != nil {
+			surface := *ch.Surface
+			cp.Surface = &surface
+		}
+		out = append(out, cp)
 	}
 	return out
 }
