@@ -150,30 +150,33 @@ describe("<CeoExecutionLineup>", () => {
     expect(screen.getByTestId("lineup-submit")).toBeDisabled();
   });
 
-  it("shows spinner text in submitting state", () => {
+  it("keeps the action label in submitting state (no spinner swap)", () => {
     setup(PAYLOAD, "submitting");
-    expect(screen.getByTestId("lineup-submit")).toHaveTextContent(
-      "Spinning up",
-    );
+    // The submitting state no longer swaps the button label to a
+    // spinner — between-question loaders read as flicker because the
+    // next card swaps in immediately via setQueryData. The button just
+    // stays disabled with the same label so the user sees what they
+    // submitted.
+    expect(screen.getByTestId("lineup-submit")).toHaveTextContent("Spin up");
+    expect(screen.getByTestId("lineup-submit")).toBeDisabled();
   });
 
   // ── Committed state ───────────────────────────────────────────────
 
-  it("renders committed confirmation in committed state", () => {
+  it("keeps the lineup visible in committed state — no chip swap", () => {
     setup(PAYLOAD, "committed");
-    expect(screen.getByTestId("lineup-committed")).toBeInTheDocument();
-    // 3 agents accepted by default before commit.
-    expect(screen.getByTestId("lineup-committed")).toHaveTextContent(
-      "agents added to roster",
-    );
-  });
-
-  it("does not render agent rows in committed state", () => {
-    setup(PAYLOAD, "committed");
-    expect(screen.queryByTestId("ceo-execution-lineup")).toBeNull();
+    // The committed state no longer replaces the lineup with a
+    // "✓ N agents added to roster" chip — that flashed between cards
+    // because the sticky-suggestion swap is near-instant. The lineup
+    // stays mounted, just disabled.
+    expect(screen.queryByTestId("lineup-committed")).toBeNull();
+    expect(screen.getByTestId("ceo-execution-lineup")).toBeInTheDocument();
     for (const agent of PAYLOAD.agents) {
-      expect(screen.queryByTestId(`lineup-agent-row-${agent.slug}`)).toBeNull();
+      expect(
+        screen.getByTestId(`lineup-agent-row-${agent.slug}`),
+      ).toBeInTheDocument();
     }
+    expect(screen.getByTestId("lineup-submit")).toBeDisabled();
   });
 
   // ── XSS sanitization regression ───────────────────────────────────

@@ -2475,17 +2475,26 @@
    `.ceo-card` directly so we don't need a wrapper. */
 .onboarding-chat .ceo-card-section,
 .onboarding-chat .ceo-card {
+  /* Smooth fade in/out for the muted state. Longer than the previous
+     220 ms because filter:blur() interpolation looks coarser than plain
+     opacity and benefits from a slower curve. */
   transition:
-    filter 220ms cubic-bezier(0.2, 0, 0.8, 1),
-    opacity 220ms cubic-bezier(0.2, 0, 0.8, 1);
+    filter 360ms cubic-bezier(0.2, 0, 0.2, 1),
+    opacity 360ms cubic-bezier(0.2, 0, 0.2, 1);
 }
 .onboarding-chat[data-input-locked="true"] .ceo-card {
+  /* Muted state: blur the card while it's not interactable so it visibly
+     reads as "wait, not your turn yet." Pointer + selection still
+     blocked. Focus chrome on inputs is NOT touched — see the rule
+     below the shell which is the same idea applied to the outer shell. */
   filter: blur(3px);
   opacity: 0.6;
+  pointer-events: none;
+  user-select: none;
 }
-.onboarding-chat[data-input-locked="true"] .ceo-card--form-field:focus-within {
-  outline-color: var(--border);
-}
+/* Locked-state DOES NOT touch the focus outline. Disabling interaction
+   (pointer-events + user-select above) is enough — visually the card
+   keeps whatever focus chrome it would normally have. */
 
 /* Base CEO card */
 .ceo-card {
@@ -3080,9 +3089,17 @@
   width: 100%;
   max-height: 640px;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  /* Plain block scroll container — flex hacks (column +
+     `::before margin-top:auto` OR row + `align-items: end`) BOTH
+     interact badly with `overflow-y: auto`: the cross-axis sizing
+     pegs the body to its own clientHeight so overflow detection
+     thinks there's nothing to scroll, and the stream gets clipped.
+     A plain block element with overflow-y scrolls the way browsers
+     have done it since 1996. Bottom-anchoring (the "last message
+     sits just above the footer" feel) is delivered by the
+     scrollIntoView call on the end-of-stream sentinel — see
+     OnboardingChat.tsx. */
+  display: block;
   /* Scrolling stays functional (wheel/touch) but the native
      scrollbar UI is hidden via `scrollbar-width: none` and the
      `::-webkit-scrollbar` rule below. The visual scroll affordance
@@ -3129,14 +3146,9 @@
   opacity: 1;
 }
 
-/* The spacer that bottom-anchors the stream when content fits, and
-   collapses to 0 when content overflows — letting the scroll engage
-   normally. */
-.onboarding-chat-body::before {
-  content: "";
-  margin-top: auto;
-  flex-shrink: 0;
-}
+/* Bottom-anchoring is now done in JS via scrollIntoView on the
+   end-of-stream sentinel; the ::before spacer hack is no longer
+   needed and would only confuse the block layout. */
 
 /* Hide WebKit's native scrollbar. Scrolling still works via
    wheel/touch/keyboard; the visual cue is the gradient mask above. */
@@ -3147,13 +3159,15 @@
 .onboarding-chat-stream {
   width: 100%;
   max-width: 640px;
+  /* Center inside the now-plain-block body. */
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   /* Match the horizontal inset of `.ceo-card-section` (the input card's
      outer wrapper inside the footer) so message bubbles sit in the same
-     720px column as the input card and their left edges visually line
-     up with the card's outer edge. `border-box` keeps the outer width
-     pinned at the 720px max regardless of the inner padding. */
+     column as the input card and their left edges visually line up
+     with the card's outer edge. `border-box` keeps the outer width
+     pinned at the max regardless of the inner padding. */
   padding: 0 40px;
   box-sizing: border-box;
 }
@@ -3388,41 +3402,12 @@ html[data-theme^="nex"] .onboarding-chat .message {
    `both` fill mode leaves the bubble at max-height: 200px — well
    above any expected single-bubble height, so it does not clip real
    content. */
-@keyframes onboardingBubbleEnter {
-  /* Single uniform animation — opacity, transform and max-height all
-     interpolate continuously from `from` to `to` across the whole
-     800ms duration on the same easing curve. */
-  from {
-    opacity: 0;
-    transform: translateY(14px);
-    max-height: 0;
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-    max-height: 200px;
-  }
-}
-.onboarding-chat .message.animate-fade {
-  /* ONE animation only — using the same keyframe / duration / curve
-     regardless of `data-ceo-bubble-state`. Previously a separate
-     override for `[data-ceo-bubble-state="pending"]` swapped to a
-     longer keyframe; when the attribute flipped to "revealed" after
-     the typing dots resolved, the CSS animation declaration changed,
-     which per CSS spec RESTARTS the animation from frame 0. The
-     bubble visibly collapsed back to max-height 0 / opacity 0 and
-     re-grew — that was the "items move, message appears, items
-     bounce back" sequence. Keeping a single animation declaration on
-     the same class means flipping the data attribute touches only
-     the inner content (dots ↔ text) — never the bubble's geometry. */
-  /* Long, gentle animation with a curve that spreads progress evenly
-     across the duration so the growth is visibly perceptible from
-     start to finish, instead of front-loading so much progress that
-     the bubble reads as "already there" after ~200ms. */
-  animation: onboardingBubbleEnter 800ms cubic-bezier(0.2, 0, 0.8, 1) both;
-  will-change: transform, opacity, max-height;
-  overflow: hidden;
-}
+/* Slot-grow / max-height entrance animation removed — onboarding bubbles
+   now use the global `.animate-fade` (300ms opacity + translateY fade-in
+   defined in global.css), matching the rest of the app's message chrome.
+   No max-height interpolation means the bubble takes its natural height
+   immediately; the parent stream pads with `gap` so successive bubbles
+   still settle without snapping. */
 
 /* The typing bubble itself eases in on the full wizard cadence so
    there's a clear "CEO heard me → starting to type" moment. */
@@ -3648,23 +3633,99 @@ html[data-theme^="nex"] .onboarding-chat .message {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Same curve as the inner .ceo-card transition so both layers fade
+     in/out together as the muted state toggles. */
   transition:
-    filter 220ms ease,
-    opacity 220ms ease;
+    filter 360ms cubic-bezier(0.2, 0, 0.2, 1),
+    opacity 360ms cubic-bezier(0.2, 0, 0.2, 1);
 }
 .onboarding-chat[data-input-locked="true"] .onboarding-card-shell {
+  /* Muted state for the outer footer shell — blur + dim so the whole
+     footer reads as "waiting" while the CEO is mid-reveal. Interaction
+     is blocked. The transition on the shell above smooths the blur in
+     and out so it doesn't flash. */
   filter: blur(3px);
   opacity: 0.6;
   pointer-events: none;
   user-select: none;
 }
-.onboarding-chat[data-input-locked="true"]
-  .onboarding-card-shell
-  .ceo-card-input {
-  border-color: var(--border);
-  box-shadow: none;
-  outline: none;
-}
 .onboarding-card-shell .interview-bar {
   display: none !important;
+}
+
+/* CEO badge inside the onboarding wizard — the agent's full `role`
+   ("Owns priorities, approvals, and escalation decisions") is too long
+   for a chat-row badge. Replace the visible label with a short "CEO"
+   chip via a CSS content swap; the underlying React tree is unchanged. */
+.onboarding-message-slot .message[data-author-slug="ceo"] .badge.badge-green {
+  font-size: 0;
+  letter-spacing: normal;
+}
+.onboarding-message-slot
+  .message[data-author-slug="ceo"]
+  .badge.badge-green::before {
+  content: "CEO";
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ─── Unified bubble + thinking overlay ──────────────────────────────────
+   Both CEO and human render through `MessageBubble`, so chrome (avatar,
+   name, badge, timestamp, padding, hover affordances) is byte-for-byte
+   identical on both sides. The only CEO-specific addition is the
+   thinking overlay layered on the slot while `data-state="thinking"`:
+   CSS hides the real `.message-text` and replaces it with dots in-place,
+   then cross-fades back to the text once the slot flips to revealing.
+   The previous per-word stagger doesn't apply — MessageBubble renders
+   text as markdown, not split spans — so the reveal is a single fade. */
+.onboarding-message-slot {
+  position: relative;
+}
+
+/* Thinking state — the dot overlay is rendered conditionally and has no
+   in/out transition: it appears the instant state flips to "thinking"
+   and disappears the instant it leaves. The `.message-text` is kept in
+   the DOM (so its split-into-words spans exist from mount) but visually
+   hidden via visibility so the bubble's footprint doesn't change. */
+.onboarding-message-slot[data-state="thinking"] .message-text,
+.onboarding-message-slot[data-state="thinking"] .message-time,
+.onboarding-message-slot[data-state="thinking"] .message-hover-actions {
+  visibility: hidden;
+}
+
+.onboarding-thinking-overlay {
+  position: absolute;
+  /* `left` and `top` are written by JS to match `.message-text`'s exact
+     position inside MessageBubble's layout. Hardcoded offsets drifted
+     out of alignment whenever MessageBubble's internal padding/grid
+     changed; measuring at runtime is robust to that. */
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+/* Per-word reveal — `.ceo-word` spans are produced by the
+   OnboardingMessageSlot useEffect after MessageBubble mounts. Each span
+   carries its own `transition-delay`, so they fade in one-by-one when
+   the slot flips to revealing/revealed. The .message-text itself does
+   NOT animate; only the individual words do. */
+.onboarding-message-slot .ceo-word {
+  opacity: 0;
+  transition: opacity var(--onboarding-word-fade-ms, 600ms)
+    var(--onboarding-anim-ease, ease);
+}
+.onboarding-message-slot[data-state="revealing"] .ceo-word,
+.onboarding-message-slot[data-state="revealed"] .ceo-word {
+  opacity: 1;
+}
+/* Backlog (instant) messages skip the per-word stagger — they were
+   already there before the wizard mounted, so they should look final. */
+.onboarding-slot-instant .ceo-word {
+  opacity: 1;
+  transition: none;
 }

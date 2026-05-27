@@ -40,20 +40,16 @@ export function CeoFormField({
     }
   }, [stage]);
 
-  if (stage === "committed") {
-    return (
-      <div className="ceo-card ceo-card--committed" role="status">
-        <span className="ceo-card-committed-text">
-          &#10003; {committedValue ?? value}
-        </span>
-      </div>
-    );
-  }
+  // Committed state intentionally renders the SAME input view as
+  // pending/submitting — just disabled. The previous "✓ <answer>"
+  // confirmation chip was flashing briefly between cards (because the
+  // sticky-suggestion swap is near-instant), and read as noise rather
+  // than acknowledgement.
 
   const canSubmit = value.trim().length > 0 || payload.optional;
 
   const handleSubmit = () => {
-    if (stage === "submitting") return;
+    if (stage !== "pending") return;
     const trimmed = value.trim();
     if (!(trimmed || payload.optional)) return;
     onSubmit(payload.field, trimmed);
@@ -77,7 +73,7 @@ export function CeoFormField({
           className="ceo-card-input"
           value={value}
           placeholder={payload.placeholder ?? ""}
-          disabled={stage === "submitting"}
+          disabled={stage !== "pending"}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -94,7 +90,7 @@ export function CeoFormField({
           <button
             type="button"
             className="btn btn-ghost btn-sm ceo-card-skip"
-            disabled={stage === "submitting"}
+            disabled={stage !== "pending"}
             onClick={() => onSkip(payload.field)}
             aria-label={`Skip ${payload.label}`}
           >
@@ -104,29 +100,29 @@ export function CeoFormField({
         <button
           type="button"
           className="ceo-card-send"
-          disabled={stage === "submitting" || !canSubmit}
+          disabled={stage !== "pending" || !canSubmit}
           onClick={handleSubmit}
           aria-label={`Submit ${payload.label}`}
           title="Submit (Enter)"
         >
-          {stage === "submitting" ? (
-            <span className="ceo-card-spinner" aria-hidden="true" />
-          ) : (
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="5" y1="12" x2="19" y2="12" />
-              <polyline points="12 5 19 12 12 19" />
-            </svg>
-          )}
+          {/* Submitting state shows no spinner — the wizard now swaps
+              to the next card almost instantly via setQueryData, so a
+              loader between questions just flashes and reads as noise.
+              The `disabled` attribute already prevents double-submit. */}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <line x1="5" y1="12" x2="19" y2="12" />
+            <polyline points="12 5 19 12 12 19" />
+          </svg>
         </button>
       </div>
     </div>

@@ -41,23 +41,14 @@ export function CeoChecklist({
       submitRef.current;
   }
 
-  if (stage === "committed") {
-    const labels =
-      committedValue ??
-      payload.items
-        .filter((item) => checked.has(item.id))
-        .map((item) => item.label);
-    return (
-      <div className="ceo-card ceo-card--committed" role="status">
-        <span className="ceo-card-committed-text">
-          &#10003; {labels.join(", ")}
-        </span>
-      </div>
-    );
-  }
+  // Committed state intentionally renders the SAME checklist view as
+  // pending/submitting — just disabled. The previous "✓ <items>" chip
+  // was flashing between cards because the sticky-suggestion swap is
+  // near-instant.
+  void committedValue;
 
   const toggle = (id: string) => {
-    if (stage === "submitting") return;
+    if (stage !== "pending") return;
     setChecked((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -67,7 +58,7 @@ export function CeoChecklist({
   };
 
   const handleSubmit = () => {
-    if (stage === "submitting") return;
+    if (stage !== "pending") return;
     onSubmit(payload.field, [...checked]);
   };
 
@@ -89,7 +80,7 @@ export function CeoChecklist({
                   type="checkbox"
                   className="ceo-checklist-checkbox"
                   checked={isChecked}
-                  disabled={stage === "submitting"}
+                  disabled={stage !== "pending"}
                   onChange={() => toggle(item.id)}
                   aria-label={item.label}
                 />
@@ -118,15 +109,10 @@ export function CeoChecklist({
           ref={submitRef}
           type="button"
           className="btn btn-primary ceo-card-submit"
-          disabled={stage === "submitting" || checked.size === 0}
+          disabled={stage !== "pending" || checked.size === 0}
           onClick={handleSubmit}
         >
-          {stage === "submitting" ? (
-            <span className="ceo-card-spinner" aria-hidden="true" />
-          ) : null}
-          {stage === "submitting"
-            ? "Saving…"
-            : (payload.submit_label ?? "Submit")}
+          {payload.submit_label ?? "Submit"}
         </button>
       </div>
     </div>

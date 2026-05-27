@@ -10,17 +10,14 @@
  * destination, not the wizard.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import type { Message } from "../../api/client";
 import { useMessages } from "../../hooks/useMessages";
-import { formatTime } from "../../lib/format";
 import { directChannelSlug } from "../../stores/app";
 import { InterviewBar } from "../messages/InterviewBar";
 import { MessageBubble } from "../messages/MessageBubble";
-import { HarnessBadge } from "../ui/HarnessBadge";
-import { PixelAvatar } from "../ui/PixelAvatar";
 import { OnboardingDMContextProvider } from "./OnboardingDMRoute";
 import type { CeoSuggestion } from "./types";
 import { useOnboardingState } from "./useOnboardingState";
@@ -31,132 +28,129 @@ const THINK_MS = 500;
 const GAP_MS = 300;
 const POST_HUMAN_MS = 700;
 const WORD_FADE_MS = 600;
-const WORD_STAGGER_MS = 110;
+const WORD_STAGGER_MS = 90;
 const WIZARD_EASE = "cubic-bezier(0.2, 0, 0.8, 1)";
 
 type CeoBubbleState = "thinking" | "revealing" | "revealed";
 
 /**
- * CEO bubble — single element with both the thinking dots and the real
- * message content stacked in the .message-text slot as overlapping grid
- * layers, cross-faded via data-pending.
+ * Single slot used for both CEO and human messages. The bubble itself is
+ * always `MessageBubble`, so chrome (avatar, name, badge, timestamp,
+ * spacing) is byte-for-byte identical across both sides. The only CEO-
+ * specific additions are:
+ *   1. A thinking-dot overlay rendered while `data-state="thinking"`. It
+ *      appears/disappears instantly (no fade) when state flips.
+ *   2. Per-word opacity reveal on the message text: after MessageBubble
+ *      mounts, text nodes inside `.message-text` are split into
+ *      `<span class="ceo-word">` spans with a per-word `transition-delay`,
+ *      so CSS can fade each word in one-by-one when the slot transitions
+ *      to `revealing` / `revealed`.
  */
-function CeoOnboardingBubble({
-  message,
-  pending,
-}: {
-  message: Message;
-  pending: boolean;
-}) {
-  return (
-    <div
-      className="message"
-      data-msg-id={message.id}
-      data-author-kind="agent"
-      data-author-slug={CEO_AGENT_SLUG}
-    >
-      <div className="message-avatar avatar-with-harness" aria-hidden="true">
-        <PixelAvatar slug={CEO_AGENT_SLUG} size={24} />
-        <HarnessBadge
-          kind="claude-code"
-          size={14}
-          className="harness-badge-on-avatar"
-        />
-      </div>
-      <div className="message-content">
-        <div className="message-header">
-          <span className="message-author">CEO</span>
-          <span className="badge badge-green">CEO</span>
-          {!pending && message.timestamp ? (
-            <span className="message-time" title={message.timestamp}>
-              {formatTime(message.timestamp)}
-            </span>
-          ) : null}
-        </div>
-        <div className="message-text ceo-text-slot" data-pending={pending}>
-          <div
-            className="ceo-text-layer ceo-text-dots"
-            aria-label="CEO is thinking"
-            aria-hidden={!pending}
-          >
-            <span className="onboarding-thinking-dot" />
-            <span className="onboarding-thinking-dot" />
-            <span className="onboarding-thinking-dot" />
-          </div>
-          <div
-            className="ceo-text-layer ceo-text-content"
-            aria-hidden={pending}
-          >
-            <span aria-label={message.content}>
-              {message.content.split(/(\s+)/).map((token, i) =>
-                /^\s+$/.test(token) ? (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: positional tokens
-                  <span key={`s${i}`} aria-hidden="true">
-                    {token}
-                  </span>
-                ) : (
-                  <span
-                    // biome-ignore lint/suspicious/noArrayIndexKey: positional tokens
-                    key={`w${i}`}
-                    className="ceo-word"
-                    aria-hidden="true"
-                    style={{
-                      transitionDelay: pending
-                        ? "0ms"
-                        : `${(i / 2) * WORD_STAGGER_MS}ms`,
-                    }}
-                  >
-                    {token}
-                  </span>
-                ),
-              )}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CeoMessageSlot({
+function OnboardingMessageSlot({
   message,
   state,
+  isCeo,
   instant,
 }: {
   message: Message;
   state: CeoBubbleState;
+  isCeo: boolean;
   instant?: boolean;
 }) {
   const instantRef = useRef(instant === true);
+  const slotRef = useRef<HTMLDivElement>(null);
+
+  // After the bubble mounts, split CEO message text into per-word spans
+  // so CSS can stagger the opacity reveal. Runs once per message.id.
+  useEffect(() => {
+    if (!isCeo) return;
+    const slot = slotRef.current;
+    if (!slot) return;
+    const textEl = slot.querySelector(".message-text");
+    if (!textEl || textEl.querySelector(".ceo-word")) return;
+
+    const walker = document.createTreeWalker(textEl, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    let node: Node | null = walker.nextNode();
+    while (node) {
+      textNodes.push(node as Text);
+      node = walker.nextNode();
+    }
+
+    let wordIndex = 0;
+    for (const textNode of textNodes) {
+      const text = textNode.textContent ?? "";
+      if (!text) continue;
+      const tokens = text.split(/(\s+)/);
+      const fragment = document.createDocumentFragment();
+      for (const token of tokens) {
+        if (!token) continue;
+        if (/^\s+$/.test(token)) {
+          fragment.appendChild(document.createTextNode(token));
+        } else {
+          const span = document.createElement("span");
+          span.className = "ceo-word";
+          span.textContent = token;
+          // For backlog (instant) messages, skip the stagger so they
+          // settle into final state immediately.
+          if (!instantRef.current) {
+            span.style.transitionDelay = `${wordIndex * WORD_STAGGER_MS}ms`;
+          }
+          wordIndex++;
+          fragment.appendChild(span);
+        }
+      }
+      textNode.parentNode?.replaceChild(fragment, textNode);
+    }
+  }, [isCeo, message.id]);
+
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Anchor the thinking overlay to wherever `.message-text` actually sits
+  // inside MessageBubble's layout — hardcoded offsets drift the moment
+  // MessageBubble's internal padding/grid changes. Runs while thinking
+  // because the text element exists (visibility-hidden, but laid out).
+  useEffect(() => {
+    if (!isCeo || state !== "thinking") return;
+    const slot = slotRef.current;
+    const overlay = overlayRef.current;
+    if (!(slot && overlay)) return;
+    const textEl = slot.querySelector(".message-text");
+    if (!(textEl instanceof HTMLElement)) return;
+    const place = () => {
+      const slotRect = slot.getBoundingClientRect();
+      const textRect = textEl.getBoundingClientRect();
+      overlay.style.left = `${textRect.left - slotRect.left}px`;
+      overlay.style.top = `${textRect.top - slotRect.top}px`;
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(textEl);
+    ro.observe(slot);
+    return () => ro.disconnect();
+  }, [isCeo, state]);
+
   return (
     <div
-      className={`onboarding-message-slot onboarding-ceo-slot${
-        instantRef.current ? " onboarding-slot-instant" : ""
-      }`}
+      ref={slotRef}
+      className={`onboarding-message-slot ${
+        isCeo ? "onboarding-ceo-slot" : "onboarding-human-slot"
+      }${instantRef.current ? " onboarding-slot-instant" : ""}`}
       data-state={state}
       data-msg-id={message.id}
     >
-      <CeoOnboardingBubble message={message} pending={state === "thinking"} />
-    </div>
-  );
-}
-
-function HumanMessageSlot({
-  message,
-  instant,
-}: {
-  message: Message;
-  instant?: boolean;
-}) {
-  const instantRef = useRef(instant === true);
-  return (
-    <div
-      className={`onboarding-message-slot onboarding-human-slot${
-        instantRef.current ? " onboarding-slot-instant" : ""
-      }`}
-      data-msg-id={message.id}
-    >
       <MessageBubble message={message} />
+      {isCeo && state === "thinking" ? (
+        <div
+          ref={overlayRef}
+          className="onboarding-thinking-overlay"
+          aria-label="CEO is thinking"
+        >
+          <span className="onboarding-thinking-dot" />
+          <span className="onboarding-thinking-dot" />
+          <span className="onboarding-thinking-dot" />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -195,6 +189,33 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
   const [atBottom, setAtBottom] = useState(true);
   const [hasOverflow, setHasOverflow] = useState(false);
 
+  // Ref to a sentinel div at the very end of the stream — see the JSX
+  // below. We call scrollIntoView on it instead of writing scrollTop
+  // arithmetic, because Safari and Chrome compute scrollHeight slightly
+  // differently across layout passes (Safari leaves the last message
+  // hidden under the footer; Chrome handles it). scrollIntoView is the
+  // browser-native "make this visible" call and works consistently.
+  const endOfStreamRef = useRef<HTMLDivElement>(null);
+
+  // Single source of truth for "should we auto-pin to the bottom on the
+  // next layout change." Mutated by the scroll listener further down.
+  // Declared early so the footer-measurement effect (which fires before
+  // the scroll-listener effect mounts) can also gate its re-pin on it.
+  const wasAtBottomRef = useRef(true);
+
+  // Pin the sentinel into view. Called from every effect that could
+  // cause the bottom-of-stream to move out of frame (new message,
+  // footer height change, animation tick). Always block:"end" so the
+  // sentinel lines up just above the absolute-positioned footer, since
+  // the body's padding-bottom already reserves footer-height of space.
+  const scrollToBottom = useCallback(() => {
+    if (!wasAtBottomRef.current) return;
+    endOfStreamRef.current?.scrollIntoView({
+      behavior: "auto",
+      block: "end",
+    });
+  }, []);
+
   // Force-refresh the onboarding state whenever messages list changes,
   // collapsing the 3-second polling lag on pending_suggestion updates.
   useEffect(() => {
@@ -202,7 +223,11 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
   }, [messages.length, queryClient]);
 
   // Measure footer height for the body's reserved padding-bottom and
-  // bottom-fade overlay's `bottom` offset.
+  // bottom-fade overlay's `bottom` offset. When the footer grows (e.g.
+  // form-field card → multi-option chip-row), the body's padding-bottom
+  // grows along with it — which pushes the last message out of view.
+  // We re-pin the scroll right after writing the new height so the
+  // bottom of the stream stays in sight.
   useEffect(() => {
     if (!(pairRef.current && footerRef.current)) return;
     const pair = pairRef.current;
@@ -212,6 +237,11 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
         "--onboarding-footer-h",
         `${footer.offsetHeight}px`,
       );
+      // rAF so the layout has applied the new padding-bottom before we
+      // ask the browser to scroll the sentinel into view; otherwise we
+      // pin to the pre-resize position and end up short by exactly the
+      // height delta.
+      requestAnimationFrame(scrollToBottom);
     };
     update();
     const observer = new ResizeObserver(update);
@@ -373,15 +403,36 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
   }, [messages, revealedIds, pendingMsg, pendingState]);
 
   // Track scroll position + overflow + auto-pin to bottom on stream growth.
-  // `wasAtBottomRef` is the source of truth: we only auto-pin if the user
-  // was at the bottom right before the growth, so a deliberate scroll-up
-  // to re-read history is preserved across new messages.
-  const wasAtBottomRef = useRef(true);
+  // `wasAtBottomRef` (declared above) is the source of truth: we only
+  // auto-pin if the user was at the bottom right before the growth, so a
+  // deliberate scroll-up to re-read history is preserved across new
+  // messages.
   useEffect(() => {
     const el = streamRef.current;
     if (!el) return;
-    const isAtBottom = () =>
-      el.scrollHeight - el.scrollTop - el.clientHeight <= 4;
+    // "At bottom" = the end-of-stream sentinel is visible inside the
+    // body's viewport. The naïve `scrollTop === scrollHeight -
+    // clientHeight` check fails here because the body has 140px of
+    // `padding-bottom` reserved for the absolute-positioned footer,
+    // so the "true" scroll bottom is below the visible content area.
+    // After scrollIntoView pins the sentinel at the viewport bottom,
+    // scrollTop is ~140px short of true bottom and the naïve check
+    // would flip wasAtBottomRef to false, killing auto-pin for the
+    // next message.
+    const isAtBottom = () => {
+      const sentinel = endOfStreamRef.current;
+      const footer = footerRef.current;
+      if (!(sentinel && footer)) return true;
+      // The body's rect bottom includes the padding-bottom reserved
+      // for the footer, so it's NOT the right reference — the footer
+      // visually covers that padding. Compare against the footer's
+      // top: if the sentinel sits at or above it, the latest message
+      // is visible above the footer and the user is "at bottom."
+      return (
+        sentinel.getBoundingClientRect().bottom <=
+        footer.getBoundingClientRect().top + 4
+      );
+    };
     const onScroll = () => {
       const at = isAtBottom();
       wasAtBottomRef.current = at;
@@ -390,7 +441,7 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
     const pinIfNeeded = () => {
       setHasOverflow(el.scrollHeight - el.clientHeight > 2);
       if (wasAtBottomRef.current) {
-        el.scrollTop = el.scrollHeight;
+        scrollToBottom();
         setAtBottom(true);
       }
     };
@@ -407,41 +458,54 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
     };
   }, []);
 
-  // rAF pin loop while anything is animating. CSS `max-height` transitions
-  // on the slot don't fire ResizeObserver on every frame, so scrollTop
-  // lags the animated height and the message settles above the fold. Re-
-  // pin every frame for the duration of the longest reveal step, but only
-  // if the user was at the bottom (preserves scroll-back).
+  // Pin sentinel into view whenever the message list grows. Runs after
+  // every new message lands in the DOM. scrollIntoView is browser-
+  // native "make this visible," which is consistent across Safari and
+  // Chrome — unlike scrollTop arithmetic, which Safari computed
+  // slightly differently and left the last message hidden behind the
+  // footer.
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages.length, scrollToBottom]);
+
+  // rAF pin loop while anything is animating. The sentinel may move as
+  // slots reveal / footer height adjusts / images load; re-pin every
+  // frame for the duration of the longest reveal step. Only fires if
+  // the user was at the bottom (preserves scroll-back).
   useEffect(() => {
     if (pendingState === "idle" && !postHumanDelay) return;
     let rafId = 0;
     const stopAt = performance.now() + ANIMATION_MS + 200;
     const tick = (now: number) => {
-      const el = streamRef.current;
-      if (el && wasAtBottomRef.current) {
-        el.scrollTop = el.scrollHeight;
-      }
+      scrollToBottom();
       if (now < stopAt) {
         rafId = requestAnimationFrame(tick);
       }
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [pendingState, postHumanDelay, displayList.length]);
+  }, [pendingState, postHumanDelay, displayList.length, scrollToBottom]);
 
   const phase = state?.phase;
   const pendingSuggestion = parsePendingSuggestion(state?.pending_suggestion);
 
-  // First greet (Office name?) is the only phase that should NOT blur
-  // the input — the user hasn't interacted yet.
+  // Lock interaction while the CEO is mid-reveal or in the post-human
+  // breather. Critically, we DO NOT lock on `!pendingSuggestion` anymore
+  // — CeoCardSection now keeps the last suggestion sticky, so the
+  // footer is never empty across phase transitions and there's nothing
+  // to gate visibility on.
+  //
+  // First-greet exemption: on the very first render of the wizard, the
+  // CEO's "Office name?" message is technically still "unrevealed" (it's
+  // about to flip from thinking → revealing), but the user hasn't
+  // interacted yet so muting their first input on arrival feels jarring.
+  // Skip the lock when we're in the greet phase and only one CEO message
+  // exists.
   const hasUnrevealedMessages = messages.some((m) => !revealedIds.has(m.id));
   const isFirstGreet = phase === "greet" && messages.length <= 1;
   const inputLocked =
     !isFirstGreet &&
-    (pendingState !== "idle" ||
-      postHumanDelay ||
-      hasUnrevealedMessages ||
-      !pendingSuggestion);
+    (pendingState !== "idle" || postHumanDelay || hasUnrevealedMessages);
 
   // Blur active element on lock so a focused input can't sneak typing through.
   useEffect(() => {
@@ -506,22 +570,32 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
             data-has-overflow={hasOverflow ? "true" : "false"}
           >
             <div className="onboarding-chat-stream">
-              {displayList.map(({ msg, state, isHuman, isBacklog }) =>
-                isHuman ? (
-                  <HumanMessageSlot
-                    key={msg.id}
-                    message={msg}
-                    instant={isBacklog}
-                  />
-                ) : (
-                  <CeoMessageSlot
-                    key={msg.id}
-                    message={msg}
-                    state={state}
-                    instant={isBacklog}
-                  />
-                ),
-              )}
+              {displayList.map(({ msg, state, isHuman, isBacklog }) => (
+                <OnboardingMessageSlot
+                  key={msg.id}
+                  message={msg}
+                  state={state}
+                  isCeo={!isHuman}
+                  instant={isBacklog}
+                />
+              ))}
+              {/* Bottom-of-stream sentinel. Scroll-into-view'd whenever
+                  new content lands. `scrollMarginBottom` is critical:
+                  scrollIntoView pins the sentinel to the body's bottom
+                  edge, which is behind the absolutely-positioned
+                  footer. The scroll-margin tells the browser "leave
+                  this much room below me when scrolling me into view,"
+                  so the sentinel (and therefore the last message)
+                  lands ABOVE the footer instead of behind it. */}
+              <div
+                ref={endOfStreamRef}
+                aria-hidden="true"
+                style={{
+                  height: 1,
+                  scrollMarginBottom:
+                    "calc(var(--onboarding-footer-h, 120px) + 16px)",
+                }}
+              />
             </div>
           </main>
 
@@ -533,16 +607,8 @@ export function OnboardingChat({ onBack }: OnboardingChatProps = {}) {
 
           <footer className="onboarding-chat-footer" ref={footerRef}>
             <div className="onboarding-chat-footer-inner">
-              <div
-                className="onboarding-card-shell"
-                data-empty={!pendingSuggestion ? "true" : "false"}
-              >
+              <div className="onboarding-card-shell">
                 <InterviewBar />
-                {!pendingSuggestion && (
-                  <p className="onboarding-chat-hint">
-                    Hang tight — the CEO is composing the next step.
-                  </p>
-                )}
               </div>
             </div>
           </footer>

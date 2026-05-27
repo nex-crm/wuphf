@@ -131,7 +131,20 @@ func HandleState(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to load state", http.StatusInternalServerError)
 		return
 	}
-	payload := map[string]any{
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(onboardingStatePayload(s))
+}
+
+// onboardingStatePayload returns the wire shape consumed by the frontend
+// useOnboardingState hook. Centralised so /onboarding/state, /onboarding/
+// answer, and /onboarding/transition all return the SAME shape — letting
+// the frontend treat the response of any action as fresh state and write
+// it straight into the React Query cache (queryClient.setQueryData) with
+// no follow-up polling/invalidate race. The race manifests in Chromium
+// (CC desktop preview, Chrome) but is masked in WebKit by event-loop
+// timing — see PR description for the side-by-side.
+func onboardingStatePayload(s *State) map[string]any {
+	return map[string]any{
 		"version":             s.Version,
 		"completed_at":        s.CompletedAt,
 		"company_name":        s.CompanyName,
@@ -150,8 +163,6 @@ func HandleState(w http.ResponseWriter, r *http.Request) {
 		"first_issue_approved_at": s.FirstIssueApprovedAt,
 		"activated":               s.Activated(),
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(payload)
 }
 
 // HandleProgress handles POST /onboarding/progress.
@@ -1007,11 +1018,20 @@ func handleTransition(w http.ResponseWriter, r *http.Request, transitionFn Trans
 		}
 	}
 
+	// Reload after transitionFn — the broker callback may mutate
+	// PendingSuggestion (advancePhase writes a new one for the next phase),
+	// and the in-memory `s` here predates that write. We must read the
+	// authoritative on-disk state to return the same shape the frontend
+	// sees from /onboarding/state, so the frontend can write it straight
+	// into the React Query cache and skip the polling/invalidate race.
+	fresh, loadErr := Load()
+	if loadErr != nil {
+		// Fall back to the pre-transitionFn state; better than 500-ing the
+		// transition itself, which already succeeded on disk.
+		fresh = s
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ok":    true,
-		"phase": next,
-	})
+	_ = json.NewEncoder(w).Encode(onboardingStatePayload(fresh))
 }
 
 // makeHandleReset returns the POST /onboarding/reset handler. resetFn is
@@ -1118,8 +1138,15 @@ func HandleAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Return the full updated state so the frontend can update its query
+	// cache directly via `setQueryData`. The previous {"status":"ok"}
+	// shape forced the frontend to follow up with an `invalidateQueries`
+	// → refetch round-trip, which races against the post-await commit
+	// setStates and produces the "✓ <old answer>" stuck-card bug in
+	// Chromium (where event-loop timing exposes the race; WebKit masks
+	// it). See the cross-browser side-by-side in the PR.
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(onboardingStatePayload(s))
 }
 
 // applyFormAnswer writes a single field value into s.FormAnswers.
