@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
@@ -269,7 +270,21 @@ func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents
 			Members:     memberSlugsFromMembers(b.members),
 		}}
 	}
-	b.messages = nil
+	// Preserve the CEO DM transcript across the seed boundary so the
+	// onboarding wizard reads as one continuous dialogue end-to-end.
+	// The seed wipes the office's channel/task history (kickoff starts
+	// fresh in #general) but the CEO conversation built up through
+	// greet → identity → website → blueprint → team is the user's
+	// only reference for what they've decided, and tossing it makes
+	// the wizard feel restarted.
+	ceoDmSlug := channel.DirectSlug("human", "ceo")
+	preservedCeoDm := make([]channelMessage, 0)
+	for _, m := range b.messages {
+		if m.Channel == ceoDmSlug {
+			preservedCeoDm = append(preservedCeoDm, m)
+		}
+	}
+	b.messages = preservedCeoDm
 	b.counter = 0
 	b.lastTaggedAt = make(map[string]time.Time)
 	if err := b.postKickoffLocked(bp, selectedAgents, task, skipTask, synthesized); err != nil {

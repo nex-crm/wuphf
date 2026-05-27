@@ -608,6 +608,10 @@ body {
   font-family: var(--font-sans);
   letter-spacing: 0;
   line-height: 1;
+  /* Optical lift: nudges the badge 2px up so its cap-height sits on the
+     same baseline as adjacent uppercase-heavy text (e.g. "CEO" in the
+     message header). */
+  margin-top: -3px;
 }
 .badge-green {
   background: var(--green-bg);

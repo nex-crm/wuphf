@@ -34,6 +34,40 @@ interface PrePickScreenProps {
   onComplete: (info?: { phaseAlreadyComplete?: boolean }) => void;
 }
 
+/**
+ * Inline right-arrow icon. Replaces the previous "→" Unicode glyph
+ * used in CTA copy ("Install →", "Continue →", "I'll add one later
+ * →") so the arrow renders as a proper icon at a consistent visual
+ * weight rather than as a font-rendered character whose appearance
+ * varies wildly by platform / font fallback. `currentColor` so the
+ * icon picks up the surrounding text color in every context.
+ */
+function ArrowRightIcon({
+  size = 14,
+  className,
+}: {
+  size?: number;
+  className?: string;
+}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
+    </svg>
+  );
+}
+
 interface RuntimeCardState {
   spec: RuntimeSpec;
   detected: PrereqResult | undefined;
@@ -58,6 +92,13 @@ interface RuntimeCardProps {
   onCopySignIn: (command: string) => void;
 }
 
+/**
+ * Card status is rendered as TWO lines: the primary state (e.g.
+ * "Signed in") and a secondary detail line (the runtime version /
+ * provider string, e.g. "2.1.150 (Claude Code)"). Splitting them on
+ * separate lines lets the eye scan the state at a glance without the
+ * version cruft competing for attention.
+ */
 function cardStatusLabel({
   prereqsLoaded,
   available,
@@ -68,20 +109,20 @@ function cardStatusLabel({
   available: boolean;
   version: string | undefined;
   signedIn: boolean | undefined;
-}): string {
-  if (!prereqsLoaded) return "Checking…";
-  if (!available) return "Not installed";
+}): { primary: string; detail: string | undefined } {
+  if (!prereqsLoaded) return { primary: "Checking…", detail: undefined };
+  if (!available) return { primary: "Not installed", detail: undefined };
   // Issue #932: when the runtime supports a session probe and we got a
   // definite "not signed in", surface that as the primary status. The user
   // would otherwise complete onboarding believing they were connected,
   // then hit "Not logged in" on the agent loop's first call.
   if (signedIn === false) {
-    return version ? `Not signed in · ${version}` : "Not signed in";
+    return { primary: "Not signed in", detail: version };
   }
   if (signedIn === true) {
-    return version ? `Signed in · ${version}` : "Signed in";
+    return { primary: "Signed in", detail: version };
   }
-  return version ? `Detected · ${version}` : "Detected";
+  return { primary: "Detected", detail: version };
 }
 
 function RuntimeCard({
@@ -95,7 +136,7 @@ function RuntimeCard({
 }: RuntimeCardProps) {
   const { spec, detected, available, signedIn, signInCommand } = state;
   const statusLabel = isSubmitting
-    ? "Starting your office…"
+    ? { primary: "Starting your office…", detail: undefined }
     : cardStatusLabel({
         prereqsLoaded,
         available,
@@ -110,7 +151,10 @@ function RuntimeCard({
   const isUnauthed = available && signedIn === false;
   const installHint =
     !available && prereqsLoaded ? (
-      <div className="pre-pick-card-install">Install &rarr;</div>
+      <div className="pre-pick-card-install">
+        Install
+        <ArrowRightIcon className="pre-pick-inline-arrow" />
+      </div>
     ) : null;
   const signInHint =
     isUnauthed && prereqsLoaded ? (
@@ -154,7 +198,16 @@ function RuntimeCard({
         <RuntimeLogo label={spec.label} />
         <span className="pre-pick-card-name">{spec.label}</span>
       </div>
-      <div className="pre-pick-card-status">{statusLabel}</div>
+      <div className="pre-pick-card-status">
+        <span className="pre-pick-card-status-primary">
+          {statusLabel.primary}
+        </span>
+        {statusLabel.detail ? (
+          <span className="pre-pick-card-status-detail">
+            {statusLabel.detail}
+          </span>
+        ) : null}
+      </div>
       {installHint}
       {signInHint}
     </button>
@@ -265,6 +318,73 @@ function buildConfigPayload(
   return payload;
 }
 
+/**
+ * CollapsibleSection — accordion row used inside the pre-pick screen's
+ * alternative-auth group (API keys, local model, custom endpoint).
+ *
+ * Controlled via `open`/`onToggle`. The whole header row (heading +
+ * chevron) is a single button so clicking anywhere in it toggles. The
+ * content area uses the `grid-template-rows: 0fr ⇆ 1fr` trick so the
+ * height animates smoothly between auto and zero — supported in all
+ * modern evergreen browsers without `interpolate-size`.
+ */
+interface CollapsibleSectionProps {
+  testId: string;
+  heading: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}
+function CollapsibleSection({
+  testId,
+  heading,
+  open,
+  onToggle,
+  children,
+}: CollapsibleSectionProps) {
+  const panelId = `${testId}-panel`;
+  return (
+    <div
+      className="pre-pick-section pre-pick-section--collapsible"
+      data-testid={testId}
+      data-open={open ? "true" : "false"}
+    >
+      <button
+        type="button"
+        className="pre-pick-section-summary"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={onToggle}
+      >
+        <span className="pre-pick-section-heading">{heading}</span>
+        <svg
+          className="pre-pick-section-chevron"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <div
+        id={panelId}
+        className="pre-pick-section-panel"
+        role="region"
+        aria-labelledby={panelId}
+        aria-hidden={!open}
+      >
+        <div className="pre-pick-section-panel-inner">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export function PrePickScreen({ onComplete }: PrePickScreenProps) {
   const [prereqs, setPrereqs] = useState<PrereqResult[]>([]);
   const [prereqsLoaded, setPrereqsLoaded] = useState(false);
@@ -281,6 +401,22 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
   // OpenAI-compatible custom endpoint
   const [oaiUrl, setOaiUrl] = useState<string>("");
   const [oaiKey, setOaiKey] = useState<string>("");
+
+  // Collapsible sections — every alternative path (API keys, local model,
+  // custom endpoint) is collapsed by default so the CLI cards above stay
+  // the dominant choice. Single-open accordion: opening one section
+  // closes the others, so only one alternative is expanded at a time.
+  // Tracked as a single `openSection` slot (or `null` for all-closed)
+  // and derived into the per-section booleans the JSX still expects.
+  type AltSection = "apiKeys" | "local" | "custom";
+  const [openSection, setOpenSection] = useState<AltSection | null>(null);
+  const openSections = {
+    apiKeys: openSection === "apiKeys",
+    local: openSection === "local",
+    custom: openSection === "custom",
+  };
+  const toggleSection = (key: AltSection) =>
+    setOpenSection((prev) => (prev === key ? null : key));
 
   useEffect(() => {
     let cancelled = false;
@@ -450,9 +586,18 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
           ))}
         </div>
 
+        {/* ── Alternative auth paths, grouped in one bordered card ────── */}
+        <div
+          className="pre-pick-collapsible-group"
+          data-testid="pre-pick-collapsible-group"
+        >
         {/* ── Section 2: API keys ──────────────────────────────────────── */}
-        <div className="pre-pick-section" data-testid="pre-pick-api-keys">
-          <p className="pre-pick-section-heading">API keys</p>
+        <CollapsibleSection
+          testId="pre-pick-api-keys"
+          heading="API keys"
+          open={openSections.apiKeys}
+          onToggle={() => toggleSection("apiKeys")}
+        >
           <p className="pre-pick-section-hint">
             Use CLI login or paste a key. CLI login is the primary path -- keys
             are a fallback or alternative.
@@ -467,11 +612,15 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
               />
             ))}
           </div>
-        </div>
+        </CollapsibleSection>
 
         {/* ── Section 3: Local provider picker ────────────────────────── */}
-        <div className="pre-pick-section" data-testid="pre-pick-local-section">
-          <p className="pre-pick-section-heading">Local model</p>
+        <CollapsibleSection
+          testId="pre-pick-local-section"
+          heading="Local model"
+          open={openSections.local}
+          onToggle={() => toggleSection("local")}
+        >
           <p className="pre-pick-section-hint">
             Run inference on this machine. No cloud key required.
           </p>
@@ -479,11 +628,15 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
             selected={localProvider}
             onSelect={(kind) => setLocalProvider(kind)}
           />
-        </div>
+        </CollapsibleSection>
 
         {/* ── Section 4: OpenAI-compatible endpoint ───────────────────── */}
-        <div className="pre-pick-section" data-testid="pre-pick-oai-section">
-          <p className="pre-pick-section-heading">Custom endpoint</p>
+        <CollapsibleSection
+          testId="pre-pick-oai-section"
+          heading="Custom endpoint"
+          open={openSections.custom}
+          onToggle={() => toggleSection("custom")}
+        >
           <p className="pre-pick-section-hint">
             Any server that speaks the OpenAI REST protocol (OpenClaw, LiteLLM,
             vLLM, etc.).
@@ -494,6 +647,7 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
             onChangeUrl={setOaiUrl}
             onChangeKey={setOaiKey}
           />
+        </CollapsibleSection>
         </div>
 
         {/* ── Submit from form sections ────────────────────────────────── */}
@@ -506,7 +660,14 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
               disabled={anySubmitting}
               onClick={() => void commitChoice("form", "form")}
             >
-              {submitting === "form" ? "Opening your office…" : "Continue  →"}
+              {submitting === "form" ? (
+                "Opening your office…"
+              ) : (
+                <>
+                  Continue
+                  <ArrowRightIcon className="pre-pick-inline-arrow" />
+                </>
+              )}
             </button>
           </div>
         ) : null}
@@ -520,15 +681,25 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
             disabled={anySubmitting}
             onClick={() => void commitChoice(null, "skip")}
           >
-            {submitting === "skip"
-              ? "Opening your office…"
-              : "I'll add one later  →"}
+            {submitting === "skip" ? (
+              "Opening your office…"
+            ) : (
+              <>
+                I'll add one later
+                <ArrowRightIcon className="pre-pick-inline-arrow" />
+              </>
+            )}
           </button>
         </div>
 
         <p className="pre-pick-helper">
           You can change this any time in{" "}
-          <strong>Settings &rarr; Runtimes</strong>.
+          <strong>
+            Settings
+            <ArrowRightIcon className="pre-pick-inline-arrow" size={12} />
+            Runtimes
+          </strong>
+          .
         </p>
 
         {submitError ? (

@@ -14,7 +14,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 
-import { get, initApi } from "../api/client";
+import { get, initApi, post } from "../api/client";
 import { TelegramConnectHost } from "../components/integrations/TelegramConnectModal";
 import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
@@ -834,7 +834,23 @@ export default function RootRoute() {
       // while still gating progress through deterministic chip / form
       // cards. Once the broker flips onboarded=true the user falls through
       // to the post-onboarding Shell branch below and lands in the office.
-      body = <OnboardingChat />;
+      body = (
+        <OnboardingChat
+          onBack={() => {
+            // Reset broker onboarding state so re-picking a runtime restarts
+            // the wizard from scratch instead of resuming mid-conversation.
+            // Fire-and-forget: UI state changes immediately; if the POST
+            // fails, the next /transition phase=greet will surface the error.
+            void post("/onboarding/reset", {}).catch(() => {
+              // Ignored — non-blocking. Back navigation should still work
+              // even if reset fails (e.g. offline broker).
+            });
+            setInCeoOnboarding(false);
+            setBootPhase(undefined);
+            void router.navigate({ to: "/", replace: true });
+          }}
+        />
+      );
     } else {
       // Provider picker. No phase set yet — user hasn't picked a runtime.
       // After they pick, setInCeoOnboarding(true) to enter the CEO DM.

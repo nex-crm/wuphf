@@ -1,15 +1,6 @@
 /**
  * CeoChecklist — list of checkboxes + submit chip.
  * CeoTeamTrim is an alias of this component with team-specific chrome.
- *
- * Used for: team trim (blueprint path).
- *
- * Keyboard model per spec:
- *   Tab    → item
- *   Space  → toggle checkbox
- *   Enter  → Submit button
- *
- * All item labels treated as plain text (never innerHTML).
  */
 
 import { useRef, useState } from "react";
@@ -25,7 +16,6 @@ interface CeoChecklistProps {
   stage: CardStage;
   committedValue?: string[];
   onSubmit: (field: string, value: string[]) => void;
-  /** Ref for focus management — parent focuses first item after prior card commits. */
   autoFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -46,7 +36,6 @@ export function CeoChecklist({
   );
   const submitRef = useRef<HTMLButtonElement>(null);
 
-  // Merge externally-provided ref so the parent can focus the submit button.
   if (autoFocusRef && submitRef.current !== null) {
     (autoFocusRef as React.MutableRefObject<HTMLElement | null>).current =
       submitRef.current;
@@ -71,11 +60,8 @@ export function CeoChecklist({
     if (stage === "submitting") return;
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -91,28 +77,47 @@ export function CeoChecklist({
         <div className="ceo-card-label">{payload.label}</div>
       ) : null}
       <ul className="ceo-checklist-items">
-        {payload.items.map((item) => (
-          <li key={item.id} className="ceo-checklist-item">
-            <label className="ceo-checklist-label">
-              <input
-                type="checkbox"
-                className="ceo-checklist-checkbox"
-                checked={checked.has(item.id)}
-                disabled={stage === "submitting"}
-                onChange={() => toggle(item.id)}
-                aria-label={item.label}
-              />
-              {/* Render as text — never innerHTML */}
-              <span className="ceo-checklist-item-text">{item.label}</span>
-            </label>
-          </li>
-        ))}
+        {payload.items.map((item) => {
+          const isChecked = checked.has(item.id);
+          return (
+            <li key={item.id} className="ceo-checklist-item">
+              <label
+                className="ceo-checklist-label"
+                data-checked={isChecked ? "true" : "false"}
+              >
+                <input
+                  type="checkbox"
+                  className="ceo-checklist-checkbox"
+                  checked={isChecked}
+                  disabled={stage === "submitting"}
+                  onChange={() => toggle(item.id)}
+                  aria-label={item.label}
+                />
+                <svg
+                  className="ceo-checklist-tick"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span className="ceo-checklist-item-text">{item.label}</span>
+              </label>
+            </li>
+          );
+        })}
       </ul>
       <div className="ceo-card-actions">
         <button
           ref={submitRef}
           type="button"
-          className="btn btn-primary btn-sm ceo-card-submit"
+          className="btn btn-primary ceo-card-submit"
           disabled={stage === "submitting" || checked.size === 0}
           onClick={handleSubmit}
         >

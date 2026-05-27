@@ -696,14 +696,22 @@ export function CeoCardSection() {
     string | string[] | undefined
   >(undefined);
 
-  // Reset stage when suggestion changes (new question arrived).
+  // Reset stage when suggestion changes (new question arrived). Track the
+  // last-seen id in a ref so `effectiveStage` is derived synchronously —
+  // `useEffect` runs after commit, which leaves a one-render gap where the
+  // new suggestion is visible but `stage` is still `"committed"`, briefly
+  // flashing an empty card. Reading the ref during render closes that gap.
   const suggestionId = pendingSuggestion?.id ?? null;
+  const lastSuggestionIdRef = useRef(suggestionId);
+  const suggestionChanged = lastSuggestionIdRef.current !== suggestionId;
+  const effectiveStage: CardStage = suggestionChanged ? "pending" : stage;
   useEffect(() => {
+    lastSuggestionIdRef.current = suggestionId;
     setStage("pending");
     setCommittedValue(undefined);
   }, [suggestionId]);
 
-  if (!pendingSuggestion || stage === "committed") return null;
+  if (!pendingSuggestion || effectiveStage === "committed") return null;
 
   const submitAnswer = async (field: string, value: unknown) => {
     if (stage === "submitting") return;

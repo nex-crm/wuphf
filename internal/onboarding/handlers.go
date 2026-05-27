@@ -51,6 +51,12 @@ type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedA
 // phase is the new phase the state machine just entered.
 type TransitionFunc func(phase string, s *State) error
 
+// ResetFunc is the broker callback invoked when the user requests
+// /onboarding/reset. The broker uses this to clear the persisted CEO DM
+// transcript so that re-entering the wizard starts on a clean canvas.
+// Best-effort: HandleReset still clears phase/answers even when this fails.
+type ResetFunc func() error
+
 // RegisterRoutes wires the onboarding HTTP endpoints onto mux.
 //
 // Routes registered:
@@ -75,7 +81,17 @@ func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string
 // RegisterRoutesWithTransition is like RegisterRoutes but also accepts a
 // TransitionFunc that the broker supplies to receive phase-transition events.
 // Pass nil transitionFn to skip the broker callback (legacy path / tests).
+//
+// resetFn is wired to /onboarding/reset so the broker can also clear the
+// CEO DM transcript when the user restarts the wizard.
 func RegisterRoutesWithTransition(mux *http.ServeMux, completeFn CompleteFunc, transitionFn TransitionFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc, wikiRoot string) {
+	RegisterRoutesWithTransitionAndReset(mux, completeFn, transitionFn, nil, packSlug, authMiddleware, wikiRoot)
+}
+
+// RegisterRoutesWithTransitionAndReset is the most-explicit registrar — used
+// by the broker to wire both transition and reset callbacks. Tests can pass
+// nil for either to skip the corresponding side-effect.
+func RegisterRoutesWithTransitionAndReset(mux *http.ServeMux, completeFn CompleteFunc, transitionFn TransitionFunc, resetFn ResetFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc, wikiRoot string) {
 	if authMiddleware == nil {
 		authMiddleware = func(h http.HandlerFunc) http.HandlerFunc { return h }
 	}
@@ -94,6 +110,7 @@ func RegisterRoutesWithTransition(mux *http.ServeMux, completeFn CompleteFunc, t
 	mux.HandleFunc("/onboarding/upload-context", authMiddleware(handleUploadContext))
 	// Phase 2 — deterministic CEO conversation handlers.
 	mux.HandleFunc("/onboarding/transition", authMiddleware(makeHandleTransition(transitionFn)))
+	mux.HandleFunc("/onboarding/reset", authMiddleware(makeHandleReset(resetFn)))
 	mux.HandleFunc("/onboarding/answer", authMiddleware(HandleAnswer))
 	mux.HandleFunc("/onboarding/suggestion/ack", authMiddleware(HandleSuggestionAck))
 }
@@ -995,6 +1012,69 @@ func handleTransition(w http.ResponseWriter, r *http.Request, transitionFn Trans
 		"ok":    true,
 		"phase": next,
 	})
+}
+
+// makeHandleReset returns the POST /onboarding/reset handler. resetFn is
+// invoked after the onboarding state is cleared so the broker can purge
+// side-effects like the CEO DM transcript.
+func makeHandleReset(resetFn ResetFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handleReset(w, r, resetFn)
+	}
+}
+
+// HandleReset is the legacy handler (no transcript cleanup). Retained for
+// callers that registered routes via RegisterRoutes without a ResetFunc.
+func HandleReset(w http.ResponseWriter, r *http.Request) {
+	handleReset(w, r, nil)
+}
+
+// handleReset handles POST /onboarding/reset.
+// Clears the deterministic CEO conversation state so the wizard restarts from
+// scratch on the next /onboarding/transition phase=greet. Used by the
+// onboarding chat's back arrow → re-pick runtime flow so the user can
+// genuinely restart the wizard after changing their runtime selection.
+//
+// When resetFn is non-nil it is invoked after state is cleared; this lets the
+// broker also purge the CEO DM transcript so the user does not see prior
+// CEO messages above the fresh greet on re-entry.
+//
+// Refuses to reset when CompletedAt is set — a finished onboarding is not
+// re-runnable from this endpoint; the user must shred the workspace.
+//
+// Returns 200 on success, 409 if already complete, 500 on persistence errors.
+func handleReset(w http.ResponseWriter, r *http.Request, resetFn ResetFunc) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s, err := Load()
+	if err != nil {
+		http.Error(w, "failed to load state", http.StatusInternalServerError)
+		return
+	}
+	if s.CompletedAt != "" {
+		http.Error(w, "cannot reset after onboarding complete", http.StatusConflict)
+		return
+	}
+	s.Phase = ""
+	s.PendingSuggestion = nil
+	s.FormAnswers = FormAnswers{}
+	if err := Save(s); err != nil {
+		http.Error(w, "failed to save state", http.StatusInternalServerError)
+		return
+	}
+
+	// Best-effort transcript clean-up. State is already persisted, so a
+	// broker-callback error should not fail the reset from the client's view.
+	if resetFn != nil {
+		if err := resetFn(); err != nil {
+			log.Printf("onboarding: reset broker callback failed: %v", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 // HandleAnswer handles POST /onboarding/answer.

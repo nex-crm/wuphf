@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
@@ -44,6 +45,34 @@ import (
 func (b *Broker) ceoOnboardingTransitionFn() onboarding.TransitionFunc {
 	return func(phase string, s *onboarding.State) error {
 		return b.advancePhase(s, phase)
+	}
+}
+
+// ceoOnboardingResetFn returns an onboarding.ResetFunc that wipes the CEO DM
+// transcript from b.messages. Invoked by POST /onboarding/reset after the
+// onboarding state is cleared, so re-entering the wizard via the back-arrow
+// flow lands on a clean canvas instead of stacking a fresh greet on top of
+// the prior conversation.
+func (b *Broker) ceoOnboardingResetFn() onboarding.ResetFunc {
+	return func() error {
+		dmSlug, err := b.EnsureDirectChannel("ceo")
+		if err != nil {
+			return fmt.Errorf("onboarding reset: ensure CEO DM: %w", err)
+		}
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		filtered := b.messages[:0]
+		for _, m := range b.messages {
+			if m.Channel == dmSlug {
+				continue
+			}
+			filtered = append(filtered, m)
+		}
+		b.messages = filtered
+		if err := b.saveLocked(); err != nil {
+			return fmt.Errorf("onboarding reset: persist after CEO DM purge: %w", err)
+		}
+		return nil
 	}
 }
 
@@ -330,9 +359,21 @@ func (b *Broker) seedMinimalScratchLocked(s *onboarding.State) error {
 		UpdatedAt:   now,
 	}}
 
-	// Clear tasks and message history for a fresh start.
+	// Clear tasks for a fresh start, but PRESERVE the CEO DM
+	// transcript across the seed boundary so the onboarding wizard
+	// reads as one continuous dialogue end-to-end (greet → identity
+	// → website → blueprint → team is the user's full conversation
+	// with the CEO and should not be wiped just because the office
+	// is being seeded).
 	b.tasks = nil
-	b.messages = nil
+	ceoDmSlug := channel.DirectSlug("human", "ceo")
+	preservedCeoDm := make([]channelMessage, 0)
+	for _, m := range b.messages {
+		if m.Channel == ceoDmSlug {
+			preservedCeoDm = append(preservedCeoDm, m)
+		}
+	}
+	b.messages = preservedCeoDm
 	b.counter = 0
 	b.lastTaggedAt = make(map[string]time.Time)
 
