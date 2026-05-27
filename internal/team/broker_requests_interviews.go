@@ -246,6 +246,18 @@ func firstActiveHumanInterview(requests []humanInterview) *humanInterview {
 	return nil
 }
 
+func (b *Broker) ActiveRequests() []humanInterview {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]humanInterview, 0, len(b.requests))
+	for _, req := range b.requests {
+		if requestIsActive(req) {
+			out = append(out, cloneHumanInterview(req))
+		}
+	}
+	return out
+}
+
 func humanSenderMayCancelInterviews(sender string) bool {
 	return isHumanMessageSender(sender)
 }

@@ -121,7 +121,7 @@ func (s *SlackTransport) Send(ctx context.Context, msg transport.Outbound) error
 }
 
 func (s *SlackTransport) FormatOutbound(msg channelMessage) (transport.Outbound, bool) {
-	slackChannelID := s.slackChannelIDForSlug(msg.Channel)
+	slackChannelID, threadTS := s.slackOutboundTarget(msg)
 	if slackChannelID == "" {
 		return transport.Outbound{}, false
 	}
@@ -134,7 +134,7 @@ func (s *SlackTransport) FormatOutbound(msg channelMessage) (transport.Outbound,
 		Binding:     transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: slackChannelID},
 		Text:        text,
 		Blocks:      slackBlocksForMessage(msg),
-		ThreadKey:   s.slackOutboundThread(msg.ReplyTo),
+		ThreadKey:   threadTS,
 	}, true
 }
 
@@ -192,6 +192,16 @@ func (s *SlackTransport) slackOutboundThread(replyTo string) string {
 		return ""
 	}
 	return s.Broker.slackOutboundTimestamp(replyTo)
+}
+
+func (s *SlackTransport) slackOutboundTarget(msg channelMessage) (channelID, threadTS string) {
+	if s.Broker != nil && strings.TrimSpace(msg.ReplyTo) != "" {
+		channelID, threadTS = s.Broker.slackReceiptForMessage(msg.ReplyTo)
+		if channelID != "" {
+			return channelID, threadTS
+		}
+	}
+	return s.slackChannelIDForSlug(msg.Channel), s.slackOutboundThread(msg.ReplyTo)
 }
 
 func (s *SlackTransport) runSocket(ctx context.Context, host transport.Host) error {
@@ -253,6 +263,12 @@ type slackAssistantEvent struct {
 	AssistantThread slackAssistantThread `json:"assistant_thread"`
 }
 
+type slackAppHomeOpenedEvent struct {
+	Type string `json:"type"`
+	User string `json:"user"`
+	Tab  string `json:"tab,omitempty"`
+}
+
 type slackAssistantThread struct {
 	UserID    string                      `json:"user_id"`
 	Context   slackAssistantThreadContext `json:"context"`
@@ -307,6 +323,11 @@ func (s *SlackTransport) handleEventCallback(ctx context.Context, host transport
 			return
 		}
 	}
+	var appHomeEvent slackAppHomeOpenedEvent
+	if err := json.Unmarshal(payload.Event, &appHomeEvent); err == nil && appHomeEvent.Type == "app_home_opened" {
+		s.handleAppHomeOpened(ctx, appHomeEvent)
+		return
+	}
 	var event slackMessageEvent
 	if err := json.Unmarshal(payload.Event, &event); err != nil {
 		return
@@ -348,6 +369,15 @@ func (s *SlackTransport) handleEventCallback(ctx context.Context, host transport
 		ReplyTo:           replyTo,
 		ThreadKey:         firstNonEmpty(event.ThreadTS, event.Timestamp),
 	})
+}
+
+func (s *SlackTransport) handleAppHomeOpened(ctx context.Context, event slackAppHomeOpenedEvent) {
+	if strings.TrimSpace(event.User) == "" {
+		return
+	}
+	if err := s.client.publishHomeView(ctx, event.User, s.slackAppHomeBlocks(event.User)); err != nil {
+		log.Printf("[slack] publish app home failed: %v", err)
+	}
 }
 
 func (s *SlackTransport) handleAssistantThreadStarted(ctx context.Context, thread slackAssistantThread) {
@@ -464,11 +494,7 @@ func (s *SlackTransport) handleAssistantMessage(ctx context.Context, event slack
 	context := s.getAssistantContext(event.Channel, threadTS)
 	channelSlug := s.assistantContextChannelSlug(context)
 	if channelSlug == "" {
-		reply := slackRestrictedChannelReply
-		if err := s.streamAssistantReply(ctx, event.Channel, threadTS, reply); err != nil {
-			log.Printf("[slack] assistant restricted reply failed: %v", err)
-			_ = s.postRestrictedChannelReply(ctx, event.Channel, threadTS)
-		}
+		s.handleAppChatMessage(ctx, event)
 		_ = s.client.setAssistantStatus(ctx, event.Channel, threadTS, "")
 		return
 	}
@@ -497,6 +523,32 @@ func (s *SlackTransport) handleAssistantMessage(ctx context.Context, event slack
 	if err := s.client.setAssistantStatus(ctx, event.Channel, threadTS, ""); err != nil {
 		log.Printf("[slack] clear assistant status failed: %v", err)
 	}
+}
+
+func (s *SlackTransport) handleAppChatMessage(ctx context.Context, event slackMessageEvent) {
+	if s.Broker == nil {
+		_ = s.postTextReply(ctx, event.Channel, firstNonEmpty(event.ThreadTS, event.Timestamp), "WUPHF broker is not available.")
+		return
+	}
+	text := normalizeSlackInboundText(event.Text, s.BotUserID)
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	msg, err := s.Broker.PostInboundSurfaceMessageWithOptions(
+		"slack:"+event.User,
+		"general",
+		text,
+		slackAdapterName,
+		inboundSurfaceMessageOptions{
+			Tagged:  s.taggedOfficeMembers(text),
+			ReplyTo: s.slackReplyToForEvent(event),
+		},
+	)
+	if err != nil {
+		_ = s.postTextReply(ctx, event.Channel, firstNonEmpty(event.ThreadTS, event.Timestamp), "WUPHF message failed: "+err.Error())
+		return
+	}
+	s.Broker.recordSlackOutbound(msg.ID, event.Channel, event.Timestamp)
 }
 
 func (s *SlackTransport) streamAssistantReply(ctx context.Context, channelID, threadTS, text string) error {
@@ -717,6 +769,122 @@ func slackBlocksForMessage(msg channelMessage) []map[string]any {
 	return blocks
 }
 
+func (s *SlackTransport) slackAppHomeBlocks(userID string) []map[string]any {
+	blocks := []map[string]any{
+		slackHeaderBlock("WUPHF"),
+		slackSectionBlock("*Chat*\nUse the Messages tab to talk to WUPHF `#general`. Use `/wuphf @agent ...` in mapped channels to route directly to agents.", true),
+		slackDividerBlock(),
+	}
+	blocks = append(blocks, s.slackIssuesHomeBlocks()...)
+	blocks = append(blocks, slackDividerBlock())
+	blocks = append(blocks, s.slackWikiHomeBlocks()...)
+	blocks = append(blocks, slackDividerBlock())
+	blocks = append(blocks, s.slackSettingsHomeBlocks(userID)...)
+	if len(blocks) > 100 {
+		return blocks[:100]
+	}
+	return blocks
+}
+
+func (s *SlackTransport) slackIssuesHomeBlocks() []map[string]any {
+	if s.Broker == nil {
+		return []map[string]any{slackHeaderBlock("Issues"), slackSectionBlock("Broker unavailable.", false)}
+	}
+	tasks := s.Broker.AllTasks()
+	requests := s.Broker.ActiveRequests()
+	blocks := []map[string]any{
+		slackHeaderBlock("Issues"),
+		slackSectionBlock(fmt.Sprintf("*Tasks:* %d\n*Open requests:* %d", len(tasks), len(requests)), false),
+	}
+	for i, task := range tasks {
+		if i >= 5 {
+			blocks = append(blocks, slackContextBlock(fmt.Sprintf("_%d more tasks in WUPHF_", len(tasks)-i)))
+			break
+		}
+		status := task.Status()
+		if status == "" {
+			status = "pending"
+		}
+		owner := firstNonEmpty(task.Owner, "unassigned")
+		blocks = append(blocks, slackSectionBlock(fmt.Sprintf("*%s* `%s`\n%s\n_Owner: @%s · Status: %s_", escapeSlackText(task.Title), escapeSlackText(task.ID), escapeSlackText(truncateSlackText(task.Details, 220)), escapeSlackText(owner), escapeSlackText(status)), false))
+	}
+	for i, req := range requests {
+		if i >= 3 {
+			blocks = append(blocks, slackContextBlock(fmt.Sprintf("_%d more requests in WUPHF_", len(requests)-i)))
+			break
+		}
+		title := firstNonEmpty(req.Title, req.Kind, "Request")
+		blocks = append(blocks, slackSectionBlock(fmt.Sprintf("*%s* `%s`\n%s", escapeSlackText(title), escapeSlackText(req.ID), escapeSlackText(truncateSlackText(req.Question, 220))), false))
+	}
+	return blocks
+}
+
+func (s *SlackTransport) slackWikiHomeBlocks() []map[string]any {
+	blocks := []map[string]any{slackHeaderBlock("Wiki")}
+	if s.Broker == nil || s.Broker.WikiIndex() == nil {
+		return append(blocks, slackSectionBlock("Wiki index is not active. Use the WUPHF web UI to configure memory and wiki settings.", false))
+	}
+	hits, err := s.Broker.WikiIndex().Search(context.Background(), "project decisions team context", 5)
+	if err != nil {
+		return append(blocks, slackSectionBlock("Wiki search failed: "+escapeSlackText(err.Error()), false))
+	}
+	if len(hits) == 0 {
+		return append(blocks, slackSectionBlock("No wiki hits yet. As WUPHF learns, relevant wiki facts will appear here.", false))
+	}
+	for _, hit := range hits {
+		label := firstNonEmpty(hit.Entity, hit.FactID, "wiki")
+		snippet := firstNonEmpty(hit.Snippet, "No snippet.")
+		blocks = append(blocks, slackSectionBlock(fmt.Sprintf("*%s* · %.2f\n%s", escapeSlackText(label), hit.Score, escapeSlackText(truncateSlackText(snippet, 240))), false))
+	}
+	return blocks
+}
+
+func (s *SlackTransport) slackSettingsHomeBlocks(userID string) []map[string]any {
+	if s.Broker == nil {
+		return []map[string]any{slackHeaderBlock("Settings"), slackSectionBlock("Broker unavailable.", false)}
+	}
+	channels := s.Broker.Channels()
+	mirrors := s.Broker.SurfaceChannels(slackAdapterName)
+	members := s.Broker.OfficeMembers()
+	fields := []map[string]any{
+		slackMrkdwnFieldText(fmt.Sprintf("*Slack user*\n<@%s>", escapeSlackText(userID))),
+		slackMrkdwnFieldText(fmt.Sprintf("*WUPHF channels*\n%d", len(channels))),
+		slackMrkdwnFieldText(fmt.Sprintf("*Slack mirrors*\n%d", len(mirrors))),
+		slackMrkdwnFieldText(fmt.Sprintf("*Agents*\n%d", countSlackVisibleAgents(members))),
+	}
+	blocks := []map[string]any{
+		slackHeaderBlock("Settings"),
+		{
+			"type":   "section",
+			"fields": fields,
+		},
+	}
+	if len(mirrors) == 0 {
+		blocks = append(blocks, slackSectionBlock("No Slack channels are mapped yet. Map a private channel in WUPHF Settings > Slack before using channel bridge features.", false))
+		return blocks
+	}
+	var lines []string
+	for _, ch := range mirrors {
+		if ch.Surface == nil {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("• `#%s` → `%s`", escapeSlackText(ch.Slug), escapeSlackText(firstNonEmpty(ch.Surface.RemoteTitle, ch.Surface.RemoteID))))
+	}
+	blocks = append(blocks, slackSectionBlock("*Mapped channels*\n"+strings.Join(lines, "\n"), false))
+	return blocks
+}
+
+func countSlackVisibleAgents(members []officeMember) int {
+	count := 0
+	for _, member := range members {
+		if member.Slug == "" || isHumanMessageSender(member.Slug) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
 func slackHeaderForMessage(msg channelMessage) string {
 	switch {
 	case isHumanDecisionKind(msg.Kind):
@@ -793,6 +961,10 @@ func slackHeaderBlock(text string) map[string]any {
 			"text": truncateSlackText(strings.TrimSpace(text), 150),
 		},
 	}
+}
+
+func slackDividerBlock() map[string]any {
+	return map[string]any{"type": "divider"}
 }
 
 func slackContextBlock(text string) map[string]any {

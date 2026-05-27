@@ -194,6 +194,84 @@ func TestSlackInboundMentionsAgentsAndResolvesThreadReply(t *testing.T) {
 	}
 }
 
+func TestSlackAppHomeOpenedPublishesDashboard(t *testing.T) {
+	b := newTestBroker(t)
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/views.publish" {
+			t.Fatalf("unexpected Slack API path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode slack request: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	slack := NewSlackTransport(b, "xoxb-test", "xapp-test", "Ubot")
+	slack.client.baseURL = srv.URL
+	slack.handleEventCallback(context.Background(), &brokerTransportHost{broker: b}, slackEventPayload{
+		Event: json.RawMessage(`{"type":"app_home_opened","user":"U1","tab":"home"}`),
+	})
+
+	if payload["user_id"] != "U1" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	view, _ := payload["view"].(map[string]any)
+	if view["type"] != "home" {
+		t.Fatalf("view = %+v", view)
+	}
+	raw, err := json.Marshal(view["blocks"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"WUPHF", "Issues", "Wiki", "Settings"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("app home blocks missing %q: %s", want, raw)
+		}
+	}
+}
+
+func TestSlackAppMessagesTabChatsWithGeneralAndRepliesToDMThread(t *testing.T) {
+	b := newTestBroker(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	slack := NewSlackTransport(b, "xoxb-test", "xapp-test", "Ubot")
+	slack.client.baseURL = srv.URL
+	slack.handleEventCallback(context.Background(), &brokerTransportHost{broker: b}, slackEventPayload{
+		Event: json.RawMessage(`{
+			"type":"message",
+			"channel":"Dapphome",
+			"channel_type":"im",
+			"user":"U1",
+			"text":"@ceo what is next?",
+			"ts":"444.000"
+		}`),
+	})
+
+	messages := b.ChannelMessages("general")
+	got := messages[len(messages)-1]
+	if got.Channel != "general" || got.Content != "@ceo what is next?" || !containsString(got.Tagged, "ceo") {
+		t.Fatalf("message = %+v", got)
+	}
+	out, ok := slack.FormatOutbound(channelMessage{
+		ID:      "msg-agent",
+		From:    "ceo",
+		Channel: "general",
+		Content: "Next step is clear.",
+		ReplyTo: got.ID,
+	})
+	if !ok {
+		t.Fatal("FormatOutbound returned false")
+	}
+	if out.Binding.ChannelSlug != "Dapphome" || out.ThreadKey != "444.000" {
+		t.Fatalf("outbound = %+v", out)
+	}
+}
+
 func TestSlackAgentManifestUsesAgentsAndAIAppSurface(t *testing.T) {
 	manifest := slackAgentManifestForMember(officeMember{Slug: "qa", Name: "Quality Agent", Role: "Checks WUPHF work"})
 	data, err := json.Marshal(manifest)
@@ -212,6 +290,30 @@ func TestSlackAgentManifestUsesAgentsAndAIAppSurface(t *testing.T) {
 		`"assistant_thread_context_changed"`,
 		`"message.im"`,
 		`"socket_mode_enabled":true`,
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("manifest missing %s: %s", want, raw)
+		}
+	}
+}
+
+func TestSlackWUPHFManifestEnablesAppHomeAndMessagesTab(t *testing.T) {
+	manifest := slackWUPHFAppManifest()
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(data)
+	for _, want := range []string{
+		`"name":"WUPHF"`,
+		`"app_home"`,
+		`"home_tab_enabled":true`,
+		`"messages_tab_enabled":true`,
+		`"messages_tab_read_only_enabled":false`,
+		`"app_home_opened"`,
+		`"message.im"`,
+		`"views:write"`,
+		`"/wuphf"`,
 	} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("manifest missing %s: %s", want, raw)

@@ -91,6 +91,11 @@ type slackStreamResponse struct {
 	MessageTS string `json:"message_ts,omitempty"`
 }
 
+type slackViewResponse struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
 type slackAssistantPrompt struct {
 	Title   string `json:"title"`
 	Message string `json:"message"`
@@ -263,6 +268,24 @@ func (c *slackAPIClient) stopStream(ctx context.Context, payload map[string]any)
 	}
 	if !out.OK {
 		return slackAPIError{Method: "chat.stopStream", Code: out.Error}
+	}
+	return nil
+}
+
+func (c *slackAPIClient) publishHomeView(ctx context.Context, userID string, blocks []map[string]any) error {
+	payload := map[string]any{
+		"user_id": userID,
+		"view": map[string]any{
+			"type":   "home",
+			"blocks": blocks,
+		},
+	}
+	var out slackViewResponse
+	if err := c.postJSON(ctx, "views.publish", c.botToken, payload, &out); err != nil {
+		return err
+	}
+	if !out.OK {
+		return slackAPIError{Method: "views.publish", Code: out.Error}
 	}
 	return nil
 }

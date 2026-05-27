@@ -150,6 +150,72 @@ func slackAgentManifestForMember(member officeMember) map[string]any {
 	}
 }
 
+func slackWUPHFAppManifest() map[string]any {
+	longDescription := "WUPHF brings the WUPHF office into Slack. Use the Messages tab to chat with WUPHF #general, mapped Slack channels to work with agents in-channel, and the Home tab to inspect issues, wiki context, channels, agents, and settings rendered with Block Kit."
+	return map[string]any{
+		"display_information": map[string]any{
+			"name":             "WUPHF",
+			"description":      "WUPHF office bridge for Slack channels, agents, wiki, issues, and settings.",
+			"long_description": truncateManifestText(longDescription, 4000),
+			"background_color": "#111827",
+		},
+		"features": map[string]any{
+			"app_home": map[string]any{
+				"home_tab_enabled":               true,
+				"messages_tab_enabled":           true,
+				"messages_tab_read_only_enabled": false,
+			},
+			"bot_user": map[string]any{
+				"display_name":  "WUPHF",
+				"always_online": true,
+			},
+			"assistant_view": map[string]any{
+				"assistant_description": "Orchestrate the WUPHF office from Slack.",
+				"suggested_prompts": []map[string]string{
+					{"title": "List agents", "message": "agent list"},
+					{"title": "Search the wiki", "message": "wiki search project decisions"},
+					{"title": "Show open work", "message": "inbox"},
+				},
+			},
+			"slash_commands": []map[string]any{
+				{
+					"command":       "/wuphf",
+					"description":   "Send a message into the mapped WUPHF channel; use @agent to tag agents.",
+					"usage_hint":    "@ceo triage this",
+					"should_escape": false,
+				},
+			},
+		},
+		"oauth_config": map[string]any{
+			"scopes": map[string]any{
+				"bot": []string{
+					"assistant:write",
+					"app_mentions:read",
+					"channels:history",
+					"chat:write",
+					"commands",
+					"groups:history",
+					"im:history",
+					"views:write",
+				},
+			},
+		},
+		"settings": map[string]any{
+			"socket_mode_enabled":    true,
+			"token_rotation_enabled": false,
+			"event_subscriptions": map[string]any{
+				"bot_events": []string{
+					"assistant_thread_started",
+					"assistant_thread_context_changed",
+					"app_home_opened",
+					"app_mention",
+					"message.im",
+				},
+			},
+		},
+	}
+}
+
 var whitespaceRE = regexp.MustCompile(`\s+`)
 
 func truncateManifestText(text string, max int) string {

@@ -61,6 +61,20 @@ func (b *Broker) slackOutboundTimestamp(messageID string) string {
 	return b.slackOutbound[messageID].Timestamp
 }
 
+func (b *Broker) slackReceiptForMessage(messageID string) (channelID, ts string) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return "", ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.slackOutbound == nil {
+		return "", ""
+	}
+	receipt := b.slackOutbound[messageID]
+	return strings.TrimSpace(receipt.ChannelID), strings.TrimSpace(receipt.Timestamp)
+}
+
 func (b *Broker) slackMessageIDForTimestamp(channelID, ts string) string {
 	channelID = strings.TrimSpace(channelID)
 	ts = strings.TrimSpace(ts)
