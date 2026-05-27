@@ -285,6 +285,7 @@ func TestSlackAgentManifestUsesAgentsAndAIAppSurface(t *testing.T) {
 		`"suggested_prompts"`,
 		`"assistant:write"`,
 		`"chat:write"`,
+		`"chat:write.customize"`,
 		`"im:history"`,
 		`"assistant_thread_started"`,
 		`"assistant_thread_context_changed"`,
@@ -313,6 +314,7 @@ func TestSlackWUPHFManifestEnablesAppHomeAndMessagesTab(t *testing.T) {
 		`"app_home_opened"`,
 		`"message.im"`,
 		`"views:write"`,
+		`"chat:write.customize"`,
 		`"/wuphf"`,
 	} {
 		if !strings.Contains(raw, want) {
@@ -340,6 +342,28 @@ func TestSlackOutboundIncludesWUPHFChannelFootnote(t *testing.T) {
 	})
 	if !strings.Contains(got, "_Reply from WUPHF #wuphf-office_") {
 		t.Fatalf("missing channel footnote: %q", got)
+	}
+}
+
+func TestSlackOutboundCustomizesAgentIdentity(t *testing.T) {
+	b := newTestBroker(t)
+	slack := NewSlackTransport(b, "xoxb-test", "xapp-test", "Ubot")
+	slack.setSlackChannelMap("Cprivate", "general")
+
+	out, ok := slack.FormatOutbound(channelMessage{
+		ID:      "msg-agent",
+		From:    "ceo",
+		Channel: "general",
+		Content: "On it.",
+	})
+	if !ok {
+		t.Fatal("FormatOutbound returned false")
+	}
+	if out.Participant.DisplayName != "WUPHF @ceo" {
+		t.Fatalf("display name = %q", out.Participant.DisplayName)
+	}
+	if out.IconEmoji == "" {
+		t.Fatalf("expected icon emoji, got %+v", out)
 	}
 }
 

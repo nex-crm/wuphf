@@ -135,6 +135,12 @@ type Outbound struct {
 	// transports that support native message blocks should read it; plain-text
 	// transports ignore it and use Text.
 	Blocks []map[string]any
+	// IconEmoji optionally customizes the sender icon on transports that support
+	// per-message bot identity customization.
+	IconEmoji string
+	// IconURL optionally customizes the sender image on transports that support
+	// per-message bot identity customization.
+	IconURL string
 	// ThreadKey is echoed from the inbound [Message.ThreadKey]. Adapters that
 	// support threading use this to send a threaded reply; adapters that do not
 	// support threading ignore it.

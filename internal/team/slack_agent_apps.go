@@ -129,6 +129,7 @@ func slackAgentManifestForMember(member officeMember) map[string]any {
 				"bot": []string{
 					"assistant:write",
 					"chat:write",
+					"chat:write.customize",
 					"im:history",
 					"app_mentions:read",
 					"channels:history",
@@ -193,6 +194,7 @@ func slackWUPHFAppManifest() map[string]any {
 					"app_mentions:read",
 					"channels:history",
 					"chat:write",
+					"chat:write.customize",
 					"commands",
 					"groups:history",
 					"im:history",

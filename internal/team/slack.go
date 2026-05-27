@@ -107,6 +107,14 @@ func (s *SlackTransport) Send(ctx context.Context, msg transport.Outbound) error
 	} else {
 		payload["blocks"] = slackBlocksForText(msg.Text)
 	}
+	if msg.Participant.DisplayName != "" {
+		payload["username"] = msg.Participant.DisplayName
+	}
+	if msg.IconURL != "" {
+		payload["icon_url"] = msg.IconURL
+	} else if msg.IconEmoji != "" {
+		payload["icon_emoji"] = msg.IconEmoji
+	}
 	if msg.ThreadKey != "" {
 		payload["thread_ts"] = msg.ThreadKey
 	}
@@ -129,11 +137,14 @@ func (s *SlackTransport) FormatOutbound(msg channelMessage) (transport.Outbound,
 		return transport.Outbound{}, false
 	}
 	text := formatSlackOutbound(msg)
+	identity := s.slackOutboundIdentity(msg)
 	return transport.Outbound{
-		Participant: transport.Participant{AdapterName: s.Name(), Key: msg.ID},
+		Participant: transport.Participant{AdapterName: s.Name(), Key: msg.ID, DisplayName: identity.Username},
 		Binding:     transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: slackChannelID},
 		Text:        text,
 		Blocks:      slackBlocksForMessage(msg),
+		IconEmoji:   identity.IconEmoji,
+		IconURL:     identity.IconURL,
 		ThreadKey:   threadTS,
 	}, true
 }
@@ -202,6 +213,29 @@ func (s *SlackTransport) slackOutboundTarget(msg channelMessage) (channelID, thr
 		}
 	}
 	return s.slackChannelIDForSlug(msg.Channel), s.slackOutboundThread(msg.ReplyTo)
+}
+
+type slackOutboundIdentity struct {
+	Username  string
+	IconEmoji string
+	IconURL   string
+}
+
+func (s *SlackTransport) slackOutboundIdentity(msg channelMessage) slackOutboundIdentity {
+	slug := normalizeActorSlug(msg.From)
+	if slug == "" || slug == "system" || slug == "nex" || isHumanMessageSender(slug) {
+		return slackOutboundIdentity{}
+	}
+	if s.Broker != nil && s.Broker.officeMemberBySlug(slug) == nil {
+		if msg.Kind == "automation" {
+			return slackOutboundIdentity{}
+		}
+	}
+	username := "WUPHF @" + slug
+	return slackOutboundIdentity{
+		Username:  truncateSlackText(username, 80),
+		IconEmoji: slackAgentIconEmoji(slug),
+	}
 }
 
 func (s *SlackTransport) runSocket(ctx context.Context, host transport.Host) error {
@@ -883,6 +917,28 @@ func countSlackVisibleAgents(members []officeMember) int {
 		count++
 	}
 	return count
+}
+
+var slackAgentIconPalette = []string{
+	":large_green_circle:",
+	":large_blue_circle:",
+	":large_yellow_circle:",
+	":large_purple_circle:",
+	":large_orange_circle:",
+	":white_circle:",
+	":black_circle:",
+}
+
+func slackAgentIconEmoji(slug string) string {
+	slug = normalizeActorSlug(slug)
+	if slug == "" {
+		return ""
+	}
+	sum := 0
+	for _, r := range slug {
+		sum += int(r)
+	}
+	return slackAgentIconPalette[sum%len(slackAgentIconPalette)]
 }
 
 func slackHeaderForMessage(msg channelMessage) string {
