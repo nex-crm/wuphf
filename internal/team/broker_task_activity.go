@@ -19,11 +19,11 @@ import (
 type IssueActivityEventKind string
 
 const (
-	IssueActivityKindLifecycle  IssueActivityEventKind = "lifecycle"
-	IssueActivityKindComment    IssueActivityEventKind = "comment"
-	IssueActivityKindAction     IssueActivityEventKind = "action"
-	IssueActivityKindRequest    IssueActivityEventKind = "request"
-	IssueActivityKindSubIssue   IssueActivityEventKind = "sub_issue"
+	IssueActivityKindLifecycle IssueActivityEventKind = "lifecycle"
+	IssueActivityKindComment   IssueActivityEventKind = "comment"
+	IssueActivityKindAction    IssueActivityEventKind = "action"
+	IssueActivityKindRequest   IssueActivityEventKind = "request"
+	IssueActivityKindSubIssue  IssueActivityEventKind = "sub_issue"
 )
 
 // IssueActivityRequestStatus mirrors the human_interview lifecycle so
@@ -56,14 +56,14 @@ type IssueActivityLifecycle struct {
 }
 
 type IssueActivityRequest struct {
-	RequestID    string                     `json:"request_id"`
-	Status       IssueActivityRequestStatus `json:"status"`
-	Question     string                     `json:"question,omitempty"`
-	ChoiceID     string                     `json:"choice_id,omitempty"`
-	ChoiceText   string                     `json:"choice_text,omitempty"`
-	CustomText   string                     `json:"custom_text,omitempty"`
-	AnsweredAt   string                     `json:"answered_at,omitempty"`
-	Blocking     bool                       `json:"blocking,omitempty"`
+	RequestID  string                     `json:"request_id"`
+	Status     IssueActivityRequestStatus `json:"status"`
+	Question   string                     `json:"question,omitempty"`
+	ChoiceID   string                     `json:"choice_id,omitempty"`
+	ChoiceText string                     `json:"choice_text,omitempty"`
+	CustomText string                     `json:"custom_text,omitempty"`
+	AnsweredAt string                     `json:"answered_at,omitempty"`
+	Blocking   bool                       `json:"blocking,omitempty"`
 }
 
 type IssueActivitySubIssue struct {

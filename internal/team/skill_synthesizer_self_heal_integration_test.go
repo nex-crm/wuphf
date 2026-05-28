@@ -29,8 +29,8 @@ func TestSynthesizer_SelfHealEndToEnd_WritesProposedSkill(t *testing.T) {
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-101",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-7"),
-		Details:    selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing deploy specialist"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-7", "", agent.EscalationCapabilityGap),
+		Details:    selfHealingTaskDetails("deploy-bot", "task-7", "", agent.EscalationCapabilityGap, "missing deploy specialist"),
 		Owner:      "deploy-bot",
 		status:     "done",
 		PipelineID: "incident",
@@ -110,8 +110,8 @@ func TestSynthesizer_SelfHealEndToEnd_LLMRejectsCandidate(t *testing.T) {
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-202",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-8"),
-		Details:    selfHealingTaskDetails("deploy-bot", "task-8", agent.EscalationCapabilityGap, "one-off env quirk"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-8", "", agent.EscalationCapabilityGap),
+		Details:    selfHealingTaskDetails("deploy-bot", "task-8", "", agent.EscalationCapabilityGap, "one-off env quirk"),
 		Owner:      "deploy-bot",
 		status:     "done",
 		PipelineID: "incident",
@@ -154,8 +154,8 @@ func TestSynthesizer_SelfHealEndToEnd_StageBProposalsTotalIncrements(t *testing.
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-303",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-9"),
-		Details:    selfHealingTaskDetails("deploy-bot", "task-9", agent.EscalationCapabilityGap, "missing relay"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-9", "", agent.EscalationCapabilityGap),
+		Details:    selfHealingTaskDetails("deploy-bot", "task-9", "", agent.EscalationCapabilityGap, "missing relay"),
 		Owner:      "deploy-bot",
 		status:     "done",
 		PipelineID: "incident",

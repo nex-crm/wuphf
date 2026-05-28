@@ -96,24 +96,24 @@ type Broker struct {
 	// the durable source of truth. The two are kept in sync by
 	// AppendReviewerGrade — Lane C mirrors writes to Lane D on each
 	// grade. Guarded by b.mu.
-	reviewerGradesByTask    map[string][]ReviewerGrade
-	requests                []humanInterview
-	approvalAudit           []ApprovalAuditEntry
-	humanInvites            []humanInvite
-	humanSessions           []humanSession
-	humanSessionRevoke      map[string]chan struct{} // session ID → closed on revoke
-	actions                 []officeActionLog
-	signals                 []officeSignalRecord
-	decisions               []officeDecisionRecord
-	watchdogs               []watchdogAlert
-	scheduler               []schedulerJob
-	skills                  []teamSkill
-	skillDescEmbeddings     map[string][]float32         // slug → description embedding vector; guarded by mu
-	sharedMemory            map[string]map[string]string // namespace → key → value
-	lastTaggedAt            map[string]time.Time         // when each agent was last @mentioned
-	lastPaneSnapshot        map[string]string            // last captured pane content per agent (for change detection)
-	seenTelegramGroups      map[int64]string             // chat_id -> title, populated by transport
-	counter                 int
+	reviewerGradesByTask map[string][]ReviewerGrade
+	requests             []humanInterview
+	approvalAudit        []ApprovalAuditEntry
+	humanInvites         []humanInvite
+	humanSessions        []humanSession
+	humanSessionRevoke   map[string]chan struct{} // session ID → closed on revoke
+	actions              []officeActionLog
+	signals              []officeSignalRecord
+	decisions            []officeDecisionRecord
+	watchdogs            []watchdogAlert
+	scheduler            []schedulerJob
+	skills               []teamSkill
+	skillDescEmbeddings  map[string][]float32         // slug → description embedding vector; guarded by mu
+	sharedMemory         map[string]map[string]string // namespace → key → value
+	lastTaggedAt         map[string]time.Time         // when each agent was last @mentioned
+	lastPaneSnapshot     map[string]string            // last captured pane content per agent (for change detection)
+	seenTelegramGroups   map[int64]string             // chat_id -> title, populated by transport
+	counter              int
 	// idPrefix is the Linear-style prefix used for new Issue IDs (e.g.
 	// "NEX" → NEX-1, NEX-2). Derived from the workspace's company_name
 	// via deriveIDPrefix; refreshed on broker init + when the human

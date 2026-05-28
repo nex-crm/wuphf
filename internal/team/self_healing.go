@@ -162,13 +162,13 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.counter++
 	task := teamTask{
-		ID:            b.allocateIssueIDLocked(),
-		Channel:       channel,
-		Title:         title,
-		Details:       details,
-		Owner:         owner,
-		status:        "open",
-		CreatedBy:     createdBy,
+		ID:        b.allocateIssueIDLocked(),
+		Channel:   channel,
+		Title:     title,
+		Details:   details,
+		Owner:     owner,
+		status:    "open",
+		CreatedBy: createdBy,
 		// Self-heal records render as Issues under the parent so the human
 		// sees them on the Issues board and the per-issue Activity feed —
 		// not buried as a separate "incident" type the UI doesn't surface.

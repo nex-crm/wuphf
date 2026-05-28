@@ -488,7 +488,7 @@ func TestMaybeCreateApprovedSelfHealTask_OverflowMarksError(t *testing.T) {
 	}
 	// The bound task must NOT be the issue's own would-be title — it is the
 	// overflow target.
-	expectedTitle := selfHealingTaskTitle("eng", "eng-fresh-1")
+	expectedTitle := selfHealingTaskTitle("eng", "eng-fresh-1", "", agent.EscalationCapabilityGap)
 	for _, task := range b.AllTasks() {
 		if task.ID == got.SelfHealTaskID && task.Title == expectedTitle {
 			t.Fatalf("overflow case must not bind to the issue's own self-heal title, got task=%+v", task)

@@ -135,23 +135,23 @@ type humanInterview struct {
 	// Redacted is set true when sanitizeHumanInterview stripped at least one
 	// secret from any field. The UI surfaces a badge so humans know the
 	// question/context/options they are reading has been partially censored.
-	Redacted         bool             `json:"redacted,omitempty"`
-	RedactionCount   int              `json:"redaction_count,omitempty"`
-	RedactionReasons []string         `json:"redaction_reasons,omitempty"`
-	DedupeKey string `json:"dedupe_key,omitempty"`
+	Redacted         bool     `json:"redacted,omitempty"`
+	RedactionCount   int      `json:"redaction_count,omitempty"`
+	RedactionReasons []string `json:"redaction_reasons,omitempty"`
+	DedupeKey        string   `json:"dedupe_key,omitempty"`
 	// IssueID links this request back to the parent Issue (team_task)
 	// that scopes the work. Populated by team_action_execute via the
 	// auto-resolve gate (resolveActionIssue) so every approval card has
 	// an Issue to anchor its audit trail to. Empty when the request was
 	// not action-execute-driven (e.g. raw team_request from an agent).
-	IssueID    string `json:"issue_id,omitempty"`
-	DueAt      string `json:"due_at,omitempty"`
-	FollowUpAt       string           `json:"follow_up_at,omitempty"`
-	ReminderAt       string           `json:"reminder_at,omitempty"`
-	RecheckAt        string           `json:"recheck_at,omitempty"`
-	CreatedAt        string           `json:"created_at"`
-	UpdatedAt        string           `json:"updated_at,omitempty"`
-	Answered         *interviewAnswer `json:"answered,omitempty"`
+	IssueID    string           `json:"issue_id,omitempty"`
+	DueAt      string           `json:"due_at,omitempty"`
+	FollowUpAt string           `json:"follow_up_at,omitempty"`
+	ReminderAt string           `json:"reminder_at,omitempty"`
+	RecheckAt  string           `json:"recheck_at,omitempty"`
+	CreatedAt  string           `json:"created_at"`
+	UpdatedAt  string           `json:"updated_at,omitempty"`
+	Answered   *interviewAnswer `json:"answered,omitempty"`
 }
 
 type humanInvite struct {
@@ -222,7 +222,7 @@ type teamTask struct {
 	// sub-issue. Empty for top-level Issues. The FE Issue detail surface
 	// shows sub-issues inline under their parent (Linear-style).
 	ParentIssueID string `json:"parent_issue_id,omitempty"`
-	blocked   bool
+	blocked       bool
 	// LifecycleState is the source of truth for the multi-agent control loop.
 	// Direct callers must NOT write this field — route through the broker's
 	// transition layer (b.transitionLifecycleLocked / b.TransitionLifecycle)

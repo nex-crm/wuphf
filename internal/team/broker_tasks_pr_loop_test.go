@@ -36,10 +36,10 @@ func TestPRLoop_RequestChangesBouncesToOwnerWithFeedback(t *testing.T) {
 
 	feedback := "Bullet 4 fails — :tada: is 6 runes vs 🎉's 1, so 'never longer than input' is violated for every mapping."
 	got, err := b.MutateTask(TaskPostRequest{
-		Action:    "request_changes",
-		ID:        "task-rc-1",
-		Channel:   "general",
-		Details:   feedback,
+		Action:  "request_changes",
+		ID:      "task-rc-1",
+		Channel: "general",
+		Details: feedback,
 		// Reviewer can request_changes on tasks where they're on the
 		// Reviewers list (Slice 7 carve-out). This task seeds reviewer
 		// in Reviewers below so the gate allows the action and the

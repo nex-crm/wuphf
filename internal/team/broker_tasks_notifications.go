@@ -432,14 +432,14 @@ func (b *Broker) postIssueCommentBroadcastLocked(actor string, task *teamTask, b
 type IssueLifecycleTransition string
 
 const (
-	IssueLifecycleTransitionStarted     IssueLifecycleTransition = "started"
-	IssueLifecycleTransitionInReview    IssueLifecycleTransition = "in_review"
-	IssueLifecycleTransitionApproved    IssueLifecycleTransition = "approved"
-	IssueLifecycleTransitionRejected    IssueLifecycleTransition = "rejected"
-	IssueLifecycleTransitionBlocked     IssueLifecycleTransition = "blocked"
-	IssueLifecycleTransitionNeedsInput  IssueLifecycleTransition = "needs_input"
-	IssueLifecycleTransitionRevising    IssueLifecycleTransition = "revising"
-	IssueLifecycleTransitionGeneric     IssueLifecycleTransition = "generic"
+	IssueLifecycleTransitionStarted    IssueLifecycleTransition = "started"
+	IssueLifecycleTransitionInReview   IssueLifecycleTransition = "in_review"
+	IssueLifecycleTransitionApproved   IssueLifecycleTransition = "approved"
+	IssueLifecycleTransitionRejected   IssueLifecycleTransition = "rejected"
+	IssueLifecycleTransitionBlocked    IssueLifecycleTransition = "blocked"
+	IssueLifecycleTransitionNeedsInput IssueLifecycleTransition = "needs_input"
+	IssueLifecycleTransitionRevising   IssueLifecycleTransition = "revising"
+	IssueLifecycleTransitionGeneric    IssueLifecycleTransition = "generic"
 )
 
 // classifyIssueLifecycleTransition reduces a from→to LifecycleState pair

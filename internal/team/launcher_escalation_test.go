@@ -304,8 +304,8 @@ func TestRequestSelfHealing_ExactReuseWinsOverOverflow(t *testing.T) {
 	// (most-recently updated active self-heal for @eng). If the exact-match
 	// path wins, the new incident lands on OLDEST. If overflow wins, it
 	// lands on NEWEST. The two body assertions disambiguate.
-	oldestTitle := selfHealingTaskTitle("eng", taskIDs[0])
-	newestTitle := selfHealingTaskTitle("eng", taskIDs[len(taskIDs)-1])
+	oldestTitle := selfHealingTaskTitle("eng", taskIDs[0], "", agent.EscalationStuck)
+	newestTitle := selfHealingTaskTitle("eng", taskIDs[len(taskIDs)-1], "", agent.EscalationStuck)
 	var oldestID, newestID string
 	for _, task := range b.AllTasks() {
 		switch task.Title {
