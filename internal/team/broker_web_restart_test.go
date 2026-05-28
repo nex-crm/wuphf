@@ -88,15 +88,11 @@ func TestWebBrokerRestartTriggersReExec(t *testing.T) {
 }
 
 // When the platform re-exec fails (e.g. Windows, or syscall.Exec returned an
-// error), the handler must fall back to the in-process listener restart so
-// the SSE client still reconnects.
-func TestWebBrokerRestartFallsBackToListenerOnReExecFailure(t *testing.T) {
-	var reExecCalled atomic.Bool
-	stubReExec(t, func() error {
-		reExecCalled.Store(true)
-		return errors.New("re-exec not supported in test")
-	})
-
+// error), performBrokerRestart must fall back to the in-process listener
+// restart so the SSE client still reconnects. Call it synchronously to avoid
+// racing the handler's goroutine — the handler is already covered by
+// TestWebBrokerRestartTriggersReExec.
+func TestPerformBrokerRestartFallsBackToListenerOnReExecFailure(t *testing.T) {
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("StartOnPort: %v", err)
@@ -105,46 +101,28 @@ func TestWebBrokerRestartFallsBackToListenerOnReExecFailure(t *testing.T) {
 
 	oldAddr := b.Addr()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/broker/restart", nil)
-	resp := httptest.NewRecorder()
+	var reExecCalled atomic.Bool
+	b.performBrokerRestart(func() error {
+		reExecCalled.Store(true)
+		return errors.New("re-exec not supported in test")
+	})
 
-	b.handleWebBrokerRestart(resp, req)
-
-	if resp.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d: %s", resp.Code, http.StatusAccepted, resp.Body.String())
+	if !reExecCalled.Load() {
+		t.Fatal("re-exec hook was not called")
 	}
-
-	// Poll until the fallback finishes — the listener restart happens in the
-	// same goroutine that called the re-exec hook.
-	deadline := time.Now().Add(5 * time.Second)
-	client := &http.Client{Timeout: 1 * time.Second}
-	for {
-		if !reExecCalled.Load() {
-			if time.Now().After(deadline) {
-				t.Fatal("re-exec hook was not called before deadline")
-			}
-			time.Sleep(20 * time.Millisecond)
-			continue
-		}
-		// re-exec returned; listener restart should be in flight or done.
-		healthResp, err := client.Get("http://" + b.Addr() + "/health")
-		if err == nil {
-			body, _ := io.ReadAll(healthResp.Body)
-			healthResp.Body.Close()
-			if healthResp.StatusCode == http.StatusOK {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("GET /health status after fallback = %d: %s", healthResp.StatusCode, string(body))
-			}
-		} else if time.Now().After(deadline) {
-			t.Fatalf("GET /health after fallback never succeeded: %v", err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
 	if b.Addr() != oldAddr {
 		t.Fatalf("listener addr after fallback = %q, want %q", b.Addr(), oldAddr)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	healthResp, err := client.Get("http://" + b.Addr() + "/health")
+	if err != nil {
+		t.Fatalf("GET /health after fallback: %v", err)
+	}
+	defer healthResp.Body.Close()
+	body, _ := io.ReadAll(healthResp.Body)
+	if healthResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /health status after fallback = %d: %s", healthResp.StatusCode, string(body))
 	}
 }
 

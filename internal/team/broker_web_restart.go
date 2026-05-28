@@ -89,19 +89,27 @@ func (b *Broker) handleWebBrokerRestart(w http.ResponseWriter, r *http.Request) 
 	reExec, delay := loadReExecHook()
 	go func() {
 		time.Sleep(delay)
-		// syscall.Exec only returns on failure. If it succeeds, the new
-		// binary takes over the process and this goroutine never resumes.
-		// On Windows (or any platform where re-exec isn't supported) we
-		// fall back to the in-process listener restart so the user at
-		// least sees a reconnect, even though the version won't change
-		// until they re-launch the CLI manually.
-		if err := reExec(); err != nil {
-			log.Printf("broker re-exec failed (%v); falling back to listener restart", err)
-			if _, restartErr := b.RestartBrokerListener(); restartErr != nil {
-				log.Printf("broker listener restart fallback failed: %v", restartErr)
-			}
-		}
+		b.performBrokerRestart(reExec)
 	}()
+}
+
+// performBrokerRestart runs the actual restart workflow synchronously. The
+// HTTP handler invokes it on a goroutine (after flushing the 202 and sleeping
+// briefly so the response reaches the client), but it is split out so tests
+// can exercise the fallback path without spawning a goroutine or polling.
+//
+// syscall.Exec only returns on failure: if it succeeds, the new binary takes
+// over the process and this function never returns. On Windows (or any
+// platform where re-exec is not supported) we fall back to the in-process
+// listener restart so the SSE client at least reconnects, even though the
+// version will not change until the user relaunches the CLI manually.
+func (b *Broker) performBrokerRestart(reExec func() error) {
+	if err := reExec(); err != nil {
+		log.Printf("broker re-exec failed (%v); falling back to listener restart", err)
+		if _, restartErr := b.RestartBrokerListener(); restartErr != nil {
+			log.Printf("broker listener restart fallback failed: %v", restartErr)
+		}
+	}
 }
 
 func (b *Broker) RestartBrokerListener() (WebBrokerRestartStatus, error) {
