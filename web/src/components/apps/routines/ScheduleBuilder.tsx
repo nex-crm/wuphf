@@ -33,6 +33,15 @@ export interface ScheduleValue {
   dayOfMonth: number;
 }
 
+/**
+ * The broker rejects routines that fire more often than every 15 minutes
+ * (see `validateRoutineCadence` in scheduler_lifecycle.go). The composer
+ * mirrors that floor so the user can't author a schedule the server will
+ * refuse — keeping the rule in one place means tightening or relaxing it
+ * requires editing both sides of the wire, by design.
+ */
+export const MIN_ROUTINE_INTERVAL_MINUTES = 15;
+
 export const DEFAULT_SCHEDULE: ScheduleValue = {
   frequency: "daily",
   intervalUnit: "minutes",
@@ -187,37 +196,50 @@ interface IntervalEditorProps {
 }
 
 function IntervalEditor({ value, onChange }: IntervalEditorProps) {
+  // Floor depends on unit. In minutes mode the broker rejects anything
+  // below MIN_ROUTINE_INTERVAL_MINUTES; in hours mode 1h is already
+  // well above the floor.
+  const minAmount = value.intervalUnit === "hours" ? 1 : MIN_ROUTINE_INTERVAL_MINUTES;
   return (
     <Row label="Every">
       <input
         type="number"
         className="input"
-        min={1}
+        min={minAmount}
         value={value.intervalAmount}
-        onChange={(e) =>
+        onChange={(e) => {
+          const raw = parseInt(e.target.value, 10) || minAmount;
           onChange({
             ...value,
-            intervalAmount: Math.max(1, parseInt(e.target.value, 10) || 1),
-          })
-        }
+            intervalAmount: Math.max(minAmount, raw),
+          });
+        }}
         data-testid="schedule-interval-amount"
         style={{ width: 96 }}
       />
       <select
         className="input"
         value={value.intervalUnit}
-        onChange={(e) =>
+        onChange={(e) => {
+          const nextUnit = e.target.value as IntervalUnit;
+          const nextFloor = nextUnit === "hours" ? 1 : MIN_ROUTINE_INTERVAL_MINUTES;
           onChange({
             ...value,
-            intervalUnit: e.target.value as IntervalUnit,
-          })
-        }
+            intervalUnit: nextUnit,
+            intervalAmount: Math.max(nextFloor, value.intervalAmount),
+          });
+        }}
         data-testid="schedule-interval-unit"
         style={{ width: 110 }}
       >
         <option value="minutes">minutes</option>
         <option value="hours">hours</option>
       </select>
+      {value.intervalUnit === "minutes" && (
+        <span style={hintStyle}>
+          (minimum {MIN_ROUTINE_INTERVAL_MINUTES})
+        </span>
+      )}
     </Row>
   );
 }

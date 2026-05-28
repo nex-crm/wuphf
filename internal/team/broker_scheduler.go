@@ -942,6 +942,15 @@ func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request,
 				return
 			}
 		}
+		// Enforce the 15-minute floor on user-created routines.
+		// System-managed crons (which never reach this PATCH path through
+		// the UI — they're created at boot) keep their own intervals.
+		if !job.SystemManaged {
+			if msg := validateRoutineCadence(job.ScheduleExpr, job.IntervalMinutes); msg != "" {
+				http.Error(w, msg, http.StatusBadRequest)
+				return
+			}
+		}
 		// Schedule fields changed — recompute NextRun so the new cadence
 		// takes effect on the next scheduler tick instead of after the old
 		// timer fires once.

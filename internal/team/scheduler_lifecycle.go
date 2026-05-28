@@ -44,9 +44,57 @@ type schedulerRevision struct {
 }
 
 const (
-	schedulerActivityHistoryLimit  = 50
-	schedulerRevisionHistoryLimit  = 20
+	schedulerActivityHistoryLimit = 50
+	schedulerRevisionHistoryLimit = 20
+	// minRoutineIntervalMinutes is the floor we enforce on user-created
+	// routines. System-managed crons (nex-insights, etc.) self-register
+	// at boot and are not subject to this rule. The cap exists to keep
+	// the agent dispatcher from getting hammered by accidentally-fast
+	// cadences ("every minute" is almost always a misclick).
+	minRoutineIntervalMinutes = 15
 )
+
+// validateRoutineCadence enforces the minimum interval (15 min) on
+// content edits. Returns a user-facing error string when the cadence
+// is too tight, or "" when the schedule is acceptable. Legacy workflow
+// jobs that declare cadence only via WorkflowKey + Provider (no
+// schedule_expr / interval_minutes) bypass this check — the workflow
+// runner owns their cadence.
+func validateRoutineCadence(scheduleExpr string, intervalMinutes int) string {
+	if intervalMinutes > 0 && intervalMinutes < minRoutineIntervalMinutes {
+		return fmt.Sprintf(
+			"interval_minutes must be at least %d (got %d)",
+			minRoutineIntervalMinutes, intervalMinutes,
+		)
+	}
+	expr := strings.TrimSpace(scheduleExpr)
+	if expr == "" {
+		return ""
+	}
+	// We can only meaningfully reason about two cron shapes: literal
+	// "* * * * *" and "*/N * * * *". Anything more elaborate is allowed;
+	// the floor is a guardrail against the obvious misclick, not a full
+	// cron evaluator.
+	if expr == "* * * * *" {
+		return fmt.Sprintf(
+			"routine cadence too tight: cron \"* * * * *\" fires every minute; minimum is every %d minutes",
+			minRoutineIntervalMinutes,
+		)
+	}
+	if strings.HasPrefix(expr, "*/") {
+		parts := strings.Fields(expr)
+		if len(parts) == 5 && strings.HasPrefix(parts[0], "*/") &&
+			parts[1] == "*" && parts[2] == "*" && parts[3] == "*" && parts[4] == "*" {
+			if n, err := strconv.Atoi(strings.TrimPrefix(parts[0], "*/")); err == nil && n > 0 && n < minRoutineIntervalMinutes {
+				return fmt.Sprintf(
+					"routine cadence too tight: cron \"%s\" fires every %d minutes; minimum is every %d minutes",
+					expr, n, minRoutineIntervalMinutes,
+				)
+			}
+		}
+	}
+	return ""
+}
 
 // recordSchedulerActivityLocked appends a lifecycle event. Caller MUST
 // hold b.mu. Older entries are evicted FIFO once the buffer is full.
@@ -390,6 +438,10 @@ func (b *Broker) handleCreateSchedulerJob(w http.ResponseWriter, r *http.Request
 			http.Error(w, "schedule_expr or interval_minutes is required", http.StatusBadRequest)
 			return
 		}
+	}
+	if msg := validateRoutineCadence(req.ScheduleExpr, req.IntervalMinutes); msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
+		return
 	}
 
 	slug := strings.TrimSpace(req.Slug)
