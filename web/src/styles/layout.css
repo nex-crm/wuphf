@@ -2135,9 +2135,9 @@ html[data-theme="nex"]
   border: 1px solid var(--border);
 }
 .task-detail-status-badge.status-done {
-  background: #e7f9ed;
-  color: #0b6b2a;
-  border-color: #c6eed2;
+  background: var(--success-100, #e7f9ed);
+  color: var(--success-500, #0b6b2a);
+  border-color: var(--success-200, #c6eed2);
 }
 .task-detail-status-badge.status-in_progress,
 .task-detail-status-badge.status-review {
@@ -2146,9 +2146,9 @@ html[data-theme="nex"]
   border-color: var(--accent-bg);
 }
 .task-detail-status-badge.status-blocked {
-  background: #fff4d6;
-  color: #7a5500;
-  border-color: #f2d98a;
+  background: var(--warning-100, #fff4d6);
+  color: var(--warning-500, #7a5500);
+  border-color: var(--warning-200, #f2d98a);
 }
 .task-detail-status-badge.status-canceled,
 .task-detail-status-badge.status-cancelled {

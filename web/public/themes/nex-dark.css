@@ -69,3 +69,117 @@ html[data-theme="nex-dark"] .sidebar-header {
 html[data-theme="nex-dark"] .message:hover {
   background: #191a1b;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Dark-theme contrast fixes
+   The base stylesheets target light surfaces. Anywhere a rule
+   hardcodes a light bg + dark text (or vice versa) needs an
+   override here so the dark theme stays readable.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── @mention pill — light tan + dark orange reads as a stain on dark bg ── */
+html[data-theme="nex-dark"] {
+  --mention-bg: rgba(255, 182, 71, 0.16);
+  --mention-fg: #ffb647;
+  --syntax-number: #f7deab;
+  --syntax-bool: #f0a8c8;
+}
+
+/* ── Task status badges — light pastel chips don't survive on dark surface ── */
+html[data-theme="nex-dark"] .task-detail-status-badge.status-done {
+  background: rgba(47, 170, 100, 0.14);
+  color: #54c984;
+  border-color: rgba(47, 170, 100, 0.3);
+}
+html[data-theme="nex-dark"] .task-detail-status-badge.status-blocked {
+  background: rgba(255, 182, 71, 0.14);
+  color: #ffb647;
+  border-color: rgba(255, 182, 71, 0.3);
+}
+
+/* ── Insight badges — white text on bright accent washes out; tint the bg
+       darker so the white-on-color stays legible ── */
+html[data-theme="nex-dark"] .insight-badge-low {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+
+/* ── Notebook surface — base tokens assume cream-paper light mode.
+       Re-map to a dark parchment palette so the wiki notebook reads. ── */
+html[data-theme="nex-dark"] .notebook-surface {
+  --nb-paper: #161718;
+  --nb-paper-dark: #111213;
+  --nb-rule: rgba(255, 255, 255, 0.03);
+  --nb-surface: #1a1b1c;
+  --nb-text: #e9eaeb;
+  --nb-text-muted: #aeb1b2;
+  --nb-text-tertiary: #7d8082;
+  --nb-border: #2a2d2f;
+  --nb-border-light: #1e2022;
+  --nb-ink-blue: #88a4c2;
+  --nb-stamp-red: #d6443c;
+  --nb-amber: #ffb647;
+  --nb-amber-bg: rgba(255, 182, 71, 0.1);
+  --nb-amber-hover: #f0a541;
+  --nb-green-approve: #54c984;
+  --nb-green-bg: rgba(84, 201, 132, 0.1);
+
+  /* Kill the cream paper grain — both layers read as scanlines on dark. */
+  background-image: none !important;
+  background-color: var(--nb-paper);
+}
+
+/* Notebook status pills — were hardcoded dark grays/ambers/burgundies that
+   only contrasted against cream paper. Re-tint for the dark surface. */
+html[data-theme="nex-dark"] .notebook-surface .nb-shelf-item .nb-status-draft {
+  color: var(--text-secondary);
+}
+html[data-theme="nex-dark"] .notebook-surface .nb-shelf-item .nb-status-review {
+  color: #ffb647;
+}
+html[data-theme="nex-dark"]
+  .notebook-surface
+  .nb-shelf-item
+  .nb-status-changes {
+  color: #ff7e6e;
+}
+
+/* Notebook shelf cards — hardcoded white background flips to dark card. */
+html[data-theme="nex-dark"] .notebook-surface .nb-shelf-card {
+  background: var(--nb-paper-dark);
+  outline-color: rgba(255, 255, 255, 0.08);
+  color: var(--nb-text);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+html[data-theme="nex-dark"] .notebook-surface .nb-shelf-card:hover {
+  background: #1f2021;
+  outline-color: rgba(255, 255, 255, 0.18);
+}
+html[data-theme="nex-dark"]
+  .notebook-surface
+  .nb-shelf-card
+  .nb-shelf-card-meta {
+  color: var(--text-tertiary);
+}
+
+/* Notebook review cards — were bright yellow sticky-notes (#eef679 / #f5fb95).
+   On dark surface the yellow burns; switch to dark amber chip. */
+html[data-theme="nex-dark"] .notebook-surface .nb-review-card {
+  background: rgba(255, 182, 71, 0.1);
+  outline-color: rgba(255, 255, 255, 0.1);
+  color: var(--nb-text);
+}
+html[data-theme="nex-dark"] .notebook-surface .nb-review-card:hover {
+  background: rgba(255, 182, 71, 0.18);
+  outline-color: rgba(255, 182, 71, 0.4);
+}
+
+/* Scrollbar thumb hover — base uses rgba(0,0,0,0.4) which disappears on dark */
+html[data-theme="nex-dark"] .notebook-surface::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* ── Wiki text muted/rule fallbacks now resolve to theme tokens via
+       :root in wiki.css; nothing extra needed here. ── */
