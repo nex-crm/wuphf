@@ -30,10 +30,10 @@ const APP_CASES = [
     content: /Office operating rules/i,
   },
   {
-    app: "calendar",
-    label: "Calendar",
+    app: "routines",
+    label: "Routines",
     content:
-      /Loading calendar|Could not load calendar|Nothing scheduled|Mon|Tue|Wed/i,
+      /Loading routines|Could not load routines|No routines yet|Routines/i,
   },
   {
     app: "skills",
