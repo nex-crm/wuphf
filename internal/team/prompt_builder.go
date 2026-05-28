@@ -125,6 +125,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(secretHandlingPromptRule())
 		if markdownMemory {
 			sb.WriteString("Markdown notebook/wiki memory is active in this 1:1. Use notebook_write for durable source notes and create an HTML visual companion with notebook_visual_artifact_create when the work would be clearer as a diagram, mockup, report, comparison grid, code explainer, PR review, or interactive tuning surface. Keep the HTML self-contained and include visual-artifact:ra_... on its own line when you reference it in chat.\n\n")
+			sb.WriteString(visualArtifactForcingBlock())
 		} else if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the conversation and direct human answers only.\n\n")
 		} else {
@@ -176,6 +177,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
 		if markdownMemory {
 			sb.WriteString(markdownKnowledgeToolBlock())
+			sb.WriteString(visualArtifactForcingBlock())
 		}
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human a cancelable interview question; it never blocks chat, and dismiss/send cancels it.\n")
@@ -318,6 +320,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
 		if markdownMemory {
 			sb.WriteString(markdownKnowledgeToolBlock())
+			sb.WriteString(visualArtifactForcingBlock())
 		}
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human only for cancelable clarifications you cannot responsibly guess.\n")
@@ -423,6 +426,25 @@ func markdownKnowledgeToolBlock() string {
 		"- team_learning_record: Record a durable typed learning only when it would save future work or prevent a repeat mistake. Use user-stated only when the human explicitly said it; otherwise choose observed, inferred, execution, synthesis, cross-agent, or cross-model with an honest confidence. This is the typed learning store, not the team wiki.\n" +
 		"- team_wiki_write: Direct canonical wiki writes only when the human explicitly asked you to write the article, playbook, or canonical page to the wiki. Pass human_request as the broker message ID for that recent human-authored wiki request. Do not use this for agent-authored working notes, observations, or proposed knowledge; those start in notebook_write and move through notebook_promote review.\n" +
 		"- Human remember/save-to-wiki phrases are auto-routed by the broker. When a human says \"remember this\", \"save to wiki\", \"save to KB\", \"write this down\", \"add to wiki\", \"wiki this\", \"save to memory\", or \"this is canonical\", do NOT re-route the content yourself and do NOT acknowledge that you saved it; the human's own message is the canonical source.\n"
+}
+
+// visualArtifactForcingBlock returns the MUST-create rule for HTML visual
+// artifacts. The notebook_visual_artifact_create tool exists, the prompt
+// catalog mentions it, and the renderer is wired (chat marker + Wiki Visual
+// tab) — but agents skipped it every time because the trigger was phrased as
+// a soft "when the work would be clearer as a rich visual artifact". Result:
+// zero artifacts on disk across every runtime. This block restates the same
+// tool with explicit MUST triggers so the default is "produce one" for the
+// work shapes the surface was built for.
+func visualArtifactForcingBlock() string {
+	return "VISUAL ARTIFACT RULE (load-bearing):\n" +
+		"You MUST call notebook_visual_artifact_create and include `visual-artifact:ra_...` on its own line in your chat reply when ANY of the following is true:\n" +
+		"- the human asked for a wiki article, draft, page, doc, brief, write-up, one-pager, memo, or canonical note;\n" +
+		"- the human asked for a plan, spec, RFC, design, proposal, roadmap, architecture, or playbook;\n" +
+		"- the answer is a comparison, decision matrix, scoring rubric, options table, or before/after;\n" +
+		"- the answer is a diagram, flow, sequence, mockup, dashboard, or interactive tuning surface;\n" +
+		"- your reply would otherwise be more than ~200 words of structured markdown headings and lists.\n" +
+		"The paired markdown (notebook_write or the wiki article) stays the durable source; the HTML is the visual companion users actually read. Default to the WUPHF technical-manual style described in the tool catalog (old mathematics/physics book, Making Software cobalt figure ink, FIG_001 labels, self-contained inline CSS/JS, no network fetches). Do not skip the artifact because the markdown felt good enough — markdown-only replies on these triggers are the failure mode this rule fixes.\n\n"
 }
 
 func secretHandlingPromptRule() string {
