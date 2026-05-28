@@ -1097,6 +1097,80 @@ html[data-theme="nex"]
   overflow: visible;
   margin-bottom: 8px;
 }
+
+/* v3 MVP — CEO/specialist org hierarchy in the sidebar.
+   The CEO row sits at the top with an "Orchestrator" pill; specialists
+   sit beneath under a "Reports to @ceo" label with a left-rail tree
+   stem on each row so the org chart is obvious at a glance. */
+.sidebar-agent-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar-agent-group + .sidebar-agent-group {
+  margin-top: 8px;
+}
+.sidebar-agent-rank-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding: 0 10px;
+  margin-bottom: 2px;
+}
+.sidebar-agent-group--ceo .sidebar-agent {
+  background: color-mix(in srgb, var(--accent, #6cf) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #6cf) 24%, transparent);
+}
+.sidebar-agent-group--ceo .sidebar-agent.active {
+  background: color-mix(in srgb, var(--accent, #6cf) 18%, transparent);
+}
+.sidebar-agent-rail-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 6px;
+}
+.sidebar-agent-rail-tree-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.sidebar-agent-rail-tree-stem {
+  flex: 0 0 12px;
+  align-self: stretch;
+  position: relative;
+}
+.sidebar-agent-rail-tree-stem::before {
+  /* Vertical trunk that runs the full row height. */
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border, rgba(255, 255, 255, 0.18));
+}
+.sidebar-agent-rail-tree-stem::after {
+  /* Elbow into the row at vertical midpoint. */
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  width: 7px;
+  height: 1px;
+  background: var(--border, rgba(255, 255, 255, 0.18));
+}
+.sidebar-agent-rail-tree-row:last-child .sidebar-agent-rail-tree-stem::before {
+  /* Trunk stops at the elbow on the last specialist. */
+  bottom: 50%;
+}
+.sidebar-agent-rail-tree-row .sidebar-agent-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .sidebar-agents .sidebar-add-btn,
 .sidebar-channels .sidebar-add-btn {
   padding: 6px 10px;

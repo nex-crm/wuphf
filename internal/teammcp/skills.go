@@ -2,8 +2,11 @@ package teammcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -50,8 +53,131 @@ func registerSkillAuthoringTools(server *mcp.Server) {
 		"team_skill_create",
 		"Create or propose a durable WUPHF skill through structured fields instead of a prose block. Any agent may use action=propose to queue human approval. Only CEO may use action=create to activate immediately when the human explicitly asked to create or activate the skill.",
 	), handleTeamSkillCreate)
+	mcp.AddTool(server, officeWriteTool(
+		"request_skill_enable",
+		"Ask the human to enable a skill from DISCOVERABLE SKILLS for you. Use this BEFORE proposing a new skill if a similar one already exists in the library. The human gets a blocking approval card; on approve, the skill moves to your AVAILABLE SKILLS on the next prompt build and you can invoke it via team_skill_run.",
+	), handleRequestSkillEnable)
 	registerSkillCompileTools(server)
 	registerSkillCRUDTools(server)
+}
+
+// RequestSkillEnableArgs are the inputs for the request_skill_enable tool.
+type RequestSkillEnableArgs struct {
+	SkillSlug string `json:"skill_slug" jsonschema:"Slug of the existing skill you want enabled, from DISCOVERABLE SKILLS in your prompt"`
+	Reason    string `json:"reason" jsonschema:"One-sentence justification for why this skill solves the current need"`
+	MySlug    string `json:"my_slug,omitempty" jsonschema:"Agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+// handleRequestSkillEnable creates a blocking approval request for the
+// human to enable an existing skill for the calling agent, polls for an
+// answer, and on approval calls /skills/<slug>/enable-for. This is the
+// anti-duplication path — agents should ask for an existing skill rather
+// than build a redundant one when AVAILABLE SKILLS is missing what they
+// need but DISCOVERABLE SKILLS has it.
+func handleRequestSkillEnable(ctx context.Context, _ *mcp.CallToolRequest, args RequestSkillEnableArgs) (*mcp.CallToolResult, any, error) {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	skillSlug := skillPathSegment(args.SkillSlug)
+	if skillSlug == "" {
+		return toolError(fmt.Errorf("skill_slug is required")), nil, nil
+	}
+	reason := strings.TrimSpace(args.Reason)
+	if reason == "" {
+		return toolError(fmt.Errorf("reason is required: explain why this skill fits the work")), nil, nil
+	}
+	channel := resolveConversationChannel(ctx, slug, "")
+
+	question := fmt.Sprintf("Enable skill `%s` for @%s?", skillSlug, slug)
+	contextLine := fmt.Sprintf("@%s says: %s", slug, reason)
+	options := []map[string]any{
+		{"id": "approve", "label": "Enable", "description": "Adds the skill to this agent's AVAILABLE list."},
+		{"id": "deny", "label": "Deny", "description": "Skill stays out of the agent's prompt."},
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := brokerPostJSON(ctx, "/requests", map[string]any{
+		"kind":           "skill_enable_request",
+		"channel":        channel,
+		"from":           slug,
+		"title":          "Enable skill for agent",
+		"question":       question,
+		"context":        contextLine,
+		"options":        options,
+		"recommended_id": "approve",
+		"blocking":       true,
+		"required":       true,
+		"metadata": map[string]any{
+			"skill_slug": skillSlug,
+			"agent_slug": slug,
+		},
+	}, &created); err != nil {
+		return toolError(fmt.Errorf("create enable request: %w", err)), nil, nil
+	}
+	if strings.TrimSpace(created.ID) == "" {
+		return toolError(fmt.Errorf("enable request did not return an ID")), nil, nil
+	}
+
+	timeout := time.After(30 * time.Minute)
+	ticker := time.NewTicker(1500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return toolError(ctx.Err()), nil, nil
+		case <-timeout:
+			return toolError(fmt.Errorf("timed out waiting for human approval")), nil, nil
+		case <-ticker.C:
+			var result brokerInterviewAnswerResponse
+			path := "/interview/answer?id=" + url.QueryEscape(created.ID)
+			if err := brokerGetJSON(ctx, path, &result); err != nil {
+				return toolError(err), nil, nil
+			}
+			switch strings.ToLower(strings.TrimSpace(result.Status)) {
+			case "canceled", "cancelled":
+				return toolError(fmt.Errorf("enable request canceled")), nil, nil
+			case "not_found":
+				return toolError(fmt.Errorf("enable request not found")), nil, nil
+			}
+			if result.Answered == nil {
+				continue
+			}
+			choice := strings.ToLower(strings.TrimSpace(result.Answered.ChoiceID))
+			if choice != "approve" {
+				payload, _ := json.MarshalIndent(map[string]any{
+					"ok":         false,
+					"approved":   false,
+					"skill_slug": skillSlug,
+					"agent_slug": slug,
+					"note":       "Human denied the enablement. Do NOT create a duplicate skill — try a different approach or ask the human for guidance.",
+				}, "", "  ")
+				return textResult(string(payload)), nil, nil
+			}
+			var enableResp struct {
+				Skill struct {
+					Name        string   `json:"name"`
+					OwnerAgents []string `json:"owner_agents"`
+				} `json:"skill"`
+			}
+			enablePath := "/skills/" + url.PathEscape(skillSlug) + "/enable-for"
+			if err := brokerPostJSON(ctx, enablePath, map[string]any{"agent": slug}, &enableResp); err != nil {
+				return toolError(fmt.Errorf("enable skill after approval: %w", err)), nil, nil
+			}
+			payload, _ := json.MarshalIndent(map[string]any{
+				"ok":           true,
+				"approved":     true,
+				"skill_slug":   enableResp.Skill.Name,
+				"agent_slug":   slug,
+				"owner_agents": enableResp.Skill.OwnerAgents,
+				"note":         "Skill enabled. It will appear in your AVAILABLE SKILLS on the next prompt build. Invoke via team_skill_run.",
+			}, "", "  ")
+			return textResult(string(payload)), nil, nil
+		}
+	}
 }
 
 // handleTeamSkillCreate creates a skill through the broker's structured API.

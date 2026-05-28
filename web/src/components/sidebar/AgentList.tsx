@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 
 import type { OfficeMember } from "../../api/client";
 import { useAgentEventPeek } from "../../hooks/useAgentEventPeek";
@@ -7,6 +7,7 @@ import { useFirstRunNudge } from "../../hooks/useFirstRunNudge";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { useOverflow } from "../../hooks/useOverflow";
 import { type HarnessKind, resolveHarness } from "../../lib/harness";
+import { router } from "../../lib/router";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { AgentWizard, useAgentWizard } from "../agents/AgentWizard";
@@ -173,9 +174,17 @@ function SidebarAgentRow({
 
 export function AgentList() {
   const { data: members = [] } = useOfficeMembers();
-  const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
   const route = useCurrentRoute();
-  const activeDmAgent = route.kind === "dm" ? route.agentSlug : null;
+  // v3 MVP — active row matches the agent subspace OR the legacy DM URL
+  // so the sidebar highlights stay coherent across both shapes during the
+  // migration. The DM branch keeps the floating-panel store affordances
+  // working until /agents/$slug fully replaces /dm/$slug.
+  const activeAgentSlug =
+    route.kind === "agent-subspace"
+      ? route.agentSlug
+      : route.kind === "dm"
+        ? route.agentSlug
+        : null;
   const wizard = useAgentWizard();
   const overflowRef = useOverflow<HTMLDivElement>();
   const defaultHarness = useDefaultHarness();
@@ -183,13 +192,37 @@ export function AgentList() {
   const isReconnecting = useAppStore((s) => s.isReconnecting);
 
   const agents = members.filter((m) => m.slug && m.slug !== "human");
-  const firstAgentSlug = agents[0]?.slug;
+  // v3 MVP — split CEO out of the flat agent list so the sidebar can
+  // render it as the orchestrator with specialists listed beneath. The
+  // CEO is always rendered first (even if missing — we render a slot so
+  // the org chart stays stable), specialists keep the broker's order.
+  const ceo = useMemo(() => agents.find((a) => a.slug === "ceo"), [agents]);
+  const specialists = useMemo(
+    () => agents.filter((a) => a.slug !== "ceo"),
+    [agents],
+  );
+  const orderedAgents = useMemo<typeof agents>(
+    () => (ceo ? [ceo, ...specialists] : specialists),
+    [ceo, specialists],
+  );
+  const firstAgentSlug = orderedAgents[0]?.slug;
+
+  // v3 MVP — clicking an agent in the sidebar opens its subspace at
+  // /agents/$slug. The floating AgentPanel popup (driven by the legacy
+  // activeAgentSlug store value) auto-closes on route change, so we do
+  // not need to clear it here.
+  const handleSelect = (slug: string) => {
+    void router.navigate({
+      to: "/agents/$agentSlug",
+      params: { agentSlug: slug },
+    });
+  };
 
   return (
     <AgentEventTickProvider>
       <div className="sidebar-scroll-wrap is-agents">
         <div className="sidebar-agents" ref={overflowRef}>
-          {agents.length === 0 ? (
+          {orderedAgents.length === 0 ? (
             <div
               style={{
                 fontSize: 11,
@@ -200,17 +233,49 @@ export function AgentList() {
               No agents online
             </div>
           ) : (
-            agents.map((agent) => (
-              <SidebarAgentRow
-                key={agent.slug}
-                agent={agent}
-                isDMActive={activeDmAgent === agent.slug}
-                isFirst={agent.slug === firstAgentSlug}
-                showNudge={showNudge}
-                defaultHarness={defaultHarness}
-                onSelect={setActiveAgentSlug}
-              />
-            ))
+            <>
+              {ceo ? (
+                <div className="sidebar-agent-group sidebar-agent-group--ceo">
+                  <div className="sidebar-agent-rank-label">Orchestrator</div>
+                  <SidebarAgentRow
+                    agent={ceo}
+                    isDMActive={activeAgentSlug === ceo.slug}
+                    isFirst={ceo.slug === firstAgentSlug}
+                    showNudge={showNudge}
+                    defaultHarness={defaultHarness}
+                    onSelect={handleSelect}
+                  />
+                </div>
+              ) : null}
+              {specialists.length > 0 ? (
+                <div className="sidebar-agent-group sidebar-agent-group--specialists">
+                  <div className="sidebar-agent-rank-label">
+                    {ceo ? "Reports to @ceo" : "Specialists"}
+                  </div>
+                  <div className="sidebar-agent-rail-tree">
+                    {specialists.map((agent) => (
+                      <div
+                        key={agent.slug}
+                        className="sidebar-agent-rail-tree-row"
+                      >
+                        <span
+                          className="sidebar-agent-rail-tree-stem"
+                          aria-hidden="true"
+                        />
+                        <SidebarAgentRow
+                          agent={agent}
+                          isDMActive={activeAgentSlug === agent.slug}
+                          isFirst={agent.slug === firstAgentSlug}
+                          showNudge={showNudge}
+                          defaultHarness={defaultHarness}
+                          onSelect={handleSelect}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
           )}
           <button
             type="button"

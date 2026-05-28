@@ -610,6 +610,11 @@ export interface AgentRequest {
   redacted?: boolean;
   redaction_count?: number;
   redaction_reasons?: string[];
+  /** Issue/task id this request belongs to, when the owner agent
+   * filed the request from inside an owned Issue. The Inbox card
+   * renders a breadcrumb when set so the human sees the parent
+   * Issue at a glance. */
+  issue_id?: string;
 }
 
 export function getRequests(channel: string) {
@@ -853,6 +858,37 @@ export function enableSkill(name: string): Promise<EnableSkillResponse> {
   );
 }
 
+export interface SkillOwnerToggleResponse {
+  skill?: Skill;
+}
+
+/**
+ * Enable a specific skill for a specific agent. Adds the agent slug to
+ * the skill's owner_agents list (idempotent). Only OwnerAgents members
+ * can invoke a skill via team_skill_run — see the AVAILABLE SKILLS /
+ * DISCOVERABLE SKILLS split in the agent prompt.
+ */
+export function enableSkillForAgent(
+  name: string,
+  agent: string,
+): Promise<SkillOwnerToggleResponse> {
+  return post<SkillOwnerToggleResponse>(
+    `/skills/${encodeURIComponent(name)}/enable-for`,
+    { agent },
+  );
+}
+
+/** Remove an agent from the skill's owner_agents list (idempotent). */
+export function disableSkillForAgent(
+  name: string,
+  agent: string,
+): Promise<SkillOwnerToggleResponse> {
+  return post<SkillOwnerToggleResponse>(
+    `/skills/${encodeURIComponent(name)}/disable-for`,
+    { agent },
+  );
+}
+
 export interface RestoreArchivedSkillResponse {
   skill?: Skill;
 }
@@ -1004,6 +1040,26 @@ export function patchSkill(
   return post<PatchSkillResponse>(
     `/skills/${encodeURIComponent(name)}/patch`,
     body,
+  );
+}
+
+export interface EditSkillContentResponse {
+  skill?: Skill;
+}
+
+/**
+ * Full SKILL.md body replacement. Caller passes the entire rendered
+ * SKILL.md (frontmatter + body). The broker re-parses, re-runs the
+ * safety scan with the original creator's trust level, and rewrites the
+ * wiki article. Used by the full-screen skill detail editor.
+ */
+export function editSkillContent(
+  name: string,
+  content: string,
+): Promise<EditSkillContentResponse> {
+  return put<EditSkillContentResponse>(
+    `/skills/${encodeURIComponent(name)}`,
+    { content },
   );
 }
 

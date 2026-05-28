@@ -110,6 +110,11 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 	if action == "create" && len(args.DependsOn) > 0 {
 		payload["depends_on"] = args.DependsOn
 	}
+	if action == "create" {
+		if parentID := strings.TrimSpace(args.ParentIssueID); parentID != "" {
+			payload["parent_issue_id"] = parentID
+		}
+	}
 	switch action {
 	case "claim":
 		payload["owner"] = mySlug

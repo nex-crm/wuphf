@@ -144,6 +144,29 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
         { label: "Issues", href: "#/issues" },
         { label: "New issue", href: "#/issues/new" },
       ];
+    case "agent-subspace":
+      return [
+        {
+          label: route.agentSlug,
+          href: `#/agents/${encodeURIComponent(route.agentSlug)}`,
+        },
+        ...(route.tab === "chat"
+          ? []
+          : [
+              {
+                label: route.tab,
+                href: `#/agents/${encodeURIComponent(route.agentSlug)}/${route.tab}`,
+              },
+            ]),
+      ];
+    case "skill-detail":
+      return [
+        { label: "Skills", href: "#/apps/skills" },
+        {
+          label: route.skillName,
+          href: `#/skills/${encodeURIComponent(route.skillName)}`,
+        },
+      ];
     case "unknown":
       return [];
     default: {

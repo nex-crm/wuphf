@@ -4,7 +4,6 @@ export const APP_PANEL_IDS = [
   "console",
   "graph",
   "health-check",
-  "overview",
   "policies",
   "receipts",
   "requests",
@@ -50,13 +49,14 @@ export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
   wiki: "Wiki",
   inbox: "Inbox",
   issues: "Issues",
-  // Routed app panels under `/apps/$appId`.
-  activity: "Activity",
+  // Routed app panels under `/apps/$appId`. The `activity` id keeps its
+  // historical slug so existing /apps/activity URLs still resolve; the
+  // human-facing label is "Dashboard".
+  activity: "Dashboard",
   calendar: "Calendar",
   console: "Console",
   graph: "Graph",
   "health-check": "Access & Health",
-  overview: "Overview",
   policies: "Policies",
   receipts: "Receipts",
   requests: "Requests",
@@ -73,7 +73,7 @@ export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
 const SIDEBAR_TOOL_EMOJIS: Partial<
   Record<AppPanelId | FirstClassAppId, string>
 > = {
-  overview: "🏠",
+  activity: "🏠",
   issues: "#",
   tasks: "✓",
   wiki: "📖",
@@ -82,7 +82,6 @@ const SIDEBAR_TOOL_EMOJIS: Partial<
   policies: "🛡",
   calendar: "📅",
   skills: "⚡",
-  activity: "📦",
   receipts: "🧾",
   "health-check": "📶",
   settings: "⚙",
@@ -111,16 +110,17 @@ export interface SidebarTool {
  * sidebar destinations.
  */
 export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
-  { id: "overview", kind: "app-panel" },
+  { id: "activity", kind: "app-panel" },
   { id: "issues", kind: "first-class" },
-  { id: "tasks", kind: "app-panel" },
+  // `tasks` retired — every unit of work is an Issue or Sub-Issue now.
+  // Legacy /tasks routes redirect to /issues; keep the registry entries
+  // for backwards-compatible URL parsing but no sidebar slot.
   { id: "wiki", kind: "first-class" },
   { id: "console", kind: "app-panel" },
   { id: "graph", kind: "app-panel" },
   { id: "policies", kind: "app-panel" },
   { id: "calendar", kind: "app-panel" },
   { id: "skills", kind: "app-panel" },
-  { id: "activity", kind: "app-panel" },
   { id: "receipts", kind: "app-panel" },
   { id: "health-check", kind: "app-panel" },
   { id: "settings", kind: "app-panel" },
@@ -159,6 +159,14 @@ export const ROUTE_PATHS = {
    * Wired so `+ New issue` can navigate here without a 404.
    */
   issueNew: "/issues/new",
+  /**
+   * v3 MVP — per-agent subspace shell.
+   * Renders the uniform Chat | App | Notebooks | Calendar | Settings tabs.
+   */
+  agentSubspace: "/agents/$agentSlug",
+  agentSubspaceTab: "/agents/$agentSlug/$tab",
+  /** Full-screen skill SKILL.md detail editor + viewer. */
+  skillDetail: "/skills/$skillName",
 } as const;
 
 export type RouteKey = keyof typeof ROUTE_PATHS;
@@ -270,6 +278,18 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     search: [],
   },
   { key: "issueNew", path: ROUTE_PATHS.issueNew, params: [], search: [] },
+  {
+    key: "agentSubspace",
+    path: ROUTE_PATHS.agentSubspace,
+    params: ["agentSlug"],
+    search: [],
+  },
+  {
+    key: "agentSubspaceTab",
+    path: ROUTE_PATHS.agentSubspaceTab,
+    params: ["agentSlug", "tab"],
+    search: [],
+  },
 ] as const;
 
 export const SIDEBAR_APP_IDS: readonly string[] = SIDEBAR_TOOLS.map(

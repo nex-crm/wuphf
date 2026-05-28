@@ -13,6 +13,49 @@ var errTaskAckOwnerOnly = errors.New("only the task owner can ack")
 var errTaskNotFound = errors.New("task not found")
 var errTaskPersistFailed = errors.New("failed to persist")
 
+// ListActiveIssueSummariesForPrompt returns slim summaries of every open
+// Issue (not yet approved / rejected / done / cancelled) across all
+// channels. Used by promptBuilder to render the ACTIVE ISSUES catalog
+// block into agent system prompts.
+//
+// Internal accessor: no channel-access check (the prompt builder is
+// office-wide and pre-auth). Slim by design — title + state + channel +
+// owner is enough for the agent to decide "reuse via comment" vs
+// "create new"; full body content would bloat every system prompt on
+// every spawn.
+func (b *Broker) ListActiveIssueSummariesForPrompt() []IssueSummary {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]IssueSummary, 0, len(b.tasks))
+	for _, t := range b.tasks {
+		st := strings.ToLower(strings.TrimSpace(t.Status()))
+		switch st {
+		case "done", "approved", "rejected", "cancelled", "canceled":
+			continue
+		}
+		ls := strings.ToLower(strings.TrimSpace(string(t.LifecycleState)))
+		switch ls {
+		case "approved", "rejected":
+			continue
+		}
+		state := ls
+		if state == "" {
+			state = st
+		}
+		if state == "" {
+			state = "open"
+		}
+		out = append(out, IssueSummary{
+			ID:      t.ID,
+			Title:   strings.TrimSpace(t.Title),
+			State:   state,
+			Channel: normalizeChannelSlug(t.Channel),
+			Owner:   strings.TrimSpace(t.Owner),
+		})
+	}
+	return out
+}
+
 func (b *Broker) ListTasks(req TaskListRequest) (TaskListResponse, error) {
 	statusFilter := strings.TrimSpace(req.StatusFilter)
 	mySlug := strings.TrimSpace(req.MySlug)
@@ -20,6 +63,7 @@ func (b *Broker) ListTasks(req TaskListRequest) (TaskListResponse, error) {
 	channel := normalizeChannelSlug(req.Channel)
 	allChannels := req.AllChannels
 	includeDone := req.IncludeDone
+	parentIssueID := strings.TrimSpace(req.ParentIssueID)
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -63,10 +107,76 @@ func (b *Broker) ListTasks(req TaskListRequest) (TaskListResponse, error) {
 		if mySlug != "" && task.Owner != "" && task.Owner != mySlug {
 			continue
 		}
+		// Sub-issue filter: only return tasks whose parent matches when
+		// caller asked for a specific parent. When empty, no filter
+		// applies — top-level Issues and sub-issues mingle as before.
+		if parentIssueID != "" && task.ParentIssueID != parentIssueID {
+			continue
+		}
+		// Specialist visibility filter (Slice 7): when the viewer is a
+		// specialist agent (not human, not CEO/lead), they only see
+		// Issues they own OR Issues where they own a sub-issue. CEO +
+		// human see everything as before. Web UI uses viewer_slug=human
+		// so the human-facing surface is unchanged.
+		if !b.viewerCanSeeTaskLocked(viewerSlug, &task) {
+			continue
+		}
 		result = append(result, task)
 	}
 
 	return TaskListResponse{Channel: channel, Tasks: result}, nil
+}
+
+// viewerCanSeeTaskLocked enforces the specialist-visibility rule. CEO,
+// human, and internal recovery actors see everything. A specialist sees
+// only Issues they own OR Issues where they own a sub-issue (so the
+// parent context is visible when they own a child).
+// Caller holds b.mu.
+func (b *Broker) viewerCanSeeTaskLocked(viewerSlug string, task *teamTask) bool {
+	if task == nil {
+		return false
+	}
+	v := strings.ToLower(strings.TrimSpace(viewerSlug))
+	// Human + internal recovery + empty viewer all see everything.
+	// Empty viewer is the legacy path used by tests + CLI tools that
+	// never pass viewer_slug.
+	switch v {
+	case "", "human", "you", "system", "broker", "nex":
+		return true
+	}
+	leadSlug := strings.ToLower(strings.TrimSpace(officeLeadSlugFrom(b.members)))
+	// No lead established yet (pre-onboarding / test fixtures) → no
+	// visibility scoping; everyone sees everything.
+	if leadSlug == "" {
+		return true
+	}
+	if v == leadSlug {
+		return true
+	}
+	// Only registered specialists get the visibility filter. Test
+	// slugs / external callers / CLI tools pass arbitrary viewer
+	// slugs we can't validate as a real specialist, so allow them
+	// through. The same pattern as the mutation gate in
+	// checkTaskActionAuthLocked.
+	if b.findMemberLocked(v) == nil {
+		return true
+	}
+	// Specialist owns the task directly.
+	if strings.EqualFold(strings.TrimSpace(task.Owner), v) {
+		return true
+	}
+	// Specialist owns a sub-issue whose parent is this task. Allow them
+	// to read the parent so the breadcrumb works.
+	for i := range b.tasks {
+		child := &b.tasks[i]
+		if !strings.EqualFold(strings.TrimSpace(child.ParentIssueID), task.ID) {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(child.Owner), v) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Broker) AckTask(req TaskAckRequest) (TaskResponse, error) {

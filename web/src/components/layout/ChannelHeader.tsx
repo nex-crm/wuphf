@@ -46,6 +46,10 @@ function headerTitleAndDesc(
       return { title: `Issue ${route.issueId}`, desc: "" };
     case "issue-new":
       return { title: "New issue", desc: "" };
+    case "agent-subspace":
+      return { title: `@${route.agentSlug}`, desc: "" };
+    case "skill-detail":
+      return { title: `Skill: ${route.skillName}`, desc: "" };
     case "unknown":
       return { title: "", desc: "" };
     default: {

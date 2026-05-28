@@ -1560,6 +1560,218 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   justify-content: flex-end;
 }
 
+/* ─── IssueCreatedCard ─── */
+/* System-authored card emitted by team_task action=create when
+   task_type=issue. Same banner pattern as SystemErrorCard but uses
+   the accent color and acts as a button that navigates to the
+   issue detail. */
+.issue-created-card {
+  margin: 8px 0;
+  padding: 10px 14px;
+  width: 100%;
+  background: color-mix(in srgb, var(--accent, #2563eb) 6%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 40%, var(--border));
+  border-radius: var(--radius-md, 8px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.issue-created-card:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--accent, #2563eb) 12%, var(--bg-card));
+  border-color: var(--accent, #2563eb);
+}
+.issue-created-card:focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: 2px;
+}
+.issue-created-card[disabled] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.issue-created-card-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+.issue-created-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.issue-created-card-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent, #2563eb);
+}
+.issue-created-card-id {
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.issue-created-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issue-created-card-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.issue-created-card-cta {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent, #2563eb);
+  white-space: nowrap;
+}
+.issue-created-card-help {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.issue-created-card--awaiting-approval {
+  background: color-mix(in srgb, var(--amber-600, #d97706) 8%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--amber-600, #d97706) 60%, var(--border));
+}
+.issue-created-card--awaiting-approval:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--amber-600, #d97706) 14%, var(--bg-card));
+  border-color: var(--amber-600, #d97706);
+}
+.issue-created-card--awaiting-approval .issue-created-card-eyebrow {
+  color: var(--amber-600, #d97706);
+}
+.issue-created-card--awaiting-approval .issue-created-card-cta {
+  color: var(--amber-600, #d97706);
+  font-weight: 600;
+}
+.issue-created-card--awaiting-approval:focus-visible {
+  outline-color: var(--amber-600, #d97706);
+}
+
+/* ─── Issue lifecycle transition card ───────────────────────────────── */
+.issue-lifecycle-card {
+  margin: 8px 0;
+  padding: 10px 14px;
+  width: 100%;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.issue-lifecycle-card:hover:not([disabled]) {
+  filter: brightness(1.04);
+}
+.issue-lifecycle-card[disabled] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.issue-lifecycle-card-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+.issue-lifecycle-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.issue-lifecycle-card-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.issue-lifecycle-card-id {
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.issue-lifecycle-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issue-lifecycle-card-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.issue-lifecycle-card-cta {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+/* Accent variants — go/review/done/stop/warn/neutral map to product colors. */
+.issue-lifecycle-card--go {
+  background: color-mix(in srgb, var(--success, #16a34a) 8%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--success, #16a34a) 50%, var(--border));
+}
+.issue-lifecycle-card--go .issue-lifecycle-card-eyebrow,
+.issue-lifecycle-card--go .issue-lifecycle-card-cta {
+  color: var(--success, #16a34a);
+}
+.issue-lifecycle-card--review {
+  background: color-mix(in srgb, var(--accent, #2563eb) 8%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent, #2563eb) 50%, var(--border));
+}
+.issue-lifecycle-card--review .issue-lifecycle-card-eyebrow,
+.issue-lifecycle-card--review .issue-lifecycle-card-cta {
+  color: var(--accent, #2563eb);
+}
+.issue-lifecycle-card--done {
+  background: color-mix(in srgb, var(--success, #16a34a) 6%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--success, #16a34a) 40%, var(--border));
+}
+.issue-lifecycle-card--done .issue-lifecycle-card-eyebrow,
+.issue-lifecycle-card--done .issue-lifecycle-card-cta {
+  color: var(--success, #16a34a);
+}
+.issue-lifecycle-card--stop {
+  background: color-mix(in srgb, var(--text-tertiary, #6b7280) 8%, var(--bg-card));
+  border-color: var(--border);
+}
+.issue-lifecycle-card--stop .issue-lifecycle-card-eyebrow {
+  color: var(--text-secondary);
+}
+.issue-lifecycle-card--warn {
+  background: color-mix(in srgb, var(--amber-600, #d97706) 8%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--amber-600, #d97706) 50%, var(--border));
+}
+.issue-lifecycle-card--warn .issue-lifecycle-card-eyebrow,
+.issue-lifecycle-card--warn .issue-lifecycle-card-cta {
+  color: var(--amber-600, #d97706);
+}
+.issue-lifecycle-card--neutral {
+  background: var(--bg-card);
+  border-color: var(--border);
+}
+
 /* ─── Feed loading / empty states ─── */
 .messages-loading-label {
   display: flex;

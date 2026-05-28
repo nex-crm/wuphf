@@ -72,6 +72,10 @@ interface SidebarSectionsState {
 const SIDEBAR_SECTIONS_KEY = "wuphf-sidebar-sections";
 
 const _storedSidebarSections = ((): SidebarSectionsState => {
+  // v3 MVP (2026-05-25 product call): Channels are first-class and open
+  // by default. Chat is the primary surface; the agent subspace is an
+  // additional view. Existing sessions keep whatever value they previously
+  // persisted.
   const def: SidebarSectionsState = {
     agents: true,
     channels: true,

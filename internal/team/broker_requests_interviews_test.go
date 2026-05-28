@@ -276,11 +276,15 @@ func TestBrokerPostRequestDedupeKeyCollapsesDuplicates(t *testing.T) {
 	}
 }
 
-// TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer pins that once
-// the human answers (or cancels) the original request, a new POST
-// with the same dedupe_key creates a fresh request instead of
-// silently mapping to the now-terminal one.
-func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
+// TestBrokerPostRequestDedupeKeyReusesApprovedApproval pins the
+// post-Slice-7 contract: once an APPROVAL is approved, a subsequent
+// POST with the same dedupe_key within recentApprovalReuseWindow
+// reuses the existing answered request (so the calling agent's poll
+// loop sees the approval immediately and executes without re-prompting
+// the human). This is the explicit fix for the "I approved it but it
+// asked me again" loop the user reported. The window-expiry +
+// non-approval-kind paths are covered by the other dedupe tests.
+func TestBrokerPostRequestDedupeKeyReusesApprovedApproval(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "ceo", "CEO")
 	if err := b.StartOnPort(0); err != nil {
@@ -346,13 +350,16 @@ func TestBrokerPostRequestDedupeKeyRecreatesAfterAnswer(t *testing.T) {
 		t.Fatalf("expected 200 answering request, got %d", resp.StatusCode)
 	}
 
-	// Same dedupe key after answer → new request, not the terminal one.
+	// Same dedupe key after approve → reuse the existing answered
+	// approval (deduped=true). The agent's poll loop on /interview/
+	// answer?id=<first> already shows answer=approve, so the agent
+	// proceeds to execute without spamming the human with a new card.
 	second, deduped := post()
-	if second == "" || second == first {
-		t.Fatalf("expected fresh request after answer, got first=%q second=%q", first, second)
+	if second != first {
+		t.Fatalf("expected reused approval, got first=%q second=%q", first, second)
 	}
-	if deduped {
-		t.Fatal("expected deduped=false for fresh request after answer")
+	if !deduped {
+		t.Fatal("expected deduped=true for reused approval within window")
 	}
 }
 

@@ -37,7 +37,7 @@ export function WorkspaceSummary() {
     return (m.status || "").toLowerCase() === "active";
   }).length;
 
-  const openTasks = tasks.filter((t) => {
+  const openIssues = tasks.filter((t) => {
     const s = (t.status ?? "").toLowerCase();
     return (
       s !== "" &&
@@ -50,14 +50,14 @@ export function WorkspaceSummary() {
 
   const parts: string[] = [
     `${activeAgents} agent${activeAgents === 1 ? "" : "s"} active`,
-    `${openTasks} task${openTasks === 1 ? "" : "s"} open`,
+    `${openIssues} issue${openIssues === 1 ? "" : "s"} open`,
   ];
   const total = usage?.total?.total_tokens ?? 0;
   if (total > 0) parts.push(`${formatTokens(total)} tokens`);
 
   const hint =
-    openTasks > 0
-      ? `${openTasks} task${openTasks === 1 ? "" : "s"} in progress`
+    openIssues > 0
+      ? `${openIssues} issue${openIssues === 1 ? "" : "s"} in progress`
       : "Type / for commands";
 
   return (

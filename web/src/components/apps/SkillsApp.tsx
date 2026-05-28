@@ -188,8 +188,14 @@ export function SkillsApp() {
   }, [queryClient]);
 
   const handlePreview = useCallback((skill: Skill) => {
-    setPreviewSkill(skill);
-    setPreviewDirty(false);
+    // Open the full-screen SKILL.md detail page (edit + render with
+    // toggle). The legacy SidePanel preview state stays wired so any
+    // ancillary callers that still mount it can keep working, but the
+    // primary click target is the dedicated page.
+    void router.navigate({
+      to: "/skills/$skillName",
+      params: { skillName: skill.name },
+    });
   }, []);
 
   const handlePreviewClose = useCallback(() => {

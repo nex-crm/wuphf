@@ -142,7 +142,7 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 	t.Run("DryRun bypasses", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
+		_, err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
 			Platform: "gmail", ActionID: "GMAIL_SEND_EMAIL", DryRun: true,
 		})
 		if err != nil {
@@ -154,7 +154,7 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 		t.Setenv("WUPHF_UNSAFE", "1")
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
+		_, err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
 			Platform: "gmail", ActionID: "GMAIL_SEND_EMAIL", DryRun: false,
 		})
 		if err != nil {
@@ -165,7 +165,7 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 	t.Run("read-only action_id bypasses", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
-		err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
+		_, err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
 			Platform: "gmail", ActionID: "GMAIL_FETCH_MAILS", DryRun: false,
 		})
 		if err != nil {

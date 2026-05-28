@@ -813,7 +813,6 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 		actorSlug = "system"
 	}
 	trimmedComment := strings.TrimSpace(comment)
-	target, reason := lifecycleStateForDecisionAction(action)
 	// TODO(v1.1): auto-merge evaluator — once a safe-class definition
 	// (e.g. wiki-only edits with all green checks and zero
 	// critical/major grades) lands, route merge actions through the
@@ -831,15 +830,22 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 	// to decide whether to emit the execution lineup card. Declaring it here
 	// (outside the closure) avoids a variable-capture hazard.
 	var wasApprovingFromDrafting bool
+	var target LifecycleState
+	var reason string
 	if err := func() error {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		// Phase 4 approval gate: capture whether this approve is from a
-		// Drafting issue so we can emit the execution lineup card below.
-		if action == RecordDecisionApprove {
-			if task := b.findTaskByIDLocked(taskID); task != nil {
-				wasApprovingFromDrafting = task.LifecycleState == LifecycleStateDrafting
-			}
+		// Resolve target inside the lock so currentState reflects the
+		// task's true state at transition time. Drafting+approve maps
+		// to Running (start work) instead of Approved (terminal); see
+		// lifecycleStateForDecisionAction for the rationale.
+		var currentState LifecycleState
+		if task := b.findTaskByIDLocked(taskID); task != nil {
+			currentState = task.LifecycleState
+		}
+		target, reason = lifecycleStateForDecisionAction(action, currentState)
+		if action == RecordDecisionApprove && currentState == LifecycleStateDrafting {
+			wasApprovingFromDrafting = true
 		}
 		if _, err := b.transitionLifecycleLocked(taskID, target, reason); err != nil {
 			return fmt.Errorf("record decision: transition: %w", err)
@@ -862,9 +868,21 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 			ActorSlug:      actorSlug,
 			Reason:         reason,
 		})
-		if action == RecordDecisionApprove {
+		// Only write the wiki Decision article + broadcast the
+		// "decision recorded" channel message when the target is the
+		// terminal Approved state. Drafting -> Running is a "start
+		// work" transition, not a decision — the issue_lifecycle card
+		// emitted below handles that surface.
+		if action == RecordDecisionApprove && target == LifecycleStateApproved {
 			b.writeWikiPromotionLocked(taskID, *packet)
 			b.broadcastDecisionLocked(taskID, *packet)
+		}
+		// Slice 2: emit a structured lifecycle chat card for Issues so
+		// the human (and owner agent) see what changed. Tagging the
+		// owner in this message wakes them on the next bridge tick,
+		// which is how Approve & Start kicks off real work.
+		if task := b.findTaskByIDLocked(taskID); task != nil {
+			b.postIssueLifecycleCardLocked(task, currentState, target, actorSlug)
 		}
 		if action == RecordDecisionRequestChanges {
 			// Mirror the agent-side path: when a human clicks
@@ -900,11 +918,19 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 }
 
 // lifecycleStateForDecisionAction maps a human resolution to the target
-// lifecycle state plus a transition reason string. Kept as a small
-// table so the mapping is grep-able.
-func lifecycleStateForDecisionAction(action recordDecisionAction) (LifecycleState, string) {
+// lifecycle state plus a transition reason string. The currentState
+// argument disambiguates "approve the draft so the owner starts work"
+// (Drafting -> Running, NOT a decision) from "approve completed work"
+// (Review/Decision -> Approved, the terminal decision). Without this
+// disambiguation, clicking "Approve & Start" on a Drafting issue would
+// land in the terminal Approved state and write a misleading wiki
+// "decision" with no execution.
+func lifecycleStateForDecisionAction(action recordDecisionAction, currentState LifecycleState) (LifecycleState, string) {
 	switch action {
 	case RecordDecisionApprove:
+		if currentState == LifecycleStateDrafting {
+			return LifecycleStateRunning, "human approved drafting issue and started work"
+		}
 		return LifecycleStateApproved, "human approved decision"
 	case RecordDecisionRequestChanges:
 		return LifecycleStateChangesRequested, "human requested changes"

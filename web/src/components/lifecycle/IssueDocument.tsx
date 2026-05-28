@@ -17,19 +17,45 @@
  * Phase 3 behaviour is fully preserved for non-Drafting states.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { get, sseURL } from "../../api/client";
-import { postDecision, postTaskComment } from "../../api/lifecycle";
-import { getOfficeTasks, type Task } from "../../api/tasks";
+import {
+  postDecision,
+  postTaskComment,
+  postTaskReject,
+} from "../../api/lifecycle";
+import {
+  createSubIssue,
+  getOfficeTasks,
+  getSubIssues,
+  reassignTask,
+  reopenIssue,
+  type Task,
+  type TaskStatusAction,
+  updateTaskStatus,
+} from "../../api/tasks";
+import { useOfficeMembers } from "../../hooks/useMembers";
+import { router } from "../../lib/router";
 import {
   messageMarkdownComponents,
   messageRemarkPlugins,
 } from "../../lib/messageMarkdown";
 import type { LifecycleState } from "../../lib/types/lifecycle";
+import {
+  Autocomplete,
+  type AutocompleteItem,
+  applyAutocomplete,
+} from "../messages/Autocomplete";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { formatIssueTitleForDisplay } from "../../lib/issueTitle";
+import { IssueActivityFeed } from "./IssueActivityFeed";
+import {
+  IssueActivityStream,
+  IssueStatusDot,
+} from "./IssueActivityStream";
 import { LifecycleStatePill } from "./LifecycleStatePill";
 
 // ── Phase 4 constants ──────────────────────────────────────────────────
@@ -86,11 +112,18 @@ export interface IssueComment {
 export interface IssueDocument {
   taskId: string;
   title: string;
+  /** Plain-markdown description (task.details from the broker).
+   * Linear-style: just the body, no Goal/Context/Approach/Acceptance
+   * sections to fill out. */
+  description: string;
   lifecycleState: LifecycleState;
+  /** Retained for back-compat with stream-handler code; unused by
+   * the Linear-style body. New work should write to `description`. */
   spec: IssueSpec;
   comments: IssueComment[];
   channel: string;
   ownerSlug?: string;
+  parentIssueId?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -343,9 +376,27 @@ export function normalizeIssueDocument(
   const spec = normalizeSpec(rawSpec, taskHint);
   const comments = normalizeIssueComments(r, rawSpec);
 
+  // Linear-style description: the broker writes `details` on the task
+  // record; legacy clients may still write `description`. Fall back to
+  // the spec's `assignment` block when neither is set so existing
+  // packet-driven Issues still render something.
+  const description =
+    (taskRecord
+      ? strField(taskRecord, "details", "description")
+      : undefined) ??
+    taskHint?.description ??
+    strField(rawSpec, "assignment") ??
+    "";
+
+  const parentIssueId =
+    (taskRecord
+      ? strField(taskRecord, "parentIssueId", "parent_issue_id")
+      : undefined) ?? undefined;
+
   return {
     taskId,
     title,
+    description,
     lifecycleState,
     spec,
     comments,
@@ -353,6 +404,7 @@ export function normalizeIssueDocument(
     ownerSlug:
       resolveAliasedField(r, taskRecord, "ownerSlug", "owner") ??
       taskHint?.owner,
+    parentIssueId,
     createdAt:
       resolveAliasedField(r, taskRecord, "createdAt", "created_at") ??
       taskHint?.created_at,
@@ -471,10 +523,21 @@ interface CommentItemProps {
 
 function CommentItem({ comment }: CommentItemProps) {
   const label = comment.isAgent ? `Agent ${comment.author}` : "Human";
+  // [SUGGESTION] prefix → specialist scope proposal (Slice 7). Highlight
+  // the card so CEO scans them quickly + strip the marker from the
+  // visible body since it duplicates the label.
+  const trimmed = comment.body.trimStart();
+  const isSuggestion = /^\[SUGGESTION\]/i.test(trimmed);
+  const body = isSuggestion
+    ? trimmed.replace(/^\[SUGGESTION\]\s*/i, "")
+    : comment.body;
   return (
     <article
       id={`comment-${comment.id}`}
-      className="issue-comment"
+      className={
+        "issue-comment" +
+        (isSuggestion ? " issue-comment--suggestion" : "")
+      }
       aria-label={`Comment by ${comment.author}`}
     >
       <div className="issue-comment-meta">
@@ -486,6 +549,14 @@ function CommentItem({ comment }: CommentItemProps) {
         <span className="issue-comment-author" title={label}>
           {comment.author}
         </span>
+        {isSuggestion ? (
+          <span
+            className="issue-comment-suggestion-badge"
+            title="Specialist suggestion — CEO decides"
+          >
+            Suggestion
+          </span>
+        ) : null}
         <time
           className="issue-comment-time"
           dateTime={comment.appendedAt}
@@ -499,7 +570,7 @@ function CommentItem({ comment }: CommentItemProps) {
           remarkPlugins={messageRemarkPlugins}
           components={messageMarkdownComponents}
         >
-          {comment.body}
+          {body}
         </ReactMarkdown>
       </div>
     </article>
@@ -623,6 +694,119 @@ function ApproveAndStartButton({
   );
 }
 
+/**
+ * Close Issue button. Visible in any non-terminal lifecycle state so
+ * the human can shelve work that's no longer relevant (CEO went down
+ * the wrong path, scope changed, user moved on). Posts a Reject via
+ * the existing /tasks endpoint — reject is terminal; downstream blocks
+ * stay blocked, packet records the reason, channel gets a "task closed"
+ * broadcast via postTaskCancelNotificationsLocked.
+ *
+ * Two-step gesture: first click reveals a reason textarea + confirm.
+ * Without that gate, a stray click on a hover-target permanently
+ * closes the Issue with no chance to undo.
+ */
+interface CloseIssueButtonProps {
+  taskId: string;
+  onClosed: () => void;
+}
+
+function CloseIssueButton({ taskId, onClosed }: CloseIssueButtonProps) {
+  const [confirming, setConfirming] = useState(false);
+  const [reason, setReason] = useState("");
+  const [closeError, setCloseError] = useState<string | null>(null);
+
+  const closeMutation = useMutation({
+    mutationFn: (r: string) => postTaskReject(taskId, r),
+    onSuccess: () => {
+      setCloseError(null);
+      setConfirming(false);
+      setReason("");
+      onClosed();
+    },
+    onError: (err: unknown) => {
+      setCloseError(
+        err instanceof Error ? err.message : "Failed to close issue.",
+      );
+    },
+  });
+
+  const trimmed = reason.trim();
+  const canSubmit = trimmed.length > 0 && !closeMutation.isPending;
+
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        className="btn btn-ghost issue-close-btn"
+        onClick={() => setConfirming(true)}
+        aria-label="Close this issue (terminal)"
+        data-testid="close-issue"
+      >
+        Close issue
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="issue-close-confirm"
+      data-testid="close-issue-confirm"
+      role="group"
+      aria-label="Confirm close issue"
+    >
+      <label className="issue-close-confirm-label" htmlFor="close-reason">
+        Reason for closing (required)
+      </label>
+      <textarea
+        id="close-reason"
+        className="issue-close-confirm-input"
+        value={reason}
+        onChange={(e) => {
+          setReason(e.target.value);
+          if (closeError) setCloseError(null);
+        }}
+        placeholder="e.g. Scope changed, no longer needed, duplicate of …"
+        rows={2}
+        disabled={closeMutation.isPending}
+        data-testid="close-issue-reason"
+      />
+      {closeError ? (
+        <p
+          className="issue-close-confirm-error"
+          role="alert"
+          data-testid="close-issue-error"
+        >
+          {closeError}
+        </p>
+      ) : null}
+      <div className="issue-close-confirm-actions">
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => {
+            setConfirming(false);
+            setReason("");
+            setCloseError(null);
+          }}
+          disabled={closeMutation.isPending}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn btn-danger"
+          disabled={!canSubmit}
+          onClick={() => closeMutation.mutate(trimmed)}
+          data-testid="close-issue-confirm"
+        >
+          {closeMutation.isPending ? "Closing…" : "Close issue"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Streaming draft hook ────────────────────────────────────────────────
 
 /**
@@ -723,12 +907,17 @@ function CommentsTimeline({
 }: CommentsTimelineProps) {
   const [commentBody, setCommentBody] = useState("");
   const [commentError, setCommentError] = useState<string | null>(null);
+  const [caret, setCaret] = useState(0);
+  const [acItems, setAcItems] = useState<AutocompleteItem[]>([]);
+  const [acIdx, setAcIdx] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trimmedComment = commentBody.trim();
 
   const commentMutation = useMutation({
     mutationFn: (body: string) => postTaskComment(taskId, channel, body),
     onSuccess: () => {
       setCommentBody("");
+      setCaret(0);
       setCommentError(null);
       onCommentPosted();
     },
@@ -739,11 +928,66 @@ function CommentsTimeline({
     },
   });
 
+  const pickAutocomplete = useCallback(
+    (item: AutocompleteItem) => {
+      const next = applyAutocomplete(commentBody, caret, item);
+      setCommentBody(next.text);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(next.caret, next.caret);
+        setCaret(next.caret);
+      });
+    },
+    [commentBody, caret],
+  );
+
+  const handleAcItems = useCallback((items: AutocompleteItem[]) => {
+    setAcItems(items);
+    setAcIdx((prev) => (prev >= items.length ? 0 : prev));
+  }, []);
+
   function submitComment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!trimmedComment || commentMutation.isPending) return;
     setCommentError(null);
     commentMutation.mutate(trimmedComment);
+  }
+
+  function handleCommentKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Autocomplete keyboard nav runs first so the textarea doesn't
+    // swallow Enter when the panel is open. Same pattern as Composer.
+    if (acItems.length > 0) {
+      switch (event.key) {
+        case "ArrowDown":
+          event.preventDefault();
+          setAcIdx((prev) => (prev + 1) % acItems.length);
+          return;
+        case "ArrowUp":
+          event.preventDefault();
+          setAcIdx((prev) => (prev - 1 + acItems.length) % acItems.length);
+          return;
+        case "Tab":
+        case "Enter": {
+          event.preventDefault();
+          const pick = acItems[acIdx];
+          if (pick) pickAutocomplete(pick);
+          return;
+        }
+        case "Escape":
+          event.preventDefault();
+          setAcItems([]);
+          return;
+      }
+    }
+    // Cmd/Ctrl+Enter submits when autocomplete is not active.
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      if (trimmedComment && !commentMutation.isPending) {
+        commentMutation.mutate(trimmedComment);
+      }
+    }
   }
 
   return (
@@ -805,19 +1049,43 @@ function CommentsTimeline({
         <label className="issue-comment-form-label" htmlFor="issue-comment">
           Add a comment
         </label>
-        <textarea
-          id="issue-comment"
-          className="issue-comment-input"
-          value={commentBody}
-          onChange={(event) => {
-            setCommentBody(event.target.value);
-            if (commentError) setCommentError(null);
-          }}
-          placeholder="Ask a question, clarify scope, or leave review notes."
-          rows={4}
-          disabled={commentMutation.isPending}
-          data-testid="issue-comment-input"
-        />
+        <div className="issue-comment-input-wrap">
+          <Autocomplete
+            value={commentBody}
+            caret={caret}
+            selectedIdx={acIdx}
+            onItems={handleAcItems}
+            onPick={pickAutocomplete}
+          />
+          <textarea
+            id="issue-comment"
+            ref={textareaRef}
+            className="issue-comment-input"
+            value={commentBody}
+            onChange={(event) => {
+              setCommentBody(event.target.value);
+              setCaret(event.target.selectionStart ?? event.target.value.length);
+              if (commentError) setCommentError(null);
+            }}
+            onSelect={(event) => {
+              const target = event.currentTarget;
+              setCaret(target.selectionStart ?? target.value.length);
+            }}
+            onKeyUp={(event) => {
+              const target = event.currentTarget;
+              setCaret(target.selectionStart ?? target.value.length);
+            }}
+            onClick={(event) => {
+              const target = event.currentTarget;
+              setCaret(target.selectionStart ?? target.value.length);
+            }}
+            onKeyDown={handleCommentKeyDown}
+            placeholder="Ask a question, clarify scope, or leave review notes. Type @ to mention."
+            rows={4}
+            disabled={commentMutation.isPending}
+            data-testid="issue-comment-input"
+          />
+        </div>
         {commentError ? (
           <p
             className="issue-comment-error"
@@ -1073,11 +1341,28 @@ export function IssueDocument({
       data-task-id={taskId}
       data-lifecycle-state={doc.lifecycleState}
     >
-      {/* Sticky header: status pill + title */}
+      {/* Sticky header: status pill + title + owner */}
       <header className="issue-doc-header issue-doc-header--sticky">
+        {doc.parentIssueId ? (
+          <ParentIssueBreadcrumb parentIssueId={doc.parentIssueId} />
+        ) : null}
         <div className="issue-doc-header-row">
           <LifecycleStatePill state={doc.lifecycleState} />
-          <h2 className="issue-doc-title">{doc.title}</h2>
+          <h2 className="issue-doc-title">{formatIssueTitleForDisplay(doc.title)}</h2>
+        </div>
+        <div className="issue-doc-meta-row">
+          <OwnerPicker
+            taskId={taskId}
+            channel={doc.channel}
+            currentOwner={doc.ownerSlug}
+            onChanged={() => {
+              void queryClient.invalidateQueries({ queryKey: ["issue", taskId] });
+              void queryClient.invalidateQueries({ queryKey: ["issues"] });
+              void queryClient.invalidateQueries({
+                queryKey: ["issue-children"],
+              });
+            }}
+          />
         </div>
         {/*
          * Phase 4 button row. Contains Approve & Start when in Drafting.
@@ -1089,41 +1374,50 @@ export function IssueDocument({
           className="issue-doc-button-row"
           data-testid="issue-doc-button-row"
         >
-          {isDrafting ? (
-            <ApproveAndStartButton
-              taskId={taskId}
-              onApproved={() => {
-                // Invalidate the issue query so the status pill updates
-                // to "running" once the broker confirms the transition.
-                void queryClient.invalidateQueries({
-                  queryKey: ["issue", taskId],
-                });
-              }}
-            />
-          ) : null}
+          <IssueActionToolbar
+            taskId={taskId}
+            channel={doc.channel}
+            lifecycleState={doc.lifecycleState}
+            onAfterAction={() => {
+              void queryClient.invalidateQueries({
+                queryKey: ["issue", taskId],
+              });
+              void queryClient.invalidateQueries({ queryKey: ["issues"] });
+              void queryClient.invalidateQueries({
+                queryKey: ["lifecycle"],
+              });
+              void queryClient.invalidateQueries({
+                queryKey: ["lifecycle", "inbox-items"],
+              });
+            }}
+          />
         </div>
       </header>
 
-      {/* Body: spec sections + comments timeline */}
+      {/* Body: Linear-style — description, sub-issues, comments.
+       *  Goal/Context/Approach/Acceptance spec sections were removed
+       *  in favor of a single rich description, matching the Linear
+       *  product surface the team optimized for. The SpecBody
+       *  component is preserved in this file for tests + legacy code
+       *  paths but is no longer mounted. */}
       <div className="issue-doc-body">
-        {/* Spec sections — aria-live for streaming draft announcements */}
-        <SpecBody
-          spec={doc.spec}
-          mergedSpec={mergedSpec}
-          shouldAutoCollapse={shouldAutoCollapse}
-          specExpanded={specExpanded}
-          isDrafting={isDrafting}
-          isSectionStreaming={isSectionStreaming}
-          onExpand={toggleSpec}
-          onCollapse={toggleSpec}
+        <IssueDescription description={doc.description} isDrafting={isDrafting} />
+
+        {/* Live activity stream — surfaces what the owning agent is doing
+         *  right now via the SSE-fed agentActivitySnapshots. Stays in the
+         *  header zone (always visible) so the human sees the heartbeat
+         *  no matter which tab is active. */}
+        <IssueActivityStream
+          ownerSlug={doc.ownerSlug}
+          lifecycleState={doc.lifecycleState}
         />
 
-        {/* Comments timeline */}
-        <CommentsTimeline
+        <IssueDetailTabs
           taskId={taskId}
           channel={doc.channel}
           comments={doc.comments}
           isDrafting={isDrafting}
+          showSubIssues={!doc.parentIssueId}
           timelineRef={timelineRef}
           onCommentPosted={() => {
             void queryClient.invalidateQueries({ queryKey: ["issue", taskId] });
@@ -1132,6 +1426,851 @@ export function IssueDocument({
           }}
         />
       </div>
+    </div>
+  );
+}
+
+// ── Issue detail tabs ────────────────────────────────────────────────
+
+type IssueDetailTab = "activity" | "comments" | "sub-issues";
+
+interface IssueDetailTabsProps {
+  taskId: string;
+  channel: string;
+  comments: IssueComment[];
+  isDrafting: boolean;
+  showSubIssues: boolean;
+  timelineRef: React.RefObject<HTMLDivElement | null>;
+  onCommentPosted: () => void;
+}
+
+/**
+ * Linear/Paperclip-shaped tab strip below the description: Activity (the
+ * default), Comments, Sub-Issues. The activity feed is the "what's
+ * happened" view; Comments is the discussion thread; Sub-Issues hosts the
+ * breakdown. Sub-Issues tab is hidden for sub-issues themselves (no
+ * sub-sub-issues), matching the prior single-flat-page rule.
+ */
+function IssueDetailTabs({
+  taskId,
+  channel,
+  comments,
+  isDrafting,
+  showSubIssues,
+  timelineRef,
+  onCommentPosted,
+}: IssueDetailTabsProps) {
+  const [tab, setTab] = useState<IssueDetailTab>("activity");
+  const commentCount = comments.length;
+
+  return (
+    <div className="issue-doc-tabs">
+      <div className="issue-doc-tabs-strip" role="tablist" aria-label="Issue detail">
+        <TabButton
+          active={tab === "activity"}
+          onClick={() => setTab("activity")}
+          label="Activity"
+        />
+        <TabButton
+          active={tab === "comments"}
+          onClick={() => setTab("comments")}
+          label="Comments"
+          count={commentCount}
+        />
+        {showSubIssues ? (
+          <TabButton
+            active={tab === "sub-issues"}
+            onClick={() => setTab("sub-issues")}
+            label="Sub-issues"
+          />
+        ) : null}
+      </div>
+
+      <div className="issue-doc-tabs-panel" role="tabpanel">
+        {tab === "activity" ? <IssueActivityFeed taskId={taskId} /> : null}
+        {tab === "comments" ? (
+          <CommentsTimeline
+            taskId={taskId}
+            channel={channel}
+            comments={comments}
+            isDrafting={isDrafting}
+            timelineRef={timelineRef}
+            onCommentPosted={onCommentPosted}
+          />
+        ) : null}
+        {tab === "sub-issues" && showSubIssues ? (
+          <SubIssuesList taskId={taskId} channel={channel} />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+interface TabButtonProps {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count?: number;
+}
+
+function TabButton({ active, onClick, label, count }: TabButtonProps) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      className={`issue-doc-tab${active ? " issue-doc-tab--active" : ""}`}
+      onClick={onClick}
+    >
+      <span>{label}</span>
+      {typeof count === "number" && count > 0 ? (
+        <span className="issue-doc-tab-count">{count}</span>
+      ) : null}
+    </button>
+  );
+}
+
+// ── Linear-style description + sub-issues ─────────────────────────────
+
+interface IssueDescriptionProps {
+  description: string;
+  isDrafting: boolean;
+}
+
+function IssueDescription({ description, isDrafting }: IssueDescriptionProps) {
+  const body = description.trim();
+  if (!body) {
+    return (
+      <section
+        className="issue-doc-description issue-doc-description--empty"
+        aria-label="Description"
+      >
+        <p className="issue-doc-description-empty-line">
+          {isDrafting
+            ? "No description yet. Add one in chat — the CEO will fill this out as the spec firms up."
+            : "No description."}
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section
+      className="issue-doc-description"
+      aria-label="Description"
+    >
+      <div className="issue-doc-description-body">
+        <ReactMarkdown
+          remarkPlugins={messageRemarkPlugins}
+          components={messageMarkdownComponents}
+        >
+          {body}
+        </ReactMarkdown>
+      </div>
+    </section>
+  );
+}
+
+interface SubIssuesListProps {
+  taskId: string;
+  channel: string;
+}
+
+function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
+  const queryClient = useQueryClient();
+  const [isAdding, setIsAdding] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftOwner, setDraftOwner] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { data: members = [] } = useOfficeMembers();
+
+  const childQuery = useQuery({
+    queryKey: ["issue-children", taskId],
+    queryFn: () => getSubIssues(taskId),
+    staleTime: 5_000,
+  });
+
+  const addMutation = useMutation({
+    mutationFn: (input: { title: string; owner: string }) =>
+      createSubIssue({
+        parentIssueId: taskId,
+        title: input.title,
+        channel,
+        owner: input.owner || undefined,
+      }),
+    onSuccess: () => {
+      setDraftTitle("");
+      setDraftOwner("");
+      setIsAdding(false);
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ["issue-children", taskId] });
+      void queryClient.invalidateQueries({ queryKey: ["issues"] });
+      void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
+    },
+    onError: (err: unknown) => {
+      setError(err instanceof Error ? err.message : "Could not add sub-issue.");
+    },
+  });
+
+  useEffect(() => {
+    if (isAdding) {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [isAdding]);
+
+  const children = childQuery.data?.tasks ?? [];
+  // Sub-issues + Issues should share owner-pick UX. Exclude `human` and
+  // self-loop entries that aren't real agent slugs.
+  const assignableAgents = members.filter(
+    (m) => m.slug && m.slug !== "human" && m.slug !== "you",
+  );
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const title = draftTitle.trim();
+    if (!title || addMutation.isPending) return;
+    addMutation.mutate({ title, owner: draftOwner.trim() });
+  }
+
+  function openSub(childId: string) {
+    void router.navigate({
+      to: "/issues/$issueId",
+      params: { issueId: childId },
+    });
+  }
+
+  return (
+    <section
+      className="issue-doc-sub-issues"
+      aria-label="Sub-issues"
+      data-testid="issue-sub-issues"
+    >
+      <header className="issue-doc-sub-issues-header">
+        <h3 className="issue-doc-sub-issues-heading">
+          Sub-issues
+          {children.length > 0 ? (
+            <span className="issue-doc-sub-issues-count">
+              {" "}
+              · {children.length}
+            </span>
+          ) : null}
+        </h3>
+        {!isAdding ? (
+          <button
+            type="button"
+            className="issue-doc-sub-issues-add"
+            onClick={() => setIsAdding(true)}
+            data-testid="add-sub-issue-button"
+          >
+            + Add sub-issue
+          </button>
+        ) : null}
+      </header>
+
+      {children.length === 0 && !isAdding ? (
+        <p className="issue-doc-sub-issues-empty">
+          No sub-issues. Break this down with the + button above.
+        </p>
+      ) : null}
+
+      {children.length > 0 ? (
+        <ul className="issue-doc-sub-issues-list">
+          {children.map((child) => {
+            const lifecycle = (child.lifecycle_state ||
+              child.status ||
+              "drafting") as LifecycleState;
+            return (
+              <li key={child.id} className="issue-doc-sub-issue-row">
+                <button
+                  type="button"
+                  className="issue-doc-sub-issue-link"
+                  onClick={() => openSub(child.id)}
+                  data-testid="sub-issue-link"
+                  data-task-id={child.id}
+                >
+                  <IssueStatusDot lifecycleState={lifecycle} />
+                  <span className="issue-doc-sub-issue-id">{child.id}</span>
+                  <span className="issue-doc-sub-issue-title">
+                    {formatIssueTitleForDisplay(child.title) || "(untitled)"}
+                  </span>
+                  <span className="issue-doc-sub-issue-state">
+                    {child.lifecycle_state || child.status}
+                  </span>
+                  {child.owner ? (
+                    <span className="issue-doc-sub-issue-owner">
+                      @{child.owner}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
+      {isAdding ? (
+        <form
+          className="issue-doc-sub-issues-form"
+          onSubmit={handleSubmit}
+          data-testid="add-sub-issue-form"
+        >
+          <input
+            ref={inputRef}
+            className="issue-doc-sub-issues-input"
+            value={draftTitle}
+            onChange={(event) => {
+              setDraftTitle(event.target.value);
+              if (error) setError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setIsAdding(false);
+                setDraftTitle("");
+                setDraftOwner("");
+              }
+            }}
+            placeholder="Sub-issue title (Enter to add, Esc to cancel)"
+            disabled={addMutation.isPending}
+            data-testid="sub-issue-title-input"
+          />
+          <label className="issue-doc-sub-issues-owner-label">
+            Owner
+            <select
+              className="issue-doc-sub-issues-owner-select"
+              value={draftOwner}
+              onChange={(event) => setDraftOwner(event.target.value)}
+              disabled={addMutation.isPending}
+              data-testid="sub-issue-owner-select"
+            >
+              <option value="">— unassigned —</option>
+              {assignableAgents.map((agent) => (
+                <option key={agent.slug} value={agent.slug}>
+                  @{agent.slug}
+                  {agent.name && agent.name !== agent.slug
+                    ? ` (${agent.name})`
+                    : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="issue-doc-sub-issues-form-actions">
+            <button
+              type="submit"
+              className="issue-doc-sub-issues-submit"
+              disabled={!draftTitle.trim() || addMutation.isPending}
+            >
+              {addMutation.isPending ? "Adding…" : "Add"}
+            </button>
+            <button
+              type="button"
+              className="issue-doc-sub-issues-cancel"
+              onClick={() => {
+                setIsAdding(false);
+                setDraftTitle("");
+                setDraftOwner("");
+                setError(null);
+              }}
+              disabled={addMutation.isPending}
+            >
+              Cancel
+            </button>
+          </div>
+          {error ? (
+            <p className="issue-doc-sub-issues-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+// ── Owner picker (Issue header) ──────────────────────────────────────
+
+interface OwnerPickerProps {
+  taskId: string;
+  channel: string;
+  currentOwner: string | undefined;
+  onChanged: () => void;
+}
+
+function OwnerPicker({
+  taskId,
+  channel,
+  currentOwner,
+  onChanged,
+}: OwnerPickerProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { data: members = [] } = useOfficeMembers();
+  const assignableAgents = members.filter(
+    (m) => m.slug && m.slug !== "human" && m.slug !== "you",
+  );
+
+  const reassignMutation = useMutation({
+    mutationFn: (newOwner: string) => reassignTask(taskId, newOwner, channel),
+    onSuccess: () => {
+      setIsEditing(false);
+      setError(null);
+      onChanged();
+    },
+    onError: (err: unknown) => {
+      setError(err instanceof Error ? err.message : "Could not reassign.");
+    },
+  });
+
+  if (!isEditing) {
+    return (
+      <button
+        type="button"
+        className="issue-doc-owner-pill"
+        onClick={() => setIsEditing(true)}
+        data-testid="issue-owner-pill"
+        aria-label="Change owner"
+      >
+        <span className="issue-doc-owner-pill-label">Owner</span>
+        <span className="issue-doc-owner-pill-value">
+          {currentOwner ? `@${currentOwner}` : "unassigned"}
+        </span>
+        <span className="issue-doc-owner-pill-edit" aria-hidden="true">
+          ✎
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="issue-doc-owner-editor">
+      <label className="issue-doc-owner-editor-label" htmlFor="owner-select">
+        Owner
+      </label>
+      <select
+        id="owner-select"
+        className="issue-doc-owner-editor-select"
+        defaultValue={currentOwner ?? ""}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (next === (currentOwner ?? "")) {
+            setIsEditing(false);
+            return;
+          }
+          reassignMutation.mutate(next);
+        }}
+        disabled={reassignMutation.isPending}
+        autoFocus
+        data-testid="issue-owner-select"
+      >
+        <option value="">— unassigned —</option>
+        {assignableAgents.map((agent) => (
+          <option key={agent.slug} value={agent.slug}>
+            @{agent.slug}
+            {agent.name && agent.name !== agent.slug
+              ? ` (${agent.name})`
+              : ""}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="issue-doc-owner-editor-cancel"
+        onClick={() => {
+          setIsEditing(false);
+          setError(null);
+        }}
+        disabled={reassignMutation.isPending}
+      >
+        Cancel
+      </button>
+      {error ? (
+        <span className="issue-doc-owner-editor-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Parent issue breadcrumb (shown on sub-issues) ────────────────────
+
+interface ParentIssueBreadcrumbProps {
+  parentIssueId: string;
+}
+
+function ParentIssueBreadcrumb({ parentIssueId }: ParentIssueBreadcrumbProps) {
+  // Fetch the parent's title so the breadcrumb shows it inline. The
+  // /tasks list is already cached for the kanban; we read the same
+  // cache key (["issues","list"]) for a free hit when available, and
+  // fall back to the task id when the parent is filtered out (e.g.
+  // it lives in a channel the viewer can't see).
+  const tasksQuery = useQuery({
+    queryKey: ["issues", "list"],
+    queryFn: () => getOfficeTasks({ includeDone: true }),
+    staleTime: 5_000,
+  });
+  const parent = tasksQuery.data?.tasks.find((t) => t.id === parentIssueId);
+  const label = parent?.title ?? parentIssueId;
+
+  function openParent() {
+    void router.navigate({
+      to: "/issues/$issueId",
+      params: { issueId: parentIssueId },
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      className="issue-doc-parent-breadcrumb"
+      onClick={openParent}
+      data-testid="issue-parent-breadcrumb"
+      aria-label={`Open parent issue ${parentIssueId}`}
+    >
+      <span className="issue-doc-parent-breadcrumb-icon" aria-hidden="true">
+        ↑
+      </span>
+      <span className="issue-doc-parent-breadcrumb-label">Parent</span>
+      <span className="issue-doc-parent-breadcrumb-id">{parentIssueId}</span>
+      <span className="issue-doc-parent-breadcrumb-title">{label}</span>
+    </button>
+  );
+}
+
+// ── Reopen button (rejected / approved Issues) ───────────────────────
+
+interface ReopenIssueButtonProps {
+  taskId: string;
+  channel: string;
+  onReopened: () => void;
+}
+
+function ReopenIssueButton({
+  taskId,
+  channel,
+  onReopened,
+}: ReopenIssueButtonProps) {
+  const [error, setError] = useState<string | null>(null);
+
+  const reopenMutation = useMutation({
+    mutationFn: () => reopenIssue(taskId, channel),
+    onSuccess: () => {
+      setError(null);
+      onReopened();
+    },
+    onError: (err: unknown) => {
+      setError(err instanceof Error ? err.message : "Could not reopen.");
+    },
+  });
+
+  return (
+    <div className="issue-doc-reopen">
+      <button
+        type="button"
+        className="issue-doc-reopen-button"
+        onClick={() => reopenMutation.mutate()}
+        disabled={reopenMutation.isPending}
+        data-testid="reopen-issue-button"
+      >
+        {reopenMutation.isPending ? "Reopening…" : "Reopen issue"}
+      </button>
+      {error ? (
+        <span className="issue-doc-reopen-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// ── State-aware Issue action toolbar ─────────────────────────────────
+
+interface IssueActionToolbarProps {
+  taskId: string;
+  channel: string;
+  lifecycleState: LifecycleState;
+  onAfterAction: () => void;
+}
+
+interface ActionDef {
+  /** Broker action verb (matches TaskStatusAction). */
+  action: TaskStatusAction;
+  /** Button label the human sees. */
+  label: string;
+  /** Visual variant: primary (positive next step), danger (terminal/scary), neutral (everything else). */
+  variant: "primary" | "danger" | "neutral";
+  /** When true, prompt the human for a 1-line reason before firing. */
+  requiresReason?: boolean;
+  /** Placeholder for the reason prompt. */
+  reasonHint?: string;
+}
+
+/** Returns the action set valid for the current lifecycle state. The
+ *  set is intentionally small — only show actions that have a clear
+ *  resolution path for the human. Pure presentation logic; the broker
+ *  is the source of truth for what's actually allowed (the hybrid
+ *  CEO/owner gate in Slice 7). */
+function actionsForState(state: LifecycleState): ActionDef[] {
+  switch (state) {
+    case "drafting":
+      // Approve & Start has its own button (special verb postDecision).
+      // From drafting we offer Cancel as the close path.
+      return [
+        {
+          action: "cancel",
+          label: "Cancel issue",
+          variant: "danger",
+          requiresReason: true,
+          reasonHint: "Why cancel? One short line.",
+        },
+      ];
+    case "intake":
+    case "ready":
+      return [
+        {
+          action: "review",
+          label: "Mark ready for review",
+          variant: "primary",
+        },
+        {
+          action: "block",
+          label: "Block",
+          variant: "neutral",
+          requiresReason: true,
+          reasonHint: "What's blocking this?",
+        },
+        {
+          action: "cancel",
+          label: "Cancel",
+          variant: "danger",
+          requiresReason: true,
+          reasonHint: "Why cancel? One short line.",
+        },
+      ];
+    case "running":
+    case "changes_requested":
+      return [
+        {
+          action: "submit_for_review",
+          label: "Submit for review",
+          variant: "primary",
+        },
+        {
+          action: "complete",
+          label: "Mark done",
+          variant: "primary",
+        },
+        {
+          action: "block",
+          label: "Block",
+          variant: "neutral",
+          requiresReason: true,
+          reasonHint: "What's blocking this?",
+        },
+        {
+          action: "cancel",
+          label: "Cancel",
+          variant: "danger",
+          requiresReason: true,
+          reasonHint: "Why cancel? One short line.",
+        },
+      ];
+    case "blocked_on_pr_merge":
+      // Blocked tasks are agent-internal blockers. The human only
+      // sees this surface on the Issue detail page (the Inbox
+      // intentionally hides blocked items per the product model:
+      // human input goes through human_interview requests instead).
+      // We still offer a manual unblock for the rare case where the
+      // human knows they fixed the underlying issue out-of-band
+      // (paid a bill, reconnected an account) — no reason required
+      // since they probably can't articulate the agent's blocker.
+      return [
+        {
+          action: "resume",
+          label: "Force unblock",
+          variant: "neutral",
+        },
+        {
+          action: "cancel",
+          label: "Cancel",
+          variant: "danger",
+          requiresReason: true,
+          reasonHint: "Why cancel? One short line.",
+        },
+      ];
+    case "review":
+    case "decision":
+      return [
+        {
+          action: "approve",
+          label: "Approve",
+          variant: "primary",
+        },
+        {
+          action: "request_changes",
+          label: "Request changes",
+          variant: "neutral",
+          requiresReason: true,
+          reasonHint: "What needs to change?",
+        },
+      ];
+    case "approved":
+    case "rejected":
+      // Terminal — actions handled by the Reopen button (separate
+      // component) and read-only otherwise.
+      return [];
+    default:
+      return [];
+  }
+}
+
+function IssueActionToolbar({
+  taskId,
+  channel,
+  lifecycleState,
+  onAfterAction,
+}: IssueActionToolbarProps) {
+  const [pendingReason, setPendingReason] = useState<{
+    action: ActionDef;
+    reason: string;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const isDrafting = lifecycleState === "drafting";
+  const isTerminal =
+    lifecycleState === "approved" || lifecycleState === "rejected";
+
+  const statusMutation = useMutation({
+    mutationFn: (input: { action: TaskStatusAction; reason?: string }) =>
+      updateTaskStatus(taskId, input.action, channel, "human", {
+        overrideReason: input.reason,
+      }),
+    onSuccess: () => {
+      setPendingReason(null);
+      setError(null);
+      onAfterAction();
+    },
+    onError: (err: unknown) => {
+      setError(err instanceof Error ? err.message : "Action failed.");
+    },
+  });
+
+  const actions = actionsForState(lifecycleState);
+
+  function fire(action: ActionDef) {
+    setError(null);
+    if (action.requiresReason) {
+      setPendingReason({ action, reason: "" });
+      return;
+    }
+    statusMutation.mutate({ action: action.action });
+  }
+
+  function submitReason() {
+    if (!pendingReason) return;
+    const reason = pendingReason.reason.trim();
+    if (!reason) {
+      setError("Reason is required for this action.");
+      return;
+    }
+    statusMutation.mutate({
+      action: pendingReason.action.action,
+      reason,
+    });
+  }
+
+  return (
+    <div className="issue-action-toolbar">
+      {/* Approve & Start (drafting only) — uses postDecision via the
+        * existing button so the special drafting→running transition
+        * keeps its current behavior (Slice 1). */}
+      {isDrafting ? (
+        <ApproveAndStartButton taskId={taskId} onApproved={onAfterAction} />
+      ) : null}
+
+      {actions.map((act) => (
+        <button
+          key={act.action}
+          type="button"
+          className={`issue-action-button issue-action-button--${act.variant}`}
+          onClick={() => fire(act)}
+          disabled={statusMutation.isPending}
+          data-testid={`action-${act.action}`}
+        >
+          {act.label}
+        </button>
+      ))}
+
+      {/* Reopen for terminal states — separate component because it
+        * uses the dedicated reopen endpoint. */}
+      {isTerminal ? (
+        <ReopenIssueButton
+          taskId={taskId}
+          channel={channel}
+          onReopened={onAfterAction}
+        />
+      ) : null}
+
+      {/* Inline reason prompt for actions that need a 1-line context. */}
+      {pendingReason ? (
+        <div className="issue-action-reason-row">
+          <input
+            type="text"
+            className="issue-action-reason-input"
+            value={pendingReason.reason}
+            placeholder={pendingReason.action.reasonHint ?? "Reason"}
+            onChange={(event) =>
+              setPendingReason({
+                action: pendingReason.action,
+                reason: event.target.value,
+              })
+            }
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submitReason();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                setPendingReason(null);
+              }
+            }}
+            autoFocus
+            data-testid="action-reason-input"
+          />
+          <button
+            type="button"
+            className="issue-action-button issue-action-button--primary"
+            onClick={submitReason}
+            disabled={statusMutation.isPending}
+          >
+            {statusMutation.isPending
+              ? "…"
+              : pendingReason.action.label}
+          </button>
+          <button
+            type="button"
+            className="issue-action-button issue-action-button--neutral"
+            onClick={() => setPendingReason(null)}
+            disabled={statusMutation.isPending}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : null}
+
+      {error ? (
+        <span className="issue-action-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+
+      {/* CloseIssueButton is intentionally NOT shown here — its old
+        * meaning ("reject") is now subsumed into Cancel for non-terminal
+        * states and is irrelevant for terminal ones. The void below
+        * silences the unused-import warning. */}
+      {false ? (
+        <CloseIssueButton taskId={taskId} onClosed={onAfterAction} />
+      ) : null}
     </div>
   );
 }

@@ -2137,6 +2137,17 @@
 .pre-pick-card-install {
   font-size: 12px;
   color: var(--accent);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  text-underline-offset: 3px;
+  transition:
+    text-decoration-color 120ms ease,
+    color 120ms ease;
+}
+
+.pre-pick-card:hover .pre-pick-card-install {
+  text-decoration-color: var(--accent);
 }
 
 .pre-pick-secondary-row {

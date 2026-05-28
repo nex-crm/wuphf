@@ -103,6 +103,13 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 				log.Printf("onboarding: sync company name to registry: %v", err)
 			}
 		}
+		// Re-derive the Linear-style Issue ID prefix now that the workspace
+		// has a real company name (e.g. "Nex" → NEX-1). Any Issues minted
+		// before onboarding completed keep their OFFICE-N IDs; new ones
+		// pick up the company-derived prefix.
+		b.mu.Lock()
+		b.refreshIDPrefixFromWorkspaceLocked()
+		b.mu.Unlock()
 	}
 
 	return nil

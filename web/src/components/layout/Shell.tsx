@@ -21,7 +21,12 @@ interface ShellProps {
 
 export function Shell({ children }: ShellProps) {
   const route = useCurrentRoute();
+  // Routes that render their own header should suppress the global
+  // ChannelHeader/RuntimeStrip: DM and the v3 per-agent subspace both
+  // own their top-of-pane chrome.
   const inDM = route.kind === "dm";
+  const inAgentSubspace = route.kind === "agent-subspace";
+  const hideChannelHeader = inDM || inAgentSubspace;
 
   // The WorkspaceRail sits to the left of the existing channel sidebar
   // — both rails are flex children of `.office`. The rail is 56px wide
@@ -34,8 +39,8 @@ export function Shell({ children }: ShellProps) {
       <main className="main">
         <DisconnectBanner />
         <TeamMemberWelcome />
-        {!inDM && <ChannelHeader />}
-        {!inDM && <RuntimeStrip />}
+        {!hideChannelHeader && <ChannelHeader />}
+        {!hideChannelHeader && <RuntimeStrip />}
         {children}
         <StatusBar />
       </main>

@@ -41,8 +41,16 @@ func sanitizeHumanInterview(req humanInterview) humanInterview {
 	redactionCount := req.RedactionCount
 	reasons := append([]string(nil), req.RedactionReasons...)
 
+	// Approval cards contain structured technical identifiers (action_id,
+	// connection key, workflow handle) that the human MUST see to know
+	// what they're approving. Run only the known-secret pattern pass on
+	// these fields — the entropy heuristic was redacting high-entropy
+	// action IDs (e.g. conn_mod_def::HASH) as "Action: [REDACTED]" which
+	// defeated the entire approval surface. Real secrets (API keys, AWS
+	// access keys, OAuth tokens, etc.) still get caught by the pattern
+	// pass.
 	applyField := func(s string) string {
-		res := scanner.RedactSecretsForDisplay(s)
+		res := scanner.RedactKnownSecretsOnly(s)
 		if res.Matches() > 0 {
 			redactionCount += res.Matches()
 			reasons = appendRedactionReasons(reasons, res.ReasonLabels())

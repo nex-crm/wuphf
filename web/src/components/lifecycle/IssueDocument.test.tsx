@@ -36,6 +36,8 @@ const BASE_DOC: IssueDocumentType = {
   taskId: "task-001",
   channel: "issue-specs",
   title: "Stripe webhook handler",
+  description:
+    "Receive Stripe webhook events and update subscription state. POST /stripe/webhook with HMAC-SHA256 verification.",
   lifecycleState: "drafting",
   spec: {
     goal: "Receive Stripe webhook events and update subscription state.",

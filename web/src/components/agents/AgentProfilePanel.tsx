@@ -324,7 +324,12 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
     refetchInterval: 30_000,
   });
 
-  const { data: channels = [] } = useQuery({
+  type ChannelLite = { slug: string; name: string; members?: string[] };
+  const { data: channels = [] as ChannelLite[] } = useQuery<
+    ChannelLite[] | { channels?: ChannelLite[] },
+    Error,
+    ChannelLite[]
+  >({
     queryKey: ["channels"],
     queryFn: () =>
       getChannels().then((r) =>
@@ -333,6 +338,16 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
         ),
       ),
     refetchInterval: 30_000,
+    // The "channels" cache slot is shared with useChannels() which stores
+    // the full {channels: [...]} envelope, not the array. Normalize on
+    // read so this surface tolerates either shape without crashing — and
+    // without renaming the cache key (which would invite a stale-data
+    // race during the migration).
+    select: (data): ChannelLite[] => {
+      if (Array.isArray(data)) return data as ChannelLite[];
+      const envelope = data as { channels?: ChannelLite[] };
+      return Array.isArray(envelope.channels) ? envelope.channels : [];
+    },
   });
 
   const { data: allTasks = [] } = useQuery({

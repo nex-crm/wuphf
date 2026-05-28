@@ -226,7 +226,7 @@ func (b *Broker) ensureOnboardingFirstIssueDraft(s *onboarding.State) error {
 		now := time.Now().UTC().Format(time.RFC3339)
 		b.counter++
 		task := teamTask{
-			ID:            fmt.Sprintf("task-%d", b.counter),
+			ID:            b.allocateIssueIDLocked(),
 			Channel:       "general",
 			Title:         onboardingFirstIssueTitle(prompt),
 			Details:       prompt,

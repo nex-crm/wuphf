@@ -149,8 +149,13 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if created.Task.ID == "" {
 		t.Fatal("expected task id")
 	}
-	if created.Task.Status() != "in_progress" {
-		t.Fatalf("created status: want in_progress, got %q", created.Task.Status())
+	// Issues default to drafting (status=open) until human approves.
+	// See docs/specs/issue-execution-loop.md.
+	if created.Task.Status() != "open" {
+		t.Fatalf("created status: want open (drafting), got %q", created.Task.Status())
+	}
+	if created.Task.LifecycleState != LifecycleStateDrafting {
+		t.Fatalf("created lifecycle: want drafting, got %q", created.Task.LifecycleState)
 	}
 	if len(b.tasks) != 1 || b.tasks[0].ID != created.Task.ID {
 		t.Fatalf("expected broker state to include created task, got %+v", b.tasks)

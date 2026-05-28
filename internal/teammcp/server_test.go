@@ -1029,19 +1029,27 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
 	ensureBrokerMembers(t, ctx, "eng")
 
+	// Slice 7: specialists can't create Issues directly — only CEO
+	// (or human). Test the "default owner to caller" semantic with
+	// MySlug="ceo" since ceo is the lead and allowed to create.
 	result, _, err := handleTeamTask(ctx, nil, TeamTaskArgs{
 		Action:  "create",
 		Channel: "general",
 		Title:   "Investigate webhook retries",
 		Details: "The agent detected this as follow-up implementation work.",
-		MySlug:  "eng",
+		MySlug:  "ceo",
 	})
 	if err != nil {
 		t.Fatalf("handleTeamTask: %v", err)
 	}
 	text := textFromResult(t, result)
-	if !strings.Contains(text, "Task task-") || !strings.Contains(text, "is now in_progress @eng") {
-		t.Fatalf("expected self-owned in-progress task result, got %q", text)
+	// Issues (the default task_type via RULE ZERO override) land in
+	// drafting / status=open until the human approves them. See
+	// docs/specs/issue-execution-loop.md.
+	// Slice 7: MySlug must be ceo (only lead can create); owner
+	// defaults to the caller, so the assertion reads "@ceo".
+	if !strings.Contains(text, "Task task-") || !strings.Contains(text, "is now open @ceo") {
+		t.Fatalf("expected self-owned drafting (open) task result, got %q", text)
 	}
 
 	var tasks brokerTasksResponse
@@ -1055,8 +1063,8 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 	if task.Title != "Investigate webhook retries" {
 		t.Fatalf("expected created fallback task, got %+v", task)
 	}
-	if task.Owner != "eng" || task.CreatedBy != "eng" || task.Status != "in_progress" {
-		t.Fatalf("expected caller-owned in-progress task, got %+v", task)
+	if task.Owner != "ceo" || task.CreatedBy != "ceo" || task.Status != "open" {
+		t.Fatalf("expected caller-owned drafting (status=open) task, got %+v", task)
 	}
 
 	result, _, err = handleTeamTask(ctx, nil, TeamTaskArgs{
@@ -1064,14 +1072,14 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 		Channel: "general",
 		Title:   "Whitespace owner fallback",
 		Owner:   "   ",
-		MySlug:  "eng",
+		MySlug:  "ceo",
 	})
 	if err != nil {
 		t.Fatalf("handleTeamTask whitespace owner: %v", err)
 	}
 	text = textFromResult(t, result)
-	if !strings.Contains(text, "is now in_progress @eng") {
-		t.Fatalf("expected whitespace-owner task to be caller-owned, got %q", text)
+	if !strings.Contains(text, "is now open @ceo") {
+		t.Fatalf("expected whitespace-owner task to be caller-owned (drafting), got %q", text)
 	}
 
 	if err := brokerGetJSON(ctx, "/tasks?channel=general&include_done=true", &tasks); err != nil {
@@ -1083,8 +1091,8 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 			continue
 		}
 		foundWhitespace = true
-		if task.Owner != "eng" || task.CreatedBy != "eng" || task.Status != "in_progress" {
-			t.Fatalf("expected trimmed-empty owner to default to caller, got %+v", task)
+		if task.Owner != "ceo" || task.CreatedBy != "ceo" || task.Status != "open" {
+			t.Fatalf("expected trimmed-empty owner to default to caller (drafting), got %+v", task)
 		}
 	}
 	if !foundWhitespace {

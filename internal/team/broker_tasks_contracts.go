@@ -9,6 +9,11 @@ type TaskListRequest struct {
 	Channel      string `json:"channel,omitempty"`
 	AllChannels  bool   `json:"all_channels,omitempty"`
 	IncludeDone  bool   `json:"include_done,omitempty"`
+	// ParentIssueID filters to sub-issues of a specific parent Issue.
+	// When empty, no parent filter is applied. When non-empty, only
+	// tasks whose ParentIssueID matches are returned. Used by the
+	// Issue detail surface to render the sub-issues list.
+	ParentIssueID string `json:"parent_issue_id,omitempty"`
 }
 
 type TaskPostRequest struct {
@@ -29,6 +34,7 @@ type TaskPostRequest struct {
 	WorktreePath                 string   `json:"worktree_path"`
 	WorktreeBranch               string   `json:"worktree_branch"`
 	DependsOn                    []string `json:"depends_on"`
+	ParentIssueID                string   `json:"parent_issue_id"`
 	MemoryWorkflowOverride       bool     `json:"memory_workflow_override"`
 	MemoryWorkflowOverrideActor  string   `json:"memory_workflow_override_actor"`
 	MemoryWorkflowOverrideReason string   `json:"memory_workflow_override_reason"`

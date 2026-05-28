@@ -1,7 +1,45 @@
 /* biome-ignore-all lint/suspicious/noUnknownAtRules: Tailwind at-rules are consumed by the PostCSS/Tailwind pipeline. */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4 canonical import — loads default theme (spacing scale,
+ * radius scale, font-size scale, etc.) plus the base, preflight, and
+ * utility layers. The v3-style `@tailwind base; @tailwind components;
+ * @tailwind utilities;` directives skip the default theme so utilities
+ * like p-5, gap-3, max-w-2xl never emit. The @config below opts back
+ * in to the legacy tailwind.config.js so its content paths + custom
+ * color tokens are honored. */
+@import "tailwindcss";
+@config "../../tailwind.config.js";
+
+/* Tailwind v4 ignores tailwind.config.js color tokens by default —
+ * it expects the CSS-first @theme block. Without this, classes like
+ * `bg-background`, `border-border`, `bg-card`, etc. emit NO rules, so
+ * the IssueCreateDialog (and any shadcn primitive that uses these
+ * tokens) renders fully transparent. The bridge below maps the
+ * shadcn HSL CSS variables (defined per-theme in the :root and
+ * html[data-theme="..."] blocks below) into Tailwind v4's
+ * `--color-*` design tokens. The variables themselves still live in
+ * the theme blocks so per-theme switching keeps working. */
+@theme {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --radius: 8px;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    Token bridge: shadcn primitives read their HSL tokens from

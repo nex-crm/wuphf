@@ -6,9 +6,15 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
-import { getConfig, type Message, postMessage } from "../../api/client";
+import {
+  cancelRequest,
+  getConfig,
+  type Message,
+  postMessage,
+} from "../../api/client";
 import { useCommands } from "../../hooks/useCommands";
 import { useOfficeMembers } from "../../hooks/useMembers";
+import { useRequests } from "../../hooks/useRequests";
 import {
   extractTaggedMentions,
   parseMentions,
@@ -151,6 +157,11 @@ export function Composer() {
     staleTime: 60_000,
   });
   const { data: members = [] } = useOfficeMembers();
+  // If the human chooses to type into the channel instead of clicking a
+  // blocking interview's button, treat that as "I'm replying in chat
+  // instead." Cancel the interview so the broker unblocks, and let the
+  // agent see the typed message as the new context.
+  const { blockingPending } = useRequests();
   const leadSlug = useMemo(
     () => resolveLeadSlug(cfg?.team_lead_slug, members),
     [cfg?.team_lead_slug, members],
@@ -245,34 +256,60 @@ export function Composer() {
     const trimmed = text.trim();
     if (!trimmed || sendMutation.isPending) return;
 
-    // Handle slash commands
-    if (trimmed.startsWith("/")) {
-      const consumed = handleSlashCommand(trimmed, {
-        leadSlug,
-        sendAsMessage: (rewritten) => {
-          sendMutation.mutate({
-            content: rewritten,
-            tagged: extractTaggedMentions(rewritten, knownSlugs),
-          });
-        },
-        clearMessages: clearCurrentChannelMessages,
-        channel: currentChannel,
-      });
-      if (consumed) {
-        // Persist the *raw* command to history so Ctrl+P replays `/ask foo`,
-        // not the rewritten `@ceo foo`. Matches user expectation.
-        pushHistory(currentChannel, trimmed);
-        resetComposer();
-        return;
-      }
-    }
+    // If a blocking interview is pending, cancel it before sending so the
+    // broker doesn't 409 the message. The agent will see the cancellation
+    // plus the human's free-form reply on its next turn and react to that
+    // instead of the dead choice list.
+    const pendingId = blockingPending?.id ?? null;
+    const dismissPending = pendingId
+      ? cancelRequest(pendingId)
+          .then(() => {
+            void queryClient.invalidateQueries({ queryKey: ["requests"] });
+            void queryClient.invalidateQueries({
+              queryKey: ["requests-badge"],
+            });
+          })
+          .catch((err: unknown) => {
+            // If cancel races with another resolver the request is already
+            // gone; don't block the send on it.
+            console.warn("composer: failed to cancel blocking request", err);
+          })
+      : Promise.resolve();
 
-    pushHistory(currentChannel, trimmed);
-    sendMutation.mutate({
-      content: trimmed,
-      tagged: extractTaggedMentions(trimmed, knownSlugs),
-    });
-    resetComposer();
+    const send = () => {
+      // Handle slash commands
+      if (trimmed.startsWith("/")) {
+        const consumed = handleSlashCommand(trimmed, {
+          leadSlug,
+          sendAsMessage: (rewritten) => {
+            sendMutation.mutate({
+              content: rewritten,
+              tagged: extractTaggedMentions(rewritten, knownSlugs),
+            });
+          },
+          clearMessages: clearCurrentChannelMessages,
+          channel: currentChannel,
+        });
+        if (consumed) {
+          pushHistory(currentChannel, trimmed);
+          resetComposer();
+          return;
+        }
+      }
+
+      pushHistory(currentChannel, trimmed);
+      sendMutation.mutate({
+        content: trimmed,
+        tagged: extractTaggedMentions(trimmed, knownSlugs),
+      });
+      resetComposer();
+    };
+
+    if (pendingId) {
+      void dismissPending.then(send);
+    } else {
+      send();
+    }
   }, [
     text,
     sendMutation,
@@ -281,6 +318,8 @@ export function Composer() {
     resetComposer,
     knownSlugs,
     clearCurrentChannelMessages,
+    blockingPending,
+    queryClient,
   ]);
 
   /**

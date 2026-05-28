@@ -90,6 +90,7 @@ func handleTeamRequest(ctx context.Context, _ *mcp.CallToolRequest, args TeamReq
 		"required":       required,
 		"secret":         args.Secret,
 		"reply_to":       replyTo,
+		"issue_id":       strings.TrimSpace(args.IssueID),
 	}, &created); err != nil {
 		return toolError(err), nil, nil
 	}
@@ -123,6 +124,7 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 		"blocking":       false,
 		"required":       false,
 		"reply_to":       location.ReplyToID,
+		"issue_id":       strings.TrimSpace(args.IssueID),
 	}, &created); err != nil {
 		return toolError(err), nil, nil
 	}

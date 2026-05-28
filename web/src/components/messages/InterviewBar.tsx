@@ -62,15 +62,31 @@ import { StructuredMessageCard } from "./cards/StructuredMessageCard";
 export function InterviewBar() {
   const { pending } = useRequests();
   const queryClient = useQueryClient();
+  // OnboardingDMContext.phase is non-empty exactly when the broker CEO
+  // onboarding state machine is mid-flow. During that window, all
+  // legitimate onboarding prompts come through CeoCardSection via
+  // pendingSuggestion (deterministic chip / form-field cards backed by
+  // onboarded.json). The operational request queue from useRequests is
+  // separate office state that can hold stale leftovers (interview /
+  // approval requests from prior office turns) — surfacing those during
+  // onboarding leaks the office inbox into the wizard. Suppress the
+  // entire queue while onboarding is in progress; CeoCardSection still
+  // renders below.
+  const { phase: onboardingPhase } = useOnboardingDMContext();
+  const isOnboarding =
+    typeof onboardingPhase === "string" &&
+    onboardingPhase !== "" &&
+    onboardingPhase !== "complete";
 
   const queue = useMemo(() => {
+    if (isOnboarding) return [];
     const sorted = [...pending].sort((a, b) => {
       const ta = a.created_at ?? "";
       const tb = b.created_at ?? "";
       return ta.localeCompare(tb);
     });
     return sorted;
-  }, [pending]);
+  }, [pending, isOnboarding]);
 
   const [cursor, setCursor] = useState(0);
   const [textMode, setTextMode] = useState<{ option: InterviewOption } | null>(

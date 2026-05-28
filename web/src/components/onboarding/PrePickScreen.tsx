@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { get, post } from "../../api/client";
+import { showNotice } from "../ui/Toast";
 import { LocalProviderPicker } from "./LocalProviderPicker";
 import { isValidUrl, OpenAICompatibleInput } from "./OpenAICompatibleInput";
 import { PrePickApiKeyRow } from "./PrePickApiKeyRow";
@@ -412,10 +413,18 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
     setSubmitError("");
     const message = `Run \`${command}\` in a terminal, then click the tile again.`;
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(command).catch(() => {
-        // Clipboard denied (e.g. iframe without permission) — fall through
-        // to the inline message below.
-      });
+      navigator.clipboard
+        .writeText(command)
+        .then(() => {
+          showNotice(`Copied: ${command}`, "success");
+        })
+        .catch(() => {
+          // Clipboard denied (e.g. iframe without permission) — fall through
+          // to the inline message + toast below so the user can copy manually.
+          showNotice(message, "info");
+        });
+    } else {
+      showNotice(message, "info");
     }
     setSubmitError(message);
   }
