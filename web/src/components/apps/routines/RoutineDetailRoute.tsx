@@ -75,7 +75,6 @@ interface RoutineDetailBodyProps {
   routine: SchedulerJob;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Page-level component coordinates header, tabs, and mutations; refactor is tracked separately.
 function RoutineDetailBody({ routine }: RoutineDetailBodyProps) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
