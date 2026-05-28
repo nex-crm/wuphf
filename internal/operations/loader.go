@@ -74,6 +74,8 @@ func normalizeBlueprint(templateID string, blueprint Blueprint) Blueprint {
 	blueprint.ReviewerPaths = normalizeReviewerPaths(blueprint.ReviewerPaths)
 	blueprint.Outcome = strings.TrimSpace(blueprint.Outcome)
 	blueprint.Category = strings.TrimSpace(strings.ToLower(blueprint.Category))
+	blueprint.Icon = strings.TrimSpace(blueprint.Icon)
+	blueprint.DisplayName = strings.TrimSpace(blueprint.DisplayName)
 	blueprint.FirstTasks = normalizeFirstTasks(blueprint.FirstTasks)
 	blueprint.Skills = normalizeBlueprintSkills(blueprint.Skills)
 	blueprint.Requirements = normalizeBlueprintRequirements(blueprint.Requirements)

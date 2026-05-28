@@ -119,6 +119,60 @@ func TestCeoDeterministicMessages_BlueprintNoAckWhenNoUrl(t *testing.T) {
 	}
 }
 
+// TestBlueprintChipOptions_LoadsFullCatalog locks in the regression that the
+// onboarding blueprint picker has to surface every blueprint shipped under
+// templates/operations, each with its icon and description, plus the
+// "Start from scratch" sentinel last. The old PhaseBlueprint emit used a
+// hardcoded three-entry slice and dropped the rest of the catalog from the
+// UI; this test fails if anyone falls back to that shape.
+func TestBlueprintChipOptions_LoadsFullCatalog(t *testing.T) {
+	opts := blueprintChipOptions()
+	if len(opts) < 4 {
+		t.Fatalf("expected catalog + scratch (>=4 options); got %d", len(opts))
+	}
+
+	last := opts[len(opts)-1]
+	if last["id"] != "" {
+		t.Errorf("scratch sentinel must come last with id=\"\"; got %v", last["id"])
+	}
+	if got, _ := last["label"].(string); got != "Start from scratch" {
+		t.Errorf("scratch label = %q, want %q", got, "Start from scratch")
+	}
+
+	bookkeeping := findOptionByID(opts, "bookkeeping-invoicing-service")
+	if bookkeeping == nil {
+		t.Fatal("expected bookkeeping-invoicing-service in options")
+	}
+	if got, _ := bookkeeping["icon"].(string); got == "" {
+		t.Errorf("bookkeeping option must carry an icon; got empty")
+	}
+	if got, _ := bookkeeping["description"].(string); got == "" {
+		t.Errorf("bookkeeping option must carry a description; got empty")
+	}
+
+	// Every catalog entry must have id, label, icon, description.
+	for _, opt := range opts[:len(opts)-1] {
+		if id, _ := opt["id"].(string); id == "" {
+			t.Errorf("catalog entry has empty id: %v", opt)
+		}
+		if label, _ := opt["label"].(string); label == "" {
+			t.Errorf("catalog entry has empty label: %v", opt)
+		}
+		if desc, _ := opt["description"].(string); desc == "" {
+			t.Errorf("catalog entry has empty description: %v", opt)
+		}
+	}
+}
+
+func findOptionByID(opts []map[string]interface{}, id string) map[string]interface{} {
+	for _, opt := range opts {
+		if got, _ := opt["id"].(string); got == id {
+			return opt
+		}
+	}
+	return nil
+}
+
 func TestLegalPhaseTransitions_PhaseScanToPhaseWebsite(t *testing.T) {
 	// Recovery: PhaseScan → PhaseWebsite must be legal so the user can
 	// retry with a different URL after a scan failure. (#934)

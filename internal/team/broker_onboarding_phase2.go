@@ -583,14 +583,9 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 			Content:      "Pick a starter template, or start from scratch:",
 			SuggestionID: "blueprint-pick",
 			SuggestionPayload: mustMarshalRaw(map[string]interface{}{
-				"field": "blueprint_id",
-				"label": "Pick a starter template, or start from scratch:",
-				"options": []map[string]interface{}{
-					{"id": "bookkeeping-invoicing-service", "label": "Bookkeeping"},
-					{"id": "niche-crm", "label": "Niche CRM"},
-					{"id": "youtube-factory", "label": "YouTube Factory"},
-					{"id": "", "label": "Start from scratch"},
-				},
+				"field":   "blueprint_id",
+				"label":   "Pick a starter template, or start from scratch:",
+				"options": blueprintChipOptions(),
 			}),
 		})
 		return out
@@ -669,6 +664,60 @@ func ceoDeterministicMessages(phase string, s *onboarding.State) []ceoMessagePay
 		// draft/approve/kickoff and unknown phases return nil — no Phase 2 wiring.
 		return nil
 	}
+}
+
+// blueprintChipOptions builds the chip-row options surfaced at PhaseBlueprint.
+// It loads every operations blueprint on disk so the picker shows the full
+// catalog with icon, label, and description rather than a hardcoded
+// three-pack subset. The "Start from scratch" sentinel is always appended
+// last so the user has a single empty-office option.
+//
+// Best-effort: if blueprint discovery fails (missing templates dir in a
+// stripped build, malformed YAML) we fall back to a minimal scratch-only
+// menu rather than blocking phase advancement. This mirrors the loader's
+// stripped-build fallback elsewhere in the codebase.
+func blueprintChipOptions() []map[string]interface{} {
+	const fallbackCount = 1
+	const scratchDescription = "Empty office, your call. Start from a blank slate."
+
+	bps, err := operations.ListBlueprints(onboarding.ResolveTemplatesRepoRoot(""))
+	if err != nil {
+		log.Printf("onboarding: list blueprints for chip row: %v", err)
+		return []map[string]interface{}{{
+			"id":          "",
+			"label":       "Start from scratch",
+			"icon":        "✨",
+			"description": scratchDescription,
+		}}
+	}
+
+	options := make([]map[string]interface{}, 0, len(bps)+fallbackCount)
+	for _, bp := range bps {
+		label := bp.DisplayName
+		if label == "" {
+			label = bp.Name
+		}
+		if label == "" {
+			label = bp.ID
+		}
+		description := bp.Outcome
+		if description == "" {
+			description = bp.Description
+		}
+		options = append(options, map[string]interface{}{
+			"id":          bp.ID,
+			"label":       label,
+			"icon":        bp.Icon,
+			"description": description,
+		})
+	}
+	options = append(options, map[string]interface{}{
+		"id":          "",
+		"label":       "Start from scratch",
+		"icon":        "✨",
+		"description": scratchDescription,
+	})
+	return options
 }
 
 func teamTrimItems(s *onboarding.State) []map[string]interface{} {

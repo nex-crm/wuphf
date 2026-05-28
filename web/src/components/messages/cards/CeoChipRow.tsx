@@ -14,7 +14,11 @@
 
 import { useRef, useState } from "react";
 
-import type { CardStage, CeoChipRowPayload } from "../../onboarding/types";
+import type {
+  CardStage,
+  CeoChipOption,
+  CeoChipRowPayload,
+} from "../../onboarding/types";
 
 interface CeoChipRowProps {
   payload: CeoChipRowPayload;
@@ -89,9 +93,17 @@ export function CeoChipRow({
     }
   };
 
+  // Card layout kicks in whenever any option ships an icon or description —
+  // that signals the row was meant as a richer picker (blueprint catalog)
+  // rather than a flat pill row (bridge_choice). Plain rows degrade to the
+  // original chip pill style so legacy chip_rows render unchanged.
+  const isCardLayout = payload.options.some(
+    (o) => (o.icon ?? "") !== "" || (o.description ?? "") !== "",
+  );
+
   return (
     <div
-      className="ceo-card ceo-card--chip-row"
+      className={`ceo-card ceo-card--chip-row${isCardLayout ? " ceo-card--chip-grid" : ""}`}
       data-testid="ceo-chip-row"
       role="group"
       aria-label={payload.label}
@@ -100,31 +112,93 @@ export function CeoChipRow({
         <div className="ceo-card-label">{payload.label}</div>
       ) : null}
       <div
-        className="ceo-chip-row-options"
+        className={
+          isCardLayout ? "ceo-chip-grid-options" : "ceo-chip-row-options"
+        }
         role="listbox"
         aria-label={payload.label}
       >
         {payload.options.map((opt, idx) => (
-          <button
+          <ChipOptionButton
             key={opt.id}
-            id={`ceo-chip-${payload.field}-${opt.id}`}
-            ref={idx === 0 ? firstChipRef : undefined}
-            type="button"
-            role="option"
-            aria-selected={selected === opt.id}
-            className={`ceo-chip${selected === opt.id ? " ceo-chip--selected" : ""}`}
-            disabled={stage === "submitting"}
-            onClick={() => handleSelect(opt.id)}
+            opt={opt}
+            field={payload.field}
+            isCardLayout={isCardLayout}
+            selected={selected === opt.id}
+            isSubmitting={stage === "submitting"}
+            firstChipRef={idx === 0 ? firstChipRef : undefined}
+            onSelect={handleSelect}
             onKeyDown={(e) => handleKeyDown(e, opt.id, idx)}
-          >
-            {stage === "submitting" && selected === opt.id ? (
-              <span className="ceo-card-spinner" aria-hidden="true" />
-            ) : null}
-            {/* Render as text — never innerHTML */}
-            {opt.label}
-          </button>
+          />
         ))}
       </div>
     </div>
+  );
+}
+
+interface ChipOptionButtonProps {
+  opt: CeoChipOption;
+  field: string;
+  isCardLayout: boolean;
+  selected: boolean;
+  isSubmitting: boolean;
+  firstChipRef?: React.RefObject<HTMLButtonElement | null>;
+  onSelect: (id: string) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
+}
+
+function ChipOptionButton({
+  opt,
+  field,
+  isCardLayout,
+  selected,
+  isSubmitting,
+  firstChipRef,
+  onSelect,
+  onKeyDown,
+}: ChipOptionButtonProps) {
+  const hasDescription = (opt.description ?? "") !== "";
+  const hasIcon = (opt.icon ?? "") !== "";
+  const className = isCardLayout
+    ? `ceo-chip-card${selected ? " ceo-chip-card--selected" : ""}`
+    : `ceo-chip${selected ? " ceo-chip--selected" : ""}`;
+  const descId = `ceo-chip-${field}-${opt.id}-desc`;
+  return (
+    <button
+      id={`ceo-chip-${field}-${opt.id}`}
+      ref={firstChipRef}
+      type="button"
+      role="option"
+      aria-selected={selected}
+      aria-describedby={hasDescription ? descId : undefined}
+      className={className}
+      disabled={isSubmitting}
+      onClick={() => onSelect(opt.id)}
+      onKeyDown={onKeyDown}
+    >
+      {isSubmitting && selected ? (
+        <span className="ceo-card-spinner" aria-hidden="true" />
+      ) : null}
+      {isCardLayout ? (
+        <>
+          {hasIcon ? (
+            <span className="ceo-chip-card-icon" aria-hidden="true">
+              {opt.icon}
+            </span>
+          ) : null}
+          <span className="ceo-chip-card-body">
+            <span className="ceo-chip-card-label">{opt.label}</span>
+            {hasDescription ? (
+              <span className="ceo-chip-card-description" id={descId}>
+                {opt.description}
+              </span>
+            ) : null}
+          </span>
+        </>
+      ) : (
+        /* Render as text — never innerHTML */
+        opt.label
+      )}
+    </button>
   );
 }

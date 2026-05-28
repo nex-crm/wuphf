@@ -1,5 +1,7 @@
 id: paid-discord-community
 name: Paid Discord Community
+display_name: Paid Discord
+icon: "💬"
 kind: community
 category: media
 outcome: "Onboarding, moderation, and engagement for a paid community."

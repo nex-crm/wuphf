@@ -1,5 +1,7 @@
 id: youtube-factory
 name: YouTube Factory
+display_name: YouTube Factory
+icon: "📹"
 kind: media_business
 category: media
 outcome: "Script, film, publish, and analyze a recurring YouTube channel."

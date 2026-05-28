@@ -1,5 +1,7 @@
 id: multi-agent-workflow-consulting
 name: Multi-Agent Workflow Consulting
+display_name: Workflow Consulting
+icon: "💼"
 kind: consulting
 category: services
 outcome: "Client engagements that ship multi-agent workflows."

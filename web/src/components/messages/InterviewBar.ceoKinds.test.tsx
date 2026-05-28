@@ -276,6 +276,68 @@ describe("CeoChipRow", () => {
     );
     expect(document.querySelector("img")).not.toBeInTheDocument();
   });
+
+  it("renders rich card layout when options carry icon + description", () => {
+    const cardPayload: CeoChipRowPayload = {
+      field: "blueprint_id",
+      label: "Pick a starter template:",
+      options: [
+        {
+          id: "bookkeeping-invoicing-service",
+          label: "Bookkeeping",
+          icon: "📊",
+          description:
+            "Books, invoices, and monthly close — with an audit trail.",
+        },
+        {
+          id: "niche-crm",
+          label: "Niche CRM",
+          icon: "🎯",
+          description: "Build and launch a focused CRM for a specific niche.",
+        },
+        {
+          id: "",
+          label: "Start from scratch",
+          icon: "✨",
+          description: "Empty office, your call. Start from a blank slate.",
+        },
+      ],
+    };
+    render(
+      <CeoChipRow payload={cardPayload} stage="pending" onSubmit={vi.fn()} />,
+    );
+    expect(screen.getByText("Bookkeeping")).toBeInTheDocument();
+    expect(screen.getByText("Niche CRM")).toBeInTheDocument();
+    expect(screen.getByText("Start from scratch")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Books, invoices, and monthly close — with an audit trail.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Build and launch a focused CRM for a specific niche."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("📊")).toBeInTheDocument();
+    expect(screen.getByText("🎯")).toBeInTheDocument();
+    expect(screen.getByText("✨")).toBeInTheDocument();
+  });
+
+  it("falls back to plain pill chips when no option ships icon or description", () => {
+    const pillPayload: CeoChipRowPayload = {
+      field: "bridge_choice",
+      label: "What's next?",
+      options: [
+        { id: "start_issue", label: "Start an issue" },
+        { id: "look_around", label: "Look around first" },
+      ],
+    };
+    const { container } = render(
+      <CeoChipRow payload={pillPayload} stage="pending" onSubmit={vi.fn()} />,
+    );
+    expect(container.querySelector(".ceo-chip-grid-options")).toBeNull();
+    expect(container.querySelector(".ceo-chip-card")).toBeNull();
+    expect(container.querySelector(".ceo-chip-row-options")).not.toBeNull();
+  });
 });
 
 // ── ceo_checklist ─────────────────────────────────────────────────────────

@@ -1,5 +1,7 @@
 id: bookkeeping-invoicing-service
 name: Bookkeeping and Invoicing Service
+display_name: Bookkeeping
+icon: "📊"
 kind: finance
 category: services
 outcome: "Books, invoices, and monthly close — with an audit trail."
