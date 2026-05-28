@@ -371,12 +371,13 @@ function RuntimeSection({
   const [draftModel, setDraftModel] = useState<string>(binding.model ?? "");
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Built-ins (CEO, lead) cannot have their runtime moved off the install
-  // default — the broker rejects the write — so we hide editing there too.
-  // The user-task says CEO chat must ask for provider on spawn, which is the
-  // wizard's job, not this panel's.
-  const isLead = agent.built_in === true || agent.slug === "ceo";
-  const editable = !(isGateway || isLead);
+  // Lead agents (CEO, other built-ins) can have their runtime changed from
+  // this panel too. The broker's built-in gate only fires on remove, not on
+  // provider updates — there's no broker-side reason to block here.
+  // Gateway-bound agents are the only non-editable case: their gateway
+  // transport is load-bearing, so changing the kind through this panel
+  // would orphan the imported session. Those go through Integrations.
+  const editable = !isGateway;
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -489,12 +490,7 @@ function RuntimeSection({
           />
         </span>
       </div>
-      {isLead && (
-        <p className="op-runtime-note">
-          Lead agents always run on the install default; change it in Settings.
-        </p>
-      )}
-      {!isLead && draftKind === "" && (
+      {draftKind === "" && (
         <p className="op-runtime-note">
           Inheriting the install default ({globalDefault}). Pick a specific
           runtime here to pin this agent.
@@ -539,6 +535,123 @@ function RuntimeSection({
         </div>
       )}
     </div>
+  );
+}
+
+// EditableName replaces the static name display with an inline-edit field.
+// Click the name to edit; Enter or blur saves, Escape cancels. Trimmed
+// empty values are rejected (the name is required at the broker layer
+// anyway). Applies to every agent including the lead — the broker's
+// built-in gate fires only on remove, not on update.
+function EditableName({ agent }: { agent: OfficeMember }) {
+  const queryClient = useQueryClient();
+  const initial = agent.name || agent.slug;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(initial);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Keep the draft in sync when the underlying member name changes from
+  // outside (e.g. another browser tab edited it). React re-mounts the
+  // component on a slug switch (key prop on AgentPanelView), so we only
+  // need to track name changes within the same agent.
+  if (!editing && draft !== initial && draft !== agent.name) {
+    setDraft(initial);
+  }
+
+  const mutation = useMutation({
+    mutationFn: async (name: string) => {
+      await post("/office-members", {
+        action: "update",
+        slug: agent.slug,
+        name,
+      });
+    },
+    onSuccess: () => {
+      setSaveError(null);
+      setEditing(false);
+      void queryClient.invalidateQueries({ queryKey: ["office-members"] });
+    },
+    onError: (err: unknown) => {
+      setSaveError(err instanceof Error ? err.message : "Failed to rename");
+    },
+  });
+
+  const commit = () => {
+    const next = draft.trim();
+    if (!next || next === initial) {
+      setDraft(initial);
+      setEditing(false);
+      setSaveError(null);
+      return;
+    }
+    mutation.mutate(next);
+  };
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="agent-panel-name"
+        onClick={() => {
+          setDraft(initial);
+          setEditing(true);
+          setSaveError(null);
+        }}
+        title="Click to rename"
+        style={{
+          background: "transparent",
+          border: 0,
+          padding: 0,
+          font: "inherit",
+          color: "inherit",
+          cursor: "text",
+        }}
+      >
+        {initial}
+      </button>
+    );
+  }
+  return (
+    <>
+      <input
+        autoFocus={true}
+        className="input"
+        value={draft}
+        disabled={mutation.isPending}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setDraft(initial);
+            setEditing(false);
+            setSaveError(null);
+          }
+        }}
+        style={{
+          font: "inherit",
+          padding: "2px 6px",
+          minWidth: 120,
+          maxWidth: 220,
+        }}
+        aria-label="Agent name"
+      />
+      {saveError && (
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--error-400)",
+            marginLeft: 6,
+          }}
+          role="alert"
+        >
+          {saveError}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -625,9 +738,7 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
             <div
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
-              <span className="agent-panel-name">
-                {agent.name || agent.slug}
-              </span>
+              <EditableName agent={agent} />
               <span
                 className={`status-dot ${statusClass}`}
                 style={{ marginLeft: -2 }}

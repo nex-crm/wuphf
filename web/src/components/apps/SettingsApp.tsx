@@ -26,6 +26,7 @@ import {
 } from "../ui/ShredWarning";
 import { showNotice } from "../ui/Toast";
 import { WipeModal } from "../ui/WipeModal";
+import { useOfficeMembers } from "../../hooks/useMembers";
 import { NexConnectPanel } from "./NexConnectPanel";
 import { ImageGenSection } from "./SettingsApp.imageGen";
 import { Field, KeyField, SaveButton } from "./settings/components";
@@ -81,6 +82,51 @@ const CLOUD_KINDS: ReadonlySet<LLMRuntimeKind> = new Set([
   "codex",
   "opencode",
 ]);
+
+// TeamLeadPicker reads the office roster so the human picks from real
+// agents rather than typing a slug. The saved value persists as a slug on
+// the wire (cfg.team_lead_slug) — the picker round-trips through the slug
+// even when the agent's display name later changes, so renaming an agent
+// doesn't break the Team Lead binding. Falls back to a free-text input
+// while the roster is still loading or empty, so the field is never a
+// dead end on a brand-new install.
+function TeamLeadPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (slug: string) => void;
+}) {
+  const { data: members = [], isLoading } = useOfficeMembers();
+  if (isLoading || members.length === 0) {
+    return (
+      <input
+        style={styles.input}
+        placeholder="e.g. ceo"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  const knownSlug = members.some((m) => m.slug === value);
+  return (
+    <select
+      style={styles.input}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">— pick an agent —</option>
+      {members.map((m) => (
+        <option key={m.slug} value={m.slug}>
+          {m.name ? `${m.name} (@${m.slug})` : `@${m.slug}`}
+        </option>
+      ))}
+      {value && !knownSlug && (
+        <option value={value}>@{value} (not in roster)</option>
+      )}
+    </select>
+  );
+}
 
 function GeneralSection({ cfg, save }: SectionProps) {
   const [provider, setProvider] = useState<LLMRuntimeKind | "">(
@@ -173,13 +219,8 @@ function GeneralSection({ cfg, save }: SectionProps) {
         </select>
       </Field>
       <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agents</div>
-      <Field label="Team Lead" hint="Default agent that leads operations">
-        <input
-          style={styles.input}
-          placeholder="e.g. ceo"
-          value={teamLead}
-          onChange={(e) => setTeamLead(e.target.value)}
-        />
+      <Field label="Team Lead" hint="Agent that leads operations">
+        <TeamLeadPicker value={teamLead} onChange={setTeamLead} />
       </Field>
       <Field label="Max Concurrent" hint="Parallel agent limit">
         <input
