@@ -19,22 +19,26 @@ html[data-theme="nex-dark"] {
   --overlay-white: rgba(255, 255, 255, 0.12);
   --overlay-white-strong: rgba(255, 255, 255, 0.32);
 
-  /* ── Semantic aliases ── */
-  --bg: #111213;
-  --bg-warm: #191a1b;
-  --bg-subtle: #0d0e0f;
-  --bg-card: #151617;
-  --text: #e9eaeb;
-  --text-secondary: #aeb1b2;
-  --text-tertiary: #686c6e;
-  --text-disabled: #434647;
+  /* ── Twilight palette ──
+     The light theme is purple-on-white; "nex-dark" is the same brand at
+     night, not a neutral dark mode. Every surface picks up a faint violet
+     temperature, and text warms toward cream so it pairs with the
+     aubergine ground instead of fighting it. */
+  --bg: #121017;
+  --bg-warm: #1c1825;
+  --bg-subtle: #0d0c14;
+  --bg-card: #16131e;
+  --text: #ece8ef;
+  --text-secondary: #b2adbb;
+  --text-tertiary: #75707d;
+  --text-disabled: #46424d;
 
   /* accent stays the same purple/tertiary */
 
-  --border: #1e2022;
-  --border-light: #171819;
-  --border-dark: #2a2d2f;
-  --border-strong: #434647;
+  --border: #221d2c;
+  --border-light: #1a1623;
+  --border-dark: #2e2839;
+  --border-strong: #45404d;
 
   /* ── Sidebar – keep purple but use a deeper shade ── */
   --nex-sidebar: #4a1f70;
@@ -44,15 +48,24 @@ html[data-theme="nex-dark"] {
   --nex-sidebar-text-active: #ffffff;
 }
 
-/* ── Override hard-coded message text color (not a CSS variable in nex.css) ── */
-html[data-theme="nex-dark"] .message-text {
-  color: #c8cacc;
+/* ── Twilight atmosphere on body — a slow vertical fade from aubergine
+   to ink so the surface reads as a lit room rather than a flat panel.
+   The gradient is fixed so it does not tile when the chat scrolls. ── */
+html[data-theme="nex-dark"] body {
+  background-color: var(--bg);
+  background-image: linear-gradient(180deg, #1a1228 0%, #0e0f14 100%);
+  background-attachment: fixed;
 }
 
-/* ── Composer inner border slightly lighter for dark bg ── */
+/* ── Override hard-coded message text color (not a CSS variable in nex.css) ── */
+html[data-theme="nex-dark"] .message-text {
+  color: #d2cdda;
+}
+
+/* ── Composer inner — match the violet-warmed card tone ── */
 html[data-theme="nex-dark"] .composer-inner {
-  background: #191a1b;
-  border-color: #2a2d2f;
+  background: var(--bg-warm);
+  border-color: var(--border-dark);
 }
 
 /* ── Sidebar bottom matches deeper dark ── */
@@ -77,11 +90,13 @@ html[data-theme="nex-dark"] .message:hover {
    override here so the dark theme stays readable.
    ═══════════════════════════════════════════════════════════════ */
 
-/* ── @mention pill — light tan + dark orange reads as a stain on dark bg ── */
+/* ── @mention + json-syntax accents track the brand purple, not amber.
+   At night the same violet that owns the sidebar should own the inline
+   accents too — otherwise the dark theme reads as a stranger. ── */
 html[data-theme="nex-dark"] {
-  --mention-bg: rgba(255, 182, 71, 0.16);
-  --mention-fg: #ffb647;
-  --syntax-number: #f7deab;
+  --mention-bg: rgba(196, 176, 255, 0.14);
+  --mention-fg: #c4b0ff;
+  --syntax-number: #c4b0ff;
   --syntax-bool: #f0a8c8;
 }
 
@@ -92,9 +107,9 @@ html[data-theme="nex-dark"] .task-detail-status-badge.status-done {
   border-color: rgba(47, 170, 100, 0.3);
 }
 html[data-theme="nex-dark"] .task-detail-status-badge.status-blocked {
-  background: rgba(255, 182, 71, 0.14);
-  color: #ffb647;
-  border-color: rgba(255, 182, 71, 0.3);
+  background: rgba(196, 176, 255, 0.14);
+  color: #c4b0ff;
+  border-color: rgba(196, 176, 255, 0.3);
 }
 
 /* ── Insight badges — white text on bright accent washes out; tint the bg
