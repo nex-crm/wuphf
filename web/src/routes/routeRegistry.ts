@@ -290,6 +290,12 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     params: ["agentSlug", "tab"],
     search: [],
   },
+  {
+    key: "skillDetail",
+    path: ROUTE_PATHS.skillDetail,
+    params: ["skillName"],
+    search: [],
+  },
 ] as const;
 
 export const SIDEBAR_APP_IDS: readonly string[] = SIDEBAR_TOOLS.map(

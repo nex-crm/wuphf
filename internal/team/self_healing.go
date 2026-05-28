@@ -316,10 +316,7 @@ func isSelfHealingTaskTitle(title string) bool {
 	// "[@<slug>] " requires a closing bracket followed by space + the
 	// reason verb. Anything else is a stray [@mention] in a normal title.
 	close := strings.Index(trimmed, "] ")
-	if close <= len(selfHealingTitleAgentPrefix) {
-		return false
-	}
-	return true
+	return close > len(selfHealingTitleAgentPrefix)
 }
 
 // isSelfHealingTask is the preferred recognition check when the caller

@@ -161,9 +161,9 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		// tool_result and is prompted (RULE ZERO) to back off.
 		if strings.EqualFold(strings.TrimSpace(resolvedState), "drafting") {
 			return approvalContext{}, fmt.Errorf(
-				"issue %s is awaiting human approval (lifecycle_state=drafting). "+
-					"Do NOT retry this action. Instead, surface the Issue to the human (it's already in chat as an Issue card and on the Issues board) and wait. "+
-					"Resume work only after the human clicks Approve & Start on the Issue.",
+				"issue %s is awaiting human approval (lifecycle_state=drafting); "+
+					"do NOT retry this action — surface the Issue to the human (it's already in chat as an Issue card and on the Issues board) and wait; "+
+					"resume work only after the human clicks Approve & Start on the Issue",
 				resolvedIssueID,
 			)
 		}

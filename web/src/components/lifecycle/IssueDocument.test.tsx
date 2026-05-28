@@ -105,6 +105,15 @@ function renderDoc(
   return { container };
 }
 
+/**
+ * IssueDocument now wraps Comments / Sub-Issues / Activity in a tab strip
+ * (IssueDetailTabs) with Activity as the default tab. Tests that touch
+ * comment DOM must first switch to the Comments tab.
+ */
+function activateCommentsTab() {
+  fireEvent.click(screen.getByRole("tab", { name: /^Comments/i }));
+}
+
 // ── Suite ──────────────────────────────────────────────────────────────
 
 describe("<IssueDocument>", () => {
@@ -124,8 +133,11 @@ describe("<IssueDocument>", () => {
   });
 
   // ── Spec sections ───────────────────────────────────────────────────
+  // OBSOLETE: the 4-section SpecBody (Goal/Context/Approach/Acceptance)
+  // was replaced by a single rich Description in IssueDescription.tsx.
+  // SpecBody is kept in the file for legacy paths but is not mounted.
 
-  it("renders all four spec section headings", () => {
+  it.skip("renders all four spec section headings", () => {
     renderDoc(BASE_DOC);
     expect(screen.getByRole("heading", { name: /goal/i })).toBeInTheDocument();
     expect(
@@ -139,7 +151,7 @@ describe("<IssueDocument>", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders spec section content from the document", () => {
+  it.skip("renders spec section content from the document", () => {
     renderDoc(BASE_DOC);
     expect(
       screen.getByText(/Receive Stripe webhook events/i),
@@ -147,7 +159,7 @@ describe("<IssueDocument>", () => {
     expect(screen.getByText(/billing database/i)).toBeInTheDocument();
   });
 
-  it("renders em-dash placeholder for missing spec sections", () => {
+  it.skip("renders em-dash placeholder for missing spec sections", () => {
     const doc: IssueDocumentType = {
       ...BASE_DOC,
       spec: { goal: "A goal" },
@@ -194,8 +206,9 @@ describe("<IssueDocument>", () => {
 
   // ── Comment timeline ────────────────────────────────────────────────
 
-  it("renders all comments in the timeline", () => {
+  it("renders all comments in the timeline", async () => {
     renderDoc(BASE_DOC);
+    activateCommentsTab();
     const list = screen.getByTestId("issue-comments-list");
     expect(list).toBeInTheDocument();
     expect(
@@ -209,20 +222,23 @@ describe("<IssueDocument>", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders a PixelAvatar canvas for each comment author", () => {
+  it("renders a PixelAvatar canvas for each comment author", async () => {
     renderDoc(BASE_DOC);
+    activateCommentsTab();
     // Three comments, each gets a canvas (PixelAvatar renders a <canvas>).
     const canvases = document.querySelectorAll(".issue-comment canvas");
     expect(canvases.length).toBe(BASE_DOC.comments.length);
   });
 
-  it("renders empty-state message when there are no comments", () => {
+  it("renders empty-state message when there are no comments", async () => {
     renderDoc({ ...BASE_DOC, comments: [] });
+    activateCommentsTab();
     expect(screen.getByTestId("issue-comments-empty")).toBeInTheDocument();
   });
 
-  it("interleaves human and agent comments in order", () => {
+  it("interleaves human and agent comments in order", async () => {
     renderDoc(BASE_DOC);
+    activateCommentsTab();
     const authors = screen
       .getAllByRole("article")
       .map((el) => el.querySelector(".issue-comment-author")?.textContent);
@@ -231,8 +247,9 @@ describe("<IssueDocument>", () => {
 
   // ── Timeline shape (#937) ──────────────────────────────────────────────
 
-  it("renders the timeline as a semantic ordered list (#937)", () => {
+  it("renders the timeline as a semantic ordered list (#937)", async () => {
     renderDoc(BASE_DOC);
+    activateCommentsTab();
     const list = screen.getByTestId("issue-comments-list");
     expect(list.tagName.toLowerCase()).toBe("ol");
     expect(list).toHaveAttribute(
@@ -243,8 +260,9 @@ describe("<IssueDocument>", () => {
     expect(list.querySelectorAll("li").length).toBe(BASE_DOC.comments.length);
   });
 
-  it("labels the timeline section 'Timeline' (#937)", () => {
+  it("labels the timeline section 'Timeline' (#937)", async () => {
     renderDoc(BASE_DOC);
+    activateCommentsTab();
     expect(
       screen.getByRole("heading", { name: /timeline/i }),
     ).toBeInTheDocument();
@@ -252,23 +270,26 @@ describe("<IssueDocument>", () => {
     expect(screen.getByLabelText(/^Timeline$/i)).toBeInTheDocument();
   });
 
-  it("empty state explains the timeline purpose in drafting state (#937)", () => {
+  it("empty state explains the timeline purpose in drafting state (#937)", async () => {
     renderDoc({ ...BASE_DOC, comments: [] });
+    activateCommentsTab();
     const empty = screen.getByTestId("issue-comments-empty");
     expect(empty).toBeInTheDocument();
     expect(empty.textContent).toMatch(/CEO will start asking questions/i);
     expect(empty.textContent).toMatch(/Answer inline/i);
   });
 
-  it("empty state uses a non-drafting copy for approved issues (#937)", () => {
+  it("empty state uses a non-drafting copy for approved issues (#937)", async () => {
     renderDoc({ ...APPROVED_DOC, comments: [] });
+    activateCommentsTab();
     const empty = screen.getByTestId("issue-comments-empty");
     expect(empty.textContent).toMatch(/Nothing on the timeline yet/i);
     expect(empty.textContent).toMatch(/Status changes/i);
   });
 
-  it("renders a human comment form", () => {
+  it("renders a human comment form", async () => {
     renderDoc(BASE_DOC);
+    activateCommentsTab();
     expect(screen.getByTestId("issue-comment-form")).toBeInTheDocument();
     expect(screen.getByLabelText(/add a comment/i)).toBeInTheDocument();
     expect(screen.getByTestId("issue-comment-submit")).toBeDisabled();
@@ -276,6 +297,7 @@ describe("<IssueDocument>", () => {
 
   it("posts a human comment and clears the editor", async () => {
     renderDoc(BASE_DOC);
+    activateCommentsTab();
     const input = screen.getByTestId("issue-comment-input");
     fireEvent.change(input, {
       target: { value: "Please confirm the webhook retry policy." },
@@ -297,8 +319,10 @@ describe("<IssueDocument>", () => {
   });
 
   // ── Collapse on approved ─────────────────────────────────────────────
+  // OBSOLETE: spec summary card + collapse-on-approved was tied to
+  // SpecBody, which is no longer mounted.
 
-  it("auto-collapses spec sections when state is approved", () => {
+  it.skip("auto-collapses spec sections when state is approved", () => {
     renderDoc(APPROVED_DOC);
     // Should show summary card, not the full spec sections.
     expect(screen.getByLabelText(/spec summary/i)).toBeInTheDocument();
@@ -306,12 +330,12 @@ describe("<IssueDocument>", () => {
     expect(screen.queryByRole("heading", { name: /^Goal$/i })).toBeNull();
   });
 
-  it("auto-collapses spec sections when state is running", () => {
+  it.skip("auto-collapses spec sections when state is running", () => {
     renderDoc(RUNNING_DOC);
     expect(screen.getByLabelText(/spec summary/i)).toBeInTheDocument();
   });
 
-  it("does NOT auto-collapse spec for drafting state", () => {
+  it.skip("does NOT auto-collapse spec for drafting state", () => {
     renderDoc(BASE_DOC);
     expect(
       screen.getByRole("heading", { name: /^Goal$/i }),
@@ -320,7 +344,7 @@ describe("<IssueDocument>", () => {
 
   // ── Expand-restore after re-mount ────────────────────────────────────
 
-  it("restores expanded state from sessionStorage on re-mount", () => {
+  it.skip("restores expanded state from sessionStorage on re-mount", () => {
     // First mount: approved (collapsed by default).
     const { unmount } = render(
       <QueryClientProvider client={makeClient()}>
@@ -347,7 +371,7 @@ describe("<IssueDocument>", () => {
     ).toBeInTheDocument();
   });
 
-  it("collapse button collapses back to summary card", () => {
+  it.skip("collapse button collapses back to summary card", () => {
     // Start approved (collapsed), expand, then collapse.
     renderDoc(APPROVED_DOC);
     fireEvent.click(screen.getByRole("button", { name: /expand spec/i }));
@@ -477,16 +501,18 @@ describe("<IssueDocument> — Phase 4: Approve & Start", () => {
     expect(screen.queryByTestId("approve-and-start-error")).toBeNull();
   });
 
-  it("shows drafting comment helper line when in drafting state", () => {
+  it("shows drafting comment helper line when in drafting state", async () => {
     renderDoc(BASE_DOC);
+    activateCommentsTab();
     expect(screen.getByTestId("drafting-comment-helper")).toBeInTheDocument();
     expect(screen.getByTestId("drafting-comment-helper")).toHaveTextContent(
       "Anyone can comment",
     );
   });
 
-  it("does NOT show drafting comment helper when in approved state", () => {
+  it("does NOT show drafting comment helper when in approved state", async () => {
     renderDoc(APPROVED_DOC);
+    activateCommentsTab();
     expect(screen.queryByTestId("drafting-comment-helper")).toBeNull();
   });
 
@@ -526,7 +552,9 @@ function renderDocWithDraft(doc: IssueDocumentType, acc: DraftAcc) {
   return { container };
 }
 
-describe("<IssueDocument> — Phase 4: Streaming draft", () => {
+// OBSOLETE: streaming-draft tests targeted SpecBody. SpecBody is no
+// longer mounted; rich Description streams in a different shape.
+describe.skip("<IssueDocument> — Phase 4: Streaming draft", () => {
   beforeEach(() => {
     try {
       sessionStorage.clear();
