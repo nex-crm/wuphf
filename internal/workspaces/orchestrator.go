@@ -394,7 +394,16 @@ func Shred(ctx context.Context, name string, permanent bool) (string, error) {
 	// behind shred keeps the UX promise that a confirmed shred actually
 	// teardown everything (process + port + tree).
 	if target.State == StateRunning || target.State == StateStarting || probePort(target.BrokerPort) {
-		if err := Pause(ctx, name); err != nil {
+		// Detach Pause from the caller's context. A canceled request (browser
+		// tab closed, network hiccup) mid-teardown would abort Pause inside
+		// its SIGTERM/SIGKILL poll loop and leave the workspace in
+		// StateStopping with the broker still alive — exactly the half-dead
+		// state this auto-pause exists to prevent. The bounded timeout still
+		// caps how long Pause can hang; it just doesn't ride on ctx.
+		pauseCtx, cancel := context.WithTimeout(context.Background(), pauseWallClockTimeout+15*time.Second)
+		err := Pause(pauseCtx, name)
+		cancel()
+		if err != nil {
 			return "", fmt.Errorf("workspaces: shred %q: pause running broker: %w", name, err)
 		}
 		// Re-read the registry so target reflects the post-pause state
