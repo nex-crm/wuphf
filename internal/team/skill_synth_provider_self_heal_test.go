@@ -750,6 +750,63 @@ func TestResolveStageBSynthModel(t *testing.T) {
 	})
 }
 
+// TestEnforceDepthGate_StepsCountedOnlyInsideProcedureSection is the
+// regression gate for the CodeRabbit catch on PR #998: the new-skill
+// step count must come from inside `## Steps` (or `## How to`), not
+// from bullets in other sections. Without this scoping, a shallow
+// `## Steps` block could pass the gate via padding in `## Inputs` /
+// `## Source incident`, defeating the depth check.
+func TestEnforceDepthGate_StepsCountedOnlyInsideProcedureSection(t *testing.T) {
+	// Body satisfies the length floor and the bullet count globally (3
+	// bullets in `## Source incident`), but `## Steps` has only one step.
+	// Pre-fix this passed; post-fix it must reject.
+	body := "## When this fires\n" +
+		"A recurring blocker the team has decided is worth codifying as a procedure for future agents.\n\n" +
+		"## Inputs\n" +
+		"- the failing tool call name\n" +
+		"- the most recent error string\n" +
+		"- a pointer to the relevant team wiki page\n\n" +
+		"## Steps\n" +
+		"1. Retry the failing tool call after pasting the wiki snippet into context.\n\n" +
+		"## Source incident\n" +
+		"- task-77 — initial recurrence on prod relay surface.\n" +
+		"- task-91 — second recurrence after the staging cutover.\n" +
+		"- task-104 — third recurrence after the OS update on the build host.\n"
+
+	resp := stageBSynthResponse{
+		IsSkill:     true,
+		Name:        "handle-foo",
+		Description: "when blocked by a recurring relay issue, do the foo recovery.",
+		Body:        body,
+	}
+	err := validateStageBSynthResponse(SourceSelfHealResolved, resp)
+	if err == nil {
+		t.Fatalf("expected rejection — only 1 step inside ## Steps, got nil")
+	}
+	if !strings.Contains(err.Error(), "enumerated steps inside") {
+		t.Fatalf("expected scoped-step error, got %q", err.Error())
+	}
+}
+
+// TestCountEnumeratedStepsInSections covers the helper directly: only
+// enumerated lines whose containing `## ` section is in the target list
+// are counted. Lines outside (e.g. `## Inputs`) are ignored.
+func TestCountEnumeratedStepsInSections(t *testing.T) {
+	body := "## Inputs\n- a\n- b\n- c\n\n## Steps\n1. one\n2. two\n\n## Output\n- d\n"
+	got := countEnumeratedStepsInSections(body, []string{"## Steps"})
+	if got != 2 {
+		t.Fatalf("expected 2 (steps only), got %d", got)
+	}
+	gotMulti := countEnumeratedStepsInSections(body, []string{"## Steps", "## How to"})
+	if gotMulti != 2 {
+		t.Fatalf("expected 2 across both target sections, got %d", gotMulti)
+	}
+	gotNone := countEnumeratedStepsInSections(body, []string{"## Procedure"})
+	if gotNone != 0 {
+		t.Fatalf("expected 0 (no target section present), got %d", gotNone)
+	}
+}
+
 // TestValidateStageBSynthResponse_HardCompactnessCapRejectsBloat pins
 // the hard compactness cap: even bodies that pass headings and depth
 // must reject above ~12KB. SkillOpt's median final skill is ~5-6KB;

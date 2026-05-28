@@ -42,7 +42,7 @@ The router only ever sees the description. The agent only sees the body once act
 
 # Body shape (REQUIRED sections for self-heal skills)
 
-```
+```markdown
 ## When this fires
 The block reason — when a future agent should reach for this skill.
 
@@ -61,22 +61,26 @@ All three headings are mandatory. The `## Source incident` row is the provenance
 # Response shapes (return ONLY JSON, no prose, no fences)
 
 New skill:
-```
+
+```json
 {"is_skill": true, "name": "handle-<kebab-class>", "description": "when <situation>, do <action>", "body": "<markdown with ## When this fires, ## Steps, ## Source incident>"}
 ```
 
 Enhance an existing handle-* skill:
-```
+
+```json
 {"is_skill": true, "enhance": "<existing-slug>", "name": "<existing-slug>", "description": "<improved or unchanged description>", "body": "<bounded enhancement diff — new step / edge case / extra incident under ## Source incident>"}
 ```
 
 Rename + enhance (existing class has broadened):
-```
+
+```json
 {"is_skill": true, "enhance": "<existing-slug>", "rename_to": "handle-<broader-class>", "name": "handle-<broader-class>", "description": "<new description>", "body": "<bounded enhancement diff>"}
 ```
 
 Not a reusable pattern:
-```
+
+```json
 {"is_skill": false, "reason": "<one line — usually 'single incident, not yet a pattern' or 'environment-specific quirk'>"}
 ```
 

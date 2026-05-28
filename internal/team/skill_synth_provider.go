@@ -900,18 +900,29 @@ func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynth
 	return nil
 }
 
+// procedureSectionHeadings names the body sections where enumerated
+// procedure steps are expected to live. Lines outside these sections —
+// `## Inputs`, `## Output`, `## Source incident`, `## Examples`, etc. —
+// are NOT counted toward the depth gate's step minimum, otherwise a
+// shallow `## Steps` block could be padded to pass via bullets in other
+// sections (CodeRabbit catch on PR #998).
+var procedureSectionHeadings = []string{"## Steps", "## How to"}
+
 // enforceDepthGate rejects new-skill bodies that are too shallow to be
 // worth codifying. Applied only to NEW skill responses — enhance / rename
 // bodies are bounded diffs and ride on top of an existing skill's depth.
 //
-// The gate has two components:
+// The gate has three components:
 //
 //   - Minimum body length (stageBSynthNewSkillMinBodyLen). Catches the
 //     "two-line how-to" shape that's almost always prose-disguised-as-skill.
-//   - Minimum enumerated step count (stageBSynthNewSkillMinSteps).
-//     Counts numbered ("1.", "2.", ...) or bulleted ("- ", "* ") lines.
-//     A skill without 3+ steps almost never has the procedural substance
-//     the gbrain "skillify" bar asks for.
+//   - Maximum body length (stageBSynthCompactnessHardLimit). SkillOpt's
+//     median final skill is ~5-6KB; bloat above 2× that is almost always
+//     length-as-effort rather than load-bearing content.
+//   - Minimum enumerated step count inside the procedure section
+//     (stageBSynthNewSkillMinSteps). Counted ONLY inside `## Steps` or
+//     `## How to`, never across the whole body — otherwise bullets in
+//     `## Inputs` / `## Source incident` would mask a shallow procedure.
 func enforceDepthGate(body string) error {
 	trimmed := strings.TrimSpace(body)
 	if len(trimmed) < stageBSynthNewSkillMinBodyLen {
@@ -922,39 +933,84 @@ func enforceDepthGate(body string) error {
 		return fmt.Errorf("body too bloated (%d > %d bytes — skills should be compact; SkillOpt median is ~5-6KB)",
 			len(trimmed), stageBSynthCompactnessHardLimit)
 	}
-	if steps := countEnumeratedSteps(body); steps < stageBSynthNewSkillMinSteps {
-		return fmt.Errorf("body has %d enumerated steps, need at least %d for a new skill",
-			steps, stageBSynthNewSkillMinSteps)
+	if steps := countEnumeratedStepsInSections(body, procedureSectionHeadings); steps < stageBSynthNewSkillMinSteps {
+		return fmt.Errorf("body has %d enumerated steps inside %v, need at least %d for a new skill (steps outside these sections do not count)",
+			steps, procedureSectionHeadings, stageBSynthNewSkillMinSteps)
 	}
 	return nil
 }
 
-// countEnumeratedSteps counts lines that look like step entries: a leading
-// "1." / "2." style number, a "- " bullet, or a "* " bullet. We tolerate
-// up to two leading spaces of indentation so nested lists inside Steps
-// blocks still count.
-func countEnumeratedSteps(body string) int {
+// countEnumeratedStepsInSections counts enumerated lines that live INSIDE
+// any of the named `## ` sections. Lines in other sections (or at the
+// top of the body before any heading) are not counted.
+//
+// Used by the new-skill depth gate so a shallow `## Steps` block cannot
+// be padded to pass via bullets in `## Inputs`, `## Source incident`,
+// or `## Examples`. The enhance edit-count bound continues to use the
+// whole-body countEnumeratedSteps because an enhance diff is a bounded
+// patch where every change counts, regardless of which section it
+// targets.
+func countEnumeratedStepsInSections(body string, sections []string) int {
+	targets := make(map[string]bool, len(sections))
+	for _, s := range sections {
+		targets[strings.TrimSpace(s)] = true
+	}
+	current := ""
 	n := 0
 	for _, line := range strings.Split(body, "\n") {
-		trim := strings.TrimLeft(line, " \t")
-		if strings.HasPrefix(trim, "- ") || strings.HasPrefix(trim, "* ") {
-			n++
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "## ") {
+			current = trimmedLine
 			continue
 		}
-		// Numbered: "1." through "999." — we only need to recognise the
-		// shape, not parse the number.
-		if len(trim) >= 2 && trim[0] >= '0' && trim[0] <= '9' {
-			rest := trim[1:]
-			// Allow up to two more digits.
-			for i := 0; i < 2 && len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9'; i++ {
-				rest = rest[1:]
-			}
-			if strings.HasPrefix(rest, ". ") || strings.HasPrefix(rest, ".\t") {
-				n++
-			}
+		if !targets[current] {
+			continue
+		}
+		if isEnumeratedStepLine(line) {
+			n++
 		}
 	}
 	return n
+}
+
+// countEnumeratedSteps counts lines that look like step entries across
+// the WHOLE body: a leading "1." / "2." style number, a "- " bullet, or
+// a "* " bullet. Used by the enhance edit-count bound where every change
+// counts regardless of which section it targets. For the new-skill
+// depth gate, use countEnumeratedStepsInSections instead so bullets in
+// `## Inputs` / `## Source incident` cannot mask a shallow procedure.
+func countEnumeratedSteps(body string) int {
+	n := 0
+	for _, line := range strings.Split(body, "\n") {
+		if isEnumeratedStepLine(line) {
+			n++
+		}
+	}
+	return n
+}
+
+// isEnumeratedStepLine reports whether line looks like a single step
+// entry — a leading "1." / "2." style number, a "- " bullet, or a "* "
+// bullet. Tolerates leading whitespace so nested lists inside a step
+// block still count.
+func isEnumeratedStepLine(line string) bool {
+	trim := strings.TrimLeft(line, " \t")
+	if strings.HasPrefix(trim, "- ") || strings.HasPrefix(trim, "* ") {
+		return true
+	}
+	// Numbered: "1." through "999." — we only need to recognise the
+	// shape, not parse the number.
+	if len(trim) >= 2 && trim[0] >= '0' && trim[0] <= '9' {
+		rest := trim[1:]
+		// Allow up to two more digits.
+		for i := 0; i < 2 && len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9'; i++ {
+			rest = rest[1:]
+		}
+		if strings.HasPrefix(rest, ". ") || strings.HasPrefix(rest, ".\t") {
+			return true
+		}
+	}
+	return false
 }
 
 // sourceSignalsFor renders a small slice of provenance markers the

@@ -32,7 +32,7 @@ The router only ever sees the description. The agent only sees the body once act
 
 Use this skeleton (skip sections that genuinely don't apply, but most skills need at least Inputs, Steps, and Output):
 
-```
+```markdown
 ## When this fires
 One paragraph naming the trigger condition.
 
@@ -64,22 +64,26 @@ Slug: kebab-case, names the CLASS of work, not a specific instance.
 # Response shapes (return ONLY JSON, no prose, no fences)
 
 New skill:
-```
+
+```json
 {"is_skill": true, "name": "<kebab-slug>", "description": "<verb-first trigger phrase>", "body": "<markdown body>"}
 ```
 
 Enhance an existing skill:
-```
+
+```json
 {"is_skill": true, "enhance": "<existing-slug>", "name": "<existing-slug>", "description": "<improved or unchanged description>", "body": "<bounded enhancement diff — new material only>"}
 ```
 
 Rename + enhance (existing scope has broadened):
-```
+
+```json
 {"is_skill": true, "enhance": "<existing-slug>", "rename_to": "<new-broader-slug>", "name": "<new-broader-slug>", "description": "<new description>", "body": "<bounded enhancement diff>"}
 ```
 
 Not a skill:
-```
+
+```json
 {"is_skill": false}
 ```
 
