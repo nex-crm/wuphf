@@ -30,7 +30,8 @@ html[data-theme="nex-dark"] {
   --bg-card: #16131e;
   --text: #ece8ef;
   --text-secondary: #b2adbb;
-  --text-tertiary: #75707d;
+  /* #75707d failed WCAG AA (3.62:1) on --bg-warm; bumped to 5.22:1. */
+  --text-tertiary: #928d9c;
   --text-disabled: #46424d;
 
   /* accent stays the same purple/tertiary */
@@ -39,6 +40,11 @@ html[data-theme="nex-dark"] {
   --border-light: #1a1623;
   --border-dark: #2e2839;
   --border-strong: #45404d;
+
+  /* Body gradient stops — tokenized so the twilight palette can be
+     tuned in one place. */
+  --bg-gradient-top: #1a1228;
+  --bg-gradient-bottom: #0e0f14;
 
   /* ── Sidebar – keep purple but use a deeper shade ── */
   --nex-sidebar: #4a1f70;
@@ -53,7 +59,11 @@ html[data-theme="nex-dark"] {
    The gradient is fixed so it does not tile when the chat scrolls. ── */
 html[data-theme="nex-dark"] body {
   background-color: var(--bg);
-  background-image: linear-gradient(180deg, #1a1228 0%, #0e0f14 100%);
+  background-image: linear-gradient(
+    180deg,
+    var(--bg-gradient-top) 0%,
+    var(--bg-gradient-bottom) 100%
+  );
   background-attachment: fixed;
 }
 
