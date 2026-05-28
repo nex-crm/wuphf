@@ -113,20 +113,24 @@ func brokerObsidianNormalizer(idx SignalIndex) ObsidianLooseLinkResolver {
 		if trimmed == "" {
 			return "", "", false
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), obsidianNormalizerTimeout)
-		defer cancel()
 
 		// 1. Treat the input as a canonical slug. EntityBySlug is keyed by
 		// `slug` only (kind is not part of the lookup), so a match here
-		// gives us the entity's actual kind too.
-		if ent, ok, err := idx.EntityBySlug(ctx, slugify(trimmed)); err == nil && ok {
+		// gives us the entity's actual kind too. Each lookup gets its own
+		// timeout budget so a slow first call cannot starve the second.
+		slugCtx, slugCancel := context.WithTimeout(context.Background(), obsidianNormalizerTimeout)
+		ent, ok, err := idx.EntityBySlug(slugCtx, slugify(trimmed))
+		slugCancel()
+		if err == nil && ok {
 			return ent.Kind, ent.Slug, true
 		}
 
 		// 2. Treat the input as a display string. EntityByName returns the
 		// candidate set; require a single match. Multiple matches (e.g. a
 		// person and a project both named "Acme") stay loose.
-		hits, err := idx.EntityByName(ctx, trimmed)
+		nameCtx, nameCancel := context.WithTimeout(context.Background(), obsidianNormalizerTimeout)
+		defer nameCancel()
+		hits, err := idx.EntityByName(nameCtx, trimmed)
 		if err != nil || len(hits) != 1 {
 			return "", "", false
 		}
