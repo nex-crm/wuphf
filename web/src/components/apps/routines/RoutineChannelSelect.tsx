@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { getChannels, type Channel } from "../../../api/client";
+import { type Channel, getChannels } from "../../../api/client";
 
 interface RoutineChannelSelectProps {
   value: string;

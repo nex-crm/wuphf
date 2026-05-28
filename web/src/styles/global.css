@@ -688,7 +688,9 @@ body {
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: 6px;
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 .routines-view-tab[aria-selected="true"] {
   background: var(--accent);
@@ -716,7 +718,9 @@ body {
   background: var(--bg-card);
   cursor: pointer;
   position: relative;
-  transition: border-color 120ms ease, transform 120ms ease,
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease,
     box-shadow 120ms ease;
 }
 .routine-row:hover {
@@ -838,7 +842,9 @@ body {
   text-overflow: ellipsis;
   text-align: left;
   width: 100%;
-  transition: transform 120ms ease, border-color 120ms ease;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease;
   animation: routine-chip-in 180ms ease both;
 }
 .routine-chip:hover {
@@ -860,50 +866,26 @@ body {
 }
 
 @keyframes routine-chip-in {
-  from { opacity: 0; transform: translateY(-2px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.routine-drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.32);
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  z-index: 60;
-  animation: routine-fade-in 160ms ease both;
-}
-.routine-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(520px, 100vw);
-  background: var(--bg);
-  border-left: 1px solid var(--border);
-  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.18);
-  z-index: 70;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  animation: routine-slide-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-@keyframes routine-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes routine-slide-in {
-  from { transform: translateX(24px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
+/* The detail surface used to be a fixed-position drawer; it was promoted
+   to a full-page route at /routines/$routineSlug so its CSS rules
+   (.routine-drawer, .routine-drawer-backdrop, the matching keyframes,
+   and their z-index hardcodes) were removed. Reduced-motion guard for
+   the surviving routine surfaces only. */
 @media (prefers-reduced-motion: reduce) {
   .routine-row,
   .routine-chip,
   .routines-view-tab,
-  .routine-day,
-  .routine-drawer,
-  .routine-drawer-backdrop {
+  .routine-day {
     animation: none !important;
     transition: none !important;
   }

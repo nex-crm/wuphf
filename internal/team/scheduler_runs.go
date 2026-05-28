@@ -31,8 +31,11 @@ type schedulerRun struct {
 const schedulerRunHistoryLimit = 20
 
 // cloneSchedulerRuns returns a deep copy suitable for serialization. The
-// persistence path runs outside the lock once the snapshot is taken, so the
-// snapshot must be detached from the live map.
+// persistence path runs outside the lock once the snapshot is taken, so
+// the snapshot must be fully detached from the live map — `copy` only
+// shallow-copies the struct slice, leaving each Events slice aliasing
+// the original backing array. Clone Events per run so caller-visible
+// history can't be mutated through shared slice state.
 func cloneSchedulerRuns(src map[string][]schedulerRun) map[string][]schedulerRun {
 	if len(src) == 0 {
 		return nil
@@ -43,7 +46,14 @@ func cloneSchedulerRuns(src map[string][]schedulerRun) map[string][]schedulerRun
 			continue
 		}
 		cp := make([]schedulerRun, len(runs))
-		copy(cp, runs)
+		for i, r := range runs {
+			if len(r.Events) > 0 {
+				events := make([]string, len(r.Events))
+				copy(events, r.Events)
+				r.Events = events
+			}
+			cp[i] = r
+		}
 		out[slug] = cp
 	}
 	return out

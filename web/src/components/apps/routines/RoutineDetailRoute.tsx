@@ -287,7 +287,11 @@ function DetailHeader({
 
 interface TabbedBodyProps {
   routine: SchedulerJob;
-  runsQuery: { data: SchedulerRun[] | undefined; isLoading: boolean };
+  runsQuery: {
+    data: SchedulerRun[] | undefined;
+    isLoading: boolean;
+    isError: boolean;
+  };
 }
 
 type DetailTab = "overview" | "runs" | "activity" | "revisions" | "triggers";
@@ -341,6 +345,7 @@ function TabbedBody({ routine, runsQuery }: TabbedBodyProps) {
           <PreviousRuns
             runs={runsQuery.data}
             loading={runsQuery.isLoading}
+            error={runsQuery.isError}
             fallbackLastRun={routine.last_run}
             fallbackStatus={routine.last_run_status}
           />
@@ -464,6 +469,19 @@ function ActivityTab({ slug }: { slug: string }) {
           style={{ fontSize: "var(--text-sm)", color: "var(--text-tertiary)" }}
         >
           Loading activity…
+        </div>
+      </Section>
+    );
+  }
+  if (query.isError) {
+    return (
+      <Section title="Activity">
+        <div
+          role="alert"
+          style={{ fontSize: "var(--text-sm)", color: "var(--red)" }}
+        >
+          Could not load activity. The broker may be unreachable; the empty
+          state here would otherwise look like real data.
         </div>
       </Section>
     );

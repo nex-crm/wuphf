@@ -268,6 +268,10 @@ func (b *Broker) handleRestoreSchedulerRevision(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Snapshot the in-memory state up front so we can roll back if
+	// persistence fails — broker memory must not drift from disk.
+	prevJob := *job
+
 	// 1) Apply the target revision's editable fields to the live job.
 	job.Label = target.Label
 	job.ScheduleExpr = target.ScheduleExpr
@@ -283,6 +287,13 @@ func (b *Broker) handleRestoreSchedulerRevision(w http.ResponseWriter, r *http.R
 	if target.Kind != "" {
 		job.Kind = target.Kind
 	}
+
+	// Recompute next_run from the restored cadence so the new schedule
+	// takes effect on the next scheduler tick instead of riding the old
+	// timer until something else triggers a recompute.
+	nextRun := nextRoutineRun(*job, time.Now().UTC())
+	job.NextRun = nextRun.Format(time.RFC3339)
+	job.DueAt = job.NextRun
 
 	// 2) Snapshot the new (restored) state as a fresh revision. The
 	// previous edit (e.g. v2) stays in the history untouched, so a
@@ -302,6 +313,21 @@ func (b *Broker) handleRestoreSchedulerRevision(w http.ResponseWriter, r *http.R
 	})
 
 	if err := b.saveLocked(); err != nil {
+		// Roll the broker back to pre-restore: undo the live job mutation,
+		// drop the revision we just appended, and drop the activity row.
+		*job = prevJob
+		if revs := b.schedulerRevisions[slug]; len(revs) > 0 {
+			b.schedulerRevisions[slug] = revs[:len(revs)-1]
+			if len(b.schedulerRevisions[slug]) == 0 {
+				delete(b.schedulerRevisions, slug)
+			}
+		}
+		if act := b.schedulerActivity[slug]; len(act) > 0 {
+			b.schedulerActivity[slug] = act[:len(act)-1]
+			if len(b.schedulerActivity[slug]) == 0 {
+				delete(b.schedulerActivity, slug)
+			}
+		}
 		http.Error(w, "failed to persist restore", http.StatusInternalServerError)
 		return
 	}
@@ -405,9 +431,18 @@ func (b *Broker) handleCreateSchedulerJob(w http.ResponseWriter, r *http.Request
 
 	// Seed NextRun if the caller didn't supply one. Without it the scheduler
 	// never sees the job as due and the routine sits dormant forever.
+	// Honor an explicit DueAt when NextRun is omitted — legacy callers
+	// pass only DueAt for one-shot jobs and we shouldn't overwrite their
+	// chosen fire time with a freshly computed cadence.
 	if job.NextRun == "" {
-		next := nextRoutineRun(job, time.Now().UTC())
-		job.NextRun = next.Format(time.RFC3339)
+		if job.DueAt != "" {
+			job.NextRun = job.DueAt
+		} else {
+			next := nextRoutineRun(job, time.Now().UTC())
+			job.NextRun = next.Format(time.RFC3339)
+			job.DueAt = job.NextRun
+		}
+	} else if job.DueAt == "" {
 		job.DueAt = job.NextRun
 	}
 

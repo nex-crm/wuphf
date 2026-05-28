@@ -771,12 +771,18 @@ func (b *Broker) handleRunSchedulerJob(w http.ResponseWriter, r *http.Request, s
 		job.LastRunStatus = prevLastRunStatus
 		job.NextRun = prevNextRun
 		job.DueAt = prevDueAt
-		// Roll back the run record so an aborted trigger doesn't leave a
-		// phantom row in the history.
+		// Roll back the run record AND the activity event so an aborted
+		// trigger doesn't leave phantom rows in either history.
 		if hist := b.schedulerRuns[slug]; len(hist) > 0 {
 			b.schedulerRuns[slug] = hist[:len(hist)-1]
 			if len(b.schedulerRuns[slug]) == 0 {
 				delete(b.schedulerRuns, slug)
+			}
+		}
+		if act := b.schedulerActivity[slug]; len(act) > 0 {
+			b.schedulerActivity[slug] = act[:len(act)-1]
+			if len(b.schedulerActivity[slug]) == 0 {
+				delete(b.schedulerActivity, slug)
 			}
 		}
 		b.mu.Unlock()
@@ -927,8 +933,14 @@ func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request,
 			job.Channel = strings.TrimSpace(*body.Channel)
 		}
 		if strings.TrimSpace(job.ScheduleExpr) == "" && job.IntervalMinutes <= 0 {
-			http.Error(w, "routine must have a schedule (schedule_expr or interval_minutes)", http.StatusBadRequest)
-			return
+			// Legacy workflow routines (One workflows) declare cadence via
+			// WorkflowKey + Provider rather than schedule_expr / interval_minutes,
+			// matching the POST /scheduler shape. Don't reject content edits on
+			// those rows — label/payload/target changes are still meaningful.
+			if strings.TrimSpace(job.WorkflowKey) == "" || strings.TrimSpace(job.Provider) == "" {
+				http.Error(w, "routine must have a schedule (schedule_expr or interval_minutes)", http.StatusBadRequest)
+				return
+			}
 		}
 		// Schedule fields changed — recompute NextRun so the new cadence
 		// takes effect on the next scheduler tick instead of after the old

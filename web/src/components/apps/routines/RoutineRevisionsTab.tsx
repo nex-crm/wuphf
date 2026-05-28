@@ -52,6 +52,19 @@ export function RoutineRevisionsTab({ slug }: RoutineRevisionsTabProps) {
       </Section>
     );
   }
+  if (query.isError) {
+    return (
+      <Section title="Revisions">
+        <div
+          role="alert"
+          style={{ fontSize: "var(--text-sm)", color: "var(--red)" }}
+        >
+          Could not load revisions. The broker may be unreachable; the empty
+          state here would otherwise look like real data.
+        </div>
+      </Section>
+    );
+  }
   const revisions = query.data ?? [];
   if (revisions.length === 0) {
     return (
@@ -135,12 +148,22 @@ function RevisionRow({
   restorePending,
   current,
 }: RevisionRowProps) {
+  // Render the row as a div with role=button + keyboard handlers rather
+  // than a real <button>, so the "Restore" control can live INSIDE the
+  // row without violating the no-nested-interactives HTML rule.
   return (
     <div style={{ borderBottom: "1px solid var(--border-light)" }}>
-      <button
-        type="button"
-        onClick={onToggle}
+      <div
+        role="button"
+        tabIndex={0}
         aria-expanded={isOpen}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
         style={{
           display: "grid",
           gridTemplateColumns: "80px 1fr auto auto",
@@ -206,7 +229,7 @@ function RevisionRow({
         >
           ▸
         </span>
-      </button>
+      </div>
       {isOpen && <RevisionDiff current={current} target={rev} />}
     </div>
   );

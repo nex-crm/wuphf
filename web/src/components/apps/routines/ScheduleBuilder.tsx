@@ -415,8 +415,12 @@ export function parseSchedule(input: {
     const parts = cron.split(/\s+/);
     if (parts.length === 5) {
       const [minStr, hourStr, dom, month, dow] = parts;
-      const minute = numericOrNull(minStr);
-      const hour = numericOrNull(hourStr);
+      // Validate against standard cron ranges so legacy/manual input
+      // like "99 25 * * *" doesn't round-trip a nonsense ScheduleValue
+      // back to the broker. Out-of-range values fall through to the
+      // interval / default safety net at the bottom.
+      const minute = numericInRange(minStr, 0, 59);
+      const hour = numericInRange(hourStr, 0, 23);
       // Hourly: "M * * * *"
       if (
         minute !== null &&
@@ -437,8 +441,8 @@ export function parseSchedule(input: {
         }
         const days = dow
           .split(",")
-          .map((d) => numericOrNull(d))
-          .filter((d): d is number => d !== null && d >= 0 && d <= 6);
+          .map((d) => numericInRange(d, 0, 6))
+          .filter((d): d is number => d !== null);
         if (days.length > 0) {
           return {
             ...DEFAULT_SCHEDULE,
@@ -450,7 +454,7 @@ export function parseSchedule(input: {
         }
       }
       // Monthly: "M H D * *"
-      const day = numericOrNull(dom);
+      const day = numericInRange(dom, 1, 31);
       if (
         minute !== null &&
         hour !== null &&
@@ -492,6 +496,13 @@ function numericOrNull(s: string): number | null {
   if (!/^\d+$/.test(s)) return null;
   const n = Number.parseInt(s, 10);
   return Number.isNaN(n) ? null : n;
+}
+
+function numericInRange(s: string, min: number, max: number): number | null {
+  const n = numericOrNull(s);
+  if (n === null) return null;
+  if (n < min || n > max) return null;
+  return n;
 }
 
 /** Compile a builder value into the wire shape POST /scheduler expects. */

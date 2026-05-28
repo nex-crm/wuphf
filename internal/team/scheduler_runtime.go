@@ -62,9 +62,15 @@ func (b *Broker) UpdateSchedulerJobState(slug string, nextRun time.Time, status 
 		// scheduler ("scheduled" is just a re-arm tick after a fire, so a
 		// single state transition produces one run entry — not two).
 		if runStatusEmitsRecord(status) {
+			// Resolve the run's status FIRST so a prior failure on the
+			// row doesn't taint a fresh successful transition, then
+			// stamp LastRunStatus so the list-view badge and the new
+			// run entry agree on this fire's outcome.
+			resolved := schedulerRunStatusFor(status, b.scheduler[i].LastRunStatus)
+			b.scheduler[i].LastRunStatus = resolved
 			run := schedulerRun{
 				Slug:        b.scheduler[i].Slug,
-				Status:      schedulerRunStatusFor(status, b.scheduler[i].LastRunStatus),
+				Status:      resolved,
 				StartedAt:   firstNonEmptyStr(startedAt, now.Format(time.RFC3339)),
 				FinishedAt:  now.Format(time.RFC3339),
 				TriggeredBy: "scheduler",
@@ -90,22 +96,24 @@ func runStatusEmitsRecord(status string) bool {
 }
 
 // schedulerRunStatusFor normalises the status field on the persisted run.
-// Most callers pass "done" which we keep, but if the scheduler-driven path
-// records a transient last_run_status (e.g. "failed") we surface that so
-// the Routines UI can colour the row red.
+// The current transition is authoritative; a prior LastRunStatus is
+// consulted only when the caller passed no transition at all (which the
+// scheduler doesn't, but defensive code paths might). Without this rule
+// a stale "failed" badge from a previous fire would silently overwrite
+// a freshly successful "done" transition as failed.
 func schedulerRunStatusFor(transition, lastRunStatus string) string {
 	t := strings.TrimSpace(strings.ToLower(transition))
 	if t == "failed" || t == "error" {
 		return "failed"
 	}
+	if t != "" {
+		return t
+	}
 	ls := strings.TrimSpace(strings.ToLower(lastRunStatus))
 	if ls == "failed" || ls == "error" {
 		return "failed"
 	}
-	if t == "" {
-		return "ok"
-	}
-	return t
+	return "ok"
 }
 
 func firstNonEmptyStr(values ...string) string {

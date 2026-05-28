@@ -38,7 +38,7 @@ export function RoutineEditPanel({
   const [instructions, setInstructions] = useState(routine.payload ?? "");
   const [ownerSlug, setOwnerSlug] = useState(routine.target_id ?? "");
   const [channel, setChannel] = useState(
-    isDirectChannelSlug(routine.channel ?? "") ? "" : routine.channel ?? "",
+    isDirectChannelSlug(routine.channel ?? "") ? "" : (routine.channel ?? ""),
   );
   const [schedule, setSchedule] = useState<ScheduleValue>(() =>
     parseSchedule({

@@ -237,9 +237,19 @@ function walkFires(
   maxFires: number,
 ): Date[] {
   const out: Date[] = [];
-  // Walk forward only — past fires belong in run history, not the upcoming view.
-  for (let t = first.getTime(); t < to.getTime(); t += stepMs) {
-    if (t >= from.getTime()) out.push(new Date(t));
+  // Fast-forward stale anchors into the visible window. A 5-minute
+  // interval routine with an anchor from last month would otherwise
+  // step ~8500 times before reaching `from`; arithmetic skips it in
+  // one shot.
+  let startMs = first.getTime();
+  const fromMs = from.getTime();
+  if (startMs < fromMs && stepMs > 0) {
+    const gap = fromMs - startMs;
+    const skip = Math.ceil(gap / stepMs);
+    startMs += skip * stepMs;
+  }
+  for (let t = startMs; t < to.getTime(); t += stepMs) {
+    if (t >= fromMs) out.push(new Date(t));
     if (out.length >= maxFires) break;
   }
   return out;

@@ -13,6 +13,7 @@ import { resolveObjectRoute } from "../../../lib/objectRoutes";
 interface PreviousRunsProps {
   runs: SchedulerRun[] | undefined;
   loading: boolean;
+  error?: boolean;
   fallbackLastRun?: string;
   fallbackStatus?: string;
 }
@@ -20,6 +21,7 @@ interface PreviousRunsProps {
 export function PreviousRuns({
   runs,
   loading,
+  error,
   fallbackLastRun,
   fallbackStatus,
 }: PreviousRunsProps) {
@@ -29,6 +31,18 @@ export function PreviousRuns({
         style={{ fontSize: "var(--text-sm)", color: "var(--text-tertiary)" }}
       >
         Loading run history…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div
+        role="alert"
+        style={{ fontSize: "var(--text-sm)", color: "var(--red)" }}
+      >
+        Could not load run history. The broker may be unreachable; the empty
+        state here would otherwise look like real data.
       </div>
     );
   }
@@ -422,7 +436,10 @@ function formatDuration(start: Date, end: Date): string {
   if (ms < 0) return "—";
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
+  // Round-then-split so 119.6s renders as "2m 0s" instead of "1m 60s".
+  // Flooring minutes first leaves rounded seconds free to hit 60.
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
   return `${minutes}m ${seconds}s`;
 }

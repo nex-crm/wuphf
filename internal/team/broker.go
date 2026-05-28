@@ -1067,6 +1067,12 @@ func (b *Broker) Reset() {
 	b.watchdogs = nil
 	b.policies = nil
 	b.scheduler = nil
+	// Clear scheduler history maps so a workspace reset can't surface
+	// stale runs / activity / revisions on a freshly recreated routine
+	// that happens to reuse a prior slug.
+	b.schedulerRuns = nil
+	b.schedulerActivity = nil
+	b.schedulerRevisions = nil
 	b.pendingInterview = nil
 	b.activity = make(map[string]agentActivitySnapshot)
 	b.memberPresence = make(map[string]memberPresenceRecord)
