@@ -35,6 +35,8 @@ function headerTitleAndDesc(
       return { title: "Notebooks", desc: "" };
     case "reviews":
       return { title: "Reviews", desc: "" };
+    case "article":
+      return { title: "Article", desc: "" };
     case "inbox":
       return { title: "Decision Inbox", desc: "" };
     case "task-decision":

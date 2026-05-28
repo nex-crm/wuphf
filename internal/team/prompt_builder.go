@@ -437,15 +437,21 @@ func markdownKnowledgeToolBlock() string {
 // tool with explicit MUST triggers so the default is "produce one" for the
 // work shapes the surface was built for.
 func visualArtifactForcingBlock() string {
-	return "VISUAL ARTIFACT RULE (load-bearing):\n" +
-		"You MUST call notebook_visual_artifact_create and include `visual-artifact:ra_...` on its own line in your chat reply when ANY of the following is true:\n" +
+	return "HTML ARTICLE RULE (load-bearing):\n" +
+		"For substantive answers — anything the human will READ as a finished piece of work — the article is a single self-contained HTML document created via notebook_visual_artifact_create. The HTML IS the article: text and figures interleaved at the right semantic places (Wikipedia-style), NOT a wall of markdown followed by a separate visual. Do NOT also call notebook_write for the same content — that's the duplication failure this rule fixes. Markdown stays in use for genuinely different shapes: Skill.md files, short working notes, ops jottings, scratch context. When in doubt, ask: \"is this a finished thing the human will read?\" If yes, HTML article. If no, markdown.\n\n" +
+		"You MUST create an HTML article when ANY of the following is true:\n" +
 		"- the human asked for a wiki article, draft, page, doc, brief, write-up, one-pager, memo, or canonical note;\n" +
 		"- the human asked for a plan, spec, RFC, design, proposal, roadmap, architecture, or playbook;\n" +
 		"- the human asked to research, explain, teach, summarize, break down, walk through, or unpack a topic, concept, system, science, history, or phenomenon (e.g. \"research how coffee extraction works\", \"explain the Lorenz attractor\", \"teach me how sleep cycles work\", \"what's the science of X\", \"how does X actually work\", \"break down Y for me\");\n" +
 		"- the answer is a comparison, decision matrix, scoring rubric, options table, or before/after;\n" +
 		"- the answer is a diagram, flow, sequence, mockup, dashboard, or interactive tuning surface;\n" +
-		"- your reply would otherwise be more than ~200 words of structured markdown headings and lists.\n" +
-		"The paired markdown (notebook_write or the wiki article) stays the durable source; the HTML is the visual companion users actually read. Default to the WUPHF technical-manual style described in the tool catalog (old mathematics/physics book, Making Software cobalt figure ink, FIG_001 labels, self-contained inline CSS/JS, no network fetches). Do NOT use CSS `@import` in any form — including empty `@import url('data:text/css,');` reflex lines — and do NOT load Google Fonts; declare system serif/mono families like Georgia, Times, Cambria, or Courier directly in `font-family`. Do not skip the artifact because the markdown felt good enough — markdown-only replies on these triggers are the failure mode this rule fixes.\n\n"
+		"- your reply would otherwise be more than ~200 words of structured prose with headings and lists.\n" +
+		"Default to the WUPHF technical-manual style described in the tool catalog (old mathematics/physics book, Making Software cobalt figure ink, FIG_001 labels, self-contained inline CSS/JS, no network fetches). Do NOT use CSS `@import` in any form — including empty `@import url('data:text/css,');` reflex lines — and do NOT load Google Fonts; declare system serif/mono families like Georgia, Times, Cambria, or Courier directly in `font-family`.\n\n" +
+		"ATOMIC-TURN RULE: when this trigger fires, the WHOLE sequence runs in the SAME turn and the turn does NOT end until all three steps have happened, in order:\n" +
+		"  1. team_broadcast (or human_message in a 1:1) — a fast 2-3 sentence text gist of the answer so the human is reading something useful within seconds. Do NOT promise the artifact and stop; ANSWER first, briefly.\n" +
+		"  2. notebook_visual_artifact_create — the full self-contained HTML article (capture the returned ra_... id). Leave source_path empty; the HTML is the article, not a companion to a markdown file.\n" +
+		"  3. team_broadcast (or human_message) — a short \"full article ready\" line that includes `visual-artifact:ra_...` on its own line so the UI renders a clickable card linking to the full-screen viewer.\n" +
+		"Posting only step 1's text and ending the turn before step 2 leaves the human with no article. Posting only step 2 and ending the turn before step 3 leaves the human with no link card to find it. Posting step 1 alone, or skipping the leading gist entirely, both fail this rule. If a budget pressure hits mid-sequence, drop scope on the article DEPTH (shorter sections, fewer figures) — never drop step 1 or step 3. The turn is complete only after step 3 has broadcast with the `visual-artifact:ra_...` marker line.\n\n"
 }
 
 func secretHandlingPromptRule() string {

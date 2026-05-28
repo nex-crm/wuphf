@@ -132,6 +132,11 @@ const DecisionPacketRoute = lazy(() =>
 );
 const CitedAnswer = lazy(() => import("../components/wiki/CitedAnswer"));
 const Wiki = lazy(() => import("../components/wiki/Wiki"));
+const ArticleView = lazy(() =>
+  import("../components/rich-artifacts/ArticleView").then((m) => ({
+    default: m.ArticleView,
+  })),
+);
 const ReviewQueueKanban = lazy(
   () => import("../components/review/ReviewQueueKanban"),
 );
@@ -631,6 +636,8 @@ function MainContent() {
       return <WikiSurface current="notebooks" route={route} />;
     case "reviews":
       return <WikiSurface current="reviews" route={route} />;
+    case "article":
+      return <ArticleView articleId={route.articleId} />;
     case "inbox":
       return <DecisionInbox />;
     case "task-decision":

@@ -334,8 +334,10 @@ func TestPromptBuilder_VisualArtifactForcingRulePresentOnEverySurface(t *testing
 		{name: "lead/one-on-one", oneOnOne: true, slug: "ceo"},
 	}
 	wants := []string{
-		"VISUAL ARTIFACT RULE",
-		"MUST call notebook_visual_artifact_create",
+		"HTML ARTICLE RULE",
+		// HTML article is the primary format; markdown stays for skills/notes.
+		"the article is a single self-contained HTML document",
+		"Skill.md files, short working notes",
 		"visual-artifact:ra_...",
 		"wiki article, draft, page",
 		"plan, spec, RFC",
@@ -348,6 +350,13 @@ func TestPromptBuilder_VisualArtifactForcingRulePresentOnEverySurface(t *testing
 		"diagram, flow, sequence",
 		"more than ~200 words",
 		"technical-manual style",
+		// Atomic-turn rule — gist text first, then article, then link card.
+		// Without this, the agent goes silent for 30-60s while building the
+		// article (the failure the user just hit in the live demo).
+		"ATOMIC-TURN RULE",
+		"fast 2-3 sentence text gist",
+		"notebook_visual_artifact_create",
+		"clickable card linking to the full-screen viewer",
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

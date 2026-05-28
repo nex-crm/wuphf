@@ -5,6 +5,7 @@ import {
   agentSubspaceTabRoute,
   appRoute,
   appTaskDetailRoute,
+  articleRoute,
   channelRoute,
   dmRoute,
   inboxRoute,
@@ -68,6 +69,7 @@ export type CurrentRoute =
   | { kind: "notebook-agent"; agentSlug: string }
   | { kind: "notebook-entry"; agentSlug: string; entrySlug: string }
   | { kind: "reviews" }
+  | { kind: "article"; articleId: string }
   | { kind: "inbox" }
   | { kind: "task-decision"; taskId: string }
   // Phase 3 — Issues surface
@@ -90,6 +92,7 @@ interface ParamsShape {
   issueId?: string;
   tab?: string;
   skillName?: string;
+  articleId?: string;
 }
 
 interface SearchShape {
@@ -111,6 +114,7 @@ type CurrentRouteId =
   | typeof notebookAgentRoute.id
   | typeof notebookEntryRoute.id
   | typeof reviewsRoute.id
+  | typeof articleRoute.id
   | typeof inboxRoute.id
   | typeof taskDecisionRoute.id
   | typeof issuesRoute.id
@@ -134,6 +138,7 @@ const CURRENT_ROUTE_IDS = [
   notebookAgentRoute.id,
   notebookEntryRoute.id,
   reviewsRoute.id,
+  articleRoute.id,
   inboxRoute.id,
   taskDecisionRoute.id,
   issuesRoute.id,
@@ -197,6 +202,10 @@ const ROUTE_DERIVERS = {
     entrySlug: params.entrySlug ?? "",
   }),
   [reviewsRoute.id]: () => ({ kind: "reviews" }),
+  [articleRoute.id]: (params) => ({
+    kind: "article",
+    articleId: params.articleId ?? "",
+  }),
   [inboxRoute.id]: () => ({ kind: "inbox" }),
   [taskDecisionRoute.id]: (params) => ({
     kind: "task-decision",
@@ -312,6 +321,8 @@ export function useCurrentApp(): string | null {
       return "notebooks";
     case "reviews":
       return "reviews";
+    case "article":
+      return "article";
     case "inbox":
       return "inbox";
     case "task-decision":

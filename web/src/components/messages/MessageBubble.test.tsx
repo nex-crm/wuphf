@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message, OfficeMember } from "../../api/client";
@@ -71,7 +72,7 @@ describe("<MessageBubble> rich artifact references", () => {
     vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue(ARTIFACT_DETAIL);
   });
 
-  it("renders the artifact inline (no card chrome, no modal) and hides the raw marker line", async () => {
+  it("renders a clickable article link card (no inline embed, no iframe) and hides the raw marker line", async () => {
     renderWithQueryClient(<MessageBubble message={MESSAGE} />);
 
     expect(
@@ -79,29 +80,37 @@ describe("<MessageBubble> rich artifact references", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/visual-artifact:/)).toBeNull();
 
-    // Embedded inline as a shadow-DOM web component — aria-label carries
-    // the artifact title, no surrounding "Rich artifact: ..." chrome card.
-    const embed = await screen.findByLabelText("Product strategy map", {
-      selector: "rich-artifact-embed",
+    // Clickable card with title + summary + Open action.
+    const card = await screen.findByRole("button", {
+      name: "Open article: Product strategy map",
     });
-    expect(embed.closest("figure")).not.toBeNull();
+    expect(card.tagName.toLowerCase()).toBe("button");
+    expect(card).toHaveTextContent("Product strategy map");
+    expect(card).toHaveTextContent(
+      "A richer artifact for reviewing the WUPHF rollout.",
+    );
+    expect(card).toHaveTextContent("Open article →");
     expect(richApi.fetchRichArtifact).toHaveBeenCalledWith(
       "ra_0123456789abcdef",
     );
 
-    // No Expand button, no NOTEBOOK VISUAL kicker, no modal dialog.
+    // Inline-embed UX is gone: no shadow-DOM mount in the bubble, no iframe,
+    // no modal dialog, no Expand button.
+    expect(document.querySelector("rich-artifact-embed")).toBeNull();
+    expect(document.querySelector("iframe")).toBeNull();
     expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
-    expect(screen.queryByText("Notebook visual")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("does not render an iframe for the artifact", async () => {
+  it("the link card navigates to /articles/$id when clicked", async () => {
+    const user = userEvent.setup();
     renderWithQueryClient(<MessageBubble message={MESSAGE} />);
-    await screen.findByLabelText("Product strategy map", {
-      selector: "rich-artifact-embed",
+    const card = await screen.findByRole("button", {
+      name: "Open article: Product strategy map",
     });
+    await user.click(card);
     await waitFor(() => {
-      expect(document.querySelector("iframe")).toBeNull();
+      expect(window.location.hash).toBe("#/articles/ra_0123456789abcdef");
     });
   });
 });
