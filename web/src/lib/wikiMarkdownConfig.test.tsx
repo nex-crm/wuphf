@@ -1,4 +1,3 @@
-import type { ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -65,11 +64,30 @@ describe("resolveRelativeWikiPath", () => {
       resolveRelativeWikiPath("nested/page.md", "team/about/README.md"),
     ).toBe("team/about/nested/page.md");
   });
+
+  it("strips query strings and fragments from relative links", () => {
+    expect(
+      resolveRelativeWikiPath("company.md?foo=bar", "team/about/README.md"),
+    ).toBe("team/about/company.md");
+    expect(
+      resolveRelativeWikiPath("company.md#section", "team/about/README.md"),
+    ).toBe("team/about/company.md");
+  });
+
+  it("returns null for empty hrefs and directory-only relative paths", () => {
+    expect(resolveRelativeWikiPath("", "team/about/README.md")).toBeNull();
+    expect(resolveRelativeWikiPath("./", "team/about/README.md")).toBeNull();
+    expect(resolveRelativeWikiPath("../", "team/about/README.md")).toBeNull();
+  });
 });
 
-function renderMd(md: string, articlePath: string, onNavigate?: () => void) {
+function renderMd(
+  md: string,
+  articlePath: string,
+  onNavigate?: (slug: string) => void,
+): void {
   const resolver = () => true;
-  return render(
+  render(
     <ReactMarkdown
       remarkPlugins={buildRemarkPlugins(resolver)}
       components={
@@ -82,7 +100,7 @@ function renderMd(md: string, articlePath: string, onNavigate?: () => void) {
     >
       {md}
     </ReactMarkdown>,
-  ) as unknown as ReactElement;
+  );
 }
 
 describe("buildMarkdownComponents anchor override", () => {
@@ -109,6 +127,12 @@ describe("buildMarkdownComponents anchor override", () => {
     const link = screen.getByRole("link", { name: "company.md" });
     link.click();
     expect(onNavigate).toHaveBeenCalledWith("team/about/company.md");
+  });
+
+  it("rewrites the href even when onNavigate is not provided", () => {
+    renderMd("[company.md](company.md)", "team/about/README.md");
+    const link = screen.getByRole("link", { name: "company.md" });
+    expect(link.getAttribute("href")).toBe("#/wiki/team/about/company.md");
   });
 
   it("is a no-op when articlePath is not supplied", () => {

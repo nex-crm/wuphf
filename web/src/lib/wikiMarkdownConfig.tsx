@@ -74,6 +74,10 @@ export function resolveRelativeWikiPath(
   if (!(href && articlePath)) return null;
   if (NON_WIKI_HREF_RE.test(href)) return null;
 
+  // Fragments and query strings are dropped: the hash-router cannot nest a
+  // second `#section` inside the wiki route, and articles do not expose a
+  // query surface today. If section-anchors inside the wiki become a real
+  // demand, route them through onNavigate instead of the href.
   const [pathOnly] = href.split(/[?#]/);
   if (!pathOnly.endsWith(".md")) return null;
 
