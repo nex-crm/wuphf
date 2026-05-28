@@ -849,15 +849,9 @@ func executionPlaybookSlug(path string) string {
 
 // handleWikiWrite is the broker HTTP endpoint the MCP subprocess posts to
 // when an agent calls team_wiki_write. Shape:
-//
-//	POST /wiki/write
-//	{ "slug":..., "path":..., "content":..., "mode":..., "commit_message":... }
-//
-// Response: 200 { "path":..., "commit_sha":..., "bytes_written":... }
-//
-//	429 { "error":"wiki queue saturated, retry on next turn" }
-//	500 { "error":"..." }
-//	503 { "error":"..." } when worker is not running
+//	POST /wiki/write { slug, path, content, mode, commit_message }
+// Responses: 200 { path, commit_sha, bytes_written } |
+//	429 wiki queue saturated | 500 generic | 503 worker not running
 func (b *Broker) handleWikiWrite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -879,6 +873,7 @@ func (b *Broker) handleWikiWrite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
 		return
 	}
+	isNew := wikiArticleIsNew(worker.Repo(), body.Path)
 	sha, n, err := worker.Enqueue(r.Context(), body.Slug, body.Path, body.Content, body.Mode, body.CommitMessage)
 	if err != nil {
 		if errors.Is(err, ErrQueueSaturated) {
@@ -887,6 +882,9 @@ func (b *Broker) handleWikiWrite(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if isNew {
+		b.emitNewWikiArticleCard(body.Path, body.Content, r.Header.Get(agentRateLimitHeader))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"path":          body.Path,

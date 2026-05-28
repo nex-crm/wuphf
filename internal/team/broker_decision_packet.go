@@ -877,13 +877,12 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 			b.writeWikiPromotionLocked(taskID, *packet)
 			b.broadcastDecisionLocked(taskID, *packet)
 		}
-		// Slice 2: emit a structured lifecycle chat card for Issues so
-		// the human (and owner agent) see what changed. Tagging the
-		// owner in this message wakes them on the next bridge tick,
-		// which is how Approve & Start kicks off real work.
-		if task := b.findTaskByIDLocked(taskID); task != nil {
-			b.postIssueLifecycleCardLocked(task, currentState, target, actorSlug)
-		}
+		// The issue_lifecycle chat card is now emitted from
+		// applyLifecycleStateLocked on every transition, so we no
+		// longer call it here. Owner attribution is "system" in the
+		// card payload; the actor slug stays in audit/decision-packet
+		// records and can be threaded through later if needed.
+		_ = actorSlug
 		if action == RecordDecisionRequestChanges {
 			// Mirror the agent-side path: when a human clicks
 			// "Request changes" in the unified Inbox, broadcast a

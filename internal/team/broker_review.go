@@ -280,6 +280,11 @@ func (b *Broker) handleNotebookPromote(w http.ResponseWriter, r *http.Request) {
 		ActorSlug: promotion.SourceSlug,
 		Timestamp: promotion.CreatedAt.Format(time.RFC3339),
 	})
+	// Emit a #general chat card for every new promotion request so the
+	// team sees review queue activity alongside Issue lifecycle cards.
+	b.mu.Lock()
+	b.postNotebookPromotionRequestedCardLocked(promotion.ID, promotion.SourcePath, promotion.TargetPath, promotion.SourceSlug)
+	b.mu.Unlock()
 	if taskID != "" {
 		_, found, _, recordErr := b.RecordTaskMemoryPromotion(taskID, promotion.SourceSlug, MemoryWorkflowArtifact{
 			Backend:     "markdown",
@@ -555,6 +560,9 @@ func (b *Broker) reviewApprove(w http.ResponseWriter, r *http.Request, id string
 		ActorSlug: body.ActorSlug,
 		Timestamp: t.Timestamp.Format(time.RFC3339),
 	})
+	b.mu.Lock()
+	b.postNotebookPromotionResolvedCardLocked(updated.ID, updated.SourcePath, updated.TargetPath, body.ActorSlug, PromotionDecisionApproved, body.Rationale, updated.SourceSlug)
+	b.mu.Unlock()
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -584,6 +592,9 @@ func (b *Broker) reviewRequestChanges(w http.ResponseWriter, r *http.Request, id
 		ActorSlug: body.ActorSlug,
 		Timestamp: t.Timestamp.Format(time.RFC3339),
 	})
+	b.mu.Lock()
+	b.postNotebookPromotionResolvedCardLocked(updated.ID, updated.SourcePath, updated.TargetPath, body.ActorSlug, PromotionDecisionChangesRequested, body.Rationale, updated.SourceSlug)
+	b.mu.Unlock()
 	writeJSON(w, http.StatusOK, updated)
 }
 
