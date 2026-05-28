@@ -419,8 +419,8 @@ export default function WikiArticle({
   );
   const rehypePlugins: PluggableList = useMemo(() => buildRehypePlugins(), []);
   const markdownComponents = useMemo(
-    () => buildMarkdownComponents({ resolver, onNavigate }),
-    [resolver, onNavigate],
+    () => buildMarkdownComponents({ resolver, onNavigate, articlePath: path }),
+    [resolver, onNavigate, path],
   );
 
   if (loading && !timedOut) {
