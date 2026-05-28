@@ -403,9 +403,8 @@ func TestHandleConfig_ProviderEndpointsAllowsOpenclawHTTPRuntime(t *testing.T) {
 
 // TestHandleConfig_ExposesGatewayAndLLMSplit locks in the wire shape the
 // frontend's Settings + Integrations apps depend on: the GET response must
-// expose llm_provider_kinds (non-gateway runtimes for the global picker) and
-// gateway_kinds (Integrations app cards) as separate lists, plus a boolean
-// llm_provider_unlocked that mirrors the friction-gate state.
+// expose llm_provider_kinds (non-gateway runtimes for the global picker)
+// and gateway_kinds (Integrations app cards) as separate lists.
 //
 // Without these on the wire, the Settings UI cannot tell which kinds are
 // safe to show in the default-runtime dropdown and the Integrations app
@@ -456,49 +455,4 @@ func TestHandleConfig_ExposesGatewayAndLLMSplit(t *testing.T) {
 	expectIn("hermes-agent", gatewayKinds, true)
 	expectIn("openclaw-http", gatewayKinds, true)
 	expectIn("claude-code", gatewayKinds, false)
-
-	// llm_provider_unlocked default = false (locked) — the safe default that
-	// keeps per-agent picks intact on a fresh install.
-	if unlocked, _ := got["llm_provider_unlocked"].(bool); unlocked {
-		t.Errorf("llm_provider_unlocked default = true, want false (locked)")
-	}
-}
-
-// TestHandleConfig_LLMProviderUnlockedRoundTrips locks in the POST shape:
-// setting llm_provider_unlocked=true persists, and GET reflects the new state.
-// This is what the Settings panel's lock toggle writes.
-func TestHandleConfig_LLMProviderUnlockedRoundTrips(t *testing.T) {
-	withWuphfHomeDir(t)
-	t.Setenv("WUPHF_LLM_PROVIDER", "")
-	b := newTestBroker(t)
-
-	if rec := configRequest(t, b, http.MethodPost, `{"llm_provider_unlocked":true}`); rec.Code != http.StatusOK {
-		t.Fatalf("POST: %d %s", rec.Code, rec.Body.String())
-	}
-	cfg, _ := config.Load()
-	if !cfg.LLMProviderUnlocked {
-		t.Errorf("LLMProviderUnlocked not persisted: cfg.LLMProviderUnlocked=%v", cfg.LLMProviderUnlocked)
-	}
-
-	rec := configRequest(t, b, http.MethodGet, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET: %d %s", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if unlocked, _ := got["llm_provider_unlocked"].(bool); !unlocked {
-		t.Errorf("GET llm_provider_unlocked = false after POST true")
-	}
-
-	// Re-lock; the inverse must also round-trip so the user can re-engage
-	// the friction gate after a stamp.
-	if rec := configRequest(t, b, http.MethodPost, `{"llm_provider_unlocked":false}`); rec.Code != http.StatusOK {
-		t.Fatalf("POST relock: %d %s", rec.Code, rec.Body.String())
-	}
-	cfg, _ = config.Load()
-	if cfg.LLMProviderUnlocked {
-		t.Errorf("LLMProviderUnlocked not cleared on relock: %v", cfg.LLMProviderUnlocked)
-	}
 }

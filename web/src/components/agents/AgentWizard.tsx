@@ -84,9 +84,7 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
   // Pull the registered runtime list off the wire so the picker stays in sync
   // with whatever providers the Go layer has registered. Falls back to a
   // hardcoded core set on first paint / fetch failure so the wizard is
-  // usable even when /config is briefly unavailable. Lock state surfaces a
-  // banner — when the global override is engaged the per-agent pick is
-  // ignored at dispatch, so the user should know before saving.
+  // usable even when /config is briefly unavailable.
   const configQuery = useQuery({
     queryKey: ["config"],
     queryFn: getConfig,
@@ -101,9 +99,6 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
     "ollama",
     "exo",
   ]) as LLMRuntimeKind[];
-  const globalLocked = configQuery.data?.llm_provider_unlocked === false;
-  const globalOverrideEngaged =
-    configQuery.data?.llm_provider_unlocked === true;
 
   async function handleGenerate() {
     const trimmed = prompt.trim();
@@ -411,17 +406,18 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
                   </option>
                 ))}
               </select>
-              {globalOverrideEngaged ? (
+              {form.provider === "inherit" ? (
                 <span className="op-hint">
-                  The global runtime is unlocked and overriding every agent —
-                  per-agent picks are ignored until it's re-locked in Settings.
+                  Inherits the install default. Pick a specific runtime to
+                  pin this agent — you can also change it later from the
+                  agent's profile.
                 </span>
-              ) : globalLocked && form.provider === "inherit" ? (
+              ) : (
                 <span className="op-hint">
-                  Inheriting the install default. Change here to pin this agent
-                  to a specific runtime.
+                  This agent will run on {PROVIDER_LABELS[form.provider]} on
+                  every turn. Change anytime from the agent's profile.
                 </span>
-              ) : null}
+              )}
             </div>
             <div className="agent-wizard-field">
               <label className="label" htmlFor="agent-model">

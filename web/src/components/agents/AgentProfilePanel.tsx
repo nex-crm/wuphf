@@ -357,8 +357,6 @@ function RuntimeSection({
     "ollama",
     "exo",
   ]) as LLMRuntimeKind[];
-  const globalOverrideEngaged =
-    configQuery.data?.llm_provider_unlocked === true;
   const globalDefault = configQuery.data?.llm_provider ?? "claude-code";
 
   const binding = bindingFromMember(agent.provider);
@@ -378,7 +376,7 @@ function RuntimeSection({
   // The user-task says CEO chat must ask for provider on spawn, which is the
   // wizard's job, not this panel's.
   const isLead = agent.built_in === true || agent.slug === "ceo";
-  const editable = !(isGateway || globalOverrideEngaged || isLead);
+  const editable = !(isGateway || isLead);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -491,20 +489,15 @@ function RuntimeSection({
           />
         </span>
       </div>
-      {globalOverrideEngaged && (
-        <p className="op-runtime-note is-warn">
-          <Lock
-            width={11}
-            height={11}
-            style={{ marginRight: 4, verticalAlign: "text-bottom" }}
-          />
-          Locked by global override — re-lock the default runtime in Settings to
-          edit per-agent runtimes.
-        </p>
-      )}
-      {isLead && !globalOverrideEngaged && (
+      {isLead && (
         <p className="op-runtime-note">
           Lead agents always run on the install default; change it in Settings.
+        </p>
+      )}
+      {!isLead && draftKind === "" && (
+        <p className="op-runtime-note">
+          Inheriting the install default ({globalDefault}). Pick a specific
+          runtime here to pin this agent.
         </p>
       )}
       {saveError && (
@@ -560,6 +553,11 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
   });
 
   type ChannelLite = { slug: string; name: string; members?: string[] };
+  // The "channels" cache slot is shared with useChannels() which stores
+  // the full {channels: [...]} envelope, not the array. Normalize on
+  // read so this surface tolerates either shape without crashing — and
+  // without renaming the cache key (which would invite a stale-data
+  // race during the migration).
   const { data: channels = [] as ChannelLite[] } = useQuery<
     ChannelLite[] | { channels?: ChannelLite[] },
     Error,
@@ -568,16 +566,9 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
     queryKey: ["channels"],
     queryFn: () =>
       getChannels().then((r) =>
-        arrayOrEmpty<{ slug: string; name: string; members?: string[] }>(
-          r?.channels,
-        ),
+        arrayOrEmpty<ChannelLite>(r?.channels),
       ),
     refetchInterval: 30_000,
-    // The "channels" cache slot is shared with useChannels() which stores
-    // the full {channels: [...]} envelope, not the array. Normalize on
-    // read so this surface tolerates either shape without crashing — and
-    // without renaming the cache key (which would invite a stale-data
-    // race during the migration).
     select: (data): ChannelLite[] => {
       if (Array.isArray(data)) return data as ChannelLite[];
       const envelope = data as { channels?: ChannelLite[] };

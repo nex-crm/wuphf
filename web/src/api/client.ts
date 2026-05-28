@@ -1160,11 +1160,6 @@ export interface ConfigSnapshot {
   // Runtime
   llm_provider?: LLMProvider;
   llm_provider_configured?: boolean;
-  // llm_provider_unlocked mirrors Config.LLMProviderUnlocked. False = locked
-  // (the global runtime is just a default for new agents). True = unlocked
-  // override (the global runtime stamps onto every agent's dispatch). The
-  // Settings panel must show a friction warning before flipping to true.
-  llm_provider_unlocked?: boolean;
   llm_provider_priority?: string[];
   // llm_provider_kinds is the non-gateway subset of registered runtimes —
   // the safe list to render in any runtime picker. Read this off the wire
@@ -1215,7 +1210,6 @@ export interface ConfigSnapshot {
 
 export type ConfigUpdate = Partial<{
   llm_provider: LLMProvider;
-  llm_provider_unlocked: boolean;
   provider_endpoints: Record<string, ProviderEndpoint>;
   memory_backend: MemoryBackend;
   action_provider: ActionProvider;

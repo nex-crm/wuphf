@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Lock, Refresh, WarningTriangle } from "iconoir-react";
+import { Refresh, WarningTriangle } from "iconoir-react";
 
 import {
   type ConfigSnapshot,
@@ -86,16 +86,6 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const [provider, setProvider] = useState<LLMRuntimeKind | "">(
     (cfg.llm_provider as LLMRuntimeKind | undefined) ?? "claude-code",
   );
-  // unlocked mirrors Config.LLMProviderUnlocked on the wire. False (default) =
-  // friction-gated: the global runtime is the default for new agents and the
-  // fallback when an agent has no per-agent binding. True = the global
-  // runtime overrides every per-agent binding on the dispatch path. We
-  // surface the lock with an explicit toggle so flipping override-on requires
-  // a deliberate gesture; the picker stays read-only while locked.
-  const [unlocked, setUnlocked] = useState<boolean>(
-    Boolean(cfg.llm_provider_unlocked),
-  );
-  const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
   const [teamLead, setTeamLead] = useState(cfg.team_lead_slug ?? "");
   const [maxConcurrent, setMaxConcurrent] = useState(
     cfg.max_concurrent_agents ? String(cfg.max_concurrent_agents) : "",
@@ -122,7 +112,6 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const onSave = async () => {
     const patch: ConfigUpdate = {
       llm_provider: provider as ConfigUpdate["llm_provider"],
-      llm_provider_unlocked: unlocked,
       default_format: format,
       blueprint,
       email,
@@ -133,12 +122,6 @@ function GeneralSection({ cfg, save }: SectionProps) {
       patch.max_concurrent_agents = parseInt(maxConcurrent, 10);
     if (timeout) patch.default_timeout = parseInt(timeout, 10);
     await save(patch);
-    // After a successful save, re-lock the override toggle locally so the
-    // user has to opt in again on the next change. The wire value persists
-    // (the broker stored whatever we sent) but the in-form draft resets to
-    // the safe state — same pattern as a one-shot "Apply to all" button.
-    setUnlocked(false);
-    setShowOverrideConfirm(false);
   };
 
   return (
@@ -148,7 +131,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
         Core runtime settings. These map to CLI flags and config file entries.
       </p>
 
-      <div style={styles.groupTitle}>Default runtime for agents</div>
+      <div style={styles.groupTitle}>Default runtime for new agents</div>
       <p
         style={{
           fontSize: 12,
@@ -157,21 +140,17 @@ function GeneralSection({ cfg, save }: SectionProps) {
           lineHeight: 1.5,
         }}
       >
-        The runtime new agents inherit when created and the fallback for any
-        agent without a per-agent pick. To bring an OpenClaw or Hermes agent
-        into the team, use the Integrations app — those gateways are not
-        runtimes you assign here.
+        Picked for new agents at creation time. Existing agents keep whatever
+        runtime they already have — change those one at a time from each
+        agent's profile (Runtime section). To import OpenClaw or Hermes
+        agents into the team, use the Integrations app — those gateways are
+        not runtimes you assign here.
       </p>
       <Field label="Runtime" hint="--provider">
         <select
-          style={{
-            ...styles.input,
-            opacity: unlocked ? 1 : 0.7,
-            cursor: unlocked ? "pointer" : "not-allowed",
-          }}
+          style={styles.input}
           value={provider}
           onChange={(e) => setProvider(e.target.value as LLMRuntimeKind | "")}
-          disabled={!unlocked}
         >
           {cloudKinds.length > 0 && (
             <optgroup label="Cloud">
@@ -193,77 +172,6 @@ function GeneralSection({ cfg, save }: SectionProps) {
           )}
         </select>
       </Field>
-      <div className={`op-lock-card${unlocked ? " is-unlocked" : ""}`}>
-        <div className="op-lock-head">
-          <div className="op-lock-title">
-            <span className="op-lock-icon" aria-hidden="true">
-              <Lock width={14} height={14} />
-            </span>
-            <span className="op-lock-title-text">
-              {unlocked
-                ? "Unlocked — saving will override every agent's runtime"
-                : "Locked: default-for-new-agents only"}
-            </span>
-          </div>
-          <span
-            className={`op-status ${unlocked ? "is-warn" : "is-off"}`}
-            aria-hidden="true"
-          >
-            <span className={`op-led ${unlocked ? "is-warn" : "is-off"}`} />
-            {unlocked ? "OVERRIDE ARMED" : "SAFE"}
-          </span>
-        </div>
-        <p className="op-lock-body">
-          {unlocked
-            ? "While unlocked, this runtime will replace every agent's per-agent pick at dispatch time until you re-lock it. Per-agent picks are saved but ignored."
-            : "Changing this runtime only affects new agents. Existing agents keep their per-agent picks. Unlock to override every current agent."}
-        </p>
-        <label className="op-lock-toggle">
-          <input
-            type="checkbox"
-            checked={unlocked}
-            onChange={(e) => {
-              if (e.target.checked) {
-                setShowOverrideConfirm(true);
-              } else {
-                setUnlocked(false);
-                setShowOverrideConfirm(false);
-              }
-            }}
-          />
-          Unlock to override all current agents
-        </label>
-        {showOverrideConfirm && !unlocked && (
-          <div className="op-lock-confirm" role="alertdialog">
-            <div className="op-lock-confirm-text">
-              This will route every agent through{" "}
-              <strong>
-                {PROVIDER_LABELS[provider as LLMRuntimeKind] ?? provider}
-              </strong>{" "}
-              on their next turn. Confirm to unlock.
-            </div>
-            <div className="op-lock-confirm-actions">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setShowOverrideConfirm(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => {
-                  setUnlocked(true);
-                  setShowOverrideConfirm(false);
-                }}
-              >
-                Unlock
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
       <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agents</div>
       <Field label="Team Lead" hint="Default agent that leads operations">
         <input

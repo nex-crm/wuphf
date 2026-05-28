@@ -438,10 +438,11 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
       <div className="pre-pick-body">
         <div className="pre-pick-hero">
           <div className="pre-pick-eyebrow">WUPHF</div>
-          <h1 className="pre-pick-headline">Pick a runtime.</h1>
+          <h1 className="pre-pick-headline">Pick a default runtime.</h1>
           <p className="pre-pick-subhead">
-            Your office needs an AI runtime. Pick one of the three below, or use
-            an API key, a local model, or a custom endpoint.
+            This is the runtime new agents will inherit when they're created.
+            You can change it later in Settings, and every agent can be moved
+            to a different runtime one at a time from its profile.
           </p>
         </div>
 

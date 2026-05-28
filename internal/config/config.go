@@ -42,23 +42,6 @@ type Config struct {
 	WorkspaceID    string `json:"workspace_id,omitempty"`
 	WorkspaceSlug  string `json:"workspace_slug,omitempty"`
 	LLMProvider    string `json:"llm_provider,omitempty"`
-	// LLMProviderUnlocked toggles the global LLMProvider field between two
-	// semantically distinct modes:
-	//
-	//  - false (default, "locked"): LLMProvider is the default-runtime used at
-	//    agent-creation time and the fallback when an agent has no per-agent
-	//    binding. Existing per-agent ProviderBindings win on the dispatch path.
-	//
-	//  - true ("unlocked override"): LLMProvider is treated as a hard override
-	//    that wins over every per-agent binding on the dispatch path. The UI
-	//    surfaces this as a friction gate: the user must explicitly unlock the
-	//    global runtime setting to flip every current agent at once.
-	//
-	// The default (zero value) is deliberately "locked" so a fresh install
-	// never silently clobbers per-agent picks made through the AgentWizard or
-	// AgentProfilePanel runtime section. JSON encoded with omitempty so an
-	// untoggled install does not write a new field into existing config files.
-	LLMProviderUnlocked bool `json:"llm_provider_unlocked,omitempty"`
 	// LLMProviderPriority is an ordered list of provider identifiers (same
 	// vocabulary as LLMProvider — "claude-code", "codex", "opencode", etc.) that agents
 	// should try in order when picking a runtime. LLMProvider remains the
@@ -303,26 +286,6 @@ func MemoryBackendLabel(backend string) string {
 	default:
 		return "Local-only"
 	}
-}
-
-// ResolveLLMProviderOverride returns the install-wide provider together with a
-// "should override per-agent bindings" flag. The flag is true when the user
-// has unlocked the global runtime setting (Config.LLMProviderUnlocked) AND a
-// non-empty global provider is configured — that combination expresses the
-// explicit "stamp this runtime onto every agent" gesture.
-//
-// Callers on the dispatch path (provider.DefaultStreamFnResolver) check the
-// override flag first and skip per-agent kindResolver lookup when it's true.
-// UI callers (Settings panel, AgentProfilePanel) use it to render a "Locked
-// by global override" read-only state on per-agent runtime pickers.
-//
-// Flag/env overrides do not engage the lock — a transient WUPHF_LLM_PROVIDER
-// only changes the default fallback, not the per-agent precedence.
-func ResolveLLMProviderOverride() (kind string, override bool) {
-	cfg, _ := Load()
-	kind = ResolveLLMProvider("")
-	override = cfg.LLMProviderUnlocked && strings.TrimSpace(cfg.LLMProvider) != ""
-	return kind, override
 }
 
 // ResolveLLMProvider resolves the active LLM provider for this run.

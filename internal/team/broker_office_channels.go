@@ -150,15 +150,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			// Runtime
 			"llm_provider":            config.ResolveLLMProvider(""),
 			"llm_provider_configured": llmProviderConfigured,
-			"llm_provider_priority":   cfg.LLMProviderPriority,
-			// llm_provider_unlocked surfaces the friction-gate state of the
-			// install-wide LLMProvider. Default (false = locked) means the
-			// global field acts as a default-for-new-agents and a fallback
-			// for agents without a per-agent binding. When true the global
-			// kind overrides every per-agent binding on the dispatch path —
-			// the UI must show a clear warning before letting the user flip
-			// it. See config.LLMProviderUnlocked for the full contract.
-			"llm_provider_unlocked": cfg.LLMProviderUnlocked,
+			"llm_provider_priority": cfg.LLMProviderPriority,
 			// llm_provider_kinds is the non-gateway subset of the registered
 			// provider runtimes — the safe set to render in any UI runtime
 			// picker (Settings default-runtime, AgentProfilePanel runtime
@@ -214,7 +206,6 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		defer b.configMu.Unlock()
 		var body struct {
 			LLMProvider         *string   `json:"llm_provider,omitempty"`
-			LLMProviderUnlocked *bool     `json:"llm_provider_unlocked,omitempty"`
 			LLMProviderPriority *[]string `json:"llm_provider_priority,omitempty"`
 			MemoryBackend       *string   `json:"memory_backend,omitempty"`
 			ActionProvider      *string   `json:"action_provider,omitempty"`
@@ -334,15 +325,6 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// provider override.
 		if llmProviderSet {
 			cfg.LLMProvider = llmProvider
-			changed = true
-		}
-		// llm_provider_unlocked is a pure boolean toggle. The friction-gate
-		// semantics (read-only-while-locked, requires explicit unlock to
-		// override per-agent bindings) live in the UI — the broker just
-		// persists what the client sent and the resolver consults the flag
-		// at dispatch time via config.ResolveLLMProviderOverride.
-		if body.LLMProviderUnlocked != nil {
-			cfg.LLMProviderUnlocked = *body.LLMProviderUnlocked
 			changed = true
 		}
 		if body.LLMProviderPriority != nil {
