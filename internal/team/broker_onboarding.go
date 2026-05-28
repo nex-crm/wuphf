@@ -6,14 +6,39 @@ import (
 	"log"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/workspaces"
 )
+
+// nextMsgCounterAfter scans a preserved message slice for IDs in the
+// "msg-<N>" pattern and returns max+1. Used by the seed paths that
+// preserve the CEO DM transcript: blindly resetting `b.counter` to 0
+// would cause newly-assigned IDs to collide with preserved ones,
+// breaking idempotency keys and message-by-id lookups (CodeRabbit
+// finding on PR #995).
+func nextMsgCounterAfter(msgs []channelMessage) int {
+	max := -1
+	for _, m := range msgs {
+		if !strings.HasPrefix(m.ID, "msg-") {
+			continue
+		}
+		n, err := strconv.Atoi(m.ID[len("msg-"):])
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max + 1
+}
 
 // onboardingCompleteFn is invoked by the onboarding package when the user
 // finishes the wizard. It seeds the team from the user's picked blueprint
@@ -269,8 +294,23 @@ func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents
 			Members:     memberSlugsFromMembers(b.members),
 		}}
 	}
-	b.messages = nil
-	b.counter = 0
+	// Preserve the CEO DM transcript across the seed boundary so the
+	// onboarding wizard reads as one continuous dialogue end-to-end.
+	// The seed wipes the office's channel/task history (kickoff starts
+	// fresh in #general) but the CEO conversation built up through
+	// greet → identity → website → blueprint → team is the user's
+	// only reference for what they've decided, and tossing it makes
+	// the wizard feel restarted.
+	ceoDmSlug := channel.DirectSlug("human", "ceo")
+	preservedCeoDm := make([]channelMessage, 0)
+	for _, m := range b.messages {
+		if m.Channel == ceoDmSlug {
+			preservedCeoDm = append(preservedCeoDm, m)
+		}
+	}
+	b.messages = preservedCeoDm
+	// Counter must clear preserved IDs to avoid msg-* collisions.
+	b.counter = nextMsgCounterAfter(preservedCeoDm)
 	b.lastTaggedAt = make(map[string]time.Time)
 	if err := b.postKickoffLocked(bp, selectedAgents, task, skipTask, synthesized); err != nil {
 		return err

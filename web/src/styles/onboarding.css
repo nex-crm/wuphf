@@ -647,6 +647,7 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
+  background: var(--bg-card);
 }
 
 .key-row {
@@ -2072,13 +2073,18 @@
 .pre-pick-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg-card);
   text-align: left;
   cursor: pointer;
+  /* Fixed height so the card never jumps when the prereq probe
+     transitions between "Checking…" / "Not installed" / "Signed in · …"
+     statuses, or when the "Install →" link appears/disappears. */
+  height: 132px;
+  box-sizing: border-box;
   transition:
     border-color 120ms ease,
     transform 120ms ease,
@@ -2118,8 +2124,28 @@
 }
 
 .pre-pick-card-status {
+  /* Two-line stack: primary state ("Signed in" / "Not installed" /
+     etc.) on the first line, secondary detail (the runtime version
+     string, e.g. "2.1.150 (Claude Code)") on the second line. The
+     min-height reservation keeps the card from jumping when the
+     prereq probe transitions between states with and without a
+     detail line. */
+  display: flex;
+  flex-direction: column;
   font-size: 12px;
   color: var(--text-secondary);
+  min-height: 36px;
+  line-height: 1.45;
+}
+.pre-pick-card-status-primary {
+  font-weight: 500;
+}
+.pre-pick-card-status-detail {
+  /* Slightly muted so the eye lands on the primary state first; the
+     detail is supporting context, not the headline. */
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums; /* version numbers align */
 }
 
 .pre-pick-card.available .pre-pick-card-status {
@@ -2145,8 +2171,8 @@
 }
 
 .pre-pick-secondary-button {
-  font-size: 13px;
-  padding: 8px 14px;
+  font-size: 15px;
+  padding: 10px 16px;
   border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
@@ -2160,7 +2186,6 @@
 
 .pre-pick-secondary-button:hover:not(:disabled) {
   color: var(--text);
-  border-color: var(--border);
 }
 
 .pre-pick-secondary-button:focus-visible {
@@ -2174,9 +2199,40 @@
 }
 
 .pre-pick-helper {
+  /* Pinned to the bottom of the viewport so the "you can change this
+     later" reassurance is always visible without competing with the
+     main content above. `position: fixed` removes it from the scroll
+     flow; centered horizontally with left/right + transform. */
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
   font-size: 12px;
   color: var(--text-tertiary);
   margin: 0;
+  text-align: center;
+  pointer-events: none; /* purely informational — don't intercept clicks */
+  z-index: 1;
+}
+
+/* Inline arrow icon used wherever the wizard previously rendered a
+   plain "→" glyph. `vertical-align: -0.15em` nudges the icon down
+   onto the optical baseline (SVGs are box-aligned, not glyph-
+   aligned), and the side margin gives it the same visual breathing
+   room a real arrow character would have. */
+.pre-pick-inline-arrow {
+  display: inline-block;
+  vertical-align: -0.15em;
+  margin: 0 0.3em;
+  flex-shrink: 0;
+}
+/* When used inside a flex button (e.g. .btn .pre-pick-form-submit),
+   the inline-block + vertical-align doesn't apply — fall back to
+   flex alignment instead. */
+.btn .pre-pick-inline-arrow,
+.pre-pick-secondary-button .pre-pick-inline-arrow,
+.pre-pick-card-install .pre-pick-inline-arrow {
+  vertical-align: middle;
 }
 
 .pre-pick-error {
@@ -2203,7 +2259,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-secondary);
-  margin: 0;
+  margin: 0 0 0 8px;
 }
 
 .pre-pick-section-hint {
@@ -2211,6 +2267,112 @@
   color: var(--text-tertiary);
   margin: 0 0 4px 0;
   line-height: 1.5;
+}
+
+/* ─── Collapsible section group ───
+   All three alternative auth paths (API keys, local model, custom
+   endpoint) are wrapped in one bordered, rounded card so they read
+   as a single unit subordinate to the CLI cards above. Internal
+   dividers separate sections; the outer border belongs to the group. */
+.pre-pick-collapsible-group {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  /* Transparent so the stack reads as a quiet outlined list against
+     the page surface — not a raised white card competing with the
+     primary CLI install cards above. */
+  background: transparent;
+  overflow: hidden;
+}
+
+/* ─── Collapsible section (controlled accordion) ───
+   Each alternative auth path is collapsed by default so the CLI cards
+   stay the primary CTA. The summary row is a button covering the
+   whole header — clicking anywhere on it toggles. The content panel
+   animates between open and closed via the `grid-template-rows: 0fr
+   ⇆ 1fr` trick (transitionable in all modern browsers without
+   `interpolate-size`). */
+.pre-pick-section--collapsible {
+  padding: 0;
+  gap: 0;
+}
+.pre-pick-collapsible-group
+  .pre-pick-section--collapsible
+  + .pre-pick-section--collapsible {
+  border-top: 1px solid var(--border);
+}
+
+/* Summary is a full-width button. Whole row is the click target — the
+   heading on the left, the chevron on the right. */
+.pre-pick-section-summary {
+  appearance: none;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  user-select: none;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+.pre-pick-section-summary:hover .pre-pick-section-heading {
+  color: var(--text);
+}
+.pre-pick-section-summary:focus-visible {
+  outline: 2px solid var(--focus-ring-color, var(--accent));
+  outline-offset: -2px;
+}
+.pre-pick-section-heading {
+  transition: color 160ms ease;
+}
+.pre-pick-section-chevron {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-open="true"] > .pre-pick-section-summary .pre-pick-section-chevron {
+  transform: rotate(180deg);
+}
+
+/* Animated content panel: height interpolates between 0 (closed) and
+   auto (open) via `interpolate-size: allow-keywords`. Supported in
+   Chrome 129+, Safari TP, Firefox behind a flag. In unsupported
+   browsers the transition simply snaps. */
+.pre-pick-collapsible-group {
+  interpolate-size: allow-keywords;
+}
+.pre-pick-section-panel {
+  height: 0;
+  overflow: hidden;
+  transition: height 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pre-pick-section--collapsible[data-open="true"] .pre-pick-section-panel {
+  height: auto;
+}
+.pre-pick-section-panel-inner {
+  padding: 0 16px 16px;
+}
+.pre-pick-section--collapsible[data-open="false"]
+  .pre-pick-section-panel-inner {
+  /* Suppress focus on hidden controls. */
+  visibility: hidden;
+  transition: visibility 0s linear 320ms;
+}
+.pre-pick-section--collapsible[data-open="true"] .pre-pick-section-panel-inner {
+  visibility: visible;
+  transition: visibility 0s linear 0s;
+}
+.pre-pick-section-panel-inner > .pre-pick-section-hint {
+  margin: 0 0 16px 8px;
 }
 
 /* Local provider picker wrapper */
@@ -2284,21 +2446,85 @@
    Spec: docs/specs/onboarding-into-office.md "## Surface 3 / Card states matrix"
    ─────────────────────────────────────────────────────────────────────── */
 
-.ceo-card-section {
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
-  background: var(--bg);
+/* Submit button inside CEO cards (checklist Confirm, execution lineup
+   Continue) — uses the storybook `.btn .btn-primary` (no `btn-sm`),
+   overridden to a 40px min-height per the wizard spec (between the
+   default 44px and `btn-sm`'s 32px). */
+.onboarding-chat .ceo-card-submit.btn,
+.onboarding-chat .ceo-card-submit.btn.btn-primary {
+  min-height: 40px;
+  padding: 0 18px;
+  font-size: var(--text-sm);
+  /* +8px down from the items above — gives the primary action room
+     to breathe instead of sitting flush with the last chip/checkbox. */
+  margin-top: 8px;
 }
+/* Suppress the global `.btn:hover` translateY(-1px) lift inside the
+   wizard footer — the wizard's primary actions stay put on hover so
+   the muted/locked footer doesn't "twitch" when the mouse drifts over. */
+.onboarding-chat .ceo-card-submit.btn:not(:disabled):hover {
+  transform: none;
+}
+
+.ceo-card-section {
+  padding: 0 24px 10px;
+  background: transparent;
+  overflow: visible;
+}
+
+/* Suppress the agent-interview section inside the onboarding
+   footer — the user is talking to the CEO, not approving downstream
+   agent skill requests. Keep `CeoCardSection` (the actual CEO
+   suggestion card) visible. */
+.onboarding-chat .onboarding-chat-footer-inner .interview-bar {
+  display: none !important;
+}
+/* Blur the footer's CEO card while input is locked. Targets
+   `.ceo-card` directly so we don't need a wrapper. */
+.onboarding-chat .ceo-card-section,
+.onboarding-chat .ceo-card {
+  /* Smooth fade in/out for the muted state. Longer than the previous
+     220 ms because filter:blur() interpolation looks coarser than plain
+     opacity and benefits from a slower curve. */
+  transition:
+    filter 360ms cubic-bezier(0.2, 0, 0.2, 1),
+    opacity 360ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+.onboarding-chat[data-input-locked="true"] .ceo-card {
+  /* Muted state: blur the card while it's not interactable so it visibly
+     reads as "wait, not your turn yet." Pointer + selection still
+     blocked. Focus chrome on inputs is NOT touched — see the rule
+     below the shell which is the same idea applied to the outer shell. */
+  filter: blur(3px);
+  opacity: 0.6;
+  pointer-events: none;
+  user-select: none;
+}
+/* Locked-state DOES NOT touch the focus outline. Disabling interaction
+   (pointer-events + user-select above) is enough — visually the card
+   keeps whatever focus chrome it would normally have. */
 
 /* Base CEO card */
 .ceo-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px;
+  border: none;
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+  border-radius: 20px;
+  padding: 14px 16px;
   background: var(--bg-card);
   display: flex;
   flex-direction: column;
   gap: 10px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.06);
+  transition:
+    outline-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.ceo-card--form-field:focus-within {
+  outline-color: var(--accent, #8b5cf6);
 }
 
 /* Committed state: collapses to one line in --text-secondary */
@@ -2326,22 +2552,62 @@
 /* Text input */
 .ceo-card-input {
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
+  padding: 6px 2px;
+  border: none;
+  border-radius: 0;
+  font-size: 14px;
   color: var(--text);
-  background: var(--bg);
+  background: transparent;
   outline: none;
-  transition: border-color 120ms ease;
+  transition: none;
 }
 
 .ceo-card-input:focus {
-  border-color: var(--accent);
+  border-color: transparent;
 }
 
 .ceo-card-input:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Input + send button row */
+.ceo-card-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ceo-card-input-row .ceo-card-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Send button — sits in the input's right corner like a chat send chip */
+.ceo-card-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent, #8b5cf6);
+  color: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.ceo-card-send:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.ceo-card-send:disabled {
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
@@ -2426,31 +2692,100 @@
 
 /* ─── Checklist ────────────────────────────────────────────────────────── */
 
+/* Items render as chip-style wrappers in a horizontal flex row that
+   wraps onto additional lines when they don't fit. Visually mirrors
+   `.ceo-chip-row-options` (chip-row) so single- and multi-select
+   surfaces share the same grammar. */
 .ceo-checklist-items {
   list-style: none;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+}
+
+.ceo-checklist-item {
+  /* Each option is a chip — same border/radius/padding as `.ceo-chip`
+     so checklist (multi-select) and chip-row (single-select) share
+     one visual language. */
+  display: inline-flex;
 }
 
 .ceo-checklist-label {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
   font-size: 13px;
-  color: var(--text);
+  color: var(--text-secondary);
+  background: var(--bg-card);
   cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+.ceo-checklist-label:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+/* When the option is checked, raise the chip to the selected style
+   (accent border + tinted background) so toggle state is obvious at
+   a glance. `:has()` selects the label that contains a checked
+   checkbox. */
+.ceo-checklist-label:has(.ceo-checklist-checkbox:checked) {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text);
 }
 
 .ceo-checklist-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
+  /* Native checkbox kept in DOM for accessibility (Space toggles,
+     screen readers announce state) but visually hidden — the chip's
+     border/background + tick icon are the visible affordance. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  /* `clip-path` replaces the deprecated `clip` property — same
+     visually-hidden semantics, satisfies Stylelint. */
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Tick icon — sits in the chip's leading position. Hidden when the
+   option is unchecked; visible when the parent label has
+   `data-checked="true"`. */
+.ceo-checklist-tick {
   flex-shrink: 0;
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  color: var(--accent);
+  /* Reserve the icon's space even when invisible so the label text
+     doesn't shift when toggled. */
+  margin-right: -2px;
+  width: 0;
+  overflow: visible;
+}
+.ceo-checklist-label[data-checked="true"] .ceo-checklist-tick {
+  opacity: 1;
+  transform: scale(1);
+  width: 14px;
+  margin-right: 0;
 }
 
 .ceo-checklist-item-text {
-  flex: 1;
+  /* No `flex: 1` — keep the label tight against the icon so the
+     chip's width hugs the text. */
 }
 
 /* ─── Scan chip ────────────────────────────────────────────────────────── */
@@ -2626,8 +2961,13 @@
    ────────────────────────────────────────────────────────────────────── */
 
 .onboarding-chat {
-  display: flex;
-  flex-direction: column;
+  /* Grid layout: header fixed at top, pair vertically centered in
+     the remaining 1fr row. Using grid (not flex + auto margins)
+     because the auto-margin trick can fail in some viewport sizes
+     when the flex item's max-height equals the available row — the
+     grid `place-items: center` is unambiguous and always centers. */
+  display: grid;
+  grid-template-rows: auto 1fr;
   height: 100vh;
   background: radial-gradient(
     circle at top,
@@ -2642,12 +2982,47 @@
 }
 
 .onboarding-chat-header {
-  display: flex;
+  /* 3-column grid so the brand stays optically centered regardless of
+     back-button presence or provider label width. Equal-fraction outer
+     tracks keep the center column at the geometric midpoint. */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   padding: 18px 28px;
-  border-bottom: 1px solid var(--border);
   background: var(--bg-card);
+  gap: 12px;
+}
+
+.onboarding-chat-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  justify-self: start;
+  padding: 0 10px 0 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.onboarding-chat-back:hover {
+  background: var(--bg);
+  color: var(--text);
+  /* No translate — hover stays still, only colour shifts. */
+}
+
+.onboarding-chat-back-label {
+  white-space: nowrap;
 }
 
 .onboarding-chat-brand {
@@ -2656,6 +3031,11 @@
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  justify-self: center;
+  text-align: center;
 }
 
 .onboarding-chat-phase {
@@ -2663,44 +3043,237 @@
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  font-weight: 500;
+}
+
+/* Invisible placeholder so the 3-column grid keeps the brand optically
+   centered even though there is no right-side content. */
+.onboarding-chat-spacer {
+  justify-self: end;
+}
+
+/* Container that holds the body + footer as a single visual unit.
+   The PAIR is what's centered in the viewport (auto margins on the
+   container), so when the body's height changes only this
+   container's size changes — the footer's position relative to the
+   body stays fixed, and the footer no longer has its own auto-margin
+   that recomputes per layout pass. */
+/* ─── Pair = positioning context for the layered body + footer ───
+   Layered layout (not flex stacking):
+     • body fills the entire pair (max 640px) and scrolls internally
+     • footer is absolutely positioned at the pair's bottom, on a
+       higher z-index, so the message stream visually passes UNDER
+       the footer when scrolled
+     • body reserves bottom padding equal to the footer's measured
+       height (`--onboarding-footer-h`, set by ResizeObserver in
+       `OnboardingChat.tsx`) so at-rest content doesn't sit behind
+       the footer
+   This way, "total height ≤ 640px" means body grows naturally; once
+   body's intrinsic content + reserved padding exceeds 640, the body
+   scrolls while the footer stays pinned at the pair's bottom edge. */
+.onboarding-chat-pair {
+  position: relative;
+  /* Inside the parent's 1fr grid row — `place-self: center` centers
+     the pair both vertically and horizontally inside that row, so
+     it's always centered regardless of viewport size or content
+     length. */
+  place-self: center;
+  width: 100%;
+  max-width: 720px;
+  max-height: 640px;
+  min-height: 0;
+  /* Fallback footer height in case JS hasn't run yet; the
+     ResizeObserver overrides this on mount and on every resize. */
+  --onboarding-footer-h: 120px;
 }
 
 .onboarding-chat-body {
-  flex: 1;
+  /* Bottom-anchored scrollable container.
+     `justify-content: flex-end` + `overflow: auto` is broken in
+     most browsers — the overflow direction reverses and scroll
+     never engages. Instead we use a `::before` spacer with
+     `margin-top: auto`: the spacer absorbs any free space inside
+     the body, pushing the stream to the bottom; when the stream's
+     content exceeds the body height the spacer collapses to 0 and
+     the stream overflows naturally upward, scrollbar engaged. */
+  width: 100%;
+  max-height: 640px;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  /* Plain block scroll container — flex hacks (column +
+     `::before margin-top:auto` OR row + `align-items: end`) BOTH
+     interact badly with `overflow-y: auto`: the cross-axis sizing
+     pegs the body to its own clientHeight so overflow detection
+     thinks there's nothing to scroll, and the stream gets clipped.
+     A plain block element with overflow-y scrolls the way browsers
+     have done it since 1996. Bottom-anchoring (the "last message
+     sits just above the footer" feel) is delivered by the
+     scrollIntoView call on the end-of-stream sentinel — see
+     OnboardingChat.tsx. */
+  display: block;
+  /* Scrolling stays functional (wheel/touch) but the native
+     scrollbar UI is hidden via `scrollbar-width: none` and the
+     `::-webkit-scrollbar` rule below. The visual scroll affordance
+     is handled by the gradient mask at the top of the body
+     (twilson.net/scroll-mask). */
   overflow-y: auto;
-  padding: 32px 16px 16px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior: contain;
+  /* Bottom padding = footer's measured height + 16px gap, so the
+     last message sits 16px above the footer's top edge at rest. */
+  padding: 32px 16px calc(var(--onboarding-footer-h, 120px) + 16px);
+  /* Top scroll-mask — applied ONLY when the body's content actually
+     overflows (driven by `data-has-overflow` from React, which a
+     ResizeObserver toggles whenever the stream exceeds the body's
+     visible height). When everything fits, no mask is needed and
+     the top edge stays crisp. */
+}
+.onboarding-chat-body[data-has-overflow="true"] {
+  mask-image: linear-gradient(to bottom, transparent 0, black 96px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 96px);
+}
+
+/* Bottom fade overlay between the body and the footer. Sits above
+   the footer (z-index between body and footer) and shows a gradient
+   from transparent at the top to the page background at the bottom,
+   visually softening the meeting line of scrolled-up messages and
+   the footer. Toggled by `data-visible` from React based on the
+   body's scroll position. */
+.onboarding-chat-bottom-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--onboarding-footer-h, 120px);
+  height: 48px;
+  background: linear-gradient(to top, var(--bg, #ffffff), transparent);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--onboarding-anim-ms, 600ms)
+    var(--onboarding-anim-ease, cubic-bezier(0.2, 0, 0.8, 1));
+  z-index: 1;
+}
+.onboarding-chat-bottom-fade[data-visible="true"] {
+  opacity: 1;
+}
+
+/* Bottom-anchoring is now done in JS via scrollIntoView on the
+   end-of-stream sentinel; the ::before spacer hack is no longer
+   needed and would only confuse the block layout. */
+
+/* Hide WebKit's native scrollbar. Scrolling still works via
+   wheel/touch/keyboard; the visual cue is the gradient mask above. */
+.onboarding-chat-body::-webkit-scrollbar {
+  display: none;
 }
 
 .onboarding-chat-stream {
   width: 100%;
-  max-width: 720px;
+  max-width: 640px;
+  /* Center inside the now-plain-block body. */
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* Match the horizontal inset of `.ceo-card-section` (the input card's
+     outer wrapper inside the footer) so message bubbles sit in the same
+     column as the input card and their left edges visually line up
+     with the card's outer edge. `border-box` keeps the outer width
+     pinned at the max regardless of the inner padding. */
+  padding: 0 40px;
+  box-sizing: border-box;
 }
 
-.onboarding-chat-stream-empty {
-  color: var(--text-tertiary);
-  font-size: 13px;
-  text-align: center;
-  padding: 40px 0;
+/* Onboarding is a strictly-forward wizard — message bubbles have no
+   meaningful hover behaviour here (no threads, no quoting, no agent-
+   panel to open). Suppress every hover affordance inside the wizard
+   so the bubbles read as static transcript, not as clickable rows. */
+.onboarding-chat .message-hover-actions {
+  display: none !important;
+}
+.onboarding-chat .message-avatar-btn,
+.onboarding-chat .message-author-btn {
+  cursor: default;
+}
+.onboarding-chat .message-avatar-btn:hover {
+  opacity: 1;
+}
+.onboarding-chat .message-author-btn:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* The `nex` theme paints `.message:hover { background: var(--bg-warm); }`
+   at theme specificity. Cancel it inside the wizard with a matching
+   theme-prefixed selector so the bubble stays flat on hover. */
+html[data-theme^="nex"] .onboarding-chat .message:hover {
+  background: transparent;
+}
+
+/* The `nex` theme also adds `margin: 0 -24px; padding: 10px 24px` to
+   `.message` so the hover background can bleed edge-to-edge against the
+   ambient -24px page margin. In the onboarding wizard there is no such
+   page margin — the stream is centered with its own padding — so those
+   negative margins push the bubble 24px past the 720px stream on each
+   side (total 744px) and break the column alignment with the input card
+   below. Reset the geometry to plain box-model values inside the wizard. */
+html[data-theme^="nex"] .onboarding-chat .message {
+  /* Reset the horizontal bleed and tighten the vertical breathing room
+     from the theme's default 10px to 8px so the stack reads as a tight
+     wizard transcript instead of a roomy channel feed. */
+  margin: 0;
+  padding: 8px 0;
 }
 
 .onboarding-chat-footer {
+  /* Pinned to the pair's bottom edge on a higher z-index so the
+     scrolling message stream passes visually UNDER the footer. The
+     opaque `background` covers messages as they scroll past. */
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
   display: flex;
   justify-content: center;
-  border-top: 1px solid var(--border);
-  background: var(--bg-card);
-  padding: 16px 24px;
+  background: var(--bg);
+  /* No top padding so the input card sits flush under the latest
+     message bubble at rest — the two read as one grouped unit (the
+     CEO's question + the user's answer field). */
+  padding: 0 24px 32px;
+  /* No auto margin — the parent `.onboarding-chat-pair` owns the
+     centering. Footer just sits directly under the body inside the
+     pair container. */
+  width: 100%;
+  transition:
+    transform var(--onboarding-anim-ms) var(--onboarding-anim-ease),
+    margin var(--onboarding-anim-ms) var(--onboarding-anim-ease),
+    opacity var(--onboarding-anim-ms) var(--onboarding-anim-ease);
 }
 
 .onboarding-chat-footer-inner {
   width: 100%;
-  max-width: 720px;
+  max-width: 640px;
+}
+
+/* ─── Input lock ───
+   While the CEO is thinking / revealing OR the post-human breather is
+   still running, the input area is non-interactive. `pointer-events:
+   none` blocks clicks, taps and submit-button activation across the
+   whole footer; additionally we disable typing into any focused
+   input by setting `user-select: none` and blocking keyboard input
+   via `tab-index: -1`-like exclusion (the focus ring is already
+   neutralized by the locked-state rule earlier). */
+.onboarding-chat[data-input-locked="true"] .onboarding-chat-footer {
+  pointer-events: none;
+  user-select: none;
+}
+.onboarding-chat[data-input-locked="true"] .onboarding-chat-footer input,
+.onboarding-chat[data-input-locked="true"] .onboarding-chat-footer textarea,
+.onboarding-chat[data-input-locked="true"] .onboarding-chat-footer button {
+  /* Belt-and-braces: even with pointer-events:none on the parent,
+     keyboard focus might still reach an input that was focused
+     BEFORE the lock kicked in. Force readonly/disabled semantics so
+     typing into a stale focus doesn't sneak a submit through. */
+  pointer-events: none;
 }
 
 .onboarding-chat-hint {
@@ -2710,4 +3283,486 @@
   color: var(--text-tertiary);
   text-align: center;
   font-style: italic;
+}
+
+/* Send button disabled while we're holding back the CEO's next message
+   (the user shouldn't be able to fire a second answer mid-stage — the
+   wizard is strictly sequential). Matches the native `:disabled` look
+   so the existing styles still apply. `pointer-events: none` blocks
+   the click even though the React `disabled` prop also covers it. */
+.onboarding-chat[data-ceo-typing="true"] .ceo-card-send {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* User ("You") message avatar — brand magenta tint in the wizard so the
+   human author reads at a glance against the CEO bubbles. The inline
+   `background: var(--bg-warm)` on the element wins by source order
+   without `!important`. */
+.onboarding-chat .message[data-author-kind="human"] .message-avatar {
+  background: var(--tertiary-200) !important;
+  color: var(--tertiary-500) !important;
+}
+
+/* Skip button — pulled out of the card and dropped below it as a
+   borderless tertiary link, so the card stays focused on the active
+   input and the optional bail-out reads as a quiet secondary action. */
+.onboarding-chat .onboarding-chat-footer-inner {
+  position: relative;
+}
+.onboarding-chat .ceo-card-actions {
+  position: absolute;
+  left: 50%;
+  bottom: -56px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+.onboarding-chat .ceo-card-skip,
+.onboarding-chat .ceo-card-skip.btn,
+.onboarding-chat .ceo-card-skip.btn-ghost {
+  /* 32px pill button. Transparent at rest so it doesn't compete
+     with the primary Send button next to it. On hover, a light
+     gray pill fills in to give the click affordance. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    background 160ms ease;
+}
+.onboarding-chat .ceo-card-skip:hover {
+  color: var(--text);
+  background: var(--bg-warm, rgba(0, 0, 0, 0.05));
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ─── Synced wizard motion (v2 — slot-based) ───
+   ═══════════════════════════════════════════════════════════════════
+
+   The wizard chat has ONE coordinated motion language. Every entrance
+   uses the same duration (`--onboarding-anim-ms`, default 300ms) and
+   the same easing (`--onboarding-anim-ease`, a symmetric ease-in-out
+   `cubic-bezier(0.2, 0, 0.8, 1)`), exposed from the React tree so JS
+   timers and CSS animations are guaranteed in sync.
+
+   Layout principles:
+     1. The body + footer pair is centered as a group (auto margins).
+     2. The stream is bottom-anchored — newest message sits flush
+        against the input card above it.
+     3. Each message lives inside a `.onboarding-message-slot` whose
+        height grows from 0 (or from the dots-height, for CEO slots)
+        up to the bubble's natural height. Because the slot is bottom-
+        anchored in the stream, growth extends UPWARD only — older
+        messages shift up, the input stays put.
+     4. CEO slots cross-fade dots → bubble in place without any DOM
+        unmount/remount.
+
+   `interpolate-size: allow-keywords` (Chrome 129+) is what makes
+   `height: auto` interpolatable from a numeric start. */
+.onboarding-chat {
+  interpolate-size: allow-keywords;
+  /* One canonical duration / curve for every motion in the wizard.
+     Slot height grow, bubble opacity, footer dim, dots cross-fade —
+     all share this dial. Overridable via inline style from React. */
+  --onboarding-anim-ms: 600ms;
+  --onboarding-anim-ease: cubic-bezier(0.2, 0, 0.8, 1);
+}
+
+/* Message bubbles — the typing bubble above is structurally a real
+   `.message` and already reserves the exact slot the incoming bubble
+   will occupy (same avatar column, same header row, same paddings).
+   So the new message doesn't need to expand the chat window or move
+   far: just a quick, soft fade-up that morphs into place where the
+   dots were. Short duration on the smoothing curve keeps it from
+   feeling laggy after the typing block disappears. */
+/* Mount-time fade-up for every bubble in the wizard chat. We use a
+   keyframe animation (not `@starting-style` + transition) because
+   keyframes fire reliably on every fresh mount across browsers,
+   whereas `@starting-style` requires the browser to paint the
+   starting frame before the transition begins — which some engines
+   skip when the element mounts inside an already-painted parent
+   that's recomputing layout in the same frame, causing the bubble
+   to appear "instantly" instead of gliding in. */
+/* Mount-time fade-up for every bubble in the wizard chat. We also
+   animate `max-height` from 0 → 200px alongside opacity/transform so
+   the bubble GROWS into the stream rather than appearing at full
+   height the moment it mounts. Without the height animation, adding
+   a new bubble instantly enlarges the body and the centered pair
+   snaps to its new center — the "jump" you saw. Growing max-height
+   in lockstep with the fade-in means the body's height changes
+   smoothly across the same duration, so the centering glides
+   instead.
+
+   `overflow: hidden` keeps the bubble's content clipped to its
+   currently-animating max-height. Once the animation finishes the
+   `both` fill mode leaves the bubble at max-height: 200px — well
+   above any expected single-bubble height, so it does not clip real
+   content. */
+/* Slot-grow / max-height entrance animation removed — onboarding bubbles
+   now use the global `.animate-fade` (300ms opacity + translateY fade-in
+   defined in global.css), matching the rest of the app's message chrome.
+   No max-height interpolation means the bubble takes its natural height
+   immediately; the parent stream pads with `gap` so successive bubbles
+   still settle without snapping. */
+
+/* The typing bubble itself eases in on the full wizard cadence so
+   there's a clear "CEO heard me → starting to type" moment. */
+.onboarding-chat .message.message-typing {
+  transition:
+    opacity var(--wizard-duration) var(--wizard-ease),
+    transform var(--wizard-duration) var(--wizard-ease);
+}
+
+/* CEO input card — persistent wrapper, morphs in place. Same curve as
+   the message bubbles so successive cards (Office name → What you do
+   → Short description …) ease in on the same rhythm as the chat
+   transcript above. */
+.onboarding-chat .ceo-card {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+  transition:
+    opacity 520ms var(--wizard-ease),
+    transform 720ms var(--wizard-ease),
+    filter 320ms var(--wizard-ease);
+  will-change: transform, opacity;
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+    filter: blur(4px);
+  }
+}
+/* Browsers without `interpolate-size` ignore the height transition but
+   still honour opacity/translate — fall back to a plain fade-up via
+   keyframe so those users still get a smooth entrance. */
+@supports not (interpolate-size: allow-keywords) {
+  @keyframes onboarding-message-enter {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .onboarding-chat .message.animate-fade,
+  .onboarding-chat .ceo-card {
+    animation: onboarding-message-enter var(--wizard-duration)
+      var(--wizard-ease) both;
+    overflow: visible;
+  }
+}
+
+/* ─── CEO "typing…" motion ───
+   Two-stage sequence, choreographed so the wizard reads as:
+     1. Typing indicator FADES IN softly (it doesn't pop into view).
+     2. Dots dance for the staging window (~1100ms).
+     3. Typing indicator unmounts, and the new message expands the chat
+        in its place using the height transition above.
+
+   The fade-in is a dedicated keyframe (independent of the message
+   transition above, which only fires inside `@supports not (...)` and
+   wouldn't apply on modern browsers). 320ms ease-out so the indicator
+   arrives quickly and decelerates — fast enough that the user sees the
+   intent ("CEO heard me") within a couple of frames, gentle enough not
+   to feel jittery.
+
+   The dots themselves animate on a soft sine wave: lift `translateY
+   -3px` and brighten 0.45 → 1 → 0.45 without ever vanishing. The wave
+   is staggered 180ms per dot so the three dots read as a travelling
+   pulse rather than three blinking dots. */
+@keyframes onboarding-typing-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes onboarding-typing-wave {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* Typing "bubble" is structurally a real `.message`, so the message
+   transition above already handles its enter animation. We only need
+   to tune the inline dots: a soft sine wave that lifts each dot a few
+   pixels and brightens it without ever fully vanishing. The wave is
+   staggered 180ms per dot so the three dots read as a travelling
+   pulse rather than three blinking dots. */
+.onboarding-chat .typing-dot {
+  animation: onboarding-typing-wave 1.6s var(--wizard-ease) infinite;
+  transform-origin: center;
+}
+
+/* ─── CEO bubble in-place dots ↔ text cross-fade ───
+   Both the typing dots and the real message text render at the same
+   time inside `.ceo-text-slot`, stacked in the same grid cell. The
+   `data-pending` attribute on the slot decides which layer is opaque
+   and which is transparent — a CSS opacity transition then cross-
+   fades them in place. The slot's intrinsic height tracks the larger
+   of the two layers (handled by `display: grid` with both layers in
+   row/column 1), so the bubble grows naturally to fit longer text
+   without snapping when the pending flag flips. */
+.onboarding-chat .ceo-text-slot {
+  display: grid;
+  /* Stack both layers into a single grid cell so they overlap. The
+     cell's height becomes the max of either layer — the text drives
+     the slot height once the message is long. */
+}
+.onboarding-chat .ceo-text-layer {
+  grid-area: 1 / 1;
+  transition: opacity 360ms var(--wizard-ease);
+  will-change: opacity;
+}
+.onboarding-chat .ceo-text-slot[data-pending="true"] .ceo-text-dots {
+  opacity: 1;
+}
+.onboarding-chat .ceo-text-slot[data-pending="true"] .ceo-text-content {
+  opacity: 0;
+}
+.onboarding-chat .ceo-text-slot[data-pending="false"] .ceo-text-dots {
+  opacity: 0;
+}
+/* The content layer itself is always opaque — the reveal happens at
+   the per-word level (see `.ceo-word` below). Otherwise we'd cross-
+   fade the whole text block at once, defeating the typewriter effect. */
+.onboarding-chat .ceo-text-slot .ceo-text-content {
+  opacity: 1;
+}
+
+/* Per-word opacity reveal. Each word starts invisible and fades in
+   when the bubble flips to revealed. The stagger delay is set inline
+   on each span (incrementing by token index) so the words appear in
+   reading order, like the CEO is typing the message in front of you.
+   240ms is the per-word fade duration — slow enough to read as a
+   conscious reveal, fast enough that even a 10-word sentence finishes
+   under a second. */
+.onboarding-chat .ceo-word {
+  opacity: 0;
+  transition: opacity 240ms var(--wizard-ease);
+}
+.onboarding-chat .ceo-text-slot[data-pending="false"] .ceo-word {
+  opacity: 1;
+}
+
+.onboarding-chat .message-typing .typing-dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.onboarding-chat .message-typing .typing-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+.onboarding-chat .typing-dot:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.onboarding-chat .typing-dot:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-chat .message.animate-fade,
+  .onboarding-chat .ceo-card {
+    animation-duration: 200ms;
+    animation-timing-function: ease;
+  }
+  .onboarding-chat .onboarding-thinking-dot {
+    animation: none;
+    opacity: 0.65;
+  }
+}
+
+/* Thinking-dot base style — the reduced-motion block above references
+   `.onboarding-thinking-dot`; without a base rule the dots have no
+   width/height/background so they render invisible. */
+.onboarding-chat .onboarding-thinking-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-tertiary, currentColor);
+  opacity: 0.45;
+  animation: onboarding-thinking-pulse 1100ms ease-in-out infinite;
+}
+.onboarding-chat .onboarding-thinking-dot:nth-child(2) {
+  animation-delay: 140ms;
+}
+.onboarding-chat .onboarding-thinking-dot:nth-child(3) {
+  animation-delay: 280ms;
+}
+@keyframes onboarding-thinking-pulse {
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.9;
+  }
+}
+
+/* Footer card chrome — wraps the InterviewBar / CeoCardSection and
+   drives the blur-on-lock muted state via [data-input-locked] on the
+   chat root. */
+.onboarding-card-shell {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Same curve as the inner .ceo-card transition so both layers fade
+     in/out together as the muted state toggles. */
+  transition:
+    filter 360ms cubic-bezier(0.2, 0, 0.2, 1),
+    opacity 360ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+.onboarding-chat[data-input-locked="true"] .onboarding-card-shell {
+  /* Muted state for the outer footer shell — blur + dim so the whole
+     footer reads as "waiting" while the CEO is mid-reveal. Interaction
+     is blocked. The transition on the shell above smooths the blur in
+     and out so it doesn't flash. */
+  filter: blur(3px);
+  opacity: 0.6;
+  pointer-events: none;
+  user-select: none;
+}
+.onboarding-card-shell .interview-bar {
+  display: none !important;
+}
+
+/* CEO badge inside the onboarding wizard — the agent's full `role`
+   ("Owns priorities, approvals, and escalation decisions") is too long
+   for a chat-row badge. Replace the visible label with a short "CEO"
+   chip via a CSS content swap; the underlying React tree is unchanged. */
+.onboarding-message-slot .message[data-author-slug="ceo"] .badge.badge-green {
+  font-size: 0;
+  letter-spacing: normal;
+}
+.onboarding-message-slot
+  .message[data-author-slug="ceo"]
+  .badge.badge-green::before {
+  content: "CEO";
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ─── Unified bubble + thinking overlay ──────────────────────────────────
+   Both CEO and human render through `MessageBubble`, so chrome (avatar,
+   name, badge, timestamp, padding, hover affordances) is byte-for-byte
+   identical on both sides. The only CEO-specific addition is the
+   thinking overlay layered on the slot while `data-state="thinking"`:
+   CSS hides the real `.message-text` and replaces it with dots in-place,
+   then cross-fades back to the text once the slot flips to revealing.
+   The previous per-word stagger doesn't apply — MessageBubble renders
+   text as markdown, not split spans — so the reveal is a single fade. */
+.onboarding-message-slot {
+  position: relative;
+  /* Entrance: slot grows from 0 to natural height over 500 ms. The
+     `overflow: visible` makes the bubble content paint at its natural
+     position from frame 1, so the surrounding stream shifts down
+     smoothly while the bubble "inflates." 600px is a generous cap
+     that covers any single-bubble height; the `both` fill mode pins
+     it there at the end so subsequent layout doesn't snap back.
+     Anchored at top so it grows downward, not centered. */
+  overflow: visible;
+  transform-origin: top center;
+  animation: onboarding-slot-grow 500ms ease-in-out both;
+}
+/* Backlog (server-replayed) messages render at full size from the
+   start — they were already in the channel before the wizard
+   mounted, so animating them would look like a redundant replay.
+   The `instant` prop on OnboardingMessageSlot writes this class. */
+.onboarding-slot-instant {
+  animation: none;
+}
+@keyframes onboarding-slot-grow {
+  from {
+    max-height: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 600px;
+    opacity: 1;
+  }
+}
+
+/* Thinking state — the dot overlay is rendered conditionally and has no
+   in/out transition: it appears the instant state flips to "thinking"
+   and disappears the instant it leaves. The `.message-text` is kept in
+   the DOM (so its split-into-words spans exist from mount) but visually
+   hidden via visibility so the bubble's footprint doesn't change. */
+.onboarding-message-slot[data-state="thinking"] .message-text,
+.onboarding-message-slot[data-state="thinking"] .message-time,
+.onboarding-message-slot[data-state="thinking"] .message-hover-actions {
+  visibility: hidden;
+}
+
+.onboarding-thinking-overlay {
+  position: absolute;
+  /* `left` and `top` are written by JS to match `.message-text`'s exact
+     position inside MessageBubble's layout. Hardcoded offsets drifted
+     out of alignment whenever MessageBubble's internal padding/grid
+     changed; measuring at runtime is robust to that. */
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+/* Per-word reveal — `.ceo-word` spans are produced by the
+   OnboardingMessageSlot useEffect after MessageBubble mounts. Each span
+   carries its own `transition-delay`, so they fade in one-by-one when
+   the slot flips to revealing/revealed. The .message-text itself does
+   NOT animate; only the individual words do. */
+.onboarding-message-slot .ceo-word {
+  opacity: 0;
+  transition: opacity var(--onboarding-word-fade-ms, 600ms)
+    var(--onboarding-anim-ease, ease);
+}
+.onboarding-message-slot[data-state="revealing"] .ceo-word,
+.onboarding-message-slot[data-state="revealed"] .ceo-word {
+  opacity: 1;
+}
+/* Backlog (instant) messages skip the per-word stagger — they were
+   already there before the wizard mounted, so they should look final. */
+.onboarding-slot-instant .ceo-word {
+  opacity: 1;
+  transition: none;
 }

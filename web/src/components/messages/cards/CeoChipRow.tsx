@@ -41,21 +41,14 @@ export function CeoChipRow({
       firstChipRef.current;
   }
 
-  if (stage === "committed") {
-    const label =
-      committedValue ??
-      payload.options.find((o) => o.id === selected)?.label ??
-      selected ??
-      "";
-    return (
-      <div className="ceo-card ceo-card--committed" role="status">
-        <span className="ceo-card-committed-text">&#10003; {label}</span>
-      </div>
-    );
-  }
+  // Committed state intentionally renders the SAME chip row as
+  // pending/submitting — just disabled. The previous "✓ <label>" chip
+  // was flashing between cards because the sticky-suggestion swap is
+  // near-instant.
+  void committedValue;
 
   const handleSelect = (id: string) => {
-    if (stage === "submitting") return;
+    if (stage !== "pending") return;
     setSelected(id);
     onSubmit(payload.field, id);
   };
@@ -113,14 +106,13 @@ export function CeoChipRow({
             role="option"
             aria-selected={selected === opt.id}
             className={`ceo-chip${selected === opt.id ? " ceo-chip--selected" : ""}`}
-            disabled={stage === "submitting"}
+            disabled={stage !== "pending"}
             onClick={() => handleSelect(opt.id)}
             onKeyDown={(e) => handleKeyDown(e, opt.id, idx)}
           >
-            {stage === "submitting" && selected === opt.id ? (
-              <span className="ceo-card-spinner" aria-hidden="true" />
-            ) : null}
-            {/* Render as text — never innerHTML */}
+            {/* Render as text — never innerHTML. No submitting spinner;
+                the next card swaps in fast enough that a loader reads
+                as flicker. `disabled` prevents double-click. */}
             {opt.label}
           </button>
         ))}

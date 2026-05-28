@@ -24,7 +24,11 @@ import { directChannelSlug, useAppStore } from "../../stores/app";
 import { SkillCompareView } from "../apps/SkillCompareView";
 import { humanEchoForCeoAnswer } from "../onboarding/humanEcho";
 import { useOnboardingDMContext } from "../onboarding/OnboardingDMRoute";
-import type { CardStage, CeoSuggestion } from "../onboarding/types";
+import type {
+  CardStage,
+  CeoSuggestion,
+  OnboardingState,
+} from "../onboarding/types";
 import { SidePanel } from "../ui/SidePanel";
 import { showNotice } from "../ui/Toast";
 import { ApprovalContextView } from "./ApprovalContextView";
@@ -696,32 +700,73 @@ export function CeoCardSection() {
     string | string[] | undefined
   >(undefined);
 
-  // Reset stage when suggestion changes (new question arrived).
-  const suggestionId = pendingSuggestion?.id ?? null;
-  useEffect(() => {
+  // Sticky-last-suggestion: the footer stays populated even during the
+  // brief windows between phases where `pendingSuggestion` from
+  // /onboarding/state is momentarily null (broker has emitted the next
+  // CEO message but hasn't yet enqueued the next suggestion). Without
+  // this, the card would unmount every time the wire goes null and the
+  // user would see an empty footer "regularly invisible from step to
+  // step." We keep rendering the LAST suggestion we saw (in whatever
+  // stage it ended — usually `"committed"`) until a genuinely new
+  // suggestion id arrives, at which point we swap and reset.
+  //
+  // Uses React's documented "reset state during render" pattern
+  // (https://react.dev/learn/you-might-not-need-an-effect#resetting-all-state-when-a-prop-changes):
+  // calling setState during render schedules a synchronous re-render
+  // before the commit, with no useEffect timing gap or ref desync race.
+  const [sticky, setSticky] = useState<CeoSuggestion | null>(
+    pendingSuggestion ?? null,
+  );
+  const stickyId = sticky?.id ?? null;
+  const incomingId = pendingSuggestion?.id ?? null;
+  if (pendingSuggestion && incomingId !== stickyId) {
+    setSticky(pendingSuggestion);
     setStage("pending");
     setCommittedValue(undefined);
-  }, [suggestionId]);
+  }
 
-  if (!pendingSuggestion || stage === "committed") return null;
+  // Render the sticky one — falls back to the active one if we haven't
+  // captured anything yet (first paint before any state has loaded).
+  const cardSuggestion = sticky ?? pendingSuggestion;
+  if (!cardSuggestion) return null;
 
   const submitAnswer = async (field: string, value: unknown) => {
     if (stage === "submitting") return;
-    setStage("submitting");
+
+    // Commit the visual state of the CURRENT card IMMEDIATELY, before
+    // any await. This is the critical ordering: while we're awaiting
+    // /onboarding/answer + /onboarding/transition (which can take 500–
+    // 1500 ms while the broker advances), the 3-second poll from
+    // useOnboardingState can refetch and surface the next phase's
+    // pending_suggestion. The sticky-swap reset (render-phase, above)
+    // then fires and puts `stage` back to "pending" for the NEW card.
+    // If we ran setStage("committed") AFTER the awaits — as the prior
+    // version did — that commit would land on the new sticky and lock
+    // it into a stuck "✓ <old answer>" display under the new question.
+    // By committing first, the commit applies to the OLD sticky, and
+    // any swap during the await cleanly transitions to the new card.
+    setCommittedValue(committedOnboardingValue(value));
+    setStage("committed");
+    // setOnboardingComplete moved AFTER the network resolves (see
+    // post-await block below) so a failed /transition rolls back
+    // cleanly. CodeRabbit #995 finding.
+
     try {
+      // /onboarding/answer + /onboarding/transition both return the full
+      // updated OnboardingState. Capture the LATEST and write it into
+      // the React Query cache so the swap happens deterministically
+      // here rather than via the next 3-second poll tick.
+      let latest: OnboardingState | null = null;
       if (shouldPersistOnboardingAnswer(field)) {
-        await post("/onboarding/answer", { field, value });
+        latest = await post<OnboardingState>("/onboarding/answer", {
+          field,
+          value,
+        });
       }
       // Mirror the human's committed answer into the CEO DM as a chat
-      // bubble. The /messages endpoint persists it the same as any typed
-      // message so a tab reload still shows the transcript. See #978.
-      const echo = humanEchoForCeoAnswer(pendingSuggestion, field, value);
+      // bubble. Detached on purpose — see #978 / #988.
+      const echo = humanEchoForCeoAnswer(cardSuggestion, field, value);
       if (echo !== null) {
-        // Detached: don't await the echo work. The echo is best-effort UI
-        // sugar (mirror the human's answer back in chat); awaiting it
-        // would let a slow/hung /messages call freeze the wizard in
-        // "submitting" even though /onboarding/answer has already
-        // committed the real state. CodeRabbit on PR #988.
         void postMessage(echo, directChannelSlug("ceo"))
           .then(() =>
             queryClient.invalidateQueries({
@@ -729,24 +774,29 @@ export function CeoCardSection() {
             }),
           )
           .catch((echoErr: unknown) => {
-            // The next CEO message will still arrive; the user just loses
-            // the visible mirror of their own answer for that turn.
             console.warn("onboarding: failed to echo human answer", echoErr);
           });
       }
-      await advanceOnboardingAfterAnswer(field, value, phase);
-      // Refresh onboarding state so the next suggestion appears.
-      await queryClient.invalidateQueries({ queryKey: ["onboarding-state"] });
-      setCommittedValue(committedOnboardingValue(value));
-      setStage("committed");
+      const advanced = await advanceOnboardingAfterAnswer(field, value, phase);
+      if (advanced) latest = advanced;
+
+      // Now that the network has resolved successfully, it's safe to
+      // signal onboarding completion. Before this point a failed
+      // transition would have left the app thinking onboarding was
+      // done while the broker disagreed (CodeRabbit finding).
       if (completesOnboarding(field)) {
         setOnboardingComplete(true);
+      }
+      if (latest) {
+        queryClient.setQueryData<OnboardingState>(["onboarding-state"], latest);
       }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to send answer";
       showNotice(message, "error");
+      // Roll back the optimistic commit so the user can retry.
       setStage("pending");
+      setCommittedValue(undefined);
     }
   };
 
@@ -766,11 +816,11 @@ export function CeoCardSection() {
       className="ceo-card-section"
       aria-label="CEO question"
       data-testid="ceo-card-section"
-      data-kind={pendingSuggestion.kind}
-      data-suggestion-id={pendingSuggestion.id}
+      data-kind={cardSuggestion.kind}
+      data-suggestion-id={cardSuggestion.id}
     >
       {renderCeoCard(
-        pendingSuggestion,
+        cardSuggestion,
         stage,
         committedValue,
         submitAnswer,
@@ -825,51 +875,50 @@ async function advanceOnboardingAfterAnswer(
   field: string,
   value: unknown,
   phase: string | undefined,
-) {
+): Promise<OnboardingState | null> {
+  // Each /onboarding/transition response carries the full fresh
+  // OnboardingState. Return the LAST response so submitAnswer can write
+  // it straight into the React Query cache and skip the polling race.
+  const transition = (phaseName: string) =>
+    post<OnboardingState>("/onboarding/transition", { phase: phaseName });
   switch (field) {
     case "company_name":
-      await post("/onboarding/transition", { phase: "identity" });
-      return;
+      return await transition("identity");
     case "description":
-      await post("/onboarding/transition", { phase: "website" });
-      return;
+      return await transition("website");
     case "blueprint_id":
       // Only a real blueprint id routes to "team". Empty string is the
-      // current scratch wire value; the named values are legacy/cached-client
-      // sentinels that the backend also normalizes to scratch.
+      // current scratch wire value; named values like "from-scratch" /
+      // "blank-slate" are legacy/cached-client sentinels normalised to
+      // scratch on the backend. Uses `isScratchBlueprintID` (from #992)
+      // for the semantic check, wrapped in our `transition()` helper so
+      // the returned state flows into setQueryData.
       if (isScratchBlueprintID(value)) {
-        await post("/onboarding/transition", { phase: "seed" });
-        await post("/onboarding/transition", { phase: "bridge" });
-      } else {
-        await post("/onboarding/transition", { phase: "team" });
+        await transition("seed");
+        return await transition("bridge");
       }
-      return;
+      return await transition("team");
     case "picked_agents":
-      await post("/onboarding/transition", { phase: "seed" });
-      await post("/onboarding/transition", { phase: "bridge" });
-      return;
+      await transition("seed");
+      return await transition("bridge");
     case "bridge_choice":
-      await post("/onboarding/transition", { phase: "complete" });
-      return;
+      // #992 collapsed "start an issue" into the same complete path —
+      // the dedicated draft phase was the source of stuck-onboarding
+      // recovery bugs. Always advance to complete here.
+      return await transition("complete");
     case "task_prompt":
-      await post("/onboarding/transition", {
-        phase: "approve",
-      });
-      return;
+      return await transition("approve");
     case "website_url":
       // Same strict trimmed-string guard as blueprint_id — whitespace-only
       // values must NOT route to "scan" (the scanner would fetch nothing).
-      await post("/onboarding/transition", {
-        phase:
-          typeof value === "string" && value.trim() !== ""
-            ? "scan"
-            : "blueprint",
-      });
-      return;
+      return await transition(
+        typeof value === "string" && value.trim() !== "" ? "scan" : "blueprint",
+      );
     default:
       if (phase === "scan" && field === "scan_complete") {
-        await post("/onboarding/transition", { phase: "blueprint" });
+        return await transition("blueprint");
       }
+      return null;
   }
 }
 

@@ -87,22 +87,11 @@ export function CeoExecutionLineup({
     () => new Set(payload.agents.map((a) => a.slug)),
   );
 
-  if (stage === "committed") {
-    const count = accepted.size;
-    return (
-      <div
-        className="ceo-card ceo-card--committed"
-        role="status"
-        data-testid="lineup-committed"
-      >
-        <span className="ceo-card-committed-text">
-          &#10003; {count} {count === 1 ? "agent" : "agents"} added to roster
-        </span>
-      </div>
-    );
-  }
-
-  const isSubmitting = stage === "submitting";
+  // Committed state intentionally renders the SAME lineup view as
+  // pending/submitting — just disabled. The previous "✓ N agents added
+  // to roster" chip was flashing between cards because the sticky-
+  // suggestion swap is near-instant.
+  const isSubmitting = stage !== "pending";
   const selectedCount = accepted.size;
 
   const toggleAgent = (slug: string) => {
@@ -162,12 +151,7 @@ export function CeoExecutionLineup({
           data-testid="lineup-submit"
           aria-label={`Spin up ${selectedCount} ${selectedCount === 1 ? "agent" : "agents"}`}
         >
-          {isSubmitting ? (
-            <span className="ceo-card-spinner" aria-hidden="true" />
-          ) : null}
-          {isSubmitting
-            ? "Spinning up…"
-            : `Spin up ${selectedCount} ${selectedCount === 1 ? "agent" : "agents"}`}
+          {`Spin up ${selectedCount} ${selectedCount === 1 ? "agent" : "agents"}`}
         </button>
       </div>
     </div>

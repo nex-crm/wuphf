@@ -646,7 +646,7 @@ func (b *Broker) StartOnPort(port int) error {
 	// Onboarding: state/progress/complete + deterministic CEO phase machine.
 	// completeFn posts the first task as a human message and seeds the team;
 	// transitionFn emits deterministic CEO onboarding cards into the CEO DM.
-	onboarding.RegisterRoutesWithTransition(mux, b.onboardingCompleteFn, b.ceoOnboardingTransitionFn(), b.packSlug, b.requireAuth, filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki"))
+	onboarding.RegisterRoutesWithTransitionAndReset(mux, b.onboardingCompleteFn, b.ceoOnboardingTransitionFn(), b.ceoOnboardingResetFn(), b.packSlug, b.requireAuth, filepath.Join(config.RuntimeHomeDir(), ".wuphf", "wiki"))
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
 	// After a successful wipe, b.Reset clears live in-memory broker state so the
 	// broker stays up without repersisting stale messages back onto disk.

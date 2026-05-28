@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/onboarding"
 )
 
 // Notification debounce cooldowns. Prevents agent-to-agent feedback
@@ -47,6 +49,38 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 		return
 	}
 	immediate, delayed := l.notificationTargetsForMessage(msg)
+
+	// Onboarding gate: while the deterministic wizard is in progress (phase
+	// set but not "complete"), suppress LLM turns to the CEO agent. The
+	// wizard already drives the conversation via ceo_form_field cards and
+	// the headless CEO subprocess has no awareness of form_answers/phase,
+	// so its conversational replies contradict the wizard ("did you mean
+	// office name = Alex?" right after Alex was accepted as company_name).
+	// Mute the CEO agent until onboarding completes; other agents are
+	// unaffected.
+	// Cheap pre-check: only pay the onboarding.Load() cost if a "ceo"
+	// target is actually in the immediate slice. The notify path is hot;
+	// most messages have no CEO recipient and shouldn't read the
+	// on-disk onboarding state (CodeRabbit finding on #995).
+	hasCEOTarget := false
+	for _, t := range immediate {
+		if t.Slug == "ceo" {
+			hasCEOTarget = true
+			break
+		}
+	}
+	if hasCEOTarget {
+		if s, err := onboarding.Load(); err == nil && s != nil && s.Phase != "" && s.Phase != onboarding.PhaseComplete && !s.Onboarded() {
+			filteredCEO := immediate[:0]
+			for _, t := range immediate {
+				if t.Slug == "ceo" {
+					continue
+				}
+				filteredCEO = append(filteredCEO, t)
+			}
+			immediate = filteredCEO
+		}
+	}
 
 	// Debounce: use shorter cooldown for human/CEO messages, longer for agent-originated
 	// to prevent agent-to-agent feedback loops (devil's advocate finding #3).

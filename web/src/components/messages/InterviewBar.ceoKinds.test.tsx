@@ -115,7 +115,7 @@ describe("CeoFormField", () => {
     expect(screen.getByText("Office name?")).toBeInTheDocument();
   });
 
-  it("disables input and shows spinner in submitting state", () => {
+  it("disables input in submitting state (no spinner — see PR #995)", () => {
     render(
       <CeoFormField
         payload={formPayload}
@@ -124,10 +124,12 @@ describe("CeoFormField", () => {
       />,
     );
     expect(screen.getByRole("textbox")).toBeDisabled();
-    expect(screen.getByText(/Saving/i)).toBeInTheDocument();
+    // The "Saving…" spinner swap was removed; the card stays in input
+    // shape, just disabled, so the user sees what they submitted.
+    expect(screen.queryByText(/Saving/i)).not.toBeInTheDocument();
   });
 
-  it("renders committed line with check mark in committed state", () => {
+  it("keeps input visible + disabled in committed state (no ✓ swap)", () => {
     render(
       <CeoFormField
         payload={formPayload}
@@ -136,9 +138,12 @@ describe("CeoFormField", () => {
         onSubmit={vi.fn()}
       />,
     );
-    expect(screen.getByRole("status")).toHaveTextContent("✓");
-    expect(screen.getByRole("status")).toHaveTextContent("Acme Billing");
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    // The "✓ <answer>" confirmation chip was removed in PR #995 because
+    // it flashed briefly between cards (sticky-suggestion swap is fast).
+    // Card stays in its input view, just disabled.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeDisabled();
   });
 
   it("calls onSubmit with field and value on Enter", () => {
@@ -248,7 +253,7 @@ describe("CeoChipRow", () => {
     }
   });
 
-  it("renders committed state as one-line with check mark", () => {
+  it("keeps chips visible + disabled in committed state (no ✓ swap)", () => {
     render(
       <CeoChipRow
         payload={chipPayload}
@@ -257,8 +262,13 @@ describe("CeoChipRow", () => {
         onSubmit={vi.fn()}
       />,
     );
-    expect(screen.getByRole("status")).toHaveTextContent("✓");
-    expect(screen.getByRole("status")).toHaveTextContent("Content Ops");
+    // Committed-state confirmation chip was removed in PR #995.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    for (const opt of options) {
+      expect(opt).toBeDisabled();
+    }
   });
 
   it("XSS: chip label renders as text not HTML", () => {
@@ -350,7 +360,7 @@ describe("CeoChecklist", () => {
     }
   });
 
-  it("renders committed state as one-line with check mark", () => {
+  it("keeps checklist visible + disabled in committed state (no ✓ swap)", () => {
     render(
       <CeoChecklist
         payload={checklistPayload}
@@ -359,9 +369,13 @@ describe("CeoChecklist", () => {
         onSubmit={vi.fn()}
       />,
     );
-    expect(screen.getByRole("status")).toHaveTextContent("✓");
-    expect(screen.getByRole("status")).toHaveTextContent("Writer");
-    expect(screen.getByRole("status")).toHaveTextContent("Editor");
+    // Committed-state confirmation chip was removed in PR #995.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes.length).toBeGreaterThan(0);
+    for (const cb of checkboxes) {
+      expect(cb).toBeDisabled();
+    }
   });
 
   it("XSS: checklist item label renders as text not HTML", () => {
@@ -559,7 +573,7 @@ describe("CeoCardSection", () => {
 
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "Acme Inc" } });
-    fireEvent.click(screen.getByText("Submit"));
+    fireEvent.click(screen.getByRole("button", { name: /^Submit/ }));
 
     await waitFor(() =>
       expect(postMock).toHaveBeenCalledWith("/onboarding/answer", {
@@ -571,10 +585,13 @@ describe("CeoCardSection", () => {
       phase: "identity",
     });
 
-    // After commit the section disappears (stage="committed" hides it)
+    // PR #995: committed-state no longer unmounts the card — it stays
+    // mounted (and disabled) so the user sees what they just submitted.
+    // The next suggestion swap is what actually replaces the content.
     await waitFor(() =>
-      expect(screen.queryByTestId("ceo-card-section")).not.toBeInTheDocument(),
+      expect(screen.getByTestId("ceo-card-section")).toBeInTheDocument(),
     );
+    expect(screen.getByRole("textbox")).toBeDisabled();
   });
 
   it("advances from blueprint pick to the team trim phase", async () => {
@@ -723,7 +740,7 @@ describe("CeoCardSection", () => {
         target: { value: "Build Stripe webhooks" },
       },
     );
-    fireEvent.click(screen.getByText("Submit"));
+    fireEvent.click(screen.getByRole("button", { name: /^Submit/ }));
 
     await waitFor(() =>
       expect(postMock).toHaveBeenCalledWith("/onboarding/answer", {
@@ -818,7 +835,7 @@ describe("CeoCardSection", () => {
     fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "Acme Test QA" },
     });
-    fireEvent.click(screen.getByText("Submit"));
+    fireEvent.click(screen.getByRole("button", { name: /^Submit/ }));
 
     await waitFor(() =>
       expect(postMessageMock).toHaveBeenCalledWith(
@@ -884,7 +901,7 @@ describe("CeoCardSection", () => {
     fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "Acme" },
     });
-    fireEvent.click(screen.getByText("Submit"));
+    fireEvent.click(screen.getByRole("button", { name: /^Submit/ }));
 
     // The transition still fires even though the echo POST failed.
     await waitFor(() =>
@@ -912,7 +929,7 @@ describe("CeoCardSection", () => {
     fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "Acme" },
     });
-    fireEvent.click(screen.getByText("Submit"));
+    fireEvent.click(screen.getByRole("button", { name: /^Submit/ }));
 
     await waitFor(() =>
       expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
