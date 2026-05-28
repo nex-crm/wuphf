@@ -441,11 +441,11 @@ func (s *SlackTransport) handleBlockActions(ctx context.Context, payload slackBl
 	view := "overview"
 	for _, action := range payload.Actions {
 		switch action.ActionID {
-		case "wuphf_home_view":
+		case "wuphf_home_view_overview", "wuphf_home_view_issues", "wuphf_home_view_wiki", "wuphf_home_view_channels", "wuphf_home_view_agents", "wuphf_home_view_settings":
 			view = firstNonEmpty(action.Value, "overview")
 		case "wuphf_home_refresh":
 			view = firstNonEmpty(action.Value, "overview")
-		case "wuphf_home_wiki_query":
+		case "wuphf_home_wiki_query_decisions", "wuphf_home_wiki_query_team", "wuphf_home_wiki_query_recent":
 			view = "wiki:" + firstNonEmpty(action.Value, "project decisions")
 		case "wuphf_home_toggle_focus":
 			if s.Broker != nil {
@@ -916,12 +916,12 @@ func slackHomeNavBlock(current string) map[string]any {
 		"type":     "actions",
 		"block_id": "wuphf_home_nav",
 		"elements": []map[string]any{
-			slackButton("Overview", "wuphf_home_view", "overview", selectedSlackButtonStyle(current == "overview")),
-			slackButton("Issues", "wuphf_home_view", "issues", selectedSlackButtonStyle(current == "issues")),
-			slackButton("Wiki", "wuphf_home_view", "wiki", selectedSlackButtonStyle(strings.HasPrefix(current, "wiki"))),
-			slackButton("Channels", "wuphf_home_view", "channels", selectedSlackButtonStyle(current == "channels")),
-			slackButton("Agents", "wuphf_home_view", "agents", selectedSlackButtonStyle(current == "agents")),
-			slackButton("Settings", "wuphf_home_view", "settings", selectedSlackButtonStyle(current == "settings")),
+			slackButton("Overview", "wuphf_home_view_overview", "overview", selectedSlackButtonStyle(current == "overview")),
+			slackButton("Issues", "wuphf_home_view_issues", "issues", selectedSlackButtonStyle(current == "issues")),
+			slackButton("Wiki", "wuphf_home_view_wiki", "wiki", selectedSlackButtonStyle(strings.HasPrefix(current, "wiki"))),
+			slackButton("Channels", "wuphf_home_view_channels", "channels", selectedSlackButtonStyle(current == "channels")),
+			slackButton("Agents", "wuphf_home_view_agents", "agents", selectedSlackButtonStyle(current == "agents")),
+			slackButton("Settings", "wuphf_home_view_settings", "settings", selectedSlackButtonStyle(current == "settings")),
 			slackButton("Refresh", "wuphf_home_refresh", current, ""),
 		},
 	}
@@ -1003,9 +1003,9 @@ func (s *SlackTransport) slackWikiHomeBlocks(query string) []map[string]any {
 		"type":     "actions",
 		"block_id": "wuphf_home_wiki_queries",
 		"elements": []map[string]any{
-			slackButton("Decisions", "wuphf_home_wiki_query", "project decisions", "primary"),
-			slackButton("Team context", "wuphf_home_wiki_query", "team context", ""),
-			slackButton("Recent work", "wuphf_home_wiki_query", "recent work", ""),
+			slackButton("Decisions", "wuphf_home_wiki_query_decisions", "project decisions", "primary"),
+			slackButton("Team context", "wuphf_home_wiki_query_team", "team context", ""),
+			slackButton("Recent work", "wuphf_home_wiki_query_recent", "recent work", ""),
 		},
 	})
 	if s.Broker == nil || s.Broker.WikiIndex() == nil {
