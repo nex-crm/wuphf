@@ -184,7 +184,7 @@ func (s *SkillSynthesizer) runPass(ctx context.Context, trigger string, start ti
 		// stageBWikiContextCap bytes to keep prompt size bounded.
 		wikiContext := buildStageBWikiContext(wikiRoot, cand.RelatedWikiPaths, stageBWikiContextCap)
 
-		fm, body, synthErr := s.provider.SynthesizeSkill(ctx, cand, wikiContext)
+		decision, synthErr := s.provider.SynthesizeSkill(ctx, cand, wikiContext)
 		if synthErr != nil {
 			res.Errors = append(res.Errors, SynthError{
 				CandidateName: cand.SuggestedName,
@@ -192,6 +192,8 @@ func (s *SkillSynthesizer) runPass(ctx context.Context, trigger string, start ti
 			})
 			continue
 		}
+		fm := decision.Frontmatter
+		body := decision.Body
 		if strings.TrimSpace(fm.Name) == "" {
 			if strings.TrimSpace(body) == "" {
 				continue
@@ -201,6 +203,34 @@ func (s *SkillSynthesizer) runPass(ctx context.Context, trigger string, start ti
 				Reason:        "synth: empty name from llm",
 			})
 			continue
+		}
+
+		// --- Enhance / rename path ---
+		// When the LLM chose to enhance an existing skill rather than mint
+		// a new one, route the response through the existing enhance funnel
+		// (and rename helper, when applicable) instead of the new-skill
+		// write path. This is the load-bearing piece of "prefer enhance
+		// over new": the LLM votes for it directly rather than relying on
+		// post-hoc semantic dedup catching near-duplicates after the fact.
+		if decision.Enhance != "" {
+			applied, enhErr := s.routeEnhanceDecision(decision, cand)
+			if enhErr != nil {
+				res.Errors = append(res.Errors, SynthError{
+					CandidateName: cand.SuggestedName,
+					Reason:        "enhance: " + enhErr.Error(),
+				})
+				continue
+			}
+			if applied {
+				res.Deduped++
+				if cand.Source == SourceSelfHealResolved {
+					atomic.AddInt64(&s.broker.skillCompileMetrics.SelfHealSkillsSynthesized, 1)
+				}
+				continue
+			}
+			// routeEnhanceDecision returning (false, nil) means the
+			// referenced skill vanished — fall through and treat as a
+			// fresh proposal under the LLM-supplied name.
 		}
 
 		// --- Pre-write dedup ---
@@ -418,4 +448,96 @@ func stageBSynthBudgetFromEnv() int {
 // avoids exposing the raw counter.
 func (b *Broker) stageBProposalsTotalLoad() int64 {
 	return atomic.LoadInt64(&b.skillCompileMetrics.StageBProposalsTotal)
+}
+
+// routeEnhanceDecision applies an LLM-emitted enhance (or enhance + rename)
+// decision to the existing skill catalog. It returns:
+//
+//   - (true, nil) when the existing skill was updated in place (enhance
+//     or enhance + rename succeeded).
+//   - (false, nil) when the referenced "enhance" skill does not exist (or
+//     was archived). Caller treats this as a miss and falls through to the
+//     new-skill write path under the LLM-supplied name.
+//   - (false, err) on a hard write failure that should surface as an error
+//     for the candidate.
+//
+// All wiki + broker mutation goes through the existing
+// enhanceSkillLocked / renameAndEnhanceSkillLocked helpers so the
+// deadlock-safe unlock/relock pattern is preserved.
+func (s *SkillSynthesizer) routeEnhanceDecision(decision StageBSynthDecision, cand SkillCandidate) (bool, error) {
+	enhance := strings.TrimSpace(decision.Enhance)
+	if enhance == "" {
+		return false, nil
+	}
+	renameTo := strings.TrimSpace(decision.RenameTo)
+	enhancementBody := strings.TrimSpace(decision.Body)
+	if enhancementBody == "" {
+		return false, errors.New("empty enhancement body")
+	}
+	description := strings.TrimSpace(decision.Frontmatter.Description)
+
+	s.broker.mu.Lock()
+	defer s.broker.mu.Unlock()
+
+	existing := s.broker.findSkillByNameLocked(enhance)
+	if existing == nil {
+		slog.Info("stage_b_synth_enhance_target_missing",
+			"source", string(cand.Source),
+			"enhance", enhance,
+			"rename_to", renameTo,
+		)
+		return false, nil
+	}
+
+	// Rename + enhance: the LLM signals the existing skill's scope has
+	// broadened (e.g. pitch-deck-saas → pitch-deck-creation). Route to
+	// the rename helper, which updates the record in place and leaves a
+	// redirect stub at the old path.
+	if renameTo != "" && renameTo != enhance {
+		if conflict := s.broker.findSkillByNameLocked(renameTo); conflict != nil {
+			// The broader slug is already taken — fall back to a plain
+			// enhance of the existing skill rather than clobbering a
+			// distinct sibling.
+			slog.Warn("stage_b_synth_rename_target_taken",
+				"source", string(cand.Source),
+				"enhance", enhance,
+				"rename_to", renameTo,
+				"fallback", "enhance-only",
+			)
+			renameTo = ""
+		}
+	}
+
+	if renameTo != "" && renameTo != enhance {
+		_, err := s.broker.renameAndEnhanceSkillLocked(enhance, renameTo, enhancementBody, description)
+		if err != nil {
+			return false, fmt.Errorf("rename+enhance %q → %q: %w", enhance, renameTo, err)
+		}
+		atomic.AddInt64(&s.broker.skillCompileMetrics.SkillEnhancementsTotal, 1)
+		slog.Info("stage_b_synth_renamed_and_enhanced",
+			"source", string(cand.Source),
+			"from", enhance,
+			"to", renameTo,
+		)
+		return true, nil
+	}
+
+	// Plain enhance. Use the existing helper, which performs the
+	// deadlock-safe wiki write, mergeSkillContent, and broker record
+	// update. We pass the candidate slug so the existing skill's
+	// related_skills list gains a backlink for provenance.
+	candSlug := skillSlug(strings.TrimSpace(cand.SuggestedName))
+	if candSlug == "" {
+		candSlug = skillSlug(decision.Frontmatter.Name)
+	}
+	_, err := s.broker.enhanceSkillLocked(existing.Name, enhancementBody, description, candSlug)
+	if err != nil {
+		return false, fmt.Errorf("enhance %q: %w", existing.Name, err)
+	}
+	atomic.AddInt64(&s.broker.skillCompileMetrics.SkillEnhancementsTotal, 1)
+	slog.Info("stage_b_synth_enhanced",
+		"source", string(cand.Source),
+		"target", existing.Name,
+	)
+	return true, nil
 }

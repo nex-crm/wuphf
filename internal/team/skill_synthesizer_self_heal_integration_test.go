@@ -164,7 +164,10 @@ func TestSynthesizer_SelfHealEndToEnd_StageBProposalsTotalIncrements(t *testing.
 		UpdatedAt:  now.Format(time.RFC3339),
 	})
 
-	reply := `{"is_skill": true, "name": "handle-capability-gap-relay", "description": "when blocked because the relay is missing, discover and add it.", "body": "## When this fires\nA capability_gap blocks deploy.\n\n## Steps\n1. Discover.\n2. Add.\n\n## Source incident\ntask-303\n"}`
+	// Body has 3 enumerated steps and >=400 chars so it clears the depth
+	// gate (stageBSynthNewSkillMinBodyLen / stageBSynthNewSkillMinSteps)
+	// that the deliberate-skill-generation work added to validateStageBSynthResponse.
+	reply := `{"is_skill": true, "name": "handle-capability-gap-relay", "description": "when blocked because the relay is missing, discover and add it.", "body": "## When this fires\nA capability_gap blocks deploy because a needed relay is not registered for this workspace.\n\n## Steps\n1. Run /capabilities discover to enumerate the missing relay handle for the failing tool call.\n2. Add the missing relay through the workspace integrations panel so future invocations find it.\n3. Verify the deploy unblocks by retrying the original tool call end-to-end.\n\n## Source incident\n- task-303 — capability gap on prod deploy relay.\n"}`
 	var calls atomic.Int64
 	srv := httptest.NewServer(fakeAnthropicHandler(t, &calls, reply))
 	defer srv.Close()

@@ -47,7 +47,34 @@ var embeddedSelfHealSkillCreator string
 // LLM to synthesize a skill from a SkillCandidate. Defined where it is
 // consumed per the "accept interfaces, return structs" idiom.
 type stageBLLMProvider interface {
-	SynthesizeSkill(ctx context.Context, candidate SkillCandidate, wikiContext string) (SkillFrontmatter, string, error)
+	SynthesizeSkill(ctx context.Context, candidate SkillCandidate, wikiContext string) (StageBSynthDecision, error)
+}
+
+// StageBSynthDecision is the full output of one Stage B synthesis call. It
+// carries the synthesized frontmatter + body plus optional enhance / rename
+// hints the LLM emits when the candidate maps onto an existing skill.
+//
+// The "prefer enhance over new" path runs whenever Enhance is non-empty:
+// the synthesizer updates the existing skill rather than minting a fresh
+// one. When RenameTo is also set, the existing skill is also renamed to
+// the broader slug (the skill the agents have been writing about has
+// outgrown its original name).
+type StageBSynthDecision struct {
+	// Frontmatter and Body are the Anthropic-shaped skill output. For an
+	// Enhance response, Body is a BOUNDED diff containing only the new
+	// material — not a full rewrite — so the existing skill's invariants
+	// survive merging.
+	Frontmatter SkillFrontmatter
+	Body        string
+
+	// Enhance is the slug of an existing skill the candidate should
+	// enhance rather than create anew. Empty for new-skill responses.
+	Enhance string
+
+	// RenameTo is the new (broader) slug an existing skill should be
+	// renamed to as part of the enhance. Only meaningful when Enhance is
+	// also set. Empty otherwise.
+	RenameTo string
 }
 
 // defaultStageBLLMProvider implements stageBLLMProvider using a live HTTP
@@ -101,8 +128,31 @@ const (
 	// malicious model from emitting megabytes that propagate through the
 	// guard scan and the wiki write. 32KiB is comfortably above legitimate
 	// skill bodies (the cohort today averages ~2KB) while small enough that
-	// downstream string ops stay cheap.
+	// downstream string ops stay cheap. The compactness gate (~6KB) further
+	// nudges the LLM toward high-signal output for new skills; the absolute
+	// 32KiB ceiling remains the hard backstop against runaway responses.
 	stageBSynthMaxBodyLen = 32 * 1024
+
+	// stageBSynthCompactnessSoftLimit is the SoftLimit warned about in the
+	// prompt — bodies over ~6KB are accepted but logged so the team can see
+	// when the LLM is bloating skills. SkillOpt's median final skill is
+	// ~920 tokens (~5-6KB), and length-as-effort is a known failure mode.
+	stageBSynthCompactnessSoftLimit = 6 * 1024
+
+	// stageBSynthNewSkillMinBodyLen is the depth floor for NEW skill bodies.
+	// Below this, the skill is almost always shallow — a few lines that
+	// could have lived in prose. Enhance bodies are exempt because they
+	// are bounded diffs that ride on top of the existing body. The gbrain
+	// "skillify" bar is roughly 20 lines of logic; ~400 bytes is a tight
+	// proxy that catches the worst noise without false-rejecting legitimate
+	// short skills.
+	stageBSynthNewSkillMinBodyLen = 400
+
+	// stageBSynthNewSkillMinSteps is the minimum number of enumerated
+	// steps a new skill body must carry. Combined with the body-length
+	// floor this enforces the "is there real procedure here?" gate the
+	// prompt asks the LLM to apply.
+	stageBSynthNewSkillMinSteps = 3
 
 	stageBSynthDefaultTimeout = 30 * time.Second
 )
@@ -119,16 +169,17 @@ func NewDefaultStageBLLMProvider(b *Broker) *defaultStageBLLMProvider {
 
 // SynthesizeSkill is the canonical entry point. It picks the system prompt
 // based on candidate source, builds the user prompt, calls the LLM, and
-// decodes the JSON response into a SkillFrontmatter + body. Self-heal
+// decodes the JSON response into a StageBSynthDecision. Self-heal
 // candidates get extra sanity checks (handle- prefix, body heading,
-// description bounds).
-func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand SkillCandidate, wikiContext string) (SkillFrontmatter, string, error) {
+// description bounds). New (non-enhance) skill responses must additionally
+// clear the depth gate so the team only accrues high-signal skills.
+func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand SkillCandidate, wikiContext string) (StageBSynthDecision, error) {
 	systemPrompt, err := p.systemPromptFor(cand.Source)
 	if err != nil {
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: load system prompt: %w", err)
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: load system prompt: %w", err)
 	}
 	if ctx.Err() != nil {
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: context: %w", ctx.Err())
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: context: %w", ctx.Err())
 	}
 
 	// Build existing-skills summary so the LLM can self-deduplicate.
@@ -144,12 +195,12 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 	rawResp, callErr := p.callLLM(ctx, systemPrompt, userPrompt)
 	if callErr != nil {
 		if errors.Is(callErr, errStageBLLMDisabled) {
-			return SkillFrontmatter{}, "", nil
+			return StageBSynthDecision{}, nil
 		}
 		if cand.Source == SourceSelfHealResolved {
 			atomic.AddInt64(&p.broker.skillCompileMetrics.SelfHealLLMRejections, 1)
 		}
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: llm call: %w", callErr)
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: llm call: %w", callErr)
 	}
 
 	parsed, parseErr := parseStageBSynthResponse(rawResp)
@@ -161,7 +212,7 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 			"source", string(cand.Source),
 			"err", parseErr,
 		)
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: parse response: %w", parseErr)
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: parse response: %w", parseErr)
 	}
 
 	if !parsed.IsSkill {
@@ -172,13 +223,14 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 			"source", string(cand.Source),
 			"reason", parsed.Reason,
 		)
-		return SkillFrontmatter{}, "", errors.New("synth: candidate rejected by LLM as not-a-skill")
+		return StageBSynthDecision{}, errors.New("synth: candidate rejected by LLM as not-a-skill")
 	}
 
 	// Sanity-check the LLM response. Self-heal candidates have stricter
 	// shape requirements (handle- prefix, body heading) than the generic
 	// notebook-cluster candidates so the resulting skill matches the
-	// "when blocked by X, do Y" framing the prompt asks for.
+	// "when blocked by X, do Y" framing the prompt asks for. New (non-
+	// enhance) skill responses must additionally clear the depth gate.
 	if err := validateStageBSynthResponse(cand.Source, parsed); err != nil {
 		if cand.Source == SourceSelfHealResolved {
 			atomic.AddInt64(&p.broker.skillCompileMetrics.SelfHealLLMRejections, 1)
@@ -188,7 +240,16 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 			"name", parsed.Name,
 			"reason", err.Error(),
 		)
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: sanity check: %w", err)
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: sanity check: %w", err)
+	}
+
+	if len(parsed.Body) > stageBSynthCompactnessSoftLimit {
+		slog.Warn("stage_b_synth_body_above_compactness_soft_limit",
+			"source", string(cand.Source),
+			"name", parsed.Name,
+			"body_bytes", len(parsed.Body),
+			"soft_limit_bytes", stageBSynthCompactnessSoftLimit,
+		)
 	}
 
 	fm := SkillFrontmatter{
@@ -200,7 +261,12 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 	// Carry the source signal forward in metadata so consumers can branch
 	// on origin without re-parsing the body.
 	fm.Metadata.Wuphf.SourceSignals = append(fm.Metadata.Wuphf.SourceSignals, sourceSignalsFor(cand)...)
-	return fm, parsed.Body, nil
+	return StageBSynthDecision{
+		Frontmatter: fm,
+		Body:        parsed.Body,
+		Enhance:     parsed.Enhance,
+		RenameTo:    parsed.RenameTo,
+	}, nil
 }
 
 // systemPromptFor returns the system prompt for the given candidate source.
@@ -607,12 +673,18 @@ func callOpenAI(ctx context.Context, client *http.Client, key, systemPrompt, use
 // returns. The fields are nullable in the wire format (Reason is only
 // meaningful when IsSkill=false); we keep the in-memory shape strict so the
 // validator can rely on present-but-empty == invalid.
+//
+// Enhance and RenameTo carry the "prefer enhance over new" hint: the LLM
+// picks an existing skill slug to enhance (instead of minting a new one),
+// optionally renaming it when the scope has broadened.
 type stageBSynthResponse struct {
 	IsSkill     bool
 	Name        string
 	Description string
 	Body        string
 	Reason      string
+	Enhance     string
+	RenameTo    string
 }
 
 // parseStageBSynthResponse decodes a model response into the structured
@@ -630,6 +702,8 @@ func parseStageBSynthResponse(raw string) (stageBSynthResponse, error) {
 		Description string `json:"description"`
 		Body        string `json:"body"`
 		Reason      string `json:"reason"`
+		Enhance     string `json:"enhance"`
+		RenameTo    string `json:"rename_to"`
 	}
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
 		return stageBSynthResponse{}, fmt.Errorf("decode json: %w", err)
@@ -641,6 +715,8 @@ func parseStageBSynthResponse(raw string) (stageBSynthResponse, error) {
 		Description: parsed.Description,
 		Body:        parsed.Body,
 		Reason:      parsed.Reason,
+		Enhance:     strings.TrimSpace(parsed.Enhance),
+		RenameTo:    strings.TrimSpace(parsed.RenameTo),
 	}, nil
 }
 
@@ -667,6 +743,20 @@ func stripJSONNoise(raw string) string {
 // must match the canonical slug shape (with handle- prefix for self-heal
 // sources), description must fall in [10, 200] chars, and the body must
 // carry at least one of the expected section headings.
+//
+// Behaviour differs between three response shapes:
+//
+//   - NEW skill (Enhance == ""): full validation, including the depth gate
+//     (min body length + min step count) so the team only accrues high-signal
+//     skills. This is the noisy path the deliberate-skill-generation work is
+//     gating against.
+//   - ENHANCE (Enhance != ""): the response is a BOUNDED diff that rides on
+//     top of an existing skill body. We validate the slug + description but
+//     skip the heading and depth requirements — those live on the existing
+//     skill, not on the diff.
+//   - RENAME + ENHANCE (Enhance != "" && RenameTo != ""): same as ENHANCE,
+//     plus we validate the rename target slug shape and require it to
+//     differ from the existing slug (otherwise it's a no-op rename).
 func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynthResponse) error {
 	name := strings.TrimSpace(parsed.Name)
 	if name == "" {
@@ -698,6 +788,34 @@ func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynth
 		return fmt.Errorf("body too long (%d > %d bytes)", len(body), stageBSynthMaxBodyLen)
 	}
 
+	enhance := strings.TrimSpace(parsed.Enhance)
+	renameTo := strings.TrimSpace(parsed.RenameTo)
+
+	if enhance != "" {
+		// Enhance / rename path. Validate the slug shapes and that the
+		// caller-supplied name lines up with one of the slugs (the
+		// existing skill for plain enhance, the new slug for rename).
+		if !stageBGenericNameRegex.MatchString(enhance) {
+			return fmt.Errorf("enhance slug %q must match ^[a-z0-9][a-z0-9-]*$", enhance)
+		}
+		if renameTo != "" {
+			if !stageBGenericNameRegex.MatchString(renameTo) {
+				return fmt.Errorf("rename_to slug %q must match ^[a-z0-9][a-z0-9-]*$", renameTo)
+			}
+			if renameTo == enhance {
+				return fmt.Errorf("rename_to %q equals enhance %q (no-op rename)", renameTo, enhance)
+			}
+			if name != renameTo {
+				return fmt.Errorf("name %q must equal rename_to %q for rename responses", name, renameTo)
+			}
+		} else if name != enhance {
+			return fmt.Errorf("name %q must equal enhance %q for enhance responses", name, enhance)
+		}
+		// Enhance bodies are bounded diffs — no heading or depth gate.
+		return nil
+	}
+
+	// --- New-skill path: full heading + depth validation ---
 	if source == SourceSelfHealResolved {
 		// Self-heal: the prompt requires BOTH "## When this fires" and
 		// "## Steps". Enforce both so a runaway model can't pass with
@@ -706,6 +824,9 @@ func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynth
 			if !strings.Contains(body, m) {
 				return fmt.Errorf("body missing required self-heal heading %q", m)
 			}
+		}
+		if err := enforceDepthGate(body); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -720,7 +841,63 @@ func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynth
 	if !hasMarker {
 		return fmt.Errorf("body missing required heading (one of %v)", stageBSynthGenericHeadingMarkers)
 	}
+	if err := enforceDepthGate(body); err != nil {
+		return err
+	}
 	return nil
+}
+
+// enforceDepthGate rejects new-skill bodies that are too shallow to be
+// worth codifying. Applied only to NEW skill responses — enhance / rename
+// bodies are bounded diffs and ride on top of an existing skill's depth.
+//
+// The gate has two components:
+//
+//   - Minimum body length (stageBSynthNewSkillMinBodyLen). Catches the
+//     "two-line how-to" shape that's almost always prose-disguised-as-skill.
+//   - Minimum enumerated step count (stageBSynthNewSkillMinSteps).
+//     Counts numbered ("1.", "2.", ...) or bulleted ("- ", "* ") lines.
+//     A skill without 3+ steps almost never has the procedural substance
+//     the gbrain "skillify" bar asks for.
+func enforceDepthGate(body string) error {
+	trimmed := strings.TrimSpace(body)
+	if len(trimmed) < stageBSynthNewSkillMinBodyLen {
+		return fmt.Errorf("body too shallow (%d < %d bytes — new skills need substantive procedure, not a snippet)",
+			len(trimmed), stageBSynthNewSkillMinBodyLen)
+	}
+	if steps := countEnumeratedSteps(body); steps < stageBSynthNewSkillMinSteps {
+		return fmt.Errorf("body has %d enumerated steps, need at least %d for a new skill",
+			steps, stageBSynthNewSkillMinSteps)
+	}
+	return nil
+}
+
+// countEnumeratedSteps counts lines that look like step entries: a leading
+// "1." / "2." style number, a "- " bullet, or a "* " bullet. We tolerate
+// up to two leading spaces of indentation so nested lists inside Steps
+// blocks still count.
+func countEnumeratedSteps(body string) int {
+	n := 0
+	for _, line := range strings.Split(body, "\n") {
+		trim := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(trim, "- ") || strings.HasPrefix(trim, "* ") {
+			n++
+			continue
+		}
+		// Numbered: "1." through "999." — we only need to recognise the
+		// shape, not parse the number.
+		if len(trim) >= 2 && trim[0] >= '0' && trim[0] <= '9' {
+			rest := trim[1:]
+			// Allow up to two more digits.
+			for i := 0; i < 2 && len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9'; i++ {
+				rest = rest[1:]
+			}
+			if strings.HasPrefix(rest, ". ") || strings.HasPrefix(rest, ".\t") {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // sourceSignalsFor renders a small slice of provenance markers the

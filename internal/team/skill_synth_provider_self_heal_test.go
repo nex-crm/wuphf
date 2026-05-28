@@ -348,15 +348,19 @@ func TestBuildSelfHealSynthUserPrompt_AgentInsideEnvelope(t *testing.T) {
 
 func TestSynthesizeSkill_SelfHealCandidate_LLMReturnsValidSkill(t *testing.T) {
 	b := newTestBroker(t)
-	reply := `{"is_skill": true, "name": "handle-capability-gap-deploy", "description": "when blocked because a deploy capability is missing, run discovery and add the missing relay.", "body": "## When this fires\nThe agent reports a capability_gap blocking deploy.\n\n## Steps\n1. Run /capabilities discover.\n2. Add the missing relay.\n\n## Source incident\ntask-77\n"}`
+	// Body has 3 enumerated steps and >=400 chars so it clears the new-skill
+	// depth gate (stageBSynthNewSkillMinBodyLen / stageBSynthNewSkillMinSteps).
+	reply := `{"is_skill": true, "name": "handle-capability-gap-deploy", "description": "when blocked because a deploy capability is missing, run discovery and add the missing relay.", "body": "## When this fires\nThe agent reports a capability_gap blocking deploy. Recurs when a needed relay is missing for a new platform integration in this workspace.\n\n## Steps\n1. Run /capabilities discover to enumerate the missing surface for the failing tool call.\n2. Add the missing relay using the discovered handle so future calls find it.\n3. Verify the deploy unblocks by retrying the original tool call end-to-end.\n\n## Source incident\n- task-77 — capability gap on prod deploy relay.\n"}`
 	prov, calls, teardown := withFakeAnthropic(t, b, reply)
 	defer teardown()
 
 	cand := selfHealCandidate()
-	fm, body, err := prov.SynthesizeSkill(context.Background(), cand, "")
+	decision, err := prov.SynthesizeSkill(context.Background(), cand, "")
 	if err != nil {
 		t.Fatalf("SynthesizeSkill: %v", err)
 	}
+	fm := decision.Frontmatter
+	body := decision.Body
 	if fm.Name != "handle-capability-gap-deploy" {
 		t.Errorf("name: got %q want handle-capability-gap-deploy", fm.Name)
 	}
@@ -386,7 +390,7 @@ func TestSynthesizeSkill_SelfHealCandidate_NameWithoutHandlePrefix(t *testing.T)
 	defer teardown()
 
 	cand := selfHealCandidate()
-	_, _, err := prov.SynthesizeSkill(context.Background(), cand, "")
+	_, err := prov.SynthesizeSkill(context.Background(), cand, "")
 	if err == nil {
 		t.Fatal("expected sanity-check error, got nil")
 	}
@@ -406,7 +410,7 @@ func TestSynthesizeSkill_SelfHealCandidate_NoBodyHeading(t *testing.T) {
 	defer teardown()
 
 	cand := selfHealCandidate()
-	_, _, err := prov.SynthesizeSkill(context.Background(), cand, "")
+	_, err := prov.SynthesizeSkill(context.Background(), cand, "")
 	if err == nil {
 		t.Fatal("expected sanity-check error, got nil")
 	}
@@ -425,7 +429,7 @@ func TestSynthesizeSkill_SelfHealCandidate_LLMSaysNo(t *testing.T) {
 	defer teardown()
 
 	cand := selfHealCandidate()
-	_, _, err := prov.SynthesizeSkill(context.Background(), cand, "")
+	_, err := prov.SynthesizeSkill(context.Background(), cand, "")
 	if err == nil {
 		t.Fatal("expected not-a-skill error, got nil")
 	}
@@ -448,7 +452,7 @@ func TestSynthesizeSkill_SelfHealCandidate_DescriptionTooShort(t *testing.T) {
 	defer teardown()
 
 	cand := selfHealCandidate()
-	_, _, err := prov.SynthesizeSkill(context.Background(), cand, "")
+	_, err := prov.SynthesizeSkill(context.Background(), cand, "")
 	if err == nil {
 		t.Fatal("expected sanity-check error, got nil")
 	}
@@ -470,12 +474,13 @@ func TestSynthesizeSkill_NoAPIKey_DegradeGracefully(t *testing.T) {
 
 	prov := NewDefaultStageBLLMProvider(b)
 	cand := selfHealCandidate()
-	fm, body, err := prov.SynthesizeSkill(context.Background(), cand, "")
+	decision, err := prov.SynthesizeSkill(context.Background(), cand, "")
 	if err != nil {
 		t.Fatalf("disabled LLM should degrade without per-candidate error, got %v", err)
 	}
-	if fm.Name != "" || body != "" {
-		t.Fatalf("disabled LLM should return empty no-op response, got fm=%+v body=%q", fm, body)
+	if decision.Frontmatter.Name != "" || decision.Body != "" {
+		t.Fatalf("disabled LLM should return empty no-op response, got fm=%+v body=%q",
+			decision.Frontmatter, decision.Body)
 	}
 	// "No API key" must NOT be counted as an LLM rejection — that's a
 	// configuration fact, not a model decision.
@@ -499,7 +504,7 @@ func TestSynthesizeSkill_UsesConfiguredAnthropicKey(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	reply := `{"is_skill": true, "name": "handle-config-key", "description": "when blocked by config auth, use the configured key.", "body": "## When this fires\nA configured key should authenticate Stage B.\n\n## Steps\n1. Resolve the saved key.\n\n## Source incident\ntask-77\n"}`
+	reply := `{"is_skill": true, "name": "handle-config-key", "description": "when blocked by config auth, use the configured key.", "body": "## When this fires\nA configured key should authenticate Stage B when the agent hits an auth gap.\n\n## Steps\n1. Resolve the saved key from the workspace config.\n2. Fall back to env vars if the workspace config is empty.\n3. Surface a one-shot warning when neither is present so the operator knows the pipeline is degraded.\n\n## Source incident\n- task-77 — Stage B authentication via configured key path.\n"}`
 	var calls atomic.Int64
 	srv := httptest.NewServer(fakeAnthropicHandler(t, &calls, reply))
 	defer srv.Close()
@@ -510,7 +515,7 @@ func TestSynthesizeSkill_UsesConfiguredAnthropicKey(t *testing.T) {
 		Timeout:   srv.Client().Timeout,
 	}
 
-	if _, _, err := prov.SynthesizeSkill(context.Background(), selfHealCandidate(), ""); err != nil {
+	if _, err := prov.SynthesizeSkill(context.Background(), selfHealCandidate(), ""); err != nil {
 		t.Fatalf("SynthesizeSkill with configured key: %v", err)
 	}
 	if calls.Load() != 1 {
@@ -520,8 +525,9 @@ func TestSynthesizeSkill_UsesConfiguredAnthropicKey(t *testing.T) {
 
 func TestSynthesizeSkill_NotebookSource_UsesNotebookPrompt(t *testing.T) {
 	b := newTestBroker(t)
-	// Notebook source: name does NOT need the handle- prefix.
-	reply := `{"is_skill": true, "name": "deploy-runbook", "description": "Deploy a service from staging to prod.", "body": "## Steps\n1. Tag.\n2. Watch.\n"}`
+	// Notebook source: name does NOT need the handle- prefix. Body has 3
+	// enumerated steps and >=400 chars so it clears the depth gate.
+	reply := `{"is_skill": true, "name": "deploy-runbook", "description": "Deploy a service from staging to prod.", "body": "## When this fires\nThe agent has a green build on staging and needs to roll the same artifact to production.\n\n## Steps\n1. Tag the release in the source repo with the build SHA so the rollout is reproducible.\n2. Watch the production dashboards for the standard 15-minute soak window after rollout.\n3. Roll back via the prior tag if any of the health gates trip during the soak window.\n\n## Output\nA tagged release deployed to prod, with the dashboards confirming the rollout cleared the soak window.\n"}`
 	prov, _, teardown := withFakeAnthropic(t, b, reply)
 	defer teardown()
 
@@ -532,10 +538,12 @@ func TestSynthesizeSkill_NotebookSource_UsesNotebookPrompt(t *testing.T) {
 		SignalCount:          3,
 		Excerpts:             []SkillCandidateExcerpt{{Path: "team/agents/eng/notebook/deploy.md", Author: "eng"}},
 	}
-	fm, body, err := prov.SynthesizeSkill(context.Background(), cand, "")
+	decision, err := prov.SynthesizeSkill(context.Background(), cand, "")
 	if err != nil {
 		t.Fatalf("notebook source should be accepted, got %v", err)
 	}
+	fm := decision.Frontmatter
+	body := decision.Body
 	if fm.Name != "deploy-runbook" {
 		t.Errorf("name: got %q want deploy-runbook", fm.Name)
 	}
@@ -599,14 +607,21 @@ func TestValidateStageBSynthResponse_RejectsMixedCaseName(t *testing.T) {
 }
 
 // TestValidateStageBSynthResponse_AllowsHowToHeading_Generic confirms that
-// `## How to` alone is sufficient for non-self-heal candidates (the
-// generic notebook-cluster path keeps the looser check).
+// `## How to` is a sufficient heading for non-self-heal candidates (the
+// generic notebook-cluster path keeps the looser heading check). The body
+// also needs to clear the new-skill depth gate added in the deliberate-
+// skill-generation work — 3+ enumerated steps and >=400 chars — so the
+// fixture below is deliberately substantive rather than minimal.
 func TestValidateStageBSynthResponse_AllowsHowToHeading_Generic(t *testing.T) {
 	resp := stageBSynthResponse{
 		IsSkill:     true,
 		Name:        "handle-foo",
 		Description: "when blocked, do the foo dance.",
-		Body:        "## How to\nDo a thing.\n",
+		Body: "## How to\n" +
+			"This procedure runs every time the agent encounters a blocked deploy and needs to drive the foo dance to completion.\n\n" +
+			"1. Identify the failing tool call and capture its exact error string for the audit trail.\n" +
+			"2. Pick the most specific resolution variant from the team wiki, falling back to the generic foo dance only when nothing matches.\n" +
+			"3. Replay the original tool call after applying the resolution and confirm it now succeeds before closing out.\n",
 	}
 	if err := validateStageBSynthResponse(SourceNotebookCluster, resp); err != nil {
 		t.Fatalf("generic source: expected valid body with `## How to` heading, got %v", err)
@@ -627,7 +642,7 @@ func TestValidateStageBSynthResponse_SelfHealRequiresAllThreeHeadings(t *testing
 		body    string
 		wantErr bool
 	}{
-		{"all three present", "## When this fires\nfoo\n## Steps\nbar\n## Source incident\nx\n", false},
+		{"all three present", "## When this fires\nThe agent reports a capability_gap on the deploy relay and cannot proceed without operator help.\n\n## Steps\n1. Run /capabilities discover to enumerate the missing surface for the failing tool call.\n2. Add the missing relay using the discovered handle so future calls find it.\n3. Verify the deploy unblocks by retrying the original tool call end-to-end.\n\n## Source incident\n- task-77 — capability gap on prod deploy relay.\n", false},
 		{"only steps", "## Steps\nbar\n", true},
 		{"only when-this-fires", "## When this fires\nfoo\n", true},
 		{"only how-to", "## How to\nDo a thing.\n", true},
@@ -648,6 +663,116 @@ func TestValidateStageBSynthResponse_SelfHealRequiresAllThreeHeadings(t *testing
 			}
 			if !tc.wantErr && err != nil {
 				t.Fatalf("unexpected error for body %q: %v", tc.body, err)
+			}
+		})
+	}
+}
+
+// TestValidateStageBSynthResponse_DepthGate pins the deliberate-skill-
+// generation depth gate: new (non-enhance) bodies under ~400 bytes or with
+// fewer than 3 enumerated steps are rejected, regardless of headings. This
+// is the gate against trigger-happy shallow skills.
+func TestValidateStageBSynthResponse_DepthGate(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string // substring; "" → expect no error
+	}{
+		{
+			name: "shallow body — too short",
+			body: "## When this fires\nfoo.\n\n## Steps\n1. a.\n2. b.\n3. c.\n\n## Source incident\n- task-77.\n",
+			// ~95 bytes — fails length floor.
+			wantErr: "too shallow",
+		},
+		{
+			name: "deep enough but only two steps",
+			// Source incident row uses prose (no leading "- ") so it
+			// does not inflate the step counter. The body otherwise
+			// clears the length floor.
+			body:    "## When this fires\nThe agent is blocked because the deploy relay is missing for a new platform integration in this workspace, and prior attempts to retry have failed.\n\n## Steps\n1. Run /capabilities discover to enumerate the missing surface for the failing tool call.\n2. Add the missing relay using the discovered handle so future calls find it without prompting.\n\n## Source incident\nIncident task-77 — capability gap on prod deploy relay.\n",
+			wantErr: "enumerated steps",
+		},
+		{
+			name:    "deep enough with three steps",
+			body:    "## When this fires\nThe agent is blocked because the deploy relay is missing for a new platform integration in this workspace, and prior attempts to retry have failed.\n\n## Steps\n1. Run /capabilities discover to enumerate the missing surface for the failing tool call.\n2. Add the missing relay using the discovered handle so future calls find it without prompting.\n3. Verify the deploy unblocks by retrying the original tool call end-to-end.\n\n## Source incident\n- task-77 — capability gap on prod deploy relay.\n",
+			wantErr: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := stageBSynthResponse{
+				IsSkill:     true,
+				Name:        "handle-foo",
+				Description: "when blocked, do the foo dance.",
+				Body:        tc.body,
+			}
+			err := validateStageBSynthResponse(SourceSelfHealResolved, resp)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected pass, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected %q in error, got %q", tc.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+// TestValidateStageBSynthResponse_EnhanceBypassesDepthGate confirms that
+// enhance responses skip the depth + heading gates: the bounded diff
+// rides on top of an existing skill's body, so requiring full procedure
+// shape on the diff itself would defeat the purpose.
+func TestValidateStageBSynthResponse_EnhanceBypassesDepthGate(t *testing.T) {
+	resp := stageBSynthResponse{
+		IsSkill:     true,
+		Name:        "deploy-runbook",
+		Description: "Deploy a service from staging to prod (enhanced with rollback).",
+		Body:        "## Steps\n3. Roll back if the soak window trips a health gate.\n",
+		Enhance:     "deploy-runbook",
+	}
+	if err := validateStageBSynthResponse(SourceNotebookCluster, resp); err != nil {
+		t.Fatalf("enhance should bypass depth/heading gates, got %v", err)
+	}
+}
+
+// TestValidateStageBSynthResponse_RenameRequiresNameToMatchTarget
+// confirms the wire-shape check: when rename_to is set, name MUST equal
+// rename_to so callers can trust the slug they see is the new slug.
+func TestValidateStageBSynthResponse_RenameRequiresNameToMatchTarget(t *testing.T) {
+	cases := []struct {
+		name     string
+		respName string
+		enhance  string
+		renameTo string
+		wantErr  bool
+	}{
+		{"name matches rename_to → valid", "pitch-deck-creation", "pitch-deck-saas", "pitch-deck-creation", false},
+		{"name matches enhance, rename_to empty → valid", "pitch-deck-saas", "pitch-deck-saas", "", false},
+		{"rename_to equals enhance → no-op rejected", "pitch-deck-saas", "pitch-deck-saas", "pitch-deck-saas", true},
+		{"name doesn't match rename_to → rejected", "pitch-deck-marketplace", "pitch-deck-saas", "pitch-deck-creation", true},
+		{"name doesn't match enhance (no rename) → rejected", "pitch-deck-marketplace", "pitch-deck-saas", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := stageBSynthResponse{
+				IsSkill:     true,
+				Name:        tc.respName,
+				Description: "Draft a pitch deck for any go-to-market motion.",
+				Body:        "## Steps\n4. Adapt the demo slide for marketplace deals.\n",
+				Enhance:     tc.enhance,
+				RenameTo:    tc.renameTo,
+			}
+			err := validateStageBSynthResponse(SourceNotebookCluster, resp)
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
 		})
 	}

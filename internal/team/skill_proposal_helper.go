@@ -355,6 +355,156 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription, ca
 	return live, nil
 }
 
+// renameAndEnhanceSkillLocked renames an existing skill to a broader slug
+// AND merges in newContent / newDescription in a single transaction. The
+// load-bearing intent: when the team has clearly outgrown an existing
+// skill's name (e.g. "pitch-deck-saas" now covers all pitch decks), the
+// LLM can signal `rename_to: pitch-deck-creation` and the existing skill
+// is renamed in place, with the old slug left behind as an archived
+// redirect stub so cached references resolve.
+//
+// Caller MUST hold b.mu on entry. The method uses the same deadlock-safe
+// unlock/relock pattern as enhanceSkillLocked for WikiWorker.Enqueue.
+//
+// Failure modes:
+//
+//   - oldName does not resolve to an existing skill → error.
+//   - newName slug fails validation → error (defensive; the synthesizer
+//     also pre-checks).
+//   - newName slug is already in use → error. Callers should fall back to
+//     plain enhanceSkillLocked rather than clobbering a distinct sibling.
+func (b *Broker) renameAndEnhanceSkillLocked(oldName, newName, newContent, newDescription string) (*teamSkill, error) {
+	existing := b.findSkillByNameLocked(oldName)
+	if existing == nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: skill %q not found", oldName)
+	}
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new name is empty")
+	}
+	newSlug := skillSlug(newName)
+	if !skillSlugRegex.MatchString(newSlug) {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new slug %q does not match ^[a-z0-9][a-z0-9-]*$", newSlug)
+	}
+	if conflict := b.findSkillByNameLocked(newName); conflict != nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new name %q already in use", newName)
+	}
+
+	oldSlug := skillSlug(existing.Name)
+	if oldSlug == newSlug {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new slug equals old slug (%q)", oldSlug)
+	}
+
+	newContent = strings.TrimSpace(newContent)
+	newDescription = strings.TrimSpace(newDescription)
+
+	// Build the renamed-and-enhanced state on a local copy so a concurrent
+	// append to b.skills cannot leave existing pointing at a stale element
+	// while the lock is released for the Enqueue calls.
+	updated := *existing
+	updated.Name = newName
+	updated.ID = "skill-" + newSlug
+	if strings.TrimSpace(updated.Title) == "" || strings.TrimSpace(updated.Title) == existing.Name {
+		updated.Title = newName
+	}
+	if newDescription != "" && len(newDescription) > len(updated.Description) {
+		updated.Description = newDescription
+	}
+	if newContent != "" {
+		updated.Content = mergeSkillContent(existing.Content, newContent, "renamed-from-"+oldSlug)
+	}
+	// Keep a backlink to the old slug so the new skill carries provenance.
+	updated.RelatedSkills = appendUnique(append([]string(nil), existing.RelatedSkills...), oldSlug)
+	updated.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	fm := teamSkillToFrontmatter(updated)
+	newMd, err := RenderSkillMarkdown(fm, updated.Content)
+	if err != nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: render new markdown for %q: %w", newName, err)
+	}
+
+	// Redirect stub at the old path: archived status + renamed_to pointer
+	// so anyone resolving the old slug (link checker, cached agent index,
+	// human reader) sees where the content moved to.
+	stub := teamSkill{
+		Name:               existing.Name,
+		Title:              existing.Title,
+		Description:        "Renamed to " + newName + ".",
+		Content:            "This skill was renamed to [`" + newName + "`](./" + newSlug + ".md).\n",
+		CreatedBy:          "archivist",
+		Channel:            existing.Channel,
+		Tags:               append([]string(nil), existing.Tags...),
+		Status:             "archived",
+		DisabledFromStatus: existing.Status,
+		CreatedAt:          existing.CreatedAt,
+		UpdatedAt:          updated.UpdatedAt,
+	}
+	stubFm := teamSkillToFrontmatter(stub)
+	stubFm.Metadata.Wuphf.RenamedTo = newName
+	stubMd, err := RenderSkillMarkdown(stubFm, stub.Content)
+	if err != nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: render stub markdown for %q: %w", existing.Name, err)
+	}
+
+	newWikiPath := "team/skills/" + newSlug + ".md"
+	oldWikiPath := "team/skills/" + oldSlug + ".md"
+	newCommit := "archivist: rename skill " + oldSlug + " → " + newSlug
+	stubCommit := "archivist: redirect " + oldSlug + " → " + newSlug
+
+	wikiWorker := b.wikiWorker
+	b.mu.Unlock()
+
+	if wikiWorker != nil {
+		if _, _, err := wikiWorker.Enqueue(
+			context.Background(),
+			newSlug,
+			newWikiPath,
+			string(newMd),
+			"replace",
+			newCommit,
+		); err != nil {
+			b.mu.Lock()
+			return nil, fmt.Errorf("renameAndEnhanceSkillLocked: wiki enqueue new for %q: %w", newName, err)
+		}
+		if _, _, err := wikiWorker.Enqueue(
+			context.Background(),
+			oldSlug,
+			oldWikiPath,
+			string(stubMd),
+			"replace",
+			stubCommit,
+		); err != nil {
+			b.mu.Lock()
+			return nil, fmt.Errorf("renameAndEnhanceSkillLocked: wiki enqueue stub for %q: %w", oldSlug, err)
+		}
+	}
+
+	b.mu.Lock()
+
+	// Re-resolve under the OLD name — the slice may have been reallocated
+	// during the unlock window.
+	live := b.findSkillByNameLocked(oldName)
+	if live == nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: skill %q vanished during rename", oldName)
+	}
+	// Apply the renamed shape in place. The skill ID and slug both update;
+	// other lookups (by ID or slug) re-resolve against the new identifiers.
+	*live = updated
+
+	b.invalidateSkillEmbeddingLocked(oldSlug)
+	b.invalidateSkillEmbeddingLocked(newSlug)
+
+	if saveErr := b.saveLocked(); saveErr != nil {
+		slog.Warn("renameAndEnhanceSkillLocked: saveLocked failed",
+			"old_slug", oldSlug, "new_slug", newSlug, "err", saveErr)
+	}
+
+	slog.Info("renameAndEnhanceSkillLocked: skill renamed",
+		"from", oldName, "to", newName,
+		"old_slug", oldSlug, "new_slug", newSlug)
+	return live, nil
+}
+
 // rerenderSkillWikiLocked re-renders the given skill to its wiki markdown so
 // the on-disk frontmatter stays consistent with broker state after metadata
 // mutations (e.g. RelatedSkills). Caller MUST hold b.mu on entry. The method
