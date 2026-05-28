@@ -37,6 +37,17 @@ describe("rewriteCSS", () => {
       ".artifact-body {",
     );
   });
+
+  it("collapses html body descendant chain so common resets still match", () => {
+    // Without the collapse step, `html body` would rewrite to
+    // `.artifact-body .artifact-body`, which never matches (we only mount
+    // one synthetic wrapper). Verify both the basic chain and the longer
+    // `html body main` shape stay applicable to the artifact root.
+    expect(rewriteCSS("html body { margin: 0 }")).toContain(".artifact-body {");
+    expect(rewriteCSS("html body main { padding: 1rem }")).toContain(
+      ".artifact-body main {",
+    );
+  });
 });
 
 describe("<RichArtifactEmbed>", () => {
@@ -104,10 +115,83 @@ describe("<RichArtifactEmbed>", () => {
     });
     // None of the pwn flags were assigned — DOMPurify swallowed the script
     // content during parse, so even the cloneNode path couldn't execute it.
-    expect((window as unknown as Record<string, string>).__pwned).toBeUndefined();
-    expect((window as unknown as Record<string, string>).__pwned2).toBeUndefined();
-    expect((window as unknown as Record<string, string>).__pwned3).toBeUndefined();
-    expect((window as unknown as Record<string, string>).__pwned4).toBeUndefined();
+    expect(
+      (window as unknown as Record<string, string>).__pwned,
+    ).toBeUndefined();
+    expect(
+      (window as unknown as Record<string, string>).__pwned2,
+    ).toBeUndefined();
+    expect(
+      (window as unknown as Record<string, string>).__pwned3,
+    ).toBeUndefined();
+    expect(
+      (window as unknown as Record<string, string>).__pwned4,
+    ).toBeUndefined();
+  });
+
+  it("copies <html> and <body> class/dir/lang/data-* onto the wrapper so body.dark, html[dir=rtl], body[data-theme] selectors still match", async () => {
+    const html = `<!doctype html>
+<html lang="en" dir="rtl">
+<head><style>
+  .artifact-body[dir="rtl"] { color: rgb(7, 8, 9); }
+  .artifact-body.dark[data-theme="paper"] { background: rgb(1, 2, 3); }
+</style></head>
+<body class="dark extra" data-theme="paper" data-track="123">
+<p id="ok">visible</p>
+</body>
+</html>`;
+    render(<RichArtifactEmbed title="Wrapper attrs" html={html} />);
+    const host = await screen.findByLabelText("Wrapper attrs", {
+      selector: "rich-artifact-embed",
+    });
+    await waitFor(() => {
+      const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+        .shadowRoot;
+      const wrap = shadow.querySelector(".artifact-body") as HTMLElement;
+      expect(wrap).not.toBeNull();
+      // body attrs merged.
+      expect(wrap.classList.contains("dark")).toBe(true);
+      expect(wrap.classList.contains("extra")).toBe(true);
+      expect(wrap.classList.contains("artifact-body")).toBe(true);
+      expect(wrap.getAttribute("data-theme")).toBe("paper");
+      expect(wrap.getAttribute("data-track")).toBe("123");
+      // html-level attrs merged.
+      expect(wrap.getAttribute("dir")).toBe("rtl");
+      expect(wrap.getAttribute("lang")).toBe("en");
+    });
+  });
+
+  it("does not copy event handlers, style, src, or href from <body> onto the wrapper", async () => {
+    // Defence-in-depth: the sanitiser drops these from elements inside
+    // the body, but the wrapper-attribute copier runs over the
+    // unsanitised doc head/body, so it has its own allow-list of attribute
+    // names. If a future refactor weakens copyHostAttributes, this test
+    // catches it.
+    const html = `<!doctype html>
+<html onclick="window.__html_pwned=1">
+<body class="ok" onclick="window.__body_pwned=1" style="background: url(javascript:1)" src="https://evil.example/x">
+<p id="ok">visible</p>
+</body>
+</html>`;
+    render(<RichArtifactEmbed title="No bad attrs" html={html} />);
+    const host = await screen.findByLabelText("No bad attrs", {
+      selector: "rich-artifact-embed",
+    });
+    await waitFor(() => {
+      const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+        .shadowRoot;
+      const wrap = shadow.querySelector(".artifact-body") as HTMLElement;
+      expect(wrap.classList.contains("ok")).toBe(true);
+      expect(wrap.getAttribute("onclick")).toBeNull();
+      expect(wrap.getAttribute("style")).toBeNull();
+      expect(wrap.getAttribute("src")).toBeNull();
+    });
+    expect(
+      (window as unknown as Record<string, number>).__html_pwned,
+    ).toBeUndefined();
+    expect(
+      (window as unknown as Record<string, number>).__body_pwned,
+    ).toBeUndefined();
   });
 
   it("re-mounts when the html prop changes", async () => {

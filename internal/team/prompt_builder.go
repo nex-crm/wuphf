@@ -388,6 +388,7 @@ func visualArtifactForcingBlock() string {
 		"You MUST call notebook_visual_artifact_create and include `visual-artifact:ra_...` on its own line in your chat reply when ANY of the following is true:\n" +
 		"- the human asked for a wiki article, draft, page, doc, brief, write-up, one-pager, memo, or canonical note;\n" +
 		"- the human asked for a plan, spec, RFC, design, proposal, roadmap, architecture, or playbook;\n" +
+		"- the human asked to research, explain, teach, summarize, break down, walk through, or unpack a topic, concept, system, science, history, or phenomenon (e.g. \"research how coffee extraction works\", \"explain the Lorenz attractor\", \"teach me how sleep cycles work\", \"what's the science of X\", \"how does X actually work\", \"break down Y for me\");\n" +
 		"- the answer is a comparison, decision matrix, scoring rubric, options table, or before/after;\n" +
 		"- the answer is a diagram, flow, sequence, mockup, dashboard, or interactive tuning surface;\n" +
 		"- your reply would otherwise be more than ~200 words of structured markdown headings and lists.\n" +

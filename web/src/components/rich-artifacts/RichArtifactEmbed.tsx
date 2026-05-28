@@ -212,10 +212,56 @@ function mountArtifact(shadow: ShadowRoot, html: string): void {
   //    wrapper. Nothing inside `sanitizedBody` has been re-parsed since
   //    DOMPurify built it, so the shape we mount is exactly what passed
   //    the sanitiser.
+  //
+  //    We also copy attributes from the original <html> and <body> elements
+  //    onto the wrapper so selectors that key off body/html state still
+  //    match after the rewriteCSS substitution. Without this,
+  //    `body.dark { ... }` or `html[dir="rtl"] { ... }` rewrites correctly
+  //    on the CSS side but has nothing to bind to in the DOM. attributes
+  //    are pulled from the unsanitised doc head/body (read-only, no script
+  //    execution), filtered through copyHostAttributes to drop anything
+  //    that could carry behaviour (style URLs, event handlers).
   const wrapper = document.createElement("div");
   wrapper.className = "artifact-body";
+  copyHostAttributes(wrapper, doc.documentElement);
+  copyHostAttributes(wrapper, doc.body);
   wrapper.appendChild(sanitizedBody);
   shadow.appendChild(wrapper);
+}
+
+// copyHostAttributes lifts class/id/dir/lang/data-*/aria-* attributes from
+// the source element onto the wrapper. Anything that could execute (on*)
+// or fetch (src, href, style with url()) is skipped — the sanitiser is the
+// authority for those. The "class" attribute is merged with the existing
+// .artifact-body class rather than replacing it.
+const HOST_ATTR_ALLOWLIST = new Set(["id", "dir", "lang", "title", "role"]);
+
+function isHostAttrAllowed(name: string): boolean {
+  return (
+    HOST_ATTR_ALLOWLIST.has(name) ||
+    name.startsWith("data-") ||
+    name.startsWith("aria-")
+  );
+}
+
+function copyHostAttributes(target: HTMLElement, source: Element | null): void {
+  if (!source) return;
+  for (const attr of Array.from(source.attributes)) {
+    const name = attr.name.toLowerCase();
+    if (name === "class") {
+      mergeClasses(target, attr.value);
+    } else if (isHostAttrAllowed(name)) {
+      target.setAttribute(attr.name, attr.value);
+    }
+    // Everything else (on*, style, src, href, xlink:href, etc.) is
+    // dropped silently — the sanitiser owns those decisions.
+  }
+}
+
+function mergeClasses(target: HTMLElement, raw: string): void {
+  for (const cls of raw.split(/\s+/)) {
+    if (cls) target.classList.add(cls);
+  }
 }
 
 const FORBIDDEN_TAG_SWEEP = [
@@ -272,7 +318,11 @@ function isUnsafeURL(raw: string): boolean {
   }
   // Allow data:image/* and data:font/* only; everything else under data: is
   // either useless to artifacts or a known vector (e.g. data:text/html).
-  if (value.startsWith("data:") && !value.startsWith("data:image/") && !value.startsWith("data:font/")) {
+  if (
+    value.startsWith("data:") &&
+    !value.startsWith("data:image/") &&
+    !value.startsWith("data:font/")
+  ) {
     return true;
   }
   return false;
@@ -283,10 +333,18 @@ function isUnsafeURL(raw: string): boolean {
 // Conservative on purpose: anything fancier should be done with a real CSS
 // parser. Tests cover the common shapes the agent emits today.
 export function rewriteCSS(css: string): string {
-  return css
-    .replace(/:root\b/g, ":host")
-    .replace(/(^|[\s,{}])body\b/g, "$1.artifact-body")
-    .replace(/(^|[\s,{}])html\b/g, "$1.artifact-body");
+  return (
+    css
+      .replace(/:root\b/g, ":host")
+      .replace(/(^|[\s,{}])body\b/g, "$1.artifact-body")
+      .replace(/(^|[\s,{}])html\b/g, "$1.artifact-body")
+      // After the two substitutions above, `html body` becomes
+      // `.artifact-body .artifact-body` which never matches (only one
+      // synthetic wrapper exists). Collapse the duplicate descendant chain
+      // back to a single class so common resets like `html body { margin: 0 }`
+      // still apply to the artifact.
+      .replace(/\.artifact-body(\s+\.artifact-body)+/g, ".artifact-body")
+  );
 }
 
 interface RichArtifactEmbedProps {
