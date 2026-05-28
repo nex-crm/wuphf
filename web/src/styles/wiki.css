@@ -19,6 +19,12 @@
   --wk-text: var(--text);
   --wk-text-muted: var(--text-secondary);
   --wk-text-tertiary: var(--text-tertiary);
+  /* Body/rule aliases for wk-team-learnings + playbook synthesis. Defined
+     here (not just as fallbacks) so dark themes get readable colors. */
+  --wk-body: var(--text);
+  --wk-body-muted: var(--text-secondary);
+  --wk-rule: var(--border);
+  --wk-rule-soft: var(--border-light);
   --wk-border: var(--border);
   --wk-border-light: var(--border-light);
   --wk-border-strong: var(--border-dark);
@@ -2326,12 +2332,12 @@
   cursor: progress;
 }
 .wk-playbook-synthesis[data-state="success"] .wk-playbook-synthesis__button {
-  color: #2a7d2a;
-  border-color: #2a7d2a;
+  color: var(--green);
+  border-color: var(--green);
 }
 .wk-playbook-synthesis[data-state="error"] .wk-playbook-synthesis__button {
-  color: #c94a4a;
-  border-color: #c94a4a;
+  color: var(--red);
+  border-color: var(--red);
 }
 
 .wk-team-learnings {
@@ -2391,7 +2397,7 @@
   background: rgba(0, 0, 0, 0.025);
 }
 .wk-team-learning__trusted {
-  color: #2a7d2a;
+  color: var(--green);
 }
 .wk-team-learning__key {
   min-width: 0;

@@ -692,3 +692,70 @@ html[data-theme="noir-gold"] .sidebar .sidebar-agent-activity {
   color: var(--gold-300);
   opacity: 1;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Noir-gold contrast fixes
+   Source CSS that hardcodes pastel light bgs with dark text fails
+   on deep noir. Override per-rule with gold-tinted equivalents.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── @mention pill + json syntax — original tan/orange already tracks
+       the gold ramp closely; tighten to gold tokens so the pill looks
+       designed-in rather than washed out. ── */
+html[data-theme="noir-gold"] {
+  --mention-bg: rgba(201, 162, 39, 0.14);
+  --mention-fg: var(--gold-200);
+  --syntax-number: var(--gold-300);
+  --syntax-bool: #f0a8c8;
+}
+
+/* ── Task status badges ── */
+html[data-theme="noir-gold"] .task-detail-status-badge.status-done {
+  background: rgba(47, 170, 100, 0.14);
+  color: var(--success-300);
+  border-color: rgba(47, 170, 100, 0.3);
+}
+html[data-theme="noir-gold"] .task-detail-status-badge.status-in_progress,
+html[data-theme="noir-gold"] .task-detail-status-badge.status-review {
+  background: var(--accent-bg);
+  color: var(--gold-200);
+  border-color: rgba(201, 162, 39, 0.3);
+}
+html[data-theme="noir-gold"] .task-detail-status-badge.status-blocked {
+  background: rgba(240, 177, 74, 0.14);
+  color: var(--warning-300);
+  border-color: rgba(240, 177, 74, 0.3);
+}
+
+/* ── Insight badges — accent stays gold; white text on bright gold
+       washes out. Switch the medium tier to dark text on gold. ── */
+html[data-theme="noir-gold"] .insight-badge-medium {
+  color: var(--gold-950);
+  background: var(--accent);
+}
+html[data-theme="noir-gold"] .insight-badge-low {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+
+/* ── Scrollbar thumb hover — base uses rgba(0,0,0,0.4) which disappears ── */
+html[data-theme="noir-gold"] .notebook-surface::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(245, 233, 200, 0.25);
+}
+
+/* ── Notebook status pills — re-tint for parchment surface ── */
+html[data-theme="noir-gold"] .notebook-surface .nb-shelf-item .nb-status-draft {
+  color: var(--text-secondary);
+}
+html[data-theme="noir-gold"]
+  .notebook-surface
+  .nb-shelf-item
+  .nb-status-review {
+  color: var(--gold-300);
+}
+html[data-theme="noir-gold"]
+  .notebook-surface
+  .nb-shelf-item
+  .nb-status-changes {
+  color: var(--red);
+}

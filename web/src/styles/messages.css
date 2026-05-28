@@ -432,8 +432,8 @@
 /* ─── @mention ─── */
 .mention {
   display: inline-block;
-  background: #fdf1e2;
-  color: #d4700e;
+  background: var(--mention-bg, var(--warning-100, #fdf1e2));
+  color: var(--mention-fg, var(--warning-500, #d4700e));
   padding: 0 5px;
   border-radius: 3px;
   font-weight: 600;
@@ -947,10 +947,10 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   white-space: pre-wrap;
 }
 .sv-num {
-  color: #b08800;
+  color: var(--syntax-number, #b08800);
 }
 .sv-bool {
-  color: #c25a8b;
+  color: var(--syntax-bool, #c25a8b);
   font-weight: 600;
 }
 .sv-null {
