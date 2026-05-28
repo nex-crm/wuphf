@@ -351,12 +351,18 @@ func TestPromptBuilder_VisualArtifactForcingRulePresentOnEverySurface(t *testing
 		"more than ~200 words",
 		"technical-manual style",
 		// Atomic-turn rule — gist text first, then article, then link card.
-		// Without this, the agent goes silent for 30-60s while building the
-		// article (the failure the user just hit in the live demo).
+		// All three tool calls in ONE assistant response, no narration
+		// between them. The agent split this across 3 separate responses
+		// in the live demo and ended its turn after step 1 each time.
 		"ATOMIC-TURN RULE",
-		"fast 2-3 sentence text gist",
+		"SAME assistant response",
+		"Do NOT narrate the process",
 		"notebook_visual_artifact_create",
 		"clickable card linking to the full-screen viewer",
+		// Pin the explicit anti-patterns so the rule keeps protecting
+		// against them if someone later rewords the block.
+		"Step 1 — quick gist first.",
+		"Step 2 — full HTML article.",
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
