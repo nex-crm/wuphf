@@ -90,14 +90,26 @@ function RoutineDetailBody({ routine }: RoutineDetailBodyProps) {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: () => patchSchedulerJob(slug, { enabled: !enabled }),
+    mutationFn: () => {
+      // Bail if we don't have a slug — the broker rejects empty slugs
+      // and the UI shouldn't issue a request we know will fail.
+      if (slug === "") {
+        return Promise.reject(new Error("Routine has no slug"));
+      }
+      return patchSchedulerJob(slug, { enabled: !enabled });
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["scheduler"] });
     },
   });
 
   const runMutation = useMutation({
-    mutationFn: () => runSchedulerJob(slug),
+    mutationFn: () => {
+      if (slug === "") {
+        return Promise.reject(new Error("Routine has no slug"));
+      }
+      return runSchedulerJob(slug);
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["scheduler"] });
       void queryClient.invalidateQueries({
@@ -261,7 +273,7 @@ function DetailHeader({
         <button
           type="button"
           onClick={onToggleEnabled}
-          disabled={togglePending}
+          disabled={togglePending || slug === ""}
           aria-pressed={enabled}
           style={{
             ...detailButtonStyle,
@@ -275,7 +287,7 @@ function DetailHeader({
         <button
           type="button"
           onClick={onRunNow}
-          disabled={runPending || !enabled}
+          disabled={runPending || !enabled || slug === ""}
           style={detailButtonStyle}
         >
           {runPending ? "…" : "Run now"}

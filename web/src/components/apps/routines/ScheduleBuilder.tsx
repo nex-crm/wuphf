@@ -199,7 +199,8 @@ function IntervalEditor({ value, onChange }: IntervalEditorProps) {
   // Floor depends on unit. In minutes mode the broker rejects anything
   // below MIN_ROUTINE_INTERVAL_MINUTES; in hours mode 1h is already
   // well above the floor.
-  const minAmount = value.intervalUnit === "hours" ? 1 : MIN_ROUTINE_INTERVAL_MINUTES;
+  const minAmount =
+    value.intervalUnit === "hours" ? 1 : MIN_ROUTINE_INTERVAL_MINUTES;
   return (
     <Row label="Every">
       <input
@@ -222,7 +223,8 @@ function IntervalEditor({ value, onChange }: IntervalEditorProps) {
         value={value.intervalUnit}
         onChange={(e) => {
           const nextUnit = e.target.value as IntervalUnit;
-          const nextFloor = nextUnit === "hours" ? 1 : MIN_ROUTINE_INTERVAL_MINUTES;
+          const nextFloor =
+            nextUnit === "hours" ? 1 : MIN_ROUTINE_INTERVAL_MINUTES;
           onChange({
             ...value,
             intervalUnit: nextUnit,
@@ -236,9 +238,7 @@ function IntervalEditor({ value, onChange }: IntervalEditorProps) {
         <option value="hours">hours</option>
       </select>
       {value.intervalUnit === "minutes" && (
-        <span style={hintStyle}>
-          (minimum {MIN_ROUTINE_INTERVAL_MINUTES})
-        </span>
+        <span style={hintStyle}>(minimum {MIN_ROUTINE_INTERVAL_MINUTES})</span>
       )}
     </Row>
   );

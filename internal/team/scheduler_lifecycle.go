@@ -453,6 +453,13 @@ func (b *Broker) handleCreateSchedulerJob(w http.ResponseWriter, r *http.Request
 		http.Error(w, "could not derive a routine slug from label", http.StatusBadRequest)
 		return
 	}
+	// Slug becomes a path segment in /scheduler/{slug}/{runs,activity,
+	// revisions}. Reject anything that isn't a safe single segment so a
+	// crafted slug can't break routing or escape to a sibling endpoint.
+	if !isSafeSchedulerSlug(slug) {
+		http.Error(w, "slug must be lowercase alphanumeric with -, _, ., or :", http.StatusBadRequest)
+		return
+	}
 
 	enabled := true
 	if req.Enabled != nil {
@@ -527,6 +534,26 @@ func (b *Broker) handleCreateSchedulerJob(w http.ResponseWriter, r *http.Request
 	})
 
 	if err := b.saveLocked(); err != nil {
+		// Roll back every in-memory artifact we just inserted so the
+		// broker doesn't ship state that's not on disk.
+		for i := len(b.scheduler) - 1; i >= 0; i-- {
+			if b.scheduler[i].Slug == slug {
+				b.scheduler = append(b.scheduler[:i], b.scheduler[i+1:]...)
+				break
+			}
+		}
+		if revs := b.schedulerRevisions[slug]; len(revs) > 0 {
+			b.schedulerRevisions[slug] = revs[:len(revs)-1]
+			if len(b.schedulerRevisions[slug]) == 0 {
+				delete(b.schedulerRevisions, slug)
+			}
+		}
+		if act := b.schedulerActivity[slug]; len(act) > 0 {
+			b.schedulerActivity[slug] = act[:len(act)-1]
+			if len(b.schedulerActivity[slug]) == 0 {
+				delete(b.schedulerActivity, slug)
+			}
+		}
 		http.Error(w, "failed to persist routine", http.StatusInternalServerError)
 		return
 	}
@@ -543,6 +570,30 @@ func (b *Broker) handleCreateSchedulerJob(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]any{"job": persisted})
+}
+
+// isSafeSchedulerSlug enforces the path-segment shape we accept on the
+// /scheduler/{slug}/{runs,activity,revisions} surface. Lowercase
+// alphanumeric plus a small punctuation alphabet matches every slug the
+// broker auto-derives (deriveSchedulerSlugFromLabel + normalizeSchedulerSlug)
+// while keeping /, ?, &, ., .., and unicode-confusable characters out.
+func isSafeSchedulerSlug(s string) bool {
+	if s == "" || len(s) > 200 {
+		return false
+	}
+	if s == "." || s == ".." {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.' || r == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // deriveSchedulerSlugFromLabel turns "Weekly Digest" into "weekly-digest".

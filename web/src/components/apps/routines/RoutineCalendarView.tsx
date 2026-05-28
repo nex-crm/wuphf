@@ -218,10 +218,14 @@ function RoutineChip({ job, at, onSelect }: RoutineChipProps) {
   const slug = job.slug ?? job.id ?? "";
   const color = routineColor(slug);
   const enabled = job.enabled !== false;
+  // Render in UTC so the chip's time matches the UTC-anchored day cell
+  // it lives inside. Mixing UTC days with local-tz times would let a
+  // fire on the GMT+12 side of midnight render under the wrong day.
   const time = at.toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone: "UTC",
   });
 
   const style: CSSProperties = {

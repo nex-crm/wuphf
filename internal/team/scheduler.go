@@ -500,22 +500,7 @@ func (w *watchdogScheduler) processAgentJob(job schedulerJob) {
 	}
 	now := w.clock.Now().UTC()
 	agentSlug := strings.TrimSpace(job.TargetID)
-	// Default to the owning agent's DM so #general doesn't get spammed
-	// with personal routines. Routines that explicitly target a shared
-	// channel (e.g. "post the daily standup to #standup") keep that
-	// channel; the dispatcher only synthesises a DM when the routine
-	// has no channel of its own.
-	channel := normalizeChannelSlug(job.Channel)
-	if channel == "" && agentSlug != "" {
-		if dm, err := w.broker.EnsureDirectChannel(agentSlug); err == nil {
-			channel = normalizeChannelSlug(dm)
-		}
-	}
-	if channel == "" {
-		channel = "general"
-	}
 	nextRun := nextRoutineRun(job, now)
-
 	startedAt := now.Format(time.RFC3339)
 
 	if agentSlug == "" {
@@ -530,6 +515,49 @@ func (w *watchdogScheduler) processAgentJob(job schedulerJob) {
 			TargetType:  job.TargetType,
 			TargetID:    job.TargetID,
 			Events:      []string{"Skipped: no owner assigned"},
+		})
+		return
+	}
+
+	// Resolve the destination channel. An explicit job.Channel always
+	// wins. Otherwise we route to the owner's DM. We must NOT fall back
+	// to #general when DM resolution fails — routines can carry
+	// owner-specific payloads (drafts, prompts, status pings) that
+	// should never leak into a shared channel because of a transient
+	// channel-store error. Record the fire as failed and skip posting.
+	channel := normalizeChannelSlug(job.Channel)
+	if channel == "" {
+		dm, err := w.broker.EnsureDirectChannel(agentSlug)
+		if err != nil {
+			_ = w.broker.CompleteSchedulerRun(job.Slug, nextRun, "scheduled", schedulerRun{
+				Slug:        job.Slug,
+				StartedAt:   startedAt,
+				Status:      "failed",
+				Message:     fmt.Sprintf("Could not resolve DM channel for @%s: %v", agentSlug, err),
+				ErrorDetail: err.Error(),
+				TriggeredBy: "scheduler",
+				TargetType:  job.TargetType,
+				TargetID:    job.TargetID,
+				Events: []string{
+					"EnsureDirectChannel failed — refusing to fall back to #general for an owner-targeted routine",
+				},
+			})
+			return
+		}
+		channel = normalizeChannelSlug(dm)
+	}
+	if channel == "" {
+		// Explicit empty job.Channel + a DM that came back blank. Treat
+		// the same way as DM failure — never silently route to general.
+		_ = w.broker.CompleteSchedulerRun(job.Slug, nextRun, "scheduled", schedulerRun{
+			Slug:        job.Slug,
+			StartedAt:   startedAt,
+			Status:      "failed",
+			Message:     "Routine has no destination channel — set channel or owner DM",
+			TriggeredBy: "scheduler",
+			TargetType:  job.TargetType,
+			TargetID:    job.TargetID,
+			Events:      []string{"Skipped: no channel resolved"},
 		})
 		return
 	}

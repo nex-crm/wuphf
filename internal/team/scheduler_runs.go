@@ -100,9 +100,18 @@ func (b *Broker) SchedulerRuns(slug string) []schedulerRun {
 	if !ok {
 		return out
 	}
-	// Reverse-copy so callers receive most-recent-first.
+	// Reverse-copy so callers receive most-recent-first. Deep-copy the
+	// Events slice on every entry so a caller that mutates the returned
+	// payload (test code, future filtering helpers) can't corrupt the
+	// stored history through aliased backing arrays.
 	for i := len(src) - 1; i >= 0; i-- {
-		out = append(out, src[i])
+		run := src[i]
+		if len(run.Events) > 0 {
+			events := make([]string, len(run.Events))
+			copy(events, run.Events)
+			run.Events = events
+		}
+		out = append(out, run)
 	}
 	return out
 }

@@ -69,8 +69,12 @@ export function PreviousRuns({
   return <RunRows runs={runs} />;
 }
 
-function runRowKey(run: SchedulerRun): string {
-  return `${run.started_at}-${run.status}-${run.triggered_by ?? ""}`;
+function runRowKey(run: SchedulerRun, idx: number): string {
+  // started_at + status alone aren't unique enough — two fires can
+  // share a second-resolution timestamp (broker's interval scheduler
+  // batches due jobs on each tick). Mix in finished_at and the array
+  // index so React doesn't reuse expansion state across collisions.
+  return `${idx}-${run.started_at}-${run.finished_at ?? ""}-${run.status}-${run.triggered_by ?? ""}`;
 }
 
 function RunRows({ runs }: { runs: SchedulerRun[] }) {
@@ -87,7 +91,7 @@ function RunRows({ runs }: { runs: SchedulerRun[] }) {
       }}
     >
       {runs.map((run, idx) => (
-        <RunRow key={runRowKey(run)} run={run} isFirst={idx === 0} />
+        <RunRow key={runRowKey(run, idx)} run={run} isFirst={idx === 0} />
       ))}
     </div>
   );

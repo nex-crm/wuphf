@@ -98,11 +98,23 @@ beforeEach(() => {
   // Reset localStorage to keep default-view assertions deterministic.
   window.localStorage.removeItem("routines.viewMode");
   window.localStorage.removeItem("routines.showSystem");
-  vi.mocked(clientMod.getScheduler).mockClear();
-  vi.mocked(clientMod.getSchedulerRuns).mockClear();
-  vi.mocked(clientMod.runSchedulerJob).mockClear();
-  vi.mocked(clientMod.patchSchedulerJob).mockClear();
-  navigateMock.mockClear();
+  // mockReset (not mockClear) drops per-test mockResolvedValueOnce
+  // overrides too, otherwise an override in one test would leak into
+  // the next if test order shifts. Re-seed the default fixture after
+  // resetting so the common path stays one assertion away.
+  vi.mocked(clientMod.getScheduler).mockReset();
+  vi.mocked(clientMod.getScheduler).mockResolvedValue({ jobs: MOCK_JOBS });
+  vi.mocked(clientMod.getSchedulerRuns).mockReset();
+  vi.mocked(clientMod.getSchedulerRuns).mockResolvedValue(MOCK_RUNS);
+  vi.mocked(clientMod.runSchedulerJob).mockReset();
+  vi.mocked(clientMod.runSchedulerJob).mockResolvedValue({
+    triggered: true,
+    slug: "nex-insights",
+    at: new Date().toISOString(),
+  });
+  vi.mocked(clientMod.patchSchedulerJob).mockReset();
+  vi.mocked(clientMod.patchSchedulerJob).mockResolvedValue({ job: {} });
+  navigateMock.mockReset();
 });
 
 afterEach(() => {

@@ -100,6 +100,12 @@ function RoutineListRow({ routine, onSelect }: RoutineListRowProps) {
       data-enabled={enabled}
       onClick={onSelect}
       onKeyDown={(e) => {
+        // Only activate the row on Enter/Space when the keypress
+        // originates on the row itself. Without this check, Enter on a
+        // nested control (owner link, Run-now button, enable toggle)
+        // would hijack into navigation, swallowing the button's own
+        // default action.
+        if (e.target !== e.currentTarget) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect();
