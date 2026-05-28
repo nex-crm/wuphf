@@ -144,6 +144,10 @@ func (b *Broker) loadState() error {
 	b.watchdogs = state.Watchdogs
 	b.policies = state.Policies
 	b.scheduler = state.Scheduler
+	b.schedulerRuns = cloneSchedulerRuns(state.SchedulerRuns)
+	b.schedulerActivity = cloneSchedulerActivity(state.SchedulerActivity)
+	b.schedulerRevisions = cloneSchedulerRevisions(state.SchedulerRevisions)
+	healStuckRoutines(b.scheduler)
 	b.skills = state.Skills
 	// Backfill OwnerAgents for skills persisted before per-agent scoping
 	// landed. Agent-created skills get auto-enabled for their creator so
@@ -316,9 +320,12 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		Signals:           signals,
 		Decisions:         decisions,
 		Watchdogs:         watchdogs,
-		Policies:          b.policies,
-		Scheduler:         scheduler,
-		Skills:            b.skills,
+		Policies:           b.policies,
+		Scheduler:          scheduler,
+		SchedulerRuns:      cloneSchedulerRuns(b.schedulerRuns),
+		SchedulerActivity:  cloneSchedulerActivity(b.schedulerActivity),
+		SchedulerRevisions: cloneSchedulerRevisions(b.schedulerRevisions),
+		Skills:             b.skills,
 		HumanInvites:      b.humanInvites,
 		HumanSessions:     b.humanSessions,
 		SharedMemory:      b.sharedMemory,

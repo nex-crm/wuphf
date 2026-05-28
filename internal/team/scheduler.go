@@ -51,6 +51,7 @@ type schedulerBroker interface {
 	FindTask(channel, id string) (teamTask, bool)
 	FindRequest(channel, id string) (humanInterview, bool)
 	UpdateSchedulerJobState(slug string, nextRun time.Time, status string) error
+	CompleteSchedulerRun(slug string, nextRun time.Time, statusForJob string, run schedulerRun) error
 	CreateWatchdogAlert(kind, channel, targetType, targetID, owner, summary string) (watchdogAlert, bool, error)
 	RecordSignals([]officeSignal) ([]officeSignalRecord, error)
 	RecordDecision(kind, channel, summary, reason, owner string, signalIDs []string, requiresHuman, blocking bool) (officeDecisionRecord, error)
@@ -230,8 +231,13 @@ func (w *watchdogScheduler) processOnce() {
 			w.processRequestJob(job)
 		case "workflow":
 			w.processWorkflowJob(job)
+		case "agent":
+			w.processAgentJob(job)
 		default:
-			nextRun := w.clock.Now().UTC().Add(time.Duration(config.ResolveTaskReminderInterval()) * time.Minute)
+			// Unknown target type — keep the row alive at its scheduled
+			// cadence so the user can still pause / edit it from the UI,
+			// but don't fire anything until a dispatcher claims this kind.
+			nextRun := nextRoutineRun(job, w.clock.Now().UTC())
 			_ = w.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
 		}
 	}
@@ -480,6 +486,132 @@ func (w *watchdogScheduler) updateJob(slug, label string, interval time.Duration
 		return
 	}
 	w.broker.updateSchedulerHeartbeat(slug, label, int(interval/time.Minute), nextRun, status, "")
+}
+
+// processAgentJob fires an agent-targeted routine. The routine's payload
+// (or label, when payload is empty) is posted as an automation message
+// into the routine's channel, tagged at the owning agent so the agent's
+// loop picks it up. Re-arms via CompleteSchedulerRun so the job stays
+// schedulable for the next tick AND the Runs tab gets a detailed trace.
+func (w *watchdogScheduler) processAgentJob(job schedulerJob) {
+	if w.broker == nil {
+		return
+	}
+	now := w.clock.Now().UTC()
+	agentSlug := strings.TrimSpace(job.TargetID)
+	channel := normalizeChannelSlug(job.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	nextRun := nextRoutineRun(job, now)
+
+	startedAt := now.Format(time.RFC3339)
+
+	if agentSlug == "" {
+		// Misconfigured — keep the schedule alive but record a failed run
+		// so the user can see why nothing landed in the channel.
+		_ = w.broker.CompleteSchedulerRun(job.Slug, nextRun, "scheduled", schedulerRun{
+			Slug:        job.Slug,
+			StartedAt:   startedAt,
+			Status:      "failed",
+			Message:     "Routine has no owning agent — set target_id in Edit",
+			TriggeredBy: "scheduler",
+			TargetType:  job.TargetType,
+			TargetID:    job.TargetID,
+			Events:      []string{"Skipped: no owner assigned"},
+		})
+		return
+	}
+
+	body := strings.TrimSpace(job.Payload)
+	if body == "" {
+		body = strings.TrimSpace(job.Label)
+	}
+	if body == "" {
+		body = fmt.Sprintf("Routine %s scheduled run", job.Slug)
+	}
+	// Prefix the body with @agent-slug when the instructions don't
+	// already mention the owner. The Tagged[] field structurally routes
+	// the message to the agent's loop, but the textual @mention makes
+	// the assignment obvious in chat and survives any downstream code
+	// path that scans message content for owner cues.
+	mention := "@" + agentSlug
+	if !strings.Contains(body, mention) {
+		body = mention + " " + body
+	}
+	title := strings.TrimSpace(job.Label)
+	if title == "" {
+		title = job.Slug
+	}
+
+	events := []string{
+		fmt.Sprintf("Scheduler tick at %s UTC", now.Format(time.RFC3339)),
+		fmt.Sprintf("Posting message to #%s tagging @%s", channel, agentSlug),
+	}
+
+	_, _, err := w.broker.PostAutomationMessage(
+		"routine",
+		channel,
+		title,
+		body,
+		fmt.Sprintf("routine:%s:%d", job.Slug, now.Unix()),
+		"routine-scheduler",
+		"Routine scheduler",
+		[]string{agentSlug},
+		"",
+	)
+	if err != nil {
+		events = append(events, fmt.Sprintf("PostAutomationMessage failed: %v", err))
+		_ = w.broker.CompleteSchedulerRun(job.Slug, nextRun, "scheduled", schedulerRun{
+			Slug:        job.Slug,
+			StartedAt:   startedAt,
+			Status:      "failed",
+			Message:     fmt.Sprintf("Failed to post routine message: %v", err),
+			ErrorDetail: err.Error(),
+			TriggeredBy: "scheduler",
+			TargetType:  job.TargetType,
+			TargetID:    job.TargetID,
+			Events:      events,
+		})
+		return
+	}
+
+	events = append(events, fmt.Sprintf("Posted; @%s notified", agentSlug))
+	summary := fmt.Sprintf("Posted to #%s and notified @%s", channel, agentSlug)
+
+	// Status MUST be "scheduled" (not "done") so schedulerJobDue keeps
+	// picking up the routine on subsequent ticks. "done" terminates the
+	// schedule, which is correct for one-shot jobs but wrong for crons.
+	_ = w.broker.CompleteSchedulerRun(job.Slug, nextRun, "scheduled", schedulerRun{
+		Slug:          job.Slug,
+		StartedAt:     startedAt,
+		Status:        "ok",
+		OutputSummary: summary,
+		TriggeredBy:   "scheduler",
+		TargetType:    job.TargetType,
+		TargetID:      job.TargetID,
+		Events:        events,
+	})
+}
+
+// nextRoutineRun computes the next fire time for an agent-targeted
+// routine. Prefers cron when present, falls back to interval_override
+// or interval_minutes, and ultimately a 5-minute heartbeat so the row
+// never goes silent — the caller can flip Enabled to actually pause it.
+func nextRoutineRun(job schedulerJob, now time.Time) time.Time {
+	if expr := strings.TrimSpace(job.ScheduleExpr); expr != "" {
+		if next, ok := nextWorkflowRun(expr, now); ok {
+			return next
+		}
+	}
+	interval := job.IntervalOverride
+	if interval <= 0 {
+		interval = job.IntervalMinutes
+	}
+	if interval > 0 {
+		return now.Add(time.Duration(interval) * time.Minute)
+	}
+	return now.Add(5 * time.Minute)
 }
 
 // nextWorkflowRun parses a cron expression and returns the next scheduled

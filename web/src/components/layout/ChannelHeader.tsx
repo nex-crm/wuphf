@@ -50,6 +50,10 @@ function headerTitleAndDesc(
       return { title: `@${route.agentSlug}`, desc: "" };
     case "skill-detail":
       return { title: `Skill: ${route.skillName}`, desc: "" };
+    case "routine-detail":
+      return { title: route.routineSlug, desc: "Routine" };
+    case "routine-new":
+      return { title: "New routine", desc: "" };
     case "unknown":
       return { title: "", desc: "" };
     default: {

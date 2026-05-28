@@ -629,6 +629,285 @@ body {
   background: var(--warning-200);
   color: var(--warning-500);
 }
+.badge-red {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+/* ─── Routines (scheduled-work surface) ─── */
+/* Tokenised local rules for the Routines app. Keeps the surface coherent
+   across themes without each component owning its own border/hover state. */
+.routines-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+.routines-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.routines-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.routines-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.routines-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin-left: var(--space-2);
+}
+.routines-view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  padding: 2px;
+  gap: 2px;
+}
+.routines-view-tab {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.routines-view-tab[aria-selected="true"] {
+  background: var(--accent);
+  color: white;
+}
+.routines-view-tab:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+.routines-view-tab:not([aria-selected="true"]):hover {
+  color: var(--text);
+}
+
+.routine-row {
+  display: grid;
+  grid-template-columns:
+    minmax(200px, 2.2fr) minmax(140px, 1fr) minmax(120px, 1fr)
+    minmax(100px, 0.8fr) minmax(150px, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--routine-color, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  cursor: pointer;
+  position: relative;
+  transition: border-color 120ms ease, transform 120ms ease,
+    box-shadow 120ms ease;
+}
+.routine-row:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+.routine-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+.routine-row[data-enabled="false"] {
+  opacity: 0.65;
+}
+.routine-row-label {
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.routine-row-slug {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.routine-row-meta {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.routine-header-row {
+  display: grid;
+  grid-template-columns:
+    minmax(200px, 2.2fr) minmax(140px, 1fr) minmax(120px, 1fr)
+    minmax(100px, 0.8fr) minmax(150px, 1fr) auto;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-2) var(--space-4);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+
+.routine-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.routine-month-weekday {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border-light);
+  background: var(--bg-subtle, var(--bg-card));
+}
+.routine-month-weekday:nth-child(7n) {
+  border-right: none;
+}
+.routine-day {
+  min-height: 104px;
+  padding: var(--space-1);
+  border-bottom: 1px solid var(--border-light);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: background 120ms ease;
+}
+.routine-day:nth-child(7n + 7) {
+  border-right: none;
+}
+.routine-day[data-out-of-month="true"] {
+  opacity: 0.5;
+  background: var(--bg-subtle, transparent);
+}
+.routine-day[data-today="true"] {
+  background: var(--accent-bg);
+}
+.routine-day:hover {
+  background: var(--bg-warm);
+}
+.routine-day-number {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: 2px 4px 0;
+}
+.routine-day[data-today="true"] .routine-day-number {
+  color: var(--accent);
+  font-weight: 700;
+}
+.routine-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--routine-color, var(--accent));
+  border-radius: 3px;
+  font-size: var(--text-2xs);
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  width: 100%;
+  transition: transform 120ms ease, border-color 120ms ease;
+  animation: routine-chip-in 180ms ease both;
+}
+.routine-chip:hover {
+  border-color: var(--border-strong);
+  transform: translateX(1px);
+}
+.routine-chip[data-enabled="false"] {
+  opacity: 0.55;
+}
+.routine-chip-time {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.routine-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes routine-chip-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.routine-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.32);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  z-index: 60;
+  animation: routine-fade-in 160ms ease both;
+}
+.routine-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(520px, 100vw);
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.18);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  animation: routine-slide-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes routine-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes routine-slide-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .routine-row,
+  .routine-chip,
+  .routines-view-tab,
+  .routine-day,
+  .routine-drawer,
+  .routine-drawer-backdrop {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 
 /* ─── Approval context (Variant B layout, shared between InterviewBar and HumanInterviewOverlay) ─── */
 /* The approval card has three semantically distinct content blocks and visual

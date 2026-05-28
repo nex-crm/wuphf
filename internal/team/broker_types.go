@@ -663,7 +663,10 @@ type brokerState struct {
 	Signals           []officeSignalRecord         `json:"signals,omitempty"`
 	Decisions         []officeDecisionRecord       `json:"decisions,omitempty"`
 	Watchdogs         []watchdogAlert              `json:"watchdogs,omitempty"`
-	Scheduler         []schedulerJob               `json:"scheduler,omitempty"`
+	Scheduler          []schedulerJob                  `json:"scheduler,omitempty"`
+	SchedulerRuns      map[string][]schedulerRun       `json:"scheduler_runs,omitempty"`
+	SchedulerActivity  map[string][]schedulerActivity  `json:"scheduler_activity,omitempty"`
+	SchedulerRevisions map[string][]schedulerRevision  `json:"scheduler_revisions,omitempty"`
 	Skills            []teamSkill                  `json:"skills,omitempty"`
 	HumanInvites      []humanInvite                `json:"human_invites,omitempty"`
 	HumanSessions     []humanSession               `json:"human_sessions,omitempty"`

@@ -1,6 +1,5 @@
 export const APP_PANEL_IDS = [
   "activity",
-  "calendar",
   "console",
   "graph",
   "health-check",
@@ -8,6 +7,7 @@ export const APP_PANEL_IDS = [
   "policies",
   "receipts",
   "requests",
+  "routines",
   "settings",
   "skills",
   "tasks",
@@ -52,9 +52,9 @@ export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
   issues: "Issues",
   // Routed app panels under `/apps/$appId`. The `activity` id keeps its
   // historical slug so existing /apps/activity URLs still resolve; the
-  // human-facing label is "Dashboard".
+  // human-facing label is "Dashboard" (renamed in #1002). The `calendar`
+  // entry is intentionally dropped — Routines replaces it.
   activity: "Dashboard",
-  calendar: "Calendar",
   console: "Console",
   graph: "Graph",
   "health-check": "Access & Health",
@@ -62,6 +62,7 @@ export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
   policies: "Policies",
   receipts: "Receipts",
   requests: "Requests",
+  routines: "Routines",
   settings: "Settings",
   skills: "Skills",
   tasks: "Tasks",
@@ -82,7 +83,7 @@ const SIDEBAR_TOOL_EMOJIS: Partial<
   console: ">",
   graph: "🕸",
   policies: "🛡",
-  calendar: "📅",
+  routines: "🔁",
   skills: "⚡",
   receipts: "🧾",
   "health-check": "📶",
@@ -122,7 +123,7 @@ export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
   { id: "console", kind: "app-panel" },
   { id: "graph", kind: "app-panel" },
   { id: "policies", kind: "app-panel" },
-  { id: "calendar", kind: "app-panel" },
+  { id: "routines", kind: "app-panel" },
   { id: "skills", kind: "app-panel" },
   { id: "receipts", kind: "app-panel" },
   { id: "health-check", kind: "app-panel" },
@@ -163,6 +164,12 @@ export const ROUTE_PATHS = {
    * Wired so `+ New issue` can navigate here without a 404.
    */
   issueNew: "/issues/new",
+  /** Routines surface index — alias for /apps/routines. */
+  routines: "/routines",
+  /** Composer for creating a routine from scratch. */
+  routineNew: "/routines/new",
+  /** Routine detail page (full-screen, not the legacy drawer). */
+  routineDetail: "/routines/$routineSlug",
   /**
    * v3 MVP — per-agent subspace shell.
    * Renders the uniform Chat | App | Notebooks | Calendar | Settings tabs.
@@ -282,6 +289,14 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     search: [],
   },
   { key: "issueNew", path: ROUTE_PATHS.issueNew, params: [], search: [] },
+  { key: "routines", path: ROUTE_PATHS.routines, params: [], search: [] },
+  { key: "routineNew", path: ROUTE_PATHS.routineNew, params: [], search: [] },
+  {
+    key: "routineDetail",
+    path: ROUTE_PATHS.routineDetail,
+    params: ["routineSlug"],
+    search: [],
+  },
   {
     key: "agentSubspace",
     path: ROUTE_PATHS.agentSubspace,
