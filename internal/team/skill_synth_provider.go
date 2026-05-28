@@ -139,6 +139,21 @@ const (
 	// ~920 tokens (~5-6KB), and length-as-effort is a known failure mode.
 	stageBSynthCompactnessSoftLimit = 6 * 1024
 
+	// stageBSynthCompactnessHardLimit is the rejection cap on new-skill
+	// body length, set at 2× the soft limit. Above this the LLM has bloated
+	// well past anything that's still a "skill" in the SkillOpt sense, and
+	// the team accrues unread procedure rather than callable surface. The
+	// 32KiB absolute backstop above remains the runaway-response defence;
+	// this is the bloat-prevention gate just above the median.
+	stageBSynthCompactnessHardLimit = 12 * 1024
+
+	// stageBSynthEnhanceMaxEdits bounds the number of enumerated steps an
+	// enhance / rename body may carry. SkillOpt's textual learning rate
+	// defaults to 4 edits/step (with cosine decay to a floor of 2); we
+	// leave headroom at 8 so legitimate compound enhancements still land
+	// but a "rewrite the whole body" disguised as enhance gets rejected.
+	stageBSynthEnhanceMaxEdits = 8
+
 	// stageBSynthNewSkillMinBodyLen is the depth floor for NEW skill bodies.
 	// Below this, the skill is almost always shallow — a few lines that
 	// could have lived in prose. Enhance bodies are exempt because they
@@ -554,11 +569,39 @@ func (p *defaultStageBLLMProvider) callLLM(ctx context.Context, systemPrompt, us
 	return callOpenAI(callCtx, client, openaiKey, systemPrompt, userPrompt)
 }
 
+// stageBDefaultAnthropicModel is the Stage B synthesizer's default. Haiku
+// is cheap and adequate for most candidates. SkillOpt (arXiv 2605.23904,
+// Table 5) shows a stronger optimizer monotonically improves the resulting
+// skill — for higher-stakes workspaces, pin Sonnet or Opus via the env
+// override below.
+const stageBDefaultAnthropicModel = "claude-haiku-4-5-20251001"
+
+// stageBDefaultOpenAIModel is the OpenAI-side default. gpt-4o-mini is the
+// cost-equivalent of Haiku and the historical default; ops can pin a
+// stronger model via WUPHF_STAGE_B_SYNTH_MODEL when the Anthropic key is
+// unset and the OpenAI fallback is in use.
+const stageBDefaultOpenAIModel = "gpt-4o-mini"
+
+// resolveStageBSynthModel returns the model identifier to use for Stage B
+// synthesis. Ops can override the default via WUPHF_STAGE_B_SYNTH_MODEL.
+// The override is provider-agnostic — the caller passes whichever default
+// matches the provider in use, and the env value (if set) wins.
+//
+// This is SkillOpt's "stronger optimizer ≠ deployment target" lever: skill
+// synthesis is offline and amortized over every future invocation, so the
+// per-pass cost of a stronger model is usually worth the quality lift.
+func resolveStageBSynthModel(defaultModel string) string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_STAGE_B_SYNTH_MODEL")); v != "" {
+		return v
+	}
+	return defaultModel
+}
+
 // callAnthropic posts to /v1/messages with a system prompt + a single user
 // message and returns the concatenated text content of the response.
 func callAnthropic(ctx context.Context, client *http.Client, key, systemPrompt, userPrompt string) (string, error) {
 	const endpoint = "https://api.anthropic.com/v1/messages"
-	const model = "claude-haiku-4-5-20251001"
+	model := resolveStageBSynthModel(stageBDefaultAnthropicModel)
 
 	payload := map[string]any{
 		"model":      model,
@@ -614,11 +657,12 @@ func callAnthropic(ctx context.Context, client *http.Client, key, systemPrompt, 
 }
 
 // callOpenAI posts to /v1/chat/completions with a system + user message and
-// returns the assistant content. We stay on gpt-4o-mini for cost; the JSON
-// shape is the standard chat.completions response.
+// returns the assistant content. Defaults to gpt-4o-mini for cost; ops can
+// pin a stronger optimizer via WUPHF_STAGE_B_SYNTH_MODEL (see SkillOpt's
+// stronger-optimizer-≠-deployment-target finding).
 func callOpenAI(ctx context.Context, client *http.Client, key, systemPrompt, userPrompt string) (string, error) {
 	const endpoint = "https://api.openai.com/v1/chat/completions"
-	const model = "gpt-4o-mini"
+	model := resolveStageBSynthModel(stageBDefaultOpenAIModel)
 
 	payload := map[string]any{
 		"model": model,
@@ -812,6 +856,15 @@ func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynth
 			return fmt.Errorf("name %q must equal enhance %q for enhance responses", name, enhance)
 		}
 		// Enhance bodies are bounded diffs — no heading or depth gate.
+		// They DO have an upper edit-count bound: SkillOpt's textual
+		// learning rate caps per-step edits at 4 (decayed to 2); we leave
+		// headroom at 8 here so legitimate compound enhancements still
+		// land while a "rewrite the whole body" disguised as enhance
+		// gets rejected.
+		if edits := countEnumeratedSteps(body); edits > stageBSynthEnhanceMaxEdits {
+			return fmt.Errorf("enhance body carries %d enumerated edits, max is %d (bounded-diff contract)",
+				edits, stageBSynthEnhanceMaxEdits)
+		}
 		return nil
 	}
 
@@ -864,6 +917,10 @@ func enforceDepthGate(body string) error {
 	if len(trimmed) < stageBSynthNewSkillMinBodyLen {
 		return fmt.Errorf("body too shallow (%d < %d bytes — new skills need substantive procedure, not a snippet)",
 			len(trimmed), stageBSynthNewSkillMinBodyLen)
+	}
+	if len(trimmed) > stageBSynthCompactnessHardLimit {
+		return fmt.Errorf("body too bloated (%d > %d bytes — skills should be compact; SkillOpt median is ~5-6KB)",
+			len(trimmed), stageBSynthCompactnessHardLimit)
 	}
 	if steps := countEnumeratedSteps(body); steps < stageBSynthNewSkillMinSteps {
 		return fmt.Errorf("body has %d enumerated steps, need at least %d for a new skill",

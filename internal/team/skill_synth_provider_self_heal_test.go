@@ -11,6 +11,7 @@ package team
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -720,6 +721,87 @@ func TestValidateStageBSynthResponse_DepthGate(t *testing.T) {
 				t.Fatalf("expected %q in error, got %q", tc.wantErr, err.Error())
 			}
 		})
+	}
+}
+
+// TestResolveStageBSynthModel pins the SkillOpt optimizer-override knob.
+// Stage B synthesis is offline and amortized across every future skill
+// invocation, so ops can pin a stronger model via env without changing
+// the deployment-time target. The default returns when the env var is
+// unset; any non-empty value wins.
+func TestResolveStageBSynthModel(t *testing.T) {
+	t.Run("unset env returns default", func(t *testing.T) {
+		t.Setenv("WUPHF_STAGE_B_SYNTH_MODEL", "")
+		if got := resolveStageBSynthModel("claude-haiku-default"); got != "claude-haiku-default" {
+			t.Fatalf("expected default, got %q", got)
+		}
+	})
+	t.Run("env override wins", func(t *testing.T) {
+		t.Setenv("WUPHF_STAGE_B_SYNTH_MODEL", "claude-opus-4-7")
+		if got := resolveStageBSynthModel("claude-haiku-default"); got != "claude-opus-4-7" {
+			t.Fatalf("expected override, got %q", got)
+		}
+	})
+	t.Run("whitespace-only env falls back", func(t *testing.T) {
+		t.Setenv("WUPHF_STAGE_B_SYNTH_MODEL", "   ")
+		if got := resolveStageBSynthModel("claude-haiku-default"); got != "claude-haiku-default" {
+			t.Fatalf("expected fallback to default, got %q", got)
+		}
+	})
+}
+
+// TestValidateStageBSynthResponse_HardCompactnessCapRejectsBloat pins
+// the hard compactness cap: even bodies that pass headings and depth
+// must reject above ~12KB. SkillOpt's median final skill is ~5-6KB;
+// bloat above 2× the soft limit is almost always length-as-effort
+// rather than load-bearing content.
+func TestValidateStageBSynthResponse_HardCompactnessCapRejectsBloat(t *testing.T) {
+	body := "## When this fires\nThe agent encounters a recurring blocker.\n\n## Steps\n1. Step one with substantive detail.\n2. Step two with substantive detail.\n3. Step three with substantive detail.\n\n## Source incident\nIncident task-77 — initial recurrence.\n"
+	// Pad with filler that keeps the body well-formed markdown but blows
+	// past the 12KB hard cap. Source incident row uses prose (no leading
+	// "- ") so the depth gate's step counter is not inflated past 3.
+	body += strings.Repeat("\n\n## Filler\n"+strings.Repeat("Bloat. ", 400), 8)
+
+	resp := stageBSynthResponse{
+		IsSkill:     true,
+		Name:        "handle-foo",
+		Description: "when blocked, do the foo dance.",
+		Body:        body,
+	}
+	err := validateStageBSynthResponse(SourceSelfHealResolved, resp)
+	if err == nil {
+		t.Fatalf("expected hard-cap rejection for %d-byte body, got nil", len(body))
+	}
+	if !strings.Contains(err.Error(), "too bloated") {
+		t.Fatalf("expected 'too bloated' message, got %q", err.Error())
+	}
+}
+
+// TestValidateStageBSynthResponse_EnhanceEditCountBound pins the
+// bounded-diff contract: an enhance body that smuggles a full rewrite
+// (more enumerated changes than the bound) is rejected. SkillOpt's
+// textual learning rate caps step edits at 4 (decayed to 2); we leave
+// headroom at 8.
+func TestValidateStageBSynthResponse_EnhanceEditCountBound(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 12; i++ {
+		lines = append(lines, fmt.Sprintf("%d. Replacement step %d with substantive detail.", i, i))
+	}
+	body := "## Steps\n" + strings.Join(lines, "\n") + "\n"
+
+	resp := stageBSynthResponse{
+		IsSkill:     true,
+		Name:        "deploy-runbook",
+		Description: "Deploy a service from staging to prod (enhanced).",
+		Body:        body,
+		Enhance:     "deploy-runbook",
+	}
+	err := validateStageBSynthResponse(SourceNotebookCluster, resp)
+	if err == nil {
+		t.Fatalf("expected edit-count bound rejection with 12 edits, got nil")
+	}
+	if !strings.Contains(err.Error(), "bounded-diff") {
+		t.Fatalf("expected 'bounded-diff' message, got %q", err.Error())
 	}
 }
 

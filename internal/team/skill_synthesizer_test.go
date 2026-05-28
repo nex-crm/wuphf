@@ -447,6 +447,99 @@ func TestSynthesizeOnce_EnhanceRoutesToExistingSkill(t *testing.T) {
 	}
 }
 
+// TestSynthesizeOnce_EnhanceProtectsInvariantBlock pins SkillOpt's
+// protected-section invariant: step-level edits must not drop or mutate
+// any <!-- INVARIANT-START --> block in the existing body. Without this
+// gate, the SkillOpt SpreadsheetBench score drops 22.5 points (ablation
+// Table 3). For us, the same risk: a fast enhancement quietly overwrites
+// a slow lesson the team learned the hard way.
+func TestSynthesizeOnce_EnhanceProtectsInvariantBlock(t *testing.T) {
+	b := newTestBroker(t)
+	// Pre-seed an existing skill that carries a protected invariant.
+	// mergeSkillContent is append-only, so a normal enhance preserves
+	// the block automatically — this test is the regression gate that
+	// makes sure a future merge implementation that doesn't preserve
+	// the block is caught at the contract layer rather than silently
+	// shipping the regression.
+	b.mu.Lock()
+	b.skills = append(b.skills, teamSkill{
+		Name:        "destructive-action-runbook",
+		Title:       "Destructive Action Runbook",
+		Description: "Run a destructive action with human approval.",
+		Content: "## Steps\n" +
+			"1. Stage the change.\n" +
+			"2. Run smoke tests.\n\n" +
+			"<!-- INVARIANT-START -->\n" +
+			"Never auto-approve destructive actions. Always require a human ack.\n" +
+			"<!-- INVARIANT-END -->\n",
+		Status:    "active",
+		CreatedBy: "scanner",
+	})
+	b.mu.Unlock()
+
+	// Enhancement that preserves the invariant block by simply appending.
+	// This must succeed — append-only merge keeps the block intact.
+	prov := &stubLLMProvider{
+		queue: []stubLLMResponse{{
+			fm: SkillFrontmatter{
+				Name:        "destructive-action-runbook",
+				Description: "Run a destructive action with human approval.",
+			},
+			body:    "## Steps\n3. Capture the approver in the audit log.\n",
+			enhance: "destructive-action-runbook",
+		}},
+	}
+	cand := SkillCandidate{
+		Source:        SourceNotebookCluster,
+		SuggestedName: "destructive-action-audit",
+		SignalCount:   3,
+	}
+	synth := newSynthWithCandidates(t, b, prov, []SkillCandidate{cand})
+
+	res, err := synth.SynthesizeOnce(context.Background(), "manual")
+	if err != nil {
+		t.Fatalf("SynthesizeOnce: %v", err)
+	}
+	if res.Deduped != 1 {
+		t.Fatalf("expected enhance to land (Deduped=1), got %+v", res)
+	}
+
+	b.mu.Lock()
+	enhanced := b.findSkillByNameLocked("destructive-action-runbook")
+	b.mu.Unlock()
+	if enhanced == nil {
+		t.Fatalf("expected enhanced skill to still exist")
+	}
+	if !strings.Contains(enhanced.Content, "Never auto-approve destructive actions. Always require a human ack.") {
+		t.Fatalf("expected invariant block to survive enhance, got:\n%s", enhanced.Content)
+	}
+	if !strings.Contains(enhanced.Content, "Capture the approver in the audit log") {
+		t.Fatalf("expected new step to be merged in, got:\n%s", enhanced.Content)
+	}
+}
+
+// TestVerifySkillInvariantsPreserved_RejectsMissingBlock is the unit-level
+// gate for the invariant check: a merge result that drops a protected
+// block must error out. Direct call rather than the synth pass so the
+// failure mode is unambiguous.
+func TestVerifySkillInvariantsPreserved_RejectsMissingBlock(t *testing.T) {
+	previous := "## Steps\n1. Foo.\n\n<!-- INVARIANT-START -->\nNever auto-approve.\n<!-- INVARIANT-END -->\n"
+	merged := "## Steps\n1. Foo.\n2. Bar.\n" // invariant block dropped
+
+	if err := verifySkillInvariantsPreserved(previous, merged); err == nil {
+		t.Fatal("expected invariant violation, got nil")
+	}
+	// Sanity: a merge that preserves the block must pass.
+	mergedOK := previous + "\n## Extra\n3. Baz.\n"
+	if err := verifySkillInvariantsPreserved(previous, mergedOK); err != nil {
+		t.Fatalf("preserved block should pass, got %v", err)
+	}
+	// No-invariant-block previous body short-circuits cleanly.
+	if err := verifySkillInvariantsPreserved("## Steps\n1. Foo.\n", "## Steps\n1. Foo.\n2. Bar.\n"); err != nil {
+		t.Fatalf("no-invariant case should pass, got %v", err)
+	}
+}
+
 // TestSynthesizeOnce_RenameAndEnhanceBroadensSlug confirms the rename
 // path: when the LLM signals that an existing skill's scope has
 // broadened (e.g. pitch-deck-saas → pitch-deck-creation), the existing

@@ -48,7 +48,7 @@ One paragraph naming the trigger condition.
 What the agent or user gets back.
 
 ## Invariants
-Things that MUST hold across edits to this skill. (Optional, but if present, enhancements MUST preserve them verbatim.)
+Things that MUST hold across edits to this skill. (Optional.) When this section matters, wrap the load-bearing lines in `<!-- INVARIANT-START -->` / `<!-- INVARIANT-END -->` markers; enhancement edits are mechanically rejected if a marked block does not survive verbatim.
 
 ## Examples
 At least one worked example for non-trivial skills.
