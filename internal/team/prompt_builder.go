@@ -444,7 +444,7 @@ func visualArtifactForcingBlock() string {
 		"- the answer is a comparison, decision matrix, scoring rubric, options table, or before/after;\n" +
 		"- the answer is a diagram, flow, sequence, mockup, dashboard, or interactive tuning surface;\n" +
 		"- your reply would otherwise be more than ~200 words of structured markdown headings and lists.\n" +
-		"The paired markdown (notebook_write or the wiki article) stays the durable source; the HTML is the visual companion users actually read. Default to the WUPHF technical-manual style described in the tool catalog (old mathematics/physics book, Making Software cobalt figure ink, FIG_001 labels, self-contained inline CSS/JS, no network fetches). Do not skip the artifact because the markdown felt good enough — markdown-only replies on these triggers are the failure mode this rule fixes.\n\n"
+		"The paired markdown (notebook_write or the wiki article) stays the durable source; the HTML is the visual companion users actually read. Default to the WUPHF technical-manual style described in the tool catalog (old mathematics/physics book, Making Software cobalt figure ink, FIG_001 labels, self-contained inline CSS/JS, no network fetches). Do NOT use CSS `@import` in any form — including empty `@import url('data:text/css,');` reflex lines — and do NOT load Google Fonts; declare system serif/mono families like Georgia, Times, Cambria, or Courier directly in `font-family`. Do not skip the artifact because the markdown felt good enough — markdown-only replies on these triggers are the failure mode this rule fixes.\n\n"
 }
 
 func secretHandlingPromptRule() string {

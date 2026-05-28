@@ -327,7 +327,7 @@ func validateRichArtifactURL(tag, attr, value string) error {
 
 func validateRichArtifactCSS(css string) error {
 	if containsASCIIFold(css, "@import") {
-		return newRichArtifactCallerError("visual artifact: css @import is not allowed")
+		return newRichArtifactCallerError("visual artifact: css @import is not allowed (including empty data: URLs); use system fonts like Georgia, Times, Cambria, or Courier directly in font-family")
 	}
 	if containsASCIIFold(css, "expression(") {
 		return newRichArtifactCallerError("visual artifact: css expression() is not allowed")
