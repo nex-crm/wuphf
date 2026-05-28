@@ -158,6 +158,9 @@ func TestBlueprintChipOptions_LoadsFullCatalog(t *testing.T) {
 		if label, _ := opt["label"].(string); label == "" {
 			t.Errorf("catalog entry has empty label: %v", opt)
 		}
+		if icon, _ := opt["icon"].(string); icon == "" {
+			t.Errorf("catalog entry has empty icon: %v", opt)
+		}
 		if desc, _ := opt["description"].(string); desc == "" {
 			t.Errorf("catalog entry has empty description: %v", opt)
 		}
