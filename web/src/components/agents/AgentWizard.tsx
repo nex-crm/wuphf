@@ -1,12 +1,22 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: Modal backdrop uses pointer hit-testing while dialog controls retain keyboard handling.
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Backdrop pointer dismissal is paired with a window Escape listener while the modal is open.
 import { useCallback, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { generateAgent, post } from "../../api/client";
+import {
+  generateAgent,
+  getConfig,
+  type LLMRuntimeKind,
+  post,
+} from "../../api/client";
 import { useWindowEscape } from "../../hooks/useWindowEscape";
 
-type Provider = "inherit" | "claude-code" | "codex" | "opencode";
+// "inherit" is the wizard-only sentinel that maps to an absent ProviderBinding
+// in the POST body (the broker then falls back to the install-wide default at
+// dispatch time). Gateway kinds (openclaw / hermes-agent) are deliberately
+// absent — agents bound to a gateway are imported through the Integrations
+// app, not created in this wizard.
+type ProviderChoice = "inherit" | LLMRuntimeKind;
 type WizardMode = "describe" | "manual";
 
 interface AgentFormData {
@@ -14,7 +24,8 @@ interface AgentFormData {
   slug: string;
   role: string;
   emoji: string;
-  provider: Provider;
+  provider: ProviderChoice;
+  model: string;
   expertise: string;
 }
 
@@ -24,15 +35,21 @@ const INITIAL_FORM: AgentFormData = {
   role: "",
   emoji: "",
   provider: "inherit",
+  model: "",
   expertise: "",
 };
 
-const PROVIDERS: { value: Provider; label: string }[] = [
-  { value: "inherit", label: "Default runtime" },
-  { value: "codex", label: "Codex" },
-  { value: "claude-code", label: "Claude Code" },
-  { value: "opencode", label: "Opencode" },
-];
+// Human-readable labels for the runtime picker. Kinds the broker hasn't
+// registered are skipped at render time, so missing labels here aren't fatal —
+// they just fall back to the raw kind string.
+const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "Opencode",
+  "mlx-lm": "MLX-LM",
+  ollama: "Ollama",
+  exo: "Exo",
+};
 
 function slugify(name: string): string {
   return name
@@ -64,6 +81,30 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
+  // Pull the registered runtime list off the wire so the picker stays in sync
+  // with whatever providers the Go layer has registered. Falls back to a
+  // hardcoded core set on first paint / fetch failure so the wizard is
+  // usable even when /config is briefly unavailable. Lock state surfaces a
+  // banner — when the global override is engaged the per-agent pick is
+  // ignored at dispatch, so the user should know before saving.
+  const configQuery = useQuery({
+    queryKey: ["config"],
+    queryFn: getConfig,
+    enabled: open,
+    staleTime: 30_000,
+  });
+  const llmKinds: LLMRuntimeKind[] = (configQuery.data?.llm_provider_kinds ?? [
+    "claude-code",
+    "codex",
+    "opencode",
+    "mlx-lm",
+    "ollama",
+    "exo",
+  ]) as LLMRuntimeKind[];
+  const globalLocked = configQuery.data?.llm_provider_unlocked === false;
+  const globalOverrideEngaged =
+    configQuery.data?.llm_provider_unlocked === true;
+
   async function handleGenerate() {
     const trimmed = prompt.trim();
     if (!trimmed) {
@@ -75,12 +116,20 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
     try {
       const tmpl = await generateAgent(trimmed);
       const generatedSlug = tmpl.slug || "";
+      // The CEO-side generator may suggest a runtime/model pair. Only
+      // honor it when the suggested provider is one we'd surface in the
+      // picker (i.e. a non-gateway registered kind) — gateway kinds must
+      // come in through the Integrations app, never through the wizard.
+      const suggestedProvider = tmpl.provider as LLMRuntimeKind | undefined;
+      const providerInList =
+        suggestedProvider && llmKinds.includes(suggestedProvider);
       setForm({
         name: tmpl.name || "",
         slug: generatedSlug,
         role: tmpl.role || "",
         emoji: tmpl.emoji || "",
-        provider: "inherit",
+        provider: providerInList ? suggestedProvider : "inherit",
+        model: tmpl.model || "",
         expertise: (tmpl.expertise || []).join(", "),
       });
       setSlugEdited(generatedSlug.length > 0);
@@ -124,14 +173,24 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
     setError(null);
 
     try {
+      // Encode provider as an explicit binding only when the user picked a
+      // specific runtime. "inherit" sends an absent provider field so the
+      // broker leaves Provider zero-valued; the dispatch resolver then
+      // falls back to the install-wide default at turn time.
+      const trimmedModel = form.model.trim();
+      const providerBody =
+        form.provider === "inherit"
+          ? undefined
+          : trimmedModel
+            ? { kind: form.provider, model: trimmedModel }
+            : { kind: form.provider };
       const body = {
         action: "create",
         slug: form.slug,
         name: form.name,
         role: form.role || undefined,
         emoji: form.emoji || undefined,
-        provider:
-          form.provider === "inherit" ? undefined : { kind: form.provider },
+        provider: providerBody,
         expertise: expertiseTags.length > 0 ? expertiseTags : undefined,
       };
 
@@ -330,24 +389,87 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
               />
             </div>
 
-            {/* Provider */}
+            {/* Provider + Model */}
             <div className="agent-wizard-field">
               <label className="label" htmlFor="agent-provider">
-                Provider
+                Runtime
               </label>
               <select
                 id="agent-provider"
                 value={form.provider}
                 onChange={(e) =>
-                  updateField("provider", e.target.value as Provider)
+                  updateField("provider", e.target.value as ProviderChoice)
                 }
               >
-                {PROVIDERS.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
+                <option value="inherit">
+                  Inherit default (
+                  {configQuery.data?.llm_provider ?? "claude-code"})
+                </option>
+                {llmKinds.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {PROVIDER_LABELS[kind] ?? kind}
                   </option>
                 ))}
               </select>
+              {globalOverrideEngaged ? (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-tertiary)",
+                    marginTop: 6,
+                    display: "block",
+                  }}
+                >
+                  The global runtime is unlocked and overriding every agent —
+                  per-agent picks are ignored until it's re-locked in Settings.
+                </span>
+              ) : globalLocked && form.provider === "inherit" ? (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-tertiary)",
+                    marginTop: 6,
+                    display: "block",
+                  }}
+                >
+                  Inheriting the install default. Change here to pin this agent
+                  to a specific runtime.
+                </span>
+              ) : null}
+            </div>
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-model">
+                Model{" "}
+                <span
+                  style={{ fontWeight: 400, color: "var(--text-tertiary)" }}
+                >
+                  (optional)
+                </span>
+              </label>
+              <input
+                id="agent-model"
+                className="input"
+                type="text"
+                placeholder={
+                  form.provider === "inherit"
+                    ? "Uses the runtime's default model"
+                    : "e.g. claude-3-5-sonnet-latest, llama3.1:8b"
+                }
+                value={form.model}
+                onChange={(e) => updateField("model", e.target.value)}
+                disabled={form.provider === "inherit"}
+              />
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-tertiary)",
+                  marginTop: 6,
+                  display: "block",
+                }}
+              >
+                Validated by the runtime, not by WUPHF. Leave blank to use
+                whatever model the runtime selects by default.
+              </span>
             </div>
 
             {/* Expertise */}

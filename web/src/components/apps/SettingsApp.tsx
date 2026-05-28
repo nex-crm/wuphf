@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Refresh, WarningTriangle } from "iconoir-react";
+import { Lock, Refresh, WarningTriangle } from "iconoir-react";
 
 import {
   type ConfigSnapshot,
   type ConfigUpdate,
   getConfig,
   getLocalProvidersStatus,
+  type LLMRuntimeKind,
   type LocalProviderStatus,
   resetWorkspace,
   shredWorkspace,
@@ -67,8 +68,34 @@ function useShredAction() {
   };
 }
 
+const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "Opencode",
+  "mlx-lm": "MLX-LM (Apple Silicon)",
+  ollama: "Ollama",
+  exo: "Exo",
+};
+const CLOUD_KINDS: ReadonlySet<LLMRuntimeKind> = new Set([
+  "claude-code",
+  "codex",
+  "opencode",
+]);
+
 function GeneralSection({ cfg, save }: SectionProps) {
-  const [provider, setProvider] = useState(cfg.llm_provider ?? "ollama");
+  const [provider, setProvider] = useState<LLMRuntimeKind | "">(
+    (cfg.llm_provider as LLMRuntimeKind | undefined) ?? "claude-code",
+  );
+  // unlocked mirrors Config.LLMProviderUnlocked on the wire. False (default) =
+  // friction-gated: the global runtime is the default for new agents and the
+  // fallback when an agent has no per-agent binding. True = the global
+  // runtime overrides every per-agent binding on the dispatch path. We
+  // surface the lock with an explicit toggle so flipping override-on requires
+  // a deliberate gesture; the picker stays read-only while locked.
+  const [unlocked, setUnlocked] = useState<boolean>(
+    Boolean(cfg.llm_provider_unlocked),
+  );
+  const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
   const [teamLead, setTeamLead] = useState(cfg.team_lead_slug ?? "");
   const [maxConcurrent, setMaxConcurrent] = useState(
     cfg.max_concurrent_agents ? String(cfg.max_concurrent_agents) : "",
@@ -81,9 +108,21 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const [email, setEmail] = useState(cfg.email ?? "");
   const [devUrl, setDevUrl] = useState(cfg.dev_url ?? "");
 
+  const llmKinds: LLMRuntimeKind[] = (cfg.llm_provider_kinds ?? [
+    "claude-code",
+    "codex",
+    "opencode",
+    "mlx-lm",
+    "ollama",
+    "exo",
+  ]) as LLMRuntimeKind[];
+  const cloudKinds = llmKinds.filter((k) => CLOUD_KINDS.has(k));
+  const localKinds = llmKinds.filter((k) => !CLOUD_KINDS.has(k));
+
   const onSave = async () => {
     const patch: ConfigUpdate = {
       llm_provider: provider as ConfigUpdate["llm_provider"],
+      llm_provider_unlocked: unlocked,
       default_format: format,
       blueprint,
       email,
@@ -94,6 +133,12 @@ function GeneralSection({ cfg, save }: SectionProps) {
       patch.max_concurrent_agents = parseInt(maxConcurrent, 10);
     if (timeout) patch.default_timeout = parseInt(timeout, 10);
     await save(patch);
+    // After a successful save, re-lock the override toggle locally so the
+    // user has to opt in again on the next change. The wire value persists
+    // (the broker stored whatever we sent) but the in-form draft resets to
+    // the safe state — same pattern as a one-shot "Apply to all" button.
+    setUnlocked(false);
+    setShowOverrideConfirm(false);
   };
 
   return (
@@ -103,27 +148,163 @@ function GeneralSection({ cfg, save }: SectionProps) {
         Core runtime settings. These map to CLI flags and config file entries.
       </p>
 
-      <div style={styles.groupTitle}>Runtime</div>
-      <Field label="LLM Provider" hint="--provider">
+      <div style={styles.groupTitle}>Default runtime for agents</div>
+      <p
+        style={{
+          fontSize: 12,
+          color: "var(--text-tertiary)",
+          margin: "0 0 12px 0",
+          lineHeight: 1.5,
+        }}
+      >
+        The runtime new agents inherit when created and the fallback for any
+        agent without a per-agent pick. To bring an OpenClaw or Hermes agent
+        into the team, use the Integrations app — those gateways are not
+        runtimes you assign here.
+      </p>
+      <Field label="Runtime" hint="--provider">
         <select
-          style={styles.input}
+          style={{
+            ...styles.input,
+            opacity: unlocked ? 1 : 0.7,
+            cursor: unlocked ? "pointer" : "not-allowed",
+          }}
           value={provider}
-          onChange={(e) => setProvider(e.target.value as typeof provider)}
+          onChange={(e) => setProvider(e.target.value as LLMRuntimeKind | "")}
+          disabled={!unlocked}
         >
-          <optgroup label="Cloud">
-            <option value="claude-code">Claude Code</option>
-            <option value="codex">Codex</option>
-            <option value="opencode">Opencode</option>
-          </optgroup>
-          <optgroup label="Local">
-            <option value="mlx-lm">MLX-LM (Apple Silicon)</option>
-            <option value="ollama">Ollama</option>
-            <option value="exo">Exo</option>
-            <option value="hermes-agent">Hermes Agent</option>
-            <option value="openclaw-http">OpenClaw Gateway</option>
-          </optgroup>
+          {cloudKinds.length > 0 && (
+            <optgroup label="Cloud">
+              {cloudKinds.map((kind) => (
+                <option key={kind} value={kind}>
+                  {PROVIDER_LABELS[kind] ?? kind}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {localKinds.length > 0 && (
+            <optgroup label="Local">
+              {localKinds.map((kind) => (
+                <option key={kind} value={kind}>
+                  {PROVIDER_LABELS[kind] ?? kind}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </Field>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          background: "var(--bg-muted, rgba(0,0,0,0.03))",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          padding: "10px 12px",
+          marginBottom: 12,
+        }}
+      >
+        <Lock
+          width={16}
+          height={16}
+          style={{
+            marginTop: 2,
+            color: unlocked
+              ? "var(--danger-500, #c33)"
+              : "var(--text-tertiary)",
+            flexShrink: 0,
+          }}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--text)",
+              marginBottom: 4,
+            }}
+          >
+            {unlocked
+              ? "Unlocked — saving will override every agent's runtime"
+              : "Locked: default-for-new-agents only"}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-tertiary)",
+              lineHeight: 1.5,
+              marginBottom: 8,
+            }}
+          >
+            {unlocked
+              ? "While unlocked, this runtime will replace every agent's per-agent pick at dispatch time until you re-lock it. Per-agent picks in the AgentProfilePanel are saved but ignored."
+              : "Changing this runtime only affects new agents. Existing agents keep their per-agent picks. Unlock to override every current agent."}
+          </div>
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={unlocked}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  setShowOverrideConfirm(true);
+                } else {
+                  setUnlocked(false);
+                  setShowOverrideConfirm(false);
+                }
+              }}
+            />
+            Unlock to override all current agents
+          </label>
+          {showOverrideConfirm && !unlocked && (
+            <div
+              style={{
+                marginTop: 8,
+                padding: 8,
+                background: "var(--bg-card)",
+                border: "1px solid var(--danger-500, #c33)",
+                borderRadius: 4,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ marginBottom: 6 }}>
+                This will route every agent through{" "}
+                <strong>
+                  {PROVIDER_LABELS[provider as LLMRuntimeKind] ?? provider}
+                </strong>{" "}
+                on their next turn. Confirm to unlock.
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setShowOverrideConfirm(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    setUnlocked(true);
+                    setShowOverrideConfirm(false);
+                  }}
+                >
+                  Unlock
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
       <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agents</div>
       <Field label="Team Lead" hint="Default agent that leads operations">
         <input
@@ -215,6 +396,11 @@ interface LocalProviderMeta {
   blurb: string;
 }
 
+// LOCAL_PROVIDERS lists directly-dispatched local LLM runtimes only. The
+// Hermes Agent and OpenClaw Gateway entries that used to live here were
+// gateway-controlled — they belong in the Integrations app, not the
+// runtime picker, because their job is to import existing agents into the
+// team rather than to back a WUPHF-created agent's turns.
 const LOCAL_PROVIDERS: LocalProviderMeta[] = [
   {
     kind: "mlx-lm",
@@ -233,18 +419,6 @@ const LOCAL_PROVIDERS: LocalProviderMeta[] = [
     label: "Exo",
     blurb:
       "Distributes inference across multiple devices. Useful when you want to pool a Mac Studio + a laptop.",
-  },
-  {
-    kind: "hermes-agent",
-    label: "Hermes Agent",
-    blurb:
-      "Runs WUPHF members through a local Hermes gateway via its OpenAI-compatible API server.",
-  },
-  {
-    kind: "openclaw-http",
-    label: "OpenClaw Gateway",
-    blurb:
-      "Runs WUPHF members through OpenClaw Gateway's OpenAI-compatible Chat Completions endpoint.",
   },
 ];
 
@@ -805,24 +979,38 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
   const [actionProvider, setActionProvider] = useState<string>(
     cfg.action_provider ?? "auto",
   );
-  const [gatewayUrl, setGatewayUrl] = useState(cfg.openclaw_gateway_url ?? "");
-  const [openclawToken, setOpenclawToken] = useState("");
 
   const onSave = async () => {
     const patch: ConfigUpdate = {
       action_provider: actionProvider as ConfigUpdate["action_provider"],
     };
-    if (gatewayUrl) patch.openclaw_gateway_url = gatewayUrl;
-    if (openclawToken) patch.openclaw_token = openclawToken;
     await save(patch);
-    setOpenclawToken("");
   };
 
+  // Gateway-style integrations (OpenClaw, Hermes, Telegram) now live in the
+  // dedicated Integrations app. We keep Action Provider + Workspace here
+  // because they're install-wide config knobs, not gateways — they configure
+  // routing for an existing action surface rather than importing agents.
   return (
     <div>
       <h2 style={styles.sectionTitle}>Integrations</h2>
       <p style={styles.sectionDesc}>
-        External service connections and action providers.
+        Install-wide integration knobs. Connect OpenClaw, Hermes, or Telegram
+        from the{" "}
+        <button
+          type="button"
+          className="btn btn-link"
+          style={{ padding: 0, height: "auto", fontSize: "inherit" }}
+          onClick={() =>
+            void router.navigate({
+              to: "/apps/$appId",
+              params: { appId: "integrations" },
+            })
+          }
+        >
+          Integrations app
+        </button>
+        .
       </p>
 
       <Field label="Action Provider" hint="External action routing">
@@ -836,30 +1024,6 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
           <option value="composio">Composio</option>
         </select>
       </Field>
-
-      <div style={{ marginTop: 20 }}>
-        <div style={styles.groupTitle}>OpenClaw</div>
-        <Field label="Gateway URL" hint="WebSocket endpoint">
-          <input
-            style={{
-              ...styles.input,
-              fontFamily: "var(--font-mono)",
-              fontSize: 12,
-            }}
-            placeholder="ws://127.0.0.1:18789"
-            value={gatewayUrl}
-            onChange={(e) => setGatewayUrl(e.target.value)}
-          />
-        </Field>
-        <Field label="Token" hint="Gateway auth token">
-          <KeyField
-            hasValue={Boolean(cfg.openclaw_token_set)}
-            placeholder="oc_..."
-            value={openclawToken}
-            onChange={setOpenclawToken}
-          />
-        </Field>
-      </div>
 
       <div style={{ marginTop: 20 }}>
         <div style={styles.groupTitle}>Workspace</div>

@@ -15,6 +15,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/nex"
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
@@ -150,14 +151,32 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"llm_provider":            config.ResolveLLMProvider(""),
 			"llm_provider_configured": llmProviderConfigured,
 			"llm_provider_priority":   cfg.LLMProviderPriority,
-			"provider_endpoints":      cfg.ProviderEndpoints,
-			"memory_backend":          config.ResolveMemoryBackend(""),
-			"action_provider":         config.ResolveActionProvider(),
-			"team_lead_slug":          cfg.TeamLeadSlug,
-			"max_concurrent_agents":   cfg.MaxConcurrent,
-			"default_format":          config.ResolveFormat(""),
-			"default_timeout":         config.ResolveTimeout(""),
-			"blueprint":               cfg.ActiveBlueprint(),
+			// llm_provider_unlocked surfaces the friction-gate state of the
+			// install-wide LLMProvider. Default (false = locked) means the
+			// global field acts as a default-for-new-agents and a fallback
+			// for agents without a per-agent binding. When true the global
+			// kind overrides every per-agent binding on the dispatch path —
+			// the UI must show a clear warning before letting the user flip
+			// it. See config.LLMProviderUnlocked for the full contract.
+			"llm_provider_unlocked": cfg.LLMProviderUnlocked,
+			// llm_provider_kinds is the non-gateway subset of the registered
+			// provider runtimes — the safe set to render in any UI runtime
+			// picker (Settings default-runtime, AgentProfilePanel runtime
+			// section, AgentWizard provider field). Gateway kinds (openclaw,
+			// hermes-agent) are excluded; the Integrations app surfaces them.
+			"llm_provider_kinds": provider.LLMProviderKinds(),
+			// gateway_kinds is the inverse — registered kinds that are
+			// gateway-controlled. Consumed by the Integrations app to
+			// enumerate which gateways are compiled in and connectable.
+			"gateway_kinds":         provider.GatewayKinds(),
+			"provider_endpoints":    cfg.ProviderEndpoints,
+			"memory_backend":        config.ResolveMemoryBackend(""),
+			"action_provider":       config.ResolveActionProvider(),
+			"team_lead_slug":        cfg.TeamLeadSlug,
+			"max_concurrent_agents": cfg.MaxConcurrent,
+			"default_format":        config.ResolveFormat(""),
+			"default_timeout":       config.ResolveTimeout(""),
+			"blueprint":             cfg.ActiveBlueprint(),
 			// Workspace
 			"email":          cfg.Email,
 			"workspace_id":   cfg.WorkspaceID,
@@ -195,6 +214,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		defer b.configMu.Unlock()
 		var body struct {
 			LLMProvider         *string   `json:"llm_provider,omitempty"`
+			LLMProviderUnlocked *bool     `json:"llm_provider_unlocked,omitempty"`
 			LLMProviderPriority *[]string `json:"llm_provider_priority,omitempty"`
 			MemoryBackend       *string   `json:"memory_backend,omitempty"`
 			ActionProvider      *string   `json:"action_provider,omitempty"`
@@ -314,6 +334,15 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// provider override.
 		if llmProviderSet {
 			cfg.LLMProvider = llmProvider
+			changed = true
+		}
+		// llm_provider_unlocked is a pure boolean toggle. The friction-gate
+		// semantics (read-only-while-locked, requires explicit unlock to
+		// override per-agent bindings) live in the UI — the broker just
+		// persists what the client sent and the resolver consults the flag
+		// at dispatch time via config.ResolveLLMProviderOverride.
+		if body.LLMProviderUnlocked != nil {
+			cfg.LLMProviderUnlocked = *body.LLMProviderUnlocked
 			changed = true
 		}
 		if body.LLMProviderPriority != nil {
@@ -476,14 +505,23 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				if k == "" {
 					continue
 				}
-				// provider_endpoints keys must be runnable global LLM
-				// kinds (mlx-lm/ollama/exo/claude-code/codex/...) —
-				// openclaw, while a valid per-member binding, has no
-				// HTTP base_url + model concept and must not get a row
-				// in this map.
-				if !config.IsLLMProviderKindAllowed(k) {
+				// provider_endpoints keys must be registered runtime kinds
+				// — that includes both directly-dispatchable LLMs
+				// (claude-code/codex/opencode/mlx-lm/ollama/exo) and
+				// gateway-controlled HTTP runtimes (openclaw-http,
+				// hermes-agent) whose base_url + model the operator may
+				// legitimately want to override. The legacy openclaw
+				// bridge kind has no Register entry (it dispatches via
+				// the WebSocket bridge, not /v1/chat/completions) so
+				// provider.Lookup returns nil and the request is rejected.
+				//
+				// Using provider.Lookup (registry membership) instead of
+				// config.IsLLMProviderKindAllowed (non-gateway subset) is
+				// deliberate: the gateway/non-gateway split lives in the
+				// picker UIs, not in the endpoint-configuration surface.
+				if provider.Lookup(k) == nil {
 					http.Error(w, "unsupported provider_endpoints kind: "+strconv.Quote(k)+
-						" (allowed: "+strings.Join(config.AllowedLLMProviderKinds(), ", ")+")",
+						" (must be a registered runtime kind)",
 						http.StatusBadRequest)
 					return
 				}

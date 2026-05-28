@@ -1,8 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
-import { Xmark } from "iconoir-react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Lock, Xmark } from "iconoir-react";
 
-import type { OfficeMember, Skill } from "../../api/client";
-import { getChannels, getSkillsList } from "../../api/client";
+import type {
+  LLMRuntimeKind,
+  OfficeMember,
+  ProviderBinding,
+  Skill,
+} from "../../api/client";
+import {
+  getChannels,
+  getConfig,
+  getSkillsList,
+  isGatewayBinding,
+  post,
+} from "../../api/client";
 import {
   getOfficeTasks,
   listAgentLogTasks,
@@ -15,6 +27,21 @@ import { resolveHarness } from "../../lib/harness";
 import { router } from "../../lib/router";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+
+const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "Opencode",
+  "mlx-lm": "MLX-LM",
+  ollama: "Ollama",
+  exo: "Exo",
+};
+
+const GATEWAY_LABELS: Record<string, string> = {
+  openclaw: "OpenClaw",
+  "openclaw-http": "OpenClaw HTTP",
+  "hermes-agent": "Hermes",
+};
 
 interface AgentProfilePanelProps {
   agent: OfficeMember;
@@ -280,20 +307,149 @@ function PermissionsSection({ agent }: { agent: OfficeMember }) {
   );
 }
 
-function ProviderSection({
+function bindingFromMember(
+  provider: OfficeMember["provider"],
+): ProviderBinding {
+  if (!provider) return {};
+  if (typeof provider === "string") {
+    // String form is a legacy shape carrying just the kind. Widen to the
+    // union so downstream code can read `binding.kind` uniformly.
+    return { kind: provider as ProviderBinding["kind"] };
+  }
+  return provider;
+}
+
+// RuntimeSection is the per-agent runtime picker — the surface the user task
+// description calls out as "enable [provider selection] in the agent's
+// settings in the UI." Three rendering paths:
+//
+//  1. Gateway-bound agent (kind ∈ {openclaw, openclaw-http, hermes-agent}):
+//     no picker. We render a "Managed by <Gateway>" pill instead because the
+//     gateway transport is load-bearing — flipping the kind here would orphan
+//     the agent from its imported session. Editing a gateway-bound agent's
+//     runtime is the Integrations app's job, not this panel's.
+//
+//  2. Global runtime unlocked (Settings.LLMProviderUnlocked === true):
+//     picker rendered but read-only with a "Locked by global override" banner,
+//     because the dispatch resolver will ignore the per-agent binding anyway.
+//     We display the value so the user can see what's stored — they just
+//     can't write while the global is overriding.
+//
+//  3. Normal: editable picker with provider + model fields and a Save button.
+function RuntimeSection({
   agent,
   defaultHarness,
 }: {
   agent: OfficeMember;
   defaultHarness: HarnessKind;
 }) {
+  const queryClient = useQueryClient();
+  const configQuery = useQuery({
+    queryKey: ["config"],
+    queryFn: getConfig,
+    staleTime: 30_000,
+  });
+  const llmKinds: LLMRuntimeKind[] = (configQuery.data?.llm_provider_kinds ?? [
+    "claude-code",
+    "codex",
+    "opencode",
+    "mlx-lm",
+    "ollama",
+    "exo",
+  ]) as LLMRuntimeKind[];
+  const globalOverrideEngaged =
+    configQuery.data?.llm_provider_unlocked === true;
+  const globalDefault = configQuery.data?.llm_provider ?? "claude-code";
+
+  const binding = bindingFromMember(agent.provider);
+  const isGateway = isGatewayBinding(agent.provider);
   const harness = resolveHarness(agent.provider, defaultHarness);
-  const providerLabel =
-    typeof agent.provider === "string"
-      ? agent.provider
-      : agent.provider?.model
-        ? `${agent.provider.kind ?? harness} / ${agent.provider.model}`
-        : agent.provider?.kind || harness;
+
+  const [draftKind, setDraftKind] = useState<"" | LLMRuntimeKind>(
+    (binding.kind && llmKinds.includes(binding.kind as LLMRuntimeKind)
+      ? (binding.kind as LLMRuntimeKind)
+      : "") as "" | LLMRuntimeKind,
+  );
+  const [draftModel, setDraftModel] = useState<string>(binding.model ?? "");
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Built-ins (CEO, lead) cannot have their runtime moved off the install
+  // default — the broker rejects the write — so we hide editing there too.
+  // The user-task says CEO chat must ask for provider on spawn, which is the
+  // wizard's job, not this panel's.
+  const isLead = agent.built_in === true || agent.slug === "ceo";
+  const editable = !(isGateway || globalOverrideEngaged || isLead);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, unknown> = {
+        action: "update",
+        slug: agent.slug,
+      };
+      if (draftKind === "") {
+        // Empty kind means "clear per-agent binding, inherit default".
+        // The broker stores ProviderBinding{} which the resolver treats as
+        // "fall back to global default" at dispatch time.
+        body.provider = { kind: "", model: "" };
+      } else {
+        body.provider = { kind: draftKind, model: draftModel.trim() };
+      }
+      await post("/office-members", body);
+    },
+    onSuccess: () => {
+      setSaveError(null);
+      void queryClient.invalidateQueries({ queryKey: ["office-members"] });
+    },
+    onError: (err: unknown) => {
+      setSaveError(err instanceof Error ? err.message : "Failed to save");
+    },
+  });
+
+  if (isGateway) {
+    const gatewayKind =
+      (typeof agent.provider === "string"
+        ? agent.provider
+        : agent.provider?.kind) || "";
+    const gatewayLabel = GATEWAY_LABELS[gatewayKind] || gatewayKind;
+    return (
+      <div className="agent-profile-section">
+        <SectionTitle>runtime</SectionTitle>
+        <div className="agent-profile-permissions">
+          <div className="agent-profile-perm-row">
+            <span className="agent-profile-perm-label">managed by</span>
+            <span
+              className="agent-profile-perm-value"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <Lock width={12} height={12} />
+              {gatewayLabel} gateway
+            </span>
+          </div>
+          {binding.model && (
+            <div className="agent-profile-perm-row">
+              <span className="agent-profile-perm-label">model</span>
+              <span className="agent-profile-perm-value">{binding.model}</span>
+            </div>
+          )}
+        </div>
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            marginTop: 8,
+            display: "block",
+          }}
+        >
+          This agent was imported through the {gatewayLabel} gateway. Change its
+          runtime from the Integrations app.
+        </span>
+      </div>
+    );
+  }
+
+  const dirty =
+    draftKind !== ((binding.kind as LLMRuntimeKind | undefined) ?? "") ||
+    draftModel.trim() !== (binding.model ?? "").trim();
 
   return (
     <div className="agent-profile-section">
@@ -303,13 +459,116 @@ function ProviderSection({
           <span className="agent-profile-perm-label">harness</span>
           <span className="agent-profile-perm-value">{harness}</span>
         </div>
-        {providerLabel && providerLabel !== harness && (
-          <div className="agent-profile-perm-row">
-            <span className="agent-profile-perm-label">provider</span>
-            <span className="agent-profile-perm-value">{providerLabel}</span>
-          </div>
-        )}
+        <div
+          className="agent-profile-perm-row"
+          style={{ alignItems: "center" }}
+        >
+          <span className="agent-profile-perm-label">provider</span>
+          <select
+            value={draftKind}
+            disabled={!editable || mutation.isPending}
+            onChange={(e) =>
+              setDraftKind(e.target.value as "" | LLMRuntimeKind)
+            }
+            style={{ flex: 1 }}
+          >
+            <option value="">Inherit default ({globalDefault})</option>
+            {llmKinds.map((kind) => (
+              <option key={kind} value={kind}>
+                {PROVIDER_LABELS[kind] ?? kind}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div
+          className="agent-profile-perm-row"
+          style={{ alignItems: "center" }}
+        >
+          <span className="agent-profile-perm-label">model</span>
+          <input
+            className="input"
+            type="text"
+            placeholder={
+              draftKind === ""
+                ? "Runtime default"
+                : "e.g. claude-3-5-sonnet-latest"
+            }
+            value={draftModel}
+            disabled={!editable || draftKind === "" || mutation.isPending}
+            onChange={(e) => setDraftModel(e.target.value)}
+            style={{ flex: 1 }}
+          />
+        </div>
       </div>
+      {globalOverrideEngaged && (
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            marginTop: 8,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <Lock width={11} height={11} />
+          Locked by global override — re-lock the default runtime in Settings to
+          edit per-agent runtimes.
+        </span>
+      )}
+      {isLead && !globalOverrideEngaged && (
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            marginTop: 8,
+            display: "block",
+          }}
+        >
+          Lead agents always run on the install default; change it in Settings.
+        </span>
+      )}
+      {saveError && (
+        <div
+          className="agent-wizard-error"
+          style={{ marginTop: 8 }}
+          role="alert"
+        >
+          {saveError}
+        </div>
+      )}
+      {editable && (
+        <div
+          className="agent-wizard-footer"
+          style={{ marginTop: 10, justifyContent: "flex-end" }}
+        >
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={!dirty || mutation.isPending}
+            onClick={() => {
+              setDraftKind(
+                (binding.kind &&
+                llmKinds.includes(binding.kind as LLMRuntimeKind)
+                  ? (binding.kind as LLMRuntimeKind)
+                  : "") as "" | LLMRuntimeKind,
+              );
+              setDraftModel(binding.model ?? "");
+              setSaveError(null);
+            }}
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={!dirty || mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
+            {mutation.isPending ? "Saving..." : "Save runtime"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -440,8 +699,8 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
           </div>
         ) : null}
 
-        {/* Provider / runtime */}
-        <ProviderSection agent={agent} defaultHarness={defaultHarness} />
+        {/* Per-agent runtime picker */}
+        <RuntimeSection agent={agent} defaultHarness={defaultHarness} />
 
         {/* Skills */}
         <SkillsSection agentSlug={agent.slug} skills={skills} />

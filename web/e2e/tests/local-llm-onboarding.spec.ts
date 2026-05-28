@@ -159,24 +159,17 @@ test.describe("Onboarding → Run a local model", () => {
     await expect(ollamaTile.getByText(/Not installed.*Settings/)).toBeVisible();
     await expect(ollamaTile).toBeDisabled();
 
-    // Hermes Agent and OpenClaw Gateway are registered local runtimes too; in
-    // this fixture they are installable but unavailable, so they should match
-    // ollama's disabled "install from Settings" behavior.
-    const hermesTile = page.getByTestId(
-      "onboarding-local-llm-tile-hermes-agent",
-    );
-    await expect(hermesTile).toBeVisible();
-    await expect(hermesTile.getByText(/Not installed.*Settings/)).toBeVisible();
-    await expect(hermesTile).toBeDisabled();
-
-    const openclawTile = page.getByTestId(
-      "onboarding-local-llm-tile-openclaw-http",
-    );
-    await expect(openclawTile).toBeVisible();
+    // Hermes Agent and OpenClaw Gateway used to render here as local runtime
+    // tiles. They were moved to the Integrations app because they are
+    // gateways for importing existing agents, not LLM runtimes for new
+    // ones. The onboarding picker now only lists directly-dispatchable
+    // local LLMs (mlx-lm, ollama, exo).
     await expect(
-      openclawTile.getByText(/Not installed.*Settings/),
-    ).toBeVisible();
-    await expect(openclawTile).toBeDisabled();
+      page.getByTestId("onboarding-local-llm-tile-hermes-agent"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByTestId("onboarding-local-llm-tile-openclaw-http"),
+    ).toHaveCount(0);
 
     // exo is platform_supported=false → tile is disabled and surfaces
     // "Not supported on this OS".

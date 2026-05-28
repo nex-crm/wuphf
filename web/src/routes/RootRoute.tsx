@@ -109,6 +109,11 @@ const SettingsApp = lazy(() =>
     default: m.SettingsApp,
   })),
 );
+const IntegrationsApp = lazy(() =>
+  import("../components/apps/IntegrationsApp").then((m) => ({
+    default: m.IntegrationsApp,
+  })),
+);
 const SkillsApp = lazy(() =>
   import("../components/apps/SkillsApp").then((m) => ({
     default: m.SkillsApp,
@@ -330,6 +335,7 @@ const APP_PANELS = {
   activity: ArtifactsApp,
   receipts: ReceiptsApp,
   "health-check": HealthCheckApp,
+  integrations: IntegrationsApp,
   settings: SettingsApp,
   console: ConsoleApp,
 } satisfies Record<AppPanelId, ComponentType>;

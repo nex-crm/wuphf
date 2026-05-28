@@ -150,14 +150,20 @@ test.describe("Settings → Local LLMs", () => {
     stubLocalProviders(page);
     await goToSettingsLocalLLMs(page);
 
-    // All registered local runtime cards render.
+    // Only directly-dispatchable local runtimes render here. Gateway
+    // runtimes (hermes-agent, openclaw-http) used to appear in this list
+    // but were moved to the Integrations app — they import existing
+    // agents rather than backing a WUPHF-created agent's turns, so they
+    // don't belong in the runtime picker.
     await expect(page.getByTestId("local-llm-card-mlx-lm")).toBeVisible();
     await expect(page.getByTestId("local-llm-card-ollama")).toBeVisible();
     await expect(page.getByTestId("local-llm-card-exo")).toBeVisible();
-    await expect(page.getByTestId("local-llm-card-hermes-agent")).toBeVisible();
+    await expect(
+      page.getByTestId("local-llm-card-hermes-agent"),
+    ).toHaveCount(0);
     await expect(
       page.getByTestId("local-llm-card-openclaw-http"),
-    ).toBeVisible();
+    ).toHaveCount(0);
 
     // MLX-LM is not installed → install command appears verbatim.
     const mlxCard = page.getByTestId("local-llm-card-mlx-lm");
