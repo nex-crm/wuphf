@@ -32,6 +32,59 @@ export interface WikiMarkdownOptions {
    * When omitted, links render as ordinary anchors.
    */
   onNavigate?: (slug: string) => void;
+  /**
+   * Wiki path of the article being rendered (e.g. `team/about/README.md`).
+   * When provided, plain markdown links to `.md` files (e.g.
+   * `[Company](company.md)`) are resolved relative to the article's
+   * directory and rewritten to point at the hash-router wiki route
+   * instead of leaking to the document base URL.
+   */
+  articlePath?: string;
+}
+
+/**
+ * Resolve a markdown link href against the article's path and return the
+ * destination wiki slug when the href is a relative `.md` link that should
+ * route through the wiki SPA. Returns null for absolute URLs, anchors,
+ * hash routes, non-`.md` targets, or paths that escape the wiki root.
+ */
+const NON_WIKI_HREF_RE = /^([a-z][a-z0-9+.-]*:|[#/])/i;
+
+function joinWikiSegments(
+  baseSegments: string[],
+  relative: string,
+): string[] | null {
+  const out = [...baseSegments];
+  for (const raw of relative.split("/")) {
+    if (raw === "" || raw === ".") continue;
+    if (raw === "..") {
+      if (out.length === 0) return null;
+      out.pop();
+      continue;
+    }
+    out.push(raw);
+  }
+  return out;
+}
+
+export function resolveRelativeWikiPath(
+  href: string,
+  articlePath: string,
+): string | null {
+  if (!(href && articlePath)) return null;
+  if (NON_WIKI_HREF_RE.test(href)) return null;
+
+  const [pathOnly] = href.split(/[?#]/);
+  if (!pathOnly.endsWith(".md")) return null;
+
+  const lastSlash = articlePath.lastIndexOf("/");
+  const baseDir = lastSlash >= 0 ? articlePath.slice(0, lastSlash) : "";
+  const segments = joinWikiSegments(
+    baseDir ? baseDir.split("/") : [],
+    pathOnly,
+  );
+  if (!segments || segments.length === 0) return null;
+  return segments.join("/");
 }
 
 /** Remark plugins — remark-gfm + wikilinks + Obsidian callouts. */
@@ -57,7 +110,7 @@ type ImageProps = ComponentProps<"img">;
 export function buildMarkdownComponents(
   options: WikiMarkdownOptions,
 ): Partial<Components> {
-  const { onNavigate } = options;
+  const { onNavigate, articlePath } = options;
   return {
     blockquote: CalloutBlockquote,
     a: (props: AnchorProps): ReactElement => {
@@ -76,6 +129,24 @@ export function buildMarkdownComponents(
             }}
           />
         );
+      }
+      if (!isWikilink && articlePath && typeof props.href === "string") {
+        const resolved = resolveRelativeWikiPath(props.href, articlePath);
+        if (resolved) {
+          const encoded = resolved.split("/").map(encodeURIComponent).join("/");
+          const nextProps = { ...props, href: `#/wiki/${encoded}` };
+          return (
+            <a
+              {...nextProps}
+              onClick={(e) => {
+                if (onNavigate) {
+                  e.preventDefault();
+                  onNavigate(resolved);
+                }
+              }}
+            />
+          );
+        }
       }
       return <a {...props} />;
     },
