@@ -327,6 +327,20 @@ type slackSlashCommandPayload struct {
 	ResponseURL string `json:"response_url"`
 }
 
+type slackBlockActionsPayload struct {
+	Type string `json:"type"`
+	User struct {
+		ID string `json:"id"`
+	} `json:"user"`
+	Actions []slackBlockAction `json:"actions"`
+}
+
+type slackBlockAction struct {
+	ActionID string `json:"action_id"`
+	Value    string `json:"value"`
+	Type     string `json:"type"`
+}
+
 func (s *SlackTransport) handleEnvelope(ctx context.Context, host transport.Host, env slackSocketEnvelope) {
 	if env.EnvelopeID != "" && s.Broker != nil && s.Broker.slackEventSeenOrMark("envelope:"+env.EnvelopeID) {
 		return
@@ -337,6 +351,11 @@ func (s *SlackTransport) handleEnvelope(ctx context.Context, host transport.Host
 			return
 		}
 		s.handleEventCallback(ctx, host, eventPayload)
+		return
+	}
+	var actions slackBlockActionsPayload
+	if err := json.Unmarshal(env.Payload, &actions); err == nil && actions.Type == "block_actions" {
+		s.handleBlockActions(ctx, actions)
 		return
 	}
 	var command slackSlashCommandPayload
@@ -411,6 +430,49 @@ func (s *SlackTransport) handleAppHomeOpened(ctx context.Context, event slackApp
 	}
 	if err := s.client.publishHomeView(ctx, event.User, s.slackAppHomeBlocks(event.User)); err != nil {
 		log.Printf("[slack] publish app home failed: %v", err)
+	}
+}
+
+func (s *SlackTransport) handleBlockActions(ctx context.Context, payload slackBlockActionsPayload) {
+	userID := strings.TrimSpace(payload.User.ID)
+	if userID == "" || len(payload.Actions) == 0 {
+		return
+	}
+	view := "overview"
+	for _, action := range payload.Actions {
+		switch action.ActionID {
+		case "wuphf_home_view":
+			view = firstNonEmpty(action.Value, "overview")
+		case "wuphf_home_refresh":
+			view = firstNonEmpty(action.Value, "overview")
+		case "wuphf_home_wiki_query":
+			view = "wiki:" + firstNonEmpty(action.Value, "project decisions")
+		case "wuphf_home_toggle_focus":
+			if s.Broker != nil {
+				if err := s.Broker.SetFocusMode(!s.Broker.FocusModeEnabled()); err != nil {
+					log.Printf("[slack] toggle focus mode failed: %v", err)
+				}
+			}
+			view = "settings"
+		case "wuphf_home_session":
+			if s.Broker != nil {
+				mode := strings.TrimSpace(action.Value)
+				agent := ""
+				if mode == SessionModeOneOnOne {
+					agent = "ceo"
+				}
+				if err := s.Broker.SetSessionMode(mode, agent); err != nil {
+					log.Printf("[slack] set session mode failed: %v", err)
+				}
+			}
+			view = "settings"
+		default:
+			view = "overview"
+		}
+		break
+	}
+	if err := s.client.publishHomeView(ctx, userID, s.slackAppHomeBlocksFor(userID, view)); err != nil {
+		log.Printf("[slack] publish interactive app home failed: %v", err)
 	}
 }
 
@@ -804,20 +866,102 @@ func slackBlocksForMessage(msg channelMessage) []map[string]any {
 }
 
 func (s *SlackTransport) slackAppHomeBlocks(userID string) []map[string]any {
+	return s.slackAppHomeBlocksFor(userID, "overview")
+}
+
+func (s *SlackTransport) slackAppHomeBlocksFor(userID, view string) []map[string]any {
+	view = normalizeSlackHomeView(view)
 	blocks := []map[string]any{
 		slackHeaderBlock("WUPHF"),
 		slackSectionBlock("*Chat*\nUse the Messages tab to talk to WUPHF `#general`. Use `/wuphf @agent ...` in mapped channels to route directly to agents.", true),
+		slackHomeNavBlock(view),
 		slackDividerBlock(),
 	}
-	blocks = append(blocks, s.slackIssuesHomeBlocks()...)
-	blocks = append(blocks, slackDividerBlock())
-	blocks = append(blocks, s.slackWikiHomeBlocks()...)
-	blocks = append(blocks, slackDividerBlock())
-	blocks = append(blocks, s.slackSettingsHomeBlocks(userID)...)
+	switch {
+	case view == "issues":
+		blocks = append(blocks, s.slackIssuesHomeBlocks()...)
+	case strings.HasPrefix(view, "wiki:"):
+		blocks = append(blocks, s.slackWikiHomeBlocks(strings.TrimPrefix(view, "wiki:"))...)
+	case view == "wiki":
+		blocks = append(blocks, s.slackWikiHomeBlocks("project decisions team context")...)
+	case view == "channels":
+		blocks = append(blocks, s.slackChannelsHomeBlocks()...)
+	case view == "agents":
+		blocks = append(blocks, s.slackAgentsHomeBlocks()...)
+	case view == "settings":
+		blocks = append(blocks, s.slackSettingsHomeBlocks(userID)...)
+	default:
+		blocks = append(blocks, s.slackOverviewHomeBlocks(userID)...)
+	}
 	if len(blocks) > 100 {
 		return blocks[:100]
 	}
 	return blocks
+}
+
+func normalizeSlackHomeView(view string) string {
+	view = strings.TrimSpace(strings.ToLower(view))
+	switch {
+	case view == "issues", view == "wiki", view == "channels", view == "agents", view == "settings":
+		return view
+	case strings.HasPrefix(view, "wiki:"):
+		return view
+	default:
+		return "overview"
+	}
+}
+
+func slackHomeNavBlock(current string) map[string]any {
+	return map[string]any{
+		"type":     "actions",
+		"block_id": "wuphf_home_nav",
+		"elements": []map[string]any{
+			slackButton("Overview", "wuphf_home_view", "overview", selectedSlackButtonStyle(current == "overview")),
+			slackButton("Issues", "wuphf_home_view", "issues", selectedSlackButtonStyle(current == "issues")),
+			slackButton("Wiki", "wuphf_home_view", "wiki", selectedSlackButtonStyle(strings.HasPrefix(current, "wiki"))),
+			slackButton("Channels", "wuphf_home_view", "channels", selectedSlackButtonStyle(current == "channels")),
+			slackButton("Agents", "wuphf_home_view", "agents", selectedSlackButtonStyle(current == "agents")),
+			slackButton("Settings", "wuphf_home_view", "settings", selectedSlackButtonStyle(current == "settings")),
+			slackButton("Refresh", "wuphf_home_refresh", current, ""),
+		},
+	}
+}
+
+func selectedSlackButtonStyle(selected bool) string {
+	if selected {
+		return "primary"
+	}
+	return ""
+}
+
+func (s *SlackTransport) slackOverviewHomeBlocks(userID string) []map[string]any {
+	if s.Broker == nil {
+		return []map[string]any{slackSectionBlock("Broker unavailable.", false)}
+	}
+	tasks := len(s.Broker.AllTasks())
+	requests := len(s.Broker.ActiveRequests())
+	channels := len(s.Broker.Channels())
+	mirrors := len(s.Broker.SurfaceChannels(slackAdapterName))
+	mode, agent := s.Broker.SessionModeState()
+	focus := "off"
+	if s.Broker.FocusModeEnabled() {
+		focus = "on"
+	}
+	return []map[string]any{
+		slackHeaderBlock("Overview"),
+		{
+			"type": "section",
+			"fields": []map[string]any{
+				slackMrkdwnFieldText(fmt.Sprintf("*Tasks*\n%d", tasks)),
+				slackMrkdwnFieldText(fmt.Sprintf("*Requests*\n%d", requests)),
+				slackMrkdwnFieldText(fmt.Sprintf("*Channels*\n%d", channels)),
+				slackMrkdwnFieldText(fmt.Sprintf("*Slack mirrors*\n%d", mirrors)),
+				slackMrkdwnFieldText(fmt.Sprintf("*Session*\n%s %s", escapeSlackText(mode), escapeSlackText(agent))),
+				slackMrkdwnFieldText("*Focus mode*\n" + focus),
+			},
+		},
+		slackSectionBlock("Use the buttons above to inspect WUPHF surfaces or change Slack-safe settings.", false),
+	}
 }
 
 func (s *SlackTransport) slackIssuesHomeBlocks() []map[string]any {
@@ -853,22 +997,78 @@ func (s *SlackTransport) slackIssuesHomeBlocks() []map[string]any {
 	return blocks
 }
 
-func (s *SlackTransport) slackWikiHomeBlocks() []map[string]any {
+func (s *SlackTransport) slackWikiHomeBlocks(query string) []map[string]any {
 	blocks := []map[string]any{slackHeaderBlock("Wiki")}
+	blocks = append(blocks, map[string]any{
+		"type":     "actions",
+		"block_id": "wuphf_home_wiki_queries",
+		"elements": []map[string]any{
+			slackButton("Decisions", "wuphf_home_wiki_query", "project decisions", "primary"),
+			slackButton("Team context", "wuphf_home_wiki_query", "team context", ""),
+			slackButton("Recent work", "wuphf_home_wiki_query", "recent work", ""),
+		},
+	})
 	if s.Broker == nil || s.Broker.WikiIndex() == nil {
 		return append(blocks, slackSectionBlock("Wiki index is not active. Use the WUPHF web UI to configure memory and wiki settings.", false))
 	}
-	hits, err := s.Broker.WikiIndex().Search(context.Background(), "project decisions team context", 5)
+	query = strings.TrimSpace(query)
+	if query == "" {
+		query = "project decisions team context"
+	}
+	hits, err := s.Broker.WikiIndex().Search(context.Background(), query, 5)
 	if err != nil {
 		return append(blocks, slackSectionBlock("Wiki search failed: "+escapeSlackText(err.Error()), false))
 	}
 	if len(hits) == 0 {
-		return append(blocks, slackSectionBlock("No wiki hits yet. As WUPHF learns, relevant wiki facts will appear here.", false))
+		return append(blocks, slackSectionBlock("No wiki hits for `"+escapeSlackText(query)+"` yet. As WUPHF learns, relevant wiki facts will appear here.", false))
 	}
+	blocks = append(blocks, slackContextBlock("_Query: "+escapeSlackText(query)+"_"))
 	for _, hit := range hits {
 		label := firstNonEmpty(hit.Entity, hit.FactID, "wiki")
 		snippet := firstNonEmpty(hit.Snippet, "No snippet.")
 		blocks = append(blocks, slackSectionBlock(fmt.Sprintf("*%s* · %.2f\n%s", escapeSlackText(label), hit.Score, escapeSlackText(truncateSlackText(snippet, 240))), false))
+	}
+	return blocks
+}
+
+func (s *SlackTransport) slackChannelsHomeBlocks() []map[string]any {
+	if s.Broker == nil {
+		return []map[string]any{slackHeaderBlock("Channels"), slackSectionBlock("Broker unavailable.", false)}
+	}
+	blocks := []map[string]any{slackHeaderBlock("Channels")}
+	for _, ch := range s.Broker.Channels() {
+		if ch.isDM() {
+			continue
+		}
+		mirror := "native"
+		if ch.Surface != nil && ch.Surface.Provider == slackAdapterName {
+			mirror = "Slack: " + firstNonEmpty(ch.Surface.RemoteTitle, ch.Surface.RemoteID)
+		}
+		blocks = append(blocks, slackSectionBlock(fmt.Sprintf("*#%s*\n%s", escapeSlackText(ch.Slug), escapeSlackText(mirror)), false))
+		if len(blocks) >= 20 {
+			blocks = append(blocks, slackContextBlock("_More channels available in WUPHF web._"))
+			break
+		}
+	}
+	return blocks
+}
+
+func (s *SlackTransport) slackAgentsHomeBlocks() []map[string]any {
+	if s.Broker == nil {
+		return []map[string]any{slackHeaderBlock("Agents"), slackSectionBlock("Broker unavailable.", false)}
+	}
+	blocks := []map[string]any{slackHeaderBlock("Agents")}
+	for _, member := range sortedOfficeMembers(s.Broker.OfficeMembers()) {
+		if member.Slug == "" || isHumanMessageSender(member.Slug) {
+			continue
+		}
+		role := firstNonEmpty(member.Role, member.Name, "WUPHF agent")
+		mode := firstNonEmpty(member.PermissionMode, "default")
+		blocks = append(blocks, slackSectionBlock(fmt.Sprintf("*@%s*\n%s\n_Mode: %s_", escapeSlackText(member.Slug), escapeSlackText(truncateSlackText(role, 180)), escapeSlackText(mode)), false))
+		if len(blocks) >= 20 {
+			blocks = append(blocks, slackContextBlock("_More agents available in WUPHF web._"))
+			break
+		}
 	}
 	return blocks
 }
@@ -880,17 +1080,35 @@ func (s *SlackTransport) slackSettingsHomeBlocks(userID string) []map[string]any
 	channels := s.Broker.Channels()
 	mirrors := s.Broker.SurfaceChannels(slackAdapterName)
 	members := s.Broker.OfficeMembers()
+	mode, agent := s.Broker.SessionModeState()
+	focus := "off"
+	focusButtonText := "Turn focus on"
+	if s.Broker.FocusModeEnabled() {
+		focus = "on"
+		focusButtonText = "Turn focus off"
+	}
 	fields := []map[string]any{
 		slackMrkdwnFieldText(fmt.Sprintf("*Slack user*\n<@%s>", escapeSlackText(userID))),
 		slackMrkdwnFieldText(fmt.Sprintf("*WUPHF channels*\n%d", len(channels))),
 		slackMrkdwnFieldText(fmt.Sprintf("*Slack mirrors*\n%d", len(mirrors))),
 		slackMrkdwnFieldText(fmt.Sprintf("*Agents*\n%d", countSlackVisibleAgents(members))),
+		slackMrkdwnFieldText(fmt.Sprintf("*Session mode*\n%s %s", escapeSlackText(mode), escapeSlackText(agent))),
+		slackMrkdwnFieldText("*Focus mode*\n" + focus),
 	}
 	blocks := []map[string]any{
 		slackHeaderBlock("Settings"),
 		{
 			"type":   "section",
 			"fields": fields,
+		},
+		{
+			"type":     "actions",
+			"block_id": "wuphf_home_settings_actions",
+			"elements": []map[string]any{
+				slackButton(focusButtonText, "wuphf_home_toggle_focus", "toggle", "primary"),
+				slackButton("Office mode", "wuphf_home_session", SessionModeOffice, selectedSlackButtonStyle(mode == SessionModeOffice)),
+				slackButton("1:1 @ceo", "wuphf_home_session", SessionModeOneOnOne, selectedSlackButtonStyle(mode == SessionModeOneOnOne)),
+			},
 		},
 	}
 	if len(mirrors) == 0 {
@@ -1017,6 +1235,23 @@ func slackHeaderBlock(text string) map[string]any {
 			"text": truncateSlackText(strings.TrimSpace(text), 150),
 		},
 	}
+}
+
+func slackButton(text, actionID, value, style string) map[string]any {
+	button := map[string]any{
+		"type":      "button",
+		"action_id": actionID,
+		"value":     value,
+		"text": map[string]any{
+			"type":  "plain_text",
+			"text":  truncateSlackText(text, 75),
+			"emoji": true,
+		},
+	}
+	if style != "" {
+		button["style"] = style
+	}
+	return button
 }
 
 func slackDividerBlock() map[string]any {

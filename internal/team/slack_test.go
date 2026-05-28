@@ -232,6 +232,46 @@ func TestSlackAppHomeOpenedPublishesDashboard(t *testing.T) {
 	}
 }
 
+func TestSlackAppHomeBlockActionsToggleSettings(t *testing.T) {
+	b := newTestBroker(t)
+	var payloads []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode slack request: %v", err)
+		}
+		payloads = append(payloads, payload)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	slack := NewSlackTransport(b, "xoxb-test", "xapp-test", "Ubot")
+	slack.client.baseURL = srv.URL
+	slack.handleEnvelope(context.Background(), &brokerTransportHost{broker: b}, slackSocketEnvelope{
+		EnvelopeID: "interactive-1",
+		Type:       "interactive",
+		Payload: json.RawMessage(`{
+			"type":"block_actions",
+			"user":{"id":"U1"},
+			"actions":[{"type":"button","action_id":"wuphf_home_toggle_focus","value":"toggle"}]
+		}`),
+	})
+
+	if !b.FocusModeEnabled() {
+		t.Fatal("focus mode was not toggled on")
+	}
+	if len(payloads) != 1 || payloads[0]["user_id"] != "U1" {
+		t.Fatalf("payloads = %+v", payloads)
+	}
+	raw, err := json.Marshal(payloads[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "Turn focus off") || !strings.Contains(string(raw), "Session mode") {
+		t.Fatalf("settings home not republished: %s", raw)
+	}
+}
+
 func TestSlackAppMessagesTabChatsWithGeneralAndRepliesToDMThread(t *testing.T) {
 	b := newTestBroker(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -291,6 +331,7 @@ func TestSlackAgentManifestUsesAgentsAndAIAppSurface(t *testing.T) {
 		`"assistant_thread_context_changed"`,
 		`"message.im"`,
 		`"socket_mode_enabled":true`,
+		`"interactivity"`,
 	} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("manifest missing %s: %s", want, raw)
@@ -315,6 +356,7 @@ func TestSlackWUPHFManifestEnablesAppHomeAndMessagesTab(t *testing.T) {
 		`"message.im"`,
 		`"views:write"`,
 		`"chat:write.customize"`,
+		`"interactivity"`,
 		`"/wuphf"`,
 	} {
 		if !strings.Contains(raw, want) {

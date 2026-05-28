@@ -139,6 +139,9 @@ func slackAgentManifestForMember(member officeMember) map[string]any {
 		"settings": map[string]any{
 			"socket_mode_enabled":    true,
 			"token_rotation_enabled": false,
+			"interactivity": map[string]any{
+				"is_enabled": true,
+			},
 			"event_subscriptions": map[string]any{
 				"bot_events": []string{
 					"assistant_thread_started",
@@ -205,6 +208,9 @@ func slackWUPHFAppManifest() map[string]any {
 		"settings": map[string]any{
 			"socket_mode_enabled":    true,
 			"token_rotation_enabled": false,
+			"interactivity": map[string]any{
+				"is_enabled": true,
+			},
 			"event_subscriptions": map[string]any{
 				"bot_events": []string{
 					"assistant_thread_started",
