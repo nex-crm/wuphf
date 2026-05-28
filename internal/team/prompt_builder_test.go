@@ -339,6 +339,11 @@ func TestPromptBuilder_VisualArtifactForcingRulePresentOnEverySurface(t *testing
 		"visual-artifact:ra_...",
 		"wiki article, draft, page",
 		"plan, spec, RFC",
+		// Topic/concept triggers — without these, "research X" or
+		// "explain how X works" reads as conversational and the agent
+		// falls back to plain markdown.
+		"research, explain, teach, summarize, break down, walk through, or unpack",
+		"how does X actually work",
 		"comparison, decision matrix",
 		"diagram, flow, sequence",
 		"more than ~200 words",
@@ -358,25 +363,40 @@ func TestPromptBuilder_VisualArtifactForcingRulePresentOnEverySurface(t *testing
 
 func TestPromptBuilder_VisualArtifactForcingRuleSkippedWithoutMarkdownMemory(t *testing.T) {
 	// The forcing rule only applies when markdown memory is the backend; if
-	// notebook/wiki tools are not available there is nothing to call.
-	pb := &promptBuilder{
-		isOneOnOne:  func() bool { return false },
-		isFocusMode: func() bool { return false },
-		packName:    func() string { return "WUPHF Office" },
-		leadSlug:    func() string { return "ceo" },
-		members: func() []officeMember {
-			return []officeMember{{Slug: "ceo", Name: "CEO", Role: "ceo"}, {Slug: "pm", Name: "PM"}}
-		},
-		policies:       func() []officePolicy { return nil },
-		nameFor:        func(slug string) string { return slug },
-		markdownMemory: false,
-		nexDisabled:    true,
-	}
-	for _, slug := range []string{"ceo", "pm"} {
-		got := pb.Build(slug)
-		if strings.Contains(got, "VISUAL ARTIFACT RULE") {
-			t.Fatalf("%s prompt should NOT contain VISUAL ARTIFACT RULE when markdownMemory=false:\n%s", slug, got)
+	// notebook/wiki tools are not available there is nothing to call. Cover
+	// every surface the positive test covers (lead/specialist/1:1) so a
+	// regression that re-emits the block on any of them is caught.
+	mkBuilder := func(oneOnOne bool) *promptBuilder {
+		return &promptBuilder{
+			isOneOnOne:  func() bool { return oneOnOne },
+			isFocusMode: func() bool { return false },
+			packName:    func() string { return "WUPHF Office" },
+			leadSlug:    func() string { return "ceo" },
+			members: func() []officeMember {
+				return []officeMember{{Slug: "ceo", Name: "CEO", Role: "ceo"}, {Slug: "pm", Name: "PM"}}
+			},
+			policies:       func() []officePolicy { return nil },
+			nameFor:        func(slug string) string { return slug },
+			markdownMemory: false,
+			nexDisabled:    true,
 		}
+	}
+	cases := []struct {
+		name     string
+		oneOnOne bool
+		slug     string
+	}{
+		{name: "lead/office", oneOnOne: false, slug: "ceo"},
+		{name: "specialist/office", oneOnOne: false, slug: "pm"},
+		{name: "lead/one-on-one", oneOnOne: true, slug: "ceo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mkBuilder(tc.oneOnOne).Build(tc.slug)
+			if strings.Contains(got, "VISUAL ARTIFACT RULE") {
+				t.Fatalf("%s prompt should NOT contain VISUAL ARTIFACT RULE when markdownMemory=false:\n%s", tc.name, got)
+			}
+		})
 	}
 }
 

@@ -19,6 +19,7 @@ interface NotebookVisualArtifactsProps {
 interface LoadedArtifact {
   artifact: RichArtifact;
   detail?: RichArtifactDetail;
+  detailError?: string;
 }
 
 // NotebookVisualArtifacts renders every visual artifact attached to a
@@ -38,8 +39,12 @@ export default function NotebookVisualArtifacts({
   const [loaded, setLoaded] = useState<LoadedArtifact[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [promotingId, setPromotingId] = useState<string | null>(null);
-  const defaultTarget = useMemo(
-    () => `team/drafts/${agentSlug}-${entrySlug}-visual.md`,
+  // Per-artifact target path. Sharing one target across all artifacts
+  // attached to the same notebook entry would cause later promotions
+  // (mode: "replace") to overwrite earlier ones at the same wiki path.
+  const targetPathFor = useMemo(
+    () => (artifactId: string) =>
+      `team/drafts/${agentSlug}-${entrySlug}-${artifactId}-visual.md`,
     [agentSlug, entrySlug],
   );
 
@@ -63,8 +68,16 @@ export default function NotebookVisualArtifacts({
             try {
               const detail = await fetchRichArtifact(artifact.id);
               return { artifact, detail } satisfies LoadedArtifact;
-            } catch {
-              return { artifact } satisfies LoadedArtifact;
+            } catch (err: unknown) {
+              // Surface the failure in the render path instead of leaving
+              // the slot stuck on "Loading visual…" forever.
+              return {
+                artifact,
+                detailError:
+                  err instanceof Error
+                    ? err.message
+                    : "Failed to load visual artifact",
+              } satisfies LoadedArtifact;
             }
           }),
         );
@@ -87,7 +100,7 @@ export default function NotebookVisualArtifacts({
     setError(null);
     try {
       const promoted = await promoteRichArtifact(artifact.id, {
-        targetWikiPath: defaultTarget,
+        targetWikiPath: targetPathFor(artifact.id),
         markdownSummary: `# ${artifact.title}\n\n${artifact.summary || "Promoted visual artifact."}\n`,
         mode: "replace",
       });
@@ -114,7 +127,7 @@ export default function NotebookVisualArtifacts({
 
   return (
     <section className="nb-visual-artifacts" aria-label="Visual artifacts">
-      {loaded.map(({ artifact, detail }) => (
+      {loaded.map(({ artifact, detail, detailError }) => (
         <article
           key={artifact.id}
           className="nb-visual-artifact"
@@ -147,6 +160,10 @@ export default function NotebookVisualArtifacts({
           </header>
           {detail ? (
             <RichArtifactEmbed title={artifact.title} html={detail.html} />
+          ) : detailError ? (
+            <p className="nb-error" role="alert">
+              {detailError}
+            </p>
           ) : (
             <div className="nb-loading">Loading visual…</div>
           )}
