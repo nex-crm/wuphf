@@ -495,6 +495,21 @@ func (b *Broker) updateOfficeMember(r *http.Request, slug string, body officeMem
 	}
 	responseMember := *member
 	b.mu.Unlock()
+	// Provider-switch hand-off: when the user reroutes an existing agent to a
+	// new runtime, the old runtime's per-agent state must not leak into the
+	// new one. The Claude session store keeps a resume id keyed by slug —
+	// reading that on the next turn would attempt to resume a dead
+	// conversation on a runtime that no longer owns it. Clear it
+	// unconditionally on a provider change (idempotent if the slug has no
+	// stored session) so the next dispatch starts clean.
+	//
+	// OpenClaw transitions are handled separately above (attach/detach the
+	// gateway subscription). Pane teardown for switches off claude-code is
+	// the launcher's job — it sees the same member_updated event we publish
+	// below and reconciles via reconcileMemberRuntime in launcher_reconfigure.
+	if providerChanged && oldBinding.Kind != newBinding.Kind {
+		provider.ResetClaudeSessionFor(slug)
+	}
 	// Match the create/remove paths so SSE subscribers learn about updated
 	// member metadata (provider switch, name changes, channel reassignment)
 	// instead of waiting for a full reload.
