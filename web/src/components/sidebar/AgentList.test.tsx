@@ -274,27 +274,17 @@ describe("<AgentList>", () => {
     ).toBe(0);
   });
 
-  // ─── Tier 2 chevron / peek wiring ────────────────────────────────────────
+  // ─── Row + peek wiring ────────────────────────────────────────
+  //
+  // The Tier-2 chevron trigger was removed in the sidebar redesign; peek is
+  // now reachable through hover + long-press only. AgentEventPeek itself,
+  // the hook, and the hover/long-press path are still wired — the tests
+  // below verify the row-click / peek-close contract that survives.
 
-  it("renders a peek chevron for every agent row, collapsed by default", () => {
-    setMembers([
-      { slug: "tess", name: "Tess", role: "engineer", task: "watching tests" },
-      { slug: "ava", name: "Ava", role: "designer", task: "moving pixels" },
-    ]);
-
-    const { container } = renderList();
-    const triggers = container.querySelectorAll(".sidebar-agent-peek-trigger");
-    expect(triggers.length).toBe(2);
-    for (const t of triggers) {
-      expect(t.getAttribute("aria-expanded")).toBe("false");
-      expect(t.getAttribute("aria-haspopup")).toBe("dialog");
-    }
-  });
-
-  it("REGRESSION: button[data-agent-slug] still resolves to the row button (NOT the chevron)", () => {
-    // The e2e harness selects rows via `button[data-agent-slug]`. The
-    // chevron is a sibling button without that attribute; it uses
-    // data-testid instead.
+  it("REGRESSION: button[data-agent-slug] resolves to the row button only", () => {
+    // The e2e harness selects rows via `button[data-agent-slug]`. There is
+    // no longer a sibling chevron button, so only the .sidebar-agent row
+    // should carry that data attribute.
     setMembers([
       { slug: "tess", name: "Tess", role: "engineer", task: "watching tests" },
     ]);
@@ -305,11 +295,10 @@ describe("<AgentList>", () => {
     expect(slugButtons.length).toBe(1);
     expect(slugButtons[0].classList.contains("sidebar-agent")).toBe(true);
 
-    const chevron = container.querySelector(
-      '[data-testid="peek-trigger-tess"]',
-    );
-    expect(chevron).not.toBeNull();
-    expect(chevron?.hasAttribute("data-agent-slug")).toBe(false);
+    // The chevron is gone — its test id should no longer be in the DOM.
+    expect(
+      container.querySelector('[data-testid="peek-trigger-tess"]'),
+    ).toBeNull();
   });
 
   it("clicking the row (Tier 3 escalation) closes any open peek before navigating", () => {
@@ -337,74 +326,6 @@ describe("<AgentList>", () => {
 
     expect(close).toHaveBeenCalledTimes(1);
     expect(setActiveAgentSlug).toHaveBeenCalledWith("tess");
-  });
-
-  it("clicking the chevron does NOT call setActiveAgentSlug (e.stopPropagation)", () => {
-    const setActiveAgentSlug = vi.fn();
-    useAppStore.setState({ setActiveAgentSlug });
-
-    setMembers([
-      { slug: "tess", name: "Tess", role: "engineer", task: "watching tests" },
-    ]);
-
-    const { container } = renderList();
-    const chevron = container.querySelector(
-      '[data-testid="peek-trigger-tess"]',
-    );
-    expect(chevron).not.toBeNull();
-    fireEvent.click(chevron as Element);
-
-    expect(setActiveAgentSlug).not.toHaveBeenCalled();
-  });
-
-  it("clicking the chevron calls peek.toggle and flips aria-expanded to true on the next render", () => {
-    const toggle = vi.fn();
-    let isOpen = false;
-    useAgentEventPeekMock.mockImplementation(() =>
-      defaultPeekState({ isOpen }),
-    );
-
-    setMembers([
-      { slug: "tess", name: "Tess", role: "engineer", task: "watching tests" },
-    ]);
-
-    const { container, rerender } = renderList();
-    const chevron = container.querySelector(
-      '[data-testid="peek-trigger-tess"]',
-    );
-    expect(chevron?.getAttribute("aria-expanded")).toBe("false");
-
-    // Rewire mock so the click handler calls our spy AND so the next
-    // render reflects the open state.
-    useAgentEventPeekMock.mockImplementation(() => {
-      const state = defaultPeekState({ isOpen });
-      (state as unknown as { toggle: () => void }).toggle = () => {
-        toggle();
-        isOpen = true;
-      };
-      return state;
-    });
-
-    rerender(
-      <QueryClientProvider client={new QueryClient()}>
-        <AgentList />
-      </QueryClientProvider>,
-    );
-    const chevron2 = container.querySelector(
-      '[data-testid="peek-trigger-tess"]',
-    );
-    fireEvent.click(chevron2 as Element);
-    expect(toggle).toHaveBeenCalledTimes(1);
-
-    rerender(
-      <QueryClientProvider client={new QueryClient()}>
-        <AgentList />
-      </QueryClientProvider>,
-    );
-    const chevron3 = container.querySelector(
-      '[data-testid="peek-trigger-tess"]',
-    );
-    expect(chevron3?.getAttribute("aria-expanded")).toBe("true");
   });
 
   // ─── presence badge ──────────────────────────────────────────────────────

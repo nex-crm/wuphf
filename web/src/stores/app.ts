@@ -99,6 +99,7 @@ function persistSidebarSections(state: SidebarSectionsState): void {
   } catch {}
 }
 
+
 /**
  * Build the broker's canonical direct-message channel slug for an agent.
  * The broker pairs `<lower>__<higher>` for stable ordering across sides;

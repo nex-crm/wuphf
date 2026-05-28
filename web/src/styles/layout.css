@@ -92,7 +92,7 @@
   width: 0;
 }
 .sidebar-rail-bottom {
-  margin: 6px 0 0;
+  margin-top: auto;
   padding: 10px 4px;
   gap: 2px;
   border-radius: 0;
@@ -144,6 +144,19 @@ html[data-theme="nex"] .sidebar-rail-bottom {
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+/* Popover that grows out of the trigger button (used by the rail's
+   More-tools menu). Scale + slight translate anchored bottom-left so it
+   appears to lift out of the 3×3 dots icon. */
+@keyframes rail-more-popover-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
   }
 }
 
@@ -213,7 +226,8 @@ html[data-theme] body .sidebar-rail-popover .sidebar-agent-name {
   color: var(--text-tertiary);
 }
 .sidebar-rail-popover .sidebar-agents,
-.sidebar-rail-popover .sidebar-channels {
+.sidebar-rail-popover .sidebar-channels,
+.sidebar-rail-popover .sidebar-issues {
   background: transparent;
   max-height: none;
   padding: 6px 10px;
@@ -222,10 +236,18 @@ html[data-theme] body .sidebar-rail-popover .sidebar-agent-name {
 .sidebar-rail-popover .sidebar-scroll-wrap,
 .sidebar-rail-popover .sidebar-scroll-wrap.is-agents,
 .sidebar-rail-popover .sidebar-scroll-wrap.is-channels,
-.sidebar-rail-popover .sidebar-scroll-wrap.is-apps {
+.sidebar-rail-popover .sidebar-scroll-wrap.is-apps,
+.sidebar-rail-popover .sidebar-scroll-wrap.is-issues {
   max-height: none;
   border: none;
   overflow: visible;
+}
+/* Recent (empty-state) popover panel — keeps the same content
+   padding as the other panels so the chrome reads uniformly. */
+.sidebar-rail-popover-body .rail-popover-empty {
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 .sidebar-rail-popover .sidebar-scroll-wrap::after {
   display: none;
@@ -404,6 +426,35 @@ html[data-theme="nex"]
   font-size: 22px;
   letter-spacing: -0.01em;
   cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-logo.is-workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 3px;
+  font-size: 15px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.25;
+  color: var(--workspace-chip-fg, #fff);
+  background: var(--workspace-chip-bg, var(--accent));
+  border-radius: 999px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08) inset,
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.sidebar-logo.is-workspace::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentcolor;
+  opacity: 0.85;
+  flex-shrink: 0;
 }
 .sidebar-btn {
   width: 28px;
@@ -534,7 +585,7 @@ html[data-theme="nex"]
   width: 10px;
   height: 10px;
   flex-shrink: 0;
-  transition: transform 0.15s;
+  transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .sidebar-section-chevron[data-open="true"] {
   transform: rotate(90deg);
@@ -568,16 +619,24 @@ html[data-theme="nex"]
     color var(--duration-base, 0.15s);
 }
 .sidebar-section-action:hover {
-  color: var(--text-secondary);
-  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.10);
 }
 .sidebar-section-action:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
+  color: var(--text);
+}
+.sidebar-section-action:active {
+  background: rgba(255, 255, 255, 0.16);
+  transform: scale(0.97);
 }
 .sidebar-section-action.active {
-  color: var(--text);
-  background: var(--accent-bg);
+  color: #0a1f24;
+  background: var(--cyan-400);
+}
+.sidebar-section-action.active:hover {
+  background: var(--cyan-400);
 }
 .sidebar-section-toggle:hover {
   color: var(--text);
@@ -675,9 +734,14 @@ html[data-theme="nex"]
   color: var(--text);
 }
 .sidebar-item.active {
-  background: var(--accent-bg);
-  color: var(--text);
+  background: var(--cyan-400);
+  color: #0a1f24;
   font-weight: 600;
+}
+.sidebar-item.active .sidebar-shortcut .kbd {
+  color: #0a1f24;
+  border-color: rgba(10, 31, 36, 0.25);
+  background: rgba(255, 255, 255, 0.35);
 }
 .sidebar-item-icon {
   width: 16px;
@@ -685,6 +749,52 @@ html[data-theme="nex"]
   flex-shrink: 0;
   color: currentcolor;
   stroke-width: 2;
+}
+.workspace-rail-tool-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: currentcolor;
+  stroke-width: 1.8;
+}
+
+/* Workspaces stack — show 3, mask the rest behind a fade. Hovering the
+   rail (or focusing into it) lifts the mask so the user can reach the
+   overflow without clicking. */
+.workspace-rail-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  /* 3 × 36 + 2 × 12 = 132 — exact room for three workspace tiles. */
+  max-height: 132px;
+  overflow: hidden;
+  transition: max-height 0.22s ease, mask-position 0.22s ease;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 28px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 28px),
+    transparent 100%
+  );
+}
+.workspace-rail-list:not(.is-overflowing) {
+  -webkit-mask-image: none;
+  mask-image: none;
+  max-height: none;
+}
+.workspace-rail:hover .workspace-rail-list.is-overflowing,
+.workspace-rail:focus-within .workspace-rail-list.is-overflowing {
+  max-height: 60vh;
+  overflow-y: auto;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 .sidebar-item-emoji {
   font-size: 16px;
@@ -1035,19 +1145,27 @@ html[data-theme="nex"]
   flex: none;
 }
 .sidebar-collapsible {
+  /* grid-template-rows: 1fr → 0fr is the only way to animate to
+     intrinsic (content) height without measuring in JS. Supported in
+     all evergreen browsers since 2024. The child needs min-height: 0 +
+     overflow: hidden so its content can be clipped while the grid row
+     shrinks. */
   display: grid;
   grid-template-rows: 1fr;
-  /* Material-standard ease-in-out. Chrome's `grid-template-rows: 1fr → 0fr`
-     interpolation is finicky with steep custom curves (e.g. cubic-bezier
-     (0.77, 0, 0.175, 1) caused the transition to no-op). This curve plays
-     nice and stays in lockstep with the section's padding-bottom. */
-  transition: grid-template-rows 200ms cubic-bezier(0.4, 0, 0.2, 1);
-  /* Sections hug content; the sidebar root owns the overflow scroll. */
+  opacity: 1;
   flex: 0 0 auto;
   min-height: 0;
+  transition:
+    grid-template-rows 240ms cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  will-change: grid-template-rows;
 }
 .sidebar-collapsible:not(.is-open) {
   grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 120ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .sidebar-collapsible > * {
   min-height: 0;
@@ -1062,26 +1180,7 @@ html[data-theme="nex"]
   max-height: 100%;
 }
 .sidebar-scroll-wrap::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 28px;
-  pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    var(--sidebar-fade-color, var(--bg-card))
-  );
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.sidebar-scroll-wrap:has([data-overflow="true"])::after {
-  opacity: 1;
-}
-.sidebar-scroll-wrap:has([data-scroll-end="true"])::after {
-  opacity: 0;
+  content: none;
 }
 
 .sidebar-agents {
@@ -1114,7 +1213,7 @@ html[data-theme="nex"]
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 6px 10px;
+  padding: 8px 10px;
   margin-bottom: 1px;
   border-radius: 6px;
   font-size: 13px;

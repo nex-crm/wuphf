@@ -20,7 +20,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus } from "iconoir-react";
+import { createPortal } from "react-dom";
+import { MoreHoriz, Plus } from "iconoir-react";
 
 import {
   usePauseWorkspace,
@@ -29,11 +30,15 @@ import {
   useWorkspacesList,
   type Workspace,
 } from "../../api/workspaces";
-import { channelRoute, dmRoute, router } from "../../lib/router";
+import { router } from "../../lib/router";
 import { showNotice } from "../ui/Toast";
 import { CreateWorkspaceModal } from "./CreateWorkspaceModal";
 import { useRestoreToast } from "./RestoreToast";
 import { ShredConfirmModal } from "./ShredConfirmModal";
+import {
+  WorkspaceRailFooter,
+  WorkspaceRailTools,
+} from "./WorkspaceRailTools";
 
 interface MenuPosition {
   x: number;
@@ -80,10 +85,9 @@ const styles = {
     display: "flex" as const,
     flexDirection: "column" as const,
     alignItems: "center" as const,
-    padding: "14px 0",
-    gap: 14,
+    padding: "14px 0 0",
     height: "100vh",
-    overflowY: "auto" as const,
+    overflow: "hidden" as const,
     color: "var(--workspace-rail-fg, var(--neutral-100))",
   },
   icon: (
@@ -93,8 +97,10 @@ const styles = {
   ): React.CSSProperties => ({
     width: 36,
     height: 36,
-    borderRadius: 8,
-    border: active ? "2px solid var(--accent)" : "2px solid transparent",
+    borderRadius: 10,
+    border: active
+      ? "2px solid var(--cyan-400)"
+      : "2px solid transparent",
     background: paused
       ? "var(--workspace-rail-icon-paused-bg, rgba(255,255,255,0.08))"
       : bg,
@@ -110,12 +116,29 @@ const styles = {
     cursor: "pointer",
     position: "relative",
     opacity: paused ? 0.65 : 1,
+    boxShadow: active
+      ? "0 0 0 4px rgba(0, 204, 255, 0.18)"
+      : "none",
+    transition:
+      "transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease",
   }),
   iconRow: {
     position: "relative" as const,
     display: "flex" as const,
     flexDirection: "column" as const,
     alignItems: "center" as const,
+  },
+  activeRailBar: {
+    position: "absolute" as const,
+    left: -14,
+    top: "50%",
+    transform: "translateY(-50%)",
+    width: 3,
+    height: 22,
+    borderRadius: "0 3px 3px 0",
+    background: "var(--cyan-400)",
+    boxShadow: "0 0 10px rgba(0, 204, 255, 0.45)",
+    pointerEvents: "none" as const,
   },
   stateDot: (state: Workspace["state"]): React.CSSProperties => {
     const color =
@@ -141,6 +164,7 @@ const styles = {
     cursor: "pointer",
     fontSize: 18,
     lineHeight: 1,
+    marginTop: 10,
   },
   tooltip: {
     position: "absolute" as const,
@@ -163,22 +187,24 @@ const styles = {
     border: "1px solid var(--border)",
     borderRadius: 8,
     padding: 4,
-    zIndex: 1100,
+    zIndex: 1400,
     minWidth: 160,
     boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
     fontSize: 13,
   },
   menuItem: {
-    display: "block" as const,
+    display: "flex" as const,
+    alignItems: "center" as const,
     width: "100%",
     background: "transparent",
     border: "none",
     color: "var(--text)",
-    padding: "6px 12px",
+    padding: "6px 10px",
     cursor: "pointer" as const,
     textAlign: "left" as const,
     fontSize: 13,
-    borderRadius: 4,
+    borderRadius: 6,
+    transition: "background 0.12s, color 0.12s",
   },
   menuItemDanger: {
     color: "var(--red)",
@@ -332,6 +358,51 @@ interface KebabMenuProps {
   onShred: () => void;
 }
 
+interface MenuItemProps {
+  onClick: () => void;
+  children: React.ReactNode;
+  danger?: boolean;
+  "data-testid"?: string;
+}
+
+function MenuItem({
+  onClick,
+  children,
+  danger,
+  "data-testid": testId,
+}: MenuItemProps) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      data-testid={testId}
+      onClick={onClick}
+      style={{
+        ...styles.menuItem,
+        ...(danger ? styles.menuItemDanger : null),
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = danger
+          ? "rgba(226, 92, 122, 0.12)"
+          : "var(--bg-warm)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+      }}
+      onFocus={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = danger
+          ? "rgba(226, 92, 122, 0.12)"
+          : "var(--bg-warm)";
+      }}
+      onBlur={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 /** Right-click context menu over a workspace icon. */
 function KebabMenu({
   workspace,
@@ -357,46 +428,24 @@ function KebabMenu({
       }}
     >
       {workspace.state === "running" ? (
-        <button
-          type="button"
-          role="menuitem"
-          style={styles.menuItem}
-          onClick={onPause}
-        >
-          Pause
-        </button>
+        <MenuItem onClick={onPause}>Pause</MenuItem>
       ) : null}
       {showResume ? (
-        <button
-          type="button"
-          role="menuitem"
-          style={styles.menuItem}
-          onClick={onResume}
-        >
-          Resume
-        </button>
+        <MenuItem onClick={onResume}>Resume</MenuItem>
       ) : null}
-      <button
-        type="button"
-        role="menuitem"
-        style={styles.menuItem}
-        onClick={onSettings}
-      >
-        Settings
-      </button>
+      <MenuItem onClick={onSettings}>Settings</MenuItem>
       <div style={styles.divider} aria-hidden="true" />
-      <button
-        type="button"
-        role="menuitem"
-        style={{ ...styles.menuItem, ...styles.menuItemDanger }}
+      <MenuItem
+        danger
         data-testid={`workspace-menu-shred-${workspace.name}`}
         onClick={onShred}
       >
         Shred…
-      </button>
+      </MenuItem>
     </div>
   );
 }
+
 
 export function WorkspaceRail({
   navigate = defaultNavigate,
@@ -408,6 +457,8 @@ export function WorkspaceRail({
   const [kebab, setKebab] = useState<KebabState | null>(null);
   const [resume, setResume] = useState<ResumeState | null>(null);
   const [shredTarget, setShredTarget] = useState<Workspace | null>(null);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const activeTileRef = useRef<HTMLButtonElement | null>(null);
 
   const restoreToast = useRestoreToast();
 
@@ -488,23 +539,51 @@ export function WorkspaceRail({
 
   const workspaces = useMemo(() => data?.workspaces ?? [], [data?.workspaces]);
   const activeName = data?.active;
+  const activeWorkspace = useMemo(
+    () =>
+      workspaces.find((w) => w.is_active || w.name === activeName) ??
+      workspaces[0],
+    [workspaces, activeName],
+  );
+  const otherWorkspaces = useMemo(
+    () => workspaces.filter((w) => w.name !== activeWorkspace?.name),
+    [workspaces, activeWorkspace],
+  );
+
+  // Close switcher popover on Esc / outside click.
+  useEffect(() => {
+    if (!switcherOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setSwitcherOpen(false);
+    }
+    function onDown(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (
+        target instanceof Element &&
+        (target.closest("[data-workspace-switcher]") ||
+          target.closest("[data-workspace-active-tile]"))
+      ) {
+        return;
+      }
+      setSwitcherOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [switcherOpen]);
 
   const handleClick = useCallback(
     (ws: Workspace) => {
-      if (ws.is_active || ws.name === activeName) {
-        // Already here — bring focus back to the office. If the user is
-        // currently on a non-conversation surface (an app panel, wiki,
-        // notebooks, reviews), drop them back to #general; if they are
-        // already in a conversation, this click is a no-op.
-        const leaf = router.state.matches.at(-1);
-        const onConversation =
-          leaf?.routeId === channelRoute.id || leaf?.routeId === dmRoute.id;
-        if (!onConversation) {
-          void router.navigate({
-            to: "/channels/$channelSlug",
-            params: { channelSlug: "general" },
-          });
-        }
+      if (
+        ws.is_active ||
+        ws.name === activeName ||
+        ws.name === activeWorkspace?.name
+      ) {
+        // Active tile → toggle the switcher popover.
+        setSwitcherOpen((v) => !v);
         return;
       }
       if (ws.state === "running") {
@@ -525,7 +604,7 @@ export function WorkspaceRail({
       // starting / stopping — just notify; user will retry.
       showNotice(`Workspace '${ws.name}' is ${ws.state}.`, "info");
     },
-    [activeName, navigate],
+    [activeName, activeWorkspace, navigate],
   );
 
   const openKebab = useCallback((ws: Workspace, x: number, y: number) => {
@@ -544,78 +623,348 @@ export function WorkspaceRail({
         <div style={{ fontSize: 11, color: "var(--neutral-400)" }}>...</div>
       ) : null}
 
-      {workspaces.map((ws) => {
-        const active = ws.is_active || ws.name === activeName;
-        const paused = ws.state === "paused" || ws.state === "stopping";
-        const showTooltip = hoveredSlug === ws.name;
-        return (
-          <div
-            key={ws.name}
-            style={styles.iconRow}
-            onMouseEnter={() => setHoveredSlug(ws.name)}
-            onMouseLeave={() => setHoveredSlug(null)}
-          >
-            <button
-              type="button"
-              className="workspace-rail-icon"
-              data-testid={`workspace-icon-${ws.name}`}
-              data-state={ws.state}
-              data-active={active ? "true" : "false"}
-              aria-label={`Switch to workspace ${ws.name} (${ws.state})`}
-              aria-current={active ? "page" : undefined}
-              style={styles.icon(active, paused, workspaceColor(ws.name))}
-              title={`${ws.name} · ${ws.state}`}
-              onClick={() => handleClick(ws)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                openKebab(ws, e.clientX, e.clientY);
-              }}
-            >
-              {workspaceInitial(ws.name)}
-              <span aria-hidden="true" style={styles.stateDot(ws.state)} />
-            </button>
-            {showTooltip ? (
-              <div role="tooltip" style={styles.tooltip}>
-                <div style={{ fontWeight: 600 }}>
-                  {ws.company_name?.trim() || ws.name}
-                </div>
-                {ws.company_name?.trim() &&
-                ws.company_name.trim() !== ws.name ? (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--neutral-500)",
-                      marginTop: 1,
-                    }}
-                  >
-                    {ws.name}
-                  </div>
-                ) : null}
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "var(--neutral-400)",
-                    marginTop: 2,
+      {activeWorkspace
+        ? (() => {
+            const ws = activeWorkspace;
+            const paused = ws.state === "paused" || ws.state === "stopping";
+            const showTooltip = !switcherOpen && hoveredSlug === ws.name;
+            return (
+              <div
+                data-workspace-active-tile
+                style={styles.iconRow}
+                onMouseEnter={() => setHoveredSlug(ws.name)}
+                onMouseLeave={() => setHoveredSlug(null)}
+              >
+                <span aria-hidden="true" style={styles.activeRailBar} />
+                <button
+                  ref={activeTileRef}
+                  type="button"
+                  className="workspace-rail-icon"
+                  data-testid={`workspace-icon-${ws.name}`}
+                  data-state={ws.state}
+                  data-active="true"
+                  aria-haspopup="menu"
+                  aria-expanded={switcherOpen}
+                  aria-label={`Workspace ${ws.name} (${ws.state}) — open switcher`}
+                  style={styles.icon(true, paused, workspaceColor(ws.name))}
+                  title={`${ws.name} · ${ws.state}`}
+                  onClick={() => handleClick(ws)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    openKebab(ws, e.clientX, e.clientY);
                   }}
                 >
-                  {ws.state} · {relativeFromNow(ws.last_used_at)}
+                  {workspaceInitial(ws.name)}
+                  <span aria-hidden="true" style={styles.stateDot(ws.state)} />
+                </button>
+                {showTooltip ? (
+                  <div role="tooltip" style={styles.tooltip}>
+                    <div style={{ fontWeight: 600 }}>
+                      {ws.company_name?.trim() || ws.name}
+                    </div>
+                    {ws.company_name?.trim() &&
+                    ws.company_name.trim() !== ws.name ? (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--neutral-500)",
+                          marginTop: 1,
+                        }}
+                      >
+                        {ws.name}
+                      </div>
+                    ) : null}
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "var(--neutral-400)",
+                        marginTop: 2,
+                      }}
+                    >
+                      {ws.state} · {relativeFromNow(ws.last_used_at)}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()
+        : null}
+
+      {switcherOpen
+        ? createPortal(
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Switch workspace"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setSwitcherOpen(false);
+              }}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.55)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1300,
+                animation: "sidebar-rail-popover-in 0.14s ease-out",
+              }}
+            >
+              <div
+                data-workspace-switcher
+                style={{
+                  width: "min(360px, calc(100vw - 40px))",
+                  maxHeight: "calc(100vh - 80px)",
+                  background: "var(--bg-card)",
+                  color: "var(--text)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 20,
+                  boxShadow:
+                    "0 1px 2px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.12)",
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <div
+                  style={{
+                    padding: "16px 20px 8px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: "var(--text)",
+                  }}
+                >
+                  Switch workspace
+                </div>
+                <div
+                  style={{
+                    padding: "4px 8px 8px",
+                    overflowY: "auto",
+                    flex: "1 1 auto",
+                  }}
+                >
+                  {otherWorkspaces.length === 0 ? (
+                    <div
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: 12,
+                        color: "var(--text-tertiary)",
+                      }}
+                    >
+                      No other workspaces.
+                    </div>
+                  ) : (
+                    otherWorkspaces.map((ws) => {
+                      const paused =
+                        ws.state === "paused" || ws.state === "stopping";
+                      const bg = workspaceColor(ws.name);
+                      return (
+                        <div
+                          key={ws.name}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                            width: "100%",
+                            padding: "8px",
+                            borderRadius: 12,
+                            cursor: "pointer",
+                            color: "var(--text)",
+                            transition: "background 0.12s",
+                          }}
+                          onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLDivElement).style.background =
+                              "var(--bg-warm)";
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLDivElement).style.background =
+                              "transparent";
+                          }}
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            data-testid={`workspace-switcher-item-${ws.name}`}
+                            onClick={() => {
+                              setSwitcherOpen(false);
+                              handleClick(ws);
+                            }}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 12,
+                              flex: "1 1 auto",
+                              minWidth: 0,
+                              background: "transparent",
+                              border: "none",
+                              padding: 0,
+                              cursor: "pointer",
+                              textAlign: "left",
+                              color: "inherit",
+                            }}
+                          >
+                            <span
+                              aria-hidden="true"
+                              style={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: 10,
+                                background: paused
+                                  ? "var(--workspace-rail-icon-paused-bg, rgba(255,255,255,0.08))"
+                                  : bg,
+                                color: paused
+                                  ? "var(--workspace-rail-icon-paused-fg, rgba(255,255,255,0.55))"
+                                  : readableTextOn(bg),
+                                fontWeight: 700,
+                                fontSize: 14,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                flexShrink: 0,
+                              }}
+                            >
+                              {workspaceInitial(ws.name)}
+                            </span>
+                            <span style={{ minWidth: 0, flex: "1 1 auto" }}>
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                }}
+                              >
+                                {ws.company_name?.trim() || ws.name}
+                              </span>
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontSize: 11,
+                                  color: "var(--text-tertiary)",
+                                }}
+                              >
+                                {ws.state}
+                              </span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`More actions for ${ws.name}`}
+                            data-testid={`workspace-switcher-menu-${ws.name}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const rect = (
+                                e.currentTarget as HTMLButtonElement
+                              ).getBoundingClientRect();
+                              openKebab(ws, rect.right, rect.bottom);
+                            }}
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 8,
+                              background: "transparent",
+                              border: "none",
+                              color: "var(--text-tertiary)",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              cursor: "pointer",
+                              flexShrink: 0,
+                            }}
+                            onMouseEnter={(e) => {
+                              (e.currentTarget as HTMLButtonElement).style.background =
+                                "rgba(0,0,0,0.06)";
+                              (e.currentTarget as HTMLButtonElement).style.color =
+                                "var(--text)";
+                            }}
+                            onMouseLeave={(e) => {
+                              (e.currentTarget as HTMLButtonElement).style.background =
+                                "transparent";
+                              (e.currentTarget as HTMLButtonElement).style.color =
+                                "var(--text-tertiary)";
+                            }}
+                          >
+                            <MoreHoriz width={16} height={16} />
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="workspace-switcher-create"
+                    onClick={() => {
+                      setSwitcherOpen(false);
+                      setCreateOpen(true);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      width: "100%",
+                      padding: "8px",
+                      background: "transparent",
+                      border: "none",
+                      borderRadius: 12,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      color: "var(--text)",
+                      fontSize: 13,
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background =
+                        "var(--bg-warm)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background =
+                        "transparent";
+                    }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 10,
+                        border:
+                          "1px dashed var(--border-strong, var(--border))",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "var(--text-tertiary)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Plus width={16} height={16} strokeWidth={2} />
+                    </span>
+                    New workspace
+                  </button>
                 </div>
               </div>
-            ) : null}
-          </div>
-        );
-      })}
+            </div>,
+            document.body,
+          )
+        : null}
 
       <button
         type="button"
         className="workspace-rail-add"
         data-testid="workspace-add-button"
         aria-label="Create workspace"
-        style={styles.addButton}
+        style={{ ...styles.addButton, display: "none" }}
         onClick={() => setCreateOpen(true)}
       >
         <Plus width={16} height={16} strokeWidth={2} />
       </button>
+
+      <WorkspaceRailTools />
+
+      <div style={{ flex: "1 1 auto" }} />
+
+      <WorkspaceRailFooter />
 
       <CreateWorkspaceModal
         open={createOpen}

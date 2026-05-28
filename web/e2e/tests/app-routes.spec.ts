@@ -6,6 +6,16 @@ import {
   waitForReactMount,
 } from "./_helpers";
 
+// Primary tools render inline as rail icons; secondary tools live behind
+// the More-tools popover and surface their active state through the
+// trigger button instead of the per-app icon.
+const PRIMARY_TOOL_IDS = new Set([
+  "overview",
+  "wiki",
+  "calendar",
+  "skills",
+]);
+
 const APP_CASES = [
   {
     app: "console",
@@ -89,31 +99,43 @@ async function fetchBrokerCommandNames(page: Page): Promise<string[]> {
 }
 
 test.describe("app route isolation", () => {
-  test("each sidebar app renders its own page", async ({ page }) => {
+  test("each app renders its own page and lights up its rail tool", async ({
+    page,
+  }) => {
     const getErrors = collectReactErrors(page);
 
     for (const appCase of APP_CASES) {
       await page.goto(`/#/apps/${appCase.app}`);
       await waitForReactMount(page);
       await expectAppRoute(page, appCase.app, appCase.content);
-      await expect(
-        page.locator(".sidebar-apps .sidebar-item.active"),
-      ).toContainText(appCase.label);
+      // Tools moved from the sidebar to the WorkspaceRail. Primary tools
+      // (overview / wiki / calendar / skills) render inline and flip
+      // `aria-current="page"`. Secondary tools live behind the
+      // More-tools popover — when one is active, the trigger button
+      // takes the active state instead.
+      if (PRIMARY_TOOL_IDS.has(appCase.app)) {
+        await expect(
+          page.getByTestId(`workspace-rail-tool-${appCase.app}`),
+        ).toHaveAttribute("aria-current", "page");
+      } else {
+        await expect(
+          page.getByTestId("workspace-rail-more-trigger"),
+        ).toHaveAttribute("aria-current", "page");
+      }
     }
 
-    // Switch between two real sidebar apps to confirm app-route swapping
-    // still works.
+    // Switch between two app routes via the rail to confirm app-route
+    // swapping still works end-to-end. Console and Graph are both
+    // secondary tools, so they live in the More-tools popover.
     await page.goto("/#/apps/console");
     await waitForReactMount(page);
-    await page
-      .locator(".sidebar-apps .sidebar-item", { hasText: "Graph" })
-      .click();
+    await page.getByTestId("workspace-rail-more-trigger").click();
+    await page.getByTestId("workspace-rail-tool-graph").click();
     await expectAppRoute(page, "graph", /Entity Graph/i);
     await expect(page.getByTestId("console-app")).toHaveCount(0);
 
-    await page
-      .locator(".sidebar-apps .sidebar-item", { hasText: "Console" })
-      .click();
+    await page.getByTestId("workspace-rail-more-trigger").click();
+    await page.getByTestId("workspace-rail-tool-console").click();
     await expectAppRoute(page, "console", /wuphf office|Slash/i);
     await expect(page.getByTestId("app-page-graph")).toHaveCount(0);
 

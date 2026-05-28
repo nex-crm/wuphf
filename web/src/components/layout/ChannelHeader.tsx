@@ -2,9 +2,7 @@ import { useChannels } from "../../hooks/useChannels";
 import { deriveBreadcrumbs } from "../../hooks/useObjectBreadcrumb";
 import { appTitle } from "../../lib/constants";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
-import { useAppStore } from "../../stores/app";
 import { Breadcrumb } from "./Breadcrumb";
-import { ThemeSwitcher } from "./ThemeSwitcher";
 
 function headerTitleAndDesc(
   route: ReturnType<typeof useCurrentRoute>,
@@ -58,7 +56,6 @@ function headerTitleAndDesc(
 
 export function ChannelHeader() {
   const route = useCurrentRoute();
-  const setSearchOpen = useAppStore((s) => s.setSearchOpen);
   const { data: channels = [] } = useChannels();
 
   const { title, desc } = headerTitleAndDesc(route, channels);
@@ -83,32 +80,6 @@ export function ChannelHeader() {
             {desc ? <span className="channel-desc">{desc}</span> : null}
           </>
         )}
-      </div>
-      <div className="channel-actions">
-        <ThemeSwitcher />
-        <button
-          type="button"
-          className="sidebar-btn"
-          title="Search"
-          aria-label="Search"
-          onClick={() => setSearchOpen(true)}
-        >
-          <svg
-            aria-hidden="true"
-            focusable="false"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-        </button>
       </div>
     </div>
   );

@@ -33,7 +33,8 @@ function stubNexRegister(page: Page, status: number, body: unknown) {
 async function goToIntegrations(page: Page) {
   await page.goto("/");
   await waitForReactMount(page);
-  await page.getByLabel("Open settings").click();
+  // Settings moved from the sidebar header to the WorkspaceRail footer.
+  await page.getByTestId("workspace-rail-tool-settings").click();
   await page.getByRole("button", { name: "Integrations" }).click();
   await expect(page.getByTestId("nex-connect-panel")).toBeVisible();
 }

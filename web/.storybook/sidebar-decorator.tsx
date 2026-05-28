@@ -37,6 +37,8 @@ import {
 import type { OfficeMember } from "../src/api/client";
 import type { Channel } from "../src/api/client";
 import type { Task } from "../src/api/tasks";
+import type { Workspace } from "../src/api/workspaces";
+import { workspaceKeys } from "../src/api/workspaces";
 import { createAppRouter, rootRoute } from "../src/lib/router";
 import { useAppStore } from "../src/stores/app";
 
@@ -122,6 +124,38 @@ const DEFAULT_ISSUES: Task[] = [
   } as Task,
 ];
 
+const DEFAULT_WORKSPACES: Workspace[] = [
+  {
+    name: "main",
+    runtime_home: "/tmp/main",
+    broker_port: 7890,
+    web_port: 7891,
+    state: "running",
+    company_name: "Acme Studio",
+    is_active: true,
+    last_used_at: new Date().toISOString(),
+  },
+  {
+    name: "test",
+    runtime_home: "/tmp/test",
+    broker_port: 7900,
+    web_port: 7901,
+    state: "paused",
+    company_name: "Acme Test",
+    is_active: false,
+    last_used_at: new Date(Date.now() - 86_400_000).toISOString(),
+  },
+  {
+    name: "hobby",
+    runtime_home: "/tmp/hobby",
+    broker_port: 7910,
+    web_port: 7911,
+    state: "never_started",
+    company_name: "Hobby",
+    is_active: false,
+  },
+];
+
 const DEFAULT_USAGE = {
   agents: {
     atlas: { total_tokens: 6200, cost_usd: 0.31 },
@@ -142,6 +176,12 @@ export interface SidebarContextProps {
   tasks?: Task[];
   /** Override sidebar Issues entries. */
   issues?: Task[];
+  /** Override workspaces list (rail + sidebar chip). */
+  workspaces?: Workspace[];
+  /** Active workspace name override (defaults to the first active=true row). */
+  activeWorkspace?: string;
+  /** Force a specific Inbox attention count (defaults to a sample 3-item set). */
+  inboxItems?: Array<{ kind: string; id: string; task?: { state: string } }>;
   /** Unread counts per channel slug. */
   unreadByChannel?: Record<string, number>;
   children: ReactNode;
@@ -157,6 +197,9 @@ export function SidebarContext({
   channels = DEFAULT_CHANNELS,
   tasks = DEFAULT_TASKS,
   issues = DEFAULT_ISSUES,
+  workspaces = DEFAULT_WORKSPACES,
+  activeWorkspace,
+  inboxItems,
   unreadByChannel = { deploys: 2, incidents: 12 },
   children,
 }: SidebarContextProps) {
@@ -180,19 +223,27 @@ export function SidebarContext({
     qc.setQueryData(["usage"], DEFAULT_USAGE);
     qc.setQueryData(["issues", "sidebar"], { tasks: issues });
     qc.setQueryData(["inbox-badge"], {
-      items: [
-        { kind: "request", id: "r1" },
-        { kind: "review", id: "r2" },
-        { kind: "task", id: "t1", task: { state: "decision" } },
-      ],
+      items:
+        inboxItems ?? [
+          { kind: "request", id: "r1" },
+          { kind: "review", id: "r2" },
+          { kind: "task", id: "t1", task: { state: "decision" } },
+        ],
     });
     qc.setQueryData(["reviews-badge"], [
       { id: "rv1", state: "pending" },
       { id: "rv2", state: "in-review" },
     ]);
     qc.setQueryData(["requests", ""], { requests: [] });
+    qc.setQueryData(workspaceKeys.list(), {
+      workspaces,
+      active:
+        activeWorkspace ??
+        workspaces.find((w) => w.is_active)?.name ??
+        workspaces[0]?.name,
+    });
     return qc;
-  }, [members, channels, tasks, issues]);
+  }, [members, channels, tasks, issues, workspaces, activeWorkspace, inboxItems]);
 
   const router = useMemo(
     () =>

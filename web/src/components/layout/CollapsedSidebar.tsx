@@ -1,71 +1,28 @@
-import {
-  type ComponentType,
-  type MouseEvent,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
-  BookStack,
-  Calendar,
-  ChatBubble,
-  CheckCircle,
-  ClipboardCheck,
-  Flash,
+  ChatBubbleWarning,
+  ClockRotateRight,
   Group,
-  Package,
-  Page,
-  Play,
-  Search,
-  Settings as SettingsIcon,
-  ShareAndroid,
-  Shield,
+  MultiBubble,
   SidebarExpand,
-  TaskList,
-  Terminal,
 } from "iconoir-react";
 
 import { getUsage } from "../../api/platform";
 import { formatTokens, formatUSD } from "../../lib/format";
-import { navigateToSidebarApp } from "../../lib/sidebarNav";
-import {
-  SIDEBAR_TOOLS,
-  WIKI_SURFACE_APP_IDS,
-} from "../../routes/routeRegistry";
-import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
+import { router } from "../../lib/router";
 import { AgentList } from "../sidebar/AgentList";
 import { ChannelList } from "../sidebar/ChannelList";
 
-const WIKI_SURFACE_APPS = new Set<string>(WIKI_SURFACE_APP_IDS);
-
-const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  studio: Play,
-  issues: ClipboardCheck,
-  wiki: BookStack,
-  console: Terminal,
-  tasks: CheckCircle,
-  requests: TaskList,
-  graph: ShareAndroid,
-  policies: Shield,
-  calendar: Calendar,
-  skills: Flash,
-  activity: Package,
-  receipts: Page,
-  "health-check": Search,
-  settings: SettingsIcon,
-};
-
-type Popover = "team" | "channels" | "usage" | null;
+type Popover = "team" | "channels" | "recent" | "usage" | null;
 type HintState = { label: string; y: number } | null;
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function CollapsedSidebar() {
   const toggleCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
-  const currentApp = useCurrentApp();
   const [popover, setPopover] = useState<Popover>(null);
   const [hint, setHint] = useState<HintState>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -124,16 +81,8 @@ export function CollapsedSidebar() {
         >
           <SidebarExpand />
         </button>
-        <button
-          type="button"
-          className={`sidebar-icon-btn${currentApp === "settings" ? " active" : ""}`}
-          aria-label="Settings"
-          onClick={() => navigateToSidebarApp("settings")}
-          onMouseEnter={(e) => showHint(e, "Settings")}
-          onMouseLeave={hideHint}
-        >
-          <SettingsIcon />
-        </button>
+        {/* Settings moved to the WorkspaceRail bottom; the collapsed
+            sidebar no longer carries a separate Settings shortcut. */}
       </div>
 
       <div className="sidebar-rail-middle">
@@ -161,38 +110,35 @@ export function CollapsedSidebar() {
           onFocus={() => openPopover("channels")}
           onBlur={scheduleClose}
         >
-          <ChatBubble />
+          <MultiBubble />
+        </button>
+        <button
+          type="button"
+          className="sidebar-icon-btn"
+          aria-label="Issues"
+          onClick={() => void router.navigate({ to: "/issues" })}
+          onMouseEnter={(e) => showHint(e, "Issues")}
+          onMouseLeave={hideHint}
+        >
+          <ChatBubbleWarning />
+        </button>
+        <button
+          type="button"
+          className={`sidebar-icon-btn${popover === "recent" ? " is-open" : ""}`}
+          aria-label="Recent"
+          aria-haspopup="dialog"
+          aria-expanded={popover === "recent"}
+          onMouseEnter={() => openPopover("recent")}
+          onMouseLeave={scheduleClose}
+          onFocus={() => openPopover("recent")}
+          onBlur={scheduleClose}
+        >
+          <ClockRotateRight />
         </button>
       </div>
 
-      <div className="sidebar-rail-apps">
-        {SIDEBAR_TOOLS.filter((t) => t.id !== "settings").map((tool) => {
-          const Icon = APP_ICONS[tool.id];
-          // Wiki entry lights up for the wiki, notebooks, and reviews surfaces
-          // since those three share the Wiki app shell via tabs.
-          const isActive =
-            tool.id === "wiki"
-              ? WIKI_SURFACE_APPS.has(currentApp ?? "")
-              : currentApp === tool.id;
-          return (
-            <button
-              key={tool.id}
-              type="button"
-              className={`sidebar-icon-btn${isActive ? " active" : ""}`}
-              aria-label={tool.label}
-              onClick={() => navigateToSidebarApp(tool.id)}
-              onMouseEnter={(e) => showHint(e, tool.label)}
-              onMouseLeave={hideHint}
-            >
-              {Icon ? (
-                <Icon />
-              ) : (
-                <span className="sidebar-item-emoji">{tool.icon}</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* Tools moved to the WorkspaceRail (left edge); the collapsed
+          sidebar no longer mirrors them here. */}
 
       <UsageRail
         onEnter={() => openPopover("usage")}
@@ -214,11 +160,18 @@ export function CollapsedSidebar() {
                   ? "Agents"
                   : popover === "channels"
                     ? "Channels"
-                    : "Usage"}
+                    : popover === "recent"
+                      ? "Recent"
+                      : "Usage"}
               </div>
               <div className="sidebar-rail-popover-body">
                 {popover === "team" ? <AgentList /> : null}
                 {popover === "channels" ? <ChannelList /> : null}
+                {popover === "recent" ? (
+                  <div className="rail-popover-empty">
+                    No recent items yet.
+                  </div>
+                ) : null}
                 {popover === "usage" ? <UsageBody /> : null}
               </div>
             </div>,
