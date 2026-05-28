@@ -815,6 +815,7 @@ func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request,
 		Payload          *string `json:"payload,omitempty"`
 		TargetType       *string `json:"target_type,omitempty"`
 		TargetID         *string `json:"target_id,omitempty"`
+		Channel          *string `json:"channel,omitempty"`
 		ChangeNote       string  `json:"change_note,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -823,7 +824,8 @@ func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request,
 	}
 	hasContentEdit := body.Label != nil || body.ScheduleExpr != nil ||
 		body.IntervalMinutes != nil || body.Payload != nil ||
-		body.TargetType != nil || body.TargetID != nil
+		body.TargetType != nil || body.TargetID != nil ||
+		body.Channel != nil
 	if body.Enabled == nil && body.IntervalOverride == nil && !hasContentEdit {
 		http.Error(w, "no editable fields supplied", http.StatusBadRequest)
 		return
@@ -920,6 +922,9 @@ func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request,
 		}
 		if body.TargetID != nil {
 			job.TargetID = strings.TrimSpace(*body.TargetID)
+		}
+		if body.Channel != nil {
+			job.Channel = strings.TrimSpace(*body.Channel)
 		}
 		if strings.TrimSpace(job.ScheduleExpr) == "" && job.IntervalMinutes <= 0 {
 			http.Error(w, "routine must have a schedule (schedule_expr or interval_minutes)", http.StatusBadRequest)

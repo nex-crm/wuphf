@@ -8,6 +8,7 @@ import {
   patchSchedulerJob,
   type SchedulerJob,
 } from "../../../api/client";
+import { RoutineChannelSelect } from "./RoutineChannelSelect";
 import {
   compileSchedule,
   parseSchedule,
@@ -36,6 +37,9 @@ export function RoutineEditPanel({
   const [label, setLabel] = useState(routine.label ?? "");
   const [instructions, setInstructions] = useState(routine.payload ?? "");
   const [ownerSlug, setOwnerSlug] = useState(routine.target_id ?? "");
+  const [channel, setChannel] = useState(
+    isDirectChannelSlug(routine.channel ?? "") ? "" : routine.channel ?? "",
+  );
   const [schedule, setSchedule] = useState<ScheduleValue>(() =>
     parseSchedule({
       schedule_expr: routine.schedule_expr,
@@ -84,6 +88,10 @@ export function RoutineEditPanel({
         payload: instructions,
         target_type: "agent",
         target_id: ownerSlug,
+        // Empty string means "owner DM" — the dispatcher synthesises
+        // the DM channel on each fire. Anything else is a literal
+        // channel slug the user picked from the dropdown.
+        channel: channel,
         change_note: changeNote.trim() || undefined,
       };
       if (compiled.schedule_expr !== undefined) {
@@ -167,6 +175,18 @@ export function RoutineEditPanel({
         </select>
       </Field>
 
+      <Field
+        label="Run in"
+        hint="Where the routine posts when it fires. Defaults to the owner's DM."
+      >
+        <RoutineChannelSelect
+          value={channel}
+          onChange={setChannel}
+          ownerSlug={ownerSlug}
+          testId="edit-channel"
+        />
+      </Field>
+
       <Field label="Schedule">
         <ScheduleBuilder value={schedule} onChange={setSchedule} />
       </Field>
@@ -245,6 +265,17 @@ export function RoutineEditPanel({
       </div>
     </form>
   );
+}
+
+function isDirectChannelSlug(slug: string): boolean {
+  // Mirrors the Go-side `isDirectChannelSlug` so the editor doesn't
+  // pre-fill the channel dropdown with a stale DM slug — DMs are the
+  // dropdown's implicit default option.
+  const s = slug.trim();
+  if (!s) return false;
+  if (s.startsWith("dm-")) return true;
+  if (s.includes("__")) return true;
+  return false;
 }
 
 function filterOwnerCandidates(members: OfficeMember[]): OfficeMember[] {

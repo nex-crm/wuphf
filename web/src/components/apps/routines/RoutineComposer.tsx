@@ -8,6 +8,7 @@ import {
   type OfficeMember,
 } from "../../../api/client";
 import { router } from "../../../lib/router";
+import { RoutineChannelSelect } from "./RoutineChannelSelect";
 import {
   compileSchedule,
   DEFAULT_SCHEDULE,
@@ -27,6 +28,7 @@ export function RoutineComposer() {
   const [schedule, setSchedule] = useState<ScheduleValue>(DEFAULT_SCHEDULE);
   const [instructions, setInstructions] = useState("");
   const [ownerSlug, setOwnerSlug] = useState<string>("");
+  const [channel, setChannel] = useState<string>("");
   const [enabled, setEnabled] = useState(true);
 
   const membersQuery = useQuery({
@@ -59,6 +61,7 @@ export function RoutineComposer() {
         payload: instructions.trim() || undefined,
         target_type: "agent",
         target_id: ownerSlug,
+        channel: channel || undefined,
         enabled,
         ...compiled,
       });
@@ -195,6 +198,18 @@ export function RoutineComposer() {
               No agents available. Add a teammate before creating a routine.
             </span>
           )}
+        </FormField>
+
+        <FormField
+          label="Run in"
+          hint="Where the routine posts when it fires. Defaults to the owner's DM."
+        >
+          <RoutineChannelSelect
+            value={channel}
+            onChange={setChannel}
+            ownerSlug={ownerSlug}
+            testId="composer-channel"
+          />
         </FormField>
 
         <FormField label="Schedule" hint="When this routine should fire.">

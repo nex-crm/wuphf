@@ -52,6 +52,7 @@ type schedulerBroker interface {
 	FindRequest(channel, id string) (humanInterview, bool)
 	UpdateSchedulerJobState(slug string, nextRun time.Time, status string) error
 	CompleteSchedulerRun(slug string, nextRun time.Time, statusForJob string, run schedulerRun) error
+	EnsureDirectChannel(agentSlug string) (string, error)
 	CreateWatchdogAlert(kind, channel, targetType, targetID, owner, summary string) (watchdogAlert, bool, error)
 	RecordSignals([]officeSignal) ([]officeSignalRecord, error)
 	RecordDecision(kind, channel, summary, reason, owner string, signalIDs []string, requiresHuman, blocking bool) (officeDecisionRecord, error)
@@ -499,7 +500,17 @@ func (w *watchdogScheduler) processAgentJob(job schedulerJob) {
 	}
 	now := w.clock.Now().UTC()
 	agentSlug := strings.TrimSpace(job.TargetID)
+	// Default to the owning agent's DM so #general doesn't get spammed
+	// with personal routines. Routines that explicitly target a shared
+	// channel (e.g. "post the daily standup to #standup") keep that
+	// channel; the dispatcher only synthesises a DM when the routine
+	// has no channel of its own.
 	channel := normalizeChannelSlug(job.Channel)
+	if channel == "" && agentSlug != "" {
+		if dm, err := w.broker.EnsureDirectChannel(agentSlug); err == nil {
+			channel = normalizeChannelSlug(dm)
+		}
+	}
 	if channel == "" {
 		channel = "general"
 	}
@@ -530,14 +541,17 @@ func (w *watchdogScheduler) processAgentJob(job schedulerJob) {
 	if body == "" {
 		body = fmt.Sprintf("Routine %s scheduled run", job.Slug)
 	}
-	// Prefix the body with @agent-slug when the instructions don't
-	// already mention the owner. The Tagged[] field structurally routes
-	// the message to the agent's loop, but the textual @mention makes
-	// the assignment obvious in chat and survives any downstream code
-	// path that scans message content for owner cues.
-	mention := "@" + agentSlug
-	if !strings.Contains(body, mention) {
-		body = mention + " " + body
+	// In a DM there's nobody else to disambiguate against, so an
+	// @mention is just noise. In a shared channel we prefix with the
+	// owner's slug so the assignment is obvious AND any downstream
+	// text-scanning fallback picks it up (the Tagged[] field is the
+	// load-bearing structural routing).
+	isDM := isDirectChannelSlug(channel)
+	if !isDM {
+		mention := "@" + agentSlug
+		if !strings.Contains(body, mention) {
+			body = mention + " " + body
+		}
 	}
 	title := strings.TrimSpace(job.Label)
 	if title == "" {
@@ -592,6 +606,24 @@ func (w *watchdogScheduler) processAgentJob(job schedulerJob) {
 		TargetID:      job.TargetID,
 		Events:        events,
 	})
+}
+
+// isDirectChannelSlug returns true for the broker's DM channel-naming
+// convention (`<agent>__human` or the migration shape `dm-<agent>`).
+// Used by processAgentJob to decide whether to prefix the routine body
+// with an @mention — DMs are 1:1 so the prefix is redundant noise.
+func isDirectChannelSlug(slug string) bool {
+	s := strings.TrimSpace(slug)
+	if s == "" {
+		return false
+	}
+	if strings.HasPrefix(s, "dm-") {
+		return true
+	}
+	if strings.Contains(s, "__") {
+		return true
+	}
+	return false
 }
 
 // nextRoutineRun computes the next fire time for an agent-targeted

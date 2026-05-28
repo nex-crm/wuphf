@@ -543,6 +543,10 @@ func (b *schedulerFixtureBroker) CompleteSchedulerRun(slug string, _ time.Time, 
 	return nil
 }
 
+func (b *schedulerFixtureBroker) EnsureDirectChannel(agentSlug string) (string, error) {
+	return agentSlug + "__human", nil
+}
+
 func (b *schedulerFixtureBroker) CreateWatchdogAlert(kind, channel, targetType, targetID, owner, summary string) (watchdogAlert, bool, error) {
 	b.alerts = append(b.alerts, alertCall{kind: kind, channel: channel, targetType: targetType, targetID: targetID, owner: owner, summary: summary})
 	return watchdogAlert{ID: "alert-1", Kind: kind, Channel: channel}, false, nil
@@ -597,6 +601,9 @@ func (b *recordingLedgerBroker) FindRequest(string, string) (humanInterview, boo
 func (b *recordingLedgerBroker) UpdateSchedulerJobState(string, time.Time, string) error { return nil }
 func (b *recordingLedgerBroker) CompleteSchedulerRun(string, time.Time, string, schedulerRun) error {
 	return nil
+}
+func (b *recordingLedgerBroker) EnsureDirectChannel(agentSlug string) (string, error) {
+	return agentSlug + "__human", nil
 }
 func (b *recordingLedgerBroker) CreateWatchdogAlert(string, string, string, string, string, string) (watchdogAlert, bool, error) {
 	return watchdogAlert{}, false, nil

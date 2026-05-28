@@ -744,6 +744,8 @@ export interface SchedulerJob {
   system_managed?: boolean;
   /** Free-form payload attached to the job (instructions, templated input). */
   payload?: string;
+  /** Channel slug where the routine posts when it fires. */
+  channel?: string;
 }
 
 export function getScheduler(opts?: { dueOnly?: boolean }) {
@@ -763,6 +765,8 @@ export interface PatchSchedulerJobBody {
   payload?: string;
   target_type?: string;
   target_id?: string;
+  /** Channel slug the routine posts into; empty string means owner DM. */
+  channel?: string;
   /** Short human note attached to the new revision. Optional. */
   change_note?: string;
 }
