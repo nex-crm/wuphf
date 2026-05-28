@@ -1,4 +1,9 @@
-import type { ConfigSnapshot, LocalProviderStatus } from "../../../api/client";
+import type { ReactElement, ReactNode } from "react";
+
+import type {
+  ConfigSnapshot,
+  LocalProviderStatus,
+} from "../../../api/client";
 
 // IntegrationCategory groups cards by the role they play in the team. The
 // app renders each category as a labelled section. Add a new category only
@@ -46,21 +51,49 @@ export interface IntegrationContext {
   localStatuses: LocalProviderStatus[];
 }
 
+// IntegrationStatus is the connectivity verdict the list view + detail
+// header both render. tone drives the LED + uppercase status pill; label
+// is the short uppercase string ("CONNECTED", "NOT CONFIGURED").
+export type IntegrationStatusTone =
+  | "connected"
+  | "available"
+  | "unconfigured"
+  | "warning";
+
+export interface IntegrationStatus {
+  tone: IntegrationStatusTone;
+  label: string;
+}
+
 // IntegrationDescriptor is the registry entry shape. Keep it data-shaped
-// (no hooks, no React state) — the only React-y field is the render
-// function. This makes the registry safe to enumerate, snapshot, and test
-// without mounting the app.
+// (no hooks, no React state) — the only React-y fields are the logo
+// component and the render function. This makes the registry safe to
+// enumerate, snapshot, and test without mounting the app.
+//
+// The split between list and detail rendering:
+//   - List view (default) renders {logo, title, summary, status}.
+//   - Detail view renders {logo, title, status, render(ctx)}. The render
+//     fn returns only the form body — back button + header chrome live
+//     in the detail layout, not in each card.
 export interface IntegrationDescriptor {
   id: string;
   category: IntegrationCategory;
   title: string;
+  // summary is the one-liner shown under the title in the list view. Aim
+  // for ≤ 80 chars so a row never wraps to two lines.
+  summary: string;
+  // logo returns the branded glyph rendered at 28px in both the list row
+  // and the detail header. Use IntegrationLogos.tsx exports when possible.
+  logo: () => ReactElement;
   // isAvailable reports whether the build/Go layer supports this
-  // integration at all. False entries are filtered out before any cards
-  // render so we don't promise a Connect button the backend can't
-  // honor. Use it for compile-time gates (`gateway_kinds` membership for
-  // gateways, future build-tag checks for compose-only integrations).
+  // integration at all. False entries are filtered out before any rows
+  // render so we don't promise a Connect button the backend can't honor.
   isAvailable: (ctx: IntegrationContext) => boolean;
-  // render returns the card body. The IntegrationsApp wraps it in the
-  // shared CardShell so card files only worry about their own state.
-  render: (ctx: IntegrationContext) => React.ReactNode;
+  // status returns the connectivity verdict from the current /config
+  // snapshot + probes. Used by both list and detail. Must be pure — no
+  // hooks, no side effects.
+  status: (ctx: IntegrationContext) => IntegrationStatus;
+  // render returns the detail-view body (form fields + action buttons).
+  // The IntegrationsApp wraps it in the back-button chrome.
+  render: (ctx: IntegrationContext) => ReactNode;
 }

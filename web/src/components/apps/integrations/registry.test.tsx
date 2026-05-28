@@ -54,4 +54,26 @@ describe("integrations/registry", () => {
       }
     }
   });
+
+  it("provides a logo, summary, and status for every descriptor", () => {
+    // The list view depends on all three. A missing logo would render an
+    // empty rail; a missing summary collapses the row; status() pure-fn
+    // contract lets us read connection state without mounting the body.
+    const ctx = {
+      cfg: {
+        gateway_kinds: ["openclaw", "openclaw-http", "hermes-agent"],
+      } as never,
+      localStatuses: [],
+    };
+    for (const d of INTEGRATIONS) {
+      expect(typeof d.logo, `${d.id} missing logo()`).toBe("function");
+      expect(d.summary.length, `${d.id} summary empty`).toBeGreaterThan(20);
+      // biome-ignore lint/suspicious/noExplicitAny: ctx is a structural sample
+      const s = d.status(ctx as any);
+      expect(["connected", "available", "warning", "unconfigured"]).toContain(
+        s.tone,
+      );
+      expect(s.label.length, `${d.id} status label empty`).toBeGreaterThan(0);
+    }
+  });
 });
