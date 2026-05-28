@@ -57,60 +57,37 @@ export function OpenClawCard({ cfg }: { cfg: ConfigSnapshot }) {
       statusLabel={connected ? "Connected" : "Not configured"}
       body={
         <div>
-          <p
-            style={{
-              margin: "0 0 12px 0",
-              fontSize: 13,
-              color: "var(--text-secondary)",
-            }}
-          >
+          <p className="op-card-blurb">
             Bridge OpenClaw-controlled agents into the team. Provide your
             gateway's WebSocket URL and an auth token; new OpenClaw agents can
             then be onboarded from the gateway's session list.
           </p>
           <label
-            style={{
-              display: "block",
-              fontSize: 11,
-              fontWeight: 600,
-              marginBottom: 4,
-              color: "var(--text-secondary)",
-              textTransform: "uppercase",
-              letterSpacing: 0.4,
-            }}
+            className="op-eyebrow op-field-label"
+            htmlFor="op-openclaw-url"
           >
             Gateway URL
           </label>
           <input
-            className="input"
+            id="op-openclaw-url"
+            className="input op-field-input"
             type="text"
             placeholder="ws://127.0.0.1:18789"
             value={gatewayUrl}
             onChange={(e) => setGatewayUrl(e.target.value)}
-            style={{
-              width: "100%",
-              marginBottom: 10,
-              fontFamily: "var(--font-mono)",
-            }}
+            style={{ fontFamily: "var(--font-mono)", marginBottom: 10 }}
           />
           <label
-            style={{
-              display: "block",
-              fontSize: 11,
-              fontWeight: 600,
-              marginBottom: 4,
-              color: "var(--text-secondary)",
-              textTransform: "uppercase",
-              letterSpacing: 0.4,
-            }}
+            className="op-eyebrow op-field-label"
+            htmlFor="op-openclaw-token"
           >
             Token{" "}
             {tokenSet && !token ? (
               <span
                 style={{
                   fontWeight: 400,
-                  textTransform: "none",
                   letterSpacing: 0,
+                  textTransform: "none",
                   color: "var(--text-tertiary)",
                 }}
               >
@@ -119,22 +96,22 @@ export function OpenClawCard({ cfg }: { cfg: ConfigSnapshot }) {
             ) : null}
           </label>
           <input
-            className="input"
+            id="op-openclaw-token"
+            className="input op-field-input"
             type={revealToken ? "text" : "password"}
             placeholder={tokenSet ? "●●●●●●●●" : "oc_..."}
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            style={{ width: "100%", marginBottom: 6 }}
+            style={{ marginBottom: 6 }}
           />
           <label
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: 4,
-              fontSize: 11,
+              gap: 6,
+              fontSize: "var(--text-xs)",
               color: "var(--text-tertiary)",
               cursor: "pointer",
-              marginBottom: 14,
             }}
           >
             <input
@@ -144,7 +121,7 @@ export function OpenClawCard({ cfg }: { cfg: ConfigSnapshot }) {
             />
             Show token
           </label>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div className="op-card-actions">
             <button
               type="button"
               className="btn btn-primary btn-sm"

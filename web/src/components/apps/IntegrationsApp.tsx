@@ -18,36 +18,24 @@ import {
 
 function HelpBanner() {
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 10,
-        alignItems: "flex-start",
-        background: "var(--bg-muted, rgba(0,0,0,0.03))",
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        padding: "10px 12px",
-        marginBottom: 18,
-      }}
-    >
-      <Lock
-        width={16}
-        height={16}
-        style={{ marginTop: 2, color: "var(--text-tertiary)", flexShrink: 0 }}
-      />
-      <div
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          lineHeight: 1.5,
-        }}
-      >
-        Integrations are <strong>gateways</strong> for bringing agents or
-        messaging streams into the team from outside. They are not LLM runtimes
-        — pick those in <em>Settings → Default runtime</em>. Agent-importing
-        gateways (External Agents) tag their imported agents with a "Managed by
-        &lt;Gateway&gt;" badge in the agent profile.
+    <div className="op-lock-card" style={{ marginBottom: 28 }}>
+      <div className="op-lock-head">
+        <div className="op-lock-title">
+          <span className="op-lock-icon" aria-hidden="true">
+            <Lock width={14} height={14} />
+          </span>
+          <span className="op-lock-title-text">
+            Integrations are gateways, not runtimes
+          </span>
+        </div>
       </div>
+      <p className="op-lock-body" style={{ marginBottom: 0 }}>
+        Integrations bring agents or messaging streams into the team from
+        outside. They are not LLM runtimes — pick those in{" "}
+        <em>Settings → Default runtime</em>. Agent-importing gateways (External
+        Agents) tag their imported agents with a "Managed by &lt;Gateway&gt;"
+        badge in the agent profile.
+      </p>
     </div>
   );
 }
@@ -63,30 +51,10 @@ function CategorySection({
 }) {
   if (descriptors.length === 0) return null;
   return (
-    <section style={{ marginBottom: 28 }}>
-      <header style={{ marginBottom: 10 }}>
-        <h3
-          style={{
-            margin: "0 0 4px 0",
-            fontSize: 13,
-            fontWeight: 700,
-            color: "var(--text-secondary)",
-            textTransform: "uppercase",
-            letterSpacing: 0.6,
-          }}
-        >
-          {meta.title}
-        </h3>
-        <p
-          style={{
-            margin: 0,
-            fontSize: 12,
-            color: "var(--text-tertiary)",
-            lineHeight: 1.5,
-          }}
-        >
-          {meta.description}
-        </p>
+    <section className="op-category">
+      <header className="op-category-head">
+        <h3 className="op-category-title">{meta.title}</h3>
+        <p className="op-category-blurb">{meta.description}</p>
       </header>
       {descriptors.map((d) => (
         <Fragment key={d.id}>{d.render(ctx)}</Fragment>
@@ -131,23 +99,34 @@ export function IntegrationsApp() {
   return (
     <div
       style={{
-        maxWidth: 760,
+        maxWidth: 780,
         margin: "0 auto",
-        padding: "24px 24px 48px 24px",
+        padding: "28px 24px 56px 24px",
       }}
     >
-      <h2 style={{ margin: "0 0 6px 0", fontSize: 20, fontWeight: 700 }}>
-        Integrations
-      </h2>
-      <p
-        style={{
-          margin: "0 0 18px 0",
-          fontSize: 13,
-          color: "var(--text-tertiary)",
-        }}
-      >
-        Bring agents and messaging streams in from outside the team.
-      </p>
+      <header style={{ marginBottom: 22 }}>
+        <span className="op-eyebrow op-eyebrow-strong">PATCH BAY</span>
+        <h2
+          style={{
+            margin: "6px 0 4px 0",
+            fontSize: 24,
+            fontWeight: 700,
+            letterSpacing: -0.2,
+          }}
+        >
+          Integrations
+        </h2>
+        <p
+          style={{
+            margin: 0,
+            fontSize: "var(--text-base)",
+            color: "var(--text-tertiary)",
+            lineHeight: 1.5,
+          }}
+        >
+          Bring agents and messaging streams in from outside the team.
+        </p>
+      </header>
 
       <HelpBanner />
 

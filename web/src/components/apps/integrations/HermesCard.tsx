@@ -27,13 +27,7 @@ export function HermesCard({ statuses }: { statuses: LocalProviderStatus[] }) {
       statusLabel={statusLabel}
       body={
         <div>
-          <p
-            style={{
-              margin: "0 0 10px 0",
-              fontSize: 13,
-              color: "var(--text-secondary)",
-            }}
-          >
+          <p className="op-card-blurb" style={{ marginBottom: 8 }}>
             Connect to a local Hermes gateway's OpenAI-compatible API server on{" "}
             <code style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
               {hermes?.endpoint ?? "http://127.0.0.1:8642/v1"}
@@ -42,9 +36,7 @@ export function HermesCard({ statuses }: { statuses: LocalProviderStatus[] }) {
             their turns through this gateway.
           </p>
           {hermes && !hermes.binary_installed && (
-            <p
-              style={{ margin: 0, fontSize: 12, color: "var(--text-tertiary)" }}
-            >
+            <p className="op-runtime-note">
               Install Hermes locally (see{" "}
               <a
                 href="https://hermesagent.com"
@@ -63,7 +55,7 @@ export function HermesCard({ statuses }: { statuses: LocalProviderStatus[] }) {
             </p>
           )}
           {hermes?.binary_installed && !hermes.reachable && (
-            <p style={{ margin: 0, fontSize: 12, color: "#d97706" }}>
+            <p className="op-runtime-note is-warn">
               Hermes binary detected but the API server isn't responding. Start
               it from a terminal and recheck.
             </p>

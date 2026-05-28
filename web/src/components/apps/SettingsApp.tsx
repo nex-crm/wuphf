@@ -193,117 +193,76 @@ function GeneralSection({ cfg, save }: SectionProps) {
           )}
         </select>
       </Field>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 10,
-          background: "var(--bg-muted, rgba(0,0,0,0.03))",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-          padding: "10px 12px",
-          marginBottom: 12,
-        }}
-      >
-        <Lock
-          width={16}
-          height={16}
-          style={{
-            marginTop: 2,
-            color: unlocked
-              ? "var(--danger-500, #c33)"
-              : "var(--text-tertiary)",
-            flexShrink: 0,
-          }}
-        />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 600,
-              color: "var(--text)",
-              marginBottom: 4,
-            }}
-          >
-            {unlocked
-              ? "Unlocked — saving will override every agent's runtime"
-              : "Locked: default-for-new-agents only"}
+      <div className={`op-lock-card${unlocked ? " is-unlocked" : ""}`}>
+        <div className="op-lock-head">
+          <div className="op-lock-title">
+            <span className="op-lock-icon" aria-hidden="true">
+              <Lock width={14} height={14} />
+            </span>
+            <span className="op-lock-title-text">
+              {unlocked
+                ? "Unlocked — saving will override every agent's runtime"
+                : "Locked: default-for-new-agents only"}
+            </span>
           </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              lineHeight: 1.5,
-              marginBottom: 8,
-            }}
+          <span
+            className={`op-status ${unlocked ? "is-warn" : "is-off"}`}
+            aria-hidden="true"
           >
-            {unlocked
-              ? "While unlocked, this runtime will replace every agent's per-agent pick at dispatch time until you re-lock it. Per-agent picks in the AgentProfilePanel are saved but ignored."
-              : "Changing this runtime only affects new agents. Existing agents keep their per-agent picks. Unlock to override every current agent."}
-          </div>
-          <label
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={unlocked}
-              onChange={(e) => {
-                if (e.target.checked) {
-                  setShowOverrideConfirm(true);
-                } else {
-                  setUnlocked(false);
-                  setShowOverrideConfirm(false);
-                }
-              }}
-            />
-            Unlock to override all current agents
-          </label>
-          {showOverrideConfirm && !unlocked && (
-            <div
-              style={{
-                marginTop: 8,
-                padding: 8,
-                background: "var(--bg-card)",
-                border: "1px solid var(--danger-500, #c33)",
-                borderRadius: 4,
-                fontSize: 12,
-              }}
-            >
-              <div style={{ marginBottom: 6 }}>
-                This will route every agent through{" "}
-                <strong>
-                  {PROVIDER_LABELS[provider as LLMRuntimeKind] ?? provider}
-                </strong>{" "}
-                on their next turn. Confirm to unlock.
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setShowOverrideConfirm(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => {
-                    setUnlocked(true);
-                    setShowOverrideConfirm(false);
-                  }}
-                >
-                  Unlock
-                </button>
-              </div>
-            </div>
-          )}
+            <span className={`op-led ${unlocked ? "is-warn" : "is-off"}`} />
+            {unlocked ? "OVERRIDE ARMED" : "SAFE"}
+          </span>
         </div>
+        <p className="op-lock-body">
+          {unlocked
+            ? "While unlocked, this runtime will replace every agent's per-agent pick at dispatch time until you re-lock it. Per-agent picks are saved but ignored."
+            : "Changing this runtime only affects new agents. Existing agents keep their per-agent picks. Unlock to override every current agent."}
+        </p>
+        <label className="op-lock-toggle">
+          <input
+            type="checkbox"
+            checked={unlocked}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setShowOverrideConfirm(true);
+              } else {
+                setUnlocked(false);
+                setShowOverrideConfirm(false);
+              }
+            }}
+          />
+          Unlock to override all current agents
+        </label>
+        {showOverrideConfirm && !unlocked && (
+          <div className="op-lock-confirm" role="alertdialog">
+            <div className="op-lock-confirm-text">
+              This will route every agent through{" "}
+              <strong>
+                {PROVIDER_LABELS[provider as LLMRuntimeKind] ?? provider}
+              </strong>{" "}
+              on their next turn. Confirm to unlock.
+            </div>
+            <div className="op-lock-confirm-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowOverrideConfirm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  setUnlocked(true);
+                  setShowOverrideConfirm(false);
+                }}
+              >
+                Unlock
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agents</div>
       <Field label="Team Lead" hint="Default agent that leads operations">

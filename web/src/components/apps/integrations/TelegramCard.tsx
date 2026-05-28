@@ -17,23 +17,19 @@ export function TelegramCard({ cfg }: { cfg: ConfigSnapshot }) {
       statusLabel={tokenSet ? "Bot connected" : "Not configured"}
       body={
         <div>
-          <p
-            style={{
-              margin: "0 0 12px 0",
-              fontSize: 13,
-              color: "var(--text-secondary)",
-            }}
-          >
+          <p className="op-card-blurb">
             Bring a Telegram chat into the office as a channel. Paste a bot
             token, pick the chat, and replies route through the bot.
           </p>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => openConnectWizard("telegram")}
-          >
-            {tokenSet ? "Connect another chat" : "Connect Telegram"}
-          </button>
+          <div className="op-card-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => openConnectWizard("telegram")}
+            >
+              {tokenSet ? "Connect another chat" : "Connect Telegram"}
+            </button>
+          </div>
         </div>
       }
     />

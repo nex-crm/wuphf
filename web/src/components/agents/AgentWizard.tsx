@@ -412,26 +412,12 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
                 ))}
               </select>
               {globalOverrideEngaged ? (
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: "var(--text-tertiary)",
-                    marginTop: 6,
-                    display: "block",
-                  }}
-                >
+                <span className="op-hint">
                   The global runtime is unlocked and overriding every agent —
                   per-agent picks are ignored until it's re-locked in Settings.
                 </span>
               ) : globalLocked && form.provider === "inherit" ? (
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: "var(--text-tertiary)",
-                    marginTop: 6,
-                    display: "block",
-                  }}
-                >
+                <span className="op-hint">
                   Inheriting the install default. Change here to pin this agent
                   to a specific runtime.
                 </span>
@@ -458,15 +444,9 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
                 value={form.model}
                 onChange={(e) => updateField("model", e.target.value)}
                 disabled={form.provider === "inherit"}
+                style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
               />
-              <span
-                style={{
-                  fontSize: 11,
-                  color: "var(--text-tertiary)",
-                  marginTop: 6,
-                  display: "block",
-                }}
-              >
+              <span className="op-hint">
                 Validated by the runtime, not by WUPHF. Leave blank to use
                 whatever model the runtime selects by default.
               </span>

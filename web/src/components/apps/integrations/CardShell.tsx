@@ -1,6 +1,13 @@
-// Shared visual primitive for every integration card. Card-level files
-// (OpenClawCard, HermesCard, TelegramCard, ...) compose this — they own
-// per-card state and submit logic; CardShell owns the chrome.
+// CardShell is the visual primitive every integration card composes. The
+// shape is a three-column grid: a "channel strip" rail with the icon, the
+// title + body, and a top-aligned status cell. Card-level files own state
+// and submit logic — CardShell owns chrome and layout.
+//
+// Status semantics map to operator.css's LED + status classes:
+//   connected  → green LED · CONNECTED
+//   available  → blue LED  · AVAILABLE
+//   warning    → amber LED · ATTENTION
+//   unconfigured → grey LED · NOT CONFIGURED
 
 export type CardStatus = "connected" | "available" | "unconfigured" | "warning";
 
@@ -12,18 +19,12 @@ interface CardShellProps {
   body: React.ReactNode;
 }
 
-function statusColor(status: CardStatus): string {
-  switch (status) {
-    case "connected":
-      return "#16a34a";
-    case "available":
-      return "#3b82f6";
-    case "warning":
-      return "#d97706";
-    default:
-      return "var(--text-tertiary)";
-  }
-}
+const STATUS_TONE: Record<CardStatus, "on" | "warn" | "off" | "info"> = {
+  connected: "on",
+  available: "info",
+  warning: "warn",
+  unconfigured: "off",
+};
 
 export function CardShell({
   icon,
@@ -32,53 +33,24 @@ export function CardShell({
   statusLabel,
   body,
 }: CardShellProps) {
+  const tone = STATUS_TONE[status];
   return (
-    <section
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        padding: 16,
-        marginBottom: 16,
-        background: "var(--bg-card)",
-      }}
-    >
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 22 }}>{icon}</span>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{title}</h3>
+    <article className="op-card">
+      <div className="op-card-rail" aria-hidden="true">
+        {icon}
+      </div>
+      <div className="op-card-body">
+        <div className="op-card-title-row">
+          <h4 className="op-card-title">{title}</h4>
         </div>
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 11,
-            color: statusColor(status),
-            fontWeight: 600,
-            textTransform: "uppercase",
-            letterSpacing: 0.4,
-          }}
-        >
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: statusColor(status),
-              display: "inline-block",
-            }}
-          />
+        {body}
+      </div>
+      <div className="op-card-status-cell">
+        <span className={`op-status is-${tone}`}>
+          <span className={`op-led is-${tone}`} />
           {statusLabel}
         </span>
-      </header>
-      <div>{body}</div>
-    </section>
+      </div>
+    </article>
   );
 }

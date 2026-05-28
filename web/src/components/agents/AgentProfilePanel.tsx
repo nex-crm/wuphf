@@ -412,37 +412,32 @@ function RuntimeSection({
         : agent.provider?.kind) || "";
     const gatewayLabel = GATEWAY_LABELS[gatewayKind] || gatewayKind;
     return (
-      <div className="agent-profile-section">
+      <div className="agent-profile-section op-runtime">
         <SectionTitle>runtime</SectionTitle>
-        <div className="agent-profile-permissions">
-          <div className="agent-profile-perm-row">
-            <span className="agent-profile-perm-label">managed by</span>
-            <span
-              className="agent-profile-perm-value"
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            >
-              <Lock width={12} height={12} />
+        <div className="op-runtime-grid">
+          <span className="op-runtime-label">managed by</span>
+          <span className="op-runtime-value">
+            <span className="op-runtime-managed">
+              <Lock width={11} height={11} />
               {gatewayLabel} gateway
             </span>
-          </div>
+          </span>
           {binding.model && (
-            <div className="agent-profile-perm-row">
-              <span className="agent-profile-perm-label">model</span>
-              <span className="agent-profile-perm-value">{binding.model}</span>
-            </div>
+            <>
+              <span className="op-runtime-label">model</span>
+              <span
+                className="op-runtime-value"
+                style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+              >
+                {binding.model}
+              </span>
+            </>
           )}
         </div>
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--text-tertiary)",
-            marginTop: 8,
-            display: "block",
-          }}
-        >
+        <p className="op-runtime-note">
           This agent was imported through the {gatewayLabel} gateway. Change its
           runtime from the Integrations app.
-        </span>
+        </p>
       </div>
     );
   }
@@ -452,25 +447,24 @@ function RuntimeSection({
     draftModel.trim() !== (binding.model ?? "").trim();
 
   return (
-    <div className="agent-profile-section">
+    <div className="agent-profile-section op-runtime">
       <SectionTitle>runtime</SectionTitle>
-      <div className="agent-profile-permissions">
-        <div className="agent-profile-perm-row">
-          <span className="agent-profile-perm-label">harness</span>
-          <span className="agent-profile-perm-value">{harness}</span>
-        </div>
-        <div
-          className="agent-profile-perm-row"
-          style={{ alignItems: "center" }}
+      <div className="op-runtime-grid">
+        <span className="op-runtime-label">harness</span>
+        <span
+          className="op-runtime-value"
+          style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
         >
-          <span className="agent-profile-perm-label">provider</span>
+          {harness}
+        </span>
+        <span className="op-runtime-label">provider</span>
+        <span className="op-runtime-value">
           <select
             value={draftKind}
             disabled={!editable || mutation.isPending}
             onChange={(e) =>
               setDraftKind(e.target.value as "" | LLMRuntimeKind)
             }
-            style={{ flex: 1 }}
           >
             <option value="">Inherit default ({globalDefault})</option>
             {llmKinds.map((kind) => (
@@ -479,12 +473,9 @@ function RuntimeSection({
               </option>
             ))}
           </select>
-        </div>
-        <div
-          className="agent-profile-perm-row"
-          style={{ alignItems: "center" }}
-        >
-          <span className="agent-profile-perm-label">model</span>
+        </span>
+        <span className="op-runtime-label">model</span>
+        <span className="op-runtime-value">
           <input
             className="input"
             type="text"
@@ -496,37 +487,25 @@ function RuntimeSection({
             value={draftModel}
             disabled={!editable || draftKind === "" || mutation.isPending}
             onChange={(e) => setDraftModel(e.target.value)}
-            style={{ flex: 1 }}
+            style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
           />
-        </div>
+        </span>
       </div>
       {globalOverrideEngaged && (
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--text-tertiary)",
-            marginTop: 8,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-          }}
-        >
-          <Lock width={11} height={11} />
+        <p className="op-runtime-note is-warn">
+          <Lock
+            width={11}
+            height={11}
+            style={{ marginRight: 4, verticalAlign: "text-bottom" }}
+          />
           Locked by global override — re-lock the default runtime in Settings to
           edit per-agent runtimes.
-        </span>
+        </p>
       )}
       {isLead && !globalOverrideEngaged && (
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--text-tertiary)",
-            marginTop: 8,
-            display: "block",
-          }}
-        >
+        <p className="op-runtime-note">
           Lead agents always run on the install default; change it in Settings.
-        </span>
+        </p>
       )}
       {saveError && (
         <div
@@ -538,10 +517,7 @@ function RuntimeSection({
         </div>
       )}
       {editable && (
-        <div
-          className="agent-wizard-footer"
-          style={{ marginTop: 10, justifyContent: "flex-end" }}
-        >
+        <div className="op-runtime-actions">
           <button
             type="button"
             className="btn btn-ghost btn-sm"
