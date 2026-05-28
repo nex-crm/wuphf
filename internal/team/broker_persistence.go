@@ -129,6 +129,13 @@ func (b *Broker) loadState() error {
 	}
 	b.requests = state.Requests
 	b.approvalAudit = state.ApprovalAudit
+	// Sanitize loaded audit entries — older persisted state (pre-sanitizer)
+	// can carry trailing whitespace and other minor noise. Run the same
+	// cleaner used on save so the in-memory view always matches what a
+	// fresh write would produce.
+	for i := range b.approvalAudit {
+		b.approvalAudit[i] = sanitizeApprovalAuditEntry(b.approvalAudit[i])
+	}
 	b.humanInvites = state.HumanInvites
 	b.humanSessions = state.HumanSessions
 	b.actions = state.Actions

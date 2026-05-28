@@ -73,6 +73,9 @@ export function OwnerPicker({
             setIsEditing(false);
             return;
           }
+          // Clear any stale error from a prior attempt so the alert
+          // banner does not linger while the new request is pending.
+          setError(null);
           reassignMutation.mutate(next);
         }}
         disabled={reassignMutation.isPending}

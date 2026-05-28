@@ -75,17 +75,27 @@ export function SkillDetailRoute({ skillName }: SkillDetailRouteProps) {
   const [seedKey, setSeedKey] = useState<string>("");
 
   // Seed the draft buffer once per (skill, content) load. We compare
-  // against a seed key so the operator's in-progress edit doesn't get
-  // overwritten by a background article refetch.
+  // against a seed key built from the full content (not its length) so
+  // a same-length edit still re-seeds when the skill switches. We also
+  // re-seed on empty initialContent so switching to a blank skill
+  // doesn't keep the previous skill's draft in the editor. The dirty
+  // guard prevents a background article refetch from clobbering an
+  // in-progress edit — a dirty edit always wins until it's saved or
+  // discarded.
   useEffect(() => {
-    const key = `${decodedName}::${initialContent.length}`;
-    if (initialContent && key !== seedKey) {
-      setDraft(initialContent);
-      setSeedKey(key);
-    }
-  }, [decodedName, initialContent, seedKey]);
+    const key = `${decodedName}::${initialContent}`;
+    if (key === seedKey) return;
+    const hasDirtyEdit = draft !== "" && draft !== initialContent;
+    if (hasDirtyEdit) return;
+    setDraft(initialContent);
+    setSeedKey(key);
+  }, [decodedName, initialContent, seedKey, draft]);
 
-  const isDirty = draft !== initialContent && draft.length > 0;
+  // Any divergence from the seeded content is dirty — including an
+  // intentional "clear this skill" edit. The save handler guards the
+  // empty-buffer case if that's not desirable, but we don't block it
+  // at the dirty-state layer.
+  const isDirty = draft !== initialContent;
 
   const saveMutation = useMutation({
     mutationFn: (content: string) => editSkillContent(decodedName, content),

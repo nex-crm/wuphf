@@ -28,6 +28,15 @@ func (b *Broker) ListActiveIssueSummariesForPrompt() []IssueSummary {
 	defer b.mu.Unlock()
 	out := make([]IssueSummary, 0, len(b.tasks))
 	for _, t := range b.tasks {
+		// Honor the method contract: only Issue-typed tasks belong in the
+		// ACTIVE ISSUES prompt block. Empty task_type is treated as Issue
+		// to preserve legacy records that pre-date the field; everything
+		// else (feature/research/follow_up/incident/...) is internal work
+		// that would just pollute the agent's system prompt.
+		taskType := strings.ToLower(strings.TrimSpace(t.TaskType))
+		if taskType != "" && taskType != "issue" {
+			continue
+		}
 		st := strings.ToLower(strings.TrimSpace(t.Status()))
 		switch st {
 		case "done", "approved", "rejected", "cancelled", "canceled":

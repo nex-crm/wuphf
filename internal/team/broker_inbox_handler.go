@@ -490,6 +490,16 @@ func (b *Broker) handleTaskComment(w http.ResponseWriter, r *http.Request, actor
 		authorSlug = "human"
 	}
 	b.mu.Lock()
+	// Re-resolve the task under the lock — the pointer captured before the
+	// earlier Unlock can be stale if b.tasks was mutated meanwhile (the
+	// underlying slice may have been re-sliced/grown by a concurrent
+	// writer, invalidating the pointer into the old backing array).
+	task = b.findTaskByIDLocked(id)
+	if task == nil {
+		b.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
 	b.AppendPacketFeedbackLocked(id, authorSlug, trimmed)
 	// Wake the agents whose attention this comment needs. Parse any
 	// @slug mentions; always add the channel leader (ceo) so an untagged
@@ -497,9 +507,7 @@ func (b *Broker) handleTaskComment(w http.ResponseWriter, r *http.Request, actor
 	// agent loops to fetch new context — without it the feedback sits on
 	// the packet but no one ever notices. Mirrors how
 	// postTaskReassignNotificationsLocked works for ownership changes.
-	if task != nil {
-		b.postIssueCommentBroadcastLocked(authorSlug, task, trimmed)
-	}
+	b.postIssueCommentBroadcastLocked(authorSlug, task, trimmed)
 	b.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]string{
 		"taskId": id,

@@ -50,6 +50,16 @@ func resolveActionIssue(ctx context.Context, slug, channel string, args TeamActi
 			var bestState string
 			var bestTS string
 			for _, t := range list.Tasks {
+				// Only auto-attach to top-level Issue records — a recently
+				// updated child task (feature/research/sub-issue) must not
+				// short-circuit the intended top-level `drafting` gate that
+				// applies to the parent Issue.
+				if tt := strings.ToLower(strings.TrimSpace(t.TaskTypeID)); tt != "" && tt != "issue" {
+					continue
+				}
+				if strings.TrimSpace(t.ParentID) != "" {
+					continue
+				}
 				switch strings.ToLower(strings.TrimSpace(t.Status)) {
 				case "done", "approved", "rejected", "cancelled", "canceled":
 					continue

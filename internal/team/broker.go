@@ -1054,6 +1054,7 @@ func (b *Broker) Reset() {
 	b.oneOnOneAgent = agent
 	b.tasks = []teamTask{}
 	b.requests = nil
+	b.approvalAudit = nil
 	b.humanInvites = nil
 	b.humanSessions = nil
 	b.humanSessionRevoke = nil

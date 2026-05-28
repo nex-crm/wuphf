@@ -540,6 +540,21 @@ func (b *Broker) reviewApprove(w http.ResponseWriter, r *http.Request, id string
 					ActorSlug: body.ActorSlug,
 					Timestamp: updated.UpdatedAt.Format(time.RFC3339),
 				})
+				// Mirror the explicit request-changes path: post the
+				// notebook_promotion_resolved card so the feed reflects the
+				// terminal disposition rather than leaving a half-resolved
+				// in-review card behind.
+				b.mu.Lock()
+				b.postNotebookPromotionResolvedCardLocked(
+					updated.ID,
+					updated.SourcePath,
+					updated.TargetPath,
+					body.ActorSlug,
+					PromotionDecisionChangesRequested,
+					"target path already exists: "+p.TargetPath,
+					updated.SourceSlug,
+				)
+				b.mu.Unlock()
 			}
 			writeJSON(w, http.StatusConflict, map[string]string{"error": commitErr.Error()})
 			return

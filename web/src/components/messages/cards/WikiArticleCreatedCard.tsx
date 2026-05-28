@@ -41,9 +41,13 @@ export interface WikiArticleCreatedCardProps {
 export function WikiArticleCreatedCard({
   payload,
 }: WikiArticleCreatedCardProps) {
-  const path = payload.path ?? "";
-  const title = payload.title ?? path ?? "(untitled article)";
-  const author = payload.author;
+  // `??` would let an empty string flow through as a valid title; use
+  // `||` so an empty/whitespace title falls through to the path and
+  // finally to the literal placeholder, guaranteeing the rendered
+  // title and aria-label always have meaningful text.
+  const path = payload.path?.trim() ?? "";
+  const title = payload.title?.trim() || path || "(untitled article)";
+  const author = payload.author?.trim();
 
   function openArticle() {
     if (!path) return;

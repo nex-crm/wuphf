@@ -4,12 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// maxTransientPollErrors caps consecutive broker-poll failures before
+// handleRequestSkillEnable gives up. The approval request has already
+// been created at this point, so aborting on the first transient read
+// error would force the agent to retry and produce duplicate approval
+// cards. Three consecutive failures at the 1.5s tick (~4.5s of broker
+// unavailability) is the threshold beyond which we surface the error.
+const maxTransientPollErrors = 3
 
 // TeamSkillRunArgs are the inputs for the team_skill_run tool.
 type TeamSkillRunArgs struct {
@@ -124,6 +133,7 @@ func handleRequestSkillEnable(ctx context.Context, _ *mcp.CallToolRequest, args 
 	timeout := time.After(30 * time.Minute)
 	ticker := time.NewTicker(1500 * time.Millisecond)
 	defer ticker.Stop()
+	consecutivePollErrors := 0
 
 	for {
 		select {
@@ -135,8 +145,24 @@ func handleRequestSkillEnable(ctx context.Context, _ *mcp.CallToolRequest, args 
 			var result brokerInterviewAnswerResponse
 			path := "/interview/answer?id=" + url.QueryEscape(created.ID)
 			if err := brokerGetJSON(ctx, path, &result); err != nil {
-				return toolError(err), nil, nil
+				// Don't abort the approval flow on a single transient poll
+				// error: the request is already created, so aborting forces
+				// the agent to retry and emits a duplicate approval card.
+				// Tolerate up to maxTransientPollErrors consecutive failures
+				// and only error out when the broker is persistently
+				// unreachable.
+				consecutivePollErrors++
+				if consecutivePollErrors >= maxTransientPollErrors {
+					return toolError(fmt.Errorf("poll enable request %s failed after %d retries: %w", created.ID, consecutivePollErrors, err)), nil, nil
+				}
+				slog.Warn("request_skill_enable: transient poll error, retrying",
+					"request_id", created.ID,
+					"attempt", consecutivePollErrors,
+					"max", maxTransientPollErrors,
+					"err", err)
+				continue
 			}
+			consecutivePollErrors = 0
 			switch strings.ToLower(strings.TrimSpace(result.Status)) {
 			case "canceled", "cancelled":
 				return toolError(fmt.Errorf("enable request canceled")), nil, nil

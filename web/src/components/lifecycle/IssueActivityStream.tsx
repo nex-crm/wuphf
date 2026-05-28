@@ -145,7 +145,6 @@ function dotKindForLifecycleState(state: LifecycleState): StatusDotKind {
   switch (state) {
     case "running":
     case "intake":
-    case "approved":
       return "running";
     case "blocked_on_pr_merge":
       return "blocked";
@@ -155,6 +154,7 @@ function dotKindForLifecycleState(state: LifecycleState): StatusDotKind {
       return "needs-input";
     case "drafting":
     case "ready":
+    case "approved":
     case "rejected":
       return "idle";
     default: {
@@ -176,7 +176,6 @@ function describeActivity(
   switch (state) {
     case "running":
     case "intake":
-    case "approved":
       return "Idle — waiting for the next event.";
     case "blocked_on_pr_merge":
       return "Blocked — waiting for an upstream PR to merge.";
@@ -190,6 +189,8 @@ function describeActivity(
       return "Drafting — not started yet.";
     case "ready":
       return "Ready to start.";
+    case "approved":
+      return "Approved.";
     case "rejected":
       return "Rejected.";
     default:

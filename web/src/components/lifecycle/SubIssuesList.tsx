@@ -169,6 +169,9 @@ export function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
                 setIsAdding(false);
                 setDraftTitle("");
                 setDraftOwner("");
+                // Clear any stale error so it does not reappear when
+                // the form is reopened on a fresh attempt.
+                setError(null);
               }
             }}
             placeholder="Sub-issue title (Enter to add, Esc to cancel)"

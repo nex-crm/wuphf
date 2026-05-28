@@ -43,6 +43,23 @@ const (
 	ApprovalOutcomeCancelled      = "cancelled"
 )
 
+// isValidApprovalOutcome guards RecordApprovalAudit and the POST handler so
+// only canonical enum values land in the persisted audit slice. Anything
+// else would pollute consumers that group by Outcome (the inbox detail
+// pane renders the trail by outcome label).
+func isValidApprovalOutcome(outcome string) bool {
+	switch outcome {
+	case ApprovalOutcomeExecutedOK,
+		ApprovalOutcomeExecutedFailed,
+		ApprovalOutcomeRejected,
+		ApprovalOutcomeTimedOut,
+		ApprovalOutcomeCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // RecordApprovalAudit appends an audit entry to the broker state. Idempotent
 // on (approval_request_id, outcome) — if a duplicate POST lands (e.g. the
 // MCP caller retried after a transient network error), the existing entry
@@ -53,6 +70,12 @@ func (b *Broker) RecordApprovalAudit(entry ApprovalAuditEntry) error {
 	if strings.TrimSpace(entry.ApprovalRequestID) == "" {
 		// Defensive: an empty key would silently merge every entry into one
 		// row, which is worse than dropping the record entirely.
+		return nil
+	}
+	if !isValidApprovalOutcome(entry.Outcome) {
+		// Drop rather than persist an unknown outcome — keeps the audit
+		// slice constrained to the documented enum so downstream readers
+		// (inbox detail pane, exports) don't have to handle stray values.
 		return nil
 	}
 	if strings.TrimSpace(entry.CreatedAt) == "" {
@@ -140,6 +163,10 @@ func (b *Broker) handleApprovalAudit(w http.ResponseWriter, r *http.Request) {
 		}
 		if strings.TrimSpace(entry.ApprovalRequestID) == "" {
 			http.Error(w, "approval_request_id required", http.StatusBadRequest)
+			return
+		}
+		if !isValidApprovalOutcome(strings.TrimSpace(entry.Outcome)) {
+			http.Error(w, "outcome must be one of executed_ok|executed_failed|rejected|timed_out|cancelled", http.StatusBadRequest)
 			return
 		}
 		if err := b.RecordApprovalAudit(entry); err != nil {

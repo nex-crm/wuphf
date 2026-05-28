@@ -381,10 +381,13 @@ export function normalizeIssueDocument(
     strField(rawSpec, "assignment") ??
     "";
 
+  // parent_issue_id can arrive on the wrapped task record, at the
+  // packet top level, or only via the office-tasks taskHint. Check all
+  // three so child issues correctly hide the Sub-issues tab and show
+  // the parent breadcrumb regardless of which shape the broker returns.
   const parentIssueId =
-    (taskRecord
-      ? strField(taskRecord, "parentIssueId", "parent_issue_id")
-      : undefined) ?? undefined;
+    resolveAliasedField(r, taskRecord, "parentIssueId", "parent_issue_id") ??
+    taskHint?.parent_issue_id;
 
   return {
     taskId,

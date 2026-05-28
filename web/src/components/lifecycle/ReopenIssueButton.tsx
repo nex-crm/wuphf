@@ -34,7 +34,12 @@ export function ReopenIssueButton({
       <button
         type="button"
         className="issue-doc-reopen-button"
-        onClick={() => reopenMutation.mutate()}
+        onClick={() => {
+          // Clear the previous error before retrying so the alert text
+          // does not linger next to a pending request.
+          setError(null);
+          reopenMutation.mutate();
+        }}
         disabled={reopenMutation.isPending}
         data-testid="reopen-issue-button"
       >

@@ -1163,10 +1163,24 @@ func (b *Broker) handleSkillEnableForAgent(w http.ResponseWriter, r *http.Reques
 	}
 	out := *sk
 	saveErr := b.saveLocked()
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(out.Name)
+	enqueueCtx := b.brokerLifecycleContext()
 	b.mu.Unlock()
 	if saveErr != nil {
 		http.Error(w, "save failed: "+saveErr.Error(), http.StatusInternalServerError)
 		return
+	}
+	// Re-render the SKILL.md so the on-disk copy reflects the updated
+	// OwnerAgents list. Without this, the per-agent enablement only lives
+	// in broker-state.json and the wiki preview goes stale. Failures are
+	// logged but do not fail the call — broker state is already saved,
+	// and a later mutation (or boot backfill) reconciles disk.
+	if !already && wikiWorker != nil {
+		if err := enqueueSkillWikiWrite(enqueueCtx, wikiWorker, out, wikiPath, "wuphf: enable skill "+out.Name+" for @"+agent); err != nil {
+			slog.Warn("handleSkillEnableForAgent: wiki enqueue failed",
+				"name", out.Name, "agent", agent, "err", err)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"skill": out})
@@ -1199,20 +1213,39 @@ func (b *Broker) handleSkillDisableForAgent(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "skill not found", http.StatusNotFound)
 		return
 	}
-	filtered := sk.OwnerAgents[:0]
+	before := len(sk.OwnerAgents)
+	// Allocate a fresh slice rather than aliasing sk.OwnerAgents[:0] so the
+	// pre-mutation snapshot stays intact for the change-detection check.
+	filtered := make([]string, 0, before)
 	for _, slug := range sk.OwnerAgents {
 		if slug != agent {
 			filtered = append(filtered, slug)
 		}
 	}
+	changed := len(filtered) != before
 	sk.OwnerAgents = filtered
-	sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if changed {
+		sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
 	out := *sk
 	saveErr := b.saveLocked()
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(out.Name)
+	enqueueCtx := b.brokerLifecycleContext()
 	b.mu.Unlock()
 	if saveErr != nil {
 		http.Error(w, "save failed: "+saveErr.Error(), http.StatusInternalServerError)
 		return
+	}
+	// Re-render the SKILL.md so the on-disk copy reflects the updated
+	// OwnerAgents list. Mirrors handleSkillEnableForAgent so per-agent
+	// enablement is round-trippable across the broker state and the
+	// wiki preview path.
+	if changed && wikiWorker != nil {
+		if err := enqueueSkillWikiWrite(enqueueCtx, wikiWorker, out, wikiPath, "wuphf: disable skill "+out.Name+" for @"+agent); err != nil {
+			slog.Warn("handleSkillDisableForAgent: wiki enqueue failed",
+				"name", out.Name, "agent", agent, "err", err)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"skill": out})

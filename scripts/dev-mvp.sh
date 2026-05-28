@@ -47,8 +47,24 @@ done
 log() { printf '\033[36m[dev-mvp]\033[0m %s\n' "$*"; }
 
 if [[ "$RESET_STATE" == "1" ]]; then
+  # Guard against accidental wipes when WUPHF_HOME is mis-set (empty, root,
+  # the cwd, or a home directory). Refuse to recursively delete anything
+  # that does not look like a wuphf workspace — must either already contain
+  # a .wuphf/ subdir OR live at a path whose basename matches a wuphf-*
+  # pattern (covers fresh --reset runs against /tmp/wuphf-mvp-home).
+  case "$WUPHF_HOME" in
+    ""|"/"|"."|"./"|"$HOME"|"$HOME/")
+      log "refusing to wipe unsafe WUPHF_HOME='$WUPHF_HOME'"
+      exit 1
+      ;;
+  esac
+  base="$(basename -- "$WUPHF_HOME")"
+  if [[ ! -d "$WUPHF_HOME/.wuphf" && ! "$base" =~ ^wuphf[-_].+ && ! "$base" =~ ^\.wuphf ]]; then
+    log "refusing to wipe '$WUPHF_HOME' — does not contain .wuphf/ and basename does not match wuphf-*"
+    exit 1
+  fi
   log "wiping $WUPHF_HOME (per --reset)"
-  rm -rf "$WUPHF_HOME"
+  rm -rf -- "$WUPHF_HOME"
 fi
 
 mkdir -p "$WUPHF_HOME"

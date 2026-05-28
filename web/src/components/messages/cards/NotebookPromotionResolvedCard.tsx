@@ -74,13 +74,20 @@ function presentationFor(
       cta: "Open review →",
     };
   }
-  // Default to approved presentation — covers explicit "approved" plus the
-  // (unexpected) missing-decision case, since the broker filters out
-  // unknown decisions before emitting.
+  if (decision === "approved") {
+    return {
+      eyebrow: `Approved by ${reviewerTag}`,
+      icon: "✅",
+      accent: "done",
+      cta: "Open review →",
+    };
+  }
+  // Unknown / missing decision: never claim "approved" since that would
+  // misrepresent the review outcome. Fall back to a neutral state.
   return {
-    eyebrow: `Approved by ${reviewerTag}`,
-    icon: "✅",
-    accent: "done",
+    eyebrow: `Promotion resolved by ${reviewerTag}`,
+    icon: "ℹ️",
+    accent: "warn",
     cta: "Open review →",
   };
 }

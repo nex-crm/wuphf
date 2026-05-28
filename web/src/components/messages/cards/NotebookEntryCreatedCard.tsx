@@ -47,11 +47,14 @@ export interface NotebookEntryCreatedCardProps {
 export function NotebookEntryCreatedCard({
   payload,
 }: NotebookEntryCreatedCardProps) {
-  const agentSlug = payload.slug ?? "";
-  const path = payload.path ?? "";
+  // `??` would let an empty title slip through and yield a blank
+  // visible title; use `||` so the fallback chain (entry slug, then
+  // literal placeholder) actually fires for empty / whitespace values.
+  const agentSlug = payload.slug?.trim() ?? "";
+  const path = payload.path?.trim() ?? "";
   const entrySlug = path ? entrySlugFromPath(path) : "";
-  const title = payload.title ?? entrySlug ?? "(untitled entry)";
-  const author = payload.author;
+  const title = payload.title?.trim() || entrySlug || "(untitled entry)";
+  const author = payload.author?.trim();
   const canNavigate = Boolean(agentSlug && entrySlug);
 
   function openEntry() {

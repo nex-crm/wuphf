@@ -69,6 +69,11 @@ type SkillWuphfMeta struct {
 	// skill is renamed to a broader slug. Acts as a redirect for humans and
 	// agents that resolve the old slug. Always paired with status=archived.
 	RenamedTo string `yaml:"renamed_to,omitempty"`
+	// OwnerAgents lists the agent slugs the skill is currently enabled
+	// for. Mirrors teamSkill.OwnerAgents in broker state so the on-disk
+	// SKILL.md stays in sync with per-agent enablement. Empty means the
+	// skill sits in DISCOVERABLE for every agent until explicitly enabled.
+	OwnerAgents []string `yaml:"owner_agents,omitempty"`
 	// WorkflowProvider is the provider for workflow-backed skills.
 	WorkflowProvider string `yaml:"workflow_provider,omitempty"`
 	// WorkflowKey identifies the workflow within the provider.
@@ -189,6 +194,7 @@ func teamSkillToFrontmatter(sk teamSkill) SkillFrontmatter {
 				DisabledFromStatus: sk.DisabledFromStatus,
 				Tags:               append([]string(nil), sk.Tags...),
 				RelatedSkills:      append([]string(nil), sk.RelatedSkills...),
+				OwnerAgents:        append([]string(nil), sk.OwnerAgents...),
 				WorkflowProvider:   sk.WorkflowProvider,
 				WorkflowKey:        sk.WorkflowKey,
 				WorkflowDefinition: sk.WorkflowDefinition,

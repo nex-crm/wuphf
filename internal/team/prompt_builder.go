@@ -562,7 +562,8 @@ type IssueSummary struct {
 func ruleZeroBlock() string {
 	return "== RULE ZERO (overrides every rule below) ==\n" +
 		"Any work the human asks for gets an Issue. No exceptions.\n" +
-		"When a human posts a work-shaped message in your channel — anything that asks you to do, build, send, draft, find, fix, schedule, research, or otherwise act on something — your FIRST tool call MUST be team_task action=create to scope that work as an Issue. Only after team_task returns may you call team_action_execute, team_request, human_interview, team_action_workflow_execute, or any external/mutating tool.\n" +
+		"When a human posts a work-shaped message in your channel — anything that asks you to do, build, send, draft, find, fix, schedule, research, or otherwise act on something — your FIRST tool call MUST be team_task action=create to scope that work as an Issue. Only after team_task returns may you call team_action_execute, team_request, team_action_workflow_execute, or any external/mutating tool.\n" +
+		"NARROW EXCEPTION — scoping interview: if (and ONLY if) the request is genuinely ambiguous and the ISSUE_JUDGMENT / ISSUE_SCOPING_FRAMEWORK block below says you need 1–3 scoping interviews first, you MAY call human_interview BEFORE team_task action=create. Restrict those interviews to scoping questions (what, for whom, by when, what done looks like). Once scope is clear, you MUST still create the Issue — interviews do not replace the Issue. Default to issue-first whenever scope is already clear from the message; only reach for a pre-Issue interview when you genuinely cannot write a sensible title and details without one.\n" +
 		"The Issue title restates what the human asked for. Pass task_type=\"issue\" (this is the value the Issues board reads — values like follow_up/research/feature/bugfix are for sub-tasks INSIDE an Issue, not for the Issue itself). Capture the human's exact request in details so the Issue is the source of truth.\n" +
 		"ALWAYS set `owner` to a slug from the AVAILABLE AGENTS block above. Prefer an existing specialist whose expertise matches the work. Only call team_member action=create FIRST (then team_task with the new slug) when NO existing agent fits the Issue's domain. Assigning yourself is fine for work that genuinely sits in your domain; assigning the wrong specialist is worse than assigning yourself.\n" +
 		"\n" +
@@ -716,19 +717,18 @@ func ownershipContractBlock() string {
 
 // renderAvailableAgentsBlock emits the AVAILABLE AGENTS section so any
 // agent (especially CEO) can pick a specialist owner when scoping a new
-// Issue, and know who to @-mention in a comment. Self is excluded so the
-// CEO catalog reads as "other people I can assign to" rather than "me +
-// everyone". Empty office (just CEO) renders an explicit "(no specialists
-// yet)" line so the LLM doesn't invent slugs.
+// Issue, and know who to @-mention in a comment. The current agent is
+// listed too (marked "(you)") so the documented self-assignment path —
+// allowed by ruleZeroBlock and issueJudgmentBlock when the work sits in
+// the agent's own domain — is actually a slug the prompt says is valid.
+// Empty office (just self) renders an explicit "(no specialists yet)"
+// line so the LLM doesn't invent slugs.
 func renderAvailableAgentsBlock(members []officeMember, selfSlug string) string {
 	var sb strings.Builder
 	sb.WriteString("== AVAILABLE AGENTS ==\n")
-	sb.WriteString("These are the ONLY agent slugs valid for the `owner` field on team_task action=create and for @-mentions in chat. Pick an existing agent whose expertise fits the Issue. Only spin up a new agent (via team_member action=create) when NO existing agent fits.\n")
+	sb.WriteString("These are the ONLY agent slugs valid for the `owner` field on team_task action=create and for @-mentions in chat. Pick an existing agent whose expertise fits the Issue — assigning yourself is fine when the work sits in your own domain. Only spin up a new agent (via team_member action=create) when NO existing agent fits.\n")
 	others := 0
 	for _, m := range members {
-		if m.Slug == selfSlug {
-			continue
-		}
 		expertise := strings.Join(m.Expertise, ", ")
 		role := strings.TrimSpace(m.Role)
 		if role == "" {
@@ -738,8 +738,12 @@ func renderAvailableAgentsBlock(members []officeMember, selfSlug string) string 
 		if expertise != "" {
 			line += " (" + expertise + ")"
 		}
+		if m.Slug == selfSlug {
+			line += " (you)"
+		} else {
+			others++
+		}
 		sb.WriteString(line + "\n")
-		others++
 	}
 	if others == 0 {
 		sb.WriteString("(no specialists yet — only you. Assign yourself as owner OR call team_member action=create FIRST to spin up a specialist, then pass the new slug as owner.)\n")

@@ -148,6 +148,10 @@ export function Composer() {
   const [caret, setCaret] = useState(0);
   const [acItems, setAcItems] = useState<AutocompleteItem[]>([]);
   const [acIdx, setAcIdx] = useState(0);
+  // Guards the cancel-then-send path so a fast double-Enter cannot
+  // fire two send POSTs before sendMutation.isPending flips. Cleared
+  // in finally() after the inner send mutates (or fails synchronously).
+  const [isPreSendPending, setIsPreSendPending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
@@ -254,7 +258,7 @@ export function Composer() {
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed || sendMutation.isPending) return;
+    if (!trimmed || sendMutation.isPending || isPreSendPending) return;
 
     // If a blocking interview is pending, cancel it before sending so the
     // broker doesn't 409 the message. The agent will see the cancellation
@@ -306,7 +310,10 @@ export function Composer() {
     };
 
     if (pendingId) {
-      void dismissPending.then(send);
+      setIsPreSendPending(true);
+      void dismissPending
+        .then(send)
+        .finally(() => setIsPreSendPending(false));
     } else {
       send();
     }
@@ -320,6 +327,7 @@ export function Composer() {
     clearCurrentChannelMessages,
     blockingPending,
     queryClient,
+    isPreSendPending,
   ]);
 
   /**
@@ -519,7 +527,7 @@ export function Composer() {
         <button
           type="button"
           className="composer-send"
-          disabled={!text.trim() || sendMutation.isPending}
+          disabled={!text.trim() || sendMutation.isPending || isPreSendPending}
           onClick={handleSend}
           aria-label="Send message"
         >

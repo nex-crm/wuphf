@@ -62,7 +62,7 @@ type InboxFilter =
   | "decisions"
   | "requests"
   | "reviews"
-  | "approved";
+  | "rejected";
 
 const FILTER_ORDER: readonly InboxFilter[] = [
   "all",
@@ -70,7 +70,7 @@ const FILTER_ORDER: readonly InboxFilter[] = [
   "decisions",
   "requests",
   "reviews",
-  "approved",
+  "rejected",
 ];
 
 const FILTER_LABEL: Record<InboxFilter, string> = {
@@ -79,7 +79,7 @@ const FILTER_LABEL: Record<InboxFilter, string> = {
   decisions: "Decisions",
   requests: "Requests",
   reviews: "Reviews",
-  approved: "Approved",
+  rejected: "Rejected",
 };
 
 // Inbox decision-state allowlist (Slice 8 fix): blocked tasks are
@@ -164,8 +164,7 @@ function itemMatchesFilter(item: InboxItem, filter: InboxFilter): boolean {
   if (filter === "reviews") return item.kind === "review";
   if (item.kind !== "task") return false;
   const state = item.task?.state ?? "";
-  if (filter === "approved")
-    return state === "approved" || state === "rejected";
+  if (filter === "rejected") return state === "rejected";
   // "decisions" bucket — task states that need a human call.
   return DECISION_STATES.has(state);
 }
@@ -255,7 +254,7 @@ export function DecisionInbox({
       decisions: 0,
       requests: 0,
       reviews: 0,
-      approved: 0,
+      rejected: 0,
     };
     for (const it of allItems) {
       for (const f of FILTER_ORDER) {
@@ -820,7 +819,9 @@ function ApprovalAuditTrail({ entries }: ApprovalAuditTrailProps) {
       <ol className="inbox-trail-list">
         {answeredAt ? (
           <li className="inbox-trail-row">
-            <span className="inbox-trail-actor">Approved by you</span>
+            <span className="inbox-trail-actor">
+              {leadVerbForOutcome(first?.outcome)} by you
+            </span>
             <span className="inbox-trail-time">{formatTrailTime(answeredAt)}</span>
           </li>
         ) : null}
@@ -855,6 +856,25 @@ function ApprovalAuditTrailRow({ entry }: ApprovalAuditTrailRowProps) {
       <span className="inbox-trail-time">{formatTrailTime(when)}</span>
     </li>
   );
+}
+
+// Lead-row verb (capitalized, for "<Verb> by you"). Mirrors
+// trailVerbForOutcome but in the past-tense "I did this" voice rather
+// than the agent's "→ @actor did this" voice.
+function leadVerbForOutcome(outcome: string | undefined): string {
+  switch (outcome) {
+    case "rejected":
+      return "Rejected";
+    case "cancelled":
+      return "Cancelled";
+    case "timed_out":
+      return "Timed out";
+    case "executed_ok":
+    case "executed_failed":
+      return "Answered";
+    default:
+      return "Answered";
+  }
 }
 
 function trailVerbForOutcome(outcome: string | undefined): string {

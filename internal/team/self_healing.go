@@ -149,14 +149,21 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 
 	// Resolve the parent Issue for the new self-heal record so it lands
 	// as a sub-issue under the originating Issue rather than floating as
-	// a standalone task. If the source task itself has a parent, walk up
-	// to the top-level Issue so we don't create sub-sub-issues (the FE
-	// only nests one deep).
+	// a standalone task. Walk all the way up to the root Issue so we
+	// don't create sub-sub-issues (the FE only nests one deep). A cycle
+	// or unexpectedly deep chain is bounded by maxParentWalkHops below.
 	parentIssueID := strings.TrimSpace(taskID)
-	if src := b.findTaskByIDLocked(parentIssueID); src != nil {
-		if strings.TrimSpace(src.ParentIssueID) != "" {
-			parentIssueID = strings.TrimSpace(src.ParentIssueID)
+	const maxParentWalkHops = 5
+	for hop := 0; hop < maxParentWalkHops; hop++ {
+		src := b.findTaskByIDLocked(parentIssueID)
+		if src == nil {
+			break
 		}
+		next := strings.TrimSpace(src.ParentIssueID)
+		if next == "" || next == parentIssueID {
+			break
+		}
+		parentIssueID = next
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)

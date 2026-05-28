@@ -848,13 +848,9 @@ func executionPlaybookSlug(path string) string {
 }
 
 // handleWikiWrite is the broker HTTP endpoint the MCP subprocess posts to
-// when an agent calls team_wiki_write. Shape:
-//
-//	POST /wiki/write { slug, path, content, mode, commit_message }
-//
-// Responses: 200 { path, commit_sha, bytes_written } |
-//
-//	429 wiki queue saturated | 500 generic | 503 worker not running
+// when an agent calls team_wiki_write. POST /wiki/write with
+// {slug, path, content, mode, commit_message}. Responses: 200 {path,
+// commit_sha, bytes_written}; 429 saturated; 500 generic; 503 no worker.
 func (b *Broker) handleWikiWrite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

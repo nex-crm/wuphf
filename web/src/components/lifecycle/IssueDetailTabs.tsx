@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { IssueComment } from "./IssueDocument";
 import { CommentsTimeline } from "./IssueDocument";
@@ -36,6 +36,14 @@ export function IssueDetailTabs({
   onCommentPosted,
 }: IssueDetailTabsProps) {
   const [tab, setTab] = useState<IssueDetailTab>("activity");
+  // If Sub-issues becomes unavailable (e.g. the issue was just promoted
+  // to a child of another issue), snap the active tab back to Activity
+  // so the panel does not render empty.
+  useEffect(() => {
+    if (!showSubIssues && tab === "sub-issues") {
+      setTab("activity");
+    }
+  }, [showSubIssues, tab]);
   const commentCount = comments.length;
 
   return (
