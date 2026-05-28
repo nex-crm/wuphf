@@ -120,6 +120,14 @@ export const reviewsRoute = createRoute({
   path: ROUTE_PATHS.reviews,
 });
 
+// /articles/$articleId — full-screen HTML article viewer.
+// Renders a rich artifact (ra_xxx) at full page size via the shadow-DOM
+// RichArtifactEmbed. Linked from chat artifact cards.
+export const articleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.article,
+});
+
 // /inbox — Decision Inbox (Lane G, multi-agent control loop)
 export const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -186,6 +194,7 @@ export const routeTree = rootRoute.addChildren([
     notebookAgentRoute.addChildren([notebookEntryRoute]),
   ]),
   reviewsRoute,
+  articleRoute,
   inboxRoute,
   taskDecisionRoute,
   // Phase 3 — Issues surface.

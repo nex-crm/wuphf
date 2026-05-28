@@ -87,6 +87,11 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
     case "reviews": {
       return [{ label: "Reviews", href: "#/reviews" }];
     }
+    case "article": {
+      return [
+        { label: "Article", href: `#/articles/${route.articleId}` },
+      ];
+    }
     case "app": {
       if (route.appId === "settings" || isSettingsSection(route.appId)) {
         const section = route.appId === "settings" ? "workspace" : route.appId;

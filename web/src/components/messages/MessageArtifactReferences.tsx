@@ -4,16 +4,19 @@ import {
   fetchRichArtifact,
   type RichArtifactDetail,
 } from "../../api/richArtifacts";
-import RichArtifactEmbed from "../rich-artifacts/RichArtifactEmbed";
+import { router } from "../../lib/router";
 
 interface MessageArtifactReferencesProps {
   artifactIds: string[];
 }
 
-// MessageArtifactReferences renders each artifact referenced by a chat
-// message inline, in the same bubble, with no separator chrome. The
-// visual IS the message; a NOTEBOOK VISUAL kicker or Expand button would
-// frame it as a separate thing and break the flow.
+// MessageArtifactReferences renders a clickable preview card for each
+// artifact referenced by the message. The card carries the article title,
+// summary, trust pill, and an "Open article →" action that navigates to
+// the full-screen ArticleView. The article body is NOT inlined in the
+// chat bubble — that breaks the chat reading rhythm and made it look
+// like the agent had given the answer in chat when the actual article
+// (with embedded figures) lives elsewhere.
 export default function MessageArtifactReferences({
   artifactIds,
 }: MessageArtifactReferencesProps) {
@@ -30,12 +33,12 @@ export default function MessageArtifactReferences({
   return (
     <section
       className="message-artifact-references"
-      aria-label="Rich artifacts"
+      aria-label="Article references"
     >
       {artifactIds.map((id, index) => {
         const result = artifactQueries[index];
         return (
-          <MessageArtifactReference
+          <ArticleCard
             key={id}
             id={id}
             detail={result?.data}
@@ -47,32 +50,53 @@ export default function MessageArtifactReferences({
   );
 }
 
-interface MessageArtifactReferenceProps {
+interface ArticleCardProps {
   id: string;
   detail?: RichArtifactDetail;
   error?: string;
 }
 
-function MessageArtifactReference({
-  id,
-  detail,
-  error,
-}: MessageArtifactReferenceProps) {
+function ArticleCard({ id, detail, error }: ArticleCardProps) {
   if (error) {
     return (
-      <div className="message-artifact-error" role="alert">
-        Could not load artifact {id}: {error}
+      <div className="message-artifact-card message-artifact-error" role="alert">
+        <span className="message-artifact-kicker">Article</span>
+        <p>Could not load article {id}: {error}</p>
       </div>
     );
   }
   if (!detail) {
     return (
-      <div className="message-artifact-loading" aria-busy="true">
-        Loading artifact…
+      <div className="message-artifact-card" aria-busy="true">
+        <span className="message-artifact-kicker">Article</span>
+        <p>Loading…</p>
       </div>
     );
   }
-  return <RichArtifactEmbed title={detail.artifact.title} html={detail.html} />;
+  const { artifact } = detail;
+  return (
+    <button
+      type="button"
+      className="message-artifact-card message-artifact-card-clickable"
+      onClick={() => {
+        void router.navigate({
+          to: "/articles/$articleId",
+          params: { articleId: artifact.id },
+        });
+      }}
+      aria-label={`Open article: ${artifact.title}`}
+    >
+      <div className="message-artifact-card-head">
+        <span className="message-artifact-kicker">Article</span>
+        <span className="rich-artifact-trust">{artifact.trustLevel}</span>
+      </div>
+      <h4 className="message-artifact-card-title">{artifact.title}</h4>
+      {artifact.summary ? (
+        <p className="message-artifact-card-summary">{artifact.summary}</p>
+      ) : null}
+      <span className="message-artifact-card-action">Open article →</span>
+    </button>
+  );
 }
 
 function queryErrorMessage(error: unknown): string | undefined {

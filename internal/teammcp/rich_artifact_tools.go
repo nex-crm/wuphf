@@ -10,14 +10,14 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const notebookVisualArtifactGuidance = "Use this after notebook_write when the work would be clearer as a rich visual artifact: complex specs, implementation plans, code explainers, PR reviews, comparison grids, diagrams, mockups, reports, or interactive tuning surfaces. Default to the WUPHF technical-manual artifact style: old mathematics/physics book on real paper, warm paper texture, black editorial serif reading copy, exact Making Software cobalt shades for figure ink (including oklch(50.58% .2886 264.84) / rgb(19, 66, 255) as the primary stroke), muted complementary state colors, faint construction grids inside figure plates, monospaced figure labels like FIG_001, IN/OUT blocks, trust/source metadata, equations or measured annotations when useful, and table-of-contents-style lists. Keep it original to WUPHF; do not copy external logos, illustrations, or brand assets. HTML must be self-contained: inline CSS/JS only, no network fetches, no external images/scripts/fonts, responsive layout, readable copy, and copy/export controls when the artifact is interactive. NEVER include a CSS `@import` rule in any form — not even an empty `@import url('data:text/css,');` reflex line — and never load Google Fonts; declare system serif/mono families like Georgia, Times, Cambria, or Courier directly in `font-family` instead. The sanitizer rejects any `@import` substring, so a single reflex import will kill the whole artifact. The paired markdown notebook entry remains the durable source note; this HTML is the visual companion users review in notebooks and the wiki. After creating an artifact, include visual-artifact:ra_0123456789abcdef on its own line in the channel summary so chat renders a compact artifact card."
+const notebookVisualArtifactGuidance = "Use this as the PRIMARY write path for any substantive answer, explainer, plan, spec, comparison, report, diagram, or interactive surface — the HTML IS the article. Do NOT also call notebook_write for the same content: the markdown-companion pattern is deprecated, and a notebook_write that duplicates this HTML is the failure mode this tool replaces. Compose the article Wikipedia-style with text and figures interleaved at the right semantic places — opening summary, sections with prose, figures embedded inline next to the paragraph they support, tables/charts/equations placed where they belong in the reading flow. Do not write a wall of text followed by a separate visuals section. Default to the WUPHF technical-manual style: old mathematics/physics book on real paper, warm paper texture, black editorial serif reading copy, Making Software cobalt shades for figure ink (oklch(50.58% .2886 264.84) / rgb(19, 66, 255) as the primary stroke), muted complementary state colors, faint construction grids inside figure plates, monospaced figure labels like FIG_001, IN/OUT blocks, trust/source metadata, equations or measured annotations when useful, and table-of-contents-style lists. Keep it original to WUPHF; do not copy external logos, illustrations, or brand assets. HTML must be self-contained: inline CSS/JS only, no network fetches, no external images/scripts/fonts, responsive layout, readable copy, and copy/export controls when the artifact is interactive. NEVER include a CSS `@import` rule in any form — not even an empty `@import url('data:text/css,');` reflex line — and never load Google Fonts; declare system serif/mono families like Georgia, Times, Cambria, or Courier directly in `font-family`. The sanitizer rejects any `@import` substring. After creating, include visual-artifact:ra_0123456789abcdef on its own line in the chat reply so the UI renders a clickable card linking to the full-screen article."
 
 // TeamNotebookVisualArtifactCreateArgs is the contract for
 // notebook_visual_artifact_create.
 type TeamNotebookVisualArtifactCreateArgs struct {
 	MySlug            string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
 	TaskID            string   `json:"task_id,omitempty" jsonschema:"Task ID this visual artifact supports, when relevant."`
-	SourcePath        string   `json:"source_path" jsonschema:"Notebook source path this HTML visualizes - MUST be agents/{my_slug}/notebook/{filename}.md. Create or update it with notebook_write first."`
+	SourcePath        string   `json:"source_path,omitempty" jsonschema:"OPTIONAL legacy field. Set ONLY when this artifact is the visual companion to a pre-existing markdown notebook entry (path agents/{my_slug}/notebook/{filename}.md). Leave EMPTY for new HTML articles — the artifact is the article and there is no separate markdown source to pair with."`
 	Title             string   `json:"title" jsonschema:"Short human-readable title for the visual artifact."`
 	Summary           string   `json:"summary" jsonschema:"One or two sentence summary of what the artifact helps the human review."`
 	HTML              string   `json:"html" jsonschema:"A complete, self-contained HTML document. Use inline CSS/JS only; do not rely on network fetches or external assets."`
@@ -53,19 +53,19 @@ type TeamNotebookVisualArtifactPromoteArgs struct {
 func registerNotebookVisualArtifactTools(server *mcp.Server) {
 	mcp.AddTool(server, officeWriteTool(
 		"notebook_visual_artifact_create",
-		"Create an HTML visual companion for a notebook entry. "+notebookVisualArtifactGuidance,
+		"Create a self-contained HTML article. "+notebookVisualArtifactGuidance,
 	), handleTeamNotebookVisualArtifactCreate)
 	mcp.AddTool(server, readOnlyTool(
 		"notebook_visual_artifact_list",
-		"List HTML visual artifacts attached to notebook entries so you can reuse, inspect, or promote them. "+notebookVisualArtifactGuidance,
+		"List HTML articles authored by an agent so you can reuse, inspect, or promote them. "+notebookVisualArtifactGuidance,
 	), handleTeamNotebookVisualArtifactList)
 	mcp.AddTool(server, readOnlyTool(
 		"notebook_visual_artifact_read",
-		"Read one HTML visual artifact and its metadata. Use this before editing or promoting an existing artifact. "+notebookVisualArtifactGuidance,
+		"Read one HTML article and its metadata. Use before editing or promoting an existing article. "+notebookVisualArtifactGuidance,
 	), handleTeamNotebookVisualArtifactRead)
 	mcp.AddTool(server, officeWriteTool(
 		"notebook_visual_artifact_promote",
-		"Promote a reviewed notebook HTML visual artifact into the canonical wiki visual view. "+notebookVisualArtifactGuidance,
+		"Promote a reviewed HTML article into the canonical team wiki. "+notebookVisualArtifactGuidance,
 	), handleTeamNotebookVisualArtifactPromote)
 }
 
@@ -74,9 +74,14 @@ func handleTeamNotebookVisualArtifactCreate(ctx context.Context, _ *mcp.CallTool
 	if err != nil {
 		return toolError(err), nil, nil
 	}
+	// source_path is now optional. When set, it must point at an existing
+	// markdown notebook entry owned by this agent (legacy companion mode).
+	// When empty, the artifact is the canonical article on its own.
 	sourcePath := strings.TrimSpace(args.SourcePath)
-	if err := validateOwnedNotebookMarkdownPath(slug, sourcePath, "source_path"); err != nil {
-		return toolError(err), nil, nil
+	if sourcePath != "" {
+		if err := validateOwnedNotebookMarkdownPath(slug, sourcePath, "source_path"); err != nil {
+			return toolError(err), nil, nil
+		}
 	}
 	title := strings.TrimSpace(args.Title)
 	if title == "" {
@@ -124,10 +129,6 @@ func handleTeamNotebookVisualArtifactList(ctx context.Context, _ *mcp.CallToolRe
 			return toolError(fmt.Errorf("target_slug is required (and WUPHF_AGENT_SLUG is not set)")), nil, nil
 		}
 	}
-	if target != "" {
-		q.Set("slug", target)
-	}
-
 	var result struct {
 		Artifacts []map[string]any `json:"artifacts"`
 	}
