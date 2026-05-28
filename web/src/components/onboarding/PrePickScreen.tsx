@@ -220,8 +220,6 @@ type ConfigPayload = {
   openai_api_key?: string;
   gemini_api_key?: string;
   provider_endpoints?: Record<string, { base_url: string }>;
-  openclaw_token?: string;
-  openclaw_gateway_url?: string;
 };
 
 /**
@@ -246,13 +244,17 @@ function buildConfigPayload(
     payload.llm_provider = localProvider;
     payload.llm_provider_priority = [localProvider];
   } else if (oaiCompatFilled(oaiUrl)) {
+    // Custom OAI-compatible endpoint goes into provider_endpoints. We do
+    // NOT write to openclaw_* here — that conflated OpenClaw (a gateway
+    // for importing existing agents) with generic OpenAI-compatible HTTP
+    // runtimes. OpenClaw is configured through the Integrations app, not
+    // through this onboarding step. The oaiKey field is intentionally
+    // unused on this path; users wanting to pair an API key with the
+    // endpoint should paste it in the OpenAI API key row above.
+    void oaiKey;
     payload.provider_endpoints = {
       "openai-compatible": { base_url: sanitizeConfigString(oaiUrl) },
     };
-    if (oaiKey.trim()) {
-      payload.openclaw_token = sanitizeConfigString(oaiKey);
-      payload.openclaw_gateway_url = sanitizeConfigString(oaiUrl);
-    }
   }
 
   for (const f of API_KEY_FIELDS) {
@@ -494,8 +496,9 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
         <div className="pre-pick-section" data-testid="pre-pick-oai-section">
           <p className="pre-pick-section-heading">Custom endpoint</p>
           <p className="pre-pick-section-hint">
-            Any server that speaks the OpenAI REST protocol (OpenClaw, LiteLLM,
-            vLLM, etc.).
+            Any server that speaks the OpenAI REST protocol (LiteLLM, vLLM,
+            llama.cpp server, etc.). For OpenClaw or Hermes, use the
+            Integrations app after onboarding.
           </p>
           <OpenAICompatibleInput
             endpointUrl={oaiUrl}
