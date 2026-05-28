@@ -43,14 +43,14 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		"--append-system-prompt", l.buildPrompt(slug),
 		"--mcp-config", agentMCP,
 		"--strict-mcp-config",
-		// Block claude-code's deferred-tool reminder loop. The CLI normally
-		// injects a "use ToolSearch to load schemas" system message when it
-		// considers our MCP tools deferred; the model trusts that reminder
-		// over our WUPHF prompt and burns a full ~30s turn calling
-		// ToolSearch before it does any real work. Disallowing ToolSearch
-		// outright forces the model to call our mcp__wuphf-office__* tools
-		// directly, which is what they are designed for.
-		"--disallowedTools", "ToolSearch",
+		// NOTE: tried --disallowedTools ToolSearch to block the
+		// deferred-tools reminder loop. claude-code requires ToolSearch
+		// when MCP tools are deferred; the agent exited with SIGTERM
+		// after ~23s and zero events. Reverted. The prompt's TOOL
+		// HYGIENE block continues to instruct the model to ignore the
+		// reminder and call MCP tools directly; we accept the soft
+		// failure mode (~30s tax on first turn) over the hard one
+		// (agent dies before producing any output).
 	}
 	args = append(args, strings.Fields(l.resolvePermissionFlags(slug))...)
 
