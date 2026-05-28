@@ -4,6 +4,7 @@ import { Lock, Xmark } from "iconoir-react";
 
 import type {
   LLMRuntimeKind,
+  LocalProviderStatus,
   OfficeMember,
   ProviderBinding,
   Skill,
@@ -11,10 +12,17 @@ import type {
 import {
   getChannels,
   getConfig,
+  getLocalProvidersStatus,
   getSkillsList,
   isGatewayBinding,
   post,
 } from "../../api/client";
+import {
+  CUSTOM_MODEL_VALUE,
+  INHERIT_MODEL_VALUE,
+  isCatalogModel,
+  modelOptionsForKind,
+} from "../../lib/modelCatalog";
 import {
   getOfficeTasks,
   listAgentLogTasks,
@@ -336,6 +344,85 @@ function bindingFromMember(
 //     can't write while the global is overriding.
 //
 //  3. Normal: editable picker with provider + model fields and a Save button.
+
+// ModelPicker is a dropdown of curated model ids for the selected runtime,
+// plus a "Custom…" escape hatch that falls back to a text input for power
+// users. Local runtimes (mlx-lm / ollama / exo) pull their model list from
+// the loopback probe (localStatuses) instead of the hardcoded catalog so
+// the dropdown shows what's actually installed.
+//
+// Empty string is the "Use runtime default" sentinel — saving with that
+// value clears ProviderBinding.Model so each runner picks its own default.
+function ModelPicker({
+  kind,
+  value,
+  disabled,
+  onChange,
+  localStatuses,
+}: {
+  kind: LLMRuntimeKind | "";
+  value: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+  localStatuses: LocalProviderStatus[];
+}) {
+  const options = modelOptionsForKind(kind, localStatuses);
+  // Custom-mode is sticky once entered (selecting Custom… from the
+  // dropdown stays in custom mode even after the underlying text matches
+  // a catalog entry). That avoids the dropdown switching back mid-type
+  // and erasing what the user just keyed.
+  const valueIsCatalog = isCatalogModel(kind, value, localStatuses);
+  const [customMode, setCustomMode] = useState(!valueIsCatalog && value !== "");
+  // selectValue feeds the <select>. While typing in custom mode we keep
+  // CUSTOM_MODEL_VALUE so the dropdown stays on "Custom…" rather than
+  // jumping around as the user types.
+  const selectValue = customMode || !valueIsCatalog
+    ? CUSTOM_MODEL_VALUE
+    : value || INHERIT_MODEL_VALUE;
+  return (
+    <span style={{ display: "inline-flex", gap: 6, width: "100%" }}>
+      <select
+        value={selectValue}
+        disabled={disabled}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (next === CUSTOM_MODEL_VALUE) {
+            setCustomMode(true);
+            // Don't clobber any value the user already had in flight.
+            return;
+          }
+          setCustomMode(false);
+          onChange(next);
+        }}
+        style={{ flex: customMode ? "0 0 130px" : 1 }}
+      >
+        {options.map((o) => (
+          <option key={o.value || "default"} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {customMode && (
+        <input
+          className="input"
+          type="text"
+          autoFocus={true}
+          placeholder="e.g. claude-3-5-sonnet-latest"
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            flex: 1,
+          }}
+          aria-label="Custom model id"
+        />
+      )}
+    </span>
+  );
+}
+
 function RuntimeSection({
   agent,
   defaultHarness,
@@ -349,6 +436,15 @@ function RuntimeSection({
     queryFn: getConfig,
     staleTime: 30_000,
   });
+  // localStatuses feeds the ModelPicker with the actual loaded model for
+  // local runtimes (mlx-lm / ollama / exo). The probe is cheap (a single
+  // loopback call) so we share the broker's existing cache key.
+  const localStatusQuery = useQuery({
+    queryKey: ["local-providers-status"],
+    queryFn: getLocalProvidersStatus,
+    staleTime: 30_000,
+  });
+  const localStatuses: LocalProviderStatus[] = localStatusQuery.data ?? [];
   const llmKinds: LLMRuntimeKind[] = (configQuery.data?.llm_provider_kinds ?? [
     "claude-code",
     "codex",
@@ -475,18 +571,12 @@ function RuntimeSection({
         </span>
         <span className="op-runtime-label">model</span>
         <span className="op-runtime-value">
-          <input
-            className="input"
-            type="text"
-            placeholder={
-              draftKind === ""
-                ? "Runtime default"
-                : "e.g. claude-3-5-sonnet-latest"
-            }
+          <ModelPicker
+            kind={draftKind}
             value={draftModel}
             disabled={!editable || draftKind === "" || mutation.isPending}
-            onChange={(e) => setDraftModel(e.target.value)}
-            style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+            onChange={setDraftModel}
+            localStatuses={localStatuses}
           />
         </span>
       </div>

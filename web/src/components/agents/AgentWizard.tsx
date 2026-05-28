@@ -6,10 +6,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   generateAgent,
   getConfig,
+  getLocalProvidersStatus,
   type LLMRuntimeKind,
+  type LocalProviderStatus,
   post,
 } from "../../api/client";
 import { useWindowEscape } from "../../hooks/useWindowEscape";
+import {
+  CUSTOM_MODEL_VALUE,
+  INHERIT_MODEL_VALUE,
+  isCatalogModel,
+  modelOptionsForKind,
+} from "../../lib/modelCatalog";
 
 // "inherit" is the wizard-only sentinel that maps to an absent ProviderBinding
 // in the POST body (the broker then falls back to the install-wide default at
@@ -70,6 +78,76 @@ const AGENT_WIZARD_DIALOG_PROPS = {
   "aria-labelledby": "agent-wizard-title",
 } as const;
 
+// WizardModelPicker mirrors AgentProfilePanel's ModelPicker — curated catalog
+// dropdown plus a "Custom…" escape hatch for power users. The wizard's
+// "Inherit default" provider state disables the picker entirely; the field is
+// re-enabled when the user picks a specific runtime.
+function WizardModelPicker({
+  providerKind,
+  value,
+  disabled,
+  onChange,
+  localStatuses,
+}: {
+  providerKind: LLMRuntimeKind | "";
+  value: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+  localStatuses: LocalProviderStatus[];
+}) {
+  const options = modelOptionsForKind(providerKind, localStatuses);
+  const valueIsCatalog = isCatalogModel(providerKind, value, localStatuses);
+  const [customMode, setCustomMode] = useState(
+    !valueIsCatalog && value !== "",
+  );
+  const selectValue =
+    customMode || !valueIsCatalog
+      ? CUSTOM_MODEL_VALUE
+      : value || INHERIT_MODEL_VALUE;
+  return (
+    <div style={{ display: "flex", gap: 6, width: "100%" }}>
+      <select
+        id="agent-model"
+        value={selectValue}
+        disabled={disabled}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (next === CUSTOM_MODEL_VALUE) {
+            setCustomMode(true);
+            return;
+          }
+          setCustomMode(false);
+          onChange(next);
+        }}
+        style={{ flex: customMode ? "0 0 160px" : 1 }}
+      >
+        {options.map((o) => (
+          <option key={o.value || "default"} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {customMode && (
+        <input
+          className="input"
+          type="text"
+          autoFocus={true}
+          placeholder="e.g. claude-opus-4-7"
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            flex: 1,
+          }}
+          aria-label="Custom model id"
+        />
+      )}
+    </div>
+  );
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
   const [mode, setMode] = useState<WizardMode>("describe");
@@ -91,6 +169,13 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
     enabled: open,
     staleTime: 30_000,
   });
+  const localStatusQuery = useQuery({
+    queryKey: ["local-providers-status"],
+    queryFn: getLocalProvidersStatus,
+    enabled: open,
+    staleTime: 30_000,
+  });
+  const localStatuses: LocalProviderStatus[] = localStatusQuery.data ?? [];
   const llmKinds: LLMRuntimeKind[] = (configQuery.data?.llm_provider_kinds ?? [
     "claude-code",
     "codex",
@@ -428,23 +513,19 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
                   (optional)
                 </span>
               </label>
-              <input
-                id="agent-model"
-                className="input"
-                type="text"
-                placeholder={
-                  form.provider === "inherit"
-                    ? "Uses the runtime's default model"
-                    : "e.g. claude-3-5-sonnet-latest, llama3.1:8b"
+              <WizardModelPicker
+                providerKind={
+                  form.provider === "inherit" ? "" : form.provider
                 }
                 value={form.model}
-                onChange={(e) => updateField("model", e.target.value)}
                 disabled={form.provider === "inherit"}
-                style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+                onChange={(next) => updateField("model", next)}
+                localStatuses={localStatuses}
               />
               <span className="op-hint">
-                Validated by the runtime, not by WUPHF. Leave blank to use
-                whatever model the runtime selects by default.
+                Pick from common models for the chosen runtime, or use
+                "Custom…" to type any model id. Leave on "Use runtime
+                default" to let the runtime decide.
               </span>
             </div>
 

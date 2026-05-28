@@ -267,6 +267,28 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 }
 
 func (l *Launcher) headlessClaudeModel(slug string) string {
+	// Per-agent override wins: when the user picks a specific model in the
+	// AgentProfilePanel runtime section (or AgentWizard), that's the
+	// model the next dispatch must use. Without this check the picker
+	// silently rewrote ProviderBinding.Model but every turn still ran
+	// against the hardcoded default — the user-visible symptom was
+	// "I picked a different model and nothing changed."
+	//
+	// The per-agent binding is only consulted when its kind is also
+	// claude-code: if a user moved the agent to codex with model=gpt-4o,
+	// we must not feed gpt-4o to claude on a later switch back. The
+	// runtime-switch flow clears the binding entirely on kind change
+	// (see AgentProfilePanel save path), so the most common edge cases
+	// are already prevented at the source, but the kind check here is
+	// belt-and-suspenders.
+	if l != nil && l.broker != nil {
+		binding := l.broker.MemberProviderBinding(slug)
+		if binding.Kind == "claude-code" {
+			if model := strings.TrimSpace(binding.Model); model != "" {
+				return model
+			}
+		}
+	}
 	if l.opusCEO && slug == l.targeter().LeadSlug() {
 		return "claude-opus-4-6"
 	}
