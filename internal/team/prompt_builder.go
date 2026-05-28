@@ -394,11 +394,19 @@ func visualArtifactForcingBlock() string {
 		"- the answer is a diagram, flow, sequence, mockup, dashboard, or interactive tuning surface;\n" +
 		"- your reply would otherwise be more than ~200 words of structured prose with headings and lists.\n" +
 		"Default to the WUPHF technical-manual style described in the tool catalog (old mathematics/physics book, Making Software cobalt figure ink, FIG_001 labels, self-contained inline CSS/JS, no network fetches). Do NOT use CSS `@import` in any form — including empty `@import url('data:text/css,');` reflex lines — and do NOT load Google Fonts; declare system serif/mono families like Georgia, Times, Cambria, or Courier directly in `font-family`.\n\n" +
-		"ATOMIC-TURN RULE: when this trigger fires, the WHOLE sequence runs in the SAME turn and the turn does NOT end until all three steps have happened, in order:\n" +
-		"  1. team_broadcast (or human_message in a 1:1) — a fast 2-3 sentence text gist of the answer so the human is reading something useful within seconds. Do NOT promise the artifact and stop; ANSWER first, briefly.\n" +
-		"  2. notebook_visual_artifact_create — the full self-contained HTML article (capture the returned ra_... id). Leave source_path empty; the HTML is the article, not a companion to a markdown file.\n" +
-		"  3. team_broadcast (or human_message) — a short \"full article ready\" line that includes `visual-artifact:ra_...` on its own line so the UI renders a clickable card linking to the full-screen viewer.\n" +
-		"Posting only step 1's text and ending the turn before step 2 leaves the human with no article. Posting only step 2 and ending the turn before step 3 leaves the human with no link card to find it. Posting step 1 alone, or skipping the leading gist entirely, both fail this rule. If a budget pressure hits mid-sequence, drop scope on the article DEPTH (shorter sections, fewer figures) — never drop step 1 or step 3. The turn is complete only after step 3 has broadcast with the `visual-artifact:ra_...` marker line.\n\n"
+		"ATOMIC-TURN RULE — read this carefully, the live demo broke on it twice already:\n" +
+		"  ▸ All three tool calls happen in the SAME assistant response, in parallel if possible. They are NOT three separate turns. Do not end your assistant response after step 1 expecting the broker to wake you up for step 2 — that is the exact failure this rule fixes.\n" +
+		"  ▸ Do NOT narrate the process. There are no chat messages titled \"Step 1\", \"Step 2\", or \"Now creating the artifact\". Those preamble broadcasts waste tokens, fragment the chat, and burn turn budget that should go to the article. The model says nothing visible to the human between the gist and the link card.\n\n" +
+		"The three tool calls, in order, all inside ONE assistant response:\n" +
+		"  1. team_broadcast (or human_message in a 1:1) — content is a 2-3 sentence text gist of the actual answer. NOT a status line. NOT \"now I'll build the article\". An actual short answer the human can read while the article is generating.\n" +
+		"  2. notebook_visual_artifact_create — the full self-contained HTML article. Capture the returned ra_... id. Leave source_path empty; the HTML is the article, not a companion to a markdown file. Cap the HTML at ~12 KB; if you need more, drop figures or sections rather than splitting the sequence across turns.\n" +
+		"  3. team_broadcast (or human_message) — a short closing line (one sentence MAX) that includes `visual-artifact:ra_...` on its own line so the UI renders a clickable card linking to the full-screen viewer. Example: `Full article is ready below.\\n\\nvisual-artifact:ra_0123456789abcdef`\n\n" +
+		"Failure modes this rule fixes (all observed live):\n" +
+		"  • Posting step 1's gist then ending the response → human sees text, no article, no link, agent goes silent.\n" +
+		"  • Posting \"Step 1 — quick gist first.\" as its own broadcast before the actual gist → wasted broadcast, fragmented chat.\n" +
+		"  • Posting \"Step 2 — full HTML article.\" as a status broadcast then ending the response → human reads a promise, never the article.\n" +
+		"  • Calling notebook_write in parallel with the artifact → redundant markdown that says the same things as the HTML.\n" +
+		"The response is complete only after step 3's broadcast actually contains the `visual-artifact:ra_...` marker line. If turn budget is tight, drop article DEPTH — never drop step 1 or step 3.\n\n"
 }
 
 func secretHandlingPromptRule() string {
