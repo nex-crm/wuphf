@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -72,7 +72,7 @@ describe("<MessageBubble> rich artifact references", () => {
     vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue(ARTIFACT_DETAIL);
   });
 
-  it("renders the artifact inline and hides the raw marker line", async () => {
+  it("renders a clickable article link card (no inline embed, no iframe) and hides the raw marker line", async () => {
     renderWithQueryClient(<MessageBubble message={MESSAGE} />);
 
     expect(
@@ -80,62 +80,37 @@ describe("<MessageBubble> rich artifact references", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/visual-artifact:/)).toBeNull();
 
-    const card = await screen.findByLabelText(
-      "Rich artifact: Product strategy map",
+    // Clickable card with title + summary + Open action.
+    const card = await screen.findByRole("button", {
+      name: "Open article: Product strategy map",
+    });
+    expect(card.tagName.toLowerCase()).toBe("button");
+    expect(card).toHaveTextContent("Product strategy map");
+    expect(card).toHaveTextContent(
+      "A richer artifact for reviewing the WUPHF rollout.",
     );
-    expect(within(card).getByText("Notebook visual")).toBeInTheDocument();
-    const frame = within(card).getByTitle("Product strategy map");
-    expect(frame).toHaveClass("rich-artifact-frame-inline");
-    expect(frame).toHaveAttribute("sandbox", "allow-scripts");
-    expect(frame).toHaveAttribute(
-      "srcdoc",
-      expect.stringContaining("<h1>Artifact body</h1>"),
-    );
+    expect(card).toHaveTextContent("Open article →");
     expect(richApi.fetchRichArtifact).toHaveBeenCalledWith(
       "ra_0123456789abcdef",
     );
+
+    // Inline-embed UX is gone: no shadow-DOM mount in the bubble, no iframe,
+    // no modal dialog, no Expand button.
+    expect(document.querySelector("rich-artifact-embed")).toBeNull();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("expands artifact HTML into the secondary sandboxed modal frame", async () => {
+  it("the link card navigates to /articles/$id when clicked", async () => {
     const user = userEvent.setup();
     renderWithQueryClient(<MessageBubble message={MESSAGE} />);
-
-    const card = await screen.findByLabelText(
-      "Rich artifact: Product strategy map",
-    );
-    expect(screen.queryByText("Artifact body")).toBeNull();
-
-    await user.click(within(card).getByRole("button", { name: "Expand" }));
-
-    const dialog = screen.getByRole("dialog", {
-      name: "Product strategy map",
+    const card = await screen.findByRole("button", {
+      name: "Open article: Product strategy map",
     });
-    const frame = within(dialog).getByTitle("Product strategy map");
-    expect(frame).toHaveAttribute("sandbox", "allow-scripts");
-    expect(frame).toHaveAttribute(
-      "srcdoc",
-      expect.stringContaining("<h1>Artifact body</h1>"),
-    );
-  });
-
-  it("closes the artifact modal with Escape", async () => {
-    const user = userEvent.setup();
-    renderWithQueryClient(<MessageBubble message={MESSAGE} />);
-
-    const card = await screen.findByLabelText(
-      "Rich artifact: Product strategy map",
-    );
-    await user.click(within(card).getByRole("button", { name: "Expand" }));
-    expect(
-      screen.getByRole("dialog", { name: "Product strategy map" }),
-    ).toBeInTheDocument();
-
-    await user.keyboard("{Escape}");
-
+    await user.click(card);
     await waitFor(() => {
-      expect(
-        screen.queryByRole("dialog", { name: "Product strategy map" }),
-      ).toBeNull();
+      expect(window.location.hash).toBe("#/articles/ra_0123456789abcdef");
     });
   });
 });

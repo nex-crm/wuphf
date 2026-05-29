@@ -102,7 +102,7 @@ describe("<WikiArticle content>", () => {
     await waitFor(() => expect(getByText(/streams from/)).toBeInTheDocument());
   });
 
-  it("shows promoted visual views in the Visual tab", async () => {
+  it("renders a paired visual artifact inline at the top of the Article tab (no separate Visual tab)", async () => {
     vi.spyOn(api, "fetchArticle").mockResolvedValue({
       path: "team/drafts/visual-plan.md",
       title: "Visual Plan",
@@ -142,19 +142,21 @@ describe("<WikiArticle content>", () => {
       />,
     );
 
-    const visualTab = await screen.findByRole("button", { name: "Visual" });
-    await waitFor(() => expect(visualTab).not.toBeDisabled());
+    // The Visual tab is gone — folded into Article. The article tab is the
+    // default, so the embed should appear without any tab interaction.
+    expect(screen.queryByRole("button", { name: "Visual" })).toBeNull();
 
-    const visual = await screen.findByTestId("wk-visual-artifact");
-    expect(visual).toBeInTheDocument();
-    expect(visual.closest(".wk-article-col")).toHaveClass(
-      "wk-article-col-visual",
-    );
-    expect(document.querySelector(".wk-right-sidebar")).toBeNull();
-    expect(screen.getByTitle("Visual Plan")).toHaveAttribute(
-      "srcdoc",
-      expect.stringContaining("Visual artifact"),
-    );
+    const embed = await screen.findByLabelText("Visual Plan", {
+      selector: "rich-artifact-embed",
+    });
+    expect(embed).toBeInTheDocument();
+    expect(embed.closest("figure")).not.toBeNull();
+
+    // The right sidebar is preserved (we dropped the dedicated visual mode).
+    expect(document.querySelector(".wk-right-sidebar")).not.toBeNull();
+
+    // No iframe anywhere — strict inline embed.
+    expect(document.querySelector("iframe")).toBeNull();
   });
 
   it("keeps the selected tab during same-path refreshes without a visual artifact", async () => {

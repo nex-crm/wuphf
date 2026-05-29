@@ -298,6 +298,123 @@ func TestPromptBuilder_MarkdownMemoryPromptsNaturalHTMLArtifactsDuringWork(t *te
 	}
 }
 
+func TestPromptBuilder_VisualArtifactForcingRulePresentOnEverySurface(t *testing.T) {
+	// The notebook_visual_artifact_create tool was unused in practice because
+	// the old prompt softly suggested it. This test pins the MUST-trigger
+	// rule into every surface that markdown memory reaches: lead office,
+	// specialist office, and 1:1. If any of these regresses to "may",
+	// agents stop producing artifacts and the chat/wiki visual surface goes
+	// empty again.
+	mkBuilder := func(oneOnOne bool) *promptBuilder {
+		return &promptBuilder{
+			isOneOnOne:  func() bool { return oneOnOne },
+			isFocusMode: func() bool { return false },
+			packName:    func() string { return "WUPHF Office" },
+			leadSlug:    func() string { return "ceo" },
+			members: func() []officeMember {
+				return []officeMember{
+					{Slug: "ceo", Name: "CEO", Role: "ceo"},
+					{Slug: "pm", Name: "Product Manager"},
+				}
+			},
+			policies:       func() []officePolicy { return nil },
+			nameFor:        func(slug string) string { return slug },
+			markdownMemory: true,
+			nexDisabled:    true,
+		}
+	}
+
+	cases := []struct {
+		name     string
+		oneOnOne bool
+		slug     string
+	}{
+		{name: "lead/office", oneOnOne: false, slug: "ceo"},
+		{name: "specialist/office", oneOnOne: false, slug: "pm"},
+		{name: "lead/one-on-one", oneOnOne: true, slug: "ceo"},
+	}
+	wants := []string{
+		"HTML ARTICLE RULE",
+		// HTML article is the primary format; markdown stays for skills/notes.
+		"the article is a single self-contained HTML document",
+		"Skill.md files, short working notes",
+		"visual-artifact:ra_...",
+		"wiki article, draft, page",
+		"plan, spec, RFC",
+		// Topic/concept triggers — without these, "research X" or
+		// "explain how X works" reads as conversational and the agent
+		// falls back to plain markdown.
+		"research, explain, teach, summarize, break down, walk through, or unpack",
+		"how does X actually work",
+		"comparison, decision matrix",
+		"diagram, flow, sequence",
+		"more than ~200 words",
+		"technical-manual style",
+		// Atomic-turn rule — gist text first, then article, then link card.
+		// All three tool calls in ONE assistant response, no narration
+		// between them. The agent split this across 3 separate responses
+		// in the live demo and ended its turn after step 1 each time.
+		"ATOMIC-TURN RULE",
+		"SAME assistant response",
+		"Do NOT narrate the process",
+		"notebook_visual_artifact_create",
+		"clickable card linking to the full-screen viewer",
+		// Pin the explicit anti-patterns so the rule keeps protecting
+		// against them if someone later rewords the block.
+		"Step 1 — quick gist first.",
+		"Step 2 — full HTML article.",
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mkBuilder(tc.oneOnOne).Build(tc.slug)
+			for _, want := range wants {
+				if !strings.Contains(got, want) {
+					t.Fatalf("missing %q in %s prompt:\n%s", want, tc.name, got)
+				}
+			}
+		})
+	}
+}
+
+func TestPromptBuilder_VisualArtifactForcingRuleSkippedWithoutMarkdownMemory(t *testing.T) {
+	// The forcing rule only applies when markdown memory is the backend; if
+	// notebook/wiki tools are not available there is nothing to call. Cover
+	// every surface the positive test covers (lead/specialist/1:1) so a
+	// regression that re-emits the block on any of them is caught.
+	mkBuilder := func(oneOnOne bool) *promptBuilder {
+		return &promptBuilder{
+			isOneOnOne:  func() bool { return oneOnOne },
+			isFocusMode: func() bool { return false },
+			packName:    func() string { return "WUPHF Office" },
+			leadSlug:    func() string { return "ceo" },
+			members: func() []officeMember {
+				return []officeMember{{Slug: "ceo", Name: "CEO", Role: "ceo"}, {Slug: "pm", Name: "PM"}}
+			},
+			policies:       func() []officePolicy { return nil },
+			nameFor:        func(slug string) string { return slug },
+			markdownMemory: false,
+			nexDisabled:    true,
+		}
+	}
+	cases := []struct {
+		name     string
+		oneOnOne bool
+		slug     string
+	}{
+		{name: "lead/office", oneOnOne: false, slug: "ceo"},
+		{name: "specialist/office", oneOnOne: false, slug: "pm"},
+		{name: "lead/one-on-one", oneOnOne: true, slug: "ceo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mkBuilder(tc.oneOnOne).Build(tc.slug)
+			if strings.Contains(got, "VISUAL ARTIFACT RULE") {
+				t.Fatalf("%s prompt should NOT contain VISUAL ARTIFACT RULE when markdownMemory=false:\n%s", tc.name, got)
+			}
+		})
+	}
+}
+
 func TestPromptBuilder_LeadFocusModeAddsDelegationSection(t *testing.T) {
 	pb := &promptBuilder{
 		isOneOnOne:  func() bool { return false },

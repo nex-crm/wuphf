@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -103,112 +103,46 @@ describe("<NotebookEntryView content>", () => {
 });
 
 describe("<NotebookEntryView visual artifacts>", () => {
-  it("renders visual artifact cards attached to the notebook entry", async () => {
-    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([
-      {
-        id: "ra_0123456789abcdef",
-        kind: "notebook_html",
-        title: "Visual plan",
-        summary: "A richer plan.",
-        trustLevel: "draft",
-        representation: "html",
-        htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
-        sourceMarkdownPath: DRAFT_ENTRY.file_path,
-        createdBy: "pm",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        contentHash: "hash",
-        sanitizerVersion: "sandbox-v1",
-      },
-    ]);
-
-    render(<NotebookEntryView entry={DRAFT_ENTRY} />);
-
-    expect(
-      await screen.findByRole("heading", { name: "Visual artifacts" }),
-    ).toBeInTheDocument();
-    expect(screen.getAllByText("Visual plan").length).toBeGreaterThan(0);
-    expect(
-      await screen.findByTestId("nb-visual-artifact-inline"),
-    ).toBeInTheDocument();
-    expect(screen.getByTitle("Visual plan")).toHaveAttribute(
-      "srcdoc",
-      expect.stringContaining("Inline visual"),
-    );
-  });
-
-  it("keeps the latest opened visual artifact when requests finish out of order", async () => {
-    const user = userEvent.setup();
-    const first = {
-      id: "ra_aaaaaaaaaaaaaaaa",
+  it("renders each visual artifact inline (no list cards, no modal)", async () => {
+    const artifact = {
+      id: "ra_0123456789abcdef",
       kind: "notebook_html" as const,
-      title: "First visual",
-      summary: "First plan.",
+      title: "Visual plan",
+      summary: "A richer plan.",
       trustLevel: "draft" as const,
       representation: "html" as const,
-      htmlPath: "wiki/visual-artifacts/ra_aaaaaaaaaaaaaaaa.html",
+      htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
       sourceMarkdownPath: DRAFT_ENTRY.file_path,
       createdBy: "pm",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      contentHash: "hash-a",
-      sanitizerVersion: "sandbox-v2",
+      contentHash: "hash",
+      sanitizerVersion: "sandbox-v1",
     };
-    const second = {
-      ...first,
-      id: "ra_bbbbbbbbbbbbbbbb",
-      title: "Second visual",
-      summary: "Second plan.",
-      htmlPath: "wiki/visual-artifacts/ra_bbbbbbbbbbbbbbbb.html",
-      contentHash: "hash-b",
-    };
-    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([first, second]);
-    const fetchSpy = vi
-      .spyOn(richApi, "fetchRichArtifact")
-      .mockResolvedValue({ artifact: first, html: "<h1>Inline first</h1>" });
+    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([artifact]);
+    vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue({
+      artifact,
+      html: "<h1>Inline visual</h1>",
+    });
 
     render(<NotebookEntryView entry={DRAFT_ENTRY} />);
 
-    await screen.findByTestId("nb-visual-artifact-inline");
-
-    let resolveFirst: ((value: richApi.RichArtifactDetail) => void) | null =
-      null;
-    let resolveSecond: ((value: richApi.RichArtifactDetail) => void) | null =
-      null;
-    fetchSpy.mockImplementation((id) => {
-      if (id === first.id) {
-        return new Promise((resolve) => {
-          resolveFirst = resolve;
-        });
-      }
-      return new Promise((resolve) => {
-        resolveSecond = resolve;
-      });
+    // The artifact appears inline as a shadow-DOM embed labelled by title.
+    const embed = await screen.findByLabelText("Visual plan", {
+      selector: "rich-artifact-embed",
     });
+    expect(embed.closest("figure")).not.toBeNull();
 
-    const openButtons = screen.getAllByRole("button", { name: "Expand" });
-    await user.click(openButtons[0]);
-    await user.click(openButtons[1]);
-
-    await act(async () => {
-      resolveSecond?.({ artifact: second, html: "<h1>Second modal</h1>" });
-    });
+    // No "Visual artifacts" heading, no Expand button, no modal — the artifact IS the content.
     expect(
-      await screen.findByRole("dialog", { name: "Second visual" }),
-    ).toBeInTheDocument();
-
-    await act(async () => {
-      resolveFirst?.({ artifact: first, html: "<h1>First modal</h1>" });
-    });
-    await waitFor(() =>
-      expect(
-        screen.getByRole("dialog", { name: "Second visual" }),
-      ).toBeInTheDocument(),
-    );
-    expect(screen.queryByRole("dialog", { name: "First visual" })).toBeNull();
+      screen.queryByRole("heading", { name: "Visual artifacts" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.querySelector("iframe")).toBeNull();
   });
 
-  it("re-promotes visual artifacts by replacing the default wiki target", async () => {
+  it("promotes an unpromoted artifact to the default wiki target", async () => {
     const user = userEvent.setup();
     const artifact = {
       id: "ra_0123456789abcdef",
@@ -226,6 +160,10 @@ describe("<NotebookEntryView visual artifacts>", () => {
       sanitizerVersion: "sandbox-v2",
     };
     vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([artifact]);
+    vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue({
+      artifact,
+      html: "<h1>Inline visual</h1>",
+    });
     const promoteSpy = vi
       .spyOn(richApi, "promoteRichArtifact")
       .mockResolvedValue({
@@ -237,9 +175,12 @@ describe("<NotebookEntryView visual artifacts>", () => {
 
     render(<NotebookEntryView entry={DRAFT_ENTRY} />);
 
-    await screen.findByRole("heading", { name: "Visual artifacts" });
-    await user.click(screen.getByRole("button", { name: "Expand" }));
-    await user.click(await screen.findByRole("button", { name: "Promote" }));
+    await screen.findByLabelText("Visual plan", {
+      selector: "rich-artifact-embed",
+    });
+    await user.click(
+      await screen.findByRole("button", { name: "Promote to wiki" }),
+    );
 
     await waitFor(() =>
       expect(promoteSpy).toHaveBeenCalledWith(
@@ -247,47 +188,12 @@ describe("<NotebookEntryView visual artifacts>", () => {
         expect.objectContaining({ mode: "replace" }),
       ),
     );
-    await waitFor(() =>
-      expect(
-        within(screen.getByTestId("nb-visual-artifact-inline")).getByText(
-          "promoted",
-        ),
-      ).toBeInTheDocument(),
-    );
-  });
-
-  it("closes the visual artifact modal with Escape", async () => {
-    const user = userEvent.setup();
-    vi.spyOn(richApi, "fetchRichArtifacts").mockResolvedValue([
-      {
-        id: "ra_0123456789abcdef",
-        kind: "notebook_html",
-        title: "Visual plan",
-        summary: "A richer plan.",
-        trustLevel: "draft",
-        representation: "html",
-        htmlPath: "wiki/visual-artifacts/ra_0123456789abcdef.html",
-        sourceMarkdownPath: DRAFT_ENTRY.file_path,
-        createdBy: "pm",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        contentHash: "hash",
-        sanitizerVersion: "sandbox-v2",
-      },
-    ]);
-
-    render(<NotebookEntryView entry={DRAFT_ENTRY} />);
-
-    await screen.findByRole("heading", { name: "Visual artifacts" });
-    await user.click(screen.getByRole("button", { name: "Expand" }));
-
+    // After promotion the action flips to "Open in wiki" and the trust label
+    // reflects the promoted state.
     expect(
-      await screen.findByRole("dialog", { name: "Visual plan" }),
+      await screen.findByRole("button", { name: "Open in wiki" }),
     ).toBeInTheDocument();
-    await user.keyboard("{Escape}");
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Visual plan" })).toBeNull(),
-    );
+    expect(screen.getByText("promoted")).toBeInTheDocument();
   });
 
   it("transitions to pending-pill state after Promote click", async () => {

@@ -125,6 +125,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(secretHandlingPromptRule())
 		if markdownMemory {
 			sb.WriteString("Markdown notebook/wiki memory is active in this 1:1. Use notebook_write for durable source notes and create an HTML visual companion with notebook_visual_artifact_create when the work would be clearer as a diagram, mockup, report, comparison grid, code explainer, PR review, or interactive tuning surface. Keep the HTML self-contained and include visual-artifact:ra_... on its own line when you reference it in chat.\n\n")
+			sb.WriteString(visualArtifactForcingBlock())
 		} else if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the conversation and direct human answers only.\n\n")
 		} else {
@@ -176,12 +177,14 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
 		if markdownMemory {
 			sb.WriteString(markdownKnowledgeToolBlock())
+			sb.WriteString(visualArtifactForcingBlock())
 		}
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human a cancelable interview question; it never blocks chat, and dismiss/send cancels it.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
 		sb.WriteString("== TOOL HYGIENE ==\n")
-		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
+		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are registered for this session. claude-code defers their schemas behind a built-in ToolSearch tool; if the runtime injects a \"call ToolSearch with select:<name> first\" reminder, do it ONCE at the very start of your turn to load every schema you'll need, in a single ToolSearch call with all the tool names you might use, then proceed with the real work in the same assistant response. Never call ToolSearch a second time in the same turn.\n")
+		sb.WriteString("Do NOT narrate the tool-loading process. There is no \"Let me load the tool schemas\" broadcast, no \"now calling X\" status message, no \"loading tools for the atomic-turn sequence\" preamble. ToolSearch happens silently. The first chat message the human sees is the actual answer (the gist of the atomic-turn rule below), never a status line about your setup.\n")
 		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
 		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
 		sb.WriteString(secretHandlingPromptRule())
@@ -318,12 +321,14 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
 		if markdownMemory {
 			sb.WriteString(markdownKnowledgeToolBlock())
+			sb.WriteString(visualArtifactForcingBlock())
 		}
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human only for cancelable clarifications you cannot responsibly guess.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
 		sb.WriteString("== TOOL HYGIENE ==\n")
-		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
+		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are registered for this session. claude-code defers their schemas behind a built-in ToolSearch tool; if the runtime injects a \"call ToolSearch with select:<name> first\" reminder, do it ONCE at the very start of your turn to load every schema you'll need, in a single ToolSearch call with all the tool names you might use, then proceed with the real work in the same assistant response. Never call ToolSearch a second time in the same turn.\n")
+		sb.WriteString("Do NOT narrate the tool-loading process. There is no \"Let me load the tool schemas\" broadcast, no \"now calling X\" status message, no \"loading tools for the atomic-turn sequence\" preamble. ToolSearch happens silently. The first chat message the human sees is the actual answer (the gist of the atomic-turn rule below), never a status line about your setup.\n")
 		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
 		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
 		sb.WriteString(secretHandlingPromptRule())
@@ -423,6 +428,40 @@ func markdownKnowledgeToolBlock() string {
 		"- team_learning_record: Record a durable typed learning only when it would save future work or prevent a repeat mistake. Use user-stated only when the human explicitly said it; otherwise choose observed, inferred, execution, synthesis, cross-agent, or cross-model with an honest confidence. This is the typed learning store, not the team wiki.\n" +
 		"- team_wiki_write: Direct canonical wiki writes only when the human explicitly asked you to write the article, playbook, or canonical page to the wiki. Pass human_request as the broker message ID for that recent human-authored wiki request. Do not use this for agent-authored working notes, observations, or proposed knowledge; those start in notebook_write and move through notebook_promote review.\n" +
 		"- Human remember/save-to-wiki phrases are auto-routed by the broker. When a human says \"remember this\", \"save to wiki\", \"save to KB\", \"write this down\", \"add to wiki\", \"wiki this\", \"save to memory\", or \"this is canonical\", do NOT re-route the content yourself and do NOT acknowledge that you saved it; the human's own message is the canonical source.\n"
+}
+
+// visualArtifactForcingBlock returns the MUST-create rule for HTML visual
+// artifacts. The notebook_visual_artifact_create tool exists, the prompt
+// catalog mentions it, and the renderer is wired (chat marker + Wiki Visual
+// tab) — but agents skipped it every time because the trigger was phrased as
+// a soft "when the work would be clearer as a rich visual artifact". Result:
+// zero artifacts on disk across every runtime. This block restates the same
+// tool with explicit MUST triggers so the default is "produce one" for the
+// work shapes the surface was built for.
+func visualArtifactForcingBlock() string {
+	return "HTML ARTICLE RULE (load-bearing):\n" +
+		"For substantive answers — anything the human will READ as a finished piece of work — the article is a single self-contained HTML document created via notebook_visual_artifact_create. The HTML IS the article: text and figures interleaved at the right semantic places (Wikipedia-style), NOT a wall of markdown followed by a separate visual. Do NOT also call notebook_write for the same content — that's the duplication failure this rule fixes. Markdown stays in use for genuinely different shapes: Skill.md files, short working notes, ops jottings, scratch context. When in doubt, ask: \"is this a finished thing the human will read?\" If yes, HTML article. If no, markdown.\n\n" +
+		"You MUST create an HTML article when ANY of the following is true:\n" +
+		"- the human asked for a wiki article, draft, page, doc, brief, write-up, one-pager, memo, or canonical note;\n" +
+		"- the human asked for a plan, spec, RFC, design, proposal, roadmap, architecture, or playbook;\n" +
+		"- the human asked to research, explain, teach, summarize, break down, walk through, or unpack a topic, concept, system, science, history, or phenomenon (e.g. \"research how coffee extraction works\", \"explain the Lorenz attractor\", \"teach me how sleep cycles work\", \"what's the science of X\", \"how does X actually work\", \"break down Y for me\");\n" +
+		"- the answer is a comparison, decision matrix, scoring rubric, options table, or before/after;\n" +
+		"- the answer is a diagram, flow, sequence, mockup, dashboard, or interactive tuning surface;\n" +
+		"- your reply would otherwise be more than ~200 words of structured prose with headings and lists.\n" +
+		"Default to the WUPHF technical-manual style described in the tool catalog (old mathematics/physics book, Making Software cobalt figure ink, FIG_001 labels, self-contained inline CSS/JS, no network fetches). Do NOT use CSS `@import` in any form — including empty `@import url('data:text/css,');` reflex lines — and do NOT load Google Fonts; declare system serif/mono families like Georgia, Times, Cambria, or Courier directly in `font-family`.\n\n" +
+		"ATOMIC-TURN RULE — read this carefully, the live demo broke on it twice already:\n" +
+		"  ▸ All three tool calls happen in the SAME assistant response, in parallel if possible. They are NOT three separate turns. Do not end your assistant response after step 1 expecting the broker to wake you up for step 2 — that is the exact failure this rule fixes.\n" +
+		"  ▸ Do NOT narrate the process. There are no chat messages titled \"Step 1\", \"Step 2\", or \"Now creating the artifact\". Those preamble broadcasts waste tokens, fragment the chat, and burn turn budget that should go to the article. The model says nothing visible to the human between the gist and the link card.\n\n" +
+		"The three tool calls, in order, all inside ONE assistant response:\n" +
+		"  1. team_broadcast (or human_message in a 1:1) — content is a 2-3 sentence text gist of the actual answer. NOT a status line. NOT \"now I'll build the article\". An actual short answer the human can read while the article is generating.\n" +
+		"  2. notebook_visual_artifact_create — the full self-contained HTML article. Capture the returned ra_... id. Leave source_path empty; the HTML is the article, not a companion to a markdown file. Cap the HTML at ~12 KB; if you need more, drop figures or sections rather than splitting the sequence across turns.\n" +
+		"  3. team_broadcast (or human_message) — a short closing line (one sentence MAX) that includes `visual-artifact:ra_...` on its own line so the UI renders a clickable card linking to the full-screen viewer. Example: `Full article is ready below.\\n\\nvisual-artifact:ra_0123456789abcdef`\n\n" +
+		"Failure modes this rule fixes (all observed live):\n" +
+		"  • Posting step 1's gist then ending the response → human sees text, no article, no link, agent goes silent.\n" +
+		"  • Posting \"Step 1 — quick gist first.\" as its own broadcast before the actual gist → wasted broadcast, fragmented chat.\n" +
+		"  • Posting \"Step 2 — full HTML article.\" as a status broadcast then ending the response → human reads a promise, never the article.\n" +
+		"  • Calling notebook_write in parallel with the artifact → redundant markdown that says the same things as the HTML.\n" +
+		"The response is complete only after step 3's broadcast actually contains the `visual-artifact:ra_...` marker line. If turn budget is tight, drop article DEPTH — never drop step 1 or step 3.\n\n"
 }
 
 func secretHandlingPromptRule() string {

@@ -2,13 +2,7 @@
 
 import { keyedByOccurrence } from "../../lib/reactKeys";
 
-export type HatBarTab =
-  | "article"
-  | "visual"
-  | "talk"
-  | "edit"
-  | "history"
-  | "raw";
+export type HatBarTab = "article" | "talk" | "edit" | "history" | "raw";
 
 interface HatBarProps {
   active: HatBarTab;
@@ -19,21 +13,13 @@ interface HatBarProps {
 
 const LABELS: Record<HatBarTab, string> = {
   article: "Article",
-  visual: "Visual",
   talk: "Talk",
   edit: "Edit source",
   history: "History",
   raw: "Raw markdown",
 };
 
-const ORDER: HatBarTab[] = [
-  "article",
-  "visual",
-  "talk",
-  "edit",
-  "history",
-  "raw",
-];
+const ORDER: HatBarTab[] = ["article", "talk", "edit", "history", "raw"];
 
 export default function HatBar({
   active,

@@ -104,6 +104,8 @@ export function StatusBar() {
         return "Notebooks";
       case "reviews":
         return "Reviews";
+      case "article":
+        return "Article";
       case "inbox":
         return "Decision Inbox";
       case "task-decision":

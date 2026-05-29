@@ -153,6 +153,8 @@ export const ROUTE_PATHS = {
   notebookAgent: "/notebooks/$agentSlug",
   notebookEntry: "/notebooks/$agentSlug/$entrySlug",
   reviews: "/reviews",
+  /** Full-screen HTML article viewer. id is an ra_... artifact id. */
+  article: "/articles/$articleId",
   inbox: "/inbox",
   taskDecision: "/task/$taskId",
   /** Phase 3 — Issue list surface (all tasks rendered as Issues). */
@@ -273,6 +275,12 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     search: [],
   },
   { key: "reviews", path: ROUTE_PATHS.reviews, params: [], search: [] },
+  {
+    key: "article",
+    path: ROUTE_PATHS.article,
+    params: ["articleId"],
+    search: [],
+  },
   { key: "inbox", path: ROUTE_PATHS.inbox, params: [], search: [] },
   {
     key: "taskDecision",

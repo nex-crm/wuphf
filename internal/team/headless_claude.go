@@ -43,6 +43,14 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		"--append-system-prompt", l.buildPrompt(slug),
 		"--mcp-config", agentMCP,
 		"--strict-mcp-config",
+		// NOTE: tried --disallowedTools ToolSearch to block the
+		// deferred-tools reminder loop. claude-code requires ToolSearch
+		// when MCP tools are deferred; the agent exited with SIGTERM
+		// after ~23s and zero events. Reverted. The prompt's TOOL
+		// HYGIENE block continues to instruct the model to ignore the
+		// reminder and call MCP tools directly; we accept the soft
+		// failure mode (~30s tax on first turn) over the hard one
+		// (agent dies before producing any output).
 	}
 	args = append(args, strings.Fields(l.resolvePermissionFlags(slug))...)
 

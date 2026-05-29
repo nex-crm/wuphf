@@ -28,7 +28,7 @@ import {
   buildRehypePlugins,
   buildRemarkPlugins,
 } from "../../lib/wikiMarkdownConfig";
-import RichArtifactFrame from "../rich-artifacts/RichArtifactFrame";
+import RichArtifactEmbed from "../rich-artifacts/RichArtifactEmbed";
 import ArticleStatusBanner from "./ArticleStatusBanner";
 import ArticleTitle from "./ArticleTitle";
 import Byline from "./Byline";
@@ -331,10 +331,6 @@ export default function WikiArticle({
       .then((detail) => {
         if (cancelled) return;
         setVisualArtifact(detail);
-        if (detail && visualAutoOpenedPathRef.current !== path) {
-          visualAutoOpenedPathRef.current = path;
-          setTab((current) => (current === "article" ? "visual" : current));
-        }
       })
       .catch(() => {
         if (cancelled) return;
@@ -471,13 +467,10 @@ export default function WikiArticle({
     setTab("article");
   };
   const handleEditorCancel = () => setTab("article");
-  const isVisualMode = tab === "visual" && visualArtifact !== null;
 
   return (
     <>
-      <main
-        className={`wk-article-col${isVisualMode ? " wk-article-col-visual" : ""}`}
-      >
+      <main className="wk-article-col">
         <LiveEditingBanner liveAgent={liveAgent} article={article} />
         <ArticleSetupPanels
           entity={entity}
@@ -488,7 +481,6 @@ export default function WikiArticle({
           active={tab}
           onChange={setTab}
           rightRail={context ? [context] : undefined}
-          disabledTabs={visualArtifact ? ["talk"] : ["visual", "talk"]}
         />
         <ArticleBreadcrumb
           article={article}
@@ -537,14 +529,12 @@ export default function WikiArticle({
           articlePath={article.path}
         />
       </main>
-      {isVisualMode ? null : (
-        <ArticleRightSidebar
-          article={article}
-          toc={toc}
-          onNavigate={onNavigate}
-          onMaintenanceApplied={() => setRefreshNonce((n) => n + 1)}
-        />
-      )}
+      <ArticleRightSidebar
+        article={article}
+        toc={toc}
+        onNavigate={onNavigate}
+        onMaintenanceApplied={() => setRefreshNonce((n) => n + 1)}
+      />
     </>
   );
 }
@@ -702,6 +692,12 @@ function ArticleTabPanels({
     case "article":
       return (
         <div className="wk-article-body" data-testid="wk-article-body">
+          {visualArtifact ? (
+            <RichArtifactEmbed
+              title={visualArtifact.artifact.title}
+              html={visualArtifact.html}
+            />
+          ) : null}
           <ReactMarkdown
             remarkPlugins={remarkPlugins}
             rehypePlugins={rehypePlugins}
@@ -710,23 +706,6 @@ function ArticleTabPanels({
             {article.content}
           </ReactMarkdown>
         </div>
-      );
-    case "visual":
-      return visualArtifact ? (
-        <div className="wk-visual-artifact" data-testid="wk-visual-artifact">
-          <div className="wk-visual-artifact-head">
-            <h2>{visualArtifact.artifact.title}</h2>
-            <div className="rich-artifact-meta">
-              <span>{visualArtifact.artifact.trustLevel}</span>
-            </div>
-          </div>
-          <RichArtifactFrame
-            title={visualArtifact.artifact.title}
-            html={visualArtifact.html}
-          />
-        </div>
-      ) : (
-        <div className="wk-loading">No visual view for this article.</div>
       );
     case "edit":
       return (
