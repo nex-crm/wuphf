@@ -3,6 +3,25 @@ import { get, post } from "./client";
 export type RichArtifactKind = "notebook_html" | "wiki_visual";
 export type RichArtifactTrustLevel = "draft" | "reviewed" | "promoted";
 
+// ArtifactPromotion is the canonical "where does this artifact live now?"
+// signal that drives link routing in chat bubbles and embed wiring in the
+// notebook + wiki detail views. Backend contract (agreed with the Go side):
+//
+//   { status: "draft" }                                            // unpromoted, only at /articles/$id
+//   { status: "promoted_to_notebook", owner_slug, entry_slug }     // attached to a notebook entry
+//   { status: "promoted_to_wiki", wiki_path }                      // promoted into the team wiki
+//
+// wiki_path is relative to the wiki root, e.g.
+// "team/reference/coffee-extraction-science.md".
+export type ArtifactPromotion =
+  | { status: "draft" }
+  | {
+      status: "promoted_to_notebook";
+      owner_slug: string;
+      entry_slug: string;
+    }
+  | { status: "promoted_to_wiki"; wiki_path: string };
+
 export interface RichArtifact {
   id: string;
   kind: RichArtifactKind;
@@ -21,6 +40,12 @@ export interface RichArtifact {
   updatedAt: string;
   contentHash: string;
   sanitizerVersion: string;
+  // promotion is the new canonical promotion-state field. It is optional
+  // for backward compatibility with older broker responses that have not
+  // been re-emitted yet; consumers should fall back to deriving a
+  // best-effort state from promotedWikiPath when promotion is absent (see
+  // resolveArtifactDestination).
+  promotion?: ArtifactPromotion;
 }
 
 export interface RichArtifactDetail {
@@ -105,6 +130,72 @@ export async function promoteRichArtifact(
     },
   );
   return res.artifact;
+}
+
+// ArtifactDestination describes where a clickable reference to an artifact
+// should navigate. It is intentionally shaped like a router NavigateOptions
+// payload (to + params) so call sites can splat it straight into
+// router.navigate(). The resolver derives the destination from the new
+// promotion field when present, then falls back to legacy fields, and
+// finally to the standalone /articles/$id viewer.
+export type ArtifactDestination =
+  | {
+      to: "/wiki/$";
+      params: { _splat: string };
+    }
+  | {
+      to: "/notebooks/$agentSlug/$entrySlug";
+      params: { agentSlug: string; entrySlug: string };
+    }
+  | {
+      to: "/articles/$articleId";
+      params: { articleId: string };
+    };
+
+// stripWikiSuffix lops off the trailing ".md" (if any) so the wiki splat
+// matches the same shape the router uses for in-app navigation (e.g.
+// "team/reference/coffee" instead of "team/reference/coffee.md"). The wiki
+// route handler accepts both, but the trimmed form keeps the URL clean.
+function stripWikiSuffix(path: string): string {
+  return path.replace(/\.md$/i, "");
+}
+
+export function resolveArtifactDestination(
+  artifact: Pick<RichArtifact, "id" | "promotion" | "promotedWikiPath">,
+): ArtifactDestination {
+  const promotion = artifact.promotion;
+  if (promotion?.status === "promoted_to_wiki" && promotion.wiki_path) {
+    return {
+      to: "/wiki/$",
+      params: { _splat: stripWikiSuffix(promotion.wiki_path) },
+    };
+  }
+  if (
+    promotion?.status === "promoted_to_notebook" &&
+    promotion.owner_slug &&
+    promotion.entry_slug
+  ) {
+    return {
+      to: "/notebooks/$agentSlug/$entrySlug",
+      params: {
+        agentSlug: promotion.owner_slug,
+        entrySlug: promotion.entry_slug,
+      },
+    };
+  }
+  // Legacy fallback for artifacts emitted before the promotion field
+  // existed: if we know a wiki path was set, route there.
+  if (!promotion && artifact.promotedWikiPath) {
+    return {
+      to: "/wiki/$",
+      params: { _splat: stripWikiSuffix(artifact.promotedWikiPath) },
+    };
+  }
+  // Draft / unknown / unpromoted: fall back to the standalone viewer.
+  return {
+    to: "/articles/$articleId",
+    params: { articleId: artifact.id },
+  };
 }
 
 export async function fetchWikiVisualArtifact(

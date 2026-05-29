@@ -3,6 +3,7 @@ import { useQueries } from "@tanstack/react-query";
 import {
   fetchRichArtifact,
   type RichArtifactDetail,
+  resolveArtifactDestination,
 } from "../../api/richArtifacts";
 import { router } from "../../lib/router";
 
@@ -59,9 +60,14 @@ interface ArticleCardProps {
 function ArticleCard({ id, detail, error }: ArticleCardProps) {
   if (error) {
     return (
-      <div className="message-artifact-card message-artifact-error" role="alert">
+      <div
+        className="message-artifact-card message-artifact-error"
+        role="alert"
+      >
         <span className="message-artifact-kicker">Article</span>
-        <p>Could not load article {id}: {error}</p>
+        <p>
+          Could not load article {id}: {error}
+        </p>
       </div>
     );
   }
@@ -74,15 +80,19 @@ function ArticleCard({ id, detail, error }: ArticleCardProps) {
     );
   }
   const { artifact } = detail;
+  // Route the card to the canonical home of the artifact:
+  //   promoted_to_wiki     → /wiki/<path>
+  //   promoted_to_notebook → /notebooks/<owner>/<entry>
+  //   draft / unknown      → /articles/<id> (standalone fallback)
+  // resolveArtifactDestination is the single source of truth so the link
+  // shape stays consistent across chat, notebook, and any future surface.
+  const destination = resolveArtifactDestination(artifact);
   return (
     <button
       type="button"
       className="message-artifact-card message-artifact-card-clickable"
       onClick={() => {
-        void router.navigate({
-          to: "/articles/$articleId",
-          params: { articleId: artifact.id },
-        });
+        void router.navigate(destination);
       }}
       aria-label={`Open article: ${artifact.title}`}
     >
