@@ -1840,3 +1840,101 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   color: var(--empty-state-color, var(--text-tertiary));
   font-size: var(--empty-state-size, 13px);
 }
+
+/* ─── Artifact skeleton (gist → drafting → artifact card) ─── */
+/* Shown after an agent message that promises a visual artifact, until the
+   real artifact card arrives. Compositor-only animations (background-position
+   + opacity) — no layout-bound props. Matches the rough footprint of the
+   real .message-artifact-card so the swap doesn't reflow the feed. */
+.artifact-skeleton {
+  --artifact-skeleton-shimmer-base: var(--bg-warm);
+  --artifact-skeleton-shimmer-highlight: color-mix(
+    in srgb,
+    var(--accent) 14%,
+    var(--bg-card)
+  );
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  max-width: 600px;
+  min-height: 120px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.artifact-skeleton-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.artifact-skeleton-title {
+  flex: 1;
+  height: 14px;
+  min-width: 120px;
+  max-width: 320px;
+  border-radius: var(--radius-sm);
+}
+
+.artifact-skeleton-label {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs, 12px);
+  letter-spacing: 0.02em;
+}
+
+.artifact-skeleton-body {
+  display: grid;
+  gap: 8px;
+}
+
+.artifact-skeleton-line {
+  display: block;
+  height: 10px;
+  border-radius: var(--radius-sm);
+}
+
+.artifact-skeleton-line-short {
+  width: 60%;
+}
+
+.artifact-skeleton-figure {
+  display: block;
+  height: 36px;
+  border-radius: var(--radius-sm);
+}
+
+.artifact-skeleton-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--artifact-skeleton-shimmer-base) 0%,
+    var(--artifact-skeleton-shimmer-highlight) 50%,
+    var(--artifact-skeleton-shimmer-base) 100%
+  );
+  background-size: 200% 100%;
+  background-position: 100% 0;
+  animation: artifact-skeleton-shimmer 1.6s ease-in-out infinite;
+  will-change: background-position;
+}
+
+@keyframes artifact-skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-skeleton-shimmer {
+    animation: none;
+    background-image: none;
+    background-color: var(--artifact-skeleton-shimmer-base);
+  }
+}
