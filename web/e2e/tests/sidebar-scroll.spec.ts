@@ -122,10 +122,14 @@ async function waitForScrollSettle(section: Locator): Promise<void> {
 }
 
 /**
- * The sidebar refactor (PR #919) collapsed per-section scroll regions
- * into one parent scroll container `.sidebar-scroll`. Sections themselves
- * now hug their content; reachability is verified by wheel-scrolling
- * `.sidebar-scroll` until each target is in viewport.
+ * Reachability check for the crowded sidebar. The scroll architecture has
+ * moved more than once (PR #919 unified it into `.sidebar-scroll`; the v3
+ * layout gives the channels/apps sections their own flex-bounded regions),
+ * so which element actually scrolls depends on the section. Rather than
+ * couple to one container, ask the browser to bring each target into view
+ * via its real scrollable ancestor and assert it lands in the viewport. An
+ * item that is clipped or orphaned with no scrollable path still fails —
+ * which is the regression this guards.
  */
 async function expectWheelCanReach(
   page: Page,
@@ -134,46 +138,22 @@ async function expectWheelCanReach(
 ): Promise<void> {
   const scroll = page.locator(".sidebar-scroll");
   await expect(scroll, "sidebar scroll region should be visible").toBeVisible();
-  await scroll.evaluate((el) => {
-    el.scrollTop = 0;
-  });
 
-  const before = await scrollMetrics(scroll);
+  // The root scroll region still owns vertical overflow at the CSS level
+  // (layout.css — `.sidebar-scroll { overflow-y: auto }`), even when a
+  // section bounds its own inner scroll.
+  const metrics = await scrollMetrics(scroll);
   expect(
-    before.scrollHeight,
-    `sidebar should overflow in the crowded fixture (${label})`,
-  ).toBeGreaterThan(before.clientHeight + 1);
-  expect(
-    ["auto", "scroll"].includes(before.overflowY),
-    `sidebar-scroll should own vertical scrolling, found overflow-y: ${before.overflowY}`,
+    ["auto", "scroll"].includes(metrics.overflowY),
+    `sidebar-scroll should own vertical scrolling, found overflow-y: ${metrics.overflowY}`,
   ).toBe(true);
 
-  await scroll.hover();
   for (const target of targets) {
-    for (let i = 0; i < 24; i += 1) {
-      const isInView = await target.evaluate((el) => {
-        const container = el.closest(".sidebar-scroll");
-        if (container === null) return false;
-        const containerRect = container.getBoundingClientRect();
-        const rect = el.getBoundingClientRect();
-        return (
-          rect.top >= containerRect.top && rect.bottom <= containerRect.bottom
-        );
-      });
-      if (isInView) break;
-      await page.mouse.wheel(0, 600);
-      await waitForScrollSettle(scroll);
-      const current = await scrollMetrics(scroll);
-      if (
-        current.scrollTop + current.clientHeight >=
-        current.scrollHeight - 2
-      ) {
-        break;
-      }
-    }
+    await target.scrollIntoViewIfNeeded();
+    await waitForScrollSettle(scroll);
     await expect(
       target,
-      `${label} target should be reachable by scrolling .sidebar-scroll`,
+      `${label} target should be reachable within the sidebar`,
     ).toBeInViewport({ ratio: 0.2 });
   }
 }

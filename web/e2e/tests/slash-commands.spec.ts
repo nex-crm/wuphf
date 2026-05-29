@@ -31,7 +31,7 @@ test.describe("wuphf web slash commands", () => {
   }) => {
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
     const composer = page.locator(".composer-input");
@@ -78,7 +78,7 @@ test.describe("wuphf web slash commands", () => {
     // /\s+/, so parts[0] is still "/help" — the dispatch path matches.
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
     const composer = page.locator(".composer-input");
@@ -108,7 +108,7 @@ test.describe("wuphf web slash commands", () => {
     // stays empty from the user's point of view.
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
     const payload = `slash clear sentinel ${Date.now()}`;

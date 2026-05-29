@@ -309,14 +309,44 @@ body {
     transform: rotate(360deg);
   }
 }
-@keyframes typing-bounce {
+/* ThinkingLoader — wave dots, traveling sheen, and shimmer text.
+   Used by the inline TypingIndicator bubble and the feed loading state. */
+@keyframes thinking-wave {
   0%,
-  80%,
+  60%,
   100% {
-    transform: scale(0);
+    transform: translateY(0) scale(1);
+    opacity: 0.35;
   }
-  40% {
-    transform: scale(1);
+  30% {
+    transform: translateY(-4px) scale(1.18);
+    opacity: 1;
+  }
+}
+@keyframes thinking-sheen {
+  0% {
+    transform: translateX(-100%);
+  }
+  60%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+@keyframes thinking-text-shimmer {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -50% 0;
+  }
+}
+@keyframes thinking-ellipsis-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
   }
 }
 .animate-fade {

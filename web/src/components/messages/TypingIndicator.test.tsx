@@ -50,7 +50,13 @@ describe("<TypingIndicator>", () => {
 
     render(<TypingIndicator />);
 
-    expect(screen.getByText("CEO is typing...")).toBeInTheDocument();
+    // The bubble shows the author heading + an italic verb, and carries an
+    // accessible "is typing" label for screen readers.
+    expect(screen.getByText("CEO")).toBeInTheDocument();
+    expect(screen.getByText("is typing")).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: /CEO is typing/ }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/PM/)).not.toBeInTheDocument();
   });
 
@@ -71,7 +77,10 @@ describe("<TypingIndicator>", () => {
 
     render(<TypingIndicator />);
 
-    expect(screen.getByText("PM is typing...")).toBeInTheDocument();
+    expect(screen.getByText("PM")).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: /PM is typing/ }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/CEO/)).not.toBeInTheDocument();
   });
 });

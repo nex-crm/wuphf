@@ -24,27 +24,19 @@ test.afterEach(async ({ request }) => {
 });
 
 test.describe("wuphf web 1:1 DM", () => {
-  test("clicking an agent → Open DM → composer addresses the DM channel", async ({
+  test("the /dm route addresses the agent's direct channel and accepts a send", async ({
     page,
   }) => {
     test.setTimeout(45_000);
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    // v3 replaced the AgentPanel "Open DM" overlay with per-agent subspaces +
+    // the canonical /#/dm/$slug route; a sidebar agent click now navigates to
+    // the subspace. Read a real seeded slug from the sidebar, then open its DM
+    // via the route — that is the steering surface this test guards.
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
-    // Composer placeholder reflects the active channel (Composer.tsx:548 —
-    // `Message #${currentChannel}`). Capture the pre-DM value so we can
-    // assert it actually changes.
-    const composer = page.locator(".composer-input");
-    const beforePlaceholder = await composer.getAttribute("placeholder");
-    expect(
-      beforePlaceholder,
-      "composer placeholder should reflect a channel name",
-    ).toMatch(/^Message #/);
-    expect(beforePlaceholder).not.toContain("__"); // pre-DM = #general or similar
-
-    // Click the first agent and read its slug — same selector smoke uses.
     const firstAgent = page.locator("button[data-agent-slug]").first();
     await expect(firstAgent).toBeVisible({ timeout: 10_000 });
     const agentSlug = await firstAgent.getAttribute("data-agent-slug");
@@ -52,20 +44,15 @@ test.describe("wuphf web 1:1 DM", () => {
       agentSlug,
       "sidebar must expose at least one agent slug",
     ).toBeTruthy();
-    await firstAgent.click();
 
-    // AgentPanel mounts → "Open DM" button is visible. The button text is
-    // literal in AgentPanel.tsx:296 and toggles to "Opening..." while the
-    // request is in flight, so anchor by role+name.
-    const openDM = page.getByRole("button", { name: "Open DM" });
-    await expect(openDM).toBeVisible({ timeout: 10_000 });
-    await openDM.click();
+    await page.goto(`/#/dm/${agentSlug}`);
+    await waitForShellReady(page);
 
-    // After enterDM, currentChannel is the direct slug (e.g. "ceo__human"
-    // or "human__ceo" depending on lexical order — see directChannelSlug).
-    // The composer placeholder updates synchronously off the store. Match
-    // either ordering AND require the agent slug appear, so we don't pass
-    // when the placeholder happens to read "Message #human-something".
+    // The DM composer addresses the agent's direct channel (slug shape
+    // `<agent>__human` or `human__<agent>`, see directChannelSlug). Match
+    // either ordering AND require the agent slug appear, so we don't pass when
+    // the placeholder happens to read "Message #human-something".
+    const composer = page.locator(".composer-input");
     await expect(composer).toHaveAttribute(
       "placeholder",
       new RegExp(`^Message #(${agentSlug}__human|human__${agentSlug})$`),
