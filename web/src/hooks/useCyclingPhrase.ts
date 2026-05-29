@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-import { randomOfficePhraseIndex } from "../lib/officeLoadingPhrases";
-
 /**
  * Cycles through `phrases` on a fixed interval, returning the current entry.
  * Pass a module-level constant array so its identity is stable across renders.
@@ -16,7 +14,7 @@ export function useCyclingPhrase(
   enabled = true,
 ): string {
   const [index, setIndex] = useState(() =>
-    phrases.length ? randomOfficePhraseIndex() % phrases.length : 0,
+    phrases.length ? Math.floor(Math.random() * phrases.length) : 0,
   );
   // Keep the timer reading the latest length without re-arming on every tick.
   const lengthRef = useRef(phrases.length);

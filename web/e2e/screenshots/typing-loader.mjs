@@ -89,7 +89,7 @@ const json = (body) => ({
   body: JSON.stringify(body),
 });
 
-async function mountFeed(context, members) {
+async function mountFeed(members) {
   await installCommonMocks(context, {
     extra: async (ctx) => {
       await ctx.route("**/api/config", (r) => r.fulfill(json(CONFIG)));
@@ -174,7 +174,7 @@ async function capture(members, theme, name) {
   // refetch timers are torn down before we swap routes — otherwise an
   // in-flight poll hits an unrouted endpoint and logs a transient 502.
   await page.goto("about:blank", { waitUntil: "load" });
-  await mountFeed(context, members);
+  await mountFeed(members);
   await page.goto(`${DEFAULT_BASE}/#/channels/general`, { waitUntil: "load" });
   await page.waitForSelector(".status-bar", { timeout: 15_000 });
   await flipStore(page);
@@ -203,19 +203,32 @@ async function capture(members, theme, name) {
   await shotElement(page, ".conversation-chat", OUT, name);
 }
 
-await capture(MULTI, "noir-gold", "01-typing-multi-noir");
-await capture(SINGLE, "nex", "02-typing-feed-light");
-await capture(SINGLE, "nex-dark", "03-typing-feed-dark");
+// Track failure via a flag rather than process.exit() inside the try —
+// process.exit does not run finally, which would leak the browser. The
+// finally always closes it; we exit after.
+let failed = false;
+try {
+  await capture(MULTI, "noir-gold", "01-typing-multi-noir");
+  await capture(SINGLE, "nex", "02-typing-feed-light");
+  await capture(SINGLE, "nex-dark", "03-typing-feed-dark");
 
-// Transient resource blips (502s from poll requests racing a route swap
-// during capture) are a harness artifact, not a product error. Real page
-// errors (pageerror, uncaught) still fail the run.
-const realErrors = errors.filter((e) => !e.includes("Failed to load resource"));
-if (realErrors.length > 0) {
-  console.error(realErrors.join("\n"));
+  // Transient resource blips (502s from poll requests racing a route swap
+  // during capture) are a harness artifact, not a product error. Real page
+  // errors (pageerror, uncaught) still fail the run.
+  const realErrors = errors.filter(
+    (e) => !e.includes("Failed to load resource"),
+  );
+  if (realErrors.length > 0) {
+    console.error(realErrors.join("\n"));
+    failed = true;
+  } else {
+    console.log(`captured 3 screenshots to ${OUT}`);
+  }
+} catch (err) {
+  console.error(err);
+  failed = true;
+} finally {
   await browser.close();
-  process.exit(1);
 }
 
-console.log(`captured 3 screenshots to ${OUT}`);
-await browser.close();
+if (failed) process.exit(1);

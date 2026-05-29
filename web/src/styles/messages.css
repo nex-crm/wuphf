@@ -645,8 +645,17 @@
    it while the dots ride a soft wave. Disabled under reduced motion.
    ───────────────────────────────────────────────────────────── */
 .thinking-loader {
-  --tl-dot: color-mix(in srgb, var(--text-secondary) 70%, var(--accent) 30%);
-  --tl-sheen: color-mix(in srgb, var(--text) 9%, transparent);
+  /* Fallbacks for browsers without color-mix (CSS Color 5): a solid
+     secondary-tinted dot and an invisible sheen. Both degrade cleanly. */
+  --tl-dot: var(--text-secondary);
+  --tl-sheen: transparent;
+}
+/* Theme-adaptive blend where supported — overrides the fallbacks above. */
+@supports (color: color-mix(in srgb, red, blue)) {
+  .thinking-loader {
+    --tl-dot: color-mix(in srgb, var(--text-secondary) 70%, var(--accent) 30%);
+    --tl-sheen: color-mix(in srgb, var(--text) 9%, transparent);
+  }
 }
 .thinking-loader-inline {
   display: inline-flex;
@@ -1758,7 +1767,8 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   padding: 10px 14px;
   width: 100%;
   background: color-mix(in srgb, var(--accent, #2563eb) 6%, var(--bg-card));
-  border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 40%, var(--border));
+  border: 1px solid
+    color-mix(in srgb, var(--accent, #2563eb) 40%, var(--border));
   border-radius: var(--radius-md, 8px);
   display: flex;
   align-items: center;
@@ -1767,7 +1777,9 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 .issue-created-card:hover:not([disabled]) {
   background: color-mix(in srgb, var(--accent, #2563eb) 12%, var(--bg-card));
@@ -1832,7 +1844,11 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
 }
 .issue-created-card--awaiting-approval {
   background: color-mix(in srgb, var(--amber-600, #d97706) 8%, var(--bg-card));
-  border-color: color-mix(in srgb, var(--amber-600, #d97706) 60%, var(--border));
+  border-color: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 60%,
+    var(--border)
+  );
 }
 .issue-created-card--awaiting-approval:hover:not([disabled]) {
   background: color-mix(in srgb, var(--amber-600, #d97706) 14%, var(--bg-card));
@@ -1864,7 +1880,9 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 .issue-lifecycle-card:hover:not([disabled]) {
   filter: brightness(1.04);
@@ -1941,7 +1959,11 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   color: var(--success, #16a34a);
 }
 .issue-lifecycle-card--stop {
-  background: color-mix(in srgb, var(--text-tertiary, #6b7280) 8%, var(--bg-card));
+  background: color-mix(
+    in srgb,
+    var(--text-tertiary, #6b7280) 8%,
+    var(--bg-card)
+  );
   border-color: var(--border);
 }
 .issue-lifecycle-card--stop .issue-lifecycle-card-eyebrow {
@@ -1949,7 +1971,11 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
 }
 .issue-lifecycle-card--warn {
   background: color-mix(in srgb, var(--amber-600, #d97706) 8%, var(--bg-card));
-  border-color: color-mix(in srgb, var(--amber-600, #d97706) 50%, var(--border));
+  border-color: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 50%,
+    var(--border)
+  );
 }
 .issue-lifecycle-card--warn .issue-lifecycle-card-eyebrow,
 .issue-lifecycle-card--warn .issue-lifecycle-card-cta {

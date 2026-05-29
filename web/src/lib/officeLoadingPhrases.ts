@@ -28,11 +28,3 @@ export const OFFICE_LOADING_PHRASES = [
   "Rehearsing the Dunder Mifflin jingle",
   "Asking what she said",
 ] as const;
-
-/**
- * Pick a starting phrase. Randomised only so two bubbles on screen do not lock
- * step; the cycle itself is deterministic.
- */
-export function randomOfficePhraseIndex(): number {
-  return Math.floor(Math.random() * OFFICE_LOADING_PHRASES.length);
-}
