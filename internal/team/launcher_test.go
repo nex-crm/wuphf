@@ -2686,8 +2686,8 @@ func TestBuildPromptToolHygieneSection(t *testing.T) {
 		if !strings.Contains(prompt, "== TOOL HYGIENE ==") {
 			t.Errorf("%s prompt missing TOOL HYGIENE section", slug)
 		}
-		if !strings.Contains(prompt, "ALREADY registered") {
-			t.Errorf("%s prompt missing 'ALREADY registered' line", slug)
+		if !strings.Contains(prompt, "registered for this session") {
+			t.Errorf("%s prompt missing tool-registration line", slug)
 		}
 		if !strings.Contains(prompt, "Do not read unrelated files") {
 			t.Errorf("%s prompt missing unrelated-files guidance", slug)
