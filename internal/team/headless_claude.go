@@ -318,12 +318,6 @@ func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {
 		"WUPHF_MEMORY_BACKEND="+config.ResolveMemoryBackend(""),
 		fmt.Sprintf("WUPHF_NO_NEX=%t", config.ResolveNoNex()),
 		"ANTHROPIC_PROMPT_CACHING=1",
-		// Force claude-code to load MCP tool schemas inline instead of
-		// deferring them behind ToolSearch. WUPHF's ~50 tools per office
-		// agent overflow the default 10%-of-context auto-defer budget,
-		// adding a ~30s tax to every turn. Prompt caching (above)
-		// amortizes the extra input-token cost across the session.
-		"ENABLE_TOOL_SEARCH=100",
 	)
 	if l.isOneOnOne() {
 		env = append(env,
