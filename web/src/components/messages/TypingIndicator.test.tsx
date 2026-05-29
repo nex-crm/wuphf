@@ -74,4 +74,85 @@ describe("<TypingIndicator>", () => {
     expect(screen.getByText("PM is typing...")).toBeInTheDocument();
     expect(screen.queryByText(/CEO/)).not.toBeInTheDocument();
   });
+
+  it("surfaces the live progress detail for a single active agent", () => {
+    mockUseCurrentRoute.mockReturnValue({
+      kind: "dm",
+      agentSlug: "pm",
+      channelSlug: "pm__human",
+    });
+    mockUseOfficeMembers.mockReturnValue({
+      data: [
+        {
+          slug: "pm",
+          name: "PM",
+          status: "active",
+          liveActivity: "drafting figure",
+        },
+      ],
+    } as unknown as ReturnType<typeof useOfficeMembers>);
+    mockUseChannelMembers.mockReturnValue({
+      data: [{ slug: "pm", name: "PM" }],
+    } as unknown as ReturnType<typeof useChannelMembers>);
+
+    render(<TypingIndicator />);
+
+    expect(screen.getByText("PM is typing...")).toBeInTheDocument();
+    expect(screen.getByText("drafting figure")).toBeInTheDocument();
+  });
+
+  it("falls back to lower-priority progress fields when liveActivity is absent", () => {
+    mockUseCurrentRoute.mockReturnValue({
+      kind: "dm",
+      agentSlug: "pm",
+      channelSlug: "pm__human",
+    });
+    mockUseOfficeMembers.mockReturnValue({
+      data: [
+        { slug: "pm", name: "PM", status: "active", activity: "scoping issue" },
+      ],
+    } as unknown as ReturnType<typeof useOfficeMembers>);
+    mockUseChannelMembers.mockReturnValue({
+      data: [{ slug: "pm", name: "PM" }],
+    } as unknown as ReturnType<typeof useChannelMembers>);
+
+    render(<TypingIndicator />);
+
+    expect(screen.getByText("scoping issue")).toBeInTheDocument();
+  });
+
+  it("suppresses the detail when several agents are active to avoid implying shared progress", () => {
+    mockUseCurrentRoute.mockReturnValue({
+      kind: "channel",
+      channelSlug: "general",
+    });
+    mockUseOfficeMembers.mockReturnValue({
+      data: [
+        {
+          slug: "pm",
+          name: "PM",
+          status: "active",
+          liveActivity: "drafting figure",
+        },
+        {
+          slug: "eng",
+          name: "Eng",
+          status: "active",
+          liveActivity: "writing code",
+        },
+      ],
+    } as unknown as ReturnType<typeof useOfficeMembers>);
+    mockUseChannelMembers.mockReturnValue({
+      data: [
+        { slug: "pm", name: "PM" },
+        { slug: "eng", name: "Eng" },
+      ],
+    } as unknown as ReturnType<typeof useChannelMembers>);
+
+    render(<TypingIndicator />);
+
+    expect(screen.getByText("PM, Eng are typing...")).toBeInTheDocument();
+    expect(screen.queryByText("drafting figure")).not.toBeInTheDocument();
+    expect(screen.queryByText("writing code")).not.toBeInTheDocument();
+  });
 });
