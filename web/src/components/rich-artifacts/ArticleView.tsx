@@ -85,7 +85,9 @@ export function ArticleView({ articleId }: ArticleViewProps) {
           ) : null}
           <div className="article-view-meta">
             <span className="rich-artifact-trust">{artifact.trustLevel}</span>
-            <span className="article-view-author">by @{artifact.createdBy}</span>
+            <span className="article-view-author">
+              by @{artifact.createdBy}
+            </span>
           </div>
         </div>
       </header>

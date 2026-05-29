@@ -194,6 +194,168 @@ describe("<RichArtifactEmbed>", () => {
     ).toBeUndefined();
   });
 
+  describe("SVG handling", () => {
+    // Agents emit SVG diagrams (`<svg><rect/><path/>…`) as part of rich
+    // artifacts. The original sanitizer blanket-dropped <svg>; here we
+    // verify the safe SVG subset survives while every known SVG-borne XSS
+    // vector is still rejected.
+
+    it("renders a safe SVG diagram with shapes and gradients", async () => {
+      const html = `<!doctype html><html><body>
+<svg id="diagram" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g"><stop offset="0%" stop-color="red"/><stop offset="100%" stop-color="blue"/></linearGradient>
+  </defs>
+  <rect width="100" height="100" fill="url(#g)"/>
+  <circle cx="50" cy="50" r="20" fill="white"/>
+  <text x="50" y="55" text-anchor="middle">ok</text>
+</svg>
+</body></html>`;
+      render(<RichArtifactEmbed title="Diagram" html={html} />);
+      const host = await screen.findByLabelText("Diagram", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        expect(shadow.querySelector("svg")).not.toBeNull();
+        expect(shadow.querySelector("rect")).not.toBeNull();
+        expect(shadow.querySelector("circle")).not.toBeNull();
+        expect(shadow.querySelector("linearGradient")).not.toBeNull();
+        expect(shadow.querySelector("text")?.textContent).toBe("ok");
+      });
+    });
+
+    it("strips <script> inside <svg>", async () => {
+      const html = `<!doctype html><html><body>
+<svg><script>window.__svg_pwned = 1</script><rect width="10" height="10"/></svg>
+</body></html>`;
+      render(<RichArtifactEmbed title="SVG script" html={html} />);
+      const host = await screen.findByLabelText("SVG script", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        expect(shadow.querySelector("svg")).not.toBeNull();
+        expect(shadow.querySelector("script")).toBeNull();
+      });
+      expect(
+        (window as unknown as Record<string, number>).__svg_pwned,
+      ).toBeUndefined();
+    });
+
+    it("strips <foreignObject> so it cannot smuggle <iframe> back in", async () => {
+      const html = `<!doctype html><html><body>
+<svg><foreignObject><iframe src="https://evil.example"></iframe></foreignObject></svg>
+</body></html>`;
+      render(<RichArtifactEmbed title="SVG foreignObject" html={html} />);
+      const host = await screen.findByLabelText("SVG foreignObject", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        // Use a case-insensitive walk because SVG element names are
+        // case-sensitive in the DOM (foreignObject vs foreignobject).
+        const tagNames = Array.from(shadow.querySelectorAll("*")).map((el) =>
+          el.tagName.toLowerCase(),
+        );
+        expect(tagNames).not.toContain("foreignobject");
+        expect(tagNames).not.toContain("iframe");
+      });
+    });
+
+    it("strips on* event handlers from svg root and inner shapes", async () => {
+      const html = `<!doctype html><html><body>
+<svg id="root" onload="window.__svg_load=1">
+  <rect id="r" width="10" height="10" onclick="window.__svg_click=1"/>
+</svg>
+</body></html>`;
+      render(<RichArtifactEmbed title="SVG events" html={html} />);
+      const host = await screen.findByLabelText("SVG events", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        const svg = shadow.querySelector("svg");
+        const rect = shadow.querySelector("rect");
+        expect(svg).not.toBeNull();
+        expect(rect).not.toBeNull();
+        expect(svg?.getAttribute("onload")).toBeNull();
+        expect(rect?.getAttribute("onclick")).toBeNull();
+      });
+      expect(
+        (window as unknown as Record<string, number>).__svg_load,
+      ).toBeUndefined();
+      expect(
+        (window as unknown as Record<string, number>).__svg_click,
+      ).toBeUndefined();
+    });
+
+    it("removes javascript: URLs from xlink:href inside SVG", async () => {
+      const html = `<!doctype html><html><body>
+<svg>
+  <a id="badlink" xlink:href="javascript:window.__svg_href=1"><rect width="10" height="10"/></a>
+  <a id="goodlink" xlink:href="#defId"><rect width="10" height="10"/></a>
+</svg>
+</body></html>`;
+      render(<RichArtifactEmbed title="SVG xlink" html={html} />);
+      const host = await screen.findByLabelText("SVG xlink", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        const bad = shadow.querySelector("#badlink");
+        const good = shadow.querySelector("#goodlink");
+        expect(bad).not.toBeNull();
+        // javascript: scheme dropped from xlink:href on the bad anchor.
+        const badHref =
+          bad?.getAttributeNS("http://www.w3.org/1999/xlink", "href") ??
+          bad?.getAttribute("xlink:href") ??
+          "";
+        expect(badHref.toLowerCase().startsWith("javascript:")).toBe(false);
+        // Internal fragment reference is preserved on the good anchor.
+        const goodHref =
+          good?.getAttributeNS("http://www.w3.org/1999/xlink", "href") ??
+          good?.getAttribute("xlink:href") ??
+          "";
+        expect(goodHref).toBe("#defId");
+      });
+      expect(
+        (window as unknown as Record<string, number>).__svg_href,
+      ).toBeUndefined();
+    });
+
+    it("strips SMIL animation tags that can fire JS via event-like sinks", async () => {
+      const html = `<!doctype html><html><body>
+<svg>
+  <rect width="10" height="10">
+    <animate attributeName="x" from="0" to="50" dur="1s"/>
+    <set attributeName="fill" to="red"/>
+  </rect>
+</svg>
+</body></html>`;
+      render(<RichArtifactEmbed title="SVG animate" html={html} />);
+      const host = await screen.findByLabelText("SVG animate", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        const tagNames = Array.from(shadow.querySelectorAll("*")).map((el) =>
+          el.tagName.toLowerCase(),
+        );
+        expect(tagNames).toContain("svg");
+        expect(tagNames).toContain("rect");
+        expect(tagNames).not.toContain("animate");
+        expect(tagNames).not.toContain("set");
+      });
+    });
+  });
+
   it("re-mounts when the html prop changes", async () => {
     const { rerender } = render(
       <RichArtifactEmbed

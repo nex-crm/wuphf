@@ -58,10 +58,14 @@ if (typeof window !== "undefined" && !customElements.get(ELEMENT_NAME)) {
 //                     sanitizerVersion=sandbox-v2.
 //   Layer 2 (client): DOMPurify with a conservative profile (no scripts, no
 //                     event handlers, no javascript:/data: URLs in href/src,
-//                     no iframe/object/embed/svg/math) runs HERE before any
+//                     no iframe/object/embed/math) runs HERE before any
 //                     DOM is mounted, so a sanitizer-bypass on the server
 //                     does not reach the parent origin even via the shadow
-//                     boundary.
+//                     boundary. SVG is intentionally allowed (safe subset
+//                     via USE_PROFILES.svg/svgFilters) so agent-emitted
+//                     diagrams render; <script> and <foreignObject> inside
+//                     SVG are still stripped by both the profile and the
+//                     deterministic post-sweep.
 //   Layer 3 (origin): shadow DOM contains style scope. The cost of leaving
 //                     the iframe sandbox is that a bypass would execute in
 //                     the parent origin; layers 1 + 2 are the mitigation.
@@ -91,13 +95,19 @@ if (typeof window !== "undefined" && !customElements.get(ELEMENT_NAME)) {
 const PURIFY_CONFIG: DOMPurifyConfig = {
   RETURN_DOM_FRAGMENT: true,
   WHOLE_DOCUMENT: false,
+  // Enable HTML + safe SVG subset (shapes, paths, gradients, filters). The
+  // svg/svgFilters profiles explicitly exclude <script> and <foreignObject>;
+  // we still belt-and-suspenders them in FORBIDDEN_TAG_SWEEP below in case
+  // a parser quirk (jsdom in tests, or future browser bugs) sneaks one
+  // past the tag walker.
+  USE_PROFILES: { html: true, svg: true, svgFilters: true },
   FORBID_TAGS: [
     "script",
     "iframe",
     "object",
     "embed",
-    "svg",
     "math",
+    "foreignObject",
     "form",
     "input",
     "button",
@@ -110,6 +120,12 @@ const PURIFY_CONFIG: DOMPurifyConfig = {
     "frame",
     "frameset",
     "applet",
+    // SMIL animation tags can fire JS via the SVG animation events. We do
+    // not need them for diagrams; drop them for now.
+    "animate",
+    "animateTransform",
+    "animateMotion",
+    "set",
   ],
   FORBID_ATTR: [
     "srcdoc",
@@ -118,7 +134,9 @@ const PURIFY_CONFIG: DOMPurifyConfig = {
     "ping",
     "background",
     "poster",
-    "xlink:href",
+    // xlink:href is allowed (SVG <use> needs it). The uponSanitizeAttribute
+    // hook below rejects javascript:/data:text/* schemes on it, mirroring
+    // the href/src checks.
   ],
   ALLOW_DATA_ATTR: true,
   ALLOW_UNKNOWN_PROTOCOLS: false,
@@ -135,22 +153,35 @@ if (typeof window !== "undefined") {
       data.keepAttr = false;
     }
   });
-  // Tighten URL schemes for href/src: keep relative paths, #fragments,
-  // data:image/* and blob:, drop everything else (especially javascript:).
+  // Tighten URL schemes for href/src/xlink:href: keep relative paths,
+  // #fragments, data:image/* (excluding SVG which can carry script) and
+  // data:font/*; drop everything else (especially javascript:). xlink:href
+  // is included because SVG <use> reaches sibling <defs> via xlink:href="#id"
+  // — internal fragment refs are exactly what we want to keep, and they
+  // pass the same scheme gate as href/src.
   DOMPurify.addHook("uponSanitizeAttribute", (_node, data) => {
-    if (data.attrName !== "href" && data.attrName !== "src") return;
+    if (
+      data.attrName !== "href" &&
+      data.attrName !== "src" &&
+      data.attrName !== "xlink:href"
+    ) {
+      return;
+    }
     const value = (data.attrValue || "").trim();
     const lower = value.toLowerCase();
     if (lower.startsWith("javascript:") || lower.startsWith("vbscript:")) {
       data.keepAttr = false;
       return;
     }
-    if (
-      lower.startsWith("data:") &&
-      !lower.startsWith("data:image/") &&
-      !lower.startsWith("data:font/")
-    ) {
-      data.keepAttr = false;
+    if (lower.startsWith("data:")) {
+      // data:image/svg+xml can carry inline <script>; refuse it. Everything
+      // else under data: that is not an explicit image or font is rejected.
+      const safeImage =
+        lower.startsWith("data:image/") && !lower.startsWith("data:image/svg");
+      const safeFont = lower.startsWith("data:font/");
+      if (!(safeImage || safeFont)) {
+        data.keepAttr = false;
+      }
     }
   });
 }
@@ -264,13 +295,18 @@ function mergeClasses(target: HTMLElement, raw: string): void {
   }
 }
 
+// Deterministic post-sweep targets. SVG itself is intentionally NOT here —
+// we want the safe SVG subset (shapes, paths, gradients, filters) to render
+// — but the dangerous SVG children (script, foreignObject which can smuggle
+// HTML, SMIL animation tags which can trigger JS event handlers) ARE swept
+// so a parser quirk cannot leave one behind.
 const FORBIDDEN_TAG_SWEEP = [
   "script",
   "iframe",
   "object",
   "embed",
-  "svg",
   "math",
+  "foreignObject",
   "form",
   "input",
   "button",
@@ -284,11 +320,20 @@ const FORBIDDEN_TAG_SWEEP = [
   "frameset",
   "applet",
   "noscript",
+  "animate",
+  "animateTransform",
+  "animateMotion",
+  "set",
 ];
 
 function sweepForbiddenTags(root: ParentNode): void {
-  const selector = FORBIDDEN_TAG_SWEEP.join(",");
-  for (const el of Array.from(root.querySelectorAll(selector))) {
+  // querySelectorAll matches lower-cased tag names in HTML documents but
+  // SVG elements like <foreignObject> are namespaced and case-sensitive
+  // when parsed inside an <svg>. Run both selectors to cover both shapes.
+  const selectors = FORBIDDEN_TAG_SWEEP.map((tag) => tag.toLowerCase())
+    .concat(FORBIDDEN_TAG_SWEEP)
+    .join(",");
+  for (const el of Array.from(root.querySelectorAll(selectors))) {
     el.remove();
   }
 }
