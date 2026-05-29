@@ -29,12 +29,14 @@ function stubNexRegister(page: Page, status: number, body: unknown) {
 }
 
 // goToIntegrations lands on the shell and opens Settings → Integrations,
-// where NexConnectPanel renders.
+// where NexConnectPanel renders. The Settings nav button is matched by
+// data-testid so it's not confused with the same-named Integrations app
+// entry in the parent sidebar.
 async function goToIntegrations(page: Page) {
   await page.goto("/");
   await waitForReactMount(page);
   await page.getByLabel("Open settings").click();
-  await page.getByRole("button", { name: "Integrations" }).click();
+  await page.getByTestId("settings-nav-integrations").click();
   await expect(page.getByTestId("nex-connect-panel")).toBeVisible();
 }
 

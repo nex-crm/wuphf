@@ -1433,6 +1433,12 @@ export function SettingsApp() {
                   key={sec.id}
                   style={styles.navItem(sec.id === section)}
                   onClick={() => setSection(sec.id)}
+                  // testid so e2e can disambiguate the Settings section
+                  // buttons from buttons with the same name that live in
+                  // the parent sidebar (e.g. the Integrations sidebar app
+                  // entry shares the "Integrations" accessible name with
+                  // the Settings → Integrations section button).
+                  data-testid={`settings-nav-${sec.id}`}
                 >
                   <Icon style={styles.navIcon} />
                   <span>{sec.name}</span>
