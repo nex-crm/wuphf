@@ -63,3 +63,115 @@ func TestReadCodexJSONStreamOversizedLine(t *testing.T) {
 		t.Fatalf("post-oversized usage not parsed: %+v", result.Usage)
 	}
 }
+
+// TestReadCodexJSONStreamItemCompletedDrivesProgress is the D3 regression:
+// a codex exec turn that reports the assistant message only via
+// item.completed (the newer exec shape, no response.output_text.delta)
+// must still drive the runner's progress surface — reasoning, tool_use,
+// and a text event for the completed assistant message. Before the fix the
+// completed message item was collected into FinalMessage but never emitted
+// as an onEvent, so the runner saw zero text events (first_text_ms stayed
+// -1) and the live-chat relay never got the spoken output.
+func TestReadCodexJSONStreamItemCompletedDrivesProgress(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"type":"item.started","item":{"id":"r1","type":"reasoning"}}`,
+		`{"type":"item.completed","item":{"id":"r1","type":"reasoning"}}`,
+		`{"type":"item.started","item":{"id":"t1","type":"function_call","name":"notebook_visual_artifact_create","arguments":"{\"title\":\"chart\"}"}}`,
+		`{"type":"item.completed","item":{"id":"t1","type":"function_call","name":"notebook_visual_artifact_create","arguments":"{\"title\":\"chart\"}"}}`,
+		`{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"Shipped the figure."}}`,
+		`{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":4}}`,
+	}, "\n")
+
+	var types []string
+	var toolNames []string
+	var textPayloads []string
+	result, err := ReadCodexJSONStream(strings.NewReader(stream), func(evt CodexStreamEvent) {
+		types = append(types, evt.Type)
+		switch evt.Type {
+		case "tool_use":
+			toolNames = append(toolNames, evt.ToolName)
+		case "text":
+			textPayloads = append(textPayloads, evt.Text)
+		}
+	})
+	if err != nil {
+		t.Fatalf("ReadCodexJSONStream: %v", err)
+	}
+
+	// The runner classifies in order: reasoning (→ "planning next step"),
+	// tool_use (→ "running <tool>"), text (→ "drafting response"). Assert
+	// each fired at least once so updateHeadlessProgress would step through
+	// thinking → tool_use → text.
+	if !containsString(types, "reasoning") {
+		t.Fatalf("expected a reasoning event, got %v", types)
+	}
+	if !containsString(types, "tool_use") {
+		t.Fatalf("expected a tool_use event, got %v", types)
+	}
+	if !containsString(types, "text") {
+		t.Fatalf("expected a text event for the item.completed message, got %v", types)
+	}
+
+	// Ordering: reasoning must precede tool_use must precede text, matching
+	// the codex turn shape the runner narrates.
+	if got := firstIndex(types, "reasoning"); got < 0 || got > firstIndex(types, "tool_use") {
+		t.Fatalf("reasoning should precede tool_use: %v", types)
+	}
+	if got := firstIndex(types, "tool_use"); got < 0 || got > firstIndex(types, "text") {
+		t.Fatalf("tool_use should precede text: %v", types)
+	}
+
+	if !containsString(toolNames, "notebook_visual_artifact_create") {
+		t.Fatalf("expected the visual-artifact tool name, got %v", toolNames)
+	}
+	if !containsString(textPayloads, "Shipped the figure.") {
+		t.Fatalf("expected the completed message text, got %v", textPayloads)
+	}
+	if result.FinalMessage != "Shipped the figure." {
+		t.Fatalf("FinalMessage = %q, want %q", result.FinalMessage, "Shipped the figure.")
+	}
+}
+
+// TestReadCodexJSONStreamCompletedMessageNotDoubledWithDeltas guards the
+// dedup: when a turn DOES stream response.output_text.delta AND closes
+// with a matching completed message item, the completed item must not
+// re-emit a duplicate text event into the relay.
+func TestReadCodexJSONStreamCompletedMessageNotDoubledWithDeltas(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"type":"response.output_text.delta","delta":"Shipped "}`,
+		`{"type":"response.output_text.delta","delta":"it."}`,
+		`{"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"Shipped it."}]}}`,
+	}, "\n")
+
+	var textEvents int
+	if _, err := ReadCodexJSONStream(strings.NewReader(stream), func(evt CodexStreamEvent) {
+		if evt.Type == "text" {
+			textEvents++
+		}
+	}); err != nil {
+		t.Fatalf("ReadCodexJSONStream: %v", err)
+	}
+	// Two delta events; the completed item must NOT add a third because the
+	// streaming deltas already carried the message to the relay.
+	if textEvents != 2 {
+		t.Fatalf("expected exactly 2 text events (no completed-item double), got %d", textEvents)
+	}
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func firstIndex(haystack []string, needle string) int {
+	for i, s := range haystack {
+		if s == needle {
+			return i
+		}
+	}
+	return -1
+}

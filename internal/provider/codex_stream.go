@@ -66,8 +66,11 @@ type codexJSONContentPart struct {
 type codexStreamState struct {
 	deltaText           strings.Builder
 	pendingTextBreak    bool
+	sawTextDelta        bool
 	completedMessages   []string
 	completedMessageSet map[string]struct{}
+	emittedMessageSet   map[string]struct{}
+	reasoningSeen       map[string]struct{}
 	toolNames           map[string]string
 	toolArgs            map[string]string
 	toolStarted         map[string]struct{}
@@ -83,6 +86,8 @@ func ReadCodexJSONStream(r io.Reader, onEvent func(CodexStreamEvent)) (CodexStre
 	var result CodexStreamResult
 	state := codexStreamState{
 		completedMessageSet: make(map[string]struct{}),
+		emittedMessageSet:   make(map[string]struct{}),
+		reasoningSeen:       make(map[string]struct{}),
 		toolNames:           make(map[string]string),
 		toolArgs:            make(map[string]string),
 		toolStarted:         make(map[string]struct{}),
@@ -113,6 +118,7 @@ func ReadCodexJSONStream(r io.Reader, onEvent func(CodexStreamEvent)) (CodexStre
 			}
 		}
 
+		state.consumeReasoningEvent(event, onEvent)
 		state.consumeToolEvent(event, onEvent)
 		state.consumeTextDelta(event, onEvent)
 		if usage, ok := extractCodexUsage(line); ok {
@@ -123,6 +129,25 @@ func ReadCodexJSONStream(r io.Reader, onEvent func(CodexStreamEvent)) (CodexStre
 			if _, seen := state.completedMessageSet[text]; !seen {
 				state.completedMessageSet[text] = struct{}{}
 				state.completedMessages = append(state.completedMessages, text)
+			}
+			// Newer codex exec builds report the assistant message only as a
+			// completed item (item.completed / response.output_item.done with
+			// a message item) and never stream response.output_text.delta. In
+			// that mode the delta path above never fires, so the runner would
+			// see no "text" event — first_text_ms stays -1 and the live-chat
+			// relay never gets the spoken output. Emit the completed message
+			// as a text event when no deltas were seen for it, so the
+			// item.completed shape drives the same progress surface as the
+			// streaming shape. Guard with emittedMessageSet so a turn that
+			// both streams deltas AND closes with a matching completed item
+			// (the response.* shape) does not double-feed the relay.
+			if !state.sawTextDelta {
+				if _, emitted := state.emittedMessageSet[text]; !emitted {
+					state.emittedMessageSet[text] = struct{}{}
+					if onEvent != nil {
+						onEvent(CodexStreamEvent{Type: "text", RawType: event.Type, Text: text})
+					}
+				}
 			}
 		}
 	})
@@ -138,11 +163,34 @@ func ReadCodexJSONStream(r io.Reader, onEvent func(CodexStreamEvent)) (CodexStre
 	return result, nil
 }
 
+// consumeReasoningEvent maps codex reasoning/thinking items to a normalized
+// "reasoning" event. Codex exec emits these between tool calls; surfacing
+// them lets the runner show "planning next step" instead of a dark interval
+// during a long reasoning stretch. The reasoning *text* is intentionally
+// not forwarded — like Claude's thinking blocks it is private chain-of-
+// thought, so only the fact that reasoning is happening is surfaced.
+// Deduped per item so a started+completed pair fires the progress hint once.
+func (s *codexStreamState) consumeReasoningEvent(event codexJSONEvent, onEvent func(CodexStreamEvent)) {
+	if onEvent == nil || !eventHasReasoningItem(event) {
+		return
+	}
+	itemID := strings.TrimSpace(firstNonEmpty(event.ItemID, itemIDFromEvent(event)))
+	if itemID == "" {
+		itemID = "reasoning"
+	}
+	if _, seen := s.reasoningSeen[itemID]; seen {
+		return
+	}
+	s.reasoningSeen[itemID] = struct{}{}
+	onEvent(CodexStreamEvent{Type: "reasoning", RawType: event.Type})
+}
+
 func (s *codexStreamState) consumeTextDelta(event codexJSONEvent, onEvent func(CodexStreamEvent)) {
 	text := strings.TrimSpace(extractCodexTextDelta(event))
 	if text == "" {
 		return
 	}
+	s.sawTextDelta = true
 	if s.pendingTextBreak && s.deltaText.Len() > 0 {
 		s.deltaText.WriteString("\n\n")
 		if onEvent != nil {
@@ -379,6 +427,10 @@ func eventHasToolItem(event codexJSONEvent) bool {
 	return event.Item != nil && isCodexToolItemType(event.Item.Type)
 }
 
+func eventHasReasoningItem(event codexJSONEvent) bool {
+	return event.Item != nil && isCodexReasoningItemType(event.Item.Type)
+}
+
 func itemIDFromEvent(event codexJSONEvent) string {
 	if event.Item == nil {
 		return ""
@@ -419,6 +471,15 @@ func isCodexTextItemType(itemType string) bool {
 func isCodexToolItemType(itemType string) bool {
 	switch strings.TrimSpace(itemType) {
 	case "function_call", "tool_call", "computer_call", "custom_tool_call":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCodexReasoningItemType(itemType string) bool {
+	switch strings.TrimSpace(itemType) {
+	case "reasoning", "reasoning_summary", "thinking":
 		return true
 	default:
 		return false
