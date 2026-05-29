@@ -4,23 +4,107 @@ import type { Message, OfficeMember } from "../../api/client";
 import { extractRichArtifactIds } from "../../lib/richArtifactReferences";
 
 /**
- * Phrases an agent uses to promise a follow-up artifact ("article", "chart", etc).
- * Lowercase, no anchors: matched against the trailing window of the message body.
+ * Trailing promise nouns an agent emits right before it posts a follow-up
+ * visual artifact ("...full breakdown below", "...see the diagram", etc).
+ *
+ * The heuristic matches when the message ends with a SHORT clause built from
+ * these nouns plus a small set of promise verbs/prepositions. We match the
+ * tail only — never mid-body — so normal sentences that merely mention a
+ * "chart" earlier on don't false-positive. On the codex path the agent may
+ * not emit one of a fixed set of phrases, so we match the shape of a promise
+ * (a deictic like "below"/"see the" or an artifact noun at the very end)
+ * rather than an exact string.
  */
-const ARTIFACT_PROMISE_PHRASES: readonly string[] = [
-  "visual artifact below",
-  "visual artifact coming",
-  "chart below",
-  "chart coming",
-  "article coming",
+const ARTIFACT_PROMISE_NOUNS: readonly string[] = [
+  "visual artifact",
+  "visual",
+  "artifact",
+  "chart",
+  "diagram",
+  "figure",
+  "graphic",
+  "schematic",
+  "breakdown",
   "full breakdown",
   "full article",
-  "in the article",
-  "below",
+  "article",
+  "writeup",
+  "write up",
+  "rendering",
 ];
 
-/** Window after the message for which the skeleton is shown (ms). */
-export const ARTIFACT_SKELETON_RECENCY_WINDOW_MS = 60_000;
+/**
+ * Trailing deictic clauses that promise something is being rendered just
+ * below the gist. Strong enough to fire on their own ("...rendered below")
+ * because they explicitly point at a follow-up render.
+ */
+const ARTIFACT_PROMISE_DEICTICS: readonly string[] = [
+  "below",
+  "rendered below",
+  "rendered",
+  "see the",
+  "see below",
+  "attached below",
+];
+
+/**
+ * Trailing "still being produced" verbs. Too weak to fire alone ("the
+ * weekend is coming"), so they only count when an artifact noun appears
+ * earlier in the same clause ("the chart is coming", "diagram incoming").
+ */
+const ARTIFACT_PROMISE_PENDING_VERBS: readonly string[] = [
+  "coming",
+  "incoming",
+  "on its way",
+  "one moment",
+  "loading",
+];
+
+/**
+ * Lead-in clauses that, immediately before a trailing artifact noun, read as
+ * a fresh promise of a follow-up artifact ("here is the chart", "drafting
+ * the figure", "more in the article").
+ *
+ * Deliberately excludes bare articles ("the", "a", "this") on their own:
+ * "I really like this article" ends with "this article" but is not a
+ * promise. Each lead-in pairs a presentation/production/reference verb with
+ * the article so only deliberate hand-offs match.
+ */
+const ARTIFACT_PROMISE_LEADINS: readonly string[] = [
+  "here is the",
+  "here is a",
+  "here's the",
+  "here's a",
+  "here is",
+  "here's",
+  "drafting the",
+  "drafting a",
+  "building the",
+  "building a",
+  "rendering the",
+  "rendering a",
+  "preparing the",
+  "preparing a",
+  "put together the",
+  "put together a",
+  "in the",
+  "in a",
+  "see the",
+  "see a",
+  "attached the",
+  "attached a",
+];
+
+/**
+ * Window after the message for which the skeleton is shown (ms).
+ *
+ * Sized to comfortably cover a long codex turn (~100s) plus broker/SSE lag,
+ * so the skeleton does not age out mid-build. It unmounts the instant the
+ * artifact marker lands (see {@link hasArtifactArrivedFromSameAgent}) and on
+ * the agent leaving "active", so the wide window is an upper bound, not the
+ * common case.
+ */
+export const ARTIFACT_SKELETON_RECENCY_WINDOW_MS = 180_000;
 
 interface ArtifactSkeletonProps {
   /** Caption next to the FIG label. Defaults to "drafting figure". */
@@ -162,7 +246,8 @@ export interface ShouldShowArtifactSkeletonInput {
  * Trigger requires ALL of:
  *  1. message is from an agent currently in `status: "active"` (server's
  *     "agent X is typing" signal — same source as <TypingIndicator>).
- *  2. message body ends with one of {@link ARTIFACT_PROMISE_PHRASES}.
+ *  2. message body ends with an artifact promise (see
+ *     {@link endsWithArtifactPromise}).
  *  3. message is less than {@link ARTIFACT_SKELETON_RECENCY_WINDOW_MS} old.
  *  4. message itself does not already carry a `visual-artifact:` marker
  *     (no skeleton when the artifact reference is already inline).
@@ -279,20 +364,98 @@ export function useArtifactSkeletonTrigger({
   });
 }
 
+/**
+ * Decide whether `content` ends with a short clause promising a follow-up
+ * artifact. The match is precise by construction: it only fires on the
+ * trailing clause (last sentence/line), so a "chart" mentioned earlier in a
+ * long message never triggers it.
+ *
+ * Matches when the trailing clause:
+ *  - ends with a deictic promise ("...below", "...rendered", "see the …"), OR
+ *  - ends with a lead-in + artifact noun ("...the chart", "here is the
+ *    figure", "...drafting the diagram"), OR
+ *  - ends with a bare artifact noun preceded by a lead-in word anywhere in
+ *    the clause ("...the full breakdown").
+ */
 function endsWithArtifactPromise(content: string): boolean {
-  const trimmed = content.trim();
-  if (!trimmed) return false;
-  // Strip trailing markdown punctuation so phrases at the very end ("...below.")
-  // still match. Keep alphanumerics, spaces, hyphens — strip everything else.
-  const tail = trimmed
-    .slice(-160)
-    .toLowerCase()
-    .replace(/[^a-z0-9 -]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const tail = trailingClause(content);
   if (!tail) return false;
-  for (const phrase of ARTIFACT_PROMISE_PHRASES) {
-    if (tail.endsWith(phrase)) return true;
+  return (
+    endsWithDeicticPromise(tail) ||
+    endsWithPendingArtifact(tail) ||
+    endsWithLeadInArtifactNoun(tail)
+  );
+}
+
+/** Strong deictic promise at the very end ("...rendered below", "see the …"). */
+function endsWithDeicticPromise(tail: string): boolean {
+  return ARTIFACT_PROMISE_DEICTICS.some((deictic) => tail.endsWith(deictic));
+}
+
+/**
+ * "Still producing" verb at the end, but only when an artifact noun is
+ * present earlier in the clause ("the chart is coming", "diagram incoming").
+ * Keeps everyday "...the weekend is coming" from matching.
+ */
+function endsWithPendingArtifact(tail: string): boolean {
+  if (!ARTIFACT_PROMISE_PENDING_VERBS.some((verb) => tail.endsWith(verb))) {
+    return false;
+  }
+  return clauseMentionsArtifactNoun(tail);
+}
+
+/**
+ * Lead-in + artifact noun at the very end ("...here is the chart",
+ * "...drafting the figure"). Requiring the lead-in keeps a sentence that
+ * happens to end on a noun ("I like this article") from matching unless it
+ * reads as a fresh promise.
+ */
+function endsWithLeadInArtifactNoun(tail: string): boolean {
+  for (const noun of ARTIFACT_PROMISE_NOUNS) {
+    if (!tail.endsWith(noun)) continue;
+    const head = tail.slice(0, tail.length - noun.length).trimEnd();
+    if (ARTIFACT_PROMISE_LEADINS.some((leadin) => head.endsWith(leadin))) {
+      return true;
+    }
   }
   return false;
+}
+
+/** True when the clause contains an artifact noun as a whole word. */
+function clauseMentionsArtifactNoun(clause: string): boolean {
+  for (const noun of ARTIFACT_PROMISE_NOUNS) {
+    if (clause === noun) return true;
+    if (
+      clause.startsWith(`${noun} `) ||
+      clause.endsWith(` ${noun}`) ||
+      clause.includes(` ${noun} `)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Lowercase, punctuation-stripped trailing clause of a message — the last
+ * sentence or line. Matching against the clause (not the whole tail) is what
+ * keeps the heuristic from firing on artifact nouns buried mid-message.
+ */
+function trailingClause(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) return "";
+  // Split on sentence terminators and line breaks; take the final non-empty
+  // segment so "Some context here. Full breakdown below." matches on the
+  // promise clause, not the whole body.
+  const segments = trimmed
+    .slice(-240)
+    .split(/[.!?\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const clause = segments.length ? segments[segments.length - 1] : trimmed;
+  return clause
+    .toLowerCase()
+    .replace(/[^a-z0-9 '-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

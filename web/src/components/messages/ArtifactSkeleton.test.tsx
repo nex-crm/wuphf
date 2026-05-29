@@ -46,13 +46,30 @@ describe("<ArtifactSkeleton>", () => {
 
 describe("shouldShowArtifactSkeleton — phrase heuristic", () => {
   it.each([
+    // Deictic promises ("…below", "see the …") fire on their own.
     ["...full breakdown below.", true],
     ["See the visual artifact below!", true],
+    ["Rendered below.", true],
+    ["Here is the breakdown, rendered below.", true],
+    // Lead-in + artifact noun at the end.
     ["More in the article.", true],
-    ["Article coming.", true],
     ["Here is the full article.", true],
-    ["Full breakdown — coming.", false],
+    ["Drafting the diagram.", true],
+    ["Building a chart.", true],
+    ["See the figure.", true],
+    // Pending verb + an artifact noun earlier in the clause.
+    ["Article coming.", true],
+    ["The chart is coming.", true],
+    ["Diagram incoming.", true],
+    ["Full breakdown — coming.", true],
+    // Common codex-path closers the agent actually emits.
+    ["I put together the full breakdown.", true],
+    ["Here's the schematic.", true],
+    // No promise — must stay silent.
     ["Just FYI, no follow-up.", false],
+    ["Talk soon, the weekend is coming.", false],
+    ["I really like this article.", false],
+    ["Let me know what you think.", false],
     ["", false],
   ])("matches %j → %s", (tail, expected) => {
     const got = shouldShowArtifactSkeleton({
@@ -64,11 +81,24 @@ describe("shouldShowArtifactSkeleton — phrase heuristic", () => {
     expect(got).toBe(expected);
   });
 
-  it("requires the phrase to be at the END of the message, not mid-body", () => {
+  it("requires the promise to be in the trailing clause, not mid-body", () => {
     const got = shouldShowArtifactSkeleton({
       message: buildMessage({
         content:
           "I'll put the full article below shortly, but first some context here.",
+      }),
+      newerMessages: [],
+      members: [PM_MEMBER],
+      nowMs: BASE_NOW,
+    });
+    expect(got).toBe(false);
+  });
+
+  it("ignores an artifact noun buried earlier in a long message", () => {
+    const got = shouldShowArtifactSkeleton({
+      message: buildMessage({
+        content:
+          "The chart we discussed last week was wrong. I have fixed the numbers and double-checked the totals against the source spreadsheet.",
       }),
       newerMessages: [],
       members: [PM_MEMBER],
