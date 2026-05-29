@@ -43,6 +43,12 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./tests/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // Hard timeouts so a runaway test/teardown fails the suite instead of
+    // hanging the CI worker for 15+ minutes. We've hit this via SSE/timer
+    // handles that outlive a test.
+    testTimeout: 10_000,
+    hookTimeout: 10_000,
+    teardownTimeout: 10_000,
     coverage: {
       provider: "v8",
       include: [
