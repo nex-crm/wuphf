@@ -50,6 +50,13 @@ vi.mock("./AgentEventPeek", () => ({
   AgentEventPeek: () => null,
 }));
 
+// v3-mvp: AgentList row click navigates to /agents/$agentSlug via the
+// TanStack Router rather than the legacy zustand setActiveAgentSlug. Mock
+// the router so the navigation contract is observable in unit tests.
+vi.mock("../../lib/router", () => ({
+  router: { navigate: vi.fn() },
+}));
+
 // Mock useAgentEventPeek so the per-row peek state is deterministic. We
 // flip `isOpen` in tests by tracking calls to `toggle` via the mock
 // implementation rather than going through the real Zustand store.
@@ -78,6 +85,7 @@ vi.mock("../../hooks/useAgentEventPeek", () => {
 import { useAgentEventPeek } from "../../hooks/useAgentEventPeek";
 import { useFirstRunNudge } from "../../hooks/useFirstRunNudge";
 import { useOfficeMembers } from "../../hooks/useMembers";
+import { router } from "../../lib/router";
 import { AgentList } from "./AgentList";
 
 const useOfficeMembersMock = vi.mocked(useOfficeMembers);
@@ -317,9 +325,12 @@ describe("<AgentList>", () => {
     // threshold is what differentiates peek from navigate." If peek is open
     // when the user taps the row, the workspace should be the only surface
     // visible after the tap — close the peek as part of escalation.
+    // v3-mvp: navigation now goes through router.navigate({ to:
+    // "/agents/$agentSlug", ... }) instead of the legacy
+    // setActiveAgentSlug store setter.
     const close = vi.fn();
-    const setActiveAgentSlug = vi.fn();
-    useAppStore.setState({ setActiveAgentSlug });
+    const navigate = vi.mocked(router.navigate);
+    navigate.mockClear();
     useAgentEventPeekMock.mockImplementation(() =>
       defaultPeekState({ isOpen: true, close }),
     );
@@ -336,12 +347,17 @@ describe("<AgentList>", () => {
     fireEvent.click(row);
 
     expect(close).toHaveBeenCalledTimes(1);
-    expect(setActiveAgentSlug).toHaveBeenCalledWith("tess");
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/agents/$agentSlug",
+      params: { agentSlug: "tess" },
+    });
   });
 
-  it("clicking the chevron does NOT call setActiveAgentSlug (e.stopPropagation)", () => {
-    const setActiveAgentSlug = vi.fn();
-    useAppStore.setState({ setActiveAgentSlug });
+  it("clicking the chevron does NOT navigate to the agent subspace (e.stopPropagation)", () => {
+    // v3-mvp: row click navigates via router.navigate; the chevron must
+    // stopPropagation so the peek toggle doesn't double as a navigation.
+    const navigate = vi.mocked(router.navigate);
+    navigate.mockClear();
 
     setMembers([
       { slug: "tess", name: "Tess", role: "engineer", task: "watching tests" },
@@ -354,7 +370,7 @@ describe("<AgentList>", () => {
     expect(chevron).not.toBeNull();
     fireEvent.click(chevron as Element);
 
-    expect(setActiveAgentSlug).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("clicking the chevron calls peek.toggle and flips aria-expanded to true on the next render", () => {

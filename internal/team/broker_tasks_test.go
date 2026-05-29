@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
@@ -1771,13 +1772,12 @@ func TestBrokerHandlePostTaskCapabilityGapCreatesSelfHealingTask(t *testing.T) {
 	var blocked teamTask
 	var healing teamTask
 	for _, candidate := range b.AllTasks() {
-		switch candidate.ID {
-		case task.ID:
+		if candidate.ID == task.ID {
 			blocked = candidate
-		default:
-			if candidate.Title == "Self-heal @eng on "+task.ID {
-				healing = candidate
-			}
+			continue
+		}
+		if isSelfHealingTask(&candidate) {
+			healing = candidate
 		}
 	}
 	if !blocked.Blocked() || blocked.Status() != "blocked" {
@@ -1786,8 +1786,16 @@ func TestBrokerHandlePostTaskCapabilityGapCreatesSelfHealingTask(t *testing.T) {
 	if healing.ID == "" {
 		t.Fatalf("expected capability-gap self-healing task, got %+v", b.AllTasks())
 	}
-	if healing.Owner != "ceo" || healing.TaskType != "incident" || healing.ExecutionMode != "office" {
-		t.Fatalf("expected office incident owned by ceo, got %+v", healing)
+	// Self-heal records render as Issues in the FE; PipelineID stays
+	// "incident" so isSelfHealingTask still recognises them.
+	if healing.Owner != "ceo" || healing.TaskType != "issue" || healing.PipelineID != "incident" || healing.ExecutionMode != "office" {
+		t.Fatalf("expected office issue/incident owned by ceo, got %+v", healing)
+	}
+	// The self-heal title should follow the new "[@<agent>] <verb>: <parent>"
+	// shape with the parent title carried through.
+	wantTitle := selfHealingTaskTitle("eng", task.ID, blocked.Title, agent.EscalationCapabilityGap)
+	if healing.Title != wantTitle {
+		t.Fatalf("expected self-heal title %q, got %q", wantTitle, healing.Title)
 	}
 	if !strings.Contains(healing.Details, "capability_gap") ||
 		!strings.Contains(healing.Details, detail) ||
