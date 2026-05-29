@@ -36,6 +36,11 @@ export function ThinkingLoader({
   className,
 }: ThinkingLoaderProps) {
   const list = phrases ?? NO_PHRASES;
+  // The visible content is decorative (aria-hidden / cycling), so the
+  // role="status" live region needs a stable accessible name of its own —
+  // otherwise it is announced unnamed. Fall back to "Loading…" when no
+  // caller label is supplied.
+  const statusLabel = label ?? "Loading…";
   const phrase = useCyclingPhrase(list, 2400, list.length > 0);
   const hasPhrase = list.length > 0 && phrase.length > 0;
 
@@ -45,7 +50,7 @@ export function ThinkingLoader({
         className={`thinking-loader thinking-loader-block${className ? ` ${className}` : ""}`}
         role="status"
         aria-live="polite"
-        aria-label={label}
+        aria-label={statusLabel}
       >
         {hasPhrase ? (
           <span
@@ -59,9 +64,11 @@ export function ThinkingLoader({
             </span>
           </span>
         ) : (
-          <span className="thinking-shimmer-text">{label ?? "Loading…"}</span>
+          <span className="thinking-shimmer-text" aria-hidden="true">
+            {statusLabel}
+          </span>
         )}
-        {label ? <span className="sr-only">{label}</span> : null}
+        <span className="sr-only">{statusLabel}</span>
       </div>
     );
   }
@@ -71,7 +78,7 @@ export function ThinkingLoader({
       className={`thinking-loader thinking-loader-inline${className ? ` ${className}` : ""}`}
       role="status"
       aria-live="polite"
-      aria-label={label}
+      aria-label={statusLabel}
     >
       <span className="thinking-bubble" aria-hidden="true">
         <span className="thinking-dots">
@@ -86,7 +93,7 @@ export function ThinkingLoader({
           </span>
         ) : null}
       </span>
-      {label ? <span className="sr-only">{label}</span> : null}
+      <span className="sr-only">{statusLabel}</span>
     </div>
   );
 }
