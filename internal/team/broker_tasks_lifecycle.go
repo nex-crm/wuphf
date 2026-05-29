@@ -269,7 +269,7 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.counter++
 	task := teamTask{
-		ID:        fmt.Sprintf("task-%d", b.counter),
+		ID:        b.allocateIssueIDLocked(),
 		Channel:   channel,
 		Title:     title,
 		Details:   strings.TrimSpace(details),

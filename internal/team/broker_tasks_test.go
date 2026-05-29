@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
@@ -241,8 +242,15 @@ func TestBrokerTaskLifecycle(t *testing.T) {
 		"owner":      "fe",
 		"thread_id":  "msg-1",
 	})
-	if created.Status() != "in_progress" || created.Owner != "fe" {
+	// Issues (task_type defaults to "issue" since the rule-zero override
+	// landed) start in drafting state, awaiting human approval — they
+	// transition to running only via the Approve & Start path. See
+	// docs/specs/issue-execution-loop.md.
+	if created.Status() != "open" || created.Owner != "fe" {
 		t.Fatalf("unexpected created task: %+v", created)
+	}
+	if created.LifecycleState != LifecycleStateDrafting {
+		t.Fatalf("expected drafting lifecycle for new issue, got %q", created.LifecycleState)
 	}
 	if created.FollowUpAt == "" || created.ReminderAt == "" || created.RecheckAt == "" {
 		t.Fatalf("expected follow-up timestamps on task create, got %+v", created)
@@ -792,7 +800,7 @@ func TestBrokerTaskPlanAssignsWorktreeForLocalWorktreeTask(t *testing.T) {
 	base := fmt.Sprintf("http://%s", b.Addr())
 	body, _ := json.Marshal(map[string]any{
 		"channel":    "general",
-		"created_by": "operator",
+		"created_by": "ceo",
 		"tasks": []map[string]any{
 			{
 				"title":          "Build intake dry-run review bundle",
@@ -852,7 +860,7 @@ func TestBrokerTaskCreateAddsAssignedOwnerToChannelMembers(t *testing.T) {
 		"channel":    "youtube-factory",
 		"title":      "Restore remotion dependency path",
 		"details":    "Unblock the real render lane.",
-		"created_by": "operator",
+		"created_by": "ceo",
 		"owner":      "builder",
 		"task_type":  "feature",
 	})
@@ -892,7 +900,7 @@ func TestBrokerResumeTaskUnblocksAndSchedulesOwnerLane(t *testing.T) {
 		Title:         "Retry kickoff send",
 		Details:       "429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.",
 		Owner:         "builder",
-		CreatedBy:     "operator",
+		CreatedBy:     "ceo",
 		TaskType:      "follow_up",
 		ExecutionMode: "live_external",
 	})
@@ -940,7 +948,7 @@ func TestBrokerResumeTaskStripsRateLimitMarker(t *testing.T) {
 		Title:         "Retry kickoff send",
 		Details:       preBlockContext + "\n" + rateLimitLine,
 		Owner:         "builder",
-		CreatedBy:     "operator",
+		CreatedBy:     "ceo",
 		TaskType:      "follow_up",
 		ExecutionMode: "live_external",
 	})
@@ -986,7 +994,7 @@ func TestBrokerResumeTaskPreservesDetailsWithoutMarker(t *testing.T) {
 		Title:     "Dependent kickoff",
 		Details:   detailsNoMarker,
 		Owner:     "builder",
-		CreatedBy: "operator",
+		CreatedBy: "ceo",
 		TaskType:  "follow_up",
 	})
 	if err != nil {
@@ -1030,14 +1038,14 @@ func TestBrokerUnblockDependentsStripsRateLimitMarker(t *testing.T) {
 	b.tasks = []teamTask{
 		{
 			ID: "task-parent", Channel: "client-loop", Title: "Prereq",
-			Owner: "builder", status: "done", CreatedBy: "operator",
+			Owner: "builder", status: "done", CreatedBy: "ceo",
 			TaskType: "feature", ExecutionMode: "local_worktree",
 			reviewState: "approved", CreatedAt: now, UpdatedAt: now,
 		},
 		{
 			ID: "task-child", Channel: "client-loop", Title: "Dependent kickoff",
 			Owner: "builder", status: "blocked", blocked: true,
-			CreatedBy: "operator", TaskType: "feature", ExecutionMode: "live_external",
+			CreatedBy: "ceo", TaskType: "feature", ExecutionMode: "live_external",
 			DependsOn: []string{"task-parent"},
 			Details:   "Original goal: ship dependent kickoff.\n429 RESOURCE_EXHAUSTED. Retry after 2026-04-15T22:00:29.610Z.",
 			CreatedAt: now, UpdatedAt: now,
@@ -1070,7 +1078,7 @@ func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 		Channel:       "client-loop",
 		Title:         "Send kickoff email",
 		Owner:         "builder",
-		CreatedBy:     "operator",
+		CreatedBy:     "ceo",
 		TaskType:      "follow_up",
 		ExecutionMode: "live_external",
 	})
@@ -1081,7 +1089,7 @@ func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 		Channel:       "client-loop",
 		Title:         "Send second kickoff email",
 		Owner:         "builder",
-		CreatedBy:     "operator",
+		CreatedBy:     "ceo",
 		TaskType:      "follow_up",
 		ExecutionMode: "live_external",
 		DependsOn:     []string{active.ID},
@@ -1211,7 +1219,7 @@ func TestBrokerTaskPlanRejectsTheaterTaskInLiveDeliveryLane(t *testing.T) {
 	base := fmt.Sprintf("http://%s", b.Addr())
 	body, _ := json.Marshal(map[string]any{
 		"channel":    "client-delivery",
-		"created_by": "operator",
+		"created_by": "ceo",
 		"tasks": []map[string]any{
 			{
 				"title":          "Generate consulting review packet artifact from the updated blueprint",
@@ -1251,7 +1259,7 @@ func TestBrokerTaskCreateRejectsLiveBusinessTheater(t *testing.T) {
 		"channel":        "general",
 		"title":          "Create one new Notion proof packet for the client handoff",
 		"details":        "Use live external execution and keep the review bundle in sync.",
-		"created_by":     "operator",
+		"created_by":     "ceo",
 		"owner":          "builder",
 		"task_type":      "launch",
 		"execution_mode": "live_external",
@@ -1287,7 +1295,7 @@ func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
 		Details:       "Use live external execution and keep the review bundle in sync.",
 		Owner:         "builder",
 		status:        "in_progress",
-		CreatedBy:     "operator",
+		CreatedBy:     "ceo",
 		TaskType:      "launch",
 		ExecutionMode: "live_external",
 		CreatedAt:     "2026-04-15T00:00:00Z",
@@ -1301,7 +1309,7 @@ func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
 		"action":     "complete",
 		"channel":    "general",
 		"id":         "task-1",
-		"created_by": "builder",
+		"created_by": "ceo",
 	})
 	req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+b.Token())
@@ -1340,7 +1348,7 @@ func TestBrokerTaskUpdateRollsBackBrokerSideEffectsOnSaveFailure(t *testing.T) {
 			Title:     "Implement reusable importer",
 			Owner:     "builder",
 			status:    "in_progress",
-			CreatedBy: "operator",
+			CreatedBy: "ceo",
 			TaskType:  "feature",
 			CreatedAt: "2026-04-15T00:00:00Z",
 			UpdatedAt: "2026-04-15T00:00:00Z",
@@ -1350,7 +1358,7 @@ func TestBrokerTaskUpdateRollsBackBrokerSideEffectsOnSaveFailure(t *testing.T) {
 			Channel:   "general",
 			Title:     "Follow-up importer docs",
 			status:    "open",
-			CreatedBy: "operator",
+			CreatedBy: "ceo",
 			TaskType:  "feature",
 			DependsOn: []string{"task-1"},
 			blocked:   true,
@@ -1366,7 +1374,7 @@ func TestBrokerTaskUpdateRollsBackBrokerSideEffectsOnSaveFailure(t *testing.T) {
 		"action":     "complete",
 		"channel":    "general",
 		"id":         "task-1",
-		"created_by": "builder",
+		"created_by": "ceo",
 	})
 	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+b.Token())
@@ -1571,7 +1579,7 @@ func TestBrokerApproveRetainsLocalWorktree(t *testing.T) {
 		"action":     "complete",
 		"channel":    "general",
 		"id":         task.ID,
-		"created_by": "fe",
+		"created_by": "ceo",
 	})
 	req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(completeBody))
 	req.Header.Set("Authorization", "Bearer "+b.Token())
@@ -1679,7 +1687,7 @@ func TestBrokerHandlePostTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *tes
 		"action":     "block",
 		"channel":    "general",
 		"id":         task.ID,
-		"created_by": "eng",
+		"created_by": "ceo",
 		"details":    "This turn is running in a read-only filesystem sandbox. Need a writable workspace.",
 	})
 	req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
@@ -1739,9 +1747,12 @@ func TestBrokerHandlePostTaskCapabilityGapCreatesSelfHealingTask(t *testing.T) {
 
 	detail := "Unable to continue: missing Slack integration tool path for posting the client update."
 	body, _ := json.Marshal(map[string]any{
-		"action":     "block",
-		"channel":    "general",
-		"id":         task.ID,
+		"action":  "block",
+		"channel": "general",
+		"id":      task.ID,
+		// Owner ("eng") signals they're blocked — owner-allowed for
+		// block action per Slice 7. The self-heal task gets named
+		// after them so the recovery path attributes correctly.
 		"created_by": "eng",
 		"details":    detail,
 	})
@@ -1761,13 +1772,12 @@ func TestBrokerHandlePostTaskCapabilityGapCreatesSelfHealingTask(t *testing.T) {
 	var blocked teamTask
 	var healing teamTask
 	for _, candidate := range b.AllTasks() {
-		switch candidate.ID {
-		case task.ID:
+		if candidate.ID == task.ID {
 			blocked = candidate
-		default:
-			if candidate.Title == "Self-heal @eng on "+task.ID {
-				healing = candidate
-			}
+			continue
+		}
+		if isSelfHealingTask(&candidate) {
+			healing = candidate
 		}
 	}
 	if !blocked.Blocked() || blocked.Status() != "blocked" {
@@ -1776,8 +1786,16 @@ func TestBrokerHandlePostTaskCapabilityGapCreatesSelfHealingTask(t *testing.T) {
 	if healing.ID == "" {
 		t.Fatalf("expected capability-gap self-healing task, got %+v", b.AllTasks())
 	}
-	if healing.Owner != "ceo" || healing.TaskType != "incident" || healing.ExecutionMode != "office" {
-		t.Fatalf("expected office incident owned by ceo, got %+v", healing)
+	// Self-heal records render as Issues in the FE; PipelineID stays
+	// "incident" so isSelfHealingTask still recognises them.
+	if healing.Owner != "ceo" || healing.TaskType != "issue" || healing.PipelineID != "incident" || healing.ExecutionMode != "office" {
+		t.Fatalf("expected office issue/incident owned by ceo, got %+v", healing)
+	}
+	// The self-heal title should follow the new "[@<agent>] <verb>: <parent>"
+	// shape with the parent title carried through.
+	wantTitle := selfHealingTaskTitle("eng", task.ID, blocked.Title, agent.EscalationCapabilityGap)
+	if healing.Title != wantTitle {
+		t.Fatalf("expected self-heal title %q, got %q", wantTitle, healing.Title)
 	}
 	if !strings.Contains(healing.Details, "capability_gap") ||
 		!strings.Contains(healing.Details, detail) ||
@@ -1809,7 +1827,7 @@ func TestBrokerHandlePostTaskNonCapabilityBlockDoesNotCreateSelfHealingTask(t *t
 		"action":     "block",
 		"channel":    "general",
 		"id":         task.ID,
-		"created_by": "eng",
+		"created_by": "ceo",
 		"details":    "Waiting on customer approval before sending the update.",
 	})
 	req, _ := http.NewRequest(http.MethodPost, "http://"+b.Addr()+"/tasks", bytes.NewReader(body))
@@ -2070,7 +2088,7 @@ func TestBrokerTaskPlanReusesExistingActiveLane(t *testing.T) {
 		Title:         "Create live client workspace in Google Drive",
 		Details:       "First pass.",
 		Owner:         "builder",
-		CreatedBy:     "operator",
+		CreatedBy:     "ceo",
 		TaskType:      "follow_up",
 		ExecutionMode: "office",
 	})
@@ -2080,7 +2098,12 @@ func TestBrokerTaskPlanReusesExistingActiveLane(t *testing.T) {
 
 	base := fmt.Sprintf("http://%s", b.Addr())
 	body, _ := json.Marshal(map[string]any{
-		"channel":    "general",
+		"channel": "general",
+		// created_by stays as operator (client-loop channel member) so
+		// preferredTaskChannelLocked routes the duplicate to
+		// client-loop where the existing task lives. /task-plan is
+		// not gated by Slice 7's CEO-only rule (it's a separate
+		// endpoint), so a specialist actor is still valid here.
 		"created_by": "operator",
 		"tasks": []map[string]any{
 			{
@@ -2235,7 +2258,7 @@ func TestBrokerCompleteClosesReviewTaskAndUnblocksDependents(t *testing.T) {
 		"action":     "complete",
 		"channel":    "general",
 		"id":         architecture.ID,
-		"created_by": "eng",
+		"created_by": "ceo",
 	})
 	if reviewReady.Status() != "review" || reviewReady.ReviewState() != "ready_for_review" {
 		t.Fatalf("expected first complete to move task into review, got %+v", reviewReady)
@@ -2315,7 +2338,7 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 		"action":         "create",
 		"title":          "Ship the dry-run approval packet generator",
 		"details":        "Initial consulting delivery slice",
-		"created_by":     "operator",
+		"created_by":     "ceo",
 		"owner":          "builder",
 		"thread_id":      "msg-1",
 		"execution_mode": "local_worktree",
@@ -2329,7 +2352,7 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 		"action":     "complete",
 		"channel":    "general",
 		"id":         first.ID,
-		"created_by": "builder",
+		"created_by": "ceo",
 	})
 	if reviewReady.Status() != "review" || reviewReady.ReviewState() != "ready_for_review" {
 		t.Fatalf("expected first complete to move task into review, got %+v", reviewReady)
@@ -2339,7 +2362,7 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 		"action":     "approve",
 		"channel":    "general",
 		"id":         first.ID,
-		"created_by": "operator",
+		"created_by": "ceo",
 	})
 	if approved.Status() != "done" || approved.ReviewState() != "approved" {
 		t.Fatalf("expected approve to close task, got %+v", approved)
@@ -2349,7 +2372,7 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 		"action":         "create",
 		"title":          "Render the approval packet into a reviewable dry-run bundle",
 		"details":        "Reuse the existing generator worktree",
-		"created_by":     "operator",
+		"created_by":     "ceo",
 		"owner":          "builder",
 		"thread_id":      "msg-2",
 		"execution_mode": "local_worktree",
@@ -2544,7 +2567,7 @@ func TestBrokerCompleteAlreadyDoneTaskStaysApproved(t *testing.T) {
 		"action":     "complete",
 		"channel":    "general",
 		"id":         task.ID,
-		"created_by": "eng",
+		"created_by": "ceo",
 	})
 	if reviewReady.Status() != "review" || reviewReady.ReviewState() != "ready_for_review" {
 		t.Fatalf("expected first complete to move task into review, got %+v", reviewReady)

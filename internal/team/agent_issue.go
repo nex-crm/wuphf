@@ -571,7 +571,11 @@ func (b *Broker) maybeCreateApprovedSelfHealTaskLocked(req humanInterview) {
 	// incident is re-merged on every iteration), but record the overflow in
 	// SelfHealError so the divergence between issue.TaskID and the linked
 	// task's TaskID is observable instead of silent.
-	expectedTitle := selfHealingTaskTitle(issue.Agent, issue.TaskID)
+	parentTitle := ""
+	if parent := b.findTaskByIDLocked(issue.TaskID); parent != nil {
+		parentTitle = strings.TrimSpace(parent.Title)
+	}
+	expectedTitle := selfHealingTaskTitle(issue.Agent, issue.TaskID, parentTitle, agent.EscalationCapabilityGap)
 	issue.SelfHealTaskID = task.ID
 	if task.Title == expectedTitle {
 		issue.SelfHealError = ""

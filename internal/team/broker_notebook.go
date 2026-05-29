@@ -134,6 +134,7 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
+	isNewEntry := notebookEntryIsNew(worker, body.Path)
 	sha, n, err := worker.NotebookWrite(r.Context(), body.Slug, body.Path, body.Content, body.Mode, body.CommitMessage)
 	if err != nil {
 		switch {
@@ -164,6 +165,9 @@ func (b *Broker) handleNotebookWrite(w http.ResponseWriter, r *http.Request) {
 		if recordErr != nil || !found {
 			log.Printf("notebook: write committed but task memory capture not recorded (task_id=%q, found=%v, err=%v)", taskID, found, recordErr)
 		}
+	}
+	if isNewEntry {
+		b.emitNewNotebookEntryCard(body.Slug, body.Path, body.Content, r.Header.Get(agentRateLimitHeader))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"path":          body.Path,

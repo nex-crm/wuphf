@@ -439,8 +439,35 @@ export function fetchCommands() {
 // ── Members ──
 
 export interface ProviderBinding {
-  kind?: string;
+  // kind tags the runtime or gateway for this agent. Empty string means
+  // "inherit from global default". Use IsGatewayKind on a Kind to decide
+  // whether to render the runtime picker (LLM kinds) or a "Managed by
+  // <Gateway>" badge (gateway kinds) in the agent profile.
+  kind?: LLMProvider | "";
+  // model is the runtime-specific model identifier. Free-form on the wire —
+  // validated by each provider implementation, not at the schema layer.
+  // Common shapes: "claude-3-5-sonnet-latest", "gpt-4o", "llama3.1:8b".
   model?: string;
+  // openclaw is populated only when kind === "openclaw" — it carries the
+  // gateway-side session key + agent id. Set by the OpenClaw bridge bootstrap
+  // path, not by the per-agent runtime picker.
+  openclaw?: {
+    session_key?: string;
+    agent_id?: string;
+  };
+}
+
+// Helper for UI code: returns true when binding.kind is a gateway-controlled
+// tag. Per-agent runtime pickers and the AgentWizard should swap their UI to
+// a read-only "Managed by <Gateway>" pill when this returns true.
+export function isGatewayBinding(
+  binding: ProviderBinding | string | undefined,
+): boolean {
+  if (!binding) return false;
+  const kind = typeof binding === "string" ? binding : binding.kind;
+  return (
+    kind === "openclaw" || kind === "openclaw-http" || kind === "hermes-agent"
+  );
 }
 
 export interface OfficeMember {
@@ -610,6 +637,11 @@ export interface AgentRequest {
   redacted?: boolean;
   redaction_count?: number;
   redaction_reasons?: string[];
+  /** Issue/task id this request belongs to, when the owner agent
+   * filed the request from inside an owned Issue. The Inbox card
+   * renders a breadcrumb when set so the human sees the parent
+   * Issue at a glance. */
+  issue_id?: string;
 }
 
 export function getRequests(channel: string) {
@@ -853,6 +885,37 @@ export function enableSkill(name: string): Promise<EnableSkillResponse> {
   );
 }
 
+export interface SkillOwnerToggleResponse {
+  skill?: Skill;
+}
+
+/**
+ * Enable a specific skill for a specific agent. Adds the agent slug to
+ * the skill's owner_agents list (idempotent). Only OwnerAgents members
+ * can invoke a skill via team_skill_run — see the AVAILABLE SKILLS /
+ * DISCOVERABLE SKILLS split in the agent prompt.
+ */
+export function enableSkillForAgent(
+  name: string,
+  agent: string,
+): Promise<SkillOwnerToggleResponse> {
+  return post<SkillOwnerToggleResponse>(
+    `/skills/${encodeURIComponent(name)}/enable-for`,
+    { agent },
+  );
+}
+
+/** Remove an agent from the skill's owner_agents list (idempotent). */
+export function disableSkillForAgent(
+  name: string,
+  agent: string,
+): Promise<SkillOwnerToggleResponse> {
+  return post<SkillOwnerToggleResponse>(
+    `/skills/${encodeURIComponent(name)}/disable-for`,
+    { agent },
+  );
+}
+
 export interface RestoreArchivedSkillResponse {
   skill?: Skill;
 }
@@ -1007,6 +1070,26 @@ export function patchSkill(
   );
 }
 
+export interface EditSkillContentResponse {
+  skill?: Skill;
+}
+
+/**
+ * Full SKILL.md body replacement. Caller passes the entire rendered
+ * SKILL.md (frontmatter + body). The broker re-parses, re-runs the
+ * safety scan with the original creator's trust level, and rewrites the
+ * wiki article. Used by the full-screen skill detail editor.
+ */
+export function editSkillContent(
+  name: string,
+  content: string,
+): Promise<EditSkillContentResponse> {
+  return put<EditSkillContentResponse>(
+    `/skills/${encodeURIComponent(name)}`,
+    { content },
+  );
+}
+
 // ── Memory ──
 
 export function getMemory(channel: string) {
@@ -1019,15 +1102,30 @@ export function setMemory(namespace: string, key: string, value: string) {
 
 // ── Config (Settings) ──
 
-export type LLMProvider =
+// LLMRuntimeKind names a directly-dispatchable LLM runtime — the kinds that
+// belong in any runtime picker (Settings default-runtime, AgentProfilePanel
+// Runtime section, AgentWizard provider field). Mirrors the non-gateway
+// subset returned by provider.LLMProviderKinds in the Go layer.
+export type LLMRuntimeKind =
   | "claude-code"
   | "ollama"
   | "codex"
   | "opencode"
   | "mlx-lm"
-  | "exo"
-  | "hermes-agent"
-  | "openclaw-http";
+  | "exo";
+
+// GatewayKind names a runtime that is reached through an integration gateway
+// rather than dispatched directly. Gateway-bound agents are imported via the
+// Integrations app (OpenClaw / Hermes) and never appear in runtime pickers;
+// they receive a "Managed by <Gateway>" badge on the agent profile.
+export type GatewayKind = "openclaw" | "openclaw-http" | "hermes-agent";
+
+// LLMProvider is the union of both — used wherever a value carries either an
+// LLM runtime or a gateway tag (per-agent ProviderBinding.Kind on the wire,
+// ConfigSnapshot.llm_provider for backward compatibility). New UI code should
+// prefer LLMRuntimeKind / GatewayKind and only widen to LLMProvider at the
+// raw-wire boundary.
+export type LLMProvider = LLMRuntimeKind | GatewayKind;
 export type MemoryBackend = "markdown" | "nex" | "gbrain" | "none";
 export type ActionProvider = "auto" | "one" | "composio" | "";
 
@@ -1063,6 +1161,15 @@ export interface ConfigSnapshot {
   llm_provider?: LLMProvider;
   llm_provider_configured?: boolean;
   llm_provider_priority?: string[];
+  // llm_provider_kinds is the non-gateway subset of registered runtimes —
+  // the safe list to render in any runtime picker. Read this off the wire
+  // instead of hardcoding the union so a future provider registered on the
+  // Go side appears in the UI without a frontend change.
+  llm_provider_kinds?: LLMRuntimeKind[];
+  // gateway_kinds is the inverse — the registered gateway runtimes. The
+  // Integrations app enumerates these to know which gateway cards (OpenClaw,
+  // Hermes) are compiled in and connectable.
+  gateway_kinds?: GatewayKind[];
   provider_endpoints?: Record<string, ProviderEndpoint>;
   memory_backend?: MemoryBackend;
   action_provider?: ActionProvider;

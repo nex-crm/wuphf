@@ -11,6 +11,10 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  type ApprovalAuditEntry,
+  getApprovalAuditByRequest,
+} from "../../api/audit";
+import {
   type AgentRequest,
   answerRequest,
   getRequests,
@@ -30,6 +34,11 @@ import { SEV_ORDER, SEVERITY_TOKENS } from "../../lib/types/lifecycle";
 import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 import { RequestItem } from "./RequestItem";
 
+const IssueDocumentRoute = lazy(() =>
+  import("./IssueDocumentRoute").then((m) => ({
+    default: m.IssueDocumentRoute,
+  })),
+);
 const DecisionPacketRoute = lazy(() =>
   import("./DecisionPacketRoute").then((m) => ({
     default: m.DecisionPacketRoute,
@@ -53,7 +62,7 @@ type InboxFilter =
   | "decisions"
   | "requests"
   | "reviews"
-  | "approved";
+  | "rejected";
 
 const FILTER_ORDER: readonly InboxFilter[] = [
   "all",
@@ -61,7 +70,7 @@ const FILTER_ORDER: readonly InboxFilter[] = [
   "decisions",
   "requests",
   "reviews",
-  "approved",
+  "rejected",
 ];
 
 const FILTER_LABEL: Record<InboxFilter, string> = {
@@ -70,25 +79,92 @@ const FILTER_LABEL: Record<InboxFilter, string> = {
   decisions: "Decisions",
   requests: "Requests",
   reviews: "Reviews",
-  approved: "Approved",
+  rejected: "Rejected",
 };
 
+// Inbox decision-state allowlist (Slice 8 fix): blocked tasks are
+// INTENTIONALLY excluded. A blocked task by itself is not actionable
+// by the human — they don't know what's blocking it or how to fix it.
+// When the agent needs HUMAN input to unblock, it calls
+// human_interview (which creates a separate "request" Inbox item the
+// human CAN answer) — that's the only path that should surface in
+// the Inbox. The blocked task itself stays in its state until the
+// blocker resolves on the agent's side OR a human reads the linked
+// question request. queued_behind_owner is also off-list for the
+// same reason — it's a coordination signal, not a human decision.
 const DECISION_STATES = new Set([
   "decision",
   "review",
   "changes_requested",
-  "blocked_on_pr_merge",
+  "rejected",
 ]);
 
+/**
+ * v3 MVP — Inbox actionability invariant.
+ *
+ * The Inbox surface is a queue of items the operator must act on. If a
+ * row cannot be approved / answered / merged / triaged by a human, it
+ * does not belong here — it lives on its source surface (Issues, Wiki,
+ * an agent's app surface, etc.) until it earns a decision moment.
+ *
+ * Rules (server may surface more items than the Inbox accepts — the
+ * invariant lives on the client because the Inbox is a UX contract):
+ *   - Reviews: always actionable (CEO approves / rejects / requests
+ *     changes). Approved + archived reviews are excluded.
+ *   - Requests: always actionable when blocking (they pause the
+ *     conversation). Non-blocking requests are excluded — they ride
+ *     along in the conversation.
+ *   - Tasks: only states that explicitly need a human call surface
+ *     here. Plain "open" / "intake" tasks live on the Issues surface.
+ */
+function isReviewActionable(item: InboxItem & { kind: "review" }): boolean {
+  const state = (item.review.state ?? "").toLowerCase();
+  return (
+    state === "pending" ||
+    state === "in-review" ||
+    state === "changes-requested" ||
+    state === "in_review" ||
+    state === "changes_requested"
+  );
+}
+
+function isRequestActionable(item: InboxItem & { kind: "request" }): boolean {
+  // Requests in WUPHF are blocking by default — keep them all unless
+  // the broker explicitly marks one non-blocking.
+  return item.request.blocking !== false;
+}
+
+function isTaskActionable(item: InboxItem & { kind: "task" }): boolean {
+  const state = (item.task?.state ?? "").toLowerCase();
+  return DECISION_STATES.has(state);
+}
+
+function isInboxItemActionable(item: InboxItem): boolean {
+  switch (item.kind) {
+    case "task":
+      return isTaskActionable(item);
+    case "request":
+      return isRequestActionable(item);
+    case "review":
+      return isReviewActionable(item);
+    default: {
+      const _exhaustive: never = item;
+      void _exhaustive;
+      return false;
+    }
+  }
+}
+
 function itemMatchesFilter(item: InboxItem, filter: InboxFilter): boolean {
+  // The actionability invariant is pre-filtered upstream of this call —
+  // every item reaching here is already known to need a human decision.
   if (filter === "all") return true;
   if (filter === "unread") return item.isUnread === true;
   if (filter === "requests") return item.kind === "request";
   if (filter === "reviews") return item.kind === "review";
   if (item.kind !== "task") return false;
   const state = item.task?.state ?? "";
-  if (filter === "approved")
-    return state === "approved" || state === "rejected";
+  if (filter === "rejected") return state === "rejected";
   // "decisions" bucket — task states that need a human call.
   return DECISION_STATES.has(state);
 }
@@ -158,7 +234,15 @@ export function DecisionInbox({
     return () => window.clearTimeout(t);
   }, [isLoading]);
 
-  const allItems = useMemo(() => query.data?.items ?? [], [query.data]);
+  // Server may surface every lifecycle row to keep counts honest, but
+  // the Inbox UX contract is: only show items the operator can act on.
+  // We enforce that invariant here so every downstream pane (counts,
+  // list, selection) respects the same definition of "actionable".
+  const rawItems = useMemo(() => query.data?.items ?? [], [query.data]);
+  const allItems = useMemo(
+    () => rawItems.filter(isInboxItemActionable),
+    [rawItems],
+  );
   const items = useMemo(
     () => allItems.filter((it) => itemMatchesFilter(it, filter)),
     [allItems, filter],
@@ -170,7 +254,7 @@ export function DecisionInbox({
       decisions: 0,
       requests: 0,
       reviews: 0,
-      approved: 0,
+      rejected: 0,
     };
     for (const it of allItems) {
       for (const f of FILTER_ORDER) {
@@ -266,7 +350,7 @@ export function DecisionInbox({
     const noItemsAtAll = allItems.length === 0 || forceState === "empty";
     const headline = noItemsAtAll ? "Inbox zero." : "Nothing in this filter.";
     const body = noItemsAtAll
-      ? "Nothing waiting on you. Agents will email you when they need something."
+      ? "No decisions waiting on you. Agents are running; items show up here only when they need a human call."
       : "Switch to All to see other inbox items.";
     return (
       <Shell>
@@ -447,11 +531,14 @@ function MailRow({
 }
 
 function DetailPane({ item }: { item: InboxItem }) {
-  // Tasks in decision / review / changes_requested / approved state
-  // render the full DecisionPacketRoute (3-pane PR-style UI with
-  // discussion thread, comment composer, and action sidebar). Other
-  // states (intake / ready / running / blocked_on_pr_merge) render a
-  // lightweight task summary because they have no packet yet.
+  // Tasks render the Linear-style Issue document so the Inbox detail
+  // pane matches the standalone /issues/$id view. The legacy
+  // DecisionPacketRoute (file diffs / reviewer grades / spec sections)
+  // was code-review-shaped and showed irrelevant blocks for non-code
+  // Issues. The simpler IssueDocument surface (description + sub-issues
+  // + comments) shows the actual context plus the same Approve / Close
+  // / Reopen actions. Kept the legacy import below for direct routes
+  // that may still want it.
   if (item.kind === "task") {
     const state = item.task?.state ?? "";
     const showFullPacket =
@@ -462,10 +549,11 @@ function DetailPane({ item }: { item: InboxItem }) {
       state === "rejected" ||
       state === "blocked_on_pr_merge";
     if (showFullPacket) {
+      void DecisionPacketRoute;
       return (
         <main
           className="inbox-detail-pane inbox-detail-pane--task"
-          aria-label="Decision detail"
+          aria-label="Issue detail"
         >
           <Suspense
             fallback={
@@ -474,7 +562,7 @@ function DetailPane({ item }: { item: InboxItem }) {
               </div>
             }
           >
-            <DecisionPacketRoute taskId={item.taskId} fallbackItem={item} />
+            <IssueDocumentRoute issueId={item.taskId} />
           </Suspense>
         </main>
       );
@@ -631,6 +719,27 @@ function RequestBody({
   });
   const allRequests: AgentRequest[] = requestsQuery.data?.requests ?? [];
   const fullRequest = allRequests.find((r) => r.id === item.requestId);
+  const isPending =
+    !!fullRequest &&
+    (!fullRequest.status ||
+      fullRequest.status === "open" ||
+      fullRequest.status === "pending");
+
+  // Audit trail loads only for answered requests. Hook MUST run on every
+  // render (even when fullRequest is null) to keep React's hook order
+  // stable across re-renders — React error #310 was firing because the
+  // early returns below were skipping this useQuery on the first render
+  // and then calling it after the request loaded. We pass a stable
+  // sentinel key when there's no request yet and gate execution on
+  // `enabled`.
+  const auditTargetId = fullRequest?.id ?? "__none__";
+  const auditQuery = useQuery({
+    queryKey: ["approval-audit", "by-request", auditTargetId],
+    queryFn: () => getApprovalAuditByRequest(auditTargetId),
+    enabled: !!fullRequest && !isPending,
+    refetchInterval: !!fullRequest && !isPending ? 5_000 : false,
+  });
+  const auditEntries: ApprovalAuditEntry[] = auditQuery.data ?? [];
 
   if (!fullRequest && requestsQuery.isPending) {
     return (
@@ -648,10 +757,6 @@ function RequestBody({
       </div>
     );
   }
-  const isPending =
-    !fullRequest.status ||
-    fullRequest.status === "open" ||
-    fullRequest.status === "pending";
 
   const handleAnswer = async (choiceId: string, customText?: string) => {
     setAnswerError(null);
@@ -683,8 +788,120 @@ function RequestBody({
           void handleAnswer(choiceId, customText)
         }
       />
+      {!isPending && auditEntries.length > 0 ? (
+        <ApprovalAuditTrail entries={auditEntries} />
+      ) : null}
     </div>
   );
+}
+
+interface ApprovalAuditTrailProps {
+  entries: ApprovalAuditEntry[];
+}
+
+function ApprovalAuditTrail({ entries }: ApprovalAuditTrailProps) {
+  // Sort entries by created_at so the timeline reads chronologically. The
+  // broker writes append-only but doesn't guarantee order on the wire.
+  const sorted = [...entries].sort((a, b) =>
+    (a.created_at ?? "").localeCompare(b.created_at ?? ""),
+  );
+
+  // Lead row: "Approved by you at <time>". Sourced from the first entry's
+  // answered_at, which the broker records on the success and rejection
+  // paths. Falls back to the entry's requested_at otherwise so the row is
+  // never blank.
+  const first = sorted[0];
+  const answeredAt = first?.answered_at ?? first?.requested_at ?? "";
+
+  return (
+    <section className="inbox-trail" aria-label="Approval trail">
+      <header className="inbox-trail-header">TRAIL</header>
+      <ol className="inbox-trail-list">
+        {answeredAt ? (
+          <li className="inbox-trail-row">
+            <span className="inbox-trail-actor">
+              {leadVerbForOutcome(first?.outcome)} by you
+            </span>
+            <span className="inbox-trail-time">{formatTrailTime(answeredAt)}</span>
+          </li>
+        ) : null}
+        {sorted.map((entry, idx) => (
+          <ApprovalAuditTrailRow
+            key={`${entry.approval_request_id}-${entry.outcome ?? ""}-${idx}`}
+            entry={entry}
+          />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+interface ApprovalAuditTrailRowProps {
+  entry: ApprovalAuditEntry;
+}
+
+function ApprovalAuditTrailRow({ entry }: ApprovalAuditTrailRowProps) {
+  const actor = entry.actor ? `@${entry.actor}` : "agent";
+  const verb = trailVerbForOutcome(entry.outcome);
+  const when = entry.executed_at ?? entry.created_at;
+  const summary = entry.outcome_summary?.trim() ?? "";
+  return (
+    <li className="inbox-trail-row">
+      <span className="inbox-trail-actor">
+        → {actor} {verb}
+      </span>
+      {summary ? (
+        <span className="inbox-trail-outcome"> — {summary}</span>
+      ) : null}
+      <span className="inbox-trail-time">{formatTrailTime(when)}</span>
+    </li>
+  );
+}
+
+// Lead-row verb (capitalized, for "<Verb> by you"). Mirrors
+// trailVerbForOutcome but in the past-tense "I did this" voice rather
+// than the agent's "→ @actor did this" voice.
+function leadVerbForOutcome(outcome: string | undefined): string {
+  switch (outcome) {
+    case "rejected":
+      return "Rejected";
+    case "cancelled":
+      return "Cancelled";
+    case "timed_out":
+      return "Timed out";
+    case "executed_ok":
+    case "executed_failed":
+      return "Answered";
+    default:
+      return "Answered";
+  }
+}
+
+function trailVerbForOutcome(outcome: string | undefined): string {
+  switch (outcome) {
+    case "executed_ok":
+      return "executed";
+    case "executed_failed":
+      return "tried to execute (failed)";
+    case "rejected":
+      return "marked rejected";
+    case "timed_out":
+      return "timed out";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return outcome ?? "updated";
+  }
+}
+
+function formatTrailTime(value: string | undefined): string {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function ReviewBody({

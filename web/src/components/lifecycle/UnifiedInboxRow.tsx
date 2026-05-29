@@ -81,6 +81,7 @@ function RequestRow({
   onOpen: (item: InboxItem) => void;
   onSelect: (item: InboxItem) => void;
 }) {
+  const issueId = item.request.issueId;
   return (
     <button
       type="button"
@@ -97,6 +98,9 @@ function RequestRow({
         <span className="inbox-row-title">
           <span className="inbox-row-kind-pill">request</span> {item.title}
         </span>
+        {issueId ? (
+          <span className="inbox-row-breadcrumb">Issue {issueId}</span>
+        ) : null}
         <span className="inbox-row-assign">{item.request.question || "—"}</span>
       </span>
       <span className="inbox-row-meta">

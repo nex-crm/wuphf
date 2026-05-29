@@ -261,6 +261,7 @@ func TestTeamSkillToFrontmatter(t *testing.T) {
 		Status:             "disabled",
 		DisabledFromStatus: "proposed",
 		Tags:               []string{"comms", "daily"},
+		OwnerAgents:        []string{"ceo", "ops"},
 		Trigger:            "Every morning",
 		WorkflowProvider:   "zapier",
 		WorkflowKey:        "wk-digest",
@@ -312,6 +313,55 @@ func TestTeamSkillToFrontmatter(t *testing.T) {
 	}
 	if len(w.RelayEventTypes) != len(sk.RelayEventTypes) {
 		t.Errorf("Wuphf.RelayEventTypes len: got %d, want %d", len(w.RelayEventTypes), len(sk.RelayEventTypes))
+	}
+	if len(w.OwnerAgents) != len(sk.OwnerAgents) {
+		t.Fatalf("Wuphf.OwnerAgents len: got %d, want %d", len(w.OwnerAgents), len(sk.OwnerAgents))
+	}
+	for i, slug := range sk.OwnerAgents {
+		if w.OwnerAgents[i] != slug {
+			t.Errorf("Wuphf.OwnerAgents[%d]: got %q, want %q", i, w.OwnerAgents[i], slug)
+		}
+	}
+}
+
+// TestSkillFrontmatterOwnerAgentsRoundTrip confirms per-agent enablement
+// survives a render+parse cycle so the SKILL.md copy stays canonical for
+// any path that reloads from disk (boot, wiki preview, agent skill
+// scanner). Without round-trip the enable-for / disable-for handlers
+// would silently drift broker state out of sync with the wiki copy.
+func TestSkillFrontmatterOwnerAgentsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	in := SkillFrontmatter{
+		Name:        "share-results",
+		Description: "Post final results to the channel.",
+		Metadata: SkillMetadata{
+			Wuphf: SkillWuphfMeta{
+				Title:       "Share Results",
+				CreatedBy:   "ceo",
+				Status:      "active",
+				OwnerAgents: []string{"ceo", "ops", "eng"},
+			},
+		},
+	}
+
+	md, err := RenderSkillMarkdown(in, "Step 1: pick a channel.")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out, _, err := ParseSkillMarkdown(md)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := out.Metadata.Wuphf.OwnerAgents
+	want := in.Metadata.Wuphf.OwnerAgents
+	if len(got) != len(want) {
+		t.Fatalf("OwnerAgents len: got %v, want %v", got, want)
+	}
+	for i, slug := range want {
+		if got[i] != slug {
+			t.Errorf("OwnerAgents[%d]: got %q, want %q", i, got[i], slug)
+		}
 	}
 }
 

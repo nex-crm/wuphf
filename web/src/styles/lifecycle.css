@@ -2004,6 +2004,13 @@ html[data-theme="noir-gold"] {
   border-radius: var(--radius-sm);
 }
 
+.inbox-row-breadcrumb {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
 .lifecycle-state-pill {
   display: inline-flex;
   align-items: center;
@@ -2018,10 +2025,28 @@ html[data-theme="noir-gold"] {
 }
 
 .lifecycle-state-pill .dot {
-  width: 6px;
-  height: 6px;
+  /* Slightly larger than the legacy 6px so the dot reads as a status
+     indicator, not a decorative bullet. Background color is set inline
+     via React (DOT_COLOR map) so it tracks the activity bucket rather
+     than the pill's text color. */
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: currentcolor;
+  background: currentcolor; /* fallback if inline style ever drops */
+  flex-shrink: 0;
+}
+
+/* When the activity bucket is "running" the dot pulses to signal the
+   owner is actively working. Pairs with .issue-activity-dot--blink in
+   the body stream below; same pulse curve, same duration. */
+.lifecycle-state-pill .dot--blink {
+  animation: issue-activity-pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lifecycle-state-pill .dot--blink {
+    animation: none;
+  }
 }
 
 .severity-summary {
@@ -3095,13 +3120,16 @@ html[data-theme="noir-gold"] {
 .issue-document-panel {
   padding: 0;
   gap: 0;
-  overflow: hidden;
+  /* Whole-page scroll: the panel owns the scrollbar so header (sticky)
+   * + body + comments scroll as one. Previously overflow:hidden on the
+   * panel + overflow:auto on .issue-doc-body created a nested scroll
+   * region for comments — annoying when reading long threads. */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .issue-document {
   display: flex;
-  flex: 1;
-  min-height: 0;
   flex-direction: column;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -3146,13 +3174,449 @@ html[data-theme="noir-gold"] {
 }
 
 .issue-doc-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
-  gap: 16px;
-  flex: 1;
-  min-height: 0;
+  /* Linear-style: single column stack — description, sub-issues,
+   * comments — instead of the legacy two-column spec/timeline grid.
+   * No own overflow: the page-level scroll is on .issue-document-panel
+   * so the whole surface (header + body + comments) scrolls as one.
+   * Without this, long comment threads got trapped in a nested scroll
+   * region. */
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
   padding: 20px 24px 24px;
-  overflow: auto;
+}
+
+/* ─── Issue description (replaces SpecBody) ─────────────────────────── */
+.issue-doc-description {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.issue-doc-description-body {
+  color: var(--text);
+  font-size: var(--text-base);
+  line-height: 1.55;
+}
+.issue-doc-description-body p:first-child {
+  margin-top: 0;
+}
+.issue-doc-description-body p:last-child {
+  margin-bottom: 0;
+}
+.issue-doc-description--empty .issue-doc-description-empty-line {
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 0;
+}
+
+/* ─── Sub-issues list ───────────────────────────────────────────────── */
+.issue-doc-sub-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+.issue-doc-sub-issues-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.issue-doc-sub-issues-heading {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.issue-doc-sub-issues-count {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 500;
+}
+.issue-doc-sub-issues-add {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.issue-doc-sub-issues-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.issue-doc-sub-issues-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+  font-style: italic;
+}
+.issue-doc-sub-issues-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.issue-doc-sub-issue-row {
+  display: flex;
+}
+.issue-doc-sub-issue-link {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 80px 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background 120ms ease;
+}
+.issue-doc-sub-issue-link:hover {
+  background: var(--bg-row-active, color-mix(in srgb, var(--accent) 6%, transparent));
+}
+.issue-doc-sub-issue-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.issue-doc-sub-issue-title {
+  font-size: var(--text-base);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issue-doc-sub-issue-state {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+.issue-doc-sub-issue-owner {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+  font-family: var(--font-mono);
+}
+.issue-doc-sub-issues-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 0;
+  border-top: 1px dashed var(--border-subtle);
+  margin-top: 4px;
+}
+.issue-doc-sub-issues-input {
+  appearance: none;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+.issue-doc-sub-issues-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg, rgba(91, 141, 239, 0.16));
+}
+.issue-doc-sub-issues-form-actions {
+  display: flex;
+  gap: 8px;
+}
+.issue-doc-sub-issues-submit,
+.issue-doc-sub-issues-cancel {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 12px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.issue-doc-sub-issues-submit {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-primary, white);
+}
+.issue-doc-sub-issues-submit:disabled,
+.issue-doc-sub-issues-cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.issue-doc-sub-issues-error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-danger, #b42318);
+}
+
+.issue-doc-sub-issues-owner-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.issue-doc-sub-issues-owner-select {
+  appearance: none;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  flex: 1;
+}
+
+/* ─── Owner pill + inline editor (Issue header) ─────────────────────── */
+.issue-doc-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.issue-doc-owner-pill {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.issue-doc-owner-pill:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.issue-doc-owner-pill-label {
+  color: var(--text-tertiary, var(--text-secondary));
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+.issue-doc-owner-pill-value {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+.issue-doc-owner-pill-edit {
+  font-size: 10px;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.issue-doc-owner-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.issue-doc-owner-editor-label {
+  color: var(--text-tertiary, var(--text-secondary));
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+.issue-doc-owner-editor-select {
+  appearance: none;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.issue-doc-owner-editor-cancel {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.issue-doc-owner-editor-error {
+  font-size: var(--text-sm);
+  color: var(--text-danger, #b42318);
+}
+
+/* ─── Parent issue breadcrumb (sub-issue header) ────────────────────── */
+.issue-doc-parent-breadcrumb {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill, 999px);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.issue-doc-parent-breadcrumb:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.issue-doc-parent-breadcrumb-icon {
+  font-weight: 700;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.issue-doc-parent-breadcrumb-label {
+  color: var(--text-tertiary, var(--text-secondary));
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+.issue-doc-parent-breadcrumb-id {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.issue-doc-parent-breadcrumb-title {
+  color: var(--text);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── State-aware Issue action toolbar (Slice 8 #46) ────────────────── */
+.issue-action-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.issue-action-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text);
+  white-space: nowrap;
+}
+.issue-action-button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.issue-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.issue-action-button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-primary, white);
+}
+.issue-action-button--primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.issue-action-button--danger {
+  border-color: color-mix(in srgb, var(--text-danger, #b42318) 60%, var(--border-subtle));
+  color: var(--text-danger, #b42318);
+}
+.issue-action-button--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-danger, #b42318) 10%, transparent);
+}
+.issue-action-button--neutral {
+  /* default styling already covers neutral */
+}
+.issue-action-reason-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 100%;
+  margin-top: 4px;
+}
+.issue-action-reason-input {
+  appearance: none;
+  flex: 1;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.issue-action-reason-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-bg, rgba(91, 141, 239, 0.16));
+}
+.issue-action-error {
+  flex: 1 1 100%;
+  font-size: var(--text-sm);
+  color: var(--text-danger, #b42318);
+}
+
+/* ─── Reopen button ─────────────────────────────────────────────────── */
+.issue-doc-reopen {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.issue-doc-reopen-button {
+  appearance: none;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 500;
+}
+.issue-doc-reopen-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.issue-doc-reopen-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.issue-doc-reopen-error {
+  font-size: var(--text-sm);
+  color: var(--text-danger, #b42318);
 }
 
 .issue-doc-spec,
@@ -3223,10 +3687,11 @@ html[data-theme="noir-gold"] {
   flex-direction: column;
   gap: 12px;
   min-width: 0;
-  align-self: start;
-  max-height: 100%;
+  align-self: stretch;
   padding: 16px;
-  overflow: auto;
+  /* No own scroll — page-level scroll on .issue-document-panel owns it.
+   * Removing max-height + overflow lets the timeline grow naturally so
+   * the comment box at the bottom is reached by scrolling the page. */
 }
 
 .issue-comments-list {
@@ -3279,6 +3744,25 @@ html[data-theme="noir-gold"] {
   background: var(--bg-primary);
 }
 
+/* [SUGGESTION] comments stand out so CEO can scan them. Amber border +
+ * subtle tint, "Suggestion" badge next to the author. */
+.issue-comment--suggestion {
+  border-color: color-mix(in srgb, var(--amber-600, #d97706) 60%, var(--border-subtle));
+  background: color-mix(in srgb, var(--amber-600, #d97706) 5%, var(--bg-primary));
+}
+.issue-comment-suggestion-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bg-primary, white);
+  background: var(--amber-600, #d97706);
+  border-radius: var(--radius-pill, 999px);
+}
+
 .issue-comment-meta {
   display: flex;
   align-items: center;
@@ -3326,6 +3810,12 @@ html[data-theme="noir-gold"] {
   color: var(--text-secondary);
   font-size: var(--text-sm);
   font-weight: 650;
+}
+
+.issue-comment-input-wrap {
+  /* Autocomplete uses position: absolute against the closest positioned
+   * ancestor — wrap is what anchors the panel above the textarea. */
+  position: relative;
 }
 
 .issue-comment-input {
@@ -3878,4 +4368,761 @@ html[data-theme="noir-gold"] {
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
+}
+
+/* Approval-audit trail — rendered underneath an answered request in the
+   inbox detail pane. Reads as a small chronological list of who did what,
+   when. Matches the muted-section style of inbox-mail-section-empty. */
+.inbox-trail {
+  margin-top: var(--space-3, 0.75rem);
+  padding-top: var(--space-3, 0.75rem);
+  border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+}
+
+.inbox-trail-header {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.inbox-trail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 0.25rem);
+}
+
+.inbox-trail-row {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2, 0.5rem);
+}
+
+.inbox-trail-actor {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.inbox-trail-outcome {
+  color: var(--text-secondary);
+}
+
+.inbox-trail-time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   New Issue dialog (Linear-style)
+
+   Built on project tokens (--bg, --bg-card, --text, --border, --accent)
+   so it survives theme switching without the brittle shadcn HSL bridge.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.issue-create-dialog {
+  background: var(--bg-card, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Top eyebrow — workspace breadcrumb */
+.issue-create-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg);
+}
+
+.issue-create-eyebrow-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-secondary);
+}
+
+.issue-create-eyebrow-label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.issue-create-eyebrow-sep {
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.6;
+}
+
+/* Body — title + description, no internal borders */
+.issue-create-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 12px;
+  background: var(--bg-card, var(--bg));
+}
+
+.issue-create-title-input {
+  width: 100%;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  margin: 0;
+  appearance: none;
+  font-family: inherit;
+}
+
+.issue-create-title-input::placeholder {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.issue-create-description {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+}
+
+.issue-create-description::placeholder {
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.75;
+}
+
+.issue-create-error {
+  padding: 0 20px 12px;
+  margin: 0;
+  color: var(--red-600, var(--destructive, #dc2626));
+  font-size: 13px;
+}
+
+/* Property chip row */
+.issue-create-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 16px 12px;
+  background: var(--bg-card, var(--bg));
+}
+
+.issue-create-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.issue-create-chip:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.04)));
+  border-color: var(--border);
+}
+
+.issue-create-chip[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.issue-create-chip--muted {
+  color: var(--text-secondary);
+}
+
+.issue-create-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-secondary);
+}
+
+.issue-create-chip-chevron {
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.7;
+}
+
+.issue-create-chip-select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* Footer */
+.issue-create-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.issue-create-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.issue-create-more:hover {
+  color: var(--text);
+}
+
+.issue-create-more-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.issue-create-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.issue-create-cancel,
+.issue-create-submit {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1;
+}
+
+.issue-create-cancel {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+}
+
+.issue-create-cancel:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.04)));
+  color: var(--text);
+}
+
+.issue-create-submit {
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  border: 1px solid var(--accent);
+}
+
+.issue-create-submit:hover:not(:disabled) {
+  background: var(--accent-hover, var(--accent));
+  filter: brightness(0.95);
+}
+
+.issue-create-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.issue-create-submit .kbd {
+  background: rgba(255, 255, 255, 0.18);
+  color: inherit;
+  border-color: transparent;
+}
+
+/* Dialog primitive close button — overrides the inline tailwind classes
+   in Dialog.tsx / Sheet.tsx for a cleaner, theme-aware affordance. */
+.dialog-close-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+  z-index: 1;
+}
+
+.dialog-close-button:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.06)));
+  color: var(--text);
+}
+
+.dialog-close-button:focus-visible {
+  outline: 2px solid var(--ring, var(--accent));
+  outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Issue activity stream + status dot
+
+   Four dot kinds map to four lifecycle buckets:
+     running     — green, blinking (agent actively working)
+     blocked     — red, solid     (technical block; no human input helps)
+     needs-input — orange, solid  (waiting on human review/decision)
+     idle        — grey, solid    (drafting, ready, terminal states)
+
+   Tokens are pulled from --green/--red/--orange/--text-secondary so the
+   colors retint cleanly across themes (nex, nex-dark, noir-gold).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.issue-activity-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-tertiary, var(--text-secondary));
+  box-shadow: 0 0 0 0 transparent;
+}
+
+.issue-activity-dot--running {
+  background: var(--green-500, #16a34a);
+}
+
+.issue-activity-dot--blocked {
+  background: var(--red-500, var(--destructive, #dc2626));
+}
+
+.issue-activity-dot--needs-input {
+  background: var(--orange-500, #f97316);
+}
+
+.issue-activity-dot--idle {
+  background: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.55;
+}
+
+/* Blinking pulse — single-layer box-shadow halo, GPU-friendly. */
+.issue-activity-dot--blink {
+  animation: issue-activity-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes issue-activity-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(22, 163, 74, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .issue-activity-dot--blink {
+    animation: none;
+  }
+}
+
+/* Standalone .issue-activity-dot is now only used by the body
+   IssueActivityStream block. The header dot was merged into the
+   LifecycleStatePill — see .lifecycle-state-pill .dot above. */
+
+/* Activity stream block in the body */
+.issue-activity-stream {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card, var(--bg));
+}
+
+.issue-activity-stream[data-state="running"] {
+  border-color: color-mix(in srgb, var(--green-500, #16a34a) 30%, var(--border));
+}
+
+.issue-activity-stream[data-state="blocked"] {
+  border-color: color-mix(in srgb, var(--red-500, #dc2626) 30%, var(--border));
+}
+
+.issue-activity-stream[data-state="needs-input"] {
+  border-color: color-mix(in srgb, var(--orange-500, #f97316) 30%, var(--border));
+}
+
+.issue-activity-stream .issue-activity-dot {
+  margin-top: 5px;
+}
+
+.issue-activity-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.issue-activity-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.issue-activity-owner {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.issue-activity-summary {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.issue-activity-elapsed {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+.issue-activity-detail {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Issue detail tabs — Activity / Comments / Sub-Issues
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.issue-doc-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 16px;
+  min-height: 0;
+}
+
+.issue-doc-tabs-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.issue-doc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* overlap the strip's bottom border */
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.issue-doc-tab:hover {
+  color: var(--text);
+}
+
+.issue-doc-tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.issue-doc-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.06)));
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.issue-doc-tab--active .issue-doc-tab-count {
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+}
+
+.issue-doc-tabs-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Activity feed (under the Activity tab)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.issue-activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.issue-activity-feed-empty {
+  margin: 0;
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-card, var(--bg));
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.issue-activity-feed-empty--error {
+  color: var(--red-600, var(--destructive, #dc2626));
+  border-style: solid;
+  border-color: var(--red-600, var(--destructive, #dc2626));
+}
+
+.issue-activity-feed-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.issue-activity-feed-retry:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.04)));
+}
+
+.issue-activity-feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.issue-activity-feed-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  padding: 10px 4px 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.issue-activity-feed-row:last-child {
+  border-bottom: 0;
+}
+
+.issue-activity-feed-row--clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 120ms ease;
+}
+
+.issue-activity-feed-row--clickable:hover {
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.03)));
+}
+
+.issue-activity-feed-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.05)));
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.issue-activity-feed-icon--lifecycle {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.issue-activity-feed-icon--comment {
+  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+}
+
+.issue-activity-feed-icon--request {
+  background: color-mix(in srgb, var(--orange-500, #f97316) 12%, transparent);
+  color: var(--orange-500, #f97316);
+}
+
+.issue-activity-feed-icon--sub_issue {
+  background: color-mix(in srgb, var(--green-500, #16a34a) 12%, transparent);
+  color: var(--green-500, #16a34a);
+}
+
+.issue-activity-feed-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.issue-activity-feed-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.issue-activity-feed-actor {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.issue-activity-feed-actor--system {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 500;
+}
+
+.issue-activity-feed-verb {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.issue-activity-feed-time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+.issue-activity-feed-lifecycle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.issue-activity-feed-state {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--bg-warm, var(--accent-bg, rgba(0, 0, 0, 0.04)));
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+}
+
+.issue-activity-feed-summary {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.issue-activity-feed-resolution {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 0;
+}
+
+.issue-activity-feed-resolution--answered {
+  color: var(--green-600, #15803d);
+}
+
+.issue-activity-feed-resolution--canceled {
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+.issue-activity-feed-resolution--open {
+  color: var(--orange-500, #f97316);
 }

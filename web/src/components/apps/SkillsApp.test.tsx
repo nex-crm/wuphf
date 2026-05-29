@@ -27,7 +27,12 @@ vi.mock("../../api/client", async () => {
   };
 });
 
+vi.mock("../../lib/router", () => ({
+  router: { navigate: vi.fn() },
+}));
+
 import * as clientMod from "../../api/client";
+import { router } from "../../lib/router";
 import { OwnersChip, SkillsApp } from "./SkillsApp";
 
 function wrap(ui: ReactNode) {
@@ -94,7 +99,11 @@ describe("<SkillsApp> similar_to_existing badge", () => {
 });
 
 describe("<SkillsApp> SidePanel editor", () => {
-  it("opens an editable textarea for proposed skills via View full link", async () => {
+  it("navigates to the full-screen SKILL.md detail page when View SKILL.md is clicked", async () => {
+    // In v3-mvp the inline SidePanel editor was replaced by a full-screen
+    // editor at /skills/$skillName (see SkillsApp.handlePreview →
+    // router.navigate, SkillDetailRoute). The "View SKILL.md →" button on
+    // each card is now a navigation trigger, not an inline-editor toggle.
     vi.mocked(clientMod.getSkillsList).mockResolvedValueOnce({
       skills: [
         {
@@ -113,117 +122,28 @@ describe("<SkillsApp> SidePanel editor", () => {
     });
     fireEvent.click(viewFull);
 
-    // Editor is keyed by the body label/aria-label.
-    const editor = await screen.findByRole("textbox", {
-      name: /Edit body for draft-skill/i,
-    });
-    expect(editor).toHaveValue("## Steps\n1. do thing");
-
-    // Save is disabled when not dirty; revert too.
-    expect(
-      screen.getByRole("button", { name: /Save edits to draft-skill/i }),
-    ).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Revert/i })).toBeDisabled();
-  });
-
-  it("calls patchSkill on Save with the new body", async () => {
-    vi.mocked(clientMod.getSkillsList).mockResolvedValueOnce({
-      skills: [
-        {
-          name: "draft-skill",
-          status: "proposed",
-          content: "old body",
-        },
-      ],
-    });
-    const patchMock = vi.mocked(clientMod.patchSkill).mockResolvedValueOnce({});
-
-    render(wrap(<SkillsApp />));
-
-    const viewFull = await screen.findByRole("button", {
-      name: /View SKILL\.md/i,
-    });
-    fireEvent.click(viewFull);
-
-    const editor = await screen.findByRole("textbox", {
-      name: /Edit body for draft-skill/i,
-    });
-    fireEvent.change(editor, { target: { value: "new body" } });
-
-    const save = screen.getByRole("button", {
-      name: /Save edits to draft-skill/i,
-    });
-    expect(save).not.toBeDisabled();
-    fireEvent.click(save);
-
+    const navigate = vi.mocked(router.navigate);
     await waitFor(() => {
-      expect(patchMock).toHaveBeenCalledWith("draft-skill", {
-        old_string: "old body",
-        new_string: "new body",
-        replace_all: false,
+      expect(navigate).toHaveBeenCalledWith({
+        to: "/skills/$skillName",
+        params: { skillName: "draft-skill" },
       });
     });
   });
 
-  it("preserves chars typed between save resolve and parent post-save effect", async () => {
-    // Regression for the stale-closure bug devils-advocate flagged: after
-    // a successful save, the parent passes back res.skill with new content,
-    // which used to land in the reset useEffect's dep array and silently
-    // wipe any chars the user typed in the gap between the patch resolving
-    // and the effect running.
-    vi.mocked(clientMod.patchSkill).mockClear();
-    vi.mocked(clientMod.getSkillsList).mockResolvedValueOnce({
-      skills: [
-        {
-          name: "draft-skill",
-          status: "proposed",
-          content: "first body",
-        },
-      ],
-    });
-    // patchSkill resolves with the new server-known body.
-    vi.mocked(clientMod.patchSkill).mockResolvedValueOnce({
-      skill: {
-        name: "draft-skill",
-        status: "proposed",
-        content: "second body",
-      },
-    });
+  it.skip("calls patchSkill on Save with the new body", async () => {
+    // FIXME(v3-mvp): The save flow moved from the SidePanel inline editor to
+    // the full-screen SkillDetailRoute. The patch surface there is
+    // editSkillContent (PUT /skills/{name}), not patchSkill. Rewrite this
+    // test against SkillDetailRoute when that route gains its own test file
+    // (web/src/routes/SkillDetailRoute.test.tsx).
+  });
 
-    render(wrap(<SkillsApp />));
-
-    const viewFull = await screen.findByRole("button", {
-      name: /View SKILL\.md/i,
-    });
-    fireEvent.click(viewFull);
-
-    const editor = await screen.findByRole("textbox", {
-      name: /Edit body for draft-skill/i,
-    });
-
-    // First save with "second body".
-    fireEvent.change(editor, { target: { value: "second body" } });
-    fireEvent.click(
-      screen.getByRole("button", { name: /Save edits to draft-skill/i }),
-    );
-
-    await waitFor(() => {
-      expect(vi.mocked(clientMod.patchSkill)).toHaveBeenCalledTimes(1);
-    });
-
-    // User keeps typing after save resolves. The parent has now updated
-    // previewSkill.content via onSaved → handlePreviewSaved → setPreviewSkill.
-    // The reset effect must NOT fire (dep array is keyed on skill.name only)
-    // and the new chars must be preserved in the editor.
-    fireEvent.change(editor, {
-      target: { value: "second body and more" },
-    });
-
-    await waitFor(() => {
-      expect((editor as HTMLTextAreaElement).value).toBe(
-        "second body and more",
-      );
-    });
+  it.skip("preserves chars typed between save resolve and parent post-save effect", async () => {
+    // FIXME(v3-mvp): Same as above — the stale-closure regression now lives
+    // in SkillDetailRoute's draft buffer (see SkillDetailRoute.tsx: seedKey
+    // gating around setDraft). Move this regression test to the new route's
+    // test file rather than re-asserting it against an unreachable surface.
   });
 
   it("does not show the editor for active skills (preview only)", async () => {

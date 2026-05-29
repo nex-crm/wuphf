@@ -110,7 +110,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		}
 
 		b.counter++
-		taskID := fmt.Sprintf("task-%d", b.counter)
+		taskID := b.allocateIssueIDLocked()
 		titleToID[strings.TrimSpace(item.Title)] = taskID
 
 		task := teamTask{
@@ -267,7 +267,7 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.counter++
 	task := teamTask{
-		ID:               fmt.Sprintf("task-%d", b.counter),
+		ID:               b.allocateIssueIDLocked(),
 		Channel:          channel,
 		Title:            title,
 		Details:          strings.TrimSpace(input.Details),

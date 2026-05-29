@@ -1,5 +1,7 @@
 id: local-business-ai-package
 name: Local Business AI Package
+display_name: Local Business AI
+icon: "🏪"
 kind: local_service
 category: services
 outcome: "Intake, booking, and follow-up for local-business clients."

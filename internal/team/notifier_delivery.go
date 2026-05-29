@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/onboarding"
 )
 
 // Notification debounce cooldowns. Prevents agent-to-agent feedback
@@ -44,6 +46,18 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	// change would silently turn the demo seed into an LLM-burning
 	// broadcast. One filter, one place.
 	if msg.Kind == "demo_seed" {
+		return
+	}
+	// Phase 2 onboarding is fully deterministic — the broker emits CEO
+	// cards from ceoDeterministicMessages and the user replies via the
+	// structured-card POST handlers. The CEO agent must NOT fire an LLM
+	// run in response, or the user sees a spurious "CEO is typing…"
+	// stream and the deterministic flow stalls behind a Claude turn that
+	// has nothing to add. (Spec: docs/specs/onboarding-into-office.md
+	// "zero LLM tokens in Phase 2".) Gate on (CEO DM channel + onboarding
+	// phase is deterministic) so other channels and the post-onboarding
+	// CEO DM keep their normal headless behaviour.
+	if isDeterministicPhase2CEODM(msg.Channel) {
 		return
 	}
 	immediate, delayed := l.notificationTargetsForMessage(msg)
@@ -275,4 +289,52 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		return
 	}
 	l.paneDispatch().Enqueue(target.Slug, target.PaneTarget, notification)
+}
+
+// isDeterministicPhase2CEODM reports whether a message landed in the
+// CEO DM during an onboarding phase where the broker drives the
+// conversation via deterministic templates and no LLM should fire.
+//
+// In production the CEO DM lands at the canonical pair-sorted slug
+// ("ceo__human"), not the reserved CEOOnboardingDMSlug constant — that
+// constant is for the state record only. So we match on "DM whose
+// target agent is CEO" instead of a literal slug comparison.
+//
+// Phase 2 covers greet → bridge (everything before the user opts into
+// the first issue). draft/approve/kickoff and complete are NOT gated —
+// those are the LLM-backed phases where the CEO agent is supposed to
+// drive the chat.
+//
+// Errors loading the state file fall through to "not gated" so a
+// missing or corrupt onboarded.json never silences a real post-
+// onboarding CEO turn.
+func isDeterministicPhase2CEODM(channel string) bool {
+	ch := normalizeChannelSlug(channel)
+	if ch == "" {
+		return false
+	}
+	target := DMTargetAgent(ch)
+	if target != "ceo" && ch != onboarding.CEOOnboardingDMSlug {
+		return false
+	}
+	s, err := onboarding.Load()
+	if err != nil || s == nil {
+		return false
+	}
+	// Already onboarded → CEO LLM is fully active again.
+	if s.Onboarded() {
+		return false
+	}
+	switch s.Phase {
+	case onboarding.PhaseGreet,
+		onboarding.PhaseIdentity,
+		onboarding.PhaseWebsite,
+		onboarding.PhaseScan,
+		onboarding.PhaseBlueprint,
+		onboarding.PhaseTeam,
+		onboarding.PhaseSeed,
+		onboarding.PhaseBridge:
+		return true
+	}
+	return false
 }

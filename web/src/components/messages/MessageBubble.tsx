@@ -23,9 +23,33 @@ import { PixelAvatar } from "../ui/PixelAvatar";
 import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 import {
+  IssueCreatedCard,
+  parseIssueCreatedPayload,
+} from "./cards/IssueCreatedCard";
+import {
+  IssueLifecycleCard,
+  parseIssueLifecyclePayload,
+} from "./cards/IssueLifecycleCard";
+import {
+  NotebookEntryCreatedCard,
+  parseNotebookEntryCreatedPayload,
+} from "./cards/NotebookEntryCreatedCard";
+import {
+  NotebookPromotionRequestedCard,
+  parseNotebookPromotionRequestedPayload,
+} from "./cards/NotebookPromotionRequestedCard";
+import {
+  NotebookPromotionResolvedCard,
+  parseNotebookPromotionResolvedPayload,
+} from "./cards/NotebookPromotionResolvedCard";
+import {
   parseSystemAuthErrorPayload,
   SystemErrorCard,
 } from "./cards/SystemErrorCard";
+import {
+  parseWikiArticleCreatedPayload,
+  WikiArticleCreatedCard,
+} from "./cards/WikiArticleCreatedCard";
 import MessageArtifactReferences from "./MessageArtifactReferences";
 
 interface MessageBubbleProps {
@@ -128,6 +152,45 @@ export function MessageBubble({
   if (message.kind === "system_auth_error") {
     const payload = parseSystemAuthErrorPayload(message.payload);
     return <SystemErrorCard payload={payload} />;
+  }
+
+  // System-authored issue card. Broker emits one per team_task
+  // action=create with task_type=issue. Renders OUTSIDE the standard
+  // message-bubble so it visually reads as a system event, not an
+  // agent line — same pattern as SystemErrorCard.
+  if (message.kind === "issue_created") {
+    const payload = parseIssueCreatedPayload(message.payload);
+    return <IssueCreatedCard payload={payload} />;
+  }
+
+  // Lifecycle transition cards (Drafting→Running, →Done, etc). Broker
+  // emits one whenever an Issue's lifecycle state changes in a way the
+  // human should see. Same surface treatment as IssueCreatedCard.
+  if (message.kind === "issue_lifecycle") {
+    const payload = parseIssueLifecyclePayload(message.payload);
+    return <IssueLifecycleCard payload={payload} />;
+  }
+
+  // Wiki/notebook surface cards. Broker emits these in #general when one
+  // of four artifact events happens (new wiki article, new notebook
+  // entry, promotion requested, promotion resolved). Each card is a
+  // clickable banner that routes to the underlying artifact — wiki
+  // article, notebook entry, or the Reviews app.
+  if (message.kind === "wiki_article_created") {
+    const payload = parseWikiArticleCreatedPayload(message.payload);
+    return <WikiArticleCreatedCard payload={payload} />;
+  }
+  if (message.kind === "notebook_entry_created") {
+    const payload = parseNotebookEntryCreatedPayload(message.payload);
+    return <NotebookEntryCreatedCard payload={payload} />;
+  }
+  if (message.kind === "notebook_promotion_requested") {
+    const payload = parseNotebookPromotionRequestedPayload(message.payload);
+    return <NotebookPromotionRequestedCard payload={payload} />;
+  }
+  if (message.kind === "notebook_promotion_resolved") {
+    const payload = parseNotebookPromotionResolvedPayload(message.payload);
+    return <NotebookPromotionResolvedCard payload={payload} />;
   }
 
   return (

@@ -195,6 +195,7 @@ type HumanInterviewArgs struct {
 	MySlug              string                 `json:"my_slug,omitempty" jsonschema:"Agent slug asking the question. Defaults to WUPHF_AGENT_SLUG."`
 	Options             []HumanInterviewOption `json:"options,omitempty" jsonschema:"Suggested answer options to show the human"`
 	RecommendedOptionID string                 `json:"recommended_option_id,omitempty" jsonschema:"Which option you recommend, if any"`
+	IssueID             string                 `json:"issue_id,omitempty" jsonschema:"Issue/task id this interview belongs to. Required when you are the owner of an active Issue — links the Inbox card back to the Issue so the human sees the breadcrumb."`
 }
 
 type HumanMessageArgs struct {
@@ -225,6 +226,7 @@ type TeamRequestArgs struct {
 	Required            bool                   `json:"required,omitempty" jsonschema:"Whether an answer is truly required before continuing"`
 	Secret              bool                   `json:"secret,omitempty" jsonschema:"Whether the answer should be treated as private in channel history"`
 	ReplyToID           string                 `json:"reply_to_id,omitempty" jsonschema:"Optional message ID this request belongs to"`
+	IssueID             string                 `json:"issue_id,omitempty" jsonschema:"Issue/task id this request belongs to. Pass it when you are the owner of an active Issue so the Inbox card links back."`
 }
 
 type TeamTasksArgs struct {
@@ -247,9 +249,10 @@ type TeamTaskArgs struct {
 	Details       string   `json:"details,omitempty" jsonschema:"Optional detail or update"`
 	Owner         string   `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
 	ThreadID      string   `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
-	TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
+	TaskType      string   `json:"task_type,omitempty" jsonschema:"Use \"issue\" for any work scoped from a human request — that is what the Issues board renders (RULE ZERO). Other values (research, feature, launch, follow_up, bugfix, incident) are for sub-tasks created INSIDE an existing Issue, not for the Issue itself. When in doubt, pick \"issue\"."`
 	ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
 	DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task must wait for before starting (create action only)"`
+	ParentIssueID string   `json:"parent_issue_id,omitempty" jsonschema:"Parent Issue id when this is a sub-issue created INSIDE an existing Issue (create action only). Leave empty for top-level Issues. Sub-issues inherit the parent's channel and surface under the parent on the Issue detail view."`
 	MySlug        string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 

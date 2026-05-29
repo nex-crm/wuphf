@@ -718,7 +718,7 @@ func (b *Broker) createIntakeTask(intent string) string {
 	now := time.Now().UTC().Format(time.RFC3339)
 	title := intakeTaskTitle(intent)
 	task := teamTask{
-		ID:            fmt.Sprintf("task-%d", b.counter),
+		ID:            b.allocateIssueIDLocked(),
 		Channel:       "general",
 		Title:         title,
 		Details:       intent,

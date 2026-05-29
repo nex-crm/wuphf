@@ -1,5 +1,7 @@
 id: niche-crm
 name: Niche CRM
+display_name: Niche CRM
+icon: "🎯"
 kind: product_gtm
 category: product
 outcome: "Build and launch a focused CRM for a specific niche."

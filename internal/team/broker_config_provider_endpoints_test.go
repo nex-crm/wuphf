@@ -400,3 +400,59 @@ func TestHandleConfig_ProviderEndpointsAllowsOpenclawHTTPRuntime(t *testing.T) {
 		t.Fatalf("expected 200 for provider_endpoints[openclaw-http], got %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestHandleConfig_ExposesGatewayAndLLMSplit locks in the wire shape the
+// frontend's Settings + Integrations apps depend on: the GET response must
+// expose llm_provider_kinds (non-gateway runtimes for the global picker)
+// and gateway_kinds (Integrations app cards) as separate lists.
+//
+// Without these on the wire, the Settings UI cannot tell which kinds are
+// safe to show in the default-runtime dropdown and the Integrations app
+// cannot enumerate which gateways are compiled in.
+func TestHandleConfig_ExposesGatewayAndLLMSplit(t *testing.T) {
+	withWuphfHomeDir(t)
+	t.Setenv("WUPHF_LLM_PROVIDER", "")
+	b := newTestBroker(t)
+
+	rec := configRequest(t, b, http.MethodGet, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+
+	llmKinds, ok := got["llm_provider_kinds"].([]any)
+	if !ok {
+		t.Fatalf("llm_provider_kinds missing or wrong type: %T", got["llm_provider_kinds"])
+	}
+	gatewayKinds, ok := got["gateway_kinds"].([]any)
+	if !ok {
+		t.Fatalf("gateway_kinds missing or wrong type: %T", got["gateway_kinds"])
+	}
+
+	// The non-gateway list must include the directly-dispatchable kinds and
+	// must NOT include the gateway-only kinds. The gateway list is the
+	// inverse — that's the whole point of the split.
+	expectIn := func(name string, list []any, want bool) {
+		t.Helper()
+		found := false
+		for _, v := range list {
+			if s, _ := v.(string); s == name {
+				found = true
+				break
+			}
+		}
+		if found != want {
+			t.Errorf("kind %q in %v: got %v, want %v", name, list, found, want)
+		}
+	}
+	expectIn("claude-code", llmKinds, true)
+	expectIn("codex", llmKinds, true)
+	expectIn("hermes-agent", llmKinds, false)
+	expectIn("openclaw-http", llmKinds, false)
+	expectIn("hermes-agent", gatewayKinds, true)
+	expectIn("openclaw-http", gatewayKinds, true)
+	expectIn("claude-code", gatewayKinds, false)
+}

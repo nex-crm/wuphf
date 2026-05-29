@@ -85,6 +85,12 @@ type RequestPeek struct {
 	Question string `json:"question"`
 	From     string `json:"from"`
 	Blocking bool   `json:"blocking,omitempty"`
+	// IssueID is the parent Issue (team_task) id when the owner
+	// agent filed this request from inside an owned Issue. Renders
+	// as a breadcrumb on the Inbox card so the human can jump back
+	// to the parent Issue without losing context. Empty when the
+	// request was filed outside an Issue (e.g. CEO clarifications).
+	IssueID string `json:"issueId,omitempty"`
 }
 
 // ReviewPeek is the trimmed promotion shape the inbox row needs.
@@ -339,6 +345,7 @@ func (b *Broker) requestsForInbox(actor requestActor) []InboxItem {
 				Question: req.Question,
 				From:     req.From,
 				Blocking: req.Blocking,
+				IssueID:  strings.TrimSpace(req.IssueID),
 			},
 		})
 	}

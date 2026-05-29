@@ -16,6 +16,7 @@ func init() {
 		Capabilities: Capabilities{
 			PaneEligible:    false,
 			SupportsOneShot: false,
+			GatewayOnly:     true,
 		},
 	})
 }

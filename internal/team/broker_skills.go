@@ -101,6 +101,55 @@ func (b *Broker) skillIDExistsLocked(id string) bool {
 	return false
 }
 
+// SkillSummary is the slim projection of an active skill used to render the
+// AVAILABLE SKILLS catalog block into agent system prompts. Slug + title +
+// one-line description is enough for the LLM to pick the right team_skill_run
+// target without dragging the full Content body (which can be long) into the
+// prompt of every agent on every spawn.
+type SkillSummary struct {
+	Slug        string
+	Title       string
+	Description string
+	// OwnerAgents lists agent slugs this skill is enabled for. Empty means
+	// library-only (no agent can invoke it until the human enables it for
+	// a specific agent via the Skills tab). Used by prompt_builder.go to
+	// split the catalog into AVAILABLE SKILLS (this agent can invoke) and
+	// DISCOVERABLE SKILLS (this agent must request enablement first).
+	OwnerAgents []string
+}
+
+// ListActiveSkillSummaries returns slim summaries of every active skill,
+// sorted by slug so the rendered prompt block is byte-stable for prompt
+// caching. Mirrors ListPolicies semantics: only active (Status=="active")
+// records are returned; proposed and archived skills are filtered out.
+//
+// Slim by design: the broker's full skill content can be many KB. We render
+// only the slug and a short description into the prompt so every agent has a
+// definitive catalog to compare against before invoking team_skill_run,
+// without paying full content cost on every system prompt build.
+func (b *Broker) ListActiveSkillSummaries() []SkillSummary {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]SkillSummary, 0, len(b.skills))
+	for i := range b.skills {
+		sk := b.skills[i]
+		if sk.Status != "active" {
+			continue
+		}
+		slug := skillSlug(sk.Name)
+		if slug == "" {
+			continue
+		}
+		out = append(out, SkillSummary{
+			Slug:        slug,
+			Title:       strings.TrimSpace(sk.Title),
+			Description: strings.TrimSpace(sk.Description),
+			OwnerAgents: append([]string(nil), sk.OwnerAgents...),
+		})
+	}
+	return out
+}
+
 func (b *Broker) findSkillByWorkflowKeyLocked(key string) *teamSkill {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -216,6 +265,15 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		title = strings.TrimSpace(body.Name)
 	}
 
+	// Auto-enable defaults: when an agent proposes/creates a skill, it
+	// becomes immediately invocable for that agent on approval. Human-
+	// created skills stay library-only — the human picks which agents get
+	// to use them via the agent Skills tab.
+	var ownerAgents []string
+	if creatorSlug := normalizeActorSlug(createdBy); creatorSlug != "" && !isHumanMessageSender(creatorSlug) && b.findMemberLocked(creatorSlug) != nil {
+		ownerAgents = []string{creatorSlug}
+	}
+
 	b.counter++
 	sk := teamSkill{
 		ID:                  b.allocateSkillIDLocked(body.Name),
@@ -224,6 +282,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		Description:         strings.TrimSpace(body.Description),
 		Content:             strings.TrimSpace(body.Content),
 		CreatedBy:           createdBy,
+		OwnerAgents:         ownerAgents,
 		Channel:             channel,
 		Tags:                body.Tags,
 		Trigger:             strings.TrimSpace(body.Trigger),
@@ -542,7 +601,33 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 
 	sk := b.findSkillByNameLocked(skillName)
 	if sk == nil {
-		http.Error(w, "skill not found", http.StatusNotFound)
+		// Soft-404 (Layer 3 of skill-hallucination fix): include the
+		// active-skill slugs in the response body so the calling agent
+		// reads the actual catalog on the next turn instead of wasting
+		// another turn on another guess. Status code stays 404 so any
+		// existing client-side error UX still triggers; the catalog
+		// just rides along in the body. Mirror the locked-state read
+		// pattern by walking b.skills here rather than re-acquiring
+		// the mutex via ListActiveSkillSummaries (we already hold it).
+		available := make([]string, 0, len(b.skills))
+		for i := range b.skills {
+			if b.skills[i].Status != "active" {
+				continue
+			}
+			slug := skillSlug(b.skills[i].Name)
+			if slug == "" {
+				continue
+			}
+			available = append(available, slug)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error":            "skill not found",
+			"requested":        skillName,
+			"available_skills": available,
+			"hint":             "Pass an exact slug from `available_skills`. If the list is empty, no skills exist yet — do not retry; propose one via team_skill_create(action=propose) if the workflow is reusable.",
+		})
 		return
 	}
 

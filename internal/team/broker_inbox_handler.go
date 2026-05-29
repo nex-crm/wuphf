@@ -33,6 +33,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // handleTasksInbox serves GET /tasks/inbox. Mounted via b.withAuth
@@ -114,6 +115,9 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			case "comment":
 				b.handleTaskComment(w, r, actor, taskID)
 				return
+			case "activity":
+				b.handleTaskActivity(w, r, actor, taskID)
+				return
 			}
 		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -141,10 +145,13 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
-	// Snapshot reviewer list under the lock so the auth check runs
-	// against a stable view; releasing the lock before the auth
-	// decision would race Lane D's reviewer-routing writes.
+	// Snapshot the task summary alongside the reviewer list so the FE
+	// detail view does not depend on a separate /tasks list query to
+	// resolve display fields (title, channel, owner). Without this, a
+	// freshly-created Issue renders "(untitled)" because the parallel
+	// /tasks fetch is filtered by viewer_slug and may omit the row.
 	reviewers := append([]string(nil), task.Reviewers...)
+	taskSnapshot := *task
 	packet, packetErr := b.findDecisionPacketLocked(id)
 	var packetCopy DecisionPacket
 	if packet != nil {
@@ -156,6 +163,13 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
+	// Note (Slice 7): /tasks/{id} stays open to broker-token holders.
+	// Agent identity isn't carried on this endpoint (no my_slug header),
+	// so we can't enforce per-agent visibility here without breaking
+	// legitimate cross-agent reads (e.g. an agent looking up the
+	// parent of a sub-issue it owns). The visibility filter on the
+	// /tasks LIST endpoint (which DOES take viewer_slug) is what
+	// shapes the agent's "which Issues exist" view and drives behavior.
 
 	if packetErr != nil {
 		// findDecisionPacketLocked returns (nil, nil) for "not yet
@@ -168,16 +182,63 @@ func (b *Broker) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if packet == nil {
-		// Lane C has not yet stored a packet for this task. Return a
-		// 404 in v1 so the frontend distinguishes "task exists, no
-		// packet yet" from "task not found at all". When Lane C ships
-		// a regenerate-from-memory fallback (per the persistence error
-		// row in the failure-modes matrix), this branch flips to a
-		// regenerated packet plus the missing-packet banner.
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "decision packet not yet available"})
-		return
+		// Lazy-seed: any task can reach the Issue detail surface, but
+		// only task_type=issue creates seed a packet on the
+		// MutateTask create path. Sub-issues created by agents with
+		// a non-issue task_type (or any pre-Slice-1 task) hit this
+		// branch and would 404 with "decision packet not yet
+		// available", breaking the detail view. Seed one on read so
+		// the FE always gets a real packet to render.
+		b.mu.Lock()
+		seeded := b.getOrInitPacketLocked(id)
+		if seeded != nil {
+			b.stampLifecycleStateLocked(seeded)
+			b.persistDecisionPacketLocked(id, *seeded)
+			packetCopy = *seeded
+		}
+		b.mu.Unlock()
+		if seeded == nil {
+			// Defensive: getOrInitPacketLocked returns nil only on
+			// invalid task id, which we've already validated above.
+			// If this somehow fires, surface a real error so the FE
+			// can show a banner rather than spin forever.
+			log.Printf("broker: lazy-seed decision packet failed for task=%q", id)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not seed decision packet"})
+			return
+		}
 	}
-	writeJSON(w, http.StatusOK, packetCopy)
+	// Decision packet response shape: packet fields at the top level
+	// (taskId, lifecycleState, spec, ...) plus a "task" field carrying
+	// the teamTask snapshot. The FE's normalizeIssueDocument reads
+	// taskRecord = recordValue(r.task) for display fields.
+	writeJSON(w, http.StatusOK, taskDetailResponse{
+		TaskID:         packetCopy.TaskID,
+		LifecycleState: packetCopy.LifecycleState,
+		Spec:           packetCopy.Spec,
+		SessionReport:  packetCopy.SessionReport,
+		ChangedFiles:   packetCopy.ChangedFiles,
+		ReviewerGrades: packetCopy.ReviewerGrades,
+		Dependencies:   packetCopy.Dependencies,
+		UpdatedAt:      packetCopy.UpdatedAt,
+		Task:           &taskSnapshot,
+	})
+}
+
+// taskDetailResponse mirrors DecisionPacket but adds the source
+// teamTask so display fields (title, channel, owner) reach the FE
+// without a second fetch. Defined here (not in
+// broker_decision_packet_types.go) because it is purely a transport
+// shape for GET /tasks/{id}; the persisted packet stays unchanged.
+type taskDetailResponse struct {
+	TaskID         string          `json:"taskId"`
+	LifecycleState LifecycleState  `json:"lifecycleState"`
+	Spec           Spec            `json:"spec"`
+	SessionReport  SessionReport   `json:"sessionReport"`
+	ChangedFiles   []DiffSummary   `json:"changedFiles"`
+	ReviewerGrades []ReviewerGrade `json:"reviewerGrades"`
+	Dependencies   Dependencies    `json:"dependencies"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
+	Task           *teamTask       `json:"task,omitempty"`
 }
 
 // handleTaskBlock serves POST /tasks/{id}/block. Body shape:
@@ -429,7 +490,24 @@ func (b *Broker) handleTaskComment(w http.ResponseWriter, r *http.Request, actor
 		authorSlug = "human"
 	}
 	b.mu.Lock()
+	// Re-resolve the task under the lock — the pointer captured before the
+	// earlier Unlock can be stale if b.tasks was mutated meanwhile (the
+	// underlying slice may have been re-sliced/grown by a concurrent
+	// writer, invalidating the pointer into the old backing array).
+	task = b.findTaskByIDLocked(id)
+	if task == nil {
+		b.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
 	b.AppendPacketFeedbackLocked(id, authorSlug, trimmed)
+	// Wake the agents whose attention this comment needs. Parse any
+	// @slug mentions; always add the channel leader (ceo) so an untagged
+	// comment is picked up by CEO. The channel message is what triggers
+	// agent loops to fetch new context — without it the feedback sits on
+	// the packet but no one ever notices. Mirrors how
+	// postTaskReassignNotificationsLocked works for ownership changes.
+	b.postIssueCommentBroadcastLocked(authorSlug, task, trimmed)
 	b.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]string{
 		"taskId": id,

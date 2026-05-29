@@ -18,6 +18,16 @@ func requestIsActive(req humanInterview) bool {
 	return status == "" || status == "pending" || status == "open"
 }
 
+// recentApprovalReuseWindow controls how long an already-approved
+// request can short-circuit a new same-dedupe-key call. Within this
+// window, any retry of the same external action by the same agent
+// reuses the existing approval and proceeds straight to execute —
+// no new request, no human re-prompt. Outside the window, the agent
+// gets a fresh prompt because the human's earlier intent may have
+// gone stale. 5 minutes balances "obvious retry" with "explicit
+// re-confirm" for slow tool loops.
+const recentApprovalReuseWindow = 5 * time.Minute
+
 func requestBlocksMessages(req humanInterview) bool {
 	if !requestIsActive(req) || !req.Blocking {
 		return false
@@ -381,6 +391,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		Secret        bool              `json:"secret"`
 		ReplyTo       string            `json:"reply_to"`
 		DedupeKey     string            `json:"dedupe_key"`
+		IssueID       string            `json:"issue_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -419,27 +430,72 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		// hitting the same gate) pile up dozens of identical pending
 		// approvals — observed as 100+ stacked "Approve gmail action"
 		// requests after a single connect-and-retry sequence.
+		//
+		// Two cases:
+		//   (a) Active request with same key → return it.
+		//   (b) RECENTLY-ANSWERED request (within recentApprovalReuseWindow)
+		//       with same key AND the answer was approve → return the
+		//       answered request directly. The agent's poll loop sees
+		//       the existing approval immediately and proceeds to
+		//       execute without re-prompting the human. This is what
+		//       fixes the "I approved it but it asked again" loop:
+		//       after the human approves, any same-key retry within
+		//       the window auto-proceeds.
 		dedupeKey := strings.TrimSpace(body.DedupeKey)
 		if dedupeKey != "" {
 			for i := range b.requests {
-				if !requestIsActive(b.requests[i]) {
-					continue
-				}
 				if normalizeChannelSlug(b.requests[i].Channel) != channel {
 					continue
 				}
 				if strings.TrimSpace(b.requests[i].DedupeKey) != dedupeKey {
 					continue
 				}
-				existing := cloneHumanInterview(b.requests[i])
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"request":    existing,
-					"id":         existing.ID,
-					"deduped":    true,
-					"dedupe_key": dedupeKey,
-				})
-				return
+				// Case (a): active request — return it.
+				if requestIsActive(b.requests[i]) {
+					existing := cloneHumanInterview(b.requests[i])
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"request":    existing,
+						"id":         existing.ID,
+						"deduped":    true,
+						"dedupe_key": dedupeKey,
+					})
+					return
+				}
+				// Case (b): recently approved — short-circuit the
+				// poll loop by returning the answered request. Only
+				// applies to approval-kind requests (the
+				// "I approved but it asked again" loop the user
+				// reported); interviews / freeform / choice keep the
+				// old behavior of always firing a fresh request after
+				// an answer.
+				existingKind := normalizeRequestKind(b.requests[i].Kind)
+				if existingKind != "approval" && normalizeRequestKind(body.Kind) != "approval" {
+					continue
+				}
+				if answered := b.requests[i].Answered; answered != nil {
+					ansAt, err := time.Parse(time.RFC3339, answered.AnsweredAt)
+					if err != nil {
+						continue
+					}
+					if time.Since(ansAt) > recentApprovalReuseWindow {
+						continue
+					}
+					choice := strings.ToLower(strings.TrimSpace(answered.ChoiceID))
+					if choice != "approve" && choice != "approve_with_note" && choice != "confirm_proceed" {
+						continue
+					}
+					existing := cloneHumanInterview(b.requests[i])
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"request":         existing,
+						"id":              existing.ID,
+						"deduped":         true,
+						"dedupe_key":      dedupeKey,
+						"reused_approval": true,
+					})
+					return
+				}
 			}
 		}
 		b.counter++
@@ -459,6 +515,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			Secret:        body.Secret,
 			ReplyTo:       strings.TrimSpace(body.ReplyTo),
 			DedupeKey:     dedupeKey,
+			IssueID:       strings.TrimSpace(body.IssueID),
 			CreatedAt:     time.Now().UTC().Format(time.RFC3339),
 			UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
 		}

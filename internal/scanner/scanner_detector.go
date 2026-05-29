@@ -131,6 +131,45 @@ func RedactSecretsForDisplay(content string) RedactionResult {
 	return redactSecretsDetailed(content)
 }
 
+// RedactKnownSecretsOnly runs the pattern pass but SKIPS the entropy
+// heuristic. Use this for structured strings the user must see verbatim
+// (action approval card context, technical identifiers like action_ids
+// of the form `connection_module::HASH::HASH`) where the entropy pass
+// would mistakenly redact the load-bearing identifier and leave the
+// human with no way to evaluate what they're approving.
+//
+// The pattern pass still catches real secrets (API keys, AWS access
+// keys, etc.) so anything that genuinely matches a known secret format
+// is still scrubbed.
+func RedactKnownSecretsOnly(content string) RedactionResult {
+	out := content
+	var reasons []RedactionReason
+	seenPattern := map[string]struct{}{}
+	patternHits := 0
+	poisoned := false
+	for _, sp := range secretPatterns {
+		p := sp
+		out = p.Pattern.ReplaceAllStringFunc(out, func(_ string) string {
+			patternHits++
+			if p.Poison {
+				poisoned = true
+			}
+			if _, seen := seenPattern[p.Name]; !seen {
+				seenPattern[p.Name] = struct{}{}
+				reasons = append(reasons, RedactionReason{Kind: "pattern", Name: p.Name})
+			}
+			return "[REDACTED]"
+		})
+	}
+	return RedactionResult{
+		Content:     out,
+		PatternHits: patternHits,
+		EntropyHits: 0,
+		Poisoned:    poisoned,
+		Reasons:     reasons,
+	}
+}
+
 // redactSecrets scrubs known-format tokens first, then sweeps the
 // remainder with the Shannon-entropy heuristic. Returns the redacted
 // content, the total hit count, and a breakdown the caller can log.

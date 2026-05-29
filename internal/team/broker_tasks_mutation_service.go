@@ -44,6 +44,146 @@ func taskMutationError(kind TaskMutationErrorKind, message string, cause error) 
 	return &TaskMutationError{Kind: kind, Message: message, Cause: cause}
 }
 
+// checkTaskActionAuthLocked enforces the hybrid CEO-managed Issues
+// model. Returns nil when the actor may perform the action on the
+// (optional) target task, or a TaskMutationForbidden error with a
+// human-readable steer when not.
+//
+// Actor classes:
+//   - humanActors: "human", "you", "" (system) — the operator. Always allowed.
+//   - "system" / "broker": internal recovery (auto-resolve safety net,
+//     self-heal, intake driver) — always allowed.
+//   - leadActor: whoever holds the lead/CEO slug. Always allowed.
+//   - taskOwner: the current Owner of the target task. Allowed for
+//     status-transition actions on their own task.
+//   - everyone else: specialist — only `comment` is open.
+//
+// Caller holds b.mu.
+func (b *Broker) checkTaskActionAuthLocked(action, actor, targetTaskID string) error {
+	a := strings.ToLower(strings.TrimSpace(action))
+	actorSlug := strings.ToLower(strings.TrimSpace(actor))
+
+	// Comment is open to all — every agent should be able to leave a
+	// note on any Issue they can see.
+	if a == "comment" {
+		return nil
+	}
+
+	// Human + internal recovery actors are unrestricted.
+	switch actorSlug {
+	case "", "human", "you", "system", "broker", "nex":
+		return nil
+	}
+
+	leadSlug := strings.ToLower(strings.TrimSpace(officeLeadSlugFrom(b.members)))
+	// Pre-onboarding / test fixtures have no members → no lead. In
+	// that state the office isn't managed yet, so don't block — the
+	// gate only kicks in once a CEO/lead is in place.
+	if leadSlug == "" {
+		return nil
+	}
+	if actorSlug == leadSlug {
+		return nil
+	}
+	// The gate ONLY blocks slugs that are registered as specialist
+	// agents in this office. Unregistered actors (test slugs, CLI
+	// scripts, external callers that pass an arbitrary created_by)
+	// fall through — we have no basis to treat them as a specialist
+	// being managed by CEO. This keeps tests + ad-hoc tooling working
+	// while still blocking actual specialist agents from scope-editing
+	// Issues that should go through CEO.
+	if b.findMemberLocked(actorSlug) == nil {
+		return nil
+	}
+
+	// Owner-allowed actions: the task's current owner can move their
+	// own work through status transitions without going through CEO.
+	// Requires a target task id to check ownership.
+	ownerAllowed := map[string]bool{
+		"submit_for_review": true,
+		"review":            true,
+		"complete":          true,
+		"resume":            true,
+		"release":           true,
+		"claim":             true,
+		"assign":            true,
+		// block is the owner saying "I can't move because of <reason>"
+		// (sets blocked=true). Allowed for owner so they can pause
+		// their own work without going through CEO.
+		"block": true,
+		// cancel kills a task. Owner can cancel their own work; CEO
+		// can cancel anything via the lead path above. Specialists
+		// can't cancel work they don't own.
+		"cancel": true,
+	}
+	// Reviewer-allowed actions: an agent assigned as a reviewer on the
+	// task can bounce work back with request_changes and (in PR-loop
+	// usage) approve/reject the submission. These are not "scope" edits
+	// — they're the reviewer fulfilling their assigned role.
+	reviewerAllowed := map[string]bool{
+		"request_changes": true,
+		"approve":         true,
+		"reject":          true,
+	}
+	if targetTaskID != "" {
+		if task := b.findTaskByIDLocked(strings.TrimSpace(targetTaskID)); task != nil {
+			if ownerAllowed[a] && strings.EqualFold(strings.TrimSpace(task.Owner), actorSlug) {
+				return nil
+			}
+			if reviewerAllowed[a] {
+				for _, r := range task.Reviewers {
+					if strings.EqualFold(strings.TrimSpace(r), actorSlug) {
+						return nil
+					}
+				}
+			}
+		}
+	}
+
+	// Everything else is CEO-only for specialists. Steer them at the
+	// suggestion channel so they know how to escalate scope ideas
+	// without being silently blocked.
+	return taskMutationError(
+		TaskMutationForbidden,
+		fmt.Sprintf(
+			"only @%s (or the human) can %s an Issue. To propose a change, post team_task action=comment with a [SUGGESTION] prefix on the parent Issue and @-mention %s.",
+			leadSlug, a, leadSlug,
+		),
+		nil,
+	)
+}
+
+// defaultTaskTypeForCreate is the broker safety net for RULE ZERO. When an
+// agent creates a top-level task via team_task action=create, the Issues
+// board only renders rows with task_type="issue" (see web IssuesList
+// isIssueSpecTask). Pre-fix the team_task tool schema listed example
+// values "research, feature, launch, follow_up, bugfix, incident" without
+// mentioning "issue", so LLMs picked one of those for human-asked work —
+// the task landed in broker state but never reached the user-visible
+// Issues board, defeating RULE ZERO. The prompt was updated to instruct
+// task_type="issue", and the schema description rewritten, but we also
+// override here so a regressed prompt cannot silently break the surface.
+//
+// Override scope: empty input and the bare "follow_up" default (the value
+// LLMs reach for when the schema example lists it first) become "issue".
+// Real pipeline values picked deliberately (feature / research / launch /
+// bugfix / incident / custom) pass through — sub-tasks INSIDE an Issue
+// are allowed to carry those typed values per the canonical workflow,
+// and tests asserting pipeline-specific behaviour rely on explicit types.
+// Part 2 ships parent_issue_id; once that lands, this override should
+// only fire when parent_issue_id is empty (top-level work).
+func defaultTaskTypeForCreate(in string) string {
+	s := strings.ToLower(strings.TrimSpace(in))
+	if s == "" {
+		return "issue"
+	}
+	switch s {
+	case "follow_up", "follow-up", "followup":
+		return "issue"
+	}
+	return strings.TrimSpace(in)
+}
+
 func writeTaskMutationHTTPError(w http.ResponseWriter, err error) {
 	var mutationErr *TaskMutationError
 	if !errors.As(err, &mutationErr) {
@@ -144,6 +284,26 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	// CEO-managed Issues gate (hybrid model, Slice 7):
+	//   - scope-shaping actions (create / reassign / approve / reject /
+	//     reopen / block / cancel) are restricted to CEO + human. They
+	//     change WHAT the Issue is or WHO owns it.
+	//   - owner status-transition actions (submit_for_review / complete
+	//     / request_changes / resume / release / claim / assign) are
+	//     allowed for CEO + human OR the task's current owner. They
+	//     report WHERE the owner's own work is.
+	//   - comment is always open — every agent can leave a note.
+	//
+	// Specialists who try to scope-edit get a clear error pointing them
+	// at the suggestion channel (team_task action=comment with
+	// [SUGGESTION] prefix). The auto-resolve / broker-internal create
+	// path passes actor="system" or the broker's own slug which we
+	// allow-list below so safety-net Issue creation keeps working.
+	if err := b.checkTaskActionAuthLocked(action, actor, body.ID); err != nil {
+		return TaskResponse{}, err
+	}
+
 	if action == "create" {
 		if b.findChannelLocked(channel) == nil {
 			return TaskResponse{}, taskMutationError(TaskMutationNotFound, "channel not found", nil)
@@ -177,7 +337,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				existing.status = "in_progress"
 			}
 			if taskType := strings.TrimSpace(body.TaskType); taskType != "" {
-				existing.TaskType = taskType
+				existing.TaskType = defaultTaskTypeForCreate(taskType)
 			}
 			if pipelineID := strings.TrimSpace(body.PipelineID); pipelineID != "" {
 				existing.PipelineID = pipelineID
@@ -227,7 +387,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		b.counter++
 		task := teamTask{
-			ID:               fmt.Sprintf("task-%d", b.counter),
+			ID:               b.allocateIssueIDLocked(),
 			Channel:          channel,
 			Title:            strings.TrimSpace(body.Title),
 			Details:          strings.TrimSpace(body.Details),
@@ -235,7 +395,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			status:           "open",
 			CreatedBy:        actor,
 			ThreadID:         strings.TrimSpace(body.ThreadID),
-			TaskType:         strings.TrimSpace(body.TaskType),
+			TaskType:         defaultTaskTypeForCreate(body.TaskType),
 			PipelineID:       strings.TrimSpace(body.PipelineID),
 			ExecutionMode:    strings.TrimSpace(body.ExecutionMode),
 			reviewState:      strings.TrimSpace(body.ReviewState),
@@ -244,8 +404,34 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			WorktreePath:     strings.TrimSpace(body.WorktreePath),
 			WorktreeBranch:   strings.TrimSpace(body.WorktreeBranch),
 			DependsOn:        trimTaskDependencies(body.DependsOn),
+			ParentIssueID:    strings.TrimSpace(body.ParentIssueID),
 			CreatedAt:        now,
 			UpdatedAt:        now,
+		}
+		// Force task_type=issue when parent_issue_id is set so every
+		// sub-issue is renderable on the Issue detail surface (same
+		// lifecycle, same packet, same components). Agents may pass
+		// task_type=research/feature on sub-issues; we override here
+		// so the FE doesn't have to special-case those.
+		if task.ParentIssueID != "" {
+			task.TaskType = "issue"
+			// Sub-issues nest one level deep only. If the proposed
+			// parent is itself a sub-issue (has its own parent),
+			// reject the create so we don't get sub-sub-sub-issue
+			// cascades the UI can't render legibly. Agents can
+			// always rescope a sub-issue under the top-level parent
+			// instead. The check stays inside the locked section
+			// since we're reading other tasks' state.
+			if parent := b.findTaskByIDLocked(task.ParentIssueID); parent != nil {
+				if strings.TrimSpace(parent.ParentIssueID) != "" {
+					rollbackTask()
+					return TaskResponse{}, taskMutationError(
+						TaskMutationConflict,
+						"sub-issues can only be one level deep; pick the top-level parent instead",
+						nil,
+					)
+				}
+			}
 		}
 		if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
 			task.blocked = true
@@ -267,7 +453,55 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		b.reindexTaskLifecycleFromLegacyLocked(&task)
 		b.tasks = append(b.tasks, task)
+		// Issues start in `drafting` regardless of whether an owner is
+		// set, so the human sees the new Issue in the Drafting column
+		// with an Approve & Start button before the agent begins work.
+		// Without this, owner-set Issues go straight to `in_progress`
+		// / running and the agent ploughs ahead — defeating the
+		// human-approval gate the user demanded for "any work getting
+		// done has an Issue in place". applyLifecycleStateLocked sets
+		// pipeline_stage=draft, review_state=pending_review, status=open,
+		// blocked=false, and updates LifecycleState in-place. Errors
+		// are ignored: the only failure mode is an unrecognized state,
+		// and LifecycleStateDrafting is canonical.
+		if strings.EqualFold(task.TaskType, "issue") {
+			// Preserve the dependency-block flag across the drafting
+			// transition. LifecycleStateDrafting's derived row has
+			// blocked=false (drafting issues aren't in any dispatch
+			// queue), but a freshly created issue with unresolved
+			// deps was just marked blocked above (line ~281). Without
+			// this restore, the block silently disappears when the
+			// human clicks Approve & Start.
+			depBlocked := b.tasks[len(b.tasks)-1].blocked
+			_ = b.applyLifecycleStateLocked(&b.tasks[len(b.tasks)-1], LifecycleStateDrafting)
+			if depBlocked {
+				b.tasks[len(b.tasks)-1].blocked = true
+			}
+			task = b.tasks[len(b.tasks)-1]
+		}
 		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
+		// Seed a Decision Packet for Issues so the /tasks/{id} read path
+		// returns 200 immediately instead of 404 "decision packet not yet
+		// available". Pre-fix: tasks created via team_task action=create
+		// had no packet until Lane B's intake driver ran SetSpec, so the
+		// Issue detail surface failed to load and the user saw "Could not
+		// load issue" even though the row was on the board. The packet
+		// starts empty; intake fills spec.goal / context / approach /
+		// acceptance as CEO streams them. Only seed for task_type=issue
+		// so internal types (skill_review_nudge, incident self-heal) keep
+		// their legacy no-packet behaviour.
+		if strings.EqualFold(task.TaskType, "issue") {
+			packet := b.getOrInitPacketLocked(task.ID)
+			if packet != nil {
+				b.stampLifecycleStateLocked(packet)
+				b.persistDecisionPacketLocked(task.ID, *packet)
+			}
+			// Post the issue card into the channel so the human (and
+			// other agents) see the new Issue land in chat with a
+			// one-click link to the detail view. Independent of any
+			// chat reply the creating agent posts itself.
+			b.postIssueCreatedCardLocked(actor, &task)
+		}
 		if err := b.saveLocked(); err != nil {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
@@ -380,6 +614,21 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				} else {
 					task.status = "open"
 				}
+			}
+			appendDetails = true
+		case "reopen":
+			// Reopen a closed (rejected/cancelled/approved) Issue back
+			// into drafting so the human can re-approve to restart work.
+			// Clears the terminal state markers; applyLifecycleStateLocked
+			// below restores the rest of the drafting tuple.
+			task.status = "open"
+			task.reviewState = "pending_review"
+			task.pipelineStage = "draft"
+			task.blocked = false
+			task.CompletedAt = ""
+			task.LifecycleState = LifecycleStateDrafting
+			if err := b.applyLifecycleStateLocked(task, LifecycleStateDrafting); err != nil {
+				return TaskResponse{}, taskMutationError(TaskMutationConflict, "could not reopen issue", err)
 			}
 			appendDetails = true
 		case "release":

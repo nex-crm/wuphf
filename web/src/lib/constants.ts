@@ -21,7 +21,7 @@ export function appTitle(app: string): string {
 export const ONBOARDING_COPY = {
   step1_headline: "AI employees with a shared brain",
   step1_subhead:
-    "A collaborative office where AI agents like Claude Code, Codex, and OpenClaw learn your work playbooks, build personalized skills, and execute, 24x7.\nEach agent is backed by its own knowledge graph.",
+    "A collaborative office where AI agents like Claude Code, Codex, and Opencode learn your work playbooks, build personalized skills, and execute, 24x7.\nEach agent is backed by its own knowledge graph.",
   step1_cta: "Continue",
   step2_headline: "Name your office",
   step2_subhead: "This becomes the workspace your agents call home.",

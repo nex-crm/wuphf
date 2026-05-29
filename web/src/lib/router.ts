@@ -30,26 +30,46 @@ export const appRoute = createRoute({
   path: ROUTE_PATHS.app,
 });
 
+// `/tasks` and `/apps/tasks/$taskId` retired (2026-05-28). Every unit of
+// work is an Issue/Sub-Issue now; the routes redirect to /issues so
+// bookmarks, chat links, and external references keep working.
 export const tasksRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.tasks,
+  beforeLoad: () => {
+    throw redirect({ to: "/issues", replace: true });
+  },
 });
 
 export const taskDetailRoute = createRoute({
   getParentRoute: () => tasksRoute,
   path: "$taskId",
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/issues/$issueId",
+      params: { issueId: params.taskId },
+      replace: true,
+    });
+  },
 });
 
 export const appTaskDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.appTaskDetail,
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/issues/$issueId",
+      params: { issueId: params.taskId },
+      replace: true,
+    });
+  },
 });
 
 export const legacyWorkbenchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.legacyWorkbench,
   beforeLoad: () => {
-    throw redirect({ to: "/tasks", replace: true });
+    throw redirect({ to: "/issues", replace: true });
   },
 });
 
@@ -57,7 +77,7 @@ export const legacyWorkbenchAgentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.legacyWorkbenchAgent,
   beforeLoad: () => {
-    throw redirect({ to: "/tasks", replace: true });
+    throw redirect({ to: "/issues", replace: true });
   },
 });
 
@@ -140,17 +160,18 @@ export const taskDecisionRoute = createRoute({
   path: ROUTE_PATHS.taskDecision,
 });
 
-// / — index route. Always redirects to /channels/general at the route
-// level so the root never has to render an empty body. Uses redirect()
-// from beforeLoad: this fires before the route mounts, so URL→store
-// race conditions can't observe the index match.
+// / — index route. v3 MVP: default landing is the CEO's subspace
+// (Chat tab) instead of #general, so the operator's first surface is
+// the strategy-and-intent chat with the CEO. Channels are demoted to
+// "Legacy". Uses redirect() from beforeLoad so the URL→store race
+// can't observe the index match.
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.index,
   beforeLoad: () => {
     throw redirect({
-      to: "/channels/$channelSlug",
-      params: { channelSlug: "general" },
+      to: "/agents/$agentSlug",
+      params: { agentSlug: "ceo" },
       replace: true,
     });
   },
@@ -178,6 +199,29 @@ export const issueNewRoute = createRoute({
   path: "new",
 });
 
+// /skills/$skillName — full-screen skill SKILL.md detail editor + viewer.
+// Renders SkillDetailRoute which lets the operator edit the body in raw
+// markdown or read it as rendered HTML via a toggle.
+export const skillDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.skillDetail,
+});
+
+// /agents/$agentSlug — v3 MVP per-agent subspace shell.
+// Renders the uniform Chat | App | Notebooks | Calendar | Settings tabs.
+// Empty tab segment lands on the Chat tab by default.
+export const agentSubspaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.agentSubspace,
+});
+
+// /agents/$agentSlug/$tab — explicit tab segment.
+// Nested under agentSubspaceRoute so $agentSlug is shared.
+export const agentSubspaceTabRoute = createRoute({
+  getParentRoute: () => agentSubspaceRoute,
+  path: "$tab",
+});
+
 // Route tree
 export const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -201,6 +245,10 @@ export const routeTree = rootRoute.addChildren([
   // issueNewRoute must be listed BEFORE issueDetailRoute so the static
   // segment "new" wins over the dynamic "$issueId" catch-all.
   issuesRoute.addChildren([issueNewRoute, issueDetailRoute]),
+  // v3 MVP — per-agent subspace.
+  agentSubspaceRoute.addChildren([agentSubspaceTabRoute]),
+  // Skill detail (full-screen edit + render with raw/preview toggle).
+  skillDetailRoute,
 ]);
 
 export function createAppRouter(history: RouterHistory = createHashHistory()) {

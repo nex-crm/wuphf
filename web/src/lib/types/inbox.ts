@@ -51,6 +51,10 @@ export interface InboxItemRequest extends InboxItemBase {
     question: string;
     from: string;
     blocking?: boolean;
+    /** Owner-set Issue id this request belongs to. Renders as a
+     * breadcrumb on the Inbox card so the human can jump back to
+     * the parent Issue without losing context. */
+    issueId?: string;
   };
 }
 

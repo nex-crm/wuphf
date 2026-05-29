@@ -96,23 +96,31 @@ type Broker struct {
 	// the durable source of truth. The two are kept in sync by
 	// AppendReviewerGrade — Lane C mirrors writes to Lane D on each
 	// grade. Guarded by b.mu.
-	reviewerGradesByTask    map[string][]ReviewerGrade
-	requests                []humanInterview
-	humanInvites            []humanInvite
-	humanSessions           []humanSession
-	humanSessionRevoke      map[string]chan struct{} // session ID → closed on revoke
-	actions                 []officeActionLog
-	signals                 []officeSignalRecord
-	decisions               []officeDecisionRecord
-	watchdogs               []watchdogAlert
-	scheduler               []schedulerJob
-	skills                  []teamSkill
-	skillDescEmbeddings     map[string][]float32         // slug → description embedding vector; guarded by mu
-	sharedMemory            map[string]map[string]string // namespace → key → value
-	lastTaggedAt            map[string]time.Time         // when each agent was last @mentioned
-	lastPaneSnapshot        map[string]string            // last captured pane content per agent (for change detection)
-	seenTelegramGroups      map[int64]string             // chat_id -> title, populated by transport
-	counter                 int
+	reviewerGradesByTask map[string][]ReviewerGrade
+	requests             []humanInterview
+	approvalAudit        []ApprovalAuditEntry
+	humanInvites         []humanInvite
+	humanSessions        []humanSession
+	humanSessionRevoke   map[string]chan struct{} // session ID → closed on revoke
+	actions              []officeActionLog
+	signals              []officeSignalRecord
+	decisions            []officeDecisionRecord
+	watchdogs            []watchdogAlert
+	scheduler            []schedulerJob
+	skills               []teamSkill
+	skillDescEmbeddings  map[string][]float32         // slug → description embedding vector; guarded by mu
+	sharedMemory         map[string]map[string]string // namespace → key → value
+	lastTaggedAt         map[string]time.Time         // when each agent was last @mentioned
+	lastPaneSnapshot     map[string]string            // last captured pane content per agent (for change detection)
+	seenTelegramGroups   map[int64]string             // chat_id -> title, populated by transport
+	counter              int
+	// idPrefix is the Linear-style prefix used for new Issue IDs (e.g.
+	// "NEX" → NEX-1, NEX-2). Derived from the workspace's company_name
+	// via deriveIDPrefix; refreshed on broker init + when the human
+	// updates the company name during onboarding. Existing task-N IDs
+	// are left untouched — only new allocations carry the new prefix.
+	// Guarded by b.mu.
+	idPrefix                string
 	notificationSince       string
 	insightsSince           string
 	pendingInterview        *humanInterview
@@ -387,6 +395,11 @@ func NewBrokerAt(statePath string) *Broker {
 	b.ensureDefaultChannelsLocked()
 	b.normalizeLoadedStateLocked()
 	b.bootstrapHumanHasPostedLocked()
+	// Resolve the Linear-style ID prefix from the workspace registry's
+	// company_name so any tasks minted from here forward carry e.g.
+	// NEX-N instead of task-N. Failure-tolerant: refresh keeps the
+	// existing (or default) prefix if the registry isn't readable.
+	b.refreshIDPrefixFromWorkspaceLocked()
 	b.mu.Unlock()
 	b.stopCh = make(chan struct{})
 	if activityWatchdogEnabled {
@@ -602,6 +615,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/decisions", b.requireAuth(b.handleDecisions))
 	mux.HandleFunc("/watchdogs", b.requireAuth(b.handleWatchdogs))
 	mux.HandleFunc("/actions", b.requireAuth(b.handleActions))
+	mux.HandleFunc("/approval-audit", b.requireAuth(b.handleApprovalAudit))
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/scheduler/", b.requireAuth(b.handleSchedulerSubpath))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
@@ -1040,6 +1054,7 @@ func (b *Broker) Reset() {
 	b.oneOnOneAgent = agent
 	b.tasks = []teamTask{}
 	b.requests = nil
+	b.approvalAudit = nil
 	b.humanInvites = nil
 	b.humanSessions = nil
 	b.humanSessionRevoke = nil

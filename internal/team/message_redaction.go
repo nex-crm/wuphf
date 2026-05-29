@@ -41,7 +41,26 @@ func sanitizeHumanInterview(req humanInterview) humanInterview {
 	redactionCount := req.RedactionCount
 	reasons := append([]string(nil), req.RedactionReasons...)
 
-	applyField := func(s string) string {
+	// Approval cards contain structured technical identifiers (action_id,
+	// connection key, workflow handle) that the human MUST see to know
+	// what they're approving. Run only the known-secret pattern pass on
+	// these short identifier-bearing fields — the entropy heuristic was
+	// redacting high-entropy action IDs (e.g. conn_mod_def::HASH) as
+	// "Action: [REDACTED]" which defeated the entire approval surface.
+	// Free-form fields (Context, answer text, option descriptions) still
+	// get the stronger display redaction so a pasted token in the body
+	// does not leak through. Real secrets (API keys, AWS access keys,
+	// OAuth tokens, etc.) get caught by the pattern pass in either mode.
+	applyKnownSecretsOnly := func(s string) string {
+		res := scanner.RedactKnownSecretsOnly(s)
+		if res.Matches() > 0 {
+			redactionCount += res.Matches()
+			reasons = appendRedactionReasons(reasons, res.ReasonLabels())
+			return res.Content
+		}
+		return s
+	}
+	applyDisplayRedaction := func(s string) string {
 		res := scanner.RedactSecretsForDisplay(s)
 		if res.Matches() > 0 {
 			redactionCount += res.Matches()
@@ -51,21 +70,21 @@ func sanitizeHumanInterview(req humanInterview) humanInterview {
 		return s
 	}
 
-	req.Title = applyField(req.Title)
-	req.Question = applyField(req.Question)
-	req.Context = applyField(req.Context)
+	req.Title = applyKnownSecretsOnly(req.Title)
+	req.Question = applyKnownSecretsOnly(req.Question)
+	req.Context = applyDisplayRedaction(req.Context)
 	if len(req.Options) > 0 {
 		req.Options = append([]interviewOption(nil), req.Options...)
 		for i := range req.Options {
-			req.Options[i].Label = applyField(req.Options[i].Label)
-			req.Options[i].Description = applyField(req.Options[i].Description)
-			req.Options[i].TextHint = applyField(req.Options[i].TextHint)
+			req.Options[i].Label = applyKnownSecretsOnly(req.Options[i].Label)
+			req.Options[i].Description = applyDisplayRedaction(req.Options[i].Description)
+			req.Options[i].TextHint = applyDisplayRedaction(req.Options[i].TextHint)
 		}
 	}
 	if req.Answered != nil {
 		answer := *req.Answered
-		answer.ChoiceText = applyField(answer.ChoiceText)
-		answer.CustomText = applyField(answer.CustomText)
+		answer.ChoiceText = applyDisplayRedaction(answer.ChoiceText)
+		answer.CustomText = applyDisplayRedaction(answer.CustomText)
 		req.Answered = &answer
 	}
 	if redactionCount > 0 || len(reasons) > 0 {

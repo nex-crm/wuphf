@@ -1642,13 +1642,13 @@ func TestRecoverTimedOutHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *te
 	}
 	var healTask teamTask
 	for _, candidate := range b.AllTasks() {
-		if candidate.Title == "Self-heal @eng on "+task.ID {
+		if candidate.ParentIssueID == task.ID && isSelfHealingTask(&candidate) {
 			healTask = candidate
 			break
 		}
 	}
 	if healTask.ID == "" {
-		t.Fatalf("expected self-healing task after timeout recovery, got %+v", b.AllTasks())
+		t.Fatalf("expected self-healing sub-issue after timeout recovery, got %+v", b.AllTasks())
 	}
 }
 
@@ -1696,13 +1696,13 @@ func TestRecoverFailedHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *test
 	}
 	var healTask teamTask
 	for _, candidate := range b.AllTasks() {
-		if candidate.Title == "Self-heal @eng on "+task.ID {
+		if candidate.ParentIssueID == task.ID && isSelfHealingTask(&candidate) {
 			healTask = candidate
 			break
 		}
 	}
 	if healTask.ID == "" {
-		t.Fatalf("expected self-healing task after error recovery, got %+v", b.AllTasks())
+		t.Fatalf("expected self-healing sub-issue after error recovery, got %+v", b.AllTasks())
 	}
 }
 
@@ -2231,7 +2231,18 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 	content := l.taskNotificationContent(action, task)
 	packet := l.buildTaskExecutionPacket("ceo", action, task, content)
 
-	l.enqueueHeadlessCodexTurn("ceo", packet)
+	// Enqueue via the record form so TaskID is set explicitly. The 2-arg
+	// enqueueHeadlessCodexTurn re-derives TaskID from the prompt using
+	// headlessCodexTaskID, which only recognises legacy "#task-" /
+	// "#blank-slate-" prefixes — not the current Linear-style IDs
+	// (e.g. "#OFFICE-3") that buildTaskExecutionPacket now emits. Without
+	// a TaskID the lead-wake heuristic can't look up review_ready and the
+	// bypass never fires.
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{
+		Prompt:  packet,
+		Channel: "general",
+		TaskID:  task.ID,
+	})
 
 	if l.headless.deferredLead != nil {
 		t.Fatal("expected review-ready task notification to bypass lead deferral")

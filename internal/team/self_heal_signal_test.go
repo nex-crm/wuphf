@@ -24,8 +24,8 @@ func TestSelfHealSignalScanner_EmitsCandidateForResolvedIncident(t *testing.T) {
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-77",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-7"),
-		Details:    selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing deploy specialist"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-7", "", agent.EscalationCapabilityGap),
+		Details:    selfHealingTaskDetails("deploy-bot", "task-7", "", agent.EscalationCapabilityGap, "missing deploy specialist"),
 		Owner:      "deploy-bot",
 		status:     "done",
 		PipelineID: "incident",
@@ -70,7 +70,7 @@ func TestSelfHealSignalScanner_SkipsOpenIncidents(t *testing.T) {
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-78",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-99"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-99", "", agent.EscalationCapabilityGap),
 		Details:    "still investigating",
 		Owner:      "deploy-bot",
 		status:     "in_progress", // not done
@@ -145,8 +145,8 @@ func TestSelfHealSignalScanner_AdvancesCutoffAcrossPasses(t *testing.T) {
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-81",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-7"),
-		Details:    selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing relay"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-7", "", agent.EscalationCapabilityGap),
+		Details:    selfHealingTaskDetails("deploy-bot", "task-7", "", agent.EscalationCapabilityGap, "missing relay"),
 		Owner:      "deploy-bot",
 		status:     "done",
 		PipelineID: "incident",
@@ -174,7 +174,7 @@ func TestSelfHealSignalScanner_AdvancesCutoffAcrossPasses(t *testing.T) {
 }
 
 func TestParseSelfHealReason(t *testing.T) {
-	details := selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing deploy specialist")
+	details := selfHealingTaskDetails("deploy-bot", "task-7", "", agent.EscalationCapabilityGap, "missing deploy specialist")
 	got := parseSelfHealReason(details)
 	if got != string(agent.EscalationCapabilityGap) {
 		t.Errorf("parseSelfHealReason: got %q want %q", got, agent.EscalationCapabilityGap)

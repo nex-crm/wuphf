@@ -29,8 +29,8 @@ func TestSynthesizer_SelfHealEndToEnd_WritesProposedSkill(t *testing.T) {
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-101",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-7"),
-		Details:    selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing deploy specialist"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-7", "", agent.EscalationCapabilityGap),
+		Details:    selfHealingTaskDetails("deploy-bot", "task-7", "", agent.EscalationCapabilityGap, "missing deploy specialist"),
 		Owner:      "deploy-bot",
 		status:     "done",
 		PipelineID: "incident",
@@ -110,8 +110,8 @@ func TestSynthesizer_SelfHealEndToEnd_LLMRejectsCandidate(t *testing.T) {
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-202",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-8"),
-		Details:    selfHealingTaskDetails("deploy-bot", "task-8", agent.EscalationCapabilityGap, "one-off env quirk"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-8", "", agent.EscalationCapabilityGap),
+		Details:    selfHealingTaskDetails("deploy-bot", "task-8", "", agent.EscalationCapabilityGap, "one-off env quirk"),
 		Owner:      "deploy-bot",
 		status:     "done",
 		PipelineID: "incident",
@@ -154,8 +154,8 @@ func TestSynthesizer_SelfHealEndToEnd_StageBProposalsTotalIncrements(t *testing.
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-303",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-9"),
-		Details:    selfHealingTaskDetails("deploy-bot", "task-9", agent.EscalationCapabilityGap, "missing relay"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-9", "", agent.EscalationCapabilityGap),
+		Details:    selfHealingTaskDetails("deploy-bot", "task-9", "", agent.EscalationCapabilityGap, "missing relay"),
 		Owner:      "deploy-bot",
 		status:     "done",
 		PipelineID: "incident",
@@ -164,7 +164,10 @@ func TestSynthesizer_SelfHealEndToEnd_StageBProposalsTotalIncrements(t *testing.
 		UpdatedAt:  now.Format(time.RFC3339),
 	})
 
-	reply := `{"is_skill": true, "name": "handle-capability-gap-relay", "description": "when blocked because the relay is missing, discover and add it.", "body": "## When this fires\nA capability_gap blocks deploy.\n\n## Steps\n1. Discover.\n2. Add.\n\n## Source incident\ntask-303\n"}`
+	// Body has 3 enumerated steps and >=400 chars so it clears the depth
+	// gate (stageBSynthNewSkillMinBodyLen / stageBSynthNewSkillMinSteps)
+	// that the deliberate-skill-generation work added to validateStageBSynthResponse.
+	reply := `{"is_skill": true, "name": "handle-capability-gap-relay", "description": "when blocked because the relay is missing, discover and add it.", "body": "## When this fires\nA capability_gap blocks deploy because a needed relay is not registered for this workspace.\n\n## Steps\n1. Run /capabilities discover to enumerate the missing relay handle for the failing tool call.\n2. Add the missing relay through the workspace integrations panel so future invocations find it.\n3. Verify the deploy unblocks by retrying the original tool call end-to-end.\n\n## Source incident\n- task-303 — capability gap on prod deploy relay.\n"}`
 	var calls atomic.Int64
 	srv := httptest.NewServer(fakeAnthropicHandler(t, &calls, reply))
 	defer srv.Close()

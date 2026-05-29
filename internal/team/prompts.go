@@ -48,6 +48,21 @@ func (l *Launcher) newPromptBuilder() *promptBuilder {
 			// inside Build is redundant.
 			return l.broker.ListPolicies()
 		},
+		skills: func() []SkillSummary {
+			if l == nil || l.broker == nil {
+				return nil
+			}
+			// Same pattern as policies above: builder re-sorts by
+			// slug for byte-stability, so this callback hands back
+			// the broker's order as-is.
+			return l.broker.ListActiveSkillSummaries()
+		},
+		activeIssues: func() []IssueSummary {
+			if l == nil || l.broker == nil {
+				return nil
+			}
+			return l.broker.ListActiveIssueSummariesForPrompt()
+		},
 		nameFor: l.targeter().NameFor,
 		learnings: func(slug string) []LearningSearchResult {
 			if l == nil || l.broker == nil || memoryBackend != config.MemoryBackendMarkdown {

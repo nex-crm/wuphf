@@ -17,20 +17,39 @@
  * Phase 3 behaviour is fully preserved for non-Drafting states.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { get, sseURL } from "../../api/client";
-import { postDecision, postTaskComment } from "../../api/lifecycle";
-import { getOfficeTasks, type Task } from "../../api/tasks";
+import {
+  postDecision,
+  postTaskComment,
+  postTaskReject,
+} from "../../api/lifecycle";
+import {
+  getOfficeTasks,
+  type Task,
+} from "../../api/tasks";
 import {
   messageMarkdownComponents,
   messageRemarkPlugins,
 } from "../../lib/messageMarkdown";
 import type { LifecycleState } from "../../lib/types/lifecycle";
+import {
+  Autocomplete,
+  type AutocompleteItem,
+  applyAutocomplete,
+} from "../messages/Autocomplete";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { formatIssueTitleForDisplay } from "../../lib/issueTitle";
+import { IssueActivityStream } from "./IssueActivityStream";
 import { LifecycleStatePill } from "./LifecycleStatePill";
+import { IssueDescription } from "./IssueDescription";
+import { IssueDetailTabs } from "./IssueDetailTabs";
+import { IssueActionToolbar } from "./IssueActionToolbar";
+import { OwnerPicker } from "./OwnerPicker";
+import { ParentIssueBreadcrumb } from "./ParentIssueBreadcrumb";
 
 // ── Phase 4 constants ──────────────────────────────────────────────────
 
@@ -86,11 +105,18 @@ export interface IssueComment {
 export interface IssueDocument {
   taskId: string;
   title: string;
+  /** Plain-markdown description (task.details from the broker).
+   * Linear-style: just the body, no Goal/Context/Approach/Acceptance
+   * sections to fill out. */
+  description: string;
   lifecycleState: LifecycleState;
+  /** Retained for back-compat with stream-handler code; unused by
+   * the Linear-style body. New work should write to `description`. */
   spec: IssueSpec;
   comments: IssueComment[];
   channel: string;
   ownerSlug?: string;
+  parentIssueId?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -343,9 +369,30 @@ export function normalizeIssueDocument(
   const spec = normalizeSpec(rawSpec, taskHint);
   const comments = normalizeIssueComments(r, rawSpec);
 
+  // Linear-style description: the broker writes `details` on the task
+  // record; legacy clients may still write `description`. Fall back to
+  // the spec's `assignment` block when neither is set so existing
+  // packet-driven Issues still render something.
+  const description =
+    (taskRecord
+      ? strField(taskRecord, "details", "description")
+      : undefined) ??
+    taskHint?.description ??
+    strField(rawSpec, "assignment") ??
+    "";
+
+  // parent_issue_id can arrive on the wrapped task record, at the
+  // packet top level, or only via the office-tasks taskHint. Check all
+  // three so child issues correctly hide the Sub-issues tab and show
+  // the parent breadcrumb regardless of which shape the broker returns.
+  const parentIssueId =
+    resolveAliasedField(r, taskRecord, "parentIssueId", "parent_issue_id") ??
+    taskHint?.parent_issue_id;
+
   return {
     taskId,
     title,
+    description,
     lifecycleState,
     spec,
     comments,
@@ -353,6 +400,7 @@ export function normalizeIssueDocument(
     ownerSlug:
       resolveAliasedField(r, taskRecord, "ownerSlug", "owner") ??
       taskHint?.owner,
+    parentIssueId,
     createdAt:
       resolveAliasedField(r, taskRecord, "createdAt", "created_at") ??
       taskHint?.created_at,
@@ -471,10 +519,21 @@ interface CommentItemProps {
 
 function CommentItem({ comment }: CommentItemProps) {
   const label = comment.isAgent ? `Agent ${comment.author}` : "Human";
+  // [SUGGESTION] prefix → specialist scope proposal (Slice 7). Highlight
+  // the card so CEO scans them quickly + strip the marker from the
+  // visible body since it duplicates the label.
+  const trimmed = comment.body.trimStart();
+  const isSuggestion = /^\[SUGGESTION\]/i.test(trimmed);
+  const body = isSuggestion
+    ? trimmed.replace(/^\[SUGGESTION\]\s*/i, "")
+    : comment.body;
   return (
     <article
       id={`comment-${comment.id}`}
-      className="issue-comment"
+      className={
+        "issue-comment" +
+        (isSuggestion ? " issue-comment--suggestion" : "")
+      }
       aria-label={`Comment by ${comment.author}`}
     >
       <div className="issue-comment-meta">
@@ -486,6 +545,14 @@ function CommentItem({ comment }: CommentItemProps) {
         <span className="issue-comment-author" title={label}>
           {comment.author}
         </span>
+        {isSuggestion ? (
+          <span
+            className="issue-comment-suggestion-badge"
+            title="Specialist suggestion — CEO decides"
+          >
+            Suggestion
+          </span>
+        ) : null}
         <time
           className="issue-comment-time"
           dateTime={comment.appendedAt}
@@ -499,7 +566,7 @@ function CommentItem({ comment }: CommentItemProps) {
           remarkPlugins={messageRemarkPlugins}
           components={messageMarkdownComponents}
         >
-          {comment.body}
+          {body}
         </ReactMarkdown>
       </div>
     </article>
@@ -574,7 +641,7 @@ interface ApproveAndStartButtonProps {
   onApproved: () => void;
 }
 
-function ApproveAndStartButton({
+export function ApproveAndStartButton({
   taskId,
   onApproved,
 }: ApproveAndStartButtonProps) {
@@ -619,6 +686,119 @@ function ApproveAndStartButton({
       >
         {isPending ? "Starting…" : "Approve & Start"}
       </button>
+    </div>
+  );
+}
+
+/**
+ * Close Issue button. Visible in any non-terminal lifecycle state so
+ * the human can shelve work that's no longer relevant (CEO went down
+ * the wrong path, scope changed, user moved on). Posts a Reject via
+ * the existing /tasks endpoint — reject is terminal; downstream blocks
+ * stay blocked, packet records the reason, channel gets a "task closed"
+ * broadcast via postTaskCancelNotificationsLocked.
+ *
+ * Two-step gesture: first click reveals a reason textarea + confirm.
+ * Without that gate, a stray click on a hover-target permanently
+ * closes the Issue with no chance to undo.
+ */
+interface CloseIssueButtonProps {
+  taskId: string;
+  onClosed: () => void;
+}
+
+export function CloseIssueButton({ taskId, onClosed }: CloseIssueButtonProps) {
+  const [confirming, setConfirming] = useState(false);
+  const [reason, setReason] = useState("");
+  const [closeError, setCloseError] = useState<string | null>(null);
+
+  const closeMutation = useMutation({
+    mutationFn: (r: string) => postTaskReject(taskId, r),
+    onSuccess: () => {
+      setCloseError(null);
+      setConfirming(false);
+      setReason("");
+      onClosed();
+    },
+    onError: (err: unknown) => {
+      setCloseError(
+        err instanceof Error ? err.message : "Failed to close issue.",
+      );
+    },
+  });
+
+  const trimmed = reason.trim();
+  const canSubmit = trimmed.length > 0 && !closeMutation.isPending;
+
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        className="btn btn-ghost issue-close-btn"
+        onClick={() => setConfirming(true)}
+        aria-label="Close this issue (terminal)"
+        data-testid="close-issue"
+      >
+        Close issue
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="issue-close-confirm"
+      data-testid="close-issue-confirm"
+      role="group"
+      aria-label="Confirm close issue"
+    >
+      <label className="issue-close-confirm-label" htmlFor="close-reason">
+        Reason for closing (required)
+      </label>
+      <textarea
+        id="close-reason"
+        className="issue-close-confirm-input"
+        value={reason}
+        onChange={(e) => {
+          setReason(e.target.value);
+          if (closeError) setCloseError(null);
+        }}
+        placeholder="e.g. Scope changed, no longer needed, duplicate of …"
+        rows={2}
+        disabled={closeMutation.isPending}
+        data-testid="close-issue-reason"
+      />
+      {closeError ? (
+        <p
+          className="issue-close-confirm-error"
+          role="alert"
+          data-testid="close-issue-error"
+        >
+          {closeError}
+        </p>
+      ) : null}
+      <div className="issue-close-confirm-actions">
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => {
+            setConfirming(false);
+            setReason("");
+            setCloseError(null);
+          }}
+          disabled={closeMutation.isPending}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn btn-danger"
+          disabled={!canSubmit}
+          onClick={() => closeMutation.mutate(trimmed)}
+          data-testid="close-issue-confirm"
+        >
+          {closeMutation.isPending ? "Closing…" : "Close issue"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -713,7 +893,7 @@ interface CommentsTimelineProps {
   onCommentPosted: () => void;
 }
 
-function CommentsTimeline({
+export function CommentsTimeline({
   taskId,
   channel,
   comments,
@@ -723,12 +903,17 @@ function CommentsTimeline({
 }: CommentsTimelineProps) {
   const [commentBody, setCommentBody] = useState("");
   const [commentError, setCommentError] = useState<string | null>(null);
+  const [caret, setCaret] = useState(0);
+  const [acItems, setAcItems] = useState<AutocompleteItem[]>([]);
+  const [acIdx, setAcIdx] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trimmedComment = commentBody.trim();
 
   const commentMutation = useMutation({
     mutationFn: (body: string) => postTaskComment(taskId, channel, body),
     onSuccess: () => {
       setCommentBody("");
+      setCaret(0);
       setCommentError(null);
       onCommentPosted();
     },
@@ -739,11 +924,66 @@ function CommentsTimeline({
     },
   });
 
+  const pickAutocomplete = useCallback(
+    (item: AutocompleteItem) => {
+      const next = applyAutocomplete(commentBody, caret, item);
+      setCommentBody(next.text);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(next.caret, next.caret);
+        setCaret(next.caret);
+      });
+    },
+    [commentBody, caret],
+  );
+
+  const handleAcItems = useCallback((items: AutocompleteItem[]) => {
+    setAcItems(items);
+    setAcIdx((prev) => (prev >= items.length ? 0 : prev));
+  }, []);
+
   function submitComment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!trimmedComment || commentMutation.isPending) return;
     setCommentError(null);
     commentMutation.mutate(trimmedComment);
+  }
+
+  function handleCommentKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Autocomplete keyboard nav runs first so the textarea doesn't
+    // swallow Enter when the panel is open. Same pattern as Composer.
+    if (acItems.length > 0) {
+      switch (event.key) {
+        case "ArrowDown":
+          event.preventDefault();
+          setAcIdx((prev) => (prev + 1) % acItems.length);
+          return;
+        case "ArrowUp":
+          event.preventDefault();
+          setAcIdx((prev) => (prev - 1 + acItems.length) % acItems.length);
+          return;
+        case "Tab":
+        case "Enter": {
+          event.preventDefault();
+          const pick = acItems[acIdx];
+          if (pick) pickAutocomplete(pick);
+          return;
+        }
+        case "Escape":
+          event.preventDefault();
+          setAcItems([]);
+          return;
+      }
+    }
+    // Cmd/Ctrl+Enter submits when autocomplete is not active.
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      if (trimmedComment && !commentMutation.isPending) {
+        commentMutation.mutate(trimmedComment);
+      }
+    }
   }
 
   return (
@@ -805,19 +1045,43 @@ function CommentsTimeline({
         <label className="issue-comment-form-label" htmlFor="issue-comment">
           Add a comment
         </label>
-        <textarea
-          id="issue-comment"
-          className="issue-comment-input"
-          value={commentBody}
-          onChange={(event) => {
-            setCommentBody(event.target.value);
-            if (commentError) setCommentError(null);
-          }}
-          placeholder="Ask a question, clarify scope, or leave review notes."
-          rows={4}
-          disabled={commentMutation.isPending}
-          data-testid="issue-comment-input"
-        />
+        <div className="issue-comment-input-wrap">
+          <Autocomplete
+            value={commentBody}
+            caret={caret}
+            selectedIdx={acIdx}
+            onItems={handleAcItems}
+            onPick={pickAutocomplete}
+          />
+          <textarea
+            id="issue-comment"
+            ref={textareaRef}
+            className="issue-comment-input"
+            value={commentBody}
+            onChange={(event) => {
+              setCommentBody(event.target.value);
+              setCaret(event.target.selectionStart ?? event.target.value.length);
+              if (commentError) setCommentError(null);
+            }}
+            onSelect={(event) => {
+              const target = event.currentTarget;
+              setCaret(target.selectionStart ?? target.value.length);
+            }}
+            onKeyUp={(event) => {
+              const target = event.currentTarget;
+              setCaret(target.selectionStart ?? target.value.length);
+            }}
+            onClick={(event) => {
+              const target = event.currentTarget;
+              setCaret(target.selectionStart ?? target.value.length);
+            }}
+            onKeyDown={handleCommentKeyDown}
+            placeholder="Ask a question, clarify scope, or leave review notes. Type @ to mention."
+            rows={4}
+            disabled={commentMutation.isPending}
+            data-testid="issue-comment-input"
+          />
+        </div>
         {commentError ? (
           <p
             className="issue-comment-error"
@@ -1073,11 +1337,28 @@ export function IssueDocument({
       data-task-id={taskId}
       data-lifecycle-state={doc.lifecycleState}
     >
-      {/* Sticky header: status pill + title */}
+      {/* Sticky header: status pill + title + owner */}
       <header className="issue-doc-header issue-doc-header--sticky">
+        {doc.parentIssueId ? (
+          <ParentIssueBreadcrumb parentIssueId={doc.parentIssueId} />
+        ) : null}
         <div className="issue-doc-header-row">
           <LifecycleStatePill state={doc.lifecycleState} />
-          <h2 className="issue-doc-title">{doc.title}</h2>
+          <h2 className="issue-doc-title">{formatIssueTitleForDisplay(doc.title)}</h2>
+        </div>
+        <div className="issue-doc-meta-row">
+          <OwnerPicker
+            taskId={taskId}
+            channel={doc.channel}
+            currentOwner={doc.ownerSlug}
+            onChanged={() => {
+              void queryClient.invalidateQueries({ queryKey: ["issue", taskId] });
+              void queryClient.invalidateQueries({ queryKey: ["issues"] });
+              void queryClient.invalidateQueries({
+                queryKey: ["issue-children"],
+              });
+            }}
+          />
         </div>
         {/*
          * Phase 4 button row. Contains Approve & Start when in Drafting.
@@ -1089,41 +1370,50 @@ export function IssueDocument({
           className="issue-doc-button-row"
           data-testid="issue-doc-button-row"
         >
-          {isDrafting ? (
-            <ApproveAndStartButton
-              taskId={taskId}
-              onApproved={() => {
-                // Invalidate the issue query so the status pill updates
-                // to "running" once the broker confirms the transition.
-                void queryClient.invalidateQueries({
-                  queryKey: ["issue", taskId],
-                });
-              }}
-            />
-          ) : null}
+          <IssueActionToolbar
+            taskId={taskId}
+            channel={doc.channel}
+            lifecycleState={doc.lifecycleState}
+            onAfterAction={() => {
+              void queryClient.invalidateQueries({
+                queryKey: ["issue", taskId],
+              });
+              void queryClient.invalidateQueries({ queryKey: ["issues"] });
+              void queryClient.invalidateQueries({
+                queryKey: ["lifecycle"],
+              });
+              void queryClient.invalidateQueries({
+                queryKey: ["lifecycle", "inbox-items"],
+              });
+            }}
+          />
         </div>
       </header>
 
-      {/* Body: spec sections + comments timeline */}
+      {/* Body: Linear-style — description, sub-issues, comments.
+       *  Goal/Context/Approach/Acceptance spec sections were removed
+       *  in favor of a single rich description, matching the Linear
+       *  product surface the team optimized for. The SpecBody
+       *  component is preserved in this file for tests + legacy code
+       *  paths but is no longer mounted. */}
       <div className="issue-doc-body">
-        {/* Spec sections — aria-live for streaming draft announcements */}
-        <SpecBody
-          spec={doc.spec}
-          mergedSpec={mergedSpec}
-          shouldAutoCollapse={shouldAutoCollapse}
-          specExpanded={specExpanded}
-          isDrafting={isDrafting}
-          isSectionStreaming={isSectionStreaming}
-          onExpand={toggleSpec}
-          onCollapse={toggleSpec}
+        <IssueDescription description={doc.description} isDrafting={isDrafting} />
+
+        {/* Live activity stream — surfaces what the owning agent is doing
+         *  right now via the SSE-fed agentActivitySnapshots. Stays in the
+         *  header zone (always visible) so the human sees the heartbeat
+         *  no matter which tab is active. */}
+        <IssueActivityStream
+          ownerSlug={doc.ownerSlug}
+          lifecycleState={doc.lifecycleState}
         />
 
-        {/* Comments timeline */}
-        <CommentsTimeline
+        <IssueDetailTabs
           taskId={taskId}
           channel={doc.channel}
           comments={doc.comments}
           isDrafting={isDrafting}
+          showSubIssues={!doc.parentIssueId}
           timelineRef={timelineRef}
           onCommentPosted={() => {
             void queryClient.invalidateQueries({ queryKey: ["issue", taskId] });
@@ -1135,3 +1425,4 @@ export function IssueDocument({
     </div>
   );
 }
+

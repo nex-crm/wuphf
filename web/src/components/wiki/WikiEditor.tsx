@@ -257,8 +257,8 @@ export default function WikiEditor({
   const remarkPlugins = useMemo(() => buildRemarkPlugins(resolver), [resolver]);
   const rehypePlugins = useMemo(() => buildRehypePlugins(), []);
   const markdownComponents = useMemo(
-    () => buildMarkdownComponents({ resolver }),
-    [resolver],
+    () => buildMarkdownComponents({ resolver, articlePath: path }),
+    [resolver, path],
   );
 
   // Per-article editor mode — persists across sessions so a user who picks

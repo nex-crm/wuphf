@@ -438,6 +438,14 @@ func (b *Broker) applyLifecycleStateLocked(task *teamTask, newState LifecycleSta
 	task.status = row.Status
 	task.blocked = row.Blocked
 	b.indexLifecycleLocked(task.ID, prev, newState)
+	// Emit a chat card on every non-initial transition for task_type=issue.
+	// postIssueLifecycleCardLocked already skips when from==to and when
+	// task is not an issue. Skip empty/unknown previous states so the
+	// initial create transition (handled by IssueCreatedCard) does not
+	// duplicate.
+	if prev != "" && prev != LifecycleStateUnknown {
+		b.postIssueLifecycleCardLocked(task, prev, newState, "system")
+	}
 	return nil
 }
 

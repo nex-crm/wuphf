@@ -101,6 +101,18 @@ export interface CeoFormFieldPayload {
 export interface CeoChipOption {
   id: string;
   label: string;
+  /**
+   * Single emoji or short glyph rendered alongside the label. Optional —
+   * the chip falls back to a plain pill when unset, so legacy chip rows
+   * keep working.
+   */
+  icon?: string;
+  /**
+   * One-line plain-text description shown under the label when present.
+   * Used by the onboarding blueprint picker so each pack reads as a card
+   * with its own purpose instead of an unlabeled pill.
+   */
+  description?: string;
 }
 
 export interface CeoChipRowPayload {

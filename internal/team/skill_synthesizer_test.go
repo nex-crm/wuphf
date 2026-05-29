@@ -47,24 +47,31 @@ type stubLLMProvider struct {
 }
 
 type stubLLMResponse struct {
-	fm   SkillFrontmatter
-	body string
-	err  error
+	fm       SkillFrontmatter
+	body     string
+	enhance  string
+	renameTo string
+	err      error
 }
 
-func (p *stubLLMProvider) SynthesizeSkill(_ context.Context, _ SkillCandidate, _ string) (SkillFrontmatter, string, error) {
+func (p *stubLLMProvider) SynthesizeSkill(_ context.Context, _ SkillCandidate, _ string) (StageBSynthDecision, error) {
 	p.calls.Add(1)
 	if p.respondNotSkill {
-		return SkillFrontmatter{}, "", errors.New("synth: candidate rejected by LLM as not-a-skill")
+		return StageBSynthDecision{}, errors.New("synth: candidate rejected by LLM as not-a-skill")
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.queue) == 0 {
-		return SkillFrontmatter{}, "", errors.New("synth: candidate rejected by LLM as not-a-skill")
+		return StageBSynthDecision{}, errors.New("synth: candidate rejected by LLM as not-a-skill")
 	}
 	r := p.queue[0]
 	p.queue = p.queue[1:]
-	return r.fm, r.body, r.err
+	return StageBSynthDecision{
+		Frontmatter: r.fm,
+		Body:        r.body,
+		Enhance:     r.enhance,
+		RenameTo:    r.renameTo,
+	}, r.err
 }
 
 // newSynthWithCandidates wires a synthesizer with a stub candidate source +
@@ -370,6 +377,265 @@ func TestStageBSignalsFooter_RendersCitations(t *testing.T) {
 	}
 	if !strings.Contains(body, "team/agents/a/notebook/x.md") {
 		t.Fatalf("expected first path in footer, got %q", body)
+	}
+}
+
+// TestSynthesizeOnce_EnhanceRoutesToExistingSkill confirms that when the
+// LLM emits an enhance hint, the synthesizer merges into the existing
+// skill instead of creating a new one. This is the core of the
+// "prefer enhance over new" gate added in the deliberate-skill-generation
+// work — without it, a near-duplicate notebook cluster could mint a
+// fresh skill and only get caught after the fact by semantic dedup.
+func TestSynthesizeOnce_EnhanceRoutesToExistingSkill(t *testing.T) {
+	b := newTestBroker(t)
+	// Pre-seed the existing skill.
+	b.mu.Lock()
+	b.skills = append(b.skills, teamSkill{
+		Name:        "deploy-runbook",
+		Title:       "Deploy Runbook",
+		Description: "Deploy a service from staging to prod.",
+		Content:     "## Steps\n1. Tag.\n2. Watch.\n",
+		Status:      "active",
+		CreatedBy:   "scanner",
+	})
+	b.mu.Unlock()
+
+	prov := &stubLLMProvider{
+		queue: []stubLLMResponse{{
+			fm: SkillFrontmatter{
+				Name:        "deploy-runbook",
+				Description: "Deploy a service from staging to prod (enhanced).",
+			},
+			body:    "## Steps\n3. Roll back if the soak window trips a health gate.\n",
+			enhance: "deploy-runbook",
+		}},
+	}
+	cand := SkillCandidate{
+		Source:        SourceNotebookCluster,
+		SuggestedName: "deploy-runbook-v2",
+		SignalCount:   3,
+	}
+	synth := newSynthWithCandidates(t, b, prov, []SkillCandidate{cand})
+
+	res, err := synth.SynthesizeOnce(context.Background(), "manual")
+	if err != nil {
+		t.Fatalf("SynthesizeOnce: %v", err)
+	}
+	if res.Synthesized != 0 {
+		t.Fatalf("Synthesized: got %d want 0 (enhance is not a new proposal)", res.Synthesized)
+	}
+	if res.Deduped != 1 {
+		t.Fatalf("Deduped: got %d want 1 (enhance counts as dedup)", res.Deduped)
+	}
+
+	b.mu.Lock()
+	enhanced := b.findSkillByNameLocked("deploy-runbook")
+	skillCount := len(b.skills)
+	b.mu.Unlock()
+	if enhanced == nil {
+		t.Fatalf("expected existing skill to survive")
+	}
+	if skillCount != 1 {
+		t.Fatalf("expected exactly 1 skill after enhance, got %d", skillCount)
+	}
+	if !strings.Contains(enhanced.Content, "Roll back if the soak window trips a health gate") {
+		t.Fatalf("expected enhancement merged into body, got:\n%s", enhanced.Content)
+	}
+	if atomic.LoadInt64(&b.skillCompileMetrics.SkillEnhancementsTotal) != 1 {
+		t.Fatalf("SkillEnhancementsTotal: got %d want 1",
+			atomic.LoadInt64(&b.skillCompileMetrics.SkillEnhancementsTotal))
+	}
+}
+
+// TestSynthesizeOnce_EnhanceProtectsInvariantBlock pins SkillOpt's
+// protected-section invariant: step-level edits must not drop or mutate
+// any <!-- INVARIANT-START --> block in the existing body. Without this
+// gate, the SkillOpt SpreadsheetBench score drops 22.5 points (ablation
+// Table 3). For us, the same risk: a fast enhancement quietly overwrites
+// a slow lesson the team learned the hard way.
+func TestSynthesizeOnce_EnhanceProtectsInvariantBlock(t *testing.T) {
+	b := newTestBroker(t)
+	// Pre-seed an existing skill that carries a protected invariant.
+	// mergeSkillContent is append-only, so a normal enhance preserves
+	// the block automatically — this test is the regression gate that
+	// makes sure a future merge implementation that doesn't preserve
+	// the block is caught at the contract layer rather than silently
+	// shipping the regression.
+	b.mu.Lock()
+	b.skills = append(b.skills, teamSkill{
+		Name:        "destructive-action-runbook",
+		Title:       "Destructive Action Runbook",
+		Description: "Run a destructive action with human approval.",
+		Content: "## Steps\n" +
+			"1. Stage the change.\n" +
+			"2. Run smoke tests.\n\n" +
+			"<!-- INVARIANT-START -->\n" +
+			"Never auto-approve destructive actions. Always require a human ack.\n" +
+			"<!-- INVARIANT-END -->\n",
+		Status:    "active",
+		CreatedBy: "scanner",
+	})
+	b.mu.Unlock()
+
+	// Enhancement that preserves the invariant block by simply appending.
+	// This must succeed — append-only merge keeps the block intact.
+	prov := &stubLLMProvider{
+		queue: []stubLLMResponse{{
+			fm: SkillFrontmatter{
+				Name:        "destructive-action-runbook",
+				Description: "Run a destructive action with human approval.",
+			},
+			body:    "## Steps\n3. Capture the approver in the audit log.\n",
+			enhance: "destructive-action-runbook",
+		}},
+	}
+	cand := SkillCandidate{
+		Source:        SourceNotebookCluster,
+		SuggestedName: "destructive-action-audit",
+		SignalCount:   3,
+	}
+	synth := newSynthWithCandidates(t, b, prov, []SkillCandidate{cand})
+
+	res, err := synth.SynthesizeOnce(context.Background(), "manual")
+	if err != nil {
+		t.Fatalf("SynthesizeOnce: %v", err)
+	}
+	if res.Deduped != 1 {
+		t.Fatalf("expected enhance to land (Deduped=1), got %+v", res)
+	}
+
+	b.mu.Lock()
+	enhanced := b.findSkillByNameLocked("destructive-action-runbook")
+	b.mu.Unlock()
+	if enhanced == nil {
+		t.Fatalf("expected enhanced skill to still exist")
+	}
+	if !strings.Contains(enhanced.Content, "Never auto-approve destructive actions. Always require a human ack.") {
+		t.Fatalf("expected invariant block to survive enhance, got:\n%s", enhanced.Content)
+	}
+	if !strings.Contains(enhanced.Content, "Capture the approver in the audit log") {
+		t.Fatalf("expected new step to be merged in, got:\n%s", enhanced.Content)
+	}
+}
+
+// TestVerifySkillInvariantsPreserved_RejectsMissingBlock is the unit-level
+// gate for the invariant check: a merge result that drops a protected
+// block must error out. Direct call rather than the synth pass so the
+// failure mode is unambiguous.
+func TestVerifySkillInvariantsPreserved_RejectsMissingBlock(t *testing.T) {
+	previous := "## Steps\n1. Foo.\n\n<!-- INVARIANT-START -->\nNever auto-approve.\n<!-- INVARIANT-END -->\n"
+	merged := "## Steps\n1. Foo.\n2. Bar.\n" // invariant block dropped
+
+	if err := verifySkillInvariantsPreserved(previous, merged); err == nil {
+		t.Fatal("expected invariant violation, got nil")
+	}
+	// Sanity: a merge that preserves the block must pass.
+	mergedOK := previous + "\n## Extra\n3. Baz.\n"
+	if err := verifySkillInvariantsPreserved(previous, mergedOK); err != nil {
+		t.Fatalf("preserved block should pass, got %v", err)
+	}
+	// No-invariant-block previous body short-circuits cleanly.
+	if err := verifySkillInvariantsPreserved("## Steps\n1. Foo.\n", "## Steps\n1. Foo.\n2. Bar.\n"); err != nil {
+		t.Fatalf("no-invariant case should pass, got %v", err)
+	}
+}
+
+// TestSynthesizeOnce_RenameAndEnhanceBroadensSlug confirms the rename
+// path: when the LLM signals that an existing skill's scope has
+// broadened (e.g. pitch-deck-saas → pitch-deck-creation), the existing
+// record is renamed in place and a redirect stub remains under the old
+// slug so cached references resolve.
+func TestSynthesizeOnce_RenameAndEnhanceBroadensSlug(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.skills = append(b.skills, teamSkill{
+		Name:        "pitch-deck-saas",
+		Title:       "SaaS Pitch Deck",
+		Description: "Draft a SaaS pitch deck.",
+		Content:     "## Steps\n1. Title.\n2. Problem.\n3. Demo.\n",
+		Status:      "active",
+		CreatedBy:   "scanner",
+	})
+	b.mu.Unlock()
+
+	prov := &stubLLMProvider{
+		queue: []stubLLMResponse{{
+			fm: SkillFrontmatter{
+				Name:        "pitch-deck-creation",
+				Description: "Draft a pitch deck for any go-to-market motion.",
+			},
+			body:     "## Steps\n4. Adapt the demo slide for marketplace / consumer / enterprise deals.\n",
+			enhance:  "pitch-deck-saas",
+			renameTo: "pitch-deck-creation",
+		}},
+	}
+	cand := SkillCandidate{
+		Source:        SourceNotebookCluster,
+		SuggestedName: "pitch-deck-marketplace",
+		SignalCount:   3,
+	}
+	synth := newSynthWithCandidates(t, b, prov, []SkillCandidate{cand})
+
+	res, err := synth.SynthesizeOnce(context.Background(), "manual")
+	if err != nil {
+		t.Fatalf("SynthesizeOnce: %v", err)
+	}
+	if res.Deduped != 1 {
+		t.Fatalf("Deduped: got %d want 1 (rename counts as dedup)", res.Deduped)
+	}
+
+	b.mu.Lock()
+	renamed := b.findSkillByNameLocked("pitch-deck-creation")
+	oldStill := b.findSkillByNameLocked("pitch-deck-saas")
+	b.mu.Unlock()
+
+	if renamed == nil {
+		t.Fatalf("expected pitch-deck-creation to exist after rename")
+	}
+	if !strings.Contains(renamed.Content, "Adapt the demo slide") {
+		t.Fatalf("expected enhancement merged into renamed body, got:\n%s", renamed.Content)
+	}
+	if !strings.Contains(renamed.Content, "Title.") {
+		t.Fatalf("expected original content preserved under renamed slug, got:\n%s", renamed.Content)
+	}
+	if oldStill != nil {
+		t.Fatalf("expected pitch-deck-saas record to be replaced in-place, still found one")
+	}
+}
+
+// TestSynthesizeOnce_EnhanceFallsThroughWhenTargetMissing confirms the
+// graceful fallback: if the LLM hallucinates an enhance target that
+// doesn't exist, we don't error — we treat the response as a fresh
+// new-skill proposal so the agent's work isn't lost.
+func TestSynthesizeOnce_EnhanceFallsThroughWhenTargetMissing(t *testing.T) {
+	b := newTestBroker(t)
+	prov := &stubLLMProvider{
+		queue: []stubLLMResponse{{
+			fm: SkillFrontmatter{
+				Name:        "deploy-runbook",
+				Description: "Deploy a service.",
+			},
+			body:    "## Steps\n1. Tag.\n2. Watch.\n",
+			enhance: "skill-that-does-not-exist",
+		}},
+	}
+	cand := SkillCandidate{
+		Source:        SourceNotebookCluster,
+		SuggestedName: "deploy-runbook",
+		SignalCount:   3,
+		Excerpts: []SkillCandidateExcerpt{
+			{Path: "team/agents/eng/notebook/deploy.md", Snippet: "we deploy", Author: "eng"},
+			{Path: "team/agents/ops/notebook/release.md", Snippet: "we deploy", Author: "ops"},
+		},
+	}
+	synth := newSynthWithCandidates(t, b, prov, []SkillCandidate{cand})
+
+	res, err := synth.SynthesizeOnce(context.Background(), "manual")
+	if err != nil {
+		t.Fatalf("SynthesizeOnce: %v", err)
+	}
+	if res.Synthesized != 1 {
+		t.Fatalf("Synthesized: got %d want 1 (fall-through to new-skill path)", res.Synthesized)
 	}
 }
 

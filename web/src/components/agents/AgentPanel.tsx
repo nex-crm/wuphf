@@ -69,6 +69,10 @@ function routeIdentityKey(route: CurrentRoute): string {
       return `issue-detail:${route.issueId}`;
     case "issue-new":
       return "issue-new";
+    case "agent-subspace":
+      return `agent-subspace:${route.agentSlug}/${route.tab}`;
+    case "skill-detail":
+      return `skill-detail:${route.skillName}`;
     case "unknown":
       return "unknown";
     default: {

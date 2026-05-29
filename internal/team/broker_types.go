@@ -135,17 +135,23 @@ type humanInterview struct {
 	// Redacted is set true when sanitizeHumanInterview stripped at least one
 	// secret from any field. The UI surfaces a badge so humans know the
 	// question/context/options they are reading has been partially censored.
-	Redacted         bool             `json:"redacted,omitempty"`
-	RedactionCount   int              `json:"redaction_count,omitempty"`
-	RedactionReasons []string         `json:"redaction_reasons,omitempty"`
-	DedupeKey        string           `json:"dedupe_key,omitempty"`
-	DueAt            string           `json:"due_at,omitempty"`
-	FollowUpAt       string           `json:"follow_up_at,omitempty"`
-	ReminderAt       string           `json:"reminder_at,omitempty"`
-	RecheckAt        string           `json:"recheck_at,omitempty"`
-	CreatedAt        string           `json:"created_at"`
-	UpdatedAt        string           `json:"updated_at,omitempty"`
-	Answered         *interviewAnswer `json:"answered,omitempty"`
+	Redacted         bool     `json:"redacted,omitempty"`
+	RedactionCount   int      `json:"redaction_count,omitempty"`
+	RedactionReasons []string `json:"redaction_reasons,omitempty"`
+	DedupeKey        string   `json:"dedupe_key,omitempty"`
+	// IssueID links this request back to the parent Issue (team_task)
+	// that scopes the work. Populated by team_action_execute via the
+	// auto-resolve gate (resolveActionIssue) so every approval card has
+	// an Issue to anchor its audit trail to. Empty when the request was
+	// not action-execute-driven (e.g. raw team_request from an agent).
+	IssueID    string           `json:"issue_id,omitempty"`
+	DueAt      string           `json:"due_at,omitempty"`
+	FollowUpAt string           `json:"follow_up_at,omitempty"`
+	ReminderAt string           `json:"reminder_at,omitempty"`
+	RecheckAt  string           `json:"recheck_at,omitempty"`
+	CreatedAt  string           `json:"created_at"`
+	UpdatedAt  string           `json:"updated_at,omitempty"`
+	Answered   *interviewAnswer `json:"answered,omitempty"`
 }
 
 type humanInvite struct {
@@ -212,7 +218,11 @@ type teamTask struct {
 	// blocked_on_pr_merge. DependsOn is preserved for legacy unblock paths;
 	// the extended unblockDependentsLocked sweeps the union of both.
 	BlockedOn []string `json:"blocked_on,omitempty"`
-	blocked   bool
+	// ParentIssueID is the id of the parent Issue when this task is a
+	// sub-issue. Empty for top-level Issues. The FE Issue detail surface
+	// shows sub-issues inline under their parent (Linear-style).
+	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	blocked       bool
 	// LifecycleState is the source of truth for the multi-agent control loop.
 	// Direct callers must NOT write this field — route through the broker's
 	// transition layer (b.transitionLifecycleLocked / b.TransitionLifecycle)
@@ -335,6 +345,7 @@ type teamTaskWire struct {
 	WorktreeBranch       string          `json:"worktree_branch,omitempty"`
 	DependsOn            []string        `json:"depends_on,omitempty"`
 	BlockedOn            []string        `json:"blocked_on,omitempty"`
+	ParentIssueID        string          `json:"parent_issue_id,omitempty"`
 	Blocked              bool            `json:"blocked,omitempty"`
 	LifecycleState       LifecycleState  `json:"lifecycle_state,omitempty"`
 	Reviewers            []string        `json:"reviewers,omitempty"`
@@ -377,6 +388,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		WorktreeBranch:       t.WorktreeBranch,
 		DependsOn:            t.DependsOn,
 		BlockedOn:            t.BlockedOn,
+		ParentIssueID:        t.ParentIssueID,
 		Blocked:              t.blocked,
 		LifecycleState:       t.LifecycleState,
 		Reviewers:            t.Reviewers,
@@ -421,6 +433,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.WorktreeBranch = w.WorktreeBranch
 	t.DependsOn = w.DependsOn
 	t.BlockedOn = w.BlockedOn
+	t.ParentIssueID = w.ParentIssueID
 	t.Reviewers = w.Reviewers
 	t.blocked = w.Blocked
 	t.LifecycleState = normalizeLegacyLifecycleStateName(w.LifecycleState)
@@ -620,8 +633,18 @@ type teamSkill struct {
 	// RelatedSkills lists slugs of other skills this skill overlaps with.
 	// Populated by the semantic dedup gate and the consolidation endpoint.
 	RelatedSkills []string `json:"related_skills,omitempty"`
-	CreatedAt     string   `json:"created_at"`
-	UpdatedAt     string   `json:"updated_at"`
+	// OwnerAgents is the set of agent slugs for which this skill is
+	// "enabled" — only enabled skills surface in the agent's AVAILABLE
+	// SKILLS prompt block and can be invoked via team_skill_run. All other
+	// active skills appear in DISCOVERABLE SKILLS; the agent must call
+	// request_skill_enable to ask the human to enable one before using it.
+	//
+	// Defaults: agent-proposed skills get OwnerAgents=[CreatedBy] so the
+	// creator can use it immediately on approval. Human-created skills get
+	// OwnerAgents=[] (must be enabled per agent via the agent Skills tab).
+	OwnerAgents []string `json:"owner_agents,omitempty"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 type brokerState struct {
@@ -635,6 +658,7 @@ type brokerState struct {
 	FocusMode         bool                         `json:"focus_mode,omitempty"`
 	Tasks             []teamTask                   `json:"tasks,omitempty"`
 	Requests          []humanInterview             `json:"requests,omitempty"`
+	ApprovalAudit     []ApprovalAuditEntry         `json:"approval_audit,omitempty"`
 	Actions           []officeActionLog            `json:"actions,omitempty"`
 	Signals           []officeSignalRecord         `json:"signals,omitempty"`
 	Decisions         []officeDecisionRecord       `json:"decisions,omitempty"`

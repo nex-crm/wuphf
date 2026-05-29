@@ -78,11 +78,6 @@ const ArtifactsApp = lazy(() =>
     default: m.ArtifactsApp,
   })),
 );
-const OfficeOverviewApp = lazy(() =>
-  import("../components/apps/OfficeOverviewApp").then((m) => ({
-    default: m.OfficeOverviewApp,
-  })),
-);
 const CalendarApp = lazy(() =>
   import("../components/apps/CalendarApp").then((m) => ({
     default: m.CalendarApp,
@@ -112,6 +107,11 @@ const ReceiptsApp = lazy(() =>
 const SettingsApp = lazy(() =>
   import("../components/apps/SettingsApp").then((m) => ({
     default: m.SettingsApp,
+  })),
+);
+const IntegrationsApp = lazy(() =>
+  import("../components/apps/IntegrationsApp").then((m) => ({
+    default: m.IntegrationsApp,
   })),
 );
 const SkillsApp = lazy(() =>
@@ -161,6 +161,14 @@ const IssueNewForm = lazy(() =>
     default: m.IssueNewForm,
   })),
 );
+// v3 MVP — per-agent subspace shell.
+const AgentSubspaceRoute = lazy(() => import("./AgentSubspaceRoute"));
+// Full-screen skill SKILL.md editor + preview.
+const SkillDetailRoute = lazy(() =>
+  import("./SkillDetailRoute").then((m) => ({
+    default: m.SkillDetailRoute,
+  })),
+);
 
 function LazyPanelFallback() {
   return (
@@ -198,6 +206,22 @@ class ErrorBoundary extends Component<
   componentDidCatch(error: Error, info: { componentStack?: string | null }) {
     // eslint-disable-next-line no-console
     console.error("[WUPHF ErrorBoundary]", error, info);
+
+    // Auto-recover from stale lazy-chunk hashes after a FE rebuild.
+    // The browser holds an old index.html that points at deleted hashed
+    // bundles; the only correct fix is to refetch index.html.
+    const message = String(error?.message ?? "");
+    const isChunkError =
+      /Failed to fetch dynamically imported module/i.test(message) ||
+      /Importing a module script failed/i.test(message) ||
+      error?.name === "ChunkLoadError";
+    if (isChunkError && typeof window !== "undefined") {
+      const key = "wuphf:chunk-reload-attempted";
+      if (!window.sessionStorage.getItem(key)) {
+        window.sessionStorage.setItem(key, String(Date.now()));
+        window.location.reload();
+      }
+    }
   }
 
   render() {
@@ -314,9 +338,9 @@ const APP_PANELS = {
   calendar: CalendarApp,
   skills: SkillsApp,
   activity: ArtifactsApp,
-  overview: OfficeOverviewApp,
   receipts: ReceiptsApp,
   "health-check": HealthCheckApp,
+  integrations: IntegrationsApp,
   settings: SettingsApp,
   console: ConsoleApp,
 } satisfies Record<AppPanelId, ComponentType>;
@@ -630,6 +654,12 @@ function MainContent() {
       return <IssueDocumentRoute issueId={route.issueId} />;
     case "issue-new":
       return <IssueNewForm />;
+    case "agent-subspace":
+      return (
+        <AgentSubspaceRoute agentSlug={route.agentSlug} tab={route.tab} />
+      );
+    case "skill-detail":
+      return <SkillDetailRoute skillName={route.skillName} />;
     case "unknown":
       // RoutedBody catches root-only matches via isUnmatchedRoute, but
       // useCurrentRoute can also return `unknown` for matched leaves that

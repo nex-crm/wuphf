@@ -44,24 +44,34 @@ func TestPostEscalation_CreatesSelfHealingTask(t *testing.T) {
 
 	l.postEscalation("eng", "eng-42", agent.EscalationStuck, "stuck in build_context for 20 ticks")
 
+	wantTitle := selfHealingTaskTitle("eng", "eng-42", "", agent.EscalationStuck)
 	var found teamTask
 	for _, task := range b.AllTasks() {
-		if task.Title == "Self-heal @eng on eng-42" {
+		if task.Title == wantTitle {
 			found = task
 			break
 		}
 	}
 	if found.ID == "" {
-		t.Fatalf("expected self-healing task, got %+v", b.AllTasks())
+		t.Fatalf("expected self-healing task (title=%q), got %+v", wantTitle, b.AllTasks())
 	}
 	if found.Owner != "ceo" {
 		t.Fatalf("expected self-healing task owned by ceo, got %+v", found)
 	}
-	if found.TaskType != "incident" || found.PipelineID != "incident" || found.ExecutionMode != "office" {
-		t.Fatalf("expected incident office task, got %+v", found)
+	// Self-heal records render as Issues in the FE; PipelineID stays "incident"
+	// so the recognition primitive (isSelfHealingTask) still matches.
+	if found.TaskType != "issue" || found.PipelineID != "incident" || found.ExecutionMode != "office" {
+		t.Fatalf("expected issue/incident office task, got %+v", found)
 	}
-	if !strings.Contains(found.Details, "Classify the blocker") || !strings.Contains(found.Details, "missing or outdated skill/playbook") {
-		t.Fatalf("expected repair-loop details, got %q", found.Details)
+	if !isSelfHealingTask(&found) {
+		t.Fatalf("expected isSelfHealingTask to recognise %+v", found)
+	}
+	// New details shape: human-readable "What happened" / "What needs to happen"
+	// halves above an agent-facing "Repair loop" half.
+	if !strings.Contains(found.Details, "## What happened") ||
+		!strings.Contains(found.Details, "## What needs to happen") ||
+		!strings.Contains(found.Details, "**Repair loop:**") {
+		t.Fatalf("expected new self-heal details shape, got %q", found.Details)
 	}
 }
 
@@ -69,19 +79,24 @@ func TestPostEscalation_ReusesSelfHealingTask(t *testing.T) {
 	b := newTestBroker(t)
 	l := &Launcher{broker: b}
 
+	// Same (agent, taskID, reason) on both events → identical title →
+	// exact-reuse path appends the second incident to the first task.
+	// (Different reasons now produce different titles by design, so the
+	// reuse behaviour is keyed on the full title match.)
 	l.postEscalation("eng", "eng-42", agent.EscalationStuck, "first stuck event")
-	l.postEscalation("eng", "eng-42", agent.EscalationMaxRetries, "second stuck event")
+	l.postEscalation("eng", "eng-42", agent.EscalationStuck, "second stuck event")
 
+	wantTitle := selfHealingTaskTitle("eng", "eng-42", "", agent.EscalationStuck)
 	var count int
 	var found teamTask
 	for _, task := range b.AllTasks() {
-		if task.Title == "Self-heal @eng on eng-42" {
+		if task.Title == wantTitle {
 			count++
 			found = task
 		}
 	}
 	if count != 1 {
-		t.Fatalf("expected one reusable self-healing task, got %d tasks: %+v", count, b.AllTasks())
+		t.Fatalf("expected one reusable self-healing task (title=%q), got %d tasks: %+v", wantTitle, count, b.AllTasks())
 	}
 	if !strings.Contains(found.Details, "first stuck event") || !strings.Contains(found.Details, "second stuck event") {
 		t.Fatalf("expected reused self-healing task to retain both incident details, got %q", found.Details)
@@ -97,15 +112,16 @@ func TestPostEscalation_DoesNotReuseCanceledSelfHealingTask(t *testing.T) {
 
 	l.postEscalation("eng", "eng-42", agent.EscalationStuck, "first stuck event")
 
+	wantTitle := selfHealingTaskTitle("eng", "eng-42", "", agent.EscalationStuck)
 	var canceledID string
 	for _, task := range b.AllTasks() {
-		if task.Title == "Self-heal @eng on eng-42" {
+		if task.Title == wantTitle {
 			canceledID = task.ID
 			break
 		}
 	}
 	if canceledID == "" {
-		t.Fatalf("expected initial self-healing task, got %+v", b.AllTasks())
+		t.Fatalf("expected initial self-healing task (title=%q), got %+v", wantTitle, b.AllTasks())
 	}
 
 	b.mu.Lock()
@@ -117,12 +133,15 @@ func TestPostEscalation_DoesNotReuseCanceledSelfHealingTask(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	l.postEscalation("eng", "eng-42", agent.EscalationMaxRetries, "second stuck event")
+	// Same reason on both replacement events so they share a title and the
+	// second event merges into the first (the replacement) instead of opening
+	// yet another task.
+	l.postEscalation("eng", "eng-42", agent.EscalationStuck, "second stuck event")
 	l.postEscalation("eng", "eng-42", agent.EscalationStuck, "third stuck event")
 
 	var selfHealingTasks []teamTask
 	for _, task := range b.AllTasks() {
-		if task.Title == "Self-heal @eng on eng-42" {
+		if task.Title == wantTitle {
 			selfHealingTasks = append(selfHealingTasks, task)
 		}
 	}
@@ -217,17 +236,22 @@ func TestPostEscalation_CapsActiveSelfHealingPerAgent(t *testing.T) {
 	}
 }
 
-// countActiveSelfHealsForAgent mirrors the prod overflow lookup: anchored
-// "@<slug> " match so prefix-overlapping slugs (eng vs engineering) do not
-// blur the count.
+// countActiveSelfHealsForAgent mirrors the prod overflow lookup
+// (findOverflowSelfHealForAgentLocked): anchored matches so prefix-
+// overlapping slugs (eng vs engineering) do not blur the count.
+//
+// Two title formats are recognised:
+//   - legacy "Self-heal @<slug> on <id>" — matches "@<slug> "
+//   - new    "[@<slug>] <verb>: <parent>" — matches "[@<slug>] "
 func countActiveSelfHealsForAgent(b *Broker, agentSlug string) int {
-	needle := "@" + agentSlug + " "
+	legacyNeedle := "@" + agentSlug + " "
+	newNeedle := "[@" + agentSlug + "] "
 	n := 0
 	for _, task := range b.AllTasks() {
 		if !isSelfHealingTaskTitle(task.Title) || isTerminalTeamTaskStatus(task.status) {
 			continue
 		}
-		if strings.Contains(task.Title, needle) {
+		if strings.Contains(task.Title, legacyNeedle) || strings.Contains(task.Title, newNeedle) {
 			n++
 		}
 	}
@@ -304,8 +328,8 @@ func TestRequestSelfHealing_ExactReuseWinsOverOverflow(t *testing.T) {
 	// (most-recently updated active self-heal for @eng). If the exact-match
 	// path wins, the new incident lands on OLDEST. If overflow wins, it
 	// lands on NEWEST. The two body assertions disambiguate.
-	oldestTitle := selfHealingTaskTitle("eng", taskIDs[0])
-	newestTitle := selfHealingTaskTitle("eng", taskIDs[len(taskIDs)-1])
+	oldestTitle := selfHealingTaskTitle("eng", taskIDs[0], "", agent.EscalationStuck)
+	newestTitle := selfHealingTaskTitle("eng", taskIDs[len(taskIDs)-1], "", agent.EscalationStuck)
 	var oldestID, newestID string
 	for _, task := range b.AllTasks() {
 		switch task.Title {
@@ -319,7 +343,11 @@ func TestRequestSelfHealing_ExactReuseWinsOverOverflow(t *testing.T) {
 		t.Fatalf("setup: missing self-heal tasks (oldest=%q newest=%q)", oldestID, newestID)
 	}
 
-	l.postEscalation("eng", taskIDs[0], agent.EscalationMaxRetries, "second incident")
+	// Re-fire with the SAME reason as the original so the exact-title
+	// match path is exercised (different reasons now produce different
+	// titles by design, so cross-reason events go through the new-task or
+	// overflow paths instead of exact reuse).
+	l.postEscalation("eng", taskIDs[0], agent.EscalationStuck, "second incident")
 
 	if got := countActiveSelfHealsForAgent(b, "eng"); got != maxActiveSelfHealsPerAgent {
 		t.Fatalf("active count must stay at cap (%d), got %d", maxActiveSelfHealsPerAgent, got)

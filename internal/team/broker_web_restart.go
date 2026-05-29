@@ -3,9 +3,12 @@ package team
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 )
@@ -15,18 +18,98 @@ type WebBrokerRestartStatus struct {
 	URL string `json:"url,omitempty"`
 }
 
+// reExecHookMu guards the package-level re-exec hook + delay so tests can
+// swap them without racing the handler goroutine that reads them.
+var (
+	reExecHookMu sync.RWMutex
+
+	// reExecBrokerProcess replaces the current process image with a fresh
+	// exec of the same binary path so a newly-installed version (from
+	// `npm install -g wuphf@latest`) actually takes over. Implemented
+	// per-platform in broker_reexec_*.go.
+	reExecBrokerProcess = platformReExecBroker
+
+	// brokerReExecDelay gives the HTTP response time to flush to the
+	// client before the process image is replaced.
+	brokerReExecDelay = 200 * time.Millisecond
+)
+
+// loadReExecHook captures the current hook + delay under the read lock so the
+// handler goroutine uses a coherent pair even if a test swaps them mid-flight.
+func loadReExecHook() (func() error, time.Duration) {
+	reExecHookMu.RLock()
+	defer reExecHookMu.RUnlock()
+	return reExecBrokerProcess, brokerReExecDelay
+}
+
 func (b *Broker) handleWebBrokerRestart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	status, err := b.RestartBrokerListener()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+	if b == nil {
+		http.Error(w, "broker unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	// Refuse to schedule a re-exec on a broker that is already shutting
+	// down — preserves the legacy behaviour of TestWebBrokerRestartRejectsAfterStop
+	// and avoids racing the lifecycle teardown.
+	if b.stopCh != nil {
+		select {
+		case <-b.stopCh:
+			http.Error(w, "broker is shutting down", http.StatusServiceUnavailable)
+			return
+		default:
+		}
+	}
+	if b.lifecycleCtx != nil {
+		select {
+		case <-b.lifecycleCtx.Done():
+			http.Error(w, "broker is shutting down", http.StatusServiceUnavailable)
+			return
+		default:
+		}
+	}
+
+	status := WebBrokerRestartStatus{
+		OK:  true,
+		URL: "http://" + b.Addr(),
+	}
+	// Confirm to the client first; the actual process replacement happens on
+	// a short delay so the response reaches the browser before the binary is
+	// replaced. The frontend's SSE client reconnects automatically once the
+	// new binary is listening on the same port.
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(status)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	reExec, delay := loadReExecHook()
+	go func() {
+		time.Sleep(delay)
+		b.performBrokerRestart(reExec)
+	}()
+}
+
+// performBrokerRestart runs the actual restart workflow synchronously. The
+// HTTP handler invokes it on a goroutine (after flushing the 202 and sleeping
+// briefly so the response reaches the client), but it is split out so tests
+// can exercise the fallback path without spawning a goroutine or polling.
+//
+// syscall.Exec only returns on failure: if it succeeds, the new binary takes
+// over the process and this function never returns. On Windows (or any
+// platform where re-exec is not supported) we fall back to the in-process
+// listener restart so the SSE client at least reconnects, even though the
+// version will not change until the user relaunches the CLI manually.
+func (b *Broker) performBrokerRestart(reExec func() error) {
+	if err := reExec(); err != nil {
+		log.Printf("broker re-exec failed (%v); falling back to listener restart", err)
+		if _, restartErr := b.RestartBrokerListener(); restartErr != nil {
+			log.Printf("broker listener restart fallback failed: %v", restartErr)
+		}
+	}
 }
 
 func (b *Broker) RestartBrokerListener() (WebBrokerRestartStatus, error) {

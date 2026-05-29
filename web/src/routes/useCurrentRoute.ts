@@ -1,6 +1,8 @@
 import { useMatches } from "@tanstack/react-router";
 
 import {
+  agentSubspaceRoute,
+  agentSubspaceTabRoute,
   appRoute,
   appTaskDetailRoute,
   articleRoute,
@@ -14,6 +16,7 @@ import {
   notebookEntryRoute,
   notebooksRoute,
   reviewsRoute,
+  skillDetailRoute,
   taskDecisionRoute,
   taskDetailRoute,
   tasksRoute,
@@ -22,6 +25,26 @@ import {
   wikiLookupRoute,
 } from "../lib/router";
 import { directChannelSlug, useAppStore } from "../stores/app";
+
+/**
+ * v3 MVP — uniform per-agent subspace tabs.
+ * The tab segment is optional in the URL; "chat" is the default.
+ */
+export const AGENT_SUBSPACE_TABS = [
+  "chat",
+  "app",
+  "notebooks",
+  "skills",
+  "calendar",
+  "settings",
+] as const;
+export type AgentSubspaceTab = (typeof AGENT_SUBSPACE_TABS)[number];
+
+const AGENT_SUBSPACE_TAB_SET = new Set<string>(AGENT_SUBSPACE_TABS);
+
+export function isAgentSubspaceTab(value: string): value is AgentSubspaceTab {
+  return AGENT_SUBSPACE_TAB_SET.has(value);
+}
 
 /**
  * Discriminated union describing the matched leaf route. Replaces the
@@ -53,6 +76,10 @@ export type CurrentRoute =
   | { kind: "issues-list" }
   | { kind: "issue-detail"; issueId: string }
   | { kind: "issue-new" }
+  // v3 MVP — per-agent subspace shell.
+  | { kind: "agent-subspace"; agentSlug: string; tab: AgentSubspaceTab }
+  // Full-screen skill detail editor + viewer.
+  | { kind: "skill-detail"; skillName: string }
   | { kind: "unknown" };
 
 interface ParamsShape {
@@ -64,6 +91,8 @@ interface ParamsShape {
   _splat?: string;
   issueId?: string;
   articleId?: string;
+  tab?: string;
+  skillName?: string;
 }
 
 interface SearchShape {
@@ -90,7 +119,10 @@ type CurrentRouteId =
   | typeof taskDecisionRoute.id
   | typeof issuesRoute.id
   | typeof issueDetailRoute.id
-  | typeof issueNewRoute.id;
+  | typeof issueNewRoute.id
+  | typeof agentSubspaceRoute.id
+  | typeof agentSubspaceTabRoute.id
+  | typeof skillDetailRoute.id;
 
 const CURRENT_ROUTE_IDS = [
   channelRoute.id,
@@ -112,6 +144,9 @@ const CURRENT_ROUTE_IDS = [
   issuesRoute.id,
   issueDetailRoute.id,
   issueNewRoute.id,
+  agentSubspaceRoute.id,
+  agentSubspaceTabRoute.id,
+  skillDetailRoute.id,
 ] as const satisfies readonly CurrentRouteId[];
 
 const CURRENT_ROUTE_ID_SET = new Set<string>(CURRENT_ROUTE_IDS);
@@ -183,6 +218,25 @@ const ROUTE_DERIVERS = {
     issueId: params.issueId ?? "",
   }),
   [issueNewRoute.id]: () => ({ kind: "issue-new" }),
+  // v3 MVP — agent subspace. Default tab = "chat".
+  [agentSubspaceRoute.id]: (params) => ({
+    kind: "agent-subspace",
+    agentSlug: params.agentSlug ?? "",
+    tab: "chat",
+  }),
+  [agentSubspaceTabRoute.id]: (params) => {
+    const raw = typeof params.tab === "string" ? params.tab : "";
+    const tab: AgentSubspaceTab = isAgentSubspaceTab(raw) ? raw : "chat";
+    return {
+      kind: "agent-subspace",
+      agentSlug: params.agentSlug ?? "",
+      tab,
+    };
+  },
+  [skillDetailRoute.id]: (params) => ({
+    kind: "skill-detail",
+    skillName: params.skillName ?? "",
+  }),
 } satisfies Record<CurrentRouteId, RouteDeriver>;
 
 /**
@@ -279,6 +333,8 @@ export function useCurrentApp(): string | null {
       return "issues";
     case "channel":
     case "dm":
+    case "agent-subspace":
+    case "skill-detail":
     case "unknown":
       return null;
     default: {

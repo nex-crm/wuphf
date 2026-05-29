@@ -14,8 +14,10 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getOfficeTasks, type Task } from "../../api/tasks";
+import { formatIssueTitleForDisplay } from "../../lib/issueTitle";
 import { router } from "../../lib/router";
 import type { LifecycleState } from "../../lib/types/lifecycle";
+import { IssueCreateDialog } from "../issues/IssueCreateDialog";
 import { LifecycleStatePill } from "./LifecycleStatePill";
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -42,6 +44,12 @@ function isLifecycleState(value: unknown): value is LifecycleState {
 }
 
 function isIssueSpecTask(task: Task): boolean {
+  // Sub-issues live on the parent Issue's detail surface, not on the
+  // top-level kanban. Filtering them out here keeps the board scoped
+  // to "real" Issues; children stay reachable via the parent Issue.
+  if (task.parent_issue_id && task.parent_issue_id.length > 0) {
+    return false;
+  }
   return (
     task.task_type === "issue" ||
     task.pipeline_id === "issue" ||
@@ -81,63 +89,69 @@ function taskToLifecycleState(task: Task): LifecycleState {
 
 type ColumnId =
   | "drafting"
-  | "intake"
-  | "running"
-  | "review"
-  | "approved"
-  | "rejected";
+  | "todo"
+  | "in_progress"
+  | "in_review"
+  | "done"
+  | "cancelled";
 
+// Linear-style 6-column layout. The broker's underlying 11-state machine
+// keeps its current shape (touched in Slice 4 follow-up); this is the
+// presentation projection that humans see on the board.
 const COLUMN_ORDER: readonly ColumnId[] = [
   "drafting",
-  "intake",
-  "running",
-  "review",
-  "approved",
-  "rejected",
+  "todo",
+  "in_progress",
+  "in_review",
+  "done",
+  "cancelled",
 ];
 
 const COLUMN_LABEL: Record<ColumnId, string> = {
-  drafting: "Draft",
-  intake: "Intake",
-  running: "Running",
-  review: "Review",
-  approved: "Approved",
-  rejected: "Rejected",
+  drafting: "Backlog",
+  todo: "Todo",
+  in_progress: "In Progress",
+  in_review: "In Review",
+  done: "Done",
+  cancelled: "Cancelled",
 };
 
 const COLUMN_HINT: Record<ColumnId, string> = {
-  drafting: "Filed but not picked up",
-  intake: "Owner agent gathering spec",
-  running: "Active work + blocked items",
-  review: "Awaiting reviewer grades or human decision",
-  approved: "Landed",
-  rejected: "Will not land",
+  drafting: "Filed, awaiting your approval",
+  todo: "Approved, not yet picked up",
+  in_progress: "Owner agent working — includes blocked / revising",
+  in_review: "Awaiting reviewer grades or human decision",
+  done: "Landed",
+  cancelled: "Will not land",
 };
 
-/** Map a lifecycle state to its kanban column. Wire shape from the broker
- *  can drift (legacy "blocked", "in_progress" strings, unknown future states),
- *  so a fall-through default lands those in the Intake column instead of
- *  crashing on `buckets[undefined].push`. */
+/** Project a broker lifecycle state onto the Linear-style column id.
+ *  The broker keeps 11 internal states; this maps them onto the 6
+ *  presentation columns. Wire shape from the broker can drift (legacy
+ *  "blocked", "in_progress" strings, unknown future states), so the
+ *  default lands those in Backlog instead of crashing. */
 function lifecycleToColumn(state: LifecycleState | string): ColumnId {
   switch (state) {
     case "drafting":
       return "drafting";
     case "intake":
     case "ready":
-      return "intake";
+    case "queued_behind_owner":
+      return "todo";
     case "running":
     case "changes_requested":
     case "blocked_on_pr_merge":
-      return "running";
+    case "in_progress":
+      return "in_progress";
     case "review":
     case "decision":
-      return "review";
+      return "in_review";
     case "approved":
-      return "approved";
+      return "done";
     case "rejected":
-      return "rejected";
+      return "cancelled";
     default:
-      return "intake";
+      return "drafting";
   }
 }
 
@@ -159,9 +173,11 @@ function IssueCard({ task }: { task: Task }) {
       className="issues-kanban-card"
       onClick={navigate}
       data-testid="issue-row"
-      aria-label={`Issue: ${task.title}, state: ${state}`}
+      aria-label={`Issue: ${formatIssueTitleForDisplay(task.title)}, state: ${state}`}
     >
-      <div className="issues-kanban-card-title">{task.title || "Untitled"}</div>
+      <div className="issues-kanban-card-title">
+        {formatIssueTitleForDisplay(task.title) || "Untitled"}
+      </div>
       <div className="issues-kanban-card-meta">
         <LifecycleStatePill state={state} />
         {task.owner ? (
@@ -220,7 +236,7 @@ function IssuesListError({
   );
 }
 
-function IssuesEmptyState() {
+function IssuesEmptyState({ onOpenCreate }: { onOpenCreate: () => void }) {
   return (
     <div
       className="issues-list issues-list--empty"
@@ -233,7 +249,7 @@ function IssuesEmptyState() {
       <button
         type="button"
         className="issues-new-btn"
-        onClick={() => void router.navigate({ to: "/issues/new" })}
+        onClick={onOpenCreate}
         data-testid="issues-new-btn"
       >
         + New issue
@@ -251,6 +267,9 @@ interface IssuesListProps {
 
 export function IssuesList({ initialTasks }: IssuesListProps = {}) {
   const [query, setQuery] = useState("");
+  // Inline dialog replaces /issues/new full-page form for the in-app path.
+  // The route stays mounted as a fallback for direct URL navigation.
+  const [createOpen, setCreateOpen] = useState(false);
 
   const result = useQuery({
     queryKey: ["issues", "list"],
@@ -276,11 +295,11 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
   const columns = useMemo(() => {
     const buckets: Record<ColumnId, Task[]> = {
       drafting: [],
-      intake: [],
-      running: [],
-      review: [],
-      approved: [],
-      rejected: [],
+      todo: [],
+      in_progress: [],
+      in_review: [],
+      done: [],
+      cancelled: [],
     };
     for (const task of filtered) {
       const col = lifecycleToColumn(taskToLifecycleState(task));
@@ -307,7 +326,12 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
   }
 
   if (tasks.length === 0) {
-    return <IssuesEmptyState />;
+    return (
+      <>
+        <IssuesEmptyState onOpenCreate={() => setCreateOpen(true)} />
+        <IssueCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
+      </>
+    );
   }
 
   return (
@@ -326,13 +350,14 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
         <button
           type="button"
           className="issues-new-btn issues-new-btn--header"
-          onClick={() => void router.navigate({ to: "/issues/new" })}
+          onClick={() => setCreateOpen(true)}
           data-testid="issues-new-btn"
           title="Create a new issue"
         >
           + New issue
         </button>
       </header>
+      <IssueCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       {/*
         The outer wrapper is a layout grid of columns, not a list — each
         column has its own role="list" of cards below. Putting role="list"

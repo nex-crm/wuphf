@@ -29,6 +29,57 @@ var skillSystemAuthors = map[string]bool{
 // skillSlugRegex validates the Anthropic Agent Skills slug format.
 var skillSlugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// skillInvariantBlockRegex matches a protected invariant region inside a
+// skill body. The mechanism follows SkillOpt's `SLOW_UPDATE_START/END`
+// pattern (arXiv 2605.23904 §3): step-level edits MUST NOT touch lines
+// inside the block. We enforce this by extracting every invariant block
+// from the existing body before an enhance merge and verifying that the
+// resulting merged body still contains each block verbatim. Authors
+// declare protected regions like this:
+//
+//	<!-- INVARIANT-START -->
+//	Always validate inputs before persisting.
+//	Never auto-approve destructive actions.
+//	<!-- INVARIANT-END -->
+//
+// Removing the SkillOpt analog cost 22.5 points on SpreadsheetBench, so
+// the gate is worth the small parsing surface.
+var skillInvariantBlockRegex = regexp.MustCompile(`(?s)<!-- ?INVARIANT-START ?-->(.*?)<!-- ?INVARIANT-END ?-->`)
+
+// extractSkillInvariantBlocks returns every invariant block found in body,
+// in document order. Each returned string contains the full block
+// (including the START/END markers) so the verification step can match
+// it verbatim without rebuilding the wrapper.
+func extractSkillInvariantBlocks(body string) []string {
+	if !strings.Contains(body, "INVARIANT-START") {
+		return nil
+	}
+	matches := skillInvariantBlockRegex.FindAllString(body, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	return append([]string(nil), matches...)
+}
+
+// verifySkillInvariantsPreserved checks that every invariant block in
+// previousBody is still present verbatim in mergedBody. Returns nil when
+// the existing body had no invariant blocks (the common case) or when
+// every block survived. Returns a descriptive error otherwise. Used by
+// the enhance / rename paths to reject edits that drop or mutate a
+// protected region.
+func verifySkillInvariantsPreserved(previousBody, mergedBody string) error {
+	blocks := extractSkillInvariantBlocks(previousBody)
+	if len(blocks) == 0 {
+		return nil
+	}
+	for i, block := range blocks {
+		if !strings.Contains(mergedBody, block) {
+			return fmt.Errorf("enhancement violated protected invariant block #%d (must survive verbatim across edits)", i+1)
+		}
+	}
+	return nil
+}
+
 // writeSkillProposalLocked is the unified write funnel for all skill proposals.
 //
 // The caller MUST hold b.mu on entry. The function releases b.mu while calling
@@ -298,6 +349,16 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription, ca
 	// pointing at a stale element while the lock is released for Enqueue.
 	updated := *sk
 	updated.Content = mergeSkillContent(sk.Content, newContent, "enhanced")
+
+	// Protected-invariant gate (SkillOpt §3): every <!-- INVARIANT-START -->
+	// block in the previous body MUST survive the merge verbatim. Step-level
+	// edits are not allowed to mutate or drop them. Reject the enhancement
+	// here rather than down at the wiki write so we don't ship a broken
+	// in-memory state if Enqueue fails afterward.
+	if err := verifySkillInvariantsPreserved(sk.Content, updated.Content); err != nil {
+		return nil, fmt.Errorf("enhanceSkillLocked: %w", err)
+	}
+
 	if newDescription != "" && len(newDescription) > len(updated.Description) {
 		updated.Description = newDescription
 	}
@@ -352,6 +413,164 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription, ca
 
 	slog.Info("enhanceSkillLocked: skill enhanced",
 		"name", existingName, "slug", slug)
+	return live, nil
+}
+
+// renameAndEnhanceSkillLocked renames an existing skill to a broader slug
+// AND merges in newContent / newDescription in a single transaction. The
+// load-bearing intent: when the team has clearly outgrown an existing
+// skill's name (e.g. "pitch-deck-saas" now covers all pitch decks), the
+// LLM can signal `rename_to: pitch-deck-creation` and the existing skill
+// is renamed in place, with the old slug left behind as an archived
+// redirect stub so cached references resolve.
+//
+// Caller MUST hold b.mu on entry. The method uses the same deadlock-safe
+// unlock/relock pattern as enhanceSkillLocked for WikiWorker.Enqueue.
+//
+// Failure modes:
+//
+//   - oldName does not resolve to an existing skill → error.
+//   - newName slug fails validation → error (defensive; the synthesizer
+//     also pre-checks).
+//   - newName slug is already in use → error. Callers should fall back to
+//     plain enhanceSkillLocked rather than clobbering a distinct sibling.
+func (b *Broker) renameAndEnhanceSkillLocked(oldName, newName, newContent, newDescription string) (*teamSkill, error) {
+	existing := b.findSkillByNameLocked(oldName)
+	if existing == nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: skill %q not found", oldName)
+	}
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new name is empty")
+	}
+	newSlug := skillSlug(newName)
+	if !skillSlugRegex.MatchString(newSlug) {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new slug %q does not match ^[a-z0-9][a-z0-9-]*$", newSlug)
+	}
+	if conflict := b.findSkillByNameLocked(newName); conflict != nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new name %q already in use", newName)
+	}
+
+	oldSlug := skillSlug(existing.Name)
+	if oldSlug == newSlug {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new slug equals old slug (%q)", oldSlug)
+	}
+
+	newContent = strings.TrimSpace(newContent)
+	newDescription = strings.TrimSpace(newDescription)
+
+	// Build the renamed-and-enhanced state on a local copy so a concurrent
+	// append to b.skills cannot leave existing pointing at a stale element
+	// while the lock is released for the Enqueue calls.
+	updated := *existing
+	updated.Name = newName
+	updated.ID = "skill-" + newSlug
+	if strings.TrimSpace(updated.Title) == "" || strings.TrimSpace(updated.Title) == existing.Name {
+		updated.Title = newName
+	}
+	if newDescription != "" && len(newDescription) > len(updated.Description) {
+		updated.Description = newDescription
+	}
+	if newContent != "" {
+		updated.Content = mergeSkillContent(existing.Content, newContent, "renamed-from-"+oldSlug)
+	}
+
+	// Protected-invariant gate (SkillOpt §3): the rename path also counts
+	// as a step-level edit from the invariant region's point of view.
+	// Reject when a protected block does not survive into the new content.
+	if err := verifySkillInvariantsPreserved(existing.Content, updated.Content); err != nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: %w", err)
+	}
+
+	// Keep a backlink to the old slug so the new skill carries provenance.
+	updated.RelatedSkills = appendUnique(append([]string(nil), existing.RelatedSkills...), oldSlug)
+	updated.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	fm := teamSkillToFrontmatter(updated)
+	newMd, err := RenderSkillMarkdown(fm, updated.Content)
+	if err != nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: render new markdown for %q: %w", newName, err)
+	}
+
+	// Redirect stub at the old path: archived status + renamed_to pointer
+	// so anyone resolving the old slug (link checker, cached agent index,
+	// human reader) sees where the content moved to.
+	stub := teamSkill{
+		Name:               existing.Name,
+		Title:              existing.Title,
+		Description:        "Renamed to " + newName + ".",
+		Content:            "This skill was renamed to [`" + newName + "`](./" + newSlug + ".md).\n",
+		CreatedBy:          "archivist",
+		Channel:            existing.Channel,
+		Tags:               append([]string(nil), existing.Tags...),
+		Status:             "archived",
+		DisabledFromStatus: existing.Status,
+		CreatedAt:          existing.CreatedAt,
+		UpdatedAt:          updated.UpdatedAt,
+	}
+	stubFm := teamSkillToFrontmatter(stub)
+	stubFm.Metadata.Wuphf.RenamedTo = newName
+	stubMd, err := RenderSkillMarkdown(stubFm, stub.Content)
+	if err != nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: render stub markdown for %q: %w", existing.Name, err)
+	}
+
+	newWikiPath := "team/skills/" + newSlug + ".md"
+	oldWikiPath := "team/skills/" + oldSlug + ".md"
+	newCommit := "archivist: rename skill " + oldSlug + " → " + newSlug
+	stubCommit := "archivist: redirect " + oldSlug + " → " + newSlug
+
+	wikiWorker := b.wikiWorker
+	b.mu.Unlock()
+
+	if wikiWorker != nil {
+		if _, _, err := wikiWorker.Enqueue(
+			context.Background(),
+			newSlug,
+			newWikiPath,
+			string(newMd),
+			"replace",
+			newCommit,
+		); err != nil {
+			b.mu.Lock()
+			return nil, fmt.Errorf("renameAndEnhanceSkillLocked: wiki enqueue new for %q: %w", newName, err)
+		}
+		if _, _, err := wikiWorker.Enqueue(
+			context.Background(),
+			oldSlug,
+			oldWikiPath,
+			string(stubMd),
+			"replace",
+			stubCommit,
+		); err != nil {
+			b.mu.Lock()
+			return nil, fmt.Errorf("renameAndEnhanceSkillLocked: wiki enqueue stub for %q: %w", oldSlug, err)
+		}
+	}
+
+	b.mu.Lock()
+
+	// Re-resolve under the OLD name — the slice may have been reallocated
+	// during the unlock window.
+	live := b.findSkillByNameLocked(oldName)
+	if live == nil {
+		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: skill %q vanished during rename", oldName)
+	}
+	// Apply the renamed shape in place. The skill ID and slug both update;
+	// other lookups (by ID or slug) re-resolve against the new identifiers.
+	*live = updated
+
+	b.invalidateSkillEmbeddingLocked(oldSlug)
+	b.invalidateSkillEmbeddingLocked(newSlug)
+
+	if saveErr := b.saveLocked(); saveErr != nil {
+		slog.Warn("renameAndEnhanceSkillLocked: saveLocked failed",
+			"old_slug", oldSlug, "new_slug", newSlug, "err", saveErr)
+	}
+
+	slog.Info("renameAndEnhanceSkillLocked: skill renamed",
+		"from", oldName, "to", newName,
+		"old_slug", oldSlug, "new_slug", newSlug)
 	return live, nil
 }
 

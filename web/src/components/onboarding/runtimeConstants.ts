@@ -39,20 +39,18 @@ export type ApiKeyFieldDef = (typeof API_KEY_FIELDS)[number];
 // LOCAL_PROVIDER_LABELS is shared between LocalProviderPicker and the
 // PrePickScreen submit logic. Kept here to avoid three-way drift if a
 // runtime is renamed or added.
+//
+// Gateway-style runtimes (Hermes Agent, OpenClaw Gateway) used to live here
+// alongside the directly-dispatchable local LLMs. They were removed because
+// they are gateways for importing existing agents into the team, not LLM
+// runtimes for backing WUPHF-created agents. Surfacing them as runtime tiles
+// confused users about whether picking "OpenClaw" meant "host my agents on
+// OpenClaw" or "import OpenClaw agents into the team." The Integrations app
+// (Settings → Integrations) is now the single place gateways are configured.
 export const LOCAL_PROVIDER_LABELS = [
   { kind: "mlx-lm" as const, label: "MLX-LM", blurb: "macOS / Apple Silicon" },
   { kind: "ollama" as const, label: "Ollama", blurb: "macOS / Linux" },
   { kind: "exo" as const, label: "Exo", blurb: "Multi-device pool" },
-  {
-    kind: "hermes-agent" as const,
-    label: "Hermes Agent",
-    blurb: "Agent gateway",
-  },
-  {
-    kind: "openclaw-http" as const,
-    label: "OpenClaw Gateway",
-    blurb: "Agent gateway",
-  },
 ] as const;
 
 export type LocalProviderMeta = (typeof LOCAL_PROVIDER_LABELS)[number];

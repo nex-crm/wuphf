@@ -313,15 +313,20 @@ func TestApprovedAgentIssueCreatesSelfHealTask(t *testing.T) {
 		t.Fatalf("expected approval answer 200, got %d", resp.StatusCode)
 	}
 
+	// The issue carries no parent TaskID, so the title falls through to the
+	// `"[@<slug>] <verb> — agent couldn't continue"` form. Match on
+	// recognition primitive + agent attribution rather than a hardcoded
+	// title so this stays robust to future copy edits.
+	wantTitle := selfHealingTaskTitle("eng", "", "", agent.EscalationCapabilityGap)
 	var found bool
 	for _, task := range b.AllTasks() {
-		if task.Title == "Self-heal @eng runtime failure" {
+		if isSelfHealingTask(&task) && task.Title == wantTitle {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected approved self-heal task, got %+v", b.AllTasks())
+		t.Fatalf("expected approved self-heal task (title=%q), got %+v", wantTitle, b.AllTasks())
 	}
 	issues := b.AgentIssues()
 	if len(issues) != 1 || issues[0].SelfHealTaskID == "" {
@@ -488,7 +493,7 @@ func TestMaybeCreateApprovedSelfHealTask_OverflowMarksError(t *testing.T) {
 	}
 	// The bound task must NOT be the issue's own would-be title — it is the
 	// overflow target.
-	expectedTitle := selfHealingTaskTitle("eng", "eng-fresh-1")
+	expectedTitle := selfHealingTaskTitle("eng", "eng-fresh-1", "", agent.EscalationCapabilityGap)
 	for _, task := range b.AllTasks() {
 		if task.ID == got.SelfHealTaskID && task.Title == expectedTitle {
 			t.Fatalf("overflow case must not bind to the issue's own self-heal title, got task=%+v", task)

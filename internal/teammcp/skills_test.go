@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -363,5 +366,65 @@ func TestHandleTeamSkillCreateRequiresDescription(t *testing.T) {
 		if res == nil || !res.IsError {
 			t.Fatalf("description=%q: expected IsError=true, got %+v", desc, res)
 		}
+	}
+}
+
+// TestHandleRequestSkillEnableToleratesTransientPollErrors verifies
+// that a single transient broker-poll failure does not abort the
+// approval flow after the request has been created. Aborting would
+// force the caller to retry and create a duplicate approval card —
+// the precise bug we are guarding against. The stub broker fails the
+// first /interview/answer poll, then returns an approved answer on
+// the next poll; the handler must succeed.
+func TestHandleRequestSkillEnableToleratesTransientPollErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("relies on the 1.5s poll tick; skip under -short")
+	}
+	var pollCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/requests":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "req-xyz"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/interview/answer"):
+			n := pollCount.Add(1)
+			if n == 1 {
+				// Simulate a transient broker outage on the first poll.
+				http.Error(w, "stub: simulated transient failure", http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "answered",
+				"answered": map[string]any{
+					"choice_id":   "approve",
+					"answered_at": "2026-05-28T12:00:00Z",
+				},
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/enable-for"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"skill": map[string]any{
+					"name":         "investigate",
+					"owner_agents": []string{"eng"},
+				},
+			})
+		default:
+			http.Error(w, "stub: unhandled "+r.Method+" "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	withBrokerURL(t, srv.URL)
+	t.Setenv("WUPHF_AGENT_SLUG", "eng")
+
+	res, _, err := handleRequestSkillEnable(context.Background(), nil, RequestSkillEnableArgs{
+		SkillSlug: "investigate",
+		Reason:    "Need it to root-cause the webhook bug.",
+	})
+	if err != nil {
+		t.Fatalf("handleRequestSkillEnable: %v", err)
+	}
+	if isToolError(res) {
+		t.Fatalf("expected success despite one transient poll error; got tool error: %s", toolErrorText(res))
+	}
+	if got := pollCount.Load(); got < 2 {
+		t.Fatalf("expected at least 2 poll attempts (1 transient + 1 success), got %d", got)
 	}
 }

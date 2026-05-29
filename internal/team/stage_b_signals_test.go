@@ -23,8 +23,8 @@ func TestStageBSignalAggregator_NotebookAndSelfHealUnion(t *testing.T) {
 	now := time.Now().UTC()
 	seedSelfHealTask(t, b, teamTask{
 		ID:         "task-101",
-		Title:      selfHealingTaskTitle("deploy-bot", "task-7"),
-		Details:    selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing deploy specialist"),
+		Title:      selfHealingTaskTitle("deploy-bot", "task-7", "", agent.EscalationCapabilityGap),
+		Details:    selfHealingTaskDetails("deploy-bot", "task-7", "", agent.EscalationCapabilityGap, "missing deploy specialist"),
 		Owner:      "deploy-bot",
 		status:     "done",
 		PipelineID: "incident",
@@ -65,8 +65,8 @@ func TestStageBSignalAggregator_RespectsMaxTotal(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		seedSelfHealTask(t, b, teamTask{
 			ID:         "task-200-" + string(rune('a'+i)),
-			Title:      selfHealingTaskTitle("deploy-bot", "task-7"),
-			Details:    selfHealingTaskDetails("deploy-bot", "task-7", agent.EscalationCapabilityGap, "missing relay"),
+			Title:      selfHealingTaskTitle("deploy-bot", "task-7", "", agent.EscalationCapabilityGap),
+			Details:    selfHealingTaskDetails("deploy-bot", "task-7", "", agent.EscalationCapabilityGap, "missing relay"),
 			Owner:      "deploy-bot",
 			status:     "done",
 			PipelineID: "incident",

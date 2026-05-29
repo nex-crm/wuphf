@@ -90,9 +90,23 @@ func actionIsReadOnly(actionID string) bool {
 	return hasRead
 }
 
+// approvalContext is the metadata requireTeamActionApproval surfaces to the
+// caller after a successful approval. The execute handler reads it to write
+// a matching ApprovalAuditEntry to the broker once the action runs.
+//
+// RequestID is empty when the gate was bypassed (dry-run, unsafe, read-only)
+// — the caller should treat an empty RequestID as "skip the audit write."
+type approvalContext struct {
+	RequestID   string
+	IssueID     string
+	RequestedAt string
+	AnsweredAt  string
+}
+
 // requireTeamActionApproval gates mutating external-action calls behind a
-// human approval request. Returns nil when the call may proceed, an error
-// describing the rejection otherwise. The approval contract:
+// human approval request. Returns the approval context (request id + Issue
+// id + timestamps) and a nil error when the call may proceed; returns a
+// non-nil error describing the rejection otherwise. The approval contract:
 //
 //  1. DryRun calls never gate — they only build the request, not send it.
 //  2. WUPHF_UNSAFE=1 bypasses the gate. The --unsafe launch flag sets this.
@@ -103,17 +117,56 @@ func actionIsReadOnly(actionID string) bool {
 //     reject_with_steer, needs_more_info) returns an error. Timeout after
 //     actionApprovalTimeout returns an error.
 //
+// On non-approve terminal dispositions (reject/timeout/cancel) the function
+// writes an ApprovalAuditEntry to the broker before returning the error so
+// the inbox trail records the dead-end. The success path's audit write is
+// the caller's responsibility because only the caller knows the executed_at
+// timestamp and outcome chat message id.
+//
 // The point: a prompt-injected agent cannot send email, write to a CRM, or
 // post a Slack message without the human explicitly clicking approve.
-func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs) error {
+func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs) (approvalContext, error) {
 	if args.DryRun {
-		return nil
+		return approvalContext{}, nil
 	}
 	if os.Getenv("WUPHF_UNSAFE") == "1" {
-		return nil
+		return approvalContext{}, nil
 	}
 	if actionIsReadOnly(args.ActionID) {
-		return nil
+		return approvalContext{}, nil
+	}
+
+	// Auto-resolve the Issue scoping this action. The product rule is
+	// "any work getting done has an Issue behind it." Rather than rejecting
+	// when the agent forgot to pass issue_id, the broker resolves the
+	// container automatically: pick the most recent open Issue in this
+	// channel, or auto-create a draft Issue from the action's intent.
+	// The resolved id rides on the approval request body so audit-trail
+	// work (Bug B Layer 2) can later correlate approval → Issue → outcome.
+	resolvedIssueID, resolvedState, err := resolveActionIssue(ctx, slug, channel, args)
+	if err != nil {
+		// Even when auto-resolve fails (broker unreachable, etc.) we do
+		// not block the approval — the human can still answer it. We
+		// just lose the Issue link for this one card. Logged so it's
+		// visible in the broker stderr.
+		fmt.Fprintf(os.Stderr, "teammcp: action issue auto-resolve failed for %s/%s: %v\n", args.Platform, args.ActionID, err)
+	} else {
+		args.IssueID = resolvedIssueID
+		// Hard gate: an Issue in `drafting` is awaiting human review +
+		// approve. The agent must NOT proceed with external actions
+		// until the human approves it via the Issue detail surface.
+		// Surface a clear error back to the agent so its next-step
+		// reasoning routes to "wait + ping the human" instead of
+		// retrying the action. The agent will see this error in its
+		// tool_result and is prompted (RULE ZERO) to back off.
+		if strings.EqualFold(strings.TrimSpace(resolvedState), "drafting") {
+			return approvalContext{}, fmt.Errorf(
+				"issue %s is awaiting human approval (lifecycle_state=drafting); "+
+					"do NOT retry this action — surface the Issue to the human (it's already in chat as an Issue card and on the Issues board) and wait; "+
+					"resume work only after the human clicks Approve & Start on the Issue",
+				resolvedIssueID,
+			)
+		}
 	}
 
 	spec := buildActionApprovalSpec(slug, channel, args)
@@ -126,6 +179,7 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 	// at 100+ stacked "Approve gmail action" cards for the same intent.
 	dedupeKey := actionApprovalDedupeKey(slug, args)
 
+	requestedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	var created struct {
 		ID string `json:"id"`
 	}
@@ -141,11 +195,16 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		"blocking":       true,
 		"required":       true,
 		"dedupe_key":     dedupeKey,
+		// Carry the parent Issue id on the approval record so the audit
+		// trail can later link approval → Issue → resulting tool call
+		// (Bug B Layer 2). The broker ignores unknown fields today, so
+		// shipping this is safe and unblocks the follow-up slice.
+		"issue_id": strings.TrimSpace(args.IssueID),
 	}, &created); err != nil {
-		return fmt.Errorf("create approval request: %w", err)
+		return approvalContext{}, fmt.Errorf("create approval request: %w", err)
 	}
 	if strings.TrimSpace(created.ID) == "" {
-		return fmt.Errorf("approval request did not return an ID")
+		return approvalContext{}, fmt.Errorf("approval request did not return an ID")
 	}
 
 	timeout := time.After(actionApprovalTimeout)
@@ -161,31 +220,59 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		actionID = "unknown"
 	}
 
+	auditBase := team.ApprovalAuditEntry{
+		ApprovalRequestID: created.ID,
+		TaskID:            strings.TrimSpace(args.IssueID),
+		Platform:          platform,
+		ActionID:          actionID,
+		ConnectionKey:     strings.TrimSpace(args.ConnectionKey),
+		RequestedAt:       requestedAt,
+		Actor:             slug,
+		Channel:           channel,
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return approvalContext{}, ctx.Err()
 		case <-timeout:
-			return fmt.Errorf("timed out waiting for human approval of %s on %s", actionID, platform)
+			audit := auditBase
+			audit.Outcome = team.ApprovalOutcomeTimedOut
+			audit.OutcomeSummary = fmt.Sprintf("timed out waiting for human approval after %s", actionApprovalTimeout)
+			brokerPostApprovalAudit(ctx, audit)
+			return approvalContext{}, fmt.Errorf("timed out waiting for human approval of %s on %s", actionID, platform)
 		case <-ticker.C:
 			var result brokerInterviewAnswerResponse
 			path := "/interview/answer?id=" + url.QueryEscape(created.ID)
 			if err := brokerGetJSON(ctx, path, &result); err != nil {
-				return fmt.Errorf("poll approval: %w", err)
+				return approvalContext{}, fmt.Errorf("poll approval: %w", err)
 			}
 			switch strings.ToLower(strings.TrimSpace(result.Status)) {
 			case "canceled", "cancelled":
-				return fmt.Errorf("human approval canceled for %s on %s", actionID, platform)
+				audit := auditBase
+				audit.Outcome = team.ApprovalOutcomeCancelled
+				audit.OutcomeSummary = "human cancelled approval"
+				brokerPostApprovalAudit(ctx, audit)
+				return approvalContext{}, fmt.Errorf("human approval canceled for %s on %s", actionID, platform)
 			case "not_found":
-				return fmt.Errorf("human approval request not found for %s on %s", actionID, platform)
+				return approvalContext{}, fmt.Errorf("human approval request not found for %s on %s", actionID, platform)
 			}
 			if result.Answered == nil {
 				continue
 			}
+			answeredAt := strings.TrimSpace(result.Answered.AnsweredAt)
+			if answeredAt == "" {
+				answeredAt = time.Now().UTC().Format(time.RFC3339Nano)
+			}
 			choice := strings.ToLower(strings.TrimSpace(result.Answered.ChoiceID))
 			switch choice {
 			case "approve", "approve_with_note", "confirm_proceed":
-				return nil
+				return approvalContext{
+					RequestID:   created.ID,
+					IssueID:     strings.TrimSpace(args.IssueID),
+					RequestedAt: requestedAt,
+					AnsweredAt:  answeredAt,
+				}, nil
 			}
 			reason := strings.TrimSpace(result.Answered.CustomText)
 			if reason == "" {
@@ -194,7 +281,12 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 			if reason == "" {
 				reason = choice
 			}
-			return fmt.Errorf("human rejected %s on %s: %s", actionID, platform, reason)
+			audit := auditBase
+			audit.Outcome = team.ApprovalOutcomeRejected
+			audit.AnsweredAt = answeredAt
+			audit.OutcomeSummary = reason
+			brokerPostApprovalAudit(ctx, audit)
+			return approvalContext{}, fmt.Errorf("human rejected %s on %s: %s", actionID, platform, reason)
 		}
 	}
 }
@@ -334,6 +426,17 @@ func actionVerbLabel(platform, actionID string) string {
 	if id == "" {
 		return "run an action"
 	}
+	// Defensive: if the actionID looks like an opaque internal identifier
+	// (contains `::`, long hash-like runs, base64-ish padding, etc.), the
+	// agent has passed a connection key or workflow handle instead of a
+	// proper action_id. Title-casing that string verbatim would surface
+	// gibberish like "conn mod def::gj3odoe fdw::ijlww5s" to the human and
+	// leave them no way to decide whether to approve. Fall back to a
+	// generic verb so the rest of the approval card (Why / What this will
+	// do / Action) is still useful.
+	if looksLikeOpaqueID(id) {
+		return "run an action"
+	}
 	tokens := strings.FieldsFunc(id, actionIDSeparator)
 	if len(tokens) > 1 {
 		first := tokens[0]
@@ -430,6 +533,12 @@ type TeamActionExecuteArgs struct {
 	Channel         string         `json:"channel,omitempty" jsonschema:"Optional office channel for logging"`
 	MySlug          string         `json:"my_slug,omitempty" jsonschema:"Agent slug performing the action. Defaults to WUPHF_AGENT_SLUG."`
 	Summary         string         `json:"summary,omitempty" jsonschema:"Optional short office log summary"`
+	// IssueID is REQUIRED for any mutating (non-dry-run, non-read-only)
+	// action. The broker rejects mutating calls without an issue_id so the
+	// agent cannot do work that has no scoping artifact. The id must come
+	// from a prior team_task action=create call in this conversation. See
+	// the ISSUE JUDGMENT block in the system prompt.
+	IssueID string `json:"issue_id,omitempty" jsonschema:"REQUIRED for mutating actions. Pass the team_task/Issue id this action executes under. Get it from a prior team_task action=create call. Read-only and dry_run actions may omit it."`
 }
 
 type TeamActionWorkflowCreateArgs struct {
@@ -633,7 +742,8 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 	// approval unless --unsafe was passed or the action is a read-only
 	// lookup. A prompt-injected agent must not be able to trigger real
 	// side-effects silently.
-	if err := requireTeamActionApproval(ctx, slug, channel, args); err != nil {
+	approvalCtx, err := requireTeamActionApproval(ctx, slug, channel, args)
+	if err != nil {
 		return toolError(err), nil, nil
 	}
 
@@ -653,17 +763,75 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 		FormURLEncoded:  args.FormURLEncoded,
 		DryRun:          args.DryRun,
 	})
+	verb := actionVerbLabel(args.Platform, args.ActionID)
+	platformLabel := platformDisplay(args.Platform)
+	// `intent` is the agent's own one-liner from args.Summary — that's
+	// the same line the human just read on the approval card, so reusing
+	// it in the outcome means the human sees "I approved THIS and it
+	// ran" instead of a generic "Executed run an action via Gmail".
+	// When the agent left Summary blank, fall back to verb+platform so
+	// we still post something readable.
+	intent := strings.TrimSpace(args.Summary)
+	if intent == "" {
+		intent = fmt.Sprintf("%s via %s", verb, platformLabel)
+	}
+	executedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if err != nil {
-		_ = brokerRecordAction(ctx, "external_action_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("%s action %s on %s failed", titleCaser.String(provider.Name()), args.ActionID, args.Platform)), args.ActionID)
+		failSummary := fallbackSummary(args.Summary, fmt.Sprintf("%s action %s on %s failed", titleCaser.String(provider.Name()), args.ActionID, args.Platform))
+		_ = brokerRecordAction(ctx, "external_action_failed", provider.Name(), channel, slug, failSummary, args.ActionID)
+		// Failure ALWAYS posts (no dedupe, no read-only skip) — silent
+		// failures are the worst UX. Clean the error of CLI/JSON noise
+		// before showing it; the agent's followup human_message can
+		// carry the deep detail when it matters.
+		cleanedErr := sanitizeOutcomeError(err.Error())
+		outcomeMsgID := brokerPostActionOutcomeMessage(ctx, channel, slug, fmt.Sprintf(
+			"⚠️ %s — failed: %s",
+			intent,
+			cleanedErr,
+		))
+		recordExecuteAudit(ctx, approvalCtx, args, slug, channel, executedAt,
+			team.ApprovalOutcomeExecutedFailed,
+			fmt.Sprintf("%s — failed: %s", intent, cleanedErr),
+			outcomeMsgID)
 		return toolError(err), nil, nil
 	}
 	kind := "external_action_executed"
-	summary := fallbackSummary(args.Summary, fmt.Sprintf("Executed %s on %s via %s", args.ActionID, args.Platform, titleCaser.String(provider.Name())))
 	if args.DryRun {
 		kind = "external_action_planned"
-		summary = fallbackSummary(args.Summary, fmt.Sprintf("Planned %s on %s via %s", args.ActionID, args.Platform, titleCaser.String(provider.Name())))
 	}
-	_ = brokerRecordAction(ctx, kind, provider.Name(), channel, slug, summary, args.ActionID)
+	_ = brokerRecordAction(ctx, kind, provider.Name(), channel, slug, intent, args.ActionID)
+	// Decide whether to post to chat. Three rules:
+	//   1. Read-only actions (list/search/get/...) bypass the approval
+	//      gate and are agent-internal lookups; posting every one would
+	//      flood chat with noise the human doesn't need to see.
+	//   2. Recent duplicate of the same action — dedupe to avoid
+	//      "✅ Executed ... ✅ Executed ... ✅ Executed" cascades when
+	//      the agent retries a successful call.
+	//   3. Everything else — the human approved it; they MUST see the
+	//      confirmation.
+	var outcomeMsgID string
+	if !actionIsReadOnly(args.ActionID) && !recentlyPostedOutcome(slug, args.ActionID, channel) {
+		// Build the outcome message: intent + a result preview so the
+		// human sees what the approved action actually produced, not
+		// just that it ran. Without the preview, the human gets "✅
+		// List inbox threads" with no idea how many threads, which
+		// ones, or what came back — defeating the trust contract of
+		// "every approval feels useful". The preview is bounded so
+		// the chat doesn't drown in raw JSON for large payloads; the
+		// agent's followup human_message carries the interpretation.
+		preview := summarizeActionResult(result)
+		var body string
+		if args.DryRun {
+			body = fmt.Sprintf("📝 Planned: %s (dry-run, nothing sent)", intent)
+		} else if preview != "" {
+			body = fmt.Sprintf("✅ %s\n\n%s", intent, preview)
+		} else {
+			body = fmt.Sprintf("✅ %s", intent)
+		}
+		outcomeMsgID = brokerPostActionOutcomeMessage(ctx, channel, slug, body)
+	}
+	recordExecuteAudit(ctx, approvalCtx, args, slug, channel, executedAt,
+		team.ApprovalOutcomeExecutedOK, intent, outcomeMsgID)
 	return textResult(prettyObject(result)), nil, nil
 }
 

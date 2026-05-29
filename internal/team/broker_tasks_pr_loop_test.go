@@ -23,11 +23,12 @@ func TestPRLoop_RequestChangesBouncesToOwnerWithFeedback(t *testing.T) {
 	}
 	b.tasks = []teamTask{
 		{
-			ID:      "task-rc-1",
-			Channel: "general",
-			Title:   "Implement ToShortcode helper",
-			Owner:   "executor",
-			status:  "review",
+			ID:        "task-rc-1",
+			Channel:   "general",
+			Title:     "Implement ToShortcode helper",
+			Owner:     "executor",
+			status:    "review",
+			Reviewers: []string{"reviewer"},
 		},
 	}
 
@@ -35,10 +36,14 @@ func TestPRLoop_RequestChangesBouncesToOwnerWithFeedback(t *testing.T) {
 
 	feedback := "Bullet 4 fails — :tada: is 6 runes vs 🎉's 1, so 'never longer than input' is violated for every mapping."
 	got, err := b.MutateTask(TaskPostRequest{
-		Action:    "request_changes",
-		ID:        "task-rc-1",
-		Channel:   "general",
-		Details:   feedback,
+		Action:  "request_changes",
+		ID:      "task-rc-1",
+		Channel: "general",
+		Details: feedback,
+		// Reviewer can request_changes on tasks where they're on the
+		// Reviewers list (Slice 7 carve-out). This task seeds reviewer
+		// in Reviewers below so the gate allows the action and the
+		// broadcast attribution stays correct.
 		CreatedBy: "reviewer",
 	})
 	if err != nil {
@@ -157,10 +162,12 @@ func TestPRLoop_CommentDoesNotChangeState(t *testing.T) {
 	}
 
 	got, err := b.MutateTask(TaskPostRequest{
-		Action:    "comment",
-		ID:        "task-cmt-1",
-		Channel:   "general",
-		Details:   "Reviewer drive-by: nice catch on the edge case.",
+		Action:  "comment",
+		ID:      "task-cmt-1",
+		Channel: "general",
+		Details: "Reviewer drive-by: nice catch on the edge case.",
+		// Comment is open to all (Slice 7); the test asserts the
+		// author propagates, so use "reviewer" as the comment author.
 		CreatedBy: "reviewer",
 	})
 	if err != nil {
@@ -226,7 +233,7 @@ func TestPRLoop_RejectIsTerminalAndDoesNotUnblockDependents(t *testing.T) {
 		ID:        "task-rej-1",
 		Channel:   "general",
 		Details:   reason,
-		CreatedBy: "reviewer",
+		CreatedBy: "ceo",
 	})
 	if err != nil {
 		t.Fatalf("MutateTask reject: %v", err)
@@ -336,7 +343,7 @@ func TestPRLoop_RejectRequiresNonEmptyReason(t *testing.T) {
 		ID:        "task-rej-empty-1",
 		Channel:   "general",
 		Details:   "   ",
-		CreatedBy: "reviewer",
+		CreatedBy: "ceo",
 	})
 	if err == nil {
 		t.Fatalf("expected error for empty reject reason, got nil")

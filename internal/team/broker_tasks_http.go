@@ -94,12 +94,13 @@ func (b *Broker) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	result, err := b.ListTasks(TaskListRequest{
-		StatusFilter: strings.TrimSpace(r.URL.Query().Get("status")),
-		MySlug:       strings.TrimSpace(r.URL.Query().Get("my_slug")),
-		ViewerSlug:   strings.TrimSpace(r.URL.Query().Get("viewer_slug")),
-		Channel:      strings.TrimSpace(r.URL.Query().Get("channel")),
-		AllChannels:  strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all_channels")), "true"),
-		IncludeDone:  strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_done")), "true"),
+		StatusFilter:  strings.TrimSpace(r.URL.Query().Get("status")),
+		MySlug:        strings.TrimSpace(r.URL.Query().Get("my_slug")),
+		ViewerSlug:    strings.TrimSpace(r.URL.Query().Get("viewer_slug")),
+		Channel:       strings.TrimSpace(r.URL.Query().Get("channel")),
+		AllChannels:   strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all_channels")), "true"),
+		IncludeDone:   strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_done")), "true"),
+		ParentIssueID: strings.TrimSpace(r.URL.Query().Get("parent_issue_id")),
 	})
 	if errors.Is(err, errTaskChannelAccessDenied) {
 		http.Error(w, "channel access denied", http.StatusForbidden)

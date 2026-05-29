@@ -114,6 +114,12 @@ func (b *Broker) handleSkillsCRUDSubpath(w http.ResponseWriter, r *http.Request)
 	case "restore":
 		b.handleSkillRestore(w, r, name)
 		return true
+	case "enable-for":
+		b.handleSkillEnableForAgent(w, r, name)
+		return true
+	case "disable-for":
+		b.handleSkillDisableForAgent(w, r, name)
+		return true
 	}
 	return false
 }
@@ -1104,4 +1110,143 @@ func yamlMarshalTombstone(tf tombstoneFile) (string, error) {
 		return "", err
 	}
 	return string(raw), nil
+}
+
+// handleSkillEnableForAgent appends an agent slug to the skill's
+// OwnerAgents list. Idempotent. Used by the agent Skills tab and by
+// request_skill_enable's approval path. POST body: {"agent": "<slug>"}.
+func (b *Broker) handleSkillEnableForAgent(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Agent string `json:"agent"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	agent := normalizeActorSlug(body.Agent)
+	if agent == "" {
+		http.Error(w, "agent required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	if b.findMemberLocked(agent) == nil {
+		b.mu.Unlock()
+		http.Error(w, "agent not in roster", http.StatusBadRequest)
+		return
+	}
+	sk := b.findSkillByNameLocked(name)
+	if sk == nil {
+		b.mu.Unlock()
+		http.Error(w, "skill not found", http.StatusNotFound)
+		return
+	}
+	if sk.Status != "active" {
+		b.mu.Unlock()
+		http.Error(w, "skill must be active to enable for an agent", http.StatusConflict)
+		return
+	}
+	already := false
+	for _, slug := range sk.OwnerAgents {
+		if slug == agent {
+			already = true
+			break
+		}
+	}
+	if !already {
+		sk.OwnerAgents = append(sk.OwnerAgents, agent)
+		sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	out := *sk
+	saveErr := b.saveLocked()
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(out.Name)
+	enqueueCtx := b.brokerLifecycleContext()
+	b.mu.Unlock()
+	if saveErr != nil {
+		http.Error(w, "save failed: "+saveErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Re-render the SKILL.md so the on-disk copy reflects the updated
+	// OwnerAgents list. Without this, the per-agent enablement only lives
+	// in broker-state.json and the wiki preview goes stale. Failures are
+	// logged but do not fail the call — broker state is already saved,
+	// and a later mutation (or boot backfill) reconciles disk.
+	if !already && wikiWorker != nil {
+		if err := enqueueSkillWikiWrite(enqueueCtx, wikiWorker, out, wikiPath, "wuphf: enable skill "+out.Name+" for @"+agent); err != nil {
+			slog.Warn("handleSkillEnableForAgent: wiki enqueue failed",
+				"name", out.Name, "agent", agent, "err", err)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"skill": out})
+}
+
+// handleSkillDisableForAgent removes an agent slug from OwnerAgents.
+// Idempotent. POST body: {"agent": "<slug>"}.
+func (b *Broker) handleSkillDisableForAgent(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Agent string `json:"agent"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	agent := normalizeActorSlug(body.Agent)
+	if agent == "" {
+		http.Error(w, "agent required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	sk := b.findSkillByNameLocked(name)
+	if sk == nil {
+		b.mu.Unlock()
+		http.Error(w, "skill not found", http.StatusNotFound)
+		return
+	}
+	before := len(sk.OwnerAgents)
+	// Allocate a fresh slice rather than aliasing sk.OwnerAgents[:0] so the
+	// pre-mutation snapshot stays intact for the change-detection check.
+	filtered := make([]string, 0, before)
+	for _, slug := range sk.OwnerAgents {
+		if slug != agent {
+			filtered = append(filtered, slug)
+		}
+	}
+	changed := len(filtered) != before
+	sk.OwnerAgents = filtered
+	if changed {
+		sk.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	out := *sk
+	saveErr := b.saveLocked()
+	wikiWorker := b.wikiWorker
+	wikiPath := skillWikiPath(out.Name)
+	enqueueCtx := b.brokerLifecycleContext()
+	b.mu.Unlock()
+	if saveErr != nil {
+		http.Error(w, "save failed: "+saveErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Re-render the SKILL.md so the on-disk copy reflects the updated
+	// OwnerAgents list. Mirrors handleSkillEnableForAgent so per-agent
+	// enablement is round-trippable across the broker state and the
+	// wiki preview path.
+	if changed && wikiWorker != nil {
+		if err := enqueueSkillWikiWrite(enqueueCtx, wikiWorker, out, wikiPath, "wuphf: disable skill "+out.Name+" for @"+agent); err != nil {
+			slog.Warn("handleSkillDisableForAgent: wiki enqueue failed",
+				"name", out.Name, "agent", agent, "err", err)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"skill": out})
 }

@@ -117,6 +117,10 @@ export function StatusBar() {
         return `Issue ${route.issueId}`;
       case "issue-new":
         return "New issue";
+      case "agent-subspace":
+        return `${route.agentSlug} · ${route.tab}`;
+      case "skill-detail":
+        return `skill · ${route.skillName}`;
       case "unknown":
         return "";
       default: {

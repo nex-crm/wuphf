@@ -65,6 +65,7 @@ func brokerStateActivityScore(state brokerState) int {
 	score += len(state.AgentIssues) * 8
 	score += len(state.Tasks) * 20
 	score += len(activeRequests(state.Requests)) * 10
+	score += len(state.ApprovalAudit) * 4
 	score += len(state.Actions) * 4
 	score += len(state.Signals) * 4
 	score += len(state.Decisions) * 4
@@ -127,6 +128,14 @@ func (b *Broker) loadState() error {
 		b.tasks = []teamTask{}
 	}
 	b.requests = state.Requests
+	b.approvalAudit = state.ApprovalAudit
+	// Sanitize loaded audit entries — older persisted state (pre-sanitizer)
+	// can carry trailing whitespace and other minor noise. Run the same
+	// cleaner used on save so the in-memory view always matches what a
+	// fresh write would produce.
+	for i := range b.approvalAudit {
+		b.approvalAudit[i] = sanitizeApprovalAuditEntry(b.approvalAudit[i])
+	}
 	b.humanInvites = state.HumanInvites
 	b.humanSessions = state.HumanSessions
 	b.actions = state.Actions
@@ -136,6 +145,21 @@ func (b *Broker) loadState() error {
 	b.policies = state.Policies
 	b.scheduler = state.Scheduler
 	b.skills = state.Skills
+	// Backfill OwnerAgents for skills persisted before per-agent scoping
+	// landed. Agent-created skills get auto-enabled for their creator so
+	// they keep working after upgrade; human-created skills stay
+	// library-only until enabled per agent via the Skills tab.
+	for i := range b.skills {
+		sk := &b.skills[i]
+		if len(sk.OwnerAgents) > 0 {
+			continue
+		}
+		creator := normalizeActorSlug(sk.CreatedBy)
+		if creator == "" || isHumanMessageSender(creator) {
+			continue
+		}
+		sk.OwnerAgents = []string{creator}
+	}
 	b.sharedMemory = state.SharedMemory
 	b.counter = state.Counter
 	b.notificationSince = state.NotificationSince
@@ -252,6 +276,10 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	for i, req := range b.requests {
 		requests[i] = sanitizeHumanInterview(req)
 	}
+	approvalAudit := make([]ApprovalAuditEntry, len(b.approvalAudit))
+	for i, entry := range b.approvalAudit {
+		approvalAudit[i] = sanitizeApprovalAuditEntry(entry)
+	}
 	signals := make([]officeSignalRecord, len(b.signals))
 	for i, sig := range b.signals {
 		signals[i] = sanitizeOfficeSignalRecord(sig)
@@ -283,6 +311,7 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		FocusMode:         b.focusMode,
 		Tasks:             tasks,
 		Requests:          requests,
+		ApprovalAudit:     approvalAudit,
 		Actions:           actions,
 		Signals:           signals,
 		Decisions:         decisions,
@@ -363,6 +392,7 @@ func (b *Broker) isDefaultBrokerStateLocked() bool {
 		len(b.agentIssues) == 0 &&
 		len(b.tasks) == 0 &&
 		len(activeRequests(b.requests)) == 0 &&
+		len(b.approvalAudit) == 0 &&
 		len(b.humanInvites) == 0 &&
 		len(b.humanSessions) == 0 &&
 		len(b.actions) == 0 &&
