@@ -1,10 +1,16 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   NotebookAgentSummary,
   NotebookEntrySummary,
 } from "../../api/notebook";
+import {
+  fetchRichArtifacts,
+  type RichArtifact,
+  resolveArtifactDestination,
+} from "../../api/richArtifacts";
 import { formatDateLabel } from "../../lib/format";
+import { router } from "../../lib/router";
 import { PixelAvatar } from "../ui/PixelAvatar";
 
 /**
@@ -67,6 +73,21 @@ function formatTimeOnly(iso: string): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+// Sort the agent's rich artifacts most-recent-first using created_at, with
+// a stable id-tiebreaker so identical timestamps stay deterministic across
+// renders.
+function sortArtifacts(artifacts: RichArtifact[]): RichArtifact[] {
+  return [...artifacts].sort((a, b) => {
+    const ta = new Date(a.createdAt).getTime();
+    const tb = new Date(b.createdAt).getTime();
+    if (Number.isNaN(ta) && Number.isNaN(tb)) return a.id.localeCompare(b.id);
+    if (Number.isNaN(ta)) return 1;
+    if (Number.isNaN(tb)) return -1;
+    if (tb !== ta) return tb - ta;
+    return a.id.localeCompare(b.id);
+  });
+}
+
 export default function AuthorShelfSidebar({
   agent,
   entries,
@@ -74,6 +95,34 @@ export default function AuthorShelfSidebar({
   onSelect,
 }: AuthorShelfSidebarProps) {
   const groups = useMemo(() => groupByDay(entries), [entries]);
+  const [artifacts, setArtifacts] = useState<RichArtifact[]>([]);
+  const [artifactsError, setArtifactsError] = useState<string | null>(null);
+
+  // Fetch the agent's rich (HTML) artifacts. These are stored at
+  // .wuphf/wiki/wiki/visual-artifacts/ra_*.{html,json} and surfaced through
+  // /notebook/visual-artifacts?slug=<agent>. Listing them next to the
+  // markdown entries is how the notebook becomes the single home for
+  // everything the agent has authored — markdown drafts and HTML visuals
+  // both. Failure is silent (the shelf still renders the markdown column).
+  useEffect(() => {
+    let cancelled = false;
+    setArtifactsError(null);
+    setArtifacts([]);
+    fetchRichArtifacts({ slug: agent.agent_slug })
+      .then((items) => {
+        if (cancelled) return;
+        setArtifacts(sortArtifacts(items));
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setArtifactsError(
+          err instanceof Error ? err.message : "Failed to load artifacts",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agent.agent_slug]);
 
   return (
     <aside className="nb-shelf" aria-label={`${agent.name}'s notebook entries`}>
@@ -123,6 +172,69 @@ export default function AuthorShelfSidebar({
           ])}
         </ul>
       )}
+      <RichArtifactsShelfSection artifacts={artifacts} error={artifactsError} />
     </aside>
+  );
+}
+
+interface RichArtifactsShelfSectionProps {
+  artifacts: RichArtifact[];
+  error: string | null;
+}
+
+function RichArtifactsShelfSection({
+  artifacts,
+  error,
+}: RichArtifactsShelfSectionProps) {
+  if (error) {
+    return (
+      <section
+        className="nb-shelf-artifacts"
+        aria-label="Visual artifacts"
+        data-test-rich-artifacts-list="error"
+      >
+        <h3 className="nb-shelf-section-head">Visual artifacts</h3>
+        <p className="nb-shelf-empty" role="alert">
+          Could not load artifacts: {error}
+        </p>
+      </section>
+    );
+  }
+  if (artifacts.length === 0) return null;
+  return (
+    <section
+      className="nb-shelf-artifacts"
+      aria-label="Visual artifacts"
+      data-test-rich-artifacts-list="ok"
+    >
+      <h3 className="nb-shelf-section-head">Visual artifacts</h3>
+      <ul className="nb-shelf-list">
+        {artifacts.map((artifact) => (
+          <li
+            key={artifact.id}
+            style={{ padding: 0, listStyle: "none" }}
+            data-testid={`nb-shelf-artifact-${artifact.id}`}
+          >
+            <button
+              type="button"
+              className="nb-shelf-item"
+              onClick={() => {
+                void router.navigate(resolveArtifactDestination(artifact));
+              }}
+              aria-label={`Open visual artifact: ${artifact.title}`}
+            >
+              <span className="nb-shelf-t">{artifact.title}</span>
+              <span className="nb-shelf-meta">
+                {formatTimeOnly(artifact.createdAt)}
+                {" · "}
+                <span className="rich-artifact-trust">
+                  {artifact.trustLevel}
+                </span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

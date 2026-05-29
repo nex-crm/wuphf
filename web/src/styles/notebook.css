@@ -316,6 +316,26 @@
   font-size: 13px;
 }
 
+/* ── Visual artifacts section in the shelf ─────────────────────
+   Renders below the markdown-entry list. The header introduces the
+   second source of authorship (HTML diagrams) so the shelf reads as one
+   ordered list of "things this agent has authored". */
+.notebook-surface .nb-shelf-artifacts {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--nb-rule);
+}
+
+.notebook-surface .nb-shelf-section-head {
+  margin: 0 0 8px;
+  padding: 0 8px;
+  font-family: var(--nb-display-serif, var(--nb-body-serif));
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--nb-text-tertiary);
+}
+
 /* ── Article column ──────────────────────────────────────────── */
 .notebook-surface .nb-article {
   padding: 32px 72px 48px;
