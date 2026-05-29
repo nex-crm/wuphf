@@ -568,6 +568,14 @@ func (r *Repo) CommitRichArtifact(ctx context.Context, slug string, artifact Ric
 	if attached != nil {
 		artifact.AttachedToNotebookEntry = attached
 	}
+	// Mirror the auto-created notebook home into SourceMarkdownPath so the
+	// existing notebook detail view (NotebookVisualArtifacts) — which looks
+	// artifacts up via fetchRichArtifacts({sourceMarkdownPath}) — finds and
+	// embeds this artifact inline. Without this, the entry shows the
+	// `visual-artifact:<id>` marker as text but no embed renders.
+	if notebookPath != "" && strings.TrimSpace(artifact.SourceMarkdownPath) == "" {
+		artifact.SourceMarkdownPath = notebookPath
+	}
 
 	if err := validateRichArtifactForWrite(artifact, html); err != nil {
 		return RichArtifact{}, "", 0, err
