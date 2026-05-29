@@ -3,6 +3,7 @@ package team
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -77,6 +78,21 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 		if err != nil {
 			writeRichArtifactError(w, err)
 			return
+		}
+		// CreateRichArtifact auto-creates a canonical notebook home for the
+		// artifact and reports it via stored.AttachedToNotebookEntry. The manual
+		// notebook-write path announces new entries with a #general chat card;
+		// mirror that here so an auto-created entry is not discovered by accident.
+		// The card emitter takes b.mu itself, and this HTTP handler holds no lock,
+		// so the call is safe. A "# Title" body makes markdownTitle resolve to the
+		// artifact title; SourceMarkdownPath is the mirrored notebook-home path.
+		if stored.AttachedToNotebookEntry != nil {
+			b.emitNewNotebookEntryCard(
+				stored.AttachedToNotebookEntry.OwnerSlug,
+				stored.SourceMarkdownPath,
+				fmt.Sprintf("# %s\n", stored.Title),
+				stored.OwnerSlug,
+			)
 		}
 		// stored carries the canonical notebook-home attachment chosen by the
 		// worker. Always pass it through DerivePromotion so the response shape
