@@ -160,6 +160,59 @@ describe("<DecisionInbox> (mail-style)", () => {
     expect(rows[1]).toHaveAttribute("data-unread", "false");
   });
 
+  it("defaults to the Needs action filter and excludes rejected + changes_requested rows", () => {
+    const rejectedTask: InboxItem = {
+      ...MIRA_TASK,
+      taskId: "task-rejected",
+      title: "Reject ship of the refactor",
+      task: { ...MIRA_TASK.task, taskId: "task-rejected", state: "rejected" },
+    };
+    const changesRequestedReview: InboxItem = {
+      ...WREN_REVIEW,
+      reviewId: "rev-cr",
+      title: "Wiki promotion bounced back",
+      review: { ...WREN_REVIEW.review, state: "changes_requested" },
+    };
+    render(
+      wrap(
+        <DecisionInbox
+          initialItems={[
+            MIRA_TASK,
+            ADA_REQUEST,
+            WREN_REVIEW,
+            rejectedTask,
+            changesRequestedReview,
+          ]}
+        />,
+      ),
+    );
+    // Needs action filter is selected by default and excludes both
+    // rejected tasks (terminal) and changes_requested reviews (back
+    // with the submitter).
+    expect(screen.getByTestId("inbox-filter-needs-action")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.queryByText(/Reject ship of the refactor/i)).toBeNull();
+    expect(screen.queryByText(/Wiki promotion bounced back/i)).toBeNull();
+    // The three actionable + still-pending rows remain visible.
+    expect(
+      screen.getAllByText(/Refactor agent-rail event pill state/i).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Bump Postgres to 17/i).length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getByText(/Promote draft to wiki/i)).toBeInTheDocument();
+    // The All chip surfaces the terminal rows when clicked.
+    fireEvent.click(screen.getByTestId("inbox-filter-all"));
+    expect(
+      screen.getByText(/Reject ship of the refactor/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Wiki promotion bounced back/i),
+    ).toBeInTheDocument();
+  });
+
   it("Unread filter chip narrows the list to unread items only", () => {
     const unreadItem: InboxItem = { ...MIRA_TASK, isUnread: true };
     const readItem: InboxItem = {

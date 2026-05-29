@@ -57,6 +57,7 @@ interface DecisionInboxProps {
 }
 
 type InboxFilter =
+  | "needs-action"
   | "all"
   | "unread"
   | "decisions"
@@ -65,6 +66,7 @@ type InboxFilter =
   | "rejected";
 
 const FILTER_ORDER: readonly InboxFilter[] = [
+  "needs-action",
   "all",
   "unread",
   "decisions",
@@ -74,6 +76,7 @@ const FILTER_ORDER: readonly InboxFilter[] = [
 ];
 
 const FILTER_LABEL: Record<InboxFilter, string> = {
+  "needs-action": "Needs action",
   all: "All",
   unread: "Unread",
   decisions: "Decisions",
@@ -155,10 +158,52 @@ function isInboxItemActionable(item: InboxItem): boolean {
   }
 }
 
+// "Needs action" is a strict subset of "actionable": items where the human
+// is the immediate blocker right now.
+//
+//   - Requests: every actionable request is awaiting the human's answer.
+//   - Reviews: pending / in-review only. changes_requested means the ball
+//     is back with the submitter, so it's actionable but not on the human.
+//   - Tasks: decision / review / changes_requested. rejected is a terminal
+//     state — the human already said no, so it's actionable for triage
+//     but doesn't need action.
+const NEEDS_ACTION_TASK_STATES = new Set([
+  "decision",
+  "review",
+  "changes_requested",
+]);
+
+function isReviewNeedsAction(item: InboxItem & { kind: "review" }): boolean {
+  const state = (item.review.state ?? "").toLowerCase();
+  return state === "pending" || state === "in-review" || state === "in_review";
+}
+
+function isTaskNeedsAction(item: InboxItem & { kind: "task" }): boolean {
+  const state = (item.task?.state ?? "").toLowerCase();
+  return NEEDS_ACTION_TASK_STATES.has(state);
+}
+
+function isInboxItemNeedsAction(item: InboxItem): boolean {
+  switch (item.kind) {
+    case "task":
+      return isTaskNeedsAction(item);
+    case "request":
+      return isRequestActionable(item);
+    case "review":
+      return isReviewNeedsAction(item);
+    default: {
+      const _exhaustive: never = item;
+      void _exhaustive;
+      return false;
+    }
+  }
+}
+
 function itemMatchesFilter(item: InboxItem, filter: InboxFilter): boolean {
   // The actionability invariant is pre-filtered upstream of this call —
   // every item reaching here is already known to need a human decision.
   if (filter === "all") return true;
+  if (filter === "needs-action") return isInboxItemNeedsAction(item);
   if (filter === "unread") return item.isUnread === true;
   if (filter === "requests") return item.kind === "request";
   if (filter === "reviews") return item.kind === "review";
@@ -195,7 +240,7 @@ export function DecisionInbox({
 }: DecisionInboxProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [showLoadingText, setShowLoadingText] = useState(false);
-  const [filter, setFilter] = useState<InboxFilter>("all");
+  const [filter, setFilter] = useState<InboxFilter>("needs-action");
 
   const seed: UnifiedInboxResponse | undefined = initialItems
     ? {
@@ -249,6 +294,7 @@ export function DecisionInbox({
   );
   const filterCounts = useMemo(() => {
     const counts: Record<InboxFilter, number> = {
+      "needs-action": 0,
       all: allItems.length,
       unread: 0,
       decisions: 0,
