@@ -19,11 +19,11 @@ describe("toAutocomplete", () => {
   it("maps known commands to their icon", () => {
     const broker: SlashCommandDescriptor[] = [
       { name: "ask", description: "Ask", webSupported: true },
-      { name: "calendar", description: "Calendar", webSupported: true },
+      { name: "routines", description: "Routines", webSupported: true },
     ];
     const mapped = toAutocomplete(broker);
     expect(mapped[0].icon).toBe(COMMAND_ICONS.ask);
-    expect(mapped[1].icon).toBe(COMMAND_ICONS.calendar);
+    expect(mapped[1].icon).toBe(COMMAND_ICONS.routines);
   });
 
   it("assigns the default icon to unknown commands so autocomplete never shows a blank glyph", () => {
@@ -85,7 +85,7 @@ describe("FALLBACK_SLASH_COMMANDS", () => {
       "/task",
       "/cancel",
       "/policies",
-      "/calendar",
+      "/routines",
       "/skills",
       "/focus",
       "/collab",

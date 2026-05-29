@@ -711,101 +711,30 @@ export function deletePolicy(id: string) {
   return del("/policies", { id });
 }
 
-// ── Scheduler ──
-
-export interface SchedulerJob {
-  id?: string;
-  slug?: string;
-  name?: string;
-  label?: string;
-  kind?: string;
-  cron?: string;
-  next_run?: string;
-  last_run?: string;
-  due_at?: string;
-  status?: string;
-  /** Interval-driven cadence in minutes (system crons + interval workflows). */
-  interval_minutes?: number;
-  /** Cron expression for cron-driven workflow jobs. */
-  schedule_expr?: string;
-  /** Provider that owns this job (e.g. "system", "agent", "workflow"). */
-  provider?: string;
-  /** Target type ("workflow" | "skill" | …) when surfaced by the runtime. */
-  target_type?: string;
-  target_id?: string;
-  // PR 8 Lane G/H — cron registry surface fields.
-  /** Whether the cron is currently enabled. */
-  enabled?: boolean;
-  /** Human override for the cadence in minutes. 0/missing = use default. */
-  interval_override?: number;
-  /** "ok" | "failed" — chip on the row. */
-  last_run_status?: string;
-  /** True for crons that self-register at broker startup. */
-  system_managed?: boolean;
-}
-
-export function getScheduler(opts?: { dueOnly?: boolean }) {
-  const params: Record<string, string> = {};
-  if (opts?.dueOnly) params.due_only = "true";
-  return get<{ jobs: SchedulerJob[] }>("/scheduler", params);
-}
-
-export interface PatchSchedulerJobBody {
-  enabled?: boolean;
-  /** Minutes; 0 clears the override. Must be >= the cron's MinFloor. */
-  interval_override?: number;
-}
-
-export interface PatchSchedulerJobResponse {
-  job: SchedulerJob;
-}
-
-/**
- * Update the enabled flag and / or interval_override for a scheduler job.
- * Backed by PATCH /scheduler/{slug} (PR 8 Lane G).
- */
-export function patchSchedulerJob(
-  slug: string,
-  body: PatchSchedulerJobBody,
-): Promise<PatchSchedulerJobResponse> {
-  return patch<PatchSchedulerJobResponse>(
-    `/scheduler/${encodeURIComponent(slug)}`,
-    body,
-  );
-}
-
-/**
- * Wire shape for one entry from GET /scheduler/system-specs.
- * Mirrors systemCronSpecJSON in internal/team/broker_scheduler.go.
- */
-export interface SystemCronSpec {
-  slug: string;
-  min_floor_minutes: number;
-  default_interval_minutes: number;
-  description: string;
-}
-
-/**
- * Fetch the system-cron spec registry from the broker so the UI can
- * derive per-slug MinFloor values at runtime instead of maintaining a
- * hardcoded mirror constant.
- */
-export async function getSystemCronSpecs(): Promise<SystemCronSpec[]> {
-  const res = await get<{ specs: SystemCronSpec[] }>("/scheduler/system-specs");
-  return res.specs ?? [];
-}
-
-/**
- * Force-trigger a scheduler job once, immediately. Does not affect the
- * recurring schedule or next_run. Backed by POST /scheduler/{slug}/run (PR 9).
- */
-export async function runSchedulerJob(
-  slug: string,
-): Promise<{ triggered: boolean; slug: string; at: string }> {
-  return post<{ triggered: boolean; slug: string; at: string }>(
-    `/scheduler/${encodeURIComponent(slug)}/run`,
-  );
-}
+// ── Scheduler / Routines ──
+// Moved to ./scheduler.ts; re-exported here for back-compat with existing
+// imports from "./api/client" or "../api/client".
+export type {
+  SchedulerJob,
+  PatchSchedulerJobBody,
+  PatchSchedulerJobResponse,
+  SystemCronSpec,
+  SchedulerRun,
+  SchedulerActivity,
+  SchedulerRevision,
+  CreateSchedulerJobBody,
+} from "./scheduler";
+export {
+  getScheduler,
+  patchSchedulerJob,
+  getSystemCronSpecs,
+  runSchedulerJob,
+  getSchedulerRuns,
+  getSchedulerActivity,
+  getSchedulerRevisions,
+  restoreSchedulerRevision,
+  createSchedulerJob,
+} from "./scheduler";
 
 // ── Skills ──
 

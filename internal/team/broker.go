@@ -107,6 +107,9 @@ type Broker struct {
 	decisions            []officeDecisionRecord
 	watchdogs            []watchdogAlert
 	scheduler            []schedulerJob
+	schedulerRuns        map[string][]schedulerRun      // per-slug fire history; ring buffer
+	schedulerActivity    map[string][]schedulerActivity // per-slug lifecycle log; ring buffer
+	schedulerRevisions   map[string][]schedulerRevision // per-slug edit snapshots; ring buffer
 	skills               []teamSkill
 	skillDescEmbeddings  map[string][]float32         // slug → description embedding vector; guarded by mu
 	sharedMemory         map[string]map[string]string // namespace → key → value
@@ -1064,6 +1067,12 @@ func (b *Broker) Reset() {
 	b.watchdogs = nil
 	b.policies = nil
 	b.scheduler = nil
+	// Clear scheduler history maps so a workspace reset can't surface
+	// stale runs / activity / revisions on a freshly recreated routine
+	// that happens to reuse a prior slug.
+	b.schedulerRuns = nil
+	b.schedulerActivity = nil
+	b.schedulerRevisions = nil
 	b.pendingInterview = nil
 	b.activity = make(map[string]agentActivitySnapshot)
 	b.memberPresence = make(map[string]memberPresenceRecord)

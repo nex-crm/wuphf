@@ -16,6 +16,8 @@ import {
   notebookEntryRoute,
   notebooksRoute,
   reviewsRoute,
+  routineDetailRoute,
+  routineNewRoute,
   skillDetailRoute,
   taskDecisionRoute,
   taskDetailRoute,
@@ -80,6 +82,8 @@ export type CurrentRoute =
   | { kind: "agent-subspace"; agentSlug: string; tab: AgentSubspaceTab }
   // Full-screen skill detail editor + viewer.
   | { kind: "skill-detail"; skillName: string }
+  | { kind: "routine-detail"; routineSlug: string }
+  | { kind: "routine-new" }
   | { kind: "unknown" };
 
 interface ParamsShape {
@@ -93,6 +97,7 @@ interface ParamsShape {
   articleId?: string;
   tab?: string;
   skillName?: string;
+  routineSlug?: string;
 }
 
 interface SearchShape {
@@ -122,7 +127,9 @@ type CurrentRouteId =
   | typeof issueNewRoute.id
   | typeof agentSubspaceRoute.id
   | typeof agentSubspaceTabRoute.id
-  | typeof skillDetailRoute.id;
+  | typeof skillDetailRoute.id
+  | typeof routineDetailRoute.id
+  | typeof routineNewRoute.id;
 
 const CURRENT_ROUTE_IDS = [
   channelRoute.id,
@@ -147,6 +154,8 @@ const CURRENT_ROUTE_IDS = [
   agentSubspaceRoute.id,
   agentSubspaceTabRoute.id,
   skillDetailRoute.id,
+  routineDetailRoute.id,
+  routineNewRoute.id,
 ] as const satisfies readonly CurrentRouteId[];
 
 const CURRENT_ROUTE_ID_SET = new Set<string>(CURRENT_ROUTE_IDS);
@@ -237,6 +246,11 @@ const ROUTE_DERIVERS = {
     kind: "skill-detail",
     skillName: params.skillName ?? "",
   }),
+  [routineDetailRoute.id]: (params) => ({
+    kind: "routine-detail",
+    routineSlug: params.routineSlug ?? "",
+  }),
+  [routineNewRoute.id]: () => ({ kind: "routine-new" }),
 } satisfies Record<CurrentRouteId, RouteDeriver>;
 
 /**
@@ -331,6 +345,9 @@ export function useCurrentApp(): string | null {
     case "issue-detail":
     case "issue-new":
       return "issues";
+    case "routine-detail":
+    case "routine-new":
+      return "routines";
     case "channel":
     case "dm":
     case "agent-subspace":

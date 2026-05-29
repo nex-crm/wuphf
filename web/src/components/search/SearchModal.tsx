@@ -540,8 +540,9 @@ function dispatchPaletteCommand(name: string, deps: CommandDeps) {
     case "/skills":
       navigateToApp("skills");
       return;
+    case "/routines":
     case "/calendar":
-      navigateToApp("calendar");
+      navigateToApp("routines");
       return;
     case "/tasks":
       navigateToApp("tasks");

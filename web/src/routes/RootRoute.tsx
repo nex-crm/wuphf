@@ -78,9 +78,19 @@ const ArtifactsApp = lazy(() =>
     default: m.ArtifactsApp,
   })),
 );
-const CalendarApp = lazy(() =>
-  import("../components/apps/CalendarApp").then((m) => ({
-    default: m.CalendarApp,
+const RoutinesApp = lazy(() =>
+  import("../components/apps/RoutinesApp").then((m) => ({
+    default: m.RoutinesApp,
+  })),
+);
+const RoutineDetailRoute = lazy(() =>
+  import("../components/apps/routines/RoutineDetailRoute").then((m) => ({
+    default: m.RoutineDetailRoute,
+  })),
+);
+const RoutineComposer = lazy(() =>
+  import("../components/apps/routines/RoutineComposer").then((m) => ({
+    default: m.RoutineComposer,
   })),
 );
 const ConsoleApp = lazy(() =>
@@ -335,7 +345,7 @@ const APP_PANELS = {
   requests: InboxRedirect,
   graph: GraphApp,
   policies: PoliciesApp,
-  calendar: CalendarApp,
+  routines: RoutinesApp,
   skills: SkillsApp,
   activity: ArtifactsApp,
   receipts: ReceiptsApp,
@@ -660,6 +670,18 @@ function MainContent() {
       );
     case "skill-detail":
       return <SkillDetailRoute skillName={route.skillName} />;
+    case "routine-detail":
+      return (
+        <div className="app-panel active" data-testid="app-page-routines">
+          <RoutineDetailRoute routineSlug={route.routineSlug} />
+        </div>
+      );
+    case "routine-new":
+      return (
+        <div className="app-panel active" data-testid="app-page-routines">
+          <RoutineComposer />
+        </div>
+      );
     case "unknown":
       // RoutedBody catches root-only matches via isUnmatchedRoute, but
       // useCurrentRoute can also return `unknown` for matched leaves that

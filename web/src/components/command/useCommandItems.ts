@@ -90,12 +90,12 @@ const STATIC_ACTIONS: Omit<CommandItem, "run">[] = [
     aliases: ["skills", "automation"],
   },
   {
-    id: "action:open-calendar",
+    id: "action:open-routines",
     group: "Actions",
-    icon: "📅",
-    label: "Open calendar",
-    desc: "View scheduled agent tasks and reminders",
-    aliases: ["calendar", "schedule"],
+    icon: "🔁",
+    label: "Open routines",
+    desc: "View scheduled routines and their owning agents",
+    aliases: ["routines", "calendar", "schedule"],
   },
   {
     id: "action:open-policies",
@@ -253,9 +253,9 @@ export function useCommandItems({
             onClose();
           };
           break;
-        case "action:open-calendar":
+        case "action:open-routines":
           run = () => {
-            navigateToApp("calendar");
+            navigateToApp("routines");
             onClose();
           };
           break;
