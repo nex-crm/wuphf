@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 // minimalLauncher builds a Launcher with a predictable two-member pack so
@@ -99,6 +100,75 @@ func TestHeadlessClaudeModel_CustomLeadSlug(t *testing.T) {
 		t.Run(tc.slug, func(t *testing.T) {
 			if got := l.headlessClaudeModel(tc.slug); got != tc.want {
 				t.Fatalf("slug=%q: want %q, got %q", tc.slug, tc.want, got)
+			}
+		})
+	}
+}
+
+// TestHeadlessClaudeModel_PerAgentBindingOverride covers the broker-driven
+// override path that ships with the AgentProfilePanel runtime picker. When
+// a member has ProviderBinding{Kind: "claude-code", Model: "<custom>"},
+// the next claude turn must dispatch against <custom>, not the hardcoded
+// opus/sonnet default. The kind guard also matters: a stale Model left
+// over from a brief codex sojourn must NOT be fed to claude on a
+// switch-back.
+//
+// Three cases:
+//
+//  1. positive: Kind=claude-code, Model=non-empty → returns the bound model.
+//  2. negative: Kind=codex with a non-empty Model → ignores the binding and
+//     falls back to the default (codex models are not claude-routable).
+//  3. negative: Kind=claude-code with an empty Model → falls back to the
+//     default. The picker writes empty when the user selects "Use runtime
+//     default" and the default must take effect.
+func TestHeadlessClaudeModel_PerAgentBindingOverride(t *testing.T) {
+	makeBoundLauncher := func(t *testing.T, slug string, binding provider.ProviderBinding) *Launcher {
+		t.Helper()
+		b := newTestBroker(t)
+		b.mu.Lock()
+		b.members = append(b.members, officeMember{
+			Slug:     slug,
+			Name:     slug,
+			Provider: binding,
+		})
+		b.memberIndex = nil
+		b.mu.Unlock()
+		l := minimalLauncher(false)
+		l.broker = b
+		return l
+	}
+
+	tests := []struct {
+		name    string
+		slug    string
+		binding provider.ProviderBinding
+		want    string
+	}{
+		{
+			name:    "claude_code_with_model_uses_binding",
+			slug:    "eng",
+			binding: provider.ProviderBinding{Kind: "claude-code", Model: "claude-opus-4-7"},
+			want:    "claude-opus-4-7",
+		},
+		{
+			name:    "non_claude_kind_falls_back_to_default",
+			slug:    "eng",
+			binding: provider.ProviderBinding{Kind: "codex", Model: "gpt-5.5"},
+			want:    "claude-sonnet-4-6",
+		},
+		{
+			name:    "claude_code_empty_model_falls_back_to_default",
+			slug:    "eng",
+			binding: provider.ProviderBinding{Kind: "claude-code", Model: ""},
+			want:    "claude-sonnet-4-6",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			l := makeBoundLauncher(t, tc.slug, tc.binding)
+			if got := l.headlessClaudeModel(tc.slug); got != tc.want {
+				t.Fatalf("headlessClaudeModel(%q) with binding %+v = %q, want %q",
+					tc.slug, tc.binding, got, tc.want)
 			}
 		})
 	}
