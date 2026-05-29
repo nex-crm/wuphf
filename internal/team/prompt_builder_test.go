@@ -298,13 +298,14 @@ func TestPromptBuilder_MarkdownMemoryPromptsNaturalHTMLArtifactsDuringWork(t *te
 	}
 }
 
-func TestPromptBuilder_VisualArtifactForcingRulePresentOnEverySurface(t *testing.T) {
-	// The notebook_visual_artifact_create tool was unused in practice because
-	// the old prompt softly suggested it. This test pins the MUST-trigger
-	// rule into every surface that markdown memory reaches: lead office,
-	// specialist office, and 1:1. If any of these regresses to "may",
-	// agents stop producing artifacts and the chat/wiki visual surface goes
-	// empty again.
+func TestPromptBuilder_VisualArtifactSelectivityRulePresentOnEverySurface(t *testing.T) {
+	// The OLD version of this prompt block FORCED an HTML article for every
+	// research/explain/plan request. The 2026-05-29 demo showed that was a
+	// bug: a one-line coffee-pressure question got a full HTML article plus
+	// an unsolicited team_skill_create. The block is now a selectivity
+	// decision tree — agents must judge whether HTML is warranted before
+	// reaching for the tool. This test pins the new shape across every
+	// surface that markdown memory reaches.
 	mkBuilder := func(oneOnOne bool) *promptBuilder {
 		return &promptBuilder{
 			isOneOnOne:  func() bool { return oneOnOne },
@@ -334,35 +335,52 @@ func TestPromptBuilder_VisualArtifactForcingRulePresentOnEverySurface(t *testing
 		{name: "lead/one-on-one", oneOnOne: true, slug: "ceo"},
 	}
 	wants := []string{
+		// Selectivity framing — header explicitly says "selectivity, not reflex".
 		"HTML ARTICLE RULE",
-		// HTML article is the primary format; markdown stays for skills/notes.
-		"the article is a single self-contained HTML document",
-		"Skill.md files, short working notes",
-		"visual-artifact:ra_...",
-		"wiki article, draft, page",
-		"plan, spec, RFC",
-		// Topic/concept triggers — without these, "research X" or
-		// "explain how X works" reads as conversational and the agent
-		// falls back to plain markdown.
-		"research, explain, teach, summarize, break down, walk through, or unpack",
-		"how does X actually work",
-		"comparison, decision matrix",
-		"diagram, flow, sequence",
-		"more than ~200 words",
-		"technical-manual style",
-		// Atomic-turn rule — gist text first, then article, then link card.
-		// All three tool calls in ONE assistant response, no narration
-		// between them. The agent split this across 3 separate responses
-		// in the live demo and ended its turn after step 1 each time.
-		"ATOMIC-TURN RULE",
+		"selectivity, not reflex",
+		"It is NOT the default answer format",
+		"answer in plain text in the channel and STOP",
+		// Positive trigger: all three conditions must be true.
+		"USE an HTML article ONLY when ALL THREE",
+		"comparing two-or-more things side by side",
+		"walking a multi-step process or timeline",
+		"mapping a 2D variable space",
+		"multi-section explainer with at least THREE distinct sections",
+		"Plain prose in chat would lose meaningful information density",
+		// Negative trigger: the decision tree's "DO NOT" branch.
+		"DO NOT use an HTML article when",
+		"conversational, a status update, a short factual reply",
+		"one-liner question expecting a one-liner answer",
+		"mostly a list, a code snippet, a small table",
+		"urge to \"codify\" or \"document\"",
+		"Do not announce that you decided against an artifact",
+		// When HTML IS warranted: it must be a real artifact with real figures.
+		"WHEN HTML IS WARRANTED",
+		"pure-text \"article\" with no figures is NOT an artifact",
+		"genuine SVG figures",
+		"#1342FF",
+		"FIG_NNN labels",
+		"monospace captions",
+		// Atomic-turn rule still applies WHEN the rule fires.
+		"ATOMIC-TURN RULE (only when HTML IS warranted)",
 		"SAME assistant response",
-		"Do NOT narrate the process",
+		"Do NOT narrate the process between steps",
 		"notebook_visual_artifact_create",
-		"clickable card linking to the full-screen viewer",
-		// Pin the explicit anti-patterns so the rule keeps protecting
-		// against them if someone later rewords the block.
-		"Step 1 — quick gist first.",
-		"Step 2 — full HTML article.",
+		"visual-artifact:ra_...",
+		"full breakdown below.",
+		// Broadcast budget — at most 2 for artifact turns, at most 1 otherwise.
+		"BROADCAST BUDGET PER TURN",
+		"Artifact turns: AT MOST two chat messages",
+		"Non-artifact turns: AT MOST one chat message",
+		"No plan preamble",
+		// Unsolicited-tools ban — the hard ban on skill/task/wiki creation.
+		"DO NOT CALL these tools without an explicit human request",
+		"team_skill_create",
+		"make this a skill",
+		"team_task create / complete",
+		"team_wiki_write",
+		"save to wiki",
+		"self-codify the pattern",
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -373,6 +391,83 @@ func TestPromptBuilder_VisualArtifactForcingRulePresentOnEverySurface(t *testing
 				}
 			}
 		})
+	}
+}
+
+func TestPromptBuilder_ToolSearchAcceptanceLanguagePreserved(t *testing.T) {
+	// Existing behavior we don't want to lose: when claude-code defers tool
+	// schemas, the agent should make ONE ToolSearch call at the start of the
+	// turn (silently, no narration) and proceed. The schema list it loads is
+	// now pared back — it must NOT preload the banned tools (skill_create,
+	// task, wiki_write) unless the human explicitly asked.
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "WUPHF Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "pm", Name: "Product Manager"},
+			}
+		},
+		policies: func() []officePolicy { return nil },
+		nameFor:  func(slug string) string { return slug },
+	}
+	for _, slug := range []string{"ceo", "pm"} {
+		got := pb.Build(slug)
+		for _, want := range []string{
+			"claude-code defers their schemas behind a built-in ToolSearch tool",
+			"do it ONCE at the very start of your turn",
+			"single ToolSearch call",
+			"Load ONLY the schemas you actually plan to use",
+			"Do NOT preload team_skill_create, team_task, or team_wiki_write",
+			"Never call ToolSearch a second time in the same turn",
+			"Do NOT narrate the tool-loading process",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%s prompt missing ToolSearch language %q", slug, want)
+			}
+		}
+	}
+}
+
+func TestPromptBuilder_UnsolicitedToolBanIsExplicit(t *testing.T) {
+	// Live demo failure 2026-05-29: after answering a coffee question, the
+	// agent called team_skill_create to codify "research-html-article" and
+	// team_task to mark a task complete. Neither was requested. Pin an
+	// explicit ban so these tools are not called for self-codification.
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "WUPHF Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "pm", Name: "Product Manager"},
+			}
+		},
+		policies:       func() []officePolicy { return nil },
+		nameFor:        func(slug string) string { return slug },
+		markdownMemory: true,
+		nexDisabled:    true,
+	}
+	for _, slug := range []string{"ceo", "pm"} {
+		got := pb.Build(slug)
+		// Ban must apply to all three tool families.
+		for _, want := range []string{
+			"team_skill_create — ONLY when the human literally says",
+			"Answering a question well is NOT permission to codify",
+			"team_task create / complete — ONLY when the human assigned a task",
+			"Do not invent a task to mark complete after a chat answer",
+			"team_wiki_write — ONLY when the human says",
+			"self-codify the pattern",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%s prompt missing unsolicited-tool ban %q", slug, want)
+			}
+		}
 	}
 }
 
