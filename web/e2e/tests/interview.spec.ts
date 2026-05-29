@@ -36,7 +36,7 @@ test.describe("wuphf web human interview", () => {
     test.setTimeout(60_000);
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
     // Seed a blocking request via the same endpoint the broker uses to
@@ -80,21 +80,13 @@ test.describe("wuphf web human interview", () => {
     await expect(bar).toContainText(`@${agentSlug}`);
     await expect(bar).toContainText(question);
 
-    // While blocking, the broker rejects new messages with 409 → composer
-    // surfaces "Answer or dismiss the request above..." (Composer.tsx:336). Send
-    // through the UI and assert the toast — this is the contract the TUI
-    // exercises under session-full-e2e.sh's Esc/blocking path.
+    // v3 behavior: the broker still 409s a raw POST while blocked, but the
+    // composer no longer surfaces that as an error — typing in chat is treated
+    // as "I'll answer in chat instead" and CANCELS the pending request before
+    // sending (Composer.tsx — blockingPending → cancelRequest). So the
+    // explicit answer path is the one to assert: click the recommended option
+    // in the bar.
     const composer = page.locator(".composer-input");
-    await composer.fill("attempt during block");
-    await page.locator(".composer-send").click();
-    await expect(
-      page
-        .locator(".animate-fade")
-        .filter({ hasText: /answer or dismiss the request above/i })
-        .first(),
-    ).toBeVisible({ timeout: 5_000 });
-
-    // Answer the request by clicking the recommended option.
     await bar.getByRole("button", { name: /Yes — ship it/ }).click();
 
     // The bar dismisses once the answer resolves and useRequests invalidates.

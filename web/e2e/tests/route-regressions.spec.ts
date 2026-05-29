@@ -101,50 +101,46 @@ test.describe("PR #634 review pins", () => {
     );
   });
 
-  test("AgentPanel hides the per-channel toggle when no conversation channel is active", async ({
+  test("AgentPanel's per-channel toggle never renders off a conversation route", async ({
     page,
   }) => {
-    // Repro: AgentPanel.AgentPanelView used `useChannelSlug() ?? "general"`
-    // and rendered an "Enabled in #general" toggle that POSTed to
-    // /channel-members for #general — even when the user opened the
-    // panel from /apps/console while last-viewing #launch. The fix
-    // narrows currentChannel to URL-only (no fallback) and gates the
-    // toggle UI on a real conversation route.
+    // Repro (#634): AgentPanel.AgentPanelView used `useChannelSlug() ??
+    // "general"` and rendered an "Enabled in #general" toggle that POSTed to
+    // /channel-members for #general — even when opened off-conversation. v3
+    // reshaped the surface: the panel is opened from the channel participant
+    // list (ChannelParticipants → onOpenAgent), the toggle is gated on a
+    // URL-derived channel (no fallback), and leaving the conversation route
+    // closes the panel outright. Together those make a stale-channel toggle
+    // structurally unreachable — which is exactly what this pins.
     //
-    // The broker's lead agent (slug "ceo") has the toggle hidden by
-    // design (canRemove/canToggle are false for built-in members), so
-    // pick the FIRST non-CEO agent for this test. The seeded roster
-    // always has one (founder/operator/builder/reviewer in the default
-    // manifest).
+    // The lead agent (slug "ceo") hides the toggle by design (built-ins are
+    // not per-channel toggleable), so open a NON-lead participant. The seeded
+    // roster always has one (planner/executor/reviewer in the default manifest).
     const getErrors = collectReactErrors(page);
-    await gotoShell(page, "/");
+    await gotoShell(page, "/#/channels/general");
 
-    const nonLeadAgent = page
-      .locator('button[data-agent-slug]:not([data-agent-slug="ceo"])')
+    const nonLeadParticipant = page
+      .locator(".channel-participant-main")
+      .filter({ hasNotText: /ceo/i })
       .first();
-    await expect(nonLeadAgent).toBeVisible({ timeout: 10_000 });
+    await expect(nonLeadParticipant).toBeVisible({ timeout: 10_000 });
+    await nonLeadParticipant.click();
 
-    // Sanity: on a conversation route, the toggle is visible.
-    await nonLeadAgent.click();
-    await expect(page.locator(".agent-panel")).toBeVisible();
+    // On a conversation route the toggle renders, scoped to the URL channel.
+    await expect(page.locator(".agent-panel")).toBeVisible({ timeout: 10_000 });
     await expect(page.locator(".agent-toggle")).toBeVisible();
-    // Close the panel before navigating so the route-change effect
-    // doesn't auto-close inside the assertion window.
-    await page.locator(".agent-panel-close").click();
-    await expect(page.locator(".agent-panel")).toHaveCount(0);
+    await expect(
+      page.locator(".agent-panel-stat-label", { hasText: /Enabled in/ }),
+    ).toContainText("#general");
 
-    // Navigate to an off-conversation surface, then re-open the panel.
+    // Leaving the conversation surface closes the panel, so the per-channel
+    // toggle can never render against a non-conversation route.
     await page.goto("/#/apps/console");
     await expect(page.getByTestId("app-page-console")).toBeVisible({
       timeout: 10_000,
     });
-    await nonLeadAgent.click();
-    await expect(page.locator(".agent-panel")).toBeVisible();
-    // The toggle MUST be gone — both the slider and its label.
+    await expect(page.locator(".agent-panel")).toHaveCount(0);
     await expect(page.locator(".agent-toggle")).toHaveCount(0);
-    await expect(
-      page.locator(".agent-panel-stat-label", { hasText: /Enabled in/ }),
-    ).toHaveCount(0);
 
     await expectNoReactErrors(page, getErrors, "agent panel off-conversation");
   });

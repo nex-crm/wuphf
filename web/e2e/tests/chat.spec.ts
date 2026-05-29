@@ -36,7 +36,7 @@ test.describe("wuphf web chat round-trip", () => {
     // on an agent replying — that is covered by the inbound-render test below.
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
     // Unique payload so a stale session message can never satisfy the assertion.
@@ -79,7 +79,7 @@ test.describe("wuphf web chat round-trip", () => {
     // fails — even when no real LLM is wired up.
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
     // Pick an agent that the seeded broker is guaranteed to know about. Read
