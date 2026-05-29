@@ -23,7 +23,6 @@ import { Composer } from "../components/messages/Composer";
 import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
-import { TypingIndicator } from "../components/messages/TypingIndicator";
 import { OnboardingChat } from "../components/onboarding/OnboardingChat";
 import { PrePickScreen } from "../components/onboarding/PrePickScreen";
 import { ConfirmHost } from "../components/ui/ConfirmDialog";
@@ -357,7 +356,6 @@ function ConversationView() {
     <div className="conversation-shell">
       <div className="conversation-chat">
         <MessageFeed />
-        <TypingIndicator />
         <InterviewBar />
         <Composer />
       </div>

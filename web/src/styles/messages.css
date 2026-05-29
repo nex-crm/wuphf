@@ -581,31 +581,157 @@
   margin-bottom: 4px;
 }
 
-/* ─── Typing indicator ─── */
-.typing-indicator {
+/* ─── Typing indicator ───────────────────────────────────────────
+   Renders as an incoming message bubble pinned to the foot of the
+   feed — the exact spot the next message lands. Reuses the .message
+   grid (avatar + content) so it lines up pixel-for-pixel with real
+   bubbles and is swapped in place when the reply arrives.
+   ───────────────────────────────────────────────────────────── */
+.typing-message {
+  /* Slightly longer settle than a real message so the placeholder
+     eases in rather than snapping. */
+  animation: fadeIn 0.4s ease-out;
+}
+.typing-message .message-content {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 20px;
-  font-size: var(--text-sm);
+  flex-direction: column;
+  gap: 4px;
+}
+.typing-verb {
+  font-size: var(--text-xs, 11px);
+  font-style: italic;
   color: var(--text-tertiary);
+  letter-spacing: 0.01em;
 }
-.typing-dots {
-  display: flex;
-  gap: 3px;
+
+/* Stacked avatars when more than one agent is composing. */
+.typing-message-avatar {
+  background: transparent;
+  padding: 0;
+  position: relative;
+  overflow: visible;
 }
-.typing-dot {
-  width: 4px;
-  height: 4px;
+.typing-avatar-stack-item {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  padding: 6px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--bg-warm);
+}
+.typing-avatar-stack-item:not(:first-child) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateX(calc(9px * var(--stack-offset, 0)));
+  box-shadow: -2px 0 0 var(--bg-card);
+}
+.typing-avatar-stack-item:nth-child(2) {
+  --stack-offset: 1;
+}
+.typing-avatar-stack-item:nth-child(3) {
+  --stack-offset: 2;
+}
+.typing-avatar-stack-item .pixel-avatar {
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── ThinkingLoader — Claude-style "response materializing" loader ──
+   Theme-adaptive sheen and dot tint via color-mix so it reads on
+   light, dark, and noir without per-theme overrides. The pill is the
+   placeholder for the incoming bubble; a sweep of light travels across
+   it while the dots ride a soft wave. Disabled under reduced motion.
+   ───────────────────────────────────────────────────────────── */
+.thinking-loader {
+  --tl-dot: color-mix(in srgb, var(--text-secondary) 70%, var(--accent) 30%);
+  --tl-sheen: color-mix(in srgb, var(--text) 9%, transparent);
+}
+.thinking-loader-inline {
+  display: inline-flex;
+}
+.thinking-bubble {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Incoming-bubble silhouette: the top-left corner is pinched so it
+     reads as anchored to the avatar above, like a real reply bubble. */
+  padding: 11px 15px;
+  border-radius: var(--radius-sm) var(--radius-lg) var(--radius-lg)
+    var(--radius-lg);
+  background: var(--bg-warm);
+  overflow: hidden;
+}
+.thinking-bubble::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    var(--tl-sheen) 50%,
+    transparent 75%
+  );
+  transform: translateX(-100%);
+  animation: thinking-sheen 1.8s ease-in-out infinite;
+}
+.thinking-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--text-tertiary);
-  animation: typing-bounce 1.4s ease-in-out infinite;
+  background: var(--tl-dot);
+  animation: thinking-wave 1.3s ease-in-out infinite;
 }
-.typing-dot:nth-child(2) {
+.thinking-dot:nth-child(2) {
   animation-delay: 0.16s;
 }
-.typing-dot:nth-child(3) {
+.thinking-dot:nth-child(3) {
   animation-delay: 0.32s;
+}
+
+/* Block variant — whole-surface loading (feed first fetch). A single
+   line of shimmer text centered in the empty space. */
+.thinking-loader-block {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+.thinking-shimmer-text {
+  font-size: var(--text-sm, 13px);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  background: linear-gradient(
+    100deg,
+    var(--text-tertiary) 30%,
+    var(--text) 50%,
+    var(--text-tertiary) 70%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinking-text-shimmer 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-bubble::after,
+  .thinking-dot,
+  .thinking-shimmer-text {
+    animation: none;
+  }
+  .thinking-shimmer-text {
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--text-tertiary);
+  }
+  .thinking-dot {
+    /* Hold dots at a legible mid-state instead of frozen mid-wave. */
+    opacity: 0.6;
+  }
 }
 
 /* ─── Interview bar (inline above composer, mirrors TUI) ─── */
@@ -1773,6 +1899,11 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
 }
 
 /* ─── Feed loading / empty states ─── */
+.messages.messages-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .messages-loading-label {
   display: flex;
   flex: 1;

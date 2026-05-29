@@ -5,7 +5,9 @@ import { useMessages } from "../../hooks/useMessages";
 import { formatDateLabel } from "../../lib/format";
 import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
+import { ThinkingLoader } from "../ui/ThinkingLoader";
 import { MessageBubble } from "./MessageBubble";
+import { TypingIndicator } from "./TypingIndicator";
 
 function dateDayKey(ts: string): string {
   const d = new Date(ts);
@@ -70,8 +72,8 @@ export function MessageFeed() {
 
   if (isLoading && messages.length === 0) {
     return (
-      <div className="messages">
-        <span className="messages-loading-label">Loading messages...</span>
+      <div className="messages messages-loading">
+        <ThinkingLoader variant="block" label="Loading messages…" />
       </div>
     );
   }
@@ -99,6 +101,7 @@ export function MessageFeed() {
             Michael would be proud. Probably.
           </span>
         </div>
+        <TypingIndicator />
       </div>
     );
   }
@@ -253,6 +256,7 @@ export function MessageFeed() {
           </div>
         );
       })}
+      <TypingIndicator />
     </div>
   );
 }
