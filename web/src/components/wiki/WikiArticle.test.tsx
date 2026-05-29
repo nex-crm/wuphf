@@ -33,6 +33,15 @@ beforeEach(() => {
   // Default history stub — individual tests override as needed.
   vi.spyOn(api, "fetchHistory").mockResolvedValue({ commits: [] });
   vi.spyOn(richApi, "fetchWikiVisualArtifact").mockResolvedValue(null);
+  // Default the by-id artifact fetch to a 404-style rejection so articles
+  // without inline `visual-artifact:<id>` markers never accidentally embed
+  // one. Tests that exercise inline markers override this with a resolved
+  // detail. restoreAllMocks in this same hook resets the spy each test, so
+  // the per-test spyOn re-installs cleanly (this mirrors the proven pattern
+  // in NotebookEntry.test.tsx).
+  vi.spyOn(richApi, "fetchRichArtifact").mockRejectedValue(
+    new Error("404 not found"),
+  );
 });
 
 describe("<WikiArticle content>", () => {
@@ -158,7 +167,171 @@ describe("<WikiArticle content>", () => {
     // No iframe anywhere — strict inline embed.
     expect(document.querySelector("iframe")).toBeNull();
   });
+});
 
+describe("<WikiArticle inline visual-artifact markers>", () => {
+  it("strips an inline visual-artifact marker and embeds the referenced artifact", async () => {
+    // Repro of the live bug: the agent hand-wrote a standalone
+    // `visual-artifact:<id>` marker into the article body via team_wiki_write
+    // instead of promoting. The marker must never render as raw text; the
+    // referenced artifact must be embedded inline.
+    const inlineId = "ra_19dcb5cac5a2bd3a";
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "team/drafts/ceo-coffee-extraction-control-chart.md",
+      title: "Coffee Extraction Control Chart",
+      content: `# Coffee Extraction\n\nBody copy.\n\nvisual-artifact:${inlineId}\n\nMore copy.`,
+      last_edited_by: "ceo",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["ceo"],
+      backlinks: [],
+      word_count: 5,
+      categories: [],
+    });
+    // Override the beforeEach 404 default: this id resolves to a draft
+    // artifact referenced only by the hand-written marker.
+    const fetchByIdSpy = vi
+      .spyOn(richApi, "fetchRichArtifact")
+      .mockResolvedValue({
+        artifact: {
+          id: inlineId,
+          kind: "wiki_visual",
+          title: "Coffee Extraction Control Chart",
+          summary: "",
+          trustLevel: "draft",
+          representation: "html",
+          htmlPath: `wiki/visual-artifacts/${inlineId}.html`,
+          createdBy: "ceo",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          contentHash: "hash",
+          sanitizerVersion: "sandbox-v1",
+        },
+        html: "<svg aria-label='inline-control-chart'></svg>",
+      });
+
+    render(
+      <WikiArticle
+        path="team/drafts/ceo-coffee-extraction-control-chart.md"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    // The artifact is fetched by id and embedded inline (scoped to this
+    // render's body to avoid sibling-test shadow-DOM leakage).
+    const body = await screen.findByTestId("wk-article-body");
+    const embed = await screen.findByTestId("rich-artifact-embed");
+    expect(body.contains(embed)).toBe(true);
+    expect(fetchByIdSpy).toHaveBeenCalledWith(inlineId);
+
+    // The raw marker must never render as literal text in the body.
+    expect(body.textContent ?? "").not.toContain("visual-artifact:");
+    expect(body.textContent ?? "").not.toContain(inlineId);
+    // Surrounding prose is preserved.
+    expect(body.textContent ?? "").toContain("Body copy.");
+    expect(body.textContent ?? "").toContain("More copy.");
+  });
+
+  it("does not double-embed when the promoted artifact is also referenced inline", async () => {
+    // Distinct from the strip test's id so a leaked shadow-DOM node from a
+    // sibling test cannot masquerade as this render's embed.
+    const sharedId = "ra_5ed0000012345abc";
+    const detail: richApi.RichArtifactDetail = {
+      artifact: {
+        id: sharedId,
+        kind: "wiki_visual",
+        title: "Shared Chart",
+        summary: "",
+        trustLevel: "promoted",
+        representation: "html",
+        htmlPath: `wiki/visual-artifacts/${sharedId}.html`,
+        promotedWikiPath: "team/reference/coffee.md",
+        createdBy: "ceo",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        contentHash: "hash",
+        sanitizerVersion: "sandbox-v1",
+      },
+      html: "<svg aria-label='shared-chart'></svg>",
+    };
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "team/reference/coffee.md",
+      title: "Coffee",
+      content: `# Coffee\n\nBody copy.\n\nvisual-artifact:${sharedId}\n`,
+      last_edited_by: "ceo",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["ceo"],
+      backlinks: [],
+      word_count: 5,
+      categories: [],
+    });
+    // The shared id resolves through BOTH the promoted-path fetch
+    // (fetchWikiVisualArtifact) and the inline-marker fetch
+    // (fetchRichArtifact). The dedupe must collapse them to a single embed.
+    vi.spyOn(richApi, "fetchWikiVisualArtifact").mockResolvedValue(detail);
+    vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue(detail);
+
+    render(
+      <WikiArticle
+        path="team/reference/coffee.md"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const body = await screen.findByTestId("wk-article-body");
+    // Wait for the inline embed to mount, then assert exactly one embed lives
+    // inside this render's body. Scoping to body (rather than screen) keeps
+    // the count honest even if a sibling test leaked a custom-element node;
+    // the distinct id above means no leaked node could match anyway.
+    const embed = await screen.findByTestId("rich-artifact-embed");
+    expect(body.contains(embed)).toBe(true);
+    const embedsInBody = Array.from(
+      body.querySelectorAll('[data-testid="rich-artifact-embed"]'),
+    );
+    expect(embedsInBody).toHaveLength(1);
+  });
+
+  it("skips an inline marker whose artifact 404s without leaking raw text", async () => {
+    const missingId = "ra_00000000deadbeef";
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "team/reference/coffee.md",
+      title: "Coffee",
+      content: `# Coffee\n\nBefore.\n\nvisual-artifact:${missingId}\n\nAfter.`,
+      last_edited_by: "ceo",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["ceo"],
+      backlinks: [],
+      word_count: 5,
+      categories: [],
+    });
+    // beforeEach already defaults fetchRichArtifact to a 404 rejection; this
+    // test relies on that default, so no extra spy is needed.
+
+    render(
+      <WikiArticle
+        path="team/reference/coffee.md"
+        catalog={[]}
+        onNavigate={() => {}}
+      />,
+    );
+
+    const body = await screen.findByTestId("wk-article-body");
+    // No embed, but also no leaked marker text — the stripped line keeps the
+    // body clean and the failed fetch degrades to nothing visible.
+    await waitFor(() => {
+      expect(body.textContent ?? "").toContain("Before.");
+    });
+    expect(body.textContent ?? "").not.toContain("visual-artifact:");
+    expect(body.textContent ?? "").not.toContain(missingId);
+    expect(screen.queryByTestId("rich-artifact-embed")).toBeNull();
+  });
+});
+
+describe("<WikiArticle content (cont.)>", () => {
   it("keeps the selected tab during same-path refreshes without a visual artifact", async () => {
     vi.spyOn(api, "fetchArticle").mockResolvedValue(STUB_ARTICLE);
 

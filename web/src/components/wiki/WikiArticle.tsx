@@ -6,6 +6,7 @@ import type { PluggableList } from "unified";
 import type { EntityKind } from "../../api/entity";
 import { detectPlaybook } from "../../api/playbook";
 import {
+  fetchRichArtifact,
   fetchWikiVisualArtifact,
   type RichArtifactDetail,
 } from "../../api/richArtifacts";
@@ -23,6 +24,10 @@ import {
 } from "../../api/wiki";
 import { formatAgentName } from "../../lib/agentName";
 import { keyedByOccurrence } from "../../lib/reactKeys";
+import {
+  extractRichArtifactIds,
+  stripStandaloneRichArtifactReferenceLines,
+} from "../../lib/richArtifactReferences";
 import {
   buildMarkdownComponents,
   buildRehypePlugins,
@@ -272,6 +277,52 @@ function useArticleFetch(
   };
 }
 
+/**
+ * Loads every rich artifact referenced inline in the article body via a
+ * standalone `visual-artifact:<id>` marker line. The agent sometimes
+ * hand-writes the marker into the markdown (via team_wiki_write) instead
+ * of going through the promote tool, so the marker is the only signal that
+ * the artifact belongs on the page. We fetch each referenced artifact by
+ * id and embed it in document order. A 404 (or any fetch failure) for a
+ * given id is swallowed — the stripped marker already keeps the raw text
+ * out of the rendered body, so a missing artifact degrades to nothing
+ * visible rather than literal `visual-artifact:` text.
+ */
+function useInlineArtifacts(content: string | null): RichArtifactDetail[] {
+  // Join into a stable string so the effect's dependency is value-equal
+  // across renders. extractRichArtifactIds returns a fresh array each call,
+  // which would otherwise re-fire the effect on every render. Rich-artifact
+  // ids cannot contain commas, so the join round-trips losslessly.
+  const idsKey = useMemo(
+    () => (content ? extractRichArtifactIds(content).join(",") : ""),
+    [content],
+  );
+  const [details, setDetails] = useState<RichArtifactDetail[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const ids = idsKey ? idsKey.split(",") : [];
+    if (ids.length === 0) {
+      setDetails([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void Promise.all(
+      ids.map((id) =>
+        fetchRichArtifact(id).catch((): RichArtifactDetail | null => null),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      // Preserve document order; drop ids that failed to resolve.
+      setDetails(results.filter((d): d is RichArtifactDetail => d !== null));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [idsKey]);
+  return details;
+}
+
 export default function WikiArticle({
   path,
   catalog,
@@ -298,6 +349,10 @@ export default function WikiArticle({
     useState<RichArtifactDetail | null>(null);
   const visualPathRef = useRef<string | null>(null);
   const visualAutoOpenedPathRef = useRef<string | null>(null);
+  // Artifacts referenced inline in the article body via standalone
+  // `visual-artifact:<id>` marker lines. These are fetched by id and
+  // embedded in document order, mirroring the notebook entry surface.
+  const inlineArtifacts = useInlineArtifacts(article?.content ?? null);
 
   // Fetch the human registry once per mount. The list is small (a handful
   // of team members) and changes rarely, so we skip refetching on every
@@ -502,6 +557,7 @@ export default function WikiArticle({
           rehypePlugins={rehypePlugins}
           markdownComponents={markdownComponents}
           visualArtifact={visualArtifact}
+          inlineArtifacts={inlineArtifacts}
           onEditorSaved={handleEditorSaved}
           onEditorCancel={handleEditorCancel}
         />
@@ -675,6 +731,7 @@ function ArticleTabPanels({
   rehypePlugins,
   markdownComponents,
   visualArtifact,
+  inlineArtifacts,
   onEditorSaved,
   onEditorCancel,
 }: {
@@ -685,28 +742,58 @@ function ArticleTabPanels({
   rehypePlugins: PluggableList;
   markdownComponents: MarkdownComponents;
   visualArtifact: RichArtifactDetail | null;
+  inlineArtifacts: RichArtifactDetail[];
   onEditorSaved: (newSha: string) => void;
   onEditorCancel: () => void;
 }) {
   switch (tab) {
-    case "article":
+    case "article": {
+      // The body may contain standalone `visual-artifact:<id>` marker lines
+      // the agent hand-wrote. Strip them so they never render as raw text,
+      // then embed each referenced artifact inline. Dedupe the promoted
+      // artifact against the inline set so it is not embedded twice when the
+      // body also references its id.
+      const renderedContent = stripStandaloneRichArtifactReferenceLines(
+        article.content,
+      );
+      // Dedupe the promoted artifact against the body's inline markers.
+      // We key off the ids referenced in article.content (known
+      // synchronously) rather than the resolved inlineArtifacts list. The
+      // two fetches (promoted-path vs by-id) settle independently, so
+      // comparing against the resolved list would let the promoted embed
+      // flash in before the inline fetch lands and produce a transient
+      // double-render. The body markers are stable from first paint, so the
+      // promoted embed is suppressed up-front whenever the body also
+      // references it.
+      const referencedIds = new Set(extractRichArtifactIds(article.content));
+      const showPromoted =
+        visualArtifact !== null &&
+        !referencedIds.has(visualArtifact.artifact.id);
       return (
         <div className="wk-article-body" data-testid="wk-article-body">
-          {visualArtifact ? (
+          {showPromoted && visualArtifact ? (
             <RichArtifactEmbed
               title={visualArtifact.artifact.title}
               html={visualArtifact.html}
             />
           ) : null}
+          {inlineArtifacts.map((detail) => (
+            <RichArtifactEmbed
+              key={detail.artifact.id}
+              title={detail.artifact.title}
+              html={detail.html}
+            />
+          ))}
           <ReactMarkdown
             remarkPlugins={remarkPlugins}
             rehypePlugins={rehypePlugins}
             components={markdownComponents}
           >
-            {article.content}
+            {renderedContent}
           </ReactMarkdown>
         </div>
       );
+    }
     case "edit":
       return (
         <WikiEditor
