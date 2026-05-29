@@ -47,7 +47,34 @@ var embeddedSelfHealSkillCreator string
 // LLM to synthesize a skill from a SkillCandidate. Defined where it is
 // consumed per the "accept interfaces, return structs" idiom.
 type stageBLLMProvider interface {
-	SynthesizeSkill(ctx context.Context, candidate SkillCandidate, wikiContext string) (SkillFrontmatter, string, error)
+	SynthesizeSkill(ctx context.Context, candidate SkillCandidate, wikiContext string) (StageBSynthDecision, error)
+}
+
+// StageBSynthDecision is the full output of one Stage B synthesis call. It
+// carries the synthesized frontmatter + body plus optional enhance / rename
+// hints the LLM emits when the candidate maps onto an existing skill.
+//
+// The "prefer enhance over new" path runs whenever Enhance is non-empty:
+// the synthesizer updates the existing skill rather than minting a fresh
+// one. When RenameTo is also set, the existing skill is also renamed to
+// the broader slug (the skill the agents have been writing about has
+// outgrown its original name).
+type StageBSynthDecision struct {
+	// Frontmatter and Body are the Anthropic-shaped skill output. For an
+	// Enhance response, Body is a BOUNDED diff containing only the new
+	// material — not a full rewrite — so the existing skill's invariants
+	// survive merging.
+	Frontmatter SkillFrontmatter
+	Body        string
+
+	// Enhance is the slug of an existing skill the candidate should
+	// enhance rather than create anew. Empty for new-skill responses.
+	Enhance string
+
+	// RenameTo is the new (broader) slug an existing skill should be
+	// renamed to as part of the enhance. Only meaningful when Enhance is
+	// also set. Empty otherwise.
+	RenameTo string
 }
 
 // defaultStageBLLMProvider implements stageBLLMProvider using a live HTTP
@@ -101,8 +128,46 @@ const (
 	// malicious model from emitting megabytes that propagate through the
 	// guard scan and the wiki write. 32KiB is comfortably above legitimate
 	// skill bodies (the cohort today averages ~2KB) while small enough that
-	// downstream string ops stay cheap.
+	// downstream string ops stay cheap. The compactness gate (~6KB) further
+	// nudges the LLM toward high-signal output for new skills; the absolute
+	// 32KiB ceiling remains the hard backstop against runaway responses.
 	stageBSynthMaxBodyLen = 32 * 1024
+
+	// stageBSynthCompactnessSoftLimit is the SoftLimit warned about in the
+	// prompt — bodies over ~6KB are accepted but logged so the team can see
+	// when the LLM is bloating skills. SkillOpt's median final skill is
+	// ~920 tokens (~5-6KB), and length-as-effort is a known failure mode.
+	stageBSynthCompactnessSoftLimit = 6 * 1024
+
+	// stageBSynthCompactnessHardLimit is the rejection cap on new-skill
+	// body length, set at 2× the soft limit. Above this the LLM has bloated
+	// well past anything that's still a "skill" in the SkillOpt sense, and
+	// the team accrues unread procedure rather than callable surface. The
+	// 32KiB absolute backstop above remains the runaway-response defence;
+	// this is the bloat-prevention gate just above the median.
+	stageBSynthCompactnessHardLimit = 12 * 1024
+
+	// stageBSynthEnhanceMaxEdits bounds the number of enumerated steps an
+	// enhance / rename body may carry. SkillOpt's textual learning rate
+	// defaults to 4 edits/step (with cosine decay to a floor of 2); we
+	// leave headroom at 8 so legitimate compound enhancements still land
+	// but a "rewrite the whole body" disguised as enhance gets rejected.
+	stageBSynthEnhanceMaxEdits = 8
+
+	// stageBSynthNewSkillMinBodyLen is the depth floor for NEW skill bodies.
+	// Below this, the skill is almost always shallow — a few lines that
+	// could have lived in prose. Enhance bodies are exempt because they
+	// are bounded diffs that ride on top of the existing body. The gbrain
+	// "skillify" bar is roughly 20 lines of logic; ~400 bytes is a tight
+	// proxy that catches the worst noise without false-rejecting legitimate
+	// short skills.
+	stageBSynthNewSkillMinBodyLen = 400
+
+	// stageBSynthNewSkillMinSteps is the minimum number of enumerated
+	// steps a new skill body must carry. Combined with the body-length
+	// floor this enforces the "is there real procedure here?" gate the
+	// prompt asks the LLM to apply.
+	stageBSynthNewSkillMinSteps = 3
 
 	stageBSynthDefaultTimeout = 30 * time.Second
 )
@@ -119,16 +184,17 @@ func NewDefaultStageBLLMProvider(b *Broker) *defaultStageBLLMProvider {
 
 // SynthesizeSkill is the canonical entry point. It picks the system prompt
 // based on candidate source, builds the user prompt, calls the LLM, and
-// decodes the JSON response into a SkillFrontmatter + body. Self-heal
+// decodes the JSON response into a StageBSynthDecision. Self-heal
 // candidates get extra sanity checks (handle- prefix, body heading,
-// description bounds).
-func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand SkillCandidate, wikiContext string) (SkillFrontmatter, string, error) {
+// description bounds). New (non-enhance) skill responses must additionally
+// clear the depth gate so the team only accrues high-signal skills.
+func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand SkillCandidate, wikiContext string) (StageBSynthDecision, error) {
 	systemPrompt, err := p.systemPromptFor(cand.Source)
 	if err != nil {
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: load system prompt: %w", err)
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: load system prompt: %w", err)
 	}
 	if ctx.Err() != nil {
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: context: %w", ctx.Err())
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: context: %w", ctx.Err())
 	}
 
 	// Build existing-skills summary so the LLM can self-deduplicate.
@@ -144,12 +210,12 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 	rawResp, callErr := p.callLLM(ctx, systemPrompt, userPrompt)
 	if callErr != nil {
 		if errors.Is(callErr, errStageBLLMDisabled) {
-			return SkillFrontmatter{}, "", nil
+			return StageBSynthDecision{}, nil
 		}
 		if cand.Source == SourceSelfHealResolved {
 			atomic.AddInt64(&p.broker.skillCompileMetrics.SelfHealLLMRejections, 1)
 		}
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: llm call: %w", callErr)
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: llm call: %w", callErr)
 	}
 
 	parsed, parseErr := parseStageBSynthResponse(rawResp)
@@ -161,7 +227,7 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 			"source", string(cand.Source),
 			"err", parseErr,
 		)
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: parse response: %w", parseErr)
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: parse response: %w", parseErr)
 	}
 
 	if !parsed.IsSkill {
@@ -172,13 +238,14 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 			"source", string(cand.Source),
 			"reason", parsed.Reason,
 		)
-		return SkillFrontmatter{}, "", errors.New("synth: candidate rejected by LLM as not-a-skill")
+		return StageBSynthDecision{}, errors.New("synth: candidate rejected by LLM as not-a-skill")
 	}
 
 	// Sanity-check the LLM response. Self-heal candidates have stricter
 	// shape requirements (handle- prefix, body heading) than the generic
 	// notebook-cluster candidates so the resulting skill matches the
-	// "when blocked by X, do Y" framing the prompt asks for.
+	// "when blocked by X, do Y" framing the prompt asks for. New (non-
+	// enhance) skill responses must additionally clear the depth gate.
 	if err := validateStageBSynthResponse(cand.Source, parsed); err != nil {
 		if cand.Source == SourceSelfHealResolved {
 			atomic.AddInt64(&p.broker.skillCompileMetrics.SelfHealLLMRejections, 1)
@@ -188,7 +255,16 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 			"name", parsed.Name,
 			"reason", err.Error(),
 		)
-		return SkillFrontmatter{}, "", fmt.Errorf("stage_b_synth: sanity check: %w", err)
+		return StageBSynthDecision{}, fmt.Errorf("stage_b_synth: sanity check: %w", err)
+	}
+
+	if len(parsed.Body) > stageBSynthCompactnessSoftLimit {
+		slog.Warn("stage_b_synth_body_above_compactness_soft_limit",
+			"source", string(cand.Source),
+			"name", parsed.Name,
+			"body_bytes", len(parsed.Body),
+			"soft_limit_bytes", stageBSynthCompactnessSoftLimit,
+		)
 	}
 
 	fm := SkillFrontmatter{
@@ -200,7 +276,12 @@ func (p *defaultStageBLLMProvider) SynthesizeSkill(ctx context.Context, cand Ski
 	// Carry the source signal forward in metadata so consumers can branch
 	// on origin without re-parsing the body.
 	fm.Metadata.Wuphf.SourceSignals = append(fm.Metadata.Wuphf.SourceSignals, sourceSignalsFor(cand)...)
-	return fm, parsed.Body, nil
+	return StageBSynthDecision{
+		Frontmatter: fm,
+		Body:        parsed.Body,
+		Enhance:     parsed.Enhance,
+		RenameTo:    parsed.RenameTo,
+	}, nil
 }
 
 // systemPromptFor returns the system prompt for the given candidate source.
@@ -488,11 +569,39 @@ func (p *defaultStageBLLMProvider) callLLM(ctx context.Context, systemPrompt, us
 	return callOpenAI(callCtx, client, openaiKey, systemPrompt, userPrompt)
 }
 
+// stageBDefaultAnthropicModel is the Stage B synthesizer's default. Haiku
+// is cheap and adequate for most candidates. SkillOpt (arXiv 2605.23904,
+// Table 5) shows a stronger optimizer monotonically improves the resulting
+// skill — for higher-stakes workspaces, pin Sonnet or Opus via the env
+// override below.
+const stageBDefaultAnthropicModel = "claude-haiku-4-5-20251001"
+
+// stageBDefaultOpenAIModel is the OpenAI-side default. gpt-4o-mini is the
+// cost-equivalent of Haiku and the historical default; ops can pin a
+// stronger model via WUPHF_STAGE_B_SYNTH_MODEL when the Anthropic key is
+// unset and the OpenAI fallback is in use.
+const stageBDefaultOpenAIModel = "gpt-4o-mini"
+
+// resolveStageBSynthModel returns the model identifier to use for Stage B
+// synthesis. Ops can override the default via WUPHF_STAGE_B_SYNTH_MODEL.
+// The override is provider-agnostic — the caller passes whichever default
+// matches the provider in use, and the env value (if set) wins.
+//
+// This is SkillOpt's "stronger optimizer ≠ deployment target" lever: skill
+// synthesis is offline and amortized over every future invocation, so the
+// per-pass cost of a stronger model is usually worth the quality lift.
+func resolveStageBSynthModel(defaultModel string) string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_STAGE_B_SYNTH_MODEL")); v != "" {
+		return v
+	}
+	return defaultModel
+}
+
 // callAnthropic posts to /v1/messages with a system prompt + a single user
 // message and returns the concatenated text content of the response.
 func callAnthropic(ctx context.Context, client *http.Client, key, systemPrompt, userPrompt string) (string, error) {
 	const endpoint = "https://api.anthropic.com/v1/messages"
-	const model = "claude-haiku-4-5-20251001"
+	model := resolveStageBSynthModel(stageBDefaultAnthropicModel)
 
 	payload := map[string]any{
 		"model":      model,
@@ -548,11 +657,12 @@ func callAnthropic(ctx context.Context, client *http.Client, key, systemPrompt, 
 }
 
 // callOpenAI posts to /v1/chat/completions with a system + user message and
-// returns the assistant content. We stay on gpt-4o-mini for cost; the JSON
-// shape is the standard chat.completions response.
+// returns the assistant content. Defaults to gpt-4o-mini for cost; ops can
+// pin a stronger optimizer via WUPHF_STAGE_B_SYNTH_MODEL (see SkillOpt's
+// stronger-optimizer-≠-deployment-target finding).
 func callOpenAI(ctx context.Context, client *http.Client, key, systemPrompt, userPrompt string) (string, error) {
 	const endpoint = "https://api.openai.com/v1/chat/completions"
-	const model = "gpt-4o-mini"
+	model := resolveStageBSynthModel(stageBDefaultOpenAIModel)
 
 	payload := map[string]any{
 		"model": model,
@@ -607,12 +717,18 @@ func callOpenAI(ctx context.Context, client *http.Client, key, systemPrompt, use
 // returns. The fields are nullable in the wire format (Reason is only
 // meaningful when IsSkill=false); we keep the in-memory shape strict so the
 // validator can rely on present-but-empty == invalid.
+//
+// Enhance and RenameTo carry the "prefer enhance over new" hint: the LLM
+// picks an existing skill slug to enhance (instead of minting a new one),
+// optionally renaming it when the scope has broadened.
 type stageBSynthResponse struct {
 	IsSkill     bool
 	Name        string
 	Description string
 	Body        string
 	Reason      string
+	Enhance     string
+	RenameTo    string
 }
 
 // parseStageBSynthResponse decodes a model response into the structured
@@ -630,6 +746,8 @@ func parseStageBSynthResponse(raw string) (stageBSynthResponse, error) {
 		Description string `json:"description"`
 		Body        string `json:"body"`
 		Reason      string `json:"reason"`
+		Enhance     string `json:"enhance"`
+		RenameTo    string `json:"rename_to"`
 	}
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
 		return stageBSynthResponse{}, fmt.Errorf("decode json: %w", err)
@@ -641,6 +759,8 @@ func parseStageBSynthResponse(raw string) (stageBSynthResponse, error) {
 		Description: parsed.Description,
 		Body:        parsed.Body,
 		Reason:      parsed.Reason,
+		Enhance:     strings.TrimSpace(parsed.Enhance),
+		RenameTo:    strings.TrimSpace(parsed.RenameTo),
 	}, nil
 }
 
@@ -667,6 +787,20 @@ func stripJSONNoise(raw string) string {
 // must match the canonical slug shape (with handle- prefix for self-heal
 // sources), description must fall in [10, 200] chars, and the body must
 // carry at least one of the expected section headings.
+//
+// Behaviour differs between three response shapes:
+//
+//   - NEW skill (Enhance == ""): full validation, including the depth gate
+//     (min body length + min step count) so the team only accrues high-signal
+//     skills. This is the noisy path the deliberate-skill-generation work is
+//     gating against.
+//   - ENHANCE (Enhance != ""): the response is a BOUNDED diff that rides on
+//     top of an existing skill body. We validate the slug + description but
+//     skip the heading and depth requirements — those live on the existing
+//     skill, not on the diff.
+//   - RENAME + ENHANCE (Enhance != "" && RenameTo != ""): same as ENHANCE,
+//     plus we validate the rename target slug shape and require it to
+//     differ from the existing slug (otherwise it's a no-op rename).
 func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynthResponse) error {
 	name := strings.TrimSpace(parsed.Name)
 	if name == "" {
@@ -698,6 +832,43 @@ func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynth
 		return fmt.Errorf("body too long (%d > %d bytes)", len(body), stageBSynthMaxBodyLen)
 	}
 
+	enhance := strings.TrimSpace(parsed.Enhance)
+	renameTo := strings.TrimSpace(parsed.RenameTo)
+
+	if enhance != "" {
+		// Enhance / rename path. Validate the slug shapes and that the
+		// caller-supplied name lines up with one of the slugs (the
+		// existing skill for plain enhance, the new slug for rename).
+		if !stageBGenericNameRegex.MatchString(enhance) {
+			return fmt.Errorf("enhance slug %q must match ^[a-z0-9][a-z0-9-]*$", enhance)
+		}
+		if renameTo != "" {
+			if !stageBGenericNameRegex.MatchString(renameTo) {
+				return fmt.Errorf("rename_to slug %q must match ^[a-z0-9][a-z0-9-]*$", renameTo)
+			}
+			if renameTo == enhance {
+				return fmt.Errorf("rename_to %q equals enhance %q (no-op rename)", renameTo, enhance)
+			}
+			if name != renameTo {
+				return fmt.Errorf("name %q must equal rename_to %q for rename responses", name, renameTo)
+			}
+		} else if name != enhance {
+			return fmt.Errorf("name %q must equal enhance %q for enhance responses", name, enhance)
+		}
+		// Enhance bodies are bounded diffs — no heading or depth gate.
+		// They DO have an upper edit-count bound: SkillOpt's textual
+		// learning rate caps per-step edits at 4 (decayed to 2); we leave
+		// headroom at 8 here so legitimate compound enhancements still
+		// land while a "rewrite the whole body" disguised as enhance
+		// gets rejected.
+		if edits := countEnumeratedSteps(body); edits > stageBSynthEnhanceMaxEdits {
+			return fmt.Errorf("enhance body carries %d enumerated edits, max is %d (bounded-diff contract)",
+				edits, stageBSynthEnhanceMaxEdits)
+		}
+		return nil
+	}
+
+	// --- New-skill path: full heading + depth validation ---
 	if source == SourceSelfHealResolved {
 		// Self-heal: the prompt requires BOTH "## When this fires" and
 		// "## Steps". Enforce both so a runaway model can't pass with
@@ -706,6 +877,9 @@ func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynth
 			if !strings.Contains(body, m) {
 				return fmt.Errorf("body missing required self-heal heading %q", m)
 			}
+		}
+		if err := enforceDepthGate(body); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -720,7 +894,123 @@ func validateStageBSynthResponse(source SkillCandidateSource, parsed stageBSynth
 	if !hasMarker {
 		return fmt.Errorf("body missing required heading (one of %v)", stageBSynthGenericHeadingMarkers)
 	}
+	if err := enforceDepthGate(body); err != nil {
+		return err
+	}
 	return nil
+}
+
+// procedureSectionHeadings names the body sections where enumerated
+// procedure steps are expected to live. Lines outside these sections —
+// `## Inputs`, `## Output`, `## Source incident`, `## Examples`, etc. —
+// are NOT counted toward the depth gate's step minimum, otherwise a
+// shallow `## Steps` block could be padded to pass via bullets in other
+// sections (CodeRabbit catch on PR #998).
+var procedureSectionHeadings = []string{"## Steps", "## How to"}
+
+// enforceDepthGate rejects new-skill bodies that are too shallow to be
+// worth codifying. Applied only to NEW skill responses — enhance / rename
+// bodies are bounded diffs and ride on top of an existing skill's depth.
+//
+// The gate has three components:
+//
+//   - Minimum body length (stageBSynthNewSkillMinBodyLen). Catches the
+//     "two-line how-to" shape that's almost always prose-disguised-as-skill.
+//   - Maximum body length (stageBSynthCompactnessHardLimit). SkillOpt's
+//     median final skill is ~5-6KB; bloat above 2× that is almost always
+//     length-as-effort rather than load-bearing content.
+//   - Minimum enumerated step count inside the procedure section
+//     (stageBSynthNewSkillMinSteps). Counted ONLY inside `## Steps` or
+//     `## How to`, never across the whole body — otherwise bullets in
+//     `## Inputs` / `## Source incident` would mask a shallow procedure.
+func enforceDepthGate(body string) error {
+	trimmed := strings.TrimSpace(body)
+	if len(trimmed) < stageBSynthNewSkillMinBodyLen {
+		return fmt.Errorf("body too shallow (%d < %d bytes — new skills need substantive procedure, not a snippet)",
+			len(trimmed), stageBSynthNewSkillMinBodyLen)
+	}
+	if len(trimmed) > stageBSynthCompactnessHardLimit {
+		return fmt.Errorf("body too bloated (%d > %d bytes — skills should be compact; SkillOpt median is ~5-6KB)",
+			len(trimmed), stageBSynthCompactnessHardLimit)
+	}
+	if steps := countEnumeratedStepsInSections(body, procedureSectionHeadings); steps < stageBSynthNewSkillMinSteps {
+		return fmt.Errorf("body has %d enumerated steps inside %v, need at least %d for a new skill (steps outside these sections do not count)",
+			steps, procedureSectionHeadings, stageBSynthNewSkillMinSteps)
+	}
+	return nil
+}
+
+// countEnumeratedStepsInSections counts enumerated lines that live INSIDE
+// any of the named `## ` sections. Lines in other sections (or at the
+// top of the body before any heading) are not counted.
+//
+// Used by the new-skill depth gate so a shallow `## Steps` block cannot
+// be padded to pass via bullets in `## Inputs`, `## Source incident`,
+// or `## Examples`. The enhance edit-count bound continues to use the
+// whole-body countEnumeratedSteps because an enhance diff is a bounded
+// patch where every change counts, regardless of which section it
+// targets.
+func countEnumeratedStepsInSections(body string, sections []string) int {
+	targets := make(map[string]bool, len(sections))
+	for _, s := range sections {
+		targets[strings.TrimSpace(s)] = true
+	}
+	current := ""
+	n := 0
+	for _, line := range strings.Split(body, "\n") {
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "## ") {
+			current = trimmedLine
+			continue
+		}
+		if !targets[current] {
+			continue
+		}
+		if isEnumeratedStepLine(line) {
+			n++
+		}
+	}
+	return n
+}
+
+// countEnumeratedSteps counts lines that look like step entries across
+// the WHOLE body: a leading "1." / "2." style number, a "- " bullet, or
+// a "* " bullet. Used by the enhance edit-count bound where every change
+// counts regardless of which section it targets. For the new-skill
+// depth gate, use countEnumeratedStepsInSections instead so bullets in
+// `## Inputs` / `## Source incident` cannot mask a shallow procedure.
+func countEnumeratedSteps(body string) int {
+	n := 0
+	for _, line := range strings.Split(body, "\n") {
+		if isEnumeratedStepLine(line) {
+			n++
+		}
+	}
+	return n
+}
+
+// isEnumeratedStepLine reports whether line looks like a single step
+// entry — a leading "1." / "2." style number, a "- " bullet, or a "* "
+// bullet. Tolerates leading whitespace so nested lists inside a step
+// block still count.
+func isEnumeratedStepLine(line string) bool {
+	trim := strings.TrimLeft(line, " \t")
+	if strings.HasPrefix(trim, "- ") || strings.HasPrefix(trim, "* ") {
+		return true
+	}
+	// Numbered: "1." through "999." — we only need to recognise the
+	// shape, not parse the number.
+	if len(trim) >= 2 && trim[0] >= '0' && trim[0] <= '9' {
+		rest := trim[1:]
+		// Allow up to two more digits.
+		for i := 0; i < 2 && len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9'; i++ {
+			rest = rest[1:]
+		}
+		if strings.HasPrefix(rest, ". ") || strings.HasPrefix(rest, ".\t") {
+			return true
+		}
+	}
+	return false
 }
 
 // sourceSignalsFor renders a small slice of provenance markers the

@@ -53,9 +53,10 @@ func TestNotebookSignalScanner_EmitsClusterAcrossThreeAgents(t *testing.T) {
 	defer teardown()
 
 	// Three notebooks across three agents all converging on the same topic.
-	// Vocabulary overlap is intentionally high so the Jaccard threshold (0.6)
+	// Vocabulary overlap is intentionally high so the Jaccard threshold (0.7)
 	// triggers a single cluster — natural-language entries with too much
-	// idiosyncratic vocabulary fall below the cut.
+	// idiosyncratic vocabulary fall below the cut. minClusterSize default is 3,
+	// so we need three entries before the scanner emits anything.
 	body := "deploy prod pipeline smoke tests toggle flipping deploy prod pipeline smoke tests toggle flipping"
 	writeNotebookEntry(t, root, "alice", "2026-04-22", body)
 	writeNotebookEntry(t, root, "bob", "2026-04-23", body)
@@ -119,6 +120,29 @@ func TestNotebookSignalScanner_RejectsSingletonCluster(t *testing.T) {
 	}
 	if len(cands) != 0 {
 		t.Fatalf("expected 0 candidates (singleton), got %d (%+v)", len(cands), cands)
+	}
+}
+
+func TestNotebookSignalScanner_RejectsTwoEntryClusterUnderDefaultFloor(t *testing.T) {
+	b, root, teardown := newNotebookScannerHarness(t)
+	defer teardown()
+
+	// Two notebooks, two distinct agents, high vocabulary overlap. Under the
+	// pre-existing defaults (minClusterSize=2) this would have emitted a
+	// candidate; under the deliberate-skill-generation defaults
+	// (minClusterSize=3) it must reject. The repetition signal is too weak —
+	// two agents saying the same thing once is not yet a pattern.
+	body := "deploy prod pipeline smoke tests toggle flipping deploy prod pipeline smoke tests toggle flipping"
+	writeNotebookEntry(t, root, "alice", "2026-04-22", body)
+	writeNotebookEntry(t, root, "bob", "2026-04-23", body)
+
+	scanner := NewNotebookSignalScanner(b)
+	cands, err := scanner.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("expected 0 candidates under default minClusterSize=3, got %d (%+v)", len(cands), cands)
 	}
 }
 

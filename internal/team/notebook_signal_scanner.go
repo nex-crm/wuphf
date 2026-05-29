@@ -54,16 +54,21 @@ type NotebookSignalScanner struct {
 // NewNotebookSignalScanner constructs a scanner with defaults pulled from
 // env (or the documented fallbacks):
 //
-//	WUPHF_STAGE_B_NOTEBOOK_MIN_CLUSTER  → minClusterSize       (default 2)
+//	WUPHF_STAGE_B_NOTEBOOK_MIN_CLUSTER  → minClusterSize       (default 3)
 //	WUPHF_STAGE_B_NOTEBOOK_MIN_AGENTS   → minDistinctAgents    (default 2)
-//	WUPHF_STAGE_B_NOTEBOOK_SIMILARITY   → similarityThreshold  (default 0.6)
+//	WUPHF_STAGE_B_NOTEBOOK_SIMILARITY   → similarityThreshold  (default 0.7)
 //	WUPHF_STAGE_B_NOTEBOOK_MAX_PER_PASS → maxCandidatesPerPass (default 10)
+//
+// minClusterSize default raised 2 → 3 and similarityThreshold default
+// raised 0.6 → 0.7 to gate against trigger-happy skill synthesis: two
+// loosely-related notebook entries are not a pattern. Skills should only
+// emit when the team has demonstrably repeated work on the same topic.
 func NewNotebookSignalScanner(b *Broker) *NotebookSignalScanner {
 	return &NotebookSignalScanner{
 		broker:               b,
-		minClusterSize:       envIntDefault("WUPHF_STAGE_B_NOTEBOOK_MIN_CLUSTER", 2),
+		minClusterSize:       envIntDefault("WUPHF_STAGE_B_NOTEBOOK_MIN_CLUSTER", 3),
 		minDistinctAgents:    envIntDefault("WUPHF_STAGE_B_NOTEBOOK_MIN_AGENTS", 2),
-		similarityThreshold:  envFloatDefault("WUPHF_STAGE_B_NOTEBOOK_SIMILARITY", 0.6),
+		similarityThreshold:  envFloatDefault("WUPHF_STAGE_B_NOTEBOOK_SIMILARITY", 0.7),
 		maxCandidatesPerPass: envIntDefault("WUPHF_STAGE_B_NOTEBOOK_MAX_PER_PASS", 10),
 		embeddingProvider:    embedding.NewDefault(),
 		embeddingCache:       embedding.NewCache(embedding.DefaultCachePath()),

@@ -65,6 +65,10 @@ type SkillWuphfMeta struct {
 	Tags []string `yaml:"tags,omitempty"`
 	// RelatedSkills lists other skill slugs this skill overlaps with.
 	RelatedSkills []string `yaml:"related_skills,omitempty"`
+	// RenamedTo is set on archived stub skills left behind when an existing
+	// skill is renamed to a broader slug. Acts as a redirect for humans and
+	// agents that resolve the old slug. Always paired with status=archived.
+	RenamedTo string `yaml:"renamed_to,omitempty"`
 	// WorkflowProvider is the provider for workflow-backed skills.
 	WorkflowProvider string `yaml:"workflow_provider,omitempty"`
 	// WorkflowKey identifies the workflow within the provider.
