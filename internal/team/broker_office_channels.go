@@ -150,7 +150,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			// Runtime
 			"llm_provider":            config.ResolveLLMProvider(""),
 			"llm_provider_configured": llmProviderConfigured,
-			"llm_provider_priority": cfg.LLMProviderPriority,
+			"llm_provider_priority":   cfg.LLMProviderPriority,
 			// llm_provider_kinds is the non-gateway subset of the registered
 			// provider runtimes — the safe set to render in any UI runtime
 			// picker (Settings default-runtime, AgentProfilePanel runtime
