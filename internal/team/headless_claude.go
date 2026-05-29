@@ -289,8 +289,13 @@ func (l *Launcher) headlessClaudeModel(slug string) string {
 			}
 		}
 	}
+	// Anthropic family default (verified 2026-05-29). The lead falls back
+	// to the top opus tier when --opus-ceo is on; everyone else gets the
+	// best-balanced sonnet. claude-opus-4-6 (the previous default here)
+	// is still available but no longer the recommended pick — see
+	// https://platform.claude.com/docs/en/docs/about-claude/models.
 	if l.opusCEO && slug == l.targeter().LeadSlug() {
-		return "claude-opus-4-6"
+		return "claude-opus-4-8"
 	}
 	return "claude-sonnet-4-6"
 }

@@ -12,24 +12,66 @@ import type { LLMRuntimeKind, LocalProviderStatus } from "../api/client";
 // Local runtimes return an empty list here — their model dropdown is
 // populated dynamically from the /status/local-providers probe (see
 // modelOptionsForKind below).
+//
+// Sourcing (verified 2026-05-29):
+//   - claude-code → Anthropic model overview
+//     https://platform.claude.com/docs/en/docs/about-claude/models
+//   - codex → OpenAI models index (developers.openai.com)
+//     https://developers.openai.com/api/docs/models/all
+//   - opencode mixes Anthropic + OpenAI via Models.dev, so the catalog
+//     surfaces the most common headline ids from each.
+//
+// Each list is ordered current-first so the dropdown's first non-default
+// option is the recommended pick. Aliases (claude-opus-4-7, claude-sonnet-4-6,
+// claude-haiku-4-5) are preferred over dated snapshots because they reduce
+// surprise migrations when Anthropic pins a new dated ID under the same
+// alias.
 const CLOUD_MODELS: Record<
   Exclude<LLMRuntimeKind, "mlx-lm" | "ollama" | "exo">,
   string[]
 > = {
   "claude-code": [
-    "claude-opus-4-7",
+    // Current / recommended
+    "claude-opus-4-8",
     "claude-sonnet-4-6",
-    "claude-haiku-4-5-20251001",
+    "claude-haiku-4-5",
+    // Legacy but still available
+    "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-sonnet-4-5",
+    "claude-opus-4-5",
+    "claude-opus-4-1",
   ],
-  codex: ["gpt-5.1", "gpt-5", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"],
-  opencode: [
-    "claude-opus-4-7",
-    "claude-sonnet-4-6",
-    "gpt-5.1",
+  codex: [
+    // Current / recommended
+    "gpt-5.5",
+    "gpt-5.5-pro",
+    "gpt-5.4",
+    "gpt-5.4-pro",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    // Codex-specialised agentic coding model
+    "gpt-5.3-codex",
+    // Legacy but still available via API
+    "gpt-5.2",
     "gpt-5",
-    "claude-sonnet-4-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "o3",
+    "o3-pro",
+  ],
+  opencode: [
+    // Anthropic top picks
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+    // OpenAI top picks
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.3-codex",
+    // Common older fallbacks
+    "claude-opus-4-7",
+    "gpt-5",
   ],
 };
 

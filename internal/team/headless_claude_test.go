@@ -55,7 +55,7 @@ func TestHeadlessClaudeModel_OpusForLeadOnly(t *testing.T) {
 		slug string
 		want string
 	}{
-		{"ceo", "claude-opus-4-6"},
+		{"ceo", "claude-opus-4-8"},
 		{"eng", "claude-sonnet-4-6"},
 		{"pm", "claude-sonnet-4-6"},
 	}
@@ -92,7 +92,7 @@ func TestHeadlessClaudeModel_CustomLeadSlug(t *testing.T) {
 		slug string
 		want string
 	}{
-		{"captain", "claude-opus-4-6"},
+		{"captain", "claude-opus-4-8"},
 		{"crew", "claude-sonnet-4-6"},
 	}
 	for _, tc := range tests {
