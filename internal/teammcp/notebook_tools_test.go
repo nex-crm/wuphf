@@ -510,7 +510,7 @@ func TestHandleTeamNotebookVisualArtifactListReadPromote(t *testing.T) {
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/notebook/visual-artifacts/ra_0123456789abcdef/promote":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"artifact":   map[string]any{"id": "ra_0123456789abcdef", "trustLevel": "promoted"},
+				"artifact":   map[string]any{"id": "ra_0123456789abcdef", "title": "Visual plan", "trustLevel": "promoted"},
 				"commit_sha": "def5678",
 			})
 		default:
@@ -557,6 +557,9 @@ func TestHandleTeamNotebookVisualArtifactListReadPromote(t *testing.T) {
 	if isToolError(res) {
 		t.Fatalf("promote tool error: %s", toolErrorText(res))
 	}
+	if auth.lastPath != "/notebook/visual-artifacts/ra_0123456789abcdef/promote" {
+		t.Fatalf("unexpected promote path: %s", auth.lastPath)
+	}
 	for _, want := range []string{
 		`"actor_slug":"pm"`,
 		`"target_wiki_path":"team/plans/visual-plan.md"`,
@@ -566,6 +569,37 @@ func TestHandleTeamNotebookVisualArtifactListReadPromote(t *testing.T) {
 		if !strings.Contains(auth.lastBody, want) {
 			t.Fatalf("promote request body missing %s: %s", want, auth.lastBody)
 		}
+	}
+	// The promote response must surface a pre-composed `card_broadcast`
+	// string and a separate `card_marker` token so the agent can copy them
+	// verbatim into the next team_broadcast. Retyping the 16-hex-char
+	// artifact ID is the load-bearing failure mode this contract avoids.
+	promoteResult := toolErrorText(res)
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(promoteResult), &decoded); err != nil {
+		t.Fatalf("promote response not JSON: %v\n%s", err, promoteResult)
+	}
+	card, ok := decoded["card_broadcast"].(string)
+	if !ok || card == "" {
+		t.Fatalf("promote response missing card_broadcast string: %s", promoteResult)
+	}
+	if !strings.Contains(card, "visual-artifact:ra_0123456789abcdef") {
+		t.Fatalf("card_broadcast missing artifact marker: %s", card)
+	}
+	if !strings.Contains(card, "team/plans/visual-plan.md") {
+		t.Fatalf("card_broadcast missing wiki path: %s", card)
+	}
+	if !strings.Contains(card, "Visual plan") {
+		t.Fatalf("card_broadcast missing title: %s", card)
+	}
+	marker, ok := decoded["card_marker"].(string)
+	if !ok || marker != "visual-artifact:ra_0123456789abcdef" {
+		t.Fatalf("card_marker malformed: %v", decoded["card_marker"])
+	}
+	// Marker MUST appear on its own line so the frontend parser can pick it
+	// up; agents pasting card_broadcast verbatim get this for free.
+	if !strings.Contains(card, "\n"+marker) {
+		t.Fatalf("card_marker not on its own line in card_broadcast: %q", card)
 	}
 }
 
