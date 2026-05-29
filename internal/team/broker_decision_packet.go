@@ -850,6 +850,20 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 		if _, err := b.transitionLifecycleLocked(taskID, target, reason); err != nil {
 			return fmt.Errorf("record decision: transition: %w", err)
 		}
+		// Wake the owner so work actually STARTS on approval. The
+		// transition above only posts a From=system lifecycle card, which
+		// notifyAgentsLoop drops — so without an explicit task action the
+		// owner is never enqueued and the issue sits idle until the human
+		// sends another message. Emitting task_updated routes through
+		// notifyTaskActionsLoop -> deliverTaskNotification ->
+		// enqueueHeadlessTurnForAgent(owner). Mirrors the status-change
+		// emit in broker_tasks_lifecycle.go. Only on Drafting->Running
+		// (start work); terminal Approved decisions don't need a wake.
+		if wasApprovingFromDrafting {
+			if task := b.findTaskByIDLocked(taskID); task != nil {
+				b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), "system", truncateSummary(task.Title+" [approved]", 140), task.ID)
+			}
+		}
 		packet := b.getOrInitPacketLocked(taskID)
 		b.stampLifecycleStateLocked(packet)
 		if trimmedComment != "" {
