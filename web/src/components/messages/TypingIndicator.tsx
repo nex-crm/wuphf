@@ -1,4 +1,5 @@
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
+import { OFFICE_LOADING_PHRASES } from "../../lib/officeLoadingPhrases";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { ThinkingLoader } from "../ui/ThinkingLoader";
@@ -61,7 +62,7 @@ export function TypingIndicator() {
           <span className="message-author">{heading}</span>
           <span className="typing-verb">{verb}</span>
         </div>
-        <ThinkingLoader label={label} />
+        <ThinkingLoader label={label} phrases={OFFICE_LOADING_PHRASES} />
       </div>
     </div>
   );

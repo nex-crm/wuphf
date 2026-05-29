@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
+import { OFFICE_LOADING_PHRASES } from "../../lib/officeLoadingPhrases";
 import { ThinkingLoader } from "./ThinkingLoader";
 
 const meta: Meta<typeof ThinkingLoader> = {
@@ -30,8 +31,32 @@ export const InlineNoLabel: Story = {
   args: { variant: "inline" },
 };
 
+/** Cycling The Office gerunds inside the typing bubble, à la the Claude Code spinner. */
+export const InlineOfficePhrases: Story = {
+  args: {
+    variant: "inline",
+    label: "Dwight is typing…",
+    phrases: OFFICE_LOADING_PHRASES,
+  },
+};
+
 export const Block: Story = {
   args: { variant: "block", label: "Loading messages…" },
+  decorators: [
+    (Story) => (
+      <div style={{ height: 160, display: "flex" }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+export const BlockOfficePhrases: Story = {
+  args: {
+    variant: "block",
+    label: "Loading messages…",
+    phrases: OFFICE_LOADING_PHRASES,
+  },
   decorators: [
     (Story) => (
       <div style={{ height: 160, display: "flex" }}>

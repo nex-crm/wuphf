@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Message } from "../../api/client";
 import { useMessages } from "../../hooks/useMessages";
 import { formatDateLabel } from "../../lib/format";
+import { OFFICE_LOADING_PHRASES } from "../../lib/officeLoadingPhrases";
 import { useChannelSlug } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { ThinkingLoader } from "../ui/ThinkingLoader";
@@ -73,7 +74,11 @@ export function MessageFeed() {
   if (isLoading && messages.length === 0) {
     return (
       <div className="messages messages-loading">
-        <ThinkingLoader variant="block" label="Loading messages…" />
+        <ThinkingLoader
+          variant="block"
+          label="Loading messages…"
+          phrases={OFFICE_LOADING_PHRASES}
+        />
       </div>
     );
   }

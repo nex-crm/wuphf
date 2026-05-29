@@ -340,6 +340,15 @@ body {
     background-position: -50% 0;
   }
 }
+@keyframes thinking-ellipsis-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 .animate-fade {
   animation: fadeIn 0.3s ease-out;
 }

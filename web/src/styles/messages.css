@@ -651,11 +651,17 @@
 .thinking-loader-inline {
   display: inline-flex;
 }
+.thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
 .thinking-bubble {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   /* Incoming-bubble silhouette: the top-left corner is pinched so it
      reads as anchored to the avatar above, like a real reply bubble. */
   padding: 11px 15px;
@@ -691,6 +697,50 @@
   animation-delay: 0.32s;
 }
 
+/* Cycling The Office phrase inside the bubble — a shimmering gerund in the
+   spirit of the Claude Code spinner. Re-keyed on every phrase so it fades in
+   fresh; the shimmer sweep runs continuously over the text. */
+.thinking-bubble-phrase {
+  position: relative;
+  font-size: var(--text-sm, 13px);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  background: linear-gradient(
+    100deg,
+    var(--text-tertiary) 20%,
+    var(--text-secondary) 45%,
+    var(--text) 50%,
+    var(--text-secondary) 55%,
+    var(--text-tertiary) 80%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation:
+    thinking-phrase-in 0.32s ease-out,
+    thinking-text-shimmer 2.2s linear infinite;
+}
+.thinking-ellipsis {
+  /* Animated trailing dots so a static gerund still feels alive. */
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  color: var(--text-tertiary);
+  animation: thinking-ellipsis-pulse 1.4s steps(1, end) infinite;
+}
+
+@keyframes thinking-phrase-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Block variant — whole-surface loading (feed first fetch). A single
    line of shimmer text centered in the empty space. */
 .thinking-loader-block {
@@ -715,18 +765,30 @@
   color: transparent;
   animation: thinking-text-shimmer 1.8s linear infinite;
 }
+.thinking-shimmer-text-cycle {
+  animation:
+    thinking-phrase-in 0.32s ease-out,
+    thinking-text-shimmer 1.8s linear infinite;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .thinking-bubble::after,
   .thinking-dot,
-  .thinking-shimmer-text {
+  .thinking-ellipsis,
+  .thinking-bubble-phrase,
+  .thinking-shimmer-text,
+  .thinking-shimmer-text-cycle {
     animation: none;
   }
-  .thinking-shimmer-text {
+  .thinking-shimmer-text,
+  .thinking-bubble-phrase {
     background: none;
     -webkit-background-clip: border-box;
     background-clip: border-box;
-    color: var(--text-tertiary);
+    color: var(--text-secondary);
+  }
+  .thinking-ellipsis {
+    opacity: 0.6;
   }
   .thinking-dot {
     /* Hold dots at a legible mid-state instead of frozen mid-wave. */
