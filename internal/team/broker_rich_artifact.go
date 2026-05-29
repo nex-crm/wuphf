@@ -19,8 +19,15 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 	}
 	switch r.Method {
 	case http.MethodGet:
+		// owner_slug is the frontend-facing query name; slug is the legacy
+		// agent-facing name. Accept both so MCP + UI callers can share the
+		// same endpoint without translation.
+		createdBy := strings.TrimSpace(r.URL.Query().Get("slug"))
+		if createdBy == "" {
+			createdBy = strings.TrimSpace(r.URL.Query().Get("owner_slug"))
+		}
 		filter := RichArtifactFilter{
-			CreatedBy:          strings.TrimSpace(r.URL.Query().Get("slug")),
+			CreatedBy:          createdBy,
 			SourceMarkdownPath: strings.TrimSpace(r.URL.Query().Get("source_path")),
 		}
 		if filter.CreatedBy != "" {

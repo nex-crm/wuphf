@@ -222,6 +222,88 @@ func (b *Broker) handleNotebookRead(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(bytes)
 }
 
+// handleNotebookEntry returns one notebook entry as a JSON envelope including
+// any visual artifacts whose promotion target points at it. The shape is
+// designed for the UI; agents continue to use /notebook/read for raw bytes.
+//
+//	GET /notebook/entry?slug={slug}&path=agents/{slug}/notebook/{file}.md
+//
+// Response:
+//
+//	{
+//	  "agent_slug":         "ceo",
+//	  "entry_slug":         "morning-standup",
+//	  "path":               "agents/ceo/notebook/morning-standup.md",
+//	  "title":              "Morning standup",
+//	  "body_md":            "...",
+//	  "attached_artifacts": [ RichArtifact, ... ]
+//	}
+//
+// The `slug` query parameter MUST match the owner embedded in `path`.
+func (b *Broker) handleNotebookEntry(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.requireWikiWorker(w, "notebook")
+	if worker == nil {
+		return
+	}
+	path := strings.TrimSpace(r.URL.Query().Get("path"))
+	if path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+		return
+	}
+	if err := validateNotebookPath(path); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	ownerSlug, entrySlug, ok := notebookOwnerAndEntryFromPath(path)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path must match agents/{slug}/notebook/{file}.md"})
+		return
+	}
+	if slugHint := strings.TrimSpace(r.URL.Query().Get("slug")); slugHint != "" {
+		if err := validateNotebookSlug(slugHint); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if slugHint != ownerSlug {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug does not match path owner"})
+			return
+		}
+	}
+	body, err := worker.NotebookRead(path)
+	if err != nil {
+		if isNotebookValidationError(err) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	title := extractTitle(body, path)
+	// Attach any visual artifacts whose SourceMarkdownPath points at this entry
+	// (i.e. agent created the artifact alongside the markdown entry). Best
+	// effort — a listing error degrades to an empty attached_artifacts slice.
+	attached := []RichArtifact{}
+	if list, listErr := worker.ListRichArtifacts(RichArtifactFilter{SourceMarkdownPath: path}); listErr == nil {
+		for _, a := range list {
+			attached = append(attached, a.WithDerivedPromotion())
+		}
+	} else {
+		log.Printf("notebook entry: attached artifact list failed for %s: %v", path, listErr)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"agent_slug":         ownerSlug,
+		"entry_slug":         entrySlug,
+		"path":               path,
+		"title":              title,
+		"body_md":            string(body),
+		"attached_artifacts": attached,
+	})
+}
+
 // handleNotebookList returns a reverse-chron JSON list of entries for one
 // agent's notebook.
 //

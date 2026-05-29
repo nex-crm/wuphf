@@ -28,6 +28,31 @@ const (
 	richArtifactMaxHTMLBytes     = 1024 * 1024
 )
 
+// Promotion status values surfaced to the frontend. The contract is:
+//
+//	{ "status": "draft" }
+//	{ "status": "promoted_to_notebook", "owner_slug": "...", "entry_slug": "..." }
+//	{ "status": "promoted_to_wiki",     "wiki_path":  "team/.../...md" }
+//
+// See web/src/api/richArtifacts.ts ArtifactPromotion for the consumer side.
+const (
+	ArtifactPromotionStatusDraft              = "draft"
+	ArtifactPromotionStatusPromotedToNotebook = "promoted_to_notebook"
+	ArtifactPromotionStatusPromotedToWiki     = "promoted_to_wiki"
+)
+
+// ArtifactPromotion is the canonical "where does this artifact live now?"
+// signal. Exactly one of the optional fields is populated, picked by Status.
+// JSON tags use snake_case to match the frontend's ArtifactPromotion union.
+type ArtifactPromotion struct {
+	Status string `json:"status"`
+	// promoted_to_notebook fields.
+	OwnerSlug string `json:"owner_slug,omitempty"`
+	EntrySlug string `json:"entry_slug,omitempty"`
+	// promoted_to_wiki fields.
+	WikiPath string `json:"wiki_path,omitempty"`
+}
+
 var errRichArtifactCaller = errors.New("visual artifact: caller error")
 
 type richArtifactCallerError struct {
@@ -74,6 +99,76 @@ type RichArtifact struct {
 	UpdatedAt          string   `json:"updatedAt"`
 	ContentHash        string   `json:"contentHash"`
 	SanitizerVersion   string   `json:"sanitizerVersion"`
+	// Promotion is the canonical surface for the UI's "where does this
+	// artifact live now?" decision. Older artifacts written before this
+	// field existed may omit it on disk; readers MUST fall back to
+	// DerivePromotion (which uses TrustLevel + PromotedWikiPath +
+	// SourceMarkdownPath) so the frontend always has something to read.
+	Promotion *ArtifactPromotion `json:"promotion,omitempty"`
+}
+
+// DerivePromotion returns the canonical ArtifactPromotion for an artifact.
+// It returns the persisted Promotion field when present, otherwise it
+// reconstructs a best-effort promotion from the legacy fields so artifacts
+// written before the promotion contract existed keep working.
+func (a RichArtifact) DerivePromotion() ArtifactPromotion {
+	if a.Promotion != nil && a.Promotion.Status != "" {
+		return *a.Promotion
+	}
+	if strings.TrimSpace(a.PromotedWikiPath) != "" {
+		return ArtifactPromotion{
+			Status:   ArtifactPromotionStatusPromotedToWiki,
+			WikiPath: a.PromotedWikiPath,
+		}
+	}
+	if owner, entry, ok := notebookOwnerAndEntryFromPath(a.SourceMarkdownPath); ok {
+		return ArtifactPromotion{
+			Status:    ArtifactPromotionStatusPromotedToNotebook,
+			OwnerSlug: owner,
+			EntrySlug: entry,
+		}
+	}
+	return ArtifactPromotion{Status: ArtifactPromotionStatusDraft}
+}
+
+// WithDerivedPromotion returns a copy of the artifact with its Promotion
+// pointer populated via DerivePromotion. Use this on the read path so JSON
+// responses always carry a non-nil promotion field even for legacy artifacts.
+func (a RichArtifact) WithDerivedPromotion() RichArtifact {
+	p := a.DerivePromotion()
+	a.Promotion = &p
+	return a
+}
+
+// notebookOwnerAndEntryFromPath splits "agents/{slug}/notebook/{file}.md"
+// into ("{slug}", "{file}", true). Returns false for any other shape so
+// callers can fall back to a draft promotion safely.
+func notebookOwnerAndEntryFromPath(path string) (string, string, bool) {
+	rel := strings.TrimSpace(path)
+	if rel == "" {
+		return "", "", false
+	}
+	rel = strings.ReplaceAll(rel, "\\", "/")
+	const prefix = "agents/"
+	const middle = "/notebook/"
+	if !strings.HasPrefix(rel, prefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(rel, prefix)
+	mid := strings.Index(rest, middle)
+	if mid <= 0 {
+		return "", "", false
+	}
+	owner := rest[:mid]
+	entry := rest[mid+len(middle):]
+	if !strings.HasSuffix(strings.ToLower(entry), ".md") {
+		return "", "", false
+	}
+	entry = entry[:len(entry)-len(".md")]
+	if owner == "" || entry == "" {
+		return "", "", false
+	}
+	return owner, entry, true
 }
 
 type RichArtifactFilter struct {
@@ -154,6 +249,18 @@ func newRichArtifact(req RichArtifactCreateRequest, now time.Time) (RichArtifact
 		UpdatedAt:          createdAt,
 		ContentHash:        contentHash,
 		SanitizerVersion:   richArtifactSanitizerVersion,
+	}
+	// New artifacts start as drafts unless they are immediately attached to
+	// a notebook entry via SourceMarkdownPath. The promote tool flips this to
+	// promoted_to_wiki on success.
+	if owner, entry, ok := notebookOwnerAndEntryFromPath(sourcePath); ok {
+		artifact.Promotion = &ArtifactPromotion{
+			Status:    ArtifactPromotionStatusPromotedToNotebook,
+			OwnerSlug: owner,
+			EntrySlug: entry,
+		}
+	} else {
+		artifact.Promotion = &ArtifactPromotion{Status: ArtifactPromotionStatusDraft}
 	}
 	return artifact, html, nil
 }
@@ -530,6 +637,10 @@ func (r *Repo) PromoteRichArtifact(ctx context.Context, actorSlug, id, targetPat
 	artifact.TrustLevel = richArtifactTrustPromoted
 	artifact.PromotedWikiPath = targetPath
 	artifact.UpdatedAt = now.UTC().Format(time.RFC3339)
+	artifact.Promotion = &ArtifactPromotion{
+		Status:   ArtifactPromotionStatusPromotedToWiki,
+		WikiPath: targetPath,
+	}
 	content := markdownWithRichArtifactProvenance(markdown, artifact)
 	if err := os.MkdirAll(filepath.Dir(fullTarget), 0o700); err != nil {
 		return RichArtifact{}, "", 0, fmt.Errorf("wiki: mkdir %s: %w", filepath.Dir(fullTarget), err)
@@ -648,7 +759,7 @@ func (r *Repo) readRichArtifactLocked(id string) (RichArtifact, string, error) {
 	if err := validateRichArtifactForWrite(artifact, string(html)); err != nil {
 		return RichArtifact{}, "", err
 	}
-	return artifact, string(html), nil
+	return artifact.WithDerivedPromotion(), string(html), nil
 }
 
 func (r *Repo) ListRichArtifacts(filter RichArtifactFilter) ([]RichArtifact, error) {
@@ -684,7 +795,7 @@ func (r *Repo) ListRichArtifacts(filter RichArtifactFilter) ([]RichArtifact, err
 		if !richArtifactMatchesFilter(artifact, filter) {
 			continue
 		}
-		out = append(out, artifact)
+		out = append(out, artifact.WithDerivedPromotion())
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].UpdatedAt == out[j].UpdatedAt {

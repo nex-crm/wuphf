@@ -1051,6 +1051,18 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
+	// Attach any visual artifacts whose promotion target points at this
+	// article. Best-effort: a listing failure surfaces the article with an
+	// empty AttachedArtifacts slice rather than 500'ing the read.
+	if attached, listErr := worker.ListRichArtifacts(RichArtifactFilter{PromotedWikiPath: relPath}); listErr == nil {
+		out := make([]RichArtifact, 0, len(attached))
+		for _, a := range attached {
+			out = append(out, a.WithDerivedPromotion())
+		}
+		meta.AttachedArtifacts = out
+	} else {
+		log.Printf("wiki article: attached artifact list failed for %s: %v", relPath, listErr)
+	}
 	// Ghost brief handling: in Demand mode, fire synthesis on first open when
 	// facts meet the threshold. In both modes, always surface in-flight state
 	// so the "generating..." badge works regardless of how synthesis was triggered.

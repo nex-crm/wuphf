@@ -80,6 +80,11 @@ type ArticleMeta struct {
 	// this entity. Computed at serve time from the EntitySynthesizer coalescing
 	// set — never persisted. Only true when Ghost is also true.
 	SynthesisQueued bool `json:"synthesis_queued,omitempty"`
+	// AttachedArtifacts is the set of visual artifacts promoted into this
+	// article's wiki path. The UI uses this to render inline embeds without
+	// a second round-trip. Always present (possibly empty) so frontend code
+	// can rely on the field shape.
+	AttachedArtifacts []RichArtifact `json:"attached_artifacts"`
 }
 
 // Backlink represents another article that wikilinks to this article.
@@ -342,14 +347,15 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath, reader string, readLog
 	}
 
 	meta := ArticleMeta{
-		Path:         relPath,
-		Content:      string(content),
-		Title:        extractTitle(content, relPath),
-		WordCount:    countWords(content),
-		Contributors: []string{},
-		Backlinks:    []Backlink{},
-		Categories:   []string{},
-		Ghost:        parseGhostFrontmatter(string(content)),
+		Path:              relPath,
+		Content:           string(content),
+		Title:             extractTitle(content, relPath),
+		WordCount:         countWords(content),
+		Contributors:      []string{},
+		Backlinks:         []Backlink{},
+		Categories:        []string{},
+		Ghost:             parseGhostFrontmatter(string(content)),
+		AttachedArtifacts: []RichArtifact{},
 	}
 
 	// Revision history and last-edit info (via git log).
