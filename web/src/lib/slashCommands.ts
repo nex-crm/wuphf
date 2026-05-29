@@ -77,8 +77,9 @@ export function handleSlashCommand(
     case "/skills":
       navigateToApp("skills");
       return true;
+    case "/routines":
     case "/calendar":
-      navigateToApp("calendar");
+      navigateToApp("routines");
       return true;
     case "/tasks":
       navigateToApp("tasks");

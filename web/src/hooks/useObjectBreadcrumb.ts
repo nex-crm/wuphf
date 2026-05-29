@@ -167,6 +167,19 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
           href: `#/skills/${encodeURIComponent(route.skillName)}`,
         },
       ];
+    case "routine-detail":
+      return [
+        { label: "Routines", href: "#/apps/routines" },
+        {
+          label: route.routineSlug,
+          href: `#/routines/${encodeURIComponent(route.routineSlug)}`,
+        },
+      ];
+    case "routine-new":
+      return [
+        { label: "Routines", href: "#/apps/routines" },
+        { label: "New routine", href: "#/routines/new" },
+      ];
     case "unknown":
       return [];
     default: {
@@ -192,7 +205,7 @@ function appLabel(appId: string): string {
     requests: "Requests",
     graph: "Graph",
     policies: "Policies",
-    calendar: "Calendar",
+    routines: "Routines",
     skills: "Skills",
     activity: "Activity",
     receipts: "Receipts",

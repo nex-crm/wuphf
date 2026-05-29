@@ -119,6 +119,10 @@ export function StatusBar() {
         return `${route.agentSlug} · ${route.tab}`;
       case "skill-detail":
         return `skill · ${route.skillName}`;
+      case "routine-detail":
+        return `Routine ${route.routineSlug}`;
+      case "routine-new":
+        return "New routine";
       case "unknown":
         return "";
       default: {

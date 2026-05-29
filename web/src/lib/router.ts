@@ -191,6 +191,37 @@ export const issueNewRoute = createRoute({
   path: "new",
 });
 
+// /routines — convenience alias that forwards to the /apps/routines panel.
+// Lets users type `/routines` in the URL bar (or share it) and land on the
+// canonical app surface without hitting "Page not found".
+export const routinesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.routines,
+  beforeLoad: () => {
+    throw redirect({
+      to: "/apps/$appId",
+      params: { appId: "routines" },
+      replace: true,
+    });
+  },
+});
+
+// /routines/new — composer page for creating a routine. Must be listed
+// BEFORE routineDetailRoute in the route tree so the static `new`
+// segment wins over the dynamic `$routineSlug` placeholder.
+export const routineNewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.routineNew,
+});
+
+// /routines/$routineSlug — full-page routine detail surface. Routine
+// slugs can contain `:` separators (e.g. `task-follow-up:general:task-1`);
+// TanStack Router decodes the param value before it reaches the consumer.
+export const routineDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.routineDetail,
+});
+
 // /skills/$skillName — full-screen skill SKILL.md detail editor + viewer.
 // Renders SkillDetailRoute which lets the operator edit the body in raw
 // markdown or read it as rendered HTML via a toggle.
@@ -236,6 +267,9 @@ export const routeTree = rootRoute.addChildren([
   // issueNewRoute must be listed BEFORE issueDetailRoute so the static
   // segment "new" wins over the dynamic "$issueId" catch-all.
   issuesRoute.addChildren([issueNewRoute, issueDetailRoute]),
+  routinesRoute,
+  routineNewRoute,
+  routineDetailRoute,
   // v3 MVP — per-agent subspace.
   agentSubspaceRoute.addChildren([agentSubspaceTabRoute]),
   // Skill detail (full-screen edit + render with raw/preview toggle).

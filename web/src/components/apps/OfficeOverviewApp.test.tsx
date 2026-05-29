@@ -142,7 +142,7 @@ describe("OfficeOverviewApp", () => {
       expect(screen.getByText("Agents working now")).toBeInTheDocument();
       expect(screen.getByText("Pending reviews")).toBeInTheDocument();
       expect(screen.getByText("Wiki proposals")).toBeInTheDocument();
-      expect(screen.getByText("Next scheduled jobs")).toBeInTheDocument();
+      expect(screen.getByText("Next scheduled routines")).toBeInTheDocument();
       expect(screen.getByText("Recent artifacts")).toBeInTheDocument();
 
       // Spot-check data in sections. Task titles, questions, etc. can appear
@@ -215,7 +215,7 @@ describe("OfficeOverviewApp", () => {
       render(wrap(<OfficeOverviewApp />));
 
       expect(
-        await screen.findByText("No upcoming scheduled jobs."),
+        await screen.findByText("No upcoming scheduled routines."),
       ).toBeInTheDocument();
     });
 
