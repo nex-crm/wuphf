@@ -27,20 +27,20 @@ type schedulerActivity struct {
 // per-slug cap. Versions are 1-indexed so the UI can address them by
 // number without leaking ring-buffer indices.
 type schedulerRevision struct {
-	Version     int    `json:"version"`
-	CreatedAt   string `json:"created_at"`
-	Author      string `json:"author,omitempty"`
-	ChangeNote  string `json:"change_note,omitempty"`
-	Label       string `json:"label"`
-	ScheduleExpr string `json:"schedule_expr,omitempty"`
-	IntervalMinutes int    `json:"interval_minutes,omitempty"`
-	IntervalOverride int   `json:"interval_override,omitempty"`
-	TargetType  string `json:"target_type,omitempty"`
-	TargetID    string `json:"target_id,omitempty"`
-	Payload     string `json:"payload,omitempty"`
-	Enabled     bool   `json:"enabled"`
-	Channel     string `json:"channel,omitempty"`
-	Kind        string `json:"kind,omitempty"`
+	Version          int    `json:"version"`
+	CreatedAt        string `json:"created_at"`
+	Author           string `json:"author,omitempty"`
+	ChangeNote       string `json:"change_note,omitempty"`
+	Label            string `json:"label"`
+	ScheduleExpr     string `json:"schedule_expr,omitempty"`
+	IntervalMinutes  int    `json:"interval_minutes,omitempty"`
+	IntervalOverride int    `json:"interval_override,omitempty"`
+	TargetType       string `json:"target_type,omitempty"`
+	TargetID         string `json:"target_id,omitempty"`
+	Payload          string `json:"payload,omitempty"`
+	Enabled          bool   `json:"enabled"`
+	Channel          string `json:"channel,omitempty"`
+	Kind             string `json:"kind,omitempty"`
 }
 
 const (
