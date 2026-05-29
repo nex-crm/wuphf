@@ -26,9 +26,17 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 		if createdBy == "" {
 			createdBy = strings.TrimSpace(r.URL.Query().Get("owner_slug"))
 		}
+		// source_path is the FE-facing query name; source_markdown_path is
+		// the JSON-payload-shaped alias spec'd for the listing contract.
+		// Accept both so MCP + UI callers (and any future SDK) can use the
+		// shape they already speak.
+		sourcePath := strings.TrimSpace(r.URL.Query().Get("source_path"))
+		if sourcePath == "" {
+			sourcePath = strings.TrimSpace(r.URL.Query().Get("source_markdown_path"))
+		}
 		filter := RichArtifactFilter{
 			CreatedBy:          createdBy,
-			SourceMarkdownPath: strings.TrimSpace(r.URL.Query().Get("source_path")),
+			SourceMarkdownPath: sourcePath,
 		}
 		if filter.CreatedBy != "" {
 			if err := validateNotebookSlug(filter.CreatedBy); err != nil {
@@ -65,13 +73,16 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		sha, n, err := worker.CreateRichArtifact(r.Context(), artifact, html, body.CommitMessage)
+		stored, sha, n, err := worker.CreateRichArtifact(r.Context(), artifact, html, body.CommitMessage)
 		if err != nil {
 			writeRichArtifactError(w, err)
 			return
 		}
+		// stored carries the canonical notebook-home attachment chosen by the
+		// worker. Always pass it through DerivePromotion so the response shape
+		// matches the list/get endpoints (non-nil promotion field).
 		writeJSON(w, http.StatusOK, map[string]any{
-			"artifact":      artifact,
+			"artifact":      stored.WithDerivedPromotion(),
 			"commit_sha":    sha,
 			"bytes_written": n,
 		})

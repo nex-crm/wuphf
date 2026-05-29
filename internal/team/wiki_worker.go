@@ -365,6 +365,9 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	} else if req.IsArtifact {
 		sha, n, err = w.repo.CommitArtifact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsRichArtifact || req.IsRichArtifactPromotion {
+		// processRichArtifactRequest may mutate the artifact (e.g. attach a
+		// freshly-derived notebook home on create) before returning it, so
+		// the worker overwrites req.RichArtifact.Artifact with the result.
 		req.RichArtifact.Artifact, sha, n, err = w.processRichArtifactRequest(writeCtx, req)
 	} else if req.IsEntityFact {
 		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
