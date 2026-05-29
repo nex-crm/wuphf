@@ -640,31 +640,228 @@
   margin-bottom: 4px;
 }
 
-/* ─── Typing indicator ─── */
-.typing-indicator {
+/* ─── Typing indicator ───────────────────────────────────────────
+   Renders as an incoming message bubble pinned to the foot of the
+   feed — the exact spot the next message lands. Reuses the .message
+   grid (avatar + content) so it lines up pixel-for-pixel with real
+   bubbles and is swapped in place when the reply arrives.
+   ───────────────────────────────────────────────────────────── */
+.typing-message {
+  /* Slightly longer settle than a real message so the placeholder
+     eases in rather than snapping. */
+  animation: fadeIn 0.4s ease-out;
+}
+.typing-message .message-content {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.typing-verb {
+  font-size: var(--text-xs, 11px);
+  font-style: italic;
+  color: var(--text-tertiary);
+  letter-spacing: 0.01em;
+}
+
+/* Stacked avatars when more than one agent is composing. */
+.typing-message-avatar {
+  background: transparent;
+  padding: 0;
+  position: relative;
+  overflow: visible;
+}
+.typing-avatar-stack-item {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  padding: 6px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--bg-warm);
+}
+.typing-avatar-stack-item:not(:first-child) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateX(calc(9px * var(--stack-offset, 0)));
+  box-shadow: -2px 0 0 var(--bg-card);
+}
+.typing-avatar-stack-item:nth-child(2) {
+  --stack-offset: 1;
+}
+.typing-avatar-stack-item:nth-child(3) {
+  --stack-offset: 2;
+}
+.typing-avatar-stack-item .pixel-avatar {
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── ThinkingLoader — Claude-style "response materializing" loader ──
+   Theme-adaptive sheen and dot tint via color-mix so it reads on
+   light, dark, and noir without per-theme overrides. The pill is the
+   placeholder for the incoming bubble; a sweep of light travels across
+   it while the dots ride a soft wave. Disabled under reduced motion.
+   ───────────────────────────────────────────────────────────── */
+.thinking-loader {
+  /* Fallbacks for browsers without color-mix (CSS Color 5): a solid
+     secondary-tinted dot and an invisible sheen. Both degrade cleanly. */
+  --tl-dot: var(--text-secondary);
+  --tl-sheen: transparent;
+}
+/* Theme-adaptive blend where supported — overrides the fallbacks above. */
+@supports (color: color-mix(in srgb, red, blue)) {
+  .thinking-loader {
+    --tl-dot: color-mix(in srgb, var(--text-secondary) 70%, var(--accent) 30%);
+    --tl-sheen: color-mix(in srgb, var(--text) 9%, transparent);
+  }
+}
+.thinking-loader-inline {
+  display: inline-flex;
+}
+.thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.thinking-bubble {
+  position: relative;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 0 20px;
-  font-size: var(--text-sm);
-  color: var(--text-tertiary);
+  /* Incoming-bubble silhouette: the top-left corner is pinched so it
+     reads as anchored to the avatar above, like a real reply bubble. */
+  padding: 11px 15px;
+  border-radius: var(--radius-sm) var(--radius-lg) var(--radius-lg)
+    var(--radius-lg);
+  background: var(--bg-warm);
+  overflow: hidden;
 }
-.typing-dots {
-  display: flex;
-  gap: 3px;
+.thinking-bubble::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    var(--tl-sheen) 50%,
+    transparent 75%
+  );
+  transform: translateX(-100%);
+  animation: thinking-sheen 1.8s ease-in-out infinite;
 }
-.typing-dot {
-  width: 4px;
-  height: 4px;
+.thinking-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--text-tertiary);
-  animation: typing-bounce 1.4s ease-in-out infinite;
+  background: var(--tl-dot);
+  animation: thinking-wave 1.3s ease-in-out infinite;
 }
-.typing-dot:nth-child(2) {
+.thinking-dot:nth-child(2) {
   animation-delay: 0.16s;
 }
-.typing-dot:nth-child(3) {
+.thinking-dot:nth-child(3) {
   animation-delay: 0.32s;
+}
+
+/* Cycling The Office phrase inside the bubble — a shimmering gerund in the
+   spirit of the Claude Code spinner. Re-keyed on every phrase so it fades in
+   fresh; the shimmer sweep runs continuously over the text. */
+.thinking-bubble-phrase {
+  position: relative;
+  font-size: var(--text-sm, 13px);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  background: linear-gradient(
+    100deg,
+    var(--text-tertiary) 20%,
+    var(--text-secondary) 45%,
+    var(--text) 50%,
+    var(--text-secondary) 55%,
+    var(--text-tertiary) 80%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation:
+    thinking-phrase-in 0.32s ease-out,
+    thinking-text-shimmer 2.2s linear infinite;
+}
+.thinking-ellipsis {
+  /* Animated trailing dots so a static gerund still feels alive. */
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  color: var(--text-tertiary);
+  animation: thinking-ellipsis-pulse 1.4s steps(1, end) infinite;
+}
+
+@keyframes thinking-phrase-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Block variant — whole-surface loading (feed first fetch). A single
+   line of shimmer text centered in the empty space. */
+.thinking-loader-block {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+.thinking-shimmer-text {
+  font-size: var(--text-sm, 13px);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  background: linear-gradient(
+    100deg,
+    var(--text-tertiary) 30%,
+    var(--text) 50%,
+    var(--text-tertiary) 70%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinking-text-shimmer 1.8s linear infinite;
+}
+.thinking-shimmer-text-cycle {
+  animation:
+    thinking-phrase-in 0.32s ease-out,
+    thinking-text-shimmer 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-bubble::after,
+  .thinking-dot,
+  .thinking-ellipsis,
+  .thinking-bubble-phrase,
+  .thinking-shimmer-text,
+  .thinking-shimmer-text-cycle {
+    animation: none;
+  }
+  .thinking-shimmer-text,
+  .thinking-bubble-phrase {
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+    color: var(--text-secondary);
+  }
+  .thinking-ellipsis {
+    opacity: 0.6;
+  }
+  .thinking-dot {
+    /* Hold dots at a legible mid-state instead of frozen mid-wave. */
+    opacity: 0.6;
+  }
 }
 
 /* ─── Interview bar (inline above composer, mirrors TUI) ─── */
@@ -1629,7 +1826,8 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   padding: 10px 14px;
   width: 100%;
   background: color-mix(in srgb, var(--accent, #2563eb) 6%, var(--bg-card));
-  border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 40%, var(--border));
+  border: 1px solid
+    color-mix(in srgb, var(--accent, #2563eb) 40%, var(--border));
   border-radius: var(--radius-md, 8px);
   display: flex;
   align-items: center;
@@ -1638,7 +1836,9 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 .issue-created-card:hover:not([disabled]) {
   background: color-mix(in srgb, var(--accent, #2563eb) 12%, var(--bg-card));
@@ -1703,7 +1903,11 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
 }
 .issue-created-card--awaiting-approval {
   background: color-mix(in srgb, var(--amber-600, #d97706) 8%, var(--bg-card));
-  border-color: color-mix(in srgb, var(--amber-600, #d97706) 60%, var(--border));
+  border-color: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 60%,
+    var(--border)
+  );
 }
 .issue-created-card--awaiting-approval:hover:not([disabled]) {
   background: color-mix(in srgb, var(--amber-600, #d97706) 14%, var(--bg-card));
@@ -1735,7 +1939,9 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 .issue-lifecycle-card:hover:not([disabled]) {
   filter: brightness(1.04);
@@ -1812,7 +2018,11 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   color: var(--success, #16a34a);
 }
 .issue-lifecycle-card--stop {
-  background: color-mix(in srgb, var(--text-tertiary, #6b7280) 8%, var(--bg-card));
+  background: color-mix(
+    in srgb,
+    var(--text-tertiary, #6b7280) 8%,
+    var(--bg-card)
+  );
   border-color: var(--border);
 }
 .issue-lifecycle-card--stop .issue-lifecycle-card-eyebrow {
@@ -1820,7 +2030,11 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
 }
 .issue-lifecycle-card--warn {
   background: color-mix(in srgb, var(--amber-600, #d97706) 8%, var(--bg-card));
-  border-color: color-mix(in srgb, var(--amber-600, #d97706) 50%, var(--border));
+  border-color: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 50%,
+    var(--border)
+  );
 }
 .issue-lifecycle-card--warn .issue-lifecycle-card-eyebrow,
 .issue-lifecycle-card--warn .issue-lifecycle-card-cta {
@@ -1832,6 +2046,11 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
 }
 
 /* ─── Feed loading / empty states ─── */
+.messages.messages-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .messages-loading-label {
   display: flex;
   flex: 1;

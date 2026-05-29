@@ -25,15 +25,17 @@ async function expectCanonicalRoute(
 }
 
 test.describe("canonical route matrix", () => {
-  test("index redirects to the default channel", async ({ page }) => {
+  test("index redirects to the CEO subspace", async ({ page }) => {
     const getErrors = collectReactErrors(page);
     await gotoRoute(page, "/");
 
-    await expect(page).toHaveURL(/#\/channels\/general$/);
-    await expect(page.locator(".composer-input")).toHaveAttribute(
-      "placeholder",
-      "Message #general",
-    );
+    // v3 MVP default landing is the CEO's subspace (Chat tab), not #general
+    // (see indexRoute.beforeLoad in lib/router.ts). Channels are demoted to
+    // "Legacy".
+    await expect(page).toHaveURL(/#\/agents\/ceo$/);
+    await expect(page.getByTestId("agent-subspace")).toBeVisible({
+      timeout: 10_000,
+    });
     await expectNoReactErrors(page, getErrors, "while redirecting /");
   });
 
@@ -76,39 +78,35 @@ test.describe("canonical route matrix", () => {
     }
   });
 
-  test("task URLs mount the Tasks surface", async ({ page }) => {
-    // /tasks renders the TasksApp kanban directly. The seeded broker may
-    // render the kanban, the empty state, or the loading skeleton depending
-    // on timing, so assert the app-panel test id rather than a specific
-    // sub-surface. The not-found surface testid would mean routing failed.
-    await page.goto("/#/tasks");
-    await expect(page.getByTestId("app-page-tasks")).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(page.getByTestId("route-not-found")).toHaveCount(0);
-
-    // /tasks/$id and /apps/tasks/$id both mount the TasksApp detail view.
-    for (const route of ["/#/tasks/task-7", "/#/apps/tasks/task-7"]) {
+  test("legacy /tasks URLs redirect to the Issues surface", async ({
+    page,
+  }) => {
+    // Tasks were consolidated into Issues (#1002): top-level /tasks and
+    // /tasks/$id redirect to the Issues list, which renders IssuesList
+    // (kanban or its empty state). The /apps/tasks app-panel still mounts
+    // separately and is covered by the app-panel matrix test above.
+    for (const route of ["/#/tasks", "/#/tasks/task-7"]) {
       await page.goto(route);
-      await expect(page.getByTestId("app-page-tasks")).toBeVisible({
-        timeout: 10_000,
-      });
+      await expect(page).toHaveURL(/#\/issues$/, { timeout: 10_000 });
+      await expect(
+        page.locator("[data-testid^='issues-list']").first(),
+      ).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId("route-not-found")).toHaveCount(0);
     }
   });
 
-  test("legacy workbench URLs redirect through to the task detail", async ({
+  test("legacy workbench URLs redirect through to the Issues surface", async ({
     page,
   }) => {
     const getErrors = collectReactErrors(page);
     await gotoRoute(page, "/#/apps/workbench/pm/tasks/task-7");
 
-    // workbench → /tasks/task-7 (legacy redirect) → TasksApp detail.
-    await expect(page).toHaveURL(/#\/tasks\/task-7$/, { timeout: 10_000 });
+    // workbench → legacy task redirect → Issues surface (#1002 consolidation).
+    await expect(page).toHaveURL(/#\/issues/, { timeout: 10_000 });
     await expect(page.getByTestId("route-not-found")).toHaveCount(0);
-    await expect(page.getByTestId("app-page-tasks")).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(
+      page.locator("[data-testid^='issues-list']").first(),
+    ).toBeVisible({ timeout: 10_000 });
     await expectNoReactErrors(
       page,
       getErrors,
