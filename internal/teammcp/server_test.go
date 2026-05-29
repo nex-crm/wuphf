@@ -1048,7 +1048,10 @@ func TestHandleTeamTaskCreateDefaultsOwnerToCaller(t *testing.T) {
 	// docs/specs/issue-execution-loop.md.
 	// Slice 7: MySlug must be ceo (only lead can create); owner
 	// defaults to the caller, so the assertion reads "@ceo".
-	if !strings.Contains(text, "Task task-") || !strings.Contains(text, "is now open @ceo") {
+	// Task IDs follow the workspace prefix (Linear-style, default OFFICE).
+	// We assert the message shape without pinning the exact prefix so the
+	// test survives prefix-from-company-name resolution.
+	if !strings.Contains(text, "Task ") || !strings.Contains(text, "is now open @ceo") {
 		t.Fatalf("expected self-owned drafting (open) task result, got %q", text)
 	}
 
