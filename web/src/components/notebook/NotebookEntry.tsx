@@ -7,6 +7,7 @@ import {
   type ReviewComment,
   type ReviewState,
 } from "../../api/notebook";
+import { stripStandaloneRichArtifactReferenceLines } from "../../lib/richArtifactReferences";
 import ByLineStrip from "./ByLineStrip";
 import DraftStamp from "./DraftStamp";
 import EntryBody from "./EntryBody";
@@ -130,7 +131,10 @@ export default function NotebookEntryView({
         reviewerSlug={entry.reviewer_slug}
       />
 
-      <EntryBody markdown={entry.body_md} onWikiNavigate={onNavigateWiki} />
+      <EntryBody
+        markdown={stripStandaloneRichArtifactReferenceLines(entry.body_md)}
+        onWikiNavigate={onNavigateWiki}
+      />
 
       <NotebookVisualArtifacts
         agentSlug={entry.agent_slug}
