@@ -245,14 +245,18 @@ await openProfile("outreach");
 // Wait for either runtime-grid (editable) or runtime-managed pill (gateway).
 // Outreach's binding is codex (non-gateway) so we expect the grid; the
 // OR-pattern lets us debug into the panel even if the selector raced.
-await page
-  .waitForSelector(".op-runtime-grid, .op-runtime-managed, .agent-profile-panel", {
-    timeout: 8_000,
-  })
-  .catch(async () => {
-    // Snapshot the page to /tmp so we can see WHY the panel didn't mount.
-    await shotPage(page, OUT, "DEBUG-after-profile-click");
-  });
+// If the wait times out, snapshot the page so we can see the failure
+// state, then re-throw so the harness exits non-zero — silently writing
+// a wrong screenshot 04 would be worse than no screenshot at all.
+try {
+  await page.waitForSelector(
+    ".op-runtime-grid, .op-runtime-managed, .agent-profile-panel",
+    { timeout: 8_000 },
+  );
+} catch (err) {
+  await shotPage(page, OUT, "DEBUG-after-profile-click");
+  throw err;
+}
 await page.waitForTimeout(700);
 await shotPage(page, OUT, "04-agent-runtime-editable");
 

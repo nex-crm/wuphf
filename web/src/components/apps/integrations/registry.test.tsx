@@ -42,7 +42,7 @@ describe("integrations/registry", () => {
     // the contract the IntegrationsApp relies on to suppress cards on
     // builds where the Go layer can't service them.
     const ctx = {
-      cfg: { gateway_kinds: [] as never[] },
+      cfg: { gateway_kinds: [] as string[] },
       localStatuses: [],
     };
     for (const d of INTEGRATIONS) {
@@ -61,8 +61,12 @@ describe("integrations/registry", () => {
     // contract lets us read connection state without mounting the body.
     const ctx = {
       cfg: {
-        gateway_kinds: ["openclaw", "openclaw-http", "hermes-agent"],
-      } as never,
+        gateway_kinds: [
+          "openclaw",
+          "openclaw-http",
+          "hermes-agent",
+        ] as string[],
+      },
       localStatuses: [],
     };
     for (const d of INTEGRATIONS) {

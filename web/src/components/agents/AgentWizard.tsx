@@ -1,6 +1,6 @@
 // biome-ignore-all lint/a11y/noStaticElementInteractions: Modal backdrop uses pointer hit-testing while dialog controls retain keyboard handling.
 // biome-ignore-all lint/a11y/useKeyWithClickEvents: Backdrop pointer dismissal is paired with a window Escape listener while the modal is open.
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -97,9 +97,24 @@ function WizardModelPicker({
 }) {
   const options = modelOptionsForKind(providerKind, localStatuses);
   const valueIsCatalog = isCatalogModel(providerKind, value, localStatuses);
-  const [customMode, setCustomMode] = useState(
-    !valueIsCatalog && value !== "",
-  );
+  const [customMode, setCustomMode] = useState(!valueIsCatalog && value !== "");
+  // Re-sync custom mode when the runtime kind switches under us.
+  // Without this, picking a different runtime after entering a custom
+  // model leaves the dropdown stuck in custom mode against the new
+  // catalog (or vice versa).
+  useEffect(() => {
+    const shouldBeCustom =
+      !isCatalogModel(providerKind, value, localStatuses) && value !== "";
+    setCustomMode(shouldBeCustom);
+  }, [providerKind, value, localStatuses]);
+  // useRef-driven focus into the custom input. Matches the
+  // AgentProfilePanel ModelPicker pattern: biome forbids the JSX
+  // autoFocus attribute but the imperative form is sanctioned and the
+  // immediate-focus UX is load-bearing after picking Custom….
+  const customInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (customMode) customInputRef.current?.focus();
+  }, [customMode]);
   const selectValue =
     customMode || !valueIsCatalog
       ? CUSTOM_MODEL_VALUE
@@ -129,9 +144,9 @@ function WizardModelPicker({
       </select>
       {customMode && (
         <input
+          ref={customInputRef}
           className="input"
           type="text"
-          autoFocus={true}
           placeholder="e.g. claude-opus-4-7"
           value={value}
           disabled={disabled}
@@ -493,14 +508,15 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
               </select>
               {form.provider === "inherit" ? (
                 <span className="op-hint">
-                  Inherits the install default. Pick a specific runtime to
-                  pin this agent — you can also change it later from the
-                  agent's profile.
+                  Inherits the install default. Pick a specific runtime to pin
+                  this agent — you can also change it later from the agent's
+                  profile.
                 </span>
               ) : (
                 <span className="op-hint">
-                  This agent will run on {PROVIDER_LABELS[form.provider]} on
-                  every turn. Change anytime from the agent's profile.
+                  This agent will run on{" "}
+                  {PROVIDER_LABELS[form.provider] ?? form.provider} on every
+                  turn. Change anytime from the agent's profile.
                 </span>
               )}
             </div>
@@ -514,18 +530,16 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
                 </span>
               </label>
               <WizardModelPicker
-                providerKind={
-                  form.provider === "inherit" ? "" : form.provider
-                }
+                providerKind={form.provider === "inherit" ? "" : form.provider}
                 value={form.model}
                 disabled={form.provider === "inherit"}
                 onChange={(next) => updateField("model", next)}
                 localStatuses={localStatuses}
               />
               <span className="op-hint">
-                Pick from common models for the chosen runtime, or use
-                "Custom…" to type any model id. Leave on "Use runtime
-                default" to let the runtime decide.
+                Pick from common models for the chosen runtime, or use "Custom…"
+                to type any model id. Leave on "Use runtime default" to let the
+                runtime decide.
               </span>
             </div>
 

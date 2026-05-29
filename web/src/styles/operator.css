@@ -33,6 +33,7 @@
 
 .op-led {
   --led-color: var(--text-tertiary);
+
   display: inline-block;
   width: 8px;
   height: 8px;
@@ -57,9 +58,9 @@
 }
 
 .op-led.is-on {
-  animation: opLedPulse 2.8s ease-in-out infinite;
+  animation: op-led-pulse 2.8s ease-in-out infinite;
 }
-@keyframes opLedPulse {
+@keyframes op-led-pulse {
   0%,
   100% {
     box-shadow:
@@ -458,12 +459,17 @@
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: border-color 140ms ease, box-shadow 140ms ease,
-    transform 140ms ease, background 140ms ease;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease,
+    background 140ms ease;
 }
 .op-list-row:hover {
   border-color: var(--border-strong);
-  box-shadow: 0 1px 0 var(--border-light), 0 8px 18px -10px rgba(0, 0, 0, 0.10);
+  box-shadow:
+    0 1px 0 var(--border-light),
+    0 8px 18px -10px rgba(0, 0, 0, 0.1);
   transform: translateY(-1px);
 }
 .op-list-row:hover .op-list-row-chevron {
@@ -509,7 +515,9 @@
 }
 .op-list-row-chevron {
   color: var(--text-tertiary);
-  transition: transform 140ms ease, color 140ms ease;
+  transition:
+    transform 140ms ease,
+    color 140ms ease;
   flex-shrink: 0;
 }
 
@@ -533,7 +541,9 @@
   color: var(--text-tertiary);
   cursor: pointer;
   align-self: flex-start;
-  transition: color 140ms ease, transform 140ms ease;
+  transition:
+    color 140ms ease,
+    transform 140ms ease;
 }
 .op-detail-back:hover {
   color: var(--text);

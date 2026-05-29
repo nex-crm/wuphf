@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, Xmark } from "iconoir-react";
 
@@ -18,12 +18,6 @@ import {
   post,
 } from "../../api/client";
 import {
-  CUSTOM_MODEL_VALUE,
-  INHERIT_MODEL_VALUE,
-  isCatalogModel,
-  modelOptionsForKind,
-} from "../../lib/modelCatalog";
-import {
   getOfficeTasks,
   listAgentLogTasks,
   type Task,
@@ -32,6 +26,12 @@ import {
 import { useDefaultHarness } from "../../hooks/useConfig";
 import type { HarnessKind } from "../../lib/harness";
 import { resolveHarness } from "../../lib/harness";
+import {
+  CUSTOM_MODEL_VALUE,
+  INHERIT_MODEL_VALUE,
+  isCatalogModel,
+  modelOptionsForKind,
+} from "../../lib/modelCatalog";
 import { router } from "../../lib/router";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
@@ -373,12 +373,31 @@ function ModelPicker({
   // and erasing what the user just keyed.
   const valueIsCatalog = isCatalogModel(kind, value, localStatuses);
   const [customMode, setCustomMode] = useState(!valueIsCatalog && value !== "");
+  // Re-sync custom mode when the runtime kind switches under us: a
+  // codex→claude-code switch can land on a value that's catalog for
+  // claude-code but custom for codex (or vice versa). Without this the
+  // input gets stuck in the wrong mode after a parent rebinds.
+  useEffect(() => {
+    const shouldBeCustom =
+      !isCatalogModel(kind, value, localStatuses) && value !== "";
+    setCustomMode(shouldBeCustom);
+  }, [kind, value, localStatuses]);
+  // Imperative focus on the custom input when it enters custom mode.
+  // biome's a11y/noAutofocus rule forbids the JSX attribute but permits
+  // useRef-driven focus (same pattern as WipeModal); the immediate-focus
+  // behaviour is load-bearing here because the user just clicked Custom…
+  // and expects to start typing without an extra tab.
+  const customInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (customMode) customInputRef.current?.focus();
+  }, [customMode]);
   // selectValue feeds the <select>. While typing in custom mode we keep
   // CUSTOM_MODEL_VALUE so the dropdown stays on "Custom…" rather than
   // jumping around as the user types.
-  const selectValue = customMode || !valueIsCatalog
-    ? CUSTOM_MODEL_VALUE
-    : value || INHERIT_MODEL_VALUE;
+  const selectValue =
+    customMode || !valueIsCatalog
+      ? CUSTOM_MODEL_VALUE
+      : value || INHERIT_MODEL_VALUE;
   return (
     <span style={{ display: "inline-flex", gap: 6, width: "100%" }}>
       <select
@@ -404,9 +423,9 @@ function ModelPicker({
       </select>
       {customMode && (
         <input
+          ref={customInputRef}
           className="input"
           type="text"
-          autoFocus={true}
           placeholder="e.g. claude-3-5-sonnet-latest"
           value={value}
           disabled={disabled}
@@ -466,6 +485,19 @@ function RuntimeSection({
   );
   const [draftModel, setDraftModel] = useState<string>(binding.model ?? "");
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Re-sync draft state when the agent prop swaps (e.g. user picks a
+  // different agent in the sidebar without unmounting the panel). useState
+  // initialisers run only on mount, so without this the picker would show
+  // the previous agent's kind/model until a manual reset.
+  useEffect(() => {
+    setDraftKind(
+      (binding.kind && llmKinds.includes(binding.kind as LLMRuntimeKind)
+        ? (binding.kind as LLMRuntimeKind)
+        : "") as "" | LLMRuntimeKind,
+    );
+    setDraftModel(binding.model ?? "");
+    setSaveError(null);
+  }, [agent.slug, binding.kind, binding.model, llmKinds]);
 
   // Lead agents (CEO, other built-ins) can have their runtime changed from
   // this panel too. The broker's built-in gate only fires on remove, not on
@@ -639,14 +671,27 @@ function EditableName({ agent }: { agent: OfficeMember }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(initial);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Imperative focus when the user enters edit mode. The JSX autoFocus
+  // attribute would also work but is forbidden by biome's a11y rule;
+  // useRef + useEffect mirrors the WipeModal pattern and keeps the
+  // immediate-focus behaviour the user expects when they click the name.
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
 
   // Keep the draft in sync when the underlying member name changes from
   // outside (e.g. another browser tab edited it). React re-mounts the
   // component on a slug switch (key prop on AgentPanelView), so we only
-  // need to track name changes within the same agent.
-  if (!editing && draft !== initial && draft !== agent.name) {
-    setDraft(initial);
-  }
+  // need to track name changes within the same agent. Use useEffect
+  // rather than a setState during render — the latter works but is
+  // brittle if a future refactor adds a second consumer that reads
+  // `draft` between the render and the re-render.
+  useEffect(() => {
+    if (!editing) {
+      setDraft(initial);
+    }
+  }, [initial, editing]);
 
   const mutation = useMutation({
     mutationFn: async (name: string) => {
@@ -704,7 +749,7 @@ function EditableName({ agent }: { agent: OfficeMember }) {
   return (
     <>
       <input
-        autoFocus={true}
+        ref={inputRef}
         className="input"
         value={draft}
         disabled={mutation.isPending}

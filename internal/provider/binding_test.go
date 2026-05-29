@@ -132,7 +132,10 @@ func TestIsGatewayKind(t *testing.T) {
 // list verbatim — if it leaks "openclaw-http" the SettingsApp dropdown will
 // surface a gateway as a global default and the friction-gate purpose is lost.
 func TestLLMProviderKindsExcludesGateways(t *testing.T) {
-	t.Parallel()
+	// Intentionally NOT t.Parallel(): LLMProviderKinds() and GatewayKinds()
+	// read the package-level registry, and another test that calls
+	// RegisterTemporary in parallel could mutate the registry between the
+	// two reads. Sequential execution is enough — the test is fast.
 	llmKinds := LLMProviderKinds()
 	gateway := GatewayKinds()
 	inSet := func(s string, list []string) bool {

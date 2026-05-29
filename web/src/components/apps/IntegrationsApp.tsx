@@ -46,9 +46,9 @@ function HelpBanner() {
       <p className="op-lock-body" style={{ marginBottom: 0 }}>
         Integrations bring agents or messaging streams into the team from
         outside. They are not LLM runtimes — pick those in{" "}
-        <em>Settings → Default runtime</em>. Agent-importing gateways
-        (External Agents) tag their imported agents with a "Managed by
-        &lt;Gateway&gt;" badge in the agent profile.
+        <em>Settings → Default runtime</em>. Agent-importing gateways (External
+        Agents) tag their imported agents with a "Managed by &lt;Gateway&gt;"
+        badge in the agent profile.
       </p>
     </div>
   );
@@ -170,7 +170,7 @@ export function IntegrationsApp() {
 
   const available = INTEGRATIONS.filter((d) => d.isAvailable(ctx));
   const selected = selectedId
-    ? available.find((d) => d.id === selectedId) ?? null
+    ? (available.find((d) => d.id === selectedId) ?? null)
     : null;
 
   return (
@@ -216,7 +216,7 @@ export function IntegrationsApp() {
       ) : (
         <ListView
           ctx={ctx}
-          available={[...available]}
+          available={available}
           onOpen={(id) => setSelectedId(id)}
         />
       )}

@@ -232,7 +232,13 @@ function buildConfigPayload(
   provider: string,
   localProvider: string,
   oaiUrl: string,
-  oaiKey: string,
+  // _oaiKey is intentionally unused on the current write path: the OAI-
+  // compatible endpoint section writes only to provider_endpoints, never
+  // to openclaw_* (gateway config) or to an Anthropic/OpenAI key row.
+  // Kept in the signature so the call site can stay 1:1 with form
+  // state — renaming the parameter to _oaiKey marks the intent for
+  // TypeScript-aware linters without forcing a 4-argument call shape.
+  _oaiKey: string,
   apiKeys: Record<string, string>,
 ): ConfigPayload {
   const payload: ConfigPayload = { memory_backend: "markdown" };
@@ -248,10 +254,9 @@ function buildConfigPayload(
     // NOT write to openclaw_* here — that conflated OpenClaw (a gateway
     // for importing existing agents) with generic OpenAI-compatible HTTP
     // runtimes. OpenClaw is configured through the Integrations app, not
-    // through this onboarding step. The oaiKey field is intentionally
+    // through this onboarding step. The _oaiKey parameter is intentionally
     // unused on this path; users wanting to pair an API key with the
     // endpoint should paste it in the OpenAI API key row above.
-    void oaiKey;
     payload.provider_endpoints = {
       "openai-compatible": { base_url: sanitizeConfigString(oaiUrl) },
     };
@@ -441,8 +446,10 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
           <h1 className="pre-pick-headline">Pick a default runtime.</h1>
           <p className="pre-pick-subhead">
             This is the runtime new agents will inherit when they're created.
-            You can change it later in Settings, and every agent can be moved
-            to a different runtime one at a time from its profile.
+            You can change it later in Settings, and most agents can be moved to
+            a different runtime one at a time from their profile. Agents
+            imported through a gateway (OpenClaw, Hermes) are managed from the
+            Integrations app instead.
           </p>
         </div>
 
