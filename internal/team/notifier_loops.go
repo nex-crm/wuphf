@@ -156,6 +156,17 @@ func (l *Launcher) notifyOfficeChangesLoop() {
 				l.respawnPanesAfterReseed()
 				return
 			}
+			// member_updated covers per-agent provider switches initiated
+			// from the AgentProfilePanel runtime picker. The launcher needs
+			// to drop any pane that was holding the old runtime so the
+			// next dispatch routes through the headless path the new kind
+			// expects. This is best-effort: the worker that picks up the
+			// next turn already reads MemberEffectiveProviderKind, so a
+			// failed pane kill at most leaves a stale claude window
+			// running silently — it won't intercept future dispatches.
+			if evt.Kind == "member_updated" {
+				l.reconcileMemberRuntime(evt.Slug)
+			}
 			if l.broker.HasPendingInterview() {
 				return
 			}

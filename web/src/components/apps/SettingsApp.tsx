@@ -7,6 +7,7 @@ import {
   type ConfigUpdate,
   getConfig,
   getLocalProvidersStatus,
+  type LLMRuntimeKind,
   type LocalProviderStatus,
   resetWorkspace,
   shredWorkspace,
@@ -25,6 +26,7 @@ import {
 } from "../ui/ShredWarning";
 import { showNotice } from "../ui/Toast";
 import { WipeModal } from "../ui/WipeModal";
+import { useOfficeMembers } from "../../hooks/useMembers";
 import { NexConnectPanel } from "./NexConnectPanel";
 import { ImageGenSection } from "./SettingsApp.imageGen";
 import { Field, KeyField, SaveButton } from "./settings/components";
@@ -67,8 +69,69 @@ function useShredAction() {
   };
 }
 
+const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "Opencode",
+  "mlx-lm": "MLX-LM (Apple Silicon)",
+  ollama: "Ollama",
+  exo: "Exo",
+};
+const CLOUD_KINDS: ReadonlySet<LLMRuntimeKind> = new Set([
+  "claude-code",
+  "codex",
+  "opencode",
+]);
+
+// TeamLeadPicker reads the office roster so the human picks from real
+// agents rather than typing a slug. The saved value persists as a slug on
+// the wire (cfg.team_lead_slug) — the picker round-trips through the slug
+// even when the agent's display name later changes, so renaming an agent
+// doesn't break the Team Lead binding. Falls back to a free-text input
+// while the roster is still loading or empty, so the field is never a
+// dead end on a brand-new install.
+function TeamLeadPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (slug: string) => void;
+}) {
+  const { data: members = [], isLoading } = useOfficeMembers();
+  if (isLoading || members.length === 0) {
+    return (
+      <input
+        style={styles.input}
+        placeholder="e.g. ceo"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  const knownSlug = members.some((m) => m.slug === value);
+  return (
+    <select
+      style={styles.input}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">— pick an agent —</option>
+      {members.map((m) => (
+        <option key={m.slug} value={m.slug}>
+          {m.name ? `${m.name} (@${m.slug})` : `@${m.slug}`}
+        </option>
+      ))}
+      {value && !knownSlug && (
+        <option value={value}>@{value} (not in roster)</option>
+      )}
+    </select>
+  );
+}
+
 function GeneralSection({ cfg, save }: SectionProps) {
-  const [provider, setProvider] = useState(cfg.llm_provider ?? "ollama");
+  const [provider, setProvider] = useState<LLMRuntimeKind | "">(
+    (cfg.llm_provider as LLMRuntimeKind | undefined) ?? "claude-code",
+  );
   const [teamLead, setTeamLead] = useState(cfg.team_lead_slug ?? "");
   const [maxConcurrent, setMaxConcurrent] = useState(
     cfg.max_concurrent_agents ? String(cfg.max_concurrent_agents) : "",
@@ -80,6 +143,17 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const [blueprint, setBlueprint] = useState(cfg.blueprint ?? "");
   const [email, setEmail] = useState(cfg.email ?? "");
   const [devUrl, setDevUrl] = useState(cfg.dev_url ?? "");
+
+  const llmKinds: LLMRuntimeKind[] = (cfg.llm_provider_kinds ?? [
+    "claude-code",
+    "codex",
+    "opencode",
+    "mlx-lm",
+    "ollama",
+    "exo",
+  ]) as LLMRuntimeKind[];
+  const cloudKinds = llmKinds.filter((k) => CLOUD_KINDS.has(k));
+  const localKinds = llmKinds.filter((k) => !CLOUD_KINDS.has(k));
 
   const onSave = async () => {
     const patch: ConfigUpdate = {
@@ -103,35 +177,50 @@ function GeneralSection({ cfg, save }: SectionProps) {
         Core runtime settings. These map to CLI flags and config file entries.
       </p>
 
-      <div style={styles.groupTitle}>Runtime</div>
-      <Field label="LLM Provider" hint="--provider">
+      <div style={styles.groupTitle}>Default runtime for new agents</div>
+      <p
+        style={{
+          fontSize: 12,
+          color: "var(--text-tertiary)",
+          margin: "0 0 12px 0",
+          lineHeight: 1.5,
+        }}
+      >
+        Picked for new agents at creation time. Existing agents keep whatever
+        runtime they already have — change those one at a time from each
+        agent's profile (Runtime section). To import OpenClaw or Hermes
+        agents into the team, use the Integrations app — those gateways are
+        not runtimes you assign here.
+      </p>
+      <Field label="Runtime" hint="--provider">
         <select
           style={styles.input}
           value={provider}
-          onChange={(e) => setProvider(e.target.value as typeof provider)}
+          onChange={(e) => setProvider(e.target.value as LLMRuntimeKind | "")}
         >
-          <optgroup label="Cloud">
-            <option value="claude-code">Claude Code</option>
-            <option value="codex">Codex</option>
-            <option value="opencode">Opencode</option>
-          </optgroup>
-          <optgroup label="Local">
-            <option value="mlx-lm">MLX-LM (Apple Silicon)</option>
-            <option value="ollama">Ollama</option>
-            <option value="exo">Exo</option>
-            <option value="hermes-agent">Hermes Agent</option>
-            <option value="openclaw-http">OpenClaw Gateway</option>
-          </optgroup>
+          {cloudKinds.length > 0 && (
+            <optgroup label="Cloud">
+              {cloudKinds.map((kind) => (
+                <option key={kind} value={kind}>
+                  {PROVIDER_LABELS[kind] ?? kind}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {localKinds.length > 0 && (
+            <optgroup label="Local">
+              {localKinds.map((kind) => (
+                <option key={kind} value={kind}>
+                  {PROVIDER_LABELS[kind] ?? kind}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </Field>
       <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agents</div>
-      <Field label="Team Lead" hint="Default agent that leads operations">
-        <input
-          style={styles.input}
-          placeholder="e.g. ceo"
-          value={teamLead}
-          onChange={(e) => setTeamLead(e.target.value)}
-        />
+      <Field label="Team Lead" hint="Agent that leads operations">
+        <TeamLeadPicker value={teamLead} onChange={setTeamLead} />
       </Field>
       <Field label="Max Concurrent" hint="Parallel agent limit">
         <input
@@ -215,6 +304,11 @@ interface LocalProviderMeta {
   blurb: string;
 }
 
+// LOCAL_PROVIDERS lists directly-dispatched local LLM runtimes only. The
+// Hermes Agent and OpenClaw Gateway entries that used to live here were
+// gateway-controlled — they belong in the Integrations app, not the
+// runtime picker, because their job is to import existing agents into the
+// team rather than to back a WUPHF-created agent's turns.
 const LOCAL_PROVIDERS: LocalProviderMeta[] = [
   {
     kind: "mlx-lm",
@@ -233,18 +327,6 @@ const LOCAL_PROVIDERS: LocalProviderMeta[] = [
     label: "Exo",
     blurb:
       "Distributes inference across multiple devices. Useful when you want to pool a Mac Studio + a laptop.",
-  },
-  {
-    kind: "hermes-agent",
-    label: "Hermes Agent",
-    blurb:
-      "Runs WUPHF members through a local Hermes gateway via its OpenAI-compatible API server.",
-  },
-  {
-    kind: "openclaw-http",
-    label: "OpenClaw Gateway",
-    blurb:
-      "Runs WUPHF members through OpenClaw Gateway's OpenAI-compatible Chat Completions endpoint.",
   },
 ];
 
@@ -805,24 +887,38 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
   const [actionProvider, setActionProvider] = useState<string>(
     cfg.action_provider ?? "auto",
   );
-  const [gatewayUrl, setGatewayUrl] = useState(cfg.openclaw_gateway_url ?? "");
-  const [openclawToken, setOpenclawToken] = useState("");
 
   const onSave = async () => {
     const patch: ConfigUpdate = {
       action_provider: actionProvider as ConfigUpdate["action_provider"],
     };
-    if (gatewayUrl) patch.openclaw_gateway_url = gatewayUrl;
-    if (openclawToken) patch.openclaw_token = openclawToken;
     await save(patch);
-    setOpenclawToken("");
   };
 
+  // Gateway-style integrations (OpenClaw, Hermes, Telegram) now live in the
+  // dedicated Integrations app. We keep Action Provider + Workspace here
+  // because they're install-wide config knobs, not gateways — they configure
+  // routing for an existing action surface rather than importing agents.
   return (
     <div>
       <h2 style={styles.sectionTitle}>Integrations</h2>
       <p style={styles.sectionDesc}>
-        External service connections and action providers.
+        Install-wide integration knobs. Connect OpenClaw, Hermes, or Telegram
+        from the{" "}
+        <button
+          type="button"
+          className="btn btn-link"
+          style={{ padding: 0, height: "auto", fontSize: "inherit" }}
+          onClick={() =>
+            void router.navigate({
+              to: "/apps/$appId",
+              params: { appId: "integrations" },
+            })
+          }
+        >
+          Integrations app
+        </button>
+        .
       </p>
 
       <Field label="Action Provider" hint="External action routing">
@@ -836,30 +932,6 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
           <option value="composio">Composio</option>
         </select>
       </Field>
-
-      <div style={{ marginTop: 20 }}>
-        <div style={styles.groupTitle}>OpenClaw</div>
-        <Field label="Gateway URL" hint="WebSocket endpoint">
-          <input
-            style={{
-              ...styles.input,
-              fontFamily: "var(--font-mono)",
-              fontSize: 12,
-            }}
-            placeholder="ws://127.0.0.1:18789"
-            value={gatewayUrl}
-            onChange={(e) => setGatewayUrl(e.target.value)}
-          />
-        </Field>
-        <Field label="Token" hint="Gateway auth token">
-          <KeyField
-            hasValue={Boolean(cfg.openclaw_token_set)}
-            placeholder="oc_..."
-            value={openclawToken}
-            onChange={setOpenclawToken}
-          />
-        </Field>
-      </div>
 
       <div style={{ marginTop: 20 }}>
         <div style={styles.groupTitle}>Workspace</div>
@@ -1361,6 +1433,12 @@ export function SettingsApp() {
                   key={sec.id}
                   style={styles.navItem(sec.id === section)}
                   onClick={() => setSection(sec.id)}
+                  // testid so e2e can disambiguate the Settings section
+                  // buttons from buttons with the same name that live in
+                  // the parent sidebar (e.g. the Integrations sidebar app
+                  // entry shares the "Integrations" accessible name with
+                  // the Settings → Integrations section button).
+                  data-testid={`settings-nav-${sec.id}`}
                 >
                   <Icon style={styles.navIcon} />
                   <span>{sec.name}</span>

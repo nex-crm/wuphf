@@ -1,8 +1,22 @@
-import { useQuery } from "@tanstack/react-query";
-import { Xmark } from "iconoir-react";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Lock, Xmark } from "iconoir-react";
 
-import type { OfficeMember, Skill } from "../../api/client";
-import { getChannels, getSkillsList } from "../../api/client";
+import type {
+  LLMRuntimeKind,
+  LocalProviderStatus,
+  OfficeMember,
+  ProviderBinding,
+  Skill,
+} from "../../api/client";
+import {
+  getChannels,
+  getConfig,
+  getLocalProvidersStatus,
+  getSkillsList,
+  isGatewayBinding,
+  post,
+} from "../../api/client";
 import {
   getOfficeTasks,
   listAgentLogTasks,
@@ -12,9 +26,30 @@ import {
 import { useDefaultHarness } from "../../hooks/useConfig";
 import type { HarnessKind } from "../../lib/harness";
 import { resolveHarness } from "../../lib/harness";
+import {
+  CUSTOM_MODEL_VALUE,
+  INHERIT_MODEL_VALUE,
+  isCatalogModel,
+  modelOptionsForKind,
+} from "../../lib/modelCatalog";
 import { router } from "../../lib/router";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+
+const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "Opencode",
+  "mlx-lm": "MLX-LM",
+  ollama: "Ollama",
+  exo: "Exo",
+};
+
+const GATEWAY_LABELS: Record<string, string> = {
+  openclaw: "OpenClaw",
+  "openclaw-http": "OpenClaw HTTP",
+  "hermes-agent": "Hermes",
+};
 
 interface AgentProfilePanelProps {
   agent: OfficeMember;
@@ -280,37 +315,478 @@ function PermissionsSection({ agent }: { agent: OfficeMember }) {
   );
 }
 
-function ProviderSection({
+function bindingFromMember(
+  provider: OfficeMember["provider"],
+): ProviderBinding {
+  if (!provider) return {};
+  if (typeof provider === "string") {
+    // String form is a legacy shape carrying just the kind. Widen to the
+    // union so downstream code can read `binding.kind` uniformly.
+    return { kind: provider as ProviderBinding["kind"] };
+  }
+  return provider;
+}
+
+// RuntimeSection is the per-agent runtime picker — the surface the user task
+// description calls out as "enable [provider selection] in the agent's
+// settings in the UI." Three rendering paths:
+//
+//  1. Gateway-bound agent (kind ∈ {openclaw, openclaw-http, hermes-agent}):
+//     no picker. We render a "Managed by <Gateway>" pill instead because the
+//     gateway transport is load-bearing — flipping the kind here would orphan
+//     the agent from its imported session. Editing a gateway-bound agent's
+//     runtime is the Integrations app's job, not this panel's.
+//
+//  2. Global runtime unlocked (Settings.LLMProviderUnlocked === true):
+//     picker rendered but read-only with a "Locked by global override" banner,
+//     because the dispatch resolver will ignore the per-agent binding anyway.
+//     We display the value so the user can see what's stored — they just
+//     can't write while the global is overriding.
+//
+//  3. Normal: editable picker with provider + model fields and a Save button.
+
+// ModelPicker is a dropdown of curated model ids for the selected runtime,
+// plus a "Custom…" escape hatch that falls back to a text input for power
+// users. Local runtimes (mlx-lm / ollama / exo) pull their model list from
+// the loopback probe (localStatuses) instead of the hardcoded catalog so
+// the dropdown shows what's actually installed.
+//
+// Empty string is the "Use runtime default" sentinel — saving with that
+// value clears ProviderBinding.Model so each runner picks its own default.
+function ModelPicker({
+  kind,
+  value,
+  disabled,
+  onChange,
+  localStatuses,
+}: {
+  kind: LLMRuntimeKind | "";
+  value: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+  localStatuses: LocalProviderStatus[];
+}) {
+  const options = modelOptionsForKind(kind, localStatuses);
+  // Custom-mode is sticky once entered (selecting Custom… from the
+  // dropdown stays in custom mode even after the underlying text matches
+  // a catalog entry). That avoids the dropdown switching back mid-type
+  // and erasing what the user just keyed.
+  const valueIsCatalog = isCatalogModel(kind, value, localStatuses);
+  const [customMode, setCustomMode] = useState(!valueIsCatalog && value !== "");
+  // Re-sync custom mode when the runtime kind switches under us: a
+  // codex→claude-code switch can land on a value that's catalog for
+  // claude-code but custom for codex (or vice versa). Without this the
+  // input gets stuck in the wrong mode after a parent rebinds.
+  useEffect(() => {
+    const shouldBeCustom =
+      !isCatalogModel(kind, value, localStatuses) && value !== "";
+    setCustomMode(shouldBeCustom);
+  }, [kind, value, localStatuses]);
+  // Imperative focus on the custom input when it enters custom mode.
+  // biome's a11y/noAutofocus rule forbids the JSX attribute but permits
+  // useRef-driven focus (same pattern as WipeModal); the immediate-focus
+  // behaviour is load-bearing here because the user just clicked Custom…
+  // and expects to start typing without an extra tab.
+  const customInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (customMode) customInputRef.current?.focus();
+  }, [customMode]);
+  // selectValue feeds the <select>. While typing in custom mode we keep
+  // CUSTOM_MODEL_VALUE so the dropdown stays on "Custom…" rather than
+  // jumping around as the user types.
+  const selectValue =
+    customMode || !valueIsCatalog
+      ? CUSTOM_MODEL_VALUE
+      : value || INHERIT_MODEL_VALUE;
+  return (
+    <span style={{ display: "inline-flex", gap: 6, width: "100%" }}>
+      <select
+        value={selectValue}
+        disabled={disabled}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (next === CUSTOM_MODEL_VALUE) {
+            setCustomMode(true);
+            // Don't clobber any value the user already had in flight.
+            return;
+          }
+          setCustomMode(false);
+          onChange(next);
+        }}
+        style={{ flex: customMode ? "0 0 130px" : 1 }}
+      >
+        {options.map((o) => (
+          <option key={o.value || "default"} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {customMode && (
+        <input
+          ref={customInputRef}
+          className="input"
+          type="text"
+          placeholder="e.g. claude-3-5-sonnet-latest"
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            flex: 1,
+          }}
+          aria-label="Custom model id"
+        />
+      )}
+    </span>
+  );
+}
+
+function RuntimeSection({
   agent,
   defaultHarness,
 }: {
   agent: OfficeMember;
   defaultHarness: HarnessKind;
 }) {
+  const queryClient = useQueryClient();
+  const configQuery = useQuery({
+    queryKey: ["config"],
+    queryFn: getConfig,
+    staleTime: 30_000,
+  });
+  // localStatuses feeds the ModelPicker with the actual loaded model for
+  // local runtimes (mlx-lm / ollama / exo). The probe is cheap (a single
+  // loopback call) so we share the broker's existing cache key.
+  const localStatusQuery = useQuery({
+    queryKey: ["local-providers-status"],
+    queryFn: getLocalProvidersStatus,
+    staleTime: 30_000,
+  });
+  const localStatuses: LocalProviderStatus[] = localStatusQuery.data ?? [];
+  const llmKinds: LLMRuntimeKind[] = (configQuery.data?.llm_provider_kinds ?? [
+    "claude-code",
+    "codex",
+    "opencode",
+    "mlx-lm",
+    "ollama",
+    "exo",
+  ]) as LLMRuntimeKind[];
+  const globalDefault = configQuery.data?.llm_provider ?? "claude-code";
+
+  const binding = bindingFromMember(agent.provider);
+  const isGateway = isGatewayBinding(agent.provider);
   const harness = resolveHarness(agent.provider, defaultHarness);
-  const providerLabel =
-    typeof agent.provider === "string"
-      ? agent.provider
-      : agent.provider?.model
-        ? `${agent.provider.kind ?? harness} / ${agent.provider.model}`
-        : agent.provider?.kind || harness;
+
+  const [draftKind, setDraftKind] = useState<"" | LLMRuntimeKind>(
+    (binding.kind && llmKinds.includes(binding.kind as LLMRuntimeKind)
+      ? (binding.kind as LLMRuntimeKind)
+      : "") as "" | LLMRuntimeKind,
+  );
+  const [draftModel, setDraftModel] = useState<string>(binding.model ?? "");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Re-sync draft state when the agent prop swaps (e.g. user picks a
+  // different agent in the sidebar without unmounting the panel). useState
+  // initialisers run only on mount, so without this the picker would show
+  // the previous agent's kind/model until a manual reset.
+  useEffect(() => {
+    setDraftKind(
+      (binding.kind && llmKinds.includes(binding.kind as LLMRuntimeKind)
+        ? (binding.kind as LLMRuntimeKind)
+        : "") as "" | LLMRuntimeKind,
+    );
+    setDraftModel(binding.model ?? "");
+    setSaveError(null);
+  }, [agent.slug, binding.kind, binding.model, llmKinds]);
+
+  // Lead agents (CEO, other built-ins) can have their runtime changed from
+  // this panel too. The broker's built-in gate only fires on remove, not on
+  // provider updates — there's no broker-side reason to block here.
+  // Gateway-bound agents are the only non-editable case: their gateway
+  // transport is load-bearing, so changing the kind through this panel
+  // would orphan the imported session. Those go through Integrations.
+  const editable = !isGateway;
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, unknown> = {
+        action: "update",
+        slug: agent.slug,
+      };
+      if (draftKind === "") {
+        // Empty kind means "clear per-agent binding, inherit default".
+        // The broker stores ProviderBinding{} which the resolver treats as
+        // "fall back to global default" at dispatch time.
+        body.provider = { kind: "", model: "" };
+      } else {
+        body.provider = { kind: draftKind, model: draftModel.trim() };
+      }
+      await post("/office-members", body);
+    },
+    onSuccess: () => {
+      setSaveError(null);
+      void queryClient.invalidateQueries({ queryKey: ["office-members"] });
+    },
+    onError: (err: unknown) => {
+      setSaveError(err instanceof Error ? err.message : "Failed to save");
+    },
+  });
+
+  if (isGateway) {
+    const gatewayKind =
+      (typeof agent.provider === "string"
+        ? agent.provider
+        : agent.provider?.kind) || "";
+    const gatewayLabel = GATEWAY_LABELS[gatewayKind] || gatewayKind;
+    return (
+      <div className="agent-profile-section op-runtime">
+        <SectionTitle>runtime</SectionTitle>
+        <div className="op-runtime-grid">
+          <span className="op-runtime-label">managed by</span>
+          <span className="op-runtime-value">
+            <span className="op-runtime-managed">
+              <Lock width={11} height={11} />
+              {gatewayLabel} gateway
+            </span>
+          </span>
+          {binding.model && (
+            <>
+              <span className="op-runtime-label">model</span>
+              <span
+                className="op-runtime-value"
+                style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+              >
+                {binding.model}
+              </span>
+            </>
+          )}
+        </div>
+        <p className="op-runtime-note">
+          This agent was imported through the {gatewayLabel} gateway. Change its
+          runtime from the Integrations app.
+        </p>
+      </div>
+    );
+  }
+
+  const dirty =
+    draftKind !== ((binding.kind as LLMRuntimeKind | undefined) ?? "") ||
+    draftModel.trim() !== (binding.model ?? "").trim();
 
   return (
-    <div className="agent-profile-section">
+    <div className="agent-profile-section op-runtime">
       <SectionTitle>runtime</SectionTitle>
-      <div className="agent-profile-permissions">
-        <div className="agent-profile-perm-row">
-          <span className="agent-profile-perm-label">harness</span>
-          <span className="agent-profile-perm-value">{harness}</span>
-        </div>
-        {providerLabel && providerLabel !== harness && (
-          <div className="agent-profile-perm-row">
-            <span className="agent-profile-perm-label">provider</span>
-            <span className="agent-profile-perm-value">{providerLabel}</span>
-          </div>
-        )}
+      <div className="op-runtime-grid">
+        <span className="op-runtime-label">harness</span>
+        <span
+          className="op-runtime-value"
+          style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+        >
+          {harness}
+        </span>
+        <span className="op-runtime-label">provider</span>
+        <span className="op-runtime-value">
+          <select
+            value={draftKind}
+            disabled={!editable || mutation.isPending}
+            onChange={(e) =>
+              setDraftKind(e.target.value as "" | LLMRuntimeKind)
+            }
+          >
+            <option value="">Inherit default ({globalDefault})</option>
+            {llmKinds.map((kind) => (
+              <option key={kind} value={kind}>
+                {PROVIDER_LABELS[kind] ?? kind}
+              </option>
+            ))}
+          </select>
+        </span>
+        <span className="op-runtime-label">model</span>
+        <span className="op-runtime-value">
+          <ModelPicker
+            kind={draftKind}
+            value={draftModel}
+            disabled={!editable || draftKind === "" || mutation.isPending}
+            onChange={setDraftModel}
+            localStatuses={localStatuses}
+          />
+        </span>
       </div>
+      {draftKind === "" && (
+        <p className="op-runtime-note">
+          Inheriting the install default ({globalDefault}). Pick a specific
+          runtime here to pin this agent.
+        </p>
+      )}
+      {saveError && (
+        <div
+          className="agent-wizard-error"
+          style={{ marginTop: 8 }}
+          role="alert"
+        >
+          {saveError}
+        </div>
+      )}
+      {editable && (
+        <div className="op-runtime-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={!dirty || mutation.isPending}
+            onClick={() => {
+              setDraftKind(
+                (binding.kind &&
+                llmKinds.includes(binding.kind as LLMRuntimeKind)
+                  ? (binding.kind as LLMRuntimeKind)
+                  : "") as "" | LLMRuntimeKind,
+              );
+              setDraftModel(binding.model ?? "");
+              setSaveError(null);
+            }}
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={!dirty || mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
+            {mutation.isPending ? "Saving..." : "Save runtime"}
+          </button>
+        </div>
+      )}
     </div>
+  );
+}
+
+// EditableName replaces the static name display with an inline-edit field.
+// Click the name to edit; Enter or blur saves, Escape cancels. Trimmed
+// empty values are rejected (the name is required at the broker layer
+// anyway). Applies to every agent including the lead — the broker's
+// built-in gate fires only on remove, not on update.
+function EditableName({ agent }: { agent: OfficeMember }) {
+  const queryClient = useQueryClient();
+  const initial = agent.name || agent.slug;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(initial);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Imperative focus when the user enters edit mode. The JSX autoFocus
+  // attribute would also work but is forbidden by biome's a11y rule;
+  // useRef + useEffect mirrors the WipeModal pattern and keeps the
+  // immediate-focus behaviour the user expects when they click the name.
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  // Keep the draft in sync when the underlying member name changes from
+  // outside (e.g. another browser tab edited it). React re-mounts the
+  // component on a slug switch (key prop on AgentPanelView), so we only
+  // need to track name changes within the same agent. Use useEffect
+  // rather than a setState during render — the latter works but is
+  // brittle if a future refactor adds a second consumer that reads
+  // `draft` between the render and the re-render.
+  useEffect(() => {
+    if (!editing) {
+      setDraft(initial);
+    }
+  }, [initial, editing]);
+
+  const mutation = useMutation({
+    mutationFn: async (name: string) => {
+      await post("/office-members", {
+        action: "update",
+        slug: agent.slug,
+        name,
+      });
+    },
+    onSuccess: () => {
+      setSaveError(null);
+      setEditing(false);
+      void queryClient.invalidateQueries({ queryKey: ["office-members"] });
+    },
+    onError: (err: unknown) => {
+      setSaveError(err instanceof Error ? err.message : "Failed to rename");
+    },
+  });
+
+  const commit = () => {
+    const next = draft.trim();
+    if (!next || next === initial) {
+      setDraft(initial);
+      setEditing(false);
+      setSaveError(null);
+      return;
+    }
+    mutation.mutate(next);
+  };
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="agent-panel-name"
+        onClick={() => {
+          setDraft(initial);
+          setEditing(true);
+          setSaveError(null);
+        }}
+        title="Click to rename"
+        style={{
+          background: "transparent",
+          border: 0,
+          padding: 0,
+          font: "inherit",
+          color: "inherit",
+          cursor: "text",
+        }}
+      >
+        {initial}
+      </button>
+    );
+  }
+  return (
+    <>
+      <input
+        ref={inputRef}
+        className="input"
+        value={draft}
+        disabled={mutation.isPending}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setDraft(initial);
+            setEditing(false);
+            setSaveError(null);
+          }
+        }}
+        style={{
+          font: "inherit",
+          padding: "2px 6px",
+          minWidth: 120,
+          maxWidth: 220,
+        }}
+        aria-label="Agent name"
+      />
+      {saveError && (
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--error-400)",
+            marginLeft: 6,
+          }}
+          role="alert"
+        >
+          {saveError}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -325,6 +801,11 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
   });
 
   type ChannelLite = { slug: string; name: string; members?: string[] };
+  // The "channels" cache slot is shared with useChannels() which stores
+  // the full {channels: [...]} envelope, not the array. Normalize on
+  // read so this surface tolerates either shape without crashing — and
+  // without renaming the cache key (which would invite a stale-data
+  // race during the migration).
   const { data: channels = [] as ChannelLite[] } = useQuery<
     ChannelLite[] | { channels?: ChannelLite[] },
     Error,
@@ -333,16 +814,9 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
     queryKey: ["channels"],
     queryFn: () =>
       getChannels().then((r) =>
-        arrayOrEmpty<{ slug: string; name: string; members?: string[] }>(
-          r?.channels,
-        ),
+        arrayOrEmpty<ChannelLite>(r?.channels),
       ),
     refetchInterval: 30_000,
-    // The "channels" cache slot is shared with useChannels() which stores
-    // the full {channels: [...]} envelope, not the array. Normalize on
-    // read so this surface tolerates either shape without crashing — and
-    // without renaming the cache key (which would invite a stale-data
-    // race during the migration).
     select: (data): ChannelLite[] => {
       if (Array.isArray(data)) return data as ChannelLite[];
       const envelope = data as { channels?: ChannelLite[] };
@@ -399,9 +873,7 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
             <div
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
-              <span className="agent-panel-name">
-                {agent.name || agent.slug}
-              </span>
+              <EditableName agent={agent} />
               <span
                 className={`status-dot ${statusClass}`}
                 style={{ marginLeft: -2 }}
@@ -440,8 +912,8 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
           </div>
         ) : null}
 
-        {/* Provider / runtime */}
-        <ProviderSection agent={agent} defaultHarness={defaultHarness} />
+        {/* Per-agent runtime picker */}
+        <RuntimeSection agent={agent} defaultHarness={defaultHarness} />
 
         {/* Skills */}
         <SkillsSection agentSlug={agent.slug} skills={skills} />

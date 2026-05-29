@@ -1,0 +1,605 @@
+/* operator.css — shared visual language for runtime / provider / gateway
+ * surfaces. The aesthetic: an operator's instrument panel for the AI team.
+ * Precision typography, status-LED color semantics, monospace eyebrow
+ * labels, a single accent stripe per card so each surface feels
+ * deliberately placed rather than dropped into a generic grid.
+ *
+ * Covered surfaces:
+ *   - Settings → Default runtime card (.op-lock-card)
+ *   - Integrations app category sections + cards (.op-category, .op-card)
+ *   - AgentProfilePanel runtime section (.op-runtime, .op-row)
+ *   - AgentWizard provider + model fields (inherit .op-eyebrow + chrome)
+ *
+ * Keep this file restricted to the operator-console pattern; do not
+ * bloat it with per-surface one-offs — push those back to the component.
+ */
+
+/* ───────────────────────── Eyebrow / monospace labels */
+
+.op-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.op-eyebrow-strong {
+  color: var(--text-secondary);
+}
+
+/* ───────────────────────── Status LED + label */
+
+.op-led {
+  --led-color: var(--text-tertiary);
+
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--led-color);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--led-color) 18%, transparent),
+    0 0 6px color-mix(in srgb, var(--led-color) 35%, transparent);
+  flex-shrink: 0;
+}
+.op-led.is-on {
+  --led-color: var(--success-400);
+}
+.op-led.is-warn {
+  --led-color: var(--warning-400);
+}
+.op-led.is-off {
+  --led-color: var(--text-tertiary);
+}
+.op-led.is-info {
+  --led-color: #3b82f6;
+}
+
+.op-led.is-on {
+  animation: op-led-pulse 2.8s ease-in-out infinite;
+}
+@keyframes op-led-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--led-color) 18%, transparent),
+      0 0 6px color-mix(in srgb, var(--led-color) 35%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--led-color) 26%, transparent),
+      0 0 10px color-mix(in srgb, var(--led-color) 55%, transparent);
+  }
+}
+
+.op-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.op-status.is-on {
+  color: var(--success-400);
+}
+.op-status.is-warn {
+  color: var(--warning-400);
+}
+.op-status.is-off {
+  color: var(--text-tertiary);
+}
+.op-status.is-info {
+  color: #3b82f6;
+}
+
+/* ───────────────────────── Lock card (Settings master switch) */
+
+.op-lock-card {
+  position: relative;
+  margin-bottom: 16px;
+  padding: 14px 16px 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease;
+}
+.op-lock-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--text-tertiary);
+  transition: background 180ms ease;
+}
+.op-lock-card.is-unlocked {
+  background: var(--warning-100);
+  border-color: var(--warning-200);
+}
+.op-lock-card.is-unlocked::before {
+  background: var(--warning-400);
+}
+
+.op-lock-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.op-lock-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text-tertiary) 12%, transparent);
+  color: var(--text-secondary);
+  transition:
+    transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 200ms ease,
+    color 200ms ease;
+}
+.op-lock-card.is-unlocked .op-lock-icon {
+  background: color-mix(in srgb, var(--warning-400) 18%, transparent);
+  color: var(--warning-500);
+  transform: rotate(-14deg);
+}
+
+.op-lock-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.op-lock-title-text {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.op-lock-body {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0 0 10px 0;
+}
+
+.op-lock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.op-lock-toggle input {
+  appearance: none;
+  width: 32px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  background: var(--neutral-200);
+  position: relative;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+.op-lock-toggle input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  transition: transform 180ms ease;
+}
+.op-lock-toggle input:checked {
+  background: var(--warning-400);
+}
+.op-lock-toggle input:checked::after {
+  transform: translateX(14px);
+}
+
+.op-lock-confirm {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--warning-300);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+.op-lock-confirm-text strong {
+  color: var(--warning-500);
+}
+.op-lock-confirm-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* ───────────────────────── Integrations: category section */
+
+.op-category {
+  margin-bottom: 28px;
+}
+.op-category-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.op-category-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin: 0;
+}
+.op-category-title::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 1px;
+  background: var(--text);
+}
+.op-category-blurb {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  margin: 0;
+  text-align: right;
+  max-width: 60%;
+}
+
+/* ───────────────────────── Integrations: card */
+
+.op-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 16px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+.op-card:hover {
+  border-color: var(--border-strong);
+  box-shadow:
+    0 1px 0 var(--border-light),
+    0 6px 18px -8px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+.op-card-rail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 28px;
+  line-height: 1;
+}
+.op-card-rail::after {
+  content: "";
+  position: absolute;
+  right: -8px;
+  top: 50%;
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  transform: translateY(-50%);
+}
+.op-card-body {
+  min-width: 0;
+}
+.op-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.op-card-title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text);
+}
+.op-card-blurb {
+  margin: 0 0 12px 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.op-card-status-cell {
+  align-self: start;
+  padding-top: 4px;
+}
+
+.op-field-label {
+  display: block;
+  margin-bottom: 4px;
+}
+.op-field-input {
+  width: 100%;
+}
+.op-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+/* ───────────────────────── Runtime section (AgentProfilePanel) */
+
+.op-runtime {
+  /* Inherits the agent-profile-section padding from agents.css; we only
+   * style the inner content so the section header keeps its existing
+   * typographic role. */
+}
+.op-runtime-grid {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  row-gap: 8px;
+  column-gap: 12px;
+  align-items: center;
+}
+.op-runtime-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.op-runtime-value {
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+.op-runtime-value select,
+.op-runtime-value input {
+  width: 100%;
+}
+
+.op-runtime-managed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-warm);
+}
+
+.op-runtime-note {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-strong);
+  background: var(--bg-subtle);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.op-runtime-note.is-warn {
+  border-left-color: var(--warning-400);
+  background: var(--warning-100);
+}
+
+.op-runtime-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+/* ───────────────────────── Hints under form fields */
+
+.op-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  line-height: 1.45;
+}
+
+/* ───────────────────────── Integrations list rows */
+
+.op-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.op-list-row {
+  display: grid;
+  grid-template-columns: 44px 1fr auto 18px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease,
+    background 140ms ease;
+}
+.op-list-row:hover {
+  border-color: var(--border-strong);
+  box-shadow:
+    0 1px 0 var(--border-light),
+    0 8px 18px -10px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+.op-list-row:hover .op-list-row-chevron {
+  transform: translateX(2px);
+  color: var(--text);
+}
+.op-list-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.op-list-row-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.op-list-row-body {
+  min-width: 0;
+}
+.op-list-row-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.2;
+}
+.op-list-row-summary {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  line-height: 1.4;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.op-list-row-status {
+  flex-shrink: 0;
+}
+.op-list-row-chevron {
+  color: var(--text-tertiary);
+  transition:
+    transform 140ms ease,
+    color 140ms ease;
+  flex-shrink: 0;
+}
+
+/* ───────────────────────── Integrations detail header */
+
+.op-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.op-detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  align-self: flex-start;
+  transition:
+    color 140ms ease,
+    transform 140ms ease;
+}
+.op-detail-back:hover {
+  color: var(--text);
+}
+.op-detail-back:hover svg {
+  transform: translateX(-2px);
+}
+.op-detail-back svg {
+  transition: transform 140ms ease;
+}
+
+.op-detail-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.op-detail-id {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: 16px;
+}
+.op-detail-id-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.op-detail-id-text {
+  min-width: 0;
+}
+.op-detail-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text);
+}
+.op-detail-summary {
+  margin: 4px 0 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+.op-detail-status {
+  align-self: flex-start;
+  padding-top: 4px;
+}
+
+.op-detail-body {
+  padding: 4px 2px 0 2px;
+}
