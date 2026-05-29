@@ -322,7 +322,9 @@
 
 .message-artifact-card-clickable {
   cursor: pointer;
-  transition: border-color 80ms, background 80ms;
+  transition:
+    border-color 80ms,
+    background 80ms;
 }
 
 .message-artifact-card-clickable:hover,
@@ -1846,95 +1848,243 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
    real artifact card arrives. Compositor-only animations (background-position
    + opacity) — no layout-bound props. Matches the rough footprint of the
    real .message-artifact-card so the swap doesn't reflow the feed. */
+/*
+ * Artifact skeleton — technical-manual draft preview shown while an HTML
+ * artifact is being generated. Paper-card frame with accent hairlines,
+ * a schematic SVG plotted live, monospace caption, and a slow accent
+ * progress sliver at the bottom. Compositor-only animation throughout.
+ */
 .artifact-skeleton {
-  --artifact-skeleton-shimmer-base: var(--bg-warm);
-  --artifact-skeleton-shimmer-highlight: color-mix(
+  --artifact-skeleton-ink: var(--accent);
+  --artifact-skeleton-ink-soft: color-mix(
     in srgb,
-    var(--accent) 14%,
+    var(--accent) 28%,
+    transparent
+  );
+  --artifact-skeleton-ink-faint: color-mix(
+    in srgb,
+    var(--accent) 12%,
+    transparent
+  );
+  --artifact-skeleton-paper: color-mix(
+    in srgb,
+    var(--bg-warm) 80%,
     var(--bg-card)
   );
+
+  position: relative;
   display: grid;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   max-width: 600px;
-  min-height: 120px;
   margin-top: 8px;
-  padding: 12px 14px;
+  padding: 14px 16px 12px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--artifact-skeleton-ink);
   border-radius: var(--radius-sm);
-  background: var(--bg-card);
+  background: var(--artifact-skeleton-paper);
+  overflow: hidden;
 }
 
 .artifact-skeleton-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs, 11px);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.artifact-skeleton-title {
-  flex: 1;
-  height: 14px;
-  min-width: 120px;
-  max-width: 320px;
-  border-radius: var(--radius-sm);
+.artifact-skeleton-figlabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--artifact-skeleton-ink);
+  font-weight: 600;
 }
 
-.artifact-skeleton-label {
-  flex: 0 0 auto;
+.artifact-skeleton-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--artifact-skeleton-ink);
+  animation: artifact-skeleton-pulse 1.4s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+.artifact-skeleton-meta {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.artifact-skeleton-plot {
+  position: relative;
+  height: 96px;
+  padding: 0;
+}
+
+.artifact-skeleton-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.artifact-skeleton-grid line {
+  stroke: var(--artifact-skeleton-ink-faint);
+  stroke-width: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.artifact-skeleton-stroke {
+  stroke: var(--artifact-skeleton-ink);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 900;
+  stroke-dashoffset: 900;
+  animation: artifact-skeleton-draw 3.6s ease-in-out infinite;
+  will-change: stroke-dashoffset, opacity;
+}
+
+.artifact-skeleton-stroke-b {
+  stroke: var(--artifact-skeleton-ink-soft);
+  stroke-width: 1;
+  animation-delay: 1.1s;
+}
+
+.artifact-skeleton-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-xs, 12px);
   letter-spacing: 0.02em;
 }
 
-.artifact-skeleton-body {
-  display: grid;
-  gap: 8px;
+.artifact-skeleton-caption-text {
+  display: inline-block;
 }
 
-.artifact-skeleton-line {
+.artifact-skeleton-ellipsis {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.artifact-skeleton-ellipsis span {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--text-secondary);
+  opacity: 0.35;
+  animation: artifact-skeleton-tick 1.4s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+.artifact-skeleton-ellipsis span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.artifact-skeleton-ellipsis span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+.artifact-skeleton-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  background: transparent;
+}
+
+.artifact-skeleton-progress-bar {
   display: block;
-  height: 10px;
-  border-radius: var(--radius-sm);
-}
-
-.artifact-skeleton-line-short {
-  width: 60%;
-}
-
-.artifact-skeleton-figure {
-  display: block;
-  height: 36px;
-  border-radius: var(--radius-sm);
-}
-
-.artifact-skeleton-shimmer {
-  background-image: linear-gradient(
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(
     90deg,
-    var(--artifact-skeleton-shimmer-base) 0%,
-    var(--artifact-skeleton-shimmer-highlight) 50%,
-    var(--artifact-skeleton-shimmer-base) 100%
+    transparent 0%,
+    var(--artifact-skeleton-ink-soft) 40%,
+    var(--artifact-skeleton-ink) 70%,
+    var(--artifact-skeleton-ink-soft) 100%
   );
-  background-size: 200% 100%;
-  background-position: 100% 0;
-  animation: artifact-skeleton-shimmer 1.6s ease-in-out infinite;
-  will-change: background-position;
+  transform-origin: left center;
+  transform: scaleX(0);
+  animation: artifact-skeleton-progress 25s cubic-bezier(0.2, 0.7, 0.4, 1)
+    infinite;
+  will-change: transform;
 }
 
-@keyframes artifact-skeleton-shimmer {
+@keyframes artifact-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes artifact-skeleton-draw {
   0% {
-    background-position: 100% 0;
+    stroke-dashoffset: 900;
+    opacity: 0.15;
+  }
+  35% {
+    opacity: 1;
+  }
+  70%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.55;
+  }
+}
+
+@keyframes artifact-skeleton-tick {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes artifact-skeleton-progress {
+  0% {
+    transform: scaleX(0);
+  }
+  60% {
+    transform: scaleX(0.72);
   }
   100% {
-    background-position: -100% 0;
+    transform: scaleX(0.92);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .artifact-skeleton-shimmer {
+  .artifact-skeleton-dot,
+  .artifact-skeleton-stroke,
+  .artifact-skeleton-ellipsis span,
+  .artifact-skeleton-progress-bar {
     animation: none;
-    background-image: none;
-    background-color: var(--artifact-skeleton-shimmer-base);
+  }
+  .artifact-skeleton-stroke {
+    stroke-dashoffset: 0;
+    opacity: 0.55;
+  }
+  .artifact-skeleton-progress-bar {
+    transform: scaleX(0.4);
+  }
+  .artifact-skeleton-ellipsis span {
+    opacity: 0.6;
   }
 }

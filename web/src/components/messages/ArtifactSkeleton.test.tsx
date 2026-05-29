@@ -28,12 +28,14 @@ const BASE_NOW = Date.parse("2026-05-29T12:00:10Z"); // 10s after the message
 
 describe("<ArtifactSkeleton>", () => {
   it("renders the placeholder label so it reads as a draft, not real content", () => {
-    render(<ArtifactSkeleton />);
-    expect(screen.getByText("drafting visual…")).toBeInTheDocument();
-    expect(screen.getByTestId("artifact-skeleton")).toHaveAttribute(
-      "role",
-      "status",
-    );
+    render(<ArtifactSkeleton figureNumber={42} />);
+    expect(screen.getByText("drafting figure")).toBeInTheDocument();
+    // FIG label is rendered so the placeholder reads as a technical figure
+    // being drafted, matching the artifact aesthetic.
+    expect(screen.getByText("FIG_042")).toBeInTheDocument();
+    const root = screen.getByTestId("artifact-skeleton");
+    expect(root).toHaveAttribute("role", "status");
+    expect(root).toHaveAttribute("aria-label", "FIG_042 — drafting figure");
   });
 
   it("respects a custom label so callers can swap copy per surface", () => {

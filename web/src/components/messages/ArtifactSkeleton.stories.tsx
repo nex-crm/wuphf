@@ -5,17 +5,18 @@ import { ArtifactSkeleton } from "./ArtifactSkeleton";
 const meta: Meta<typeof ArtifactSkeleton> = {
   title: "Messages / ArtifactSkeleton",
   component: ArtifactSkeleton,
-  args: { label: "drafting visual…" },
+  args: { label: "drafting figure", figureNumber: 7 },
   parameters: {
     layout: "padded",
     docs: {
       description: {
         component:
-          "Skeletal placeholder rendered after an agent's 'gist' chat message while " +
-          "the visual artifact (HTML article) is still being generated. Replaces the " +
-          "~2 minutes of dead silence in the chat feed between the gist and the " +
-          "artifact card. Shimmer is compositor-only (background-position) so it " +
-          "never triggers layout work.",
+          "Technical-manual draft preview rendered after an agent's gist message " +
+          "while the HTML artifact is still being generated. Frames the wait as " +
+          "FIG_NNN being plotted live on a paper card — schematic SVG self-draws, " +
+          "an accent dot pulses, an ellipsis ticks, and a thin accent sliver at the " +
+          "bottom grows over ~25s. All motion is compositor-only and collapses " +
+          "to a static state under prefers-reduced-motion.",
       },
     },
   },
@@ -29,7 +30,23 @@ export const Default: Story = {};
 
 /** Caller can swap the label for surfaces that produce text rather than charts. */
 export const WritingArticle: Story = {
-  args: { label: "writing article" },
+  args: { label: "writing article", figureNumber: 12 },
+};
+
+/** Demonstrates the reduced-motion fallback so reviewers can confirm the
+ * static state still reads as "draft figure in progress". Toggle the
+ * "prefers-reduced-motion" emulator from the Storybook toolbar to view. */
+export const ReducedMotion: Story = {
+  args: { label: "drafting figure", figureNumber: 18 },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Activate the prefers-reduced-motion media query (toolbar or OS) " +
+          "to see the static, no-animation rendering.",
+      },
+    },
+  },
 };
 
 /**

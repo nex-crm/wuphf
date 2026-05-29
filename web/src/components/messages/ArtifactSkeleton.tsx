@@ -22,38 +22,117 @@ const ARTIFACT_PROMISE_PHRASES: readonly string[] = [
 /** Window after the message for which the skeleton is shown (ms). */
 export const ARTIFACT_SKELETON_RECENCY_WINDOW_MS = 60_000;
 
+interface ArtifactSkeletonProps {
+  /** Caption next to the FIG label. Defaults to "drafting figure". */
+  label?: string;
+  /**
+   * Optional figure number override. Defaults to a stable per-mount pick so
+   * two skeletons rendered in the same channel won't collide on "FIG 001".
+   */
+  figureNumber?: number;
+}
+
 /**
- * The skeleton card itself. Pure presentational: render-time fixed, no
- * intrinsic timers. Triggering / unmount is the caller's job.
+ * Technical-manual draft preview shown while an agent is building an HTML
+ * artifact. Visual language matches the artifact aesthetic (paper card,
+ * accent hairlines, monospace captions, schematic figure being plotted
+ * live) so the loader previews the form factor instead of looking like a
+ * generic shimmer block.
  *
- * Visual size mirrors a typical artifact card frame (~600px × ~120px).
- * Shimmer is compositor-only via `background-position` so it can't trigger
- * layout. `prefers-reduced-motion` is honoured by the CSS (animation: none).
+ * Motion: SVG strokes self-draw via stroke-dashoffset, a pulsing accent
+ * dot signals "live", an ellipsis ticks under the caption, and a thin
+ * accent progress sliver grows over ~25s and loops. All compositor-only.
+ * `prefers-reduced-motion` collapses everything to a static state with
+ * the figure pre-drawn.
+ *
+ * Pure presentational. Triggering and unmount are the caller's job.
  */
 export function ArtifactSkeleton({
-  label = "drafting visual…",
-}: {
-  label?: string;
-} = {}) {
+  label = "drafting figure",
+  figureNumber,
+}: ArtifactSkeletonProps = {}) {
+  const fig = useMemo(
+    () => figureNumber ?? pickStableFigureNumber(),
+    [figureNumber],
+  );
+  const figLabel = `FIG_${fig.toString().padStart(3, "0")}`;
+  const ariaLabel = `${figLabel} — ${label}`;
+
   return (
     <div
       className="artifact-skeleton"
       role="status"
       aria-live="polite"
-      aria-label={label}
+      aria-label={ariaLabel}
       data-testid="artifact-skeleton"
     >
       <div className="artifact-skeleton-head">
-        <span className="artifact-skeleton-title artifact-skeleton-shimmer" />
-        <span className="artifact-skeleton-label">{label}</span>
+        <span className="artifact-skeleton-figlabel">
+          <span className="artifact-skeleton-dot" aria-hidden="true" />
+          {figLabel}
+        </span>
+        <span className="artifact-skeleton-meta" aria-hidden="true">
+          NOTEBOOK · DRAFT
+        </span>
       </div>
-      <div className="artifact-skeleton-body">
-        <span className="artifact-skeleton-line artifact-skeleton-shimmer" />
-        <span className="artifact-skeleton-line artifact-skeleton-line-short artifact-skeleton-shimmer" />
-        <span className="artifact-skeleton-figure artifact-skeleton-shimmer" />
+      <div className="artifact-skeleton-plot" aria-hidden="true">
+        <svg
+          viewBox="0 0 520 96"
+          preserveAspectRatio="none"
+          className="artifact-skeleton-svg"
+          role="presentation"
+          focusable="false"
+        >
+          {/* Hairline grid — paper-light, static */}
+          <g className="artifact-skeleton-grid">
+            <line x1="0" y1="0" x2="520" y2="0" />
+            <line x1="0" y1="32" x2="520" y2="32" />
+            <line x1="0" y1="64" x2="520" y2="64" />
+            <line x1="0" y1="96" x2="520" y2="96" />
+            <line x1="0" y1="0" x2="0" y2="96" />
+            <line x1="130" y1="0" x2="130" y2="96" />
+            <line x1="260" y1="0" x2="260" y2="96" />
+            <line x1="390" y1="0" x2="390" y2="96" />
+            <line x1="520" y1="0" x2="520" y2="96" />
+          </g>
+          {/* Two sketched paths that draw themselves in. Curve A is a
+              rising trend; curve B is a step series. Together they read as
+              "a chart is being plotted" without committing to a specific
+              figure type. */}
+          <path
+            className="artifact-skeleton-stroke artifact-skeleton-stroke-a"
+            d="M8 80 C 80 70, 150 40, 220 36 S 360 22, 510 14"
+            fill="none"
+          />
+          <path
+            className="artifact-skeleton-stroke artifact-skeleton-stroke-b"
+            d="M8 86 L 100 86 L 100 64 L 200 64 L 200 48 L 320 48 L 320 28 L 510 28"
+            fill="none"
+          />
+        </svg>
       </div>
+      <div className="artifact-skeleton-caption">
+        <span className="artifact-skeleton-caption-text">{label}</span>
+        <span className="artifact-skeleton-ellipsis" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      </div>
+      <span className="artifact-skeleton-progress" aria-hidden="true">
+        <span className="artifact-skeleton-progress-bar" />
+      </span>
     </div>
   );
+}
+
+/**
+ * Pick a per-mount figure number in [1, 99]. Deterministic per render but
+ * varies between mounts so two parallel skeletons don't both read "FIG_001".
+ * Uses `Math.random` because there's no semantic meaning — purely visual.
+ */
+function pickStableFigureNumber(): number {
+  return Math.floor(Math.random() * 99) + 1;
 }
 
 /**
