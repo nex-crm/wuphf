@@ -46,6 +46,16 @@ export interface RichArtifact {
   // best-effort state from promotedWikiPath when promotion is absent (see
   // resolveArtifactDestination).
   promotion?: ArtifactPromotion;
+  // attached_to_notebook_entry is the artifact's notebook home, set by the
+  // broker when the artifact is created against a source_markdown_path that
+  // resolves to a known notebook entry. Even draft artifacts get this set,
+  // so the chat link card can deep-link the user to the entry page (which
+  // embeds the artifact inline via NotebookVisualArtifacts) instead of the
+  // standalone /articles/$id viewer.
+  attached_to_notebook_entry?: {
+    owner_slug: string;
+    entry_slug: string;
+  } | null;
 }
 
 export interface RichArtifactDetail {
@@ -161,7 +171,10 @@ function stripWikiSuffix(path: string): string {
 }
 
 export function resolveArtifactDestination(
-  artifact: Pick<RichArtifact, "id" | "promotion" | "promotedWikiPath">,
+  artifact: Pick<
+    RichArtifact,
+    "id" | "promotion" | "promotedWikiPath" | "attached_to_notebook_entry"
+  >,
 ): ArtifactDestination {
   const promotion = artifact.promotion;
   if (promotion?.status === "promoted_to_wiki" && promotion.wiki_path) {
@@ -180,6 +193,20 @@ export function resolveArtifactDestination(
       params: {
         agentSlug: promotion.owner_slug,
         entrySlug: promotion.entry_slug,
+      },
+    };
+  }
+  // Draft artifacts that are nonetheless attached to a notebook entry should
+  // route to that entry — the entry page embeds the artifact inline via
+  // NotebookVisualArtifacts, so the user sees the visual in its natural
+  // home instead of the bare /articles/$id viewer.
+  const attached = artifact.attached_to_notebook_entry;
+  if (attached?.owner_slug && attached.entry_slug) {
+    return {
+      to: "/notebooks/$agentSlug/$entrySlug",
+      params: {
+        agentSlug: attached.owner_slug,
+        entrySlug: attached.entry_slug,
       },
     };
   }

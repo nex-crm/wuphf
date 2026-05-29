@@ -171,6 +171,67 @@ describe("rich artifact API", () => {
       });
     });
 
+    it("routes draft artifacts to their attached notebook entry home", () => {
+      const dest = resolveArtifactDestination({
+        id: ARTIFACT.id,
+        promotion: { status: "draft" },
+        attached_to_notebook_entry: {
+          owner_slug: "barista",
+          entry_slug: "extraction-yield",
+        },
+      });
+      expect(dest).toEqual({
+        to: "/notebooks/$agentSlug/$entrySlug",
+        params: { agentSlug: "barista", entrySlug: "extraction-yield" },
+      });
+    });
+
+    it("attached_to_notebook_entry resolves even when promotion is absent", () => {
+      const dest = resolveArtifactDestination({
+        id: ARTIFACT.id,
+        attached_to_notebook_entry: {
+          owner_slug: "pm",
+          entry_slug: "kickoff-notes",
+        },
+      });
+      expect(dest).toEqual({
+        to: "/notebooks/$agentSlug/$entrySlug",
+        params: { agentSlug: "pm", entrySlug: "kickoff-notes" },
+      });
+    });
+
+    it("promoted_to_wiki still wins over attached_to_notebook_entry", () => {
+      // If the artifact was already promoted to the wiki, the wiki is the
+      // canonical home; the notebook attachment is its historical origin.
+      const dest = resolveArtifactDestination({
+        id: ARTIFACT.id,
+        promotion: {
+          status: "promoted_to_wiki",
+          wiki_path: "team/reference/coffee.md",
+        },
+        attached_to_notebook_entry: {
+          owner_slug: "barista",
+          entry_slug: "extraction-yield",
+        },
+      });
+      expect(dest).toEqual({
+        to: "/wiki/$",
+        params: { _splat: "team/reference/coffee" },
+      });
+    });
+
+    it("null attached_to_notebook_entry falls through to /articles", () => {
+      const dest = resolveArtifactDestination({
+        id: ARTIFACT.id,
+        promotion: { status: "draft" },
+        attached_to_notebook_entry: null,
+      });
+      expect(dest).toEqual({
+        to: "/articles/$articleId",
+        params: { articleId: ARTIFACT.id },
+      });
+    });
+
     it("legacy promotedWikiPath still routes to the wiki when promotion is absent", () => {
       const dest = resolveArtifactDestination({
         id: ARTIFACT.id,

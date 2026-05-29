@@ -93,6 +93,29 @@ describe("<MessageArtifactReferences> destination routing", () => {
     });
   });
 
+  it("navigates to the notebook entry home for a draft attached to a notebook", async () => {
+    vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue(
+      makeDetail({
+        promotion: { status: "draft" },
+        attached_to_notebook_entry: {
+          owner_slug: "pm",
+          entry_slug: "kickoff-notes",
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithQueryClient(
+      <MessageArtifactReferences artifactIds={["ra_0123456789abcdef"]} />,
+    );
+    const card = await screen.findByRole("button", {
+      name: "Open article: Coffee extraction science",
+    });
+    await user.click(card);
+    await waitFor(() => {
+      expect(window.location.hash).toBe("#/notebooks/pm/kickoff-notes");
+    });
+  });
+
   it("falls back to /articles/$id for unpromoted drafts", async () => {
     vi.spyOn(richApi, "fetchRichArtifact").mockResolvedValue(
       makeDetail({ promotion: { status: "draft" } }),
