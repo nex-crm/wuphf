@@ -353,14 +353,20 @@ func (b *Broker) postIssueCreatedCardLocked(actor string, task *teamTask) {
 	}
 	b.counter++
 	b.appendMessageLocked(channelMessage{
-		ID:           fmt.Sprintf("msg-%d", b.counter),
-		From:         "system",
-		Channel:      taskChannel,
-		Kind:         "issue_created",
-		Title:        title,
-		Content:      fmt.Sprintf("Issue created: %s — %s", task.ID, title),
-		Tagged:       dedupeReassignTags([]string{"ceo", strings.TrimSpace(task.Owner), actor}),
-		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "system",
+		Channel:   taskChannel,
+		Kind:      "issue_created",
+		Title:     title,
+		Content:   fmt.Sprintf("Issue created: %s — %s", task.ID, title),
+		Tagged:    dedupeReassignTags([]string{"ceo", strings.TrimSpace(task.Owner), actor}),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		// ReplyTo folds the card into the originating chat thread so
+		// subsequent messages in that thread appear after the card
+		// rather than the card visually floating "above" newer chat
+		// activity in its own top-level slot. task.ThreadID is set at
+		// create time from the agent's MCP call.
+		ReplyTo:      strings.TrimSpace(task.ThreadID),
 		SourceTaskID: task.ID,
 		Payload:      raw,
 	})
@@ -379,6 +385,16 @@ func (b *Broker) postIssueCreatedCardLocked(actor string, task *teamTask) {
 // "no one is listening" comment. Tag dedupe + ordering follows the
 // existing dedupeReassignTags helper.
 //
+// Content shape (load-bearing): the broker emits an instructional brief
+// the woken agent reads — "reply via team_task action=comment, do NOT
+// change lifecycle state" — INSTEAD of the raw comment body. Without
+// this hint, agents historically interpreted the comment text as a
+// chat directive and started executing work on un-approved Issues
+// rather than answering the comment thread. The full body still lives
+// on the packet feedback log (AppendPacketFeedbackLocked, called by
+// the handler before this) and in the structured Payload below so the
+// FE card can show the excerpt.
+//
 // Must be called while b.mu is held for write.
 func (b *Broker) postIssueCommentBroadcastLocked(actor string, task *teamTask, body string) {
 	if task == nil {
@@ -396,12 +412,14 @@ func (b *Broker) postIssueCommentBroadcastLocked(actor string, task *teamTask, b
 	if title == "" {
 		title = task.ID
 	}
+	owner := strings.TrimSpace(task.Owner)
+	lifecycleState := string(task.LifecycleState)
 
 	// Build the tagged list. Always include CEO + the Issue owner so
 	// they see clarifications even when no one @-mentioned them. Add
 	// any @slug parsed from the body so multi-agent threads work.
 	tagged := []string{"ceo"}
-	if owner := strings.TrimSpace(task.Owner); owner != "" {
+	if owner != "" {
 		tagged = append(tagged, owner)
 	}
 	tagged = append(tagged, parseAtMentions(body)...)
@@ -412,17 +430,57 @@ func (b *Broker) postIssueCommentBroadcastLocked(actor string, task *teamTask, b
 		excerpt = strings.TrimSpace(excerpt[:500]) + "…"
 	}
 
+	payload := map[string]string{
+		"task_id":         task.ID,
+		"title":           title,
+		"owner":           owner,
+		"channel":         taskChannel,
+		"lifecycle_state": lifecycleState,
+		"author":          actor,
+		"excerpt":         excerpt,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	// Instructional brief the woken agent reads. Tells them WHERE to
+	// reply (the Issue's comment thread, not chat) and explicitly
+	// forbids lifecycle changes from this signal alone. The actual
+	// comment text is structured under Payload + on the packet, so
+	// the agent can fetch it deliberately when ready to reply.
+	stateHint := ""
+	if lifecycleState != "" {
+		stateHint = fmt.Sprintf(" (state: %s)", lifecycleState)
+	}
+	authorLabel := actor
+	if authorLabel == "" {
+		authorLabel = "Someone"
+	}
+	content := fmt.Sprintf(
+		"@%s commented on Issue %s%s — %s.\n"+
+			"Reply via team_task action=comment on this Issue. "+
+			"Do NOT change its lifecycle state from this comment alone.",
+		authorLabel,
+		task.ID,
+		stateHint,
+		title,
+	)
+
 	b.counter++
 	b.appendMessageLocked(channelMessage{
-		ID:           fmt.Sprintf("msg-%d", b.counter),
-		From:         actor,
-		Channel:      taskChannel,
-		Kind:         "issue_comment",
-		Title:        title,
-		Content:      fmt.Sprintf("Comment on %s — %s\n\n%s", task.ID, title, excerpt),
-		Tagged:       tagged,
-		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "system",
+		Channel:   taskChannel,
+		Kind:      "issue_comment",
+		Title:     title,
+		Content:   content,
+		Tagged:    tagged,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		// Fold into the Issue's originating thread (see postIssueCreatedCardLocked).
+		ReplyTo:      strings.TrimSpace(task.ThreadID),
 		SourceTaskID: task.ID,
+		Payload:      raw,
 	})
 }
 
@@ -525,19 +583,67 @@ func (b *Broker) postIssueLifecycleCardLocked(task *teamTask, from, to Lifecycle
 	tagged = dedupeReassignTags(tagged)
 
 	human := issueLifecycleHumanLine(transition, task.ID, title, owner)
+
+	// Coalesce: if a recent (<10s) issue_lifecycle card for the SAME
+	// task is still in the message log, drop it before appending the
+	// new card. This collapses multi-step flows that a user perceives
+	// as ONE action (e.g. Approve & Start fires Drafting→Approved
+	// AND Approved→Running back-to-back). Without this, the channel
+	// shows two lifecycle cards for one click. The 10s window is
+	// conservative — typical multi-step flows complete in under 1s.
+	b.coalesceRecentLifecycleCardLocked(task.ID, 10*time.Second)
+
 	b.counter++
 	b.appendMessageLocked(channelMessage{
-		ID:           fmt.Sprintf("msg-%d", b.counter),
-		From:         "system",
-		Channel:      taskChannel,
-		Kind:         "issue_lifecycle",
-		Title:        title,
-		Content:      human,
-		Tagged:       tagged,
-		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "system",
+		Channel:   taskChannel,
+		Kind:      "issue_lifecycle",
+		Title:     title,
+		Content:   human,
+		Tagged:    tagged,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		// Fold into the Issue's originating thread (see postIssueCreatedCardLocked).
+		ReplyTo:      strings.TrimSpace(task.ThreadID),
 		SourceTaskID: task.ID,
 		Payload:      raw,
 	})
+}
+
+// coalesceRecentLifecycleCardLocked removes any issue_lifecycle card
+// for taskID emitted within the last `window`. Used to collapse a
+// burst of lifecycle transitions (e.g. Drafting→Approved→Running on
+// a single Approve & Start click) into the most recent card, so the
+// channel does not stack redundant cards for what a user reads as one
+// action.
+//
+// Walks newest-first and stops at the first message older than the
+// window. Returns the number of cards removed.
+//
+// Caller must hold b.mu for write.
+func (b *Broker) coalesceRecentLifecycleCardLocked(taskID string, window time.Duration) int {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || len(b.messages) == 0 {
+		return 0
+	}
+	cutoff := time.Now().UTC().Add(-window)
+	removed := 0
+	for i := len(b.messages) - 1; i >= 0; i-- {
+		msg := b.messages[i]
+		ts, err := time.Parse(time.RFC3339, msg.Timestamp)
+		if err == nil && ts.Before(cutoff) {
+			break
+		}
+		if msg.Kind != "issue_lifecycle" {
+			continue
+		}
+		if strings.TrimSpace(msg.SourceTaskID) != taskID {
+			continue
+		}
+		b.messages = append(b.messages[:i], b.messages[i+1:]...)
+		removed++
+	}
+	return removed
 }
 
 // issueLifecycleHumanLine renders the plain-text fallback that shows in

@@ -28,6 +28,10 @@ import {
   useArtifactSkeletonTrigger,
 } from "./ArtifactSkeleton";
 import {
+  IssueCommentCard,
+  parseIssueCommentPayload,
+} from "./cards/IssueCommentCard";
+import {
   IssueCreatedCard,
   parseIssueCreatedPayload,
 } from "./cards/IssueCreatedCard";
@@ -186,6 +190,16 @@ export function MessageBubble({
   if (message.kind === "issue_created") {
     const payload = parseIssueCreatedPayload(message.payload);
     return <IssueCreatedCard payload={payload} />;
+  }
+
+  // PR-style Issue comment card. Broker emits one per
+  // POST /tasks/{id}/comment with a brief instructional content the
+  // agent loop wakes on; the card body shows the actual comment as a
+  // distinct chat surface so the human's question on the Issue does
+  // not look like a free-form chat ask.
+  if (message.kind === "issue_comment") {
+    const payload = parseIssueCommentPayload(message.payload);
+    return <IssueCommentCard payload={payload} />;
   }
 
   // Lifecycle transition cards (Drafting→Running, →Done, etc). Broker

@@ -473,6 +473,12 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// this restore, the block silently disappears when the
 			// human clicks Approve & Start.
 			depBlocked := b.tasks[len(b.tasks)-1].blocked
+			// Blank the legacy-derived LifecycleState before applying
+			// Drafting so the prev=="" guard in applyLifecycleStateLocked
+			// suppresses the (otherwise) redundant issue_lifecycle chat
+			// card on Issue creation — postIssueCreatedCardLocked below
+			// is the one card we want for the create event.
+			b.tasks[len(b.tasks)-1].LifecycleState = ""
 			_ = b.applyLifecycleStateLocked(&b.tasks[len(b.tasks)-1], LifecycleStateDrafting)
 			if depBlocked {
 				b.tasks[len(b.tasks)-1].blocked = true

@@ -1950,6 +1950,93 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   outline-color: var(--amber-600, #d97706);
 }
 
+/* ─── Issue comment card ──────────────────────────────────────────────
+   System-authored card emitted on POST /tasks/{id}/comment. Same
+   banner pattern as IssueCreatedCard so the comment is visually
+   distinct from a free-form chat bubble. */
+.issue-comment-card {
+  margin: 8px 0;
+  padding: 10px 14px;
+  width: 100%;
+  background: color-mix(in srgb, var(--accent, #2563eb) 4%, var(--bg-card));
+  border: 1px solid
+    color-mix(in srgb, var(--accent, #2563eb) 30%, var(--border));
+  border-radius: var(--radius-md, 8px);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.issue-comment-card:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--accent, #2563eb) 10%, var(--bg-card));
+  border-color: var(--accent, #2563eb);
+}
+.issue-comment-card:focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: 2px;
+}
+.issue-comment-card[disabled] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.issue-comment-card-icon {
+  font-size: 18px;
+  line-height: 1.2;
+  padding-top: 1px;
+}
+.issue-comment-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.issue-comment-card-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent, #2563eb);
+}
+.issue-comment-card-id {
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.issue-comment-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issue-comment-card-excerpt {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.issue-comment-card-cta {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent, #2563eb);
+  white-space: nowrap;
+  align-self: flex-start;
+  padding-top: 2px;
+}
+
 /* ─── Issue lifecycle transition card ───────────────────────────────── */
 .issue-lifecycle-card {
   margin: 8px 0;
