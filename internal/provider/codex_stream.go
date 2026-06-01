@@ -64,9 +64,15 @@ type codexJSONContentPart struct {
 }
 
 type codexStreamState struct {
-	deltaText           strings.Builder
-	pendingTextBreak    bool
-	sawTextDelta        bool
+	deltaText        strings.Builder
+	pendingTextBreak bool
+	// sawTextDeltaByID tracks, per message/item ID, whether a streaming text
+	// delta was already relayed for that message. It is message-scoped (not a
+	// single turn-wide bool) so a turn that streams deltas for one message and
+	// then reports a LATER message only as a completed item still emits the
+	// later message's text — a turn-wide bool would suppress every
+	// completed-only message after the first streamed one.
+	sawTextDeltaByID    map[string]bool
 	completedMessages   []string
 	completedMessageSet map[string]struct{}
 	emittedMessageSet   map[string]struct{}
@@ -85,6 +91,7 @@ type codexStreamState struct {
 func ReadCodexJSONStream(r io.Reader, onEvent func(CodexStreamEvent)) (CodexStreamResult, error) {
 	var result CodexStreamResult
 	state := codexStreamState{
+		sawTextDeltaByID:    make(map[string]bool),
 		completedMessageSet: make(map[string]struct{}),
 		emittedMessageSet:   make(map[string]struct{}),
 		reasoningSeen:       make(map[string]struct{}),
@@ -136,12 +143,17 @@ func ReadCodexJSONStream(r io.Reader, onEvent func(CodexStreamEvent)) (CodexStre
 			// that mode the delta path above never fires, so the runner would
 			// see no "text" event — first_text_ms stays -1 and the live-chat
 			// relay never gets the spoken output. Emit the completed message
-			// as a text event when no deltas were seen for it, so the
+			// as a text event when no deltas were seen for THIS message, so the
 			// item.completed shape drives the same progress surface as the
-			// streaming shape. Guard with emittedMessageSet so a turn that
-			// both streams deltas AND closes with a matching completed item
-			// (the response.* shape) does not double-feed the relay.
-			if !state.sawTextDelta {
+			// streaming shape. Suppression is keyed per message ID
+			// (sawTextDeltaByID), not a single turn-wide flag: a mixed-shape
+			// turn that streams deltas for one message and then reports a later
+			// message only as a completed item must still emit the later
+			// message's text. Guard with emittedMessageSet so a turn that both
+			// streams deltas AND closes with a matching completed item (the
+			// response.* shape) does not double-feed the relay.
+			msgID := strings.TrimSpace(codexMessageIDFromEvent(event))
+			if !state.sawTextDeltaByID[msgID] {
 				if _, emitted := state.emittedMessageSet[text]; !emitted {
 					state.emittedMessageSet[text] = struct{}{}
 					if onEvent != nil {
@@ -190,7 +202,9 @@ func (s *codexStreamState) consumeTextDelta(event codexJSONEvent, onEvent func(C
 	if text == "" {
 		return
 	}
-	s.sawTextDelta = true
+	// Record the delta per message ID so the completed-message path only
+	// suppresses a completed item whose own message already streamed deltas.
+	s.sawTextDeltaByID[strings.TrimSpace(codexMessageIDFromEvent(event))] = true
 	if s.pendingTextBreak && s.deltaText.Len() > 0 {
 		s.deltaText.WriteString("\n\n")
 		if onEvent != nil {
@@ -436,6 +450,16 @@ func itemIDFromEvent(event codexJSONEvent) string {
 		return ""
 	}
 	return strings.TrimSpace(event.Item.ID)
+}
+
+// codexMessageIDFromEvent resolves the message/item identifier a text event
+// belongs to. Delta events (response.output_text.delta) and
+// response.output_text.done carry it in item_id; item-shaped completions
+// (response.output_item.done / item.completed) carry it on the nested item.
+// Used to scope text-delta dedup per message so a completed-only message in a
+// mixed-shape turn is not suppressed by an earlier streamed message.
+func codexMessageIDFromEvent(event codexJSONEvent) string {
+	return strings.TrimSpace(firstNonEmpty(event.ItemID, itemIDFromEvent(event)))
 }
 
 func toolNameFromEvent(event codexJSONEvent) string {

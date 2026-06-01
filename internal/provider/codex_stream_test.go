@@ -158,6 +158,51 @@ func TestReadCodexJSONStreamCompletedMessageNotDoubledWithDeltas(t *testing.T) {
 	}
 }
 
+// TestReadCodexJSONStreamMixedShapeEmitsBothMessages guards the
+// message-scoped dedup: a turn that streams response.output_text.delta for
+// one message (id m1) AND later reports a SECOND message only as a completed
+// item (id m2) must emit text events for BOTH. A turn-wide sawTextDelta flag
+// would suppress the completed-only second message because a delta had been
+// seen earlier in the turn — that is the missed-relay regression this test
+// pins. The IDs differ, so per-message dedup must let m2 through.
+func TestReadCodexJSONStreamMixedShapeEmitsBothMessages(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"type":"response.output_text.delta","item_id":"m1","delta":"First "}`,
+		`{"type":"response.output_text.delta","item_id":"m1","delta":"message."}`,
+		`{"type":"response.output_item.done","item":{"id":"m1","type":"message","content":[{"type":"output_text","text":"First message."}]}}`,
+		`{"type":"item.completed","item":{"id":"m2","type":"agent_message","text":"Second message."}}`,
+		`{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":4}}`,
+	}, "\n")
+
+	var textPayloads []string
+	result, err := ReadCodexJSONStream(strings.NewReader(stream), func(evt CodexStreamEvent) {
+		if evt.Type == "text" {
+			textPayloads = append(textPayloads, evt.Text)
+		}
+	})
+	if err != nil {
+		t.Fatalf("ReadCodexJSONStream: %v", err)
+	}
+	// m1: two deltas (no completed double, same item_id). m2: one completed
+	// emission (no deltas for m2, so it must not be suppressed). Delta text is
+	// trimmed by the parser, so "First " arrives as "First".
+	wantText := []string{"First", "message.", "Second message."}
+	if len(textPayloads) != len(wantText) {
+		t.Fatalf("expected %d text events %v, got %d: %v", len(wantText), wantText, len(textPayloads), textPayloads)
+	}
+	for i, want := range wantText {
+		if textPayloads[i] != want {
+			t.Fatalf("text event %d = %q, want %q (all: %v)", i, textPayloads[i], want, textPayloads)
+		}
+	}
+	if !containsString(textPayloads, "Second message.") {
+		t.Fatalf("completed-only second message was suppressed: %v", textPayloads)
+	}
+	if result.FinalMessage != "First message.\n\nSecond message." {
+		t.Fatalf("FinalMessage = %q, want %q", result.FinalMessage, "First message.\n\nSecond message.")
+	}
+}
+
 func containsString(haystack []string, needle string) bool {
 	for _, s := range haystack {
 		if s == needle {
