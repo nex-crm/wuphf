@@ -168,18 +168,22 @@ func TestPostIssueCommentBroadcastsInstructionalBrief(t *testing.T) {
 		t.Fatalf("unexpected comment status %d: %s", commentResp.StatusCode, raw)
 	}
 
-	var commentMsg *channelMessage
+	var (
+		commentMsg channelMessage
+		found      bool
+	)
 	b.mu.Lock()
 	for i := range b.messages {
 		msg := &b.messages[i]
 		if msg.SourceTaskID == taskID && msg.Kind == "issue_comment" {
-			commentMsg = msg
+			commentMsg = *msg
+			found = true
 			break
 		}
 	}
 	b.mu.Unlock()
 
-	if commentMsg == nil {
+	if !found {
 		t.Fatalf("expected an issue_comment chat message for task %s", taskID)
 	}
 
