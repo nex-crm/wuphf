@@ -243,6 +243,24 @@ describe("rich artifact API", () => {
       });
     });
 
+    it("legacy promotedWikiPath wins over attached_to_notebook_entry when promotion is absent", () => {
+      // A backfilled legacy artifact can carry BOTH the legacy wiki path and
+      // a notebook attachment. The wiki page is its canonical home, so the
+      // wiki branch must win — mirroring the promoted_to_wiki precedence.
+      const dest = resolveArtifactDestination({
+        id: ARTIFACT.id,
+        promotedWikiPath: "team/reference/coffee.md",
+        attached_to_notebook_entry: {
+          owner_slug: "barista",
+          entry_slug: "extraction-yield",
+        },
+      });
+      expect(dest).toEqual({
+        to: "/wiki/$",
+        params: { _splat: "team/reference/coffee" },
+      });
+    });
+
     it("explicit draft promotion overrides legacy promotedWikiPath", () => {
       // Older artifacts that were drafted, promoted, then unpromoted could
       // carry both fields. The new promotion field is the source of truth.

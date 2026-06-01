@@ -196,6 +196,18 @@ export function resolveArtifactDestination(
       },
     };
   }
+  // Legacy fallback for artifacts emitted before the promotion field
+  // existed: if we know a wiki path was set, route there. This must run
+  // BEFORE the attached_to_notebook_entry branch — a backfilled legacy
+  // artifact can carry BOTH fields, and the wiki page is its canonical home
+  // (the notebook attachment is only its historical origin). Mirrors the
+  // promoted_to_wiki vs attached_to_notebook_entry precedence above.
+  if (!promotion && artifact.promotedWikiPath) {
+    return {
+      to: "/wiki/$",
+      params: { _splat: stripWikiSuffix(artifact.promotedWikiPath) },
+    };
+  }
   // Draft artifacts that are nonetheless attached to a notebook entry should
   // route to that entry — the entry page embeds the artifact inline via
   // NotebookVisualArtifacts, so the user sees the visual in its natural
@@ -208,14 +220,6 @@ export function resolveArtifactDestination(
         agentSlug: attached.owner_slug,
         entrySlug: attached.entry_slug,
       },
-    };
-  }
-  // Legacy fallback for artifacts emitted before the promotion field
-  // existed: if we know a wiki path was set, route there.
-  if (!promotion && artifact.promotedWikiPath) {
-    return {
-      to: "/wiki/$",
-      params: { _splat: stripWikiSuffix(artifact.promotedWikiPath) },
     };
   }
   // Draft / unknown / unpromoted: fall back to the standalone viewer.
