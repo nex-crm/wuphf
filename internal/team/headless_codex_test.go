@@ -856,10 +856,18 @@ func TestHeadlessCodexHelperProcess(t *testing.T) {
 			"{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"codex office reply\"}}\n",
 			"{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":123,\"cached_input_tokens\":45,\"output_tokens\":6}}\n",
 		}
+		// Pace emissions with a ticker (not time.Sleep — the repo's
+		// no-sleep-in-tests guard bans that) so the parent's heartbeat
+		// goroutine overlaps the stream callback and -race can observe any
+		// unguarded metrics access. This runs in the helper subprocess, so
+		// the cadence models a real CLI streaming over time, not test-state
+		// synchronization.
+		ticker := time.NewTicker(delay)
+		defer ticker.Stop()
 		for _, line := range lines {
 			_, _ = os.Stdout.WriteString(line)
 			_ = os.Stdout.Sync()
-			time.Sleep(delay)
+			<-ticker.C
 		}
 		os.Exit(0)
 	}
