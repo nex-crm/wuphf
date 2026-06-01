@@ -215,7 +215,14 @@ func handleTeamNotebookVisualArtifactPromote(ctx context.Context, _ *mcp.CallToo
 	// See web/src/components/messages/MessageArtifactReferences.tsx for the
 	// parser side.
 	marker := "visual-artifact:" + id
-	displayTitle := artifactTitleFromPromoteResult(result, targetPath)
+	// displayTitle is agent-controlled (it comes from the promote result's
+	// artifact.title or a path fallback). It is interpolated into a
+	// precomposed card_broadcast string the agent is told to paste verbatim
+	// into team_broadcast. Newlines, backticks, or an embedded
+	// `visual-artifact:` marker in the title could spoof a second card or
+	// break the single-line marker contract the frontend parser keys off.
+	// Normalize before composing so the title can never inject structure.
+	displayTitle := normalizeArtifactCardTitle(artifactTitleFromPromoteResult(result, targetPath))
 	cardBroadcast := fmt.Sprintf(
 		"Saved \"%s\" to the wiki at `%s`.\n\n%s",
 		displayTitle,
@@ -260,6 +267,66 @@ func artifactTitleFromPromoteResult(result map[string]any, targetWikiPath string
 		return "the visual artifact"
 	}
 	return title
+}
+
+// normalizeArtifactCardTitle neutralizes an agent-controlled title before it is
+// interpolated into the precomposed card_broadcast string. The card relies on
+// the `visual-artifact:<id>` marker being a single token on its own line for
+// the frontend parser (web/src/components/messages/MessageArtifactReferences.tsx).
+// A title carrying newlines, backticks, or its own `visual-artifact:` substring
+// could spoof a second card or break the marker line, so:
+//   - all whitespace runs (including newlines/tabs) collapse to a single space,
+//   - any `visual-artifact:` substring (case-insensitive) is defanged so it can
+//     no longer be parsed as a marker, and
+//   - backticks are replaced with single quotes so the title cannot open or
+//     close the code span around the wiki path.
+func normalizeArtifactCardTitle(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	// Defang any visual-artifact: marker spoof, case-insensitively. Replacing
+	// the colon with a space breaks the `marker:id` token the parser matches
+	// while keeping the words readable.
+	for {
+		idx := indexFoldASCII(s, "visual-artifact:")
+		if idx < 0 {
+			break
+		}
+		colon := idx + len("visual-artifact:") - 1
+		s = s[:colon] + " " + s[colon+1:]
+	}
+	s = strings.ReplaceAll(s, "`", "'")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "the visual artifact"
+	}
+	return s
+}
+
+// indexFoldASCII returns the index of the first case-insensitive (ASCII)
+// occurrence of token in s, or -1. token is assumed lowercase ASCII.
+func indexFoldASCII(s, token string) int {
+	if token == "" {
+		return 0
+	}
+	if len(token) > len(s) {
+		return -1
+	}
+	for i := 0; i <= len(s)-len(token); i++ {
+		match := true
+		for j := 0; j < len(token); j++ {
+			c := s[i+j]
+			if c >= 'A' && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			if c != token[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
 }
 
 func validateOwnedNotebookMarkdownPath(slug, path, field string) error {
