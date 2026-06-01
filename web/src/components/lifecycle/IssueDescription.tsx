@@ -6,6 +6,7 @@ import {
   messageMarkdownComponents,
   messageRemarkPlugins,
 } from "../../lib/messageMarkdown";
+import { keyedByOccurrence } from "../../lib/reactKeys";
 import { stripStandaloneRichArtifactReferenceLines } from "../../lib/richArtifactReferences";
 import RichArtifactEmbed from "../rich-artifacts/RichArtifactEmbed";
 
@@ -44,7 +45,7 @@ export function IssueDescription({
   const hasMarkdown = renderedBody.length > 0;
   const hasArtifacts = inlineArtifacts.length > 0;
 
-  if (!body || (!hasMarkdown && !hasArtifacts)) {
+  if (!(body && (hasMarkdown || hasArtifacts))) {
     return (
       <section
         className="issue-doc-description issue-doc-description--empty"
@@ -65,13 +66,15 @@ export function IssueDescription({
         className="issue-doc-description-body"
         data-testid="issue-doc-description-body"
       >
-        {inlineArtifacts.map((detail) => (
-          <RichArtifactEmbed
-            key={detail.artifact.id}
-            title={detail.artifact.title}
-            html={detail.html}
-          />
-        ))}
+        {keyedByOccurrence(inlineArtifacts, (detail) => detail.artifact.id).map(
+          ({ key, value: detail }) => (
+            <RichArtifactEmbed
+              key={key}
+              title={detail.artifact.title}
+              html={detail.html}
+            />
+          ),
+        )}
         {hasMarkdown ? (
           <ReactMarkdown
             remarkPlugins={messageRemarkPlugins}

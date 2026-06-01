@@ -30,15 +30,19 @@ export function useInlineArtifacts(
     () => (content ? extractRichArtifactIds(content).join(",") : ""),
     [content],
   );
-  const [details, setDetails] = useState<RichArtifactDetail[]>([]);
+  // Track the idsKey that produced `details` so a content change cannot
+  // briefly paint stale artifacts during the render that runs before the
+  // effect clears state. Without this guard, the previous content's
+  // embeds flash for one frame on navigation between articles or issues.
+  const [resolved, setResolved] = useState<{
+    idsKey: string;
+    details: RichArtifactDetail[];
+  }>({ idsKey: "", details: [] });
   useEffect(() => {
     let cancelled = false;
-    // Clear the previous container's artifacts up-front so a navigation
-    // does not flash the old inline embeds while the new batch is still
-    // in flight.
-    setDetails([]);
     const ids = idsKey ? idsKey.split(",") : [];
     if (ids.length === 0) {
+      setResolved({ idsKey, details: [] });
       return () => {
         cancelled = true;
       };
@@ -49,11 +53,14 @@ export function useInlineArtifacts(
       ),
     ).then((results) => {
       if (cancelled) return;
-      setDetails(results.filter((d): d is RichArtifactDetail => d !== null));
+      setResolved({
+        idsKey,
+        details: results.filter((d): d is RichArtifactDetail => d !== null),
+      });
     });
     return () => {
       cancelled = true;
     };
   }, [idsKey]);
-  return details;
+  return resolved.idsKey === idsKey ? resolved.details : [];
 }
