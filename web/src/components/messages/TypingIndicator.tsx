@@ -1,18 +1,25 @@
 import type { OfficeMember } from "../../api/client";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
+import { OFFICE_LOADING_PHRASES } from "../../lib/officeLoadingPhrases";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
+import { PixelAvatar } from "../ui/PixelAvatar";
+import { ThinkingLoader } from "../ui/ThinkingLoader";
 
 /**
- * Live "agent is working" indicator shown under the message feed during a
- * turn. The deeper requirement (vs a fragile phrase-triggered skeleton) is
- * that the user always knows what's happening across a long (~100s) turn:
- * the broker pushes a per-agent progress detail (`liveActivity`/`activity`/
- * `detail`, fed by the headless runner's thinking/tool_use/text states), so
- * when one is present we surface it ("scoping issue", "drafting figure",
- * "writing article") instead of a bare "is typing…".
+ * TypingIndicator renders as an incoming message bubble pinned to the bottom
+ * of the feed — the exact spot the next message will land, à la Claude. When
+ * the real message arrives it replaces this placeholder in place, so the
+ * conversation reads as one continuous stream instead of a footer caption
+ * blinking on and off below the composer.
  *
- * Falls back to the classic typing label when no detail is available, so the
- * indicator never goes silent while an agent is active.
+ * Beyond "who is composing", the deeper requirement (vs a fragile
+ * phrase-triggered skeleton) is that the user always knows WHAT is happening
+ * across a long (~100s) turn: the broker pushes a per-agent progress detail
+ * (`liveActivity`/`task`/`activity`/`detail`, fed by the headless runner's
+ * thinking/tool_use/text states), so when exactly one agent is active we
+ * surface it ("scoping issue", "drafting figure", "writing article") next to
+ * the typing label. Falls back to the classic typing bubble when no detail is
+ * available, so the indicator never goes silent while an agent is active.
  */
 export function TypingIndicator() {
   const route = useCurrentRoute();
@@ -33,35 +40,64 @@ export function TypingIndicator() {
 
   if (active.length === 0) return null;
 
+  const names = active.map((m) => m.name || m.slug);
+  const heading =
+    names.length === 1
+      ? names[0]
+      : names.length <= 3
+        ? names.join(", ")
+        : `${names.length} agents`;
+  const verb = names.length === 1 ? "is typing" : "are typing";
+  // buildLabel carries the canonical "X is typing..." accessible label so the
+  // loader's screen-reader text and aria-label stay stable across surfaces.
   const label = buildLabel(active);
+  // Live per-agent progress detail (single active agent only) surfaced next to
+  // the typing verb so the user sees WHAT is happening, not just WHO.
   const detail = resolveProgressDetail(active);
 
+  // Up to three stacked avatars echo who is composing; the bubble itself
+  // carries the live loader so the focus stays on the incoming message.
+  const avatarSlugs = active.slice(0, 3).map((m) => m.slug);
+
   return (
-    <div className="typing-indicator">
-      <div className="typing-dots" aria-hidden="true">
-        <span className="typing-dot" />
-        <span className="typing-dot" />
-        <span className="typing-dot" />
-      </div>
-      <span className="typing-indicator-label">{label}</span>
-      {detail ? (
-        <>
-          {/* Hairline separator between the typing label and the live
-              progress detail. Token-driven via CSS so it tracks the theme. */}
-          <span className="typing-indicator-sep" aria-hidden="true">
-            ·
-          </span>
+    <div className="message typing-message" data-testid="typing-indicator">
+      <div className="message-avatar typing-message-avatar">
+        {avatarSlugs.map((slug, i) => (
           <span
-            className="typing-indicator-detail"
-            // Live region so screen readers announce progress updates without
-            // a focus change. `aria-live="polite"` matches the unobtrusive
-            // intent — it's ambient status, not an alert.
-            aria-live="polite"
+            key={slug}
+            className="typing-avatar-stack-item"
+            style={{ zIndex: avatarSlugs.length - i }}
           >
-            {detail}
+            <PixelAvatar slug={slug} size={24} />
           </span>
-        </>
-      ) : null}
+        ))}
+      </div>
+      <div className="message-content">
+        <div className="message-header">
+          <span className="message-author">{heading}</span>
+          <span className="typing-verb">{verb}</span>
+          {detail ? (
+            <>
+              {/* Hairline separator between the typing verb and the live
+                  progress detail. Token-driven via CSS so it tracks the
+                  theme. */}
+              <span className="typing-indicator-sep" aria-hidden="true">
+                ·
+              </span>
+              <span
+                className="typing-indicator-detail"
+                // Live region so screen readers announce progress updates
+                // without a focus change. `aria-live="polite"` matches the
+                // unobtrusive intent — it's ambient status, not an alert.
+                aria-live="polite"
+              >
+                {detail}
+              </span>
+            </>
+          ) : null}
+        </div>
+        <ThinkingLoader label={label} phrases={OFFICE_LOADING_PHRASES} />
+      </div>
     </div>
   );
 }

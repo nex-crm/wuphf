@@ -67,7 +67,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		"--color", "never",
 		"--json",
 	)
-	if model := strings.TrimSpace(config.ResolveCodexModel(l.cwd)); model != "" {
+	if model := strings.TrimSpace(l.codexModelForAgent(slug)); model != "" {
 		args = append(args, "--model", model)
 	}
 	for _, override := range overrides {
@@ -310,7 +310,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, summary, "", metrics, codexUsageToTokenUsage(result.Usage))
 	emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", turnToolNames, turnTextLen, metrics, codexUsageToTokenUsage(result.Usage))
 	if l.broker != nil && (result.Usage.InputTokens != 0 || result.Usage.OutputTokens != 0 || result.Usage.CacheReadTokens != 0 || result.Usage.CacheCreationTokens != 0 || result.Usage.CostUSD != 0) {
-		l.broker.RecordAgentUsage(slug, config.ResolveCodexModel(l.cwd), result.Usage)
+		l.broker.RecordAgentUsage(slug, l.codexModelForAgent(slug), result.Usage)
 	}
 	relay.Flush()
 	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
@@ -943,4 +943,26 @@ func codexToolProgressDetail(toolName string) string {
 	default:
 		return fmt.Sprintf("running %s", name)
 	}
+}
+
+// codexModelForAgent returns the codex model the next dispatch should use
+// for slug. Per-agent ProviderBinding.Model wins when set and the binding
+// kind is codex; otherwise we fall back to the install-wide codex config
+// resolver (--model flag, $CODEX_MODEL env var, ~/.codex/config.toml).
+//
+// The kind check prevents a stale gpt-4o written when the user briefly
+// switched the agent to codex from being fed to codex on a later
+// switch-back if the per-agent binding wasn't fully cleared. In practice
+// the AgentProfilePanel save flow keeps Model and Kind aligned, but
+// belt-and-suspenders matches how headlessClaudeModel reads its binding.
+func (l *Launcher) codexModelForAgent(slug string) string {
+	if l != nil && l.broker != nil {
+		binding := l.broker.MemberProviderBinding(slug)
+		if binding.Kind == "codex" {
+			if model := strings.TrimSpace(binding.Model); model != "" {
+				return model
+			}
+		}
+	}
+	return strings.TrimSpace(config.ResolveCodexModel(l.cwd))
 }

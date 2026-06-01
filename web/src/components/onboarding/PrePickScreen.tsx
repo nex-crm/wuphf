@@ -220,8 +220,6 @@ type ConfigPayload = {
   openai_api_key?: string;
   gemini_api_key?: string;
   provider_endpoints?: Record<string, { base_url: string }>;
-  openclaw_token?: string;
-  openclaw_gateway_url?: string;
 };
 
 /**
@@ -234,7 +232,13 @@ function buildConfigPayload(
   provider: string,
   localProvider: string,
   oaiUrl: string,
-  oaiKey: string,
+  // _oaiKey is intentionally unused on the current write path: the OAI-
+  // compatible endpoint section writes only to provider_endpoints, never
+  // to openclaw_* (gateway config) or to an Anthropic/OpenAI key row.
+  // Kept in the signature so the call site can stay 1:1 with form
+  // state — renaming the parameter to _oaiKey marks the intent for
+  // TypeScript-aware linters without forcing a 4-argument call shape.
+  _oaiKey: string,
   apiKeys: Record<string, string>,
 ): ConfigPayload {
   const payload: ConfigPayload = { memory_backend: "markdown" };
@@ -246,13 +250,16 @@ function buildConfigPayload(
     payload.llm_provider = localProvider;
     payload.llm_provider_priority = [localProvider];
   } else if (oaiCompatFilled(oaiUrl)) {
+    // Custom OAI-compatible endpoint goes into provider_endpoints. We do
+    // NOT write to openclaw_* here — that conflated OpenClaw (a gateway
+    // for importing existing agents) with generic OpenAI-compatible HTTP
+    // runtimes. OpenClaw is configured through the Integrations app, not
+    // through this onboarding step. The _oaiKey parameter is intentionally
+    // unused on this path; users wanting to pair an API key with the
+    // endpoint should paste it in the OpenAI API key row above.
     payload.provider_endpoints = {
       "openai-compatible": { base_url: sanitizeConfigString(oaiUrl) },
     };
-    if (oaiKey.trim()) {
-      payload.openclaw_token = sanitizeConfigString(oaiKey);
-      payload.openclaw_gateway_url = sanitizeConfigString(oaiUrl);
-    }
   }
 
   for (const f of API_KEY_FIELDS) {
@@ -436,10 +443,13 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
       <div className="pre-pick-body">
         <div className="pre-pick-hero">
           <div className="pre-pick-eyebrow">WUPHF</div>
-          <h1 className="pre-pick-headline">Pick a runtime.</h1>
+          <h1 className="pre-pick-headline">Pick a default runtime.</h1>
           <p className="pre-pick-subhead">
-            Your office needs an AI runtime. Pick one of the three below, or use
-            an API key, a local model, or a custom endpoint.
+            This is the runtime new agents will inherit when they're created.
+            You can change it later in Settings, and most agents can be moved to
+            a different runtime one at a time from their profile. Agents
+            imported through a gateway (OpenClaw, Hermes) are managed from the
+            Integrations app instead.
           </p>
         </div>
 
@@ -494,8 +504,9 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
         <div className="pre-pick-section" data-testid="pre-pick-oai-section">
           <p className="pre-pick-section-heading">Custom endpoint</p>
           <p className="pre-pick-section-hint">
-            Any server that speaks the OpenAI REST protocol (OpenClaw, LiteLLM,
-            vLLM, etc.).
+            Any server that speaks the OpenAI REST protocol (LiteLLM, vLLM,
+            llama.cpp server, etc.). For OpenClaw or Hermes, use the
+            Integrations app after onboarding.
           </p>
           <OpenAICompatibleInput
             endpointUrl={oaiUrl}

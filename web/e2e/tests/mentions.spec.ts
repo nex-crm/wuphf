@@ -29,7 +29,7 @@ test.describe("wuphf web mention chips", () => {
     test.setTimeout(45_000);
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
     // Pull a known slug from the seeded sidebar — same idea as chat.spec.ts.
@@ -82,7 +82,7 @@ test.describe("wuphf web mention chips", () => {
     // mention styles) and UX (chip styling on garbage input).
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/channels/general");
     await waitForShellReady(page);
 
     const tail = `unknown mention ${Date.now()}`;

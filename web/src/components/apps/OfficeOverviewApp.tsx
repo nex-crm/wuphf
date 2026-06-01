@@ -79,7 +79,7 @@ function goToSkills(): void {
 }
 
 function goToCalendar(): void {
-  void router.navigate({ to: "/apps/$appId", params: { appId: "calendar" } });
+  void router.navigate({ to: "/apps/$appId", params: { appId: "routines" } });
 }
 
 function goToSettings(): void {
@@ -406,20 +406,20 @@ interface ScheduledJobsSectionProps {
 function ScheduledJobsSection({ jobs, isLoading }: ScheduledJobsSectionProps) {
   return (
     <OverviewSection
-      title="Next scheduled jobs"
+      title="Next scheduled routines"
       count={jobs.length}
       id="scheduled-jobs"
       action={
         jobs.length > 0 ? (
-          <SectionLink onClick={goToCalendar}>View calendar</SectionLink>
+          <SectionLink onClick={goToCalendar}>View routines</SectionLink>
         ) : null
       }
     >
       {isLoading ? (
         <SkeletonRows count={3} />
       ) : jobs.length === 0 ? (
-        <EmptyState action={{ label: "Go to calendar", onClick: goToCalendar }}>
-          No upcoming scheduled jobs.
+        <EmptyState action={{ label: "Go to routines", onClick: goToCalendar }}>
+          No upcoming scheduled routines.
         </EmptyState>
       ) : (
         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Scheduled-jobs map callback derives nextRun, badge, and fallback key from multiple optional fields; inline for readability, baselined pending extraction.

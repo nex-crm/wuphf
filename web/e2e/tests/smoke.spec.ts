@@ -95,12 +95,14 @@ test.describe("wuphf web UI smoke (shell)", () => {
     await expect(agentButtons.first()).toBeVisible({ timeout: 10_000 });
     await agentButtons.first().click();
 
-    // Deterministic post-click signal: clicking a sidebar agent sets
-    // activeAgentSlug in the store, which mounts <AgentPanel> → `.agent-panel`
-    // (see components/agents/AgentPanel.tsx). Waiting on the panel — instead
-    // of networkidle, which never settles due to the live SSE stream — gives
-    // the panel a cycle to render and any errors a cycle to fire.
-    await expect(page.locator(".agent-panel").first()).toBeVisible({
+    // Deterministic post-click signal: in v3 a sidebar agent click navigates
+    // to that agent's subspace (AgentSubspaceRoute → `[data-testid=
+    // "agent-subspace"]`) rather than opening the old AgentPanel overlay.
+    // Waiting on the subspace root — instead of networkidle, which never
+    // settles due to the live SSE stream — gives the route a cycle to render
+    // and any errors a cycle to fire.
+    await expect(page).toHaveURL(/#\/agents\//, { timeout: 10_000 });
+    await expect(page.getByTestId("agent-subspace")).toBeVisible({
       timeout: 10_000,
     });
     await expect(page.getByTestId("error-boundary")).toHaveCount(0);

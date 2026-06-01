@@ -3,7 +3,6 @@ import type { ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookStack,
-  Calendar,
   CheckCircle,
   ClipboardCheck,
   Flash,
@@ -11,6 +10,7 @@ import {
   Package,
   Page,
   Play,
+  Repeat,
   Search,
   Settings,
   ShareAndroid,
@@ -43,7 +43,7 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   requests: TaskList,
   graph: ShareAndroid,
   policies: Shield,
-  calendar: Calendar,
+  routines: Repeat,
   skills: Flash,
   activity: Package,
   receipts: Page,

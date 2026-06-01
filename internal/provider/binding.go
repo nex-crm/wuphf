@@ -68,3 +68,18 @@ func ResolveKind(b ProviderBinding, global func() string) string {
 	}
 	return global()
 }
+
+// IsGatewayKind reports whether kind names a gateway-controlled binding rather
+// than a directly-dispatched LLM runtime. Gateway kinds (openclaw, openclaw-http,
+// hermes-agent) tag agents that were imported through an external gateway; they
+// are managed via the Integrations app, not via the Default Runtime picker.
+// Per-agent provider pickers should hide gateway kinds and surface a
+// "Managed by <Gateway>" badge instead.
+func IsGatewayKind(kind string) bool {
+	switch kind {
+	case KindOpenclaw, KindOpenclawHTTP, KindHermesAgent:
+		return true
+	default:
+		return false
+	}
+}

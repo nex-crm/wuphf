@@ -587,34 +587,38 @@ describe("PrePickScreen", () => {
       );
     });
 
-    it("strips control characters from the endpoint URL before posting", async () => {
+    it("does not conflate the OAI-compat endpoint with OpenClaw config", async () => {
+      // Locks in the redesign: filling the Custom endpoint section must
+      // write only to provider_endpoints, never to openclaw_token /
+      // openclaw_gateway_url. OpenClaw is a gateway managed through the
+      // Integrations app; persisting an unrelated OAI-compat URL as the
+      // OpenClaw gateway was the exact "OpenClaw treated as a provider"
+      // bug this redesign closes.
       mockPrereqs({});
       const onComplete = vi.fn();
       render(<PrePickScreen onComplete={onComplete} />);
       await screen.findByTestId("pre-pick-oai-url");
 
-      // Inject a control char in the URL (after valid prefix so it passes URL validation)
-      // Use a URL that is valid but contains a control char we expect to be stripped.
-      // NOTE: URL constructor strips control chars itself, so we verify the sanitizer
-      // is invoked by checking the posted value is clean.
       fireEvent.change(screen.getByTestId("pre-pick-oai-url"), {
         target: { value: "https://example.com/v1" },
       });
       fireEvent.change(screen.getByTestId("pre-pick-oai-key"), {
-        target: { value: "tok-\x01secret" },
+        target: { value: "tok-secret" },
       });
 
       const submitBtn = await screen.findByTestId("pre-pick-form-submit");
       fireEvent.click(submitBtn);
 
       await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
-      // The API key must have control chars stripped
-      expect(postMock).toHaveBeenCalledWith(
-        "/config",
-        expect.objectContaining({
-          openclaw_token: "tok-secret",
-        }),
-      );
+      const calledPayload = postMock.mock.calls[0]?.[1] as Record<
+        string,
+        unknown
+      >;
+      expect(calledPayload.openclaw_token).toBeUndefined();
+      expect(calledPayload.openclaw_gateway_url).toBeUndefined();
+      expect(calledPayload.provider_endpoints).toMatchObject({
+        "openai-compatible": { base_url: "https://example.com/v1" },
+      });
     });
   });
 

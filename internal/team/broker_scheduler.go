@@ -371,21 +371,10 @@ func (b *Broker) handleScheduler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": jobs})
 	case http.MethodPost:
-		var body schedulerJob
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
-		if strings.TrimSpace(body.Slug) == "" || strings.TrimSpace(body.Label) == "" {
-			http.Error(w, "slug and label required", http.StatusBadRequest)
-			return
-		}
-		if err := b.SetSchedulerJob(body); err != nil {
-			http.Error(w, "failed to persist scheduler job", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		// Delegate to the lifecycle-aware create path: derives a slug
+		// from the label when absent, rejects duplicates, snapshots the
+		// initial revision, and emits a "created" activity event.
+		b.handleCreateSchedulerJob(w, r)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -645,6 +634,62 @@ func (b *Broker) handleSchedulerSubpath(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// /scheduler/{slug}/runs — GET only, returns the per-slug ring buffer
+	// of fires (most-recent-first). Powers the "Previous runs" surface in
+	// the Routines detail drawer.
+	if strings.HasSuffix(rest, "/runs") {
+		slug := strings.TrimSuffix(rest, "/runs")
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
+			return
+		}
+		b.handleSchedulerRuns(w, r, slug)
+		return
+	}
+
+	// /scheduler/{slug}/activity — GET only.
+	if strings.HasSuffix(rest, "/activity") {
+		slug := strings.TrimSuffix(rest, "/activity")
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
+			return
+		}
+		b.handleSchedulerActivity(w, r, slug)
+		return
+	}
+
+	// /scheduler/{slug}/revisions — GET only.
+	if strings.HasSuffix(rest, "/revisions") {
+		slug := strings.TrimSuffix(rest, "/revisions")
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			http.Error(w, "scheduler slug required in path", http.StatusBadRequest)
+			return
+		}
+		b.handleSchedulerRevisions(w, r, slug)
+		return
+	}
+
+	// /scheduler/{slug}/revisions/{version}/restore — POST only.
+	if strings.HasSuffix(rest, "/restore") {
+		trimmed := strings.TrimSuffix(rest, "/restore")
+		idx := strings.LastIndex(trimmed, "/revisions/")
+		if idx < 0 {
+			http.Error(w, "invalid restore path", http.StatusBadRequest)
+			return
+		}
+		slug := strings.TrimSpace(trimmed[:idx])
+		version := strings.TrimSpace(trimmed[idx+len("/revisions/"):])
+		if slug == "" || version == "" {
+			http.Error(w, "slug and version required", http.StatusBadRequest)
+			return
+		}
+		b.handleRestoreSchedulerRevision(w, r, slug, version)
+		return
+	}
+
 	// /scheduler/{slug} — PATCH only.
 	slug := rest
 	switch r.Method {
@@ -704,11 +749,42 @@ func (b *Broker) handleRunSchedulerJob(w http.ResponseWriter, r *http.Request, s
 		job.NextRun = now.Format(time.RFC3339)
 		job.DueAt = job.NextRun
 	}
+	b.recordSchedulerRunLocked(schedulerRun{
+		Slug:        slug,
+		StartedAt:   now.Format(time.RFC3339),
+		Status:      "triggered",
+		Message:     "Manual run from Routines UI",
+		TriggeredBy: "human",
+		TargetType:  job.TargetType,
+		TargetID:    job.TargetID,
+		Events: []string{
+			fmt.Sprintf("Human triggered routine %s at %s", slug, now.Format(time.RFC3339)),
+		},
+	})
+	b.recordSchedulerActivityLocked(slug, schedulerActivity{
+		Kind:    "triggered",
+		Actor:   "human",
+		Summary: "Routine triggered manually",
+	})
 	if err := b.saveLocked(); err != nil {
 		job.LastRun = prevLastRun
 		job.LastRunStatus = prevLastRunStatus
 		job.NextRun = prevNextRun
 		job.DueAt = prevDueAt
+		// Roll back the run record AND the activity event so an aborted
+		// trigger doesn't leave phantom rows in either history.
+		if hist := b.schedulerRuns[slug]; len(hist) > 0 {
+			b.schedulerRuns[slug] = hist[:len(hist)-1]
+			if len(b.schedulerRuns[slug]) == 0 {
+				delete(b.schedulerRuns, slug)
+			}
+		}
+		if act := b.schedulerActivity[slug]; len(act) > 0 {
+			b.schedulerActivity[slug] = act[:len(act)-1]
+			if len(b.schedulerActivity[slug]) == 0 {
+				delete(b.schedulerActivity, slug)
+			}
+		}
 		b.mu.Unlock()
 		http.Error(w, "failed to persist trigger", http.StatusInternalServerError)
 		return
@@ -737,15 +813,27 @@ func (b *Broker) handleRunSchedulerJob(w http.ResponseWriter, r *http.Request, s
 //   - Read-only spec (one-relay-events) → 400 with reason.
 func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request, slug string) {
 	var body struct {
-		Enabled          *bool `json:"enabled,omitempty"`
-		IntervalOverride *int  `json:"interval_override,omitempty"`
+		Enabled          *bool   `json:"enabled,omitempty"`
+		IntervalOverride *int    `json:"interval_override,omitempty"`
+		Label            *string `json:"label,omitempty"`
+		ScheduleExpr     *string `json:"schedule_expr,omitempty"`
+		IntervalMinutes  *int    `json:"interval_minutes,omitempty"`
+		Payload          *string `json:"payload,omitempty"`
+		TargetType       *string `json:"target_type,omitempty"`
+		TargetID         *string `json:"target_id,omitempty"`
+		Channel          *string `json:"channel,omitempty"`
+		ChangeNote       string  `json:"change_note,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if body.Enabled == nil && body.IntervalOverride == nil {
-		http.Error(w, "at least one of enabled or interval_override required", http.StatusBadRequest)
+	hasContentEdit := body.Label != nil || body.ScheduleExpr != nil ||
+		body.IntervalMinutes != nil || body.Payload != nil ||
+		body.TargetType != nil || body.TargetID != nil ||
+		body.Channel != nil
+	if body.Enabled == nil && body.IntervalOverride == nil && !hasContentEdit {
+		http.Error(w, "no editable fields supplied", http.StatusBadRequest)
 		return
 	}
 
@@ -808,6 +896,122 @@ func (b *Broker) handlePatchSchedulerJob(w http.ResponseWriter, r *http.Request,
 			job.Status = "scheduled"
 		}
 	}
+
+	if hasContentEdit {
+		if spec != nil && spec.ReadOnly {
+			http.Error(w, fmt.Sprintf("scheduler job %q is read-only in v1", slug), http.StatusBadRequest)
+			return
+		}
+		if body.Label != nil {
+			trimmed := strings.TrimSpace(*body.Label)
+			if trimmed == "" {
+				http.Error(w, "label cannot be empty", http.StatusBadRequest)
+				return
+			}
+			job.Label = trimmed
+		}
+		if body.ScheduleExpr != nil {
+			job.ScheduleExpr = strings.TrimSpace(*body.ScheduleExpr)
+		}
+		if body.IntervalMinutes != nil {
+			if *body.IntervalMinutes < 0 {
+				http.Error(w, "interval_minutes must be >= 0", http.StatusBadRequest)
+				return
+			}
+			job.IntervalMinutes = *body.IntervalMinutes
+		}
+		if body.Payload != nil {
+			job.Payload = *body.Payload
+		}
+		if body.TargetType != nil {
+			job.TargetType = strings.TrimSpace(*body.TargetType)
+		}
+		if body.TargetID != nil {
+			job.TargetID = strings.TrimSpace(*body.TargetID)
+		}
+		if body.Channel != nil {
+			job.Channel = strings.TrimSpace(*body.Channel)
+		}
+		if strings.TrimSpace(job.ScheduleExpr) == "" && job.IntervalMinutes <= 0 {
+			// Legacy workflow routines (One workflows) declare cadence via
+			// WorkflowKey + Provider rather than schedule_expr / interval_minutes,
+			// matching the POST /scheduler shape. Don't reject content edits on
+			// those rows — label/payload/target changes are still meaningful.
+			if strings.TrimSpace(job.WorkflowKey) == "" || strings.TrimSpace(job.Provider) == "" {
+				http.Error(w, "routine must have a schedule (schedule_expr or interval_minutes)", http.StatusBadRequest)
+				return
+			}
+		}
+		// Enforce the 15-minute floor on user-created routines.
+		// System-managed crons (which never reach this PATCH path through
+		// the UI — they're created at boot) keep their own intervals.
+		if !job.SystemManaged {
+			if msg := validateRoutineCadence(job.ScheduleExpr, job.IntervalMinutes); msg != "" {
+				http.Error(w, msg, http.StatusBadRequest)
+				return
+			}
+		}
+		// Schedule fields changed — recompute NextRun so the new cadence
+		// takes effect on the next scheduler tick instead of after the old
+		// timer fires once.
+		if body.ScheduleExpr != nil || body.IntervalMinutes != nil {
+			nextRun := nextRoutineRun(*job, time.Now().UTC())
+			job.NextRun = nextRun.Format(time.RFC3339)
+			job.DueAt = job.NextRun
+		}
+	}
+
+	// Snapshot a revision for any content edit. Enable/throttle changes
+	// alone are operational and don't merit a revision row — they show up
+	// in the activity feed as `paused`/`resumed`/`throttled` instead.
+	var newRevision *schedulerRevision
+	if hasContentEdit {
+		rev := snapshotSchedulerRevision(*job)
+		rev.ChangeNote = strings.TrimSpace(body.ChangeNote)
+		rev.Author = "human"
+		saved := b.recordSchedulerRevisionLocked(slug, rev)
+		newRevision = &saved
+	}
+
+	// Activity events. We emit at most one row per request: a content
+	// edit subsumes the operational toggles, but isolated enable/throttle
+	// changes still need their own audit line.
+	switch {
+	case hasContentEdit:
+		summary := "Routine edited"
+		if note := strings.TrimSpace(body.ChangeNote); note != "" {
+			summary = fmt.Sprintf("Edited: %s", note)
+		}
+		detail := ""
+		if newRevision != nil {
+			detail = fmt.Sprintf("Saved as v%d", newRevision.Version)
+		}
+		b.recordSchedulerActivityLocked(slug, schedulerActivity{
+			Kind:    "edited",
+			Actor:   "human",
+			Summary: summary,
+			Detail:  detail,
+		})
+	case body.Enabled != nil && *body.Enabled && strings.EqualFold(snapshot.Status, "disabled"):
+		b.recordSchedulerActivityLocked(slug, schedulerActivity{
+			Kind:    "resumed",
+			Actor:   "human",
+			Summary: "Routine resumed",
+		})
+	case body.Enabled != nil && !*body.Enabled:
+		b.recordSchedulerActivityLocked(slug, schedulerActivity{
+			Kind:    "paused",
+			Actor:   "human",
+			Summary: "Routine paused",
+		})
+	case body.IntervalOverride != nil:
+		b.recordSchedulerActivityLocked(slug, schedulerActivity{
+			Kind:    "throttled",
+			Actor:   "human",
+			Summary: fmt.Sprintf("Cadence override set to %d min", *body.IntervalOverride),
+		})
+	}
+
 	if err := b.saveLocked(); err != nil {
 		// Restore in-memory state so the broker stays consistent with disk.
 		*job = snapshot

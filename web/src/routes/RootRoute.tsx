@@ -23,7 +23,6 @@ import { Composer } from "../components/messages/Composer";
 import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
-import { TypingIndicator } from "../components/messages/TypingIndicator";
 import { OnboardingChat } from "../components/onboarding/OnboardingChat";
 import { PrePickScreen } from "../components/onboarding/PrePickScreen";
 import { ConfirmHost } from "../components/ui/ConfirmDialog";
@@ -78,9 +77,19 @@ const ArtifactsApp = lazy(() =>
     default: m.ArtifactsApp,
   })),
 );
-const CalendarApp = lazy(() =>
-  import("../components/apps/CalendarApp").then((m) => ({
-    default: m.CalendarApp,
+const RoutinesApp = lazy(() =>
+  import("../components/apps/RoutinesApp").then((m) => ({
+    default: m.RoutinesApp,
+  })),
+);
+const RoutineDetailRoute = lazy(() =>
+  import("../components/apps/routines/RoutineDetailRoute").then((m) => ({
+    default: m.RoutineDetailRoute,
+  })),
+);
+const RoutineComposer = lazy(() =>
+  import("../components/apps/routines/RoutineComposer").then((m) => ({
+    default: m.RoutineComposer,
   })),
 );
 const ConsoleApp = lazy(() =>
@@ -107,6 +116,11 @@ const ReceiptsApp = lazy(() =>
 const SettingsApp = lazy(() =>
   import("../components/apps/SettingsApp").then((m) => ({
     default: m.SettingsApp,
+  })),
+);
+const IntegrationsApp = lazy(() =>
+  import("../components/apps/IntegrationsApp").then((m) => ({
+    default: m.IntegrationsApp,
   })),
 );
 const SkillsApp = lazy(() =>
@@ -330,11 +344,12 @@ const APP_PANELS = {
   requests: InboxRedirect,
   graph: GraphApp,
   policies: PoliciesApp,
-  calendar: CalendarApp,
+  routines: RoutinesApp,
   skills: SkillsApp,
   activity: ArtifactsApp,
   receipts: ReceiptsApp,
   "health-check": HealthCheckApp,
+  integrations: IntegrationsApp,
   settings: SettingsApp,
   console: ConsoleApp,
 } satisfies Record<AppPanelId, ComponentType>;
@@ -346,7 +361,6 @@ function ConversationView() {
     <div className="conversation-shell">
       <div className="conversation-chat">
         <MessageFeed />
-        <TypingIndicator />
         <InterviewBar />
         <Composer />
       </div>
@@ -654,6 +668,18 @@ function MainContent() {
       );
     case "skill-detail":
       return <SkillDetailRoute skillName={route.skillName} />;
+    case "routine-detail":
+      return (
+        <div className="app-panel active" data-testid="app-page-routines">
+          <RoutineDetailRoute routineSlug={route.routineSlug} />
+        </div>
+      );
+    case "routine-new":
+      return (
+        <div className="app-panel active" data-testid="app-page-routines">
+          <RoutineComposer />
+        </div>
+      );
     case "unknown":
       // RoutedBody catches root-only matches via isUnmatchedRoute, but
       // useCurrentRoute can also return `unknown` for matched leaves that

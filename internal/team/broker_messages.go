@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/emoji"
 )
 
 func (b *Broker) handleMessages(w http.ResponseWriter, r *http.Request) {
@@ -464,7 +466,7 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		Channel:   channel,
 		Kind:      "",
 		Title:     "",
-		Content:   strings.TrimSpace(content),
+		Content:   emoji.ToShortcode(strings.TrimSpace(content)),
 		Tagged:    uniqueSlugs(tagged),
 		ReplyTo:   strings.TrimSpace(replyTo),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),

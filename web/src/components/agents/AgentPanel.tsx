@@ -73,6 +73,10 @@ function routeIdentityKey(route: CurrentRoute): string {
       return `agent-subspace:${route.agentSlug}/${route.tab}`;
     case "skill-detail":
       return `skill-detail:${route.skillName}`;
+    case "routine-detail":
+      return `routine-detail:${route.routineSlug}`;
+    case "routine-new":
+      return "routine-new";
     case "unknown":
       return "unknown";
     default: {

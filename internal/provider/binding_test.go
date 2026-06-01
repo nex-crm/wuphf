@@ -109,3 +109,58 @@ func TestResolveKindFallsBackToGlobal(t *testing.T) {
 		t.Fatalf("explicit Kind should win, got %q", got)
 	}
 }
+
+func TestIsGatewayKind(t *testing.T) {
+	t.Parallel()
+	gateways := []string{KindOpenclaw, KindOpenclawHTTP, KindHermesAgent}
+	for _, k := range gateways {
+		if !IsGatewayKind(k) {
+			t.Errorf("IsGatewayKind(%q) = false, want true", k)
+		}
+	}
+	llms := []string{"", KindClaudeCode, KindCodex, KindOpencode, KindMLXLM, KindOllama, KindExo}
+	for _, k := range llms {
+		if IsGatewayKind(k) {
+			t.Errorf("IsGatewayKind(%q) = true, want false", k)
+		}
+	}
+}
+
+// TestLLMProviderKindsExcludesGateways locks in the picker-source contract:
+// every gateway-registered kind must be excluded from LLMProviderKinds, and
+// every directly-dispatchable LLM must be included. The picker-UIs read this
+// list verbatim — if it leaks "openclaw-http" the SettingsApp dropdown will
+// surface a gateway as a global default and the friction-gate purpose is lost.
+func TestLLMProviderKindsExcludesGateways(t *testing.T) {
+	// Intentionally NOT t.Parallel(): LLMProviderKinds() and GatewayKinds()
+	// read the package-level registry, and another test that calls
+	// RegisterTemporary in parallel could mutate the registry between the
+	// two reads. Sequential execution is enough — the test is fast.
+	llmKinds := LLMProviderKinds()
+	gateway := GatewayKinds()
+	inSet := func(s string, list []string) bool {
+		for _, v := range list {
+			if v == s {
+				return true
+			}
+		}
+		return false
+	}
+	for _, k := range gateway {
+		if inSet(k, llmKinds) {
+			t.Errorf("LLMProviderKinds leaked gateway kind %q: %v", k, llmKinds)
+		}
+	}
+	mustHave := []string{KindClaudeCode, KindCodex}
+	for _, k := range mustHave {
+		if !inSet(k, llmKinds) {
+			t.Errorf("LLMProviderKinds missing %q: %v", k, llmKinds)
+		}
+	}
+	mustGateway := []string{KindOpenclawHTTP, KindHermesAgent}
+	for _, k := range mustGateway {
+		if !inSet(k, gateway) {
+			t.Errorf("GatewayKinds missing %q: %v", k, gateway)
+		}
+	}
+}

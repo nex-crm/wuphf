@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -30,6 +31,15 @@ type Capabilities struct {
 	// default away from this provider should also wipe the Claude session
 	// store. Today only Claude Code populates that store.
 	RequiresClaudeSessionReset bool
+
+	// GatewayOnly reports whether this kind is a gateway-controlled binding
+	// (OpenClaw, Hermes) rather than a directly-runnable LLM runtime. Gateway
+	// kinds are dispatched the same way at the StreamFn layer but are
+	// managed via the Integrations app — they never appear in the global
+	// "Default Runtime" picker or in per-agent provider pickers. Register
+	// skips config.AllowLLMProviderKind when GatewayOnly is true so the
+	// kind cannot be selected as an install-wide default.
+	GatewayOnly bool
 }
 
 // Entry is a registered provider's runtime hooks plus its capabilities.
@@ -76,7 +86,9 @@ func Register(e *Entry) {
 		panic(fmt.Sprintf("provider: Kind %q already registered", e.Kind))
 	}
 	registry[e.Kind] = e
-	config.AllowLLMProviderKind(e.Kind)
+	if !e.Capabilities.GatewayOnly {
+		config.AllowLLMProviderKind(e.Kind)
+	}
 }
 
 // RegisterTemporary installs e and returns a restore function. It is intended
@@ -96,7 +108,9 @@ func RegisterTemporary(e *Entry) func() {
 	prev, hadPrev := registry[e.Kind]
 	registry[e.Kind] = e
 	registryMu.Unlock()
-	config.AllowLLMProviderKind(e.Kind)
+	if !e.Capabilities.GatewayOnly {
+		config.AllowLLMProviderKind(e.Kind)
+	}
 	return func() {
 		registryMu.Lock()
 		defer registryMu.Unlock()
@@ -116,6 +130,46 @@ func Lookup(kind string) *Entry {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	return registry[kind]
+}
+
+// LLMProviderKinds returns the sorted set of registered, non-gateway provider
+// kinds — the runtimes a user can pick as a directly-dispatched LLM (Claude
+// Code, Codex, Opencode, MLX-LM, Ollama, Exo). Gateway kinds (OpenClaw, Hermes)
+// are excluded because they represent agents imported through an external
+// gateway and are managed via the Integrations app, not the runtime picker.
+//
+// UI consumers (Settings default-runtime dropdown, AgentProfilePanel runtime
+// picker, AgentWizard provider field) should read this list to keep gateway
+// kinds out of provider selection surfaces.
+func LLMProviderKinds() []string {
+	registryMu.RLock()
+	out := make([]string, 0, len(registry))
+	for k, e := range registry {
+		if e.Capabilities.GatewayOnly {
+			continue
+		}
+		out = append(out, k)
+	}
+	registryMu.RUnlock()
+	sort.Strings(out)
+	return out
+}
+
+// GatewayKinds returns the sorted set of registered gateway-only kinds — the
+// inverse of LLMProviderKinds. Used by the Integrations app to enumerate which
+// gateways are compiled in.
+func GatewayKinds() []string {
+	registryMu.RLock()
+	out := make([]string, 0, len(registry))
+	for k, e := range registry {
+		if !e.Capabilities.GatewayOnly {
+			continue
+		}
+		out = append(out, k)
+	}
+	registryMu.RUnlock()
+	sort.Strings(out)
+	return out
 }
 
 // CapabilitiesFor returns the capabilities for kind, or the zero value if

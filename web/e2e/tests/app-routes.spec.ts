@@ -12,11 +12,8 @@ const APP_CASES = [
     label: "Console",
     content: /wuphf office|Slash/i,
   },
-  {
-    app: "tasks",
-    label: "Tasks",
-    content: /Office tasks|No tasks|Loading|Could not load/i,
-  },
+  // Tasks were consolidated into Issues (#1002): no "Tasks" sidebar slot
+  // remains. /tasks redirects are covered in route-matrix.spec.ts.
   // Phase 2b retired the standalone RequestsApp surface; /apps/requests
   // now redirects to /inbox. Coverage moved to the unified-inbox E2E.
   {
@@ -30,10 +27,10 @@ const APP_CASES = [
     content: /Office operating rules/i,
   },
   {
-    app: "calendar",
-    label: "Calendar",
+    app: "routines",
+    label: "Routines",
     content:
-      /Loading calendar|Could not load calendar|Nothing scheduled|Mon|Tue|Wed/i,
+      /Loading routines|Could not load routines|No routines yet|Routines/i,
   },
   {
     app: "skills",
@@ -41,8 +38,10 @@ const APP_CASES = [
     content: /Loading skills|Could not load skills|Skills/i,
   },
   {
+    // The `activity` app id keeps its historical slug; the v3 sidebar label
+    // is "Dashboard" (see APP_LABELS in routeRegistry.ts).
     app: "activity",
-    label: "Activity",
+    label: "Dashboard",
     content: /Loading office activity|Office activity/i,
   },
   {
@@ -54,6 +53,11 @@ const APP_CASES = [
     app: "health-check",
     label: "Access & Health",
     content: /Checking health|Could not reach health endpoint|Access & Health/i,
+  },
+  {
+    app: "integrations",
+    label: "Integrations",
+    content: /Integrations|PATCH BAY/i,
   },
 ] as const;
 

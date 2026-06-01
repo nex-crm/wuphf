@@ -6,6 +6,40 @@ All notable changes to WUPHF will be documented in this file.
 
 ### Added
 
+- **Routines app — Calendar replaced.** The sidebar Calendar entry is now
+  Routines, with a Paperclip-style List view (default) and a Google-style
+  monthly Calendar view. Every routine has an owning agent picked from a
+  dropdown, a human-readable schedule (frequency chips + time/weekday
+  pickers, no cron syntax), and a "Run in" channel selector that defaults
+  to the owner's DM. A new `+ New routine` composer at `/routines/new`
+  builds them from scratch; an inline editor on the detail page saves
+  edits as new revisions.
+- **Routine detail page with tabs.** Full-screen surface at
+  `/routines/$slug` with Overview, Runs, Activity, Revisions, and
+  Triggers tabs. Runs are expandable with status glyph, event trace,
+  output summary, error block, and a link to the routine's target.
+  Revisions list every saved snapshot with one-click Restore and an
+  inline diff against the current state. Triggers shows the schedule
+  card plus Webhook and Context-change cards flagged Coming soon.
+- **Routine lifecycle in the broker.** Per-slug ring buffers for runs,
+  activity, and revisions persist across restarts. New endpoints:
+  `POST /scheduler` (derives slug, enforces uniqueness, seeds first
+  revision), `PATCH /scheduler/{slug}` (extended to accept the full
+  editable shape and snapshot a revision on content edits),
+  `GET /scheduler/{slug}/{runs,activity,revisions}`, and
+  `POST /scheduler/{slug}/revisions/{n}/restore`. Restoring records
+  the restored state as the new top revision so history stays
+  append-only and reversible.
+- **Agent routine dispatcher.** `processAgentJob` fires routines into
+  the owner's DM (or an explicit channel) with an `@mention` prefix in
+  shared channels, tagging the agent's loop via the `Tagged[]` field.
+  Each fire records a detailed `schedulerRun` (events, output summary,
+  target snapshot, error block on failure) via `CompleteSchedulerRun`,
+  which re-arms the job with status `scheduled` so the schedule keeps
+  ticking. Existing routines stuck in terminal `done` state are
+  auto-healed on broker load. Routines that fire more often than every
+  15 minutes are rejected at create and edit time.
+
 - **Paper-manual rich HTML artifact guidance and tutorials.** Agents now get
   default guidance for producing self-contained HTML companions in a warm
   technical-manual style, including exact Making Software cobalt figure ink,
