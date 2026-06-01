@@ -673,10 +673,20 @@
   font-size: var(--text-xs, 11px);
   color: var(--text-tertiary);
 }
+/* Allow the header flex container to shrink so the detail can truncate
+   instead of blowing out the typing-header width on a long progress string. */
+.typing-message .message-header {
+  min-width: 0;
+}
 .typing-indicator-detail {
   font-size: var(--text-xs, 11px);
   color: var(--text-secondary);
   letter-spacing: 0.01em;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Stacked avatars when more than one agent is composing. */
