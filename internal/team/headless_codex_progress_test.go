@@ -2,7 +2,6 @@ package team
 
 import (
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -39,69 +38,72 @@ func TestCodexToolProgressDetail(t *testing.T) {
 // TestCodexProgressHeartbeatFiresOnSilence verifies the coarse heartbeat
 // fires during genuine silence (point-4 fallback) so a long codex turn
 // with no parseable item events is not a frozen UI.
+//
+// The tick callback pushes to a buffered channel; the test blocks on that
+// channel (no time.Sleep / polling) so it is deterministic — it advances
+// the moment a real tick lands and only falls back to a generous deadline
+// if the heartbeat never fires.
 func TestCodexProgressHeartbeatFiresOnSilence(t *testing.T) {
 	old := codexHeartbeatIntervalForTest
 	codexHeartbeatIntervalForTest = 20 * time.Millisecond
 	defer func() { codexHeartbeatIntervalForTest = old }()
 
-	var mu sync.Mutex
-	var ticks int
-	hb := newCodexProgressHeartbeat(func(elapsed time.Duration) {
-		mu.Lock()
-		ticks++
-		mu.Unlock()
+	ticks := make(chan struct{}, 8)
+	hb := newCodexProgressHeartbeat(func(_ time.Duration) {
+		select {
+		case ticks <- struct{}{}:
+		default:
+		}
 	})
 	hb.Start(time.Now())
-	// No Note() calls: simulate a silent stretch. Wait for a few intervals.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		n := ticks
-		mu.Unlock()
-		if n >= 2 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	hb.Stop()
+	defer hb.Stop()
 
-	mu.Lock()
-	got := ticks
-	mu.Unlock()
-	if got < 2 {
-		t.Fatalf("expected the heartbeat to fire at least twice during silence, got %d", got)
+	// No Note() calls: simulate a silent stretch and require two ticks.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-ticks:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("expected the heartbeat to fire at least twice during silence, got %d", i)
+		}
 	}
 }
 
 // TestCodexProgressHeartbeatResetsOnNote verifies Note() suppresses the
 // coarse heartbeat: while real events stream, the fine-grained per-event
 // detail is the user's signal and the heartbeat must not fire over it.
+//
+// A real run streams events continuously, so Note() keeps resetting the
+// silence window and the timer never elapses. The test models that with a
+// time.Ticker driving Note() at well under the heartbeat interval, then
+// asserts no tick landed in a window several intervals long.
 func TestCodexProgressHeartbeatResetsOnNote(t *testing.T) {
 	old := codexHeartbeatIntervalForTest
 	codexHeartbeatIntervalForTest = 40 * time.Millisecond
 	defer func() { codexHeartbeatIntervalForTest = old }()
 
-	var mu sync.Mutex
-	var ticks int
-	hb := newCodexProgressHeartbeat(func(elapsed time.Duration) {
-		mu.Lock()
-		ticks++
-		mu.Unlock()
+	ticked := make(chan struct{}, 1)
+	hb := newCodexProgressHeartbeat(func(_ time.Duration) {
+		select {
+		case ticked <- struct{}{}:
+		default:
+		}
 	})
 	hb.Start(time.Now())
-	// Keep noting well inside the interval so the timer never elapses.
-	stop := time.Now().Add(300 * time.Millisecond)
-	for time.Now().Before(stop) {
-		hb.Note()
-		time.Sleep(10 * time.Millisecond)
-	}
-	hb.Stop()
+	defer hb.Stop()
 
-	mu.Lock()
-	got := ticks
-	mu.Unlock()
-	if got != 0 {
-		t.Fatalf("expected no heartbeat ticks while events are flowing, got %d", got)
+	// Drive Note() every 10ms (well inside the 40ms interval) for ~300ms.
+	noteTicker := time.NewTicker(10 * time.Millisecond)
+	defer noteTicker.Stop()
+	done := time.After(300 * time.Millisecond)
+	for {
+		select {
+		case <-noteTicker.C:
+			hb.Note()
+		case <-ticked:
+			t.Fatal("expected no heartbeat ticks while events are flowing, got one")
+		case <-done:
+			return
+		}
 	}
 }
 
