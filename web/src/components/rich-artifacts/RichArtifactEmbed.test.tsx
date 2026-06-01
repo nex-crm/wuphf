@@ -356,6 +356,118 @@ describe("<RichArtifactEmbed>", () => {
     });
   });
 
+  describe("URL allowlist (relative-only)", () => {
+    // The href/src/xlink:href allowlist permits ONLY fragments, true relative
+    // paths, data:image/* (non-SVG), and data:font/*. Everything else —
+    // including http:/https:/mailto: and protocol-relative "//host" — is
+    // stripped in both the DOMPurify hook and the deterministic post-sweep.
+
+    it("strips http(s) src on <img> so external network refs cannot leak", async () => {
+      const html = `<!doctype html><html><body>
+<img id="ext" src="https://evil.test/x.png" alt="x">
+</body></html>`;
+      render(<RichArtifactEmbed title="External img" html={html} />);
+      const host = await screen.findByLabelText("External img", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        const img = shadow.querySelector("#ext");
+        expect(img).not.toBeNull();
+        expect(img?.getAttribute("src")).toBeNull();
+      });
+    });
+
+    it("strips data:image/svg+xml src (SVG can carry inline script)", async () => {
+      const svgData =
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3C/svg%3E";
+      const html = `<!doctype html><html><body>
+<img id="svgdata" src="${svgData}" alt="x">
+</body></html>`;
+      render(<RichArtifactEmbed title="SVG data img" html={html} />);
+      const host = await screen.findByLabelText("SVG data img", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        const img = shadow.querySelector("#svgdata");
+        expect(img).not.toBeNull();
+        expect(img?.getAttribute("src")).toBeNull();
+      });
+    });
+
+    it("keeps data:image/png src (safe inline raster)", async () => {
+      const pngData =
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+      const html = `<!doctype html><html><body>
+<img id="png" src="${pngData}" alt="x">
+</body></html>`;
+      render(<RichArtifactEmbed title="PNG data img" html={html} />);
+      const host = await screen.findByLabelText("PNG data img", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        const img = shadow.querySelector("#png");
+        expect(img?.getAttribute("src")).toBe(pngData);
+      });
+    });
+
+    it("keeps a fragment href on an anchor", async () => {
+      const html = `<!doctype html><html><body>
+<a id="frag" href="#section">jump</a>
+</body></html>`;
+      render(<RichArtifactEmbed title="Frag href" html={html} />);
+      const host = await screen.findByLabelText("Frag href", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        expect(shadow.querySelector("#frag")?.getAttribute("href")).toBe(
+          "#section",
+        );
+      });
+    });
+
+    it("keeps a true relative src on <img>", async () => {
+      const html = `<!doctype html><html><body>
+<img id="rel" src="./rel.png" alt="x">
+</body></html>`;
+      render(<RichArtifactEmbed title="Relative img" html={html} />);
+      const host = await screen.findByLabelText("Relative img", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        expect(shadow.querySelector("#rel")?.getAttribute("src")).toBe(
+          "./rel.png",
+        );
+      });
+    });
+
+    it("strips a protocol-relative //host src", async () => {
+      const html = `<!doctype html><html><body>
+<img id="protorel" src="//evil.test/x.png" alt="x">
+</body></html>`;
+      render(<RichArtifactEmbed title="Proto-rel img" html={html} />);
+      const host = await screen.findByLabelText("Proto-rel img", {
+        selector: "rich-artifact-embed",
+      });
+      await waitFor(() => {
+        const shadow = (host as HTMLElement & { shadowRoot: ShadowRoot })
+          .shadowRoot;
+        const img = shadow.querySelector("#protorel");
+        expect(img).not.toBeNull();
+        expect(img?.getAttribute("src")).toBeNull();
+      });
+    });
+  });
+
   it("re-mounts when the html prop changes", async () => {
     const { rerender } = render(
       <RichArtifactEmbed

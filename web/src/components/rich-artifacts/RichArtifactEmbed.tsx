@@ -144,6 +144,56 @@ const PURIFY_CONFIG: DOMPurifyConfig = {
   // and the catch-all on* event-handler strip.
 };
 
+// isAllowedArtifactURL is the single source of truth for which href/src/
+// xlink:href values may survive sanitisation. It is intentionally a strict
+// allowlist (reject by default) so the hook and the deterministic post-sweep
+// in isUnsafeURL cannot drift apart. Allowed, and ONLY these:
+//
+//   - fragment refs:        "#defId"          (SVG <use>, in-page anchors)
+//   - true relative paths:  "/x", "./x", "../x", "img/x.png" (no scheme,
+//                           no protocol-relative "//host")
+//   - data:image/* EXCEPT data:image/svg*     (svg can carry inline script)
+//   - data:font/*
+//
+// Everything else is rejected: any explicit scheme (http:, https:, mailto:,
+// tel:, javascript:, vbscript:, ftp:, ...) and protocol-relative "//host".
+// Rejecting http/https here is deliberate — external network refs in an
+// agent-authored artifact are an exfiltration / tracking vector, and the
+// artifact renders inside the parent origin (no iframe), so there is no
+// origin isolation backstop.
+function isAllowedArtifactURL(raw: string): boolean {
+  const value = (raw ?? "").trim();
+  if (value === "") return false;
+  const lower = value.toLowerCase();
+
+  // Fragment-only reference.
+  if (lower.startsWith("#")) return true;
+
+  // Protocol-relative URLs ("//evil.test/x") inherit the page scheme and hit
+  // the network — reject before the scheme check (they have no colon).
+  if (lower.startsWith("//")) return false;
+
+  // data: URLs — only non-SVG images and fonts.
+  if (lower.startsWith("data:")) {
+    const safeImage =
+      lower.startsWith("data:image/") && !lower.startsWith("data:image/svg");
+    const safeFont = lower.startsWith("data:font/");
+    return safeImage || safeFont;
+  }
+
+  // Any explicit scheme (token followed by ':') is rejected. A scheme is an
+  // ASCII letter followed by letters/digits/+/-/. up to the first ':'. We
+  // check before any '/', '?', or '#' so "img/a:b.png" (a path with a colon
+  // in a later segment) is NOT mistaken for a scheme.
+  const schemeMatch = /^[a-z][a-z0-9+.-]*:/.exec(lower);
+  if (schemeMatch) return false;
+
+  // No scheme, not protocol-relative, not a fragment, not a data: URL: it is
+  // a true relative path ("/x", "./x", "../x", "img/x.png", "a:later/seg" is
+  // handled above as a non-scheme because the ':' is past the first '/').
+  return true;
+}
+
 if (typeof window !== "undefined") {
   // Strip every on* attribute. DOMPurify already drops known event handlers,
   // but this guards future-attribute additions (e.g. onbeforetoggle) by
@@ -153,12 +203,13 @@ if (typeof window !== "undefined") {
       data.keepAttr = false;
     }
   });
-  // Tighten URL schemes for href/src/xlink:href: keep relative paths,
+  // Tighten URL schemes for href/src/xlink:href: keep ONLY relative paths,
   // #fragments, data:image/* (excluding SVG which can carry script) and
-  // data:font/*; drop everything else (especially javascript:). xlink:href
-  // is included because SVG <use> reaches sibling <defs> via xlink:href="#id"
-  // — internal fragment refs are exactly what we want to keep, and they
-  // pass the same scheme gate as href/src.
+  // data:font/*; drop everything else — including http:/https:/mailto: and
+  // protocol-relative "//host". xlink:href is included because SVG <use>
+  // reaches sibling <defs> via xlink:href="#id" — internal fragment refs are
+  // exactly what we want to keep, and they pass the same gate as href/src.
+  // The post-sweep isUnsafeURL mirrors this allowlist via the same helper.
   DOMPurify.addHook("uponSanitizeAttribute", (_node, data) => {
     if (
       data.attrName !== "href" &&
@@ -167,21 +218,8 @@ if (typeof window !== "undefined") {
     ) {
       return;
     }
-    const value = (data.attrValue || "").trim();
-    const lower = value.toLowerCase();
-    if (lower.startsWith("javascript:") || lower.startsWith("vbscript:")) {
+    if (!isAllowedArtifactURL(data.attrValue || "")) {
       data.keepAttr = false;
-      return;
-    }
-    if (lower.startsWith("data:")) {
-      // data:image/svg+xml can carry inline <script>; refuse it. Everything
-      // else under data: that is not an explicit image or font is rejected.
-      const safeImage =
-        lower.startsWith("data:image/") && !lower.startsWith("data:image/svg");
-      const safeFont = lower.startsWith("data:font/");
-      if (!(safeImage || safeFont)) {
-        data.keepAttr = false;
-      }
     }
   });
 }
@@ -356,21 +394,13 @@ function sweepForbiddenAttributes(root: ParentNode): void {
   }
 }
 
+// isUnsafeURL is the deterministic post-sweep mirror of the
+// uponSanitizeAttribute hook. It MUST stay in lockstep with the hook, so it
+// delegates to the same isAllowedArtifactURL allowlist rather than
+// re-deriving its own (looser) scheme checks. Anything the allowlist does
+// not explicitly permit is unsafe.
 function isUnsafeURL(raw: string): boolean {
-  const value = raw.trim().toLowerCase();
-  if (value.startsWith("javascript:") || value.startsWith("vbscript:")) {
-    return true;
-  }
-  // Allow data:image/* and data:font/* only; everything else under data: is
-  // either useless to artifacts or a known vector (e.g. data:text/html).
-  if (
-    value.startsWith("data:") &&
-    !value.startsWith("data:image/") &&
-    !value.startsWith("data:font/")
-  ) {
-    return true;
-  }
-  return false;
+  return !isAllowedArtifactURL(raw);
 }
 
 // rewriteCSS does two small substitutions so document-level selectors in the
