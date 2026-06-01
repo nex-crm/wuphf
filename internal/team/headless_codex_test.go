@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -256,6 +257,66 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	}
 	if got := l.broker.usage.Agents["ceo"].OutputTokens; got != 6 {
 		t.Fatalf("expected recorded output tokens 6, got %d", got)
+	}
+}
+
+// TestRunHeadlessCodexTurnMetricsNoDataRace pins the metricsMu fix: the
+// heartbeat tick goroutine reads the metrics struct (via
+// updateHeadlessProgress) while the stream callback writes
+// FirstEventMs/FirstTextMs/FirstToolMs and the post-Wait path writes TotalMs.
+// Run under `go test -race`, an unguarded shared metrics struct trips the
+// race detector. The helper streams slowly and the heartbeat interval is
+// shrunk so the heartbeat goroutine is guaranteed to read concurrently with
+// the callback writes.
+func TestRunHeadlessCodexTurnMetricsNoDataRace(t *testing.T) {
+	oldInterval := codexHeartbeatIntervalForTest
+	codexHeartbeatIntervalForTest = 5 * time.Millisecond
+	defer func() { codexHeartbeatIntervalForTest = oldInterval }()
+
+	oldLookPath := headlessCodexLookPath
+	oldExecutablePath := headlessCodexExecutablePath
+	oldCommandContext := headlessCodexCommandContext
+	headlessCodexLookPath = func(file string) (string, error) {
+		switch file {
+		case "codex":
+			return "/usr/bin/codex", nil
+		case "nex-mcp":
+			return "/usr/bin/nex-mcp", nil
+		default:
+			return "", exec.ErrNotFound
+		}
+	}
+	headlessCodexExecutablePath = func() (string, error) { return "/tmp/wuphf", nil }
+	headlessCodexCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmdArgs := []string{"-test.run=TestHeadlessCodexHelperProcess", "--"}
+		cmdArgs = append(cmdArgs, args...)
+		return exec.CommandContext(ctx, os.Args[0], cmdArgs...)
+	}
+	defer func() {
+		headlessCodexLookPath = oldLookPath
+		headlessCodexExecutablePath = oldExecutablePath
+		headlessCodexCommandContext = oldCommandContext
+	}()
+
+	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
+	t.Setenv("HEADLESS_CODEX_RECORD_FILE", filepath.Join(t.TempDir(), "record.jsonl"))
+	// Slow the helper so a turn spans several heartbeat intervals — forces the
+	// heartbeat goroutine to read metrics while the callback is still writing.
+	t.Setenv("HEADLESS_CODEX_HELPER_DELAY_MS", "15")
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("WUPHF_RUNTIME_HOME", tmpHome)
+	t.Setenv("WUPHF_OPENAI_API_KEY", "openai-secret-key")
+
+	l := &Launcher{
+		pack:     agent.GetPack("founding-team"),
+		cwd:      t.TempDir(),
+		broker:   newTestBroker(t),
+		headless: headlessWorkerPool{ctx: t.Context()},
+	}
+
+	if err := l.runHeadlessCodexTurn(t.Context(), "ceo", "You have new work in #launch."); err != nil {
+		t.Fatalf("runHeadlessCodexTurn: %v", err)
 	}
 }
 
@@ -780,6 +841,27 @@ func TestHeadlessCodexHelperProcess(t *testing.T) {
 
 	if !containsArg(codexArgs, "--json") {
 		t.Fatalf("missing --json arg: %#v", codexArgs)
+	}
+	// Optional slow mode: when HEADLESS_CODEX_HELPER_DELAY_MS is set, emit a
+	// stream of events with a delay between each so a parent test that shrinks
+	// codexHeartbeatIntervalForTest can drive the heartbeat goroutine
+	// concurrently with the stream callback. Off by default, so the existing
+	// fast-path tests above keep their exact two-line output and assertions.
+	if delayRaw := strings.TrimSpace(os.Getenv("HEADLESS_CODEX_HELPER_DELAY_MS")); delayRaw != "" {
+		delayMs, _ := strconv.Atoi(delayRaw)
+		delay := time.Duration(delayMs) * time.Millisecond
+		lines := []string{
+			"{\"type\":\"item.started\",\"item\":{\"id\":\"r1\",\"type\":\"reasoning\"}}\n",
+			"{\"type\":\"item.completed\",\"item\":{\"id\":\"t1\",\"type\":\"function_call\",\"name\":\"team_broadcast\",\"arguments\":\"{}\"}}\n",
+			"{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"codex office reply\"}}\n",
+			"{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":123,\"cached_input_tokens\":45,\"output_tokens\":6}}\n",
+		}
+		for _, line := range lines {
+			_, _ = os.Stdout.WriteString(line)
+			_ = os.Stdout.Sync()
+			time.Sleep(delay)
+		}
+		os.Exit(0)
 	}
 	_, _ = os.Stdout.WriteString("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"codex office reply\"}}\n")
 	_, _ = os.Stdout.WriteString("{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":123,\"cached_input_tokens\":45,\"output_tokens\":6}}\n")

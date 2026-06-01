@@ -148,7 +148,24 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		FirstTextMs:  -1,
 		FirstToolMs:  -1,
 	}
-	l.updateHeadlessProgress(slug, "active", "thinking", "reviewing work packet", metrics)
+	// metricsMu guards every read and write of metrics. The heartbeat tick
+	// closure below runs on its own goroutine and reads the whole struct (via
+	// updateHeadlessProgress) while the stream callback mutates FirstEventMs /
+	// FirstTextMs / FirstToolMs and the post-Wait paths write TotalMs — a real
+	// -race data race without this lock. Helpers snapshot a copy under the lock
+	// so callers never pass the live struct to a concurrent reader.
+	var metricsMu sync.Mutex
+	snapshotMetrics := func() headlessProgressMetrics {
+		metricsMu.Lock()
+		defer metricsMu.Unlock()
+		return metrics
+	}
+	setMetric := func(mutate func(m *headlessProgressMetrics)) {
+		metricsMu.Lock()
+		mutate(&metrics)
+		metricsMu.Unlock()
+	}
+	l.updateHeadlessProgress(slug, "active", "thinking", "reviewing work packet", snapshotMetrics())
 
 	// Coarse "still working (NNs)" heartbeat. A codex exec turn runs
 	// ~80-120s; if the model is mid-reasoning and the parser sees no
@@ -160,7 +177,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	// fine-grained "running <tool>" / "drafting response" detail.
 	heartbeat := newCodexProgressHeartbeat(func(elapsed time.Duration) {
 		l.updateHeadlessProgress(slug, "active", "thinking",
-			fmt.Sprintf("still working (%ds)", int(elapsed.Seconds())), metrics)
+			fmt.Sprintf("still working (%ds)", int(elapsed.Seconds())), snapshotMetrics())
 	})
 	heartbeat.Start(startedAt)
 	defer heartbeat.Stop()
@@ -197,22 +214,22 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		heartbeat.Note()
 		if firstEventAt.IsZero() {
 			firstEventAt = time.Now()
-			metrics.FirstEventMs = durationMillis(startedAt, firstEventAt)
+			setMetric(func(m *headlessProgressMetrics) { m.FirstEventMs = durationMillis(startedAt, firstEventAt) })
 		}
 		switch event.Type {
 		case "reasoning":
 			// Codex emits reasoning/thinking items between tool calls; map
 			// them to the same "planning next step" surface the Claude
 			// runner uses so a long reasoning stretch is not a dark interval.
-			l.updateHeadlessProgress(slug, "active", "thinking", "planning next step", metrics)
+			l.updateHeadlessProgress(slug, "active", "thinking", "planning next step", snapshotMetrics())
 		case "text":
 			if firstTextAt.IsZero() && strings.TrimSpace(event.Text) != "" {
 				firstTextAt = time.Now()
-				metrics.FirstTextMs = durationMillis(startedAt, firstTextAt)
+				setMetric(func(m *headlessProgressMetrics) { m.FirstTextMs = durationMillis(startedAt, firstTextAt) })
 			}
 			if !textStarted && strings.TrimSpace(event.Text) != "" {
 				textStarted = true
-				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
+				l.updateHeadlessProgress(slug, "active", "text", "drafting response", snapshotMetrics())
 			}
 			relay.OnText(event.Text)
 			turnTextLen += len(event.Text)
@@ -221,40 +238,41 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			relay.Flush()
 			if firstToolAt.IsZero() {
 				firstToolAt = time.Now()
-				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
+				setMetric(func(m *headlessProgressMetrics) { m.FirstToolMs = durationMillis(startedAt, firstToolAt) })
 			}
 			line := fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120))
 			appendHeadlessCodexLog(slug, line)
 			heartbeat.Note() // suppress the coarse heartbeat: a real tool event just landed.
-			l.updateHeadlessProgress(slug, "active", "tool_use", codexToolProgressDetail(event.ToolName), metrics)
+			l.updateHeadlessProgress(slug, "active", "tool_use", codexToolProgressDetail(event.ToolName), snapshotMetrics())
 			turnToolNames = append(turnToolNames, event.ToolName)
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderCodex, slug, taskID, event.ToolName, event.ToolInput, event.RawType)
 		case "tool_result":
 			line := "tool_result: " + truncate(event.Text, 140)
 			appendHeadlessCodexLog(slug, line)
-			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
+			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), snapshotMetrics())
 			emitHeadlessToolResult(agentStream, turnID, HeadlessProviderCodex, slug, taskID, event.ToolName, event.Text, event.RawType)
 		case "error":
 			appendHeadlessCodexLog(slug, "stream_error: "+event.Detail)
-			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
+			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), snapshotMetrics())
 		}
 	})
 	_ = pw.Close() // signal scanner goroutine that stream is done (io.PipeWriter.Close always returns nil)
 	if err := cmd.Wait(); err != nil {
 		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
-		metrics.TotalMs = time.Since(startedAt).Milliseconds()
+		setMetric(func(m *headlessProgressMetrics) { m.TotalMs = time.Since(startedAt).Milliseconds() })
+		metricsSnap := snapshotMetrics()
 		if detail != "" {
 			appendHeadlessCodexLatency(slug, fmt.Sprintf("status=error total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d detail=%q",
-				metrics.TotalMs,
+				metricsSnap.TotalMs,
 				durationMillis(startedAt, firstEventAt),
 				durationMillis(startedAt, firstTextAt),
 				durationMillis(startedAt, firstToolAt),
 				detail,
 			))
 			appendHeadlessCodexLog(slug, "stderr: "+detail)
-			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
-			emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", detail, metrics, codexUsageToTokenUsage(result.Usage))
-			emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, detail, turnToolNames, turnTextLen, metrics, codexUsageToTokenUsage(result.Usage))
+			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metricsSnap)
+			emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", detail, metricsSnap, codexUsageToTokenUsage(result.Usage))
+			emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, detail, turnToolNames, turnTextLen, metricsSnap, codexUsageToTokenUsage(result.Usage))
 			if isCodexAuthError(detail) && l.broker != nil {
 				sysTarget := target
 				if strings.TrimSpace(sysTarget) == "" {
@@ -268,32 +286,34 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			return fmt.Errorf("%w: %s", err, detail)
 		}
 		appendHeadlessCodexLatency(slug, fmt.Sprintf("status=error total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d detail=%q",
-			metrics.TotalMs,
+			metricsSnap.TotalMs,
 			durationMillis(startedAt, firstEventAt),
 			durationMillis(startedAt, firstTextAt),
 			durationMillis(startedAt, firstToolAt),
 			err.Error(),
 		))
-		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", err.Error(), metrics, codexUsageToTokenUsage(result.Usage))
-		emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, err.Error(), turnToolNames, turnTextLen, metrics, codexUsageToTokenUsage(result.Usage))
+		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", err.Error(), metricsSnap, codexUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, err.Error(), turnToolNames, turnTextLen, metricsSnap, codexUsageToTokenUsage(result.Usage))
 		return err
 	}
 	if parseErr != nil {
-		metrics.TotalMs = time.Since(startedAt).Milliseconds()
-		l.updateHeadlessProgress(slug, "error", "error", truncate(parseErr.Error(), 180), metrics)
-		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", parseErr.Error(), metrics, codexUsageToTokenUsage(result.Usage))
-		emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, parseErr.Error(), turnToolNames, turnTextLen, metrics, codexUsageToTokenUsage(result.Usage))
+		setMetric(func(m *headlessProgressMetrics) { m.TotalMs = time.Since(startedAt).Milliseconds() })
+		metricsSnap := snapshotMetrics()
+		l.updateHeadlessProgress(slug, "error", "error", truncate(parseErr.Error(), 180), metricsSnap)
+		emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", parseErr.Error(), metricsSnap, codexUsageToTokenUsage(result.Usage))
+		emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, parseErr.Error(), turnToolNames, turnTextLen, metricsSnap, codexUsageToTokenUsage(result.Usage))
 		return parseErr
 	}
-	metrics.TotalMs = time.Since(startedAt).Milliseconds()
+	setMetric(func(m *headlessProgressMetrics) { m.TotalMs = time.Since(startedAt).Milliseconds() })
+	metricsSnap := snapshotMetrics()
 	appendHeadlessCodexLatency(slug, fmt.Sprintf("status=ok total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d final_chars=%d",
-		metrics.TotalMs,
+		metricsSnap.TotalMs,
 		durationMillis(startedAt, firstEventAt),
 		durationMillis(startedAt, firstTextAt),
 		durationMillis(startedAt, firstToolAt),
 		len(strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine))),
 	))
-	summary := strings.TrimSpace(formatHeadlessLatencySummary(metrics))
+	summary := strings.TrimSpace(formatHeadlessLatencySummary(metricsSnap))
 	if summary == "" {
 		summary = "reply ready"
 	} else {
@@ -307,8 +327,8 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	// status; flipping to idle before the gist message lands would tear
 	// down the skeleton a beat too early and the final message would pop in
 	// against an already-idle agent. Keep status="active" through the post.
-	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, summary, "", metrics, codexUsageToTokenUsage(result.Usage))
-	emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", turnToolNames, turnTextLen, metrics, codexUsageToTokenUsage(result.Usage))
+	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, summary, "", metricsSnap, codexUsageToTokenUsage(result.Usage))
+	emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", turnToolNames, turnTextLen, metricsSnap, codexUsageToTokenUsage(result.Usage))
 	if l.broker != nil && (result.Usage.InputTokens != 0 || result.Usage.OutputTokens != 0 || result.Usage.CacheReadTokens != 0 || result.Usage.CacheCreationTokens != 0 || result.Usage.CostUSD != 0) {
 		l.broker.RecordAgentUsage(slug, l.codexModelForAgent(slug), result.Usage)
 	}
@@ -325,7 +345,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	// Flip to idle last: the gist+artifact post above has now landed, so the
 	// frontend's "agent is working" skeleton stays up until the final message
 	// is in the channel, then resolves cleanly to idle.
-	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
+	l.updateHeadlessProgress(slug, "idle", "idle", summary, metricsSnap)
 	return nil
 }
 
