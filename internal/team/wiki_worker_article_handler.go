@@ -63,7 +63,14 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 				slug := strings.TrimSuffix(parts[1], ".md")
 				if synth.Mode() == SynthesisModeDemand {
 					if factLog := b.FactLog(); factLog != nil {
-						if facts, _ := factLog.List(kind, slug); len(facts) >= synth.Threshold() {
+						// Capture the List error instead of swallowing it as "no
+						// facts": a transient read failure would otherwise leave a
+						// ghost article permanently unsynthesized with no signal.
+						facts, listErr := factLog.List(kind, slug)
+						switch {
+						case listErr != nil:
+							log.Printf("wiki: demand-pull fact list failed for %s/%s: %v", kind, slug, listErr)
+						case len(facts) >= synth.Threshold():
 							if _, enqErr := synth.EnqueueSynthesis(kind, slug, ArchivistAuthor); enqErr != nil && !errors.Is(enqErr, ErrSynthesisQueueSaturated) && !errors.Is(enqErr, ErrSynthesizerStopped) {
 								log.Printf("wiki: demand-pull enqueue %s/%s: %v", kind, slug, enqErr)
 							}
