@@ -34,6 +34,20 @@ const { MOCK_JOBS, MOCK_RUNS } = vi.hoisted(() => {
         last_run: new Date(now - 26 * 60 * 60_000).toISOString(),
         last_run_status: "failed",
       },
+      // One-shot watchdog job the broker enqueues per task transition. It
+      // arrives with interval_minutes: 0 (no omitempty on the wire), no cron,
+      // and is not system-managed — so it must never render as a routine.
+      {
+        slug: "task_follow_up:general:task-42",
+        label: "Follow up on Ship the launch post",
+        kind: "task_follow_up",
+        target_type: "task",
+        target_id: "task-42",
+        interval_minutes: 0,
+        due_at: new Date(now + 30 * 60_000).toISOString(),
+        next_run: new Date(now + 30 * 60_000).toISOString(),
+        status: "scheduled",
+      },
     ] as SchedulerJob[],
     MOCK_RUNS: [
       {
@@ -148,6 +162,31 @@ describe("RoutinesApp", () => {
     // System routine (nex-insights) is hidden behind the opt-in toggle.
     expect(
       screen.queryByTestId("routine-row-nex-insights"),
+    ).not.toBeInTheDocument();
+    // One-shot follow-up watchdog jobs are internal plumbing, not routines —
+    // they must never render here, even though they ship interval_minutes: 0.
+    expect(
+      screen.queryByTestId("routine-row-task_follow_up:general:task-42"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("never surfaces one-shot watchdog jobs, even with system routines shown", async () => {
+    render(wrap(<RoutinesApp />));
+    const toggle = await screen.findByTestId("routines-show-system-toggle");
+    const checkbox = toggle.querySelector(
+      "input[type=checkbox]",
+    ) as HTMLInputElement;
+    fireEvent.click(checkbox);
+    // System routine becomes visible…
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("routine-row-nex-insights"),
+      ).toBeInTheDocument(),
+    );
+    // …but the one-shot follow-up is filtered out entirely: it is neither
+    // system-managed nor recurring, so "Show system" must not reveal it.
+    expect(
+      screen.queryByTestId("routine-row-task_follow_up:general:task-42"),
     ).not.toBeInTheDocument();
   });
 
