@@ -345,9 +345,15 @@ export function useArtifactSkeletonTrigger({
   }, [enabled, message.id, message.timestamp, channelMessages]);
 
   const baseMs = message.timestamp ? Date.parse(message.timestamp) : NaN;
+  // Mirror isWithinSkeletonWindow / shouldShowArtifactSkeleton: a future-dated
+  // (clock-skewed) message has a negative delta and must NOT arm the ticker,
+  // otherwise a single skewed message installs a long-lived 5s interval that
+  // shouldShowArtifactSkeleton would then short-circuit to false anyway.
+  const deltaMs = nowMs - baseMs;
   const withinWindow =
-    Number.isFinite(baseMs) &&
-    nowMs - baseMs < ARTIFACT_SKELETON_RECENCY_WINDOW_MS;
+    Number.isFinite(deltaMs) &&
+    deltaMs >= 0 &&
+    deltaMs < ARTIFACT_SKELETON_RECENCY_WINDOW_MS;
 
   useEffect(() => {
     if (!(enabled && withinWindow)) return;

@@ -219,157 +219,162 @@ export function MessageBubble({
   }
 
   return (
-    <>
-      <div
-        className={`message animate-fade${grouped ? " message-grouped" : ""}${isReply ? " message-reply" : ""}`}
-        data-msg-id={message.id}
-        // Precise author selectors so e2e specs can filter without parsing
-        // textContent. `data-author-kind` is "human" | "agent"; `data-author-slug`
-        // carries the raw `from` (e.g. "you", "human", or an agent slug like "planner").
-        data-author-kind={isHuman ? "human" : "agent"}
-        data-author-slug={message.from}
-      >
-        {/* Avatar */}
-        {!isHuman ? (
-          <button
-            type="button"
-            className="message-avatar avatar-with-harness message-avatar-btn"
-            data-agent-slug={message.from}
-            aria-label={`Open agent panel for ${agent?.name || message.from}`}
-            onClick={() => setActiveAgentSlug(message.from)}
-          >
-            <PixelAvatar slug={message.from} size={24} />
-            {harness ? (
-              <HarnessBadge
-                kind={harness}
-                size={14}
-                className="harness-badge-on-avatar"
-              />
-            ) : null}
-          </button>
-        ) : (
-          <div
-            className="message-avatar"
-            style={{
-              background: "var(--bg-warm)",
-              color: "var(--text-secondary)",
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
-            {isLocalUser
-              ? "You"
-              : teamMemberDisplayName
-                ? teamMemberDisplayName.slice(0, 1).toUpperCase()
-                : null}
-          </div>
-        )}
-
-        {/* Content */}
-        <div className="message-content">
-          {/* Header */}
-          <div className="message-header">
-            {!isHuman ? (
-              <button
-                type="button"
-                className="message-author message-author-btn"
-                data-agent-slug={message.from}
-                aria-label={`Open agent panel for ${agent?.name || message.from}`}
-                onClick={() => setActiveAgentSlug(message.from)}
-              >
-                {agent?.name || message.from}
-              </button>
-            ) : (
-              <span className="message-author">
-                {isLocalUser
-                  ? "You"
-                  : teamMemberDisplayName || agent?.name || message.from}
-              </span>
-            )}
-            {isHuman ? (
-              <span className="badge badge-neutral">human</span>
-            ) : agent?.role ? (
-              <span className="badge badge-green">{agent.role}</span>
-            ) : null}
-            <span className="message-time" title={message.timestamp}>
-              {formatTime(message.timestamp)}
-            </span>
-            {Boolean(message.redacted) && (
-              <RedactedBadge reasons={message.redaction_reasons} />
-            )}
-          </div>
-
-          {/* Text — humans render mention chips via safe ReactNode children;
-            agent messages render through ReactMarkdown (no raw HTML). */}
-          <MessageBodyText
-            isHuman={isHuman}
-            renderedText={renderedText}
-            humanRendered={humanRendered}
-          />
-
-          {richArtifactIds.length > 0 ? (
-            <MessageArtifactReferences artifactIds={richArtifactIds} />
+    <div
+      className={`message animate-fade${grouped ? " message-grouped" : ""}${isReply ? " message-reply" : ""}`}
+      data-msg-id={message.id}
+      // Precise author selectors so e2e specs can filter without parsing
+      // textContent. `data-author-kind` is "human" | "agent"; `data-author-slug`
+      // carries the raw `from` (e.g. "you", "human", or an agent slug like "planner").
+      data-author-kind={isHuman ? "human" : "agent"}
+      data-author-slug={message.from}
+    >
+      {/* Avatar */}
+      {!isHuman ? (
+        <button
+          type="button"
+          className="message-avatar avatar-with-harness message-avatar-btn"
+          data-agent-slug={message.from}
+          aria-label={`Open agent panel for ${agent?.name || message.from}`}
+          onClick={() => setActiveAgentSlug(message.from)}
+        >
+          <PixelAvatar slug={message.from} size={24} />
+          {harness ? (
+            <HarnessBadge
+              kind={harness}
+              size={14}
+              className="harness-badge-on-avatar"
+            />
           ) : null}
+        </button>
+      ) : (
+        <div
+          className="message-avatar"
+          style={{
+            background: "var(--bg-warm)",
+            color: "var(--text-secondary)",
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          {isLocalUser
+            ? "You"
+            : teamMemberDisplayName
+              ? teamMemberDisplayName.slice(0, 1).toUpperCase()
+              : null}
+        </div>
+      )}
 
-          {/* Reactions */}
-          {reactions.length > 0 && (
-            <div className="message-reactions">
-              {reactions.map((r) => (
-                <button
-                  type="button"
-                  key={r.emoji}
-                  className="reaction-pill"
-                  onClick={() => {
-                    toggleReaction(message.id, r.emoji, currentChannel).catch(
-                      (e: Error) =>
-                        showNotice(`Reaction failed: ${e.message}`, "error"),
-                    );
-                  }}
-                >
-                  <span>{r.emoji}</span>
-                  <span className="reaction-pill-count">{r.count ?? 1}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Thread summary — shown under a parent that has replies. Clicking
-            opens the thread panel where the full chain is browsable. */}
-          {replyCount > 0 && onOpenThread && (
+      {/* Content */}
+      <div className="message-content">
+        {/* Header */}
+        <div className="message-header">
+          {!isHuman ? (
             <button
               type="button"
-              className="inline-thread-toggle"
-              onClick={() => onOpenThread(message.id)}
-              title="Open thread"
+              className="message-author message-author-btn"
+              data-agent-slug={message.from}
+              aria-label={`Open agent panel for ${agent?.name || message.from}`}
+              onClick={() => setActiveAgentSlug(message.from)}
             >
-              <svg
-                aria-hidden="true"
-                focusable="false"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-              {replyCount} {replyCount === 1 ? "reply" : "replies"}
+              {agent?.name || message.from}
             </button>
+          ) : (
+            <span className="message-author">
+              {isLocalUser
+                ? "You"
+                : teamMemberDisplayName || agent?.name || message.from}
+            </span>
+          )}
+          {isHuman ? (
+            <span className="badge badge-neutral">human</span>
+          ) : agent?.role ? (
+            <span className="badge badge-green">{agent.role}</span>
+          ) : null}
+          <span className="message-time" title={message.timestamp}>
+            {formatTime(message.timestamp)}
+          </span>
+          {Boolean(message.redacted) && (
+            <RedactedBadge reasons={message.redaction_reasons} />
           )}
         </div>
 
-        <MessageHoverActions
-          message={message}
-          onOpenThread={onOpenThread}
-          onQuoteReply={onQuoteReply}
-          onCopyLink={onCopyLink}
+        {/* Text — humans render mention chips via safe ReactNode children;
+            agent messages render through ReactMarkdown (no raw HTML). */}
+        <MessageBodyText
+          isHuman={isHuman}
+          renderedText={renderedText}
+          humanRendered={humanRendered}
         />
+
+        {/* Rich-artifact reference card, or the drafting skeleton while the
+            real card is still being produced. Rendered INSIDE .message-content
+            (not as a sibling of .message) so the skeleton aligns horizontally
+            with the eventual MessageArtifactReferences card instead of jumping
+            in from the feed edge when the real artifact lands. The skeleton
+            only shows when there's no real artifact reference yet. */}
+        {richArtifactIds.length > 0 ? (
+          <MessageArtifactReferences artifactIds={richArtifactIds} />
+        ) : showArtifactSkeleton ? (
+          <ArtifactSkeleton />
+        ) : null}
+
+        {/* Reactions */}
+        {reactions.length > 0 && (
+          <div className="message-reactions">
+            {reactions.map((r) => (
+              <button
+                type="button"
+                key={r.emoji}
+                className="reaction-pill"
+                onClick={() => {
+                  toggleReaction(message.id, r.emoji, currentChannel).catch(
+                    (e: Error) =>
+                      showNotice(`Reaction failed: ${e.message}`, "error"),
+                  );
+                }}
+              >
+                <span>{r.emoji}</span>
+                <span className="reaction-pill-count">{r.count ?? 1}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Thread summary — shown under a parent that has replies. Clicking
+            opens the thread panel where the full chain is browsable. */}
+        {replyCount > 0 && onOpenThread && (
+          <button
+            type="button"
+            className="inline-thread-toggle"
+            onClick={() => onOpenThread(message.id)}
+            title="Open thread"
+          >
+            <svg
+              aria-hidden="true"
+              focusable="false"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            {replyCount} {replyCount === 1 ? "reply" : "replies"}
+          </button>
+        )}
       </div>
-      {showArtifactSkeleton ? <ArtifactSkeleton /> : null}
-    </>
+
+      <MessageHoverActions
+        message={message}
+        onOpenThread={onOpenThread}
+        onQuoteReply={onQuoteReply}
+        onCopyLink={onCopyLink}
+      />
+    </div>
   );
 }
 

@@ -1,11 +1,12 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, renderHook, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Message, OfficeMember } from "../../api/client";
 import {
   ARTIFACT_SKELETON_RECENCY_WINDOW_MS,
   ArtifactSkeleton,
   shouldShowArtifactSkeleton,
+  useArtifactSkeletonTrigger,
 } from "./ArtifactSkeleton";
 
 const PM_MEMBER: Pick<OfficeMember, "slug" | "status"> = {
@@ -190,6 +191,54 @@ describe("shouldShowArtifactSkeleton — unmount on marker arrival", () => {
         nowMs: BASE_NOW,
       }),
     ).toBe(false);
+  });
+});
+
+describe("useArtifactSkeletonTrigger — ticker arming", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("does not arm the 5s ticker for a future-dated (clock-skewed) message", () => {
+    // A message dated in the future has a negative delta. Without the
+    // deltaMs >= 0 guard it would still install a long-lived interval that
+    // keeps re-rendering even though shouldShowArtifactSkeleton returns
+    // false. Assert no interval is armed at all.
+    vi.useFakeTimers();
+    const fixedNow = Date.parse("2026-05-29T12:00:00Z");
+    vi.setSystemTime(fixedNow);
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+
+    const { result } = renderHook(() =>
+      useArtifactSkeletonTrigger({
+        enabled: true,
+        message: buildMessage({ timestamp: "2026-05-29T12:01:00Z" }),
+        channelMessages: [],
+        members: [PM_MEMBER as OfficeMember],
+      }),
+    );
+
+    expect(result.current).toBe(false);
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+  });
+
+  it("arms the ticker for a fresh (in-window) message", () => {
+    vi.useFakeTimers();
+    const fixedNow = Date.parse("2026-05-29T12:00:10Z"); // 10s after message
+    vi.setSystemTime(fixedNow);
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+
+    renderHook(() =>
+      useArtifactSkeletonTrigger({
+        enabled: true,
+        message: buildMessage(),
+        channelMessages: [],
+        members: [PM_MEMBER as OfficeMember],
+      }),
+    );
+
+    expect(setIntervalSpy).toHaveBeenCalled();
   });
 });
 
