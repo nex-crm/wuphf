@@ -49,7 +49,7 @@ func TestRichArtifactNaturalWorkflowPromptAndToolLoop(t *testing.T) {
 		},
 		{
 			Name:        "notebook_visual_artifact_create",
-			Description: "After notebook_write, create a self-contained HTML companion for complex specs, PR reviews, diagrams, reports, and interactive tuning surfaces.",
+			Description: "Produce a self-contained HTML article for complex specs, PR reviews, diagrams, reports, and interactive tuning surfaces. The HTML article IS the deliverable; leave source_path empty and do not also call notebook_write for the same content.",
 			Execute: func(params map[string]any, _ context.Context, _ func(string)) (string, error) {
 				calls = append(calls, "notebook_visual_artifact_create")
 				if got := fmt.Sprint(params["source_path"]); got != sourcePath {
@@ -95,7 +95,7 @@ func TestRichArtifactNaturalWorkflowPromptAndToolLoop(t *testing.T) {
 					}
 					for _, want := range []string{
 						"notebook_visual_artifact_create",
-						"After notebook_write",
+						"self-contained HTML article",
 						"interactive tuning surfaces",
 						"notebook HTML visual artifact",
 						"long markdown wall",

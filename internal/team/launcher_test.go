@@ -1197,7 +1197,7 @@ func TestBuildPromptIncludesMarkdownNotebookPromotionGuidance(t *testing.T) {
 			"notebook_visual_artifact_create",
 			"notebook_promote",
 			"wuphf_wiki_lookup",
-			"create a self-contained HTML companion",
+			"self-contained HTML article",
 			"visual-artifact:ra_...",
 			"Do not bypass notebook_promote",
 		} {
