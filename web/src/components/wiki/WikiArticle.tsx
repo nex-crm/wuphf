@@ -300,9 +300,11 @@ function useInlineArtifacts(content: string | null): RichArtifactDetail[] {
   const [details, setDetails] = useState<RichArtifactDetail[]>([]);
   useEffect(() => {
     let cancelled = false;
+    // Clear the previous article's artifacts up-front so navigation does not
+    // flash the old inline embeds while the new batch is still in flight.
+    setDetails([]);
     const ids = idsKey ? idsKey.split(",") : [];
     if (ids.length === 0) {
-      setDetails([]);
       return () => {
         cancelled = true;
       };
@@ -777,9 +779,15 @@ function ArticleTabPanels({
               html={visualArtifact.html}
             />
           ) : null}
-          {inlineArtifacts.map((detail) => (
+          {/* A body can reference the same artifact id twice, which would
+            collide on a pure-id key. keyedByOccurrence appends an occurrence
+            suffix to duplicates so each embed gets a stable, unique key. */}
+          {keyedByOccurrence(
+            inlineArtifacts,
+            (detail) => detail.artifact.id,
+          ).map(({ key, value: detail }) => (
             <RichArtifactEmbed
-              key={detail.artifact.id}
+              key={key}
               title={detail.artifact.title}
               html={detail.html}
             />
