@@ -932,3 +932,28 @@ func TestPromptBuilder_DeterministicOrderingFromMembers(t *testing.T) {
 		t.Fatalf("promptBuilder.Build is not deterministic across member input orderings.\nA len=%d\nB len=%d", len(a), len(b))
 	}
 }
+
+// TestVisualArtifactForcingBlock_CoversIssueSpecs locks in the rule that a
+// non-trivial Issue spec must ship with an HTML artifact reference inside
+// the `details` field. The FE's IssueDescription renders that artifact
+// inline above the markdown body via the same RichArtifactEmbed pipeline
+// wiki articles use — without this prompt language, agents fall back to
+// pasting a wall of markdown into details and the inline-embed surface
+// never gets exercised.
+func TestVisualArtifactForcingBlock_CoversIssueSpecs(t *testing.T) {
+	got := visualArtifactForcingBlock()
+	for _, want := range []string{
+		"ISSUE SPECS ALSO QUALIFY",
+		"team_task action=create",
+		"`visual-artifact:ra_<id>` on its own line inside the `details` field",
+		"RichArtifactEmbed",
+		"Skip the artifact for trivial Issues",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf(
+				"visualArtifactForcingBlock missing required Issue-spec language %q\n--- got ---\n%s",
+				want, got,
+			)
+		}
+	}
+}

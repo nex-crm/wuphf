@@ -6,7 +6,6 @@ import type { PluggableList } from "unified";
 import type { EntityKind } from "../../api/entity";
 import { detectPlaybook } from "../../api/playbook";
 import {
-  fetchRichArtifact,
   fetchWikiVisualArtifact,
   type RichArtifactDetail,
 } from "../../api/richArtifacts";
@@ -22,6 +21,7 @@ import {
   type WikiHistoryCommit,
   type WikiMaintenanceAction,
 } from "../../api/wiki";
+import { useInlineArtifacts } from "../../hooks/useInlineArtifacts";
 import { formatAgentName } from "../../lib/agentName";
 import { keyedByOccurrence } from "../../lib/reactKeys";
 import {
@@ -277,53 +277,6 @@ function useArticleFetch(
   };
 }
 
-/**
- * Loads every rich artifact referenced inline in the article body via a
- * standalone `visual-artifact:<id>` marker line. The agent sometimes
- * hand-writes the marker into the markdown (via team_wiki_write) instead
- * of going through the promote tool, so the marker is the only signal that
- * the artifact belongs on the page. We fetch each referenced artifact by
- * id and embed it in document order. A 404 (or any fetch failure) for a
- * given id is swallowed — the stripped marker already keeps the raw text
- * out of the rendered body, so a missing artifact degrades to nothing
- * visible rather than literal `visual-artifact:` text.
- */
-function useInlineArtifacts(content: string | null): RichArtifactDetail[] {
-  // Join into a stable string so the effect's dependency is value-equal
-  // across renders. extractRichArtifactIds returns a fresh array each call,
-  // which would otherwise re-fire the effect on every render. Rich-artifact
-  // ids cannot contain commas, so the join round-trips losslessly.
-  const idsKey = useMemo(
-    () => (content ? extractRichArtifactIds(content).join(",") : ""),
-    [content],
-  );
-  const [details, setDetails] = useState<RichArtifactDetail[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    // Clear the previous article's artifacts up-front so navigation does not
-    // flash the old inline embeds while the new batch is still in flight.
-    setDetails([]);
-    const ids = idsKey ? idsKey.split(",") : [];
-    if (ids.length === 0) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    void Promise.all(
-      ids.map((id) =>
-        fetchRichArtifact(id).catch((): RichArtifactDetail | null => null),
-      ),
-    ).then((results) => {
-      if (cancelled) return;
-      // Preserve document order; drop ids that failed to resolve.
-      setDetails(results.filter((d): d is RichArtifactDetail => d !== null));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [idsKey]);
-  return details;
-}
 
 export default function WikiArticle({
   path,

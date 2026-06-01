@@ -1,9 +1,13 @@
+import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 
+import { useInlineArtifacts } from "../../hooks/useInlineArtifacts";
 import {
   messageMarkdownComponents,
   messageRemarkPlugins,
 } from "../../lib/messageMarkdown";
+import { stripStandaloneRichArtifactReferenceLines } from "../../lib/richArtifactReferences";
+import RichArtifactEmbed from "../rich-artifacts/RichArtifactEmbed";
 
 // ── Linear-style description ──────────────────────────────────────────
 
@@ -12,9 +16,35 @@ interface IssueDescriptionProps {
   isDrafting: boolean;
 }
 
-export function IssueDescription({ description, isDrafting }: IssueDescriptionProps) {
+/**
+ * IssueDescription renders the Issue's spec body. When the agent has
+ * dropped a `visual-artifact:<id>` marker into the description (the same
+ * way wiki articles and notebook entries reference rich HTML companions),
+ * the marker is stripped from the markdown body and the underlying
+ * RichArtifactEmbed renders inline ABOVE the remaining prose, in
+ * document order.
+ *
+ * Mirrors the wiki + notebook surfaces' embed pattern via the shared
+ * useInlineArtifacts hook so the Making-Software / technical-manual
+ * aesthetic looks identical wherever the agent emitted an HTML spec.
+ * A 404 (or any fetch failure) for a referenced artifact degrades to
+ * nothing visible — the stripped marker keeps the raw `visual-artifact:`
+ * text out of the body either way.
+ */
+export function IssueDescription({
+  description,
+  isDrafting,
+}: IssueDescriptionProps) {
   const body = description.trim();
-  if (!body) {
+  const inlineArtifacts = useInlineArtifacts(body || null);
+  const renderedBody = useMemo(
+    () => stripStandaloneRichArtifactReferenceLines(body),
+    [body],
+  );
+  const hasMarkdown = renderedBody.length > 0;
+  const hasArtifacts = inlineArtifacts.length > 0;
+
+  if (!body || (!hasMarkdown && !hasArtifacts)) {
     return (
       <section
         className="issue-doc-description issue-doc-description--empty"
@@ -28,18 +58,28 @@ export function IssueDescription({ description, isDrafting }: IssueDescriptionPr
       </section>
     );
   }
+
   return (
-    <section
-      className="issue-doc-description"
-      aria-label="Description"
-    >
-      <div className="issue-doc-description-body">
-        <ReactMarkdown
-          remarkPlugins={messageRemarkPlugins}
-          components={messageMarkdownComponents}
-        >
-          {body}
-        </ReactMarkdown>
+    <section className="issue-doc-description" aria-label="Description">
+      <div
+        className="issue-doc-description-body"
+        data-testid="issue-doc-description-body"
+      >
+        {inlineArtifacts.map((detail) => (
+          <RichArtifactEmbed
+            key={detail.artifact.id}
+            title={detail.artifact.title}
+            html={detail.html}
+          />
+        ))}
+        {hasMarkdown ? (
+          <ReactMarkdown
+            remarkPlugins={messageRemarkPlugins}
+            components={messageMarkdownComponents}
+          >
+            {renderedBody}
+          </ReactMarkdown>
+        ) : null}
       </div>
     </section>
   );
