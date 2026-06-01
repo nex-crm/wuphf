@@ -671,11 +671,13 @@ func (r *Repo) ensureRichArtifactNotebookHomeLocked(slug string, artifact RichAr
 
 // pickAvailableNotebookEntrySlug returns (entrySlug, relPath) for the first
 // slug in the {base, base-2, base-3, ...} sequence whose target file does not
-// already exist. Caller must hold r.mu. The 100-attempt cap is defensive:
-// hitting it would require 100 colliding titles for the same owner, which
-// signals a bug rather than a real collision.
+// already exist. Caller must hold r.mu. The loop is unbounded on purpose: it
+// only ever returns a slug whose file is confirmed absent on disk, so it can
+// never hand back a path that would clobber an unrelated entry. (A prior
+// version returned an unconditional `{base}-fallback` after 100 collisions
+// without an existence check, which could overwrite a stranger's note.)
 func (r *Repo) pickAvailableNotebookEntrySlug(owner, base string) (string, string) {
-	for attempt := 0; attempt < 100; attempt++ {
+	for attempt := 0; ; attempt++ {
 		candidate := base
 		if attempt > 0 {
 			candidate = fmt.Sprintf("%s-%d", base, attempt+1)
@@ -686,12 +688,6 @@ func (r *Repo) pickAvailableNotebookEntrySlug(owner, base string) (string, strin
 			return candidate, rel
 		}
 	}
-	// Defensive fallback — exhausted suffix budget. Stamp the artifact ID
-	// into the slug so the caller still gets a unique filename rather than
-	// silently overwriting somebody else's notebook entry.
-	candidate := fmt.Sprintf("%s-%s", base, "fallback")
-	rel := filepath.ToSlash(filepath.Join("agents", owner, "notebook", candidate+".md"))
-	return candidate, rel
 }
 
 // renderNotebookHomeBody returns the markdown body for the auto-created
@@ -842,7 +838,11 @@ func (r *Repo) PromoteRichArtifact(ctx context.Context, actorSlug, id, targetPat
 	artifact.Kind = richArtifactKindWikiVisual
 	artifact.TrustLevel = richArtifactTrustPromoted
 	artifact.PromotedWikiPath = targetPath
-	artifact.UpdatedAt = now.UTC().Format(time.RFC3339)
+	// RFC3339Nano (not RFC3339) so promoted-artifact UpdatedAt matches the
+	// nanosecond precision newRichArtifact writes at create time. ListRichArtifacts
+	// sorts UpdatedAt lexicographically; mixed precision misorders artifacts
+	// updated within the same second.
+	artifact.UpdatedAt = now.UTC().Format(time.RFC3339Nano)
 	artifact.Promotion = &ArtifactPromotion{
 		Status:   ArtifactPromotionStatusPromotedToWiki,
 		WikiPath: targetPath,
