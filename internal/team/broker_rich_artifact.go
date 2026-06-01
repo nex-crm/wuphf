@@ -86,7 +86,13 @@ func (b *Broker) handleNotebookVisualArtifacts(w http.ResponseWriter, r *http.Re
 		// The card emitter takes b.mu itself, and this HTTP handler holds no lock,
 		// so the call is safe. A "# Title" body makes markdownTitle resolve to the
 		// artifact title; SourceMarkdownPath is the mirrored notebook-home path.
-		if stored.AttachedToNotebookEntry != nil {
+		//
+		// Only emit when the entry was DERIVED by the system. AttachedToNotebookEntry
+		// is also populated in companion mode (request supplied source_markdown_path),
+		// where it names a PRE-EXISTING note — firing the "new entry" card there is a
+		// false signal. Gate on an empty source path so the card announces genuinely
+		// new system-created homes only.
+		if stored.AttachedToNotebookEntry != nil && strings.TrimSpace(body.SourceMarkdownPath) == "" {
 			b.emitNewNotebookEntryCard(
 				stored.AttachedToNotebookEntry.OwnerSlug,
 				stored.SourceMarkdownPath,
