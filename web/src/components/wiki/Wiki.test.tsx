@@ -11,7 +11,17 @@ vi.mock("./viewers/FileViewer", () => ({
   isMarkdownPath: (path: string) => /\.(md|markdown)$/i.test(path),
 }));
 
+// Stub the embedded app viewer so the app-routing branch can be asserted
+// without mounting an iframe or touching the sidebar store.
+vi.mock("./WebsiteViewer", () => ({
+  __esModule: true,
+  default: ({ path }: { path: string }) => (
+    <div data-testid="stub-website-viewer" data-path={path} />
+  ),
+}));
+
 import * as api from "../../api/wiki";
+import { APP_NAV_PREFIX } from "./tree/WikiTree";
 import Wiki from "./Wiki";
 
 describe("<Wiki>", () => {
@@ -81,6 +91,30 @@ describe("<Wiki>", () => {
     );
     // The article fetch must not fire for a file path.
     expect(articleSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders the embedded app viewer for an APP_NAV_PREFIX path", async () => {
+    vi.spyOn(api, "fetchCatalog").mockResolvedValue([]);
+    const articleSpy = vi.spyOn(api, "fetchArticle");
+
+    render(
+      <Wiki
+        articlePath={`${APP_NAV_PREFIX}team/site/dashboard`}
+        onNavigate={() => {}}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("stub-website-viewer")).toBeInTheDocument(),
+    );
+    // The sentinel prefix is stripped before the folder path reaches the viewer.
+    expect(screen.getByTestId("stub-website-viewer")).toHaveAttribute(
+      "data-path",
+      "team/site/dashboard",
+    );
+    // App folders are not articles or files — neither of those views fires.
+    expect(articleSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("stub-file-viewer")).not.toBeInTheDocument();
   });
 
   it("keeps the article view for a bare slug (no extension)", async () => {

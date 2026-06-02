@@ -46,6 +46,15 @@ import WikiTreeNode, { type NodeMenuAction } from "./WikiTreeNode";
 
 const WIKI_TREE_QUERY_KEY = ["wiki-tree"] as const;
 
+/**
+ * Navigation sentinel for embedded app/website folders. The tree prepends it to
+ * an app/website folder path when a leaf is opened so Wiki can route to the
+ * sandboxed WebsiteViewer instead of the article/file view, without changing the
+ * shared `(path: string) => void` onNavigate contract. Chosen to never collide
+ * with a real cabinet path (real paths start with `team/`).
+ */
+const APP_NAV_PREFIX = "_app:";
+
 interface WikiTreeProps {
   /** Currently-open article path (full team/...md), highlighted in the tree. */
   currentPath?: string | null;
@@ -197,15 +206,14 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
   const busyPath = activeBusyPath(moveMutation, renameMutation, deleteMutation);
 
   // Open a leaf: pages route to the article view and file leaves to the in-app
-  // file viewer (both via onNavigate); app/website leaves are embedded surfaces
-  // that land in a later slice, so they surface an informational note instead
-  // of navigating to a viewer that does not exist yet.
+  // file viewer (both via onNavigate with the raw path). App/website leaves are
+  // embedded surfaces, so they navigate with the APP_NAV_PREFIX sentinel — Wiki
+  // strips it back off and mounts WebsiteViewer instead of the article/file
+  // view. The sentinel keeps the `(path: string) => void` onNavigate signature
+  // intact across the sidebar without threading a separate node-type argument.
   const openLeaf = (node: WikiFSTreeNode) => {
     if (node.type === "app" || node.type === "website") {
-      setNote({
-        kind: "info",
-        text: `“${node.title}” opens as an app — coming soon.`,
-      });
+      onNavigate(`${APP_NAV_PREFIX}${node.path}`);
       return;
     }
     onNavigate(node.path);
@@ -1100,5 +1108,7 @@ function UploadDialog({
 }
 
 // Re-export the query key + findNode for callers/tests that want to seed or
-// assert against the tree query.
-export { findNode, WIKI_TREE_QUERY_KEY };
+// assert against the tree query. APP_NAV_PREFIX is shared with Wiki so the
+// sentinel that routes app/website folders to the embedded viewer stays defined
+// in exactly one place.
+export { APP_NAV_PREFIX, findNode, WIKI_TREE_QUERY_KEY };
