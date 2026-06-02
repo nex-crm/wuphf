@@ -157,7 +157,14 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if created.Task.LifecycleState != LifecycleStateDrafting {
 		t.Fatalf("created lifecycle: want drafting, got %q", created.Task.LifecycleState)
 	}
-	if len(b.tasks) != 1 || b.tasks[0].ID != created.Task.ID {
+	var foundCreated *teamTask
+	for i := range b.tasks {
+		if b.tasks[i].ID == created.Task.ID {
+			foundCreated = &b.tasks[i]
+			break
+		}
+	}
+	if foundCreated == nil {
 		t.Fatalf("expected broker state to include created task, got %+v", b.tasks)
 	}
 
@@ -176,8 +183,15 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	if updated.Task.CompletedAt == "" {
 		t.Fatal("expected completion timestamp")
 	}
-	if b.tasks[0].Status() != "done" {
-		t.Fatalf("expected broker state to be updated, got %+v", b.tasks[0])
+	var foundUpdated *teamTask
+	for i := range b.tasks {
+		if b.tasks[i].ID == created.Task.ID {
+			foundUpdated = &b.tasks[i]
+			break
+		}
+	}
+	if foundUpdated == nil || foundUpdated.Status() != "done" {
+		t.Fatalf("expected broker state to be updated, got %+v", b.tasks)
 	}
 }
 

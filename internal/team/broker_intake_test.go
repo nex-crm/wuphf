@@ -418,11 +418,18 @@ func TestIntake_ProviderErrorSurfacesAndCleansUp(t *testing.T) {
 		t.Fatalf("error should wrap provider error, got %q", err.Error())
 	}
 
-	// No leftover task in any lifecycle bucket.
+	// No leftover task in any lifecycle bucket (excluding permanent system
+	// tasks such as the "Backup & Migration" task that is always present).
 	idx := b.LifecycleIndexSnapshot()
 	for state, ids := range idx {
-		if len(ids) != 0 {
-			t.Fatalf("expected empty index after provider failure, found %d in %s: %v", len(ids), state, ids)
+		nonSystem := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if id != backupMigrationTaskID {
+				nonSystem = append(nonSystem, id)
+			}
+		}
+		if len(nonSystem) != 0 {
+			t.Fatalf("expected empty index after provider failure, found %d in %s: %v", len(nonSystem), state, nonSystem)
 		}
 	}
 }

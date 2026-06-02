@@ -272,6 +272,11 @@ type teamTask struct {
 	CreatedAt      string          `json:"created_at"`
 	UpdatedAt      string          `json:"updated_at"`
 	CompletedAt    string          `json:"completed_at,omitempty"`
+	// System marks a task as a permanent system-owned task that may not
+	// be deleted or removed. The "Backup & Migration" task (ID: task-general)
+	// is the only current system task; it owns the #general channel so all
+	// 141 fallback call sites that post to "general" keep working unchanged.
+	System bool `json:"system,omitempty"`
 }
 
 // IssueDraftSpec holds the four spec sections the CEO draft writer
@@ -362,6 +367,7 @@ type teamTaskWire struct {
 	CreatedAt            string          `json:"created_at"`
 	UpdatedAt            string          `json:"updated_at"`
 	CompletedAt          string          `json:"completed_at,omitempty"`
+	System               bool            `json:"system,omitempty"`
 }
 
 // MarshalJSON preserves the pre-Lane-A wire format (status/review_state/
@@ -405,6 +411,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
 		CompletedAt:          t.CompletedAt,
+		System:               t.System,
 	})
 }
 
@@ -450,6 +457,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt
 	t.CompletedAt = w.CompletedAt
+	t.System = w.System
 	return nil
 }
 
@@ -473,6 +481,11 @@ type teamChannel struct {
 	CreatedBy   string          `json:"created_by,omitempty"`
 	CreatedAt   string          `json:"created_at,omitempty"`
 	UpdatedAt   string          `json:"updated_at,omitempty"`
+	// TaskID links a per-task dedicated channel back to its owning task.
+	// Empty for shared channels (e.g. #general) and DM channels.
+	// Set to the owning task's ID when createPerTaskChannelLocked creates
+	// a task-<id> channel during task creation.
+	TaskID string `json:"task_id,omitempty"`
 }
 
 type officeMember struct {

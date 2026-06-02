@@ -370,11 +370,42 @@
     broker_messages.go + web. Removal surfaces for DMs/subspaces: dmRoute/DMView,
     AgentSubspaceRoute, router/routeRegistry/useCurrentRoute, slashCommands, objectRoutes,
     Sidebar Agents/Channels sections.
-  - **Plan (proposed sub-steps, commit each):**
-    - **2a (backend):** task creation spins a dedicated channel (slug `task-<n>`), 1:1
-      task↔channel link (add `teamChannel.taskID` + `teamTask.Channel`=its own channel);
-      seed members owner + CEO (Librarian added Phase 4). Rip out the `""→"general"`
-      fallback + default-channel machinery. Onboarding stops seeding office channels.
+  - **🚨 CRITICAL DISCOVERY (2026-06-02): "general" is load-bearing plumbing, not
+    just a UI surface.** 141 non-test `"general"` literals across the backend —
+    decision packets (`broker_decision_packet.go:57` `decisionPacketChannel="general"`),
+    intake (`broker_intake.go:722`), human-share/human (`broker_human*.go`), requests/
+    interviews, skills (`broker_skills.go` x4), scheduler (`broker_scheduler.go` x4),
+    studio, auto-notebook, reviewer-routing — all use #general as the SYSTEM FALLBACK
+    BUS for non-task messages. Onboarding seeds #general as the sole channel
+    (`broker_onboarding_phase2.go:324`). Naive deletion breaks ~141 paths + onboarding.
+  - **✅ RESOLVED — D11 "Backup & Migration" task (user, 2026-06-02):** absorb the
+    default channel into a special **"Backup & Migration" Task** that OWNS the channel
+    (keep slug `"general"`). Named for what it is: the holding container for migrated
+    legacy #general history + the system catch-all. This means:
+    - The ~141 backend `"general"` fallbacks + `normalizeChannelSlug("")→"general"`
+      stay UNCHANGED — they now post to the Backup & Migration task's channel. ZERO 141-callsite
+      churn, onboarding doesn't break. This is the big de-risk.
+    - The UI becomes pure task-scoped: NO free-standing channel surface / channel
+      list / #general landing. #general's role is served by the **Backup & Migration task** on
+      the board (it absorbs system + uncategorized messages + legacy #general history).
+    - Placement: Backup & Migration task defaults to the **Archive** stage (per "archive them
+      under a general task") — parked out of the active flow but always present +
+      accessible. (Assumption — correct me if you meant pinned/always-visible.)
+    - It's a permanent, non-deletable system task.
+  - **Plan (proposed sub-steps, commit each) — per D11:**
+    - **2a-i (backend) ✅ DONE + committed.** Backup & Migration system task
+      (`broker_system_tasks.go`, ID `task-general`, owns #general, archived, idempotent
+      seed at all 3 paths). `teamTask.System` + `teamChannel.TaskID` fields.
+      AllTasks/ChannelTasks exclude System tasks; archived tasks skip scheduler. Gates
+      green (build/vet/test-go ./internal/team/boot). The `""→"general"` fallback +
+      141 refs INTENTIONALLY KEPT (they now feed the Backup & Migration task).
+    - **2a-ii (backend) — channel-per-task: DEFERRED from 2a, NEXT.** Root causes the
+      agent surfaced: `findReusableTaskLocked` dedups tasks by CHANNEL (must become
+      channel-agnostic), prompt builders hardcode `#general`, `canAccessChannelLocked`
+      ordering (channel must exist before access check), ~15 tests assume tasks live in
+      "general". Plan: new non-system tasks get a dedicated `task-<id>` channel
+      (createChannelLocked, members owner+ceo, reverse-linked via teamChannel.TaskID);
+      make task reuse keyed on title/intent not channel; migrate prompts off `#general`.
     - **2b (frontend):** sidebar primary = Tasks grouped by stage (+ Tools); landing
       changes `/agents/ceo` → `/tasks` board (INTERIM home until Phase 3 composer; keep
       existing TaskCreateDialog for creation meanwhile). Remove DM route/view + agent
@@ -383,7 +414,13 @@
   - **Sequencing decision (TAKEN, not asking):** Tasks board is the INTERIM home in 2b;
     the rich new-task composer is Phase 3. Keeps the app working throughout (never a
     broken no-landing state).
-  - **OPEN FORK (asking): where does agent management go when subspaces are removed?**
+  - **FORK RESOLVED (2026-06-02): agent management → a dedicated "Agents" tool**
+    (standalone surface under Tools: list roster, create agents, configure
+    provider/role/persona). Agents stay first-class, just not chat surfaces.
+  - **external-app naming: BANNED everywhere** (PR/wiki/docs/branch/code) —
+    user hard rule 2026-06-02. My tracker scrubbed (commit 3f46f328). Pre-existing
+    competitive-analysis docs (desktop-platform.md, tutorials/*) left as-is per user
+    (out of this PR's scope). the 🗄 emoji's Unicode name is an unrelated false positive.
   - Gate: new task → its own channel works; no path depends on a default channel;
     app boots to a working tasks-home with no DM/subspace surfaces.
 - [ ] **Phase 3 — new-task home composer.** Home = new-task composer with

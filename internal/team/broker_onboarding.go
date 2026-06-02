@@ -292,6 +292,9 @@ func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents
 	b.messages = nil
 	b.counter = 0
 	b.lastTaggedAt = make(map[string]time.Time)
+	// Seed the "Backup & Migration" system task that owns #general so the
+	// ~141 fallback call sites that post to "general" keep working.
+	b.ensureBackupMigrationTaskLocked()
 	if err := b.postKickoffLocked(bp, selectedAgents, task, skipTask, synthesized); err != nil {
 		return err
 	}

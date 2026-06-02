@@ -460,6 +460,9 @@ func TestTaskIDsUseBlueprintPrefix(t *testing.T) {
 	b.mu.Lock()
 	ids := make([]string, 0, len(b.tasks))
 	for _, tk := range b.tasks {
+		if tk.System {
+			continue // skip permanent system tasks (e.g. task-general)
+		}
 		ids = append(ids, tk.ID)
 	}
 	b.mu.Unlock()

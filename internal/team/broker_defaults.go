@@ -146,44 +146,47 @@ func normalizeActorSlug(slug string) string {
 func (b *Broker) ensureDefaultChannelsLocked() {
 	if len(b.channels) == 0 {
 		b.channels = defaultTeamChannels()
-		return
-	}
-	hasGeneral := false
-	for _, ch := range b.channels {
-		if ch.Slug == "general" {
-			hasGeneral = true
-			break
-		}
-	}
-	if !hasGeneral {
-		for _, def := range defaultTeamChannels() {
-			if def.Slug == "general" {
-				b.channels = append([]teamChannel{def}, b.channels...)
+	} else {
+		hasGeneral := false
+		for _, ch := range b.channels {
+			if ch.Slug == "general" {
+				hasGeneral = true
 				break
 			}
 		}
-	}
-	// Merge surface metadata from manifest into existing channels
-	// (handles case where state was saved without surfaces by an older binary)
-	defaults := defaultTeamChannels()
-	for _, def := range defaults {
-		if def.Surface == nil {
-			continue
-		}
-		found := false
-		for i := range b.channels {
-			if b.channels[i].Slug == def.Slug {
-				if b.channels[i].Surface == nil {
-					b.channels[i].Surface = def.Surface
+		if !hasGeneral {
+			for _, def := range defaultTeamChannels() {
+				if def.Slug == "general" {
+					b.channels = append([]teamChannel{def}, b.channels...)
+					break
 				}
-				found = true
-				break
 			}
 		}
-		if !found {
-			b.channels = append(b.channels, def)
+		// Merge surface metadata from manifest into existing channels
+		// (handles case where state was saved without surfaces by an older binary)
+		defaults := defaultTeamChannels()
+		for _, def := range defaults {
+			if def.Surface == nil {
+				continue
+			}
+			found := false
+			for i := range b.channels {
+				if b.channels[i].Slug == def.Slug {
+					if b.channels[i].Surface == nil {
+						b.channels[i].Surface = def.Surface
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				b.channels = append(b.channels, def)
+			}
 		}
 	}
+	// Always seed the "Backup & Migration" system task that owns #general,
+	// now that we have guaranteed #general exists.
+	b.ensureBackupMigrationTaskLocked()
 }
 
 // ensureDefaultOfficeMembersLocked seeds the DefaultManifest roster ONLY when
