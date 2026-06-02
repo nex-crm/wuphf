@@ -231,6 +231,21 @@ html[data-theme="nex-dark"] {
   --wk-amber: var(--tertiary-300);
   --wk-amber-bg: rgba(159, 77, 191, 0.22);
   --wk-amber-banner: rgba(159, 77, 191, 0.22);
+
+  /* Version-history diff washes. wiki.css seeds these from the light ramp:
+       --wk-diff-add-bg    = --green-bg  (#e9fbef, near-white green)
+       --wk-diff-remove-bg = --red-bg    (#ffeeeb, near-white red)
+     Those near-white washes flash bright on the twilight diff surface
+     (--wk-code-bg = --bg-warm = #1c1825) and the near-white --wk-text muted
+     context lines around them lose contrast. Re-map to low-alpha color washes
+     with a bright readable ink, mirroring the violet amber re-tint above:
+       added   #5ad08a on the composited ~#26312f wash clears ~6.9:1 on --bg-warm
+       removed  #f08a82 on the composited ~#312026 wash clears ~5.9:1 on --bg-warm
+     Both pass WCAG AA; the +/- prefix stays as the non-color cue. */
+  --wk-diff-add-bg: rgba(64, 180, 116, 0.16);
+  --wk-diff-add-ink: #5ad08a;
+  --wk-diff-remove-bg: rgba(214, 68, 60, 0.16);
+  --wk-diff-remove-ink: #f08a82;
 }
 
 /* "NEW" / type pill — the base rule's --accent-bg (#ffebfc, near-white)

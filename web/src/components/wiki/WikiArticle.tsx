@@ -55,6 +55,7 @@ import type { SourceItem } from "./Sources";
 import Sources from "./Sources";
 import TeamLearningPanel from "./TeamLearningPanel";
 import TocBox, { type TocEntry } from "./TocBox";
+import VersionHistory from "./VersionHistory";
 import WikiEditor from "./WikiEditor";
 import WikiMaintenanceAssistant from "./WikiMaintenanceAssistant";
 
@@ -476,6 +477,14 @@ export default function WikiArticle({
     setTab("article");
   };
   const handleEditorCancel = () => setTab("article");
+  const handleVersionRestored = (newSha: string) => {
+    // A restore writes a fresh forward commit; bump the same nonce the editor
+    // uses so the article body + history + sources all refetch, then drop the
+    // human back on the rendered article showing the restored content.
+    void newSha;
+    setRefreshNonce((n) => n + 1);
+    setTab("article");
+  };
 
   return (
     <>
@@ -514,6 +523,7 @@ export default function WikiArticle({
           inlineArtifacts={inlineArtifacts}
           onEditorSaved={handleEditorSaved}
           onEditorCancel={handleEditorCancel}
+          onVersionRestored={handleVersionRestored}
         />
         <ArticleRelatedPanels
           visible={tab === "article"}
@@ -688,6 +698,7 @@ function ArticleTabPanels({
   inlineArtifacts,
   onEditorSaved,
   onEditorCancel,
+  onVersionRestored,
 }: {
   tab: HatBarTab;
   article: WikiArticleT;
@@ -699,6 +710,7 @@ function ArticleTabPanels({
   inlineArtifacts: RichArtifactDetail[];
   onEditorSaved: (newSha: string) => void;
   onEditorCancel: () => void;
+  onVersionRestored: (newSha: string) => void;
 }) {
   switch (tab) {
     case "article": {
@@ -785,9 +797,7 @@ function ArticleTabPanels({
       );
     case "history":
       return (
-        <div className="wk-loading">
-          History view streams from <code>git log</code>. Wiring pending Lane A.
-        </div>
+        <VersionHistory path={article.path} onRestored={onVersionRestored} />
       );
   }
   return null;

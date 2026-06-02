@@ -586,6 +586,11 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/page/move", b.requireAuth(b.handleWikiPageMove))
 	mux.HandleFunc("/wiki/page/rename", b.requireAuth(b.handleWikiPageRename))
 	mux.HandleFunc("/wiki/upload", b.requireAuth(b.handleWikiUpload))
+	// Slice 5: per-article version history, per-commit diff, append-only restore.
+	// /wiki/history/ is a path-prefix route — the article path is the suffix.
+	mux.HandleFunc("/wiki/history/", b.requireAuth(b.handleWikiHistory))
+	mux.HandleFunc("/wiki/diff", b.requireAuth(b.handleWikiDiff))
+	mux.HandleFunc("/wiki/restore", b.requireAuth(b.handleWikiRestore))
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/entry", b.requireAuth(b.handleNotebookEntry))

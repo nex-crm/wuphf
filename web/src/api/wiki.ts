@@ -788,6 +788,52 @@ export async function fetchHistory(
 }
 
 /**
+ * Result envelope for GET /wiki/diff?path=&sha=. `diff` is the raw unified
+ * git diff for the article at the given commit `sha` (the change that commit
+ * introduced). The version-history UI renders it line-by-line, colouring
+ * added/removed lines. Unlike fetchHistory this does NOT swallow errors —
+ * the caller surfaces a "couldn't load this version's diff" state so the
+ * selection feedback is honest rather than silently blank.
+ */
+export interface WikiDiffResult {
+  diff: string;
+  sha: string;
+  path: string;
+}
+
+export async function fetchWikiDiff(
+  path: string,
+  sha: string,
+): Promise<WikiDiffResult> {
+  return get<WikiDiffResult>("/wiki/diff", { path, sha });
+}
+
+/**
+ * Result envelope for POST /wiki/restore. `commit_sha` is the NEW commit the
+ * broker created to bring the article's content back to the restored version
+ * (a forward commit, never a history rewrite). The caller passes it up via
+ * onRestored so the article view refetches the now-current body.
+ */
+export interface RestoreVersionResult {
+  path: string;
+  commit_sha: string;
+}
+
+/**
+ * Restore an article to a prior `sha`. State-changing and not reversible from
+ * the UI without another restore — callers MUST confirm with the user before
+ * invoking this (the broker writes a fresh commit that overwrites HEAD's body
+ * with the historical version). Mirrors the page-mutation client pattern: a
+ * thin POST with a typed envelope, errors propagated to the caller.
+ */
+export async function restoreWikiVersion(
+  path: string,
+  sha: string,
+): Promise<RestoreVersionResult> {
+  return post<RestoreVersionResult>("/wiki/restore", { path, sha });
+}
+
+/**
  * Subscribe to the shared broker `/events` SSE stream filtered to
  * `wiki:write` events. Returns an unsubscribe function that tears down
  * the underlying EventSource.

@@ -108,7 +108,11 @@ describe("<WikiArticle content>", () => {
     getByRole("button", { name: "Raw markdown" }).click();
     await waitFor(() => expect(getByText(/## Heading A/)).toBeInTheDocument());
     getByRole("button", { name: "History" }).click();
-    await waitFor(() => expect(getByText(/streams from/)).toBeInTheDocument());
+    // The History tab now mounts the real VersionHistory panel. With the
+    // default empty fetchHistory stub it lands on its empty state.
+    await waitFor(() =>
+      expect(getByText(/no version history yet/i)).toBeInTheDocument(),
+    );
   });
 
   it("renders a paired visual artifact inline at the top of the Article tab (no separate Visual tab)", async () => {
