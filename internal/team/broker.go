@@ -564,6 +564,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/list", b.requireAuth(b.handleWikiList))
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
+	mux.HandleFunc("/wiki/tree", b.requireAuth(b.handleWikiTree))
+	mux.HandleFunc("/wiki/file", b.requireAuth(b.handleWikiFile))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
 	mux.HandleFunc("/wiki/visual", b.requireAuth(b.handleWikiVisualArtifact))
 	mux.HandleFunc("/wiki/archive/sweep", b.requireAuth(b.handleWikiArchiveSweep))
