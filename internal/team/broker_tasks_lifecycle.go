@@ -267,9 +267,23 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		return *existing, true, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Allocate the task ID before choosing the channel so we can name
+	// the per-task channel deterministically.
 	b.counter++
+	taskID := b.allocateIssueIDLocked()
+	// Mint a dedicated channel for new business-objective tasks that
+	// defaulted to "general".
+	if shouldMintPerTaskChannel(channel, &teamTask{
+		Title:   title,
+		Details: strings.TrimSpace(details),
+		Owner:   strings.TrimSpace(owner),
+	}) {
+		if ch := b.createPerTaskChannelLocked(taskID, title, strings.TrimSpace(owner), strings.TrimSpace(createdBy)); ch != nil {
+			channel = ch.Slug
+		}
+	}
 	task := teamTask{
-		ID:        b.allocateIssueIDLocked(),
+		ID:        taskID,
 		Channel:   channel,
 		Title:     title,
 		Details:   strings.TrimSpace(details),
@@ -567,17 +581,21 @@ func taskCanMatchScopedIdentity(task *teamTask, match taskReuseMatch) bool {
 	return strings.TrimSpace(match.PipelineID) != "" && strings.TrimSpace(task.PipelineID) != ""
 }
 
+// findReusableTaskLocked looks for an existing non-terminal task that
+// matches the given intent (title + owner + optional thread / scoped
+// identity).  The search is deliberately channel-agnostic: since each
+// new business-objective task now gets its own dedicated channel
+// (task-<id>), a duplicate create request that arrives against "general"
+// must still find the already-minted task in its per-task channel.
+// The Backup & Migration system task has a unique title so it is never
+// matched accidentally.
 func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
-	channel := normalizeChannelSlug(match.Channel)
 	title := strings.TrimSpace(match.Title)
 	threadID := strings.TrimSpace(match.ThreadID)
 	owner := strings.TrimSpace(match.Owner)
 	scopedIdentity := match.hasScopedIdentity()
 	for i := range b.tasks {
 		task := &b.tasks[i]
-		if normalizeChannelSlug(task.Channel) != channel {
-			continue
-		}
 		if isTerminalTeamTaskStatus(task.status) {
 			continue
 		}

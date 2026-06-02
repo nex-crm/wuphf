@@ -386,9 +386,29 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			b.emitTaskTransitionAutoNotebook(existing, beforeStatus, actor)
 			return TaskResponse{Task: *existing}, nil
 		}
+		// Allocate the task ID before choosing the channel so we can
+		// name the per-task channel "task-<id>" deterministically.
 		b.counter++
+		taskID := b.allocateIssueIDLocked()
+		// For new business-objective tasks that defaulted to "general",
+		// mint a dedicated task-<id> channel so each goal runs in
+		// isolation.  Non-business / system / sub-issue / incident tasks
+		// stay in "general" (shouldMintPerTaskChannel guards all that).
+		if shouldMintPerTaskChannel(channel, &teamTask{
+			Title:         strings.TrimSpace(body.Title),
+			Details:       strings.TrimSpace(body.Details),
+			Owner:         strings.TrimSpace(body.Owner),
+			TaskType:      defaultTaskTypeForCreate(body.TaskType),
+			PipelineID:    strings.TrimSpace(body.PipelineID),
+			ExecutionMode: strings.TrimSpace(body.ExecutionMode),
+			ParentIssueID: strings.TrimSpace(body.ParentIssueID),
+		}) {
+			if ch := b.createPerTaskChannelLocked(taskID, strings.TrimSpace(body.Title), strings.TrimSpace(body.Owner), actor); ch != nil {
+				channel = ch.Slug
+			}
+		}
 		task := teamTask{
-			ID:               b.allocateIssueIDLocked(),
+			ID:               taskID,
 			Channel:          channel,
 			Title:            strings.TrimSpace(body.Title),
 			Details:          strings.TrimSpace(body.Details),

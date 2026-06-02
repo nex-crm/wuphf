@@ -976,7 +976,10 @@ func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
 		t.Fatalf("expected 200 answering request, got %d: %s", resp.StatusCode, raw)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, base+"/tasks?channel=general", nil)
+	// "Ship the launch packet after approval" is a business-objective task
+	// (title contains "launch") so it gets its own per-task channel — query
+	// using all_channels=true so the check is channel-location-agnostic.
+	req, _ = http.NewRequest(http.MethodGet, base+"/tasks?all_channels=true&viewer=ceo", nil)
 	req.Header.Set("Authorization", "Bearer "+b.Token())
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {

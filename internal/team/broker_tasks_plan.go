@@ -112,6 +112,19 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		b.counter++
 		taskID := b.allocateIssueIDLocked()
 		titleToID[strings.TrimSpace(item.Title)] = taskID
+		// Mint a dedicated channel for new business-objective tasks
+		// that defaulted to "general".
+		if shouldMintPerTaskChannel(taskChannel, &teamTask{
+			Title:         strings.TrimSpace(item.Title),
+			Details:       strings.TrimSpace(item.Details),
+			Owner:         strings.TrimSpace(item.Assignee),
+			TaskType:      strings.TrimSpace(item.TaskType),
+			ExecutionMode: strings.TrimSpace(item.ExecutionMode),
+		}) {
+			if ch := b.createPerTaskChannelLocked(taskID, strings.TrimSpace(item.Title), strings.TrimSpace(item.Assignee), createdBy); ch != nil {
+				taskChannel = ch.Slug
+			}
+		}
 
 		task := teamTask{
 			ID:            taskID,
@@ -265,9 +278,26 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		return *existing, true, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Allocate the task ID before choosing the channel so we can name
+	// the per-task channel deterministically.
 	b.counter++
+	taskID := b.allocateIssueIDLocked()
+	// Mint a dedicated channel for new business-objective tasks that
+	// defaulted to "general".
+	if shouldMintPerTaskChannel(channel, &teamTask{
+		Title:         title,
+		Details:       strings.TrimSpace(input.Details),
+		Owner:         strings.TrimSpace(input.Owner),
+		TaskType:      strings.TrimSpace(input.TaskType),
+		PipelineID:    strings.TrimSpace(input.PipelineID),
+		ExecutionMode: strings.TrimSpace(input.ExecutionMode),
+	}) {
+		if ch := b.createPerTaskChannelLocked(taskID, title, strings.TrimSpace(input.Owner), strings.TrimSpace(input.CreatedBy)); ch != nil {
+			channel = ch.Slug
+		}
+	}
 	task := teamTask{
-		ID:               b.allocateIssueIDLocked(),
+		ID:               taskID,
 		Channel:          channel,
 		Title:            title,
 		Details:          strings.TrimSpace(input.Details),

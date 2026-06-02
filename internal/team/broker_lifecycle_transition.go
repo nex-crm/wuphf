@@ -331,7 +331,7 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	// Archived — tasks stored on disk with status="archived" (bare or
 	// canonical tuple) resolve to LifecycleStateArchived so pre-existing
 	// broker-state.json files load cleanly after the archive action ships.
-	{PipelineStage: "", ReviewState: "", Status: "archived", Blocked: false}:                     LifecycleStateArchived,
+	{PipelineStage: "", ReviewState: "", Status: "archived", Blocked: false}:                 LifecycleStateArchived,
 	{PipelineStage: "archived", ReviewState: "approved", Status: "archived", Blocked: false}: LifecycleStateArchived,
 }
 

@@ -1,28 +1,28 @@
 package team
 
 type brokerTaskMutationSnapshot struct {
-	tasks       []teamTask
-	channels    []teamChannel
-	messages    []channelMessage
+	tasks     []teamTask
+	channels  []teamChannel
+	messages  []channelMessage
 	incidents []incidentRecord
-	actions     []officeActionLog
-	watchdogs   []watchdogAlert
-	scheduler   []schedulerJob
-	lifecycle   map[LifecycleState][]string
-	counter     int
+	actions   []officeActionLog
+	watchdogs []watchdogAlert
+	scheduler []schedulerJob
+	lifecycle map[LifecycleState][]string
+	counter   int
 }
 
 func snapshotBrokerTaskMutationLocked(b *Broker) brokerTaskMutationSnapshot {
 	return brokerTaskMutationSnapshot{
-		tasks:       cloneTeamTasksForRollback(b.tasks),
-		channels:    cloneTeamChannelsForRollback(b.channels),
-		messages:    cloneChannelMessagesForRollback(b.messages),
+		tasks:     cloneTeamTasksForRollback(b.tasks),
+		channels:  cloneTeamChannelsForRollback(b.channels),
+		messages:  cloneChannelMessagesForRollback(b.messages),
 		incidents: append([]incidentRecord(nil), b.incidents...),
-		actions:     cloneOfficeActionsForRollback(b.actions),
-		watchdogs:   append([]watchdogAlert(nil), b.watchdogs...),
-		scheduler:   append([]schedulerJob(nil), b.scheduler...),
-		lifecycle:   cloneLifecycleIndexForRollback(b.lifecycleIndex),
-		counter:     b.counter,
+		actions:   cloneOfficeActionsForRollback(b.actions),
+		watchdogs: append([]watchdogAlert(nil), b.watchdogs...),
+		scheduler: append([]schedulerJob(nil), b.scheduler...),
+		lifecycle: cloneLifecycleIndexForRollback(b.lifecycleIndex),
+		counter:   b.counter,
 	}
 }
 

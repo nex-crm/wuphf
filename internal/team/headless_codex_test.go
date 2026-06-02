@@ -1343,13 +1343,16 @@ func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t 
 	}
 
 	b.mu.Lock()
+	taskChannel := normalizeChannelSlug(task.Channel)
 	for i := range b.tasks {
 		if b.tasks[i].ID != task.ID {
 			continue
 		}
 		b.tasks[i].status = "done"
 		b.tasks[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		b.appendActionLocked("task_updated", "office", "general", "gtm", truncateSummary(b.tasks[i].Title+" ["+b.tasks[i].status+"]", 140), task.ID)
+		// Use the task's actual channel (may be a per-task channel) for the
+		// action log so the notification content reflects the real location.
+		b.appendActionLocked("task_updated", "office", taskChannel, "gtm", truncateSummary(b.tasks[i].Title+" ["+b.tasks[i].status+"]", 140), task.ID)
 		break
 	}
 	b.mu.Unlock()
@@ -1362,7 +1365,10 @@ func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t 
 	l.wakeLeadAfterSpecialist("gtm")
 
 	got := waitForString(t, notifications)
-	if !strings.Contains(got, "[Task updated #"+task.ID+" on #general]") {
+	// "Lock the faceless YouTube niche" is a business objective and gets a
+	// per-task channel; the notification uses the task's real channel slug.
+	expectedNotifHeader := "[Task updated #" + task.ID + " on #" + taskChannel + "]"
+	if !strings.Contains(got, expectedNotifHeader) {
 		t.Fatalf("expected CEO notification for completed task handoff, got %q", got)
 	}
 	if !strings.Contains(got, "status done") {
@@ -2028,7 +2034,9 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithWorkflowEviden
 			break
 		}
 	}
-	if err := b.RecordAction("external_workflow_executed", "notion", "general", "builder", "Created client workspace page in Notion", "workflow-notion-client-page", nil, ""); err != nil {
+	// Record the external action in the task's actual channel (which may be a
+	// per-task channel for business-objective tasks like this one).
+	if err := b.RecordAction("external_workflow_executed", "notion", task.Channel, "builder", "Created client workspace page in Notion", "workflow-notion-client-page", nil, ""); err != nil {
 		t.Fatalf("record action: %v", err)
 	}
 
@@ -2067,7 +2075,9 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithActionEvidence
 			break
 		}
 	}
-	if err := b.RecordAction("external_action_executed", "one", "general", "reviewer", "Verified client workspace page in Notion", "notion-client-page", nil, ""); err != nil {
+	// Record the external action in the task's actual channel (which may be a
+	// per-task channel for business-objective tasks like this one).
+	if err := b.RecordAction("external_action_executed", "one", task.Channel, "reviewer", "Verified client workspace page in Notion", "notion-client-page", nil, ""); err != nil {
 		t.Fatalf("record action: %v", err)
 	}
 

@@ -664,7 +664,10 @@ func TestBrokerTaskCreateReusesExistingOpenTask(t *testing.T) {
 	if second.Details != "Updated details" {
 		t.Fatalf("expected task details to update, got %+v", second)
 	}
-	if got := len(b.ChannelTasks("general")); got != 1 {
+	// "Own the landing page" qualifies as a business objective and gets its
+	// own per-task channel, so AllTasks (not ChannelTasks("general")) is the
+	// right way to assert deduplication.
+	if got := len(b.AllTasks()); got != 1 {
 		t.Fatalf("expected one open task after reuse, got %d", got)
 	}
 }
@@ -706,7 +709,9 @@ func TestBrokerEnsurePlannedTaskKeepsScopedDuplicateTitlesDistinct(t *testing.T)
 	if first.ID == second.ID {
 		t.Fatalf("expected distinct tasks for duplicate scoped titles, got %s", first.ID)
 	}
-	if got := len(b.ChannelTasks("general")); got != 2 {
+	// Both tasks are business objectives ("publish" + "youtube" keywords)
+	// so they each get their own per-task channel; AllTasks covers both.
+	if got := len(b.AllTasks()); got != 2 {
 		t.Fatalf("expected two planned tasks after duplicate scoped titles, got %d", got)
 	}
 
@@ -2012,9 +2017,19 @@ func TestBrokerEnsurePlannedTaskQueuesConcurrentExclusiveOwnerWork(t *testing.T)
 	}
 }
 
-func TestBrokerTaskPlanRoutesLiveBusinessTasksIntoRecentExecutionChannel(t *testing.T) {
+// TestBrokerTaskPlanMintsPerTaskChannelForBusinessObjective verifies that a
+// business-objective task submitted against "general" gets its own dedicated
+// task-<id> channel instead of being grouped into a recent execution channel
+// (the old behaviour, removed).  The task must NOT land in "general" and must
+// NOT land in any pre-existing shared channel (e.g. "client-loop").
+func TestBrokerTaskPlanMintsPerTaskChannelForBusinessObjective(t *testing.T) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
+		return t.TempDir(), "wuphf-" + taskID, nil
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
+	// Pre-existing shared channel — must NOT absorb the new task.
 	b.channels = append(b.channels, teamChannel{
 		Slug:      "client-loop",
 		Name:      "client-loop",
@@ -2063,8 +2078,42 @@ func TestBrokerTaskPlanRoutesLiveBusinessTasksIntoRecentExecutionChannel(t *test
 	if len(result.Tasks) != 1 {
 		t.Fatalf("expected one task, got %+v", result.Tasks)
 	}
-	if result.Tasks[0].Channel != "client-loop" {
-		t.Fatalf("expected task to route into client-loop, got %+v", result.Tasks[0])
+	task := result.Tasks[0]
+	// Must have its own dedicated channel, not "general" and not "client-loop".
+	if task.Channel == "general" {
+		t.Fatalf("expected dedicated per-task channel, got general: %+v", task)
+	}
+	if task.Channel == "client-loop" {
+		t.Fatalf("expected dedicated per-task channel, not the pre-existing client-loop: %+v", task)
+	}
+	// Channel slug is normalised (lowercased) by createChannelLocked.
+	expectedSlug := normalizeChannelSlug("task-" + task.ID)
+	if task.Channel != expectedSlug {
+		t.Fatalf("expected channel %q, got %q", expectedSlug, task.Channel)
+	}
+	// The minted channel must be discoverable via the broker and must link
+	// back to the task via TaskID.
+	b.mu.Lock()
+	var mintedCh *teamChannel
+	for i := range b.channels {
+		if b.channels[i].Slug == expectedSlug {
+			mintedCh = &b.channels[i]
+			break
+		}
+	}
+	b.mu.Unlock()
+	if mintedCh == nil {
+		t.Fatalf("expected channel %q to exist in broker, not found", expectedSlug)
+	}
+	if mintedCh.TaskID != task.ID {
+		t.Fatalf("expected channel TaskID=%q, got %q", task.ID, mintedCh.TaskID)
+	}
+	// "builder" (task owner) and "ceo" must be members.
+	if !stringSliceContainsFold(mintedCh.Members, "ceo") {
+		t.Fatalf("expected ceo to be a channel member, got %v", mintedCh.Members)
+	}
+	if !stringSliceContainsFold(mintedCh.Members, "builder") {
+		t.Fatalf("expected builder (task owner) to be a channel member, got %v", mintedCh.Members)
 	}
 }
 
@@ -2099,12 +2148,10 @@ func TestBrokerTaskPlanReusesExistingActiveLane(t *testing.T) {
 	base := fmt.Sprintf("http://%s", b.Addr())
 	body, _ := json.Marshal(map[string]any{
 		"channel": "general",
-		// created_by stays as operator (client-loop channel member) so
-		// preferredTaskChannelLocked routes the duplicate to
-		// client-loop where the existing task lives. /task-plan is
-		// not gated by Slice 7's CEO-only rule (it's a separate
-		// endpoint), so a specialist actor is still valid here.
-		"created_by": "operator",
+		// created_by=ceo always passes the access check; reuse is now
+		// channel-agnostic so the existing task in client-loop is found
+		// regardless of the requested channel.
+		"created_by": "ceo",
 		"tasks": []map[string]any{
 			{
 				"title":          "Create live client workspace in Google Drive",
@@ -2143,11 +2190,166 @@ func TestBrokerTaskPlanReusesExistingActiveLane(t *testing.T) {
 	if got := len(b.AllTasks()); got != 1 {
 		t.Fatalf("expected one durable task after reuse, got %d", got)
 	}
+	// Reuse preserves the original channel the task was created in.
 	if result.Tasks[0].Channel != "client-loop" {
 		t.Fatalf("expected reused task to stay in client-loop, got %+v", result.Tasks[0])
 	}
 	if result.Tasks[0].Details != "Updated live-work details." {
 		t.Fatalf("expected details to update, got %+v", result.Tasks[0])
+	}
+}
+
+// TestPerTaskChannelMintedForBusinessObjective verifies that:
+//   - A new business-objective task submitted against "general" lands
+//     in its own dedicated "task-<id>" channel.
+//   - The minted channel has TaskID set and includes ceo + owner as
+//     members.
+//   - A system task (System=true) stays in "general".
+//   - A sub-issue (ParentIssueID set) stays in its requested channel.
+func TestPerTaskChannelMintedForBusinessObjective(t *testing.T) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
+		return t.TempDir(), "wuphf-" + taskID, nil
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
+
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "builder", "Builder")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	// --- Case 1: business-objective task → gets task-<id> channel ---
+	task1, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "general",
+		Title:         "Launch the client-facing sales campaign",
+		Details:       "Deliver the customer-ready marketing materials.",
+		Owner:         "builder",
+		CreatedBy:     "ceo",
+		TaskType:      "issue",
+		ExecutionMode: "office",
+	})
+	if err != nil {
+		t.Fatalf("EnsurePlannedTask business objective: %v", err)
+	}
+	if task1.Channel == "general" {
+		t.Fatalf("expected business-objective task to leave general, got %+v", task1)
+	}
+	// Channel slug is normalised (lowercased) by createChannelLocked.
+	expectedSlug1 := normalizeChannelSlug("task-" + task1.ID)
+	if task1.Channel != expectedSlug1 {
+		t.Fatalf("expected channel %q, got %q", expectedSlug1, task1.Channel)
+	}
+
+	b.mu.Lock()
+	var ch1 *teamChannel
+	for i := range b.channels {
+		if b.channels[i].Slug == expectedSlug1 {
+			ch1 = &b.channels[i]
+			break
+		}
+	}
+	b.mu.Unlock()
+	if ch1 == nil {
+		t.Fatalf("per-task channel %q not found", expectedSlug1)
+	}
+	if ch1.TaskID != task1.ID {
+		t.Fatalf("channel TaskID: want %q, got %q", task1.ID, ch1.TaskID)
+	}
+	if !stringSliceContainsFold(ch1.Members, "ceo") {
+		t.Fatalf("ceo not in per-task channel members: %v", ch1.Members)
+	}
+	if !stringSliceContainsFold(ch1.Members, "builder") {
+		t.Fatalf("builder (owner) not in per-task channel members: %v", ch1.Members)
+	}
+
+	// --- Case 2: non-business-objective task stays in "general" ---
+	task2, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:   "general",
+		Title:     "Internal tooling housekeeping",
+		Owner:     "builder",
+		CreatedBy: "system",
+		TaskType:  "chore",
+	})
+	if err != nil {
+		t.Fatalf("EnsurePlannedTask non-business: %v", err)
+	}
+	if task2.Channel != "general" {
+		t.Fatalf("expected non-business task in general, got %q", task2.Channel)
+	}
+
+	// --- Case 3: explicit non-general channel is kept as-is ---
+	ensureTestMemberAccess(b, "youtube-factory", "builder", "Builder")
+	task3, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "youtube-factory",
+		Title:         "Publish the YouTube channel launch video",
+		Owner:         "builder",
+		CreatedBy:     "ceo",
+		TaskType:      "issue",
+		ExecutionMode: "office",
+	})
+	if err != nil {
+		t.Fatalf("EnsurePlannedTask explicit channel: %v", err)
+	}
+	if task3.Channel != "youtube-factory" {
+		t.Fatalf("expected explicit channel youtube-factory, got %q", task3.Channel)
+	}
+}
+
+// TestReuseIsChannelAgnostic verifies that findReusableTaskLocked finds
+// an existing task even when the incoming create request names a different
+// channel.  This is the dedup invariant for the new per-task-channel world:
+// submitting the same title twice must never create a second task row.
+func TestReuseIsChannelAgnostic(t *testing.T) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
+		return t.TempDir(), "wuphf-" + taskID, nil
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
+
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "builder", "Builder")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	// Create the initial task in its per-task channel.
+	first, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "general",
+		Title:         "Launch the client revenue pipeline",
+		Owner:         "builder",
+		CreatedBy:     "ceo",
+		TaskType:      "issue",
+		ExecutionMode: "office",
+	})
+	if err != nil {
+		t.Fatalf("first EnsurePlannedTask: %v", err)
+	}
+	if first.Channel == "general" {
+		t.Fatalf("first task should have gotten a per-task channel: %+v", first)
+	}
+
+	// Submit the same title a second time against "general" — must reuse.
+	second, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "general",
+		Title:         "Launch the client revenue pipeline",
+		Owner:         "builder",
+		CreatedBy:     "ceo",
+		TaskType:      "issue",
+		ExecutionMode: "office",
+	})
+	if err != nil {
+		t.Fatalf("second EnsurePlannedTask: %v", err)
+	}
+	if !reused {
+		t.Fatalf("expected second create to reuse the existing task; second=%+v", second)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("expected same task ID on reuse: first=%s second=%s", first.ID, second.ID)
+	}
+	// Exactly one task row must exist.
+	if got := len(b.AllTasks()); got != 1 {
+		t.Fatalf("expected 1 task after reuse, got %d", got)
 	}
 }
 

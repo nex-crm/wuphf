@@ -406,6 +406,24 @@
       "general". Plan: new non-system tasks get a dedicated `task-<id>` channel
       (createChannelLocked, members owner+ceo, reverse-linked via teamChannel.TaskID);
       make task reuse keyed on title/intent not channel; migrate prompts off `#general`.
+  - **2a-ii design (traced 2026-06-02):** Today `preferredTaskChannelLocked`
+    (broker_tasks_worktrees.go:250) does the OPPOSITE of channel-per-task — for a
+    business-objective task it GROUPS it into a recent (<20min) shared execution channel
+    by the same creator (channels hold many tasks). `findReusableTaskLocked`
+    (broker_tasks_lifecycle.go:570) hard-filters reuse by channel (line 578). Flip:
+    (1) business-objective tasks (gate: `taskLooksLikeLiveBusinessObjective`) MINT their
+    own `task-<id>` channel (members owner+ceo, reverse-link teamChannel.TaskID); remove
+    the group-into-shared-channel behavior. (2) Non-business/system tasks stay in
+    `general` (Backup & Migration) — keeps system plumbing quiet. (3) `findReusableTaskLocked`
+    drops the channel hard-filter → reuse by title+owner+thread+scoped-identity
+    (channel-agnostic). (4) create path mints the channel BEFORE the access check.
+    (5) prompt_builder.go:268 "keep #general for top-level decisions" → task-scoped wording.
+  - **2a-ii ✅ DONE + committed.** Implemented as designed. Removed now-dead
+    `taskChannelCandidateOwnerAllowed` + gofmt'd 2 Phase-1/2a files → golangci-lint 0
+    issues. Gates: build/vet ./..., golangci-lint(0), test-go ./internal/team (111s), boot
+    clean. 7 tests updated + 3 added. **Refinement flagged (not blocking):** sub-issues
+    (ParentIssueID set) currently fall back to #general instead of their parent task's
+    channel — better to inherit the parent's channel; revisit in Phase 2 polish / Phase 5.
     - **2b (frontend):** sidebar primary = Tasks grouped by stage (+ Tools); landing
       changes `/agents/ceo` → `/tasks` board (INTERIM home until Phase 3 composer; keep
       existing TaskCreateDialog for creation meanwhile). Remove DM route/view + agent
