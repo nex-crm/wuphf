@@ -38,7 +38,7 @@
 
 ## Change log
 
-## Change 1 — Tasks as the primary primitive (Issues → Tasks), channel-per-task, citation-style home
+## Change 1 — Tasks as the primary primitive (Issues → Tasks), channel-per-task
 
 **Status:** PLANNING (exploring codebase; no code yet)
 
@@ -49,8 +49,7 @@
    see memory `project_mvp_session_2026_05_28`. Confirm intent / migration story.)
 2. **Every channel is tied to a Task. There is no default channel.** (Today there
    is a "general"/default channel — must be removed.)
-3. **Default screen = a chatbox like the the reference tool homepage**
-   (https://github.com/hilash/reference tool) that creates a new Task. On that composer
+3. **Default screen = a chatbox-style home composer** that creates a new Task. On that composer
    the user selects **provider**, **effort**, and **agent** for the task.
    - In our version the selected agent is the **owner agent**, and it can summon
      other agents as needed.
@@ -61,7 +60,7 @@
    organizing the wiki**. Notebooks are still written by the **owning agents**.
    The **Librarian takes over wiki promotions and reviews from the CEO** (it has
    better context on what already exists in the wiki).
-6. **Task creation options (like the reference tool UI):** start **right away**, put in
+6. **Task creation options (launcher style):** start **right away**, put in
    **Backlog**, or create as a **Routine** (routines already implemented).
 7. **Simplified Task stages:** `Backlog`, `In-progress`, `Requires human input`,
    `Done`, plus **`Archive`** (for tasks done-and-archived OR archived before done).
@@ -191,7 +190,7 @@
   (e.g. `team/specs/<task-id>-<slug>.md`), authored by the Librarian, and linked
   from the task. The on-task `IssueDraftSpec` stays as the draft buffer during the
   interview; on approval the Librarian materializes + links it.
-- **D4 — Home = the reference tool composer:** post-onboarding landing becomes the new-task
+- **D4 — Home = new-task composer:** post-onboarding landing becomes the new-task
   composer (provider/effort/owner-agent selectors + Start now / Backlog / Routine).
   Index `/` → `/` (composer), not `/agents/ceo`. Onboarding flow preserved.
 - **D5 — Default agents per task:** owner agent (selected) + CEO + Librarian always
@@ -359,12 +358,35 @@
     new `TasksList.test.tsx` tests; onboarding gates the visual on a fresh workspace
     anyway. Broker left running on :7891 for the user to eyeball if desired.
   - **NOT committed yet** — awaiting user nod (commit + Phase 2, or hold to eyeball).
-- [ ] **Phase 2 — Channel-per-task + kill default channel** (pure task-scoped, D8).
-    1:1 task↔channel link; spin a channel per task at creation; rip out every
-    `""→"general"` fallback + office-channel/default machinery; remove agent DMs +
-    subspaces; sidebar lists Tasks grouped by stage instead of channels/agents.
-  - Gate: new task → its channel works; no path depends on a default channel.
-- [ ] **Phase 3 — citation-style home composer.** Home = new-task composer with
+- [~] **Phase 2 — Channel-per-task + kill default channel** (pure task-scoped, D8).
+    **DESIGN (2026-06-02).**
+  - **Recon:** today tasks REFERENCE a channel slug (`normalizeChannelSlug(body.Channel)`,
+    →"general"); they do NOT get a dedicated channel. Channel-create primitive exists:
+    `createChannelLocked(channelCreateInput)` (broker_office_channels.go:917). Default-
+    channel machinery to remove (from Phase-0 map): `normalizeChannelSlug("")→"general"`,
+    auto-add-to-general (broker.go:909), general-undeletable (broker_office_channels.go:810),
+    `defaultTeamChannels`/`ensureDefaultChannelsLocked` (broker_defaults.go:53,145),
+    onboarding seeds general (broker_onboarding.go:220), all `||"general"` in
+    broker_messages.go + web. Removal surfaces for DMs/subspaces: dmRoute/DMView,
+    AgentSubspaceRoute, router/routeRegistry/useCurrentRoute, slashCommands, objectRoutes,
+    Sidebar Agents/Channels sections.
+  - **Plan (proposed sub-steps, commit each):**
+    - **2a (backend):** task creation spins a dedicated channel (slug `task-<n>`), 1:1
+      task↔channel link (add `teamChannel.taskID` + `teamTask.Channel`=its own channel);
+      seed members owner + CEO (Librarian added Phase 4). Rip out the `""→"general"`
+      fallback + default-channel machinery. Onboarding stops seeding office channels.
+    - **2b (frontend):** sidebar primary = Tasks grouped by stage (+ Tools); landing
+      changes `/agents/ceo` → `/tasks` board (INTERIM home until Phase 3 composer; keep
+      existing TaskCreateDialog for creation meanwhile). Remove DM route/view + agent
+      subspace pages (pure task-scoped). Notebooks already have a standalone `/notebooks`
+      route, so subspace removal doesn't orphan them.
+  - **Sequencing decision (TAKEN, not asking):** Tasks board is the INTERIM home in 2b;
+    the rich new-task composer is Phase 3. Keeps the app working throughout (never a
+    broken no-landing state).
+  - **OPEN FORK (asking): where does agent management go when subspaces are removed?**
+  - Gate: new task → its own channel works; no path depends on a default channel;
+    app boots to a working tasks-home with no DM/subspace surfaces.
+- [ ] **Phase 3 — new-task home composer.** Home = new-task composer with
     provider / effort / owner-agent selectors + Start now / Backlog / Routine
     actions. Add `effort` field to task model + run wiring (D7). Wire Routine→
     existing scheduler; Backlog→create-without-dispatch; Start now→spec interview→
