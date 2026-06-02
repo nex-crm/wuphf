@@ -67,6 +67,24 @@ describe("<CsvViewer>", () => {
     expect(screen.getByRole("cell", { name: "plain" })).toBeInTheDocument();
   });
 
+  it("exposes Download + open-in-new-tab actions for the file", async () => {
+    mockFetchText("name,role\nSarah,PM\n");
+    render(<CsvViewer path="team/assets/people.csv" />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("link", { name: /download/i }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("link", { name: /download/i })).toHaveAttribute(
+      "download",
+      "people.csv",
+    );
+    expect(
+      screen.getByRole("link", { name: /open in new tab/i }),
+    ).toHaveAttribute("target", "_blank");
+  });
+
   it("shows the error state when the fetch fails", async () => {
     mockFetchText("", false, 404);
     render(<CsvViewer path="team/assets/missing.csv" />);

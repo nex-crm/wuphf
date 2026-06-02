@@ -121,11 +121,21 @@ export default function ImageViewer({ path }: ImageViewerProps) {
         <span className="wk-viewer__filename" title={path}>
           {filename}
         </span>
+        <span className="wk-viewer__spacer" aria-hidden="true" />
+        <a
+          className="wk-viewer__action"
+          href={src}
+          download={filename}
+          title={`Download ${filename}`}
+        >
+          Download
+        </a>
         <a
           className="wk-viewer__action"
           href={src}
           target="_blank"
           rel="noreferrer noopener"
+          title="Open this image in a new browser tab"
         >
           Open in new tab
         </a>

@@ -325,20 +325,47 @@ export default function NotebookViewer({ path }: NotebookViewerProps) {
   }, [path]);
 
   const filename = path.split("/").pop() || path;
+  const src = wikiFileUrl(path);
   const cells = notebook?.cells ?? [];
   const language =
     notebook?.metadata?.language_info?.name ||
     notebook?.metadata?.kernelspec?.name ||
     "python";
   const codeCellCount = cells.filter((c) => c.cell_type === "code").length;
+  // True when the notebook carries code cells but none has been executed yet —
+  // matches cabinet's "hasn't been run" hint so a freshly-authored notebook
+  // does not read as broken when it shows no outputs.
+  const hasAnyOutputs = cells.some(
+    (c) => c.cell_type === "code" && ((c as CodeCell).outputs?.length ?? 0) > 0,
+  );
 
   return (
     <section className="wk-viewer wk-viewer--notebook" aria-label={filename}>
       <div className="wk-viewer__toolbar">
-        <span title={path}>{filename}</span>
+        <span className="wk-viewer__filename" title={path}>
+          {filename}
+        </span>
         {notebook ? (
-          <span>{`${cells.length} cells · ${codeCellCount} code · ${language}`}</span>
+          <span className="wk-viewer__meta">{`${cells.length} cells · ${codeCellCount} code · ${language}`}</span>
         ) : null}
+        <span className="wk-viewer__spacer" aria-hidden="true" />
+        <a
+          className="wk-viewer__action"
+          href={src}
+          download={filename}
+          title={`Download ${filename}`}
+        >
+          Download
+        </a>
+        <a
+          className="wk-viewer__action"
+          href={src}
+          target="_blank"
+          rel="noreferrer noopener"
+          title="Open the raw notebook JSON in a new tab"
+        >
+          Raw
+        </a>
       </div>
       <section className="wk-viewer__body" aria-label="Notebook contents">
         {loading ? (
@@ -352,6 +379,12 @@ export default function NotebookViewer({ path }: NotebookViewerProps) {
           <p className="wk-viewer__empty">This notebook has no cells.</p>
         ) : (
           <div className="wk-nb">
+            {!hasAnyOutputs && codeCellCount > 0 ? (
+              <p className="wk-viewer__notice" role="status">
+                This notebook has not been run yet — code and markdown cells are
+                shown below, and outputs appear once the author runs it.
+              </p>
+            ) : null}
             {cells.map((cell, i) => {
               if (cell.cell_type === "markdown") {
                 return <MarkdownCellView key={i} cell={cell as MarkdownCell} />;

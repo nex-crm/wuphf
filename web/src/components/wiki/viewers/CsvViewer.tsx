@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import { wikiFileUrl } from "@/api/wiki";
 
+/** Hard cap on rendered rows. A multi-megabyte CSV would otherwise mount tens
+ * of thousands of <tr> nodes and lock the tab; we render the first MAX_ROWS and
+ * surface a notice with the true total. */
+const MAX_ROWS = 1000;
+
 interface CsvViewerProps {
   path: string;
 }
@@ -144,18 +149,42 @@ export default function CsvViewer({ path }: CsvViewerProps) {
     );
   }
 
-  const [header, ...body] = rows;
+  const [header, ...allBody] = rows;
+  const totalRows = allBody.length;
+  const body = allBody.slice(0, MAX_ROWS);
+  const truncated = totalRows > body.length;
   const colCount = rows.reduce((max, r) => Math.max(max, r.length), 0);
   const cols = Array.from({ length: colCount }, (_, i) => i);
+  const src = wikiFileUrl(path);
 
   return (
     <section className="wk-viewer wk-viewer--csv" aria-label={filename}>
       <div className="wk-viewer__toolbar">
-        <span title={filename}>{filename}</span>
-        <span>
-          {body.length} {body.length === 1 ? "row" : "rows"} · {colCount}{" "}
+        <span className="wk-viewer__filename" title={filename}>
+          {filename}
+        </span>
+        <span className="wk-viewer__meta">
+          {totalRows} {totalRows === 1 ? "row" : "rows"} · {colCount}{" "}
           {colCount === 1 ? "column" : "columns"}
         </span>
+        <span className="wk-viewer__spacer" aria-hidden="true" />
+        <a
+          className="wk-viewer__action"
+          href={src}
+          download={filename}
+          title={`Download ${filename}`}
+        >
+          Download
+        </a>
+        <a
+          className="wk-viewer__action"
+          href={src}
+          target="_blank"
+          rel="noreferrer noopener"
+          title="Open the raw file in a new tab"
+        >
+          Open in new tab
+        </a>
       </div>
       <section className="wk-viewer__body" aria-label={`${filename} table`}>
         <table>
@@ -178,6 +207,12 @@ export default function CsvViewer({ path }: CsvViewerProps) {
             ))}
           </tbody>
         </table>
+        {truncated ? (
+          <p className="wk-viewer__notice" role="status">
+            Showing the first {body.length} of {totalRows} rows. Download the
+            file to see everything.
+          </p>
+        ) : null}
       </section>
     </section>
   );

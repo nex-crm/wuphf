@@ -112,6 +112,7 @@ export default function XlsxViewer({ path }: XlsxViewerProps) {
   }, [path]);
 
   const filename = useMemo(() => path.split("/").pop() ?? path, [path]);
+  const src = useMemo(() => wikiFileUrl(path), [path]);
 
   if (state.status === "loading") {
     return (
@@ -213,10 +214,28 @@ export default function XlsxViewer({ path }: XlsxViewerProps) {
         ) : (
           <span>{current.name}</span>
         )}
-        <span>
+        <span className="wk-viewer__meta">
           {current.totalRows} {current.totalRows === 1 ? "row" : "rows"} ·{" "}
           {current.colCount} {current.colCount === 1 ? "column" : "columns"}
         </span>
+        <span className="wk-viewer__spacer" aria-hidden="true" />
+        <a
+          className="wk-viewer__action"
+          href={src}
+          download={filename}
+          title={`Download ${filename}`}
+        >
+          Download
+        </a>
+        <a
+          className="wk-viewer__action"
+          href={src}
+          target="_blank"
+          rel="noreferrer noopener"
+          title="Open this workbook in a new browser tab"
+        >
+          Open in new tab
+        </a>
       </div>
       {hasTabs ? (
         <div

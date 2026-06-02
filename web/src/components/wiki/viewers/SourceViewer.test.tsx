@@ -107,6 +107,23 @@ describe("SourceViewer", () => {
     expect(wrapToggle).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("copies the file contents to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    fetchMock.mockResolvedValue(textResponse(200, "select 1;"));
+
+    render(<SourceViewer path="team/assets/query.sql" />);
+
+    const copy = await screen.findByRole("button", { name: /^copy$/i });
+    // Enabled only once the file has loaded.
+    await waitFor(() => expect(copy).not.toBeDisabled());
+    copy.click();
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("select 1;"));
+  });
+
   it("caps very large files with a notice", async () => {
     const huge = "x".repeat(512 * 1024 + 10);
     fetchMock.mockResolvedValue(textResponse(200, huge));

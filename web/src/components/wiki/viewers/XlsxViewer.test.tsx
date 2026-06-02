@@ -140,6 +140,25 @@ describe("<XlsxViewer>", () => {
     expect(alphaTab).toHaveFocus();
   });
 
+  it("exposes Download + open-in-new-tab actions in the toolbar", async () => {
+    const buf = buildWorkbook({ Sheet1: [["a"], ["1"]] });
+    mockFetchBuffer(buf);
+    render(<XlsxViewer path="team/assets/data.xlsx" />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("link", { name: /download/i }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("link", { name: /download/i })).toHaveAttribute(
+      "download",
+      "data.xlsx",
+    );
+    expect(
+      screen.getByRole("link", { name: /open in new tab/i }),
+    ).toHaveAttribute("target", "_blank");
+  });
+
   it("shows the error state when the fetch fails", async () => {
     mockFetchBuffer(new ArrayBuffer(0), false, 500);
     render(<XlsxViewer path="team/assets/missing.xlsx" />);

@@ -171,6 +171,54 @@ describe("<NotebookViewer>", () => {
     expect(iframe.getAttribute("srcdoc")).toContain("<td>cell</td>");
   });
 
+  it("exposes Download + raw-JSON actions in the toolbar", async () => {
+    mockFetchJson({
+      cells: [{ cell_type: "markdown", source: ["# Hi"] }],
+    });
+    render(<NotebookViewer path="team/notebooks/demo.ipynb" />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("link", { name: /download/i }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("link", { name: /download/i })).toHaveAttribute(
+      "download",
+      "demo.ipynb",
+    );
+    expect(screen.getByRole("link", { name: /^raw$/i })).toHaveAttribute(
+      "target",
+      "_blank",
+    );
+  });
+
+  it("shows a 'not run yet' notice when code cells have no outputs", async () => {
+    mockFetchJson({
+      cells: [{ cell_type: "code", source: "print('hi')\n", outputs: [] }],
+    });
+    render(<NotebookViewer path="team/notebooks/fresh.ipynb" />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/has not been run yet/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("omits the 'not run yet' notice once a code cell has output", async () => {
+    mockFetchJson({
+      cells: [
+        {
+          cell_type: "code",
+          source: "print('hi')\n",
+          outputs: [{ output_type: "stream", name: "stdout", text: "hi\n" }],
+        },
+      ],
+    });
+    render(<NotebookViewer path="team/notebooks/ran.ipynb" />);
+
+    await waitFor(() => expect(screen.getByText("hi")).toBeInTheDocument());
+    expect(screen.queryByText(/has not been run yet/i)).not.toBeInTheDocument();
+  });
+
   it("shows the error state when the fetch fails", async () => {
     mockFetchReject();
     render(<NotebookViewer path="team/notebooks/missing.ipynb" />);

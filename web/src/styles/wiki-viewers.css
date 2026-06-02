@@ -67,6 +67,29 @@
   max-width: 60ch;
 }
 
+/* Secondary metadata in the toolbar (row/column/cell counts, language). Reads
+   quieter than the filename so the eye lands on the file name first. */
+.wk-viewer__meta {
+  flex: 0 0 auto;
+  color: var(--wk-text-muted);
+  white-space: nowrap;
+}
+
+/* Pushes trailing toolbar actions (Download / Open / Copy …) to the right
+   edge. Replaces the ad-hoc inline `flex: 1` spacers some viewers used so the
+   chrome reads consistently in the markup. */
+.wk-viewer__spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+/* A disabled toolbar action (e.g. Copy before the file has loaded) reads as
+   inert without changing the layout. */
+.wk-viewer__action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .wk-viewer__kind {
   flex: 0 0 auto;
   font-size: var(--text-2xs, 11px);
@@ -199,12 +222,34 @@
 
 /* ─── Image viewer + lightbox ────────────────────────────────────────────── */
 
+/* Images and video sit on a neutral checkerboard canvas (the Preview.app /
+   Figma idiom) so a transparent PNG, a tiny sprite, or a dark photo all read
+   clearly regardless of theme. The board is built from the theme's own
+   translucent overlay tokens layered over the warm paper surface, so it adapts
+   across Nex Light / Dark / Noir Gold without any hardcoded palette. */
 .wk-viewer--image .wk-viewer__body,
 .wk-viewer--media .wk-viewer__body {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--wk-paper-dark);
+  background-color: var(--wk-paper-dark);
+  background-image:
+    linear-gradient(45deg, var(--overlay-white-soft) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--overlay-white-soft) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--overlay-white-soft) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--overlay-white-soft) 75%);
+  background-size: 20px 20px;
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+}
+/* The audio player has no visual canvas to fill, so keep its body on the plain
+   paper surface — the checkerboard only makes sense behind a picture. */
+.wk-viewer--audio .wk-viewer__body {
+  background-image: none;
+  background-color: var(--wk-paper-dark);
 }
 .wk-viewer__zoom {
   border: 0;
@@ -225,9 +270,33 @@
   max-height: 100%;
   object-fit: contain;
   border-radius: var(--radius-sm, 6px);
+  box-shadow: var(--wk-shadow-popover);
+}
+/* Audio gets a small "now playing" card rather than a stretched control on a
+   bare canvas: a filename caption above a full-width native player. */
+.wk-viewer__audio-card {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--wk-shadow-popover);
+}
+.wk-viewer__audio-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wk-text);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .wk-viewer__audio {
-  width: min(560px, 100%);
+  width: 100%;
   height: auto;
 }
 
@@ -332,6 +401,75 @@
   word-break: break-word;
 }
 
+/* ─── Syntax highlighting (lowlight / highlight.js token classes) ─────────────
+ *
+ * SourceViewer and NotebookViewer emit `<span class="hljs-…">` token spans via
+ * `highlightToReact`. The editor's own hljs rules in wiki.css are scoped to
+ * `.wk-editor-code-block`, so without these the viewer code blocks render with
+ * NO colour (all one ink). These mirror the editor palette exactly — same
+ * `--wk-*` tokens — so the viewers, the editor, all three themes stay in sync. */
+.wk-viewer__code .hljs-comment,
+.wk-viewer__code .hljs-quote,
+.wk-nb__code .hljs-comment,
+.wk-nb__code .hljs-quote {
+  color: var(--wk-text-tertiary);
+  font-style: italic;
+}
+.wk-viewer__code .hljs-keyword,
+.wk-viewer__code .hljs-selector-tag,
+.wk-viewer__code .hljs-built_in,
+.wk-viewer__code .hljs-name,
+.wk-viewer__code .hljs-tag,
+.wk-nb__code .hljs-keyword,
+.wk-nb__code .hljs-selector-tag,
+.wk-nb__code .hljs-built_in,
+.wk-nb__code .hljs-name,
+.wk-nb__code .hljs-tag {
+  color: var(--wk-wikilink);
+}
+.wk-viewer__code .hljs-string,
+.wk-viewer__code .hljs-title,
+.wk-viewer__code .hljs-section,
+.wk-viewer__code .hljs-attribute,
+.wk-viewer__code .hljs-literal,
+.wk-viewer__code .hljs-template-tag,
+.wk-viewer__code .hljs-template-variable,
+.wk-viewer__code .hljs-type,
+.wk-viewer__code .hljs-addition,
+.wk-nb__code .hljs-string,
+.wk-nb__code .hljs-title,
+.wk-nb__code .hljs-section,
+.wk-nb__code .hljs-attribute,
+.wk-nb__code .hljs-literal,
+.wk-nb__code .hljs-template-tag,
+.wk-nb__code .hljs-template-variable,
+.wk-nb__code .hljs-type,
+.wk-nb__code .hljs-addition {
+  color: var(--wk-amber-text);
+}
+.wk-viewer__code .hljs-number,
+.wk-viewer__code .hljs-symbol,
+.wk-viewer__code .hljs-bullet,
+.wk-viewer__code .hljs-attr,
+.wk-viewer__code .hljs-variable,
+.wk-viewer__code .hljs-meta,
+.wk-nb__code .hljs-number,
+.wk-nb__code .hljs-symbol,
+.wk-nb__code .hljs-bullet,
+.wk-nb__code .hljs-attr,
+.wk-nb__code .hljs-variable,
+.wk-nb__code .hljs-meta {
+  color: var(--wk-text-muted);
+}
+.wk-viewer__code .hljs-emphasis,
+.wk-nb__code .hljs-emphasis {
+  font-style: italic;
+}
+.wk-viewer__code .hljs-strong,
+.wk-nb__code .hljs-strong {
+  font-weight: 600;
+}
+
 /* ─── Tabular viewers (csv / xlsx) ───────────────────────────────────────── */
 
 .wk-viewer--csv .wk-viewer__body,
@@ -406,6 +544,22 @@
   align-items: center;
   justify-content: center;
   background: var(--wk-paper);
+}
+/* When the mermaid viewer toggles to its source view it reuses the source
+   viewer's code shell; override the body's centering so the code block fills
+   the pane and scrolls like a real code view instead of shrink-wrapping. */
+.wk-viewer--mermaid .wk-viewer__body:has(.wk-viewer__code) {
+  padding: 0;
+  align-items: stretch;
+  justify-content: flex-start;
+  background: var(--wk-code-bg);
+}
+.wk-viewer--mermaid .wk-viewer__code {
+  align-self: stretch;
+  flex: 1 1 auto;
+  width: 100%;
+  padding: 16px;
+  overflow: auto;
 }
 /* docx-preview / pptx-preview write their own light-canvas DOM into the body;
    wrap it on a paper surface so it reads as a document regardless of theme. */

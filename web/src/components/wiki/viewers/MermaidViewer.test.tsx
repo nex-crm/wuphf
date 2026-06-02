@@ -93,6 +93,48 @@ describe("<MermaidViewer>", () => {
     );
   });
 
+  it("toggles between the diagram and its source via the Code button", async () => {
+    mockFetchText("graph TD; A-->B;");
+    render(<MermaidViewer path="team/diagrams/flow.mmd" />);
+
+    // Diagram renders first; the toggle is labelled "Code".
+    await screen.findByRole("img", { name: /flow\.mmd/i });
+    const toggle = screen.getByRole("button", { name: /^code$/i });
+    toggle.click();
+
+    // After toggling, the raw source is shown and the image is gone.
+    await waitFor(() =>
+      expect(screen.getByText(/graph TD; A-->B;/)).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("img", { name: /flow\.mmd/i }),
+    ).not.toBeInTheDocument();
+    // The toggle now offers a way back to the diagram.
+    expect(
+      screen.getByRole("button", { name: /^diagram$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("exposes Copy and Download SVG actions once rendered", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    mockFetchText("graph TD; A-->B;");
+    render(<MermaidViewer path="team/diagrams/flow.mmd" />);
+
+    await screen.findByRole("img", { name: /flow\.mmd/i });
+    expect(
+      screen.getByRole("button", { name: /download svg/i }),
+    ).toBeInTheDocument();
+
+    screen.getByRole("button", { name: /^copy$/i }).click();
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("graph TD; A-->B;"),
+    );
+  });
+
   it("re-renders when the path changes", async () => {
     mockFetchText("graph TD; A-->B;");
     const { rerender } = render(

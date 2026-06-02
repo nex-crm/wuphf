@@ -59,6 +59,8 @@ function extensionOf(path: string): string {
 interface LoadedSource {
   /** Highlighted React nodes, one entry per source line. */
   lines: ReactNode[];
+  /** Raw (already-sliced) text, kept so the Copy action has the source. */
+  text: string;
   /** True when the file exceeded MAX_BYTES and only a prefix is shown. */
   truncated: boolean;
 }
@@ -99,6 +101,7 @@ export default function SourceViewer({ path }: SourceViewerProps) {
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<LoadedSource | null>(null);
   const [wrap, setWrap] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const src = useMemo(() => wikiFileUrl(path), [path]);
   const filename = useMemo(() => path.split("/").pop() || path, [path]);
@@ -125,7 +128,7 @@ export default function SourceViewer({ path }: SourceViewerProps) {
         // An empty file yields `[""]` from split; treat it as no lines so the
         // empty state renders instead of a single blank gutter row.
         const lines = text.length === 0 ? [] : highlightToLines(text, language);
-        setSource({ lines, truncated });
+        setSource({ lines, text, truncated });
       } catch (err: unknown) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load file");
@@ -140,6 +143,24 @@ export default function SourceViewer({ path }: SourceViewerProps) {
   }, [src, language]);
 
   const langLabel = language || (ext ? ext.toUpperCase() : "text");
+
+  // Reset the transient "Copied" label after a short window. Bound only while
+  // the label is showing so it never fires for a viewer that never copied.
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  const copyToClipboard = (): void => {
+    if (!source) return;
+    void navigator.clipboard?.writeText(source.text).then(
+      () => setCopied(true),
+      () => {
+        /* clipboard denied — leave the label unchanged */
+      },
+    );
+  };
 
   return (
     <section
@@ -159,6 +180,15 @@ export default function SourceViewer({ path }: SourceViewerProps) {
           title={wrap ? "Disable line wrap" : "Enable line wrap"}
         >
           {wrap ? "Wrap: on" : "Wrap: off"}
+        </button>
+        <button
+          type="button"
+          className="wk-viewer__action"
+          onClick={copyToClipboard}
+          disabled={!source || source.lines.length === 0}
+          title="Copy the file contents to the clipboard"
+        >
+          {copied ? "Copied" : "Copy"}
         </button>
         <a
           className="wk-viewer__action"

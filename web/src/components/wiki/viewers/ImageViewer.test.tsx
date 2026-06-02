@@ -95,6 +95,18 @@ describe("<ImageViewer>", () => {
     expect(zoom).toHaveFocus();
   });
 
+  it("exposes Download + open-in-new-tab actions for the image", () => {
+    render(<ImageViewer path="team/assets/diagram.png" />);
+    const download = screen.getByRole("link", { name: /download/i });
+    expect(download).toHaveAttribute("download", "diagram.png");
+    expect(download).toHaveAttribute(
+      "href",
+      "https://broker.test/wiki/file?path=team/assets/diagram.png",
+    );
+    const openTab = screen.getByRole("link", { name: /open in new tab/i });
+    expect(openTab).toHaveAttribute("target", "_blank");
+  });
+
   it("hides the zoom affordance until the image has loaded", () => {
     render(<ImageViewer path="team/assets/diagram.png" />);
     // While loading the zoom button is hidden, so it is absent from the a11y

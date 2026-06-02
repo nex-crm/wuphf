@@ -78,11 +78,21 @@ export default function MediaViewer({ path }: MediaViewerProps) {
         <span className="wk-viewer__filename" title={path}>
           {filename}
         </span>
+        <span className="wk-viewer__spacer" aria-hidden="true" />
+        <a
+          className="wk-viewer__action"
+          href={src}
+          download={filename}
+          title={`Download ${filename}`}
+        >
+          Download
+        </a>
         <a
           className="wk-viewer__action"
           href={src}
           target="_blank"
           rel="noreferrer noopener"
+          title={`Open this ${kind} in a new browser tab`}
         >
           Open in new tab
         </a>
@@ -114,18 +124,23 @@ export default function MediaViewer({ path }: MediaViewerProps) {
                 <track kind="captions" />
               </video>
             ) : (
-              <audio
-                className="wk-viewer__media wk-viewer__audio"
-                src={src}
-                controls={true}
-                preload="metadata"
-                hidden={status !== "ready"}
-                aria-label={`Audio: ${filename}`}
-                onCanPlay={() => setStatus("ready")}
-                onError={() => setStatus("error")}
-              >
-                <track kind="captions" />
-              </audio>
+              <div className="wk-viewer__audio-card">
+                <p className="wk-viewer__audio-name" title={filename}>
+                  {filename}
+                </p>
+                <audio
+                  className="wk-viewer__audio"
+                  src={src}
+                  controls={true}
+                  preload="metadata"
+                  hidden={status !== "ready"}
+                  aria-label={`Audio: ${filename}`}
+                  onCanPlay={() => setStatus("ready")}
+                  onError={() => setStatus("error")}
+                >
+                  <track kind="captions" />
+                </audio>
+              </div>
             )}
           </>
         )}
