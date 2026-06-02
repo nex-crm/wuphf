@@ -114,6 +114,59 @@ function tryParseConflict(text: string): WriteHumanConflict | null {
   return null;
 }
 
+// ── Cabinet file surface (GET /wiki/tree, GET /wiki/file) ──────────────────────
+
+/**
+ * One node in the cabinet content tree. Mirrors Go's `team.TreeNode`.
+ *
+ * - `path` is repo-root-relative, slash-separated, and includes the `team/`
+ *   prefix. For a page it is byte-identical to what /wiki/catalog emits.
+ * - `children` is populated only for `dir` nodes. Apps and websites are
+ *   leaves even though they are directories on disk.
+ * - `ext` is populated only for `file` nodes (lowercase, with the dot).
+ */
+export interface WikiFSTreeNode {
+  name: string;
+  path: string;
+  type: "dir" | "page" | "file" | "app" | "website";
+  title: string;
+  ext?: string;
+  children?: WikiFSTreeNode[];
+}
+
+/**
+ * GET /wiki/tree — the cabinet directory + page + app/website tree. An
+ * optional `subPath` (repo-root-relative, e.g. "team/people") scopes the
+ * walk to a subtree; omit it for the whole `team/` tree. The response
+ * shape is `{ "nodes": WikiFSTreeNode[] }`; this returns the nodes array.
+ */
+export async function fetchWikiTree(
+  subPath?: string,
+): Promise<WikiFSTreeNode[]> {
+  const trimmed = subPath?.trim();
+  const url = trimmed
+    ? `/wiki/tree?path=${encodeURIComponent(trimmed)}`
+    : "/wiki/tree";
+  const res = await get<{ nodes: WikiFSTreeNode[] }>(url);
+  return Array.isArray(res?.nodes) ? res.nodes : [];
+}
+
+/**
+ * Build the GET /wiki/file URL for a repo-root-relative `path` (e.g.
+ * "team/site/index.html"). Returned as a URL — not a fetch — because callers
+ * use it directly as an `<img>` / `<iframe>` src, which cannot carry an
+ * Authorization header. In direct-broker mode `sseURL` appends the auth token
+ * as a query param (same pattern as the SSE stream); in proxy mode the cookie-
+ * less same-origin `/api` prefix is used. We compose the `path` query onto the
+ * base `sseURL("/wiki/file")` with the correct separator so the token param
+ * (when present) is preserved.
+ */
+export function wikiFileUrl(path: string): string {
+  const base = sseURL("/wiki/file");
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}path=${encodeURIComponent(path)}`;
+}
+
 export interface WikiCatalogEntry {
   path: string;
   title: string;
