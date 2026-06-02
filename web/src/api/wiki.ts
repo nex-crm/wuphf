@@ -114,10 +114,10 @@ function tryParseConflict(text: string): WriteHumanConflict | null {
   return null;
 }
 
-// ── Cabinet file surface (GET /wiki/tree, GET /wiki/file) ──────────────────────
+// ── Wiki file surface (GET /wiki/tree, GET /wiki/file) ──────────────────────
 
 /**
- * One node in the cabinet content tree. Mirrors Go's `team.TreeNode`.
+ * One node in the wiki file tree. Mirrors Go's `team.TreeNode`.
  *
  * - `path` is repo-root-relative, slash-separated, and includes the `team/`
  *   prefix. For a page it is byte-identical to what /wiki/catalog emits.
@@ -135,7 +135,7 @@ export interface WikiFSTreeNode {
 }
 
 /**
- * GET /wiki/tree — the cabinet directory + page + app/website tree. An
+ * GET /wiki/tree — the wiki directory + page + app/website tree. An
  * optional `subPath` (repo-root-relative, e.g. "team/people") scopes the
  * walk to a subtree; omit it for the whole `team/` tree. The response
  * shape is `{ "nodes": WikiFSTreeNode[] }`; this returns the nodes array.
@@ -168,7 +168,7 @@ export function wikiFileUrl(path: string): string {
 }
 
 /**
- * Build the embedded-app entry URL for an app/website cabinet folder. `folderPath`
+ * Build the embedded-app entry URL for an app/website wiki folder. `folderPath`
  * is a repo-root-relative directory under `team/` (e.g. "team/site/dashboard");
  * the broker serves the folder's `index.html` from GET /wiki/app/<folderPath>/index.html
  * with relative assets (./styles.css, ./app.js) resolving against the same path.
@@ -202,7 +202,7 @@ export function appUrl(folderPath: string): string {
   return `${base}/${encoded}/index.html`;
 }
 
-// ── Cabinet page mutations (Slice 2 — create / move / rename / delete) ─────────
+// ── Wiki page mutations (Slice 2 — create / move / rename / delete) ─────────
 //
 // These drive the drag-and-drop file tree in components/wiki/tree. Each maps to
 // a broker endpoint that commits a single git change and, for move/rename,
@@ -248,7 +248,7 @@ export interface UploadFileResult {
 }
 
 /**
- * Upload a file into a cabinet folder via multipart POST /wiki/upload. `dir` is
+ * Upload a file into a wiki folder via multipart POST /wiki/upload. `dir` is
  * a repo-root-relative directory under `team/` (e.g. "team/assets"); `file` is
  * the browser File from a drop or picker. The broker derives a safe basename,
  * blocks executable extensions, writes under `team/<dir>/<name>` with collision

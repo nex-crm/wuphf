@@ -1,10 +1,10 @@
 /**
  * Selection bubble menu for the Tiptap wiki editor.
  *
- * Ported from cabinet's `bubble-menu.tsx`; rewritten for WUPHF's stack —
- * `@tiptap/react/menus` BubbleMenu, design-token CSS classes (no Tailwind /
- * shadcn / oklch), and lucide-free text-glyph buttons so the editor pulls in
- * no icon dependency. Appears on a non-empty text selection.
+ * Built for WUPHF's stack — `@tiptap/react/menus` BubbleMenu, design-token
+ * CSS classes (no Tailwind / shadcn / oklch), and lucide-free text-glyph
+ * buttons so the editor pulls in no icon dependency. Appears on a non-empty
+ * text selection.
  *
  * Mark toggles (bold/italic/underline/strike/code/highlight) run inline. The
  * link button delegates to `onRequestLink` so the parent editor owns the link

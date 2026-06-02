@@ -1,5 +1,5 @@
 /**
- * Roving-tabindex + WAI-ARIA keyboard navigation for the cabinet file tree.
+ * Roving-tabindex + WAI-ARIA keyboard navigation for the wiki file tree.
  *
  * Owns the single "active" row (the one treeitem with `tabIndex=0`) and maps
  * ArrowUp/Down/Left/Right, Enter/Space, and Home/End onto the flattened

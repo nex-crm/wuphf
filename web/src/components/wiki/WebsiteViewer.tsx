@@ -61,7 +61,7 @@ interface WebsiteViewerProps {
 }
 
 /**
- * WebsiteViewer — embeds an agent-authored app/website cabinet folder in a
+ * WebsiteViewer — embeds an agent-authored app/website wiki folder in a
  * sandboxed iframe pointed at the broker's GET /wiki/app/<folder>/index.html
  * route. Unlike the rich-artifact embed (which sanitises agent HTML into the
  * PARENT origin via shadow DOM), an app folder is a multi-file surface that

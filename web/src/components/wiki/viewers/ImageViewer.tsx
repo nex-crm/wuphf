@@ -10,7 +10,7 @@ interface ImageViewerProps {
 type LoadStatus = "loading" | "ready" | "error";
 
 /**
- * Renders a raster or vector image straight from the cabinet file surface.
+ * Renders a raster or vector image straight from the wiki file surface.
  *
  * The broker serves SVGs sandboxed, so a plain `<img>` is safe for every
  * supported extension (png/jpg/jpeg/gif/webp/avif/svg/bmp/ico). The element
@@ -105,7 +105,7 @@ export default function ImageViewer({ path }: ImageViewerProps) {
   const closeZoom = useCallback(() => setZoomed(false), []);
 
   // Escape closes the lightbox. Only bound while open so it never swallows a
-  // global Escape elsewhere in the cabinet.
+  // global Escape elsewhere in the wiki.
   useEffect(() => {
     if (!zoomed) return;
     const onKey = (event: KeyboardEvent) => {

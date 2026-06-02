@@ -1,6 +1,6 @@
 package team
 
-// wiki_fs_handlers.go holds the two thin HTTP handlers for the cabinet-style
+// wiki_fs_handlers.go holds the two thin HTTP handlers for the
 // wiki file experience:
 //
 //	GET /wiki/tree            — the directory + page + app/website tree

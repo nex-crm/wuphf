@@ -1,6 +1,6 @@
 package team
 
-// Tests for Slice 5 of the cabinet wiki port: version history, per-commit
+// Tests for Slice 5 of the wiki feature: version history, per-commit
 // diff, and append-only restore. Covers:
 //
 //   - GET /wiki/history/<path> lists every commit newest-first with the exact

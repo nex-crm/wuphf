@@ -46,7 +46,7 @@ function appFolderPath(path: string): string {
  * True when an active path should open in the non-article FileViewer rather
  * than the markdown article view. Pseudo-paths (`_audit`/`_lint`) and bare
  * slugs / `.md` paths stay on the article path; anything with a non-markdown
- * extension (team/assets/x.pdf, .png, .csv, …) is a cabinet file.
+ * extension (team/assets/x.pdf, .png, .csv, …) is a wiki file.
  *
  * A bare slug like `people/nazz` has no extension and resolves to an article
  * via fetchArticle's candidate paths, so it correctly stays out of this branch.

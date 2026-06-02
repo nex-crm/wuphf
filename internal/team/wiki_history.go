@@ -1,6 +1,6 @@
 package team
 
-// wiki_history.go — Slice 5 of the cabinet wiki port: per-article version
+// wiki_history.go — Slice 5 of the wiki feature: per-article version
 // history, per-commit diff, and append-only restore.
 //
 // Surface

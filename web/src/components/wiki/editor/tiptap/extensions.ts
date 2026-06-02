@@ -7,9 +7,9 @@
  * config (a catalog `getItems` plus a React popup `render`), so the editor
  * component appends `buildWikiMention(...)` from `./mention` to this array.
  *
- * Ported from cabinet's `extensions.ts`; the language set, math config, and
- * the StarterKit overrides mirror cabinet, while the WikiLink mark and the
- * design-token styling are WUPHF's own.
+ * The language set, math config, and StarterKit overrides are tuned for the
+ * wiki editor, while the WikiLink mark and the design-token styling are
+ * WUPHF's own.
  */
 
 import { MathExtension } from "@aarkue/tiptap-math-extension";

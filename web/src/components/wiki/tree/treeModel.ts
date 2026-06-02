@@ -1,5 +1,5 @@
 /**
- * Pure tree helpers for the cabinet file tree. Kept free of React so the
+ * Pure tree helpers for the wiki file tree. Kept free of React so the
  * drag-and-drop drop→move mapping (the part DnD makes hard to exercise through
  * the DOM) can be unit-tested directly.
  */

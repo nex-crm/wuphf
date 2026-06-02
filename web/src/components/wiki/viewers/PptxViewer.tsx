@@ -1,5 +1,5 @@
 /**
- * PptxViewer — renders a PowerPoint deck (.pptx) inside the cabinet using the
+ * PptxViewer — renders a PowerPoint deck (.pptx) inside the wiki using the
  * `pptx-preview` library. `init(dom, options)` returns a previewer bound to a
  * container we own; `preview(arrayBuffer)` parses the deck and injects the
  * rendered slide DOM into that container. We render into a `ref` we own,

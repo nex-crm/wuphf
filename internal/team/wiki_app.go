@@ -2,7 +2,7 @@ package team
 
 // wiki_app.go serves the bytes of self-contained embedded HTML apps/websites
 // that live inside the wiki content tree (team/<...>/index.html + siblings),
-// so the cabinet SPA can frame them. It is the ONLY wiki surface that opts a
+// so the wiki SPA can frame them. It is the ONLY wiki surface that opts a
 // document into `sandbox allow-scripts`: the app runs JS, yet because it is
 // granted an OPAQUE origin (NO allow-same-origin), its script cannot read the
 // WUPHF bearer token, our localStorage, or call authenticated /wiki/* as the

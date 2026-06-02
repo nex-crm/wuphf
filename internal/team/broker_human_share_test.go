@@ -332,7 +332,7 @@ func TestHumanSessionAuthIsScopedToShareRoutes(t *testing.T) {
 	}
 }
 
-// The cabinet wiki tree's structural authoring routes run as a HUMAN session,
+// The wiki file tree's structural authoring routes run as a HUMAN session,
 // exactly like /wiki/write-human. They must pass the routing-level human
 // allowlist (not 403) so the UI tree can create / move / rename / delete pages.
 func TestHumanSessionAuthAllowsWikiStructuralRoutes(t *testing.T) {

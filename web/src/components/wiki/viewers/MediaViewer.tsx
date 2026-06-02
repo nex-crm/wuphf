@@ -12,7 +12,7 @@ const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "m4a", "aac", "flac"]);
 type MediaKind = "video" | "audio";
 
 /**
- * Classify a cabinet path by its extension. Returns `null` for anything this
+ * Classify a wiki path by its extension. Returns `null` for anything this
  * viewer cannot play so the dispatcher's routing never silently mounts an
  * empty `<video>`/`<audio>` element.
  */
@@ -24,7 +24,7 @@ function mediaKind(path: string): MediaKind | null {
 }
 
 /**
- * Plays a cabinet video or audio file with the browser's native controls.
+ * Plays a wiki video or audio file with the browser's native controls.
  *
  * The element `src` is `wikiFileUrl(path)` — the broker handles HTTP Range
  * streaming server-side, so seeking and partial loads work without any client

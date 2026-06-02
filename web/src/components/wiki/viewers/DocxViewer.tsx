@@ -1,5 +1,5 @@
 /**
- * DocxViewer — renders a Word document (.docx) inside the cabinet using the
+ * DocxViewer — renders a Word document (.docx) inside the wiki using the
  * `docx-preview` library. The lib parses the OOXML and writes the rendered
  * DOM directly into a container element we own, so we render into a `ref`
  * rather than setting inner HTML ourselves.

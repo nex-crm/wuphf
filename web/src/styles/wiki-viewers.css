@@ -1,5 +1,5 @@
 /*
- * Cabinet file viewers — shared chrome + per-viewer specifics.
+ * Wiki file viewers — shared chrome + per-viewer specifics.
  *
  * Every viewer (image / media / pdf / source / csv / xlsx / docx / pptx /
  * notebook / mermaid) and the fallback card render the same skeleton:

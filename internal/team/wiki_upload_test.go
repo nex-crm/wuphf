@@ -1,6 +1,6 @@
 package team
 
-// Tests for the cabinet asset-upload surface: POST /wiki/upload.
+// Tests for the wiki asset-upload surface: POST /wiki/upload.
 //
 // Covers the happy path (write + single commit + path/sha response), the
 // executable-extension blocklist (400), the script-capable markup blocklist

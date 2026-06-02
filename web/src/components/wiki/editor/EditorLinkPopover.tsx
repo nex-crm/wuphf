@@ -1,7 +1,7 @@
 /**
  * Small, token-styled link-entry popover for the Tiptap wiki editor.
  *
- * Replaces cabinet's blocking `window.prompt` link flow (banned by the repo's
+ * Replaces a blocking `window.prompt` link flow (banned by the repo's
  * no-blocking-UI rule) with an inline form. The bubble menu opens it over the
  * current selection; Mod-e (bound in `tiptap/extensions.ts`) routes here too.
  *

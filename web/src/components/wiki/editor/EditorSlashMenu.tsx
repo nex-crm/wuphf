@@ -2,9 +2,8 @@
  * Combined slash menu for the Tiptap wiki editor.
  *
  * Two command groups in one floating list:
- *   - "Basic" blocks ported from cabinet's `slash-commands.tsx` (text, H1-3,
- *     lists, code, quote, divider, table, image) — direct Tiptap commands or
- *     a popover request handled by the parent.
+ *   - "Basic" blocks (text, H1-3, lists, code, quote, divider, table, image)
+ *     — direct Tiptap commands or a popover request handled by the parent.
  *   - "Insert" — the WUPHF-specific actions from `inserts/types.ts`
  *     (`SLASH_ACTIONS`), filtered with the shared `filterSlashActions` so the
  *     keyword matching stays identical to the rest of the wiki tooling.
@@ -31,7 +30,7 @@ export function slashOptionId(idx: number): string {
   return `wk-slash-opt-${idx}`;
 }
 
-/** Identifiers for the cabinet-style basic blocks. */
+/** Identifiers for the basic blocks. */
 export type BasicBlock =
   | "text"
   | "h1"

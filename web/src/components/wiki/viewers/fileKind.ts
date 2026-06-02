@@ -1,5 +1,5 @@
 /**
- * Pure file-classification helpers for the cabinet viewer dispatcher.
+ * Pure file-classification helpers for the wiki viewer dispatcher.
  *
  * Kept free of React so the tree, the wiki main pane, and tests can decide
  * "is this path a viewable file, and which viewer handles it" without pulling
@@ -132,7 +132,7 @@ export function extensionOf(path: string): string {
 }
 
 /**
- * Classify a repo-root-relative cabinet path into a `FileKind`.
+ * Classify a repo-root-relative wiki path into a `FileKind`.
  *
  * `.md`/`.markdown` return `fallback` — they are owned by the article view, so
  * callers that route article-vs-file should check `isMarkdownPath` first.

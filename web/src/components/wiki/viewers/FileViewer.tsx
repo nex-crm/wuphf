@@ -4,7 +4,7 @@ import FileFallbackViewer from "./FileFallbackViewer";
 import { type FileKind, fileKindForPath } from "./fileKind";
 
 /**
- * FileViewer — the cabinet's non-article viewer dispatcher. Given a
+ * FileViewer — the wiki's non-article viewer dispatcher. Given a
  * repo-root-relative file path it infers the file kind from the extension and
  * renders the matching viewer. Every heavy viewer is wrapped in `React.lazy`
  * so its chunk (and its parser dependency — xlsx / docx-preview / pptx-preview
@@ -59,7 +59,7 @@ const LAZY_VIEWER_BY_KIND: Record<
 };
 
 interface FileViewerProps {
-  /** Repo-root-relative cabinet path (with the `team/` prefix, e.g. team/assets/x.pdf). */
+  /** Repo-root-relative wiki path (with the `team/` prefix, e.g. team/assets/x.pdf). */
   path: string;
 }
 

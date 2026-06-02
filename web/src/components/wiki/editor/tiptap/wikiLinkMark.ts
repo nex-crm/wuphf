@@ -17,9 +17,8 @@
  * (path traversal, absolute path, control bytes) never becomes a mark — it is
  * left as literal text, exactly as the preview would treat it.
  *
- * Adapted from cabinet's `wiki-link-extension.ts`; the slug grammar and the
- * anchor attributes are WUPHF's, not cabinet's `#page:` / `data-page-name`
- * convention.
+ * The slug grammar and the anchor attributes are WUPHF's own, distinct from
+ * any upstream `#page:` / `data-page-name` convention.
  */
 
 import { InputRule, Mark, mergeAttributes } from "@tiptap/core";

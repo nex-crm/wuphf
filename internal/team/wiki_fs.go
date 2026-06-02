@@ -1,6 +1,6 @@
 package team
 
-// wiki_fs.go ports the "cabinet" knowledge-base file experience onto the
+// wiki_fs.go provides the wiki file experience onto the
 // existing wiki git repo. It exposes the wiki content tree (directories,
 // markdown pages, raw files, and self-contained HTML apps/websites) and a
 // raw-byte file server with Range support, layered on top of the team/
@@ -9,10 +9,8 @@ package team
 // Design notes
 // ============
 //
-//   - Reference implementation: /tmp/cabinet-explore tree-builder.ts +
-//     assets/[...path]/route.ts. The shapes diverge intentionally — WUPHF
-//     paths are repo-root-relative and always carry the `team/` prefix so
-//     the tree path of a markdown page is byte-identical to what
+//   - WUPHF paths are repo-root-relative and always carry the `team/` prefix
+//     so the tree path of a markdown page is byte-identical to what
 //     /wiki/catalog emits for that same file (e.g. team/people/nazz.md).
 //
 //   - Security: every path that crosses an HTTP boundary is resolved with
@@ -33,7 +31,7 @@ import (
 )
 
 // TreeNode is one entry in the /wiki/tree response. The JSON shape is the
-// wire contract consumed by the cabinet-style web sidebar.
+// wire contract consumed by the wiki sidebar.
 //
 //   - Path is RELATIVE TO REPO ROOT, slash-separated, and INCLUDES the
 //     `team/` prefix. For a markdown page it is byte-identical to the path
@@ -202,7 +200,7 @@ func hasControlByte(s string) bool {
 }
 
 // buildWikiTree walks the wiki content under <repoRoot>/team and returns the
-// cabinet tree. subPath, when non-empty, is a repo-root-relative subtree root
+// wiki file tree. subPath, when non-empty, is a repo-root-relative subtree root
 // (e.g. team/people) that must resolve inside team/; empty means the whole
 // team/ tree.
 //
@@ -479,7 +477,7 @@ func titleWord(w string) string {
 
 // sortTreeNodes orders a single level: directories and apps/websites first,
 // then pages, then files; alphabetical (case-insensitive by name) within
-// each group. This matches the cabinet sidebar grouping while keeping
+// each group. This matches the wiki sidebar grouping while keeping
 // deterministic output for the wire contract.
 func sortTreeNodes(nodes []TreeNode) {
 	sort.SliceStable(nodes, func(i, j int) bool {

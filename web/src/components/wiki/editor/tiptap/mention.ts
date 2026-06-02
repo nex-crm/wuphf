@@ -13,8 +13,8 @@
  * supplied here as the injectable `render` factory. `buildWikiMention` is a
  * pure config factory so it can be unit-tested without mounting React.
  *
- * Adapted from cabinet's `mention-extension.ts`; the trigger + suggestion
- * mechanics are cabinet's, the insert target (a WUPHF wikilink mark) is ours.
+ * The trigger + suggestion mechanics are standard Tiptap mention behaviour;
+ * the insert target (a WUPHF wikilink mark) is ours.
  */
 
 import type { Node as TiptapNode } from "@tiptap/core";

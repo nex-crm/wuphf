@@ -171,7 +171,7 @@ func humanRouteAllowed(r *http.Request) bool {
 			"/requests/answer",
 			"/interview/answer",
 			"/wiki/write-human",
-			// Structural wiki authoring routes (cabinet tree). The web UI's
+			// Structural wiki authoring routes (wiki file tree). The web UI's
 			// page create / move / rename run as a HUMAN session exactly like
 			// /wiki/write-human, so they must be allowed here or the tree's
 			// authoring actions 403. The destructive-confirm guard for these
@@ -180,7 +180,7 @@ func humanRouteAllowed(r *http.Request) bool {
 			"/wiki/page/create",
 			"/wiki/page/move",
 			"/wiki/page/rename",
-			// POST /wiki/upload (cabinet tree asset upload) is a human wiki
+			// POST /wiki/upload (wiki file tree asset upload) is a human wiki
 			// authoring write on the same footing as the page-ops routes above:
 			// the destination is confined to team/ and the executable-extension
 			// blocklist runs in the handler. Allowed here so the upload action
@@ -201,7 +201,7 @@ func humanRouteAllowed(r *http.Request) bool {
 		}
 	}
 
-	// DELETE /wiki/page (cabinet tree page delete) is a human wiki authoring
+	// DELETE /wiki/page (wiki file tree page delete) is a human wiki authoring
 	// action consistent with write-human; the destructive-confirm guard lives in
 	// the UI. Allowed at the routing layer on the same rationale as the POST
 	// structural routes above.

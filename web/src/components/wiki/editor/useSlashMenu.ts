@@ -1,7 +1,7 @@
 /**
  * Slash-trigger watcher for the Tiptap wiki editor.
  *
- * Ported from cabinet's `slash-commands.tsx` keydown approach: a `/` at the
+ * Uses a keydown approach: a `/` at the
  * start of a node (or after whitespace) opens a coordinate-positioned menu;
  * subsequent typing builds the query; Backspace past the trigger or Space /
  * Escape closes it. The menu's own keyboard nav (Arrow/Enter) is owned by the

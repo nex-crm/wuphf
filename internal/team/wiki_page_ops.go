@@ -1,6 +1,6 @@
 package team
 
-// wiki_page_ops.go — Slice 2 of the cabinet wiki port: page create / move /
+// wiki_page_ops.go — Slice 2 of the wiki feature: page create / move /
 // rename / delete with [[wikilink]] reference rewriting.
 //
 // Surface

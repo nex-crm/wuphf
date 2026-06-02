@@ -51,7 +51,7 @@ const WIKI_TREE_QUERY_KEY = ["wiki-tree"] as const;
  * an app/website folder path when a leaf is opened so Wiki can route to the
  * sandboxed WebsiteViewer instead of the article/file view, without changing the
  * shared `(path: string) => void` onNavigate contract. Chosen to never collide
- * with a real cabinet path (real paths start with `team/`).
+ * with a real wiki path (real paths start with `team/`).
  */
 const APP_NAV_PREFIX = "_app:";
 
@@ -76,7 +76,7 @@ interface Note {
 }
 
 /**
- * Drag-and-drop cabinet file tree. Fetches the team/ content tree, renders
+ * Drag-and-drop wiki file tree. Fetches the team/ content tree, renders
  * folders (expand/collapse) and page/file/app/website leaves, filters by a
  * search box, and exposes a "New page" affordance. Dragging a page onto a
  * folder calls movePage and surfaces how many wikilinks were rewritten.

@@ -55,7 +55,7 @@ const ICON_BY_TYPE: Record<WikiFSTreeNode["type"], string> = {
 };
 
 /**
- * One row in the cabinet file tree, implemented as a WAI-ARIA `treeitem`. The
+ * One row in the wiki file tree, implemented as a WAI-ARIA `treeitem`. The
  * row is a single tab stop (roving tabindex): exactly one row in the tree has
  * `tabIndex=0` and the rest are `-1`, so the whole tree is one Tab stop and the
  * inner controls (caret, kebab) are reached contextually via the keyboard

@@ -9,7 +9,7 @@ interface FileFallbackViewerProps {
 }
 
 /**
- * Catch-all viewer for cabinet files with no dedicated in-app renderer
+ * Catch-all viewer for wiki files with no dedicated in-app renderer
  * (binaries, archives, fonts, unknown formats). Rather than a blank pane it
  * shows the filename, a kind chip, and the two actions that always work for an
  * authenticated file URL: download and open-in-new-tab.
@@ -58,8 +58,8 @@ export default function FileFallbackViewer({ path }: FileFallbackViewerProps) {
         <div className="wk-viewer__empty">
           <p className="wk-viewer__empty-title">No preview for this file</p>
           <p>
-            <code>{filename}</code> can't be previewed in the cabinet. Download
-            it or open it in a new tab to view the contents.
+            <code>{filename}</code> can't be previewed in the wiki. Download it
+            or open it in a new tab to view the contents.
           </p>
         </div>
       </div>

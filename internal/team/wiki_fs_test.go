@@ -1,6 +1,6 @@
 package team
 
-// Tests for the cabinet-style wiki file surface: GET /wiki/tree and
+// Tests for the wiki file surface: GET /wiki/tree and
 // GET /wiki/file. Covers tree classification (dir / page / file / app /
 // website, hidden-skipped, sorted), title extraction precedence, and file
 // serving (MIME, body bytes, Range → 206, traversal/absolute → 400,

@@ -1,6 +1,6 @@
 package team
 
-// wiki_upload.go — Slice 3 of the cabinet wiki port: human asset upload.
+// wiki_upload.go — Slice 3 of the wiki feature: human asset upload.
 //
 // Surface
 // =======
