@@ -266,7 +266,7 @@ function PacketLeftColumn({ packet }: { packet: DecisionPacket }) {
       </div>
       {packet.subIssues.length > 0 ? (
         <>
-          <h2>Sub-issues</h2>
+          <h2>Sub-tasks</h2>
           <div className="packet-deps">
             {packet.subIssues.map((sub) => (
               <div key={sub.taskId} className="packet-dep">

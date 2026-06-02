@@ -16,6 +16,11 @@ import { router } from "../../lib/router";
 import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 
 function navigateToApp(appId: string): void {
+  // `tasks` is a first-class surface (lives at `/tasks`, not `/apps/tasks`).
+  if (appId === "tasks") {
+    void router.navigate({ to: "/tasks" });
+    return;
+  }
   void router.navigate({ to: "/apps/$appId", params: { appId } });
 }
 

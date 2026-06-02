@@ -1,23 +1,23 @@
 /**
- * IssuesList — /issues surface.
+ * TasksList — /tasks surface.
  *
- * Renders issue-spec tasks (back-compat read of GET /tasks?all_channels=true)
+ * Renders spec-level tasks (back-compat read of GET /tasks?all_channels=true)
  * as a lifecycle kanban. Six columns: Draft / Intake / Running / Review /
- * Approved / Rejected. Each card opens the IssueDocument detail surface at
- * /issues/$issueId.
+ * Approved / Rejected. Each card opens the TaskDocument detail surface at
+ * /tasks/$taskId.
  *
  * Replaces the previous flat list view — the kanban surfaces movement across
- * the agent workflow that the old TasksApp used to show.
+ * the agent workflow that the old office board used to show.
  */
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getOfficeTasks, type Task } from "../../api/tasks";
-import { formatIssueTitleForDisplay } from "../../lib/issueTitle";
 import { router } from "../../lib/router";
+import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import type { LifecycleState } from "../../lib/types/lifecycle";
-import { IssueCreateDialog } from "../issues/IssueCreateDialog";
+import { TaskCreateDialog } from "../tasks/TaskCreateDialog";
 import { LifecycleStatePill } from "./LifecycleStatePill";
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -43,10 +43,10 @@ function isLifecycleState(value: unknown): value is LifecycleState {
   );
 }
 
-function isIssueSpecTask(task: Task): boolean {
-  // Sub-issues live on the parent Issue's detail surface, not on the
+function isTaskSpecTask(task: Task): boolean {
+  // Sub-tasks live on the parent Task's detail surface, not on the
   // top-level kanban. Filtering them out here keeps the board scoped
-  // to "real" Issues; children stay reachable via the parent Issue.
+  // to "real" Tasks; children stay reachable via the parent Task.
   if (task.parent_issue_id && task.parent_issue_id.length > 0) {
     return false;
   }
@@ -157,13 +157,13 @@ function lifecycleToColumn(state: LifecycleState | string): ColumnId {
 
 // ── Sub-components ─────────────────────────────────────────────────────
 
-function IssueCard({ task }: { task: Task }) {
+function TaskCard({ task }: { task: Task }) {
   const state = taskToLifecycleState(task);
 
   function navigate() {
     void router.navigate({
-      to: "/issues/$issueId",
-      params: { issueId: task.id },
+      to: "/tasks/$taskId",
+      params: { taskId: task.id },
     });
   }
 
@@ -173,10 +173,10 @@ function IssueCard({ task }: { task: Task }) {
       className="issues-kanban-card"
       onClick={navigate}
       data-testid="issue-row"
-      aria-label={`Issue: ${formatIssueTitleForDisplay(task.title)}, state: ${state}`}
+      aria-label={`Task: ${formatTaskTitleForDisplay(task.title)}, state: ${state}`}
     >
       <div className="issues-kanban-card-title">
-        {formatIssueTitleForDisplay(task.title) || "Untitled"}
+        {formatTaskTitleForDisplay(task.title) || "Untitled"}
       </div>
       <div className="issues-kanban-card-meta">
         <LifecycleStatePill state={state} />
@@ -191,7 +191,7 @@ function IssueCard({ task }: { task: Task }) {
   );
 }
 
-function IssuesListSkeleton() {
+function TasksListSkeleton() {
   return (
     <div
       className="issues-list issues-list--loading"
@@ -209,7 +209,7 @@ function IssuesListSkeleton() {
   );
 }
 
-function IssuesListError({
+function TasksListError({
   message,
   onRetry,
 }: {
@@ -222,7 +222,7 @@ function IssuesListError({
       data-testid="issues-list-error"
     >
       <div role="alert" className="issues-list-error-card">
-        <strong>Could not load issues</strong>
+        <strong>Could not load tasks</strong>
         <p>{message}</p>
         <button
           type="button"
@@ -236,15 +236,15 @@ function IssuesListError({
   );
 }
 
-function IssuesEmptyState({ onOpenCreate }: { onOpenCreate: () => void }) {
+function TasksEmptyState({ onOpenCreate }: { onOpenCreate: () => void }) {
   return (
     <div
       className="issues-list issues-list--empty"
       data-testid="issues-list-empty"
     >
       <p className="issues-empty-copy">
-        No issue specs yet. File larger project work here, then cut it into
-        agent tasks.
+        No task specs yet. File larger project work here, then cut it into agent
+        tasks.
       </p>
       <button
         type="button"
@@ -252,7 +252,7 @@ function IssuesEmptyState({ onOpenCreate }: { onOpenCreate: () => void }) {
         onClick={onOpenCreate}
         data-testid="issues-new-btn"
       >
-        + New issue
+        + New task
       </button>
     </div>
   );
@@ -260,14 +260,14 @@ function IssuesEmptyState({ onOpenCreate }: { onOpenCreate: () => void }) {
 
 // ── Main component ─────────────────────────────────────────────────────
 
-interface IssuesListProps {
+interface TasksListProps {
   /** Used in tests to skip the fetch. */
   initialTasks?: Task[];
 }
 
-export function IssuesList({ initialTasks }: IssuesListProps = {}) {
+export function TasksList({ initialTasks }: TasksListProps = {}) {
   const [query, setQuery] = useState("");
-  // Inline dialog replaces /issues/new full-page form for the in-app path.
+  // Inline dialog replaces /tasks/new full-page form for the in-app path.
   // The route stays mounted as a fallback for direct URL navigation.
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -281,7 +281,7 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
   });
 
   const allTasks = result.data?.tasks ?? [];
-  const tasks = useMemo(() => allTasks.filter(isIssueSpecTask), [allTasks]);
+  const tasks = useMemo(() => allTasks.filter(isTaskSpecTask), [allTasks]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -309,12 +309,12 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
   }, [filtered]);
 
   if (result.isPending && !initialTasks) {
-    return <IssuesListSkeleton />;
+    return <TasksListSkeleton />;
   }
 
   if (result.isError && !result.data) {
     return (
-      <IssuesListError
+      <TasksListError
         message={
           result.error instanceof Error
             ? result.error.message
@@ -328,8 +328,8 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
   if (tasks.length === 0) {
     return (
       <>
-        <IssuesEmptyState onOpenCreate={() => setCreateOpen(true)} />
-        <IssueCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
+        <TasksEmptyState onOpenCreate={() => setCreateOpen(true)} />
+        <TaskCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       </>
     );
   }
@@ -337,14 +337,14 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
   return (
     <div className="issues-list issues-list--kanban" data-testid="issues-list">
       <header className="issues-list-header">
-        <h2 className="issues-list-heading">Issues</h2>
+        <h2 className="issues-list-heading">Tasks</h2>
         <input
           type="search"
           className="issues-list-search"
           placeholder="Filter…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          aria-label="Filter issues"
+          aria-label="Filter tasks"
           data-testid="issues-list-search"
         />
         <button
@@ -352,12 +352,12 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
           className="issues-new-btn issues-new-btn--header"
           onClick={() => setCreateOpen(true)}
           data-testid="issues-new-btn"
-          title="Create a new issue"
+          title="Create a new task"
         >
-          + New issue
+          + New task
         </button>
       </header>
-      <IssueCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <TaskCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       {/*
         The outer wrapper is a layout grid of columns, not a list — each
         column has its own role="list" of cards below. Putting role="list"
@@ -385,14 +385,14 @@ export function IssuesList({ initialTasks }: IssuesListProps = {}) {
               {columns[col].length === 0 ? (
                 <li
                   className="issues-kanban-column-empty"
-                  aria-label={`No issues in ${COLUMN_LABEL[col]}`}
+                  aria-label={`No tasks in ${COLUMN_LABEL[col]}`}
                 >
                   —
                 </li>
               ) : (
                 columns[col].map((task) => (
                   <li key={task.id}>
-                    <IssueCard task={task} />
+                    <TaskCard task={task} />
                   </li>
                 ))
               )}

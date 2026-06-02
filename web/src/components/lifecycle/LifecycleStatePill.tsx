@@ -8,7 +8,7 @@ import {
   activityDotForLifecycleState,
   ariaLabelForActivityDot,
   type StatusDotKind,
-} from "./IssueActivityStream";
+} from "./TaskActivityStream";
 
 interface LifecycleStatePillProps {
   state: LifecycleState;

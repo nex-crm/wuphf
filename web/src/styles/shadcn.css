@@ -12,7 +12,7 @@
 /* Tailwind v4 ignores tailwind.config.js color tokens by default —
  * it expects the CSS-first @theme block. Without this, classes like
  * `bg-background`, `border-border`, `bg-card`, etc. emit NO rules, so
- * the IssueCreateDialog (and any shadcn primitive that uses these
+ * the TaskCreateDialog (and any shadcn primitive that uses these
  * tokens) renders fully transparent. The bridge below maps the
  * shadcn HSL CSS variables (defined per-theme in the :root and
  * html[data-theme="..."] blocks below) into Tailwind v4's

@@ -34,9 +34,9 @@ import { SEV_ORDER, SEVERITY_TOKENS } from "../../lib/types/lifecycle";
 import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 import { RequestItem } from "./RequestItem";
 
-const IssueDocumentRoute = lazy(() =>
-  import("./IssueDocumentRoute").then((m) => ({
-    default: m.IssueDocumentRoute,
+const TaskDocumentRoute = lazy(() =>
+  import("./TaskDocumentRoute").then((m) => ({
+    default: m.TaskDocumentRoute,
   })),
 );
 const DecisionPacketRoute = lazy(() =>
@@ -577,11 +577,11 @@ function MailRow({
 }
 
 function DetailPane({ item }: { item: InboxItem }) {
-  // Tasks render the Linear-style Issue document so the Inbox detail
-  // pane matches the standalone /issues/$id view. The legacy
+  // Tasks render the Linear-style Task document so the Inbox detail
+  // pane matches the standalone /tasks/$id view. The legacy
   // DecisionPacketRoute (file diffs / reviewer grades / spec sections)
   // was code-review-shaped and showed irrelevant blocks for non-code
-  // Issues. The simpler IssueDocument surface (description + sub-issues
+  // Tasks. The simpler TaskDocument surface (description + sub-tasks
   // + comments) shows the actual context plus the same Approve / Close
   // / Reopen actions. Kept the legacy import below for direct routes
   // that may still want it.
@@ -599,7 +599,7 @@ function DetailPane({ item }: { item: InboxItem }) {
       return (
         <main
           className="inbox-detail-pane inbox-detail-pane--task"
-          aria-label="Issue detail"
+          aria-label="Task detail"
         >
           <Suspense
             fallback={
@@ -608,7 +608,7 @@ function DetailPane({ item }: { item: InboxItem }) {
               </div>
             }
           >
-            <IssueDocumentRoute issueId={item.taskId} />
+            <TaskDocumentRoute taskId={item.taskId} />
           </Suspense>
         </main>
       );
@@ -868,7 +868,9 @@ function ApprovalAuditTrail({ entries }: ApprovalAuditTrailProps) {
             <span className="inbox-trail-actor">
               {leadVerbForOutcome(first?.outcome)} by you
             </span>
-            <span className="inbox-trail-time">{formatTrailTime(answeredAt)}</span>
+            <span className="inbox-trail-time">
+              {formatTrailTime(answeredAt)}
+            </span>
           </li>
         ) : null}
         {sorted.map((entry, idx) => (

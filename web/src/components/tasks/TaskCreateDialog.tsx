@@ -13,42 +13,47 @@ import { FastArrowDown, Hashtag, KeyframeSolid, User } from "iconoir-react";
 
 import { getConfig } from "../../api/client";
 import { useChannels } from "../../hooks/useChannels";
-import { useCreateIssue } from "../../hooks/useCreateIssue";
+import { useCreateTask } from "../../hooks/useCreateTask";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { router } from "../../lib/router";
 import { resolveLeadSlug } from "../../lib/slashCommands";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../ui/Dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "../ui/Dialog";
 import { Kbd, MOD_KEY } from "../ui/Kbd";
 
 const DEFAULT_CHANNEL = "general";
 const AUTO_ASSIGN = "";
 
-export interface IssueCreateDialogProps {
+export interface TaskCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Pre-select a channel — used when opened from a channel header. */
   defaultChannel?: string;
   /** Pre-select an assignee — used when opened from an agent subspace. */
   defaultAssignee?: string;
-  /** Navigate to the new issue's detail page on success. Default: true. */
+  /** Navigate to the new task's detail page on success. Default: true. */
   navigateOnCreate?: boolean;
 }
 
 /**
- * IssueCreateDialog — Linear-shaped new-issue modal.
+ * TaskCreateDialog — Linear-shaped new-task modal.
  *
  * Built on project design tokens (--bg, --bg-card, --text, --border,
  * --accent) via named CSS classes in lifecycle.css so it renders
  * correctly across all themes without depending on the shadcn HSL bridge.
  * Uses the shared Dialog, Kbd primitives.
  */
-export function IssueCreateDialog({
+export function TaskCreateDialog({
   open,
   onOpenChange,
   defaultChannel,
   defaultAssignee,
   navigateOnCreate = true,
-}: IssueCreateDialogProps) {
+}: TaskCreateDialogProps) {
   const titleId = useId();
   const detailsId = useId();
   const channelId = useId();
@@ -64,7 +69,7 @@ export function IssueCreateDialog({
 
   const channelsQuery = useChannels();
   const membersQuery = useOfficeMembers();
-  const createIssue = useCreateIssue();
+  const createTask = useCreateTask();
   const { data: cfg } = useQuery({
     queryKey: ["config"],
     queryFn: getConfig,
@@ -89,7 +94,7 @@ export function IssueCreateDialog({
     }
   }, [open, defaultChannel, defaultAssignee]);
 
-  const canSubmit = title.trim().length > 0 && !createIssue.isPending;
+  const canSubmit = title.trim().length > 0 && !createTask.isPending;
 
   const assigneeLabel = useMemo(() => {
     if (!assignee) {
@@ -109,7 +114,7 @@ export function IssueCreateDialog({
     if (!canSubmit) return;
     setError(null);
     try {
-      const result = await createIssue.mutateAsync({
+      const result = await createTask.mutateAsync({
         title,
         details,
         channel,
@@ -125,17 +130,17 @@ export function IssueCreateDialog({
         onOpenChange(false);
         if (navigateOnCreate && result.task?.id) {
           void router.navigate({
-            to: "/issues/$issueId",
-            params: { issueId: result.task.id },
+            to: "/tasks/$taskId",
+            params: { taskId: result.task.id },
           });
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not file issue.");
+      setError(err instanceof Error ? err.message : "Could not file task.");
     }
   }, [
     canSubmit,
-    createIssue,
+    createTask,
     title,
     details,
     channel,
@@ -167,16 +172,16 @@ export function IssueCreateDialog({
         onKeyDown={handleKeyDown}
         aria-describedby={undefined}
       >
-        <DialogTitle className="sr-only">Create a new issue</DialogTitle>
+        <DialogTitle className="sr-only">Create a new task</DialogTitle>
         <DialogDescription className="sr-only">
-          File a new issue. Use {MOD_KEY} plus Enter to submit.
+          File a new task. Use {MOD_KEY} plus Enter to submit.
         </DialogDescription>
 
         <div className="issue-create-eyebrow">
           <span className="issue-create-eyebrow-icon">
             <KeyframeSolid width={14} height={14} aria-hidden="true" />
           </span>
-          <span className="issue-create-eyebrow-label">New issue</span>
+          <span className="issue-create-eyebrow-label">New task</span>
           <span className="issue-create-eyebrow-sep" aria-hidden="true">
             ·
           </span>
@@ -193,7 +198,7 @@ export function IssueCreateDialog({
 
         <div className="issue-create-body">
           <label htmlFor={titleId} className="sr-only">
-            Issue title
+            Task title
           </label>
           <input
             ref={titleRef}
@@ -201,7 +206,7 @@ export function IssueCreateDialog({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Issue title"
+            placeholder="Task title"
             className="issue-create-title-input"
             data-testid="issue-create-title"
             autoComplete="off"
@@ -209,7 +214,7 @@ export function IssueCreateDialog({
           />
 
           <label htmlFor={detailsId} className="sr-only">
-            Issue details
+            Task details
           </label>
           <textarea
             id={detailsId}
@@ -299,7 +304,7 @@ export function IssueCreateDialog({
               type="button"
               className="issue-create-cancel"
               onClick={() => onOpenChange(false)}
-              disabled={createIssue.isPending}
+              disabled={createTask.isPending}
             >
               Cancel
             </button>
@@ -310,9 +315,7 @@ export function IssueCreateDialog({
               disabled={!canSubmit}
               data-testid="issue-create-submit"
             >
-              <span>
-                {createIssue.isPending ? "Creating…" : "Create issue"}
-              </span>
+              <span>{createTask.isPending ? "Creating…" : "Create task"}</span>
               <Kbd size="sm" variant="inverse">{`${MOD_KEY}⏎`}</Kbd>
             </button>
           </div>

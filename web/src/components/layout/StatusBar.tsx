@@ -110,13 +110,8 @@ export function StatusBar() {
         return "Decision Inbox";
       case "task-decision":
         return `Task ${route.taskId}`;
-      // Phase 3 — Issues surface
-      case "issues-list":
-        return "Issues";
-      case "issue-detail":
-        return `Issue ${route.issueId}`;
-      case "issue-new":
-        return "New issue";
+      case "task-new":
+        return "New task";
       case "agent-subspace":
         return `${route.agentSlug} · ${route.tab}`;
       case "skill-detail":

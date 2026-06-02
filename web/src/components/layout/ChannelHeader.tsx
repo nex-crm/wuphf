@@ -41,13 +41,8 @@ function headerTitleAndDesc(
       return { title: "Decision Inbox", desc: "" };
     case "task-decision":
       return { title: `Task ${route.taskId}`, desc: "" };
-    // Phase 3 — Issues surface
-    case "issues-list":
-      return { title: "Issues", desc: "" };
-    case "issue-detail":
-      return { title: `Issue ${route.issueId}`, desc: "" };
-    case "issue-new":
-      return { title: "New issue", desc: "" };
+    case "task-new":
+      return { title: "New task", desc: "" };
     case "agent-subspace":
       return { title: `@${route.agentSlug}`, desc: "" };
     case "skill-detail":

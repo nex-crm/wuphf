@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { post } from "../api/client";
 import type { Task, TaskResponse } from "../api/tasks";
 
-export interface CreateIssueInput {
+export interface CreateTaskFormInput {
   title: string;
   details?: string;
   channel: string;
@@ -11,7 +11,7 @@ export interface CreateIssueInput {
   createdBy?: string;
 }
 
-export interface CreateIssueResult {
+export interface CreateTaskResult {
   task?: Task;
 }
 
@@ -20,15 +20,15 @@ export interface CreateIssueResult {
  * (dialog, command palette, CEO inline card).
  *
  * Routes through POST /tasks (action=create, task_type=issue) — the SAME
- * path createSubIssue uses — so the broker applies LifecycleStateDrafting
+ * path createSubTask uses — so the broker applies LifecycleStateDrafting
  * by construction. The previous /task-plan route skipped drafting and
  * landed the task straight at status=in_progress, which silently
  * bypassed the CEO scoping interview (issueScopingFrameworkBlock would
  * see a fully-formed task and never ask the office-hours questions).
  */
-export function useCreateIssue() {
+export function useCreateTask() {
   const queryClient = useQueryClient();
-  return useMutation<CreateIssueResult, Error, CreateIssueInput>({
+  return useMutation<CreateTaskResult, Error, CreateTaskFormInput>({
     mutationFn: async (input) => {
       const response = await post<TaskResponse>("/tasks", {
         action: "create",

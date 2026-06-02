@@ -1,5 +1,5 @@
 /**
- * IssueDocument — Phase 4 Issue surface.
+ * TaskDocument — Task detail surface.
  *
  * Extends Phase 3 read-only surface with:
  *  - Approve & Start button (visible only when lifecycleState === "drafting")
@@ -29,11 +29,11 @@ import {
   postTaskReject,
 } from "../../api/lifecycle";
 import { getOfficeTasks, type Task } from "../../api/tasks";
-import { formatIssueTitleForDisplay } from "../../lib/issueTitle";
 import {
   messageMarkdownComponents,
   messageRemarkPlugins,
 } from "../../lib/messageMarkdown";
+import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import type { LifecycleState } from "../../lib/types/lifecycle";
 import {
   Autocomplete,
@@ -41,13 +41,13 @@ import {
   applyAutocomplete,
 } from "../messages/Autocomplete";
 import { PixelAvatar } from "../ui/PixelAvatar";
-import { IssueActionToolbar } from "./IssueActionToolbar";
-import { IssueActivityStream } from "./IssueActivityStream";
-import { IssueDescription } from "./IssueDescription";
-import { IssueDetailTabs } from "./IssueDetailTabs";
 import { LifecycleStatePill } from "./LifecycleStatePill";
 import { OwnerPicker } from "./OwnerPicker";
-import { ParentIssueBreadcrumb } from "./ParentIssueBreadcrumb";
+import { ParentTaskBreadcrumb } from "./ParentTaskBreadcrumb";
+import { TaskActionToolbar } from "./TaskActionToolbar";
+import { TaskActivityStream } from "./TaskActivityStream";
+import { TaskDescription } from "./TaskDescription";
+import { TaskDetailTabs } from "./TaskDetailTabs";
 
 // ── Phase 4 constants ──────────────────────────────────────────────────
 
@@ -72,7 +72,7 @@ const DRAFT_SECTION_KEYS: ReadonlyArray<DraftSectionKey> = [
  * Each section is plain markdown text (may be empty / undefined when the
  * issue was just created).
  */
-export interface IssueSpec {
+export interface TaskSpec {
   goal?: string;
   context?: string;
   approach?: string;
@@ -85,7 +85,7 @@ export interface IssueSpec {
  * (broker_inbox_handler.go:229 / lifecycle.ts FeedbackItem), extended
  * with an id for scroll-targeting.
  */
-export interface IssueComment {
+export interface TaskComment {
   id: string;
   author: string;
   /** True when the author is an agent slug (vs. "human"). */
@@ -100,7 +100,7 @@ export interface IssueComment {
  * Fetched from GET /tasks/<taskId>. Fields mirror the broker's `teamTask`
  * JSON shape (camelCase on the wire from the Go side).
  */
-export interface IssueDocument {
+export interface TaskDocument {
   taskId: string;
   title: string;
   /** Plain-markdown description (task.details from the broker).
@@ -110,11 +110,11 @@ export interface IssueDocument {
   lifecycleState: LifecycleState;
   /** Retained for back-compat with stream-handler code; unused by
    * the Linear-style body. New work should write to `description`. */
-  spec: IssueSpec;
-  comments: IssueComment[];
+  spec: TaskSpec;
+  comments: TaskComment[];
   channel: string;
   ownerSlug?: string;
-  parentIssueId?: string;
+  parentTaskId?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -234,7 +234,7 @@ function normalizeAcceptanceCriteria(value: unknown): string | undefined {
 function normalizeSpec(
   rawSpec: Record<string, unknown>,
   taskHint?: Task,
-): IssueSpec {
+): TaskSpec {
   return {
     goal:
       strField(rawSpec, "goal") ??
@@ -251,7 +251,7 @@ function normalizeSpec(
 }
 
 /** Normalize one comment entry from the raw broker response. */
-function normalizeComment(c: unknown, idx: number): IssueComment {
+function normalizeComment(c: unknown, idx: number): TaskComment {
   const comment = (c ?? {}) as Record<string, unknown>;
   const id = strField(comment, "id") ?? `comment-${String(idx)}`;
   const author = strField(comment, "author") ?? "unknown";
@@ -265,7 +265,7 @@ function normalizeComment(c: unknown, idx: number): IssueComment {
   return { id, author, isAgent, body, appendedAt };
 }
 
-function resolveIssueTaskId(
+function resolveTaskId(
   packet: Record<string, unknown>,
   taskRecord: Record<string, unknown> | undefined,
   taskHint: Task | undefined,
@@ -278,7 +278,7 @@ function resolveIssueTaskId(
   );
 }
 
-function resolveIssueTitle(
+function resolveTaskTitle(
   packet: Record<string, unknown>,
   taskRecord: Record<string, unknown> | undefined,
   spec: Record<string, unknown>,
@@ -295,7 +295,7 @@ function resolveIssueTitle(
   );
 }
 
-function resolveIssueLifecycleState(
+function resolveTaskLifecycleState(
   packet: Record<string, unknown>,
   taskHint: Task | undefined,
 ): LifecycleState {
@@ -305,10 +305,10 @@ function resolveIssueLifecycleState(
     : taskStatusToLifecycleState(taskHint);
 }
 
-function normalizeIssueComments(
+function normalizeTaskComments(
   packet: Record<string, unknown>,
   spec: Record<string, unknown>,
-): IssueComment[] {
+): TaskComment[] {
   const rawComments: unknown[] = Array.isArray(packet.comments)
     ? packet.comments
     : Array.isArray(packet.feedback)
@@ -331,7 +331,7 @@ function resolveAliasedField(
   );
 }
 
-function resolveIssueChannel(
+function resolveTaskChannel(
   packet: Record<string, unknown>,
   taskRecord: Record<string, unknown> | undefined,
   taskHint: Task | undefined,
@@ -340,18 +340,18 @@ function resolveIssueChannel(
     resolveAliasedField(packet, taskRecord, "channel", "channel")?.trim() ||
     taskHint?.channel?.trim();
   if (!channel) {
-    throw new Error("issue channel is missing");
+    throw new Error("task channel is missing");
   }
   return channel;
 }
 
-/** Normalize the raw API response into a clean IssueDocument. */
-export function normalizeIssueDocument(
+/** Normalize the raw API response into a clean TaskDocument. */
+export function normalizeTaskDocument(
   raw: unknown,
   taskHint?: Task,
-): IssueDocument {
+): TaskDocument {
   if (!raw || typeof raw !== "object") {
-    throw new Error("invalid issue document response");
+    throw new Error("invalid task document response");
   }
   const r = raw as Record<string, unknown>;
   const taskRecord = recordValue(r.task);
@@ -361,11 +361,11 @@ export function normalizeIssueDocument(
   // /tasks/<id> returns the decision-packet shape. Normalise both
   // forms at the boundary so the document route can render direct
   // links and list-to-detail navigations consistently.
-  const taskId = resolveIssueTaskId(r, taskRecord, taskHint);
-  const title = resolveIssueTitle(r, taskRecord, rawSpec, taskHint, taskId);
-  const lifecycleState = resolveIssueLifecycleState(r, taskHint);
+  const taskId = resolveTaskId(r, taskRecord, taskHint);
+  const title = resolveTaskTitle(r, taskRecord, rawSpec, taskHint, taskId);
+  const lifecycleState = resolveTaskLifecycleState(r, taskHint);
   const spec = normalizeSpec(rawSpec, taskHint);
-  const comments = normalizeIssueComments(r, rawSpec);
+  const comments = normalizeTaskComments(r, rawSpec);
 
   // Linear-style description: the broker writes `details` on the task
   // record; legacy clients may still write `description`. Fall back to
@@ -381,7 +381,7 @@ export function normalizeIssueDocument(
   // packet top level, or only via the office-tasks taskHint. Check all
   // three so child issues correctly hide the Sub-issues tab and show
   // the parent breadcrumb regardless of which shape the broker returns.
-  const parentIssueId =
+  const parentTaskId =
     resolveAliasedField(r, taskRecord, "parentIssueId", "parent_issue_id") ??
     taskHint?.parent_issue_id;
 
@@ -392,11 +392,11 @@ export function normalizeIssueDocument(
     lifecycleState,
     spec,
     comments,
-    channel: resolveIssueChannel(r, taskRecord, taskHint),
+    channel: resolveTaskChannel(r, taskRecord, taskHint),
     ownerSlug:
       resolveAliasedField(r, taskRecord, "ownerSlug", "owner") ??
       taskHint?.owner,
-    parentIssueId,
+    parentTaskId,
     createdAt:
       resolveAliasedField(r, taskRecord, "createdAt", "created_at") ??
       taskHint?.created_at,
@@ -406,8 +406,8 @@ export function normalizeIssueDocument(
   };
 }
 
-async function fetchIssueDocument(taskId: string): Promise<IssueDocument> {
-  // The broker exposes the full task at /tasks/<id>. IssueDocument is a
+async function fetchTaskDocument(taskId: string): Promise<TaskDocument> {
+  // The broker exposes the full task at /tasks/<id>. TaskDocument is a
   // presentation projection; we re-use the same endpoint as the Decision
   // Packet (which GET /tasks/<id> already serves) and normalise at the
   // boundary.
@@ -416,7 +416,7 @@ async function fetchIssueDocument(taskId: string): Promise<IssueDocument> {
     getOfficeTasks({ includeDone: true }).catch(() => undefined),
   ]);
   const taskHint = tasksResponse?.tasks.find((task) => task.id === taskId);
-  return normalizeIssueDocument(raw, taskHint);
+  return normalizeTaskDocument(raw, taskHint);
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────
@@ -469,7 +469,7 @@ function SpecSummaryCard({
   spec,
   onExpand,
 }: {
-  spec: IssueSpec;
+  spec: TaskSpec;
   onExpand: () => void;
 }) {
   // Produce a 3-line plaintext summary from the spec sections.
@@ -510,7 +510,7 @@ function SpecSummaryCard({
 }
 
 interface CommentItemProps {
-  comment: IssueComment;
+  comment: TaskComment;
 }
 
 function CommentItem({ comment }: CommentItemProps) {
@@ -570,13 +570,13 @@ function CommentItem({ comment }: CommentItemProps) {
 
 // ── Loading + error states ─────────────────────────────────────────────
 
-function IssueDocumentSkeleton() {
+function TaskDocumentSkeleton() {
   return (
     <div
       className="issue-document issue-document--loading"
       data-testid="issue-document-loading"
       aria-busy="true"
-      aria-label="Loading issue"
+      aria-label="Loading task"
       role="status"
     >
       <div className="issue-doc-header issue-doc-header--sticky">
@@ -596,7 +596,7 @@ function IssueDocumentSkeleton() {
   );
 }
 
-function IssueDocumentError({
+function TaskDocumentError({
   message,
   onRetry,
 }: {
@@ -609,7 +609,7 @@ function IssueDocumentError({
       data-testid="issue-document-error"
     >
       <div className="issue-doc-error-card" role="alert">
-        <strong>Could not load issue</strong>
+        <strong>Could not load task</strong>
         <p>{message}</p>
         <button type="button" className="issue-doc-retry-btn" onClick={onRetry}>
           Retry
@@ -650,7 +650,7 @@ export function ApproveAndStartButton({
     },
     onError: (err: unknown) => {
       const message =
-        err instanceof Error ? err.message : "Failed to approve issue.";
+        err instanceof Error ? err.message : "Failed to approve task.";
       setApproveError(message);
     },
   });
@@ -697,12 +697,12 @@ export function ApproveAndStartButton({
  * Without that gate, a stray click on a hover-target permanently
  * closes the Issue with no chance to undo.
  */
-interface CloseIssueButtonProps {
+interface CloseTaskButtonProps {
   taskId: string;
   onClosed: () => void;
 }
 
-export function CloseIssueButton({ taskId, onClosed }: CloseIssueButtonProps) {
+export function CloseTaskButton({ taskId, onClosed }: CloseTaskButtonProps) {
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
   const [closeError, setCloseError] = useState<string | null>(null);
@@ -717,7 +717,7 @@ export function CloseIssueButton({ taskId, onClosed }: CloseIssueButtonProps) {
     },
     onError: (err: unknown) => {
       setCloseError(
-        err instanceof Error ? err.message : "Failed to close issue.",
+        err instanceof Error ? err.message : "Failed to close task.",
       );
     },
   });
@@ -731,10 +731,10 @@ export function CloseIssueButton({ taskId, onClosed }: CloseIssueButtonProps) {
         type="button"
         className="btn btn-ghost issue-close-btn"
         onClick={() => setConfirming(true)}
-        aria-label="Close this issue (terminal)"
+        aria-label="Close this task (terminal)"
         data-testid="close-issue"
       >
-        Close issue
+        Close task
       </button>
     );
   }
@@ -744,7 +744,7 @@ export function CloseIssueButton({ taskId, onClosed }: CloseIssueButtonProps) {
       className="issue-close-confirm"
       data-testid="close-issue-confirm"
       role="group"
-      aria-label="Confirm close issue"
+      aria-label="Confirm close task"
     >
       <label className="issue-close-confirm-label" htmlFor="close-reason">
         Reason for closing (required)
@@ -791,7 +791,7 @@ export function CloseIssueButton({ taskId, onClosed }: CloseIssueButtonProps) {
           onClick={() => closeMutation.mutate(trimmed)}
           data-testid="close-issue-confirm"
         >
-          {closeMutation.isPending ? "Closing…" : "Close issue"}
+          {closeMutation.isPending ? "Closing…" : "Close task"}
         </button>
       </div>
     </div>
@@ -880,7 +880,7 @@ function useDraftStream(taskId: string, enabled: boolean): DraftAccumulator {
 interface CommentsTimelineProps {
   taskId: string;
   channel: string;
-  comments: IssueComment[];
+  comments: TaskComment[];
   isDrafting: boolean;
   timelineRef: React.RefObject<HTMLDivElement | null>;
   onCommentPosted: () => void;
@@ -1104,8 +1104,8 @@ export function CommentsTimeline({
 // ── Spec body sub-component ───────────────────────────────────────────
 
 interface SpecBodyProps {
-  spec: IssueSpec;
-  mergedSpec: IssueSpec;
+  spec: TaskSpec;
+  mergedSpec: TaskSpec;
   shouldAutoCollapse: boolean;
   specExpanded: boolean;
   isDrafting: boolean;
@@ -1130,7 +1130,7 @@ function SpecBody({
   return (
     <section
       className="issue-doc-spec"
-      aria-label="Issue specification"
+      aria-label="Task specification"
       aria-live={isDrafting ? "polite" : undefined}
     >
       {shouldAutoCollapse ? (
@@ -1177,8 +1177,8 @@ function SpecBody({
 function mergeSpec(
   isDrafting: boolean,
   accumulated: DraftAccumulator,
-  serverSpec: IssueSpec,
-): IssueSpec {
+  serverSpec: TaskSpec,
+): TaskSpec {
   if (!isDrafting) return serverSpec;
   return {
     goal: accumulated.goal ?? serverSpec.goal,
@@ -1207,10 +1207,10 @@ function buildSectionStreamingCheck(
 
 // ── Main component ─────────────────────────────────────────────────────
 
-interface IssueDocumentProps {
+interface TaskDocumentProps {
   taskId: string;
   /** Skip fetch and render with these data directly. Used by tests + screenshots. */
-  initialDocument?: IssueDocument;
+  initialDocument?: TaskDocument;
   /**
    * Inject a mock draft accumulator for tests (streaming draft section).
    * In production this is driven by useDraftStream.
@@ -1219,7 +1219,7 @@ interface IssueDocumentProps {
 }
 
 /**
- * IssueDocument renders a single Issue, extended in Phase 4 with:
+ * TaskDocument renders a single Issue, extended in Phase 4 with:
  *  - Approve & Start button (Drafting state only)
  *  - Streaming draft section rendering via SSE
  *  - Comment helper line in Drafting state
@@ -1232,16 +1232,16 @@ interface IssueDocumentProps {
  * The component manages spec-collapsed state in sessionStorage so
  * returning to an already-approved issue restores the user's choice.
  */
-export function IssueDocument({
+export function TaskDocument({
   taskId,
   initialDocument,
   testDraftAccumulator,
-}: IssueDocumentProps) {
+}: TaskDocumentProps) {
   const queryClient = useQueryClient();
 
-  const query = useQuery<IssueDocument>({
+  const query = useQuery<TaskDocument>({
     queryKey: ["issue", taskId],
-    queryFn: () => fetchIssueDocument(taskId),
+    queryFn: () => fetchTaskDocument(taskId),
     initialData: initialDocument,
     staleTime: 5_000,
     enabled: !initialDocument,
@@ -1307,12 +1307,12 @@ export function IssueDocument({
   }, [doc]);
 
   if (query.isPending && !initialDocument) {
-    return <IssueDocumentSkeleton />;
+    return <TaskDocumentSkeleton />;
   }
 
   if (query.isError && !doc) {
     return (
-      <IssueDocumentError
+      <TaskDocumentError
         message={
           query.error instanceof Error
             ? query.error.message
@@ -1324,7 +1324,7 @@ export function IssueDocument({
   }
 
   if (!doc) {
-    return <IssueDocumentSkeleton />;
+    return <TaskDocumentSkeleton />;
   }
 
   return (
@@ -1336,13 +1336,13 @@ export function IssueDocument({
     >
       {/* Sticky header: status pill + title + owner */}
       <header className="issue-doc-header issue-doc-header--sticky">
-        {doc.parentIssueId ? (
-          <ParentIssueBreadcrumb parentIssueId={doc.parentIssueId} />
+        {doc.parentTaskId ? (
+          <ParentTaskBreadcrumb parentTaskId={doc.parentTaskId} />
         ) : null}
         <div className="issue-doc-header-row">
           <LifecycleStatePill state={doc.lifecycleState} />
           <h2 className="issue-doc-title">
-            {formatIssueTitleForDisplay(doc.title)}
+            {formatTaskTitleForDisplay(doc.title)}
           </h2>
         </div>
         <div className="issue-doc-meta-row">
@@ -1371,7 +1371,7 @@ export function IssueDocument({
           className="issue-doc-button-row"
           data-testid="issue-doc-button-row"
         >
-          <IssueActionToolbar
+          <TaskActionToolbar
             taskId={taskId}
             channel={doc.channel}
             lifecycleState={doc.lifecycleState}
@@ -1398,7 +1398,7 @@ export function IssueDocument({
        *  component is preserved in this file for tests + legacy code
        *  paths but is no longer mounted. */}
       <div className="issue-doc-body">
-        <IssueDescription
+        <TaskDescription
           description={doc.description}
           isDrafting={isDrafting}
         />
@@ -1407,17 +1407,17 @@ export function IssueDocument({
          *  right now via the SSE-fed agentActivitySnapshots. Stays in the
          *  header zone (always visible) so the human sees the heartbeat
          *  no matter which tab is active. */}
-        <IssueActivityStream
+        <TaskActivityStream
           ownerSlug={doc.ownerSlug}
           lifecycleState={doc.lifecycleState}
         />
 
-        <IssueDetailTabs
+        <TaskDetailTabs
           taskId={taskId}
           channel={doc.channel}
           comments={doc.comments}
           isDrafting={isDrafting}
-          showSubIssues={!doc.parentIssueId}
+          showSubTasks={!doc.parentTaskId}
           timelineRef={timelineRef}
           onCommentPosted={() => {
             void queryClient.invalidateQueries({ queryKey: ["issue", taskId] });

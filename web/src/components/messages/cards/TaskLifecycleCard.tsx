@@ -1,10 +1,10 @@
 /**
- * IssueLifecycleCard — chat card emitted by the broker on important
- * lifecycle transitions of an Issue (Drafting → Running, → Done, → Closed,
+ * TaskLifecycleCard — chat card emitted by the broker on important
+ * lifecycle transitions of a Task (Drafting → Running, → Done, → Closed,
  * → Needs your input, etc).
  *
- * The card is the "what happened to this Issue" surface for humans and
- * other agents scrolling the channel. Click → navigates to the Issue
+ * The card is the "what happened to this Task" surface for humans and
+ * other agents scrolling the channel. Click → navigates to the Task
  * detail.
  *
  * The broker sends Kind="issue_lifecycle" with a structured payload
@@ -16,7 +16,7 @@
 
 import { router } from "../../../lib/router";
 
-export type IssueLifecycleTransition =
+export type TaskLifecycleTransition =
   | "started"
   | "in_review"
   | "approved"
@@ -26,14 +26,14 @@ export type IssueLifecycleTransition =
   | "revising"
   | "generic";
 
-export interface IssueLifecyclePayload {
+export interface TaskLifecyclePayload {
   task_id?: string;
   title?: string;
   owner?: string;
   channel?: string;
   from_state?: string;
   to_state?: string;
-  transition?: IssueLifecycleTransition;
+  transition?: TaskLifecycleTransition;
   actor?: string;
 }
 
@@ -41,7 +41,7 @@ function isStringField(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-const TRANSITIONS: ReadonlyArray<IssueLifecycleTransition> = [
+const TRANSITIONS: ReadonlyArray<TaskLifecycleTransition> = [
   "started",
   "in_review",
   "approved",
@@ -52,19 +52,19 @@ const TRANSITIONS: ReadonlyArray<IssueLifecycleTransition> = [
   "generic",
 ];
 
-function parseTransition(raw: unknown): IssueLifecycleTransition | undefined {
+function parseTransition(raw: unknown): TaskLifecycleTransition | undefined {
   if (typeof raw !== "string") return undefined;
   return (TRANSITIONS as ReadonlyArray<string>).includes(raw)
-    ? (raw as IssueLifecycleTransition)
+    ? (raw as TaskLifecycleTransition)
     : undefined;
 }
 
-export function parseIssueLifecyclePayload(raw: unknown): IssueLifecyclePayload {
+export function parseTaskLifecyclePayload(raw: unknown): TaskLifecyclePayload {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return {};
   }
   const r = raw as Record<string, unknown>;
-  const out: IssueLifecyclePayload = {};
+  const out: TaskLifecyclePayload = {};
   if (isStringField(r.task_id)) out.task_id = r.task_id;
   if (isStringField(r.title)) out.title = r.title;
   if (isStringField(r.owner)) out.owner = r.owner;
@@ -84,7 +84,7 @@ interface TransitionPresentation {
 }
 
 function presentationFor(
-  transition: IssueLifecycleTransition,
+  transition: TaskLifecycleTransition,
   owner: string | undefined,
 ): TransitionPresentation {
   const tag = owner ? `@${owner}` : "the owner";
@@ -129,26 +129,26 @@ function presentationFor(
       };
     case "generic":
     default:
-      return { eyebrow: "Issue updated", icon: "📋", accent: "neutral" };
+      return { eyebrow: "Task updated", icon: "📋", accent: "neutral" };
   }
 }
 
-export interface IssueLifecycleCardProps {
-  payload: IssueLifecyclePayload;
+export interface TaskLifecycleCardProps {
+  payload: TaskLifecyclePayload;
 }
 
-export function IssueLifecycleCard({ payload }: IssueLifecycleCardProps) {
+export function TaskLifecycleCard({ payload }: TaskLifecycleCardProps) {
   const taskId = payload.task_id ?? "";
-  const title = payload.title ?? "(untitled issue)";
+  const title = payload.title ?? "(untitled task)";
   const transition = payload.transition ?? "generic";
   const owner = payload.owner;
   const presentation = presentationFor(transition, owner);
 
-  function openIssue() {
+  function openTask() {
     if (!taskId) return;
     void router.navigate({
-      to: "/issues/$issueId",
-      params: { issueId: taskId },
+      to: "/tasks/$taskId",
+      params: { taskId },
     });
   }
 
@@ -156,11 +156,11 @@ export function IssueLifecycleCard({ payload }: IssueLifecycleCardProps) {
     <button
       type="button"
       className={`issue-lifecycle-card issue-lifecycle-card--${presentation.accent}`}
-      onClick={openIssue}
+      onClick={openTask}
       data-testid="issue-lifecycle-card"
       data-task-id={taskId}
       data-transition={transition}
-      aria-label={`Open issue ${taskId}: ${title}`}
+      aria-label={`Open task ${taskId}: ${title}`}
       disabled={!taskId}
     >
       <span className="issue-lifecycle-card-icon" aria-hidden="true">

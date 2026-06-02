@@ -61,7 +61,7 @@ type ipRateLimitBucket struct {
 type Broker struct {
 	channelStore      *channel.Store
 	messages          []channelMessage
-	agentIssues       []agentIssueRecord
+	incidents         []incidentRecord
 	members           []officeMember
 	memberIndex       map[string]int                  // slug → index into members; guarded by mu
 	memberPresence    map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
@@ -1073,7 +1073,7 @@ func (b *Broker) Reset() {
 	mode := b.sessionMode
 	agent := b.oneOnOneAgent
 	b.messages = nil
-	b.agentIssues = nil
+	b.incidents = nil
 	b.members = defaultOfficeMembers()
 	b.channels = defaultTeamChannels()
 	b.sessionMode = mode

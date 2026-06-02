@@ -1,17 +1,14 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
-import {
-  type TaskStatusAction,
-  updateTaskStatus,
-} from "../../api/tasks";
+import { type TaskStatusAction, updateTaskStatus } from "../../api/tasks";
 import type { LifecycleState } from "../../lib/types/lifecycle";
-import { ApproveAndStartButton, CloseIssueButton } from "./IssueDocument";
-import { ReopenIssueButton } from "./ReopenIssueButton";
+import { ReopenTaskButton } from "./ReopenTaskButton";
+import { ApproveAndStartButton, CloseTaskButton } from "./TaskDocument";
 
 // ── State-aware Issue action toolbar ─────────────────────────────────
 
-interface IssueActionToolbarProps {
+interface TaskActionToolbarProps {
   taskId: string;
   channel: string;
   lifecycleState: LifecycleState;
@@ -150,12 +147,12 @@ function actionsForState(state: LifecycleState): ActionDef[] {
   }
 }
 
-export function IssueActionToolbar({
+export function TaskActionToolbar({
   taskId,
   channel,
   lifecycleState,
   onAfterAction,
-}: IssueActionToolbarProps) {
+}: TaskActionToolbarProps) {
   const [pendingReason, setPendingReason] = useState<{
     action: ActionDef;
     reason: string;
@@ -208,8 +205,8 @@ export function IssueActionToolbar({
   return (
     <div className="issue-action-toolbar">
       {/* Approve & Start (drafting only) — uses postDecision via the
-        * existing button so the special drafting→running transition
-        * keeps its current behavior (Slice 1). */}
+       * existing button so the special drafting→running transition
+       * keeps its current behavior (Slice 1). */}
       {isDrafting ? (
         <ApproveAndStartButton taskId={taskId} onApproved={onAfterAction} />
       ) : null}
@@ -228,9 +225,9 @@ export function IssueActionToolbar({
       ))}
 
       {/* Reopen for terminal states — separate component because it
-        * uses the dedicated reopen endpoint. */}
+       * uses the dedicated reopen endpoint. */}
       {isTerminal ? (
-        <ReopenIssueButton
+        <ReopenTaskButton
           taskId={taskId}
           channel={channel}
           onReopened={onAfterAction}
@@ -260,7 +257,7 @@ export function IssueActionToolbar({
                 setPendingReason(null);
               }
             }}
-            autoFocus
+            autoFocus={true}
             data-testid="action-reason-input"
           />
           <button
@@ -269,9 +266,7 @@ export function IssueActionToolbar({
             onClick={submitReason}
             disabled={statusMutation.isPending}
           >
-            {statusMutation.isPending
-              ? "…"
-              : pendingReason.action.label}
+            {statusMutation.isPending ? "…" : pendingReason.action.label}
           </button>
           <button
             type="button"
@@ -290,12 +285,12 @@ export function IssueActionToolbar({
         </span>
       ) : null}
 
-      {/* CloseIssueButton is intentionally NOT shown here — its old
-        * meaning ("reject") is now subsumed into Cancel for non-terminal
-        * states and is irrelevant for terminal ones. The void below
-        * silences the unused-import warning. */}
+      {/* CloseTaskButton is intentionally NOT shown here — its old
+       * meaning ("reject") is now subsumed into Cancel for non-terminal
+       * states and is irrelevant for terminal ones. The void below
+       * silences the unused-import warning. */}
       {false ? (
-        <CloseIssueButton taskId={taskId} onClosed={onAfterAction} />
+        <CloseTaskButton taskId={taskId} onClosed={onAfterAction} />
       ) : null}
     </div>
   );

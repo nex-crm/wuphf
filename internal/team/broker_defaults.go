@@ -270,17 +270,17 @@ func (b *Broker) normalizeLoadedStateLocked() {
 			b.messages[i].Channel = "general"
 		}
 	}
-	for i := range b.agentIssues {
-		issueChannel := normalizeChannelSlug(channel.MigrateDMSlugString(b.agentIssues[i].Channel))
-		if issueChannel == "" {
-			issueChannel = "general"
+	for i := range b.incidents {
+		incChannel := normalizeChannelSlug(channel.MigrateDMSlugString(b.incidents[i].Channel))
+		if incChannel == "" {
+			incChannel = "general"
 		}
-		b.agentIssues[i].Channel = issueChannel
-		if strings.TrimSpace(b.agentIssues[i].UpdatedAt) == "" {
-			b.agentIssues[i].UpdatedAt = b.agentIssues[i].CreatedAt
+		b.incidents[i].Channel = incChannel
+		if strings.TrimSpace(b.incidents[i].UpdatedAt) == "" {
+			b.incidents[i].UpdatedAt = b.incidents[i].CreatedAt
 		}
-		if b.agentIssues[i].Count <= 0 {
-			b.agentIssues[i].Count = 1
+		if b.incidents[i].Count <= 0 {
+			b.incidents[i].Count = 1
 		}
 	}
 	for i := range b.tasks {

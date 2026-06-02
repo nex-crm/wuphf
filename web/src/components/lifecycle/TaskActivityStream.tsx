@@ -4,7 +4,7 @@ import type { LifecycleState } from "../../lib/types/lifecycle";
 import { useAppStore } from "../../stores/app";
 
 /**
- * IssueActivityStream — surfaces the per-owner live activity snapshot on
+ * TaskActivityStream — surfaces the per-owner live activity snapshot on
  * the Issue detail page so the human sees, in real time, what the owning
  * agent is doing right now. Pairs with the StatusDot which encodes the
  * Issue's overall state at a glance:
@@ -51,7 +51,7 @@ export function ariaLabelForActivityDot(dot: StatusDotKind): string {
  * LifecycleStatePill but with no surrounding pill chrome so it fits in
  * tight grids. Use the pill when you also want the state label.
  */
-export function IssueStatusDot({
+export function TaskStatusDot({
   lifecycleState,
 }: {
   lifecycleState: LifecycleState;
@@ -69,15 +69,15 @@ export function IssueStatusDot({
   );
 }
 
-interface IssueActivityStreamProps {
+interface TaskActivityStreamProps {
   ownerSlug: string | undefined;
   lifecycleState: LifecycleState;
 }
 
-export function IssueActivityStream({
+export function TaskActivityStream({
   ownerSlug,
   lifecycleState,
-}: IssueActivityStreamProps) {
+}: TaskActivityStreamProps) {
   const snapshot = useAppStore((s) =>
     ownerSlug ? s.agentActivitySnapshots[ownerSlug] : undefined,
   );
@@ -128,9 +128,7 @@ export function IssueActivityStream({
             <time className="issue-activity-elapsed">{elapsedLabel}</time>
           ) : null}
         </div>
-        {detail ? (
-          <p className="issue-activity-detail">{detail}</p>
-        ) : null}
+        {detail ? <p className="issue-activity-detail">{detail}</p> : null}
       </div>
     </section>
   );

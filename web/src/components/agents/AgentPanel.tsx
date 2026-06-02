@@ -62,13 +62,8 @@ function routeIdentityKey(route: CurrentRoute): string {
       return "inbox";
     case "task-decision":
       return `task-decision:${route.taskId}`;
-    // Phase 3 — Issues surface
-    case "issues-list":
-      return "issues-list";
-    case "issue-detail":
-      return `issue-detail:${route.issueId}`;
-    case "issue-new":
-      return "issue-new";
+    case "task-new":
+      return "task-new";
     case "agent-subspace":
       return `agent-subspace:${route.agentSlug}/${route.tab}`;
     case "skill-detail":

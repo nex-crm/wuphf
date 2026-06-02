@@ -131,11 +131,6 @@ const SkillsApp = lazy(() =>
     default: m.SkillsApp,
   })),
 );
-const TasksApp = lazy(() =>
-  import("../components/apps/TasksApp").then((m) => ({
-    default: m.TasksApp,
-  })),
-);
 const Notebook = lazy(() => import("../components/notebook/Notebook"));
 const DecisionInbox = lazy(() =>
   import("../components/lifecycle/DecisionInbox").then((m) => ({
@@ -157,20 +152,20 @@ const ArticleView = lazy(() =>
 const ReviewQueueKanban = lazy(
   () => import("../components/review/ReviewQueueKanban"),
 );
-// Phase 3 — Issues surface.
-const IssuesList = lazy(() =>
-  import("../components/lifecycle/IssuesList").then((m) => ({
-    default: m.IssuesList,
+// Tasks surface (list + detail + new).
+const TasksList = lazy(() =>
+  import("../components/lifecycle/TasksList").then((m) => ({
+    default: m.TasksList,
   })),
 );
-const IssueDocumentRoute = lazy(() =>
-  import("../components/lifecycle/IssueDocumentRoute").then((m) => ({
-    default: m.IssueDocumentRoute,
+const TaskDocumentRoute = lazy(() =>
+  import("../components/lifecycle/TaskDocumentRoute").then((m) => ({
+    default: m.TaskDocumentRoute,
   })),
 );
-const IssueNewForm = lazy(() =>
-  import("../components/lifecycle/IssueNewForm").then((m) => ({
-    default: m.IssueNewForm,
+const TaskNewForm = lazy(() =>
+  import("../components/lifecycle/TaskNewForm").then((m) => ({
+    default: m.TaskNewForm,
   })),
 );
 // v3 MVP — per-agent subspace shell.
@@ -343,7 +338,6 @@ function navigateNotebookEntry(
 }
 
 const APP_PANELS = {
-  tasks: TasksApp,
   requests: InboxRedirect,
   graph: GraphApp,
   policies: PoliciesApp,
@@ -624,17 +618,11 @@ function MainContent() {
       }
       return <AppPanel appId={route.appId} />;
     case "task-board":
-      return (
-        <div className="app-panel active" data-testid="app-page-tasks">
-          <TasksApp />
-        </div>
-      );
+      return <TasksList />;
     case "task-detail":
-      return (
-        <div className="app-panel active" data-testid="app-page-tasks">
-          <TasksApp taskId={route.taskId} />
-        </div>
-      );
+      return <TaskDocumentRoute taskId={route.taskId} />;
+    case "task-new":
+      return <TaskNewForm />;
     case "wiki":
     case "wiki-article":
       return <WikiSurface current="wiki" route={route} />;
@@ -659,12 +647,6 @@ function MainContent() {
       return <DecisionInbox />;
     case "task-decision":
       return <DecisionPacketRoute taskId={route.taskId} />;
-    case "issues-list":
-      return <IssuesList />;
-    case "issue-detail":
-      return <IssueDocumentRoute issueId={route.issueId} />;
-    case "issue-new":
-      return <IssueNewForm />;
     case "agent-subspace":
       return <AgentSubspaceRoute agentSlug={route.agentSlug} tab={route.tab} />;
     case "skill-detail":

@@ -78,7 +78,7 @@ export interface TaskMemoryWorkflow {
   completed_at?: string;
 }
 
-export interface TaskIssueDraftSpec {
+export interface TaskDraftSpec {
   goal?: string;
   context?: string;
   approach?: string;
@@ -122,7 +122,7 @@ export interface Task {
   recheck_at?: string;
   created_at?: string;
   updated_at?: string;
-  issue_draft_spec?: TaskIssueDraftSpec;
+  issue_draft_spec?: TaskDraftSpec;
   memory_workflow?: TaskMemoryWorkflow;
 }
 
@@ -233,28 +233,28 @@ export function getTasks(
   return get<TaskListResponse>("/tasks", params);
 }
 
-/** List sub-issues of a parent Issue. Uses the broker's
+/** List sub-tasks of a parent Task. Uses the broker's
  *  parent_issue_id query filter (Slice 4 follow-up). Returns an empty
  *  list when the parent has no children. */
-// ── Per-Issue Activity feed ─────────────────────────────────────────────
+// ── Per-Task Activity feed ──────────────────────────────────────────────
 
-export type IssueActivityEventKind =
+export type TaskActivityEventKind =
   | "lifecycle"
   | "comment"
   | "action"
   | "request"
   | "sub_issue";
 
-export type IssueActivityRequestStatus = "open" | "answered" | "canceled";
+export type TaskActivityRequestStatus = "open" | "answered" | "canceled";
 
-export interface IssueActivityLifecycle {
+export interface TaskActivityLifecycle {
   from?: string;
   to?: string;
 }
 
-export interface IssueActivityRequest {
+export interface TaskActivityRequest {
   request_id: string;
-  status: IssueActivityRequestStatus;
+  status: TaskActivityRequestStatus;
   question?: string;
   choice_id?: string;
   choice_text?: string;
@@ -263,52 +263,54 @@ export interface IssueActivityRequest {
   blocking?: boolean;
 }
 
-export interface IssueActivitySubIssue {
+export interface TaskActivitySubIssue {
   sub_issue_id: string;
   title?: string;
 }
 
-export interface IssueActivityEvent {
+export interface TaskActivityEvent {
   id: string;
-  kind: IssueActivityEventKind;
+  kind: TaskActivityEventKind;
   timestamp: string;
   actor?: string;
   summary?: string;
   detail?: string;
-  lifecycle?: IssueActivityLifecycle;
-  request?: IssueActivityRequest;
-  sub_issue?: IssueActivitySubIssue;
+  lifecycle?: TaskActivityLifecycle;
+  request?: TaskActivityRequest;
+  sub_issue?: TaskActivitySubIssue;
 }
 
-export interface IssueActivityResponse {
+export interface TaskActivityResponse {
   task_id: string;
-  events: IssueActivityEvent[];
+  events: TaskActivityEvent[];
 }
 
 /**
- * Fetch the per-Issue activity feed: lifecycle transitions, comments,
- * requests (with resolution), sub-issue creations. Sorted oldest first
+ * Fetch the per-Task activity feed: lifecycle transitions, comments,
+ * requests (with resolution), sub-task creations. Sorted oldest first
  * by the broker; the FE can reverse if it wants newest-on-top.
  */
-export function getIssueActivity(taskId: string) {
-  return get<IssueActivityResponse>(`/tasks/${encodeURIComponent(taskId)}/activity`);
+export function getTaskActivity(taskId: string) {
+  return get<TaskActivityResponse>(
+    `/tasks/${encodeURIComponent(taskId)}/activity`,
+  );
 }
 
-export function getSubIssues(parentIssueId: string) {
+export function getSubTasks(parentTaskId: string) {
   return get<TaskListResponse>("/tasks", {
     viewer_slug: "human",
     all_channels: "true",
     include_done: "true",
-    parent_issue_id: parentIssueId,
+    parent_issue_id: parentTaskId,
   });
 }
 
-/** Create a sub-issue under a parent Issue. Sub-issues have the same
- *  shape as Issues: title, details, optional owner. Defaults
- *  task_type=issue so the row lands on the Issues board with the same
+/** Create a sub-task under a parent Task. Sub-tasks have the same
+ *  shape as Tasks: title, details, optional owner. Defaults
+ *  task_type=issue so the row lands on the Tasks board with the same
  *  lifecycle. */
-export function createSubIssue(opts: {
-  parentIssueId: string;
+export function createSubTask(opts: {
+  parentTaskId: string;
   title: string;
   channel: string;
   details?: string;
@@ -322,14 +324,14 @@ export function createSubIssue(opts: {
     owner: opts.owner || "",
     created_by: "human",
     task_type: "issue",
-    parent_issue_id: opts.parentIssueId,
+    parent_issue_id: opts.parentTaskId,
   });
 }
 
-/** Reopen a closed Issue (rejected/cancelled/approved) back to drafting
+/** Reopen a closed Task (rejected/cancelled/approved) back to drafting
  *  so the human can re-approve to restart work. The broker preserves
  *  the title/details/owner and just resets the lifecycle. */
-export function reopenIssue(taskId: string, channel: string) {
+export function reopenTask(taskId: string, channel: string) {
   return post<TaskResponse>("/tasks", {
     action: "reopen",
     id: taskId,

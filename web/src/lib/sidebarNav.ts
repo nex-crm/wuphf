@@ -17,11 +17,8 @@ export function navigateToSidebarApp(appId: string): void {
     void router.navigate({ to: "/inbox" });
     return;
   }
-  if (appId === "issues") {
-    void router.navigate({ to: "/issues" });
-    return;
-  }
-  if (appId === "tasks") {
+  // `issues` is a back-compat alias for the first-class Tasks surface.
+  if (appId === "tasks" || appId === "issues") {
     void router.navigate({ to: "/tasks" });
     return;
   }

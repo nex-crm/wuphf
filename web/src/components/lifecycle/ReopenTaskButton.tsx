@@ -1,25 +1,25 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
-import { reopenIssue } from "../../api/tasks";
+import { reopenTask } from "../../api/tasks";
 
-// ── Reopen button (rejected / approved Issues) ───────────────────────
+// ── Reopen button (rejected / approved Tasks) ────────────────────────
 
-interface ReopenIssueButtonProps {
+interface ReopenTaskButtonProps {
   taskId: string;
   channel: string;
   onReopened: () => void;
 }
 
-export function ReopenIssueButton({
+export function ReopenTaskButton({
   taskId,
   channel,
   onReopened,
-}: ReopenIssueButtonProps) {
+}: ReopenTaskButtonProps) {
   const [error, setError] = useState<string | null>(null);
 
   const reopenMutation = useMutation({
-    mutationFn: () => reopenIssue(taskId, channel),
+    mutationFn: () => reopenTask(taskId, channel),
     onSuccess: () => {
       setError(null);
       onReopened();
@@ -43,7 +43,7 @@ export function ReopenIssueButton({
         disabled={reopenMutation.isPending}
         data-testid="reopen-issue-button"
       >
-        {reopenMutation.isPending ? "Reopening…" : "Reopen issue"}
+        {reopenMutation.isPending ? "Reopening…" : "Reopen task"}
       </button>
       {error ? (
         <span className="issue-doc-reopen-error" role="alert">

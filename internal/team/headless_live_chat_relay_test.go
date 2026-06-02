@@ -121,7 +121,7 @@ func TestHeadlessLiveChatRelayReportsIssueImmediately(t *testing.T) {
 		t.Fatalf("expected issue to post immediately, got %+v", msgs)
 	}
 	got := msgs[1]
-	if got.From != "ceo" || got.Kind != agentIssueMessageKind || got.ReplyTo != root.ID || got.Content != "Issue: browser access is not available" {
+	if got.From != "ceo" || got.Kind != agentIssueMessageKind || got.ReplyTo != root.ID || got.Content != "Incident: browser access is not available" {
 		t.Fatalf("unexpected issue message: %+v", got)
 	}
 	if approval := msgs[2]; approval.From != "system" || approval.Kind != "approval" || approval.EventID == "" || approval.Content == "" {
@@ -190,7 +190,7 @@ func TestOpenAICompatToolErrorReportsIssueToChat(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("expected tool error to post to chat, got %+v", msgs)
 	}
-	if got := msgs[1].Content; got != "Issue: ERROR: browser access is not available" {
+	if got := msgs[1].Content; got != "Incident: ERROR: browser access is not available" {
 		t.Fatalf("unexpected issue content: %q", got)
 	}
 	if msgs[1].Kind != agentIssueMessageKind {
@@ -198,12 +198,12 @@ func TestOpenAICompatToolErrorReportsIssueToChat(t *testing.T) {
 	}
 }
 
-func TestReportAgentIssueSuppressesStructuredPayloads(t *testing.T) {
+func TestReportIncidentSuppressesStructuredPayloads(t *testing.T) {
 	b := newTestBroker(t)
 
-	_, _, posted, err := b.ReportAgentIssue("ceo", "general", "", `{"error":"browser access is not available"}`)
+	_, _, posted, err := b.ReportIncident("ceo", "general", "", `{"error":"browser access is not available"}`)
 	if err != nil {
-		t.Fatalf("report issue: %v", err)
+		t.Fatalf("report incident: %v", err)
 	}
 	if posted {
 		t.Fatal("expected structured JSON payload to be suppressed")
@@ -211,12 +211,12 @@ func TestReportAgentIssueSuppressesStructuredPayloads(t *testing.T) {
 	if len(b.ChannelMessages("general")) != 0 {
 		t.Fatalf("expected no chat messages, got %+v", b.ChannelMessages("general"))
 	}
-	if len(b.AgentIssues()) != 0 {
-		t.Fatalf("expected no agent issues, got %+v", b.AgentIssues())
+	if len(b.Incidents()) != 0 {
+		t.Fatalf("expected no incidents, got %+v", b.Incidents())
 	}
 }
 
-func TestReportAgentIssueDedupesRepeatedStreamIssue(t *testing.T) {
+func TestReportIncidentDedupesRepeatedStreamIssue(t *testing.T) {
 	b := newTestBroker(t)
 	l := &Launcher{broker: b}
 	relay := newHeadlessLiveChatRelay(l, "ceo", "general", "", nil)
@@ -226,11 +226,11 @@ func TestReportAgentIssueDedupesRepeatedStreamIssue(t *testing.T) {
 
 	msgs := b.ChannelMessages("general")
 	if len(msgs) != 2 {
-		t.Fatalf("expected one issue message, got %+v", msgs)
+		t.Fatalf("expected one incident message, got %+v", msgs)
 	}
-	issues := b.AgentIssues()
-	if len(issues) != 1 || issues[0].Count != 2 {
-		t.Fatalf("expected one counted issue, got %+v", issues)
+	incidents := b.Incidents()
+	if len(incidents) != 1 || incidents[0].Count != 2 {
+		t.Fatalf("expected one counted incident, got %+v", incidents)
 	}
 	requests := b.Requests("general", false)
 	if len(requests) != 1 {
@@ -238,7 +238,7 @@ func TestReportAgentIssueDedupesRepeatedStreamIssue(t *testing.T) {
 	}
 }
 
-func TestReportAgentIssueAttachesActiveTaskAndWaitsForApproval(t *testing.T) {
+func TestReportIncidentAttachesActiveTaskAndWaitsForApproval(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
@@ -252,13 +252,13 @@ func TestReportAgentIssueAttachesActiveTaskAndWaitsForApproval(t *testing.T) {
 		t.Fatalf("ensure task: %v reused=%v", err, reused)
 	}
 
-	if _, _, posted, err := b.ReportAgentIssue("eng", "general", "", "browser access is not available"); err != nil || !posted {
-		t.Fatalf("report issue: posted=%v err=%v", posted, err)
+	if _, _, posted, err := b.ReportIncident("eng", "general", "", "browser access is not available"); err != nil || !posted {
+		t.Fatalf("report incident: posted=%v err=%v", posted, err)
 	}
 
-	issues := b.AgentIssues()
-	if len(issues) != 1 || issues[0].TaskID != task.ID {
-		t.Fatalf("expected issue attached to active task %s, got %+v", task.ID, issues)
+	incidents := b.Incidents()
+	if len(incidents) != 1 || incidents[0].TaskID != task.ID {
+		t.Fatalf("expected incident attached to active task %s, got %+v", task.ID, incidents)
 	}
 	var updated teamTask
 	for _, candidate := range b.AllTasks() {
@@ -275,7 +275,7 @@ func TestReportAgentIssueAttachesActiveTaskAndWaitsForApproval(t *testing.T) {
 	}
 }
 
-func TestApprovedAgentIssueCreatesSelfHealTask(t *testing.T) {
+func TestApprovedIncidentCreatesSelfHealTask(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
 	if err := b.StartOnPort(0); err != nil {
@@ -283,8 +283,8 @@ func TestApprovedAgentIssueCreatesSelfHealTask(t *testing.T) {
 	}
 	defer b.Stop()
 
-	if _, _, posted, err := b.ReportAgentIssue("eng", "general", "", "browser access is not available"); err != nil || !posted {
-		t.Fatalf("report issue: posted=%v err=%v", posted, err)
+	if _, _, posted, err := b.ReportIncident("eng", "general", "", "browser access is not available"); err != nil || !posted {
+		t.Fatalf("report incident: posted=%v err=%v", posted, err)
 	}
 	requests := b.Requests("general", false)
 	if len(requests) != 1 {
@@ -313,7 +313,7 @@ func TestApprovedAgentIssueCreatesSelfHealTask(t *testing.T) {
 		t.Fatalf("expected approval answer 200, got %d", resp.StatusCode)
 	}
 
-	// The issue carries no parent TaskID, so the title falls through to the
+	// The incident carries no parent TaskID, so the title falls through to the
 	// `"[@<slug>] <verb> — agent couldn't continue"` form. Match on
 	// recognition primitive + agent attribution rather than a hardcoded
 	// title so this stays robust to future copy edits.
@@ -328,13 +328,13 @@ func TestApprovedAgentIssueCreatesSelfHealTask(t *testing.T) {
 	if !found {
 		t.Fatalf("expected approved self-heal task (title=%q), got %+v", wantTitle, b.AllTasks())
 	}
-	issues := b.AgentIssues()
-	if len(issues) != 1 || issues[0].SelfHealTaskID == "" {
-		t.Fatalf("expected issue to record self-heal task, got %+v", issues)
+	incidents := b.Incidents()
+	if len(incidents) != 1 || incidents[0].SelfHealTaskID == "" {
+		t.Fatalf("expected incident to record self-heal task, got %+v", incidents)
 	}
 }
 
-func TestAnsweredAgentIssueApprovalDoesNotCreateDuplicateRequest(t *testing.T) {
+func TestAnsweredIncidentApprovalDoesNotCreateDuplicateRequest(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
 
@@ -352,18 +352,18 @@ func TestAnsweredAgentIssueApprovalDoesNotCreateDuplicateRequest(t *testing.T) {
 		UpdatedAt: now,
 		Answered:  &interviewAnswer{ChoiceID: "approve", AnsweredAt: now},
 	})
-	b.agentIssues = append(b.agentIssues, agentIssueRecord{
+	b.incidents = append(b.incidents, incidentRecord{
 		ID:                "issue-1",
 		Agent:             "eng",
 		Channel:           "general",
 		Detail:            "browser access is not available",
-		NormalizedKey:     normalizedAgentIssueKey("eng", "general", "browser access is not available"),
+		NormalizedKey:     normalizedIncidentKey("eng", "general", "browser access is not available"),
 		ApprovalRequestID: "request-issue-1",
 		Count:             1,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	})
-	b.ensureSelfHealApprovalRequestLocked(&b.agentIssues[0], agentIssueClassification{
+	b.ensureSelfHealApprovalRequestLocked(&b.incidents[0], incidentClassification{
 		Visible:       true,
 		CapabilityGap: true,
 		Severity:      "warning",
@@ -374,13 +374,13 @@ func TestAnsweredAgentIssueApprovalDoesNotCreateDuplicateRequest(t *testing.T) {
 	if got := len(requests); got != 1 {
 		t.Fatalf("expected answered approval to be reused, got %d requests: %+v", got, requests)
 	}
-	issues := b.AgentIssues()
-	if len(issues) != 1 || issues[0].SelfHealTaskID == "" {
-		t.Fatalf("expected answered approval to create one self-heal task, got issues=%+v tasks=%+v", issues, b.AllTasks())
+	incidents := b.Incidents()
+	if len(incidents) != 1 || incidents[0].SelfHealTaskID == "" {
+		t.Fatalf("expected answered approval to create one self-heal task, got incidents=%+v tasks=%+v", incidents, b.AllTasks())
 	}
 }
 
-func TestApprovedAgentIssueSelfHealFailureSurfacesToChat(t *testing.T) {
+func TestApprovedIncidentSelfHealFailureSurfacesToChat(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
 
@@ -399,12 +399,12 @@ func TestApprovedAgentIssueSelfHealFailureSurfacesToChat(t *testing.T) {
 		UpdatedAt: now,
 		Answered:  &interviewAnswer{ChoiceID: "approve", AnsweredAt: now},
 	})
-	b.agentIssues = append(b.agentIssues, agentIssueRecord{
+	b.incidents = append(b.incidents, incidentRecord{
 		ID:                "issue-1",
 		Agent:             "eng",
 		Channel:           "general",
 		Detail:            "browser access is not available",
-		NormalizedKey:     normalizedAgentIssueKey("eng", "general", "browser access is not available"),
+		NormalizedKey:     normalizedIncidentKey("eng", "general", "browser access is not available"),
 		ApprovalRequestID: "request-issue-1",
 		Count:             1,
 		CreatedAt:         now,
@@ -414,9 +414,9 @@ func TestApprovedAgentIssueSelfHealFailureSurfacesToChat(t *testing.T) {
 	b.maybeCreateApprovedSelfHealTaskLocked(b.requests[0])
 	b.mu.Unlock()
 
-	issues := b.AgentIssues()
-	if len(issues) != 1 || issues[0].SelfHealError == "" {
-		t.Fatalf("expected self-heal creation error to be recorded, got %+v", issues)
+	incidents := b.Incidents()
+	if len(incidents) != 1 || incidents[0].SelfHealError == "" {
+		t.Fatalf("expected self-heal creation error to be recorded, got %+v", incidents)
 	}
 	msgs := b.ChannelMessages("general")
 	if len(msgs) != 1 {
@@ -429,8 +429,8 @@ func TestApprovedAgentIssueSelfHealFailureSurfacesToChat(t *testing.T) {
 
 // TestMaybeCreateApprovedSelfHealTask_OverflowMarksError guards that when an
 // approved self-heal request lands at the per-agent cap and merges into
-// another self-heal lane, the issue records the divergence in
-// SelfHealError. Without this marker, the issue would silently link to a
+// another self-heal lane, the incident records the divergence in
+// SelfHealError. Without this marker, the incident would silently link to a
 // task whose original TaskID is unrelated, with no observable signal of the
 // overflow merge.
 func TestMaybeCreateApprovedSelfHealTask_OverflowMarksError(t *testing.T) {
@@ -438,7 +438,7 @@ func TestMaybeCreateApprovedSelfHealTask_OverflowMarksError(t *testing.T) {
 	l := &Launcher{broker: b}
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
 
-	// Pin @eng at the cap with self-heal tasks for taskIDs the issue does
+	// Pin @eng at the cap with self-heal tasks for taskIDs the incident does
 	// not match. The approved request below carries a fresh TaskID, so the
 	// exact-reuse path misses and we fall into overflow merge.
 	for i := 0; i < maxActiveSelfHealsPerAgent; i++ {
@@ -462,13 +462,13 @@ func TestMaybeCreateApprovedSelfHealTask_OverflowMarksError(t *testing.T) {
 		UpdatedAt: now,
 		Answered:  &interviewAnswer{ChoiceID: "approve", AnsweredAt: now},
 	})
-	b.agentIssues = append(b.agentIssues, agentIssueRecord{
+	b.incidents = append(b.incidents, incidentRecord{
 		ID:                "issue-overflow-1",
 		Agent:             "eng",
 		Channel:           "general",
 		TaskID:            "eng-fresh-1",
 		Detail:            "browser access is not available",
-		NormalizedKey:     normalizedAgentIssueKey("eng", "general", "browser access is not available"),
+		NormalizedKey:     normalizedIncidentKey("eng", "general", "browser access is not available"),
 		ApprovalRequestID: "request-overflow-1",
 		Count:             1,
 		CreatedAt:         now,
@@ -480,34 +480,34 @@ func TestMaybeCreateApprovedSelfHealTask_OverflowMarksError(t *testing.T) {
 	if got := countActiveSelfHealsForAgent(b, "eng"); got != maxActiveSelfHealsPerAgent {
 		t.Fatalf("active count must stay at cap after overflow merge, got %d", got)
 	}
-	issues := b.AgentIssues()
-	if len(issues) != 1 {
-		t.Fatalf("expected one issue, got %+v", issues)
+	incidents := b.Incidents()
+	if len(incidents) != 1 {
+		t.Fatalf("expected one incident, got %+v", incidents)
 	}
-	got := issues[0]
+	got := incidents[0]
 	if got.SelfHealTaskID == "" {
 		t.Fatalf("expected SelfHealTaskID to bind to the overflow lane, got empty")
 	}
 	if !strings.Contains(got.SelfHealError, "merged into agent self-heal overflow lane") {
 		t.Fatalf("expected SelfHealError to record overflow merge, got %q", got.SelfHealError)
 	}
-	// The bound task must NOT be the issue's own would-be title — it is the
+	// The bound task must NOT be the incident's own would-be title — it is the
 	// overflow target.
 	expectedTitle := selfHealingTaskTitle("eng", "eng-fresh-1", "", agent.EscalationCapabilityGap)
 	for _, task := range b.AllTasks() {
 		if task.ID == got.SelfHealTaskID && task.Title == expectedTitle {
-			t.Fatalf("overflow case must not bind to the issue's own self-heal title, got task=%+v", task)
+			t.Fatalf("overflow case must not bind to the incident's own self-heal title, got task=%+v", task)
 		}
 	}
 }
 
-func TestAgentIssueDoesNotCountAsSubstantiveProgress(t *testing.T) {
+func TestIncidentDoesNotCountAsSubstantiveProgress(t *testing.T) {
 	b := newTestBroker(t)
 	l := &Launcher{broker: b}
 	startedAt := time.Now().UTC().Add(-1 * time.Second)
 
-	if _, _, posted, err := b.ReportAgentIssue("ceo", "general", "", "browser access is not available"); err != nil || !posted {
-		t.Fatalf("report issue: posted=%v err=%v", posted, err)
+	if _, _, posted, err := b.ReportIncident("ceo", "general", "", "browser access is not available"); err != nil || !posted {
+		t.Fatalf("report incident: posted=%v err=%v", posted, err)
 	}
 	if l.agentPostedSubstantiveMessageSince("ceo", startedAt) {
 		t.Fatal("agent_issue should not count as substantive progress")

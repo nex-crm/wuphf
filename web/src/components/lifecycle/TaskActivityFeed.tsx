@@ -2,8 +2,8 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
-  CheckCircle,
   ChatLines,
+  CheckCircle,
   GitFork,
   HelpCircle,
   Refresh,
@@ -11,19 +11,19 @@ import {
 } from "iconoir-react";
 
 import {
-  getIssueActivity,
-  type IssueActivityEvent,
-  type IssueActivityEventKind,
+  getTaskActivity,
+  type TaskActivityEvent,
+  type TaskActivityEventKind,
 } from "../../api/tasks";
 import { router } from "../../lib/router";
 
-interface IssueActivityFeedProps {
+interface TaskActivityFeedProps {
   taskId: string;
 }
 
 /**
  * Activity tab content — Paperclip-style chronological feed of everything
- * that happened to this Issue. Mounted under the IssueDocument's Activity
+ * that happened to this Issue. Mounted under the TaskDocument's Activity
  * tab. Sources:
  *   - lifecycle transitions (officeActionLog kind=lifecycle_*)
  *   - workflow actions (task_created, task_updated, …)
@@ -34,10 +34,10 @@ interface IssueActivityFeedProps {
  * Open requests are clickable — they deep-link into the Inbox so the
  * human can answer without leaving the Activity view.
  */
-export function IssueActivityFeed({ taskId }: IssueActivityFeedProps) {
+export function TaskActivityFeed({ taskId }: TaskActivityFeedProps) {
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["issue", taskId, "activity"],
-    queryFn: () => getIssueActivity(taskId),
+    queryFn: () => getTaskActivity(taskId),
     refetchInterval: 8_000,
     staleTime: 4_000,
   });
@@ -77,8 +77,8 @@ export function IssueActivityFeed({ taskId }: IssueActivityFeedProps) {
     return (
       <div className="issue-activity-feed">
         <p className="issue-activity-feed-empty">
-          No activity yet. Events appear here as the issue moves through
-          its lifecycle.
+          No activity yet. Events appear here as the issue moves through its
+          lifecycle.
         </p>
       </div>
     );
@@ -95,7 +95,7 @@ export function IssueActivityFeed({ taskId }: IssueActivityFeedProps) {
   );
 }
 
-function ActivityRow({ event }: { event: IssueActivityEvent }) {
+function ActivityRow({ event }: { event: TaskActivityEvent }) {
   const icon = iconForKind(event.kind);
   const verb = verbForEvent(event);
   const isOpenRequest =
@@ -168,10 +168,11 @@ function ActivityRow({ event }: { event: IssueActivityEvent }) {
 function RequestResolution({
   req,
 }: {
-  req: NonNullable<IssueActivityEvent["request"]>;
+  req: NonNullable<TaskActivityEvent["request"]>;
 }) {
   if (req.status === "answered") {
-    const answer = req.custom_text?.trim() || req.choice_text?.trim() || req.choice_id;
+    const answer =
+      req.custom_text?.trim() || req.choice_text?.trim() || req.choice_id;
     return (
       <div className="issue-activity-feed-resolution issue-activity-feed-resolution--answered">
         <CheckCircle width={12} height={12} aria-hidden="true" />
@@ -196,7 +197,7 @@ function RequestResolution({
   );
 }
 
-function iconForKind(kind: IssueActivityEventKind) {
+function iconForKind(kind: TaskActivityEventKind) {
   switch (kind) {
     case "lifecycle":
       return <ArrowRight width={14} height={14} aria-hidden="true" />;
@@ -212,7 +213,7 @@ function iconForKind(kind: IssueActivityEventKind) {
   }
 }
 
-function verbForEvent(event: IssueActivityEvent): string {
+function verbForEvent(event: TaskActivityEvent): string {
   switch (event.kind) {
     case "lifecycle":
       return "moved state";
@@ -223,7 +224,7 @@ function verbForEvent(event: IssueActivityEvent): string {
       if (event.request?.status === "canceled") return "request canceled";
       return "asked";
     case "sub_issue":
-      return "added a sub-issue";
+      return "added a sub-task";
     case "action":
     default:
       return event.summary || "took action";

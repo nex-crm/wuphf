@@ -11,7 +11,7 @@ The user has set the next direction:
 3. Cloud is **explicitly deferred** for this plan; revisit later. Focus on local browser (mode 1) + native desktop (mode 2).
 4. TypeScript-preferred for new code; Go and subprocesses are fine. No third runtime (no Elixir/OTP) — the existing Go broker handles fanout/SSE/transport bridging today.
 5. Robust testing harness with quantitative SLOs (startup latency, RSS, IPC latency, render perf). Bundle size is **not** a top priority (high-bandwidth users assumed).
-6. Fold in the highest-leverage deltas from `nex-crm/business-musings` agent comparison — Cabinet-style memory UX, Sandcastle-style run records, Claude-Squad-style coding lanes, OpenHands-style credibility/evals — without expanding into a new product.
+6. Fold in the highest-leverage deltas from `nex-crm/business-musings` agent comparison — citation-style memory UX, Sandcastle-style run records, Claude-Squad-style coding lanes, OpenHands-style credibility/evals — without expanding into a new product.
 
 The intended outcome: a polished desktop app on three OSes with measurable performance, with the bubbletea TUI removed cleanly and the existing web UI untouched as the product surface for both browser and desktop modes.
 
@@ -111,7 +111,7 @@ Desktop releases use a separate `desktop-release` workflow with its own version 
 
 Three product surfaces land in the desktop v1 because they reinforce the "shared brain" thesis without expanding scope. The fourth (coding lanes) is OSS-differentiating per the MBA review and is included to back the dogfooding flywheel.
 
-1. **Cabinet-style memory UX** (Phase 3) — add citation hover-cards on cited claims; surface per-article history using existing `EditLogFooter`; keep human edit-and-promote flow on notebook→wiki. Wiki and notebook routes already exist.
+1. **citation-style memory UX** (Phase 3) — add citation hover-cards on cited claims; surface per-article history using existing `EditLogFooter`; keep human edit-and-promote flow on notebook→wiki. Wiki and notebook routes already exist.
 2. **Sandcastle-style run records** (Phase 3) — enrich receipt/run-record schema with tools, approvals, files changed, cost, and status. Receipts already exists as a top-level route; this work improves the record, not navigation.
 3. **Claude-Squad-style coding lanes** (Phase 3) — extend `AgentPanel` with worktree state, attach/steer, diff, and PR-handoff. The panel already exists; this adds lane depth inside the office.
 4. **OpenHands-style credibility** (Phase 2 → ongoing) — wire the scaffolded `evals/harness/` runner; expose nightly pass rates + perf SLOs in CI; keep SLOs advisory until macOS/Windows baselines exist.
@@ -172,7 +172,7 @@ Hard constraints:
 | 6 | 2. Native OS verbs | Tray, native notifications via `desktop/oswails/` Wails API, dock badge, autostart. `internal/team/notifier_*` remains agent wake/routing machinery, not OS notification delivery. |
 | 7 | 2. `cmd/wuphfbench` advisory | SLOs land as advisory CI checks. Baselines collected on macOS/Windows/Linux. |
 | 8 | 3. Web parity audit | Audit against `cmd/wuphf/channelui/sidebar_apps.go` and `internal/commands/slash.go`. Fill real gaps; skip already-shipped items such as receipts, wiki/notebooks/reviews, and Cmd/Ctrl-K. |
-| 9 | 3. Citation hover + run-record enrichment | Cabinet/Sandcastle deltas: hover-cards on cited claims; receipt schema additions for tools/approvals/files changed. |
+| 9 | 3. Citation hover + run-record enrichment | citation/run-record deltas: hover-cards on cited claims; receipt schema additions for tools/approvals/files changed. |
 | 10 | 4. Full matrix + desktop smoke | `macos-14` + `windows-2022` full Go test runners. `desktop-smoke` Playwright green on all three OSes. SLOs flip from advisory to required only after baselines exist. |
 | 11 | 4. Cut over | `--legacy-tui` hard-fails only after installers ship green. Delete `cmd/wuphf/channel*.go` + `cmd/wuphf/channelui/` (≈26k LOC). Ship desktop v1 on `nex.ai/download`. Submit Homebrew cask + winget. |
 
@@ -288,7 +288,7 @@ The review noted the original phasing was mis-sequenced and recommended this ord
 | 6 | 2. Native OS verbs | Tray, native notifications via `desktop/oswails/`, dock badge, autostart. (Not via `internal/team/notifier_*`.) |
 | 7 | 2. `cmd/wuphfbench` advisory | SLOs land as **advisory** CI checks. Baselines collected on macOS/Windows/Linux. |
 | 8 | 3. Web parity audit (corrected sources) | Audit against `cmd/wuphf/channelui/sidebar_apps.go` and `internal/commands/slash.go`. Fill real gaps; skip already-shipped items (receipts/wiki/notebooks/Cmd-K). |
-| 9 | 3. Citation hover + run-record enrichment | Cabinet/Sandcastle deltas: hover-cards on cited claims; receipt schema additions for tools/approvals/files-changed. |
+| 9 | 3. Citation hover + run-record enrichment | citation/run-record deltas: hover-cards on cited claims; receipt schema additions for tools/approvals/files-changed. |
 | 10 | 4. Full CI matrix + desktop smoke | `macos-14` + `windows-2022` full Go test runners. `desktop-smoke` Playwright green on all three OSes. SLOs flip from advisory to required **only after baselines exist**. |
 | 11 | 4. Cut over | `--legacy-tui` hard-fails (only after installers ship green). Delete `cmd/wuphf/channel*.go` + `cmd/wuphf/channelui/` (≈26k LOC). Ship desktop v1 on `nex.ai/download`. Submit Homebrew cask + winget. |
 

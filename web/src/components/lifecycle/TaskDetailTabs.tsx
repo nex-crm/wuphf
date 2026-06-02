@@ -1,54 +1,58 @@
 import { useEffect, useState } from "react";
 
-import type { IssueComment } from "./IssueDocument";
-import { CommentsTimeline } from "./IssueDocument";
-import { IssueActivityFeed } from "./IssueActivityFeed";
-import { SubIssuesList } from "./SubIssuesList";
+import { SubTasksList } from "./SubTasksList";
+import { TaskActivityFeed } from "./TaskActivityFeed";
+import type { TaskComment } from "./TaskDocument";
+import { CommentsTimeline } from "./TaskDocument";
 
-// ── Issue detail tabs ────────────────────────────────────────────────
+// ── Task detail tabs ─────────────────────────────────────────────────
 
-type IssueDetailTab = "activity" | "comments" | "sub-issues";
+type TaskDetailTab = "activity" | "comments" | "sub-issues";
 
-interface IssueDetailTabsProps {
+interface TaskDetailTabsProps {
   taskId: string;
   channel: string;
-  comments: IssueComment[];
+  comments: TaskComment[];
   isDrafting: boolean;
-  showSubIssues: boolean;
+  showSubTasks: boolean;
   timelineRef: React.RefObject<HTMLDivElement | null>;
   onCommentPosted: () => void;
 }
 
 /**
  * Linear/Paperclip-shaped tab strip below the description: Activity (the
- * default), Comments, Sub-Issues. The activity feed is the "what's
- * happened" view; Comments is the discussion thread; Sub-Issues hosts the
- * breakdown. Sub-Issues tab is hidden for sub-issues themselves (no
- * sub-sub-issues), matching the prior single-flat-page rule.
+ * default), Comments, Sub-Tasks. The activity feed is the "what's
+ * happened" view; Comments is the discussion thread; Sub-Tasks hosts the
+ * breakdown. Sub-Tasks tab is hidden for sub-tasks themselves (no
+ * sub-sub-tasks), matching the prior single-flat-page rule.
  */
-export function IssueDetailTabs({
+export function TaskDetailTabs({
   taskId,
   channel,
   comments,
   isDrafting,
-  showSubIssues,
+  showSubTasks,
   timelineRef,
   onCommentPosted,
-}: IssueDetailTabsProps) {
-  const [tab, setTab] = useState<IssueDetailTab>("activity");
-  // If Sub-issues becomes unavailable (e.g. the issue was just promoted
-  // to a child of another issue), snap the active tab back to Activity
+}: TaskDetailTabsProps) {
+  const [tab, setTab] = useState<TaskDetailTab>("activity");
+  // If Sub-tasks becomes unavailable (e.g. the task was just promoted
+  // to a child of another task), snap the active tab back to Activity
   // so the panel does not render empty.
   useEffect(() => {
-    if (!showSubIssues && tab === "sub-issues") {
+    if (!showSubTasks && tab === "sub-issues") {
       setTab("activity");
     }
-  }, [showSubIssues, tab]);
+  }, [showSubTasks, tab]);
   const commentCount = comments.length;
 
   return (
     <div className="issue-doc-tabs">
-      <div className="issue-doc-tabs-strip" role="tablist" aria-label="Issue detail">
+      <div
+        className="issue-doc-tabs-strip"
+        role="tablist"
+        aria-label="Task detail"
+      >
         <TabButton
           active={tab === "activity"}
           onClick={() => setTab("activity")}
@@ -60,17 +64,17 @@ export function IssueDetailTabs({
           label="Comments"
           count={commentCount}
         />
-        {showSubIssues ? (
+        {showSubTasks ? (
           <TabButton
             active={tab === "sub-issues"}
             onClick={() => setTab("sub-issues")}
-            label="Sub-issues"
+            label="Sub-tasks"
           />
         ) : null}
       </div>
 
       <div className="issue-doc-tabs-panel" role="tabpanel">
-        {tab === "activity" ? <IssueActivityFeed taskId={taskId} /> : null}
+        {tab === "activity" ? <TaskActivityFeed taskId={taskId} /> : null}
         {tab === "comments" ? (
           <CommentsTimeline
             taskId={taskId}
@@ -81,8 +85,8 @@ export function IssueDetailTabs({
             onCommentPosted={onCommentPosted}
           />
         ) : null}
-        {tab === "sub-issues" && showSubIssues ? (
-          <SubIssuesList taskId={taskId} channel={channel} />
+        {tab === "sub-issues" && showSubTasks ? (
+          <SubTasksList taskId={taskId} channel={channel} />
         ) : null}
       </div>
     </div>

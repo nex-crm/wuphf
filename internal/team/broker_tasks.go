@@ -4,7 +4,7 @@ type brokerTaskMutationSnapshot struct {
 	tasks       []teamTask
 	channels    []teamChannel
 	messages    []channelMessage
-	agentIssues []agentIssueRecord
+	incidents []incidentRecord
 	actions     []officeActionLog
 	watchdogs   []watchdogAlert
 	scheduler   []schedulerJob
@@ -17,7 +17,7 @@ func snapshotBrokerTaskMutationLocked(b *Broker) brokerTaskMutationSnapshot {
 		tasks:       cloneTeamTasksForRollback(b.tasks),
 		channels:    cloneTeamChannelsForRollback(b.channels),
 		messages:    cloneChannelMessagesForRollback(b.messages),
-		agentIssues: append([]agentIssueRecord(nil), b.agentIssues...),
+		incidents: append([]incidentRecord(nil), b.incidents...),
 		actions:     cloneOfficeActionsForRollback(b.actions),
 		watchdogs:   append([]watchdogAlert(nil), b.watchdogs...),
 		scheduler:   append([]schedulerJob(nil), b.scheduler...),
@@ -30,7 +30,7 @@ func (snapshot brokerTaskMutationSnapshot) restore(b *Broker) {
 	b.tasks = cloneTeamTasksForRollback(snapshot.tasks)
 	b.channels = cloneTeamChannelsForRollback(snapshot.channels)
 	b.messages = cloneChannelMessagesForRollback(snapshot.messages)
-	b.agentIssues = append([]agentIssueRecord(nil), snapshot.agentIssues...)
+	b.incidents = append([]incidentRecord(nil), snapshot.incidents...)
 	b.actions = cloneOfficeActionsForRollback(snapshot.actions)
 	b.watchdogs = append([]watchdogAlert(nil), snapshot.watchdogs...)
 	b.scheduler = append([]schedulerJob(nil), snapshot.scheduler...)

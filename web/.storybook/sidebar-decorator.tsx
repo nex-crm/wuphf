@@ -218,7 +218,7 @@ export function SidebarContext({
     useAppStore.setState({
       sidebarAgentsOpen: true,
       sidebarChannelsOpen: true,
-      sidebarIssuesOpen: true,
+      sidebarTasksOpen: true,
       sidebarAppsOpen: true,
       sidebarCollapsed: false,
       unreadByChannel,
@@ -227,7 +227,7 @@ export function SidebarContext({
       useAppStore.setState({
         sidebarAgentsOpen: initial.sidebarAgentsOpen,
         sidebarChannelsOpen: initial.sidebarChannelsOpen,
-        sidebarIssuesOpen: initial.sidebarIssuesOpen,
+        sidebarTasksOpen: initial.sidebarTasksOpen,
         sidebarAppsOpen: initial.sidebarAppsOpen,
         sidebarCollapsed: initial.sidebarCollapsed,
         unreadByChannel: initial.unreadByChannel,

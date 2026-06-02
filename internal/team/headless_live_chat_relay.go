@@ -71,7 +71,7 @@ func (r *headlessLiveChatRelay) ReportIssue(detail string) {
 		return
 	}
 	r.Flush()
-	msg, _, posted, err := r.l.broker.ReportAgentIssue(r.slug, r.channel, r.replyTo, detail)
+	msg, _, posted, err := r.l.broker.ReportIncident(r.slug, r.channel, r.replyTo, detail)
 	if err != nil {
 		r.postFailures++
 		if r.logf != nil && r.postFailures <= 3 {
@@ -127,5 +127,5 @@ func headlessLiveChatShouldFlush(text string) bool {
 }
 
 func headlessLiveChatLooksIssue(text string) bool {
-	return classifyAgentIssue(text).Visible
+	return classifyIncident(text).Visible
 }

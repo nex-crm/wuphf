@@ -1,5 +1,5 @@
 /**
- * Formatting helpers for Issue titles surfaced in the UI.
+ * Formatting helpers for Task titles surfaced in the UI.
  *
  * The broker may persist a self-heal title with a "[@<slug>] " provenance
  * prefix — that prefix is for backend recognition + per-agent overflow
@@ -11,14 +11,16 @@ const SELF_HEAL_TITLE_PREFIX_RE = /^\[@([a-z0-9_-]+)\]\s+/i;
 
 /**
  * Strips the "[@<slug>] " self-heal provenance prefix so the title reads
- * cleanly in human-facing surfaces (Issue header, kanban cards,
- * sub-issue rows). Returns the original title unchanged when no prefix
+ * cleanly in human-facing surfaces (Task header, kanban cards,
+ * sub-task rows). Returns the original title unchanged when no prefix
  * is present.
  *
  *   "[@ceo] Agent stuck on: Send VC outreach" → "Agent stuck on: Send VC outreach"
  *   "Send VC outreach email"                   → "Send VC outreach email"
  */
-export function formatIssueTitleForDisplay(title: string | undefined | null): string {
+export function formatTaskTitleForDisplay(
+  title: string | undefined | null,
+): string {
   if (!title) return "";
   return title.replace(SELF_HEAL_TITLE_PREFIX_RE, "");
 }
@@ -28,7 +30,7 @@ export function formatIssueTitleForDisplay(title: string | undefined | null): st
  * for surfaces that want to render a "self-heal" badge instead of just
  * dropping the prefix.
  */
-export function isSelfHealIssueTitle(title: string | undefined | null): boolean {
+export function isSelfHealTaskTitle(title: string | undefined | null): boolean {
   if (!title) return false;
   return SELF_HEAL_TITLE_PREFIX_RE.test(title);
 }

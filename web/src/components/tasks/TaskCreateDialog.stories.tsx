@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { Channel, OfficeMember } from "../../api/client";
 import { Button } from "../ui/Button";
-import { IssueCreateDialog } from "./IssueCreateDialog";
+import { TaskCreateDialog } from "./TaskCreateDialog";
 
 const SAMPLE_CHANNELS: Channel[] = [
   { slug: "general", name: "General" },
@@ -69,7 +69,7 @@ function Harness({
           minHeight: 200,
         }}
       >
-        <Button onClick={() => setOpen(true)}>Open create-issue dialog</Button>
+        <Button onClick={() => setOpen(true)}>Open create-task dialog</Button>
         <p
           style={{
             fontSize: 12,
@@ -81,7 +81,7 @@ function Harness({
           broker), but the loading state is exercised by the form's own mutation
           flow.
         </p>
-        <IssueCreateDialog
+        <TaskCreateDialog
           open={open}
           onOpenChange={setOpen}
           defaultChannel={defaultChannel}
@@ -94,14 +94,14 @@ function Harness({
 }
 
 const meta: Meta<typeof Harness> = {
-  title: "Features/Issues/IssueCreateDialog",
+  title: "Features/Tasks/TaskCreateDialog",
   component: Harness,
   parameters: {
     layout: "padded",
     docs: {
       description: {
         component:
-          "Linear-inspired issue creation dialog. Title is the hero input, description is a markdown textarea, channel + assignee live as chip-style pickers in the footer. Cmd/Ctrl+Enter submits.",
+          "Linear-inspired task creation dialog. Title is the hero input, description is a markdown textarea, channel + assignee live as chip-style pickers in the footer. Cmd/Ctrl+Enter submits.",
       },
     },
   },

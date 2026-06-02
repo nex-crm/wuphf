@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { Task } from "../../api/tasks";
-import { IssuesList } from "./IssuesList";
+import { TasksList } from "./TasksList";
 
 function makeTask(overrides: Partial<Task>): Task {
   return {
@@ -20,12 +20,12 @@ function renderList(tasks: Task[]) {
   });
   return render(
     <QueryClientProvider client={client}>
-      <IssuesList initialTasks={tasks} />
+      <TasksList initialTasks={tasks} />
     </QueryClientProvider>,
   );
 }
 
-describe("<IssuesList>", () => {
+describe("<TasksList>", () => {
   it("shows spec-level issue tasks and hides ordinary execution tasks", () => {
     renderList([
       makeTask({
@@ -69,7 +69,7 @@ describe("<IssuesList>", () => {
     ]);
 
     expect(screen.getByTestId("issues-list-empty")).toHaveTextContent(
-      "No issue specs yet.",
+      "No task specs yet.",
     );
     expect(screen.queryByText("Reply with status")).not.toBeInTheDocument();
   });

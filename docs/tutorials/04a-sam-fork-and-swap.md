@@ -78,6 +78,6 @@ source. CEO can decide whether we adopt section 4.
 
 A clean edit to a JSON file replaces an agent role and shows up
 immediately on restart. No code change, no plugin install, no
-framework re-init — the same observation the Paperclip/Cabinet ICP
+framework re-init — the same observation the Paperclip ICP
 asked about ("forkable architecture, JSON configs, no cloud
 dependency").

@@ -62,7 +62,7 @@ func loadBrokerStateFile(path string) (brokerState, error) {
 func brokerStateActivityScore(state brokerState) int {
 	score := 0
 	score += len(state.Messages) * 10
-	score += len(state.AgentIssues) * 8
+	score += len(state.Incidents) * 8
 	score += len(state.Tasks) * 20
 	score += len(activeRequests(state.Requests)) * 10
 	score += len(state.ApprovalAudit) * 4
@@ -117,7 +117,7 @@ func (b *Broker) loadState() error {
 		}
 	}
 	b.messages = state.Messages
-	b.agentIssues = state.AgentIssues
+	b.incidents = state.Incidents
 	b.members = state.Members
 	b.channels = state.Channels
 	b.sessionMode = state.SessionMode
@@ -192,8 +192,8 @@ func (b *Broker) loadState() error {
 		b.messages[i].Channel = channel.MigrateDMSlugString(b.messages[i].Channel)
 		b.messages[i] = sanitizeChannelMessageSecrets(b.messages[i])
 	}
-	for i := range b.agentIssues {
-		b.agentIssues[i] = sanitizeAgentIssueRecord(b.agentIssues[i])
+	for i := range b.incidents {
+		b.incidents[i] = sanitizeIncidentRecord(b.incidents[i])
 	}
 	for i := range b.tasks {
 		b.tasks[i].Channel = channel.MigrateDMSlugString(b.tasks[i].Channel)
@@ -272,9 +272,9 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	for i, action := range b.actions {
 		actions[i] = sanitizeOfficeActionLog(action)
 	}
-	agentIssues := make([]agentIssueRecord, len(b.agentIssues))
-	for i, issue := range b.agentIssues {
-		agentIssues[i] = sanitizeAgentIssueRecord(issue)
+	incidents := make([]incidentRecord, len(b.incidents))
+	for i, inc := range b.incidents {
+		incidents[i] = sanitizeIncidentRecord(inc)
 	}
 	requests := make([]humanInterview, len(b.requests))
 	for i, req := range b.requests {
@@ -307,7 +307,7 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	state := brokerState{
 		ChannelStore:       channelStoreRaw,
 		Messages:           messages,
-		AgentIssues:        agentIssues,
+		Incidents:          incidents,
 		Members:            b.members,
 		Channels:           b.channels,
 		SessionMode:        b.sessionMode,
@@ -396,7 +396,7 @@ func (b *Broker) markBrokerStateWriteApplied(seq uint64) {
 
 func (b *Broker) isDefaultBrokerStateLocked() bool {
 	return len(b.messages) == 0 &&
-		len(b.agentIssues) == 0 &&
+		len(b.incidents) == 0 &&
 		len(b.tasks) == 0 &&
 		len(activeRequests(b.requests)) == 0 &&
 		len(b.approvalAudit) == 0 &&

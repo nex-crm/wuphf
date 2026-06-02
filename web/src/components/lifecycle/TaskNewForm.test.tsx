@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { IssueNewForm } from "./IssueNewForm";
+import { TaskNewForm } from "./TaskNewForm";
 
 const tasksApi = vi.hoisted(() => ({
   createTasks: vi.fn(),
@@ -21,12 +21,12 @@ function renderForm() {
   });
   return render(
     <QueryClientProvider client={client}>
-      <IssueNewForm />
+      <TaskNewForm />
     </QueryClientProvider>,
   );
 }
 
-describe("<IssueNewForm>", () => {
+describe("<TaskNewForm>", () => {
   it("creates manual issues as spec-level issue tasks", async () => {
     tasksApi.createTasks.mockResolvedValueOnce({
       tasks: [{ id: "task-issue-1", title: "Spec onboarding", status: "open" }],

@@ -9,9 +9,6 @@ import {
   channelRoute,
   dmRoute,
   inboxRoute,
-  issueDetailRoute,
-  issueNewRoute,
-  issuesRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
@@ -21,6 +18,7 @@ import {
   skillDetailRoute,
   taskDecisionRoute,
   taskDetailRoute,
+  taskNewRoute,
   tasksRoute,
   wikiArticleRoute,
   wikiIndexRoute,
@@ -64,6 +62,7 @@ export type CurrentRoute =
   | { kind: "app"; appId: string }
   | { kind: "task-board" }
   | { kind: "task-detail"; taskId: string }
+  | { kind: "task-new" }
   | { kind: "wiki" }
   | { kind: "wiki-article"; articlePath: string }
   | { kind: "wiki-lookup"; query: string | null }
@@ -74,10 +73,6 @@ export type CurrentRoute =
   | { kind: "article"; articleId: string }
   | { kind: "inbox" }
   | { kind: "task-decision"; taskId: string }
-  // Phase 3 — Issues surface
-  | { kind: "issues-list" }
-  | { kind: "issue-detail"; issueId: string }
-  | { kind: "issue-new" }
   // v3 MVP — per-agent subspace shell.
   | { kind: "agent-subspace"; agentSlug: string; tab: AgentSubspaceTab }
   // Full-screen skill detail editor + viewer.
@@ -93,7 +88,6 @@ interface ParamsShape {
   entrySlug?: string;
   taskId?: string;
   _splat?: string;
-  issueId?: string;
   articleId?: string;
   tab?: string;
   skillName?: string;
@@ -111,6 +105,7 @@ type CurrentRouteId =
   | typeof appRoute.id
   | typeof tasksRoute.id
   | typeof taskDetailRoute.id
+  | typeof taskNewRoute.id
   | typeof appTaskDetailRoute.id
   | typeof wikiIndexRoute.id
   | typeof wikiLookupRoute.id
@@ -122,9 +117,6 @@ type CurrentRouteId =
   | typeof articleRoute.id
   | typeof inboxRoute.id
   | typeof taskDecisionRoute.id
-  | typeof issuesRoute.id
-  | typeof issueDetailRoute.id
-  | typeof issueNewRoute.id
   | typeof agentSubspaceRoute.id
   | typeof agentSubspaceTabRoute.id
   | typeof skillDetailRoute.id
@@ -137,6 +129,7 @@ const CURRENT_ROUTE_IDS = [
   appRoute.id,
   tasksRoute.id,
   taskDetailRoute.id,
+  taskNewRoute.id,
   appTaskDetailRoute.id,
   wikiIndexRoute.id,
   wikiLookupRoute.id,
@@ -148,9 +141,6 @@ const CURRENT_ROUTE_IDS = [
   articleRoute.id,
   inboxRoute.id,
   taskDecisionRoute.id,
-  issuesRoute.id,
-  issueDetailRoute.id,
-  issueNewRoute.id,
   agentSubspaceRoute.id,
   agentSubspaceTabRoute.id,
   skillDetailRoute.id,
@@ -183,6 +173,9 @@ const ROUTE_DERIVERS = {
     kind: "task-detail",
     taskId: params.taskId ?? "",
   }),
+  [taskNewRoute.id]: () => ({ kind: "task-new" }),
+  // `/apps/tasks/$taskId` redirects before matching; the deriver mirrors
+  // taskDetail for completeness so the registry type stays exhaustive.
   [appTaskDetailRoute.id]: (params) => ({
     kind: "task-detail",
     taskId: params.taskId ?? "",
@@ -220,13 +213,6 @@ const ROUTE_DERIVERS = {
     kind: "task-decision",
     taskId: params.taskId ?? "",
   }),
-  // Phase 3 — Issues surface
-  [issuesRoute.id]: () => ({ kind: "issues-list" }),
-  [issueDetailRoute.id]: (params) => ({
-    kind: "issue-detail",
-    issueId: params.issueId ?? "",
-  }),
-  [issueNewRoute.id]: () => ({ kind: "issue-new" }),
   // v3 MVP — agent subspace. Default tab = "chat".
   [agentSubspaceRoute.id]: (params) => ({
     kind: "agent-subspace",
@@ -323,6 +309,7 @@ export function useCurrentApp(): string | null {
       return route.appId;
     case "task-board":
     case "task-detail":
+    case "task-new":
       return "tasks";
     case "wiki":
     case "wiki-article":
@@ -341,10 +328,6 @@ export function useCurrentApp(): string | null {
       return "inbox";
     case "task-decision":
       return "inbox";
-    case "issues-list":
-    case "issue-detail":
-    case "issue-new":
-      return "issues";
     case "routine-detail":
     case "routine-new":
       return "routines";

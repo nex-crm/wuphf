@@ -2,9 +2,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as richApi from "../../api/richArtifacts";
-import { IssueDescription } from "./IssueDescription";
+import { TaskDescription } from "./TaskDescription";
 
-// IssueDescription rendering rules:
+// TaskDescription rendering rules:
 //
 //  1. Plain markdown bodies render through ReactMarkdown unchanged.
 //
@@ -20,7 +20,10 @@ import { IssueDescription } from "./IssueDescription";
 //  4. Multiple markers embed in document order so the agent can interleave
 //     several artifacts without the FE collapsing them.
 
-const DRAFT_DETAIL = (id: string, title: string): richApi.RichArtifactDetail => ({
+const DRAFT_DETAIL = (
+  id: string,
+  title: string,
+): richApi.RichArtifactDetail => ({
   artifact: {
     id,
     kind: "notebook_html",
@@ -48,12 +51,12 @@ beforeEach(() => {
   );
 });
 
-describe("<IssueDescription>", () => {
+describe("<TaskDescription>", () => {
   it("renders a plain markdown description without any embed", async () => {
     render(
-      <IssueDescription
+      <TaskDescription
         description="**Pilot scope** — clarify rollout for week 3."
-        isDrafting
+        isDrafting={true}
       />,
     );
     expect(
@@ -63,7 +66,7 @@ describe("<IssueDescription>", () => {
   });
 
   it("renders the empty state when description is whitespace-only", () => {
-    render(<IssueDescription description={"   \n  "} isDrafting />);
+    render(<TaskDescription description={"   \n  "} isDrafting={true} />);
     expect(screen.getByText(/No description yet\./i)).toBeInTheDocument();
   });
 
@@ -74,9 +77,9 @@ describe("<IssueDescription>", () => {
       .mockResolvedValue(DRAFT_DETAIL(id, "Pilot Spec"));
 
     render(
-      <IssueDescription
+      <TaskDescription
         description={`Short summary of the work.\n\nvisual-artifact:${id}\n\nOpen question: ship gating?`}
-        isDrafting
+        isDrafting={true}
       />,
     );
 
@@ -98,7 +101,7 @@ describe("<IssueDescription>", () => {
     // beforeEach default (rejection) drives the 404 here — no extra spy.
     const id = "ra_dead0000beef0000";
     render(
-      <IssueDescription
+      <TaskDescription
         description={`Header line.\n\nvisual-artifact:${id}\n\nTail line.`}
         isDrafting={false}
       />,
@@ -127,9 +130,9 @@ describe("<IssueDescription>", () => {
     );
 
     render(
-      <IssueDescription
+      <TaskDescription
         description={`visual-artifact:${idA}\n\nMid copy.\n\nvisual-artifact:${idB}`}
-        isDrafting
+        isDrafting={true}
       />,
     );
 

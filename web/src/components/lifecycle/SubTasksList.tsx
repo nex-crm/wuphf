@@ -1,22 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  createSubIssue,
-  getSubIssues,
-} from "../../api/tasks";
+import { createSubTask, getSubTasks } from "../../api/tasks";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { router } from "../../lib/router";
+import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import type { LifecycleState } from "../../lib/types/lifecycle";
-import { formatIssueTitleForDisplay } from "../../lib/issueTitle";
-import { IssueStatusDot } from "./IssueActivityStream";
+import { TaskStatusDot } from "./TaskActivityStream";
 
-interface SubIssuesListProps {
+interface SubTasksListProps {
   taskId: string;
   channel: string;
 }
 
-export function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
+export function SubTasksList({ taskId, channel }: SubTasksListProps) {
   const queryClient = useQueryClient();
   const [isAdding, setIsAdding] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
@@ -27,14 +24,14 @@ export function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
 
   const childQuery = useQuery({
     queryKey: ["issue-children", taskId],
-    queryFn: () => getSubIssues(taskId),
+    queryFn: () => getSubTasks(taskId),
     staleTime: 5_000,
   });
 
   const addMutation = useMutation({
     mutationFn: (input: { title: string; owner: string }) =>
-      createSubIssue({
-        parentIssueId: taskId,
+      createSubTask({
+        parentTaskId: taskId,
         title: input.title,
         channel,
         owner: input.owner || undefined,
@@ -44,12 +41,14 @@ export function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
       setDraftOwner("");
       setIsAdding(false);
       setError(null);
-      void queryClient.invalidateQueries({ queryKey: ["issue-children", taskId] });
+      void queryClient.invalidateQueries({
+        queryKey: ["issue-children", taskId],
+      });
       void queryClient.invalidateQueries({ queryKey: ["issues"] });
       void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
     },
     onError: (err: unknown) => {
-      setError(err instanceof Error ? err.message : "Could not add sub-issue.");
+      setError(err instanceof Error ? err.message : "Could not add sub-task.");
     },
   });
 
@@ -60,7 +59,7 @@ export function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
   }, [isAdding]);
 
   const children = childQuery.data?.tasks ?? [];
-  // Sub-issues + Issues should share owner-pick UX. Exclude `human` and
+  // Sub-tasks + Tasks should share owner-pick UX. Exclude `human` and
   // self-loop entries that aren't real agent slugs.
   const assignableAgents = members.filter(
     (m) => m.slug && m.slug !== "human" && m.slug !== "you",
@@ -75,20 +74,20 @@ export function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
 
   function openSub(childId: string) {
     void router.navigate({
-      to: "/issues/$issueId",
-      params: { issueId: childId },
+      to: "/tasks/$taskId",
+      params: { taskId: childId },
     });
   }
 
   return (
     <section
       className="issue-doc-sub-issues"
-      aria-label="Sub-issues"
+      aria-label="Sub-tasks"
       data-testid="issue-sub-issues"
     >
       <header className="issue-doc-sub-issues-header">
         <h3 className="issue-doc-sub-issues-heading">
-          Sub-issues
+          Sub-tasks
           {children.length > 0 ? (
             <span className="issue-doc-sub-issues-count">
               {" "}
@@ -103,14 +102,14 @@ export function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
             onClick={() => setIsAdding(true)}
             data-testid="add-sub-issue-button"
           >
-            + Add sub-issue
+            + Add sub-task
           </button>
         ) : null}
       </header>
 
       {children.length === 0 && !isAdding ? (
         <p className="issue-doc-sub-issues-empty">
-          No sub-issues. Break this down with the + button above.
+          No sub-tasks. Break this down with the + button above.
         </p>
       ) : null}
 
@@ -129,10 +128,10 @@ export function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
                   data-testid="sub-issue-link"
                   data-task-id={child.id}
                 >
-                  <IssueStatusDot lifecycleState={lifecycle} />
+                  <TaskStatusDot lifecycleState={lifecycle} />
                   <span className="issue-doc-sub-issue-id">{child.id}</span>
                   <span className="issue-doc-sub-issue-title">
-                    {formatIssueTitleForDisplay(child.title) || "(untitled)"}
+                    {formatTaskTitleForDisplay(child.title) || "(untitled)"}
                   </span>
                   <span className="issue-doc-sub-issue-state">
                     {child.lifecycle_state || child.status}
@@ -174,7 +173,7 @@ export function SubIssuesList({ taskId, channel }: SubIssuesListProps) {
                 setError(null);
               }
             }}
-            placeholder="Sub-issue title (Enter to add, Esc to cancel)"
+            placeholder="Sub-task title (Enter to add, Esc to cancel)"
             disabled={addMutation.isPending}
             data-testid="sub-issue-title-input"
           />

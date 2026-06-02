@@ -12,13 +12,13 @@ import RichArtifactEmbed from "../rich-artifacts/RichArtifactEmbed";
 
 // ── Linear-style description ──────────────────────────────────────────
 
-interface IssueDescriptionProps {
+interface TaskDescriptionProps {
   description: string;
   isDrafting: boolean;
 }
 
 /**
- * IssueDescription renders the Issue's spec body. When the agent has
+ * TaskDescription renders the Issue's spec body. When the agent has
  * dropped a `visual-artifact:<id>` marker into the description (the same
  * way wiki articles and notebook entries reference rich HTML companions),
  * the marker is stripped from the markdown body and the underlying
@@ -32,10 +32,10 @@ interface IssueDescriptionProps {
  * nothing visible — the stripped marker keeps the raw `visual-artifact:`
  * text out of the body either way.
  */
-export function IssueDescription({
+export function TaskDescription({
   description,
   isDrafting,
-}: IssueDescriptionProps) {
+}: TaskDescriptionProps) {
   const body = description.trim();
   const inlineArtifacts = useInlineArtifacts(body || null);
   const renderedBody = useMemo(

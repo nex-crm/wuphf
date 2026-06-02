@@ -1,9 +1,9 @@
 /**
- * IssueNewForm — manual issue draft creation surface (/issues/new).
+ * TaskNewForm — manual task draft creation surface (/tasks/new).
  *
- * Lets a human file a spec-level issue without going through the CEO chat.
+ * Lets a human file a spec-level task without going through the CEO chat.
  * The resulting task starts in the broker's intake bucket so the owner agent
- * can pick it up; on success we hand the user straight to the new issue's
+ * can pick it up; on success we hand the user straight to the new task's
  * detail surface so they can iterate from there.
  */
 
@@ -15,7 +15,7 @@ import { router } from "../../lib/router";
 
 const DEFAULT_CHANNEL = "general";
 
-export function IssueNewForm() {
+export function TaskNewForm() {
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
   const [channel, setChannel] = useState(DEFAULT_CHANNEL);
@@ -65,15 +65,15 @@ export function IssueNewForm() {
       void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
       if (created?.id) {
         void router.navigate({
-          to: "/issues/$issueId",
-          params: { issueId: created.id },
+          to: "/tasks/$taskId",
+          params: { taskId: created.id },
           replace: true,
         });
       } else {
-        void router.navigate({ to: "/issues", replace: true });
+        void router.navigate({ to: "/tasks", replace: true });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not file issue.");
+      setError(err instanceof Error ? err.message : "Could not file task.");
     } finally {
       submitLockRef.current = false;
       setSubmitting(false);
@@ -91,7 +91,7 @@ export function IssueNewForm() {
         onSubmit={handleSubmit}
         noValidate={true}
       >
-        <h2 className="issue-new-form-heading">File an issue spec</h2>
+        <h2 className="issue-new-form-heading">File a task spec</h2>
         <p className="issue-new-form-hint">
           Use this for project-sized work. Smaller execution tasks should be cut
           from the spec after intake.
@@ -167,7 +167,7 @@ export function IssueNewForm() {
           <button
             type="button"
             className="issues-list-retry-btn"
-            onClick={() => void router.navigate({ to: "/issues" })}
+            onClick={() => void router.navigate({ to: "/tasks" })}
             disabled={submitting}
           >
             Cancel
@@ -178,7 +178,7 @@ export function IssueNewForm() {
             disabled={submitting}
             data-testid="issue-new-submit"
           >
-            {submitting ? "Filing..." : "File issue spec"}
+            {submitting ? "Filing..." : "File task spec"}
           </button>
         </div>
       </form>

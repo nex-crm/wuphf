@@ -72,7 +72,7 @@ type channelMessage struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-type agentIssueRecord struct {
+type incidentRecord struct {
 	ID                string `json:"id"`
 	Agent             string `json:"agent"`
 	Channel           string `json:"channel"`
@@ -651,7 +651,7 @@ type teamSkill struct {
 type brokerState struct {
 	ChannelStore       json.RawMessage                `json:"channel_store,omitempty"`
 	Messages           []channelMessage               `json:"messages"`
-	AgentIssues        []agentIssueRecord             `json:"agent_issues,omitempty"`
+	Incidents          []incidentRecord               `json:"agent_issues,omitempty"`
 	Members            []officeMember                 `json:"members,omitempty"`
 	Channels           []teamChannel                  `json:"channels,omitempty"`
 	SessionMode        string                         `json:"session_mode,omitempty"`

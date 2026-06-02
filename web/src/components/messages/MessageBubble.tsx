@@ -28,18 +28,6 @@ import {
   useArtifactSkeletonTrigger,
 } from "./ArtifactSkeleton";
 import {
-  IssueCommentCard,
-  parseIssueCommentPayload,
-} from "./cards/IssueCommentCard";
-import {
-  IssueCreatedCard,
-  parseIssueCreatedPayload,
-} from "./cards/IssueCreatedCard";
-import {
-  IssueLifecycleCard,
-  parseIssueLifecyclePayload,
-} from "./cards/IssueLifecycleCard";
-import {
   NotebookEntryCreatedCard,
   parseNotebookEntryCreatedPayload,
 } from "./cards/NotebookEntryCreatedCard";
@@ -55,6 +43,18 @@ import {
   parseSystemAuthErrorPayload,
   SystemErrorCard,
 } from "./cards/SystemErrorCard";
+import {
+  parseTaskCommentPayload,
+  TaskCommentCard,
+} from "./cards/TaskCommentCard";
+import {
+  parseTaskCreatedPayload,
+  TaskCreatedCard,
+} from "./cards/TaskCreatedCard";
+import {
+  parseTaskLifecyclePayload,
+  TaskLifecycleCard,
+} from "./cards/TaskLifecycleCard";
 import {
   parseWikiArticleCreatedPayload,
   WikiArticleCreatedCard,
@@ -188,8 +188,8 @@ export function MessageBubble({
   // message-bubble so it visually reads as a system event, not an
   // agent line — same pattern as SystemErrorCard.
   if (message.kind === "issue_created") {
-    const payload = parseIssueCreatedPayload(message.payload);
-    return <IssueCreatedCard payload={payload} />;
+    const payload = parseTaskCreatedPayload(message.payload);
+    return <TaskCreatedCard payload={payload} />;
   }
 
   // PR-style Issue comment card. Broker emits one per
@@ -198,16 +198,16 @@ export function MessageBubble({
   // distinct chat surface so the human's question on the Issue does
   // not look like a free-form chat ask.
   if (message.kind === "issue_comment") {
-    const payload = parseIssueCommentPayload(message.payload);
-    return <IssueCommentCard payload={payload} />;
+    const payload = parseTaskCommentPayload(message.payload);
+    return <TaskCommentCard payload={payload} />;
   }
 
   // Lifecycle transition cards (Drafting→Running, →Done, etc). Broker
   // emits one whenever an Issue's lifecycle state changes in a way the
-  // human should see. Same surface treatment as IssueCreatedCard.
+  // human should see. Same surface treatment as TaskCreatedCard.
   if (message.kind === "issue_lifecycle") {
-    const payload = parseIssueLifecyclePayload(message.payload);
-    return <IssueLifecycleCard payload={payload} />;
+    const payload = parseTaskLifecyclePayload(message.payload);
+    return <TaskLifecycleCard payload={payload} />;
   }
 
   // Wiki/notebook surface cards. Broker emits these in #general when one

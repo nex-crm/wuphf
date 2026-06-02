@@ -1,5 +1,5 @@
-import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { CSSProperties } from "react";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { BookStack, HomeSimple, Terminal } from "iconoir-react";
 
 import { Kbd, MOD_KEY } from "../ui/Kbd";
@@ -75,7 +75,7 @@ export const Variants: Story = {
         label="SVG + badge"
         badge={badge(2)}
       />
-      <SidebarItem variant="add" icon="+" label="New issue" />
+      <SidebarItem variant="add" icon="+" label="New task" />
     </>
   ),
 };
@@ -85,12 +85,17 @@ export const States: Story = {
   render: () => (
     <>
       <SidebarItem icon="#" label="default" />
-      <SidebarItem icon="#" label="active" active />
-      <SidebarItem icon="#" label="active + unread" active badge={badge(3)} />
+      <SidebarItem icon="#" label="active" active={true} />
+      <SidebarItem
+        icon="#"
+        label="active + unread"
+        active={true}
+        badge={badge(3)}
+      />
       <SidebarItem
         icon={<Terminal className="sidebar-item-icon" />}
         label="active SVG"
-        active
+        active={true}
       />
       <SidebarItem variant="add" icon="+" label="add idle" />
     </>

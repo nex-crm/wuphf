@@ -30,36 +30,37 @@ export const appRoute = createRoute({
   path: ROUTE_PATHS.app,
 });
 
-// `/tasks` and `/apps/tasks/$taskId` retired (2026-05-28). Every unit of
-// work is an Issue/Sub-Issue now; the routes redirect to /issues so
-// bookmarks, chat links, and external references keep working.
+// `/tasks` is the first-class human work-item surface. The list lives at
+// `/tasks`, with `/tasks/new` (creation) and `/tasks/$taskId` (detail) as
+// child routes. (Reverses the prior consolidation that redirected /tasks
+// to /issues — Task is the primary primitive now.)
 export const tasksRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.tasks,
-  beforeLoad: () => {
-    throw redirect({ to: "/issues", replace: true });
-  },
+});
+
+// /tasks/new — Task creation form. Must be listed BEFORE taskDetailRoute in
+// the route tree so the static `new` segment wins over the dynamic
+// `$taskId` placeholder.
+export const taskNewRoute = createRoute({
+  getParentRoute: () => tasksRoute,
+  path: "new",
 });
 
 export const taskDetailRoute = createRoute({
   getParentRoute: () => tasksRoute,
   path: "$taskId",
-  beforeLoad: ({ params }) => {
-    throw redirect({
-      to: "/issues/$issueId",
-      params: { issueId: params.taskId },
-      replace: true,
-    });
-  },
 });
 
+// `/apps/tasks/$taskId` redirects to the canonical `/tasks/$taskId` detail
+// route so old bookmarks keep working.
 export const appTaskDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.appTaskDetail,
   beforeLoad: ({ params }) => {
     throw redirect({
-      to: "/issues/$issueId",
-      params: { issueId: params.taskId },
+      to: "/tasks/$taskId",
+      params: { taskId: params.taskId },
       replace: true,
     });
   },
@@ -69,7 +70,7 @@ export const legacyWorkbenchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.legacyWorkbench,
   beforeLoad: () => {
-    throw redirect({ to: "/issues", replace: true });
+    throw redirect({ to: "/tasks", replace: true });
   },
 });
 
@@ -77,7 +78,7 @@ export const legacyWorkbenchAgentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.legacyWorkbenchAgent,
   beforeLoad: () => {
-    throw redirect({ to: "/issues", replace: true });
+    throw redirect({ to: "/tasks", replace: true });
   },
 });
 
@@ -177,26 +178,36 @@ export const indexRoute = createRoute({
   },
 });
 
-// /issues — Phase 3 Issue list surface.
-// Lists all existing tasks as Issues (back-compat read, no new write).
-export const issuesRoute = createRoute({
+// Back-compat redirects for the legacy /issues surface. Task is the
+// primary primitive now; these forward old bookmarks and chat links to
+// the canonical /tasks routes. legacyIssueNewRoute must be listed BEFORE
+// legacyIssueDetailRoute so the static `new` segment wins over `$issueId`.
+export const legacyIssuesRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: ROUTE_PATHS.issues,
+  path: ROUTE_PATHS.legacyIssues,
+  beforeLoad: () => {
+    throw redirect({ to: "/tasks", replace: true });
+  },
 });
 
-// /issues/$issueId — Phase 3 Issue detail surface.
-// Renders IssueDocument for a single task.
-export const issueDetailRoute = createRoute({
-  getParentRoute: () => issuesRoute,
-  path: "$issueId",
-});
-
-// /issues/new — Phase 4 stub.
-// Wired so `+ New issue` can navigate here without a 404.
-// Returns a 501 placeholder in Phase 3; Phase 4 wires the draft writer.
-export const issueNewRoute = createRoute({
-  getParentRoute: () => issuesRoute,
+export const legacyIssueNewRoute = createRoute({
+  getParentRoute: () => legacyIssuesRoute,
   path: "new",
+  beforeLoad: () => {
+    throw redirect({ to: "/tasks/new", replace: true });
+  },
+});
+
+export const legacyIssueDetailRoute = createRoute({
+  getParentRoute: () => legacyIssuesRoute,
+  path: "$issueId",
+  beforeLoad: ({ params }) => {
+    throw redirect({
+      to: "/tasks/$taskId",
+      params: { taskId: params.issueId },
+      replace: true,
+    });
+  },
 });
 
 // /routines — convenience alias that forwards to the /apps/routines panel.
@@ -258,7 +269,8 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   channelRoute,
   dmRoute,
-  tasksRoute.addChildren([taskDetailRoute]),
+  // /tasks list with static `new` before dynamic `$taskId`.
+  tasksRoute.addChildren([taskNewRoute, taskDetailRoute]),
   appTaskDetailRoute,
   legacyWorkbenchRoute,
   legacyWorkbenchAgentRoute,
@@ -272,10 +284,10 @@ export const routeTree = rootRoute.addChildren([
   articleRoute,
   inboxRoute,
   taskDecisionRoute,
-  // Phase 3 — Issues surface.
-  // issueNewRoute must be listed BEFORE issueDetailRoute so the static
-  // segment "new" wins over the dynamic "$issueId" catch-all.
-  issuesRoute.addChildren([issueNewRoute, issueDetailRoute]),
+  // Back-compat redirects for the legacy /issues surface.
+  // legacyIssueNewRoute must be listed BEFORE legacyIssueDetailRoute so the
+  // static segment "new" wins over the dynamic "$issueId" catch-all.
+  legacyIssuesRoute.addChildren([legacyIssueNewRoute, legacyIssueDetailRoute]),
   routinesRoute,
   routineNewRoute,
   routineDetailRoute,

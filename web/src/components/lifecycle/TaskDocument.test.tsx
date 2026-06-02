@@ -1,5 +1,5 @@
 /**
- * IssueDocument — Phase 3 + Phase 4 component tests.
+ * TaskDocument — Phase 3 + Phase 4 component tests.
  *
  * All tests use `initialDocument` to bypass the TanStack Query fetch so
  * the suite stays deterministic without a network/broker. The query-key
@@ -16,8 +16,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { IssueDocument as IssueDocumentType } from "./IssueDocument";
-import { IssueDocument, normalizeIssueDocument } from "./IssueDocument";
+import type { TaskDocument as TaskDocumentType } from "./TaskDocument";
+import { normalizeTaskDocument, TaskDocument } from "./TaskDocument";
 
 const lifecycleApi = vi.hoisted(() => ({
   postDecision: vi.fn(() =>
@@ -30,7 +30,7 @@ const lifecycleApi = vi.hoisted(() => ({
 
 vi.mock("../../api/lifecycle", () => lifecycleApi);
 
-// IssueActivityFeed hardcodes refetchInterval: 8_000 which keeps the
+// TaskActivityFeed hardcodes refetchInterval: 8_000 which keeps the
 // vitest worker alive past teardown when fetch fails. Stub the api so
 // the query resolves synchronously and idle.
 vi.mock("../../api/tasks", async () => {
@@ -38,8 +38,8 @@ vi.mock("../../api/tasks", async () => {
     await vi.importActual<typeof import("../../api/tasks")>("../../api/tasks");
   return {
     ...actual,
-    getIssueActivity: vi.fn(() => Promise.resolve({ events: [] })),
-    getSubIssues: vi.fn(() => Promise.resolve({ tasks: [] })),
+    getTaskActivity: vi.fn(() => Promise.resolve({ events: [] })),
+    getSubTasks: vi.fn(() => Promise.resolve({ tasks: [] })),
   };
 });
 
@@ -60,7 +60,7 @@ vi.mock("../../api/client", async () => {
 
 // ── Fixtures ───────────────────────────────────────────────────────────
 
-const BASE_DOC: IssueDocumentType = {
+const BASE_DOC: TaskDocumentType = {
   taskId: "task-001",
   channel: "issue-specs",
   title: "Stripe webhook handler",
@@ -99,13 +99,13 @@ const BASE_DOC: IssueDocumentType = {
   ],
 };
 
-const APPROVED_DOC: IssueDocumentType = {
+const APPROVED_DOC: TaskDocumentType = {
   ...BASE_DOC,
   taskId: "task-002",
   lifecycleState: "approved",
 };
 
-const RUNNING_DOC: IssueDocumentType = {
+const RUNNING_DOC: TaskDocumentType = {
   ...BASE_DOC,
   taskId: "task-003",
   lifecycleState: "running",
@@ -131,22 +131,22 @@ function makeClient() {
 }
 
 function renderDoc(
-  doc: IssueDocumentType,
+  doc: TaskDocumentType,
   props: Partial<{ taskId: string }> = {},
 ) {
   const client = makeClient();
   const taskId = props.taskId ?? doc.taskId;
   const { container } = render(
     <QueryClientProvider client={client}>
-      <IssueDocument taskId={taskId} initialDocument={doc} />
+      <TaskDocument taskId={taskId} initialDocument={doc} />
     </QueryClientProvider>,
   );
   return { container };
 }
 
 /**
- * IssueDocument now wraps Comments / Sub-Issues / Activity in a tab strip
- * (IssueDetailTabs) with Activity as the default tab. Tests that touch
+ * TaskDocument now wraps Comments / Sub-Issues / Activity in a tab strip
+ * (TaskDetailTabs) with Activity as the default tab. Tests that touch
  * comment DOM must first switch to the Comments tab.
  */
 function activateCommentsTab() {
@@ -156,12 +156,12 @@ function activateCommentsTab() {
 // ── Suite ──────────────────────────────────────────────────────────────
 
 // FIXME(v3-mvp): full-file vitest run hangs the worker at module-load
-// phase. Filtered -t runs (and the normalizeIssueDocument describe in
+// phase. Filtered -t runs (and the normalizeTaskDocument describe in
 // isolation) work fine in <1s. Root cause not yet isolated — likely a
 // transitive timer/SSE handle that survives teardown despite mocks for
-// EventSource, getIssueActivity, getSubIssues, and useOfficeMembers.
+// EventSource, getTaskActivity, getSubTasks, and useOfficeMembers.
 // Tracking issue: TODO. Re-enable once the trigger is identified.
-describe.skip("<IssueDocument>", () => {
+describe.skip("<TaskDocument>", () => {
   beforeEach(() => {
     // Clear sessionStorage to keep tests independent.
     try {
@@ -179,7 +179,7 @@ describe.skip("<IssueDocument>", () => {
 
   // ── Spec sections ───────────────────────────────────────────────────
   // OBSOLETE: the 4-section SpecBody (Goal/Context/Approach/Acceptance)
-  // was replaced by a single rich Description in IssueDescription.tsx.
+  // was replaced by a single rich Description in TaskDescription.tsx.
   // SpecBody is kept in the file for legacy paths but is not mounted.
 
   it.skip("renders all four spec section headings", () => {
@@ -205,7 +205,7 @@ describe.skip("<IssueDocument>", () => {
   });
 
   it.skip("renders em-dash placeholder for missing spec sections", () => {
-    const doc: IssueDocumentType = {
+    const doc: TaskDocumentType = {
       ...BASE_DOC,
       spec: { goal: "A goal" },
     };
@@ -246,13 +246,11 @@ describe.skip("<IssueDocument>", () => {
   it("button row hides Approve & Start for non-drafting states", () => {
     renderDoc(APPROVED_DOC);
     const row = screen.getByTestId("issue-doc-button-row");
-    // IssueActionToolbar now renders state-appropriate actions for every
+    // TaskActionToolbar now renders state-appropriate actions for every
     // lifecycle (e.g. Cancel on approved), so the row is no longer empty.
     // What we still want to guarantee is that the Approve & Start button
     // is suppressed off the drafting state.
-    expect(
-      row.querySelector("[data-testid='approve-and-start']"),
-    ).toBeNull();
+    expect(row.querySelector("[data-testid='approve-and-start']")).toBeNull();
   });
 
   // ── Comment timeline ────────────────────────────────────────────────
@@ -399,7 +397,7 @@ describe.skip("<IssueDocument>", () => {
     // First mount: approved (collapsed by default).
     const { unmount } = render(
       <QueryClientProvider client={makeClient()}>
-        <IssueDocument taskId="task-002" initialDocument={APPROVED_DOC} />
+        <TaskDocument taskId="task-002" initialDocument={APPROVED_DOC} />
       </QueryClientProvider>,
     );
     // Expand via button.
@@ -414,7 +412,7 @@ describe.skip("<IssueDocument>", () => {
     // Second mount: same taskId — should restore expanded.
     render(
       <QueryClientProvider client={makeClient()}>
-        <IssueDocument taskId="task-002" initialDocument={APPROVED_DOC} />
+        <TaskDocument taskId="task-002" initialDocument={APPROVED_DOC} />
       </QueryClientProvider>,
     );
     expect(
@@ -433,9 +431,9 @@ describe.skip("<IssueDocument>", () => {
   });
 });
 
-describe("normalizeIssueDocument", () => {
+describe("normalizeTaskDocument", () => {
   it("normalizes the broker decision-packet shape with task metadata fallback", () => {
-    const doc = normalizeIssueDocument(
+    const doc = normalizeTaskDocument(
       {
         taskId: "task-5",
         lifecycleState: "blocked_on_pr_merge",
@@ -482,22 +480,22 @@ describe("normalizeIssueDocument", () => {
     expect(doc.comments[0]?.body).toContain("self-heal diagnosis");
   });
 
-  it("rejects issue documents without a channel", () => {
+  it("rejects task documents without a channel", () => {
     expect(() =>
-      normalizeIssueDocument({
+      normalizeTaskDocument({
         taskId: "task-5",
         title: "Pull unread emails",
         lifecycleState: "drafting",
         spec: {},
       }),
-    ).toThrow("issue channel is missing");
+    ).toThrow("task channel is missing");
   });
 });
 
 // ── Phase 4: Approve & Start button ───────────────────────────────────
 
-// FIXME(v3-mvp): same hang as <IssueDocument> above. Re-enable when fixed.
-describe.skip("<IssueDocument> — Phase 4: Approve & Start", () => {
+// FIXME(v3-mvp): same hang as <TaskDocument> above. Re-enable when fixed.
+describe.skip("<TaskDocument> — Phase 4: Approve & Start", () => {
   beforeEach(() => {
     try {
       sessionStorage.clear();
@@ -588,13 +586,13 @@ type DraftAcc = {
   acceptance: string | null;
 };
 
-function renderDocWithDraft(doc: IssueDocumentType, acc: DraftAcc) {
+function renderDocWithDraft(doc: TaskDocumentType, acc: DraftAcc) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const { container } = render(
     <QueryClientProvider client={client}>
-      <IssueDocument
+      <TaskDocument
         taskId={doc.taskId}
         initialDocument={doc}
         testDraftAccumulator={acc}
@@ -606,7 +604,7 @@ function renderDocWithDraft(doc: IssueDocumentType, acc: DraftAcc) {
 
 // OBSOLETE: streaming-draft tests targeted SpecBody. SpecBody is no
 // longer mounted; rich Description streams in a different shape.
-describe.skip("<IssueDocument> — Phase 4: Streaming draft", () => {
+describe.skip("<TaskDocument> — Phase 4: Streaming draft", () => {
   beforeEach(() => {
     try {
       sessionStorage.clear();
@@ -620,7 +618,7 @@ describe.skip("<IssueDocument> — Phase 4: Streaming draft", () => {
   });
 
   it("renders streamed goal text from testDraftAccumulator", () => {
-    const draftDoc: IssueDocumentType = {
+    const draftDoc: TaskDocumentType = {
       ...BASE_DOC,
       spec: {}, // server spec is empty; all content comes from stream
     };
@@ -634,7 +632,7 @@ describe.skip("<IssueDocument> — Phase 4: Streaming draft", () => {
   });
 
   it("shows typing-dot on sections not yet started when streaming has begun", () => {
-    const draftDoc: IssueDocumentType = { ...BASE_DOC, spec: {} };
+    const draftDoc: TaskDocumentType = { ...BASE_DOC, spec: {} };
     renderDocWithDraft(draftDoc, {
       goal: "Goal is here", // started
       context: null, // not yet → typing-dot expected
@@ -659,7 +657,7 @@ describe.skip("<IssueDocument> — Phase 4: Streaming draft", () => {
   });
 
   it("does NOT show typing-dot when all sections are complete", () => {
-    const draftDoc: IssueDocumentType = { ...BASE_DOC, spec: {} };
+    const draftDoc: TaskDocumentType = { ...BASE_DOC, spec: {} };
     renderDocWithDraft(draftDoc, {
       goal: "Goal",
       context: "Context",
@@ -671,7 +669,7 @@ describe.skip("<IssueDocument> — Phase 4: Streaming draft", () => {
   });
 
   it("merges streamed content over empty server spec", () => {
-    const draftDoc: IssueDocumentType = { ...BASE_DOC, spec: {} };
+    const draftDoc: TaskDocumentType = { ...BASE_DOC, spec: {} };
     renderDocWithDraft(draftDoc, {
       goal: "Merged goal",
       context: "Merged context",

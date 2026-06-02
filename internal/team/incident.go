@@ -20,26 +20,26 @@ const agentIssueMessageKind = "agent_issue"
 // chat bubble. Issue #933.
 const systemAuthErrorMessageKind = "system_auth_error"
 
-var agentIssueWhitespacePattern = regexp.MustCompile(`\s+`)
+var incidentWhitespacePattern = regexp.MustCompile(`\s+`)
 
-type agentIssueClassification struct {
+type incidentClassification struct {
 	Visible       bool
 	CapabilityGap bool
 	HumanAction   bool
 	Severity      string
 }
 
-func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail string) (channelMessage, agentIssueRecord, bool, error) {
+func (b *Broker) ReportIncident(agentSlug, targetChannel, replyTo, detail string) (channelMessage, incidentRecord, bool, error) {
 	if b == nil {
-		return channelMessage{}, agentIssueRecord{}, false, nil
+		return channelMessage{}, incidentRecord{}, false, nil
 	}
 	detail = strings.TrimSpace(detail)
 	if detail == "" {
-		return channelMessage{}, agentIssueRecord{}, false, nil
+		return channelMessage{}, incidentRecord{}, false, nil
 	}
-	classification := classifyAgentIssue(detail)
+	classification := classifyIncident(detail)
 	if !classification.Visible {
-		return channelMessage{}, agentIssueRecord{}, false, nil
+		return channelMessage{}, incidentRecord{}, false, nil
 	}
 	safeDetail := redactSecretsInText(detail)
 
@@ -50,7 +50,7 @@ func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail stri
 	// signal and route through a dedicated system-authored card that
 	// carries a structured payload the SPA renders as a SystemErrorCard.
 	if authProbe := classifyProviderAuthError(safeDetail); authProbe.IsAuthError {
-		return b.postSystemAuthError(agentSlug, targetChannel, replyTo, safeDetail, authProbe)
+		return b.postSystemAuthErrorIncident(agentSlug, targetChannel, replyTo, safeDetail, authProbe)
 	}
 
 	b.mu.Lock()
@@ -71,39 +71,39 @@ func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail stri
 			}
 		}
 		if b.findChannelLocked(channel) == nil {
-			return channelMessage{}, agentIssueRecord{}, false, fmt.Errorf("channel not found")
+			return channelMessage{}, incidentRecord{}, false, fmt.Errorf("channel not found")
 		}
 	}
 	if !b.canAccessChannelLocked(agentSlug, channel) {
-		return channelMessage{}, agentIssueRecord{}, false, fmt.Errorf("channel access denied")
+		return channelMessage{}, incidentRecord{}, false, fmt.Errorf("channel access denied")
 	}
 
 	taskID := b.activeTaskIDForAgentLocked(agentSlug)
-	key := normalizedAgentIssueKey(agentSlug, channel, safeDetail)
+	key := normalizedIncidentKey(agentSlug, channel, safeDetail)
 	now := time.Now().UTC().Format(time.RFC3339)
-	for i := range b.agentIssues {
-		issue := &b.agentIssues[i]
-		if issue.Agent != agentSlug || issue.Channel != channel || issue.NormalizedKey != key {
+	for i := range b.incidents {
+		inc := &b.incidents[i]
+		if inc.Agent != agentSlug || inc.Channel != channel || inc.NormalizedKey != key {
 			continue
 		}
-		issue.Count++
-		issue.UpdatedAt = now
-		if issue.TaskID == "" {
-			issue.TaskID = taskID
+		inc.Count++
+		inc.UpdatedAt = now
+		if inc.TaskID == "" {
+			inc.TaskID = taskID
 		}
 		if classification.CapabilityGap && !classification.HumanAction {
-			b.ensureSelfHealApprovalRequestLocked(issue, classification, safeDetail)
+			b.ensureSelfHealApprovalRequestLocked(inc, classification, safeDetail)
 		}
 		if err := b.saveLocked(); err != nil {
-			return channelMessage{}, *issue, false, err
+			return channelMessage{}, *inc, false, err
 		}
-		return channelMessage{}, *issue, false, nil
+		return channelMessage{}, *inc, false, nil
 	}
 
 	b.counter++
-	issueID := fmt.Sprintf("issue-%d", b.counter)
-	issue := agentIssueRecord{
-		ID:            issueID,
+	incidentID := fmt.Sprintf("incident-%d", b.counter)
+	inc := incidentRecord{
+		ID:            incidentID,
 		Agent:         agentSlug,
 		Channel:       channel,
 		ReplyTo:       strings.TrimSpace(replyTo),
@@ -122,66 +122,66 @@ func (b *Broker) ReportAgentIssue(agentSlug, targetChannel, replyTo, detail stri
 		From:      agentSlug,
 		Channel:   channel,
 		Kind:      agentIssueMessageKind,
-		EventID:   issue.ID,
-		Content:   "Issue: " + truncate(safeDetail, 600),
+		EventID:   inc.ID,
+		Content:   "Incident: " + truncate(safeDetail, 600),
 		ReplyTo:   strings.TrimSpace(replyTo),
 		Timestamp: now,
 	}
-	b.agentIssues = append(b.agentIssues, issue)
-	issuePtr := &b.agentIssues[len(b.agentIssues)-1]
+	b.incidents = append(b.incidents, inc)
+	incPtr := &b.incidents[len(b.incidents)-1]
 	msg = b.appendMessageLocked(msg)
-	b.appendActionLocked("agent_issue", "office", channel, agentSlug, truncateSummary(msg.Content, 140), issue.ID)
+	b.appendActionLocked("agent_issue", "office", channel, agentSlug, truncateSummary(msg.Content, 140), inc.ID)
 	if classification.CapabilityGap && !classification.HumanAction {
-		b.ensureSelfHealApprovalRequestLocked(issuePtr, classification, safeDetail)
+		b.ensureSelfHealApprovalRequestLocked(incPtr, classification, safeDetail)
 	}
 	if err := b.saveLocked(); err != nil {
-		return channelMessage{}, *issuePtr, false, err
+		return channelMessage{}, *incPtr, false, err
 	}
-	return msg, *issuePtr, true, nil
+	return msg, *incPtr, true, nil
 }
 
-func (b *Broker) AgentIssues() []agentIssueRecord {
+func (b *Broker) Incidents() []incidentRecord {
 	if b == nil {
 		return nil
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]agentIssueRecord, len(b.agentIssues))
-	for i, issue := range b.agentIssues {
-		out[i] = sanitizeAgentIssueRecord(issue)
+	out := make([]incidentRecord, len(b.incidents))
+	for i, inc := range b.incidents {
+		out[i] = sanitizeIncidentRecord(inc)
 	}
 	return out
 }
 
-func sanitizeAgentIssueRecord(issue agentIssueRecord) agentIssueRecord {
-	issue.Detail = redactSecretsInText(issue.Detail)
-	issue.NormalizedKey = normalizedAgentIssueKey(issue.Agent, issue.Channel, issue.Detail)
-	issue.SelfHealError = redactSecretsInText(issue.SelfHealError)
-	return issue
+func sanitizeIncidentRecord(inc incidentRecord) incidentRecord {
+	inc.Detail = redactSecretsInText(inc.Detail)
+	inc.NormalizedKey = normalizedIncidentKey(inc.Agent, inc.Channel, inc.Detail)
+	inc.SelfHealError = redactSecretsInText(inc.SelfHealError)
+	return inc
 }
 
-func (b *Broker) pruneAgentIssuesByChannelLocked(channelSlug string) {
-	b.pruneAgentIssuesByChannelAndAgentLocked(channelSlug, "")
+func (b *Broker) pruneIncidentsByChannelLocked(channelSlug string) {
+	b.pruneIncidentsByChannelAndAgentLocked(channelSlug, "")
 }
 
-func (b *Broker) pruneAgentIssuesByChannelAndAgentLocked(channelSlug, agentSlug string) {
+func (b *Broker) pruneIncidentsByChannelAndAgentLocked(channelSlug, agentSlug string) {
 	channelSlug = normalizeChannelSlug(channelSlug)
-	if channelSlug == "" || len(b.agentIssues) == 0 {
+	if channelSlug == "" || len(b.incidents) == 0 {
 		return
 	}
 	agentSlug = strings.TrimSpace(agentSlug)
 	removedRequestIDs := make(map[string]struct{})
-	filtered := b.agentIssues[:0]
-	for _, issue := range b.agentIssues {
-		if normalizeChannelSlug(issue.Channel) != channelSlug || (agentSlug != "" && strings.TrimSpace(issue.Agent) != agentSlug) {
-			filtered = append(filtered, issue)
+	filtered := b.incidents[:0]
+	for _, inc := range b.incidents {
+		if normalizeChannelSlug(inc.Channel) != channelSlug || (agentSlug != "" && strings.TrimSpace(inc.Agent) != agentSlug) {
+			filtered = append(filtered, inc)
 			continue
 		}
-		if reqID := strings.TrimSpace(issue.ApprovalRequestID); reqID != "" {
+		if reqID := strings.TrimSpace(inc.ApprovalRequestID); reqID != "" {
 			removedRequestIDs[reqID] = struct{}{}
 		}
 	}
-	b.agentIssues = filtered
+	b.incidents = filtered
 	if len(removedRequestIDs) == 0 {
 		return
 	}
@@ -196,7 +196,7 @@ func (b *Broker) pruneAgentIssuesByChannelAndAgentLocked(channelSlug, agentSlug 
 }
 
 // providerAuthErrorProbe captures the classification + suggested remediation
-// for a detected provider auth failure. Used by ReportAgentIssue to fork
+// for a detected provider auth failure. Used by ReportIncident to fork
 // into the SystemErrorCard rendering path (issue #933).
 type providerAuthErrorProbe struct {
 	IsAuthError   bool
@@ -273,7 +273,7 @@ func classifyProviderAuthError(detail string) providerAuthErrorProbe {
 // Idempotency: collapses repeated auth errors from the same provider+
 // channel within a short window. The chat doesn't need three identical
 // banners in a row.
-func (b *Broker) postSystemAuthError(agentSlug, targetChannel, replyTo, safeDetail string, probe providerAuthErrorProbe) (channelMessage, agentIssueRecord, bool, error) {
+func (b *Broker) postSystemAuthErrorIncident(agentSlug, targetChannel, replyTo, safeDetail string, probe providerAuthErrorProbe) (channelMessage, incidentRecord, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -293,15 +293,15 @@ func (b *Broker) postSystemAuthError(agentSlug, targetChannel, replyTo, safeDeta
 			}
 		}
 		if b.findChannelLocked(channel) == nil {
-			return channelMessage{}, agentIssueRecord{}, false, fmt.Errorf("channel not found")
+			return channelMessage{}, incidentRecord{}, false, fmt.Errorf("channel not found")
 		}
 	}
-	// Channel ACL gate, mirroring ReportAgentIssue. Without this, an agent
+	// Channel ACL gate, mirroring ReportIncident. Without this, an agent
 	// could surface a system-auth banner into a channel it has no business
 	// in (e.g. another agent's DM) just because the LLM happened to fail
 	// while resolving it.
 	if !b.canAccessChannelLocked(agentSlug, channel) {
-		return channelMessage{}, agentIssueRecord{}, false, fmt.Errorf("channel access denied")
+		return channelMessage{}, incidentRecord{}, false, fmt.Errorf("channel access denied")
 	}
 
 	// Dedup: if the most recent message in the channel is already a
@@ -319,7 +319,7 @@ func (b *Broker) postSystemAuthError(agentSlug, targetChannel, replyTo, safeDeta
 			}
 			// Last message in channel IS a system_auth_error — check provider.
 			if strings.Contains(string(m.Payload), `"provider":"`+probe.Provider+`"`) {
-				return m, agentIssueRecord{}, false, nil
+				return m, incidentRecord{}, false, nil
 			}
 			break
 		}
@@ -358,18 +358,18 @@ func (b *Broker) postSystemAuthError(agentSlug, targetChannel, replyTo, safeDeta
 	}
 	msg = b.appendMessageLocked(msg)
 	if err := b.saveLocked(); err != nil {
-		return channelMessage{}, agentIssueRecord{}, false, err
+		return channelMessage{}, incidentRecord{}, false, err
 	}
-	return msg, agentIssueRecord{}, true, nil
+	return msg, incidentRecord{}, true, nil
 }
 
-func classifyAgentIssue(detail string) agentIssueClassification {
+func classifyIncident(detail string) incidentClassification {
 	trimmed := strings.TrimSpace(detail)
 	if trimmed == "" {
-		return agentIssueClassification{}
+		return incidentClassification{}
 	}
-	if looksStructuredAgentIssuePayload(trimmed) {
-		return agentIssueClassification{}
+	if looksStructuredIncidentPayload(trimmed) {
+		return incidentClassification{}
 	}
 	text := strings.ToLower(trimmed)
 	visibleSignals := []string{
@@ -385,7 +385,7 @@ func classifyAgentIssue(detail string) agentIssueClassification {
 		}
 	}
 	if !visible {
-		return agentIssueClassification{}
+		return incidentClassification{}
 	}
 	humanAction := strings.Contains(text, "login") ||
 		strings.Contains(text, "sign in") ||
@@ -393,7 +393,7 @@ func classifyAgentIssue(detail string) agentIssueClassification {
 		strings.Contains(text, "oauth") ||
 		strings.Contains(text, "two-factor") ||
 		strings.Contains(text, "2fa")
-	return agentIssueClassification{
+	return incidentClassification{
 		Visible:       true,
 		CapabilityGap: isCapabilityGapBlocker(detail),
 		HumanAction:   humanAction,
@@ -401,7 +401,7 @@ func classifyAgentIssue(detail string) agentIssueClassification {
 	}
 }
 
-func looksStructuredAgentIssuePayload(text string) bool {
+func looksStructuredIncidentPayload(text string) bool {
 	if text == "" {
 		return false
 	}
@@ -411,12 +411,12 @@ func looksStructuredAgentIssuePayload(text string) bool {
 	return strings.Contains(text, `":`) && json.Valid([]byte(text))
 }
 
-func normalizedAgentIssueKey(agentSlug, channel, detail string) string {
+func normalizedIncidentKey(agentSlug, channel, detail string) string {
 	text := strings.ToLower(strings.TrimSpace(detail))
-	for _, prefix := range []string{"issue:", "error:", "failed:", "failure:"} {
+	for _, prefix := range []string{"incident:", "issue:", "error:", "failed:", "failure:"} {
 		text = strings.TrimSpace(strings.TrimPrefix(text, prefix))
 	}
-	text = agentIssueWhitespacePattern.ReplaceAllString(text, " ")
+	text = incidentWhitespacePattern.ReplaceAllString(text, " ")
 	if len(text) > 180 {
 		text = text[:180]
 	}
@@ -440,7 +440,7 @@ func (b *Broker) activeTaskIDForAgentLocked(agentSlug string) string {
 	return ""
 }
 
-func (b *Broker) ensureSelfHealApprovalRequestLocked(issue *agentIssueRecord, classification agentIssueClassification, detail string) {
+func (b *Broker) ensureSelfHealApprovalRequestLocked(issue *incidentRecord, classification incidentClassification, detail string) {
 	if b == nil || issue == nil || issue.SelfHealTaskID != "" {
 		return
 	}
@@ -467,8 +467,8 @@ func (b *Broker) ensureSelfHealApprovalRequestLocked(issue *agentIssueRecord, cl
 		Title:    "Approve self-heal",
 		Question: fmt.Sprintf("I recommend creating a self-heal task to restore @%s's missing capability. Proceed?", issue.Agent),
 		Context: strings.Join([]string{
-			"Agent issue: " + detail,
-			"Incident: " + issue.ID,
+			"Incident: " + detail,
+			"Incident ID: " + issue.ID,
 			"Original task: " + valueOrUnknown(issue.TaskID),
 		}, "\n"),
 		Options: []interviewOption{
@@ -533,10 +533,10 @@ func (b *Broker) maybeCreateApprovedSelfHealTaskLocked(req humanInterview) {
 	if !selfHealApprovalGranted(req.Answered.GetChoiceID()) {
 		return
 	}
-	var issue *agentIssueRecord
-	for i := range b.agentIssues {
-		if b.agentIssues[i].ApprovalRequestID == req.ID {
-			issue = &b.agentIssues[i]
+	var issue *incidentRecord
+	for i := range b.incidents {
+		if b.incidents[i].ApprovalRequestID == req.ID {
+			issue = &b.incidents[i]
 			break
 		}
 	}
@@ -549,7 +549,7 @@ func (b *Broker) maybeCreateApprovedSelfHealTaskLocked(req humanInterview) {
 	}
 	task, _, err := b.requestSelfHealingLocked(issue.Agent, issue.TaskID, agent.EscalationCapabilityGap, detail)
 	if err != nil {
-		log.Printf("agent-issue: create approved self-heal task for issue=%s agent=%s: %v", issue.ID, issue.Agent, err)
+		log.Printf("incident: create approved self-heal task for incident=%s agent=%s: %v", issue.ID, issue.Agent, err)
 		errText := strings.TrimSpace(err.Error())
 		if errText == "" {
 			errText = "unknown error"
@@ -585,7 +585,7 @@ func (b *Broker) maybeCreateApprovedSelfHealTaskLocked(req humanInterview) {
 	issue.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 }
 
-func (b *Broker) notifySelfHealCreationFailureLocked(issue *agentIssueRecord, errText, now string) {
+func (b *Broker) notifySelfHealCreationFailureLocked(issue *incidentRecord, errText, now string) {
 	if b == nil || issue == nil {
 		return
 	}
@@ -597,7 +597,7 @@ func (b *Broker) notifySelfHealCreationFailureLocked(issue *agentIssueRecord, er
 	if channel == "" {
 		channel = "general"
 	}
-	content := fmt.Sprintf("Issue: approved self-heal for @%s could not be created: %s", agentSlug, truncate(errText, 400))
+	content := fmt.Sprintf("Incident: approved self-heal for @%s could not be created: %s", agentSlug, truncate(errText, 400))
 	b.counter++
 	b.appendMessageLocked(channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),

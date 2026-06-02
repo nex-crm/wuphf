@@ -158,7 +158,7 @@ export function Sidebar() {
           </div>
           {/* WorkspaceSummary intentionally not rendered here — the stats
               it shows (agents active, tasks open, tokens) are redundant
-              with the Agents/Issues sections and the Usage footer. The
+              with the Agents/Tasks sections and the Usage footer. The
               component file is preserved so it can be re-used inside a
               future Usage popover or Settings surface. */}
           <UsagePanel />
