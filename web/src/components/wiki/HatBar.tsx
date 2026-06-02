@@ -30,13 +30,17 @@ export default function HatBar({
   return (
     <nav className="wk-hatbar" aria-label="Article views">
       {ORDER.map((tab) => {
+        const isActive = tab === active;
         const disabled = disabledTabs.includes(tab);
-        const className = `wk-tab${tab === active ? " active" : ""}`;
+        const className = `wk-tab${isActive ? " active" : ""}`;
         return (
           <button
             key={tab}
             type="button"
             className={className}
+            // The active tab is indicated by more than color: aria-current
+            // exposes "this is the current view" to assistive tech.
+            aria-current={isActive ? "page" : undefined}
             disabled={disabled}
             onClick={() => !disabled && onChange?.(tab)}
           >

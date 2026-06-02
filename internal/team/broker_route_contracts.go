@@ -237,10 +237,60 @@ var taskBrokerRoutes = []brokerRoute{
 	},
 }
 
+// wikiHistoryBrokerRoutes documents the Slice 5 wiki history / diff / restore
+// surface. These three routes are registered in broker.go via requireAuth
+// (not routeHandler), so the contract here is the documented wire shape that
+// the route-contract test asserts against — keeping the registry honest about
+// the auth + method expectations for the version-history endpoints.
+var wikiHistoryBrokerRoutes = []brokerRoute{
+	{
+		contract: RouteContract{
+			Domain:       "wiki",
+			Capability:   "Article version history, diff, and restore",
+			Path:         "/wiki/history/",
+			Method:       http.MethodGet,
+			Auth:         RouteAuthBearer,
+			RequestType:  "path suffix: team/<article>.md",
+			ResponseType: "{commits: []team.wikiHistoryCommit}",
+		},
+		handler: func(b *Broker) http.HandlerFunc {
+			return b.handleWikiHistory
+		},
+	},
+	{
+		contract: RouteContract{
+			Domain:       "wiki",
+			Capability:   "Article version history, diff, and restore",
+			Path:         "/wiki/diff",
+			Method:       http.MethodGet,
+			Auth:         RouteAuthBearer,
+			RequestType:  "query: path, sha",
+			ResponseType: "{diff, sha, path}",
+		},
+		handler: func(b *Broker) http.HandlerFunc {
+			return b.handleWikiDiff
+		},
+	},
+	{
+		contract: RouteContract{
+			Domain:       "wiki",
+			Capability:   "Article version history, diff, and restore",
+			Path:         "/wiki/restore",
+			Method:       http.MethodPost,
+			Auth:         RouteAuthBearer,
+			RequestType:  "{path, sha}",
+			ResponseType: "{path, commit_sha}",
+		},
+		handler: func(b *Broker) http.HandlerFunc {
+			return b.handleWikiRestore
+		},
+	},
+}
+
 // BrokerRouteContracts returns the contract registry for routes that have been
 // moved under explicit domain registration.
 func BrokerRouteContracts() []RouteContract {
-	routes := make([]RouteContract, 0, len(platformBrokerRoutes)+len(taskBrokerRoutes))
+	routes := make([]RouteContract, 0, len(platformBrokerRoutes)+len(taskBrokerRoutes)+len(wikiHistoryBrokerRoutes))
 	appendContracts := func(source []brokerRoute) {
 		for _, route := range source {
 			routes = append(routes, route.contract)
@@ -248,6 +298,7 @@ func BrokerRouteContracts() []RouteContract {
 	}
 	appendContracts(platformBrokerRoutes)
 	appendContracts(taskBrokerRoutes)
+	appendContracts(wikiHistoryBrokerRoutes)
 	return routes
 }
 

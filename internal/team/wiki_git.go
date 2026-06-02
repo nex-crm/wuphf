@@ -70,6 +70,13 @@ var ErrBackupMissing = errors.New("wiki: backup mirror does not exist")
 
 var errArchiveCandidateChanged = errors.New("wiki archive: candidate changed during sweep")
 
+// errWikiCallerInput is the sentinel wrapped by validateArticlePath and
+// validateCommitSHA so callers can route a 400-class input error via
+// errors.Is instead of fragile string-prefix matching on the message text.
+// The wrapped messages stay human-readable (and free of git stderr /
+// filesystem layout), so handlers can safely echo them.
+var errWikiCallerInput = errors.New("wiki: invalid caller input")
+
 // CommitRef is a lightweight git log entry for a single article.
 type CommitRef struct {
 	SHA       string
@@ -552,6 +559,171 @@ func (r *Repo) Log(ctx context.Context, relPath string) ([]CommitRef, error) {
 		})
 	}
 	return refs, nil
+}
+
+// ErrWikiCommitNotFound is returned by Diff / RestoreToCommit when the
+// supplied SHA does not exist in the repo, or does not contain the requested
+// path. Handlers map it to 404.
+var ErrWikiCommitNotFound = errors.New("wiki: commit or path not found at sha")
+
+// ErrWikiRestoreNoop is returned by RestoreToCommit when the working-tree
+// content already matches the content at the target SHA, so there is nothing
+// to restore. Handlers map it to 409.
+var ErrWikiRestoreNoop = errors.New("wiki: nothing to restore; content is already current")
+
+// validateCommitSHA rejects anything that is not a short/long hex git object
+// name. Git accepts abbreviated SHAs as short as 4 hex chars; full SHA-256 is
+// 64. We never pass caller-supplied refs (HEAD, branch names, `..` ranges)
+// into git, so confining to [0-9a-f]{7,64} keeps the value from being mistaken
+// for a flag or a revision range. The returned value is the lower-cased SHA.
+func validateCommitSHA(sha string) (string, error) {
+	sha = strings.ToLower(strings.TrimSpace(sha))
+	if sha == "" {
+		return "", fmt.Errorf("%w: sha is required", errWikiCallerInput)
+	}
+	if len(sha) < 7 || len(sha) > 64 {
+		return "", fmt.Errorf("%w: sha must be 7-64 hex characters; got %d", errWikiCallerInput, len(sha))
+	}
+	for i := 0; i < len(sha); i++ {
+		c := sha[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", fmt.Errorf("%w: sha must be hexadecimal", errWikiCallerInput)
+		}
+	}
+	return sha, nil
+}
+
+// Diff returns the unified diff that the given commit introduced for a single
+// article. It uses `git show <sha> -- <path>` so the root (first) commit is
+// handled gracefully: git show on a root commit emits the full added content
+// as a diff against the empty tree, with no special-casing required.
+//
+// relPath must be a valid team/ article path and sha must be a hex object name
+// (validated before any git call). Returns ErrWikiCommitNotFound when the sha
+// does not resolve to a commit. A valid sha that simply did not touch relPath
+// yields an empty diff (not an error) — the commit exists, it just changed
+// nothing for that file.
+func (r *Repo) Diff(ctx context.Context, relPath, sha string) (string, error) {
+	if err := validateArticlePath(relPath); err != nil {
+		return "", err
+	}
+	// Use the cleaned slash path in the git argv (not the raw pre-clean
+	// relPath), mirroring RestoreToCommit. resolveTeamRelPath re-validates
+	// containment and returns the normalized team/-rooted slash path.
+	clean, _, err := resolveTeamRelPath(r.root, relPath)
+	if err != nil {
+		return "", err
+	}
+	cleanSHA, err := validateCommitSHA(sha)
+	if err != nil {
+		return "", err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Confirm the object resolves to a commit before asking for its diff so a
+	// bogus sha surfaces as 404 rather than an empty diff that could be
+	// confused with "commit exists, file unchanged".
+	if _, verifyErr := r.runGitLocked(ctx, "system", "rev-parse", "--verify", "--quiet", cleanSHA+"^{commit}"); verifyErr != nil {
+		return "", fmt.Errorf("%w: %s", ErrWikiCommitNotFound, cleanSHA)
+	}
+
+	out, err := r.runGitLocked(
+		ctx, "system",
+		"show",
+		"--no-color",
+		cleanSHA,
+		"--",
+		clean,
+	)
+	if err != nil {
+		// Never forward raw git stderr to the caller — log it and surface a
+		// fixed error. The rev-parse above already proved the commit exists,
+		// so a failure here is an internal git error, not a caller error.
+		log.Printf("wiki: git show %s -- %s failed: %v: %s", cleanSHA, clean, err, strings.TrimSpace(out))
+		return "", fmt.Errorf("wiki: git show: %w", err)
+	}
+	return out, nil
+}
+
+// RestoreToCommit reads the article content as it existed at sha and writes it
+// back into the working tree as a NEW commit authored by the supplied human
+// identity. It NEVER rewrites history (no reset, no force, no checkout of the
+// branch ref) — the prior commits remain intact and the restore is itself an
+// additional commit, so the audit trail is append-only.
+//
+//   - relPath must be a valid team/ article path.
+//   - sha must be a hex object name that contains relPath. A sha that does not
+//     resolve, or that did not contain the file, returns ErrWikiCommitNotFound
+//     (404).
+//   - When the working-tree content already equals the content at sha, returns
+//     ErrWikiRestoreNoop (409) without creating an empty commit.
+//
+// Returns the new short commit SHA.
+func (r *Repo) RestoreToCommit(ctx context.Context, relPath, sha string, identity HumanIdentity) (string, error) {
+	clean, abs, err := resolveTeamRelPath(r.root, relPath)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasSuffix(strings.ToLower(clean), ".md") {
+		return "", fmt.Errorf("%w: restore path must end with .md; got %q", errWikiFSBadPath, relPath)
+	}
+	cleanSHA, err := validateCommitSHA(sha)
+	if err != nil {
+		return "", err
+	}
+	name, email, _ := effectiveHumanIdentity(identity)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Read the file content as it existed at the target commit. `git show
+	// <sha>:<path>` fails if either the commit or the path is absent at that
+	// revision — both map to a 404 for the caller.
+	historical, err := r.runGitLocked(ctx, "system", "show", cleanSHA+":"+clean)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s:%s", ErrWikiCommitNotFound, cleanSHA, clean)
+	}
+
+	// No-op guard: if the live file already byte-matches the historical
+	// content there is nothing to restore. Treat a missing live file as
+	// "differs" so a restore of a since-deleted page still proceeds.
+	if current, readErr := os.ReadFile(abs); readErr == nil && string(current) == historical {
+		return "", ErrWikiRestoreNoop
+	} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return "", fmt.Errorf("wiki: read current article: %w", readErr)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
+		return "", fmt.Errorf("wiki: mkdir %s: %w", filepath.Dir(abs), err)
+	}
+
+	// Snapshot the live bytes so a failed commit can roll the working tree
+	// back to exactly what was there before. os.ReadFile already ran above
+	// (errors other than NotExist returned), so re-read for the rollback copy.
+	prevBytes, prevErr := os.ReadFile(abs)
+	prevExisted := prevErr == nil
+
+	if err := os.WriteFile(abs, []byte(historical), 0o600); err != nil {
+		return "", fmt.Errorf("wiki: write restored article: %w", err)
+	}
+
+	msg := fmt.Sprintf("human: restore %s to %s", clean, cleanSHA)
+	commitSHA, commitErr := r.commitPathsLocked(ctx, name, email, msg, []string{clean})
+	if commitErr != nil {
+		// Roll the working tree back so a failed restore does not leave an
+		// uncommitted change that RecoverDirtyTree would later misattribute.
+		if prevExisted {
+			if rbErr := os.WriteFile(abs, prevBytes, 0o600); rbErr != nil {
+				return "", errors.Join(commitErr, fmt.Errorf("wiki: rollback restore %s: %w", clean, rbErr))
+			}
+		} else if rbErr := os.Remove(abs); rbErr != nil && !errors.Is(rbErr, os.ErrNotExist) {
+			return "", errors.Join(commitErr, fmt.Errorf("wiki: rollback restore %s: %w", clean, rbErr))
+		}
+		return "", commitErr
+	}
+	return commitSHA, nil
 }
 
 // AuditEntry is a single cross-article commit surfaced by AuditLog. Unlike
@@ -1049,23 +1221,23 @@ func searchArticles(repo *Repo, pattern string) ([]WikiSearchHit, error) {
 func validateArticlePath(relPath string) error {
 	relPath = strings.TrimSpace(relPath)
 	if relPath == "" {
-		return fmt.Errorf("wiki: article_path is required")
+		return fmt.Errorf("%w: article_path is required", errWikiCallerInput)
 	}
 	if filepath.IsAbs(relPath) {
-		return fmt.Errorf("wiki: article path must be relative; got %q", relPath)
+		return fmt.Errorf("%w: article path must be relative; got %q", errWikiCallerInput, relPath)
 	}
 	clean := filepath.ToSlash(filepath.Clean(relPath))
 	if clean != filepath.ToSlash(relPath) && !strings.HasPrefix(clean, "team/") {
-		return fmt.Errorf("wiki: article path must be within team/; got %q", relPath)
+		return fmt.Errorf("%w: article path must be within team/; got %q", errWikiCallerInput, relPath)
 	}
 	if strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") || clean == ".." {
-		return fmt.Errorf("wiki: article path must not contain ..; got %q", relPath)
+		return fmt.Errorf("%w: article path must not contain ..; got %q", errWikiCallerInput, relPath)
 	}
 	if !strings.HasPrefix(clean, "team/") {
-		return fmt.Errorf("wiki: article path must be within team/; got %q", relPath)
+		return fmt.Errorf("%w: article path must be within team/; got %q", errWikiCallerInput, relPath)
 	}
 	if !strings.HasSuffix(strings.ToLower(clean), ".md") {
-		return fmt.Errorf("wiki: article path must end with .md; got %q", relPath)
+		return fmt.Errorf("%w: article path must end with .md; got %q", errWikiCallerInput, relPath)
 	}
 	return nil
 }

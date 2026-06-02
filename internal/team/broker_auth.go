@@ -124,6 +124,7 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/wiki/audit",
 			path == "/wiki/visual",
 			path == "/wiki/sections",
+			path == "/wiki/diff",
 			path == "/notebook/visual-artifacts",
 			path == "/review/list",
 			path == "/entity/facts",
@@ -138,6 +139,11 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/skills/compile/stats":
 			return true
 		case strings.HasPrefix(path, "/review/"):
+			return true
+		case strings.HasPrefix(path, "/wiki/history/"):
+			// Slice 5: per-article version history is a human-readable view on
+			// the same footing as /wiki/audit and /wiki/article. The article
+			// path is the suffix; the handler validates it under team/.
 			return true
 		case isTaskDetailPath(path):
 			// Lane E: human sessions hit /tasks/{id} for the Decision
@@ -180,6 +186,13 @@ func humanRouteAllowed(r *http.Request) bool {
 			// blocklist runs in the handler. Allowed here so the upload action
 			// does not 403 in a human session.
 			"/wiki/upload",
+			// POST /wiki/restore (Slice 5: append-only restore to a prior
+			// version) is a human wiki authoring write on the same footing as
+			// the page-ops routes above: it records a NEW commit authored by the
+			// requesting human and never rewrites history. The committing
+			// identity is resolved server-side. Allowed here so the restore
+			// action does not 403 in a human session.
+			"/wiki/restore",
 			"/notebook/visual-artifacts":
 			return true
 		}

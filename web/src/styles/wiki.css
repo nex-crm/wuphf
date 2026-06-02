@@ -36,6 +36,15 @@
   --wk-amber-bg: var(--olive-200);
   --wk-amber-banner: var(--olive-100);
   --wk-code-bg: var(--bg-warm);
+  /* Version-history diff line washes. Seeded from the light green/red ramp.
+     Kept as wiki-scoped tokens (not the global --green-bg/--red-bg) so dark
+     themes can remap the diff wash + ink independently without disturbing the
+     many other consumers of the global success/error tokens. The +/- line
+     prefix is a non-color cue and stays regardless of theme. */
+  --wk-diff-add-bg: var(--green-bg);
+  --wk-diff-add-ink: var(--green-dark);
+  --wk-diff-remove-bg: var(--red-bg);
+  --wk-diff-remove-ink: var(--red-dark);
   /* Floating-chrome elevation. Aliases the global popover shadow so the
      bubble menu / slash menu / link popovers track the theme instead of a
      hardcoded black drop shadow that reads as a smudge on dark surfaces. */
@@ -3406,4 +3415,207 @@
 .wk-tree2-danger-btn {
   background: var(--wk-wikilink-broken);
   border-color: var(--wk-wikilink-broken);
+}
+
+/* ─── Version history (History tab) ─── */
+.wk-history {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 12px;
+  font-family: var(--wk-chrome);
+}
+@container (max-width: 640px) {
+  .wk-history {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wk-history-list-status,
+.wk-history-diff-status,
+.wk-history-diff-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--wk-text-muted);
+  font-size: 13px;
+}
+.wk-history-error {
+  color: var(--wk-wikilink-broken);
+}
+
+.wk-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  align-self: start;
+}
+.wk-history-row + .wk-history-row {
+  border-top: 1px solid var(--wk-border-light);
+}
+.wk-history-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--wk-paper);
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--wk-text);
+}
+.wk-history-commit:hover {
+  background: var(--wk-paper-dark);
+}
+.wk-history-commit.is-selected {
+  background: var(--wk-amber-banner);
+  box-shadow: inset 3px 0 0 var(--wk-amber);
+}
+.wk-history-commit:focus-visible {
+  outline: 2px solid var(--wk-wikilink);
+  outline-offset: -2px;
+}
+.wk-history-msg {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--wk-text);
+  overflow-wrap: anywhere;
+}
+.wk-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--wk-text-tertiary);
+}
+.wk-history-sep {
+  color: var(--wk-border-strong);
+}
+.wk-history-sha {
+  font-family: var(--wk-mono);
+}
+
+.wk-history-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.wk-history-diff-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--wk-border);
+}
+.wk-history-diff-bar .wk-history-sha {
+  font-size: 12px;
+  color: var(--wk-text-muted);
+}
+
+.wk-history-restore-btn {
+  padding: 5px 12px;
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-text);
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.wk-history-restore-btn:hover {
+  background: var(--wk-border-light);
+}
+.wk-history-restore-btn:focus-visible,
+.wk-history-restore-cancel:focus-visible {
+  outline: 2px solid var(--wk-wikilink);
+  outline-offset: 2px;
+}
+.wk-history-restore-confirm {
+  border-color: var(--wk-wikilink-broken);
+  color: var(--wk-wikilink-broken);
+}
+.wk-history-restore-confirm:disabled,
+.wk-history-restore-cancel:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.wk-history-confirm {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wk-history-confirm-msg {
+  font-size: 12px;
+  color: var(--wk-text-muted);
+}
+.wk-history-restore-cancel {
+  padding: 5px 10px;
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.wk-history-restore-cancel:hover {
+  color: var(--wk-text);
+}
+.wk-history-restore-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--wk-wikilink-broken);
+}
+
+.wk-history-diff-pre {
+  margin: 0;
+  max-height: 480px;
+  overflow: auto;
+  background: var(--wk-code-bg);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wk-history-diff-pre:focus-visible {
+  outline: 2px solid var(--wk-wikilink);
+  outline-offset: 2px;
+}
+.wk-diff-line {
+  display: block;
+  padding: 0 8px;
+  /* Keep blank diff lines (which render with no text node) at a full row
+     height so the diff's vertical rhythm survives empty context lines. */
+  min-height: 1.55em;
+}
+.wk-diff-added {
+  background: var(--wk-diff-add-bg);
+  color: var(--wk-diff-add-ink);
+}
+.wk-diff-removed {
+  background: var(--wk-diff-remove-bg);
+  color: var(--wk-diff-remove-ink);
+}
+.wk-diff-hunk {
+  color: var(--wk-wikilink);
+  font-weight: 600;
+}
+.wk-diff-meta {
+  color: var(--wk-text-tertiary);
+}
+.wk-diff-context {
+  color: var(--wk-text-muted);
 }

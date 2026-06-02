@@ -649,6 +649,20 @@ html[data-theme="noir-gold"] {
   --wk-amber-bg: rgba(201, 162, 39, 0.12);
   --wk-amber-banner: rgba(201, 162, 39, 0.16);
   --wk-code-bg: var(--bg-warm);
+
+  /* Version-history diff washes. The noir ramp seeds these as dark-on-dark:
+       --wk-diff-add-bg=#1a2b21 + ink --green-dark #1c5b34 -> ~1.4:1 (fails)
+       --wk-diff-remove-bg=#1f0f10 + ink --red-dark #6e1018 -> ~1.x:1 (fails)
+     Re-map to low-alpha color washes with a bright readable ink over the noir
+     diff surface (--wk-code-bg = --bg-warm = #111113), mirroring the gold amber
+     re-tint above:
+       added   #5fcf8c on the composited ~#1a221d wash clears ~8.7:1
+       removed  #e8786f on the composited ~#241718 wash clears ~6.2:1
+     Both pass WCAG AA; the +/- prefix stays as the non-color cue. */
+  --wk-diff-add-bg: rgba(47, 170, 100, 0.16);
+  --wk-diff-add-ink: #5fcf8c;
+  --wk-diff-remove-bg: rgba(214, 68, 60, 0.16);
+  --wk-diff-remove-ink: #e8786f;
 }
 html[data-theme="noir-gold"] .wk-nav-sidebar h3 {
   color: var(--gold-300);
