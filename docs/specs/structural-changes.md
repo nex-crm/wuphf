@@ -30,9 +30,40 @@
 - Hard rule reminder: broker embeds `web/dist` at build time — always
   `bun run build` before rebuilding the binary when verifying UI changes.
 
+## ▶ RESUME HERE — current state (2026-06-02, pre-compact)
+
+**Read this section first on session resume, then the Change log below.**
+
+- **Branch:** `worktree-structural-changes`. **HEAD:** `f4c50882`. Base `origin/main` @ `46f06e54`.
+- **Commits so far:** `461b578d` Phase 0 (Issues→Tasks rename) · `96877617` Phase 1
+  (7-stage board + Archive) · `3f46f328` doc scrub · `5cc95204` Phase 2a-i (Backup &
+  Migration task) · `f4c50882` Phase 2a-ii (channel-per-task). All green, all committed.
+- **DONE:** Phase 0 ✅, Phase 1 ✅, naming scrub ✅, Phase 2a (i+ii) ✅. Backend is now
+  fully task-scoped (each business task mints its own `task-<id>` channel; #general is
+  owned by the archived "Backup & Migration" system task; ~141 `general` refs untouched).
+- **NEXT: Phase 2b (frontend, NOT started)** — pure task-scoped UI:
+  sidebar primary = Tasks grouped by stage (drop Channels + Agents nav sections);
+  landing `/agents/ceo` → `/tasks` board (interim home; rich composer is Phase 3);
+  REMOVE the DM route/view + per-agent subspace pages; ADD a dedicated **Agents tool**
+  (roster + create/configure agents); task detail surfaces its own channel. See the
+  Phase 2b sub-bullet in the Change log for the file map.
+- **Then:** Phase 3 (new-task home composer), Phase 4 (Librarian = Pam), Phase 5 (spec→wiki
+  Specs/), Phase 6 (persisted-state migration + E2E).
+- **HARD RULES still active:** (1) NO external-app name anywhere in
+  PR/wiki/docs/branch/code (my work scrubbed; 4 pre-existing competitive docs left per
+  user). (2) Keep persisted JSON wire keys stable through Phase 5; migrate in Phase 6.
+- **Gotchas:** browser-harness↔Chrome CDP is BROKEN (stale :9222 ws) — live screenshots
+  blocked until Chrome is restarted (don't kill the user's Chrome unprompted). Dev boot:
+  `bash scripts/dev-mvp.sh --reset` (web :7891 / API :7890, API needs auth → use browser
+  not curl). The :7891 broker is stale (built pre-2a) — rebuild before any live test.
+  Verify Go with `golangci-lint run ./internal/team/...` too (agents only run go vet,
+  which misses gofmt + dead code).
+- **User working style:** terse, wants momentum ("do it" / "move on"); commit + brief
+  check-in per phase increment. Big design forks → ask; routine → just do it.
+
 ## Open questions / parking lot
 
-- _(none yet)_
+- _(none open)_
 
 ---
 
