@@ -104,6 +104,9 @@
     "turndown-plugin-gfm": "^1.0.2",
     "remark-rehype": "^11.1.2",
     "rehype-stringify": "^10.0.1",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "zustand": "^5.0.5"
   },
   "devDependencies": {

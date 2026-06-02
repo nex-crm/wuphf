@@ -332,6 +332,74 @@ func TestHumanSessionAuthIsScopedToShareRoutes(t *testing.T) {
 	}
 }
 
+// The cabinet wiki tree's structural authoring routes run as a HUMAN session,
+// exactly like /wiki/write-human. They must pass the routing-level human
+// allowlist (not 403) so the UI tree can create / move / rename / delete pages.
+func TestHumanSessionAuthAllowsWikiStructuralRoutes(t *testing.T) {
+	b := newTestBroker(t)
+	token, _, err := b.createHumanInvite()
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	sessionToken, _, err := b.acceptHumanInvite(token, "Mira", "browser")
+	if err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+	cookie := &http.Cookie{Name: humanSessionCookie, Value: sessionToken}
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/wiki/page/create"},
+		{http.MethodPost, "/wiki/page/move"},
+		{http.MethodPost, "/wiki/page/rename"},
+		{http.MethodDelete, "/wiki/page"},
+		{http.MethodDelete, "/wiki/page?path=team/people/nazz.md"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(`{}`)))
+			req.AddCookie(cookie)
+			rec := httptest.NewRecorder()
+			called := false
+			b.withAuth(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				actor, ok := requestActorFromContext(r.Context())
+				if !ok || actor.Kind != requestActorKindHuman || actor.Slug != "mira" {
+					t.Fatalf("actor = %+v ok=%v, want human mira", actor, ok)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			})(rec, req)
+			if !called || rec.Code != http.StatusNoContent {
+				t.Fatalf("route called=%v status=%d body=%s", called, rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	// A non-allowlisted wiki write method/path still 403s for a human session,
+	// proving the allowlist is exact and not a blanket /wiki/* grant.
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/wiki/page/destroy"},
+		{http.MethodPut, "/wiki/page"},
+		{http.MethodGet, "/wiki/page/move"},
+	} {
+		t.Run("forbidden "+tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte(`{}`)))
+			req.AddCookie(cookie)
+			rec := httptest.NewRecorder()
+			b.withAuth(func(http.ResponseWriter, *http.Request) {
+				t.Fatalf("handler should not be called for %s %s", tc.method, tc.path)
+			})(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403 body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestHumanSessionAuthBlocksDMChannelList(t *testing.T) {
 	b := newTestBroker(t)
 	token, _, err := b.createHumanInvite()

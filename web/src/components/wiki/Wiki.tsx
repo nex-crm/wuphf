@@ -123,6 +123,7 @@ export default function Wiki({
           onNavigateAudit={() => onNavigate(AUDIT_PATH)}
           onNavigateLint={() => onNavigate(LINT_PATH)}
           skills={sidebarSkills}
+          defaultMode="tree"
         />
         {isAudit ? (
           <WikiAudit onNavigate={(path) => onNavigate(path)} />

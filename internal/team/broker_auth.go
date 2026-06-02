@@ -165,12 +165,29 @@ func humanRouteAllowed(r *http.Request) bool {
 			"/requests/answer",
 			"/interview/answer",
 			"/wiki/write-human",
+			// Structural wiki authoring routes (cabinet tree). The web UI's
+			// page create / move / rename run as a HUMAN session exactly like
+			// /wiki/write-human, so they must be allowed here or the tree's
+			// authoring actions 403. The destructive-confirm guard for these
+			// lives in the UI; routing-level access is granted on parity with
+			// write-human because they are human-authored wiki writes.
+			"/wiki/page/create",
+			"/wiki/page/move",
+			"/wiki/page/rename",
 			"/notebook/visual-artifacts":
 			return true
 		}
 		if strings.HasPrefix(path, "/notebook/visual-artifacts/") {
 			return true
 		}
+	}
+
+	// DELETE /wiki/page (cabinet tree page delete) is a human wiki authoring
+	// action consistent with write-human; the destructive-confirm guard lives in
+	// the UI. Allowed at the routing layer on the same rationale as the POST
+	// structural routes above.
+	if method == http.MethodDelete && path == "/wiki/page" {
+		return true
 	}
 
 	return false
