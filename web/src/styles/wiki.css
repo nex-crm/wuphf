@@ -36,6 +36,13 @@
   --wk-amber-bg: var(--olive-200);
   --wk-amber-banner: var(--olive-100);
   --wk-code-bg: var(--bg-warm);
+  /* Floating-chrome elevation. Aliases the global popover shadow so the
+     bubble menu / slash menu / link popovers track the theme instead of a
+     hardcoded black drop shadow that reads as a smudge on dark surfaces. */
+  --wk-shadow-popover: var(
+    --shadow-popover,
+    0 8px 24px -8px rgba(0, 0, 0, 0.32)
+  );
   --wk-display: var(--font-sans);
   --wk-body-serif: "Newsreader", "Georgia", ui-serif, serif;
   --wk-chrome: var(--font-sans);
@@ -1531,16 +1538,19 @@
   opacity: 0.7;
 }
 .wk-section-new {
-  font-family:
-    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--wk-chrome);
   font-size: 9px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 1px 5px;
   border-radius: 3px;
-  background: #cff5f5;
-  color: #0f5c5c;
+  /* Accent-tinted "NEW" pill. Light: pale tertiary wash + deep tertiary
+     ink (well past 4.5:1). Dark themes re-tint this in their own files
+     because the pale accent surface would flash near-white on a dark
+     ground; see nex-dark.css / noir-gold.css. */
+  background: var(--accent-bg);
+  color: var(--accent-warm);
 }
 .wk-section-empty {
   padding: 4px 10px;
@@ -2547,7 +2557,7 @@
 .wk-insert-menu {
   background: var(--wk-paper);
   border: 1px solid var(--wk-border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--wk-shadow-popover);
   min-width: 280px;
   max-width: 360px;
   max-height: 360px;
@@ -2591,6 +2601,14 @@
 .wk-insert-menu__item.is-active .wk-insert-menu__btn,
 .wk-insert-menu__btn:hover {
   background: var(--wk-amber-banner);
+}
+/* Non-color cue for the keyboard-selected row: a left accent bar via an
+   inset box-shadow. Background tint alone is a WCAG non-color-cue gap and
+   is invisible at low contrast — the bar reads as "selected" regardless of
+   the tint. --wk-wikilink is the wiki link/accent token and clears 3:1
+   against the menu surface in every theme. */
+.wk-insert-menu__item.is-active .wk-insert-menu__btn {
+  box-shadow: inset 3px 0 0 0 var(--wk-wikilink);
 }
 .wk-insert-menu__btn {
   display: flex;
@@ -2680,4 +2698,368 @@
   background: var(--wk-amber-banner);
   border-left: 3px solid var(--wk-amber);
   color: var(--wk-text);
+}
+
+/* ─── Tiptap rich editor (replaces Milkdown) ─────────────────────────────── */
+
+.wk-tiptap-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* The ProseMirror surface. Mirrors `.wk-article-body` so the rich editor and
+   the preview pane read the same — serif body on paper. */
+.wk-tiptap-editor__content .ProseMirror {
+  font-family: var(--wk-body-serif);
+  font-size: 18px;
+  line-height: 1.72;
+  color: var(--wk-text);
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  padding: 18px 20px;
+  min-height: 480px;
+  outline: none;
+  box-sizing: border-box;
+}
+.wk-tiptap-editor__content .ProseMirror:focus-within {
+  border-color: var(--wk-wikilink);
+}
+.wk-tiptap-editor__content .ProseMirror > * + * {
+  margin-top: 0;
+}
+.wk-tiptap-editor__content .ProseMirror p {
+  margin: 0 0 18px;
+}
+
+/* Empty-document placeholder (Tiptap Placeholder extension). */
+.wk-tiptap-editor__content .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--wk-text-tertiary);
+}
+
+.wk-tiptap-editor__content .ProseMirror h1 {
+  font-family: var(--wk-display);
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 36px 0 16px;
+}
+.wk-tiptap-editor__content .ProseMirror h2 {
+  font-family: var(--wk-display);
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.2;
+  margin: 40px 0 14px;
+  letter-spacing: -0.01em;
+  border-bottom: 1px solid var(--wk-border);
+  padding-bottom: 6px;
+}
+.wk-tiptap-editor__content .ProseMirror h3 {
+  font-family: var(--wk-display);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.3;
+  margin: 28px 0 10px;
+}
+.wk-tiptap-editor__content .ProseMirror h4 {
+  font-family: var(--wk-display);
+  font-size: 17px;
+  font-weight: 600;
+  margin: 22px 0 8px;
+}
+.wk-tiptap-editor__content .ProseMirror ul,
+.wk-tiptap-editor__content .ProseMirror ol {
+  margin: 0 0 18px 24px;
+  padding: 0;
+}
+.wk-tiptap-editor__content .ProseMirror li {
+  margin-bottom: 6px;
+}
+.wk-tiptap-editor__content .ProseMirror blockquote {
+  margin: 0 0 18px;
+  padding-left: 16px;
+  border-left: 3px solid var(--wk-border-strong);
+  color: var(--wk-text-muted);
+}
+.wk-tiptap-editor__content .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--wk-border);
+  margin: 24px 0;
+}
+.wk-tiptap-editor__content .ProseMirror strong {
+  font-weight: 600;
+}
+
+/* Inline code + fenced code blocks. */
+.wk-tiptap-editor__content .ProseMirror code {
+  font-family: var(--wk-mono);
+  background: var(--wk-code-bg);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.88em;
+}
+.wk-tiptap-editor__content .ProseMirror pre,
+.wk-editor-code-block {
+  font-family: var(--wk-mono);
+  background: var(--wk-code-bg);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm, 4px);
+  padding: 12px 14px;
+  margin: 0 0 18px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.wk-tiptap-editor__content .ProseMirror pre code,
+.wk-editor-code-block code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  color: var(--wk-text);
+}
+
+/* Tables. Mirror `.wk-article-body table`, plus the column-resize handle. */
+.wk-tiptap-editor__content .ProseMirror table,
+.wk-editor-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 18px;
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  table-layout: fixed;
+}
+.wk-tiptap-editor__content .ProseMirror th,
+.wk-tiptap-editor__content .ProseMirror td {
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid var(--wk-border);
+  position: relative;
+  min-width: 60px;
+}
+.wk-tiptap-editor__content .ProseMirror th {
+  font-weight: 600;
+  background: var(--wk-paper-dark);
+  border-bottom: 1px solid var(--wk-border-strong);
+}
+.wk-tiptap-editor__content .ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--wk-wikilink);
+  pointer-events: none;
+}
+.wk-tiptap-editor__content .ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--wk-amber-bg);
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+/* Images. */
+.wk-editor-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm, 4px);
+}
+.wk-tiptap-editor__content .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--wk-wikilink);
+}
+
+/* Task list with checkboxes (TaskList / TaskItem). */
+.wk-editor-task-list {
+  list-style: none;
+  margin-left: 0;
+  padding-left: 0;
+}
+.wk-tiptap-editor__content .ProseMirror li[data-type="taskItem"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.wk-tiptap-editor__content .ProseMirror li[data-type="taskItem"] > label {
+  margin-top: 4px;
+  user-select: none;
+}
+.wk-tiptap-editor__content .ProseMirror li[data-type="taskItem"] > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wk-tiptap-editor__content
+  .ProseMirror
+  li[data-type="taskItem"]
+  input[type="checkbox"] {
+  accent-color: var(--wk-wikilink);
+}
+
+/* Wikilink marks. Reuse the preview's dashed-underline treatment. */
+.wk-tiptap-editor__content .ProseMirror a.wk-wikilink {
+  color: var(--wk-wikilink);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: text;
+}
+.wk-tiptap-editor__content .ProseMirror a.wk-wikilink.wk-broken {
+  color: var(--wk-wikilink-broken);
+  text-decoration-color: var(--wk-wikilink-broken);
+}
+/* Generic (non-wiki) links. */
+.wk-editor-link {
+  color: var(--wk-wikilink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ─── Bubble menu (selection toolbar) ──────────────────────────────────── */
+
+.wk-bubble-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm, 4px);
+  box-shadow: var(--wk-shadow-popover);
+}
+.wk-bubble-menu__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--wk-text);
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  cursor: pointer;
+}
+.wk-bubble-menu__btn:hover,
+.wk-bubble-menu__btn.is-active {
+  background: var(--wk-amber-banner);
+}
+/* Non-color cue for the active mark (bold/italic/etc. toggled on): a 2px
+   inset accent ring so the toggled state is distinguishable from a plain
+   hover without relying on the background tint. --wk-wikilink clears 3:1
+   against the menu surface in every theme. */
+.wk-bubble-menu__btn.is-active {
+  box-shadow: inset 0 0 0 2px var(--wk-wikilink);
+}
+.wk-bubble-menu__btn code {
+  background: transparent;
+  padding: 0;
+  font-family: var(--wk-mono);
+  font-size: 12px;
+}
+.wk-bubble-menu__sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: var(--wk-border);
+}
+.wk-bubble-menu__swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--wk-border);
+  border-radius: 3px;
+}
+
+/* ─── Link / image popovers ────────────────────────────────────────────── */
+
+.wk-editor-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(340px, 90vw);
+  padding: 12px;
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm, 4px);
+  box-shadow: var(--wk-shadow-popover);
+  font-family: var(--wk-chrome);
+}
+.wk-editor-popover__row {
+  display: flex;
+}
+.wk-editor-popover__input {
+  width: 100%;
+  padding: 8px 10px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-text);
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+.wk-editor-popover__input:focus {
+  outline: 2px solid var(--wk-wikilink);
+  outline-offset: -2px;
+}
+.wk-editor-popover__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wk-editor-popover__actions .wk-editor-save,
+.wk-editor-popover__actions .wk-editor-cancel {
+  font-size: 13px;
+  padding: 6px 12px;
+}
+
+/* ─── Syntax highlighting (lowlight / highlight.js token classes) ───────── */
+
+.wk-editor-code-block .hljs-comment,
+.wk-editor-code-block .hljs-quote {
+  color: var(--wk-text-tertiary);
+  font-style: italic;
+}
+.wk-editor-code-block .hljs-keyword,
+.wk-editor-code-block .hljs-selector-tag,
+.wk-editor-code-block .hljs-built_in,
+.wk-editor-code-block .hljs-name,
+.wk-editor-code-block .hljs-tag {
+  color: var(--wk-wikilink);
+}
+.wk-editor-code-block .hljs-string,
+.wk-editor-code-block .hljs-title,
+.wk-editor-code-block .hljs-section,
+.wk-editor-code-block .hljs-attribute,
+.wk-editor-code-block .hljs-literal,
+.wk-editor-code-block .hljs-template-tag,
+.wk-editor-code-block .hljs-template-variable,
+.wk-editor-code-block .hljs-type,
+.wk-editor-code-block .hljs-addition {
+  color: var(--wk-amber-text);
+}
+.wk-editor-code-block .hljs-number,
+.wk-editor-code-block .hljs-symbol,
+.wk-editor-code-block .hljs-bullet,
+.wk-editor-code-block .hljs-attr,
+.wk-editor-code-block .hljs-variable,
+.wk-editor-code-block .hljs-meta {
+  color: var(--wk-text-muted);
+}
+.wk-editor-code-block .hljs-emphasis {
+  font-style: italic;
+}
+.wk-editor-code-block .hljs-strong {
+  font-weight: 600;
 }

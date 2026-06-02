@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { buildDecisionBlock, type DecisionDraft } from "./markdownShapes";
+import { useFocusTrap } from "./useFocusTrap";
 
 export interface DecisionDialogProps {
   onConfirm: (block: string) => void;
@@ -37,6 +38,7 @@ export function DecisionDialog({
   const [alternativesText, setAlternativesText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+  const trapRef = useFocusTrap<HTMLDivElement>();
 
   useEffect(() => {
     titleRef.current?.focus();
@@ -74,6 +76,7 @@ export function DecisionDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="wk-decision-dialog-title"
+      ref={trapRef}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();

@@ -632,13 +632,22 @@ html[data-theme="noir-gold"] .wiki-tab-badge {
 /* ─── Wiki surface — left nav menu buttons + wikilinks ───────────────
    --wk-wikilink resolves to --olive-500 which we already redirected to
    #3d2e0a (deep oxidized) — too dark on dark bg. Re-route the wiki
-   palette to gold tones so links and the active menu button read. */
-html[data-theme="noir-gold"] .wiki-root {
+   palette to gold tones so links and the active menu button read.
+
+   These are also declared at html[data-theme="noir-gold"] scope below so
+   the slash menu, mention menu, and link/image popovers — which portal to
+   document.body, outside .wiki-root — pick them up too. Keep the two blocks
+   in sync. --wk-amber-banner is the active/hover row surface; the old 0.05
+   tint was effectively invisible, so the keyboard-selected row read the
+   same as every other row. Bumped to 0.16 — visible against the noir
+   surface while still keeping the bright cream --wk-text legible. */
+html[data-theme="noir-gold"] .wiki-root,
+html[data-theme="noir-gold"] {
   --wk-wikilink: var(--gold-300);
   --wk-wikilink-broken: var(--red);
   --wk-amber: var(--gold-400);
-  --wk-amber-bg: rgba(201, 162, 39, 0.1);
-  --wk-amber-banner: rgba(201, 162, 39, 0.05);
+  --wk-amber-bg: rgba(201, 162, 39, 0.12);
+  --wk-amber-banner: rgba(201, 162, 39, 0.16);
   --wk-code-bg: var(--bg-warm);
 }
 html[data-theme="noir-gold"] .wk-nav-sidebar h3 {

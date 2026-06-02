@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { buildFactBlock, type FactDraft } from "./markdownShapes";
+import { useFocusTrap } from "./useFocusTrap";
 
 export interface FactDialogProps {
   /** Optional default source citation reference (e.g. `[^1]`) — used
@@ -44,6 +45,7 @@ export function FactDialog({
   const [stage, setStage] = useState<Stage>("edit");
   const [error, setError] = useState<string | null>(null);
   const subjectRef = useRef<HTMLInputElement | null>(null);
+  const trapRef = useFocusTrap<HTMLDivElement>();
 
   useEffect(() => {
     if (stage === "edit") subjectRef.current?.focus();
@@ -82,6 +84,7 @@ export function FactDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby="wk-fact-dialog-title"
+      ref={trapRef}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
