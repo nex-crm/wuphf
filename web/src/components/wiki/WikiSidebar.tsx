@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { DiscoveredSection, WikiCatalogEntry } from "../../api/wiki";
 import { resolveGroupOrder } from "../../lib/groupOrder";
+import WikiTree from "./tree/WikiTree";
+
+type SidebarMode = "tree" | "sections";
 
 export interface SidebarSkill {
   name: string;
@@ -31,6 +34,14 @@ interface WikiSidebarProps {
   onNavigateLint?: () => void;
   /** Skills to show as a dedicated Skills section below wiki sections. */
   skills?: SidebarSkill[];
+  /**
+   * Which navigation surface to show first. The live Wiki passes `"tree"` so
+   * the drag-and-drop file tree is the primary surface; the legacy
+   * catalog-grouped "Sections" view stays one toggle away. Defaults to
+   * `"sections"` so existing render tests (and any non-React-Query host) keep
+   * the section IA without extra setup.
+   */
+  defaultMode?: SidebarMode;
 }
 
 // Sections first seen within this window render a "new" indicator. 7 days
@@ -46,9 +57,11 @@ export default function WikiSidebar({
   onNavigateAudit,
   onNavigateLint,
   skills,
+  defaultMode = "sections",
 }: WikiSidebarProps) {
   const [query, setQuery] = useState("");
   const [bannerSlug, setBannerSlug] = useState<string | null>(null);
+  const [mode, setMode] = useState<SidebarMode>(defaultMode);
 
   // When the broker ships sections, use them verbatim for the IA. Otherwise
   // fall back to the legacy catalog-grouping path so the sidebar still
@@ -84,78 +97,110 @@ export default function WikiSidebar({
     return out;
   }, [usingSections, sections]);
 
+  const isTree = mode === "tree";
+
   return (
     <aside className="wk-nav-sidebar">
-      <input
-        type="search"
-        className="search"
-        placeholder="Search wiki…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-      {bannerSlug ? (
-        <AddToBlueprintBanner
-          slug={bannerSlug}
-          onDismiss={() => setBannerSlug(null)}
-        />
-      ) : null}
-      <div className="wk-nav-sidebar-scroll">
-        {usingSections
-          ? sectionList.map((section) => (
-              <SectionGroup
-                key={section.slug}
-                section={section}
-                entries={section.entries}
-                currentPath={currentPath}
-                isNew={newSectionSlugs.has(section.slug)}
-                onNavigate={onNavigate}
-                onSectionHeaderClick={() => {
-                  if (!section.from_schema) {
-                    setBannerSlug(section.slug);
-                  }
-                }}
-              />
-            ))
-          : fallbackOrder.map((group) => {
-              const items = groupedFromCatalog[group];
-              if (!items || items.length === 0) return null;
-              return (
-                <div key={group}>
-                  <h3>{group}</h3>
-                  <ul>
-                    {items.map((item) => (
-                      <li
-                        key={item.path}
-                        className={
-                          articlePathKey(currentPath ?? "") ===
-                          articlePathKey(item.path)
-                            ? "current"
-                            : ""
-                        }
-                      >
-                        <a
-                          href={`#/wiki/${encodeURI(item.path)}`}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            onNavigate(item.path);
-                          }}
-                        >
-                          {item.title}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-        {skills && skills.length > 0 ? (
-          <SkillsNavSection
-            skills={skills}
-            currentPath={currentPath}
-            onNavigate={onNavigate}
-          />
-        ) : null}
+      <div
+        className="wk-nav-mode-toggle"
+        role="tablist"
+        aria-label="Wiki navigation mode"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={isTree}
+          className={`wk-nav-mode-tab${isTree ? " is-active" : ""}`}
+          onClick={() => setMode("tree")}
+        >
+          Files
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!isTree}
+          className={`wk-nav-mode-tab${!isTree ? " is-active" : ""}`}
+          onClick={() => setMode("sections")}
+        >
+          Sections
+        </button>
       </div>
+      {isTree ? (
+        <WikiTree currentPath={currentPath} onNavigate={onNavigate} />
+      ) : (
+        <>
+          <input
+            type="search"
+            className="search"
+            placeholder="Search wiki…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {bannerSlug ? (
+            <AddToBlueprintBanner
+              slug={bannerSlug}
+              onDismiss={() => setBannerSlug(null)}
+            />
+          ) : null}
+          <div className="wk-nav-sidebar-scroll">
+            {usingSections
+              ? sectionList.map((section) => (
+                  <SectionGroup
+                    key={section.slug}
+                    section={section}
+                    entries={section.entries}
+                    currentPath={currentPath}
+                    isNew={newSectionSlugs.has(section.slug)}
+                    onNavigate={onNavigate}
+                    onSectionHeaderClick={() => {
+                      if (!section.from_schema) {
+                        setBannerSlug(section.slug);
+                      }
+                    }}
+                  />
+                ))
+              : fallbackOrder.map((group) => {
+                  const items = groupedFromCatalog[group];
+                  if (!items || items.length === 0) return null;
+                  return (
+                    <div key={group}>
+                      <h3>{group}</h3>
+                      <ul>
+                        {items.map((item) => (
+                          <li
+                            key={item.path}
+                            className={
+                              articlePathKey(currentPath ?? "") ===
+                              articlePathKey(item.path)
+                                ? "current"
+                                : ""
+                            }
+                          >
+                            <a
+                              href={`#/wiki/${encodeURI(item.path)}`}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                onNavigate(item.path);
+                              }}
+                            >
+                              {item.title}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+            {skills && skills.length > 0 ? (
+              <SkillsNavSection
+                skills={skills}
+                currentPath={currentPath}
+                onNavigate={onNavigate}
+              />
+            ) : null}
+          </div>
+        </>
+      )}
       {onNavigateAudit ? (
         <div className="wk-sidebar-audit">
           <button

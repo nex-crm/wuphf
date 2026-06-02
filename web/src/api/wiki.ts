@@ -2,7 +2,7 @@
  * Wiki API client — thin wrapper over the shared fetch helper in `client.ts`.
  */
 
-import { get, post, sseURL } from "./client";
+import { del, get, post, sseURL } from "./client";
 
 export interface WikiArticle {
   path: string;
@@ -165,6 +165,98 @@ export function wikiFileUrl(path: string): string {
   const base = sseURL("/wiki/file");
   const sep = base.includes("?") ? "&" : "?";
   return `${base}${sep}path=${encodeURIComponent(path)}`;
+}
+
+// ── Cabinet page mutations (Slice 2 — create / move / rename / delete) ─────────
+//
+// These drive the drag-and-drop file tree in components/wiki/tree. Each maps to
+// a broker endpoint that commits a single git change and, for move/rename,
+// rewrites any wikilinks that pointed at the old path so references never break.
+// `path`/`from`/`to` are always repo-root-relative with the `team/` prefix and a
+// `.md` suffix, byte-identical to what /wiki/tree and /wiki/catalog emit.
+
+/** Result envelope for POST /wiki/page/create. */
+export interface CreatePageResult {
+  path: string;
+  commit_sha: string;
+}
+
+/**
+ * Result envelope for POST /wiki/page/move. `references_rewritten` is the count
+ * of wikilinks the broker repointed at the new path; `rewritten_paths` lists the
+ * articles it touched so the UI can surface "Rewrote N links" with detail.
+ */
+export interface MovePageResult {
+  to: string;
+  commit_sha: string;
+  references_rewritten: number;
+  rewritten_paths: string[];
+}
+
+/** Result envelope for POST /wiki/page/rename. */
+export interface RenamePageResult {
+  to: string;
+  commit_sha: string;
+  references_rewritten: number;
+}
+
+/** Result envelope for DELETE /wiki/page. */
+export interface DeletePageResult {
+  path: string;
+  commit_sha: string;
+}
+
+/**
+ * Create a new wiki page at `path`. The broker commits a stub (or the supplied
+ * `content`) and returns the canonical path + commit SHA. `title` seeds the H1
+ * when `content` is omitted.
+ */
+export async function createPage(params: {
+  path: string;
+  title?: string;
+  content?: string;
+}): Promise<CreatePageResult> {
+  const body: Record<string, string> = { path: params.path };
+  if (params.title !== undefined) body.title = params.title;
+  if (params.content !== undefined) body.content = params.content;
+  return post<CreatePageResult>("/wiki/page/create", body);
+}
+
+/**
+ * Move a page from `from` to `to` (e.g. dropping it into a different folder).
+ * The broker rewrites any wikilinks pointing at the old path and reports how
+ * many it rewrote so the caller can confirm the cascade to the user.
+ */
+export async function movePage(params: {
+  from: string;
+  to: string;
+}): Promise<MovePageResult> {
+  return post<MovePageResult>("/wiki/page/move", {
+    from: params.from,
+    to: params.to,
+  });
+}
+
+/**
+ * Rename the leaf of `path` to `newName` (no extension, no slashes — the broker
+ * appends `.md`). Like move, this rewrites inbound wikilinks.
+ */
+export async function renamePage(params: {
+  path: string;
+  newName: string;
+}): Promise<RenamePageResult> {
+  return post<RenamePageResult>("/wiki/page/rename", {
+    path: params.path,
+    newName: params.newName,
+  });
+}
+
+/**
+ * Delete the page at `path`. State-changing and irreversible from the UI's
+ * perspective — callers MUST confirm with the user before invoking this.
+ */
+export async function deletePage(path: string): Promise<DeletePageResult> {
+  return del<DeletePageResult>(`/wiki/page?path=${encodeURIComponent(path)}`);
 }
 
 export interface WikiCatalogEntry {
