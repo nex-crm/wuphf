@@ -97,6 +97,7 @@
     "@tiptap/extension-text-style": "^3.22.3",
     "@tiptap/extension-underline": "^3.22.3",
     "@aarkue/tiptap-math-extension": "^1.4.0",
+    "highlight.js": "^11.11.1",
     "katex": "^0.16.45",
     "lowlight": "^3.3.0",
     "turndown": "^7.2.2",

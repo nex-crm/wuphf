@@ -72,6 +72,7 @@
         "clsx": "^2.1.1",
         "dompurify": "^3.4.0",
         "github-slugger": "^2.0.0",
+        "highlight.js": "^11.11.1",
         "iconoir-react": "^7.11.0",
         "katex": "^0.16.45",
         "lowlight": "^3.3.0",

@@ -19,10 +19,10 @@ import {
 } from "../../lib/wikiMarkdownConfig";
 
 /**
- * Milkdown lives in a lazy chunk (~100kB gzipped). Users who never toggle
- * Rich mode never download it.
+ * The Tiptap rich editor lives in a lazy chunk (Tiptap + extensions +
+ * lowlight + katex). Users who never toggle Rich mode never download it.
  */
-const RichWikiEditor = lazy(() => import("./editor/RichWikiEditor"));
+const TiptapWikiEditor = lazy(() => import("./editor/TiptapWikiEditor"));
 
 type EditorMode = "source" | "rich";
 const EDITOR_MODE_KEY_PREFIX = "wuphf:editor-mode:";
@@ -94,10 +94,13 @@ interface SourcePaneProps {
   /** Catalog passed through to the rich editor for the mention picker
    *  and broken-link detection. The textarea path doesn't use it. */
   catalog: WikiCatalogEntry[];
+  /** Wikilink resolver passed to the rich editor so it flags broken links
+   *  the same way the preview pane does. The textarea path doesn't use it. */
+  resolver: (slug: string) => boolean;
 }
 
 /**
- * The left/source pane swaps between the textarea and the lazy Milkdown
+ * The left/source pane swaps between the textarea and the lazy Tiptap
  * surface based on `editorMode`. Pulled out of `WikiEditor` so the parent
  * stays under Biome's cognitive-complexity ceiling.
  */
@@ -108,6 +111,7 @@ function SourcePane({
   setContent,
   textareaRef,
   catalog,
+  resolver,
 }: SourcePaneProps) {
   const labelText = `Article source (${path})`;
   return (
@@ -140,10 +144,12 @@ function SourcePane({
             data-testid="wk-editor-rich"
             aria-labelledby="wk-editor-source-label"
           >
-            <RichWikiEditor
+            <TiptapWikiEditor
               content={content}
               onChange={setContent}
+              resolver={resolver}
               catalog={catalog}
+              labelId="wk-editor-source-label"
             />
           </div>
         </Suspense>
@@ -351,6 +357,7 @@ export default function WikiEditor({
             setContent={setContent}
             textareaRef={textareaRef}
             catalog={catalog}
+            resolver={resolver}
           />
         ) : null}
         {showPreview ? (
@@ -430,7 +437,8 @@ export default function WikiEditor({
         {editorMode === "rich" ? (
           <>
             Type <code>/</code> for inserts; <code>@</code> opens the mention
-            picker.
+            picker. Select text, then <code>Mod-e</code> adds a link and{" "}
+            <code>Mod-Shift-h</code> toggles highlight.
           </>
         ) : (
           <>

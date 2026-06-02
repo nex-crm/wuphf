@@ -277,7 +277,6 @@ function useArticleFetch(
   };
 }
 
-
 export default function WikiArticle({
   path,
   catalog,

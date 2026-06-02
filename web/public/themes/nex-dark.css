@@ -208,3 +208,36 @@ html[data-theme="nex-dark"] .notebook-surface::-webkit-scrollbar-thumb:hover {
 
 /* ── Wiki text muted/rule fallbacks now resolve to theme tokens via
        :root in wiki.css; nothing extra needed here. ── */
+
+/* ═══════════════════════════════════════════════════════════════
+   Wiki link + amber accents (Tiptap editor chrome)
+
+   wiki.css seeds these from the light-only olive ramp:
+     --wk-wikilink   = --olive-500  (#3f4224, deep olive)
+     --wk-amber      = --olive-500
+     --wk-amber-bg   = --olive-200  (#eef679, near-white yellow)
+     --wk-amber-banner = --olive-100 (#f8ffdb, near-white)
+   On the twilight surface the olive link is ~1.5:1 (invisible) and the
+   near-white amber surfaces flash bright and bury the near-white --wk-text
+   (active rows become white-on-white). Re-map to the brand violet:
+   tertiary-300 (#cf72d9) clears ~5.6:1 on --bg for the link/accent, and the
+   amber surfaces become subtle violet tints that keep --wk-text readable.
+
+   Scoped to html[data-theme] (not .wiki-root) on purpose: the slash menu,
+   mention menu, and link/image popovers portal to document.body, outside
+   .wiki-root, so a .wiki-root override would never reach them. ── */
+html[data-theme="nex-dark"] {
+  --wk-wikilink: var(--tertiary-300);
+  --wk-amber: var(--tertiary-300);
+  --wk-amber-bg: rgba(159, 77, 191, 0.22);
+  --wk-amber-banner: rgba(159, 77, 191, 0.22);
+}
+
+/* "NEW" / type pill — the base rule's --accent-bg (#ffebfc, near-white)
+   would flash bright on the twilight surface. Re-tint to a violet wash with
+   a bright violet ink: #cf72d9 on the composited ~#2a2330 surface clears
+   well past 4.5:1. */
+html[data-theme="nex-dark"] .wk-section-new {
+  background: rgba(159, 77, 191, 0.2);
+  color: var(--tertiary-300);
+}

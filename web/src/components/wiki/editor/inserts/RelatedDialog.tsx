@@ -15,6 +15,7 @@ import {
   type MentionItem,
   searchMentionItems,
 } from "./mentionCatalog";
+import { useFocusTrap } from "./useFocusTrap";
 
 export interface RelatedDialogProps {
   items: MentionItem[];
@@ -30,6 +31,7 @@ export function RelatedDialog({
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const queryRef = useRef<HTMLInputElement | null>(null);
+  const trapRef = useFocusTrap<HTMLDivElement>();
 
   // Auto-focus the search input on mount, matching CitationDialog,
   // DecisionDialog, and FactDialog so all four dialogs share the same
@@ -69,6 +71,8 @@ export function RelatedDialog({
       data-testid="wk-related-dialog-backdrop"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="wk-related-dialog-title"
+      ref={trapRef}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
@@ -80,7 +84,7 @@ export function RelatedDialog({
         className="wk-modal wk-insert-dialog"
         data-testid="wk-related-dialog"
       >
-        <h2>Insert related pages</h2>
+        <h2 id="wk-related-dialog-title">Insert related pages</h2>
         <label htmlFor="wk-related-search" className="wk-editor-label">
           Filter
         </label>
