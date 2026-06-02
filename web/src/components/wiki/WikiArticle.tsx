@@ -11,6 +11,7 @@ import {
 } from "../../api/richArtifacts";
 import {
   compressArticle,
+  deletePage,
   fetchArticle,
   fetchHistory,
   fetchHumans,
@@ -41,10 +42,12 @@ import CategoriesFooter from "./CategoriesFooter";
 import CiteThisPagePanel from "./CiteThisPagePanel";
 import EntityBriefBar from "./EntityBriefBar";
 import EntityRelatedPanel from "./EntityRelatedPanel";
+import { useFocusTrap } from "./editor/inserts/useFocusTrap";
 import FactsOnFile from "./FactsOnFile";
 import HatBar, { type HatBarTab } from "./HatBar";
 import Hatnote from "./Hatnote";
 import { consumeMaintenanceTarget } from "./maintenanceTarget";
+import { consumeOpenInEdit } from "./openInEditTarget";
 import PageFooter from "./PageFooter";
 import PageStatsPanel from "./PageStatsPanel";
 import PlaybookExecutionLog from "./PlaybookExecutionLog";
@@ -278,6 +281,25 @@ function useArticleFetch(
   };
 }
 
+/**
+ * Consume the tree's "open in edit" hand-off for `path` and flip the tab to the
+ * editor when it matches. Guarded by a ref so the side-effecting sessionStorage
+ * read fires exactly once per path even under React strict mode's intentional
+ * double-invoke (same defense ArticleRightSidebar uses for the maintenance
+ * target). Lives outside the component body so the main render stays lean.
+ */
+function useOpenInEditTab(
+  path: string,
+  setTab: (tab: HatBarTab) => void,
+): void {
+  const consumedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (consumedRef.current === path) return;
+    consumedRef.current = path;
+    if (consumeOpenInEdit(path)) setTab("edit");
+  }, [path, setTab]);
+}
+
 export default function WikiArticle({
   path,
   catalog,
@@ -350,6 +372,12 @@ export default function WikiArticle({
       cancelled = true;
     };
   }, [path, externalRefreshNonce, refreshNonce]);
+
+  // A page created via the tree's "New page" flow parks an "open in edit"
+  // intent (see openInEditTarget.ts). This pops it after the visual-artifact
+  // effect's `setTab("article")` reset above, so a just-created page lands
+  // straight in the WYSIWYG editor with no flash of read view.
+  useOpenInEditTab(path, setTab);
 
   useEffect(() => {
     let cancelled = false;
@@ -500,6 +528,11 @@ export default function WikiArticle({
           onChange={setTab}
           rightRail={context ? [context] : undefined}
         />
+        <ArticleDeleteControl
+          title={article.title}
+          path={article.path}
+          onDeleted={() => onNavigate("")}
+        />
         <ArticleBreadcrumb
           article={article}
           segments={breadcrumbSegments}
@@ -577,6 +610,149 @@ function ArticleErrorState({
       >
         Retry
       </button>
+    </div>
+  );
+}
+
+/**
+ * Read-view "Delete page" affordance: a small token-styled trigger plus a
+ * confirm dialog. Owns its own open/pending/error state so the parent article
+ * component stays lean. Destructive, so it follows tell-don't-ask: the dialog
+ * shows the recommendation up front and focus lands on Cancel (a stray Enter
+ * cancels rather than destroying data). On success the parent navigates away
+ * via onDeleted so the user is never stranded on a now-404 page.
+ */
+function ArticleDeleteControl({
+  title,
+  path,
+  onDeleted,
+}: {
+  title: string;
+  path: string;
+  onDeleted: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const confirm = async () => {
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      await deletePage(path);
+      setOpen(false);
+      onDeleted();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Delete failed.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="wk-article-toolbar">
+        <button
+          type="button"
+          className="wk-article-delete-btn"
+          data-testid="wk-article-delete"
+          onClick={() => {
+            setError(null);
+            setOpen(true);
+          }}
+        >
+          Delete page
+        </button>
+      </div>
+      {open ? (
+        <ConfirmDeleteArticle
+          title={title}
+          path={path}
+          pending={pending}
+          error={error}
+          onCancel={() => setOpen(false)}
+          onConfirm={() => {
+            void confirm();
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Confirm-before-delete dialog for the article view. Mirrors the tree's
+ * ConfirmDelete: focus lands on Cancel first (a stray Enter cancels rather than
+ * destroying data), Escape closes, and the recommendation is shown up front so
+ * the destructive action is tell-don't-ask with a one-click veto.
+ */
+function ConfirmDeleteArticle({
+  title,
+  path,
+  pending,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  path: string;
+  pending: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const trapRef = useFocusTrap<HTMLDivElement>();
+  return (
+    <div
+      ref={trapRef}
+      className="wk-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wk-article-delete-title"
+      data-testid="wk-article-delete-confirm"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+    >
+      <div className="wk-modal wk-tree2-modal">
+        <h2 id="wk-article-delete-title">Delete “{title}”?</h2>
+        <p className="wk-editor-help">
+          This permanently deletes <code>{path}</code>. We recommend deleting
+          only pages you are sure are no longer referenced. This cannot be
+          undone.
+        </p>
+        {error ? (
+          <div
+            className="wk-editor-banner wk-editor-banner--error"
+            role="alert"
+          >
+            {error}
+          </div>
+        ) : null}
+        <div className="wk-editor-actions">
+          <button
+            type="button"
+            className="wk-editor-cancel"
+            onClick={onCancel}
+            disabled={pending}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="wk-editor-save wk-tree2-danger-btn"
+            data-testid="wk-article-delete-confirm-btn"
+            onClick={onConfirm}
+            disabled={pending}
+          >
+            {pending ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

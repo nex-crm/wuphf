@@ -33,6 +33,7 @@ import {
   type WikiFSTreeNode,
 } from "../../../api/wiki";
 import { useFocusTrap } from "../editor/inserts/useFocusTrap";
+import { requestOpenInEdit } from "../openInEditTarget";
 import {
   baseName,
   dropToMove,
@@ -186,6 +187,11 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
       setNewPageOpen(false);
       setMoveState(null);
       setNote({ kind: "info", text: "Page created." });
+      // A freshly-created page should land in the WYSIWYG editor, not the
+      // empty read view. Park the "open in edit" intent keyed to the new path;
+      // WikiArticle pops it on mount and defaults to the editor tab. This keeps
+      // the onNavigate(path) contract a plain string (see openInEditTarget.ts).
+      requestOpenInEdit(result.path);
       onNavigate(result.path);
     },
     onError: (err: unknown) => setNote(errorNote(err, "Create failed")),

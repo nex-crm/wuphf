@@ -1,173 +1,14 @@
-// biome-ignore-all lint/a11y/useAriaPropsSupportedByRole: Passive metadata uses accessible labels queried by screen-reader tests; visual text remains unchanged.
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import ReactMarkdown from "react-markdown";
+import { lazy, Suspense, useCallback, useMemo } from "react";
 
 import type { WikiCatalogEntry } from "../../api/wiki";
 import { useWikiEditorController } from "../../hooks/useWikiEditorController";
-import {
-  buildMarkdownComponents,
-  buildRehypePlugins,
-  buildRemarkPlugins,
-} from "../../lib/wikiMarkdownConfig";
 
 /**
  * The Tiptap rich editor lives in a lazy chunk (Tiptap + extensions +
- * lowlight + katex). Users who never toggle Rich mode never download it.
+ * lowlight + katex). It is the single, always-on editing surface for wiki
+ * articles — there is no longer a plain-markdown source/preview fallback.
  */
 const TiptapWikiEditor = lazy(() => import("./editor/TiptapWikiEditor"));
-
-type EditorMode = "source" | "rich";
-const EDITOR_MODE_KEY_PREFIX = "wuphf:editor-mode:";
-
-function readEditorMode(path: string): EditorMode {
-  if (typeof window === "undefined") return "source";
-  try {
-    const raw = window.localStorage.getItem(EDITOR_MODE_KEY_PREFIX + path);
-    return raw === "rich" ? "rich" : "source";
-  } catch {
-    return "source";
-  }
-}
-
-function writeEditorMode(path: string, mode: EditorMode): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(EDITOR_MODE_KEY_PREFIX + path, mode);
-  } catch {
-    // Storage disabled / out of quota — toggle still works for the session.
-  }
-}
-
-interface MobileTabsProps {
-  mobileView: "source" | "preview";
-  setMobileView: (next: "source" | "preview") => void;
-}
-
-function MobileTabs({ mobileView, setMobileView }: MobileTabsProps) {
-  return (
-    <div
-      className="wk-editor-mobile-tabs"
-      role="tablist"
-      data-testid="wk-editor-mobile-tabs"
-    >
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mobileView === "source"}
-        className={`wk-editor-mobile-tab${mobileView === "source" ? " is-active" : ""}`}
-        onClick={() => setMobileView("source")}
-        data-testid="wk-editor-mobile-source"
-      >
-        Source
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mobileView === "preview"}
-        className={
-          "wk-editor-mobile-tab" +
-          (mobileView === "preview" ? " is-active" : "")
-        }
-        onClick={() => setMobileView("preview")}
-        data-testid="wk-editor-mobile-preview"
-      >
-        Preview
-      </button>
-    </div>
-  );
-}
-
-interface SourcePaneProps {
-  path: string;
-  editorMode: EditorMode;
-  content: string;
-  setContent: (next: string) => void;
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
-  /** Catalog passed through to the rich editor for the mention picker
-   *  and broken-link detection. The textarea path doesn't use it. */
-  catalog: WikiCatalogEntry[];
-  /** Wikilink resolver passed to the rich editor so it flags broken links
-   *  the same way the preview pane does. The textarea path doesn't use it. */
-  resolver: (slug: string) => boolean;
-}
-
-/**
- * The left/source pane swaps between the textarea and the lazy Tiptap
- * surface based on `editorMode`. Pulled out of `WikiEditor` so the parent
- * stays under Biome's cognitive-complexity ceiling.
- */
-function SourcePane({
-  path,
-  editorMode,
-  content,
-  setContent,
-  textareaRef,
-  catalog,
-  resolver,
-}: SourcePaneProps) {
-  const labelText = `Article source (${path})`;
-  return (
-    <div className="wk-editor-pane wk-editor-pane--source">
-      <label
-        id="wk-editor-source-label"
-        className="wk-editor-label"
-        // The textarea only mounts in source mode, so `htmlFor` only points
-        // to it when relevant. In rich mode the wrapper uses
-        // `aria-labelledby` against this label's id so the visible text
-        // both labels the editor *and* clicks through, instead of being a
-        // detached caption with a duplicated `aria-label`.
-        htmlFor={editorMode === "source" ? "wk-editor-textarea" : undefined}
-      >
-        {labelText}
-      </label>
-      {editorMode === "rich" ? (
-        <Suspense
-          fallback={
-            <div
-              className="wk-editor-rich-fallback"
-              data-testid="wk-editor-rich-loading"
-            >
-              Loading rich editor…
-            </div>
-          }
-        >
-          <div
-            className="wk-editor-rich"
-            data-testid="wk-editor-rich"
-            aria-labelledby="wk-editor-source-label"
-          >
-            <TiptapWikiEditor
-              content={content}
-              onChange={setContent}
-              resolver={resolver}
-              catalog={catalog}
-              labelId="wk-editor-source-label"
-            />
-          </div>
-        </Suspense>
-      ) : (
-        <textarea
-          id="wk-editor-textarea"
-          ref={textareaRef}
-          className="wk-editor-textarea"
-          data-testid="wk-editor-textarea"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          spellCheck={true}
-          rows={28}
-        />
-      )}
-    </div>
-  );
-}
 
 interface WikiEditorProps {
   /** Target article path, e.g. `team/people/nazz.md`. */
@@ -179,8 +20,8 @@ interface WikiEditorProps {
   /** Server's last-edited timestamp for the article, used to decide whether
    *  a cached localStorage draft is newer than what's on disk. */
   serverLastEditedTs?: string;
-  /** Catalog used by the preview pane to resolve wikilinks and mark
-   *  broken ones. Pass the same list WikiArticle renders against. */
+  /** Catalog the rich editor uses to resolve wikilinks (mark broken ones) and
+   *  to power the mention picker. Pass the same list WikiArticle renders against. */
   catalog?: WikiCatalogEntry[];
   /** Called after a successful save so the parent can refetch. */
   onSaved: (newSha: string) => void;
@@ -206,12 +47,14 @@ function formatAgo(isoOrMs: string): string {
 }
 
 /**
- * Plain-markdown editor with autosaved drafts and a live preview pane.
+ * WYSIWYG-first wiki article editor with autosaved drafts.
  *
- * Editor state (draft restore/discard, autosave debounce, save, conflict
- * reload, mobile source/preview toggle) lives in `useWikiEditorController`
- * so the upcoming rich editor can share the same state machine. This
- * component owns presentation only: textarea, preview pane, banners.
+ * The Tiptap rich editor is the only editing surface — the former
+ * markdown-source textarea, the live ReactMarkdown preview pane, and the
+ * source/rich + preview toggles have been removed. This component owns
+ * presentation only (the rich editor body, draft/conflict/error banners, the
+ * commit input, and Save/Cancel); the draft/save/conflict/SHA state machine
+ * lives in `useWikiEditorController`.
  */
 export default function WikiEditor({
   path,
@@ -222,8 +65,6 @@ export default function WikiEditor({
   onSaved,
   onCancel,
 }: WikiEditorProps) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
   const {
     content,
     setContent,
@@ -233,13 +74,6 @@ export default function WikiEditor({
     error,
     conflict,
     draft,
-    previewOn,
-    setPreviewOn,
-    mobileView,
-    setMobileView,
-    isMobile,
-    showSource,
-    showPreview,
     handleRestoreDraft,
     handleDiscardDraft,
     handleSave,
@@ -260,47 +94,9 @@ export default function WikiEditor({
     (slug: string) => catalogSlugs.has(slug),
     [catalogSlugs],
   );
-  const remarkPlugins = useMemo(() => buildRemarkPlugins(resolver), [resolver]);
-  const rehypePlugins = useMemo(() => buildRehypePlugins(), []);
-  const markdownComponents = useMemo(
-    () => buildMarkdownComponents({ resolver, articlePath: path }),
-    [resolver, path],
-  );
-
-  // Per-article editor mode — persists across sessions so a user who picks
-  // Rich on a page they edit often gets it back next time without resetting.
-  //
-  // The mode is keyed to `path` *synchronously*: when the parent navigates
-  // to a different article, the new article's stored mode must apply on
-  // the very first render. A previous version held mode in `useState` and
-  // reset it via `useEffect`, which left mode one render behind path —
-  // a `rich -> source` navigation would mount Milkdown for one paint
-  // before correcting itself. Storing `{ path, mode }` lets us detect the
-  // stale snapshot and read storage inline when it doesn't match.
-  const [storedMode, setStoredMode] = useState<{
-    path: string;
-    mode: EditorMode;
-  }>(() => ({ path, mode: readEditorMode(path) }));
-  const editorMode: EditorMode =
-    storedMode.path === path ? storedMode.mode : readEditorMode(path);
-  useEffect(() => {
-    setStoredMode({ path, mode: readEditorMode(path) });
-  }, [path]);
-  const toggleEditorMode = useCallback(() => {
-    setStoredMode((prev) => {
-      const current: EditorMode =
-        prev.path === path ? prev.mode : readEditorMode(path);
-      const next: EditorMode = current === "rich" ? "source" : "rich";
-      writeEditorMode(path, next);
-      return { path, mode: next };
-    });
-  }, [path]);
 
   return (
-    <div
-      className={`wk-editor${previewOn ? " wk-editor--with-preview" : ""}`}
-      data-testid="wk-editor"
-    >
+    <div className="wk-editor" data-testid="wk-editor">
       {draft ? (
         <div
           className="wk-editor-banner wk-editor-banner--draft"
@@ -345,38 +141,37 @@ export default function WikiEditor({
           {error}
         </div>
       )}
-      {previewOn && isMobile ? (
-        <MobileTabs mobileView={mobileView} setMobileView={setMobileView} />
-      ) : null}
       <div className="wk-editor-panes">
-        {showSource ? (
-          <SourcePane
-            path={path}
-            editorMode={editorMode}
-            content={content}
-            setContent={setContent}
-            textareaRef={textareaRef}
-            catalog={catalog}
-            resolver={resolver}
-          />
-        ) : null}
-        {showPreview ? (
-          <div
-            className="wk-editor-pane wk-editor-pane--preview"
-            data-testid="wk-editor-preview"
-            aria-label="Live preview"
-          >
-            <div className="wk-editor-preview-body wk-article-body">
-              <ReactMarkdown
-                remarkPlugins={remarkPlugins}
-                rehypePlugins={rehypePlugins}
-                components={markdownComponents}
+        <div className="wk-editor-pane wk-editor-pane--rich">
+          {/* Visible region label. Rendered as a span (not a <label>) because
+              the editable control is the ProseMirror surface inside
+              TiptapWikiEditor, which references this id via aria-labelledby
+              (labelId) — a span avoids a control-less <label> while still
+              naming the editor for assistive tech. */}
+          <span id="wk-editor-source-label" className="wk-editor-label">
+            Editing {path}
+          </span>
+          <Suspense
+            fallback={
+              <div
+                className="wk-editor-rich-fallback"
+                data-testid="wk-editor-rich-loading"
               >
-                {content}
-              </ReactMarkdown>
+                Loading rich editor…
+              </div>
+            }
+          >
+            <div className="wk-editor-rich" data-testid="wk-editor-rich">
+              <TiptapWikiEditor
+                content={content}
+                onChange={setContent}
+                resolver={resolver}
+                catalog={catalog}
+                labelId="wk-editor-source-label"
+              />
             </div>
-          </div>
-        ) : null}
+          </Suspense>
+        </div>
       </div>
       <label className="wk-editor-label" htmlFor="wk-editor-commit-msg">
         Edit summary
@@ -403,49 +198,19 @@ export default function WikiEditor({
         <button
           type="button"
           className="wk-editor-cancel"
+          data-testid="wk-editor-cancel"
           onClick={onCancel}
           disabled={saving}
         >
           Cancel
         </button>
-        <button
-          type="button"
-          className={`wk-editor-preview-toggle${previewOn ? " is-on" : ""}`}
-          data-testid="wk-editor-preview-toggle"
-          aria-pressed={previewOn}
-          onClick={() => setPreviewOn((v) => !v)}
-        >
-          {previewOn ? "Hide preview" : "Preview"}
-        </button>
-        <button
-          type="button"
-          className={`wk-editor-mode-toggle${editorMode === "rich" ? " is-on" : ""}`}
-          data-testid="wk-editor-mode-toggle"
-          // Visible label names the *current* mode so it agrees with
-          // `aria-pressed`. Screen readers announce e.g. "Rich, pressed"
-          // when rich is active rather than the contradictory pairing of
-          // "Source, pressed" the previous implementation produced.
-          aria-pressed={editorMode === "rich"}
-          onClick={toggleEditorMode}
-        >
-          {editorMode === "rich" ? "Rich" : "Source"}
-        </button>
       </div>
       <p className="wk-editor-help">
-        Plain markdown. <code>[[slug]]</code> creates a wikilink. Saved as
-        commit author <strong>Human &lt;human@wuphf.local&gt;</strong>.{" "}
-        {editorMode === "rich" ? (
-          <>
-            Type <code>/</code> for inserts; <code>@</code> opens the mention
-            picker. Select text, then <code>Mod-e</code> adds a link and{" "}
-            <code>Mod-Shift-h</code> toggles highlight.
-          </>
-        ) : (
-          <>
-            Toggle <strong>Rich</strong> for slash commands and the mention
-            picker.
-          </>
-        )}
+        <code>[[slug]]</code> creates a wikilink. Saved as commit author{" "}
+        <strong>Human &lt;human@wuphf.local&gt;</strong>. Type <code>/</code>{" "}
+        for inserts; <code>@</code> opens the mention picker. Select text, then{" "}
+        <code>Mod-e</code> adds a link and <code>Mod-Shift-h</code> toggles
+        highlight.
       </p>
     </div>
   );

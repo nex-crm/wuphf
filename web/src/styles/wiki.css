@@ -1875,73 +1875,55 @@
   flex-direction: column;
   gap: 10px;
 }
-.wk-editor--with-preview .wk-editor-panes {
-  flex-direction: row;
-  gap: 14px;
-  align-items: stretch;
-}
 .wk-editor-pane {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
 }
-.wk-editor--with-preview .wk-editor-pane {
-  flex: 1 1 50%;
-}
-.wk-editor-pane--preview {
-  border: 1px solid var(--wk-border);
-  background: var(--wk-paper);
-  padding: 12px 14px;
-  overflow: auto;
-  min-height: 480px;
-}
-.wk-editor-preview-body {
-  font-family: var(--wk-serif, var(--wk-chrome));
-  color: var(--wk-text);
-  line-height: 1.6;
-}
-.wk-editor-preview-toggle {
-  font-family: var(--wk-chrome);
-  font-size: 14px;
-  padding: 8px 14px;
-  border: 1px solid var(--wk-border);
-  background: var(--wk-paper);
-  color: var(--wk-text);
-  cursor: pointer;
-  margin-left: auto;
-}
-.wk-editor-preview-toggle.is-on {
-  background: var(--wk-amber-banner);
-  border-color: var(--wk-amber);
-}
-.wk-editor-mobile-tabs {
+.wk-editor-rich {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--wk-border);
+  flex-direction: column;
 }
-.wk-editor-mobile-tab {
-  flex: 1;
+.wk-editor-rich-fallback {
+  min-height: 480px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper);
+  color: var(--wk-text-muted);
   font-family: var(--wk-chrome);
   font-size: 13px;
-  padding: 8px 12px;
-  border: none;
+}
+
+/* Article-view toolbar: holds the read-mode Delete affordance so a reader can
+   remove a page without hunting through the sidebar tree's kebab. */
+.wk-article-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 6px 0 0;
+}
+.wk-article-delete-btn {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--wk-text-muted);
+  color: var(--wk-wikilink-broken);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
 }
-.wk-editor-mobile-tab.is-active {
-  color: var(--wk-text);
-  border-bottom-color: var(--wk-wikilink);
+.wk-article-delete-btn:hover {
+  background: var(--wk-paper-dark);
+  border-color: var(--wk-wikilink-broken);
 }
-@media (max-width: 767px) {
-  .wk-editor--with-preview .wk-editor-panes {
-    flex-direction: column;
-  }
-  .wk-editor--with-preview .wk-editor-pane {
-    flex: 1 1 auto;
-  }
+.wk-article-delete-btn:focus-visible {
+  outline: 2px solid var(--wk-wikilink-broken);
+  outline-offset: 1px;
 }
 
 .wk-human-pill {
@@ -3392,7 +3374,10 @@
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  opacity: 0;
+  /* Resting state: dimmed but visible on every row so the actions menu (which
+     owns Delete) is discoverable without first hovering. Full opacity on
+     hover / focus / menu-open below. */
+  opacity: 0.55;
   transition:
     opacity 0.12s,
     background-color 0.12s,
@@ -3400,9 +3385,9 @@
 }
 .wk-tree2-row-inner:hover .wk-tree2-kebab,
 .wk-tree2-kebab[aria-expanded="true"],
-/* Keep the kebab visible while focused or when its row is keyboard-focused, so
-   keyboard users see (and can act on) the control instead of an invisible
-   hover-only target. */
+/* Keep the kebab fully visible while hovered, focused, when its row is
+   keyboard-focused, or while its menu is open, so both pointer and keyboard
+   users get a clear, actionable target rather than the dimmed resting state. */
 .wk-tree2-kebab:focus-visible,
 .wk-tree2-row:focus-within .wk-tree2-kebab,
 .wk-tree2-row:focus-visible .wk-tree2-kebab {

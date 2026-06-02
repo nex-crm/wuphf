@@ -10,6 +10,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api/wiki";
 import WikiEditor from "./WikiEditor";
 
+// The real Tiptap editor lazy-loads ProseMirror + a stack of extensions, which
+// is heavy and irrelevant to WikiEditor's wrapper responsibilities (draft /
+// conflict / error banners, the commit input, Save/Cancel wiring). Stub it with
+// a lightweight controlled textarea that mirrors the props.onChange contract so
+// these tests exercise the wrapper without mounting ProseMirror.
+vi.mock("./editor/TiptapWikiEditor", () => ({
+  default: ({
+    content,
+    onChange,
+  }: {
+    content: string;
+    onChange: (markdown: string) => void;
+  }) => (
+    <textarea
+      data-testid="wk-tiptap-stub"
+      value={content}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}));
+
 const PATH = "team/people/nazz.md";
 const DRAFT_KEY = `wuphf:draft:${PATH}`;
 const SERVER_TS = "2026-04-20T10:00:00.000Z";
@@ -25,7 +46,11 @@ function setLocalStorageDraft(
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
+/** The lazy editor resolves on a microtask; await the stub before asserting. */
+async function findStub(): Promise<HTMLTextAreaElement> {
+  return (await screen.findByTestId("wk-tiptap-stub")) as HTMLTextAreaElement;
+}
+
 describe("<WikiEditor>", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -36,7 +61,7 @@ describe("<WikiEditor>", () => {
     vi.useRealTimers();
   });
 
-  it("pre-fills the textarea with the article content and the expected SHA is sent on save", async () => {
+  it("mounts the rich editor seeded with the article content and sends the expected SHA on save", async () => {
     const spy = vi.spyOn(api, "writeHumanArticle").mockResolvedValue({
       path: PATH,
       commit_sha: "abc1234",
@@ -55,12 +80,10 @@ describe("<WikiEditor>", () => {
       />,
     );
 
-    const textarea = screen.getByTestId(
-      "wk-editor-textarea",
-    ) as HTMLTextAreaElement;
-    expect(textarea.value).toContain("Original.");
+    const editor = await findStub();
+    expect(editor.value).toContain("Original.");
 
-    fireEvent.change(textarea, { target: { value: "# Nazz\n\nEdited." } });
+    fireEvent.change(editor, { target: { value: "# Nazz\n\nEdited." } });
     fireEvent.change(screen.getByTestId("wk-editor-commit"), {
       target: { value: "fix wording" },
     });
@@ -94,6 +117,7 @@ describe("<WikiEditor>", () => {
         onCancel={() => {}}
       />,
     );
+    await findStub();
     fireEvent.click(screen.getByTestId("wk-editor-save"));
 
     const banner = await screen.findByText(/Someone else edited this article/);
@@ -103,7 +127,7 @@ describe("<WikiEditor>", () => {
     ).toBeInTheDocument();
   });
 
-  it("blocks save when the textarea is emptied", async () => {
+  it("blocks save and surfaces an error when the content is emptied", async () => {
     const spy = vi.spyOn(api, "writeHumanArticle");
     render(
       <WikiEditor
@@ -115,9 +139,8 @@ describe("<WikiEditor>", () => {
         onCancel={() => {}}
       />,
     );
-    fireEvent.change(screen.getByTestId("wk-editor-textarea"), {
-      target: { value: "   " },
-    });
+    const editor = await findStub();
+    fireEvent.change(editor, { target: { value: "   " } });
     fireEvent.click(screen.getByTestId("wk-editor-save"));
     expect(spy).not.toHaveBeenCalled();
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -125,7 +148,7 @@ describe("<WikiEditor>", () => {
     );
   });
 
-  it("cancels via the Cancel button", () => {
+  it("cancels via the Cancel button", async () => {
     const onCancel = vi.fn();
     render(
       <WikiEditor
@@ -137,14 +160,53 @@ describe("<WikiEditor>", () => {
         onCancel={onCancel}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await findStub();
+    fireEvent.click(screen.getByTestId("wk-editor-cancel"));
     expect(onCancel).toHaveBeenCalled();
   });
 
-  // ── Draft autosave ─────────────────────────────────────────────────
+  // ── Edit summary + help text ───────────────────────────────────────
+
+  it("renders the edit-summary commit input and the slash/mention help hints", async () => {
+    render(
+      <WikiEditor
+        path={PATH}
+        initialContent="body"
+        expectedSha="abc"
+        serverLastEditedTs={SERVER_TS}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    await findStub();
+    expect(screen.getByTestId("wk-editor-commit")).toBeInTheDocument();
+    expect(screen.getByText(/Edit summary/)).toBeInTheDocument();
+    const help = screen.getByText(/creates a wikilink/i);
+    expect(help.textContent ?? "").toMatch(/Mod-e/);
+    // The old plain-markdown / Rich-toggle wording is gone (the surviving
+    // "toggles highlight" hint is unrelated to the removed mode toggle).
+    expect(help.textContent ?? "").not.toMatch(/Plain markdown/i);
+    expect(help.textContent ?? "").not.toMatch(/toggle\s+rich/i);
+    // No source/preview/mode toggles or textarea remain.
+    expect(screen.queryByTestId("wk-editor-textarea")).toBeNull();
+    expect(screen.queryByTestId("wk-editor-mode-toggle")).toBeNull();
+    expect(screen.queryByTestId("wk-editor-preview-toggle")).toBeNull();
+    expect(screen.queryByTestId("wk-editor-mobile-tabs")).toBeNull();
+  });
+});
+
+// ── Draft autosave ───────────────────────────────────────────────────
+describe("<WikiEditor drafts>", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it("writes a debounced draft to localStorage after edits", async () => {
-    vi.useFakeTimers();
     render(
       <WikiEditor
         path={PATH}
@@ -155,9 +217,11 @@ describe("<WikiEditor>", () => {
         onCancel={() => {}}
       />,
     );
-    fireEvent.change(screen.getByTestId("wk-editor-textarea"), {
-      target: { value: "Edited locally." },
-    });
+    const editor = await findStub();
+    // Switch to fake timers only after the lazy chunk + initial effects have
+    // settled, so the debounce window is the only timer in flight.
+    vi.useFakeTimers();
+    fireEvent.change(editor, { target: { value: "Edited locally." } });
     // Before the debounce fires, nothing is persisted.
     expect(window.localStorage.getItem(DRAFT_KEY)).toBeNull();
     // Advance past the debounce window.
@@ -170,7 +234,7 @@ describe("<WikiEditor>", () => {
     expect(parsed.content).toBe("Edited locally.");
   });
 
-  it("shows the draft banner when localStorage has a newer draft than the server", () => {
+  it("shows the draft banner when localStorage has a newer draft than the server", async () => {
     const tenMinAfterServer = new Date(
       Date.parse(SERVER_TS) + 10 * 60 * 1000,
     ).toISOString();
@@ -186,10 +250,12 @@ describe("<WikiEditor>", () => {
         onCancel={() => {}}
       />,
     );
-    expect(screen.getByTestId("wk-editor-draft-banner")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("wk-editor-draft-banner"),
+    ).toBeInTheDocument();
   });
 
-  it("restore copies the draft into the textarea and hides the banner", () => {
+  it("restore copies the draft into the editor and hides the banner", async () => {
     const tenMinAfter = new Date(
       Date.parse(SERVER_TS) + 10 * 60 * 1000,
     ).toISOString();
@@ -205,17 +271,15 @@ describe("<WikiEditor>", () => {
         onCancel={() => {}}
       />,
     );
-    fireEvent.click(screen.getByTestId("wk-editor-draft-restore"));
-    const textarea = screen.getByTestId(
-      "wk-editor-textarea",
-    ) as HTMLTextAreaElement;
-    expect(textarea.value).toBe("# Nazz\n\nDraft text.");
+    fireEvent.click(await screen.findByTestId("wk-editor-draft-restore"));
+    const editor = await findStub();
+    expect(editor.value).toBe("# Nazz\n\nDraft text.");
     const commit = screen.getByTestId("wk-editor-commit") as HTMLInputElement;
     expect(commit.value).toBe("wip summary");
     expect(screen.queryByTestId("wk-editor-draft-banner")).toBeNull();
   });
 
-  it("discard clears the draft from localStorage and hides the banner", () => {
+  it("discard clears the draft from localStorage and hides the banner", async () => {
     const tenMinAfter = new Date(
       Date.parse(SERVER_TS) + 10 * 60 * 1000,
     ).toISOString();
@@ -231,12 +295,12 @@ describe("<WikiEditor>", () => {
         onCancel={() => {}}
       />,
     );
-    fireEvent.click(screen.getByTestId("wk-editor-draft-discard"));
+    fireEvent.click(await screen.findByTestId("wk-editor-draft-discard"));
     expect(window.localStorage.getItem(DRAFT_KEY)).toBeNull();
     expect(screen.queryByTestId("wk-editor-draft-banner")).toBeNull();
   });
 
-  it("hides the banner when the server is newer than the stored draft", () => {
+  it("hides the banner when the server is newer than the stored draft", async () => {
     // Draft saved before the server timestamp — the server won; draft stale.
     const oldDraft = new Date(
       Date.parse(SERVER_TS) - 10 * 60 * 1000,
@@ -253,6 +317,7 @@ describe("<WikiEditor>", () => {
         onCancel={() => {}}
       />,
     );
+    await findStub();
     expect(screen.queryByTestId("wk-editor-draft-banner")).toBeNull();
     // Stale draft should also be cleared.
     expect(window.localStorage.getItem(DRAFT_KEY)).toBeNull();
@@ -280,7 +345,7 @@ describe("<WikiEditor>", () => {
       />,
     );
     // Restore so content is non-empty + recognized as a real draft.
-    fireEvent.click(screen.getByTestId("wk-editor-draft-restore"));
+    fireEvent.click(await screen.findByTestId("wk-editor-draft-restore"));
     fireEvent.click(screen.getByTestId("wk-editor-save"));
     await waitFor(() =>
       expect(window.localStorage.getItem(DRAFT_KEY)).toBeNull(),
@@ -309,67 +374,12 @@ describe("<WikiEditor>", () => {
         onCancel={() => {}}
       />,
     );
-    fireEvent.click(screen.getByTestId("wk-editor-draft-restore"));
+    fireEvent.click(await screen.findByTestId("wk-editor-draft-restore"));
     fireEvent.click(screen.getByTestId("wk-editor-save"));
     await screen.findByText(/Someone else edited this article/);
     // The draft must survive so the user's work isn't lost.
     const raw = window.localStorage.getItem(DRAFT_KEY);
     expect(raw).not.toBeNull();
     expect(JSON.parse(raw as string).content).toBe("my body");
-  });
-
-  // ── Preview pane ───────────────────────────────────────────────────
-
-  it("preview toggle renders markdown with wikilinks via the shared pipeline", () => {
-    render(
-      <WikiEditor
-        path={PATH}
-        initialContent="See [[people/sarah-chen|Sarah]] for context."
-        expectedSha="abc"
-        serverLastEditedTs={SERVER_TS}
-        catalog={[
-          {
-            path: "people/sarah-chen",
-            title: "Sarah",
-            author_slug: "ceo",
-            last_edited_ts: SERVER_TS,
-            group: "people",
-          },
-        ]}
-        onSaved={() => {}}
-        onCancel={() => {}}
-      />,
-    );
-    // Preview is off initially.
-    expect(screen.queryByTestId("wk-editor-preview")).toBeNull();
-    fireEvent.click(screen.getByTestId("wk-editor-preview-toggle"));
-    const preview = screen.getByTestId("wk-editor-preview");
-    expect(preview).toBeInTheDocument();
-    // The wikilink in the preview resolves (not broken) and carries the
-    // shared pipeline's data-wikilink attribute.
-    const link = preview.querySelector('a[data-wikilink="true"]');
-    expect(link).not.toBeNull();
-    expect(link?.getAttribute("data-broken")).toBe("false");
-    expect(link?.textContent).toBe("Sarah");
-  });
-
-  it("preview renders image markdown through ImageEmbed", () => {
-    render(
-      <WikiEditor
-        path={PATH}
-        initialContent={"![logo](https://cdn.example.com/logo.png)"}
-        expectedSha="abc"
-        serverLastEditedTs={SERVER_TS}
-        onSaved={() => {}}
-        onCancel={() => {}}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("wk-editor-preview-toggle"));
-    const preview = screen.getByTestId("wk-editor-preview");
-    // ImageEmbed wraps the <img> in a <figure class="image-embed">.
-    expect(preview.querySelector("figure.image-embed")).not.toBeNull();
-    const img = preview.querySelector("img") as HTMLImageElement | null;
-    expect(img?.getAttribute("src")).toBe("https://cdn.example.com/logo.png");
-    expect(img?.getAttribute("referrerpolicy")).toBe("no-referrer");
   });
 });
