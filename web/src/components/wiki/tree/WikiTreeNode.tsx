@@ -8,6 +8,7 @@ import {
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 
 import type { WikiFSTreeNode } from "../../../api/wiki";
+import { type FileKind, fileKindForPath } from "../viewers/fileKind";
 import { baseName } from "./treeModel";
 
 /** Context-menu action requested for a node, handled by the parent tree. */
@@ -50,9 +51,34 @@ const ICON_BY_TYPE: Record<WikiFSTreeNode["type"], string> = {
   dir: "📁",
   page: "📄",
   file: "📎",
-  app: "📎",
-  website: "📎",
+  app: "🖥️",
+  website: "🌐",
 };
+
+// File leaves get an icon that reflects their type, classified the same way the
+// viewer dispatcher routes them (fileKindForPath is React/viewer-free by design).
+const FILE_GLYPH: Record<FileKind, string> = {
+  image: "🖼️",
+  media: "🎬",
+  pdf: "📕",
+  csv: "📊",
+  xlsx: "📊",
+  docx: "📘",
+  pptx: "📙",
+  notebook: "📓",
+  mermaid: "🔷",
+  source: "📜",
+  fallback: "📎",
+};
+
+/**
+ * The tree-row glyph for a node: file leaves reflect their file type; folders,
+ * pages, and embedded apps/websites use their structural icon.
+ */
+function glyphForNode(node: WikiFSTreeNode): string {
+  if (node.type === "file") return FILE_GLYPH[fileKindForPath(node.path)];
+  return ICON_BY_TYPE[node.type];
+}
 
 /**
  * One row in the wiki file tree, implemented as a WAI-ARIA `treeitem`. The
@@ -207,7 +233,7 @@ export default function WikiTreeNode({
             onClick={handleRowClick}
           >
             <span className="wk-tree2-icon" aria-hidden="true">
-              {ICON_BY_TYPE[node.type]}
+              {glyphForNode(node)}
             </span>
             <span className="wk-tree2-title">{node.title}</span>
             {/*
