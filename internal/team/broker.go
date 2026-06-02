@@ -566,6 +566,11 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/tree", b.requireAuth(b.handleWikiTree))
 	mux.HandleFunc("/wiki/file", b.requireAuth(b.handleWikiFile))
+	// /wiki/app/ serves embedded HTML app bundles WITHOUT requireAuth: a
+	// sandboxed app has an opaque origin and cannot send the bearer token, so
+	// (like /web-token) the handler's loopback RemoteAddr + Host gate is the
+	// boundary. Trailing slash = path-prefix route.
+	mux.HandleFunc("/wiki/app/", b.handleWikiApp)
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
 	mux.HandleFunc("/wiki/visual", b.requireAuth(b.handleWikiVisualArtifact))
 	mux.HandleFunc("/wiki/archive/sweep", b.requireAuth(b.handleWikiArchiveSweep))

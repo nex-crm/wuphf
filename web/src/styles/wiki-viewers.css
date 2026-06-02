@@ -17,11 +17,14 @@
  * Nex Dark, Noir Gold — render correctly with no hardcoded palette.
  */
 
-/* The file view has no right rail; collapse the wiki grid to two columns. */
-.wiki-layout[data-view="file"] {
+/* The file + app views have no right rail; collapse the wiki grid to two
+   columns. */
+.wiki-layout[data-view="file"],
+.wiki-layout[data-view="app"] {
   grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr);
 }
-.wiki-main--file {
+.wiki-main--file,
+.wiki-main--app {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -521,6 +524,45 @@
   border: 1px solid var(--wk-border-light);
   border-radius: var(--radius-sm, 6px);
   background: var(--wk-paper);
+}
+
+/* ─── Embedded app / website viewer ──────────────────────────────────────── */
+
+/* The embedded app fills the body edge-to-edge — its own chrome is inside the
+   sandboxed frame, so no inner padding. */
+.wk-viewer--website .wk-viewer__body {
+  padding: 0;
+  background: var(--wk-paper-dark);
+}
+
+/* Pushes the toolbar actions to the trailing edge (the same role as the inline
+   flex spacer the fallback viewer uses, named so it reads in the markup). */
+.wk-website-frame-spacer {
+  flex: 1 1 auto;
+}
+
+.wk-website-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  /* A white-ish surface so apps that assume a light page background do not
+     render unreadable text before their own styles load; --wk-paper tracks the
+     theme so it stays legible across Nex Light / Dark / Noir Gold. */
+  background: var(--wk-paper);
+}
+
+/* Full-screen: lift the whole viewer out of the wiki grid to cover the
+   workspace. The sidebar is collapsed in JS (shared app store) on enter and
+   restored on exit; this just owns the geometry. z-index sits below the app's
+   modal hosts (lightbox uses 1000) so global overlays still win. */
+.wk-viewer--website.wk-viewer--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  height: 100vh;
+  background: var(--wk-paper);
+  box-shadow: var(--wk-shadow-popover);
 }
 
 /* ─── Spinner (shared with the tree) ─────────────────────────────────────── */

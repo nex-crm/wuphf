@@ -167,6 +167,41 @@ export function wikiFileUrl(path: string): string {
   return `${base}${sep}path=${encodeURIComponent(path)}`;
 }
 
+/**
+ * Build the embedded-app entry URL for an app/website cabinet folder. `folderPath`
+ * is a repo-root-relative directory under `team/` (e.g. "team/site/dashboard");
+ * the broker serves the folder's `index.html` from GET /wiki/app/<folderPath>/index.html
+ * with relative assets (./styles.css, ./app.js) resolving against the same path.
+ *
+ * Unlike wikiFileUrl, this URL carries NO auth token. The route is served on the
+ * loopback origin and the app loads inside a sandboxed iframe WITHOUT
+ * allow-same-origin (see WebsiteViewer); embedding the broker token in the URL
+ * would hand a bearer credential to untrusted, agent-authored app code, which
+ * could then exfiltrate it. We pick the same base as sseURL (proxy `/api` prefix
+ * vs the direct broker origin) but strip the `?token=...` query the SSE helper
+ * appends so only the bare path crosses into the sandbox.
+ *
+ * Each path segment is URL-encoded but the slash separators are preserved so the
+ * broker still routes on the folder hierarchy.
+ */
+export function appUrl(folderPath: string): string {
+  // sseURL gives us the right base (proxy vs direct broker) but appends the
+  // auth token as `?token=...` in direct mode. Strip everything from the first
+  // `?` so the token never rides into the sandboxed app.
+  const baseWithToken = sseURL("/wiki/app");
+  const base = baseWithToken.split("?")[0];
+
+  const encoded = String(folderPath)
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  return `${base}/${encoded}/index.html`;
+}
+
 // ── Cabinet page mutations (Slice 2 — create / move / rename / delete) ─────────
 //
 // These drive the drag-and-drop file tree in components/wiki/tree. Each maps to

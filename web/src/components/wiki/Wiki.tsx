@@ -10,7 +10,9 @@ import {
   type WikiCatalogEntry,
 } from "../../api/wiki";
 import EditLogFooter from "./EditLogFooter";
+import { APP_NAV_PREFIX } from "./tree/WikiTree";
 import FileViewer, { isMarkdownPath } from "./viewers/FileViewer";
+import WebsiteViewer from "./WebsiteViewer";
 import WikiArticle from "./WikiArticle";
 import WikiAudit from "./WikiAudit";
 import WikiCatalog from "./WikiCatalog";
@@ -24,7 +26,21 @@ import "../../styles/wiki-viewers.css";
 const AUDIT_PATH = "_audit";
 // Reserved pseudo-path for the lint view.
 const LINT_PATH = "_lint";
-type WikiView = "audit" | "lint" | "article" | "file" | "catalog";
+type WikiView = "audit" | "lint" | "article" | "file" | "app" | "catalog";
+
+/**
+ * True when `path` targets an embedded app/website folder. The tree prepends
+ * APP_NAV_PREFIX when opening an app/website leaf (see WikiTree.openLeaf); we
+ * route those to WebsiteViewer rather than the article/file view.
+ */
+function isAppPath(path: string): boolean {
+  return path.startsWith(APP_NAV_PREFIX);
+}
+
+/** Strip the APP_NAV_PREFIX sentinel back off to recover the real folder path. */
+function appFolderPath(path: string): string {
+  return path.slice(APP_NAV_PREFIX.length);
+}
 
 /**
  * True when an active path should open in the non-article FileViewer rather
@@ -131,7 +147,16 @@ export default function Wiki({
   const isAudit = view === "audit";
   const isLint = view === "lint";
   const isFile = view === "file";
+  const isApp = view === "app";
   const editLogHistoryPath = wikiHistoryPath(articlePath, view);
+  // The app view navigates with the APP_NAV_PREFIX sentinel; strip it so the
+  // sidebar tree can still highlight the underlying folder, and so the viewer
+  // receives the real folder path.
+  const appPath = isApp && articlePath ? appFolderPath(articlePath) : null;
+  // The audit/lint pseudo-views have no tree selection; the app view highlights
+  // the underlying folder rather than the prefixed sentinel string.
+  const sidebarCurrentPath =
+    isAudit || isLint ? null : (appPath ?? articlePath);
 
   return (
     <div className="wiki-root" data-testid="wiki-root">
@@ -139,7 +164,7 @@ export default function Wiki({
         <WikiSidebar
           catalog={catalog}
           sections={sections}
-          currentPath={isAudit || isLint ? null : articlePath}
+          currentPath={sidebarCurrentPath}
           onNavigate={(path) => onNavigate(path)}
           onNavigateAudit={() => onNavigate(AUDIT_PATH)}
           onNavigateLint={() => onNavigate(LINT_PATH)}
@@ -150,6 +175,10 @@ export default function Wiki({
           <WikiAudit onNavigate={(path) => onNavigate(path)} />
         ) : isLint ? (
           <WikiLint onNavigate={(path) => onNavigate(path)} />
+        ) : isApp && appPath ? (
+          <div className="wiki-main wiki-main--app" data-testid="wiki-app">
+            <WebsiteViewer path={appPath} onExit={() => onNavigate(null)} />
+          </div>
         ) : isFile && articlePath ? (
           <div className="wiki-main wiki-main--file" data-testid="wiki-file">
             <FileViewer path={articlePath} />
@@ -183,6 +212,7 @@ function wikiViewFor(articlePath: string | null | undefined): WikiView {
   if (articlePath === AUDIT_PATH) return "audit";
   if (articlePath === LINT_PATH) return "lint";
   if (!articlePath) return "catalog";
+  if (isAppPath(articlePath)) return "app";
   return isFilePath(articlePath) ? "file" : "article";
 }
 

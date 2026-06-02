@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WikiFSTreeNode } from "../../../api/wiki";
 import * as wiki from "../../../api/wiki";
-import WikiTree from "./WikiTree";
+import WikiTree, { APP_NAV_PREFIX } from "./WikiTree";
 
 const TREE: WikiFSTreeNode[] = [
   {
@@ -95,7 +95,7 @@ describe("<WikiTree>", () => {
     expect(onNavigate).toHaveBeenCalledWith("team/assets/report.pdf");
   });
 
-  it("shows a coming-soon note for an app leaf instead of navigating", async () => {
+  it("navigates an app leaf with the APP_NAV_PREFIX sentinel so the embedded viewer opens", async () => {
     const onNavigate = vi.fn();
     render(<WikiTree onNavigate={onNavigate} />);
 
@@ -103,12 +103,15 @@ describe("<WikiTree>", () => {
     fireEvent.click(screen.getByRole("button", { name: /Expand Assets/i }));
     fireEvent.click(screen.getByText("Dashboard"));
 
-    expect(onNavigate).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(
-        screen.getAllByText(/opens as an app — coming soon/i).length,
-      ).toBeGreaterThan(0),
+    // App/website leaves route through the sentinel-prefixed path so Wiki mounts
+    // the embedded WebsiteViewer rather than the article/file view.
+    expect(onNavigate).toHaveBeenCalledWith(
+      `${APP_NAV_PREFIX}team/assets/dashboard`,
     );
+    // No more "coming soon" placeholder for app leaves.
+    expect(
+      screen.queryByText(/opens as an app — coming soon/i),
+    ).not.toBeInTheDocument();
   });
 
   it("uploads a file from the Upload dialog into the chosen folder", async () => {

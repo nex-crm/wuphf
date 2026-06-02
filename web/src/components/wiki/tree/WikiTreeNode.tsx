@@ -61,9 +61,9 @@ const ICON_BY_TYPE: Record<WikiFSTreeNode["type"], string> = {
  * inner controls (caret, kebab) are reached contextually via the keyboard
  * (arrows) or pointer rather than as separate tab stops.
  *
- * Pages navigate on click; file/app/website leaves are still clickable but full
- * viewers land in a later slice, so they carry a tooltip explaining the
- * placeholder behaviour.
+ * Pages navigate on click; file leaves open the in-app file viewer; app/website
+ * leaves open the embedded sandboxed app viewer. The tooltip reflects each
+ * destination so the click target is never a surprise.
  */
 export default function WikiTreeNode({
   node,
@@ -121,9 +121,8 @@ export default function WikiTreeNode({
     onSelect(node);
   };
 
-  // Pages open the article view; file leaves open the in-app file viewer.
-  // App/website leaves are embedded surfaces that land in a later slice, so
-  // their tooltip explains the placeholder rather than promising a viewer.
+  // Pages open the article view; file leaves open the in-app file viewer;
+  // app/website leaves open the embedded sandboxed app viewer.
   const leafTitle = rowTooltip(node);
 
   // dnd-kit's useDraggable injects aria-roledescription="draggable" plus an
@@ -211,6 +210,14 @@ export default function WikiTreeNode({
               {ICON_BY_TYPE[node.type]}
             </span>
             <span className="wk-tree2-title">{node.title}</span>
+            {/*
+              App/website leaves share the generic paperclip glyph with file
+              leaves, so for AT the title alone would not say they open as an
+              embedded app. Append a visually-hidden suffix so screen readers
+              announce e.g. "Dashboard (app)" while the visible title stays
+              clean. The icon is aria-hidden, so this is the only naming cue.
+            */}
+            <LeafTypeSuffix node={node} />
             {busy ? (
               <span
                 className="wk-spinner wk-tree2-spinner"
@@ -454,16 +461,30 @@ function stripExt(name: string): string {
 }
 
 /**
- * Tooltip text for a row's label. App/website leaves are embedded surfaces that
- * land in a later slice, so their tooltip explains the placeholder; pages and
- * file leaves both open in-app (article view / file viewer), so they just show
- * their path.
+ * Tooltip text for a row's label. App/website leaves open the embedded
+ * sandboxed app viewer, so their tooltip says so; pages and file leaves both
+ * open in-app (article view / file viewer), so they just show their path.
  */
 function rowTooltip(node: WikiFSTreeNode): string {
   if (node.type === "app" || node.type === "website") {
-    return "Opens as an app — coming soon";
+    return `Opens as an app — ${node.path}`;
   }
   return node.path;
+}
+
+/**
+ * Visually-hidden suffix appended to a leaf's accessible name so AT can tell
+ * app/website leaves apart from plain files (they all render the same paperclip
+ * glyph). Renders nothing for every other node type, so the accessible name is
+ * unchanged. Kept as its own component so the branch stays out of the row's
+ * render path.
+ */
+function LeafTypeSuffix({ node }: { node: WikiFSTreeNode }) {
+  if (node.type === "app") return <span className="sr-only"> (app)</span>;
+  if (node.type === "website") {
+    return <span className="sr-only"> (website)</span>;
+  }
+  return null;
 }
 
 interface RenameInputProps {
