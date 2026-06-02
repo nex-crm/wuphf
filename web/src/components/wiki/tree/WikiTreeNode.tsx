@@ -84,7 +84,6 @@ export default function WikiTreeNode({
   children,
 }: WikiTreeNodeProps) {
   const isDir = node.type === "dir";
-  const isLeafNode = !isDir;
   const rowRef = useRef<HTMLDivElement | null>(null);
 
   // Roving focus: when this row becomes the active one, pull DOM focus to it so
@@ -122,10 +121,10 @@ export default function WikiTreeNode({
     onSelect(node);
   };
 
-  const leafTitle =
-    isLeafNode && node.type !== "page"
-      ? "Viewer coming soon — opens the page view for now"
-      : node.path;
+  // Pages open the article view; file leaves open the in-app file viewer.
+  // App/website leaves are embedded surfaces that land in a later slice, so
+  // their tooltip explains the placeholder rather than promising a viewer.
+  const leafTitle = rowTooltip(node);
 
   // dnd-kit's useDraggable injects aria-roledescription="draggable" plus an
   // aria-describedby pointing at its drag instructions. We do NOT register a
@@ -452,6 +451,19 @@ function RowMenu({ node, isDir, onMenuAction, kebabTabIndex }: RowMenuProps) {
 
 function stripExt(name: string): string {
   return name.replace(/\.md$/, "");
+}
+
+/**
+ * Tooltip text for a row's label. App/website leaves are embedded surfaces that
+ * land in a later slice, so their tooltip explains the placeholder; pages and
+ * file leaves both open in-app (article view / file viewer), so they just show
+ * their path.
+ */
+function rowTooltip(node: WikiFSTreeNode): string {
+  if (node.type === "app" || node.type === "website") {
+    return "Opens as an app — coming soon";
+  }
+  return node.path;
 }
 
 interface RenameInputProps {

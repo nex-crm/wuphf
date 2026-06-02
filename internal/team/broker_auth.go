@@ -174,6 +174,12 @@ func humanRouteAllowed(r *http.Request) bool {
 			"/wiki/page/create",
 			"/wiki/page/move",
 			"/wiki/page/rename",
+			// POST /wiki/upload (cabinet tree asset upload) is a human wiki
+			// authoring write on the same footing as the page-ops routes above:
+			// the destination is confined to team/ and the executable-extension
+			// blocklist runs in the handler. Allowed here so the upload action
+			// does not 403 in a human session.
+			"/wiki/upload",
 			"/notebook/visual-artifacts":
 			return true
 		}

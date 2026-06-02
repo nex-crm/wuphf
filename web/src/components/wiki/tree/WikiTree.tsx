@@ -1,5 +1,6 @@
 import {
   Fragment,
+  type DragEvent as ReactDragEvent,
   type ReactNode,
   useEffect,
   useMemo,
@@ -28,6 +29,7 @@ import {
   fetchWikiTree,
   movePage,
   renamePage,
+  uploadWikiFile,
   type WikiFSTreeNode,
 } from "../../../api/wiki";
 import { useFocusTrap } from "../editor/inserts/useFocusTrap";
@@ -106,6 +108,10 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
   const [moveState, setMoveState] = useState<MoveState | null>(null);
   const [newPageOpen, setNewPageOpen] = useState(false);
   const [newSubpageParent, setNewSubpageParent] = useState<string | null>(null);
+  // Upload dialog: when open, holds the destination folder it was opened for
+  // (null = let the user pick). A drop onto a folder opens it pre-targeted.
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadDir, setUploadDir] = useState<string | null>(null);
   const [note, setNote] = useState<Note | null>(null);
   // Roving-tabindex active row: the single treeitem that owns the tab stop.
   const [activePath, setActivePath] = useState<string | null>(null);
@@ -176,7 +182,39 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
     onError: (err: unknown) => setNote(errorNote(err, "Create failed")),
   });
 
+  const uploadMutation = useMutation({
+    mutationFn: ({ dir, file }: { dir: string; file: File }) =>
+      uploadWikiFile(dir, file),
+    onSuccess: async (result) => {
+      await refetchTree();
+      setUploadOpen(false);
+      setUploadDir(null);
+      setNote({ kind: "info", text: `Uploaded ${baseName(result.path)}.` });
+    },
+    onError: (err: unknown) => setNote(errorNote(err, "Upload failed")),
+  });
+
   const busyPath = activeBusyPath(moveMutation, renameMutation, deleteMutation);
+
+  // Open a leaf: pages route to the article view and file leaves to the in-app
+  // file viewer (both via onNavigate); app/website leaves are embedded surfaces
+  // that land in a later slice, so they surface an informational note instead
+  // of navigating to a viewer that does not exist yet.
+  const openLeaf = (node: WikiFSTreeNode) => {
+    if (node.type === "app" || node.type === "website") {
+      setNote({
+        kind: "info",
+        text: `“${node.title}” opens as an app — coming soon.`,
+      });
+      return;
+    }
+    onNavigate(node.path);
+  };
+  const openLeafByPath = (path: string) => {
+    const node = findNode(nodes, path);
+    if (node) openLeaf(node);
+    else onNavigate(path);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -231,7 +269,7 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
     expand,
     collapse,
     toggle,
-    onOpenLeaf: onNavigate,
+    onOpenLeaf: openLeafByPath,
   });
 
   const handleDragOver = (event: DragOverEvent) => {
@@ -251,6 +289,43 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
     const payload = dropToMove(fromPath, overNode);
     if (!payload) return;
     moveMutation.mutate(payload);
+  };
+
+  // Native OS file drop onto the tree. dnd-kit only handles internal page
+  // drags (those carry no DataTransfer Files), so we read the drop target's
+  // enclosing folder from the row under the cursor and open the upload dialog
+  // pre-targeted there. A drop outside any folder defaults to the team root.
+  const dropTargetDir = (target: EventTarget | null): string => {
+    const el =
+      target instanceof Element ? target.closest("[data-node-path]") : null;
+    const path = el?.getAttribute("data-node-path");
+    if (!path) return "team";
+    const node = findNode(nodes, path);
+    if (!node) return "team";
+    return node.type === "dir" ? node.path : parentDir(node.path) || "team";
+  };
+
+  const isFileDrag = (event: ReactDragEvent): boolean =>
+    Array.from(event.dataTransfer?.types ?? []).includes("Files");
+
+  const handleFileDragOver = (event: ReactDragEvent) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleFileDrop = (event: ReactDragEvent) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    const file = event.dataTransfer.files?.[0];
+    const dir = dropTargetDir(event.target);
+    if (!file) {
+      setUploadDir(dir);
+      setUploadOpen(true);
+      return;
+    }
+    setNote(null);
+    uploadMutation.mutate({ dir, file });
   };
 
   const handleMenuAction = (action: NodeMenuAction, node: WikiFSTreeNode) => {
@@ -290,6 +365,17 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
           }}
         >
           + New page
+        </button>
+        <button
+          type="button"
+          className="wk-tree2-new wk-tree2-upload"
+          onClick={() => {
+            setNote(null);
+            setUploadDir(null);
+            setUploadOpen(true);
+          }}
+        >
+          Upload file
         </button>
       </div>
 
@@ -346,7 +432,18 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
             roles (tree/treeitem/group) live on neutral containers, per the
             WAI-ARIA tree pattern.
           */}
-          <div className="wk-tree2-list" role="tree" aria-label="Wiki files">
+          {/*
+            Native OS file-drop target. dnd-kit owns internal page drags; a
+            drag carrying DataTransfer Files is an OS upload, which we route to
+            uploadMutation against the folder under the cursor.
+          */}
+          <div
+            className="wk-tree2-list"
+            role="tree"
+            aria-label="Wiki files"
+            onDragOver={handleFileDragOver}
+            onDrop={handleFileDrop}
+          >
             <TreeBranch
               level={filtered}
               depth={0}
@@ -362,7 +459,7 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
                   }
                   busy={busyPath === node.path}
                   onToggle={toggle}
-                  onSelect={(n) => onNavigate(n.path)}
+                  onSelect={openLeaf}
                   onMenuAction={handleMenuAction}
                   onRowKeyDown={handleRowKeyDown}
                   onActivate={setActivePath}
@@ -416,6 +513,19 @@ function WikiTreeInner({ currentPath, onNavigate }: WikiTreeProps) {
           pending={createMutation.isPending}
           onCancel={() => setNewPageOpen(false)}
           onConfirm={(path, title) => createMutation.mutate({ path, title })}
+        />
+      ) : null}
+
+      {uploadOpen ? (
+        <UploadDialog
+          initialDir={uploadDir}
+          nodes={nodes}
+          pending={uploadMutation.isPending}
+          onCancel={() => {
+            setUploadOpen(false);
+            setUploadDir(null);
+          }}
+          onConfirm={(dir, file) => uploadMutation.mutate({ dir, file })}
         />
       ) : null}
     </div>
@@ -867,6 +977,126 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+// ── Upload dialog ────────────────────────────────────────────────────────────
+
+interface UploadDialogProps {
+  /** Folder a drop pre-targeted, or null to let the user pick. */
+  initialDir: string | null;
+  nodes: WikiFSTreeNode[];
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: (dir: string, file: File) => void;
+}
+
+function UploadDialog({
+  initialDir,
+  nodes,
+  pending,
+  onCancel,
+  onConfirm,
+}: UploadDialogProps) {
+  const dirs = useMemo(() => collectFolderDirs(nodes, " never"), [nodes]);
+  const [dest, setDest] = useState<string>(
+    initialDir ?? dirs[0]?.path ?? "team",
+  );
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const trapRef = useFocusTrap<HTMLDivElement>();
+
+  const submit = () => {
+    setError(null);
+    if (!file) {
+      setError("Choose a file to upload.");
+      return;
+    }
+    onConfirm(dest, file);
+  };
+
+  return (
+    <div
+      ref={trapRef}
+      className="wk-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wk-tree2-upload-title"
+      data-testid="wk-tree-upload"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+    >
+      <div className="wk-modal wk-tree2-modal">
+        <h2 id="wk-tree2-upload-title">Upload file</h2>
+
+        <label className="wk-editor-label" htmlFor="wk-tree2-upload-dest">
+          Folder
+        </label>
+        <select
+          id="wk-tree2-upload-dest"
+          className="wk-editor-commit"
+          value={dest}
+          onChange={(e) => setDest(e.target.value)}
+        >
+          {dirs.map((d) => (
+            <option key={d.path || "__root__"} value={d.path}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+
+        <label className="wk-editor-label" htmlFor="wk-tree2-upload-file">
+          File
+        </label>
+        <input
+          id="wk-tree2-upload-file"
+          className="wk-editor-commit"
+          type="file"
+          onChange={(e) => {
+            setError(null);
+            setFile(e.target.files?.[0] ?? null);
+          }}
+        />
+
+        {file ? (
+          <p className="wk-editor-help">
+            Will upload <code>{file.name}</code> to <code>{dest}</code>
+          </p>
+        ) : null}
+
+        {error ? (
+          <div
+            className="wk-editor-banner wk-editor-banner--error"
+            role="alert"
+          >
+            {error}
+          </div>
+        ) : null}
+
+        <div className="wk-editor-actions">
+          <button
+            type="button"
+            className="wk-editor-save"
+            onClick={submit}
+            disabled={pending}
+          >
+            {pending ? "Uploading…" : "Upload"}
+          </button>
+          <button
+            type="button"
+            className="wk-editor-cancel"
+            onClick={onCancel}
+            disabled={pending}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // Re-export the query key + findNode for callers/tests that want to seed or

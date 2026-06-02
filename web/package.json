@@ -107,6 +107,10 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "docx-preview": "^0.3.7",
+    "pptx-preview": "^1.0.7",
+    "mermaid": "^11.14.0",
     "zustand": "^5.0.5"
   },
   "devDependencies": {

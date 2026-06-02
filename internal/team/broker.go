@@ -580,6 +580,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/page/create", b.requireAuth(b.handleWikiPageCreate))
 	mux.HandleFunc("/wiki/page/move", b.requireAuth(b.handleWikiPageMove))
 	mux.HandleFunc("/wiki/page/rename", b.requireAuth(b.handleWikiPageRename))
+	mux.HandleFunc("/wiki/upload", b.requireAuth(b.handleWikiUpload))
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/entry", b.requireAuth(b.handleNotebookEntry))

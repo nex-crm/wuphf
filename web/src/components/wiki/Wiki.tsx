@@ -10,19 +10,39 @@ import {
   type WikiCatalogEntry,
 } from "../../api/wiki";
 import EditLogFooter from "./EditLogFooter";
+import FileViewer, { isMarkdownPath } from "./viewers/FileViewer";
 import WikiArticle from "./WikiArticle";
 import WikiAudit from "./WikiAudit";
 import WikiCatalog from "./WikiCatalog";
 import WikiLint from "./WikiLint";
 import WikiSidebar, { type SidebarSkill } from "./WikiSidebar";
 import "../../styles/wiki.css";
+import "../../styles/wiki-viewers.css";
 
 // Reserved pseudo-path for the audit view. Never collides with a real
 // article because real articles must live under `team/` and end in `.md`.
 const AUDIT_PATH = "_audit";
 // Reserved pseudo-path for the lint view.
 const LINT_PATH = "_lint";
-type WikiView = "audit" | "lint" | "article" | "catalog";
+type WikiView = "audit" | "lint" | "article" | "file" | "catalog";
+
+/**
+ * True when an active path should open in the non-article FileViewer rather
+ * than the markdown article view. Pseudo-paths (`_audit`/`_lint`) and bare
+ * slugs / `.md` paths stay on the article path; anything with a non-markdown
+ * extension (team/assets/x.pdf, .png, .csv, …) is a cabinet file.
+ *
+ * A bare slug like `people/nazz` has no extension and resolves to an article
+ * via fetchArticle's candidate paths, so it correctly stays out of this branch.
+ */
+function isFilePath(path: string): boolean {
+  if (path === AUDIT_PATH || path === LINT_PATH) return false;
+  const leaf = path.split("/").pop() ?? path;
+  const dot = leaf.lastIndexOf(".");
+  // No extension → treat as an article slug/path, not a file.
+  if (dot <= 0 || dot === leaf.length - 1) return false;
+  return !isMarkdownPath(path);
+}
 
 interface WikiProps {
   /** When set, renders the article view for this path; otherwise renders the catalog. */
@@ -110,6 +130,7 @@ export default function Wiki({
   const view = wikiViewFor(articlePath);
   const isAudit = view === "audit";
   const isLint = view === "lint";
+  const isFile = view === "file";
   const editLogHistoryPath = wikiHistoryPath(articlePath, view);
 
   return (
@@ -129,6 +150,10 @@ export default function Wiki({
           <WikiAudit onNavigate={(path) => onNavigate(path)} />
         ) : isLint ? (
           <WikiLint onNavigate={(path) => onNavigate(path)} />
+        ) : isFile && articlePath ? (
+          <div className="wiki-main wiki-main--file" data-testid="wiki-file">
+            <FileViewer path={articlePath} />
+          </div>
         ) : articlePath ? (
           <WikiArticle
             path={articlePath}
@@ -157,7 +182,8 @@ export default function Wiki({
 function wikiViewFor(articlePath: string | null | undefined): WikiView {
   if (articlePath === AUDIT_PATH) return "audit";
   if (articlePath === LINT_PATH) return "lint";
-  return articlePath ? "article" : "catalog";
+  if (!articlePath) return "catalog";
+  return isFilePath(articlePath) ? "file" : "article";
 }
 
 function wikiHistoryPath(

@@ -1,0 +1,532 @@
+/*
+ * Cabinet file viewers — shared chrome + per-viewer specifics.
+ *
+ * Every viewer (image / media / pdf / source / csv / xlsx / docx / pptx /
+ * notebook / mermaid) and the fallback card render the same skeleton:
+ *
+ *   .wk-viewer                      outer section, fills the main pane
+ *     .wk-viewer__toolbar           filename + actions strip across the top
+ *     .wk-viewer__body              scrollable content region
+ *       .wk-viewer__loading         "Loading …" placeholder (role=status)
+ *       .wk-viewer__empty           "nothing to show" state
+ *       .wk-viewer__error           failure state (role=alert)
+ *
+ * Colours come only from the --wk-* aliases (defined at :root in wiki.css,
+ * each an alias of a global token) plus a few global tokens (--radius-*,
+ * --accent, --scrim, --shadow-popover), so all three themes — Nex Light,
+ * Nex Dark, Noir Gold — render correctly with no hardcoded palette.
+ */
+
+/* The file view has no right rail; collapse the wiki grid to two columns. */
+.wiki-layout[data-view="file"] {
+  grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr);
+}
+.wiki-main--file {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Shared viewer skeleton ─────────────────────────────────────────────── */
+
+.wk-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  background: var(--wk-paper);
+  color: var(--wk-text);
+  font-family: var(--wk-chrome);
+}
+
+.wk-viewer__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--wk-border);
+  background: var(--wk-surface);
+  font-size: 13px;
+  min-height: 44px;
+}
+
+.wk-viewer__filename {
+  font-weight: 600;
+  color: var(--wk-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60ch;
+}
+
+.wk-viewer__kind {
+  flex: 0 0 auto;
+  font-size: var(--text-2xs, 11px);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wk-text-muted);
+  background: var(--wk-code-bg);
+  border: 1px solid var(--wk-border-light);
+  border-radius: var(--radius-full, 999px);
+  padding: 2px 8px;
+}
+
+.wk-viewer__action {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--wk-text-muted);
+  background: transparent;
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 4px 10px;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.wk-viewer__action:hover {
+  color: var(--wk-text);
+  border-color: var(--wk-border-strong);
+  background: var(--wk-code-bg);
+}
+.wk-viewer__action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.wk-viewer__action[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.wk-viewer__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Loading / empty / error share a centred, muted layout. */
+.wk-viewer__loading,
+.wk-viewer__empty,
+.wk-viewer__error,
+.wk-viewer__notice {
+  font-family: var(--wk-chrome);
+}
+.wk-viewer__loading,
+.wk-viewer__empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--wk-text-muted);
+  font-size: 13px;
+}
+.wk-viewer__empty-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--wk-text);
+}
+.wk-viewer__empty p {
+  margin: 0;
+  max-width: 48ch;
+  line-height: 1.55;
+}
+.wk-viewer__empty code,
+.wk-viewer__error code {
+  font-family: var(--wk-mono);
+  font-size: 0.92em;
+  background: var(--wk-code-bg);
+  border-radius: var(--radius-sm, 6px);
+  padding: 1px 5px;
+}
+
+.wk-viewer__error {
+  margin: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--wk-border);
+  border-left: 3px solid var(--red, #c0392b);
+  border-radius: var(--radius-md, 8px);
+  background: var(--wk-surface);
+  color: var(--wk-text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.wk-viewer__error p {
+  margin: 0 0 6px;
+}
+.wk-viewer__error a {
+  color: var(--accent);
+}
+
+.wk-viewer__notice {
+  margin: 12px 16px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--wk-border-light);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--wk-amber-banner, var(--wk-code-bg));
+  color: var(--wk-text-muted);
+  font-size: 12px;
+}
+
+/* The dispatcher's Suspense fallback reuses the loading shell. */
+.wk-viewer--loading-shell {
+  height: 100%;
+}
+
+/* ─── Image viewer + lightbox ────────────────────────────────────────────── */
+
+.wk-viewer--image .wk-viewer__body,
+.wk-viewer--media .wk-viewer__body {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--wk-paper-dark);
+}
+.wk-viewer__zoom {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: zoom-in;
+  max-width: 100%;
+  max-height: 100%;
+  display: inline-flex;
+}
+.wk-viewer__zoom:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.wk-viewer__media {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm, 6px);
+}
+.wk-viewer__audio {
+  width: min(560px, 100%);
+  height: auto;
+}
+
+.wk-viewer__lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: var(--scrim, rgba(0, 0, 0, 0.72));
+}
+.wk-viewer__lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-out;
+}
+.wk-viewer__lightbox-media {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--wk-shadow-popover);
+}
+.wk-viewer__lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--overlay-white-soft, rgba(255, 255, 255, 0.4));
+  border-radius: var(--radius-full, 999px);
+  background: var(--overlay-strong, rgba(0, 0, 0, 0.5));
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.wk-viewer__lightbox-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── PDF / iframe-backed viewers ────────────────────────────────────────── */
+
+.wk-viewer--pdf .wk-viewer__body {
+  padding: 0;
+}
+.wk-viewer__frame {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--wk-paper-dark);
+}
+
+/* ─── Source / code viewer ───────────────────────────────────────────────── */
+
+.wk-viewer--source .wk-viewer__body {
+  padding: 0;
+}
+.wk-viewer__code {
+  margin: 0;
+  padding: 12px 0;
+  font-family: var(--wk-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+  background: var(--wk-code-bg);
+  color: var(--wk-text);
+  min-height: 100%;
+}
+.wk-viewer__code code {
+  font-family: inherit;
+  display: block;
+}
+.wk-viewer__line {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 0 16px;
+}
+.wk-viewer__gutter {
+  flex: 0 0 auto;
+  width: 3ch;
+  text-align: right;
+  color: var(--wk-text-tertiary);
+  user-select: none;
+}
+.wk-viewer__content {
+  flex: 1 1 auto;
+  white-space: pre;
+  overflow: visible;
+}
+.wk-viewer__code--wrap .wk-viewer__content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ─── Tabular viewers (csv / xlsx) ───────────────────────────────────────── */
+
+.wk-viewer--csv .wk-viewer__body,
+.wk-viewer--xlsx .wk-viewer__body {
+  padding: 0;
+}
+.wk-viewer table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+  font-family: var(--wk-mono);
+}
+.wk-viewer th,
+.wk-viewer td {
+  border: 1px solid var(--wk-border-light);
+  padding: 4px 10px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  max-width: 48ch;
+}
+.wk-viewer thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--wk-surface);
+  color: var(--wk-text);
+  font-weight: 600;
+  border-bottom: 2px solid var(--wk-border);
+}
+.wk-viewer tbody tr:nth-child(even) td {
+  background: var(--wk-code-bg);
+}
+
+/* xlsx sheet tabs */
+.wk-viewer__sheet-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.wk-viewer__sheet-tab {
+  font: inherit;
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  background: transparent;
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.wk-viewer__sheet-tab[aria-selected="true"] {
+  color: var(--wk-text);
+  border-color: var(--accent);
+  background: var(--accent-bg, var(--wk-code-bg));
+}
+.wk-viewer__sheet-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── Rich document viewers (docx / pptx / notebook / mermaid) ───────────── */
+
+.wk-viewer--docx .wk-viewer__body,
+.wk-viewer--pptx .wk-viewer__body,
+.wk-viewer--notebook .wk-viewer__body {
+  padding: 16px;
+  background: var(--wk-paper-dark);
+  align-items: center;
+}
+.wk-viewer--mermaid .wk-viewer__body {
+  padding: 24px;
+  align-items: center;
+  justify-content: center;
+  background: var(--wk-paper);
+}
+/* docx-preview / pptx-preview write their own light-canvas DOM into the body;
+   wrap it on a paper surface so it reads as a document regardless of theme. */
+.wk-viewer--docx .docx-wrapper,
+.wk-viewer--pptx .pptx-preview-wrapper {
+  box-shadow: var(--wk-shadow-popover);
+  border-radius: var(--radius-sm, 6px);
+}
+/* The mermaid viewer renders the sanitized SVG as an `<img>` carrying a
+   `data:image/svg+xml` source; constrain it so the diagram scales down to the
+   pane without overflow. */
+.wk-viewer__mermaid-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* ─── Notebook cells ─────────────────────────────────────────────────────── */
+
+/* Class names mirror NotebookViewer.tsx exactly: the component renders the
+   container as `.wk-nb`, each cell as `.wk-nb__cell` + a kind modifier
+   (`--code` / `--markdown` / `--raw`), a code cell's left rail as
+   `.wk-nb__gutter`, the source + outputs column as `.wk-nb__code`, the outputs
+   block as `.wk-nb__outputs`, stream/text/error output as `.wk-nb__stream`
+   (`--err` variant), image output as `.wk-nb__image`, and HTML output as the
+   sandboxed iframe `.wk-nb__html`. */
+.wk-nb {
+  width: min(820px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-self: center;
+}
+.wk-nb__cell {
+  border: 1px solid var(--wk-border-light);
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+  background: var(--wk-surface);
+}
+.wk-nb__cell--code {
+  display: flex;
+  align-items: stretch;
+}
+.wk-nb__cell--markdown {
+  padding: 12px 16px;
+  color: var(--wk-text);
+  line-height: 1.6;
+}
+.wk-nb__cell--markdown :first-child {
+  margin-top: 0;
+}
+.wk-nb__cell--markdown :last-child {
+  margin-bottom: 0;
+}
+.wk-nb__gutter {
+  flex: 0 0 auto;
+  width: 7ch;
+  padding: 12px 8px;
+  font-family: var(--wk-mono);
+  font-size: 11px;
+  text-align: right;
+  color: var(--wk-text-tertiary);
+  background: var(--wk-code-bg);
+  border-right: 1px solid var(--wk-border-light);
+  user-select: none;
+}
+.wk-nb__code {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wk-nb__code > pre {
+  margin: 0;
+  padding: 12px 16px;
+  overflow-x: auto;
+  font-family: var(--wk-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+  background: var(--wk-code-bg);
+  color: var(--wk-text);
+}
+.wk-nb__code > pre code {
+  font-family: inherit;
+}
+.wk-nb__outputs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--wk-border-light);
+  background: var(--wk-surface);
+}
+.wk-nb__stream {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--wk-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--wk-text);
+}
+.wk-nb__stream--err {
+  color: var(--red, #c0392b);
+}
+.wk-nb__image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm, 6px);
+}
+.wk-nb__html {
+  width: 100%;
+  min-height: 120px;
+  border: 1px solid var(--wk-border-light);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--wk-paper);
+}
+
+/* ─── Spinner (shared with the tree) ─────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .wk-viewer__action {
+    transition: none;
+  }
+}

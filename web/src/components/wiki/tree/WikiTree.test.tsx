@@ -34,6 +34,27 @@ const TREE: WikiFSTreeNode[] = [
       },
     ],
   },
+  {
+    name: "assets",
+    path: "team/assets",
+    type: "dir",
+    title: "Assets",
+    children: [
+      {
+        name: "report.pdf",
+        path: "team/assets/report.pdf",
+        type: "file",
+        title: "report.pdf",
+        ext: ".pdf",
+      },
+      {
+        name: "dashboard",
+        path: "team/assets/dashboard",
+        type: "app",
+        title: "Dashboard",
+      },
+    ],
+  },
 ];
 
 describe("<WikiTree>", () => {
@@ -62,6 +83,61 @@ describe("<WikiTree>", () => {
     fireEvent.click(screen.getByRole("button", { name: /Expand People/i }));
     fireEvent.click(screen.getByText("Nazz"));
     expect(onNavigate).toHaveBeenCalledWith("team/people/nazz.md");
+  });
+
+  it("navigates to a file leaf so the viewer opens", async () => {
+    const onNavigate = vi.fn();
+    render(<WikiTree onNavigate={onNavigate} />);
+
+    await waitFor(() => expect(screen.getByText("Assets")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Expand Assets/i }));
+    fireEvent.click(screen.getByText("report.pdf"));
+    expect(onNavigate).toHaveBeenCalledWith("team/assets/report.pdf");
+  });
+
+  it("shows a coming-soon note for an app leaf instead of navigating", async () => {
+    const onNavigate = vi.fn();
+    render(<WikiTree onNavigate={onNavigate} />);
+
+    await waitFor(() => expect(screen.getByText("Assets")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Expand Assets/i }));
+    fireEvent.click(screen.getByText("Dashboard"));
+
+    expect(onNavigate).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/opens as an app — coming soon/i).length,
+      ).toBeGreaterThan(0),
+    );
+  });
+
+  it("uploads a file from the Upload dialog into the chosen folder", async () => {
+    const uploadSpy = vi.spyOn(wiki, "uploadWikiFile").mockResolvedValue({
+      path: "team/assets/notes.txt",
+      commit_sha: "abc1234",
+    });
+    render(<WikiTree onNavigate={() => {}} />);
+    await waitFor(() => expect(screen.getByText("People")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload file" }));
+    const dialog = screen.getByTestId("wk-tree-upload");
+
+    const fileInput = dialog.querySelector(
+      "#wk-tree2-upload-file",
+    ) as HTMLInputElement;
+    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+
+    await waitFor(() => expect(uploadSpy).toHaveBeenCalledTimes(1));
+    // dir defaults to the first folder option (team root); file is forwarded.
+    expect(uploadSpy.mock.calls[0][1]).toBe(file);
+    await waitFor(() =>
+      expect(screen.getAllByText(/Uploaded notes\.txt/).length).toBeGreaterThan(
+        0,
+      ),
+    );
   });
 
   it("force-expands all folders while searching so deep matches show", async () => {
