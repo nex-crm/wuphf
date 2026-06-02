@@ -206,6 +206,55 @@ export interface DeletePageResult {
   commit_sha: string;
 }
 
+/** Result envelope for POST /wiki/upload. */
+export interface UploadFileResult {
+  path: string;
+  commit_sha: string;
+}
+
+/**
+ * Upload a file into a cabinet folder via multipart POST /wiki/upload. `dir` is
+ * a repo-root-relative directory under `team/` (e.g. "team/assets"); `file` is
+ * the browser File from a drop or picker. The broker derives a safe basename,
+ * blocks executable extensions, writes under `team/<dir>/<name>` with collision
+ * suffixing, and commits the change as the human, returning the canonical path
+ * plus commit SHA.
+ *
+ * This cannot reuse the shared `post()` helper: multipart bodies must NOT carry
+ * an explicit `Content-Type` header (the browser sets the boundary), whereas
+ * `post()` hardcodes `application/json`. We build the URL with `sseURL` so the
+ * auth token rides as a query param in direct-broker mode (the same tokened-URL
+ * pattern as `wikiFileUrl`), and the cookieless same-origin `/api` prefix in
+ * proxy mode.
+ */
+export async function uploadWikiFile(
+  dir: string,
+  file: File,
+): Promise<UploadFileResult> {
+  const form = new FormData();
+  form.append("dir", dir);
+  form.append("file", file, file.name);
+
+  const res = await fetch(sseURL("/wiki/upload"), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const text = (await res.text().catch(() => "")).trim();
+    let message = text || `Upload failed with status ${res.status}`;
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error) {
+        message = parsed.error;
+      }
+    } catch {
+      // Non-JSON body (e.g. a 413 from MaxBytesReader); keep the raw text.
+    }
+    throw new Error(message);
+  }
+  return (await res.json()) as UploadFileResult;
+}
+
 /**
  * Create a new wiki page at `path`. The broker commits a stub (or the supplied
  * `content`) and returns the canonical path + commit SHA. `title` seeds the H1

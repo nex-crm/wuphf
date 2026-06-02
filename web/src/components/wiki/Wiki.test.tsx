@@ -1,6 +1,16 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// Stub the lazy file-viewer dispatcher so the article-vs-file routing can be
+// asserted without loading the heavy per-format viewer chunks.
+vi.mock("./viewers/FileViewer", () => ({
+  __esModule: true,
+  default: ({ path }: { path: string }) => (
+    <div data-testid="stub-file-viewer" data-path={path} />
+  ),
+  isMarkdownPath: (path: string) => /\.(md|markdown)$/i.test(path),
+}));
+
 import * as api from "../../api/wiki";
 import Wiki from "./Wiki";
 
@@ -54,6 +64,46 @@ describe("<Wiki>", () => {
         screen.getByRole("heading", { name: "Customer X" }),
       ).toBeInTheDocument(),
     );
+  });
+
+  it("renders the file viewer for a non-markdown path", async () => {
+    vi.spyOn(api, "fetchCatalog").mockResolvedValue([]);
+    const articleSpy = vi.spyOn(api, "fetchArticle");
+
+    render(<Wiki articlePath="team/assets/report.pdf" onNavigate={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("stub-file-viewer")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("stub-file-viewer")).toHaveAttribute(
+      "data-path",
+      "team/assets/report.pdf",
+    );
+    // The article fetch must not fire for a file path.
+    expect(articleSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the article view for a bare slug (no extension)", async () => {
+    vi.spyOn(api, "fetchCatalog").mockResolvedValue([]);
+    vi.spyOn(api, "fetchArticle").mockResolvedValue({
+      path: "team/people/nazz.md",
+      title: "Nazz",
+      content: "Body.",
+      last_edited_by: "ceo",
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ["ceo"],
+      backlinks: [],
+      word_count: 5,
+      categories: [],
+    });
+
+    render(<Wiki articlePath="people/nazz" onNavigate={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Nazz" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("stub-file-viewer")).not.toBeInTheDocument();
   });
 
   it("refreshes the article catalog after a live section update", async () => {
