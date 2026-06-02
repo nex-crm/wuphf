@@ -1056,18 +1056,28 @@ function UploadDialog({
           ))}
         </select>
 
-        <label className="wk-editor-label" htmlFor="wk-tree2-upload-file">
-          File
-        </label>
-        <input
-          id="wk-tree2-upload-file"
-          className="wk-editor-commit"
-          type="file"
-          onChange={(e) => {
-            setError(null);
-            setFile(e.target.files?.[0] ?? null);
-          }}
-        />
+        <span className="wk-editor-label">File</span>
+        <div className="wk-filepick">
+          <label className="wk-filepick__btn" htmlFor="wk-tree2-upload-file">
+            Choose file
+          </label>
+          <span
+            id="wk-tree2-upload-file-name"
+            className={`wk-filepick__name${file ? " wk-filepick__name--set" : ""}`}
+          >
+            {file ? file.name : "No file chosen"}
+          </span>
+          <input
+            id="wk-tree2-upload-file"
+            className="wk-filepick__input"
+            type="file"
+            aria-describedby="wk-tree2-upload-file-name"
+            onChange={(e) => {
+              setError(null);
+              setFile(e.target.files?.[0] ?? null);
+            }}
+          />
+        </div>
 
         {file ? (
           <p className="wk-editor-help">
