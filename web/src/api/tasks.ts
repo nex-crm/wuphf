@@ -183,7 +183,8 @@ export type TaskStatusAction =
   | "resume"
   | "submit_for_review"
   | "request_changes"
-  | "approve";
+  | "approve"
+  | "archive";
 
 export interface UpdateTaskStatusOptions {
   memoryWorkflowOverride?: boolean;

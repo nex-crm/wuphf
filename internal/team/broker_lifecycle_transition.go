@@ -104,6 +104,16 @@ const (
 	// the data layer; the presentation layer uses "Drafting" for the UI
 	// label via STATE_PILL_TOKENS on the frontend).
 	LifecycleStateDrafting LifecycleState = "drafting"
+
+	// LifecycleStateArchived marks work that has been intentionally moved
+	// off the active board. Archived tasks are terminal and are excluded
+	// from default active listings (same gate as done/approved), but are
+	// returned when the caller passes include_done=true so the board's
+	// Archive column can fetch them. Distinct from Rejected (reviewer
+	// rejected the work as un-landable) and Approved (work landed). An
+	// archived task can be reopened via the reopen action which resets
+	// it to Drafting.
+	LifecycleStateArchived LifecycleState = "archived"
 )
 
 // normalizeLegacyLifecycleStateName maps pre-Phase-1 lifecycle state
@@ -139,6 +149,7 @@ func CanonicalLifecycleStates() []LifecycleState {
 		LifecycleStateChangesRequested,
 		LifecycleStateApproved,
 		LifecycleStateRejected,
+		LifecycleStateArchived,
 	}
 }
 
@@ -192,6 +203,12 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 	// downstream tasks STAY blocked permanently. Status="rejected" is
 	// NOT in isTerminalTeamTaskStatus, which is what we want.
 	LifecycleStateRejected: {PipelineStage: "review", ReviewState: "rejected", Status: "rejected", Blocked: true},
+	// Archived: terminal, off-board. Status="archived" is added to
+	// isTerminalTeamTaskStatus so archived tasks are treated as closed
+	// (not re-dispatched). Blocked=false because the task is not waiting
+	// on anything; it is simply off the active board. ReviewState="approved"
+	// mirrors the approved path (clean terminal, not a failure).
+	LifecycleStateArchived: {PipelineStage: "archived", ReviewState: "approved", Status: "archived", Blocked: false},
 }
 
 // derivedFieldsFor returns the forward-map row for a state, plus a flag
@@ -201,6 +218,56 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 func derivedFieldsFor(state LifecycleState) (lifecycleDerivedFieldsRow, bool) {
 	row, ok := lifecycleDerivedFields[state]
 	return row, ok
+}
+
+// LifecycleStage is the 7-value display grouping that collapses the 12
+// execution substrate LifecycleState values into the user-facing board
+// columns. The stage concept lives only in Go-side canonical use and
+// tests; the web frontend derives its own grouping from the lifecycle_state
+// wire field and does NOT receive a stage field over the wire.
+type LifecycleStage string
+
+const (
+	// StageScheduled is reserved for routines/scheduled work. No
+	// LifecycleState maps to StageScheduled — it comes from a different
+	// scheduling primitive. lifecycleStageFor never returns StageScheduled.
+	StageScheduled  LifecycleStage = "scheduled"
+	StageBacklog    LifecycleStage = "backlog"
+	StageInProgress LifecycleStage = "in_progress"
+	StageBlocked    LifecycleStage = "blocked"
+	StageNeedsHuman LifecycleStage = "needs_human"
+	StageDone       LifecycleStage = "done"
+	StageArchive    LifecycleStage = "archive"
+)
+
+// lifecycleStageFor maps a LifecycleState to its display LifecycleStage.
+// The mapping is:
+//   - backlog     ← drafting, intake, ready, unknown
+//   - in_progress ← running, review, changes_requested
+//   - blocked     ← blocked_on_pr_merge, queued_behind_owner
+//   - needs_human ← decision
+//   - done        ← approved
+//   - archive     ← archived, rejected
+//
+// StageScheduled is never returned (it comes from a different scheduling
+// primitive). Any unmapped state defaults to StageBacklog.
+func lifecycleStageFor(s LifecycleState) LifecycleStage {
+	switch s {
+	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady, LifecycleStateUnknown:
+		return StageBacklog
+	case LifecycleStateRunning, LifecycleStateReview, LifecycleStateChangesRequested:
+		return StageInProgress
+	case LifecycleStateBlockedOnPRMerge, LifecycleStateQueuedBehindOwner:
+		return StageBlocked
+	case LifecycleStateDecision:
+		return StageNeedsHuman
+	case LifecycleStateApproved:
+		return StageDone
+	case LifecycleStateArchived, LifecycleStateRejected:
+		return StageArchive
+	default:
+		return StageBacklog
+	}
 }
 
 // lifecycleMigrationKey is the legacy (pipelineStage, reviewState, status,
@@ -260,6 +327,12 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	// dedicated cancelled state.
 	{PipelineStage: "", ReviewState: "", Status: "canceled", Blocked: false}:  LifecycleStateApproved,
 	{PipelineStage: "", ReviewState: "", Status: "cancelled", Blocked: false}: LifecycleStateApproved,
+
+	// Archived — tasks stored on disk with status="archived" (bare or
+	// canonical tuple) resolve to LifecycleStateArchived so pre-existing
+	// broker-state.json files load cleanly after the archive action ships.
+	{PipelineStage: "", ReviewState: "", Status: "archived", Blocked: false}:                     LifecycleStateArchived,
+	{PipelineStage: "archived", ReviewState: "approved", Status: "archived", Blocked: false}: LifecycleStateArchived,
 }
 
 // deriveLifecycleStateFromLegacy looks the legacy tuple up in the

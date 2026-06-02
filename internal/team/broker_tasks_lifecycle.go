@@ -618,7 +618,7 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 
 func isTerminalTeamTaskStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "done", "completed", "canceled", "cancelled":
+	case "done", "completed", "canceled", "cancelled", "archived":
 		return true
 	default:
 		return false

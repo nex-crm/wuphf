@@ -4069,7 +4069,10 @@ html[data-theme="noir-gold"] {
 
 .issues-kanban {
   display: grid;
-  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  /* Seven user-facing stages. Each column holds a min width so the row
+     scrolls horizontally rather than crushing columns when the viewport
+     is narrow. */
+  grid-template-columns: repeat(7, minmax(160px, 1fr));
   gap: 12px;
   flex: 1;
   min-height: 0;
@@ -4180,6 +4183,11 @@ html[data-theme="noir-gold"] {
 
 .issues-kanban-card-owner,
 .issues-kanban-card-channel {
+  font-variant-numeric: tabular-nums;
+}
+
+.issues-kanban-card-schedule {
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 

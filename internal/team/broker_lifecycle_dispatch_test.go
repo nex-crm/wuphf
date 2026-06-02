@@ -56,6 +56,7 @@ func TestIsExecutableTeamTaskStatus(t *testing.T) {
 		{LifecycleStateBlockedOnPRMerge, false},
 		{LifecycleStateQueuedBehindOwner, false},
 		{LifecycleStateRejected, false},
+		{LifecycleStateArchived, false},
 		{LifecycleStateUnknown, false},
 		// Empty string (unset): not executable.
 		{"", false},
@@ -114,6 +115,7 @@ func TestBrokerRefusesDispatchForNonExecutableLifecycle(t *testing.T) {
 		{LifecycleStateBlockedOnPRMerge, false},
 		{LifecycleStateQueuedBehindOwner, false},
 		{LifecycleStateRejected, false},
+		{LifecycleStateArchived, false},
 	}
 
 	for _, tc := range cases {

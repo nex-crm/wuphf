@@ -145,6 +145,7 @@ function dotKindForLifecycleState(state: LifecycleState): StatusDotKind {
     case "intake":
       return "running";
     case "blocked_on_pr_merge":
+    case "queued_behind_owner":
       return "blocked";
     case "review":
     case "decision":
@@ -154,6 +155,7 @@ function dotKindForLifecycleState(state: LifecycleState): StatusDotKind {
     case "ready":
     case "approved":
     case "rejected":
+    case "archived":
       return "idle";
     default: {
       // Exhaustiveness check — adding a new LifecycleState without
@@ -191,6 +193,8 @@ function describeActivity(
       return "Approved.";
     case "rejected":
       return "Rejected.";
+    case "archived":
+      return "Archived.";
     default:
       return "Idle.";
   }

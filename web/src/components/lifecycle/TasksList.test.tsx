@@ -73,4 +73,65 @@ describe("<TasksList>", () => {
     );
     expect(screen.queryByText("Reply with status")).not.toBeInTheDocument();
   });
+
+  it("renders the seven user-facing stage columns", () => {
+    renderList([
+      makeTask({ id: "task-issue", title: "A spec", task_type: "issue" }),
+    ]);
+
+    for (const stage of [
+      "scheduled",
+      "backlog",
+      "in_progress",
+      "blocked",
+      "needs_human",
+      "done",
+      "archive",
+    ]) {
+      expect(
+        screen.getByTestId(`issues-kanban-column-${stage}`),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("groups tasks into their derived stage columns", () => {
+    renderList([
+      makeTask({
+        id: "task-running",
+        title: "Running task",
+        task_type: "issue",
+        lifecycle_state: "running",
+      }),
+      makeTask({
+        id: "task-decision",
+        title: "Decision task",
+        task_type: "issue",
+        lifecycle_state: "decision",
+      }),
+      makeTask({
+        id: "task-archived",
+        title: "Archived task",
+        task_type: "issue",
+        lifecycle_state: "archived",
+      }),
+      makeTask({
+        id: "task-approved",
+        title: "Approved task",
+        task_type: "issue",
+        lifecycle_state: "approved",
+      }),
+    ]);
+
+    const inProgress = screen.getByTestId("issues-kanban-column-in_progress");
+    expect(inProgress).toHaveTextContent("Running task");
+
+    const needsHuman = screen.getByTestId("issues-kanban-column-needs_human");
+    expect(needsHuman).toHaveTextContent("Decision task");
+
+    const archive = screen.getByTestId("issues-kanban-column-archive");
+    expect(archive).toHaveTextContent("Archived task");
+
+    const done = screen.getByTestId("issues-kanban-column-done");
+    expect(done).toHaveTextContent("Approved task");
+  });
 });

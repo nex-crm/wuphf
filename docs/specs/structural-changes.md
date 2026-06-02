@@ -249,7 +249,16 @@
       are camelCase WIRE fields from the Go broker.
     - Go `agentIssueMessageKind` value `"agent_issue"` kept — it's a persisted
       message Kind read by the SPA renderer (wire).
-  - **NOT committed yet** — awaiting user nod to checkpoint-commit Phase 0.
+  - **Committed** as `461b578d` (checkpoint).
+  - **Live-tested ✅ (2026-06-02)** on built broker `:7891` (`dev-mvp.sh --reset`):
+    web+Go build clean, broker boots with no panic, SPA mounts with no JS/console
+    errors, index redirect fires, `/tasks` live, `/issues`→`/tasks` redirect works
+    (param preserved — `legacyIssueDetailRoute` confirmed in code). Populated board +
+    sidebar "Tasks" label covered by component tests (not re-shot live — fresh
+    workspace gates on onboarding; avoided drifting into the user's separate `:7899`
+    instance). Broker left running on `:7891` (fresh onboarding-gated workspace).
+  - **Dev-boot recipe:** `bash scripts/dev-mvp.sh --reset` → web :7891 / broker API
+    :7890 (API requires auth — use the browser via browser-harness, not curl).
   - **DISCOVERY (2026-06-02): two live "task" surfaces collide.**
     - "Issues" surface = human work-items, `task_type="issue"` only, with
       lifecycle/spec/approval/owner: `IssuesList`, `IssueDocument`,
@@ -294,11 +303,62 @@
   - **Collisions handled by hand:** `CreateIssueInput` (hook) vs existing
     `CreateTaskInput` (api) — keep distinct; getSubIssues/createSubIssue/reopenIssue
     keep wire keys `parent_issue_id` etc. but rename the TS function symbols.
-- [ ] **Phase 1 — Collapse lifecycle to 5 stages** (Backlog / In progress / Needs
-    human input / Done / Archive) per D2. Redefine enum + derived-field map +
-    transitions + dispatch gate + state pills + board columns. In-memory
-    old→new remap (full persisted migration deferred to Phase 6).
-  - Gate: lifecycle dispatch tests pass; board renders 5 columns.
+- [~] **Phase 1 — Collapse lifecycle to 5 stages** (Backlog / In progress / Needs
+    human input / Done / Archive) per D2. **IN PROGRESS — design locked, building.**
+  - **Approach (confirmed): Stage = display/grouping LAYER over the existing 12
+    `LifecycleState` values, NOT an enum collapse.** The 12 states carry load-bearing
+    control-loop semantics (dispatch gate keys Running/Approved; reviewer auto-resolve
+    on Review; unblock cascade on Rejected/Approved; decision-packet flush). Collapsing
+    the enum would break the loop + dozens of `status=="blocked"` readers. So the
+    substrate stays; we add a derived 5-value `Stage` that the board + pill render.
+    Add `Archived` as a REAL new state (it's an action target, not just a bucket).
+  - **7 stages now (user added Scheduled + Blocked, 2026-06-02). Board order:**
+    Scheduled → Backlog → In progress → Blocked → Needs human input → Done → Archive.
+  - **State→Stage mapping (the product call):**
+    | Stage | LifecycleStates / source |
+    |---|---|
+    | `scheduled` ("Scheduled Tasks") | NOT a LifecycleState — populated from routines/scheduler data |
+    | `backlog` | drafting, intake, ready, unknown |
+    | `in_progress` | running, review, changes_requested |
+    | `blocked` | blocked_on_pr_merge, queued_behind_owner (blocked on another thing first, NO human review needed) |
+    | `needs_human` | decision (+ Phase-3: open blocking human request overrides any state) |
+    | `done` | approved (Status already = "done"/ship) |
+    | `archive` | **archived (NEW)**, rejected |
+    - **Blocked vs Needs human input:** Blocked = waiting on a dependency/upstream
+      (agent/system resolves it); Needs human input = waiting on the human specifically.
+    - **Scheduled** = routines, relabeled "Scheduled Tasks". Routines are scheduler
+      entities, not lifecycle tasks → the Scheduled column reads the routines list, not
+      `lifecycleStageFor()`. Full task↔routine unification (create-as-routine) is Phase 3.
+    - Spec-draft + approval gate sits at the backlog→in_progress boundary (Drafting =
+      backlog; approving to start → Running = in_progress). Matches D2.
+    - "Agent actively requests human input mid-run → needs_human" is wired in Phase 3
+      (needs the per-task channel + request flow); Phase 1 maps needs_human←decision.
+  - **Build:** Go — add `LifecycleStage` type + `lifecycleStageFor()`; add
+    `LifecycleStateArchived` (enum + CanonicalLifecycleStates + derivedFields +
+    migration map + isTerminal); add `archive`/`unarchive` status actions; expose a
+    derived `stage` field on the `/tasks` wire payload (additive, back-compat). Web —
+    add `LifecycleStage` TS type + labels/tokens; read `stage` off the wire (TS
+    fallback map for safety); render the board as 5 stage columns; pill shows stage.
+  - Gate: lifecycle dispatch tests still pass (gate unchanged); board renders 7
+    columns; archive action round-trips; `go build/vet`, tsc, web+go tests green.
+  - **Built 2026-06-02** (two parallel agents, Go substrate + Web 7-stage board).
+    Reviewed: Go `lifecycleStageFor` and TS `stageForState` mappings are IDENTICAL
+    (verified). Fixed one consistency gap by hand: added `queued_behind_owner` to the
+    TS `LifecycleState` union + pill token + `stageForState`→blocked + TaskActivityStream
+    switch (it was Go-only before). Web derives `stage` from `lifecycle_state` (no wire
+    churn). Scheduled column = `getScheduler()` filtered by `isCadenceSchedulerJob`,
+    cards deep-link `/routines/$routineSlug`; board fetches `includeDone:true`.
+  - **Gates ALL green (independently re-run):** `go build ./...` ✅, `go vet ./...` ✅,
+    `bunx tsc --noEmit` ✅, `bash scripts/test-web.sh` ✅ (179 files / 1731 / 40 skip),
+    `test-go.sh ./internal/team` ✅ (agent run). Diff: 15 files, +496/−107.
+  - **Live build+boot ✅** — `dev-mvp.sh --reset` rebuilt web+Go and booted the
+    Phase-1 broker on :7891 (pid varies) with no panic. **Browser screenshot BLOCKED**:
+    browser-harness↔Chrome CDP went stale (`ws://127.0.0.1:9222` dead; daemon restart
+    didn't recover; only fix is killing the user's Chrome, which has live tabs → won't
+    do unprompted). The 7-column board structure + stage grouping is covered by the 2
+    new `TasksList.test.tsx` tests; onboarding gates the visual on a fresh workspace
+    anyway. Broker left running on :7891 for the user to eyeball if desired.
+  - **NOT committed yet** — awaiting user nod (commit + Phase 2, or hold to eyeball).
 - [ ] **Phase 2 — Channel-per-task + kill default channel** (pure task-scoped, D8).
     1:1 task↔channel link; spin a channel per task at creation; rip out every
     `""→"general"` fallback + office-channel/default machinery; remove agent DMs +

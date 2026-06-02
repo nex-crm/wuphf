@@ -162,6 +162,11 @@ export function TaskActionToolbar({
   const isDrafting = lifecycleState === "drafting";
   const isTerminal =
     lifecycleState === "approved" || lifecycleState === "rejected";
+  // Archive is a filing affordance available on every task that is not
+  // already archived. It does not gate on lifecycle position the way the
+  // state-specific actions do — a human can file away a task from any
+  // column (terminal or not) once they are done looking at it.
+  const canArchive = lifecycleState !== "archived";
 
   const statusMutation = useMutation({
     mutationFn: (input: { action: TaskStatusAction; reason?: string }) =>
@@ -223,6 +228,22 @@ export function TaskActionToolbar({
           {act.label}
         </button>
       ))}
+
+      {/* Archive — available on any non-archived task. Files the task
+       * into the board's Archive column without a reason prompt. Fires
+       * through the same status mutation so onAfterAction() invalidates
+       * the task + board queries on success. */}
+      {canArchive ? (
+        <button
+          type="button"
+          className="issue-action-button issue-action-button--neutral"
+          onClick={() => statusMutation.mutate({ action: "archive" })}
+          disabled={statusMutation.isPending}
+          data-testid="action-archive"
+        >
+          Archive
+        </button>
+      ) : null}
 
       {/* Reopen for terminal states — separate component because it
        * uses the dedicated reopen endpoint. */}

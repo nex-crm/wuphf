@@ -22,9 +22,82 @@ export type LifecycleState =
   | "review"
   | "decision"
   | "blocked_on_pr_merge"
+  | "queued_behind_owner"
   | "changes_requested"
   | "approved"
-  | "rejected";
+  | "rejected"
+  | "archived";
+
+/**
+ * User-facing board stage. The board groups the granular
+ * `LifecycleState` values into a smaller set of columns it derives in
+ * TypeScript via `stageForState`. The `scheduled` stage is the one
+ * exception — it is fed by routines (the scheduler), not by any
+ * lifecycle_state, so `stageForState` never returns it.
+ */
+export type LifecycleStage =
+  | "scheduled"
+  | "backlog"
+  | "in_progress"
+  | "blocked"
+  | "needs_human"
+  | "done"
+  | "archive";
+
+/** Left-to-right column order for the task board. */
+export const STAGE_ORDER: readonly LifecycleStage[] = [
+  "scheduled",
+  "backlog",
+  "in_progress",
+  "blocked",
+  "needs_human",
+  "done",
+  "archive",
+];
+
+/** Column header label per stage. */
+export const STAGE_LABELS: Record<LifecycleStage, string> = {
+  scheduled: "Scheduled Tasks",
+  backlog: "Backlog",
+  in_progress: "In progress",
+  blocked: "Blocked",
+  needs_human: "Needs human input",
+  done: "Done",
+  archive: "Archive",
+};
+
+/**
+ * Project a granular lifecycle_state onto the board stage it belongs in.
+ *
+ * Never returns "scheduled" — that column is fed by routines, not
+ * lifecycle_state. Any unknown / unmapped value falls back to "backlog"
+ * so a newer broker state still lands somewhere readable instead of
+ * being dropped.
+ */
+export function stageForState(s: LifecycleState): LifecycleStage {
+  switch (s) {
+    case "drafting":
+    case "intake":
+    case "ready":
+      return "backlog";
+    case "running":
+    case "review":
+    case "changes_requested":
+      return "in_progress";
+    case "blocked_on_pr_merge":
+    case "queued_behind_owner":
+      return "blocked";
+    case "decision":
+      return "needs_human";
+    case "approved":
+      return "done";
+    case "archived":
+    case "rejected":
+      return "archive";
+    default:
+      return "backlog";
+  }
+}
 
 /** Severity tier on a reviewer grade. CodeRabbit-shaped. */
 export type Severity = "critical" | "major" | "minor" | "nitpick" | "skipped";
@@ -293,6 +366,11 @@ export const STATE_PILL_TOKENS: Record<
     text: "var(--warning-500)",
     label: "blocked",
   },
+  queued_behind_owner: {
+    bg: "var(--warning-200)",
+    text: "var(--warning-500)",
+    label: "queued",
+  },
   changes_requested: {
     bg: "var(--bg-row-active)",
     text: "var(--warning-500)",
@@ -307,6 +385,16 @@ export const STATE_PILL_TOKENS: Record<
     bg: "var(--danger-200, var(--warning-200))",
     text: "var(--danger-500, var(--warning-500))",
     label: "rejected",
+  },
+  /**
+   * archived: terminal, muted. Lands in the board's Archive column
+   * alongside rejected. Styled neutral (no accent / no alarm color) to
+   * read as "filed away, no longer in flight".
+   */
+  archived: {
+    bg: "var(--bg-row-active)",
+    text: "var(--text-tertiary)",
+    label: "archived",
   },
 };
 
@@ -405,7 +493,12 @@ export const FILTER_TO_STATES: Record<
   // drafting is surfaced in the issues route, not the inbox; include it in
   // running so inbox rows with this state still land somewhere readable.
   running: ["drafting", "intake", "ready", "running", "review"],
-  blocked: ["blocked_on_pr_merge", "changes_requested", "rejected"],
+  blocked: [
+    "blocked_on_pr_merge",
+    "queued_behind_owner",
+    "changes_requested",
+    "rejected",
+  ],
   approved: ["approved"],
   // Unread is post-filtered against the actor's cursor on the server,
   // not against a fixed state set. Leave the state list empty so any

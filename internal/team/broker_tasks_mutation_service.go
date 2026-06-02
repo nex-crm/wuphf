@@ -124,6 +124,7 @@ func (b *Broker) checkTaskActionAuthLocked(action, actor, targetTaskID string) e
 		"request_changes": true,
 		"approve":         true,
 		"reject":          true,
+		"archive":         true,
 	}
 	if targetTaskID != "" {
 		if task := b.findTaskByIDLocked(strings.TrimSpace(targetTaskID)); task != nil {
@@ -235,11 +236,11 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 	if task == nil {
 		return
 	}
-	// PR-style review-loop actions write reviewState directly; the
-	// reconciler must not overwrite their authoritative value with a
-	// status-derived guess.
+	// PR-style review-loop actions and terminal actions write reviewState
+	// directly via applyLifecycleStateLocked; the reconciler must not
+	// overwrite their authoritative value with a status-derived guess.
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "request_changes", "submit_for_review", "comment", "reject":
+	case "request_changes", "submit_for_review", "comment", "reject", "archive":
 		return
 	}
 	if !taskNeedsStructuredReview(task) {
@@ -700,6 +701,19 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			}
 			appendDetails = true
 			rejectTriggered = true
+		case "archive":
+			// Move the task off the active board. Archived tasks are
+			// terminal (excluded from default active listings, included
+			// with include_done=true for the Archive board column). An
+			// optional note is captured via appendDetails so the actor
+			// can document why the work was archived. Unlike reject,
+			// no reason is required — archiving is a housekeeping act,
+			// not a quality judgement. The task can be reopened via
+			// the reopen action which resets it to Drafting.
+			if err := b.applyLifecycleStateLocked(task, LifecycleStateArchived); err != nil {
+				return TaskResponse{}, taskMutationError(TaskMutationInvalid, err.Error(), err)
+			}
+			appendDetails = true
 		default:
 			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "unknown action", nil)
 		}

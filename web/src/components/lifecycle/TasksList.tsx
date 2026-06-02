@@ -2,21 +2,40 @@
  * TasksList — /tasks surface.
  *
  * Renders spec-level tasks (back-compat read of GET /tasks?all_channels=true)
- * as a lifecycle kanban. Six columns: Draft / Intake / Running / Review /
- * Approved / Rejected. Each card opens the TaskDocument detail surface at
- * /tasks/$taskId.
+ * as a 7-stage board. The data substrate keeps the broker's granular
+ * `lifecycle_state` values; the board groups them into the seven
+ * user-facing STAGES it derives in TypeScript (see `stageForState` in
+ * lib/types/lifecycle.ts).
  *
- * Replaces the previous flat list view — the kanban surfaces movement across
- * the agent workflow that the old office board used to show.
+ *   Scheduled Tasks · Backlog · In progress · Blocked ·
+ *   Needs human input · Done · Archive
+ *
+ * The Scheduled column is the one exception to the lifecycle grouping —
+ * it is fed by routines (the scheduler), not by any lifecycle_state, so
+ * each card there is a SchedulerJob that links to its routine detail.
+ * Every other card opens the TaskDocument detail surface at /tasks/$taskId.
  */
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import { getScheduler, type SchedulerJob } from "../../api/scheduler";
 import { getOfficeTasks, type Task } from "../../api/tasks";
 import { router } from "../../lib/router";
 import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
-import type { LifecycleState } from "../../lib/types/lifecycle";
+import {
+  type LifecycleStage,
+  type LifecycleState,
+  STAGE_LABELS,
+  STAGE_ORDER,
+  stageForState,
+} from "../../lib/types/lifecycle";
+import {
+  routineKey,
+  routineLabel,
+  routineSchedule,
+} from "../apps/routines/routineModel";
+import { isCadenceSchedulerJob } from "../apps/schedulerJobClassification";
 import { TaskCreateDialog } from "../tasks/TaskCreateDialog";
 import { LifecycleStatePill } from "./LifecycleStatePill";
 
@@ -34,6 +53,7 @@ const KNOWN_LIFECYCLE_STATES: ReadonlySet<LifecycleState> =
     "changes_requested",
     "approved",
     "rejected",
+    "archived",
   ]);
 
 function isLifecycleState(value: unknown): value is LifecycleState {
@@ -45,7 +65,7 @@ function isLifecycleState(value: unknown): value is LifecycleState {
 
 function isTaskSpecTask(task: Task): boolean {
   // Sub-tasks live on the parent Task's detail surface, not on the
-  // top-level kanban. Filtering them out here keeps the board scoped
+  // top-level board. Filtering them out here keeps the board scoped
   // to "real" Tasks; children stay reachable via the parent Task.
   if (task.parent_issue_id && task.parent_issue_id.length > 0) {
     return false;
@@ -82,78 +102,25 @@ function taskToLifecycleState(task: Task): LifecycleState {
       return "review";
     case "rejected":
       return "rejected";
+    case "archived":
+      return "archived";
     default:
       return "intake";
   }
 }
 
-type ColumnId =
-  | "drafting"
-  | "todo"
-  | "in_progress"
-  | "in_review"
-  | "done"
-  | "cancelled";
-
-// Linear-style 6-column layout. The broker's underlying 11-state machine
-// keeps its current shape (touched in Slice 4 follow-up); this is the
-// presentation projection that humans see on the board.
-const COLUMN_ORDER: readonly ColumnId[] = [
-  "drafting",
-  "todo",
-  "in_progress",
-  "in_review",
-  "done",
-  "cancelled",
-];
-
-const COLUMN_LABEL: Record<ColumnId, string> = {
-  drafting: "Backlog",
-  todo: "Todo",
-  in_progress: "In Progress",
-  in_review: "In Review",
-  done: "Done",
-  cancelled: "Cancelled",
-};
-
-const COLUMN_HINT: Record<ColumnId, string> = {
-  drafting: "Filed, awaiting your approval",
-  todo: "Approved, not yet picked up",
-  in_progress: "Owner agent working — includes blocked / revising",
-  in_review: "Awaiting reviewer grades or human decision",
+/** Per-stage hint copy shown under the column header. The `scheduled`
+ *  column is fed by routines, not lifecycle_state, so its hint reflects
+ *  that. */
+const STAGE_HINT: Record<LifecycleStage, string> = {
+  scheduled: "Recurring routines on a schedule",
+  backlog: "Filed, awaiting pickup",
+  in_progress: "Owner agent working — includes revising",
+  blocked: "Blocked on an upstream merge",
+  needs_human: "Awaiting your decision",
   done: "Landed",
-  cancelled: "Will not land",
+  archive: "Filed away — archived or rejected",
 };
-
-/** Project a broker lifecycle state onto the Linear-style column id.
- *  The broker keeps 11 internal states; this maps them onto the 6
- *  presentation columns. Wire shape from the broker can drift (legacy
- *  "blocked", "in_progress" strings, unknown future states), so the
- *  default lands those in Backlog instead of crashing. */
-function lifecycleToColumn(state: LifecycleState | string): ColumnId {
-  switch (state) {
-    case "drafting":
-      return "drafting";
-    case "intake":
-    case "ready":
-    case "queued_behind_owner":
-      return "todo";
-    case "running":
-    case "changes_requested":
-    case "blocked_on_pr_merge":
-    case "in_progress":
-      return "in_progress";
-    case "review":
-    case "decision":
-      return "in_review";
-    case "approved":
-      return "done";
-    case "rejected":
-      return "cancelled";
-    default:
-      return "drafting";
-  }
-}
 
 // ── Sub-components ─────────────────────────────────────────────────────
 
@@ -186,6 +153,62 @@ function TaskCard({ task }: { task: Task }) {
         {task.channel ? (
           <span className="issues-kanban-card-channel">#{task.channel}</span>
         ) : null}
+      </div>
+    </button>
+  );
+}
+
+/** Human-readable "next run" sub-line for a scheduled-task card. Prefers
+ *  the routine's stored next_run timestamp, falling back to the cadence
+ *  summary so the card always carries a schedule signal. */
+function scheduledSubLine(job: SchedulerJob): string {
+  if (job.next_run) {
+    const next = new Date(job.next_run);
+    if (!Number.isNaN(next.getTime())) {
+      return `Next run ${next.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })}`;
+    }
+  }
+  return routineSchedule(job).text;
+}
+
+/** Card for the Scheduled Tasks column. Reuses the task-card visual
+ *  shell (title + meta sub-line) so the column reads consistently with
+ *  the lifecycle columns, but navigates to the routine detail surface
+ *  instead of a task detail. */
+function ScheduledTaskCard({ job }: { job: SchedulerJob }) {
+  const title = routineLabel(job);
+  const { slug } = job;
+
+  function navigate() {
+    if (slug) {
+      void router.navigate({
+        to: "/routines/$routineSlug",
+        params: { routineSlug: slug },
+      });
+      return;
+    }
+    // No slug to deep-link with — fall back to the Routines workspace.
+    void router.navigate({ to: "/apps/$appId", params: { appId: "routines" } });
+  }
+
+  return (
+    <button
+      type="button"
+      className="issues-kanban-card"
+      onClick={navigate}
+      data-testid="scheduled-task-row"
+      aria-label={`Scheduled task: ${title}`}
+    >
+      <div className="issues-kanban-card-title">{title || "Untitled"}</div>
+      <div className="issues-kanban-card-meta">
+        <span className="issues-kanban-card-schedule">
+          {scheduledSubLine(job)}
+        </span>
       </div>
     </button>
   );
@@ -273,6 +296,8 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
 
   const result = useQuery({
     queryKey: ["issues", "list"],
+    // includeDone so the Done + Archive columns populate — the broker
+    // otherwise drops landed/closed tasks from the default list.
     queryFn: () => getOfficeTasks({ includeDone: true }),
     initialData: initialTasks ? { tasks: initialTasks } : undefined,
     staleTime: 5_000,
@@ -280,8 +305,22 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
     enabled: !initialTasks,
   });
 
+  // Routines feed the Scheduled column. Skipped in test renders (when
+  // initialTasks is provided) so unit tests stay free of scheduler mocks.
+  const schedulerResult = useQuery({
+    queryKey: ["scheduler"],
+    queryFn: () => getScheduler(),
+    refetchInterval: 15_000,
+    enabled: !initialTasks,
+  });
+
   const allTasks = result.data?.tasks ?? [];
   const tasks = useMemo(() => allTasks.filter(isTaskSpecTask), [allTasks]);
+
+  const scheduledJobs = useMemo<SchedulerJob[]>(() => {
+    const jobs = schedulerResult.data?.jobs ?? [];
+    return jobs.filter(isCadenceSchedulerJob);
+  }, [schedulerResult.data]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -292,18 +331,29 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
     });
   }, [tasks, query]);
 
+  const filteredScheduled = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return scheduledJobs;
+    return scheduledJobs.filter((job) =>
+      routineLabel(job).toLowerCase().includes(needle),
+    );
+  }, [scheduledJobs, query]);
+
+  // Bucket lifecycle tasks by stage. The scheduled stage is filled
+  // separately from routines, so it stays empty here.
   const columns = useMemo(() => {
-    const buckets: Record<ColumnId, Task[]> = {
-      drafting: [],
-      todo: [],
+    const buckets: Record<LifecycleStage, Task[]> = {
+      scheduled: [],
+      backlog: [],
       in_progress: [],
-      in_review: [],
+      blocked: [],
+      needs_human: [],
       done: [],
-      cancelled: [],
+      archive: [],
     };
     for (const task of filtered) {
-      const col = lifecycleToColumn(taskToLifecycleState(task));
-      buckets[col].push(task);
+      const stage = stageForState(taskToLifecycleState(task));
+      buckets[stage].push(task);
     }
     return buckets;
   }, [filtered]);
@@ -332,6 +382,12 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
         <TaskCreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       </>
     );
+  }
+
+  function columnCount(stage: LifecycleStage): number {
+    return stage === "scheduled"
+      ? filteredScheduled.length
+      : columns[stage].length;
   }
 
   return (
@@ -365,32 +421,38 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
         be invalid ARIA, so the wrapper is left as a plain <div>.
       */}
       <div className="issues-kanban" data-testid="issues-list-rows">
-        {COLUMN_ORDER.map((col) => (
+        {STAGE_ORDER.map((stage) => (
           <section
-            key={col}
+            key={stage}
             className="issues-kanban-column"
-            data-column={col}
-            data-testid={`issues-kanban-column-${col}`}
+            data-column={stage}
+            data-testid={`issues-kanban-column-${stage}`}
           >
             <header className="issues-kanban-column-header">
               <span className="issues-kanban-column-title">
-                {COLUMN_LABEL[col]}
+                {STAGE_LABELS[stage]}
               </span>
               <span className="issues-kanban-column-count">
-                {columns[col].length}
+                {columnCount(stage)}
               </span>
             </header>
-            <p className="issues-kanban-column-hint">{COLUMN_HINT[col]}</p>
+            <p className="issues-kanban-column-hint">{STAGE_HINT[stage]}</p>
             <ul className="issues-kanban-column-cards">
-              {columns[col].length === 0 ? (
+              {columnCount(stage) === 0 ? (
                 <li
                   className="issues-kanban-column-empty"
-                  aria-label={`No tasks in ${COLUMN_LABEL[col]}`}
+                  aria-label={`No tasks in ${STAGE_LABELS[stage]}`}
                 >
                   —
                 </li>
+              ) : stage === "scheduled" ? (
+                filteredScheduled.map((job) => (
+                  <li key={routineKey(job)}>
+                    <ScheduledTaskCard job={job} />
+                  </li>
+                ))
               ) : (
-                columns[col].map((task) => (
+                columns[stage].map((task) => (
                   <li key={task.id}>
                     <TaskCard task={task} />
                   </li>
