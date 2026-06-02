@@ -119,18 +119,26 @@ func (b *Broker) handleWikiFile(w http.ResponseWriter, r *http.Request) {
 	ext := strings.ToLower(filepath.Ext(abs))
 	w.Header().Set("Content-Type", wikiFSContentType(ext))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	// HTML backs self-contained apps/websites the user re-generates; force
-	// revalidation so a stale build is never served. Everything else is
-	// content-addressed enough to cache briefly per-client.
-	if ext == ".html" {
-		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-		// Clickjacking close for served HTML: allow same-origin framing (our own
-		// SPA embeds these apps/websites) but block cross-origin framing. We do
-		// NOT set a restrictive default-src — embedded apps load their own
-		// resources; frame-ancestors 'self' is the targeted control here.
+	// Script-capable, user-authored content (HTML/SVG/XML) is served from the
+	// SAME ORIGIN as the app, so a naive inline response is a stored-XSS sink:
+	// a wiki author or agent could store <script> that, on direct navigation to
+	// /wiki/file, runs in our origin and calls authenticated /wiki/* endpoints.
+	// The CSP `sandbox` directive WITHOUT allow-scripts neutralizes scripts,
+	// plugins, and forms and forces an opaque origin — for top-level navigation
+	// AND inside frames (the response-header sandbox is the most-restrictive
+	// floor; an iframe sandbox attribute cannot re-grant scripts). A generic
+	// file fetch must never execute scripts. The deliberate embedded-app surface
+	// is the only path that opts into `sandbox allow-scripts` (opaque origin, no
+	// allow-same-origin), so apps run JS yet cannot read WUPHF credentials.
+	if isScriptCapableExt(ext) {
+		w.Header().Set("Content-Security-Policy",
+			"sandbox; default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; font-src 'self' data:; media-src 'self'")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-		w.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
+		// Re-generated content: force revalidation so a stale build is never served.
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 	} else {
+		// Inert assets (images, fonts, pdf, media, csv, …) are content enough to
+		// cache briefly per-client.
 		w.Header().Set("Cache-Control", "private, max-age=300")
 	}
 
@@ -139,4 +147,18 @@ func (b *Broker) handleWikiFile(w http.ResponseWriter, r *http.Request) {
 	// sniffing/extension, so we set our explicit type above first; ServeContent
 	// only fills it when unset, leaving our value intact.
 	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
+}
+
+// isScriptCapableExt reports whether a file extension can execute script when
+// rendered as a top-level document or framed document — the stored-XSS surface
+// for same-origin file serving. Such responses get a scripts-disabled sandbox
+// CSP. Inert types (png, pdf, css, js-as-text, …) are excluded: navigating to
+// a .js/.css serves it as text, it is not executed as a page.
+func isScriptCapableExt(ext string) bool {
+	switch ext {
+	case ".html", ".htm", ".svg", ".xhtml", ".xml":
+		return true
+	default:
+		return false
+	}
 }

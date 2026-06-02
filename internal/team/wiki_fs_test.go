@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -285,6 +286,44 @@ func TestWikiFileHTMLCacheControl(t *testing.T) {
 	}
 	if cc := resp.Header.Get("Cache-Control"); cc != "no-cache, must-revalidate" {
 		t.Errorf("Cache-Control = %q, want no-cache, must-revalidate", cc)
+	}
+	// Stored-XSS defense: user-authored HTML must carry a scripts-disabled
+	// sandbox CSP so a stored <script> cannot run in our origin on direct
+	// navigation. The `sandbox` token must be present and allow-scripts absent.
+	csp := resp.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "sandbox") {
+		t.Errorf("HTML CSP = %q, want a sandbox directive", csp)
+	}
+	if strings.Contains(csp, "allow-scripts") {
+		t.Errorf("HTML CSP = %q must NOT contain allow-scripts (generic file fetch must not run scripts)", csp)
+	}
+	if xfo := resp.Header.Get("X-Frame-Options"); xfo != "SAMEORIGIN" {
+		t.Errorf("X-Frame-Options = %q, want SAMEORIGIN", xfo)
+	}
+}
+
+// Script-capable types (.svg here) get the scripts-disabled sandbox CSP;
+// inert types (.png) do not, so images stay cacheable and header-light.
+func TestWikiFileScriptCapableSandboxCSP(t *testing.T) {
+	baseURL, repo, cleanup := newWikiFSTestServer(t)
+	defer cleanup()
+
+	seedFile(t, repo, "assets/diagram.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>")
+	seedFile(t, repo, "assets/photo.png", "\x89PNG\r\n\x1a\n")
+
+	svg := get(t, baseURL+"/wiki/file?path=team/assets/diagram.svg")
+	defer func() { _ = svg.Body.Close() }()
+	if csp := svg.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "sandbox") || strings.Contains(csp, "allow-scripts") {
+		t.Errorf("SVG CSP = %q, want sandbox without allow-scripts", csp)
+	}
+
+	png := get(t, baseURL+"/wiki/file?path=team/assets/photo.png")
+	defer func() { _ = png.Body.Close() }()
+	if csp := png.Header.Get("Content-Security-Policy"); csp != "" {
+		t.Errorf("PNG CSP = %q, want no CSP on inert image responses", csp)
+	}
+	if cc := png.Header.Get("Cache-Control"); cc != "private, max-age=300" {
+		t.Errorf("PNG Cache-Control = %q, want private, max-age=300", cc)
 	}
 }
 
