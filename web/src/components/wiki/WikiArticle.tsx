@@ -1,6 +1,8 @@
 // biome-ignore-all lint/a11y/useValidAnchor: Anchor is intercepted by the app router or markdown renderer while preserving href fallback behavior.
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { useQueryClient } from "@tanstack/react-query";
 import type { PluggableList } from "unified";
 
 import type { EntityKind } from "../../api/entity";
@@ -58,6 +60,7 @@ import type { SourceItem } from "./Sources";
 import Sources from "./Sources";
 import TeamLearningPanel from "./TeamLearningPanel";
 import TocBox, { type TocEntry } from "./TocBox";
+import { WIKI_TREE_QUERY_KEY } from "./tree/WikiTree";
 import VersionHistory from "./VersionHistory";
 import WikiEditor from "./WikiEditor";
 import WikiMaintenanceAssistant from "./WikiMaintenanceAssistant";
@@ -349,6 +352,12 @@ export default function WikiArticle({
     };
   }, []);
 
+  // The repo-root path of the loaded article (e.g. "team/people/nazz.md"). The
+  // URL splat is the bare, group-relative form ("people/nazz"); the visual API
+  // keys on the same canonical path /wiki/file and /wiki/catalog emit, so use
+  // the server-resolved article.path — passing the splat 400s ("must be within
+  // team/").
+  const repoArticlePath = article?.path ?? null;
   useEffect(() => {
     let cancelled = false;
     void externalRefreshNonce;
@@ -357,9 +366,12 @@ export default function WikiArticle({
       visualPathRef.current = path;
       visualAutoOpenedPathRef.current = null;
       setTab("article");
+      setVisualArtifact(null);
     }
-    setVisualArtifact(null);
-    fetchWikiVisualArtifact(path)
+    // Wait for the article fetch to resolve the canonical path before asking
+    // for its visual view; there is nothing to look up until then.
+    if (!repoArticlePath) return;
+    fetchWikiVisualArtifact(repoArticlePath)
       .then((detail) => {
         if (cancelled) return;
         setVisualArtifact(detail);
@@ -371,7 +383,7 @@ export default function WikiArticle({
     return () => {
       cancelled = true;
     };
-  }, [path, externalRefreshNonce, refreshNonce]);
+  }, [path, repoArticlePath, externalRefreshNonce, refreshNonce]);
 
   // A page created via the tree's "New page" flow parks an "open in edit"
   // intent (see openInEditTarget.ts). This pops it after the visual-artifact
@@ -669,6 +681,7 @@ function ArticleDeleteControl({
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const confirm = async () => {
     if (pending) return;
@@ -676,6 +689,12 @@ function ArticleDeleteControl({
     setError(null);
     try {
       await deletePage(path);
+      // Drop the page from the always-visible sidebar file tree. The tree is a
+      // React Query (WIKI_TREE_QUERY_KEY) that only refetches on its OWN
+      // mutations; a delete fired from the article view bypassed it, so the
+      // deleted page lingered in the index until a manual reload. Invalidate it
+      // here so the index reflects the delete immediately.
+      await queryClient.invalidateQueries({ queryKey: WIKI_TREE_QUERY_KEY });
       setOpen(false);
       onDeleted();
     } catch (err: unknown) {

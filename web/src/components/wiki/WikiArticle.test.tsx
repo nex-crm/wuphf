@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as richApi from "../../api/richArtifacts";
@@ -6,25 +13,42 @@ import * as api from "../../api/wiki";
 import { requestOpenInEdit } from "./openInEditTarget";
 import WikiArticle from "./WikiArticle";
 
+// WikiArticle now reads the wiki-tree React Query (the article delete control
+// invalidates it so a deleted page leaves the sidebar index), so renders need
+// a QueryClient in context. Wrap via the `wrapper` option so `rerender` keeps
+// the provider. Fresh client per render isolates tests; retries off so error
+// states surface immediately.
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return rtlRender(ui, { wrapper: Wrapper });
+}
+
 // WikiArticle's Edit tab mounts the WYSIWYG WikiEditor, which lazy-loads the
-// real Tiptap/ProseMirror stack. Stub it with a controlled textarea that
-// mirrors the props.onChange contract so the article-level save/refresh flow is
-// exercised without booting ProseMirror in tests.
-vi.mock("./editor/TiptapWikiEditor", () => ({
-  default: ({
-    content,
-    onChange,
-  }: {
-    content: string;
-    onChange: (markdown: string) => void;
-  }) => (
-    <textarea
-      data-testid="wk-tiptap-stub"
-      value={content}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  ),
-}));
+// real Tiptap/ProseMirror stack (RefCloneEditor). Stub that module with a
+// controlled textarea that mirrors the props.onChange contract so the
+// article-level save/refresh flow is exercised without booting ProseMirror in
+// tests. (The legacy ./editor/TiptapWikiEditor is also stubbed for any path
+// that still references it.)
+const editorStub = ({
+  content,
+  onChange,
+}: {
+  content: string;
+  onChange: (markdown: string) => void;
+}) => (
+  <textarea
+    data-testid="wk-tiptap-stub"
+    value={content}
+    onChange={(e) => onChange(e.target.value)}
+  />
+);
+vi.mock("./editor/refclone/RefCloneEditor", () => ({ default: editorStub }));
+vi.mock("./editor/TiptapWikiEditor", () => ({ default: editorStub }));
 
 const CATALOG: api.WikiCatalogEntry[] = [
   {

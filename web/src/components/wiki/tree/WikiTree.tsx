@@ -45,6 +45,13 @@ import {
 import { useTreeNavigation } from "./useTreeNavigation";
 import WikiTreeNode, { type NodeMenuAction } from "./WikiTreeNode";
 
+/**
+ * React Query key for the wiki file tree (the sidebar "page index"). Exported
+ * so mutation sites OUTSIDE this component — e.g. the article-view delete
+ * control — can invalidate the tree after they change the page set, keeping the
+ * always-visible index in sync instead of stranding a deleted page in it.
+ * (Exported via the re-export block at the bottom of this file.)
+ */
 const WIKI_TREE_QUERY_KEY = ["wiki-tree"] as const;
 
 /**

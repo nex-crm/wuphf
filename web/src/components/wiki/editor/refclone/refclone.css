@@ -36,7 +36,17 @@
      host's theme-aware --wk-* tokens so the editor wears WUPHF's warm "paper"
      look (like the notebook surface) and follows the active theme — Nex Light /
      Dark / Noir Gold — with no separate dark block. Gold/olive is the accent. */
-  --background: var(--wk-paper);
+  /* Warm "journal" writing paper. The theme's own warm token (--bg-warm) is
+     neutral in light mode and the amber accent is a dark olive, so neither
+     yields a true cream — we wash a warm parchment hue over the paper instead.
+     In light mode this lands on a soft cream in the same family as the notebook
+     surface (#faf5e8), far easier on the eyes for long writing than a clinical
+     white page. Dark themes get their own warm-dark value in the `.dark`
+     override below (mixing a light hue over a dark base would just wash it
+     out). Drives the editor body via --background and is painted explicitly on
+     the pane + writing surface below. */
+  --wk-editor-paper: color-mix(in srgb, #d8b878 16%, var(--wk-paper));
+  --background: var(--wk-editor-paper);
   --foreground: var(--wk-text);
   --card: var(--wk-surface);
   --card-foreground: var(--wk-text);
@@ -103,11 +113,24 @@
   --color-ring: var(--ring);
 
   color: var(--foreground);
+  /* Paint the whole pane warm so the area around the centered writing column
+     reads as one continuous sheet, not a warm stripe on white. */
+  background: var(--wk-editor-paper);
 }
 
 /* Dark theming is inherited automatically: the tokens above map to the host's
    --wk-* tokens, which already switch per `data-theme` (Nex Dark / Noir Gold).
-   No editor-local dark override is needed. */
+   The one exception is the journal paper — RefCloneEditor adds `.dark` for any
+   non-light theme, so warm the writing surface from the theme's warm-dark
+   surface (--wk-paper-dark) with a gentle amber nudge instead of washing a
+   light cream over a dark base (which would just bleach it). */
+.refclone-editor.dark {
+  --wk-editor-paper: color-mix(
+    in srgb,
+    var(--wk-amber) 14%,
+    var(--wk-paper-dark)
+  );
+}
 
 /* ── Warm editorial prose ───────────────────────────────────────────────────
    WYSIWYG should read like the published article. The wiki reader sets article
@@ -248,6 +271,8 @@
      left margin the markers vanish and lists render marker-less. The inline
      margin gives the markers room to paint and the prose room to breathe. */
   padding: 1.5rem clamp(1rem, 4vw, 2rem);
+  /* Warm journal surface for the writing column itself (see --wk-editor-paper). */
+  background: var(--wk-editor-paper);
 }
 
 .refclone-editor .tiptap h1 {
