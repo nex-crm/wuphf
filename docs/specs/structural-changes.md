@@ -34,15 +34,23 @@
 
 **Read this section first on session resume, then the Change log below.**
 
-- **Branch:** `worktree-structural-changes`. **HEAD:** `9473517c`. Base `origin/main` @ `46f06e54`.
-- **Commits so far:** `461b578d` Phase 0 · `96877617` Phase 1 · `3f46f328` doc scrub ·
-  `5cc95204` Phase 2a-i · `f4c50882` Phase 2a-ii · `e4bf6355` Phase 2b · `a8b17d70` Phase 2a-iii ·
-  `5e43ceb3` **Phase 3a** · `d5b10eb8` **Phase 3b** · `c815f68a` tracker · `35012a1d` **Phase 3c** ·
-  `9473517c` **teammcp regression fix + effort MCP surface**. All green, all committed.
-- **NEXT: Phase 4 (Librarian = Pam agent).** PHASE 3 IS DONE — all three create-modes work
-  end-to-end + live-verified (Backlog → owner=∅/status=open parked; Start now →
-  owner set/status=in_progress executable; effort round-trips to disk as wire key `effort`;
-  Routine → /routines/new prefilled). Then Phase 5 (spec→wiki Specs/), Phase 6 (migration, LAST).
+- **Branch:** `worktree-structural-changes`. **HEAD:** `4a1ef8bf`. Base `origin/main` @ `46f06e54`.
+- **Commits so far:** …Phase 0–2 · `5e43ceb3` Phase 3a · `d5b10eb8` Phase 3b · `35012a1d` Phase 3c ·
+  `9473517c` teammcp fix · `b5faabb8` tracker · `96a48401` **per-task runtime + backlog/Auto (backend)** ·
+  `4a1ef8bf` **same (frontend)**. All green, all committed.
+- **PHASE 3 REVISION DONE (per-task runtime + backlog/Auto):** the LLM model/provider is now a
+  property of the TASK, not the agent (teamTask gains `provider`/`model` next to `effort`; dispatch
+  prefers task runtime over the owner's soft-default binding via `effectiveProviderKindForAgent`/
+  `taskModelForKind`, cross-kind isolated; threaded through create paths + team_task/team_plan MCP).
+  Composer sends provider/model/effort ON THE TASK (no more `POST /office-members` binding mutation;
+  agent picker stays a soft default). Every task is assigned: owner chip defaults to **Auto**
+  (CEO triages → `requestAutoAssignmentLocked` posts a human-authored @ceo-tagged msg → CEO reassigns
+  → runs); **Backlog** create sends `park=true` → task lands in `Drafting` (Backlog stage, assigned,
+  NOT dispatched), activated via the FE "Approve & Start" (Drafting→Running, wakes owner; Auto→triage
+  on approve). Live-verified all 4 flows + disk persistence.
+- **NEXT: Parallel instances per agent (deferred concurrency follow-up — user wants this).** Then
+  Phase 4 (Librarian = Pam), Phase 5 (spec→wiki Specs/), Phase 6 (migration, LAST). See the
+  "PARALLEL INSTANCES PICKUP" note below for the exact worker-pool changes.
 - **⚠ REGRESSION LESSON (2026-06-03):** Phase 2a (channel-per-task) silently broke 5
   `internal/teammcp` tests because 2a verification ran only `./internal/team`. Fixed in
   `9473517c`. **On every phase, run the FULL Go + web suites, not just the package you touched**
@@ -62,16 +70,21 @@
   and LAST** — it is the only irreversible-on-real-user-data step and must be written
   against the final settled shape + tested on a legacy fixture. Design forks all LOCKED
   (see "LAYOUT FORKS LOCKED" + Phase 3 in the Change log).
-- **NEXT: Phase 3c (create-mode wiring)** — see above. Then Phase 4 (Librarian = Pam),
-  Phase 5 (spec→wiki Specs/). 3a+3b shipped: composer is the landing (`/`), with
-  owner/provider/model/effort chips; effort is model-specific (claude
-  low/medium/high/xhigh/max, codex minimal/low/medium/high/xhigh, else default-only) and
-  mirrors the Go dispatch guardrails in `internal/team/headless_effort.go`. Provider/model
-  edits persist to the OWNER agent's binding (that is where WUPHF stores an agent's model);
-  effort is per-task. New shared lib `web/src/lib/providerBinding.ts` (canonical
-  bindingFromMember/PROVIDER_LABELS — AgentProfilePanel + AgentWizard still hold local
-  copies, a later consolidation).
-- **LAST (separate):** Phase 6 (persisted-state migration + E2E).
+- **PARALLEL INSTANCES PICKUP (next concurrency follow-up):** let one agent run multiple
+  tasks at once, each on its own per-task model. The per-task runtime already lands the model
+  on the task; this is purely the headless scheduler. Changes (from exploration 2026-06-03):
+  (1) `headlessWorkerPool` in `headless_codex.go` is keyed by SLUG — nest `workers`/`active`/
+  `queues` by `(slug, taskID)` and thread `taskID` through enqueue/dequeue/worker-spawn
+  (`headless_codex_queue.go`). (2) Relax the exclusive-owner lane
+  (`queueTaskBehindActiveOwnerLaneLocked` + `taskRequiresExclusiveOwnerTurn` in
+  `broker_tasks_worktrees.go`) — gate it behind a per-mode toggle (keep serialized for
+  `local_worktree` unless per-task worktrees are confirmed collision-free). (3) The ~11
+  `agentActiveTask(slug)` callers assume one active task per slug — they need a taskID to
+  disambiguate; `headlessTaskWorkspaceDir` must read the turn's task, not "the" active task.
+  ~800–1200 lines; its own pass + dedicated concurrency verification.
+- Then Phase 4 (Librarian = Pam), Phase 5 (spec→wiki Specs/).
+- **LAST (separate):** Phase 6 (persisted-state migration + E2E — now also folds `provider`/
+  `model`/`effort` task keys + the "auto" owner sentinel into the legacy-state migration).
 - **HARD RULES still active:** (1) NO external-app name anywhere in
   PR/wiki/docs/branch/code (my work scrubbed; 4 pre-existing competitive docs left per
   user). (2) Keep persisted JSON wire keys stable through Phase 5; migrate in Phase 6.
