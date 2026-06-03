@@ -181,7 +181,12 @@ func (l *Launcher) ensureAgentMCPConfig(slug string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, "wuphf-mcp-"+slug+".json")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Atomic write (temp + rename): an agent can now run several turns at once
+	// (parallel instances), and they all target this one per-slug path. A plain
+	// truncating WriteFile would let a concurrent turn's spawned process read a
+	// half-written config. The content is identical per slug, so the rename just
+	// guarantees readers always see a complete file.
+	if err := atomicWriteFile(path, data); err != nil {
 		return "", err
 	}
 	return path, nil
