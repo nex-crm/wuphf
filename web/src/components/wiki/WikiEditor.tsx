@@ -164,6 +164,7 @@ export default function WikiEditor({
             <div className="wk-editor-rich" data-testid="wk-editor-rich">
               <RefCloneEditor
                 content={content}
+                path={path}
                 onChange={setContent}
                 resolver={resolver}
                 catalog={catalog}

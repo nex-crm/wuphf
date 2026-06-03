@@ -108,31 +108,42 @@ function upgradeProviderVideos(html: string): string {
 }
 
 /**
- * Rewrite relative URLs (./file.pdf, ./image.png) to /api/assets/{pagePath}/file
- * and convert PDF links to inline embedded viewers.
- * Applies to href, src, and data-src attributes (the last is used by embed blocks).
+ * Rewrite relative URLs (./file.pdf, ./image.png) to the WUPHF wiki file API
+ * and convert PDF links to inline embedded viewers. Applies to href, src, and
+ * data-src attributes (the last is used by embed blocks).
+ *
+ * `pagePath` is the open article's DIRECTORY (repo-root-relative, e.g.
+ * `team/people`); a relative `./assets/x.png` resolves against it to
+ * `team/people/assets/x.png` and is served through `/api/wiki/file?path=…`
+ * (the reference app's `/api/assets/<path>` route does not exist in WUPHF).
  */
+function assetUrlFor(dirPath: string, file: string): string {
+  const rel = dirPath ? `${dirPath}/${file}` : file;
+  return `/api/wiki/file?path=${encodeURIComponent(rel)}`;
+}
+
 function resolveRelativeUrls(html: string, pagePath: string): string {
   const dirPath = pagePath;
 
   html = html.replace(
     /href="\.\/([^"]+)"/g,
-    (_match, file: string) => `href="/api/assets/${dirPath}/${file}"`,
+    (_match, file: string) => `href="${assetUrlFor(dirPath, file)}"`,
   );
 
   html = html.replace(
     /src="\.\/([^"]+)"/g,
-    (_match, file: string) => `src="/api/assets/${dirPath}/${file}"`,
+    (_match, file: string) => `src="${assetUrlFor(dirPath, file)}"`,
   );
 
   html = html.replace(
     /data-src="\.\/([^"]+)"/g,
-    (_match, file: string) => `data-src="/api/assets/${dirPath}/${file}"`,
+    (_match, file: string) => `data-src="${assetUrlFor(dirPath, file)}"`,
   );
 
-  // Mark PDF links with a data attribute so the editor can handle them
+  // Mark PDF links (served via the wiki file API) so the editor can handle
+  // them with the inline PDF affordance.
   html = html.replace(
-    /<a([^>]*?)href="(\/api\/assets\/[^"]+\.pdf)"([^>]*?)>/gi,
+    /<a([^>]*?)href="(\/api\/wiki\/file\?path=[^"]+\.pdf)"([^>]*?)>/gi,
     (_match, before: string, url: string, after: string) => {
       return `<a${before}href="${url}"${after} data-pdf-link="true">`;
     },

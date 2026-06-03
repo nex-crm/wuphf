@@ -26,6 +26,13 @@ import {
 export interface RefCloneEditorProps {
   /** Markdown the editor edits. Pushed into the editor-store via the provider. */
   content: string;
+  /**
+   * Repo-root-relative path of the article being edited (e.g.
+   * `team/people/nazz.md`). Used to resolve relative asset URLs (`./img.png`)
+   * and to attach uploads to the article's own folder. Optional for callers
+   * that have no concrete path (falls back to the team root).
+   */
+  path?: string;
   /** Persist edited markdown. Fired on every edit + source-mode apply. */
   onChange: (markdown: string) => void;
   /**
@@ -74,10 +81,18 @@ function buildWikiLinkResolver(
 
 export default function RefCloneEditor({
   content,
+  path,
   onChange,
   resolver,
   catalog,
 }: RefCloneEditorProps) {
+  // The article's DIRECTORY drives relative-asset resolution (./img.png →
+  // team/<dir>/img.png) and the upload target. Strip the filename; fall back to
+  // the team root when no path is supplied.
+  const dir =
+    path && path.includes("/")
+      ? path.slice(0, path.lastIndexOf("/"))
+      : HOST_EDITOR_PATH;
   // Dark palette: the reference editor reads its dark tokens from a `dark`
   // ancestor/own class. WUPHF drives theming via `data-theme` on the document;
   // mirror that here so the editor matches the host's light/dark surface.
@@ -90,20 +105,23 @@ export default function RefCloneEditor({
   );
 
   // Upload via WUPHF's multipart endpoint, then resolve to a servable URL.
-  const uploadFile = useCallback(async (file: File): Promise<string | null> => {
-    try {
-      const res = await uploadWikiFile(HOST_EDITOR_PATH, file);
-      return wikiFileUrl(res.path);
-    } catch {
-      return null;
-    }
-  }, []);
+  const uploadFile = useCallback(
+    async (file: File): Promise<string | null> => {
+      try {
+        const res = await uploadWikiFile(dir, file);
+        return wikiFileUrl(res.path);
+      } catch {
+        return null;
+      }
+    },
+    [dir],
+  );
 
   const resolveAssetUrl = useCallback((path: string) => wikiFileUrl(path), []);
 
   const value = useMemo<RefcloneEditorContextValue>(
     () => ({
-      currentPath: HOST_EDITOR_PATH,
+      currentPath: dir,
       content,
       frontmatter: null,
       onChange,
@@ -111,7 +129,7 @@ export default function RefCloneEditor({
       resolveWikiLink,
       resolveAssetUrl,
     }),
-    [content, onChange, uploadFile, resolveWikiLink, resolveAssetUrl],
+    [dir, content, onChange, uploadFile, resolveWikiLink, resolveAssetUrl],
   );
 
   return (
