@@ -669,3 +669,22 @@
   background-color: color-mix(in srgb, var(--primary) 52%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 68%, transparent);
 }
+
+/* ── Slash menu padding ──────────────────────────────────────────────────────
+   The reference styles the slash menu purely with Tailwind padding utilities
+   (py-1 on the card; px-3 / py-1.5 on rows; px-3 / pt-2 / pb-1 on category
+   headers). Those low-priority utilities are overridden by the host app's
+   element resets, so the menu rendered with its content flush against the card
+   edges (~1px top and left). Re-apply the reference's intended padding here,
+   with selectors specific enough to win, so the rows get their top + left
+   breathing room back. Keeps the reference's full-width active-row highlight
+   (no inset pill, no row radius) — only the padding is restored. */
+.refclone-editor .wk-slash-menu {
+  padding-block: 0.25rem; /* py-1 — top/bottom breathing room */
+}
+.refclone-editor .wk-slash-cat {
+  padding: 0.5rem 0.75rem 0.25rem; /* pt-2 pb-1 px-3 */
+}
+.refclone-editor .wk-slash-row {
+  padding: 0.375rem 0.75rem; /* py-1.5 px-3 — content inset from the left edge */
+}

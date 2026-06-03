@@ -516,7 +516,7 @@ export function SlashCommands({ editor }: SlashCommandsProps) {
       {open && filtered.length > 0 && (
         <div
           ref={menuRef}
-          className="absolute z-50 w-[280px] bg-popover border border-border rounded-lg shadow-lg py-1 overflow-hidden max-h-[380px] overflow-y-auto"
+          className="wk-slash-menu absolute z-50 w-[280px] bg-popover border border-border rounded-lg shadow-lg py-1 overflow-hidden max-h-[380px] overflow-y-auto"
           style={{
             top: position.top,
             left: position.left,
@@ -528,7 +528,7 @@ export function SlashCommands({ editor }: SlashCommandsProps) {
             if (!items || items.length === 0) return null;
             return (
               <div key={group.key}>
-                <div className="text-[9px] uppercase tracking-wider text-muted-foreground px-3 pt-2 pb-1">
+                <div className="wk-slash-cat text-[9px] uppercase tracking-wider text-muted-foreground px-3 pt-2 pb-1">
                   {group.title}
                 </div>
                 {items.map((cmd) => {
@@ -543,7 +543,7 @@ export function SlashCommands({ editor }: SlashCommandsProps) {
                       }}
                       onMouseEnter={() => setSelectedIndex(flatIndex)}
                       className={cn(
-                        "flex items-center gap-3 w-full px-3 py-1.5 text-left transition-colors",
+                        "wk-slash-row flex items-center gap-3 w-full px-3 py-1.5 text-left transition-colors",
                         flatIndex === selectedIndex
                           ? "bg-accent text-accent-foreground"
                           : "hover:bg-accent/50",
