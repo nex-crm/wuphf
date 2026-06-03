@@ -38,12 +38,14 @@
 - **Commits so far:** `461b578d` Phase 0 (Issues→Tasks rename) · `96877617` Phase 1
   (7-stage board + Archive) · `3f46f328` doc scrub · `5cc95204` Phase 2a-i (Backup &
   Migration task) · `f4c50882` Phase 2a-ii (channel-per-task). All green, all committed.
-- **DONE:** Phase 0 ✅, Phase 1 ✅, naming scrub ✅, Phase 2a (i+ii) ✅, **Phase 2b ✅**.
-  Backend is fully task-scoped (each business task mints its own `task-<id>` channel;
-  #general is owned by the archived "Backup & Migration" system task; ~141 `general`
-  refs untouched). **Frontend is now pure task-scoped too** (sidebar = Tasks by stage,
-  landing → /tasks, DM + per-agent-subspace removed from the navigable product, dedicated
-  Agents tool, task detail = tabbed Channel|Spec|Activity).
+- **DONE:** Phase 0 ✅, Phase 1 ✅, naming scrub ✅, Phase 2a (i+ii+iii) ✅, **Phase 2b ✅**.
+  Backend is fully task-scoped: **every real top-level task mints its own `task-<id>`
+  channel** (2a-iii dropped the keyword heuristic on 2026-06-03 — only System / incident /
+  sub-tasks stay shared; verified live + the human and @ceo always retain channel access
+  so the primary user is never locked out). #general is owned by the archived "Backup &
+  Migration" system task; ~141 `general` refs untouched. **Frontend is pure task-scoped
+  too** (sidebar = Tasks by stage, landing → /tasks, DM + per-agent-subspace removed from
+  the navigable product, dedicated Agents tool, task detail = tabbed Channel|Spec|Activity).
 - **DECISION (2026-06-03): bundle Phases 2b + 3 + 4 + 5 into ONE build-and-test pass**
   (commit at each phase checkpoint for bisectability), then test the integrated result
   against 3 ICP tutorial scenarios. **Phase 6 (persisted-state migration) stays ISOLATED

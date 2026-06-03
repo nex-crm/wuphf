@@ -254,16 +254,26 @@ func (b *Broker) preferredTaskChannelLocked(requestedChannel, _, _, _, _ string)
 }
 
 // shouldMintPerTaskChannel reports whether a newly created task
-// warrants a dedicated task-<id> channel.  The conditions are:
-//  1. The resolved channel is "general" (no explicit non-general
-//     channel was requested).
-//  2. taskLooksLikeLiveBusinessObjective is true — it is a real
-//     business goal, not a system or internal-tooling task.
-//  3. It is not a system task (System==true would be the Backup &
-//     Migration entry, which always lives in "general").
-//  4. It is not an incident self-heal (PipelineID=="incident").
-//  5. It is not a sub-issue (ParentIssueID!="") — sub-issues share
-//     the parent task's channel.
+// warrants a dedicated task-<id> channel.
+//
+// The product vision is "every task spins up its own channel", so the
+// default is to mint for any real, top-level task. We only withhold a
+// channel for the three internal-plumbing cases that genuinely belong in
+// #general (or on a parent):
+//  1. The resolved channel is "general" — an explicit non-general channel
+//     request is already a real channel, so leave it alone.
+//  2. It is not a system task (System==true is the Backup & Migration
+//     entry, which always owns "general").
+//  3. It is not an incident self-heal (PipelineID=="incident") — those are
+//     internal tooling, not user work.
+//  4. It is not a sub-issue (ParentIssueID!="") — sub-issues share their
+//     parent task's channel.
+//
+// Note: this used to additionally require taskLooksLikeLiveBusinessObjective
+// (a keyword heuristic). That under-delivered the vision — a real task whose
+// title lacked execution keywords ("Draft Q3 outbound sequence") stayed in
+// #general — so the heuristic was dropped (2026-06-03). The function is still
+// used elsewhere (notifications / pipeline), just not as a channel gate.
 func shouldMintPerTaskChannel(channel string, task *teamTask) bool {
 	if normalizeChannelSlug(channel) != "general" {
 		return false
@@ -280,7 +290,7 @@ func shouldMintPerTaskChannel(channel string, task *teamTask) bool {
 	if strings.TrimSpace(task.ParentIssueID) != "" {
 		return false
 	}
-	return taskLooksLikeLiveBusinessObjective(task)
+	return true
 }
 
 // createPerTaskChannelLocked mints a dedicated channel for a task.

@@ -133,15 +133,18 @@ func TestAckTaskRejectsInvalidOwnerAndMissingTask(t *testing.T) {
 func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 	b := newTestBroker(t)
 	b.channels = []teamChannel{
-		{Slug: "general", Name: "general", Members: []string{"pm"}},
+		{Slug: "general", Name: "general", Members: []string{"ceo"}},
 	}
 
+	// Issues can only be created by @ceo or the human. @ceo is also a
+	// trusted sender, so it keeps access to the per-task channel that is
+	// now minted on create — which is what authorizes the later "complete".
 	created, err := b.MutateTask(TaskPostRequest{
 		Action:    "create",
 		Channel:   "general",
 		Title:     "Write the plan",
 		Owner:     "alice",
-		CreatedBy: "pm",
+		CreatedBy: "ceo",
 	})
 	if err != nil {
 		t.Fatalf("MutateTask create: %v", err)
@@ -172,7 +175,7 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 		Action:    "complete",
 		ID:        created.Task.ID,
 		Channel:   "general",
-		CreatedBy: "pm",
+		CreatedBy: "ceo",
 	})
 	if err != nil {
 		t.Fatalf("MutateTask complete: %v", err)

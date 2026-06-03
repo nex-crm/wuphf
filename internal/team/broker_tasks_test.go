@@ -784,8 +784,18 @@ func TestBrokerTaskCreateKeepsDistinctTasksInSameThread(t *testing.T) {
 	if first.ID == second.ID {
 		t.Fatalf("expected distinct tasks in the same thread, got reused task id %q", first.ID)
 	}
-	if got := len(b.ChannelTasks("general")); got != 2 {
-		t.Fatalf("expected two open tasks after distinct creates, got %d", got)
+	// Every task now mints its own channel, so two distinct creates land
+	// in two distinct per-task channels rather than being grouped under
+	// #general. The non-dedup invariant is that both tasks exist, each in
+	// its own channel.
+	if first.Channel == second.Channel {
+		t.Fatalf("expected distinct per-task channels, both = %q", first.Channel)
+	}
+	if got := len(b.ChannelTasks(first.Channel)); got != 1 {
+		t.Fatalf("expected one task in %q, got %d", first.Channel, got)
+	}
+	if got := len(b.ChannelTasks(second.Channel)); got != 1 {
+		t.Fatalf("expected one task in %q, got %d", second.Channel, got)
 	}
 }
 
@@ -2200,12 +2210,17 @@ func TestBrokerTaskPlanReusesExistingActiveLane(t *testing.T) {
 }
 
 // TestPerTaskChannelMintedForBusinessObjective verifies that:
-//   - A new business-objective task submitted against "general" lands
-//     in its own dedicated "task-<id>" channel.
+//   - A new task submitted against "general" lands in its own dedicated
+//     "task-<id>" channel — including a plain task whose title has no
+//     "business objective" keywords (the keyword gate was dropped on
+//     2026-06-03 so every real task spins up a channel, per the vision).
 //   - The minted channel has TaskID set and includes ceo + owner as
 //     members.
-//   - A system task (System=true) stays in "general".
-//   - A sub-issue (ParentIssueID set) stays in its requested channel.
+//   - An explicit non-general channel request is kept as-is.
+//
+// The internal-plumbing guards (System / incident / sub-task stay in
+// #general or on the parent) are covered by
+// TestShouldMintPerTaskChannelGuards below.
 func TestPerTaskChannelMintedForBusinessObjective(t *testing.T) {
 	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return t.TempDir(), "wuphf-" + taskID, nil
@@ -2263,19 +2278,25 @@ func TestPerTaskChannelMintedForBusinessObjective(t *testing.T) {
 		t.Fatalf("builder (owner) not in per-task channel members: %v", ch1.Members)
 	}
 
-	// --- Case 2: non-business-objective task stays in "general" ---
+	// --- Case 2: a plain task with NO business-objective keywords also
+	// mints its own channel (the keyword gate was dropped so the vision
+	// "every task spins up its own channel" holds). ---
 	task2, _, err := b.EnsurePlannedTask(plannedTaskInput{
-		Channel:   "general",
-		Title:     "Internal tooling housekeeping",
-		Owner:     "builder",
-		CreatedBy: "system",
-		TaskType:  "chore",
+		Channel:       "general",
+		Title:         "Internal tooling housekeeping",
+		Owner:         "builder",
+		CreatedBy:     "ceo",
+		TaskType:      "issue",
+		ExecutionMode: "office",
 	})
 	if err != nil {
-		t.Fatalf("EnsurePlannedTask non-business: %v", err)
+		t.Fatalf("EnsurePlannedTask plain task: %v", err)
 	}
-	if task2.Channel != "general" {
-		t.Fatalf("expected non-business task in general, got %q", task2.Channel)
+	if task2.Channel == "general" {
+		t.Fatalf("expected plain (keyword-less) task to mint its own channel, got general: %+v", task2)
+	}
+	if task2.Channel != normalizeChannelSlug("task-"+task2.ID) {
+		t.Fatalf("expected channel %q, got %q", normalizeChannelSlug("task-"+task2.ID), task2.Channel)
 	}
 
 	// --- Case 3: explicit non-general channel is kept as-is ---
@@ -2293,6 +2314,36 @@ func TestPerTaskChannelMintedForBusinessObjective(t *testing.T) {
 	}
 	if task3.Channel != "youtube-factory" {
 		t.Fatalf("expected explicit channel youtube-factory, got %q", task3.Channel)
+	}
+}
+
+// TestShouldMintPerTaskChannelGuards pins the channel-minting gate after
+// the keyword heuristic was dropped (2026-06-03): every real top-level
+// task in "general" mints its own channel, and only the three internal
+// guards (system task / incident self-heal / sub-task) withhold one. An
+// explicit non-general channel request is always left as-is.
+func TestShouldMintPerTaskChannelGuards(t *testing.T) {
+	cases := []struct {
+		name    string
+		channel string
+		task    teamTask
+		want    bool
+	}{
+		{"plain keyword-less task mints", "general", teamTask{Title: "Tidy up the backlog"}, true},
+		{"business-objective task mints", "general", teamTask{Title: "Launch the sales campaign"}, true},
+		{"system task stays in general", "general", teamTask{Title: "Backup & Migration", System: true}, false},
+		{"incident self-heal stays in general", "general", teamTask{Title: "Recover", PipelineID: "incident"}, false},
+		{"sub-task stays on parent channel", "general", teamTask{Title: "child", ParentIssueID: "task-1"}, false},
+		{"explicit non-general channel kept", "youtube-factory", teamTask{Title: "Publish the launch video"}, false},
+		{"empty task in general still mints", "general", teamTask{}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldMintPerTaskChannel(tc.channel, &tc.task)
+			if got != tc.want {
+				t.Fatalf("shouldMintPerTaskChannel(%q, %+v) = %v, want %v", tc.channel, tc.task, got, tc.want)
+			}
+		})
 	}
 }
 
