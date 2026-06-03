@@ -68,6 +68,24 @@ func rejectFalseLocalWorktreeBlock(task *teamTask, reason string) error {
 	return nil
 }
 
+// taskRequiresExclusiveOwnerTurn reports whether a task must be the OWNER's only
+// active task of its kind — i.e. admission control queues a second such task
+// behind the first instead of letting both run at once.
+//
+// Only live_external still requires this. External side-effects (sends, posts,
+// remote mutations) have no per-task workspace to isolate them, so running two
+// at once for one owner risks double-sends and races on shared remote state;
+// serializing them per owner (with a clean "queued behind" dependency) is the
+// safe default.
+//
+// local_worktree used to be serialized here too, but parallel instances now run
+// distinct-worktree tasks for one owner concurrently. Safety no longer needs
+// admission control: the headless scheduler keys dispatch lanes by worktree
+// path (see headlessLane / laneForTurn), so two worktree tasks for one owner
+// run in parallel only when their worktrees differ, and collapse to one
+// serialized lane whenever they SHARE a tree (e.g. a dependent reusing its
+// parent's worktree). The filesystem boundary is enforced at dispatch, not by
+// withholding the second task.
 func taskRequiresExclusiveOwnerTurn(task *teamTask) bool {
 	if task == nil {
 		return false
@@ -75,12 +93,7 @@ func taskRequiresExclusiveOwnerTurn(task *teamTask) bool {
 	if strings.TrimSpace(task.Owner) == "" {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(task.ExecutionMode)) {
-	case "local_worktree", "live_external":
-		return true
-	default:
-		return false
-	}
+	return strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "live_external")
 }
 
 func taskStatusConsumesExclusiveOwnerTurn(status string) bool {

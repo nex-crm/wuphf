@@ -1977,7 +1977,13 @@ func TestBrokerBlockTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *testing.
 	}
 }
 
-func TestBrokerEnsurePlannedTaskQueuesConcurrentExclusiveOwnerWork(t *testing.T) {
+// TestBrokerEnsurePlannedTaskRunsWorktreeOwnerLanesConcurrently: two
+// local_worktree tasks for the same owner now BOTH activate at once (parallel
+// instances). Each gets its own worktree, so the headless scheduler runs them
+// in distinct lanes; admission control no longer queues the second behind the
+// first. (Contrast TestBrokerEnsurePlannedTaskQueuesConcurrentLiveExternalOwnerWork,
+// where external side-effects still serialize.)
+func TestBrokerEnsurePlannedTaskRunsWorktreeOwnerLanesConcurrently(t *testing.T) {
 	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
 	})
@@ -2013,8 +2019,57 @@ func TestBrokerEnsurePlannedTaskQueuesConcurrentExclusiveOwnerWork(t *testing.T)
 	if first.Status() != "in_progress" || first.Blocked() {
 		t.Fatalf("expected first task to stay active, got %+v", first)
 	}
+	// Second worktree task now runs concurrently — NOT queued behind the first.
+	if second.Status() != "in_progress" || second.Blocked() {
+		t.Fatalf("expected second worktree task to run concurrently (in_progress, not blocked), got %+v", second)
+	}
+	if second.LifecycleState == LifecycleStateQueuedBehindOwner {
+		t.Fatalf("expected second task NOT to be queued behind owner, got %q", second.LifecycleState)
+	}
+	if containsString(second.DependsOn, first.ID) {
+		t.Fatalf("expected second task NOT to depend on first %s, got %+v", first.ID, second.DependsOn)
+	}
+	if strings.Contains(second.Details, "Queued behind "+first.ID) {
+		t.Fatalf("expected no queue note in details, got %+v", second)
+	}
+}
+
+// TestBrokerEnsurePlannedTaskQueuesConcurrentLiveExternalOwnerWork: two
+// live_external tasks for the same owner still serialize — external
+// side-effects have no per-task workspace, so the second queues behind the
+// first via admission control.
+func TestBrokerEnsurePlannedTaskQueuesConcurrentLiveExternalOwnerWork(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "executor", "Executor")
+
+	first, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "general",
+		Title:         "Send the launch announcement",
+		Owner:         "executor",
+		CreatedBy:     "ceo",
+		TaskType:      "follow_up",
+		ExecutionMode: "live_external",
+	})
+	if err != nil || reused {
+		t.Fatalf("ensure first task: %v reused=%v", err, reused)
+	}
+	second, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "general",
+		Title:         "Send the follow-up announcement",
+		Owner:         "executor",
+		CreatedBy:     "ceo",
+		TaskType:      "follow_up",
+		ExecutionMode: "live_external",
+	})
+	if err != nil || reused {
+		t.Fatalf("ensure second task: %v reused=%v", err, reused)
+	}
+
+	if first.Status() != "in_progress" || first.Blocked() {
+		t.Fatalf("expected first task to stay active, got %+v", first)
+	}
 	if second.Status() != "open" || !second.Blocked() {
-		t.Fatalf("expected second task to queue behind the first, got %+v", second)
+		t.Fatalf("expected second external task to queue behind the first, got %+v", second)
 	}
 	if second.LifecycleState != LifecycleStateQueuedBehindOwner {
 		t.Fatalf("expected second task lifecycle to be queued behind owner, got %q", second.LifecycleState)
