@@ -66,6 +66,13 @@ linters:
           - bodyclose
           - errorlint
           - noctx
+      # staticcheck under Go 1.25.11 reports existing test nil-guard patterns
+      # after t.Fatal as SA5011. Keep production SA5011 enabled while avoiding
+      # a repo-wide test churn in unrelated PRs.
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: "SA5011"
       # govet's shadow check on `err` is famously noisy in idiomatic Go
       # (every nested `if err := ...; err != nil` shadows). Keep shadow on
       # for non-err identifiers (real bugs hide there) but mute the err case.

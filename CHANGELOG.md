@@ -4,6 +4,13 @@ All notable changes to WUPHF will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+
+- Bumped the Go toolchain directive to `go 1.25.11` so CI and release workflows
+  using `go-version-file: go.mod` pick up the patch release's stdlib fixes for
+  CVE-2026-42504, CVE-2026-42507, and x509 certificate parsing resource
+  consumption. This is separate from the Time Machine cache exclusion change.
+
 ### Added
 
 - **Routines app — Calendar replaced.** The sidebar Calendar entry is now

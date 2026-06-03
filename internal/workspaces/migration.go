@@ -75,6 +75,7 @@ func MigrateToSymmetric() error {
 		return err
 	}
 	if _, err := os.Stat(rp); err == nil {
+		_ = EnsureCacheBackupExclusions()
 		return nil // already migrated
 	}
 
@@ -143,7 +144,11 @@ func MigrateToSymmetric() error {
 			},
 		},
 	}
-	return writeUnderLock(reg)
+	if err := writeUnderLock(reg); err != nil {
+		return err
+	}
+	_ = EnsureCacheBackupExclusions()
+	return nil
 }
 
 // isBrokerRunning probes port via HTTP HEAD with a short timeout.
