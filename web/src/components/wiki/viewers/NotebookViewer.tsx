@@ -333,7 +333,7 @@ export default function NotebookViewer({ path }: NotebookViewerProps) {
     "python";
   const codeCellCount = cells.filter((c) => c.cell_type === "code").length;
   // True when the notebook carries code cells but none has been executed yet —
-  // matches cabinet's "hasn't been run" hint so a freshly-authored notebook
+  // drives a "hasn't been run" hint so a freshly-authored notebook
   // does not read as broken when it shows no outputs.
   const hasAnyOutputs = cells.some(
     (c) => c.cell_type === "code" && ((c as CodeCell).outputs?.length ?? 0) > 0,

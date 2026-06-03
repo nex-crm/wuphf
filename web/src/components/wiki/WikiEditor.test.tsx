@@ -10,12 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../../api/wiki";
 import WikiEditor from "./WikiEditor";
 
-// The real Tiptap editor lazy-loads ProseMirror + a stack of extensions, which
-// is heavy and irrelevant to WikiEditor's wrapper responsibilities (draft /
-// conflict / error banners, the commit input, Save/Cancel wiring). Stub it with
-// a lightweight controlled textarea that mirrors the props.onChange contract so
-// these tests exercise the wrapper without mounting ProseMirror.
-vi.mock("./editor/TiptapWikiEditor", () => ({
+// The real reference-clone editor lazy-loads ProseMirror + a stack of
+// extensions, which is heavy and irrelevant to WikiEditor's wrapper
+// responsibilities (draft / conflict / error banners, the commit input,
+// Save/Cancel wiring). Stub it with a lightweight controlled textarea that
+// mirrors the props.onChange contract so these tests exercise the wrapper
+// without mounting ProseMirror.
+vi.mock("./editor/refclone/RefCloneEditor", () => ({
   default: ({
     content,
     onChange,

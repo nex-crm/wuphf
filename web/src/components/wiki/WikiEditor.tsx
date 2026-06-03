@@ -4,11 +4,11 @@ import type { WikiCatalogEntry } from "../../api/wiki";
 import { useWikiEditorController } from "../../hooks/useWikiEditorController";
 
 /**
- * The Tiptap rich editor lives in a lazy chunk (Tiptap + extensions +
+ * The reference-clone rich editor lives in a lazy chunk (Tiptap + extensions +
  * lowlight + katex). It is the single, always-on editing surface for wiki
  * articles — there is no longer a plain-markdown source/preview fallback.
  */
-const TiptapWikiEditor = lazy(() => import("./editor/TiptapWikiEditor"));
+const RefCloneEditor = lazy(() => import("./editor/refclone/RefCloneEditor"));
 
 interface WikiEditorProps {
   /** Target article path, e.g. `team/people/nazz.md`. */
@@ -162,12 +162,11 @@ export default function WikiEditor({
             }
           >
             <div className="wk-editor-rich" data-testid="wk-editor-rich">
-              <TiptapWikiEditor
+              <RefCloneEditor
                 content={content}
                 onChange={setContent}
                 resolver={resolver}
                 catalog={catalog}
-                labelId="wk-editor-source-label"
               />
             </div>
           </Suspense>

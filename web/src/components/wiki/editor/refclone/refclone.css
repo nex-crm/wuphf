@@ -1,0 +1,652 @@
+/* =============================================================================
+   refclone.css — scoped design tokens + editor styles for the reference KB
+   editor clone.
+
+   The reference editor is a shadcn-token-driven Tiptap surface. To reproduce
+   its LOOK faithfully WITHOUT polluting WUPHF's own app tokens, every token and
+   every editor style is scoped under the `.refclone-editor` wrapper class.
+
+   Mount the editor inside:
+
+       <div className="refclone-editor"> … editor … </div>
+
+   add `refclone-editor` + `dark` together (or rely on a `.dark` ancestor) to
+   get the dark palette. Tokens are oklch, lifted verbatim from the reference
+   app's globals.css. The Tailwind utility classes baked into the vendored
+   primitives (button / separator) resolve their
+   `--color-*` theme vars from these `--*` custom properties, so the components
+   render with the reference look only inside this wrapper.
+   ========================================================================== */
+
+/* ── Token scope: light ─────────────────────────────────────────────────── */
+.refclone-editor {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.4 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.4 0 0);
+
+  /* Radius scale the vendored shadcn primitives reference via
+     rounded-[min(var(--radius-md),Npx)] / --radius-lg etc. */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+
+  /* Bridge tokens → Tailwind v4 theme color vars so utilities like `bg-card`,
+     `text-muted-foreground`, `border-border`, `ring-ring` resolve inside the
+     wrapper. (Tailwind reads `--color-*`; the reference maps them via @theme
+     inline at the app root — here we map them locally so the scope is honored.) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  color: var(--foreground);
+}
+
+/* ── Token scope: dark ──────────────────────────────────────────────────── */
+.refclone-editor.dark,
+.dark .refclone-editor {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* ── Thin scrollbars (toolbar + scroll regions) ─────────────────────────── */
+.refclone-editor .scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent)
+    transparent;
+}
+.refclone-editor .scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.refclone-editor .scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.refclone-editor .scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: color-mix(
+    in oklch,
+    var(--muted-foreground) 30%,
+    transparent
+  );
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.refclone-editor .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(
+    in oklch,
+    var(--muted-foreground) 55%,
+    transparent
+  );
+}
+
+.refclone-editor .editor-toolbar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 10%, transparent)
+    transparent;
+}
+.refclone-editor .editor-toolbar-scroll::-webkit-scrollbar {
+  height: 1px;
+  width: 1px;
+}
+.refclone-editor .editor-toolbar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.refclone-editor .editor-toolbar-scroll::-webkit-scrollbar-thumb {
+  background-color: color-mix(
+    in oklch,
+    var(--muted-foreground) 10%,
+    transparent
+  );
+  border-radius: 999px;
+}
+.refclone-editor .editor-toolbar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(
+    in oklch,
+    var(--muted-foreground) 25%,
+    transparent
+  );
+}
+
+/* ── Tiptap editor styles ───────────────────────────────────────────────── */
+.refclone-editor .tiptap {
+  outline: none;
+  font-size: 0.9375rem;
+  letter-spacing: -0.011em;
+}
+
+.refclone-editor .tiptap h1 {
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.025em;
+}
+
+.refclone-editor .tiptap h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.75rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.02em;
+}
+
+.refclone-editor .tiptap h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.015em;
+}
+
+.refclone-editor .tiptap h4 {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+.refclone-editor .tiptap p {
+  margin-bottom: 0.75rem;
+  line-height: 1.65;
+}
+
+/* Per-block automatic direction inference. */
+.refclone-editor .tiptap
+  :where(
+    p,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    li,
+    blockquote,
+    td,
+    th,
+    dd,
+    dt,
+    figcaption
+  ) {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+.refclone-editor .tiptap ul,
+.refclone-editor .tiptap ol {
+  padding-inline-start: 0;
+  margin-bottom: 0.75rem;
+}
+
+.refclone-editor .tiptap ul {
+  list-style-type: disc;
+}
+
+.refclone-editor .tiptap ol {
+  list-style-type: decimal;
+}
+
+.refclone-editor .tiptap li {
+  padding-inline-start: 1.5rem;
+  margin-bottom: 0.25rem;
+  line-height: 1.65;
+}
+
+.refclone-editor .tiptap[dir="rtl"] li,
+.refclone-editor .tiptap[dir="rtl"] li > p {
+  direction: rtl;
+  unicode-bidi: isolate;
+}
+
+.refclone-editor .tiptap li p {
+  margin-bottom: 0.25rem;
+}
+
+.refclone-editor .tiptap blockquote {
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 1rem;
+  margin: 1rem 0;
+  color: var(--muted-foreground);
+}
+
+.refclone-editor .tiptap code {
+  background: var(--muted);
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.8125rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.refclone-editor .tiptap pre {
+  background: var(--muted);
+  border-radius: 0.5rem;
+  padding: 1rem 1.25rem;
+  margin: 1rem 0;
+  overflow-x: auto;
+}
+
+.refclone-editor .tiptap pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.refclone-editor .tiptap hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5rem 0;
+}
+
+.refclone-editor .tiptap a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.refclone-editor .tiptap strong {
+  font-weight: 600;
+}
+
+.refclone-editor .tiptap p.is-editor-empty:first-child::before {
+  color: var(--muted-foreground);
+  content: attr(data-placeholder);
+  float: inline-start;
+  height: 0;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* Wiki-link styles */
+.refclone-editor .tiptap .wiki-link {
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+  padding: 0.05rem 0.25rem;
+  border-radius: 0.25rem;
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.refclone-editor .tiptap .wiki-link:hover {
+  background: color-mix(in oklch, var(--primary) 20%, transparent);
+  text-decoration: underline;
+}
+
+.refclone-editor .editor-mention {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+  padding: 0 0.375rem;
+  font-size: 0.85em;
+  font-weight: 500;
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--primary) 20%, transparent);
+  user-select: none;
+  cursor: default;
+}
+
+/* Table styles */
+.refclone-editor .tiptap table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+  table-layout: fixed;
+}
+
+.refclone-editor .tiptap .tableWrapper {
+  margin: 1rem 0;
+  overflow-x: auto;
+}
+
+.refclone-editor .tiptap .tableWrapper table {
+  margin: 0;
+}
+
+.refclone-editor .tiptap th,
+.refclone-editor .tiptap td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  text-align: start;
+  vertical-align: top;
+}
+
+.refclone-editor .tiptap th {
+  background: var(--muted);
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+.refclone-editor .tiptap td {
+  font-size: 0.8125rem;
+}
+
+.refclone-editor .tiptap tr:hover td {
+  background: var(--muted);
+}
+
+.refclone-editor .tiptap .selectedCell {
+  position: relative;
+}
+
+.refclone-editor .tiptap .selectedCell::after {
+  background: color-mix(in oklch, var(--primary) 18%, transparent);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+}
+
+.refclone-editor .tiptap .column-resize-handle {
+  background-color: var(--primary);
+  bottom: -1px;
+  pointer-events: none;
+  position: absolute;
+  inset-inline-end: -2px;
+  top: 0;
+  width: 3px;
+}
+
+.refclone-editor .tiptap.resize-cursor {
+  cursor: col-resize;
+}
+
+/* Checklist / task list styles */
+.refclone-editor .tiptap .task-list {
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+.refclone-editor .tiptap .task-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding-inline-start: 0;
+}
+
+.refclone-editor .tiptap .task-list li label {
+  display: flex;
+  align-items: center;
+  margin-top: 0.2rem;
+}
+
+.refclone-editor .tiptap .task-list li label input[type="checkbox"] {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border: 1.5px solid var(--border);
+  border-radius: 0.25rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+.refclone-editor .tiptap .task-list li label input[type="checkbox"]:checked {
+  background: var(--primary);
+  border-color: var(--primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  background-size: 0.7rem;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.refclone-editor .tiptap .task-list li[data-checked="true"] > div > p {
+  text-decoration: line-through;
+  color: var(--muted-foreground);
+}
+
+/* PDF link styling */
+.refclone-editor .tiptap a[href$=".pdf"] {
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Callout styles */
+.refclone-editor .tiptap .callout {
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  border-inline-start: 3px solid;
+}
+
+.refclone-editor .tiptap .callout-info {
+  background: color-mix(in oklch, oklch(0.6 0.18 250) 8%, transparent);
+  border-color: oklch(0.6 0.18 250);
+}
+
+.refclone-editor .tiptap .callout-warning {
+  background: color-mix(in oklch, oklch(0.75 0.15 80) 8%, transparent);
+  border-color: oklch(0.75 0.15 80);
+}
+
+.refclone-editor .tiptap .callout-success {
+  background: color-mix(in oklch, oklch(0.65 0.2 145) 8%, transparent);
+  border-color: oklch(0.65 0.2 145);
+}
+
+.refclone-editor .tiptap .callout-error {
+  background: color-mix(in oklch, oklch(0.6 0.2 25) 8%, transparent);
+  border-color: oklch(0.6 0.2 25);
+}
+
+/* Resizable image wrapper */
+.refclone-editor .tiptap .resizable-image {
+  position: relative;
+}
+.refclone-editor .tiptap .resizable-image[data-align="left"] {
+  margin-left: 0;
+  margin-right: auto;
+}
+.refclone-editor .tiptap .resizable-image[data-align="right"] {
+  margin-left: auto;
+  margin-right: 0;
+}
+.refclone-editor .tiptap .resizable-image[data-align="center"] {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Embed blocks */
+.refclone-editor .tiptap [data-embed="true"] {
+  margin: 1rem 0;
+}
+.refclone-editor .tiptap [data-embed="true"] iframe {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+.refclone-editor .tiptap [data-embed="true"] video {
+  width: 100%;
+  border-radius: 0.5rem;
+  background: black;
+}
+
+/* KaTeX sizing tweaks inside editor */
+.refclone-editor .tiptap .katex {
+  font-size: 1em;
+}
+.refclone-editor .tiptap [data-type="inline-math"],
+.refclone-editor .tiptap [data-type="inlineMath"] {
+  display: inline-block;
+  padding: 0 0.1rem;
+  border-radius: 0.2rem;
+  background: color-mix(in oklch, var(--primary) 6%, transparent);
+  cursor: pointer;
+}
+.refclone-editor .tiptap [data-type="inline-math"]:hover,
+.refclone-editor .tiptap [data-type="inlineMath"]:hover {
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+}
+
+/* Text-align fallback for older content */
+.refclone-editor .tiptap [style*="text-align: center"] {
+  text-align: center;
+}
+.refclone-editor .tiptap [style*="text-align: right"] {
+  text-align: right;
+}
+.refclone-editor .tiptap [style*="text-align: justify"] {
+  text-align: justify;
+}
+
+/* Emoji-mart picker theming (matches popover) */
+.refclone-editor em-emoji-picker {
+  --background-rgb: 255, 255, 255;
+  --border-radius: 0.5rem;
+  height: 340px;
+  max-width: 340px;
+}
+.refclone-editor.dark em-emoji-picker,
+.dark .refclone-editor em-emoji-picker {
+  --background-rgb: 32, 32, 32;
+  --rgb-background: 32, 32, 32;
+  --rgb-color: 232, 232, 232;
+  --rgb-input: 45, 45, 45;
+}
+
+/* Code syntax highlighting (hljs token colors used inside the editor) */
+.refclone-editor .tiptap pre code .hljs-keyword,
+.refclone-editor .tiptap pre code .hljs-selector-tag,
+.refclone-editor .tiptap pre code .hljs-built_in {
+  color: oklch(0.7 0.15 300);
+}
+
+.refclone-editor .tiptap pre code .hljs-string,
+.refclone-editor .tiptap pre code .hljs-attr {
+  color: oklch(0.7 0.15 145);
+}
+
+.refclone-editor .tiptap pre code .hljs-number,
+.refclone-editor .tiptap pre code .hljs-literal {
+  color: oklch(0.7 0.15 55);
+}
+
+.refclone-editor .tiptap pre code .hljs-comment {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+.refclone-editor .tiptap pre code .hljs-function,
+.refclone-editor .tiptap pre code .hljs-title {
+  color: oklch(0.75 0.15 250);
+}
+
+.refclone-editor .tiptap pre code .hljs-type,
+.refclone-editor .tiptap pre code .hljs-class {
+  color: oklch(0.75 0.12 80);
+}
+
+/* Drag handle + gutter add-button.
+   These are portaled to document.body (positioned against the viewport), so
+   they live OUTSIDE the .refclone-editor token scope. Their inline styles read
+   var(--muted-foreground)/var(--muted); without a fallback those resolve
+   against the host app's global tokens (bare HSL triplets, invalid as direct
+   color values) and the grip paints the wrong color. Define the two tokens on
+   the elements themselves with neutral grays that read on light and dark, and
+   keep the selectors unscoped so they actually match the body-level nodes. */
+#refclone-drag-handle,
+#refclone-gutter-add {
+  --muted-foreground: oklch(0.556 0 0);
+  --muted: oklch(0.55 0 0 / 0.16);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+#refclone-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* ── In-page find (Cmd+F) match highlighting ── */
+.refclone-editor .ProseMirror .find-match {
+  background-color: color-mix(in srgb, var(--primary) 20%, transparent);
+  border-radius: 2px;
+}
+.refclone-editor .ProseMirror .find-match--current {
+  background-color: color-mix(in srgb, var(--primary) 52%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 68%, transparent);
+}
