@@ -24,6 +24,7 @@ const AGENT_COLORS: Record<string, string> = {
   designer: "#F778BA",
   cmo: "#FFA657",
   cro: "#79C0FF",
+  jim: "#8FB3D1",
   pam: "#F4B6C2",
   nex: "#56D4DD",
 };
@@ -72,6 +73,7 @@ const RESERVED_DYNAMIC_AVATAR_IDS = new Set([
   "hybridCeo",
   "hybridGeneric",
   "hybridHuman",
+  "hybridJim",
   "hybridPam",
   "hybridPamCute",
 ]);

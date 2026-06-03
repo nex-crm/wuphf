@@ -43,6 +43,7 @@
   width: 96px;
   user-select: none;
   pointer-events: none; /* only the button + menu receive clicks */
+  overflow: visible;
 }
 
 .pam-button {
@@ -200,6 +201,89 @@
   pointer-events: none;
 }
 
+/* ─── Jim visits Pam ───
+ *
+ * Jim occasionally walks in from off-tab, trades a few bubbles with Pam, then
+ * leaves. The sprite comes from the shared generated office avatar system; this
+ * wrapper only handles placement and timing. It is intentionally non-interactive
+ * and pointer-events free so Pam's desk menu remains the only control here.
+ */
+.jim-pam-visitor {
+  position: absolute;
+  right: 98px;
+  bottom: 0;
+  z-index: 35;
+  width: 46px;
+  height: 65px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(180px);
+}
+
+.jim-pam-visitor.is-walking-in {
+  animation: jim-walk-in 2.6s linear forwards;
+}
+
+.jim-pam-visitor.is-chatting {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.jim-pam-visitor.is-walking-out {
+  animation: jim-walk-out 2.2s linear forwards;
+}
+
+.jim-pam-visitor.is-walking-in .jim-pixel,
+.jim-pam-visitor.is-walking-out .jim-pixel {
+  animation: jim-step 0.36s steps(2, end) infinite;
+}
+
+.jim-pixel {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 46px;
+  display: block;
+  image-rendering: pixelated;
+  transform-origin: 50% 100%;
+}
+
+.jim-pam-bubble {
+  position: absolute;
+  bottom: 60px;
+  left: -78px;
+  width: 190px;
+  padding: 7px 9px;
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  color: var(--wk-text);
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.jim-pam-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  left: 91px;
+  width: 10px;
+  height: 10px;
+  background: var(--wk-surface);
+  border-right: 1px solid var(--wk-border);
+  border-bottom: 1px solid var(--wk-border);
+  transform: rotate(45deg);
+}
+
+.jim-pam-bubble[data-speaker="pam"] {
+  left: -34px;
+  border-color: var(--wk-amber);
+  background: var(--wk-amber-banner);
+}
+
 /* ─── Idle + busy animations ───
  * Sway is a gentle 1deg rotation roughly every 8 seconds. Blink is a quick
  * vertical squash so Pam feels alive without motion-sickness risk. Busy-bob
@@ -229,9 +313,47 @@
   }
 }
 
+@keyframes jim-walk-in {
+  from {
+    opacity: 1;
+    transform: translateX(180px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes jim-walk-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(180px);
+  }
+}
+
+@keyframes jim-step {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(1deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pam-button,
-  .pam-button[data-busy="true"] {
+  .pam-button[data-busy="true"],
+  .jim-pam-visitor {
+    animation: none;
+  }
+
+  .jim-pam-visitor.is-walking-in .jim-pixel,
+  .jim-pam-visitor.is-walking-out .jim-pixel {
     animation: none;
   }
 }

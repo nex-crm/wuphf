@@ -13,6 +13,8 @@ describe("pixel avatar sprite resolution", () => {
       ["planner", "hybridPm"],
       ["builder", "hybridEng"],
       ["growth", "hybridGtm"],
+      ["jim", "hybridJim"],
+      ["halpert", "hybridJim"],
       ["reviewer", "hybridQa"],
       ["operator", "hybridNex"],
     ]);
@@ -31,6 +33,14 @@ describe("pixel avatar sprite resolution", () => {
     expect(mixedCase.palette).toEqual(normalized.palette);
   });
 
+  it("keeps Jim on the sheet-derived full-body sprite", () => {
+    const jim = resolvePortraitSprite("jim");
+
+    expect(jim.id).toBe("hybridJim");
+    expect(jim.portrait).toHaveLength(24);
+    expect(jim.portrait[0]).toHaveLength(17);
+  });
+
   it("keeps arbitrary new-agent slugs on generated office sprites", () => {
     const avatar = resolvePortraitSprite("custom-ops-agent");
     const idParts = avatar.id.split(":");
@@ -41,6 +51,7 @@ describe("pixel avatar sprite resolution", () => {
       "hybridCeo",
       "hybridGeneric",
       "hybridHuman",
+      "hybridJim",
       "hybridPam",
       "hybridPamCute",
     ]).not.toContain(baseID);
@@ -61,6 +72,7 @@ describe("pixel avatar sprite resolution", () => {
 
   it("keeps procedural agent colors stable and accent-like", () => {
     expect(getAgentColor("ceo")).toBe("#E8A838");
+    expect(getAgentColor("jim")).toBe("#8FB3D1");
     expect(getAgentColor("custom-ops-agent")).toMatch(/^#[0-9A-F]{6}$/i);
     expect(getAgentColor("custom-ops-agent")).toBe(
       getAgentColor("custom-ops-agent"),
