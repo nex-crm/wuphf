@@ -24,6 +24,19 @@ export interface OnboardingFormAnswers {
   task_prompt?: string;
 }
 
+/**
+ * One row of the post-onboarding "Settle into your office" checklist.
+ * Mirrors `internal/onboarding/state.go` ChecklistItem. The server only
+ * carries `id` + `done`; the human-readable label is overlaid by the
+ * frontend (GettingStartedChecklist) with WUPHF copy, so `label` is
+ * optional here for forward-compat if the wire shape ever adds one.
+ */
+export interface OnboardingChecklistItem {
+  id: string;
+  label?: string;
+  done: boolean;
+}
+
 export interface OnboardingState {
   onboarded?: boolean;
   phase?: string;
@@ -34,6 +47,10 @@ export interface OnboardingState {
   first_issue_approved_at?: string;
   company_name?: string;
   completed_at?: string;
+  /** Post-onboarding getting-started checklist (omitted on legacy state). */
+  checklist?: OnboardingChecklistItem[];
+  /** True once the user closes the getting-started panel. */
+  checklist_dismissed?: boolean;
 }
 
 // ── Suggestion wire shapes ─────────────────────────────────────────────────

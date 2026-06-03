@@ -100,7 +100,7 @@ describe("PrePickScreen", () => {
     expect(screen.getByTestId("pre-pick-skip")).toBeInTheDocument();
   });
 
-  it("posts /config and starts CEO onboarding when a detected runtime is picked", async () => {
+  it("posts /config and hands off to the onboarding wizard when a detected runtime is picked", async () => {
     mockPrereqs({ claude: true });
     const onComplete = vi.fn();
     render(<PrePickScreen onComplete={onComplete} />);
@@ -119,15 +119,17 @@ describe("PrePickScreen", () => {
         memory_backend: "markdown",
       }),
     );
-    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
-      phase: "greet",
-    });
+    // The visual wizard now drives onboarding, so the pick must NOT start the
+    // legacy CEO-chat phase machine. No greet transition, no early complete.
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/onboarding/transition"),
+    ).toBeUndefined();
     expect(
       postMock.mock.calls.find((call) => call[0] === "/onboarding/complete"),
     ).toBeUndefined();
   });
 
-  it("starts CEO onboarding with no runtime when the user picks the skip affordance", async () => {
+  it("hands off to the wizard with no runtime when the user picks the skip affordance", async () => {
     mockPrereqs({});
     const onComplete = vi.fn();
     render(<PrePickScreen onComplete={onComplete} />);
@@ -143,9 +145,10 @@ describe("PrePickScreen", () => {
     expect(
       postMock.mock.calls.find((call) => call[0] === "/config"),
     ).toBeUndefined();
-    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
-      phase: "greet",
-    });
+    // No phase-machine transition: the wizard seeds via /onboarding/complete.
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/onboarding/transition"),
+    ).toBeUndefined();
   });
 
   it("does NOT persist /config on skip even when form fields are filled", async () => {
@@ -175,9 +178,10 @@ describe("PrePickScreen", () => {
     expect(
       postMock.mock.calls.find((call) => call[0] === "/config"),
     ).toBeUndefined();
-    expect(postMock).toHaveBeenCalledWith("/onboarding/transition", {
-      phase: "greet",
-    });
+    // No phase-machine transition on the wizard flow.
+    expect(
+      postMock.mock.calls.find((call) => call[0] === "/onboarding/transition"),
+    ).toBeUndefined();
   });
 
   it("opens the install URL in a new tab when a missing runtime card is clicked", async () => {
@@ -352,10 +356,10 @@ describe("PrePickScreen", () => {
     ).toBeUndefined();
   });
 
-  it("surfaces an error if /onboarding/transition fails and does not invoke onComplete", async () => {
+  it("surfaces an error if /config fails and does not invoke onComplete", async () => {
     mockPrereqs({ codex: true });
     postMock.mockImplementation(async (path: string) => {
-      if (path === "/onboarding/transition") {
+      if (path === "/config") {
         throw new Error("broker unreachable");
       }
       return {};
@@ -680,6 +684,199 @@ describe("PrePickScreen", () => {
       render(<PrePickScreen onComplete={vi.fn()} />);
       const card = await screen.findByTestId("pre-pick-card-claude-code");
       await waitFor(() => expect(card).not.toBeDisabled());
+    });
+  });
+
+  // ── Guided setup + verify loop (spec section B) ────────────────────────
+  //
+  // The "Set up & verify" toggle expands a guided panel: numbered steps pulled
+  // from GET /onboarding/install-steps, plus a Verify button that POSTs
+  // /onboarding/verify and renders the classified result.
+
+  describe("guided setup + verify", () => {
+    const CLAUDE_STEPS = {
+      runtime: "claude",
+      steps: [
+        {
+          title: "Install Claude Code",
+          detail: "One npm install and the CLI is on your PATH.",
+          command: "npm install -g @anthropic-ai/claude-code",
+          link_label: "Install guide",
+          link_url: "https://claude.ai/code",
+        },
+        {
+          title: "Sign in to Claude",
+          detail: "Sign in once and the office can run turns on your account.",
+          command: "claude auth login",
+        },
+        { title: "Verify", detail: "Press Verify and we confirm." },
+      ],
+    };
+
+    // Route install-steps onto the existing GET mock, and verify onto POST.
+    function mockGuide(verifyResult: Record<string, unknown>) {
+      getMock.mockImplementation(async (path: string) => {
+        if (path === "/onboarding/prereqs") {
+          return [{ name: "claude", required: false, found: false }];
+        }
+        if (path === "/onboarding/install-steps") {
+          return CLAUDE_STEPS;
+        }
+        if (path === "/onboarding/state") {
+          return {};
+        }
+        return {};
+      });
+      postMock.mockImplementation(async (path: string) => {
+        if (path === "/onboarding/verify") {
+          return verifyResult;
+        }
+        return {};
+      });
+    }
+
+    it("expands the guided steps from /onboarding/install-steps when the toggle is clicked", async () => {
+      mockGuide({ status: "not_installed", runtime: "claude" });
+      render(<PrePickScreen onComplete={vi.fn()} />);
+
+      const toggle = await screen.findByTestId(
+        "pre-pick-guide-toggle-claude-code",
+      );
+      fireEvent.click(toggle);
+
+      // Steps render from the backend payload.
+      const guide = await screen.findByTestId("pre-pick-guide-claude");
+      expect(guide).toHaveTextContent("Install Claude Code");
+      expect(guide).toHaveTextContent("Sign in to Claude");
+      // The copyable command row is present.
+      expect(
+        screen.getByTestId("pre-pick-guide-command-claude-0"),
+      ).toHaveTextContent("npm install -g @anthropic-ai/claude-code");
+      // The verify button is present and idle.
+      expect(screen.getByTestId("pre-pick-verify-claude")).toHaveTextContent(
+        /Verify/,
+      );
+    });
+
+    it("renders a pass result and surfaces the Next button when verify classifies the runtime as ready", async () => {
+      mockGuide({ status: "pass", runtime: "claude", version: "1.2.3" });
+      render(<PrePickScreen onComplete={vi.fn()} />);
+
+      fireEvent.click(
+        await screen.findByTestId("pre-pick-guide-toggle-claude-code"),
+      );
+      fireEvent.click(await screen.findByTestId("pre-pick-verify-claude"));
+
+      const result = await screen.findByTestId("pre-pick-verify-result-claude");
+      expect(result.getAttribute("data-status")).toBe("pass");
+      expect(result).toHaveTextContent("Ready to go.");
+      expect(result).toHaveTextContent("1.2.3");
+      // POST /onboarding/verify fired with the runtime name.
+      expect(postMock).toHaveBeenCalledWith(
+        "/onboarding/verify",
+        { runtime: "claude" },
+        expect.anything(),
+      );
+      // A pass flips the primary CTA to "Next".
+      expect(await screen.findByTestId("pre-pick-next")).toHaveTextContent(
+        /Next/,
+      );
+    });
+
+    it("renders an auth_required result with the sign-in command and hint", async () => {
+      mockGuide({
+        status: "auth_required",
+        runtime: "claude",
+        command: "claude auth login",
+        sign_in_command: "claude auth login",
+        hint: "Run the sign-in command, then verify again.",
+        failed_step: "Sign in to Claude",
+      });
+      render(<PrePickScreen onComplete={vi.fn()} />);
+
+      fireEvent.click(
+        await screen.findByTestId("pre-pick-guide-toggle-claude-code"),
+      );
+      fireEvent.click(await screen.findByTestId("pre-pick-verify-claude"));
+
+      const result = await screen.findByTestId("pre-pick-verify-result-claude");
+      expect(result.getAttribute("data-status")).toBe("auth_required");
+      expect(result).toHaveTextContent(
+        "Run the sign-in command, then verify again.",
+      );
+      // The classified command renders as a copyable row.
+      expect(
+        screen.getByTestId("pre-pick-verify-command-claude"),
+      ).toHaveTextContent("claude auth login");
+      // The failed step is highlighted.
+      const failedStep = screen.getByTestId("pre-pick-guide-step-claude-1");
+      expect(failedStep.getAttribute("data-failed")).toBe("true");
+      // auth_required is NOT ready, so no Next button appears.
+      expect(screen.queryByTestId("pre-pick-next")).toBeNull();
+    });
+
+    it("renders a not_installed result with the install command and no Next button", async () => {
+      mockGuide({
+        status: "not_installed",
+        runtime: "claude",
+        command: "npm install -g @anthropic-ai/claude-code",
+        hint: "claude is not on your PATH yet. Run the install command, then verify again.",
+        failed_step: "Install claude",
+      });
+      render(<PrePickScreen onComplete={vi.fn()} />);
+
+      fireEvent.click(
+        await screen.findByTestId("pre-pick-guide-toggle-claude-code"),
+      );
+      fireEvent.click(await screen.findByTestId("pre-pick-verify-claude"));
+
+      const result = await screen.findByTestId("pre-pick-verify-result-claude");
+      expect(result.getAttribute("data-status")).toBe("not_installed");
+      expect(result).toHaveTextContent("Not installed yet.");
+      expect(
+        screen.getByTestId("pre-pick-verify-command-claude"),
+      ).toHaveTextContent("npm install -g @anthropic-ai/claude-code");
+      expect(screen.queryByTestId("pre-pick-next")).toBeNull();
+    });
+
+    it("offers Verify again after a result and re-runs the probe", async () => {
+      mockGuide({ status: "pass", runtime: "claude" });
+      render(<PrePickScreen onComplete={vi.fn()} />);
+
+      fireEvent.click(
+        await screen.findByTestId("pre-pick-guide-toggle-claude-code"),
+      );
+      const verifyBtn = await screen.findByTestId("pre-pick-verify-claude");
+      fireEvent.click(verifyBtn);
+
+      await screen.findByTestId("pre-pick-verify-result-claude");
+      // The button relabels to "Verify again".
+      await waitFor(() =>
+        expect(screen.getByTestId("pre-pick-verify-claude")).toHaveTextContent(
+          /Verify again/,
+        ),
+      );
+
+      const verifyCalls = () =>
+        postMock.mock.calls.filter((c) => c[0] === "/onboarding/verify").length;
+      expect(verifyCalls()).toBe(1);
+      fireEvent.click(screen.getByTestId("pre-pick-verify-claude"));
+      await waitFor(() => expect(verifyCalls()).toBe(2));
+    });
+
+    it("collapses the guide when the toggle is clicked again", async () => {
+      mockGuide({ status: "pass", runtime: "claude" });
+      render(<PrePickScreen onComplete={vi.fn()} />);
+
+      const toggle = await screen.findByTestId(
+        "pre-pick-guide-toggle-claude-code",
+      );
+      fireEvent.click(toggle);
+      await screen.findByTestId("pre-pick-guide-claude");
+      fireEvent.click(toggle);
+      await waitFor(() =>
+        expect(screen.queryByTestId("pre-pick-guide-claude")).toBeNull(),
+      );
     });
   });
 });

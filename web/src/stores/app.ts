@@ -187,6 +187,17 @@ export interface AppStore {
   composerSearchInitialQuery: string;
   setComposerSearchInitialQuery: (q: string) => void;
 
+  /**
+   * One-shot composer prefill keyed by channel. Set when a flow wants to drop
+   * the user into a channel with text already in the box — for example, the
+   * office tour finish handoff seeds an example first issue in the CEO DM.
+   * The Composer consumes and clears it when its channel matches, so it never
+   * re-applies on a later visit to the same channel.
+   */
+  pendingComposerDraft: { channel: string; text: string } | null;
+  setPendingComposerDraft: (channel: string, text: string) => void;
+  consumePendingComposerDraft: (channel: string) => string | null;
+
   // Help modal — /help slash command surface
   composerHelpOpen: boolean;
   setComposerHelpOpen: (v: boolean) => void;
@@ -359,6 +370,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setSearchOpen: (v) => set({ searchOpen: v }),
   composerSearchInitialQuery: "",
   setComposerSearchInitialQuery: (q) => set({ composerSearchInitialQuery: q }),
+
+  pendingComposerDraft: null,
+  setPendingComposerDraft: (channel, text) =>
+    set({ pendingComposerDraft: { channel, text } }),
+  consumePendingComposerDraft: (channel) => {
+    const pending = get().pendingComposerDraft;
+    if (!pending || pending.channel !== channel) return null;
+    set({ pendingComposerDraft: null });
+    return pending.text;
+  },
 
   composerHelpOpen: false,
   setComposerHelpOpen: (v) => set({ composerHelpOpen: v }),

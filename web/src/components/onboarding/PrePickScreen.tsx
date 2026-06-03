@@ -5,6 +5,7 @@ import { showNotice } from "../ui/Toast";
 import { LocalProviderPicker } from "./LocalProviderPicker";
 import { isValidUrl, OpenAICompatibleInput } from "./OpenAICompatibleInput";
 import { PrePickApiKeyRow } from "./PrePickApiKeyRow";
+import { RuntimeGuidePanel } from "./RuntimeGuidePanel";
 import { RuntimeLogo } from "./RuntimeLogos";
 import { API_KEY_FIELDS, sanitizeConfigString } from "./runtimeConstants";
 import type { PrereqResult, RuntimeSpec } from "./runtimes";
@@ -54,9 +55,11 @@ interface RuntimeCardProps {
   prereqsLoaded: boolean;
   isSubmitting: boolean;
   anySubmitting: boolean;
+  expanded: boolean;
   onPick: (spec: RuntimeSpec) => void;
   onInstall: (url: string) => void;
   onCopySignIn: (command: string) => void;
+  onToggleGuide: (binary: string) => void;
 }
 
 function cardStatusLabel({
@@ -90,9 +93,11 @@ function RuntimeCard({
   prereqsLoaded,
   isSubmitting,
   anySubmitting,
+  expanded,
   onPick,
   onInstall,
   onCopySignIn,
+  onToggleGuide,
 }: RuntimeCardProps) {
   const { spec, detected, available, signedIn, signInCommand } = state;
   const statusLabel = isSubmitting
@@ -117,48 +122,70 @@ function RuntimeCard({
     isUnauthed && prereqsLoaded ? (
       <div className="pre-pick-card-install">Copy sign-in command</div>
     ) : null;
+  // The guide toggle stays usable while a card is in a blocking state
+  // (missing / not signed in) — that is exactly when the user needs the
+  // step-by-step setup. It is only disabled during an in-flight submit so a
+  // second office cannot start underneath the first.
   return (
-    <button
-      key={spec.label}
-      type="button"
-      className={`pre-pick-card${available ? " available" : " missing"}${isUnauthed ? " unauthed" : ""}`}
-      data-testid={`pre-pick-card-${spec.provider}`}
-      data-signed-in={signedIn === undefined ? "unknown" : String(signedIn)}
-      // CodeRabbit fix (PR #889): guard against clicks during prereq detection
-      // and any in-flight submission. Both disable conditions must hold.
-      // Issue #932: don't fully disable when unauthed — we still want clicks
-      // to fire the sign-in CTA. The pick path early-returns instead.
-      disabled={anySubmitting || !prereqsLoaded}
-      onClick={() => {
-        // Belt-and-suspenders guard: early-return if prereqs haven't settled.
-        if (!prereqsLoaded) return;
-        if (!available) {
-          onInstall(spec.installUrl);
-          return;
-        }
-        // Auth gate: when the runtime probed and reported NOT signed in,
-        // never fall through to onPick — even if sign_in_command is
-        // missing/empty. Falling through would advance onboarding to an
-        // un-authed runtime, which the agent loop's first LLM call would
-        // immediately reject. Copy the command when we have it; otherwise
-        // just no-op (the inline "not signed in" hint stays visible).
-        if (isUnauthed) {
-          if (signInCommand) {
-            onCopySignIn(signInCommand);
-          }
-          return;
-        }
-        onPick(spec);
-      }}
+    <div
+      className="pre-pick-cell"
+      data-testid={`pre-pick-cell-${spec.provider}`}
     >
-      <div className="pre-pick-card-head">
-        <RuntimeLogo label={spec.label} />
-        <span className="pre-pick-card-name">{spec.label}</span>
-      </div>
-      <div className="pre-pick-card-status">{statusLabel}</div>
-      {installHint}
-      {signInHint}
-    </button>
+      <button
+        type="button"
+        className={`pre-pick-card${available ? " available" : " missing"}${isUnauthed ? " unauthed" : ""}`}
+        data-testid={`pre-pick-card-${spec.provider}`}
+        data-signed-in={signedIn === undefined ? "unknown" : String(signedIn)}
+        // CodeRabbit fix (PR #889): guard against clicks during prereq detection
+        // and any in-flight submission. Both disable conditions must hold.
+        // Issue #932: don't fully disable when unauthed — we still want clicks
+        // to fire the sign-in CTA. The pick path early-returns instead.
+        disabled={anySubmitting || !prereqsLoaded}
+        onClick={() => {
+          // Belt-and-suspenders guard: early-return if prereqs haven't settled.
+          if (!prereqsLoaded) return;
+          if (!available) {
+            onInstall(spec.installUrl);
+            return;
+          }
+          // Auth gate: when the runtime probed and reported NOT signed in,
+          // never fall through to onPick — even if sign_in_command is
+          // missing/empty. Falling through would advance onboarding to an
+          // un-authed runtime, which the agent loop's first LLM call would
+          // immediately reject. Copy the command when we have it; otherwise
+          // just no-op (the inline "not signed in" hint stays visible).
+          if (isUnauthed) {
+            if (signInCommand) {
+              onCopySignIn(signInCommand);
+            }
+            return;
+          }
+          onPick(spec);
+        }}
+      >
+        <div className="pre-pick-card-head">
+          <RuntimeLogo label={spec.label} />
+          <span className="pre-pick-card-name">{spec.label}</span>
+        </div>
+        <div className="pre-pick-card-status">{statusLabel}</div>
+        {installHint}
+        {signInHint}
+      </button>
+      <button
+        type="button"
+        className={`pre-pick-guide-toggle${expanded ? " open" : ""}`}
+        data-testid={`pre-pick-guide-toggle-${spec.provider}`}
+        aria-expanded={expanded}
+        aria-controls={`pre-pick-guide-${spec.binary}`}
+        disabled={isSubmitting}
+        onClick={() => onToggleGuide(spec.binary)}
+      >
+        <span className="pre-pick-guide-toggle-chevron" aria-hidden="true">
+          &rsaquo;
+        </span>
+        {expanded ? "Hide setup" : "Set up & verify"}
+      </button>
+    </div>
   );
 }
 
@@ -273,6 +300,36 @@ function buildConfigPayload(
   return payload;
 }
 
+// Static illustration of the "Set up & verify" flow. The GIF autoplays and
+// cannot honor prefers-reduced-motion, so a <picture> serves a static poster
+// to reduced-motion users. Extracted to a module-level component so the
+// PrePickScreen render body stays within the per-function line budget.
+function VerifyClipFigure() {
+  return (
+    <figure className="pre-pick-clip-figure">
+      <picture>
+        <source
+          srcSet="/media/onboarding/provider-verify-still.png"
+          media="(prefers-reduced-motion: reduce)"
+        />
+        <img
+          className="pre-pick-clip"
+          src="/media/onboarding/provider-verify.gif"
+          width={808}
+          height={600}
+          alt="A runtime being verified: Claude Code is checked for an installed binary, an active sign-in, and a reachable model, then resolves to Connected."
+          loading="lazy"
+          decoding="async"
+        />
+      </picture>
+      <figcaption className="pre-pick-clip-caption">
+        "Set up &amp; verify" checks the binary, your sign-in, and that the
+        model is reachable before you continue.
+      </figcaption>
+    </figure>
+  );
+}
+
 export function PrePickScreen({ onComplete }: PrePickScreenProps) {
   const [prereqs, setPrereqs] = useState<PrereqResult[]>([]);
   const [prereqsLoaded, setPrereqsLoaded] = useState(false);
@@ -289,6 +346,15 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
   // OpenAI-compatible custom endpoint
   const [oaiUrl, setOaiUrl] = useState<string>("");
   const [oaiKey, setOaiKey] = useState<string>("");
+
+  // Guided-setup + verify state (spec section B). At most one runtime's guide
+  // is expanded at a time. `verifiedReady` records the runtimes a live verify
+  // pass classified as ready, keyed by the prereq binary — once one is ready
+  // the primary advance button reads "Next" instead of "Skip for now".
+  const [expandedGuide, setExpandedGuide] = useState<string | null>(null);
+  const [verifiedReady, setVerifiedReady] = useState<Record<string, boolean>>(
+    {},
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -345,6 +411,28 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
     setApiKeys((prev) => ({ ...prev, [key]: value }));
   }
 
+  // Toggle the guided-setup panel for a runtime (keyed by prereq binary).
+  // Opening one collapses any other so the screen never stacks two guides.
+  function handleToggleGuide(binary: string): void {
+    setExpandedGuide((prev) => (prev === binary ? null : binary));
+  }
+
+  // A live verify pass classified this runtime as ready. Record it so the
+  // primary advance button can read "Next". Keyed by prereq binary.
+  function handleVerified(runtimeBinary: string): void {
+    setVerifiedReady((prev) =>
+      prev[runtimeBinary] ? prev : { ...prev, [runtimeBinary]: true },
+    );
+  }
+
+  // The runtime whose guide is currently expanded, if any.
+  const expandedRuntime = expandedGuide
+    ? runtimes.find((r) => r.spec.binary === expandedGuide)
+    : undefined;
+
+  // True once any runtime has verified ready — drives the primary CTA copy.
+  const anyRuntimeReady = Object.values(verifiedReady).some(Boolean);
+
   // Issue #979 guard: best-effort probe of /onboarding/state at click time.
   // If the broker reports phase=complete, the SPA is in a session-loss
   // recovery state — POSTing /onboarding/transition with phase=greet would
@@ -396,7 +484,13 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
       ) {
         await post("/config", configPayload);
       }
-      await post("/onboarding/transition", { phase: "greet" });
+      // Hand off to the visual onboarding wizard. We deliberately do NOT POST
+      // /onboarding/transition {phase:"greet"} here: that starts the legacy
+      // CEO-chat phase machine (and a greet agent turn), which the wizard
+      // replaces. The wizard collects answers across its steps and seeds the
+      // office in one shot via POST /onboarding/complete at finish, so no
+      // phase-machine transition is needed (or wanted — the greet turn could
+      // block this pick on a runtime that is still being set up).
       onComplete();
     } catch (err: unknown) {
       const msg =
@@ -445,7 +539,7 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
           <div className="pre-pick-eyebrow">WUPHF</div>
           <h1 className="pre-pick-headline">Pick a default runtime.</h1>
           <p className="pre-pick-subhead">
-            This is the runtime new agents will inherit when they're created.
+            This is the runtime new agents will inherit when they are created.
             You can change it later in Settings, and most agents can be moved to
             a different runtime one at a time from their profile. Agents
             imported through a gateway (OpenClaw, Hermes) are managed from the
@@ -462,18 +556,62 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
               prereqsLoaded={prereqsLoaded}
               isSubmitting={submitting === state.spec.label}
               anySubmitting={anySubmitting}
+              expanded={expandedGuide === state.spec.binary}
               onPick={(spec) => void commitChoice(spec.provider, spec.label)}
               onInstall={openInstallPage}
               onCopySignIn={handleCopySignIn}
+              onToggleGuide={handleToggleGuide}
             />
           ))}
         </div>
 
+        {/* ── Guided setup + verify panel for the expanded runtime ──────── */}
+        {expandedRuntime ? (
+          <RuntimeGuidePanel
+            key={expandedRuntime.spec.binary}
+            runtime={expandedRuntime.spec.binary}
+            label={expandedRuntime.spec.label}
+            onVerified={(runtimeBinary) => handleVerified(runtimeBinary)}
+          />
+        ) : null}
+
+        {/* ── Advance when a runtime has verified ready ─────────────────── */}
+        {anyRuntimeReady && expandedRuntime ? (
+          <div className="pre-pick-secondary-row">
+            <button
+              type="button"
+              className="btn btn-primary pre-pick-next-button"
+              data-testid="pre-pick-next"
+              disabled={anySubmitting}
+              onClick={() =>
+                void commitChoice(
+                  expandedRuntime.spec.provider,
+                  expandedRuntime.spec.label,
+                )
+              }
+            >
+              {submitting === expandedRuntime.spec.label
+                ? "Opening your office…"
+                : "Next  →"}
+            </button>
+          </div>
+        ) : null}
+
+        {/* What "Set up & verify" looks like. Sits BELOW the runtime cards so
+            the providers stay first; the clip illustrates the verify flow. */}
+        <VerifyClipFigure />
+
         {/* ── Section 2: API keys ──────────────────────────────────────── */}
-        <div className="pre-pick-section" data-testid="pre-pick-api-keys">
-          <p className="pre-pick-section-heading">API keys</p>
+        <section
+          className="pre-pick-section"
+          data-testid="pre-pick-api-keys"
+          aria-labelledby="pre-pick-api-keys-h"
+        >
+          <h2 className="pre-pick-section-heading" id="pre-pick-api-keys-h">
+            API keys
+          </h2>
           <p className="pre-pick-section-hint">
-            Use CLI login or paste a key. CLI login is the primary path -- keys
+            Use CLI login or paste a key. CLI login is the primary path; keys
             are a fallback or alternative.
           </p>
           <div className="key-group">
@@ -486,11 +624,17 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
               />
             ))}
           </div>
-        </div>
+        </section>
 
         {/* ── Section 3: Local provider picker ────────────────────────── */}
-        <div className="pre-pick-section" data-testid="pre-pick-local-section">
-          <p className="pre-pick-section-heading">Local model</p>
+        <section
+          className="pre-pick-section"
+          data-testid="pre-pick-local-section"
+          aria-labelledby="pre-pick-local-h"
+        >
+          <h2 className="pre-pick-section-heading" id="pre-pick-local-h">
+            Local model
+          </h2>
           <p className="pre-pick-section-hint">
             Run inference on this machine. No cloud key required.
           </p>
@@ -498,11 +642,17 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
             selected={localProvider}
             onSelect={(kind) => setLocalProvider(kind)}
           />
-        </div>
+        </section>
 
         {/* ── Section 4: OpenAI-compatible endpoint ───────────────────── */}
-        <div className="pre-pick-section" data-testid="pre-pick-oai-section">
-          <p className="pre-pick-section-heading">Custom endpoint</p>
+        <section
+          className="pre-pick-section"
+          data-testid="pre-pick-oai-section"
+          aria-labelledby="pre-pick-oai-h"
+        >
+          <h2 className="pre-pick-section-heading" id="pre-pick-oai-h">
+            Custom endpoint
+          </h2>
           <p className="pre-pick-section-hint">
             Any server that speaks the OpenAI REST protocol (LiteLLM, vLLM,
             llama.cpp server, etc.). For OpenClaw or Hermes, use the
@@ -514,7 +664,7 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
             onChangeUrl={setOaiUrl}
             onChangeKey={setOaiKey}
           />
-        </div>
+        </section>
 
         {/* ── Submit from form sections ────────────────────────────────── */}
         {canContinueFromForm ? (
@@ -542,7 +692,7 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
           >
             {submitting === "skip"
               ? "Opening your office…"
-              : "I'll add one later  →"}
+              : "I will add one later  →"}
           </button>
         </div>
 

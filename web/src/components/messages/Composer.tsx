@@ -144,6 +144,10 @@ export function Composer() {
   const currentChannel = useChannelSlug() ?? "general";
   const setLastMessageId = useAppStore((s) => s.setLastMessageId);
   const setChannelClearMarker = useAppStore((s) => s.setChannelClearMarker);
+  const pendingComposerDraft = useAppStore((s) => s.pendingComposerDraft);
+  const consumePendingComposerDraft = useAppStore(
+    (s) => s.consumePendingComposerDraft,
+  );
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
   const [acItems, setAcItems] = useState<AutocompleteItem[]>([]);
@@ -189,6 +193,32 @@ export function Composer() {
   useEffect(() => {
     historyRef.current = emptyHistoryState();
   }, []);
+
+  // Consume a one-shot composer prefill (e.g. the office tour finish handoff
+  // seeds an example first issue in the CEO DM). Fires when a draft targeting
+  // this channel appears, whether the user navigated here or was already here.
+  // consumePendingComposerDraft clears it so it never re-applies on a revisit.
+  useEffect(() => {
+    if (
+      !pendingComposerDraft ||
+      pendingComposerDraft.channel !== currentChannel
+    ) {
+      return;
+    }
+    const draft = consumePendingComposerDraft(currentChannel);
+    if (draft === null) return;
+    setText(draft);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const end = el.value.length;
+      el.setSelectionRange(end, end);
+      setCaret(end);
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    });
+  }, [pendingComposerDraft, currentChannel, consumePendingComposerDraft]);
 
   const resetRecall = useCallback(() => {
     historyRef.current = emptyHistoryState();
@@ -311,9 +341,7 @@ export function Composer() {
 
     if (pendingId) {
       setIsPreSendPending(true);
-      void dismissPending
-        .then(send)
-        .finally(() => setIsPreSendPending(false));
+      void dismissPending.then(send).finally(() => setIsPreSendPending(false));
     } else {
       send();
     }

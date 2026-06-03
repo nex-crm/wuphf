@@ -4,6 +4,7 @@ import {
   lazy,
   type ReactNode,
   Suspense,
+  useCallback,
   useEffect,
   useState,
 } from "react";
@@ -23,8 +24,10 @@ import { Composer } from "../components/messages/Composer";
 import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
-import { OnboardingChat } from "../components/onboarding/OnboardingChat";
 import { PrePickScreen } from "../components/onboarding/PrePickScreen";
+import { OfficeTour } from "../components/onboarding/tour/OfficeTour";
+import { useOfficeTour } from "../components/onboarding/tour/useOfficeTour";
+import { OnboardingWizard } from "../components/onboarding/wizard/OnboardingWizard";
 import { ConfirmHost } from "../components/ui/ConfirmDialog";
 import { ProviderSwitcherHost } from "../components/ui/ProviderSwitcher";
 import { ToastContainer } from "../components/ui/Toast";
@@ -34,7 +37,7 @@ import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
-import { useAppStore } from "../stores/app";
+import { directChannelSlug, useAppStore } from "../stores/app";
 import {
   type AppPanelId,
   type FirstClassAppId,
@@ -663,9 +666,7 @@ function MainContent() {
     case "issue-new":
       return <IssueNewForm />;
     case "agent-subspace":
-      return (
-        <AgentSubspaceRoute agentSlug={route.agentSlug} tab={route.tab} />
-      );
+      return <AgentSubspaceRoute agentSlug={route.agentSlug} tab={route.tab} />;
     case "skill-detail":
       return <SkillDetailRoute skillName={route.skillName} />;
     case "routine-detail":
@@ -819,6 +820,37 @@ export default function RootRoute() {
   useKeyboardShortcuts();
   useBrokerEvents(apiReady);
 
+  // Guided office tour. The first-run auto-open is now OWNED BY THE VISUAL
+  // ONBOARDING WIZARD (the four education slides moved into the pre-office
+  // wizard steps), so we pass `enabled={false}` to suppress the post-office
+  // auto-open. The replay path is independent of `enabled` in useOfficeTour:
+  // the `requestShowOfficeTour()` window-event listener stays bound, so Help →
+  // "Replay the office tour" still overlays the tour on the live office.
+  const officeTour = useOfficeTour(false);
+
+  // Finish handoff (spec section 4): drop the user mid-action in the CEO DM
+  // with an example first issue already typed into the composer, instead of
+  // dead-ending on "Done". We seed a one-shot, channel-scoped draft in the
+  // app store; the Composer consumes and clears it on mount/when its channel
+  // matches (see stores/app.ts pendingComposerDraft + Composer.tsx). This is
+  // the controlled-state-safe alternative to writing the textarea imperatively.
+  const handleTourFinish = useCallback(() => {
+    const ceoChannel = directChannelSlug("ceo");
+    useAppStore
+      .getState()
+      .setPendingComposerDraft(
+        ceoChannel,
+        "Audit our CRM for duplicate accounts, deals missing an owner, and opportunities with no activity in 30 days, then propose a cleanup plan",
+      );
+    void router.navigate({
+      to: "/dm/$agentSlug",
+      params: { agentSlug: "ceo" },
+    });
+    // Deps intentionally empty: router and directChannelSlug are module-level
+    // imports and useAppStore.getState() is Zustand's imperative escape hatch,
+    // so nothing from render scope is captured.
+  }, []);
+
   useEffect(() => {
     const href = getTheme(theme).cssPath;
     const existing = document.getElementById(
@@ -885,26 +917,30 @@ export default function RootRoute() {
     );
   } else if (!onboardingComplete) {
     if (inCeoOnboarding || bootPhase) {
-      // CEO wizard running — render OnboardingChat full-screen, NOT inside
-      // the office Shell. The user is not "in the office" yet; the wizard
-      // is mocked as a CEO chat so the experience reads as a conversation
-      // while still gating progress through deterministic chip / form
-      // cards. Once the broker flips onboarded=true the user falls through
-      // to the post-onboarding Shell branch below and lands in the office.
-      body = <OnboardingChat />;
+      // Visual stepped wizard — full-screen, NOT inside the office Shell. The
+      // user is not "in the office" yet. The wizard educates with a persistent
+      // mock office and creates the team (pick a blueprint, brief the first
+      // agent, write the first issue), then POSTs /onboarding/complete to seed
+      // the office and flip onboarded=true. Its onComplete fires after the seed
+      // succeeds, so we flip onboardingComplete here and the office Shell mounts
+      // via the branch below with the first issue already seeded into the CEO
+      // DM composer (pendingComposerDraft, set inside the wizard hook).
+      body = (
+        <OnboardingWizard onComplete={() => setOnboardingComplete(true)} />
+      );
     } else {
       // Provider picker. No phase set yet — user hasn't picked a runtime.
-      // After they pick, setInCeoOnboarding(true) to enter the CEO DM.
+      // After they pick, setInCeoOnboarding(true) to enter the wizard.
       body = (
         <PrePickScreen
           onComplete={(info) => {
             // Issue #979: when the broker reports phase=complete at pick time
-            // (session-loss recovery), skip the CEO DM hand-off entirely and
-            // route straight into the office. Otherwise enter the normal CEO
+            // (session-loss recovery), skip the wizard hand-off entirely and
+            // route straight into the office. Otherwise enter the normal
             // onboarding hand-off: PrePickScreen has just POSTed
-            // /onboarding/transition phase=greet, so the Shell renders the
-            // OnboardingDMRoute around the CEO DM until the broker flips
-            // onboarded=true.
+            // /onboarding/transition phase=greet, so RootRoute renders the
+            // visual OnboardingWizard until it seeds the office and calls
+            // onComplete.
             if (info?.phaseAlreadyComplete) {
               setOnboardingComplete(true);
               return;
@@ -923,6 +959,16 @@ export default function RootRoute() {
             single source of truth for navigation state — RoutedBody
             reads it via useCurrentRoute. */}
         <Outlet />
+        {/* Replay only: an already-onboarded user reopened the tour from Help,
+            so it overlays the live office at --z-modal. First-run shows the
+            tour as the surface above (no Shell behind), per the converged arc. */}
+        {officeTour.open && officeTour.replay ? (
+          <OfficeTour
+            open={true}
+            onClose={officeTour.skip}
+            onFinish={handleTourFinish}
+          />
+        ) : null}
       </Shell>
     );
   }

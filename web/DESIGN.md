@@ -161,3 +161,63 @@ correct — the action hint is already announced in the dialog label.
 At most one peek is open at a time. Opening a second peek closes the
 first. Managed by Slice D's opener state; the peek component itself has
 no instance registry.
+
+## Onboarding office tour
+
+Post-onboarding orientation: a full-viewport modal (`--z-modal`) that
+overlays the real office once `onboarded` flips true. Auto-opens once per
+browser (`localStorage: wuphf.office-tour-done`), replayable from Help via
+the `wuphf:show-office-tour` event. Files: `components/onboarding/tour/*`,
+styles `office-tour.css` (shell) + `office-tour-slides.css` (slides).
+
+### Composition
+
+Editorial, not card-pile. Each slide is a two-column grid
+(`minmax(0,1fr) minmax(0,1.15fr)`): copy left, a live mock of the real
+surface right (mock sidebar, agent card, composer fan-out, wiki tree). It
+collapses to one column at `≤760px`. Headlines use `--font-logo` (serif);
+slugs and typed commands use `--font-mono`. The footer is a `1fr auto 1fr`
+grid so the progress dots stay optically centered while Back / Next / Finish
+size to their labels.
+
+### Color + theme
+
+Token-only, verified in `nex`, `nex-dark`, and `noir-gold`. The overlay
+carries an atmosphere wash:
+`radial-gradient(... color-mix(in srgb, var(--accent) N%, transparent) ...)`
+layered over a flat `background-color: var(--bg)` fallback. Completion ticks
+and heartbeats use `--green` / `--green-bg`.
+
+### Motion budget
+
+| Element | Animation |
+| ------- | --------- |
+| Slide morph | `document.startViewTransition` when available, synchronous fallback otherwise, never under reduced motion |
+| Entrances (copy, stage, cards, ticks) | `transform`/`opacity`, `cubic-bezier(0.22, 1, 0.36, 1)`, replays per slide via `data-active` |
+| Composer typewriter | `clip-path: inset(0 100% 0 0)` → `inset(0)` (paint, not layout). Caret follows via `transform: translateX(var(--typed-ch))`, `--typed-ch` set inline from the command length so it never goes stale |
+| Heartbeat / caret blink | `opacity` only |
+
+Under `prefers-reduced-motion: reduce`: every entrance lands on its final
+state, the typed command shows in full, the caret rests at the line end.
+
+### Accessibility
+
+- `role="dialog"` + `aria-modal` + `aria-label`; focus moves in on open,
+  returns on close, and is **trapped** while open (Tab cycles within the
+  overlay using the shared `FOCUSABLE_SELECTOR`, matching `SidePanel`).
+- Esc skips, `←`/`→` navigate slides. The dot rail is one labeled
+  `role="img"` ("Step N of M"); individual dots and the step marker are
+  `aria-hidden`. The mock surfaces are `aria-hidden` (decorative).
+- A visually-hidden live region announces the active slide headline.
+- Coarse pointers get 44px minimum hit areas on skip + footer buttons.
+
+## Getting-started checklist
+
+Dismissible "Settle into your office" panel (`GettingStartedChecklist.tsx`)
+shown to onboarded-but-not-settled users; renders the dormant Go
+`DefaultChecklist`. A `--green` `role="progressbar"` fill visualizes the
+N/total count. Completion is exposed to screen readers with `.sr-only`
+"Done." text, never by strikethrough alone (the tick is `aria-hidden`).
+External actions open in a new tab with `rel="noopener noreferrer"`;
+"Connect a GitHub repo" is internal nav to the seeded how-to wiki page, not
+the source repo. Action controls reach 44px on coarse pointers.

@@ -1,0 +1,255 @@
+/* ═══════════════════════════════════════════════════════════════
+   Office tour — modal SHELL styles only.
+
+   Scope split (do not cross it):
+     - THIS file owns the modal shell: overlay, body wrapper, skip button,
+       footer, progress dots, and shell-level keyframes.
+     - office-tour-slides.css (sibling task) owns slide internals and the
+       mock sidebar. Do not style `.tour-mockup-*` or slide-internal
+       classes here.
+
+   Class-name contract (the slides author matches these from OfficeTour.tsx):
+     .office-tour-overlay              full-viewport overlay (role=dialog)
+     .office-tour-skip                 top-right skip button
+     .office-tour-body                 centers the active slide;
+                                       carries data-slide="<id>"
+     .office-tour-footer               Back · dots · Next/Finish row
+     .office-tour-footer-side          left + right footer cells (Back / CTA)
+     .office-tour-footer-side-end      right cell modifier (CTA aligned end)
+     .office-tour-dots                 progress-dot rail (role=img,
+                                       labelled "Step N of M")
+     .office-tour-dot                  one progress dot (aria-hidden)
+     .office-tour-dot-active           active dot modifier
+     .office-tour-transition-fallback  visually-hidden live region used as
+                                       the synchronous-fallback announcement
+
+   Tokens only — no hardcoded hex. Renders in nex / nex-dark / noir-gold.
+   ═══════════════════════════════════════════════════════════════ */
+
+.office-tour-overlay {
+  position: fixed;
+  inset: 0;
+  /* Above the office Shell and its panels. --z-modal is the shared modal
+     layer; the tour is a modal orientation surface, so it belongs here. */
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+  /* Atmosphere, not a flat field: two faint accent washes give the orientation
+     surface depth and pull focus toward the slide. background-color is a
+     separate declaration so a browser without color-mix() still gets the solid
+     --bg fall back rather than a transparent overlay. The accent token adapts
+     per theme, so the wash stays on-brand in nex / nex-dark / noir-gold. */
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(
+      1100px 560px at 16% 10%,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 520px at 88% 92%,
+      color-mix(in srgb, var(--accent) 5%, transparent),
+      transparent 55%
+    );
+  /* The overlay is its own view-transition root so slide morphs animate
+     only the body, not the whole page. Harmless on browsers without the
+     API (the property is simply ignored). */
+  view-transition-name: office-tour;
+  animation: office-tour-overlay-in 200ms ease-out both;
+}
+
+@keyframes office-tour-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.office-tour-skip {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.office-tour-skip:hover {
+  color: var(--text);
+  background: var(--bg-warm);
+}
+
+.office-tour-skip:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ─── Top-left wayfinding marker (mirrors the skip control top-right) ─── */
+.office-tour-step {
+  position: absolute;
+  top: calc(var(--space-4) + 2px);
+  left: var(--space-6);
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1em;
+  /* --text-secondary (not -tertiary): at 11px the tertiary tier falls below
+     the 4.5:1 AA contrast minimum on the light --bg. This is wayfinding, not
+     decoration, so it must stay legible to low-vision users. */
+  color: var(--text-secondary);
+}
+
+/* ─── Keyboard affordance shown in the left footer cell on slide 1 ─── */
+.office-tour-kbd-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.office-tour-kbd-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.office-tour-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-6);
+  overflow: auto;
+}
+
+/* ─── Footer: Back · dots · Next/Finish ─── */
+/* A 3-column grid (1fr auto 1fr) keeps the dot rail optically centered
+   whether or not Back is present, while letting each side track grow to its
+   button's intrinsic width. A flex `flex:1 1 0` split (the prior approach)
+   forced equal side widths, so a wide CTA like "Write your first issue"
+   overflowed its cell past the footer padding and clipped at the viewport
+   edge; the grid sizes the track to the content instead. */
+.office-tour-footer {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6) calc(var(--space-6) + var(--space-2));
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.office-tour-footer-side {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.office-tour-footer-side-end {
+  justify-content: flex-end;
+}
+
+/* The Back / Next / Finish buttons size to their label and never shrink or
+   wrap, so the affordance reads as a solid, tappable target on every slide. */
+.office-tour-footer-side > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* The shadcn Button's horizontal padding (px-4) lives in @layer utilities,
+   which an unlayered reset can outrank depending on stylesheet load order
+   (Storybook does this), collapsing the button to its text width. Restate the
+   padding unlayered and token-based so Back / Next / Finish keep a real hit
+   area in every context. --space-4 (16px) matches the shadcn px-4 value, so
+   this is a no-op where the utility already wins. */
+.office-tour-footer-side > button {
+  padding-inline: var(--space-4);
+}
+
+/* ─── Progress dots ─── */
+.office-tour-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+.office-tour-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--border-dark);
+  transition:
+    width 0.25s,
+    background 0.25s;
+}
+
+.office-tour-dot-active {
+  width: 28px;
+  background: var(--accent);
+}
+
+/* ─── Synchronous-fallback live region (visually hidden, SR-available) ─── */
+.office-tour-transition-fallback {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ─── Touch: 44px minimum hit area on coarse pointers ─── */
+/* The skip control and footer buttons are comfortable for a mouse but cramped
+   for a finger. Raise them to the 44px guideline on touch without bloating the
+   desktop layout. */
+@media (pointer: coarse) {
+  .office-tour-skip {
+    min-height: 44px;
+  }
+  .office-tour-footer-side > button {
+    min-height: 44px;
+  }
+}
+
+/* ─── Reduced motion: disable shell transitions + entrance ─── */
+@media (prefers-reduced-motion: reduce) {
+  .office-tour-overlay {
+    animation: none;
+  }
+  .office-tour-dot {
+    transition: none;
+  }
+}
