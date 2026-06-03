@@ -398,8 +398,8 @@ func (l *Launcher) buildHeadlessCodexEnv(slug string, workspaceDir string, chann
 		goCache := filepath.Join(base, "go-build", strings.TrimSpace(slug))
 		goTmp := filepath.Join(base, "go-tmp", strings.TrimSpace(slug))
 		if config.EnsureCacheDir(base) == nil &&
-			os.MkdirAll(goCache, 0o755) == nil &&
-			os.MkdirAll(goTmp, 0o755) == nil {
+			os.MkdirAll(goCache, 0o700) == nil &&
+			os.MkdirAll(goTmp, 0o700) == nil {
 			env = setEnvValue(env, "GOCACHE", goCache)
 			env = setEnvValue(env, "GOTMPDIR", goTmp)
 		}
