@@ -236,6 +236,18 @@
   outline: none;
   font-size: 0.9375rem;
   letter-spacing: -0.011em;
+  /* Writing margin. The ported editable carries Tailwind `px-4 sm:px-8 py-6`
+     for its margin, but those PADDING utilities don't resolve on this element
+     in the host build (the max-width + centering ones do, so the column is
+     correct — only the inner padding is lost). Set it explicitly here, with a
+     selector specific enough to win over the utility. Two things break without
+     it: the prose sits flush against the scroll container's left edge (no
+     breathing room, unlike the reference's roomy page), and — the visible bug —
+     `list-style: outside` bullet/number markers hang to the LEFT of the list's
+     content box into x<0, where the `overflow` editing body clips them. With no
+     left margin the markers vanish and lists render marker-less. The inline
+     margin gives the markers room to paint and the prose room to breathe. */
+  padding: 1.5rem clamp(1rem, 4vw, 2rem);
 }
 
 .refclone-editor .tiptap h1 {

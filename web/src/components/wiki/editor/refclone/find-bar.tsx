@@ -21,20 +21,34 @@ export function FindBar({ editor }: FindBarProps) {
     current: -1,
   });
 
-  // Mirror the plugin's match state into React on every transaction so the
-  // "3/12" counter and disabled states stay in sync as the user types.
+  // Mirror the plugin's match state into React so the "3/12" counter and
+  // disabled states stay in sync as the user types.
+  //
+  // Coalesce into one animation frame: this listener is attached for the whole
+  // editing session, and a single keystroke fires several transactions. Calling
+  // setStats synchronously on every one floods React's update queue under fast
+  // input and trips "Maximum update depth exceeded" — same failure mode as the
+  // toolbar's force-render. Batching to one rAF keeps the counter live without
+  // the per-transaction setState storm.
   useEffect(() => {
     if (!editor) return;
-    const sync = () => {
+    let frame = 0;
+    const apply = () => {
+      frame = 0;
       const ps = findPluginKey.getState(editor.state);
       setStats({
         count: ps?.matches.length ?? 0,
         current: ps?.current ?? -1,
       });
     };
+    const sync = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(apply);
+    };
     editor.on("transaction", sync);
-    sync();
+    apply();
     return () => {
+      if (frame) cancelAnimationFrame(frame);
       editor.off("transaction", sync);
     };
   }, [editor]);

@@ -136,13 +136,31 @@ export function EditorToolbar({
   // Force re-render on selection/transaction changes so isActive() reflects the
   // current cursor position (the editor object reference is stable so React
   // won't re-render automatically when the internal state changes).
+  //
+  // Coalesce into a single animation frame. One user action routinely fires
+  // several transactions (input rules, auto-direction's appended transaction,
+  // list/typing bursts), and under fast input ProseMirror flushes them
+  // back-to-back. Calling setState synchronously on EVERY transaction floods
+  // React's update queue and trips "Maximum update depth exceeded" — the editor
+  // then crashes into the error boundary the moment you type a list quickly or
+  // load a doc with media. Batching to one rAF re-renders the toolbar at most
+  // once per frame, which is plenty for cursor-state reflection, and makes the
+  // surface resilient to transaction bursts.
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!editor) return;
-    const bump = () => setTick((t) => t + 1);
+    let frame = 0;
+    const bump = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setTick((t) => t + 1);
+      });
+    };
     editor.on("selectionUpdate", bump);
     editor.on("transaction", bump);
     return () => {
+      if (frame) cancelAnimationFrame(frame);
       editor.off("selectionUpdate", bump);
       editor.off("transaction", bump);
     };
