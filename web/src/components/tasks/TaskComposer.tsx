@@ -10,10 +10,14 @@
  * runtime, the model dropdown lists that runtime's models, and the effort chip
  * offers only the levels that runtime applies at dispatch (see effortCatalog).
  *
- * Provider/model selection writes the OWNER agent's runtime binding (that is
- * where WUPHF stores the model an agent runs on), so changing them updates the
- * owner's default — surfaced in the hint line. Effort is stored on the task
- * itself and applies to this task only.
+ * The provider/model/effort are sent ON THE TASK — the model is a property of
+ * the task, not the agent, so nothing here mutates an agent's binding. Dispatch
+ * prefers the task's runtime over the owner's (soft-default) binding.
+ *
+ * Every task is assigned: the owner chip defaults to "Auto" (the CEO picks the
+ * best specialist) and also lists the CEO + specialists. "Start now" dispatches
+ * the owner (Auto → CEO triages); "Backlog" parks the task assigned until the
+ * user starts it; "Routine" hands off to the recurring-routine composer.
  */
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -24,10 +28,8 @@ import {
   getLocalProvidersStatus,
   type LLMRuntimeKind,
   type LocalProviderStatus,
-  post,
 } from "../../api/client";
 import { createTasks } from "../../api/tasks";
-import { useTeamLeadSlug } from "../../hooks/useConfig";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import {
   effortOptionsForKind,
@@ -47,6 +49,10 @@ type CreateMode = "start" | "backlog" | "routine";
 
 const DEFAULT_CHANNEL = "general";
 
+// "auto" owner sentinel — the CEO picks the real specialist (the floor
+// assignment; every task is assigned). Mirrors isAutoOwner on the Go side.
+const AUTO_OWNER = "auto";
+
 // firstLine returns a task title from the free-text prompt: the first
 // non-empty line, trimmed to a sane title length. The full prompt is kept as
 // the task details so nothing the user typed is lost.
@@ -63,7 +69,6 @@ export function TaskComposer() {
   const queryClient = useQueryClient();
   const membersQuery = useOfficeMembers();
   const members = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
-  const leadSlug = useTeamLeadSlug(members);
 
   const configQuery = useQuery({
     queryKey: ["config"],
@@ -82,7 +87,7 @@ export function TaskComposer() {
     "claude-code") as LLMRuntimeKind;
 
   const [prompt, setPrompt] = useState("");
-  const [ownerSlug, setOwnerSlug] = useState<string>("");
+  const [ownerSlug, setOwnerSlug] = useState<string>(AUTO_OWNER);
   const [providerKind, setProviderKind] = useState<"" | LLMRuntimeKind>("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
@@ -91,31 +96,24 @@ export function TaskComposer() {
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const submitLockRef = useRef(false);
 
-  // Default the owner to the team lead once members + config resolve.
-  useEffect(() => {
-    if (!ownerSlug && leadSlug) setOwnerSlug(leadSlug);
-  }, [ownerSlug, leadSlug]);
-
-  // Track the owner's stored binding so we only PATCH when the user actually
-  // changes provider/model away from it.
+  // The selected owner's stored binding seeds the chips as a starting point.
+  // "auto" (and any owner without a binding) seeds from the global default
+  // runtime. Whatever the user picks is sent ON THE TASK — it never mutates the
+  // agent's binding (the model is a property of the task, not the agent).
   const ownerMember = members.find((m) => m.slug === ownerSlug);
   const ownerBinding = bindingFromMember(ownerMember?.provider);
   const ownerKind = runtimeKindFromMember(ownerMember?.provider, llmKinds);
   const ownerModel = ownerBinding.model ?? "";
 
-  // Sync the chips to the owner's stored runtime. Keyed on the binding's
-  // primitive values (ownerKind/ownerModel) rather than just ownerSlug so the
-  // chips populate once members finish loading on cold boot, not only when the
-  // user switches owner. These are stable strings — the 5s members refetch
-  // returns identical values, so it does NOT re-run and clobber a user's chip
-  // edits; the effect only fires when the owner or their binding truly changes.
+  // Seed the runtime chips when the owner (or their binding) changes. Keyed on
+  // primitive values so the 5s members refetch — which returns identical
+  // strings — does NOT re-run and clobber the user's chip edits.
   useEffect(() => {
-    if (!ownerSlug) return;
     const kind = ownerKind || globalDefaultKind;
     setProviderKind(kind);
     setModel(ownerModel);
     setEffort((prev) => normalizeEffortForKind(kind, prev));
-  }, [ownerSlug, ownerKind, ownerModel, globalDefaultKind]);
+  }, [ownerKind, ownerModel, globalDefaultKind]);
 
   useEffect(() => {
     promptRef.current?.focus();
@@ -140,52 +138,26 @@ export function TaskComposer() {
     setEffort((prev) => normalizeEffortForKind(nextKind, prev));
   }
 
-  const providerChanged =
-    providerKind !== ownerKind || model.trim() !== ownerModel.trim();
-
-  async function persistOwnerBindingIfChanged() {
-    // Only registered agents carry a runtime binding; skip for the human owner
-    // and when nothing changed.
-    if (!ownerSlug || ownerSlug === "human" || !ownerMember) return;
-    if (!providerChanged) return;
-    const provider =
-      providerKind === ""
-        ? { kind: "", model: "" }
-        : { kind: providerKind, model: model.trim() };
-    await post("/office-members", {
-      action: "update",
-      slug: ownerSlug,
-      provider,
-    });
-    void queryClient.invalidateQueries({ queryKey: ["office-members"] });
-  }
-
-  // createAndRoute creates the task and hands the user off. Split out of
-  // handleCreate so the latter stays a thin validate-then-dispatch shell.
-  //
-  // Start now → assign the owner. With an owner set the broker derives an
-  //   executable state, so the owner picks the task up and runs it.
-  // Backlog → create UNASSIGNED (assignee ""). The broker leaves an
-  //   ownerless task in the backlog stage and dispatches nobody; the user
-  //   assigns an owner later when they pull it off the backlog. We therefore
-  //   skip the owner-binding write too (no owner to bind). Effort still rides
-  //   along on the task and applies whenever it is eventually run.
-  async function createAndRoute(mode: "start" | "backlog") {
-    const assignee =
-      mode === "start" ? ownerSlug.trim() || leadSlug || "ceo" : "";
+  // createAndRoute creates the task and hands the user off. The task carries
+  // its own provider/model/effort, so nothing here mutates an agent binding.
+  //   Start now → dispatch the owner (a real owner runs; Auto → CEO triages).
+  //   Backlog   → park=true: assigned but parked in the backlog until started.
+  async function createAndRoute(mode: "start" | "backlog", owner: string) {
     setError(null);
     submitLockRef.current = true;
     setSubmitting(true);
     try {
-      if (mode === "start") await persistOwnerBindingIfChanged();
       const response = await createTasks(
         [
           {
             title: deriveTitle(prompt.trim()),
-            assignee,
+            assignee: owner,
             details: prompt.trim(),
             task_type: "issue",
+            provider: providerKind || undefined,
+            model: model.trim() || undefined,
             effort: effort || undefined,
+            park: mode === "backlog",
           },
         ],
         { channel: DEFAULT_CHANNEL, createdBy: "human" },
@@ -235,7 +207,7 @@ export function TaskComposer() {
       });
       return;
     }
-    void createAndRoute(mode);
+    void createAndRoute(mode, ownerSlug.trim() || AUTO_OWNER);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -243,7 +215,11 @@ export function TaskComposer() {
     void handleCreate("start");
   }
 
-  const ownerLabel = ownerMember?.name || ownerSlug || "CEO";
+  const isAuto = ownerSlug === AUTO_OWNER;
+  const ownerLabel = isAuto
+    ? "Auto — CEO picks the specialist"
+    : ownerMember?.name || ownerSlug || "CEO";
+  const runtimeLabel = model.trim() || "runtime default";
 
   return (
     <main className="task-composer-screen" data-testid="task-composer">
@@ -273,15 +249,13 @@ export function TaskComposer() {
                 onChange={(e) => setOwnerSlug(e.target.value)}
                 data-testid="task-composer-owner"
               >
-                {members.length === 0 ? (
-                  <option value="">CEO</option>
-                ) : (
-                  members.map((m) => (
-                    <option key={m.slug} value={m.slug}>
-                      {m.name || m.slug}
-                    </option>
-                  ))
-                )}
+                {/* Auto is the floor: the CEO picks the best specialist. */}
+                <option value={AUTO_OWNER}>Auto</option>
+                {members.map((m) => (
+                  <option key={m.slug} value={m.slug}>
+                    {m.name || m.slug}
+                  </option>
+                ))}
               </select>
             </label>
 
@@ -350,11 +324,10 @@ export function TaskComposer() {
           </div>
 
           <p className="task-composer-hint">
-            Runs <strong>@{ownerSlug || "ceo"}</strong> ({ownerLabel}).
-            {providerChanged
-              ? " Provider/model update this agent's default runtime."
-              : null}{" "}
-            Effort applies to this task only.
+            Owner <strong>{ownerLabel}</strong> · runs on{" "}
+            <strong>{runtimeLabel}</strong>
+            {effort ? ` · ${effort} effort` : ""}. Model and effort apply to
+            this task only.
           </p>
 
           {error ? (
@@ -372,7 +345,11 @@ export function TaskComposer() {
               type="submit"
               className="task-composer-btn task-composer-btn-primary"
               disabled={submitting}
-              title={`Assign @${ownerSlug || "ceo"} and start now`}
+              title={
+                isAuto
+                  ? "Create and have the CEO assign + start it now"
+                  : `Assign @${ownerSlug} and start now`
+              }
               data-testid="task-composer-start"
             >
               {submitting ? "Creating…" : "Start now"}
@@ -382,7 +359,7 @@ export function TaskComposer() {
               className="task-composer-btn"
               onClick={() => void handleCreate("backlog")}
               disabled={submitting}
-              title="Park unassigned in the backlog — nobody starts until you assign it"
+              title="Park in the backlog (assigned) — nobody starts until you activate it"
               data-testid="task-composer-backlog"
             >
               Backlog

@@ -107,6 +107,10 @@ export interface Task {
    */
   lifecycle_state?: string;
   execution_mode?: string;
+  /** Per-task LLM runtime set in the new-task composer (model lives on the
+   * task, not the agent). */
+  provider?: string;
+  model?: string;
   /** Model-specific reasoning-effort level set in the new-task composer. */
   effort?: string;
   review_state?: string;
@@ -135,11 +139,20 @@ export interface CreateTaskInput {
   task_type?: string;
   execution_mode?: string;
   /**
-   * Model-specific reasoning-effort level (e.g. "high" for claude,
-   * "medium" for codex). Applied by the owner's runtime at dispatch.
-   * Omit for the runtime default.
+   * Per-task LLM runtime. The model/provider is a property of the task, not
+   * the agent: dispatch prefers these over the owner's binding. Effort is the
+   * model-specific reasoning level. Omit any to inherit the owner's binding /
+   * the install default.
    */
+  provider?: string;
+  model?: string;
   effort?: string;
+  /**
+   * When true, create the task ASSIGNED but parked in the backlog
+   * (non-executable) instead of dispatching the owner now. The composer's
+   * "Backlog" action sets this; "Start now" leaves it false.
+   */
+  park?: boolean;
   depends_on?: string[];
 }
 
