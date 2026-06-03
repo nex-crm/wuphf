@@ -36,6 +36,7 @@ const PptxViewer = lazy(() => import("./PptxViewer"));
 const NotebookViewer = lazy(() => import("./NotebookViewer"));
 const MermaidViewer = lazy(() => import("./MermaidViewer"));
 const SourceViewer = lazy(() => import("./SourceViewer"));
+const GoogleDocViewer = lazy(() => import("./GoogleDocViewer"));
 
 /**
  * Map each viewable kind to its lazy component. `fallback` is intentionally
@@ -56,6 +57,7 @@ const LAZY_VIEWER_BY_KIND: Record<
   notebook: NotebookViewer,
   mermaid: MermaidViewer,
   source: SourceViewer,
+  google: GoogleDocViewer,
 };
 
 interface FileViewerProps {

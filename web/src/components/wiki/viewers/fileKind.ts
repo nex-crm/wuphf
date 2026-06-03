@@ -29,6 +29,7 @@ export type FileKind =
   | "notebook"
   | "mermaid"
   | "source"
+  | "google"
   | "fallback";
 
 const IMAGE_EXTS = new Set([
@@ -67,6 +68,21 @@ const XLSX_EXTS = new Set(["xlsx", "xls"]);
 const NOTEBOOK_EXTS = new Set(["ipynb"]);
 
 const MERMAID_EXTS = new Set(["mmd", "mermaid"]);
+
+/**
+ * Google Workspace link files. A `.gdoc`/`.gsheet`/`.gslides`/`.gform`/`.gdraw`
+ * is Google Drive's own desktop-shortcut format (JSON with a `url`); `.glink`
+ * is our plain-text convention (the file is just the Google URL). Either way
+ * GoogleDocViewer reads the file, extracts the URL, and embeds the doc.
+ */
+const GOOGLE_EXTS = new Set([
+  "gdoc",
+  "gsheet",
+  "gslides",
+  "gform",
+  "gdraw",
+  "glink",
+]);
 
 /**
  * Extensions the SourceViewer can syntax-highlight or render as plain text.
@@ -153,6 +169,7 @@ export function fileKindForPath(path: string): FileKind {
   if (XLSX_EXTS.has(ext)) return "xlsx";
   if (NOTEBOOK_EXTS.has(ext)) return "notebook";
   if (MERMAID_EXTS.has(ext)) return "mermaid";
+  if (GOOGLE_EXTS.has(ext)) return "google";
   const singleton = SINGLETON_KIND_BY_EXT[ext];
   if (singleton) return singleton;
   if (SOURCE_EXTS.has(ext)) return "source";
@@ -204,6 +221,8 @@ export function fileKindLabel(path: string): string {
       return "Diagram";
     case "source":
       return "Source";
+    case "google":
+      return "Google";
     default: {
       const ext = extensionOf(path);
       return ext ? ext.toUpperCase() : "File";

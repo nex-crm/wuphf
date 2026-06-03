@@ -68,6 +68,7 @@ const FILE_GLYPH: Record<FileKind, string> = {
   notebook: "📓",
   mermaid: "🔷",
   source: "📜",
+  google: "🟦",
   fallback: "📎",
 };
 
