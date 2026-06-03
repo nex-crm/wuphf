@@ -31,8 +31,8 @@
     "installer:lint": "bun run --cwd apps/installer-stub lint"
   },
   "devDependencies": {
-    "@commitlint/cli": "21.0.0",
-    "@commitlint/config-conventional": "21.0.0",
+    "@commitlint/cli": "21.0.1",
+    "@commitlint/config-conventional": "21.0.1",
     "@secretlint/secretlint-rule-pattern": "13.0.0",
     "@secretlint/secretlint-rule-preset-recommend": "13.0.0",
     "secretlint": "13.0.0"
