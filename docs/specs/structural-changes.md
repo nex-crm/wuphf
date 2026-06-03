@@ -30,15 +30,22 @@
 - Hard rule reminder: broker embeds `web/dist` at build time — always
   `bun run build` before rebuilding the binary when verifying UI changes.
 
-## ▶ RESUME HERE — current state (2026-06-02, pre-compact)
+## ▶ RESUME HERE — current state (2026-06-03)
 
 **Read this section first on session resume, then the Change log below.**
 
-- **Branch:** `worktree-structural-changes`. **HEAD:** `f4c50882`. Base `origin/main` @ `46f06e54`.
-- **Commits so far:** `461b578d` Phase 0 (Issues→Tasks rename) · `96877617` Phase 1
-  (7-stage board + Archive) · `3f46f328` doc scrub · `5cc95204` Phase 2a-i (Backup &
-  Migration task) · `f4c50882` Phase 2a-ii (channel-per-task). All green, all committed.
-- **DONE:** Phase 0 ✅, Phase 1 ✅, naming scrub ✅, Phase 2a (i+ii+iii) ✅, **Phase 2b ✅**.
+- **Branch:** `worktree-structural-changes`. **HEAD:** `d5b10eb8`. Base `origin/main` @ `46f06e54`.
+- **Commits so far:** `461b578d` Phase 0 · `96877617` Phase 1 · `3f46f328` doc scrub ·
+  `5cc95204` Phase 2a-i · `f4c50882` Phase 2a-ii · `e4bf6355` Phase 2b · `a8b17d70` Phase 2a-iii ·
+  `5e43ceb3` **Phase 3a** (backend `effort` field + dispatch wiring) · `d5b10eb8` **Phase 3b**
+  (new-task home composer). All green, all committed.
+- **NEXT: Phase 3c** — create-mode wiring. 3a + 3b DONE + live-verified (effort round-trips
+  to disk as wire key `effort`, task mints its own channel, fresh bundle serves on :7891).
+  3c = make **Backlog** create-without-dispatch (no owner turn), **Routine** prefill
+  /routines/new from the prompt, confirm **Start now** runs the spec→approval→running gate.
+  See Phase 3 "BUILD MAP" + "3c PICKUP" below.
+- **DONE:** Phase 0 ✅, Phase 1 ✅, naming scrub ✅, Phase 2a (i+ii+iii) ✅, Phase 2b ✅,
+  **Phase 3a ✅, Phase 3b ✅**.
   Backend is fully task-scoped: **every real top-level task mints its own `task-<id>`
   channel** (2a-iii dropped the keyword heuristic on 2026-06-03 — only System / incident /
   sub-tasks stay shared; verified live + the human and @ceo always retain channel access
@@ -52,9 +59,15 @@
   and LAST** — it is the only irreversible-on-real-user-data step and must be written
   against the final settled shape + tested on a legacy fixture. Design forks all LOCKED
   (see "LAYOUT FORKS LOCKED" + Phase 3 in the Change log).
-- **NEXT: Phase 3 (new-task home composer)** — centered chatbox + chips, model-specific
-  effort, Start-now / Backlog / Routine. Then Phase 4 (Librarian = Pam), Phase 5
-  (spec→wiki Specs/).
+- **NEXT: Phase 3c (create-mode wiring)** — see above. Then Phase 4 (Librarian = Pam),
+  Phase 5 (spec→wiki Specs/). 3a+3b shipped: composer is the landing (`/`), with
+  owner/provider/model/effort chips; effort is model-specific (claude
+  low/medium/high/xhigh/max, codex minimal/low/medium/high/xhigh, else default-only) and
+  mirrors the Go dispatch guardrails in `internal/team/headless_effort.go`. Provider/model
+  edits persist to the OWNER agent's binding (that is where WUPHF stores an agent's model);
+  effort is per-task. New shared lib `web/src/lib/providerBinding.ts` (canonical
+  bindingFromMember/PROVIDER_LABELS — AgentProfilePanel + AgentWizard still hold local
+  copies, a later consolidation).
 - **LAST (separate):** Phase 6 (persisted-state migration + E2E).
 - **HARD RULES still active:** (1) NO external-app name anywhere in
   PR/wiki/docs/branch/code (my work scrubbed; 4 pre-existing competitive docs left per
@@ -538,24 +551,37 @@
     - Model catalog = `web/src/lib/modelCatalog.ts` (`modelOptionsForKind(kind)`
       → per-provider model lists; providers are `LLMRuntimeKind`:
       claude-code / codex / opencode / mlx-lm / ollama / exo).
-    - **`effort` does NOT exist yet** — needs adding. Suggested 3-step build:
-      - **3a (backend):** add `Effort string` to `teamTask` + `teamTaskWire`
-        (wire key `effort`, stable per hard-rule-2) and thread it into the
-        owner's run/dispatch (where provider/model are resolved). Small, commit
-        alone.
-      - **3b (UI):** the composer component (centered chatbox + chips). Add a
-        `modelEffortOptions(kind, model)` capability map next to modelCatalog.
-        DEFAULT (decide w/ user or sensible default): claude-code →
-        none/low/medium/high reasoning; codex → minimal/low/medium/high; local →
-        none. Selecting a model repopulates effort.
-      - **3c (wiring):** Start-now → create + approve→running; Backlog →
-        create-without-dispatch (drafting, no owner turn); Routine → existing
-        scheduler (`/routines/new` flow). Seed channel members owner+CEO
-        (+Librarian once Phase 4 lands).
-    - **OPEN INPUT for fidelity:** user said "use the same components/design as
-      [reference app]" and "effort and model are model-specific as you can do in
-      [it]" — for pixel/UX fidelity, get a screenshot/source of its composer, or
-      build the locked interpretation and let them refine.
+    - 3-step build:
+      - **3a (backend) ✅ `5e43ceb3`:** `Effort string` on `teamTask` + `teamTaskWire`
+        (wire key `effort`, stable). Threaded into dispatch: claude `--effort <level>`,
+        codex `-c model_reasoning_effort=<level>`, re-validated per runtime in
+        `internal/team/headless_effort.go`. Also plumbed through `TaskPlanInput` + both
+        create paths. Effort CLI mechanisms confirmed (claude `--effort`
+        low/medium/high/xhigh/max; codex `model_reasoning_effort`
+        minimal/low/medium/high/xhigh). Live-verified: round-trips to `broker-state.json`.
+      - **3b (UI) ✅ `d5b10eb8`:** `web/src/components/tasks/TaskComposer.tsx` (centered
+        chatbox + owner/provider/model/effort chips + Start/Backlog/Routine). Effort map =
+        `web/src/lib/effortCatalog.ts` (mirrors the Go guardrails). Mounted as landing
+        (`/` → `{kind:"home"}`). Provider/model edits persist to the owner agent's binding;
+        effort is per-task. Shared `web/src/lib/providerBinding.ts`.
+      - **3c (wiring) ← NEXT.** See "3c PICKUP" below.
+    - **3c PICKUP (start here):**
+      - **Backlog = create-without-dispatch.** PROBLEM: `refreshPlannedTaskBlockStateLocked`
+        sets `status="in_progress"` whenever an owner is set, which dispatches the owner
+        immediately. For Backlog we want the task parked, no owner turn. Investigate: create
+        with empty assignee (no owner → stays "open", no dispatch) vs. a backlog lifecycle
+        state. The composer currently sends `assignee=owner` for both Start and Backlog and
+        routes Backlog to `/tasks`; change Backlog to NOT trigger the owner run. Check
+        `lifecycleStageFor`/`stageForState` for the backlog stage + how the board's Backlog
+        column is populated, and whether `POST /task-plan` can create a parked task.
+      - **Routine = prefill `/routines/new`.** 3b just navigates there. Check
+        `web/src/api/scheduler.ts` + the routine composer route for a prompt/title prefill
+        (search param or store) and pass the composer's prompt through.
+      - **Start now = spec→approval→running.** Confirm the current create path already runs
+        the owner through the spec interview + approval gate before In-progress (it should —
+        that is the existing lifecycle); add nothing if so, document if it does.
+      - Channel members: per-task channel already seeds owner + actor (2a). Librarian seed
+        is Phase 4.
   - Gate: all 3 create-modes work end-to-end from the composer.
 - [ ] **Phase 4 — Librarian agent (Pam → Librarian).** Promote Pam to first-class
     `librarian` agent, default member of every task. Move wiki write/format/
