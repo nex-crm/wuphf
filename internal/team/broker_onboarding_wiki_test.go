@@ -96,11 +96,14 @@ func TestOnboardingCompleteWikiIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestOnboardingCompleteSynthesizedBlueprintSkipsWiki verifies the
-// from-scratch path (blueprintID=""): synthesized blueprints do not
-// carry a WikiSchema so the materializer silently no-ops. The user gets
-// a functional empty wiki rather than a partial one.
-func TestOnboardingCompleteSynthesizedBlueprintSkipsWiki(t *testing.T) {
+// TestOnboardingCompleteSynthesizedBlueprintSeedsGettingStarted verifies the
+// from-scratch path (blueprintID=""): the synthesized blueprint carries no
+// WikiSchema so materializeBlueprintWiki no-ops, but onboardingCompleteFn now
+// also seeds the team/getting-started/ pages so a wizard-onboarded scratch
+// office still lands on a populated Getting Started wiki section rather than
+// an empty one. (Previously this path created no wiki at all, which left the
+// office wiki blank — the gap this seed closes.)
+func TestOnboardingCompleteSynthesizedBlueprintSeedsGettingStarted(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 
 	tmpHome := t.TempDir()
@@ -112,9 +115,10 @@ func TestOnboardingCompleteSynthesizedBlueprintSkipsWiki(t *testing.T) {
 		t.Fatalf("onboardingCompleteFn (synthesized): %v", err)
 	}
 
-	// No wiki dir expected — materializer never ran.
-	wikiRoot := filepath.Join(tmpHome, ".wuphf", "wiki")
-	if _, err := os.Stat(wikiRoot); !os.IsNotExist(err) {
-		t.Fatalf("expected no wiki root for synthesized blueprint, got err=%v", err)
+	// The Getting Started pages must materialize even on the synthesized
+	// (no-WikiSchema) path so the office wiki is never empty.
+	gsIndex := filepath.Join(tmpHome, ".wuphf", "wiki", "team", "getting-started", "index.md")
+	if _, err := os.Stat(gsIndex); err != nil {
+		t.Fatalf("expected getting-started/index.md to be seeded on the synthesized path, got err=%v", err)
 	}
 }

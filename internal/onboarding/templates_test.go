@@ -145,11 +145,11 @@ func TestBlankSlateTemplatesDoNotRouteStarterLoopThroughReviewer(t *testing.T) {
 
 func TestTemplatesForSelectionUsesOperationBlueprintStarterTasks(t *testing.T) {
 	repoRoot := onboardingTestRepoRoot(t)
-	got := TemplatesForSelection(repoRoot, "multi-agent-workflow-consulting")
+	got := TemplatesForSelection(repoRoot, "niche-crm")
 	if len(got) == 0 {
 		t.Fatal("expected blueprint-backed onboarding templates")
 	}
-	if got[0].Title != "Turn the directive into a client operating plan" {
+	if got[0].Title != "Choose the niche and CRM shape" {
 		t.Fatalf("unexpected first blueprint-backed template: %+v", got[0])
 	}
 	if got[0].OwnerSlug != "planner" {

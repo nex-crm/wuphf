@@ -59,6 +59,8 @@ type TransitionFunc func(phase string, s *State) error
 //	POST /onboarding/progress
 //	POST /onboarding/complete
 //	GET  /onboarding/prereqs
+//	POST /onboarding/verify
+//	GET  /onboarding/install-steps
 //	POST /onboarding/validate-key
 //	GET  /onboarding/templates
 //	POST /onboarding/checklist/{id}/done
@@ -83,6 +85,8 @@ func RegisterRoutesWithTransition(mux *http.ServeMux, completeFn CompleteFunc, t
 	mux.HandleFunc("/onboarding/progress", authMiddleware(HandleProgress))
 	mux.HandleFunc("/onboarding/complete", authMiddleware(makeHandleComplete(completeFn)))
 	mux.HandleFunc("/onboarding/prereqs", authMiddleware(HandlePrereqs))
+	mux.HandleFunc("/onboarding/verify", authMiddleware(HandleVerify))
+	mux.HandleFunc("/onboarding/install-steps", authMiddleware(HandleInstallSteps))
 	mux.HandleFunc("/onboarding/validate-key", authMiddleware(HandleValidateKey))
 	mux.HandleFunc("/onboarding/templates", authMiddleware(makeHandleTemplates(packSlug)))
 	mux.HandleFunc("/onboarding/blueprints", authMiddleware(HandleBlueprints))
@@ -452,6 +456,75 @@ func HandlePrereqs(w http.ResponseWriter, r *http.Request) {
 	results := CheckAll(r.Context())
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(results)
+}
+
+// HandleVerify handles POST /onboarding/verify.
+// Body: {"runtime": string}. The runtime may also be supplied as the
+// ?runtime= query parameter (the body takes precedence when both are set).
+// Returns a VerifyResult JSON classifying the runtime as
+// pass | not_installed | auth_required by reusing CheckOne plus the
+// per-runtime session probe.
+//
+// A 10s request deadline bounds the underlying subprocess probes (CheckOne's
+// own per-call timeout is 10s for --version and 3s for the session probe, so
+// a single runtime stays well inside this budget). Matches the client-side
+// 5s budget on /onboarding/prereqs spirit while leaving slack for a probe
+// under load.
+func HandleVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Accept the runtime from the JSON body first, falling back to the query
+	// parameter. An empty or absent body is tolerated so the ?runtime= form
+	// works on its own.
+	runtime := strings.TrimSpace(r.URL.Query().Get("runtime"))
+	var body struct {
+		Runtime string `json:"runtime"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+		if b := strings.TrimSpace(body.Runtime); b != "" {
+			runtime = b
+		}
+	}
+	if runtime == "" {
+		http.Error(w, "runtime required", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	result := VerifyRuntime(ctx, runtime)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+// HandleInstallSteps handles GET /onboarding/install-steps?runtime=<name>.
+// Returns {"runtime": string, "steps": []InstallStep} with the per-runtime
+// guided setup. This is cheap, static metadata (no subprocess), kept separate
+// from the live /onboarding/verify probe so the guided picker can render the
+// steps without paying for a check.
+func HandleInstallSteps(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	runtime := strings.TrimSpace(r.URL.Query().Get("runtime"))
+	if runtime == "" {
+		http.Error(w, "runtime required", http.StatusBadRequest)
+		return
+	}
+	steps := InstallSteps(runtime)
+	if steps == nil {
+		steps = []InstallStep{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"runtime": runtime,
+		"steps":   steps,
+	})
 }
 
 // HandleValidateKey handles POST /onboarding/validate-key.

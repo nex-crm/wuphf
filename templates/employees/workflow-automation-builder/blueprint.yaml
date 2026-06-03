@@ -31,6 +31,5 @@ expected_results:
   - Reduced manual handoffs
   - Safer automation recovery
 used_by:
-  - multi-agent-workflow-consulting
   - local-business-ai-package
   - niche-crm

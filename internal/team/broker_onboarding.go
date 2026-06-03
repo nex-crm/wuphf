@@ -94,6 +94,20 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 	// rather than a broken onboarding flow). Log and move on.
 	b.materializeBlueprintWiki(bp)
 
+	// Seed the team/getting-started/ pages here too. The wizard onboarding
+	// completes through THIS path (onboardingCompleteFn), not the chat-phase
+	// runSeedPhase where materializeGettingStarted is also wired, so without
+	// this call a wizard-onboarded office lands on a wiki with no Getting
+	// Started section (and on the scratch path, no wiki content at all, since
+	// materializeBlueprintWiki no-ops without a WikiSchema). Mirrors the
+	// runSeedPhase seed; best-effort and idempotent (skip-if-exists). The
+	// trailing index regen mirrors runSeedPhase so index/all.md reflects the
+	// pages that land via atomicWrite outside the WikiWorker commit path.
+	b.materializeGettingStarted()
+	regenCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	b.regenWikiIndexAfterSeed(regenCtx, "wizard complete")
+	cancel()
+
 	// Sync the company name captured during onboarding to the workspace
 	// registry so the rail can display it without a separate API call.
 	companyName = strings.TrimSpace(companyName)
