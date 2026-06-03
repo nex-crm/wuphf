@@ -1,98 +1,90 @@
 /* =============================================================================
-   refclone.css — scoped design tokens + editor styles for the reference KB
-   editor clone.
+   refclone.css — editor styles for the wiki rich-text editor.
 
-   The reference editor is a shadcn-token-driven Tiptap surface. To reproduce
-   its LOOK faithfully WITHOUT polluting WUPHF's own app tokens, every token and
-   every editor style is scoped under the `.refclone-editor` wrapper class.
+   This is a FAITHFUL PORT of the reference KB editor's stylesheet (its token
+   system + the full `.tiptap` content block + scrollbars), scoped under the
+   `.refclone-editor` wrapper so it never leaks into WUPHF's app tokens. The ONE
+   intentional change from the reference is COLOR: the reference ships a
+   greyscale (chroma-0) shadcn palette; we keep its exact LIGHTNESS values — so
+   contrast, hierarchy, and spacing are identical — but inject a warm hue + a
+   little chroma. The result is a coherent warm "journal" surface where the body,
+   the floating menus (slash / bubble / toolbar / link / media popovers), the
+   borders, and the accents all derive from one warm token set, instead of warmth
+   living only on the body background.
 
    Mount the editor inside:
 
        <div className="refclone-editor"> … editor … </div>
 
-   add `refclone-editor` + `dark` together (or rely on a `.dark` ancestor) to
-   get the dark palette. Tokens are oklch, lifted verbatim from the reference
-   app's globals.css. The Tailwind utility classes baked into the vendored
-   primitives (button / separator) resolve their
-   `--color-*` theme vars from these `--*` custom properties, so the components
-   render with the reference look only inside this wrapper.
+   The wrapper toggles `.dark` (added by RefCloneEditor for any non-light host
+   theme) to switch to the warm-dark palette. The vendored shadcn primitives +
+   the menu components read Tailwind utilities (`bg-popover`, `text-foreground`,
+   `bg-accent`, `border-border`, …) which resolve from the `--color-*` bridge
+   below, so they pick up the warm palette automatically.
    ========================================================================== */
 
-/* ── Token scope: light ─────────────────────────────────────────────────── */
+/* ── Token scope: warm light ─────────────────────────────────────────────────
+   Values mirror the reference's :root lightness exactly; only hue (~55–85, warm
+   amber/parchment) and a small chroma are added. Keep the lightness if you
+   retune — it is what preserves the reference's legibility + visual rhythm. */
 .refclone-editor {
-  /* The ported editor (editor.tsx) is built to FILL a fixed-height flex
-     parent: its root is `flex-1 flex flex-col overflow-hidden` and the editing
-     body is `flex-1 relative` → `absolute inset-0 overflow-y-auto`. Without a
-     definite height here the body collapses to 0 and the ProseMirror surface
-     escapes its box (toolbar with no editing area below). Make the wrapper a
-     bounded flex column so the editor lays out as the self-contained
-     toolbar + scrollable body + status bar pane it is in the reference app. */
+  /* Host-integration layout. The ported editor.tsx is built to FILL a
+     fixed-height flex parent (root `flex-1 flex flex-col overflow-hidden`, body
+     `absolute inset-0 overflow-y-auto`). The reference app gets that height from
+     its Next.js page layout; here the wrapper must supply it or the body
+     collapses to 0 and the surface escapes its box. */
   display: flex;
   flex-direction: column;
   height: clamp(520px, 78vh, 1100px);
 
-  /* Warm WUPHF palette. The ported editor + its vendored primitives reference
-     shadcn token NAMES (--background, --primary, --muted, …); map them to the
-     host's theme-aware --wk-* tokens so the editor wears WUPHF's warm "paper"
-     look (like the notebook surface) and follows the active theme — Nex Light /
-     Dark / Noir Gold — with no separate dark block. Gold/olive is the accent. */
-  /* Warm "journal" writing paper. The theme's own warm token (--bg-warm) is
-     neutral in light mode and the amber accent is a dark olive, so neither
-     yields a true cream — we wash a warm parchment hue over the paper instead.
-     In light mode this lands on a soft cream in the same family as the notebook
-     surface (#faf5e8), far easier on the eyes for long writing than a clinical
-     white page. Dark themes get their own warm-dark value in the `.dark`
-     override below (mixing a light hue over a dark base would just wash it
-     out). Drives the editor body via --background and is painted explicitly on
-     the pane + writing surface below. */
-  --wk-editor-paper: color-mix(in srgb, #d8b878 16%, var(--wk-paper));
-  --background: var(--wk-editor-paper);
-  --foreground: var(--wk-text);
-  --card: var(--wk-surface);
-  --card-foreground: var(--wk-text);
-  --popover: var(--wk-surface);
-  --popover-foreground: var(--wk-text);
-  --primary: var(--wk-amber);
-  --primary-foreground: var(--wk-paper);
-  --secondary: var(--wk-paper-dark);
-  --secondary-foreground: var(--wk-text);
-  --muted: var(--wk-paper-dark);
-  --muted-foreground: var(--wk-text-muted);
-  /* A soft, refined warm-gold wash for hover/active surfaces (toolbar toggles,
-     slash rows). A fixed low-opacity mix off the gold accent reads as elegant
-     parchment rather than the loud highlighter the raw banner tint can be. */
-  --accent: color-mix(in srgb, var(--wk-amber) 14%, transparent);
-  --accent-foreground: var(--wk-text);
-  --destructive: var(--wk-wikilink-broken, oklch(0.577 0.245 27.325));
-  --border: var(--wk-border);
-  --input: var(--wk-border);
-  --ring: var(--wk-amber);
-  --chart-1: var(--wk-amber);
-  --chart-2: var(--wk-text-muted);
-  --chart-3: var(--wk-text-tertiary, var(--wk-text-muted));
-  --chart-4: var(--wk-border-strong, var(--wk-border));
-  --chart-5: var(--wk-text);
+  /* Warm palette (reference lightness + warm hue/chroma). */
+  --background: oklch(0.974 0.018 83); /* warm cream page (ref: 1 0 0) */
+  --foreground: oklch(0.245 0.022 54); /* warm near-black brown (ref: 0.145) */
+  --card: oklch(0.988 0.013 85); /* menu/toolbar surface, a touch brighter */
+  --card-foreground: oklch(0.245 0.022 54);
+  --popover: oklch(0.988 0.013 85); /* slash / bubble / link / media menus */
+  --popover-foreground: oklch(0.245 0.022 54);
+  --primary: oklch(0.52 0.1 58); /* links, active, checkbox — warm sienna */
+  --primary-foreground: oklch(0.99 0.012 85);
+  --secondary: oklch(0.95 0.018 84);
+  --secondary-foreground: oklch(0.3 0.022 55);
+  --muted: oklch(0.948 0.022 83); /* code bg, table header, row hover — tan */
+  --muted-foreground: oklch(0.552 0.03 62); /* warm taupe (ref: 0.556) */
+  --accent: oklch(0.925 0.036 80); /* toolbar/slash hover — clearly warm */
+  --accent-foreground: oklch(0.3 0.025 55);
+  --destructive: oklch(0.577 0.245 27.325); /* semantic red — left as-is */
+  --border: oklch(0.895 0.025 81); /* warm hairline (ref: 0.922) */
+  --input: oklch(0.895 0.025 81);
+  --ring: oklch(0.55 0.09 60); /* warm focus ring */
+  --chart-1: oklch(0.72 0.1 70);
+  --chart-2: oklch(0.6 0.06 65);
+  --chart-3: oklch(0.5 0.05 60);
+  --chart-4: oklch(0.42 0.04 58);
+  --chart-5: oklch(0.32 0.03 55);
   --radius: 0.625rem;
-  --sidebar: var(--wk-surface);
-  --sidebar-foreground: var(--wk-text);
-  --sidebar-primary: var(--wk-amber);
-  --sidebar-primary-foreground: var(--wk-paper);
-  --sidebar-accent: var(--wk-amber-bg);
-  --sidebar-accent-foreground: var(--wk-text);
-  --sidebar-border: var(--wk-border);
-  --sidebar-ring: var(--wk-amber);
+  --sidebar: oklch(0.988 0.013 85);
+  --sidebar-foreground: oklch(0.245 0.022 54);
+  --sidebar-primary: oklch(0.52 0.1 58);
+  --sidebar-primary-foreground: oklch(0.99 0.012 85);
+  --sidebar-accent: oklch(0.925 0.036 80);
+  --sidebar-accent-foreground: oklch(0.3 0.025 55);
+  --sidebar-border: oklch(0.895 0.025 81);
+  --sidebar-ring: oklch(0.55 0.09 60);
 
-  /* Radius scale the vendored shadcn primitives reference via
-     rounded-[min(var(--radius-md),Npx)] / --radius-lg etc. */
+  /* Radius scale the vendored shadcn primitives reference. */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
 
-  /* Bridge tokens → Tailwind v4 theme color vars so utilities like `bg-card`,
-     `text-muted-foreground`, `border-border`, `ring-ring` resolve inside the
-     wrapper. (Tailwind reads `--color-*`; the reference maps them via @theme
-     inline at the app root — here we map them locally so the scope is honored.) */
+  /* Mono stack for code/pre/kbd (the reference's `--font-mono`). */
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, monospace;
+
+  /* Tailwind v4 color bridge — utilities like `bg-popover`, `bg-accent`,
+     `text-muted-foreground`, `border-border`, `ring-ring` read `--color-*`.
+     The reference maps these via `@theme inline` at the app root; we map them
+     locally so the scope is self-contained AND the menus inherit the warm
+     palette (this is what fixes "warm only on the body, not the menus"). */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -113,77 +105,50 @@
   --color-ring: var(--ring);
 
   color: var(--foreground);
-  /* Paint the whole pane warm so the area around the centered writing column
-     reads as one continuous sheet, not a warm stripe on white. */
-  background: var(--wk-editor-paper);
+  background: var(--background);
 }
 
-/* Dark theming is inherited automatically: the tokens above map to the host's
-   --wk-* tokens, which already switch per `data-theme` (Nex Dark / Noir Gold).
-   The one exception is the journal paper — RefCloneEditor adds `.dark` for any
-   non-light theme, so warm the writing surface from the theme's warm-dark
-   surface (--wk-paper-dark) with a gentle amber nudge instead of washing a
-   light cream over a dark base (which would just bleach it). */
+/* ── Token scope: warm dark ──────────────────────────────────────────────────
+   RefCloneEditor adds `.dark` for any non-light host theme (Nex Dark, Noir
+   Gold). Mirrors the reference's `.dark` lightness with warm hue/chroma. */
 .refclone-editor.dark {
-  --wk-editor-paper: color-mix(
-    in srgb,
-    var(--wk-amber) 14%,
-    var(--wk-paper-dark)
-  );
+  --background: oklch(0.205 0.016 60);
+  --foreground: oklch(0.955 0.012 85);
+  --card: oklch(0.255 0.018 60);
+  --card-foreground: oklch(0.955 0.012 85);
+  --popover: oklch(0.255 0.018 60);
+  --popover-foreground: oklch(0.955 0.012 85);
+  --primary: oklch(0.8 0.09 76);
+  --primary-foreground: oklch(0.24 0.02 55);
+  --secondary: oklch(0.3 0.018 60);
+  --secondary-foreground: oklch(0.955 0.012 85);
+  --muted: oklch(0.3 0.018 60);
+  --muted-foreground: oklch(0.72 0.03 78);
+  --accent: oklch(0.32 0.024 64);
+  --accent-foreground: oklch(0.955 0.012 85);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(0.85 0.04 80 / 12%);
+  --input: oklch(0.85 0.04 80 / 16%);
+  --ring: oklch(0.62 0.06 70);
+  --sidebar: oklch(0.255 0.018 60);
+  --sidebar-foreground: oklch(0.955 0.012 85);
+  --sidebar-primary: oklch(0.8 0.09 76);
+  --sidebar-primary-foreground: oklch(0.24 0.02 55);
+  --sidebar-accent: oklch(0.32 0.024 64);
+  --sidebar-accent-foreground: oklch(0.955 0.012 85);
+  --sidebar-border: oklch(0.85 0.04 80 / 12%);
+  --sidebar-ring: oklch(0.62 0.06 70);
 }
 
-/* ── Warm editorial prose ───────────────────────────────────────────────────
-   WYSIWYG should read like the published article. The wiki reader sets article
-   body in the serif face; mirror it in the editor so editing and reading match
-   and the surface feels like the warm notebook pages, not a code box. Chrome
-   (toolbar, menus) keeps the UI sans; code/pre keep mono. */
-.refclone-editor .tiptap {
-  font-family: var(--wk-body-serif, "Newsreader", Georgia, ui-serif, serif);
-  color: var(--wk-text);
-}
-.refclone-editor .tiptap code,
-.refclone-editor .tiptap pre,
-.refclone-editor .tiptap kbd {
-  font-family: var(--wk-mono, ui-monospace, "SF Mono", monospace);
-}
-
-/* ── Menu / popover polish (slash, bubble, link/media/embed, mention) ───────
-   Every floating surface carries `bg-popover`. Give them one warm, soft
-   elevation + hairline border + tightened radius so they read as crafted
-   paper cards rather than the default flat drop-shadow. */
-.refclone-editor .bg-popover {
-  border-radius: 12px;
-  border-color: var(--wk-border);
-  background: var(--wk-surface);
-  box-shadow:
-    0 1px 2px rgba(60, 50, 30, 0.06),
-    0 12px 32px -10px rgba(60, 50, 30, 0.24);
-  backdrop-filter: saturate(1.05);
-}
-/* Slash/mention rows: soft warm hover + a gold rail on the active row. */
-.refclone-editor .bg-popover button:hover,
-.refclone-editor .bg-popover [role="option"]:hover {
-  background: color-mix(in srgb, var(--wk-amber) 10%, transparent);
-}
-.refclone-editor .bg-popover .bg-accent {
-  background: color-mix(in srgb, var(--wk-amber) 16%, transparent);
-  box-shadow: inset 2px 0 0 var(--wk-amber);
-}
-
-/* ── Full-page editing ──────────────────────────────────────────────────────
+/* ── Full-page editing (host-only) ───────────────────────────────────────────
    In edit mode WikiArticle drops the reader chrome + right rail and tags the
-   column `--editing`; let the editor fill the whole content height so it reads
-   as a full-page writing surface (like the reference app), not a boxed pane. */
+   column `--editing`; let the editor fill the content height as a full-page
+   writing surface. */
 .wk-article-col--editing {
   grid-column: 2 / -1;
   padding: 10px 28px 0;
   overflow-y: auto;
 }
-/* The editor owns its own scroll, so give it a tall, viewport-anchored height
-   rather than relying on a multi-level flex-fill chain through the editor
-   controller's wrappers (which aren't all flex parents). This fills the
-   content area for the full-page writing surface; the prose still centers via
-   the editor's internal max-w-3xl. */
 .wk-article-col--editing .wk-editor,
 .wk-article-col--editing .wk-editor-panes,
 .wk-article-col--editing .wk-editor-pane--rich,
@@ -195,7 +160,7 @@
   min-height: 460px;
 }
 
-/* ── Thin scrollbars (toolbar + scroll regions) ─────────────────────────── */
+/* ── Scrollbars (ported verbatim, scoped) ───────────────────────────────── */
 .refclone-editor .scrollbar-thin {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent)
@@ -225,7 +190,6 @@
     transparent
   );
 }
-
 .refclone-editor .editor-toolbar-scroll {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in oklch, var(--muted-foreground) 10%, transparent)
@@ -254,25 +218,26 @@
   );
 }
 
-/* ── Tiptap editor styles ───────────────────────────────────────────────── */
+/* ── Tiptap editor styles (ported verbatim from the reference, scoped) ────────
+   The only host-added rules in this block are (1) the inline `padding` on
+   `.tiptap` — the reference sets its writing margin via a Tailwind
+   `px-4 sm:px-8 py-6` class on the editable, but those PADDING utilities do not
+   resolve on this element in our build, and without the inline-start margin the
+   `list-style: outside` bullets hang into negative space and get clipped; and
+   (2) the serif body face for a warm "journal" reading feel (the reference
+   inherits the app sans). Everything else — sizes, margins, line-heights,
+   letter-spacing — is the reference's, so spacing matches it exactly. */
 .refclone-editor .tiptap {
   outline: none;
   font-size: 0.9375rem;
   letter-spacing: -0.011em;
-  /* Writing margin. The ported editable carries Tailwind `px-4 sm:px-8 py-6`
-     for its margin, but those PADDING utilities don't resolve on this element
-     in the host build (the max-width + centering ones do, so the column is
-     correct — only the inner padding is lost). Set it explicitly here, with a
-     selector specific enough to win over the utility. Two things break without
-     it: the prose sits flush against the scroll container's left edge (no
-     breathing room, unlike the reference's roomy page), and — the visible bug —
-     `list-style: outside` bullet/number markers hang to the LEFT of the list's
-     content box into x<0, where the `overflow` editing body clips them. With no
-     left margin the markers vanish and lists render marker-less. The inline
-     margin gives the markers room to paint and the prose room to breathe. */
   padding: 1.5rem clamp(1rem, 4vw, 2rem);
-  /* Warm journal surface for the writing column itself (see --wk-editor-paper). */
-  background: var(--wk-editor-paper);
+  font-family: var(--wk-body-serif, "Newsreader", Georgia, ui-serif, serif);
+}
+.refclone-editor .tiptap code,
+.refclone-editor .tiptap pre,
+.refclone-editor .tiptap kbd {
+  font-family: var(--font-mono);
 }
 
 .refclone-editor .tiptap h1 {
@@ -283,7 +248,6 @@
   margin-bottom: 0.75rem;
   letter-spacing: -0.025em;
 }
-
 .refclone-editor .tiptap h2 {
   font-size: 1.5rem;
   font-weight: 600;
@@ -292,7 +256,6 @@
   margin-bottom: 0.5rem;
   letter-spacing: -0.02em;
 }
-
 .refclone-editor .tiptap h3 {
   font-size: 1.25rem;
   font-weight: 600;
@@ -301,7 +264,6 @@
   margin-bottom: 0.5rem;
   letter-spacing: -0.015em;
 }
-
 .refclone-editor .tiptap h4 {
   font-size: 1.0625rem;
   font-weight: 600;
@@ -310,7 +272,6 @@
   margin-bottom: 0.5rem;
   letter-spacing: -0.01em;
 }
-
 .refclone-editor .tiptap p {
   margin-bottom: 0.75rem;
   line-height: 1.65;
@@ -343,27 +304,22 @@
   padding-inline-start: 0;
   margin-bottom: 0.75rem;
 }
-
 .refclone-editor .tiptap ul {
   list-style-type: disc;
 }
-
 .refclone-editor .tiptap ol {
   list-style-type: decimal;
 }
-
 .refclone-editor .tiptap li {
   padding-inline-start: 1.5rem;
   margin-bottom: 0.25rem;
   line-height: 1.65;
 }
-
 .refclone-editor .tiptap[dir="rtl"] li,
 .refclone-editor .tiptap[dir="rtl"] li > p {
   direction: rtl;
   unicode-bidi: isolate;
 }
-
 .refclone-editor .tiptap li p {
   margin-bottom: 0.25rem;
 }
@@ -380,10 +336,8 @@
   border-radius: 0.375rem;
   padding: 0.125rem 0.375rem;
   font-size: 0.8125rem;
-  font-family: var(--font-mono);
   font-weight: 500;
 }
-
 .refclone-editor .tiptap pre {
   background: var(--muted);
   border-radius: 0.5rem;
@@ -391,7 +345,6 @@
   margin: 1rem 0;
   overflow-x: auto;
 }
-
 .refclone-editor .tiptap pre code {
   background: none;
   padding: 0;
@@ -406,17 +359,14 @@
   border-top: 1px solid var(--border);
   margin: 1.5rem 0;
 }
-
 .refclone-editor .tiptap a {
   color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-
 .refclone-editor .tiptap strong {
   font-weight: 600;
 }
-
 .refclone-editor .tiptap p.is-editor-empty:first-child::before {
   color: var(--muted-foreground);
   content: attr(data-placeholder);
@@ -436,12 +386,12 @@
   cursor: pointer;
   font-weight: 500;
 }
-
 .refclone-editor .tiptap .wiki-link:hover {
   background: color-mix(in oklch, var(--primary) 20%, transparent);
   text-decoration: underline;
 }
 
+/* Mention pill (the reference uses an @apply line; expanded to plain CSS). */
 .refclone-editor .editor-mention {
   display: inline-flex;
   align-items: center;
@@ -465,16 +415,13 @@
   font-size: 0.875rem;
   table-layout: fixed;
 }
-
 .refclone-editor .tiptap .tableWrapper {
   margin: 1rem 0;
   overflow-x: auto;
 }
-
 .refclone-editor .tiptap .tableWrapper table {
   margin: 0;
 }
-
 .refclone-editor .tiptap th,
 .refclone-editor .tiptap td {
   border: 1px solid var(--border);
@@ -482,25 +429,20 @@
   text-align: start;
   vertical-align: top;
 }
-
 .refclone-editor .tiptap th {
   background: var(--muted);
   font-weight: 600;
   font-size: 0.8125rem;
 }
-
 .refclone-editor .tiptap td {
   font-size: 0.8125rem;
 }
-
 .refclone-editor .tiptap tr:hover td {
   background: var(--muted);
 }
-
 .refclone-editor .tiptap .selectedCell {
   position: relative;
 }
-
 .refclone-editor .tiptap .selectedCell::after {
   background: color-mix(in oklch, var(--primary) 18%, transparent);
   content: "";
@@ -509,7 +451,6 @@
   position: absolute;
   z-index: 1;
 }
-
 .refclone-editor .tiptap .column-resize-handle {
   background-color: var(--primary);
   bottom: -1px;
@@ -519,7 +460,6 @@
   top: 0;
   width: 3px;
 }
-
 .refclone-editor .tiptap.resize-cursor {
   cursor: col-resize;
 }
@@ -529,20 +469,17 @@
   list-style: none;
   padding-inline-start: 0;
 }
-
 .refclone-editor .tiptap .task-list li {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
   padding-inline-start: 0;
 }
-
 .refclone-editor .tiptap .task-list li label {
   display: flex;
   align-items: center;
   margin-top: 0.2rem;
 }
-
 .refclone-editor .tiptap .task-list li label input[type="checkbox"] {
   appearance: none;
   width: 1rem;
@@ -553,7 +490,6 @@
   flex-shrink: 0;
   background: transparent;
 }
-
 .refclone-editor .tiptap .task-list li label input[type="checkbox"]:checked {
   background: var(--primary);
   border-color: var(--primary);
@@ -562,7 +498,6 @@
   background-position: center;
   background-repeat: no-repeat;
 }
-
 .refclone-editor .tiptap .task-list li[data-checked="true"] > div > p {
   text-decoration: line-through;
   color: var(--muted-foreground);
@@ -582,22 +517,18 @@
   margin: 1rem 0;
   border-inline-start: 3px solid;
 }
-
 .refclone-editor .tiptap .callout-info {
   background: color-mix(in oklch, oklch(0.6 0.18 250) 8%, transparent);
   border-color: oklch(0.6 0.18 250);
 }
-
 .refclone-editor .tiptap .callout-warning {
   background: color-mix(in oklch, oklch(0.75 0.15 80) 8%, transparent);
   border-color: oklch(0.75 0.15 80);
 }
-
 .refclone-editor .tiptap .callout-success {
   background: color-mix(in oklch, oklch(0.65 0.2 145) 8%, transparent);
   border-color: oklch(0.65 0.2 145);
 }
-
 .refclone-editor .tiptap .callout-error {
   background: color-mix(in oklch, oklch(0.6 0.2 25) 8%, transparent);
   border-color: oklch(0.6 0.2 25);
@@ -663,65 +594,56 @@
   text-align: justify;
 }
 
-/* Emoji-mart picker theming (matches popover) */
+/* Code syntax highlighting (hljs token colors inside the editor) */
+.refclone-editor .tiptap pre code .hljs-keyword,
+.refclone-editor .tiptap pre code .hljs-selector-tag,
+.refclone-editor .tiptap pre code .hljs-built_in {
+  color: oklch(0.7 0.15 300);
+}
+.refclone-editor .tiptap pre code .hljs-string,
+.refclone-editor .tiptap pre code .hljs-attr {
+  color: oklch(0.7 0.15 145);
+}
+.refclone-editor .tiptap pre code .hljs-number,
+.refclone-editor .tiptap pre code .hljs-literal {
+  color: oklch(0.7 0.15 55);
+}
+.refclone-editor .tiptap pre code .hljs-comment {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.refclone-editor .tiptap pre code .hljs-function,
+.refclone-editor .tiptap pre code .hljs-title {
+  color: oklch(0.75 0.15 250);
+}
+.refclone-editor .tiptap pre code .hljs-type,
+.refclone-editor .tiptap pre code .hljs-class {
+  color: oklch(0.75 0.12 80);
+}
+
+/* Emoji-mart picker theming (matches the warm popover). */
 .refclone-editor em-emoji-picker {
-  --background-rgb: 255, 255, 255;
   --border-radius: 0.5rem;
   height: 340px;
   max-width: 340px;
 }
 .refclone-editor.dark em-emoji-picker,
 .dark .refclone-editor em-emoji-picker {
-  --background-rgb: 32, 32, 32;
-  --rgb-background: 32, 32, 32;
-  --rgb-color: 232, 232, 232;
-  --rgb-input: 45, 45, 45;
-}
-
-/* Code syntax highlighting (hljs token colors used inside the editor) */
-.refclone-editor .tiptap pre code .hljs-keyword,
-.refclone-editor .tiptap pre code .hljs-selector-tag,
-.refclone-editor .tiptap pre code .hljs-built_in {
-  color: oklch(0.7 0.15 300);
-}
-
-.refclone-editor .tiptap pre code .hljs-string,
-.refclone-editor .tiptap pre code .hljs-attr {
-  color: oklch(0.7 0.15 145);
-}
-
-.refclone-editor .tiptap pre code .hljs-number,
-.refclone-editor .tiptap pre code .hljs-literal {
-  color: oklch(0.7 0.15 55);
-}
-
-.refclone-editor .tiptap pre code .hljs-comment {
-  color: var(--muted-foreground);
-  font-style: italic;
-}
-
-.refclone-editor .tiptap pre code .hljs-function,
-.refclone-editor .tiptap pre code .hljs-title {
-  color: oklch(0.75 0.15 250);
-}
-
-.refclone-editor .tiptap pre code .hljs-type,
-.refclone-editor .tiptap pre code .hljs-class {
-  color: oklch(0.75 0.12 80);
+  --rgb-background: 41, 37, 32;
+  --rgb-color: 238, 232, 222;
+  --rgb-input: 56, 50, 43;
 }
 
 /* Drag handle + gutter add-button.
-   These are portaled to document.body (positioned against the viewport), so
-   they live OUTSIDE the .refclone-editor token scope. Their inline styles read
-   var(--muted-foreground)/var(--muted); without a fallback those resolve
-   against the host app's global tokens (bare HSL triplets, invalid as direct
-   color values) and the grip paints the wrong color. Define the two tokens on
-   the elements themselves with neutral grays that read on light and dark, and
-   keep the selectors unscoped so they actually match the body-level nodes. */
+   Portaled to document.body (positioned against the viewport), so they live
+   OUTSIDE the .refclone-editor token scope. Their inline styles read
+   var(--muted-foreground)/var(--muted); define warm fallbacks on the elements
+   so the grip paints correctly off-scope, and keep the selectors unscoped so
+   they match the body-level nodes. */
 #refclone-drag-handle,
 #refclone-gutter-add {
-  --muted-foreground: oklch(0.556 0 0);
-  --muted: oklch(0.55 0 0 / 0.16);
+  --muted-foreground: oklch(0.55 0.03 62);
+  --muted: oklch(0.55 0.03 62 / 0.16);
   font-family: var(--font-mono, ui-monospace, monospace);
 }
 #refclone-drag-handle:active {
