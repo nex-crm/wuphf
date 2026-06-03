@@ -91,9 +91,9 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	// launches or blank-slate runs).
 	if l.operationBlueprint != nil {
 		bp := l.operationBlueprint
-		l.broker.SetReviewerResolver(func(wikiPath string) string {
+		l.broker.SetReviewerResolver(librarianAwareReviewer(l.broker, func(wikiPath string) string {
 			return bp.ResolveReviewer(wikiPath)
-		})
+		}))
 	}
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)

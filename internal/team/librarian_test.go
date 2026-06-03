@@ -1,6 +1,10 @@
 package team
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/nex-crm/wuphf/internal/operations"
+)
 
 // TestLibrarianIsBuiltInDefaultMember: the Librarian (slug "librarian", name
 // "Pam", role "Librarian") is a built-in member of the default roster.
@@ -88,6 +92,29 @@ func TestLibrarianTaskChannelSeedNoopsWithoutMember(t *testing.T) {
 	b.mu.Unlock()
 	if hasLibrarian {
 		t.Errorf("did not expect a phantom librarian member when none is registered")
+	}
+}
+
+// TestLibrarianAwareReviewer: the Librarian becomes the default wiki reviewer
+// when the base resolver yields its "ceo" fallback and a Librarian exists; a
+// blueprint-configured reviewer is respected; and without a Librarian member
+// the fallback is unchanged (legacy-safe).
+func TestLibrarianAwareReviewer(t *testing.T) {
+	withLib := newTestBroker(t) // auto-seeds the built-in Librarian
+	if got := librarianAwareReviewer(withLib, func(string) string { return operations.ReviewerFallback })("team/x.md"); got != LibrarianSlug {
+		t.Errorf("fallback reviewer with librarian present = %q, want %q", got, LibrarianSlug)
+	}
+	if got := librarianAwareReviewer(withLib, func(string) string { return "pinned-reviewer" })("team/x.md"); got != "pinned-reviewer" {
+		t.Errorf("configured reviewer = %q, want pinned-reviewer (respected)", got)
+	}
+
+	noLib := newTestBroker(t)
+	noLib.mu.Lock()
+	noLib.members = []officeMember{{Slug: "ceo", Name: "CEO"}}
+	noLib.memberIndex = nil
+	noLib.mu.Unlock()
+	if got := librarianAwareReviewer(noLib, func(string) string { return operations.ReviewerFallback })("team/x.md"); got != operations.ReviewerFallback {
+		t.Errorf("fallback reviewer without librarian = %q, want %q (legacy-safe)", got, operations.ReviewerFallback)
 	}
 }
 

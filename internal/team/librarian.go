@@ -3,6 +3,8 @@ package team
 import (
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/operations"
 )
 
 // librarian.go defines the Librarian — a first-class, always-present agent
@@ -65,4 +67,41 @@ func ensureLibrarianMember(members []officeMember) []officeMember {
 		}
 	}
 	return append(members, librarianOfficeMember(""))
+}
+
+// librarianAwareReviewer wraps a base wiki-promotion reviewer resolver so the
+// Librarian becomes the DEFAULT reviewer (Phase 4 authority move). When the base
+// resolver returns nothing or its historical fallback ("ceo") — i.e. the
+// blueprint did not pin a specific reviewer for the path — and the workspace has
+// a Librarian, route the review to the Librarian. A blueprint-configured
+// reviewer is respected. Existing workspaces without a Librarian member
+// (pre-Phase-6) keep their current reviewer, so this is safe to roll out.
+//
+// (Blueprints use "ceo" only as the implicit fallback, never as an explicit
+// DefaultReviewer, so treating base=="ceo" as "unset" does not steal a
+// deliberately-chosen CEO reviewer.)
+func librarianAwareReviewer(b *Broker, base ReviewerResolver) ReviewerResolver {
+	return func(wikiPath string) string {
+		r := ""
+		if base != nil {
+			r = strings.TrimSpace(base(wikiPath))
+		}
+		if (r == "" || r == operations.ReviewerFallback) && b.hasMember(LibrarianSlug) {
+			return LibrarianSlug
+		}
+		return r
+	}
+}
+
+// librarianWikiAuthorityBlock is the prompt block emitted for the Librarian in
+// place of the generic specialist wiki rules. It encodes the Phase 4 authority
+// move: the Librarian curates and reviews notebook→wiki promotions (the CEO no
+// longer does). Numbering continues the specialist rules (the caller appends a
+// "13. …stop" rule after this block).
+func librarianWikiAuthorityBlock() string {
+	return "== WIKI OWNERSHIP (you are the Librarian) ==\n" +
+		"You own the team's wiki — keep it accurate, well-organized, and easy to search — and you are the reviewer for notebook→wiki promotions. Owning agents write their own notebooks; you curate, format, organize, and decide what becomes canonical. You do not author other agents' notes for them.\n" +
+		"12. Use team_notebook_review to see which notebook entries have earned promotion demand (cross-agent searches, channel context-asks), ranked by convergence. Review the high-demand ones and flag entries worth promoting. Calling team_notebook_review is itself a demand signal — use it when you are actually curating, not as background polling.\n" +
+		"12b. Before accepting knowledge as canonical, use wuphf_wiki_lookup / team_wiki_search / notebook_search to see what already exists, so articles get merged and cross-linked instead of duplicated. Keep clear titles and sections; keep `scratch: true` working notes out of the canonical wiki.\n" +
+		"12c. When the CEO, another agent, or the human asks to preserve something for the team, shepherd it into the wiki: surface and curate the strong promotion candidates from the review queue rather than letting durable knowledge sit unreviewed in notebooks.\n"
 }

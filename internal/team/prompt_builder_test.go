@@ -780,33 +780,50 @@ func TestMarkdownKnowledgeToolBlock_NotebookSearchDemandSignalNote(t *testing.T)
 	}
 }
 
-func TestPromptBuilder_CEORuleMentionsTeamNotebookReview(t *testing.T) {
-	// PR 7 edit 3: the CEO prompt must mention team_notebook_review and the
-	// "calling the tool is itself a demand signal" caveat.
-	pb := &promptBuilder{
-		isOneOnOne:  func() bool { return false },
-		isFocusMode: func() bool { return false },
-		packName:    func() string { return "WUPHF Office" },
-		leadSlug:    func() string { return "ceo" },
-		members: func() []officeMember {
-			return []officeMember{
-				{Slug: "ceo", Name: "CEO"},
-				{Slug: "fe", Name: "Frontend"},
-			}
-		},
-		policies:       func() []officePolicy { return nil },
-		nameFor:        func(slug string) string { return slug },
-		markdownMemory: true,
+func TestPromptBuilder_LibrarianOwnsWikiReviewCEODelegates(t *testing.T) {
+	// Phase 4: wiki promotion/review authority moved from the CEO to the
+	// Librarian. The Librarian prompt mentions team_notebook_review + the demand
+	// signal; the CEO prompt no longer runs review itself and instead delegates
+	// to @librarian.
+	mk := func() *promptBuilder {
+		return &promptBuilder{
+			isOneOnOne:  func() bool { return false },
+			isFocusMode: func() bool { return false },
+			packName:    func() string { return "WUPHF Office" },
+			leadSlug:    func() string { return "ceo" },
+			members: func() []officeMember {
+				return []officeMember{
+					{Slug: "ceo", Name: "CEO"},
+					{Slug: LibrarianSlug, Name: librarianName, Role: librarianRole},
+					{Slug: "fe", Name: "Frontend"},
+				}
+			},
+			policies:       func() []officePolicy { return nil },
+			nameFor:        func(slug string) string { return slug },
+			markdownMemory: true,
+		}
 	}
-	got := pb.Build("ceo")
+
+	lib := mk().Build(LibrarianSlug)
 	for _, want := range []string{
 		"team_notebook_review",
-		"multi-agent convergence",
 		"demand signal",
+		"WIKI OWNERSHIP (you are the Librarian)",
 	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("CEO prompt missing team_notebook_review fragment %q", want)
+		if !strings.Contains(lib, want) {
+			t.Errorf("Librarian prompt missing wiki-authority fragment %q", want)
 		}
+	}
+
+	ceo := mk().Build("ceo")
+	if strings.Contains(ceo, "WIKI OWNERSHIP (you are the Librarian)") {
+		t.Errorf("CEO prompt must not carry the Librarian's wiki-ownership block")
+	}
+	if !strings.Contains(ceo, "You do NOT run team_notebook_review or approve promotions yourself") {
+		t.Errorf("CEO prompt should explicitly hand wiki review to @librarian")
+	}
+	if !strings.Contains(ceo, "@librarian owns the team wiki") {
+		t.Errorf("CEO prompt should delegate the wiki to @librarian")
 	}
 }
 
@@ -854,20 +871,31 @@ func TestPromptBuilder_PromoteWhenAskedBehavior(t *testing.T) {
 			markdownMemory: true,
 		}
 	}
-	for _, slug := range []string{"ceo", "fe"} {
-		got := mk(slug).Build(slug)
-		if !strings.Contains(got, "notebook_promote in the same turn") {
-			t.Errorf("%s prompt missing promote-when-asked instruction", slug)
-		}
-		if !strings.Contains(got, "broker auto-writes; you curate") {
-			t.Errorf("%s prompt missing broker-curates framing", slug)
-		}
+	// Specialists still draft+submit (notebook_promote) when asked, now framed
+	// as queued for @librarian's review. The CEO no longer promotes itself; it
+	// delegates the wiki to @librarian.
+	fe := mk("fe").Build("fe")
+	if !strings.Contains(fe, "notebook_promote in the same turn") {
+		t.Errorf("specialist prompt missing promote-when-asked instruction")
+	}
+	if !strings.Contains(fe, "@librarian's review") {
+		t.Errorf("specialist prompt should queue promotions for @librarian's review")
+	}
+	if !strings.Contains(fe, "broker auto-writes on approval; you draft and submit") {
+		t.Errorf("specialist prompt missing updated broker-writes-on-approval framing")
+	}
+
+	ceo := mk("ceo").Build("ceo")
+	if !strings.Contains(ceo, "tag @librarian to capture or promote it") {
+		t.Errorf("CEO prompt should delegate promotion to @librarian")
 	}
 }
 
-func TestPromptBuilder_RegressionNotebookPromoteStillPresent(t *testing.T) {
-	// Regression: existing notebook_promote guidance line must still appear
-	// in both the CEO rule 8 and the specialist rule 12.
+func TestPromptBuilder_NotebookPromoteGuidanceAfterAuthorityMove(t *testing.T) {
+	// Phase 4: wiki authority moved CEO->Librarian. notebook_promote guidance
+	// must still exist for SPECIALISTS (they draft + submit), now framed as
+	// queued for @librarian. The CEO writes its own notebooks but delegates
+	// promotion/curation to @librarian rather than promoting itself.
 	pb := &promptBuilder{
 		isOneOnOne:  func() bool { return false },
 		isFocusMode: func() bool { return false },
@@ -884,24 +912,21 @@ func TestPromptBuilder_RegressionNotebookPromoteStillPresent(t *testing.T) {
 		markdownMemory: true,
 	}
 	ceoPrompt := pb.Build("ceo")
-	if !strings.Contains(ceoPrompt, "submit notebook_promote for reviewer approval to make it canonical wiki knowledge") {
-		t.Fatalf("CEO prompt regression: original notebook_promote rule 8 missing")
+	if !strings.Contains(ceoPrompt, "write it to your notebook") {
+		t.Fatalf("CEO prompt should still tell it to write durable decisions to its notebook")
 	}
-	if !strings.Contains(ceoPrompt, "Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.") {
-		t.Fatalf("CEO prompt missing notebook promotion follow-through guardrail")
-	}
-	if !strings.Contains(ceoPrompt, "Claim canonical wiki storage only after reviewer approval makes it canonical.") {
-		t.Fatalf("CEO prompt missing reviewer approval claim guardrail")
+	if !strings.Contains(ceoPrompt, "@librarian owns the team wiki") {
+		t.Fatalf("CEO prompt should delegate wiki curation/promotion to @librarian")
 	}
 	fePrompt := pb.Build("fe")
-	if !strings.Contains(fePrompt, "submit notebook_promote for reviewer approval when they should become canonical") {
-		t.Fatalf("specialist prompt regression: original notebook_promote rule 12 missing")
+	if !strings.Contains(fePrompt, "submit notebook_promote when they should become canonical") {
+		t.Fatalf("specialist prompt regression: notebook_promote guidance missing")
 	}
 	if !strings.Contains(fePrompt, "Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.") {
 		t.Fatalf("specialist prompt missing notebook promotion follow-through guardrail")
 	}
-	if !strings.Contains(fePrompt, "Claim canonical wiki storage only after reviewer approval makes it canonical.") {
-		t.Fatalf("specialist prompt missing reviewer approval claim guardrail")
+	if !strings.Contains(fePrompt, "queued for @librarian's review") {
+		t.Fatalf("specialist prompt should queue promotions for @librarian's review")
 	}
 }
 

@@ -240,9 +240,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")
 		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for cancelable clarifications, and team_request for blocking decisions\n")
 		if markdownMemory {
-			sb.WriteString("8. When you lock a durable decision, write it to your notebook first and submit notebook_promote for reviewer approval to make it canonical wiki knowledge. Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.\n")
-			sb.WriteString("8b. Use team_notebook_review to see which notebook entries have earned promotion demand from cross-agent searches and channel context-asks. The tool surfaces candidates ranked by multi-agent convergence — review and approve those with the highest demand rather than scanning shelves manually. Calling the tool is itself a demand signal, so use it when you are actually curating, not as background polling.\n")
-			sb.WriteString("8c. When another agent or the human explicitly asks you to preserve something for the team, OR when team_notebook_review surfaces an entry with high demand, submit notebook_promote in the same turn and say it is queued for reviewer approval. Claim canonical wiki storage only after reviewer approval makes it canonical. The reviewer model is the quality gate — the broker auto-writes; you curate.\n")
+			sb.WriteString("8. When you lock a durable decision, write it to your notebook so it is not lost (mark temporary working notes with frontmatter `scratch: true`). @librarian owns the team wiki — it curates notebooks into canonical articles and reviews promotions. You do NOT run team_notebook_review or approve promotions yourself; when something matters for the team's long-term knowledge, tag @librarian to capture or promote it.\n")
 		} else if noNex {
 			sb.WriteString("8. Summarize final decisions clearly in-channel\n")
 		} else {
@@ -393,8 +391,12 @@ func (p *promptBuilder) Build(slug string) string {
 			sb.WriteString("11g. When you commit to opening a pull request, actually open it. Run `gh pr create --title \"<short title>\" --body \"<body>\" --head \"<your-branch>\" --base main` via the bash tool. Paste the returned URL into your channel message so the team can click through. Do not claim a PR is open unless the bash output shows a https://github.com/... URL.\n")
 		}
 		if markdownMemory {
-			sb.WriteString("12. Use wuphf_wiki_lookup, team_wiki_search, or notebook_search when prior knowledge matters. Store your own working notes with notebook_write and submit notebook_promote for reviewer approval when they should become canonical. Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.\n")
-			sb.WriteString("12b. When another agent or the human explicitly asks you to preserve something for the team, OR when your own scan reveals a notebook entry that is clearly high-demand (cross-agent searches converging on it, repeated context-asks), submit notebook_promote in the same turn and say it is queued for reviewer approval. Claim canonical wiki storage only after reviewer approval makes it canonical. The reviewer model is the quality gate — the broker auto-writes; you curate.\n")
+			if isLibrarianSlug(slug) {
+				sb.WriteString(librarianWikiAuthorityBlock())
+			} else {
+				sb.WriteString("12. Use wuphf_wiki_lookup, team_wiki_search, or notebook_search when prior knowledge matters. Store your own working notes with notebook_write and submit notebook_promote when they should become canonical. Mark temporary working notes with frontmatter `scratch: true`; do not leave canonical knowledge parked only in a notebook without promoting it.\n")
+				sb.WriteString("12b. When another agent or the human explicitly asks you to preserve something for the team, OR when your own scan reveals a notebook entry that is clearly high-demand (cross-agent searches converging on it, repeated context-asks), submit notebook_promote in the same turn and say it is queued for @librarian's review. Claim canonical wiki storage only after the promotion is approved. @librarian owns the wiki and is the quality gate — the broker auto-writes on approval; you draft and submit.\n")
+			}
 			sb.WriteString("13. Once you have posted the needed update for the current packet, stop. A later pushed notification will wake you again if more is needed.\n\n")
 		} else if noNex {
 			sb.WriteString("12. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n")

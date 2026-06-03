@@ -1230,6 +1230,18 @@ func (b *Broker) findMemberLocked(slug string) *officeMember {
 	return nil
 }
 
+// hasMember reports whether the roster contains slug. Lock-safe wrapper around
+// findMemberLocked for callers that do not already hold b.mu (e.g. HTTP
+// handlers).
+func (b *Broker) hasMember(slug string) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.findMemberLocked(slug) != nil
+}
+
 // rebuildMemberIndexLocked rebuilds memberIndex from b.members. Callers must
 // hold b.mu. Called on load and after any structural mutation (remove, reorder)
 // to keep the map in sync with the slice. Appends and in-place updates are
