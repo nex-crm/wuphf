@@ -61,6 +61,19 @@
   --wk-article-max: 640px;
 }
 .wiki-root {
+  /* Warm-journal cohesion. Shift the wiki's surface tokens off pure white
+     toward a soft warm off-white, so the rich editor's warm palette reads as a
+     SUBTLE step within the wiki rather than a foreign island. Scoped to
+     .wiki-root on purpose: the global --wk-* aliases at :root are reused by
+     non-wiki chrome (the Telegram /connect modal), which must stay neutral.
+     Theme-aware — a small wash of the brand gold over the active theme's base,
+     so light gets a cream off-white and dark/Noir get a subtly warmer dark
+     instead of a bleached light tint. */
+  --wk-paper: color-mix(in srgb, #c78a1f 5%, var(--bg));
+  --wk-surface: color-mix(in srgb, #c78a1f 3%, var(--bg-card));
+  --wk-paper-dark: color-mix(in srgb, #c78a1f 8%, var(--bg-warm));
+  --wk-border: color-mix(in srgb, #c78a1f 13%, var(--border));
+  --wk-border-light: color-mix(in srgb, #c78a1f 9%, var(--border-light));
   background: var(--wk-paper);
   color: var(--wk-text);
   line-height: 1.6;

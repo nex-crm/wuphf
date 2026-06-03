@@ -42,7 +42,9 @@
      with red/green/blue ink semantics. The notebook tokens are scoped to
      `.notebook-surface`, so their hex values are mirrored here (they ARE the
      brand colors) to keep this editor scope self-contained. */
-  --background: #faf5e8; /* nb-surface — warm journal cream (the page) */
+  --background: #f7f2e6; /* warm journal cream — one subtle step warmer than
+                            the wiki reader's warmed paper, so edit mode reads
+                            as a gentle focus shift, not a foreign surface */
   --foreground: #2a2721; /* nb-text — warm brown ink */
   --card: #fffdf6; /* warm white — menus/toolbar float above the cream */
   --card-foreground: #2a2721;
