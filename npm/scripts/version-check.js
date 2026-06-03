@@ -78,7 +78,7 @@ async function markCacheDirExcludedFromBackup(dir = cacheDir()) {
 
 async function ensureCacheDir() {
   const dir = cacheDir();
-  await fsp.mkdir(dir, { recursive: true });
+  await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
   await markCacheDirExcludedFromBackup(dir);
   return dir;
 }

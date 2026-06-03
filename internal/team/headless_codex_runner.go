@@ -397,11 +397,12 @@ func (l *Launcher) buildHeadlessCodexEnv(slug string, workspaceDir string, chann
 	if base := l.headlessCodexWorkspaceCacheDir(workspaceDir); base != "" {
 		goCache := filepath.Join(base, "go-build", strings.TrimSpace(slug))
 		goTmp := filepath.Join(base, "go-tmp", strings.TrimSpace(slug))
-		_ = config.EnsureCacheDir(base)
-		_ = os.MkdirAll(goCache, 0o755)
-		_ = os.MkdirAll(goTmp, 0o755)
-		env = setEnvValue(env, "GOCACHE", goCache)
-		env = setEnvValue(env, "GOTMPDIR", goTmp)
+		if config.EnsureCacheDir(base) == nil &&
+			os.MkdirAll(goCache, 0o755) == nil &&
+			os.MkdirAll(goTmp, 0o755) == nil {
+			env = setEnvValue(env, "GOCACHE", goCache)
+			env = setEnvValue(env, "GOTMPDIR", goTmp)
+		}
 	}
 	env = setEnvValue(env, "WUPHF_AGENT_SLUG", slug)
 	if channel = strings.TrimSpace(channel); channel != "" {
