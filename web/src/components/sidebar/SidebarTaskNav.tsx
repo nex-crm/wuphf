@@ -43,7 +43,9 @@ function openBoard(): void {
 }
 
 function openNewTask(): void {
-  void router.navigate({ to: "/tasks/new" });
+  // The home composer (index `/`) is the primary new-task surface; the
+  // /tasks/new form remains as a fallback for direct links.
+  void router.navigate({ to: "/" });
 }
 
 function openTask(taskId: string): void {

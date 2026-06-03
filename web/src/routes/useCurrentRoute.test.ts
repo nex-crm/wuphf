@@ -7,6 +7,7 @@ import {
   appTaskDetailRoute,
   channelRoute,
   inboxRoute,
+  indexRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
@@ -50,13 +51,7 @@ describe("deriveCurrentRoute (URL → discriminated union)", () => {
       {},
       { kind: "channel", channelSlug: "general" },
     ],
-    [
-      "agents roster grid",
-      agentsRoute.id,
-      {},
-      {},
-      { kind: "agents" },
-    ],
+    ["agents roster grid", agentsRoute.id, {}, {}, { kind: "agents" }],
     [
       "agent detail",
       agentDetailRoute.id,
@@ -71,6 +66,7 @@ describe("deriveCurrentRoute (URL → discriminated union)", () => {
       {},
       { kind: "app", appId: "tasks" },
     ],
+    ["home composer", indexRoute.id, {}, {}, { kind: "home" }],
     ["task board", tasksRoute.id, {}, {}, { kind: "task-board" }],
     [
       "task detail",

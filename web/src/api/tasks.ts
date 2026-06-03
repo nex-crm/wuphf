@@ -107,6 +107,8 @@ export interface Task {
    */
   lifecycle_state?: string;
   execution_mode?: string;
+  /** Model-specific reasoning-effort level set in the new-task composer. */
+  effort?: string;
   review_state?: string;
   source_signal_id?: string;
   source_decision_id?: string;
@@ -132,6 +134,12 @@ export interface CreateTaskInput {
   details?: string;
   task_type?: string;
   execution_mode?: string;
+  /**
+   * Model-specific reasoning-effort level (e.g. "high" for claude,
+   * "medium" for codex). Applied by the owner's runtime at dispatch.
+   * Omit for the runtime default.
+   */
+  effort?: string;
   depends_on?: string[];
 }
 

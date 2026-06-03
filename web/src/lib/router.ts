@@ -156,16 +156,13 @@ export const taskDecisionRoute = createRoute({
 });
 
 // / — index route. Tasks are the primary primitive, so the default
-// landing is the Tasks board (the interim home until the new-task
-// composer ships). The operator's first surface is their work, grouped
-// by stage, rather than a channel or an agent chat. Uses redirect() from
-// beforeLoad so the URL→store race can't observe the index match.
+// landing is the new-task composer: a centered chatbox where the operator
+// describes an outcome and chooses how it runs. Their work board lives one
+// click away at /tasks. The route renders (no redirect) so the composer is
+// the literal home; useCurrentRoute derives {kind: "home"} for it.
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.index,
-  beforeLoad: () => {
-    throw redirect({ to: "/tasks", replace: true });
-  },
 });
 
 // Back-compat redirects for the legacy /issues surface. Task is the

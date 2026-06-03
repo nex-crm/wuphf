@@ -72,6 +72,8 @@ function routeIdentityKey(route: CurrentRoute): string {
       return `routine-detail:${route.routineSlug}`;
     case "routine-new":
       return "routine-new";
+    case "home":
+      return "home";
     case "unknown":
       return "unknown";
     default: {

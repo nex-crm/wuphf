@@ -8,6 +8,7 @@ import {
   articleRoute,
   channelRoute,
   inboxRoute,
+  indexRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
@@ -38,6 +39,8 @@ import { useAppStore } from "../stores/app";
 export type CurrentRoute =
   | { kind: "channel"; channelSlug: string }
   | { kind: "app"; appId: string }
+  // New-task home composer (index route).
+  | { kind: "home" }
   | { kind: "task-board" }
   | { kind: "task-detail"; taskId: string }
   | { kind: "task-new" }
@@ -79,6 +82,7 @@ interface SearchShape {
 
 type RouteDeriver = (params: ParamsShape, search: SearchShape) => CurrentRoute;
 type CurrentRouteId =
+  | typeof indexRoute.id
   | typeof channelRoute.id
   | typeof appRoute.id
   | typeof tasksRoute.id
@@ -102,6 +106,7 @@ type CurrentRouteId =
   | typeof routineNewRoute.id;
 
 const CURRENT_ROUTE_IDS = [
+  indexRoute.id,
   channelRoute.id,
   appRoute.id,
   tasksRoute.id,
@@ -132,6 +137,7 @@ function isCurrentRouteId(routeId: string): routeId is CurrentRouteId {
 }
 
 const ROUTE_DERIVERS = {
+  [indexRoute.id]: () => ({ kind: "home" }),
   [channelRoute.id]: (params) => ({
     kind: "channel",
     channelSlug: params.channelSlug ?? "general",
@@ -292,6 +298,7 @@ export function useCurrentApp(): string | null {
     case "agents":
     case "agent-detail":
       return "agents";
+    case "home":
     case "channel":
     case "skill-detail":
     case "unknown":

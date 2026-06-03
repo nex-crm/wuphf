@@ -163,6 +163,8 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
         { label: "Routines", href: "#/apps/routines" },
         { label: "New routine", href: "#/routines/new" },
       ];
+    case "home":
+      return [];
     case "unknown":
       return [];
     default: {

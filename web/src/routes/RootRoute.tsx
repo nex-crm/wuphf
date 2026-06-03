@@ -167,6 +167,12 @@ const TaskNewForm = lazy(() =>
     default: m.TaskNewForm,
   })),
 );
+// New-task home composer — the app's landing surface (index route).
+const TaskComposer = lazy(() =>
+  import("../components/tasks/TaskComposer").then((m) => ({
+    default: m.TaskComposer,
+  })),
+);
 // Agents tool — roster grid (/agents) + per-agent config (/agents/$slug).
 const AgentsTool = lazy(() =>
   import("../components/agents/AgentsTool").then((m) => ({
@@ -611,6 +617,8 @@ function MainContent() {
   useTrackLastConversationalChannel(route);
 
   switch (route.kind) {
+    case "home":
+      return <TaskComposer />;
     case "channel":
       return <ConversationView />;
     case "app":
@@ -783,25 +791,24 @@ export default function RootRoute() {
   const [bootPhase, setBootPhase] = useState<string | undefined>(undefined);
 
   // When CEO onboarding is active (phase set, not "complete"), pin a
-  // generic landing URL (root, #general) to the Tasks board so the URL is
-  // sensible the moment the broker flips onboarded=true and the office
-  // Shell mounts. The onboarding conversation itself renders full-screen
-  // via OnboardingChat regardless of the URL, so this only governs where
-  // the user lands once onboarding completes. Already-onboarded users
-  // (onboardingComplete === true) skip the whole inCeoOnboarding branch
-  // and never hit this redirect.
+  // generic landing URL (#general) to the home composer (index `/`) so the
+  // URL is sensible the moment the broker flips onboarded=true and the
+  // office Shell mounts. The new-task composer is the app's landing surface,
+  // so completing onboarding drops the user there. The onboarding
+  // conversation itself renders full-screen via OnboardingChat regardless of
+  // the URL, so this only governs where the user lands once onboarding
+  // completes. Already-onboarded users (onboardingComplete === true) skip the
+  // whole inCeoOnboarding branch and never hit this redirect.
   useEffect(() => {
     if (!(inCeoOnboarding || bootPhase)) return;
-    // Only redirect when the user is on a generic destination (root, general).
-    // Explicit deep-links (e.g. a specific /tasks/$id) should be preserved.
+    // Only redirect when the user is on a non-home generic destination
+    // (#general). Root (`#/`, `""`) already renders the composer, and
+    // explicit deep-links (e.g. a specific /tasks/$id) should be preserved.
     const hash = typeof window !== "undefined" ? window.location.hash : "";
     const onGenericRoute =
-      hash === "" ||
-      hash === "#/" ||
-      hash === "#/channels/general" ||
-      hash.startsWith("#/?");
+      hash === "#/channels/general" || hash.startsWith("#/?");
     if (onGenericRoute) {
-      void router.navigate({ to: "/tasks", replace: true });
+      void router.navigate({ to: "/", replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inCeoOnboarding, bootPhase]);
