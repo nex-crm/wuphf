@@ -34,7 +34,23 @@
 
 **Read this section first on session resume, then the Change log below.**
 
-- **Branch:** `worktree-structural-changes`. **HEAD:** `981520db`. Base `origin/main` @ `46f06e54`.
+- **Branch:** `worktree-structural-changes`. **HEAD:** `91180e7a`. Base `origin/main` @ `46f06e54`.
+- **PHASE 4 DONE (Librarian = Pam; commits `e9b2f1d3` presence + `91180e7a` authority move).**
+  Promoted the wiki "Pam the Archivist" to a first-class built-in agent: **slug `librarian`, name
+  "Pam", role "Librarian"** (`librarian.go`). Present in every new workspace like the CEO
+  (`ensureLibrarianMember` wired into `blankSlateOfficeMembersFromBlueprint` + `defaultOfficeMembers`),
+  seeded as a default member of every task channel (`createPerTaskChannelLocked`, guarded so legacy
+  workspaces no-op), and granted cross-channel access (reserved-slug bypass). **Wiki authority moved
+  CEO→Librarian:** the promotion reviewer resolves to `librarian` when present (`librarianAwareReviewer`
+  wraps the blueprint resolver — base "ceo" fallback → librarian; pinned reviewer respected; no
+  librarian member → unchanged); `team_notebook_review` opened to CEO+Librarian (NOT the lead's
+  structural tools); CEO prompt delegates the wiki to @librarian, the Librarian gets a WIKI OWNERSHIP
+  prompt block, specialists queue promotions for @librarian's review. The headless `pam` enrich helper
+  (git author `archivist`) is unchanged. **Gradual + legacy-safe** — existing workspaces gain the
+  Librarian member in Phase 6, and everything no-ops cleanly until then. KNOWN LIMIT: the Librarian's
+  "format/organize the wiki" relies on the standard wiki tools; unrestricted `team_wiki_write` for
+  re-organizing is still gated to verified-human-request (a possible follow-up). Full Go (39) + web
+  (1738) green; lint clean.
 - **Commits so far:** …Phase 0–2 · `5e43ceb3` Phase 3a · `d5b10eb8` Phase 3b · `35012a1d` Phase 3c ·
   `9473517c` teammcp fix · `b5faabb8` tracker · `96a48401` per-task runtime + backlog/Auto (backend) ·
   `4a1ef8bf` same (frontend) · `9484ce3c` tracker · **`f638c554` parallel-instances A (thread per-turn
@@ -72,9 +88,10 @@
   → runs); **Backlog** create sends `park=true` → task lands in `Drafting` (Backlog stage, assigned,
   NOT dispatched), activated via the FE "Approve & Start" (Drafting→Running, wakes owner; Auto→triage
   on approve). Live-verified all 4 flows + disk persistence.
-- **NEXT: Phase 4 (Librarian = Pam), then Phase 5 (spec→wiki Specs/), then Phase 6 (migration, LAST).**
-  Parallel instances ✅ done (see above). The migration in Phase 6 now also folds the `provider`/`model`/
-  `effort` task keys + the "auto" owner sentinel into legacy-state migration.
+- **NEXT: Phase 5 (spec→wiki `Specs/`), then Phase 6 (migration, LAST).** Parallel instances ✅,
+  Phase 4 Librarian ✅ (see above). The migration in Phase 6 now also folds the `provider`/`model`/
+  `effort` task keys + the "auto" owner sentinel + **adds the built-in `librarian` member to existing
+  rosters** into legacy-state migration.
 - **⚠ REGRESSION LESSON (2026-06-03):** Phase 2a (channel-per-task) silently broke 5
   `internal/teammcp` tests because 2a verification ran only `./internal/team`. Fixed in
   `9473517c`. **On every phase, run the FULL Go + web suites, not just the package you touched**
@@ -622,11 +639,12 @@
     disk, Routine prefills /routines/new). Composer is the landing (`/`); board at /tasks.
     Note: visual browser click-through still blocked by the Chrome CDP zombie (data path
     + build + full test suite are the verification surface used instead).
-- [ ] **Phase 4 — Librarian agent (Pam → Librarian).** Promote Pam to first-class
-    `librarian` agent, default member of every task. Move wiki write/format/
-    organize + promotion + review authority CEO→Librarian (prompts + tool gating).
-    Owning agents still write notebooks (D6).
-  - Gate: Librarian present in tasks; promotion/review flows route to Librarian.
+- [x] **Phase 4 — Librarian agent (Pam → Librarian). DONE** (`e9b2f1d3` + `91180e7a`).
+    First-class built-in `librarian` agent (name "Pam"), default member of every task
+    channel + cross-channel access. Wiki promotion/review authority moved CEO→Librarian
+    (reviewer resolver prefers librarian-when-present; `team_notebook_review` opened to
+    Librarian; prompts delegate). Owning agents still write notebooks. Gradual/legacy-safe.
+  - Gate: Librarian present in tasks ✅; promotion/review flows route to Librarian ✅.
 - [ ] **Phase 5 — Spec-first into wiki `Specs/`** (D3). On approval, Librarian
     materializes approved spec to `team/specs/<task>.md`, linked from the task.
     Keep interview/questions + approval gate; render spec from wiki + link.
