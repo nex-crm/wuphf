@@ -34,10 +34,26 @@
 
 **Read this section first on session resume, then the Change log below.**
 
-- **Branch:** `worktree-structural-changes`. **HEAD:** `4a1ef8bf`. Base `origin/main` @ `46f06e54`.
+- **Branch:** `worktree-structural-changes`. **HEAD:** `eabd09e1`. Base `origin/main` @ `46f06e54`.
 - **Commits so far:** …Phase 0–2 · `5e43ceb3` Phase 3a · `d5b10eb8` Phase 3b · `35012a1d` Phase 3c ·
-  `9473517c` teammcp fix · `b5faabb8` tracker · `96a48401` **per-task runtime + backlog/Auto (backend)** ·
-  `4a1ef8bf` **same (frontend)**. All green, all committed.
+  `9473517c` teammcp fix · `b5faabb8` tracker · `96a48401` per-task runtime + backlog/Auto (backend) ·
+  `4a1ef8bf` same (frontend) · `9484ce3c` tracker · **`f638c554` parallel-instances A (thread per-turn
+  task identity via ctx)** · **`576e972a` B (nest scheduler by lane = (slug, worktree-path))** ·
+  **`e0b3cb7c` C (relax exclusive lane: distinct-worktree owner tasks run concurrently; live_external
+  still serialized)** · **`c18c8a56` D (concurrency verification tests)** · `eabd09e1` (sandbox-bypass
+  per-turn fix). All green, all committed.
+- **PARALLEL INSTANCES DONE (2026-06-03).** One agent now runs multiple tasks at once, each on its
+  own per-task model. Design: the headless scheduler lane key is the turn's **resolved git worktree
+  path** (`headlessLane{slug, key}` + `laneForTurn` in `headless_codex_queue.go`), NOT the task id —
+  so two turns share a lane (serialize) exactly when they write the same directory. Distinct worktrees
+  → distinct lanes → parallel; shared worktree (dependency reuse) / office-mode / chat / lead → the
+  agent's default `""` lane → serialized as before. This makes the scheduler intrinsically
+  collision-proof, which let admission control (`taskRequiresExclusiveOwnerTurn`) relax to
+  `live_external`-only (worktree tasks no longer queue behind each other; external side-effects still
+  do). Per-turn task identity threads via `context.Context` (`withHeadlessTurnTaskID` /
+  `turnTaskForCtx` / `turnTaskIDForCtx`) so model/effort/provider/workspace/sandbox-bypass all resolve
+  THIS turn's task, not "first in_progress" (agentActiveTask). Full Go + team suites green; headless/
+  queue/recovery + the two new parallel tests green under `-race`; golangci-lint 0 issues.
 - **PHASE 3 REVISION DONE (per-task runtime + backlog/Auto):** the LLM model/provider is now a
   property of the TASK, not the agent (teamTask gains `provider`/`model` next to `effort`; dispatch
   prefers task runtime over the owner's soft-default binding via `effectiveProviderKindForAgent`/
@@ -48,15 +64,15 @@
   → runs); **Backlog** create sends `park=true` → task lands in `Drafting` (Backlog stage, assigned,
   NOT dispatched), activated via the FE "Approve & Start" (Drafting→Running, wakes owner; Auto→triage
   on approve). Live-verified all 4 flows + disk persistence.
-- **NEXT: Parallel instances per agent (deferred concurrency follow-up — user wants this).** Then
-  Phase 4 (Librarian = Pam), Phase 5 (spec→wiki Specs/), Phase 6 (migration, LAST). See the
-  "PARALLEL INSTANCES PICKUP" note below for the exact worker-pool changes.
+- **NEXT: Phase 4 (Librarian = Pam), then Phase 5 (spec→wiki Specs/), then Phase 6 (migration, LAST).**
+  Parallel instances ✅ done (see above). The migration in Phase 6 now also folds the `provider`/`model`/
+  `effort` task keys + the "auto" owner sentinel into legacy-state migration.
 - **⚠ REGRESSION LESSON (2026-06-03):** Phase 2a (channel-per-task) silently broke 5
   `internal/teammcp` tests because 2a verification ran only `./internal/team`. Fixed in
   `9473517c`. **On every phase, run the FULL Go + web suites, not just the package you touched**
   — channel-per-task ripples into any test that assumed tasks live in #general.
 - **DONE:** Phase 0 ✅, Phase 1 ✅, naming scrub ✅, Phase 2a (i+ii+iii) ✅, Phase 2b ✅,
-  **Phase 3 (a+b+c) ✅, teammcp regressions ✅**.
+  **Phase 3 (a+b+c) ✅, teammcp regressions ✅, Phase 3 revision ✅, Parallel instances ✅**.
   Backend is fully task-scoped: **every real top-level task mints its own `task-<id>`
   channel** (2a-iii dropped the keyword heuristic on 2026-06-03 — only System / incident /
   sub-tasks stay shared; verified live + the human and @ceo always retain channel access
@@ -70,19 +86,14 @@
   and LAST** — it is the only irreversible-on-real-user-data step and must be written
   against the final settled shape + tested on a legacy fixture. Design forks all LOCKED
   (see "LAYOUT FORKS LOCKED" + Phase 3 in the Change log).
-- **PARALLEL INSTANCES PICKUP (next concurrency follow-up):** let one agent run multiple
-  tasks at once, each on its own per-task model. The per-task runtime already lands the model
-  on the task; this is purely the headless scheduler. Changes (from exploration 2026-06-03):
-  (1) `headlessWorkerPool` in `headless_codex.go` is keyed by SLUG — nest `workers`/`active`/
-  `queues` by `(slug, taskID)` and thread `taskID` through enqueue/dequeue/worker-spawn
-  (`headless_codex_queue.go`). (2) Relax the exclusive-owner lane
-  (`queueTaskBehindActiveOwnerLaneLocked` + `taskRequiresExclusiveOwnerTurn` in
-  `broker_tasks_worktrees.go`) — gate it behind a per-mode toggle (keep serialized for
-  `local_worktree` unless per-task worktrees are confirmed collision-free). (3) The ~11
-  `agentActiveTask(slug)` callers assume one active task per slug — they need a taskID to
-  disambiguate; `headlessTaskWorkspaceDir` must read the turn's task, not "the" active task.
-  ~800–1200 lines; its own pass + dedicated concurrency verification.
-- Then Phase 4 (Librarian = Pam), Phase 5 (spec→wiki Specs/).
+- **PARALLEL INSTANCES — DONE (commits `f638c554`/`576e972a`/`e0b3cb7c`/`c18c8a56`/`eabd09e1`).**
+  Resolution vs the original pickup: (1) nested the pool maps but keyed lanes by **worktree path**
+  (not raw `(slug,taskID)`) — strictly safer (collision-proof by construction; auto-handles
+  dependency-shared worktrees + office-cwd). (2) relaxed the exclusive lane to **`live_external`-only**
+  — `local_worktree` is "proven safe" because the lane key IS the worktree, so the scheduler serializes
+  shared-tree turns itself. (3) the on-path `agentActiveTask(slug)` callers (model/effort/provider/
+  workspace/stream-label/sandbox-bypass) now resolve the turn's task via ctx; off-path/pane callers
+  keep the single-task fallback. `headlessTaskWorkspaceDir` takes an explicit taskID.
 - **LAST (separate):** Phase 6 (persisted-state migration + E2E — now also folds `provider`/
   `model`/`effort` task keys + the "auto" owner sentinel into the legacy-state migration).
 - **HARD RULES still active:** (1) NO external-app name anywhere in
