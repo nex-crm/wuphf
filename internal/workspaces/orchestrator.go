@@ -126,7 +126,7 @@ func Create(ctx context.Context, name, blueprint string, opts CreateOptions) err
 		releaseLock(lf)
 		return fmt.Errorf("workspaces: create %q: mkdir: %w", name, err)
 	}
-	if err := config.EnsureCacheDir(filepath.Join(wuphfDir, "cache")); err != nil {
+	if err := config.EnsureCacheDir(config.CacheDirForRuntimeHome(runtimeHome)); err != nil {
 		releaseLock(lf)
 		return fmt.Errorf("workspaces: create %q: cache dir: %w", name, err)
 	}

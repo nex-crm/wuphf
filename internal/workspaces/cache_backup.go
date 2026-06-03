@@ -14,6 +14,9 @@ import (
 func EnsureCacheBackupExclusions() error {
 	reg, err := Read()
 	if err != nil {
+		if errors.Is(err, ErrRegistryNotFound) {
+			return nil
+		}
 		return err
 	}
 	var errs []error
