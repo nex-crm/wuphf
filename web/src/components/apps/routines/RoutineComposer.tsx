@@ -7,7 +7,7 @@ import {
   getOfficeMembers,
   type OfficeMember,
 } from "../../../api/client";
-import { router } from "../../../lib/router";
+import { router, routineNewRoute } from "../../../lib/router";
 import { RoutineChannelSelect } from "./RoutineChannelSelect";
 import {
   compileSchedule,
@@ -23,10 +23,16 @@ import {
  */
 export function RoutineComposer() {
   const queryClient = useQueryClient();
-  const [label, setLabel] = useState("");
+  // Optional prefill carried from the new-task composer's "Routine" action.
+  // useState initialisers run once, so the composer stays fully editable after
+  // seeding (a later navigation with new params remounts via the route key).
+  const prefill = routineNewRoute.useSearch();
+  const [label, setLabel] = useState(() => prefill.label ?? "");
   const [slug, setSlug] = useState("");
   const [schedule, setSchedule] = useState<ScheduleValue>(DEFAULT_SCHEDULE);
-  const [instructions, setInstructions] = useState("");
+  const [instructions, setInstructions] = useState(
+    () => prefill.instructions ?? "",
+  );
   const [ownerSlug, setOwnerSlug] = useState<string>("");
   const [channel, setChannel] = useState<string>("");
   const [enabled, setEnabled] = useState(true);

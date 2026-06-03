@@ -160,20 +160,29 @@ export function TaskComposer() {
     void queryClient.invalidateQueries({ queryKey: ["office-members"] });
   }
 
-  // createAndRoute persists any binding change, creates the task, and hands
-  // the user off. Split out of handleCreate so the latter stays a thin
-  // validate-then-dispatch shell. `mode` here is "start" | "backlog".
-  async function createAndRoute(mode: "start" | "backlog", owner: string) {
+  // createAndRoute creates the task and hands the user off. Split out of
+  // handleCreate so the latter stays a thin validate-then-dispatch shell.
+  //
+  // Start now → assign the owner. With an owner set the broker derives an
+  //   executable state, so the owner picks the task up and runs it.
+  // Backlog → create UNASSIGNED (assignee ""). The broker leaves an
+  //   ownerless task in the backlog stage and dispatches nobody; the user
+  //   assigns an owner later when they pull it off the backlog. We therefore
+  //   skip the owner-binding write too (no owner to bind). Effort still rides
+  //   along on the task and applies whenever it is eventually run.
+  async function createAndRoute(mode: "start" | "backlog") {
+    const assignee =
+      mode === "start" ? ownerSlug.trim() || leadSlug || "ceo" : "";
     setError(null);
     submitLockRef.current = true;
     setSubmitting(true);
     try {
-      await persistOwnerBindingIfChanged();
+      if (mode === "start") await persistOwnerBindingIfChanged();
       const response = await createTasks(
         [
           {
             title: deriveTitle(prompt.trim()),
-            assignee: owner,
+            assignee,
             details: prompt.trim(),
             task_type: "issue",
             effort: effort || undefined,
@@ -187,7 +196,7 @@ export function TaskComposer() {
       void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
       setPrompt("");
       // Start-now hands the user to the live task; Backlog keeps them on the
-      // board to queue more. (3c: Backlog should create without dispatching.)
+      // board to queue more.
       if (mode === "start" && created?.id) {
         void router.navigate({
           to: "/tasks/$taskId",
@@ -206,20 +215,27 @@ export function TaskComposer() {
 
   function handleCreate(mode: CreateMode) {
     if (submitLockRef.current) return;
-    if (!prompt.trim()) {
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) {
       setError("Describe what you want to get done.");
       promptRef.current?.focus();
       return;
     }
-    const owner = ownerSlug.trim() || leadSlug || "ceo";
 
     // Routine work routes to the recurring-routine composer rather than
-    // creating a one-off task. (3c: prefill the routine from this prompt.)
+    // creating a one-off task. Carry the prompt through as the routine's
+    // title + instructions so the user does not retype it.
     if (mode === "routine") {
-      void router.navigate({ to: "/routines/new" });
+      void router.navigate({
+        to: "/routines/new",
+        search: {
+          label: deriveTitle(trimmedPrompt),
+          instructions: trimmedPrompt,
+        },
+      });
       return;
     }
-    void createAndRoute(mode, owner);
+    void createAndRoute(mode);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -356,6 +372,7 @@ export function TaskComposer() {
               type="submit"
               className="task-composer-btn task-composer-btn-primary"
               disabled={submitting}
+              title={`Assign @${ownerSlug || "ceo"} and start now`}
               data-testid="task-composer-start"
             >
               {submitting ? "Creating…" : "Start now"}
@@ -365,6 +382,7 @@ export function TaskComposer() {
               className="task-composer-btn"
               onClick={() => void handleCreate("backlog")}
               disabled={submitting}
+              title="Park unassigned in the backlog — nobody starts until you assign it"
               data-testid="task-composer-backlog"
             >
               Backlog
@@ -374,6 +392,7 @@ export function TaskComposer() {
               className="task-composer-btn"
               onClick={() => void handleCreate("routine")}
               disabled={submitting}
+              title="Set up as a recurring routine on a schedule"
               data-testid="task-composer-routine"
             >
               Routine

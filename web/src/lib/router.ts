@@ -218,6 +218,16 @@ export const routinesRoute = createRoute({
 export const routineNewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.routineNew,
+  // Optional prefill carried from the new-task composer's "Routine" action so
+  // the user does not retype what they just described. Both keys are optional;
+  // a bare /routines/new still renders an empty composer.
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { label?: string; instructions?: string } => ({
+    label: typeof search.label === "string" ? search.label : undefined,
+    instructions:
+      typeof search.instructions === "string" ? search.instructions : undefined,
+  }),
 });
 
 // /routines/$routineSlug — full-page routine detail surface. Routine
