@@ -1,6 +1,9 @@
 package team
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 // Per-task reasoning-effort wiring. The new-task composer lets a user pick a
 // model-specific effort level for a task; teamTask.Effort persists it. At
@@ -55,14 +58,16 @@ func normalizeCodexEffort(effort string) string {
 	return level
 }
 
-// activeTaskEffort returns the trimmed Effort of the task slug is currently
-// running (in_progress), or "" when slug has no active task. Both headless
-// runners call this at dispatch to resolve the per-task effort override.
-func (l *Launcher) activeTaskEffort(slug string) string {
+// activeTaskEffort returns the trimmed Effort of the task the current turn is
+// running, or "" when there is no such task. Both headless runners call this at
+// dispatch to resolve the per-task effort override. Resolves the turn's task
+// via ctx (see turnTaskForCtx) so a parallel instance gets its own task's
+// effort, not whichever in_progress task happens to be first.
+func (l *Launcher) activeTaskEffort(ctx context.Context, slug string) string {
 	if l == nil {
 		return ""
 	}
-	task := l.agentActiveTask(slug)
+	task := l.turnTaskForCtx(ctx, slug)
 	if task == nil {
 		return ""
 	}

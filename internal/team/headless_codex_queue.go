@@ -574,9 +574,13 @@ func (l *Launcher) beginHeadlessCodexTurn(slug string) (headlessCodexTurn, conte
 	}
 	timeout := l.headlessCodexTurnTimeoutForTurn(turn)
 	turnCtx, cancel := context.WithTimeout(baseCtx, timeout)
+	// Tag the turn context with its task id so the runner helpers
+	// (model / effort / provider / workspace) resolve THIS turn's task even when
+	// the agent has several tasks in flight at once. See headless_runtime.go.
+	turnCtx = withHeadlessTurnTaskID(turnCtx, turn.TaskID)
 	startedAt := time.Now()
 	workspaceDir := ""
-	if worktreeDir := l.headlessTaskWorkspaceDir(slug); worktreeDir != "" {
+	if worktreeDir := l.headlessTaskWorkspaceDir(slug, turn.TaskID); worktreeDir != "" {
 		workspaceDir = worktreeDir
 	} else if codingAgentSlugs[slug] {
 		workspaceDir = normalizeHeadlessWorkspaceDir(l.cwd)

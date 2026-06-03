@@ -51,7 +51,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	}
 
 	workspaceDir := strings.TrimSpace(l.cwd)
-	if worktreeDir := l.headlessTaskWorkspaceDir(slug); worktreeDir != "" {
+	if worktreeDir := l.headlessTaskWorkspaceDir(slug, headlessTurnTaskID(ctx)); worktreeDir != "" {
 		workspaceDir = worktreeDir
 	}
 	workspaceDir = normalizeHeadlessWorkspaceDir(workspaceDir)
@@ -100,7 +100,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	}
 
 	var agentStream *agentStreamBuffer
-	taskID := l.agentActiveTaskID(slug)
+	taskID := l.turnTaskIDForCtx(ctx, slug)
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}

@@ -41,7 +41,7 @@ func TestHeadlessClaudeModel_SonnetByDefault(t *testing.T) {
 	l := minimalLauncher(false)
 	for _, slug := range []string{"ceo", "eng", "pm"} {
 		t.Run(slug, func(t *testing.T) {
-			if got := l.headlessClaudeModel(slug); got != "claude-sonnet-4-6" {
+			if got := l.headlessClaudeModel(context.Background(), slug); got != "claude-sonnet-4-6" {
 				t.Fatalf("slug=%q opusCEO=false: want claude-sonnet-4-6, got %q", slug, got)
 			}
 		})
@@ -62,7 +62,7 @@ func TestHeadlessClaudeModel_OpusForLeadOnly(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.slug, func(t *testing.T) {
-			if got := l.headlessClaudeModel(tc.slug); got != tc.want {
+			if got := l.headlessClaudeModel(context.Background(), tc.slug); got != tc.want {
 				t.Fatalf("slug=%q opusCEO=true: want %q, got %q", tc.slug, tc.want, got)
 			}
 		})
@@ -98,7 +98,7 @@ func TestHeadlessClaudeModel_CustomLeadSlug(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.slug, func(t *testing.T) {
-			if got := l.headlessClaudeModel(tc.slug); got != tc.want {
+			if got := l.headlessClaudeModel(context.Background(), tc.slug); got != tc.want {
 				t.Fatalf("slug=%q: want %q, got %q", tc.slug, tc.want, got)
 			}
 		})
@@ -166,7 +166,7 @@ func TestHeadlessClaudeModel_PerAgentBindingOverride(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			l := makeBoundLauncher(t, tc.slug, tc.binding)
-			if got := l.headlessClaudeModel(tc.slug); got != tc.want {
+			if got := l.headlessClaudeModel(context.Background(), tc.slug); got != tc.want {
 				t.Fatalf("headlessClaudeModel(%q) with binding %+v = %q, want %q",
 					tc.slug, tc.binding, got, tc.want)
 			}

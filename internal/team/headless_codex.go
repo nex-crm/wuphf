@@ -38,7 +38,7 @@ var (
 func defaultHeadlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
 	if l != nil {
 		// Per-task provider wins over the agent binding (then global default).
-		kind := l.effectiveProviderKindForAgent(slug)
+		kind := l.effectiveProviderKindForAgent(ctx, slug)
 		switch {
 		case kind == provider.KindCodex:
 			return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)

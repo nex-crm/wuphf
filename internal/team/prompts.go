@@ -9,6 +9,7 @@ package team
 // launcher feeds to tmux split-window for an interactive claude pane.
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -208,7 +209,10 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
 		}
 	}
 
-	model := l.headlessClaudeModel(slug)
+	// The interactive pane builder has no per-turn context; a background
+	// context makes headlessClaudeModel fall back to the agent's active task,
+	// which is correct here because tmux panes run one task at a time.
+	model := l.headlessClaudeModel(context.Background(), slug)
 	brokerBaseURL := l.BrokerBaseURL()
 	otelLogsEndpoint := brokerBaseURL + "/v1/logs"
 	otelHeaders := "Authorization=Bearer " + brokerToken
