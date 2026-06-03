@@ -68,32 +68,27 @@ func rejectFalseLocalWorktreeBlock(task *teamTask, reason string) error {
 	return nil
 }
 
-// taskRequiresExclusiveOwnerTurn reports whether a task must be the OWNER's only
-// active task of its kind — i.e. admission control queues a second such task
-// behind the first instead of letting both run at once.
+// taskRequiresExclusiveOwnerTurn used to force a task to be the owner's only
+// active task of its kind — admission control queued a second such task behind
+// the first by injecting a synthetic dependency. That synthetic serialization
+// is gone: the product rule is that ONLY a real, declared dependency
+// (`depends_on`, gated by hasUnresolvedDepsLocked) holds a task back. Anything
+// non-dependent runs concurrently.
 //
-// Only live_external still requires this. External side-effects (sends, posts,
-// remote mutations) have no per-task workspace to isolate them, so running two
-// at once for one owner risks double-sends and races on shared remote state;
-// serializing them per owner (with a clean "queued behind" dependency) is the
-// safe default.
+// Safety is now enforced at the right layers, not by withholding the task:
+//   - worktree tasks: the headless scheduler keys dispatch lanes by worktree
+//     path (see laneForTurn), so two worktree turns run in parallel only when
+//     their worktrees differ and serialize the moment they share a tree.
+//   - office / live_external: no shared worktree; concurrent turns are the same
+//     concurrency the system already runs across different agents (broker
+//     mediates shared state). If two external actions must be ordered, the
+//     caller declares a dependency.
 //
-// local_worktree used to be serialized here too, but parallel instances now run
-// distinct-worktree tasks for one owner concurrently. Safety no longer needs
-// admission control: the headless scheduler keys dispatch lanes by worktree
-// path (see headlessLane / laneForTurn), so two worktree tasks for one owner
-// run in parallel only when their worktrees differ, and collapse to one
-// serialized lane whenever they SHARE a tree (e.g. a dependent reusing its
-// parent's worktree). The filesystem boundary is enforced at dispatch, not by
-// withholding the second task.
+// Always false now — kept (with its callers) as the single switch so the
+// admission lane can be re-armed for a specific mode later without re-threading
+// every call site.
 func taskRequiresExclusiveOwnerTurn(task *teamTask) bool {
-	if task == nil {
-		return false
-	}
-	if strings.TrimSpace(task.Owner) == "" {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "live_external")
+	return false
 }
 
 func taskStatusConsumesExclusiveOwnerTurn(status string) bool {

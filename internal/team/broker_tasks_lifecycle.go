@@ -141,7 +141,14 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 			task.Details = cleaned
 			changed = true
 		}
-		if task.blocked || strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
+		// Honor real dependencies on resume. Clearing a transient block (a
+		// rate-limit cooldown, a capability self-heal) must not jump a task
+		// ahead of a declared dependency: a task with unresolved DependsOn stays
+		// blocked, and unblockDependentsLocked activates it when its dependency
+		// completes. This is the inverse of "non-dependent tasks run together" —
+		// dependent tasks do NOT. (Previously the now-removed exclusive-owner
+		// lane re-blocked here as a side effect; the gate is now explicit.)
+		if (task.blocked || strings.EqualFold(strings.TrimSpace(task.status), "blocked")) && !b.hasUnresolvedDepsLocked(task) {
 			targetState := LifecycleStateReady
 			if strings.TrimSpace(task.Owner) != "" {
 				targetState = LifecycleStateRunning

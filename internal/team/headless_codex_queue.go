@@ -30,12 +30,22 @@ func taskRunsInIsolatedWorktree(task *teamTask) bool {
 	return strings.TrimSpace(task.WorktreePath) != ""
 }
 
-// laneForTurn resolves the dispatch lane a turn runs in. A turn earns its own
-// parallel lane only when it is (a) not a lead turn and (b) for a task with an
-// isolated worktree; the lane key is that worktree path. Everything else
-// collapses to the agent's default lane (key ""), exactly as before parallel
-// instances existed. Callers hold l.headless.mu; the broker lookup respects the
-// established headless.mu → broker.mu order (see headlessLeadTurnNeedsImmediateWakeLocked).
+// laneForTurn resolves the dispatch lane a turn runs in. The guiding rule:
+// non-dependent tasks run concurrently, so every task turn gets its OWN lane
+// unless two turns would collide on a shared resource. Callers hold
+// l.headless.mu; the broker lookup respects the established headless.mu →
+// broker.mu order (see headlessLeadTurnNeedsImmediateWakeLocked).
+//
+//   - chat turns (no task) and all lead turns → the agent's default lane (""):
+//     conversational coherence for the agent, and the coordinator never forks.
+//   - worktree tasks → keyed by worktree PATH: distinct worktrees run in
+//     parallel; a shared worktree (a dependent reusing its parent's tree)
+//     collapses to one serialized lane. A worktree task with no path assigned
+//     yet serializes on the default lane until it's prepared.
+//   - office / live_external / other → keyed by TASK id: no shared worktree to
+//     collide on (concurrent office turns share cwd exactly as different agents'
+//     turns already do; the broker mediates shared state), so each task runs in
+//     its own lane and non-dependent tasks of one agent run at once.
 func (l *Launcher) laneForTurn(slug string, turn headlessCodexTurn) headlessLane {
 	slug = strings.TrimSpace(slug)
 	taskID := strings.TrimSpace(turn.TaskID)
@@ -43,14 +53,22 @@ func (l *Launcher) laneForTurn(slug string, turn headlessCodexTurn) headlessLane
 		return headlessLane{slug: slug}
 	}
 	if slug == l.targeter().LeadSlug() {
-		// The coordinator never forks into parallel instances.
 		return headlessLane{slug: slug}
 	}
 	task := l.broker.TaskByID(taskID)
-	if !taskRunsInIsolatedWorktree(task) {
+	if task == nil {
 		return headlessLane{slug: slug}
 	}
-	return headlessLane{slug: slug, key: strings.TrimSpace(task.WorktreePath)}
+	if taskRunsInIsolatedWorktree(task) {
+		return headlessLane{slug: slug, key: strings.TrimSpace(task.WorktreePath)}
+	}
+	if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
+		// Worktree mode but no path assigned yet — serialize on the default lane
+		// until syncTaskWorktreeLocked prepares the tree, so it can't race a
+		// sibling turn in cwd before its workspace exists.
+		return headlessLane{slug: slug}
+	}
+	return headlessLane{slug: slug, key: "task:" + taskID}
 }
 
 func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string, channel ...string) {

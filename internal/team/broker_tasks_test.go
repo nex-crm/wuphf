@@ -1084,7 +1084,13 @@ func TestBrokerUnblockDependentsStripsRateLimitMarker(t *testing.T) {
 	}
 }
 
-func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
+// TestBrokerResumeKeepsTaskBlockedByRealDependency: resume must honor a real
+// declared dependency. A task that depends on an unfinished task stays blocked
+// even after a transient block (a cooldown) is cleared — only the dependency
+// completing activates it. This is the inverse of "non-dependent tasks run
+// together": dependent tasks do NOT. (Previously the now-removed exclusive-owner
+// lane re-blocked here; the gate is now the real dependency itself.)
+func TestBrokerResumeKeepsTaskBlockedByRealDependency(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
 	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
@@ -1110,34 +1116,38 @@ func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 		DependsOn:     []string{active.ID},
 	})
 	if err != nil || reused {
-		t.Fatalf("ensure queued task: %v reused=%v", err, reused)
+		t.Fatalf("ensure dependent task: %v reused=%v", err, reused)
 	}
 	if !task.blocked {
-		t.Fatalf("expected second task to start blocked behind active lane, got %+v", task)
+		t.Fatalf("expected dependent task to start blocked on its dependency, got %+v", task)
 	}
 	if _, changed, err := b.BlockTask(task.ID, "operator", "provider cooldown", ""); err != nil || !changed {
 		t.Fatalf("block task: %v changed=%v", err, changed)
 	}
 
-	resumed, changed, err := b.ResumeTask(task.ID, "watchdog", "Retry window passed")
+	resumed, _, err := b.ResumeTask(task.ID, "watchdog", "Retry window passed")
 	if err != nil {
 		t.Fatalf("resume task: %v", err)
 	}
-	if !changed {
-		t.Fatalf("expected resume to change task state, got %+v", resumed)
+	// The real dependency (active) is still in_progress, so resume must NOT
+	// activate the dependent — it stays blocked.
+	if !resumed.Blocked() {
+		t.Fatalf("expected dependent task to stay blocked while its dependency runs, got %+v", resumed)
 	}
-	if resumed.Status() != "open" || !resumed.Blocked() {
-		t.Fatalf("expected resumed task to stay queued behind active lane, got %+v", resumed)
-	}
-	if resumed.LifecycleState != LifecycleStateQueuedBehindOwner {
-		t.Fatalf("expected resumed task lifecycle to be queued behind owner, got %q", resumed.LifecycleState)
+	if resumed.Status() == "in_progress" {
+		t.Fatalf("expected dependent task NOT to be in_progress while its dependency runs, got %+v", resumed)
 	}
 	if !containsString(resumed.DependsOn, active.ID) {
-		t.Fatalf("expected resumed task to remain dependent on active lane, got %+v", resumed)
+		t.Fatalf("expected resumed task to remain dependent on %s, got %+v", active.ID, resumed)
 	}
 }
 
-func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
+// TestBrokerUnblockDependentsActivatesAllNonDependentLanes: when a task
+// completes, ALL of its dependents activate at once — they depend on the
+// completed task, not on each other, so "non-dependent tasks run together"
+// applies. (Previously the exclusive-owner lane serialized them per owner; that
+// synthetic serialization is gone.)
+func TestBrokerUnblockDependentsActivatesAllNonDependentLanes(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "youtube-factory", "ceo", "CEO")
 	ensureTestMemberAccess(b, "youtube-factory", "executor", "Executor")
@@ -1206,18 +1216,14 @@ func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
 	got := append([]teamTask(nil), b.tasks...)
 	b.mu.Unlock()
 
-	if got[1].Status() != "in_progress" || got[1].Blocked() {
-		t.Fatalf("expected first dependent to become active, got %+v", got[1])
-	}
-	for _, task := range got[2:] {
-		if task.status != "open" || !task.blocked {
-			t.Fatalf("expected later dependent to stay queued, got %+v", task)
+	// All three dependents only depended on task-setup, so all three activate
+	// concurrently once it completes — none is queued behind another.
+	for _, task := range got[1:] {
+		if task.Status() != "in_progress" || task.Blocked() {
+			t.Fatalf("expected dependent %s to activate concurrently (in_progress, not blocked), got %+v", task.ID, task)
 		}
-		if task.LifecycleState != LifecycleStateQueuedBehindOwner {
-			t.Fatalf("expected later dependent lifecycle to stay queued behind owner, got %q", task.LifecycleState)
-		}
-		if !containsString(task.DependsOn, "task-32") {
-			t.Fatalf("expected later dependent to queue behind task-32, got %+v", task)
+		if task.LifecycleState == LifecycleStateQueuedBehindOwner {
+			t.Fatalf("expected dependent %s NOT to be queued behind owner, got %q", task.ID, task.LifecycleState)
 		}
 	}
 }
@@ -2034,11 +2040,11 @@ func TestBrokerEnsurePlannedTaskRunsWorktreeOwnerLanesConcurrently(t *testing.T)
 	}
 }
 
-// TestBrokerEnsurePlannedTaskQueuesConcurrentLiveExternalOwnerWork: two
-// live_external tasks for the same owner still serialize — external
-// side-effects have no per-task workspace, so the second queues behind the
-// first via admission control.
-func TestBrokerEnsurePlannedTaskQueuesConcurrentLiveExternalOwnerWork(t *testing.T) {
+// TestBrokerEnsurePlannedTaskRunsNonDependentLiveExternalConcurrently: two
+// NON-dependent live_external tasks for the same owner both activate at once.
+// External side-effects no longer serialize by default — only a declared
+// dependency holds a task back. The headless scheduler gives each its own lane.
+func TestBrokerEnsurePlannedTaskRunsNonDependentLiveExternalConcurrently(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "executor", "Executor")
 
@@ -2068,17 +2074,14 @@ func TestBrokerEnsurePlannedTaskQueuesConcurrentLiveExternalOwnerWork(t *testing
 	if first.Status() != "in_progress" || first.Blocked() {
 		t.Fatalf("expected first task to stay active, got %+v", first)
 	}
-	if second.Status() != "open" || !second.Blocked() {
-		t.Fatalf("expected second external task to queue behind the first, got %+v", second)
+	if second.Status() != "in_progress" || second.Blocked() {
+		t.Fatalf("expected second external task to run concurrently (in_progress, not blocked), got %+v", second)
 	}
-	if second.LifecycleState != LifecycleStateQueuedBehindOwner {
-		t.Fatalf("expected second task lifecycle to be queued behind owner, got %q", second.LifecycleState)
+	if second.LifecycleState == LifecycleStateQueuedBehindOwner {
+		t.Fatalf("expected second task NOT to be queued behind owner, got %q", second.LifecycleState)
 	}
-	if !containsString(second.DependsOn, first.ID) {
-		t.Fatalf("expected second task to depend on first %s, got %+v", first.ID, second.DependsOn)
-	}
-	if !strings.Contains(second.Details, "Queued behind "+first.ID) {
-		t.Fatalf("expected queue note in details, got %+v", second)
+	if containsString(second.DependsOn, first.ID) {
+		t.Fatalf("expected second task NOT to depend on first %s, got %+v", first.ID, second.DependsOn)
 	}
 }
 

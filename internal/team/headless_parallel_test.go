@@ -34,6 +34,8 @@ func TestLaneForTurnKeysByWorktree(t *testing.T) {
 		teamTask{ID: "task-b", Title: "b", Owner: "eng", status: "in_progress", ExecutionMode: "local_worktree", WorktreePath: "/wt/b"},
 		teamTask{ID: "task-shared", Title: "c", Owner: "eng", status: "in_progress", ExecutionMode: "local_worktree", WorktreePath: "/wt/a"},
 		teamTask{ID: "task-office", Title: "d", Owner: "eng", status: "in_progress", ExecutionMode: "office"},
+		teamTask{ID: "task-office2", Title: "d2", Owner: "eng", status: "in_progress", ExecutionMode: "office"},
+		teamTask{ID: "task-ext", Title: "x", Owner: "eng", status: "in_progress", ExecutionMode: "live_external"},
 		teamTask{ID: "task-nopath", Title: "e", Owner: "eng", status: "in_progress", ExecutionMode: "local_worktree"},
 		teamTask{ID: "task-lead", Title: "f", Owner: "ceo", status: "in_progress", ExecutionMode: "local_worktree", WorktreePath: "/wt/lead"},
 	)
@@ -49,7 +51,9 @@ func TestLaneForTurnKeysByWorktree(t *testing.T) {
 		{"worktree A", "eng", headlessCodexTurn{TaskID: "task-a"}, headlessLane{slug: "eng", key: "/wt/a"}},
 		{"worktree B distinct from A", "eng", headlessCodexTurn{TaskID: "task-b"}, headlessLane{slug: "eng", key: "/wt/b"}},
 		{"shared worktree collapses onto A's lane", "eng", headlessCodexTurn{TaskID: "task-shared"}, headlessLane{slug: "eng", key: "/wt/a"}},
-		{"office task -> default lane", "eng", headlessCodexTurn{TaskID: "task-office"}, headlessLane{slug: "eng"}},
+		{"office task -> own per-task lane", "eng", headlessCodexTurn{TaskID: "task-office"}, headlessLane{slug: "eng", key: "task:task-office"}},
+		{"second office task -> distinct per-task lane", "eng", headlessCodexTurn{TaskID: "task-office2"}, headlessLane{slug: "eng", key: "task:task-office2"}},
+		{"live_external task -> own per-task lane", "eng", headlessCodexTurn{TaskID: "task-ext"}, headlessLane{slug: "eng", key: "task:task-ext"}},
 		{"worktree without a path yet -> default lane", "eng", headlessCodexTurn{TaskID: "task-nopath"}, headlessLane{slug: "eng"}},
 		{"chat turn (no task) -> default lane", "eng", headlessCodexTurn{}, headlessLane{slug: "eng"}},
 		{"lead never forks -> default lane", "ceo", headlessCodexTurn{TaskID: "task-lead"}, headlessLane{slug: "ceo"}},
@@ -104,5 +108,46 @@ func TestParallelInstancesRunDistinctWorktreesConcurrently(t *testing.T) {
 	}
 	if !got["task-a"] || !got["task-b"] {
 		t.Fatalf("expected task-a and task-b to run concurrently, got %v", got)
+	}
+}
+
+// TestParallelInstancesRunNonDependentOfficeTasksConcurrently proves the rule
+// "non-dependent tasks run together" extends to office/external work, not just
+// worktree tasks: one agent with two non-dependent office tasks runs both at
+// once. They share cwd — the same concurrency the system already runs across
+// different agents — so each gets its own per-task lane.
+func TestParallelInstancesRunNonDependentOfficeTasksConcurrently(t *testing.T) {
+	b := brokerWithTasks(t,
+		teamTask{ID: "task-a", Title: "a", Owner: "eng", status: "in_progress", ExecutionMode: "office"},
+		teamTask{ID: "task-b", Title: "b", Owner: "eng", status: "in_progress", ExecutionMode: "office"},
+	)
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+
+	started := make(chan string, 8)
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+		select {
+		case started <- headlessTurnTaskID(ctx):
+		default:
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	l.enqueueHeadlessCodexTurnRecord("eng", headlessCodexTurn{Prompt: "work #task-a", Channel: "general", TaskID: "task-a"})
+	l.enqueueHeadlessCodexTurnRecord("eng", headlessCodexTurn{Prompt: "work #task-b", Channel: "general", TaskID: "task-b"})
+
+	got := map[string]bool{}
+	deadline := time.After(10 * time.Second)
+	for len(got) < 2 {
+		select {
+		case id := <-started:
+			got[id] = true
+		case <-deadline:
+			t.Fatalf("only %d/2 office instances started concurrently (serialized?): %v", len(got), got)
+		}
+	}
+	if !got["task-a"] || !got["task-b"] {
+		t.Fatalf("expected both office tasks to run concurrently, got %v", got)
 	}
 }

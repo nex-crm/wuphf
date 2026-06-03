@@ -1829,18 +1829,22 @@ func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testin
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
-	l.recoverFailedHeadlessTurn("operator", headlessCodexTurn{
+	turn := headlessCodexTurn{
 		Prompt:   "Send #task-" + strings.TrimPrefix(task.ID, "task-"),
 		Channel:  "general",
 		TaskID:   task.ID,
 		Attempts: 0,
-	}, time.Now().UTC().Add(-2*time.Second), "channel_not_found")
+	}
+	// The retry routes to this task's own lane; pre-mark it busy so the enqueue
+	// doesn't spawn a real draining worker, then inspect that lane.
+	lane := l.laneForTurn("operator", turn)
+	l.headless.workers[lane] = true
+	l.recoverFailedHeadlessTurn("operator", turn, time.Now().UTC().Add(-2*time.Second), "channel_not_found")
 
-	// Snapshot the queue under the launcher's headlessMu — the spawned worker
-	// goroutine drains headlessQueues under that mutex, so an unguarded read
-	// from the test races with the drain (caught by `go test -race`).
+	// Snapshot the queue under the launcher's headlessMu — defensive even though
+	// the pre-marked worker prevents a spawn.
 	l.headless.mu.Lock()
-	queue := append([]headlessCodexTurn(nil), l.headless.queues[headlessLane{slug: "operator"}]...)
+	queue := append([]headlessCodexTurn(nil), l.headless.queues[lane]...)
 	l.headless.mu.Unlock()
 	if len(queue) != 1 {
 		t.Fatalf("expected one retry queued for external action, got %+v", queue)
