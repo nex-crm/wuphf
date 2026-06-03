@@ -66,6 +66,15 @@ linters:
           - bodyclose
           - errorlint
           - noctx
+      # staticcheck SA5011 ("possible nil pointer dereference") does not treat
+      # t.Fatal/t.Fatalf as terminating in golangci-lint 2.12.2, so the
+      # idiomatic `x := f(); if x == nil { t.Fatal(...) }; x.Field` pattern
+      # false-positives across the test suite. Mute SA5011 in tests only; it
+      # stays enabled for production code.
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: "SA5011|possible nil pointer dereference"
       # govet's shadow check on `err` is famously noisy in idiomatic Go
       # (every nested `if err := ...; err != nil` shadows). Keep shadow on
       # for non-err identifiers (real bugs hide there) but mute the err case.
