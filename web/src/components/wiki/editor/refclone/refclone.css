@@ -20,6 +20,17 @@
 
 /* ── Token scope: light ─────────────────────────────────────────────────── */
 .refclone-editor {
+  /* The ported editor (editor.tsx) is built to FILL a fixed-height flex
+     parent: its root is `flex-1 flex flex-col overflow-hidden` and the editing
+     body is `flex-1 relative` → `absolute inset-0 overflow-y-auto`. Without a
+     definite height here the body collapses to 0 and the ProseMirror surface
+     escapes its box (toolbar with no editing area below). Make the wrapper a
+     bounded flex column so the editor lays out as the self-contained
+     toolbar + scrollable body + status bar pane it is in the reference app. */
+  display: flex;
+  flex-direction: column;
+  height: clamp(520px, 78vh, 1100px);
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

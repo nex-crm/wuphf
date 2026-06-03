@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   writeHumanArticle as defaultWriteHumanArticle,
@@ -173,12 +173,26 @@ export function useWikiEditorController(
   // refetch and re-conflict against the version we just wrote.
   const [currentExpectedSha, setCurrentExpectedSha] = useState(expectedSha);
 
+  // The article identity this controller last seeded from. Reset is keyed on
+  // the article CHANGING, not on `initialContent` getting a fresh reference —
+  // see the effect below.
+  const seededPathRef = useRef<string | null>(null);
+
   // On mount / when the article changes, reset editor state AND check
   // localStorage for a draft newer than server's last_edited_ts.
-  // Intentionally does NOT depend on `expectedSha`: a prop-only SHA refresh
-  // (e.g. after a save round-trip) must not wipe an in-progress edit on the
-  // same article. SHA resync lives in its own effect below.
+  //
+  // Guarded on `path` (the article identity), NOT on `initialContent`: a
+  // background refetch of the SAME article (an SSE wiki:write, window focus,
+  // staleTime expiry) re-renders the parent with a fresh `initialContent`
+  // string. Resetting the buffer on every such change silently discards the
+  // user's in-progress edit — the open editor keeps the typed text locally,
+  // but the save buffer reverts to server bytes, so Save ships stale content.
+  // Intentionally also does NOT depend on `expectedSha`: a prop-only SHA
+  // refresh after a save round-trip must not wipe an in-progress edit. SHA
+  // resync lives in its own effect below.
   useEffect(() => {
+    if (seededPathRef.current === path) return;
+    seededPathRef.current = path;
     setContent(initialContent);
     setCommitMessage("");
     setError(null);

@@ -65,6 +65,63 @@ describe("useWikiEditorController — initial state", () => {
   });
 });
 
+describe("useWikiEditorController — edit survives same-article refetch", () => {
+  // Regression: a background refetch of the OPEN article re-renders the parent
+  // with a fresh `initialContent` string. The reset must be keyed on the
+  // article path, not on initialContent — otherwise the in-progress edit is
+  // silently discarded and Save ships stale server bytes.
+  it("keeps in-progress content when initialContent changes for the same path", () => {
+    const { result, rerender } = renderHook(
+      (props) => useWikiEditorController(props),
+      {
+        initialProps: {
+          path: PATH,
+          initialContent: INITIAL,
+          expectedSha: SHA,
+          onSaved: vi.fn(),
+        },
+      },
+    );
+
+    act(() => result.current.setContent("# Sam\n\nEdited in the editor.\n"));
+    expect(result.current.content).toBe("# Sam\n\nEdited in the editor.\n");
+
+    // Same article, fresh initialContent reference (a refetch returning the
+    // unchanged server bytes as a new string). The edit must survive.
+    rerender({
+      path: PATH,
+      initialContent: `${INITIAL}`,
+      expectedSha: SHA,
+      onSaved: vi.fn(),
+    });
+    expect(result.current.content).toBe("# Sam\n\nEdited in the editor.\n");
+  });
+
+  it("does reset content when the article path changes", () => {
+    const OTHER = "team/people/alex.md";
+    const { result, rerender } = renderHook(
+      (props) => useWikiEditorController(props),
+      {
+        initialProps: {
+          path: PATH,
+          initialContent: INITIAL,
+          expectedSha: SHA,
+          onSaved: vi.fn(),
+        },
+      },
+    );
+
+    act(() => result.current.setContent("# Sam\n\nEdited.\n"));
+    rerender({
+      path: OTHER,
+      initialContent: "# Alex\n\nAlex body.\n",
+      expectedSha: "othersha",
+      onSaved: vi.fn(),
+    });
+    expect(result.current.content).toBe("# Alex\n\nAlex body.\n");
+  });
+});
+
 describe("useWikiEditorController — draft restore/discard", () => {
   it("surfaces a draft banner when localStorage is newer than server and content diverges", () => {
     window.localStorage.setItem(
