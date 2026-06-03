@@ -88,10 +88,14 @@
   → runs); **Backlog** create sends `park=true` → task lands in `Drafting` (Backlog stage, assigned,
   NOT dispatched), activated via the FE "Approve & Start" (Drafting→Running, wakes owner; Auto→triage
   on approve). Live-verified all 4 flows + disk persistence.
-- **NEXT: Phase 5 (spec→wiki `Specs/`), then Phase 6 (migration, LAST).** Parallel instances ✅,
-  Phase 4 Librarian ✅ (see above). The migration in Phase 6 now also folds the `provider`/`model`/
-  `effort` task keys + the "auto" owner sentinel + **adds the built-in `librarian` member to existing
-  rosters** into legacy-state migration.
+- **NEXT: Phase 5 — Plan mode (REVISED 2026-06-04). IN PROGRESS.** Per-task "Plan first" toggle
+  (default ON): owner plans autonomously into its notebook → Approve & Start → execute; OFF → run
+  immediately. New `LifecycleStatePlanning` state + plan-only work packet. Specs live in notebooks;
+  Librarian promotes selectively (NOT auto to wiki Specs/). See the Phase 5 checklist entry for the
+  full locked design. Then Phase 6 (migration, LAST). Parallel instances ✅, Phase 4 Librarian ✅,
+  Librarian direct wiki-write ✅ (`5c386594`). Phase 6 migration also folds provider/model/effort +
+  "auto" sentinel + adds the built-in `librarian` member + the new `plan_first`/Planning state into
+  legacy-state migration.
 - **⚠ REGRESSION LESSON (2026-06-03):** Phase 2a (channel-per-task) silently broke 5
   `internal/teammcp` tests because 2a verification ran only `./internal/team`. Fixed in
   `9473517c`. **On every phase, run the FULL Go + web suites, not just the package you touched**
@@ -645,10 +649,22 @@
     (reviewer resolver prefers librarian-when-present; `team_notebook_review` opened to
     Librarian; prompts delegate). Owning agents still write notebooks. Gradual/legacy-safe.
   - Gate: Librarian present in tasks ✅; promotion/review flows route to Librarian ✅.
-- [ ] **Phase 5 — Spec-first into wiki `Specs/`** (D3). On approval, Librarian
-    materializes approved spec to `team/specs/<task>.md`, linked from the task.
-    Keep interview/questions + approval gate; render spec from wiki + link.
-  - Gate: approve a task → spec appears in wiki Specs, linked both ways.
+- [ ] **Phase 5 — Plan mode (REVISED 2026-06-04; supersedes the old "spec→wiki Specs/" D3).**
+    Per-task **"Plan first" toggle, default ON** (composer toggle alongside Start now/Backlog).
+    **ON →** the owner agent PLANS AUTONOMOUSLY first: a new `LifecycleStatePlanning` state
+    dispatches the owner with a PLAN-ONLY work packet — explore, write the plan into its OWN
+    notebook (notebook_write), post a summary, do NOT touch the repo, then stop and await
+    approval. "Approve & Start" (Planning→Running) re-dispatches the owner to execute against
+    its own plan. **OFF →** straight to Running, no plan/approval. Specs live in the owner's
+    NOTEBOOK (not wiki); the Librarian promotes to the wiki only if worth the team seeing — the
+    team sees the OUTPUT, not every spec. (User decisions 2026-06-04: "specs in notebooks,
+    promote selectively" + "spec writing = Plan mode, toggle default ON, off jumps straight in"
+    + forks: owner-plans-autonomously + toggle-alongside-actions.) `plan_first` rides the
+    create contract as a nullable field (absent = ON). v1 enforcement of plan-only is the
+    packet instruction (+ owner self-limits); HARD enforcement via runtime read-only/plan
+    permission-mode is a noted follow-up.
+  - Gate: create with Plan-first ON → owner plans into notebook + posts → Approve & Start →
+    owner executes; Plan-first OFF → runs immediately, no gate.
 - [ ] **Phase 6 — Persisted-state migration + cleanup + E2E.** One-shot
     `broker-state.json` migration (lifecycle remap, fold legacy channels/DMs into
     archived Tasks, rename keys, incident rename). 3 ICP tutorial E2E scenarios +
