@@ -3176,12 +3176,32 @@
 }
 .wk-tree2-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
-.wk-tree2-search {
-  flex: 1 1 auto;
+/* Give the file-search its own full-width row. In the narrow Files panel it
+   could not fit beside the New page + Upload buttons, so it collapsed to a
+   tiny ~34px square with the placeholder clipped — reading as a useless box.
+   flex-basis:100% forces it onto its own line as a proper search field; the
+   two buttons wrap below it. */
+.wk-tree2-toolbar .wk-tree2-search {
+  flex: 1 1 100%;
   min-width: 0;
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  padding: 6px 9px;
+  border: 1px solid var(--wk-border);
+  border-radius: var(--radius-sm);
+  background: var(--wk-surface);
+  color: var(--wk-text);
+}
+.wk-tree2-toolbar .wk-tree2-search::placeholder {
+  color: var(--wk-text-tertiary);
+}
+.wk-tree2-toolbar .wk-tree2-search:focus-visible {
+  outline: 2px solid var(--wk-wikilink);
+  outline-offset: 1px;
 }
 .wk-tree2-new {
   flex: 0 0 auto;
