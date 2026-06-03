@@ -23,18 +23,13 @@ import { ThinkingLoader } from "../ui/ThinkingLoader";
  */
 export function TypingIndicator() {
   const route = useCurrentRoute();
-  const currentChannel =
-    route.kind === "channel" || route.kind === "dm"
-      ? route.channelSlug
-      : "general";
-  const dm = route.kind === "dm" ? { agentSlug: route.agentSlug } : null;
+  const currentChannel = route.kind === "channel" ? route.channelSlug : "general";
   const { data: members = [] } = useOfficeMembers();
   const { data: channelMembers = [] } = useChannelMembers(currentChannel);
   const channelMemberSlugs = new Set(channelMembers.map((m) => m.slug));
 
   const active = members.filter((m) => {
     if (m.status !== "active" || m.slug === "human") return false;
-    if (dm) return m.slug === dm.agentSlug;
     return channelMemberSlugs.size === 0 || channelMemberSlugs.has(m.slug);
   });
 

@@ -21,7 +21,6 @@ import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
 import { ChannelParticipants } from "../components/messages/ChannelParticipants";
 import { Composer } from "../components/messages/Composer";
-import { DMView } from "../components/messages/DMView";
 import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
 import { PrePickScreen } from "../components/onboarding/PrePickScreen";
@@ -168,8 +167,17 @@ const TaskNewForm = lazy(() =>
     default: m.TaskNewForm,
   })),
 );
-// v3 MVP — per-agent subspace shell.
-const AgentSubspaceRoute = lazy(() => import("./AgentSubspaceRoute"));
+// Agents tool — roster grid (/agents) + per-agent config (/agents/$slug).
+const AgentsTool = lazy(() =>
+  import("../components/agents/AgentsTool").then((m) => ({
+    default: m.AgentsTool,
+  })),
+);
+const AgentDetail = lazy(() =>
+  import("../components/agents/AgentsTool").then((m) => ({
+    default: m.AgentDetail,
+  })),
+);
 // Full-screen skill SKILL.md editor + preview.
 const SkillDetailRoute = lazy(() =>
   import("./SkillDetailRoute").then((m) => ({
@@ -492,20 +500,26 @@ function InboxRedirect() {
 
 /**
  * FirstClassAppRedirect navigates the user from a `/apps/$id` URL whose
- * `$id` is a first-class app (wiki, inbox) to that app's canonical
- * dedicated route. Users who type a sidebar-label-style URL by hand
- * (e.g. `/#/apps/wiki`) used to hit "Page not found" because first-class
- * apps live at `/wiki` and `/inbox`, not under `/apps`. Mirrors
+ * `$id` is a first-class app (wiki, inbox, tasks, agents) to that app's
+ * canonical dedicated route. Users who type a sidebar-label-style URL by
+ * hand (e.g. `/#/apps/wiki`) used to hit "Page not found" because
+ * first-class apps live at their own paths, not under `/apps`. Mirrors
  * `InboxRedirect` so the route ↔ sidebar mapping is forgiving without
  * the route registry sprouting alias entries.
  */
+const FIRST_CLASS_APP_TARGETS: Record<
+  FirstClassAppId,
+  "/wiki" | "/inbox" | "/tasks" | "/agents"
+> = {
+  wiki: "/wiki",
+  inbox: "/inbox",
+  tasks: "/tasks",
+  agents: "/agents",
+};
+
 function FirstClassAppRedirect({ appId }: { appId: FirstClassAppId }) {
   useEffect(() => {
-    if (appId === "wiki") {
-      void router.navigate({ to: "/wiki", replace: true });
-    } else {
-      void router.navigate({ to: "/inbox", replace: true });
-    }
+    void router.navigate({ to: FIRST_CLASS_APP_TARGETS[appId], replace: true });
   }, [appId]);
   return (
     <div
@@ -578,8 +592,7 @@ function useTrackLastConversationalChannel(route: CurrentRoute): void {
     (s) => s.setLastConversationalChannel,
   );
   const clearUnread = useAppStore((s) => s.clearUnread);
-  const channelSlug =
-    route.kind === "channel" || route.kind === "dm" ? route.channelSlug : null;
+  const channelSlug = route.kind === "channel" ? route.channelSlug : null;
   useEffect(() => {
     if (channelSlug) {
       setLastConversationalChannel(channelSlug);
@@ -600,10 +613,6 @@ function MainContent() {
   switch (route.kind) {
     case "channel":
       return <ConversationView />;
-    case "dm":
-      return (
-        <DMView agentSlug={route.agentSlug} channelSlug={route.channelSlug} />
-      );
     case "app":
       // `/apps/wiki` and `/apps/inbox` are not app-panel routes — the
       // sidebar navigates to `/wiki` and `/inbox` directly — but users
@@ -647,8 +656,10 @@ function MainContent() {
       return <DecisionInbox />;
     case "task-decision":
       return <DecisionPacketRoute taskId={route.taskId} />;
-    case "agent-subspace":
-      return <AgentSubspaceRoute agentSlug={route.agentSlug} tab={route.tab} />;
+    case "agents":
+      return <AgentsTool />;
+    case "agent-detail":
+      return <AgentDetail agentSlug={route.agentSlug} />;
     case "skill-detail":
       return <SkillDetailRoute skillName={route.skillName} />;
     case "routine-detail":
@@ -771,18 +782,18 @@ export default function RootRoute() {
   // onboarding phase from /onboarding/state — set once on boot if available.
   const [bootPhase, setBootPhase] = useState<string | undefined>(undefined);
 
-  // When CEO onboarding is active (phase set, not "complete"), redirect any
-  // root or /channels/general URL to the CEO DM so the Shell always shows
-  // the CEO conversation regardless of the URL the user landed on.
-  // This is a TanStack-level navigate (not a beforeLoad, because onboarding
-  // state is only known after the /onboarding/state API call in the effect
-  // below). Already-onboarded users (onboardingComplete === true) skip the
-  // whole inCeoOnboarding branch and never hit this redirect.
+  // When CEO onboarding is active (phase set, not "complete"), pin a
+  // generic landing URL (root, #general) to the Tasks board so the URL is
+  // sensible the moment the broker flips onboarded=true and the office
+  // Shell mounts. The onboarding conversation itself renders full-screen
+  // via OnboardingChat regardless of the URL, so this only governs where
+  // the user lands once onboarding completes. Already-onboarded users
+  // (onboardingComplete === true) skip the whole inCeoOnboarding branch
+  // and never hit this redirect.
   useEffect(() => {
     if (!(inCeoOnboarding || bootPhase)) return;
     // Only redirect when the user is on a generic destination (root, general).
-    // Other explicit URLs (e.g. /dm/some-agent) should not be redirected so
-    // deep-links remain functional during onboarding.
+    // Explicit deep-links (e.g. a specific /tasks/$id) should be preserved.
     const hash = typeof window !== "undefined" ? window.location.hash : "";
     const onGenericRoute =
       hash === "" ||
@@ -790,11 +801,7 @@ export default function RootRoute() {
       hash === "#/channels/general" ||
       hash.startsWith("#/?");
     if (onGenericRoute) {
-      void router.navigate({
-        to: "/dm/$agentSlug",
-        params: { agentSlug: "ceo" },
-        replace: true,
-      });
+      void router.navigate({ to: "/tasks", replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inCeoOnboarding, bootPhase]);

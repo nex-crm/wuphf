@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { resolveObjectRoute, resolveUnknownObjectRoute } from "./objectRoutes";
 
 describe("resolveObjectRoute", () => {
-  it("resolves an agent slug to the DM hash route", () => {
+  it("resolves an agent slug to the agents hash route", () => {
     const route = resolveObjectRoute({ kind: "agent", slug: "alex" });
-    expect(route.href).toBe("#/dm/alex");
+    expect(route.href).toBe("#/agents/alex");
     expect(route.label).toBe("Agent: alex");
-    expect(route.appAction).toEqual({ app: "dm", channel: "alex" });
+    expect(route.appAction).toEqual({ app: "agents", channel: "alex" });
     expect(route.fallback).toBeUndefined();
   });
 

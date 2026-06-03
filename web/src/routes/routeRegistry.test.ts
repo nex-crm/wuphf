@@ -2,11 +2,12 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
 
 import {
+  agentDetailRoute,
+  agentsRoute,
   appRoute,
   appTaskDetailRoute,
   channelRoute,
   createAppRouter,
-  dmRoute,
   inboxRoute,
   indexRoute,
   legacyWorkbenchAgentRoute,
@@ -101,7 +102,8 @@ describe("TanStack route tree", () => {
   const expectedLeafRoutes = [
     ["/", indexRoute.id],
     ["/channels/launch", channelRoute.id],
-    ["/dm/pm", dmRoute.id],
+    ["/agents", agentsRoute.id],
+    ["/agents/pm", agentDetailRoute.id],
     ["/apps/tasks", appRoute.id],
     ["/tasks", tasksRoute.id],
     ["/tasks/task-7", taskDetailRoute.id],

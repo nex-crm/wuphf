@@ -63,7 +63,7 @@ function isLifecycleState(value: unknown): value is LifecycleState {
   );
 }
 
-function isTaskSpecTask(task: Task): boolean {
+export function isTaskSpecTask(task: Task): boolean {
   // Sub-tasks live on the parent Task's detail surface, not on the
   // top-level board. Filtering them out here keeps the board scoped
   // to "real" Tasks; children stay reachable via the parent Task.
@@ -85,7 +85,7 @@ function isTaskSpecTask(task: Task): boolean {
  * status-driven mapping so `LifecycleStatePill` never receives a value
  * outside the typed union.
  */
-function taskToLifecycleState(task: Task): LifecycleState {
+export function taskToLifecycleState(task: Task): LifecycleState {
   if (task.pipeline_stage === "draft") return "drafting";
   const raw = (task as unknown as Record<string, unknown>).lifecycle_state;
   if (isLifecycleState(raw)) return raw;

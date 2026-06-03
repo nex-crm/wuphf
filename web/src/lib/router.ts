@@ -18,12 +18,6 @@ export const channelRoute = createRoute({
   path: ROUTE_PATHS.channel,
 });
 
-// /dm/$agentSlug — direct-message view
-export const dmRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: ROUTE_PATHS.dm,
-});
-
 // /apps/$appId — app panel view (tasks, policies, calendar, etc.)
 export const appRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -161,20 +155,16 @@ export const taskDecisionRoute = createRoute({
   path: ROUTE_PATHS.taskDecision,
 });
 
-// / — index route. v3 MVP: default landing is the CEO's subspace
-// (Chat tab) instead of #general, so the operator's first surface is
-// the strategy-and-intent chat with the CEO. Channels are demoted to
-// "Legacy". Uses redirect() from beforeLoad so the URL→store race
-// can't observe the index match.
+// / — index route. Tasks are the primary primitive, so the default
+// landing is the Tasks board (the interim home until the new-task
+// composer ships). The operator's first surface is their work, grouped
+// by stage, rather than a channel or an agent chat. Uses redirect() from
+// beforeLoad so the URL→store race can't observe the index match.
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.index,
   beforeLoad: () => {
-    throw redirect({
-      to: "/agents/$agentSlug",
-      params: { agentSlug: "ceo" },
-      replace: true,
-    });
+    throw redirect({ to: "/tasks", replace: true });
   },
 });
 
@@ -249,26 +239,27 @@ export const skillDetailRoute = createRoute({
   path: ROUTE_PATHS.skillDetail,
 });
 
-// /agents/$agentSlug — v3 MVP per-agent subspace shell.
-// Renders the uniform Chat | App | Notebooks | Calendar | Settings tabs.
-// Empty tab segment lands on the Chat tab by default.
-export const agentSubspaceRoute = createRoute({
+// /agents — Agents tool. Roster grid of every agent (CEO, Librarian,
+// specialists). Replaces the per-agent chat subspace: agents are
+// first-class, configured here, but they are not chat surfaces. The
+// detail page (/agents/$agentSlug) is mounted as a child so the static
+// index and the dynamic detail share the same `/agents` prefix.
+export const agentsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: ROUTE_PATHS.agentSubspace,
+  path: ROUTE_PATHS.agents,
 });
 
-// /agents/$agentSlug/$tab — explicit tab segment.
-// Nested under agentSubspaceRoute so $agentSlug is shared.
-export const agentSubspaceTabRoute = createRoute({
-  getParentRoute: () => agentSubspaceRoute,
-  path: "$tab",
+// /agents/$agentSlug — agent detail / config (provider, role, persona,
+// skills). Child of agentsRoute.
+export const agentDetailRoute = createRoute({
+  getParentRoute: () => agentsRoute,
+  path: "$agentSlug",
 });
 
 // Route tree
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   channelRoute,
-  dmRoute,
   // /tasks list with static `new` before dynamic `$taskId`.
   tasksRoute.addChildren([taskNewRoute, taskDetailRoute]),
   appTaskDetailRoute,
@@ -291,8 +282,8 @@ export const routeTree = rootRoute.addChildren([
   routinesRoute,
   routineNewRoute,
   routineDetailRoute,
-  // v3 MVP — per-agent subspace.
-  agentSubspaceRoute.addChildren([agentSubspaceTabRoute]),
+  // Agents tool: roster (/agents) with the detail/config page as a child.
+  agentsRoute.addChildren([agentDetailRoute]),
   // Skill detail (full-screen edit + render with raw/preview toggle).
   skillDetailRoute,
 ]);

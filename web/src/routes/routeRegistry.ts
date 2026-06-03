@@ -14,7 +14,12 @@ export const APP_PANEL_IDS = [
 
 export type AppPanelId = (typeof APP_PANEL_IDS)[number];
 
-export const FIRST_CLASS_APP_IDS = ["wiki", "inbox", "tasks"] as const;
+export const FIRST_CLASS_APP_IDS = [
+  "wiki",
+  "inbox",
+  "tasks",
+  "agents",
+] as const;
 export type FirstClassAppId = (typeof FIRST_CLASS_APP_IDS)[number];
 
 export const WIKI_SURFACE_APP_IDS = ["wiki", "notebooks", "reviews"] as const;
@@ -49,6 +54,7 @@ export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
   wiki: "Wiki",
   inbox: "Inbox",
   tasks: "Tasks",
+  agents: "Agents",
   // Routed app panels under `/apps/$appId`. The `activity` id keeps its
   // historical slug so existing /apps/activity URLs still resolve; the
   // human-facing label is "Dashboard" (renamed in #1002). The `calendar`
@@ -76,6 +82,7 @@ const SIDEBAR_TOOL_EMOJIS: Partial<
 > = {
   activity: "🏠",
   tasks: "✓",
+  agents: "🤖",
   wiki: "📖",
   console: ">",
   graph: "🕸",
@@ -113,6 +120,7 @@ export interface SidebarTool {
 export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
   { id: "activity", kind: "app-panel" },
   { id: "tasks", kind: "first-class" },
+  { id: "agents", kind: "first-class" },
   { id: "wiki", kind: "first-class" },
   { id: "console", kind: "app-panel" },
   { id: "graph", kind: "app-panel" },
@@ -132,7 +140,6 @@ export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
 export const ROUTE_PATHS = {
   index: "/",
   channel: "/channels/$channelSlug",
-  dm: "/dm/$agentSlug",
   app: "/apps/$appId",
   /** Task list surface (first-class; all human work-items render as Tasks). */
   tasks: "/tasks",
@@ -168,12 +175,10 @@ export const ROUTE_PATHS = {
   routineNew: "/routines/new",
   /** Routine detail page (full-screen, not the legacy drawer). */
   routineDetail: "/routines/$routineSlug",
-  /**
-   * v3 MVP — per-agent subspace shell.
-   * Renders the uniform Chat | App | Notebooks | Calendar | Settings tabs.
-   */
-  agentSubspace: "/agents/$agentSlug",
-  agentSubspaceTab: "/agents/$agentSlug/$tab",
+  /** Agents tool — roster grid of every agent (CEO, Librarian, specialists). */
+  agents: "/agents",
+  /** Agent detail/config page — provider, role, persona, skills. */
+  agentDetail: "/agents/$agentSlug",
   /** Full-screen skill SKILL.md detail editor + viewer. */
   skillDetail: "/skills/$skillName",
 } as const;
@@ -207,7 +212,6 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     params: ["channelSlug"],
     search: [],
   },
-  { key: "dm", path: ROUTE_PATHS.dm, params: ["agentSlug"], search: [] },
   { key: "app", path: ROUTE_PATHS.app, params: ["appId"], search: [] },
   { key: "tasks", path: ROUTE_PATHS.tasks, params: [], search: [] },
   {
@@ -308,16 +312,11 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     params: ["routineSlug"],
     search: [],
   },
+  { key: "agents", path: ROUTE_PATHS.agents, params: [], search: [] },
   {
-    key: "agentSubspace",
-    path: ROUTE_PATHS.agentSubspace,
+    key: "agentDetail",
+    path: ROUTE_PATHS.agentDetail,
     params: ["agentSlug"],
-    search: [],
-  },
-  {
-    key: "agentSubspaceTab",
-    path: ROUTE_PATHS.agentSubspaceTab,
-    params: ["agentSlug", "tab"],
     search: [],
   },
   {

@@ -7,11 +7,10 @@ import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
-import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
-import { ChannelList } from "../sidebar/ChannelList";
 import { InboxButton } from "../sidebar/InboxButton";
 import { SidebarSection } from "../sidebar/SidebarSection";
+import { SidebarTaskNav } from "../sidebar/SidebarTaskNav";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { CollapsedSidebar } from "./CollapsedSidebar";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -41,10 +40,6 @@ function useMobileRail(): boolean {
 }
 
 export function Sidebar() {
-  const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
-  const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
-  const sidebarChannelsOpen = useAppStore((s) => s.sidebarChannelsOpen);
-  const toggleSidebarChannels = useAppStore((s) => s.toggleSidebarChannels);
   const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
   const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
@@ -127,22 +122,11 @@ export function Sidebar() {
           </div>
 
           <div className="sidebar-scroll">
-            <SidebarSection
-              label="Agents"
-              variant="team"
-              open={sidebarAgentsOpen}
-              onToggle={toggleSidebarAgents}
-            >
-              <AgentList />
-            </SidebarSection>
-
-            <SidebarSection
-              label="Channels"
-              open={sidebarChannelsOpen}
-              onToggle={toggleSidebarChannels}
-            >
-              <ChannelList />
-            </SidebarSection>
+            {/* Tasks are the primary primitive — the sidebar lists them
+                grouped by stage. Channels are per task (reached via the
+                task detail) and agents live in the Agents tool, so neither
+                gets its own nav section anymore. */}
+            <SidebarTaskNav />
 
             <SidebarSection
               label="Tools"
@@ -158,9 +142,9 @@ export function Sidebar() {
           </div>
           {/* WorkspaceSummary intentionally not rendered here — the stats
               it shows (agents active, tasks open, tokens) are redundant
-              with the Agents/Tasks sections and the Usage footer. The
-              component file is preserved so it can be re-used inside a
-              future Usage popover or Settings surface. */}
+              with the Tasks nav and the Usage footer. The component file is
+              preserved so it can be re-used inside a future Usage popover
+              or Settings surface. */}
           <UsagePanel />
         </>
       )}

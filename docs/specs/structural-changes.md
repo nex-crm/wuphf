@@ -38,17 +38,22 @@
 - **Commits so far:** `461b578d` Phase 0 (Issues→Tasks rename) · `96877617` Phase 1
   (7-stage board + Archive) · `3f46f328` doc scrub · `5cc95204` Phase 2a-i (Backup &
   Migration task) · `f4c50882` Phase 2a-ii (channel-per-task). All green, all committed.
-- **DONE:** Phase 0 ✅, Phase 1 ✅, naming scrub ✅, Phase 2a (i+ii) ✅. Backend is now
-  fully task-scoped (each business task mints its own `task-<id>` channel; #general is
-  owned by the archived "Backup & Migration" system task; ~141 `general` refs untouched).
-- **NEXT: Phase 2b (frontend, NOT started)** — pure task-scoped UI:
-  sidebar primary = Tasks grouped by stage (drop Channels + Agents nav sections);
-  landing `/agents/ceo` → `/tasks` board (interim home; rich composer is Phase 3);
-  REMOVE the DM route/view + per-agent subspace pages; ADD a dedicated **Agents tool**
-  (roster + create/configure agents); task detail surfaces its own channel. See the
-  Phase 2b sub-bullet in the Change log for the file map.
-- **Then:** Phase 3 (new-task home composer), Phase 4 (Librarian = Pam), Phase 5 (spec→wiki
-  Specs/), Phase 6 (persisted-state migration + E2E).
+- **DONE:** Phase 0 ✅, Phase 1 ✅, naming scrub ✅, Phase 2a (i+ii) ✅, **Phase 2b ✅**.
+  Backend is fully task-scoped (each business task mints its own `task-<id>` channel;
+  #general is owned by the archived "Backup & Migration" system task; ~141 `general`
+  refs untouched). **Frontend is now pure task-scoped too** (sidebar = Tasks by stage,
+  landing → /tasks, DM + per-agent-subspace removed from the navigable product, dedicated
+  Agents tool, task detail = tabbed Channel|Spec|Activity).
+- **DECISION (2026-06-03): bundle Phases 2b + 3 + 4 + 5 into ONE build-and-test pass**
+  (commit at each phase checkpoint for bisectability), then test the integrated result
+  against 3 ICP tutorial scenarios. **Phase 6 (persisted-state migration) stays ISOLATED
+  and LAST** — it is the only irreversible-on-real-user-data step and must be written
+  against the final settled shape + tested on a legacy fixture. Design forks all LOCKED
+  (see "LAYOUT FORKS LOCKED" + Phase 3 in the Change log).
+- **NEXT: Phase 3 (new-task home composer)** — centered chatbox + chips, model-specific
+  effort, Start-now / Backlog / Routine. Then Phase 4 (Librarian = Pam), Phase 5
+  (spec→wiki Specs/).
+- **LAST (separate):** Phase 6 (persisted-state migration + E2E).
 - **HARD RULES still active:** (1) NO external-app name anywhere in
   PR/wiki/docs/branch/code (my work scrubbed; 4 pre-existing competitive docs left per
   user). (2) Keep persisted JSON wire keys stable through Phase 5; migrate in Phase 6.
@@ -455,17 +460,49 @@
     clean. 7 tests updated + 3 added. **Refinement flagged (not blocking):** sub-issues
     (ParentIssueID set) currently fall back to #general instead of their parent task's
     channel — better to inherit the parent's channel; revisit in Phase 2 polish / Phase 5.
-    - **2b (frontend):** sidebar primary = Tasks grouped by stage (+ Tools); landing
-      changes `/agents/ceo` → `/tasks` board (INTERIM home until Phase 3 composer; keep
-      existing TaskCreateDialog for creation meanwhile). Remove DM route/view + agent
-      subspace pages (pure task-scoped). Notebooks already have a standalone `/notebooks`
-      route, so subspace removal doesn't orphan them.
+    - **2b (frontend) ✅ DONE + committed.** Implemented as designed:
+      - **Sidebar** (`Sidebar.tsx`): dropped Agents + Channels nav sections; new
+        `SidebarTaskNav.tsx` = tasks grouped by the 7 stages (active stages open by
+        default), `+ New` → /tasks/new, `All tasks` → board. Tools section keeps AppList
+        with **Agents** added as a first-class tool.
+      - **Landing** (`router.ts` indexRoute + `RootRoute.tsx` onboarding redirect):
+        `/agents/ceo` → `/tasks` (interim home; composer is Phase 3).
+      - **Agents tool** (`AgentsTool.tsx`, new): `/agents` roster grid of cards +
+        `/agents/$agentSlug` detail (reuses `AgentProfilePanel`). `+ New agent` → wizard.
+      - **DM + subspace removed from the navigable product:** deleted `dmRoute`,
+        `agentSubspaceRoute`/`agentSubspaceTabRoute`, route kinds `dm`/`agent-subspace`
+        (→ `agents`/`agent-detail`); deleted `AgentSubspaceRoute.tsx`. Rewired all
+        consumers (StatusBar, ChannelHeader, Shell, AgentPanel, AgentList, breadcrumbs,
+        objectRoutes `#/dm/`→`#/agents/`, slashCommands) + tests.
+      - **Task detail = tabbed** (`TaskDetailTabs.tsx`): Channel (channel discussion) ·
+        Spec (the task body) · Activity (feed) + Sub-tasks when present. Spec-first
+        default while drafting, else Channel.
+      - **Gates:** `tsc` clean · biome clean · full web vitest **1732 passed / 40 skipped
+        / 0 failed**.
+      - **PRESERVED as internal-only (onboarding still uses them):** `DMView` +
+        `directChannelSlug` (OnboardingChat / InterviewBar CEO-echo / useBrokerEvents).
+        NOT navigable; full source deletion deferred to Phase 6 cleanup.
+      - **DEFERRED to Phase 6 cleanup (dormant, not dead-causing):** store fields
+        `sidebarAgentsOpen`/`sidebarChannelsOpen` + `activeAgentSlug` (kept to avoid
+        touching the persistence layer now); `ChannelList`/`AgentList` components still
+        exist (used by `CollapsedSidebar` popovers — revisit). Skipped `TaskDocument.test`
+        blocks still reference old "Comments" tab label — update when the FIXME hang is
+        fixed.
   - **Sequencing decision (TAKEN, not asking):** Tasks board is the INTERIM home in 2b;
     the rich new-task composer is Phase 3. Keeps the app working throughout (never a
     broken no-landing state).
   - **FORK RESOLVED (2026-06-02): agent management → a dedicated "Agents" tool**
     (standalone surface under Tools: list roster, create agents, configure
     provider/role/persona). Agents stay first-class, just not chat surfaces.
+  - **LAYOUT FORKS LOCKED (2026-06-03):**
+    1. **Task detail = TABBED** — one header (title + stage pill) over
+       `Channel | Spec | Activity` tabs. Channel tab is the per-task chat;
+       Spec tab renders the wiki spec + approval gate (Phase 5); Activity tab
+       is the existing TaskActivity feed. Default to Channel tab.
+    2. **Agents tool = ROSTER GRID of cards** (CEO, Librarian, specialists) +
+       "+ New agent"; click a card → configure skills/role. Reuses the
+       existing card-grid pattern (AgentList/AgentPanel/AgentProfilePanel).
+    3. **Composer = centered chatbox + chips** (see Phase 3 above).
   - **external-app naming: BANNED everywhere** (PR/wiki/docs/branch/code) —
     user hard rule 2026-06-02. My tracker scrubbed (commit 3f46f328). Pre-existing
     competitive-analysis docs (desktop-platform.md, tutorials/*) left as-is per user
@@ -477,6 +514,19 @@
     actions. Add `effort` field to task model + run wiring (D7). Wire Routine→
     existing scheduler; Backlog→create-without-dispatch; Start now→spec interview→
     approval→In progress. Seed each task channel with owner + CEO + Librarian (D5).
+  - **Layout LOCKED (2026-06-03): centered chatbox + chips.** Single focal
+    input ("What do you want to get done?"); provider / effort / owner as inline
+    chips; Start-now / Backlog / Routine below. Mirror the reference homepage
+    composer's components + interaction that the user pointed to in chat.
+    **Model + effort are coupled and model-specific (clarified 2026-06-03):**
+    the effort options are NOT a fixed global Low/Med/High — they derive from
+    the selected model's own capabilities. Selecting a model populates that
+    model's effort/reasoning set; changing the model updates the effort
+    choices; both are selectable and changeable (in the composer and on the
+    task later). Needs a model→effort-options registry/capability map.
+  - **NAMING GUARD (hard rule):** match the reference design, but the external
+    app's name must NOT appear in any artifact (code, comments, docs, this
+    tracker, PR, branch). Use our own task vocabulary throughout.
   - Gate: all 3 create-modes work end-to-end from the composer.
 - [ ] **Phase 4 — Librarian agent (Pam → Librarian).** Promote Pam to first-class
     `librarian` agent, default member of every task. Move wiki write/format/

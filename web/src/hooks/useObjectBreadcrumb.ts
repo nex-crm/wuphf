@@ -29,10 +29,6 @@ export interface BreadcrumbItem {
  */
 export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
   switch (route.kind) {
-    case "dm": {
-      const res = resolveObjectRoute({ kind: "agent", slug: route.agentSlug });
-      return [breadcrumbItem(res, `@${route.agentSlug}`)];
-    }
     case "task-board": {
       return [{ label: "Tasks", href: "#/tasks" }];
     }
@@ -137,21 +133,15 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
         { label: "Tasks", href: "#/tasks" },
         { label: "New task", href: "#/tasks/new" },
       ];
-    case "agent-subspace":
+    case "agents":
+      return [{ label: "Agents", href: "#/agents" }];
+    case "agent-detail": {
+      const res = resolveObjectRoute({ kind: "agent", slug: route.agentSlug });
       return [
-        {
-          label: route.agentSlug,
-          href: `#/agents/${encodeURIComponent(route.agentSlug)}`,
-        },
-        ...(route.tab === "chat"
-          ? []
-          : [
-              {
-                label: route.tab,
-                href: `#/agents/${encodeURIComponent(route.agentSlug)}/${route.tab}`,
-              },
-            ]),
+        { label: "Agents", href: "#/agents" },
+        breadcrumbItem(res, `@${route.agentSlug}`),
       ];
+    }
     case "skill-detail":
       return [
         { label: "Skills", href: "#/apps/skills" },

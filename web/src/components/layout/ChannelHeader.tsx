@@ -18,8 +18,6 @@ function headerTitleAndDesc(
         desc: ch?.description || "",
       };
     }
-    case "dm":
-      return { title: `@${route.agentSlug}`, desc: "" };
     case "app":
       return { title: appTitle(route.appId), desc: "" };
     case "task-board":
@@ -43,7 +41,9 @@ function headerTitleAndDesc(
       return { title: `Task ${route.taskId}`, desc: "" };
     case "task-new":
       return { title: "New task", desc: "" };
-    case "agent-subspace":
+    case "agents":
+      return { title: "Agents", desc: "" };
+    case "agent-detail":
       return { title: `@${route.agentSlug}`, desc: "" };
     case "skill-detail":
       return { title: `Skill: ${route.skillName}`, desc: "" };

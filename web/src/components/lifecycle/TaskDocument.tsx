@@ -46,7 +46,6 @@ import { OwnerPicker } from "./OwnerPicker";
 import { ParentTaskBreadcrumb } from "./ParentTaskBreadcrumb";
 import { TaskActionToolbar } from "./TaskActionToolbar";
 import { TaskActivityStream } from "./TaskActivityStream";
-import { TaskDescription } from "./TaskDescription";
 import { TaskDetailTabs } from "./TaskDetailTabs";
 
 // ── Phase 4 constants ──────────────────────────────────────────────────
@@ -1391,22 +1390,16 @@ export function TaskDocument({
         </div>
       </header>
 
-      {/* Body: Linear-style — description, sub-issues, comments.
-       *  Goal/Context/Approach/Acceptance spec sections were removed
-       *  in favor of a single rich description, matching the Linear
-       *  product surface the team optimized for. The SpecBody
-       *  component is preserved in this file for tests + legacy code
-       *  paths but is no longer mounted. */}
+      {/* Body: the task's channel, spec, and activity live in the tab
+       *  strip below. The spec is the single rich description the team
+       *  agreed on (Goal/Context/Approach/Acceptance sections were
+       *  collapsed into one body, matching the Linear surface the team
+       *  optimized for); it renders inside the Spec tab. */}
       <div className="issue-doc-body">
-        <TaskDescription
-          description={doc.description}
-          isDrafting={isDrafting}
-        />
-
         {/* Live activity stream — surfaces what the owning agent is doing
-         *  right now via the SSE-fed agentActivitySnapshots. Stays in the
-         *  header zone (always visible) so the human sees the heartbeat
-         *  no matter which tab is active. */}
+         *  right now via the SSE-fed agentActivitySnapshots. Stays above
+         *  the tabs (always visible) so the human sees the heartbeat no
+         *  matter which tab is active. */}
         <TaskActivityStream
           ownerSlug={doc.ownerSlug}
           lifecycleState={doc.lifecycleState}
@@ -1415,6 +1408,7 @@ export function TaskDocument({
         <TaskDetailTabs
           taskId={taskId}
           channel={doc.channel}
+          description={doc.description}
           comments={doc.comments}
           isDrafting={isDrafting}
           showSubTasks={!doc.parentTaskId}
