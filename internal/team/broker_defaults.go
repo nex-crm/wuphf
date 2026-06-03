@@ -33,12 +33,13 @@ func defaultOfficeMembers() []officeMember {
 	if err != nil || len(manifest.Members) == 0 {
 		manifest = company.DefaultManifest()
 	}
-	members := make([]officeMember, 0, len(manifest.Members))
+	members := make([]officeMember, 0, len(manifest.Members)+1)
 	for _, cfg := range manifest.Members {
 		builtIn := cfg.System || cfg.Slug == manifest.Lead || cfg.Slug == "ceo"
 		members = append(members, memberFromSpec(cfg, "wuphf", now, builtIn))
 	}
-	return members
+	// The Librarian is built-in, present in every workspace alongside the lead.
+	return ensureLibrarianMember(members)
 }
 
 func defaultOfficeMemberSlugs() []string {

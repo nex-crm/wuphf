@@ -336,6 +336,23 @@ func (b *Broker) createPerTaskChannelLocked(taskID, title, owner, actor string) 
 		actorNorm != "nex" && b.findMemberLocked(actorNorm) != nil {
 		members = append(members, actorNorm)
 	}
+	// Seed the Librarian as a default member of every task channel (owner + CEO
+	// + Librarian — CEO has all-channel access via the reserved-slug bypass, so
+	// it isn't listed explicitly). Added only when the workspace actually has a
+	// Librarian member: new workspaces do; existing ones gain it in the Phase 6
+	// migration, so this no-ops there. Never duplicated.
+	if b.findMemberLocked(LibrarianSlug) != nil {
+		alreadyMember := false
+		for _, m := range members {
+			if m == LibrarianSlug {
+				alreadyMember = true
+				break
+			}
+		}
+		if !alreadyMember {
+			members = append(members, LibrarianSlug)
+		}
+	}
 	ch, cerr := b.createChannelLocked(channelCreateInput{
 		Slug:      slug,
 		Name:      name,
