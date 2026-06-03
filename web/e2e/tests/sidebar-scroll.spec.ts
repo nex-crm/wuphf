@@ -174,7 +174,9 @@ test.describe("left sidebar scrolling", () => {
         page.locator("aside.sidebar:not(.sidebar-collapsed)"),
       ).toBeVisible();
       await expect(
-        page.getByRole("button", { name: "Open settings" }),
+        page
+          .locator("aside.sidebar")
+          .getByRole("button", { name: "Open settings" }),
       ).toBeInViewport();
       await expect(
         page.locator(".sidebar-agents button[data-agent-slug]"),

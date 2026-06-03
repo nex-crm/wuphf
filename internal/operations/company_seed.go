@@ -4,21 +4,113 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"golang.org/x/net/html"
 )
+
+// gettingStartedFS embeds the authored team/getting-started/ wiki pages so the
+// binary ships them. They are materialized into a brand-new workspace wiki at
+// the office-seed boundary (both the blueprint and scratch paths) so the office
+// is never empty: every founder lands in an office whose wiki already explains
+// how the office works. See docs/specs/office-onboarding-uplift.md section 5.
+//
+//go:embed resources/getting-started/*.md
+var gettingStartedFS embed.FS
+
+// gettingStartedEmbedDir is the directory prefix inside gettingStartedFS that
+// holds the embedded markdown pages.
+const gettingStartedEmbedDir = "resources/getting-started"
+
+// GettingStartedRelDir is the wiki-relative directory the getting-started pages
+// are materialized into. Exported so callers and tests can reference the exact
+// destination without re-deriving the path.
+const GettingStartedRelDir = "team/getting-started"
+
+// SeedGettingStarted materializes the embedded resources/getting-started/*.md
+// pages into wikiRoot/team/getting-started/. It mirrors the team/about/ seed
+// flow in SeedCompanyContext: each page is written skip-if-exists via
+// atomicWrite (temp-dir-then-rename) so a page authored by a prior seed is
+// never clobbered and a partial write is never visible. Returns the list of
+// wiki-relative paths newly written this call (empty when everything already
+// existed).
+//
+// Files are written in deterministic (sorted) filename order so the seed is
+// reproducible and the post-seed index/all.md ordering is stable.
+//
+// wikiRoot must be a non-empty path; callers gate this exactly like the
+// team/about/ seed (only run when a real wiki root is known).
+func SeedGettingStarted(wikiRoot string) ([]string, error) {
+	if strings.TrimSpace(wikiRoot) == "" {
+		return nil, fmt.Errorf("operations: SeedGettingStarted: empty wikiRoot")
+	}
+	// Clean the root at the public boundary so a caller-supplied path with
+	// embedded ".." segments cannot escape the intended wiki tree. The page
+	// names come from embed.FS (*.md literals) so they cannot traverse; this
+	// guards only the wikiRoot parameter.
+	wikiRoot = filepath.Clean(wikiRoot)
+
+	entries, err := fs.ReadDir(gettingStartedFS, gettingStartedEmbedDir)
+	if err != nil {
+		return nil, fmt.Errorf("operations: read embedded getting-started: %w", err)
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(strings.ToLower(name), ".md") {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	if err := os.MkdirAll(filepath.Join(wikiRoot, "team", "getting-started"), 0o755); err != nil {
+		return nil, fmt.Errorf("operations: mkdir team/getting-started: %w", err)
+	}
+
+	var written []string
+	for _, name := range names {
+		relPath := "team/getting-started/" + name
+		finalPath := filepath.Join(wikiRoot, "team", "getting-started", name)
+		// Skip-if-exists: never overwrite a page a prior seed (or a human, or
+		// an agent enriching the section) already wrote. Mirrors the
+		// skip-if-exists guard on team/about/{README,company,owner}.md.
+		if _, statErr := os.Stat(finalPath); statErr == nil {
+			continue
+		} else if !os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("operations: stat %s: %w", relPath, statErr)
+		}
+
+		data, readErr := gettingStartedFS.ReadFile(gettingStartedEmbedDir + "/" + name)
+		if readErr != nil {
+			return nil, fmt.Errorf("operations: read embedded %s: %w", name, readErr)
+		}
+		if err := atomicWrite(wikiRoot, relPath, data); err != nil {
+			return nil, err
+		}
+		written = append(written, relPath)
+	}
+
+	return written, nil
+}
 
 // safeUTF8Truncate returns s truncated to at most maxBytes bytes without
 // splitting a multi-byte UTF-8 sequence. If s fits, it is returned as-is.

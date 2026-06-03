@@ -219,7 +219,11 @@ func (b *Broker) findSimilarByEmbeddingLocked(candidateSlug, candidateDescLower 
 // vectors). Caller MUST hold b.mu.
 func (b *Broker) skillEmbeddingProviderLocked() embedding.Provider {
 	provider := embedding.NewDefault()
-	if provider == nil || provider.Name() == "local-stub" {
+	// NewDefault always returns a non-nil provider (it falls back to the
+	// stub), so the only unusable case is the local-stub, whose vectors are
+	// non-semantic. A `provider == nil` guard here is dead code (staticcheck
+	// SA4023), so it is intentionally omitted.
+	if provider.Name() == "local-stub" {
 		return nil
 	}
 	return provider

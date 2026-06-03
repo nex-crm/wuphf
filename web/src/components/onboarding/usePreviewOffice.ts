@@ -51,7 +51,7 @@ export function usePreviewOffice(): PreviewOfficeState {
     };
   }
 
-  const phase = state.phase;
+  const { phase } = state;
   if (!phase) {
     return {
       rows: [],

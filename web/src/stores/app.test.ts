@@ -18,6 +18,7 @@ afterEach(() => {
     lastConversationalChannel: null,
     searchOpen: false,
     composerSearchInitialQuery: "",
+    pendingComposerDraft: null,
     composerHelpOpen: false,
     onboardingComplete: false,
     agentActivitySnapshots: {},
@@ -366,5 +367,45 @@ describe("setTheme", () => {
       document.documentElement.setAttribute("data-theme", "nex");
       useAppStore.setState({ theme: "nex" });
     }
+  });
+});
+
+describe("pendingComposerDraft (one-shot composer prefill)", () => {
+  it("returns and clears the draft when the channel matches", () => {
+    useAppStore
+      .getState()
+      .setPendingComposerDraft("ceo__human", "Build a Stripe webhook handler");
+
+    // The first consume for the matching channel returns the seeded text.
+    expect(
+      useAppStore.getState().consumePendingComposerDraft("ceo__human"),
+    ).toBe("Build a Stripe webhook handler");
+
+    // It is one-shot: the store is cleared, so a second consume is null and
+    // a later revisit to the same channel does not re-apply it.
+    expect(useAppStore.getState().pendingComposerDraft).toBeNull();
+    expect(
+      useAppStore.getState().consumePendingComposerDraft("ceo__human"),
+    ).toBeNull();
+  });
+
+  it("leaves the draft intact when a different channel consumes", () => {
+    useAppStore
+      .getState()
+      .setPendingComposerDraft("ceo__human", "Draft for the CEO DM");
+
+    // A mismatched channel must not steal another channel's draft.
+    expect(
+      useAppStore.getState().consumePendingComposerDraft("general"),
+    ).toBeNull();
+    expect(useAppStore.getState().pendingComposerDraft).toEqual({
+      channel: "ceo__human",
+      text: "Draft for the CEO DM",
+    });
+
+    // The intended channel still receives it.
+    expect(
+      useAppStore.getState().consumePendingComposerDraft("ceo__human"),
+    ).toBe("Draft for the CEO DM");
   });
 });

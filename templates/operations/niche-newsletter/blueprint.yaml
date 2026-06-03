@@ -1,0 +1,516 @@
+id: niche-newsletter
+name: Niche Newsletter
+display_name: Niche Newsletter
+icon: "📰"
+kind: media_publication
+category: media
+outcome: "Stand up a team that researches, writes, grows, and monetizes a niche newsletter."
+description: A publication team of agents that runs a focused newsletter end to end, from the editorial angle to a growing subscriber list and a working revenue loop.
+objective: Find the niche, ship issues on a cadence, grow the subscriber list, and turn it into revenue, with every send behind human approval.
+estimated_setup_minutes: 6
+first_tasks:
+  - id: niche-angle-brief
+    title: "Write the newsletter niche and angle"
+    prompt: |
+      Write a positioning brief for a newsletter aimed at a niche I will pick during the call. Capture: who the reader is, the specific thing they want every week, the angle nobody else covers, the format and length, and what we will refuse to write about.
+    expected_output: "A one-page brief with the reader, the weekly value, the angle, the format, and the explicit cuts."
+  - id: first-issue-outline
+    title: "Outline the first issue"
+    prompt: |
+      Outline the first issue of the newsletter. Give the headline, the one idea it delivers, the three sections, the sources to pull from, and the single call to action. Keep it tight enough to write in one sitting.
+    expected_output: "A first-issue outline with a headline, one core idea, three sections, sources, and one CTA."
+skills:
+  - name: "Niche research"
+    purpose: "Find the angle and the recurring topics the audience actually wants."
+  - name: "Editorial writing"
+    purpose: "Turn research into a tight, voice-consistent issue on a cadence."
+  - name: "Audience growth"
+    purpose: "Run the subscriber growth loop and the monetization ladder."
+requirements:
+  - kind: api-key
+    name: "ANTHROPIC_API_KEY or OPENAI_API_KEY"
+    required: true
+    detail: "Powers the editor, growth, monetization, and reviewer agents."
+  - kind: runtime
+    name: "Claude Code or Codex CLI"
+    required: true
+    detail: "Runs the agent loops locally and drafts the issues."
+example_artifacts:
+  - kind: brief
+    title: "Niche and angle brief"
+  - kind: plan
+    title: "Editorial calendar"
+  - kind: report
+    title: "Subscriber growth report"
+default_reviewer: ceo
+reviewer_paths:
+  "team/editorial/**": editor
+  "team/audience/**": growth
+  "team/reviews/**": reviewer
+employee_blueprints:
+  - workflow-automation-builder
+
+starter:
+  lead_slug: ceo
+  general_channel_description: "Command deck for the {{brand_name}} newsletter."
+  kickoff_prompt: "Stand up the {{brand_name}} newsletter end to end. Find the angle, ship the first issue, run the subscriber growth loop, and keep every send to the list and every paid commitment behind human approval."
+  agents:
+    - slug: ceo
+      emoji: "⚙️"
+      name: CEO
+      role: Owns priorities, approvals, and escalation decisions
+      permission_mode: plan
+      checked: true
+      type: lead
+      built_in: true
+    - slug: editor
+      emoji: "✍️"
+      name: Editor
+      role: Writes, edits, and schedules the issues in one consistent voice
+      employee_blueprint: workflow-automation-builder
+      permission_mode: auto
+      checked: true
+      type: specialist
+      expertise:
+        - Editorial writing
+        - Research synthesis
+        - Voice and style
+      personality: Kills the boring paragraph. Ships a tight issue over a perfect one, every week.
+    - slug: growth
+      emoji: "📈"
+      name: Growth
+      role: Grows the subscriber list and the open rate
+      permission_mode: plan
+      checked: true
+      type: specialist
+      expertise:
+        - Audience growth
+        - Referral loops
+        - Positioning
+      personality: Treats subscriber growth as a loop to engineer, not a number to hope for.
+    - slug: monetization
+      emoji: "💸"
+      name: Monetization
+      role: Turns the audience into revenue, sponsors and a paid tier
+      permission_mode: plan
+      checked: true
+      type: specialist
+      expertise:
+        - Sponsorships
+        - Paid tiers
+        - Offers
+      personality: Will not run an ad that betrays the reader. Picks revenue the audience thanks you for.
+    - slug: reviewer
+      emoji: "🔎"
+      name: Reviewer
+      role: Owns fact-checking, QA, and approval gates before a send
+      permission_mode: plan
+      checked: true
+      type: specialist
+      expertise:
+        - Fact-checking
+        - Release QA
+        - Approval gates
+      personality: No issue goes to the list with an unchecked claim. Holds the send until it is right.
+  channels:
+    - slug: "{{command_slug}}"
+      name: "{{command_slug}}"
+      description: "Executive control room for the {{brand_name}} newsletter."
+      members: [editor, growth, reviewer]
+    - slug: editorial
+      name: editorial
+      description: "Draft, edit, and schedule the issues."
+      members: [editor, reviewer]
+    - slug: growth
+      name: growth
+      description: "Subscriber growth, referrals, and open-rate experiments."
+      members: [growth, editor]
+    - slug: revenue
+      name: revenue
+      description: "Sponsorships, paid tier, and the monetization ladder."
+      members: [monetization, growth]
+    - slug: review
+      name: review
+      description: "Track outcomes, evidence, and the next editorial iteration."
+      members: [reviewer, growth]
+  tasks:
+    - channel: editorial
+      owner: editor
+      title: "Draft the first issue"
+      details: "Turn the outline into a finished issue, queued for review before any send."
+    - channel: growth
+      owner: growth
+      title: "Design the subscriber growth loop"
+      details: "Map the first acquisition and referral loop to the right readers."
+    - channel: revenue
+      owner: monetization
+      title: "Map the monetization ladder"
+      details: "Define the free tier, the first sponsor offer, and the paid tier."
+    - channel: review
+      owner: reviewer
+      title: "Set the editorial scorecard and review cadence"
+      details: "Define success metrics, the review rhythm, and the fact-check gate for each issue."
+
+bootstrap_config:
+  channel_name: "{{brand_name}}"
+  channel_slug: "{{brand_slug}}"
+  niche: "A focused newsletter that delivers one specific thing to one specific audience every week."
+  audience: "Operators, builders, and enthusiasts who want a sharp weekly read on a narrow topic"
+  positioning: "A niche newsletter with a real angle: research, write, grow, and monetize without betraying the reader."
+  content_pillars:
+    - "Editorial angle"
+    - "Audience growth"
+    - "Monetization"
+  content_series:
+    - "Weekly issues"
+    - "Growth experiments"
+    - "Revenue retros"
+  monetization_hooks:
+    - "free tier"
+    - "sponsorship"
+    - "paid subscription"
+    - "premium drop"
+  publishing_cadence: "Weekly issue"
+  lead_magnet:
+    name: "Newsletter Angle Brief"
+    cta: "Open the angle brief"
+    path: "/angle-brief"
+  monetization_assets:
+    - stage: "Day 0"
+      name: "Newsletter Angle Brief"
+      slot: "command_room"
+      cta: "Open the angle brief"
+    - stage: "Publish"
+      name: "Editorial Calendar"
+      slot: "editorial_lane"
+      cta: "Open the calendar"
+    - stage: "Grow"
+      name: "Sponsorship Kit"
+      slot: "revenue_lane"
+      cta: "Open the sponsorship kit"
+  kpi_tracking:
+    - name: "Issues shipped on cadence"
+      target: "1 per week, no misses"
+      why: "Proves the publication actually ships, not just plans."
+    - name: "Subscriber growth rate"
+      target: "Trending up week over week"
+      why: "Shows the growth loop is real, not one-off spikes."
+    - name: "Open rate"
+      target: "> 40%"
+      why: "Confirms the issues are worth opening, not just landing."
+    - name: "First revenue"
+      target: "Within 60 days"
+      why: "Marks the point where the audience becomes a business."
+
+automation:
+  - id: control-plane
+    kicker: Build now
+    title: Control plane + workspace defaults
+    copy: Load the newsletter pack, queue seed, editorial lanes, and approval boundaries from template data instead of rebuilding them in the browser.
+    status: build_now
+    footer: "Single source of truth: template + runtime state."
+  - id: editorial-engine
+    kicker: Build now
+    title: Editorial drafting packets
+    copy: Turn the angle into reusable issue packets with an outline, sources, and an approval gate before any send.
+    status: build_now
+    footer: The first issue seeds the queue automatically.
+  - id: growth-engine
+    kicker: Build now
+    title: Growth loop templates
+    copy: Generate referral loops, acquisition experiments, and open-rate tests from the current subscriber state.
+    status: build_now
+    footer: Template-derived goals shape the experiment prompt.
+  - id: approval-plane
+    kicker: Build now
+    title: Approval boundaries stay explicit
+    copy: Every run carries its own human approval list so sends to the list, sponsor deals, and spend are blocked until approved.
+    status: build_now
+    footer: Approval policy is data-driven from the template.
+  - id: review-loop
+    kicker: Build now
+    title: Metrics and review loop
+    copy: Track issues shipped, subscriber growth, and open rate so the publication improves each iteration.
+    status: build_now
+    footer: A weekly review loop is seeded by default.
+
+monetization_ladder:
+  - kicker: "Step 1"
+    title: "free tier"
+    copy: "Turn the free tier into a reusable commercial lane in the operating system."
+    footer: "Loaded from the newsletter ladder."
+  - kicker: "Step 2"
+    title: "sponsorship"
+    copy: "Turn sponsorship into a reusable commercial lane in the operating system."
+    footer: "Loaded from the newsletter ladder."
+  - kicker: "Step 3"
+    title: "paid subscription"
+    copy: "Turn the paid subscription into a reusable commercial lane in the operating system."
+    footer: "Loaded from the newsletter ladder."
+  - kicker: "Step 4"
+    title: "premium drop"
+    copy: "Turn premium drops into a reusable commercial lane in the operating system."
+    footer: "Loaded from the newsletter ladder."
+
+queue_seed:
+  - id: angle-selection
+    title: "Define the newsletter niche and angle"
+    format: "Operational work item"
+    stage_index: 0
+    score: 95
+    unit_cost: 7
+    eta: "Iteration 1"
+    monetization: "free tier"
+    state: "active"
+  - id: first-issue
+    title: "Draft the first issue"
+    format: "Operational work item"
+    stage_index: 1
+    score: 92
+    unit_cost: 9
+    eta: "Iteration 2"
+    monetization: "sponsorship"
+    state: "active"
+  - id: growth-loop
+    title: "Design the subscriber growth loop"
+    format: "Operational work item"
+    stage_index: 2
+    score: 86
+    unit_cost: 10
+    eta: "Iteration 3"
+    monetization: "paid subscription"
+    state: "active"
+  - id: editorial-scorecard
+    title: "Set the editorial scorecard and review cadence"
+    format: "Operational work item"
+    stage_index: 3
+    score: 82
+    unit_cost: 10
+    eta: "Iteration 4"
+    monetization: "premium drop"
+    state: "active"
+
+stages:
+  - id: discover
+    name: Discover
+    engine: planning
+    description: "Find the niche, the reader, and the weekly value."
+    exit_criteria: "The angle and first work items are durable."
+  - id: design
+    name: Design
+    engine: planning
+    description: "Turn the angle into an editorial calendar and issue plan."
+    exit_criteria: "Starter tasks, channels, and the calendar exist."
+  - id: write
+    name: Write
+    engine: execution
+    description: "Draft the first issues and the growth assets."
+    exit_criteria: "The first issue is reviewable."
+  - id: validate
+    name: Validate
+    engine: review
+    description: "Fact-check, edit, and capture evidence before any send."
+    exit_criteria: "Evidence is persisted and the send is approved."
+  - id: grow
+    name: Grow
+    engine: operations
+    description: "Ship on cadence, run the growth loop, and monetize."
+    exit_criteria: "The publication has a repeatable weekly rhythm."
+
+artifacts:
+  - id: angle_brief
+    name: Angle brief
+    description: "The reader, the weekly value, the angle, and the format."
+  - id: editorial_calendar
+    name: Editorial calendar
+    description: "The issue schedule, topics, and owners."
+  - id: issue_draft
+    name: Issue draft
+    description: "The current issue, sources, and the fact-check checklist."
+  - id: growth_report
+    name: Growth report
+    description: "Subscriber growth, open rate, and the next experiment."
+
+capabilities:
+  - id: planning
+    name: Planning and decomposition
+    kind: planning
+    description: "Turn the angle into editorial and growth workstreams."
+  - id: production
+    name: Editorial production
+    kind: execution
+    description: "Draft, edit, and schedule issues with an approval gate."
+  - id: integrations
+    name: Integrations and handoffs
+    kind: integration
+    integrations: [github, gmail, slack, google-drive]
+    description: "Use connected systems as the drafting and send surfaces."
+  - id: approvals
+    name: Operations and approvals
+    kind: execution
+    description: "Run the workflows, enforce send approvals, and keep state durable."
+  - id: analytics
+    name: Metrics and review
+    kind: analysis
+    description: "Track issues, subscriber growth, and loop improvements."
+
+approval_rules:
+  - id: public-send
+    trigger: public_send_or_publish
+    description: Human approval required before any send to the subscriber list or public publish.
+  - id: external-accounts
+    trigger: connect_account
+    description: Human approval required before linking or authorizing a real external account.
+  - id: spend
+    trigger: spend_money
+    description: Human approval required before vendor spend, ad spend, or budget commitments.
+  - id: commercial-commitment
+    trigger: contract_or_legal_change
+    description: Human approval required before sponsor deals, legal, or commercial commitments.
+
+connections:
+  - name: "Gmail send lane"
+    integration: gmail
+    owner: Editorial
+    priority: critical
+    purpose: "Use Gmail for the newsletter send, replies, and reader communication."
+    smoke_test: "Draft a dry-run issue send and persist evidence without sending."
+    blocker: "Needs approved Gmail credentials before any live send to the list."
+  - name: "GitHub drafts lane"
+    integration: github
+    owner: Editorial
+    priority: important
+    purpose: "Use GitHub for issue drafts, sources, and change tracking."
+    smoke_test: "Create a dry-run draft issue and persist evidence."
+    blocker: "Needs approved GitHub credentials before any live repository mutation."
+  - name: "Slack coordination lane"
+    integration: slack
+    owner: Operations
+    priority: important
+    purpose: "Use Slack for team coordination and approval handoffs."
+    smoke_test: "Run a dry-run update and persist evidence."
+    blocker: "Needs approved Slack credentials before any live message."
+  - name: "Google Drive evidence lane"
+    integration: google-drive
+    owner: Knowledge
+    priority: important
+    purpose: "Use Drive for source assets, drafts, and evidence."
+    smoke_test: "Write a mock issue bundle and confirm persistence."
+    blocker: "Needs approved Drive credentials before any live file mutation."
+
+workflows:
+  - id: issue-draft-dry-run
+    name: Issue draft dry-run
+    trigger: manual
+    mode: dry_run
+    integrations: [github, google-drive]
+    checklist:
+      - Confirm issue outline
+      - Produce the draft
+      - Persist evidence
+    description: Validate the issue-drafting path and produce a reviewable draft without sending.
+    definition:
+      provider: one
+      key: issue-draft-dry-run
+    smoke_test:
+      name: Issue draft dry-run
+      mode: dry_run
+      proof: Draft evidence persisted without touching external systems.
+      inputs:
+        operation_name: Niche Newsletter
+  - id: send-pilot
+    name: Send pilot
+    trigger: manual
+    mode: mock
+    integrations: [gmail, slack]
+    checklist:
+      - Confirm send scope
+      - Run the mock send
+      - Persist send evidence
+    description: Validate the approved-send path for a single issue to a test segment.
+    definition:
+      provider: one
+      key: send-pilot
+    smoke_test:
+      name: Send pilot
+      mode: mock
+      proof: Send evidence persisted successfully.
+      inputs:
+        operation_name: Niche Newsletter
+  - id: growth-experiment
+    name: Growth experiment
+    trigger: manual
+    mode: dry_run
+    integrations: [google-drive, github]
+    checklist:
+      - Confirm experiment design
+      - Run the dry-run loop
+      - Persist audit evidence
+    description: Validate a subscriber-growth experiment and capture the result.
+    definition:
+      provider: one
+      key: growth-experiment
+    smoke_test:
+      name: Growth experiment
+      mode: dry_run
+      proof: Growth evidence persisted successfully.
+      inputs:
+        operation_name: Niche Newsletter
+  - id: review-handoff
+    name: Review handoff
+    trigger: manual
+    mode: mock
+    integrations: [slack, google-drive]
+    checklist:
+      - Confirm fact-check checklist
+      - Confirm review gate
+      - Persist review evidence
+    description: Validate the review handoff and the evidence trail before a send.
+    definition:
+      provider: one
+      key: review-handoff
+    smoke_test:
+      name: Review handoff
+      mode: mock
+      proof: Review evidence persisted successfully.
+      inputs:
+        operation_name: Niche Newsletter
+
+wiki_schema:
+  dirs:
+    - team/editorial/
+    - team/audience/
+    - team/playbooks/
+    - team/decisions/
+    - team/inbox/
+  bootstrap:
+    - path: team/editorial/voice-and-style.md
+      title: "Voice and style guide"
+      skeleton: |
+        # Voice and style
+
+        _(How the newsletter sounds: the words we use, the words we ban, sentence length, how we open, how we close. Every issue reads like one writer. Update it the first time an issue feels off-voice.)_
+    - path: team/editorial/cadence.md
+      title: "Publishing cadence and format"
+      skeleton: |
+        # Cadence and format
+
+        _(The day and time we send, the issue structure, the length budget, and the one call to action per issue. The rhythm is the product.)_
+    - path: team/audience/growth-playbook.md
+      title: "Subscriber growth playbook"
+      skeleton: |
+        # Subscriber growth
+
+        _(The loops that actually add subscribers: referrals, cross-posts, guest swaps. What worked, what flopped, and the current best channel. Revisit monthly.)_
+    - path: team/decisions/editorial-log.md
+      title: "Editorial decisions log"
+      skeleton: |
+        # Editorial decisions log
+
+        _(One dated entry per non-trivial call: a topic we killed, a sponsor we turned down, a format change. What we decided, what we rejected, what would make us revisit.)_
+    - path: team/inbox/raw-ideas.md
+      title: "Raw ideas and reader replies"
+      skeleton: |
+        # Raw ideas and reader replies
+
+        _(Unprocessed story ideas, reader replies, and source links. Periodically the team reviews this page and promotes the best into the editorial calendar.)_

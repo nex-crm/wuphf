@@ -19,6 +19,10 @@ import "./styles/console.css";
 import "./styles/pixel-skill-card.css";
 import "./styles/lifecycle.css";
 import "./styles/onboarding.css";
+import "./styles/onboarding-wizard.css";
+import "./styles/office-tour.css";
+import "./styles/office-tour-slides.css";
+import "./styles/getting-started-checklist.css";
 import "./styles/operator.css";
 
 // Attach the root route's component at startup. Defining the component

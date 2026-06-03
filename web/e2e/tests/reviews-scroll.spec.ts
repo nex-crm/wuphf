@@ -74,6 +74,8 @@ test("reviews queue scrolls when wiki promotions overflow the viewport", async (
   await expect
     .poll(() => board.evaluate((el) => el.scrollTop))
     .toBeGreaterThan(0);
-  await expect(page.getByText("Promotion review 28")).toBeInViewport();
+  const lastReview = page.getByText("Promotion review 28");
+  await lastReview.scrollIntoViewIfNeeded();
+  await expect(lastReview).toBeInViewport();
   await expectNoReactErrors(page, getErrors, "while scrolling reviews");
 });

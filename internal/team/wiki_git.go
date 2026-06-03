@@ -168,17 +168,10 @@ func (r *Repo) Init(ctx context.Context) error {
 		return ErrGitUnavailable
 	}
 
-	gitDir := filepath.Join(r.root, ".git")
-	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+	if ok, err := r.isGitRepoLocked(ctx); err != nil {
+		return err
+	} else if ok {
 		return r.ensureLayoutLocked()
-	}
-
-	// If the wiki dir exists but .git does not, preserve whatever is there
-	// by moving it aside before re-initialising. Never discard user data.
-	if info, err := os.Stat(r.root); err == nil && info.IsDir() {
-		if err := r.preserveOrphanDirLocked(); err != nil {
-			return fmt.Errorf("wiki: preserve orphan dir: %w", err)
-		}
 	}
 
 	if err := os.MkdirAll(r.root, 0o700); err != nil {
@@ -200,14 +193,39 @@ func (r *Repo) Init(ctx context.Context) error {
 	return nil
 }
 
-// preserveOrphanDirLocked renames the existing wiki/ dir to wiki.orphan-<ts>
-// so an init can proceed without destroying the user's files.
-// Caller must hold r.mu.
-func (r *Repo) preserveOrphanDirLocked() error {
-	ts := time.Now().UTC().Format("20060102T150405")
-	parent := filepath.Dir(r.root)
-	target := filepath.Join(parent, fmt.Sprintf("wiki.orphan-%s", ts))
-	return os.Rename(r.root, target)
+// isGitRepoLocked reports whether r.root is already a valid git work tree.
+// It uses git itself instead of only checking for a .git directory so linked
+// worktrees with a .git file are accepted too. Caller must hold r.mu.
+func (r *Repo) isGitRepoLocked(ctx context.Context) (bool, error) {
+	info, err := os.Stat(r.root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("wiki: stat root: %w", err)
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("wiki: root exists but is not a directory: %s", r.root)
+	}
+	out, err := r.runGitLocked(ctx, "system", "rev-parse", "--is-inside-work-tree")
+	if err != nil {
+		if isGitNotRepositoryOutput(out) {
+			if _, statErr := os.Lstat(filepath.Join(r.root, ".git")); statErr == nil {
+				return false, fmt.Errorf("wiki: check git work tree: %w: %s", err, strings.TrimSpace(out))
+			} else if !os.IsNotExist(statErr) {
+				return false, fmt.Errorf("wiki: stat git metadata: %w", statErr)
+			}
+			return false, nil
+		}
+		return false, fmt.Errorf("wiki: check git work tree: %w: %s", err, strings.TrimSpace(out))
+	}
+	return strings.TrimSpace(out) == "true", nil
+}
+
+func isGitNotRepositoryOutput(out string) bool {
+	normalized := strings.ToLower(out)
+	return strings.Contains(normalized, "not a git repository") ||
+		strings.Contains(normalized, "not a git work tree")
 }
 
 // ensureLayoutLocked creates the thematic directories and the .gitignore so
