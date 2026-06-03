@@ -186,4 +186,5 @@ stateDiagram-v2
   token vectors before the WebAuthn bytes become public.
 - `packages/broker/*`: implement registration, challenge storage, assertion
   verification, threshold policy, and replay consumption.
-- `apps/desktop/*`: implement credential registration and cosign prompts.
+- desktop renderer (now in the `nex-crm/nex-local` repo): implement credential
+  registration and cosign prompts.

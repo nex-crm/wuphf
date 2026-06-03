@@ -1,5 +1,13 @@
 # WUPHF — Deprecate TUI, Build a Cross-Platform Desktop Experience
 
+> **Historical design note (superseded).** This document explores a Wails-based
+> desktop path. The desktop app was instead built on **Electron** and has since
+> **moved to the `nex-crm/nex-local` repo** (a sibling to the web WUPHF, not a
+> replacement). The Go `desktop/oswails/` boundary, the `scripts/check-wails-boundary.sh`
+> guard, and the `.golangci.yml` Wails depguard rule referenced below have been
+> removed from this repo. Kept for the design rationale (TUI deprecation, OS-verb
+> boundary, packaging) only — paths and guardrails here no longer exist.
+
 ## Context
 
 Wuphf today is a Go single-binary that serves a React/Vite web UI from `web/dist` (embedded via `//go:embed all:web/dist` in `embed.go`) and exposes the broker over HTTP + SSE + WebSocket on `127.0.0.1:7891` (`internal/team/broker_web_proxy.go ServeWebUI`, `internal/team/broker_terminal.go`). The default user path is `npx wuphf` → npm shim downloads the platform binary → binary launches the broker → browser auto-opens to the local web UI. A bubbletea TUI (`cmd/wuphf/channel*.go` + `cmd/wuphf/channelui/` ≈ 26k LOC) remains as `--tui` opt-in; tmux is also used as an *internal* per-agent process backend (`internal/team/pane*.go`, `tmux_runner.go` ≈ 3.7k LOC).

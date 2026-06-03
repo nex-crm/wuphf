@@ -226,8 +226,9 @@ discipline.
 This rhythm is appropriate for protocol-grade work; do not impose it
 uncritically on small bug fixes or documentation-only changes.
 
-For PR-shaped reviews specifically (major dependency bumps, IPC surface
-changes, anything under `apps/desktop/AGENTS.md`'s hard rules), see
+For PR-shaped reviews specifically (major dependency bumps, wire-shape
+changes, anything under a v1 package's `AGENTS.md` hard rules — e.g.
+`packages/broker`, `packages/protocol`), see
 [docs/agents/orthogonal-pr-review.md](/docs/agents/orthogonal-pr-review.md).
 It spells out the lens menu, codex-vs-Claude routing, and the round-2
 adversarial rhythm.
