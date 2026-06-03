@@ -4,13 +4,14 @@
    This is a FAITHFUL PORT of the reference KB editor's stylesheet (its token
    system + the full `.tiptap` content block + scrollbars), scoped under the
    `.refclone-editor` wrapper so it never leaks into WUPHF's app tokens. The ONE
-   intentional change from the reference is COLOR: the reference ships a
-   greyscale (chroma-0) shadcn palette; we keep its exact LIGHTNESS values — so
-   contrast, hierarchy, and spacing are identical — but inject a warm hue + a
-   little chroma. The result is a coherent warm "journal" surface where the body,
-   the floating menus (slash / bubble / toolbar / link / media popovers), the
-   borders, and the accents all derive from one warm token set, instead of warmth
-   living only on the body background.
+   intentional change from the reference is COLOR: the reference ships a greyscale
+   shadcn palette; we remap the same token ROLES onto WUPHF's notebook brand
+   (cream paper, warm brown ink, tan borders, gold accent — see
+   src/styles/notebook.css). Spacing, hierarchy, and the full `.tiptap` block stay
+   byte-faithful to the reference. Because the body, the floating menus (slash /
+   bubble / toolbar / link / media popovers), the borders, and the accents all
+   read from one token set, the whole surface is coherently on-brand, not just the
+   body background.
 
    Mount the editor inside:
 
@@ -23,10 +24,9 @@
    below, so they pick up the warm palette automatically.
    ========================================================================== */
 
-/* ── Token scope: warm light ─────────────────────────────────────────────────
-   Values mirror the reference's :root lightness exactly; only hue (~55–85, warm
-   amber/parchment) and a small chroma are added. Keep the lightness if you
-   retune — it is what preserves the reference's legibility + visual rhythm. */
+/* ── Token scope: light (WUPHF notebook brand) ───────────────────────────────
+   Maps the reference's shadcn token ROLES onto the notebook brand hex (cream,
+   brown ink, tan, gold). Dark mode keeps a warm-dark variant below. */
 .refclone-editor {
   /* Host-integration layout. The ported editor.tsx is built to FILL a
      fixed-height flex parent (root `flex-1 flex flex-col overflow-hidden`, body
@@ -37,39 +37,47 @@
   flex-direction: column;
   height: clamp(520px, 78vh, 1100px);
 
-  /* Warm palette (reference lightness + warm hue/chroma). */
-  --background: oklch(0.974 0.018 83); /* warm cream page (ref: 1 0 0) */
-  --foreground: oklch(0.245 0.022 54); /* warm near-black brown (ref: 0.145) */
-  --card: oklch(0.988 0.013 85); /* menu/toolbar surface, a touch brighter */
-  --card-foreground: oklch(0.245 0.022 54);
-  --popover: oklch(0.988 0.013 85); /* slash / bubble / link / media menus */
-  --popover-foreground: oklch(0.245 0.022 54);
-  --primary: oklch(0.52 0.1 58); /* links, active, checkbox — warm sienna */
-  --primary-foreground: oklch(0.99 0.012 85);
-  --secondary: oklch(0.95 0.018 84);
-  --secondary-foreground: oklch(0.3 0.022 55);
-  --muted: oklch(0.948 0.022 83); /* code bg, table header, row hover — tan */
-  --muted-foreground: oklch(0.552 0.03 62); /* warm taupe (ref: 0.556) */
-  --accent: oklch(0.925 0.036 80); /* toolbar/slash hover — clearly warm */
-  --accent-foreground: oklch(0.3 0.025 55);
-  --destructive: oklch(0.577 0.245 27.325); /* semantic red — left as-is */
-  --border: oklch(0.895 0.025 81); /* warm hairline (ref: 0.922) */
-  --input: oklch(0.895 0.025 81);
-  --ring: oklch(0.55 0.09 60); /* warm focus ring */
-  --chart-1: oklch(0.72 0.1 70);
-  --chart-2: oklch(0.6 0.06 65);
-  --chart-3: oklch(0.5 0.05 60);
-  --chart-4: oklch(0.42 0.04 58);
-  --chart-5: oklch(0.32 0.03 55);
+  /* WUPHF brand palette — the notebook surface (src/styles/notebook.css
+     --nb-*): cream paper, warm brown ink, tan borders, and the gold accent
+     with red/green/blue ink semantics. The notebook tokens are scoped to
+     `.notebook-surface`, so their hex values are mirrored here (they ARE the
+     brand colors) to keep this editor scope self-contained. */
+  --background: #faf5e8; /* nb-surface — warm journal cream (the page) */
+  --foreground: #2a2721; /* nb-text — warm brown ink */
+  --card: #fffdf6; /* warm white — menus/toolbar float above the cream */
+  --card-foreground: #2a2721;
+  --popover: #fffdf6; /* slash / bubble / link / media menus */
+  --popover-foreground: #2a2721;
+  --primary: #c78a1f; /* nb-amber — brand gold: links, active, checkbox */
+  --primary-foreground: #fffdf6;
+  --secondary: #f1ead8;
+  --secondary-foreground: #2a2721;
+  --muted: #efe7d3; /* code bg, table header, row hover — warm tan */
+  --muted-foreground: #5b5547; /* nb-text-muted — warm taupe */
+  --accent: color-mix(
+    in srgb,
+    #c78a1f 16%,
+    #faf5e8
+  ); /* gold-washed highlight */
+  --accent-foreground: #2a2721;
+  --destructive: #b43a2f; /* nb-stamp-red */
+  --border: #d9ceb5; /* nb-border — warm tan hairline */
+  --input: #d9ceb5;
+  --ring: #c78a1f; /* brand gold focus */
+  --chart-1: #c78a1f; /* nb ink palette: amber, green, blue, red, taupe */
+  --chart-2: #6a8b52;
+  --chart-3: #274472;
+  --chart-4: #b43a2f;
+  --chart-5: #5b5547;
   --radius: 0.625rem;
-  --sidebar: oklch(0.988 0.013 85);
-  --sidebar-foreground: oklch(0.245 0.022 54);
-  --sidebar-primary: oklch(0.52 0.1 58);
-  --sidebar-primary-foreground: oklch(0.99 0.012 85);
-  --sidebar-accent: oklch(0.925 0.036 80);
-  --sidebar-accent-foreground: oklch(0.3 0.025 55);
-  --sidebar-border: oklch(0.895 0.025 81);
-  --sidebar-ring: oklch(0.55 0.09 60);
+  --sidebar: #fffdf6;
+  --sidebar-foreground: #2a2721;
+  --sidebar-primary: #c78a1f;
+  --sidebar-primary-foreground: #fffdf6;
+  --sidebar-accent: color-mix(in srgb, #c78a1f 16%, #faf5e8);
+  --sidebar-accent-foreground: #2a2721;
+  --sidebar-border: #d9ceb5;
+  --sidebar-ring: #c78a1f;
 
   /* Radius scale the vendored shadcn primitives reference. */
   --radius-sm: calc(var(--radius) * 0.6);
@@ -118,21 +126,21 @@
   --card-foreground: oklch(0.955 0.012 85);
   --popover: oklch(0.255 0.018 60);
   --popover-foreground: oklch(0.955 0.012 85);
-  --primary: oklch(0.8 0.09 76);
+  --primary: #d9a43f; /* nb-amber lifted for dark — brand gold */
   --primary-foreground: oklch(0.24 0.02 55);
   --secondary: oklch(0.3 0.018 60);
   --secondary-foreground: oklch(0.955 0.012 85);
   --muted: oklch(0.3 0.018 60);
   --muted-foreground: oklch(0.72 0.03 78);
-  --accent: oklch(0.32 0.024 64);
+  --accent: color-mix(in srgb, #d9a43f 22%, oklch(0.255 0.018 60));
   --accent-foreground: oklch(0.955 0.012 85);
-  --destructive: oklch(0.704 0.191 22.216);
+  --destructive: #cf5043; /* nb-stamp-red, lifted for dark */
   --border: oklch(0.85 0.04 80 / 12%);
   --input: oklch(0.85 0.04 80 / 16%);
-  --ring: oklch(0.62 0.06 70);
+  --ring: #d9a43f;
   --sidebar: oklch(0.255 0.018 60);
   --sidebar-foreground: oklch(0.955 0.012 85);
-  --sidebar-primary: oklch(0.8 0.09 76);
+  --sidebar-primary: #d9a43f;
   --sidebar-primary-foreground: oklch(0.24 0.02 55);
   --sidebar-accent: oklch(0.32 0.024 64);
   --sidebar-accent-foreground: oklch(0.955 0.012 85);
