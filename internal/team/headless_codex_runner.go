@@ -53,7 +53,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	// sandbox rejects both apply_patch and shell writes even with
 	// workspace-write, which leaves coding tasks permanently unable to land
 	// edits. Keep office/non-editing turns on workspace-write.
-	if l.unsafe || l.headlessCodexNeedsDangerousBypass(slug) {
+	if l.unsafe || l.headlessCodexNeedsDangerousBypass(ctx, slug) {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	} else {
 		args = append(args, "-a", "never", "-s", "workspace-write")
@@ -365,11 +365,14 @@ func codexUsageToTokenUsage(u provider.ClaudeUsage) *headlessTokenUsage {
 	return &headlessTokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 }
 
-func (l *Launcher) headlessCodexNeedsDangerousBypass(slug string) bool {
+func (l *Launcher) headlessCodexNeedsDangerousBypass(ctx context.Context, slug string) bool {
 	if l == nil || l.broker == nil {
 		return false
 	}
-	task := l.agentActiveTask(slug)
+	// Resolve THIS turn's task: with parallel instances an agent can run a
+	// worktree turn and a chat/office turn at once, and only the worktree turn
+	// should get the sandbox bypass.
+	task := l.turnTaskForCtx(ctx, slug)
 	if task == nil {
 		return false
 	}
