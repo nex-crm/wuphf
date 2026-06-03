@@ -91,6 +91,12 @@ type SkillCompileMetrics struct {
 	// SkillEnhancementsTotal counts proposals that enhanced an existing
 	// skill instead of being discarded or created as new.
 	SkillEnhancementsTotal int64
+	// ValidationGateRejections counts Stage B proposals rejected by the
+	// held-out fixture validation gate (regression or no improvement found).
+	ValidationGateRejections int64
+	// ValidationGateNoFixtures counts Stage B proposals where the gate was
+	// called but no fixture file existed (gate skipped — graceful degradation).
+	ValidationGateNoFixtures int64
 }
 
 // snapshotSkillCompileMetrics returns a copy of m suitable for serialization.
@@ -118,6 +124,8 @@ func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 		EmbeddingCostUsdBits:          atomic.LoadUint64(&m.EmbeddingCostUsdBits),
 		SemanticDedupHitsTotal:        atomic.LoadInt64(&m.SemanticDedupHitsTotal),
 		SkillEnhancementsTotal:        atomic.LoadInt64(&m.SkillEnhancementsTotal),
+		ValidationGateRejections:      atomic.LoadInt64(&m.ValidationGateRejections),
+		ValidationGateNoFixtures:      atomic.LoadInt64(&m.ValidationGateNoFixtures),
 	}
 }
 

@@ -44,13 +44,14 @@ type SynthError struct {
 // StageBSynthResult is the JSON-serializable summary of a single synth pass.
 // Counts mirror ScanResult so callers can fold them into Stage A telemetry.
 type StageBSynthResult struct {
-	CandidatesScanned int          `json:"candidates_scanned"`
-	Synthesized       int          `json:"synthesized"`
-	Deduped           int          `json:"deduped"`
-	RejectedByGuard   int          `json:"rejected_by_guard"`
-	Errors            []SynthError `json:"errors,omitempty"`
-	DurationMs        int64        `json:"duration_ms"`
-	Trigger           string       `json:"trigger"`
+	CandidatesScanned    int          `json:"candidates_scanned"`
+	Synthesized          int          `json:"synthesized"`
+	Deduped              int          `json:"deduped"`
+	RejectedByGuard      int          `json:"rejected_by_guard"`
+	RejectedByValidation int          `json:"rejected_by_validation"`
+	Errors               []SynthError `json:"errors,omitempty"`
+	DurationMs           int64        `json:"duration_ms"`
+	Trigger              string       `json:"trigger"`
 }
 
 // stageBCandidateSource is the small interface SkillSynthesizer reads
@@ -69,6 +70,7 @@ type SkillSynthesizer struct {
 	broker        *Broker
 	aggregator    stageBCandidateSource
 	provider      stageBLLMProvider
+	gate          skillValidationGate // nil when WUPHF_SKILL_VALIDATION_GATE_DISABLED=true
 	budgetPerPass int
 }
 
@@ -77,9 +79,14 @@ type SkillSynthesizer struct {
 // candidates); the provider is set separately by the caller so tests can
 // inject fakes.
 func NewSkillSynthesizer(b *Broker, agg stageBCandidateSource) *SkillSynthesizer {
+	var gate skillValidationGate
+	if strings.TrimSpace(os.Getenv("WUPHF_SKILL_VALIDATION_GATE_DISABLED")) != "true" {
+		gate = newDefaultSkillValidationGate()
+	}
 	return &SkillSynthesizer{
 		broker:        b,
 		aggregator:    agg,
+		gate:          gate,
 		budgetPerPass: stageBSynthBudgetFromEnv(),
 	}
 }
@@ -142,6 +149,7 @@ func (s *SkillSynthesizer) SynthesizeOnce(ctx context.Context, trigger string) (
 		"synthesized", res.Synthesized,
 		"deduped", res.Deduped,
 		"rejected_by_guard", res.RejectedByGuard,
+		"rejected_by_validation", res.RejectedByValidation,
 		"errors", len(res.Errors),
 		"duration_ms", res.DurationMs,
 	)
@@ -203,6 +211,42 @@ func (s *SkillSynthesizer) runPass(ctx context.Context, trigger string, start ti
 				Reason:        "synth: empty name from llm",
 			})
 			continue
+		}
+
+		// --- Validation gate ---
+		// LLM-as-judge: candidate must strictly improve on held-out task
+		// fixtures versus the baseline (empty for new skills, existing body
+		// for enhance). Skipped when no fixture file exists for the slug
+		// (graceful degradation — common before teams author fixture sets).
+		if s.gate != nil {
+			gateSlug := fm.Name
+			baselineBody := ""
+			if decision.Enhance != "" {
+				gateSlug = decision.Enhance
+				s.broker.mu.Lock()
+				if ex := s.broker.findSkillByNameLocked(decision.Enhance); ex != nil {
+					baselineBody = ex.Content
+				}
+				s.broker.mu.Unlock()
+			}
+			hasFixtures, gateErr := s.gate.Validate(ctx, gateSlug, body, baselineBody, wikiRoot)
+			if !hasFixtures {
+				atomic.AddInt64(&s.broker.skillCompileMetrics.ValidationGateNoFixtures, 1)
+			}
+			if gateErr != nil {
+				res.RejectedByValidation++
+				atomic.AddInt64(&s.broker.skillCompileMetrics.ValidationGateRejections, 1)
+				slog.Info("stage_b_synth_validation_gate_rejected",
+					"source", string(cand.Source),
+					"slug", gateSlug,
+					"reason", gateErr.Error(),
+				)
+				res.Errors = append(res.Errors, SynthError{
+					CandidateName: fm.Name,
+					Reason:        "validation_gate: " + gateErr.Error(),
+				})
+				continue
+			}
 		}
 
 		// --- Enhance / rename path ---
