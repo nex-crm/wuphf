@@ -548,9 +548,9 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 			},
 		},
 		headless: headlessWorkerPool{
-			workers: make(map[string]bool),
-			active:  make(map[string]*headlessCodexActiveTurn),
-			queues:  make(map[string][]headlessCodexTurn),
+			workers: make(map[headlessLane]bool),
+			active:  make(map[headlessLane]*headlessCodexActiveTurn),
+			queues:  make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 	t.Cleanup(l.stopHeadlessWorkers)
@@ -563,12 +563,12 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 	ceoPresent := func() bool {
 		l.headless.mu.Lock()
 		defer l.headless.mu.Unlock()
-		return len(l.headless.queues["ceo"]) > 0 || l.headless.active["ceo"] != nil
+		return len(l.headless.queues[headlessLane{slug: "ceo"}]) > 0 || l.headless.active[headlessLane{slug: "ceo"}] != nil
 	}
 	fePresent := func() bool {
 		l.headless.mu.Lock()
 		defer l.headless.mu.Unlock()
-		return len(l.headless.queues["fe"]) > 0 || l.headless.active["fe"] != nil
+		return len(l.headless.queues[headlessLane{slug: "fe"}]) > 0 || l.headless.active[headlessLane{slug: "fe"}] != nil
 	}
 
 	if !ceoPresent() {
@@ -674,9 +674,9 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 			},
 		},
 		headless: headlessWorkerPool{
-			workers: make(map[string]bool),
-			active:  make(map[string]*headlessCodexActiveTurn),
-			queues:  make(map[string][]headlessCodexTurn),
+			workers: make(map[headlessLane]bool),
+			active:  make(map[headlessLane]*headlessCodexActiveTurn),
+			queues:  make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 	t.Cleanup(l.stopHeadlessWorkers)
@@ -686,7 +686,7 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 	present := func(slug string) bool {
 		l.headless.mu.Lock()
 		defer l.headless.mu.Unlock()
-		return len(l.headless.queues[slug]) > 0 || l.headless.active[slug] != nil
+		return len(l.headless.queues[headlessLane{slug: slug}]) > 0 || l.headless.active[headlessLane{slug: slug}] != nil
 	}
 
 	if !present("ceo") {
@@ -739,12 +739,12 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 			},
 		},
 		headless: headlessWorkerPool{
-			workers: map[string]bool{
-				"ceo": true,
-				"fe":  true,
+			workers: map[headlessLane]bool{
+				{slug: "ceo"}: true,
+				{slug: "fe"}:  true,
 			},
-			active: make(map[string]*headlessCodexActiveTurn),
-			queues: make(map[string][]headlessCodexTurn),
+			active: make(map[headlessLane]*headlessCodexActiveTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 	t.Cleanup(l.stopHeadlessWorkers)
@@ -759,8 +759,8 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 	}
 
 	l.headless.mu.Lock()
-	ceoQueue := append([]headlessCodexTurn(nil), l.headless.queues["ceo"]...)
-	feQueue := append([]headlessCodexTurn(nil), l.headless.queues["fe"]...)
+	ceoQueue := append([]headlessCodexTurn(nil), l.headless.queues[headlessLane{slug: "ceo"}]...)
+	feQueue := append([]headlessCodexTurn(nil), l.headless.queues[headlessLane{slug: "fe"}]...)
 	l.headless.mu.Unlock()
 
 	if len(ceoQueue) != 0 {

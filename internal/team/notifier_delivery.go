@@ -196,20 +196,22 @@ func (l *Launcher) activeHeadlessSlugs(except string) map[string]struct{} {
 	l.headless.mu.Lock()
 	defer l.headless.mu.Unlock()
 	out := map[string]struct{}{}
-	for workerSlug, queue := range l.headless.queues {
-		if workerSlug == except {
+	// An agent may now span several lanes; group by lane.slug so a slug counts
+	// as active when ANY of its lanes has queued or in-flight work.
+	for workerLane, queue := range l.headless.queues {
+		if workerLane.slug == except {
 			continue
 		}
 		if len(queue) > 0 {
-			out[workerSlug] = struct{}{}
+			out[workerLane.slug] = struct{}{}
 		}
 	}
-	for workerSlug, active := range l.headless.active {
-		if workerSlug == except {
+	for workerLane, active := range l.headless.active {
+		if workerLane.slug == except {
 			continue
 		}
 		if active != nil {
-			out[workerSlug] = struct{}{}
+			out[workerLane.slug] = struct{}{}
 		}
 	}
 	return out

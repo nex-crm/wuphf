@@ -26,9 +26,9 @@ func minimalLauncher(opusCEO bool) *Launcher {
 		},
 		opusCEO: opusCEO,
 		headless: headlessWorkerPool{
-			workers: make(map[string]bool),
-			active:  make(map[string]*headlessCodexActiveTurn),
-			queues:  make(map[string][]headlessCodexTurn),
+			workers: make(map[headlessLane]bool),
+			active:  make(map[headlessLane]*headlessCodexActiveTurn),
+			queues:  make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 }
@@ -83,9 +83,9 @@ func TestHeadlessClaudeModel_CustomLeadSlug(t *testing.T) {
 		},
 		opusCEO: true,
 		headless: headlessWorkerPool{
-			workers: make(map[string]bool),
-			active:  make(map[string]*headlessCodexActiveTurn),
-			queues:  make(map[string][]headlessCodexTurn),
+			workers: make(map[headlessLane]bool),
+			active:  make(map[headlessLane]*headlessCodexActiveTurn),
+			queues:  make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 

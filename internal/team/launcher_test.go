@@ -2708,12 +2708,12 @@ func TestBuildMessageActiveAgentsSorted(t *testing.T) {
 			},
 		},
 		headless: headlessWorkerPool{
-			active: map[string]*headlessCodexActiveTurn{
-				"zebra": {},
-				"alpha": {},
-				"mango": {},
+			active: map[headlessLane]*headlessCodexActiveTurn{
+				{slug: "zebra"}: {},
+				{slug: "alpha"}: {},
+				{slug: "mango"}: {},
 			},
-			queues: make(map[string][]headlessCodexTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 
