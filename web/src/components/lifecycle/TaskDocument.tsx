@@ -190,9 +190,11 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
 
 function taskStatusToLifecycleState(task: Task | undefined): LifecycleState {
   if (task?.pipeline_stage === "draft") return "drafting";
+  if (task?.pipeline_stage === "plan") return "planning";
   const state = task?.lifecycle_state ?? task?.status;
   switch (state) {
     case "drafting":
+    case "planning":
     case "intake":
     case "ready":
     case "running":
@@ -633,11 +635,15 @@ function TaskDocumentError({
 interface ApproveAndStartButtonProps {
   taskId: string;
   onApproved: () => void;
+  /** Button label. Defaults to "Approve & Start"; Plan mode passes
+   *  "Approve plan & Start" so the human knows they are accepting the plan. */
+  label?: string;
 }
 
 export function ApproveAndStartButton({
   taskId,
   onApproved,
+  label = "Approve & Start",
 }: ApproveAndStartButtonProps) {
   const [approveError, setApproveError] = useState<string | null>(null);
 
@@ -678,7 +684,7 @@ export function ApproveAndStartButton({
         aria-label="Approve and start execution"
         data-testid="approve-and-start"
       >
-        {isPending ? "Starting…" : "Approve & Start"}
+        {isPending ? "Starting…" : label}
       </button>
     </div>
   );

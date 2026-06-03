@@ -3950,6 +3950,23 @@ body.resizing-pane * {
   color: var(--text-secondary);
   font-weight: 600;
 }
+.task-composer-planfirst {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary, var(--text-secondary));
+  cursor: pointer;
+}
+.task-composer-planfirst input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+.task-composer-planfirst strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
 .task-composer-error {
   margin: 0;
   font-size: 13px;

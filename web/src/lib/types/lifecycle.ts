@@ -16,6 +16,7 @@
 /** Lifecycle position of a task. Source of truth on the broker (`teamTask.LifecycleState`). */
 export type LifecycleState =
   | "drafting"
+  | "planning"
   | "intake"
   | "ready"
   | "running"
@@ -80,6 +81,7 @@ export function stageForState(s: LifecycleState): LifecycleStage {
     case "intake":
     case "ready":
       return "backlog";
+    case "planning":
     case "running":
     case "review":
     case "changes_requested":
@@ -336,6 +338,16 @@ export const STATE_PILL_TOKENS: Record<
     text: "var(--accent)",
     label: "drafting",
   },
+  /**
+   * planning: Plan mode (Phase 5) — the owner is writing a plan for human
+   * approval before executing. Uses the accent tokens like drafting because it
+   * is also pre-execution and awaits a human Approve & Start.
+   */
+  planning: {
+    bg: "var(--accent-bg)",
+    text: "var(--accent)",
+    label: "planning",
+  },
   intake: {
     bg: "var(--bg-row-active)",
     text: "var(--text-secondary)",
@@ -492,7 +504,7 @@ export const FILTER_TO_STATES: Record<
   decision_required: ["decision"],
   // drafting is surfaced in the issues route, not the inbox; include it in
   // running so inbox rows with this state still land somewhere readable.
-  running: ["drafting", "intake", "ready", "running", "review"],
+  running: ["drafting", "planning", "intake", "ready", "running", "review"],
   blocked: [
     "blocked_on_pr_merge",
     "queued_behind_owner",

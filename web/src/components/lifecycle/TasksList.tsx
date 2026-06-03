@@ -44,6 +44,7 @@ import { LifecycleStatePill } from "./LifecycleStatePill";
 const KNOWN_LIFECYCLE_STATES: ReadonlySet<LifecycleState> =
   new Set<LifecycleState>([
     "drafting",
+    "planning",
     "intake",
     "ready",
     "running",
@@ -87,6 +88,7 @@ export function isTaskSpecTask(task: Task): boolean {
  */
 export function taskToLifecycleState(task: Task): LifecycleState {
   if (task.pipeline_stage === "draft") return "drafting";
+  if (task.pipeline_stage === "plan") return "planning";
   const raw = (task as unknown as Record<string, unknown>).lifecycle_state;
   if (isLifecycleState(raw)) return raw;
   switch (task.status) {

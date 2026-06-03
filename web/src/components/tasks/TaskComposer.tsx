@@ -91,6 +91,10 @@ export function TaskComposer() {
   const [providerKind, setProviderKind] = useState<"" | LLMRuntimeKind>("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
+  // Plan mode (Phase 5): default ON. When on, the owner plans autonomously
+  // (writes a plan to its notebook) and waits for "Approve & Start" before
+  // executing. When off, the task runs immediately with no plan/approval gate.
+  const [planFirst, setPlanFirst] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
@@ -158,6 +162,7 @@ export function TaskComposer() {
             model: model.trim() || undefined,
             effort: effort || undefined,
             park: mode === "backlog",
+            plan_first: planFirst,
           },
         ],
         { channel: DEFAULT_CHANNEL, createdBy: "human" },
@@ -330,6 +335,24 @@ export function TaskComposer() {
             this task only.
           </p>
 
+          <label
+            className="task-composer-planfirst"
+            data-testid="task-composer-planfirst"
+          >
+            <input
+              type="checkbox"
+              checked={planFirst}
+              onChange={(e) => setPlanFirst(e.target.checked)}
+              data-testid="task-composer-planfirst-input"
+            />
+            <span>
+              <strong>Plan first</strong> —{" "}
+              {planFirst
+                ? "the owner writes a plan for your approval before starting the work."
+                : "off: the owner starts the work immediately, no plan or approval."}
+            </span>
+          </label>
+
           {error ? (
             <p
               className="task-composer-error"
@@ -346,13 +369,21 @@ export function TaskComposer() {
               className="task-composer-btn task-composer-btn-primary"
               disabled={submitting}
               title={
-                isAuto
-                  ? "Create and have the CEO assign + start it now"
-                  : `Assign @${ownerSlug} and start now`
+                planFirst
+                  ? isAuto
+                    ? "Create and have the CEO assign an owner who plans it first for your approval"
+                    : `Assign @${ownerSlug} to plan it first for your approval`
+                  : isAuto
+                    ? "Create and have the CEO assign + start it now"
+                    : `Assign @${ownerSlug} and start now`
               }
               data-testid="task-composer-start"
             >
-              {submitting ? "Creating…" : "Start now"}
+              {submitting
+                ? "Creating…"
+                : planFirst
+                  ? "Plan & start"
+                  : "Start now"}
             </button>
             <button
               type="button"

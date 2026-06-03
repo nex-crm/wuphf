@@ -153,6 +153,13 @@ export interface CreateTaskInput {
    * "Backlog" action sets this; "Start now" leaves it false.
    */
   park?: boolean;
+  /**
+   * Plan mode (Phase 5): when true, the owner plans autonomously before
+   * executing — it writes a plan to its notebook and waits for "Approve &
+   * Start". When false, the task runs immediately with no plan/approval gate.
+   * The composer's "Plan first" toggle defaults ON and always sends a value.
+   */
+  plan_first?: boolean;
   depends_on?: string[];
 }
 
