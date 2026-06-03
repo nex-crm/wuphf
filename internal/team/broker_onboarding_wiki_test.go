@@ -1,6 +1,7 @@
 package team
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,6 +40,17 @@ func TestOnboardingCompleteMaterializesWiki(t *testing.T) {
 	}
 	if info.Size() == 0 {
 		t.Fatalf("wiki article %q is empty — skeleton bytes did not land", onboarding)
+	}
+	repo := NewRepoAt(wikiRoot, filepath.Join(tmpHome, ".wuphf", "wiki.bak"))
+	refs, err := repo.Log(context.Background(), "team/customers/onboarding.md")
+	if err != nil {
+		t.Fatalf("expected materialized article to have git history: %v", err)
+	}
+	if len(refs) == 0 {
+		t.Fatal("expected materialized article to have a bootstrap commit")
+	}
+	if refs[0].Author != "wuphf-bootstrap" {
+		t.Fatalf("expected bootstrap author, got %q", refs[0].Author)
 	}
 
 	// Temp dir cleanup invariant: no .wiki.tmp.* siblings left behind.

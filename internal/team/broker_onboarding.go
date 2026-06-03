@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -138,22 +137,24 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 // blueprint without a WikiSchema (e.g. a synthesized from-scratch
 // blueprint) is silently skipped.
 //
-// Important: this runs OUTSIDE the broker lock (see caller), and uses the
-// wiki worker's Repo for the commit so we go through the same
-// per-commit-identity plumbing as regular agent writes. If the worker is
-// not yet live (memory backend != markdown), we log and return — the
-// skeletons stay on disk untracked and will be folded into the next
-// RecoverDirtyTree pass. That's not ideal but it's the honest fallback.
+// Important: this runs OUTSIDE the broker lock (see caller), and initializes
+// the wiki worker before writing when the markdown backend is active. That
+// keeps skeleton files and git history coupled from the first render. If the
+// worker is not live (memory backend != markdown), we still materialize files
+// best-effort for read-only fallback, but no git commit is possible.
 func (b *Broker) materializeBlueprintWiki(bp operations.Blueprint) {
 	if bp.WikiSchema == nil {
 		return
 	}
-	home := config.RuntimeHomeDir()
-	if home == "" {
-		log.Printf("onboarding: resolve runtime home for wiki materialization: WUPHF_RUNTIME_HOME unset (config.RuntimeHomeDir returned empty)")
-		return
+	b.ensureWikiWorker()
+	worker := b.WikiWorker()
+
+	wikiRoot := ""
+	if worker != nil && worker.Repo() != nil {
+		wikiRoot = worker.Repo().Root()
+	} else {
+		wikiRoot = WikiRootDir()
 	}
-	wikiRoot := filepath.Join(home, ".wuphf", "wiki")
 	result, err := operations.MaterializeWiki(context.Background(), wikiRoot, bp.WikiSchema)
 	if err != nil {
 		log.Printf("onboarding: wiki materialize failed (wiki left empty): %v", err)
@@ -167,10 +168,8 @@ func (b *Broker) materializeBlueprintWiki(bp operations.Blueprint) {
 	if len(result.ArticlesCreated) == 0 && len(result.DirsCreated) == 0 {
 		return
 	}
-	worker := b.WikiWorker()
 	if worker == nil || worker.Repo() == nil {
-		// Non-markdown backend — skeletons stay on disk, will surface via
-		// RecoverDirtyTree on the next markdown-backend launch.
+		// Non-markdown backend — skeletons stay on disk as read-only files.
 		return
 	}
 	repo := worker.Repo()
