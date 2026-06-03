@@ -54,12 +54,16 @@ type TaskPlanRequest struct {
 }
 
 type TaskPlanInput struct {
-	Title         string   `json:"title"`
-	Assignee      string   `json:"assignee"`
-	Details       string   `json:"details"`
-	TaskType      string   `json:"task_type"`
-	ExecutionMode string   `json:"execution_mode"`
-	DependsOn     []string `json:"depends_on"`
+	Title         string `json:"title"`
+	Assignee      string `json:"assignee"`
+	Details       string `json:"details"`
+	TaskType      string `json:"task_type"`
+	ExecutionMode string `json:"execution_mode"`
+	// Effort is the optional model-specific reasoning-effort level chosen in
+	// the new-task composer (e.g. "high" for claude, "medium" for codex). It
+	// is stored on the task and applied at dispatch. Empty means default.
+	Effort    string   `json:"effort"`
+	DependsOn []string `json:"depends_on"`
 }
 
 type TaskMemoryWorkflowRequest struct {

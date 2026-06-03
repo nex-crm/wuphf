@@ -54,6 +54,13 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	args = append(args, strings.Fields(l.resolvePermissionFlags(slug))...)
 
+	// Per-task reasoning effort: when the active task carries a composer-set
+	// effort that claude accepts, pass it as `--effort <level>`. Empty/unknown
+	// normalises away so the CLI keeps its default (high).
+	if effort := normalizeClaudeEffort(l.activeTaskEffort(slug)); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+
 	// Workspace isolation: coding agents get their own git worktree.
 	worktreeDir := ""
 	if codingAgentSlugs[slug] && l.broker != nil {

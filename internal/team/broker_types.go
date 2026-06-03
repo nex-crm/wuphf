@@ -199,13 +199,21 @@ type teamTask struct {
 	// accessor methods. The wire format is preserved verbatim by the custom
 	// MarshalJSON / UnmarshalJSON below, so persisted broker state and HTTP
 	// responses look identical to pre-Lane-A clients.
-	status           string
-	CreatedBy        string `json:"created_by"`
-	ThreadID         string `json:"thread_id,omitempty"`
-	TaskType         string `json:"task_type,omitempty"`
-	PipelineID       string `json:"pipeline_id,omitempty"`
-	pipelineStage    string
-	ExecutionMode    string `json:"execution_mode,omitempty"`
+	status        string
+	CreatedBy     string `json:"created_by"`
+	ThreadID      string `json:"thread_id,omitempty"`
+	TaskType      string `json:"task_type,omitempty"`
+	PipelineID    string `json:"pipeline_id,omitempty"`
+	pipelineStage string
+	ExecutionMode string `json:"execution_mode,omitempty"`
+	// Effort is the per-task reasoning-effort override chosen in the
+	// new-task composer. It is model-specific: the composer only offers the
+	// levels the selected runtime supports, so the stored value is already
+	// validated against that runtime. It is applied at dispatch time —
+	// claude-code passes it as `--effort <level>`, codex as
+	// `-c model_reasoning_effort=<level>`. Empty means "use the runtime's
+	// default effort". The wire key "effort" is stable per the migration plan.
+	Effort           string `json:"effort,omitempty"`
 	reviewState      string
 	SourceSignalID   string   `json:"source_signal_id,omitempty"`
 	SourceDecisionID string   `json:"source_decision_id,omitempty"`
@@ -343,6 +351,7 @@ type teamTaskWire struct {
 	PipelineID           string          `json:"pipeline_id,omitempty"`
 	PipelineStage        string          `json:"pipeline_stage,omitempty"`
 	ExecutionMode        string          `json:"execution_mode,omitempty"`
+	Effort               string          `json:"effort,omitempty"`
 	ReviewState          string          `json:"review_state,omitempty"`
 	SourceSignalID       string          `json:"source_signal_id,omitempty"`
 	SourceDecisionID     string          `json:"source_decision_id,omitempty"`
@@ -387,6 +396,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		PipelineID:           t.PipelineID,
 		PipelineStage:        t.pipelineStage,
 		ExecutionMode:        t.ExecutionMode,
+		Effort:               t.Effort,
 		ReviewState:          t.reviewState,
 		SourceSignalID:       t.SourceSignalID,
 		SourceDecisionID:     t.SourceDecisionID,
@@ -433,6 +443,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.PipelineID = w.PipelineID
 	t.pipelineStage = w.PipelineStage
 	t.ExecutionMode = w.ExecutionMode
+	t.Effort = w.Effort
 	t.reviewState = w.ReviewState
 	t.SourceSignalID = w.SourceSignalID
 	t.SourceDecisionID = w.SourceDecisionID

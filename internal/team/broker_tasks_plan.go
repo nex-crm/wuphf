@@ -87,6 +87,9 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			if executionMode := strings.TrimSpace(item.ExecutionMode); executionMode != "" {
 				existing.ExecutionMode = executionMode
 			}
+			if effort := strings.TrimSpace(item.Effort); effort != "" {
+				existing.Effort = effort
+			}
 			existing.DependsOn = resolvedDeps
 			b.refreshPlannedTaskBlockStateLocked(existing)
 			syncTaskMemoryWorkflow(existing, now)
@@ -136,6 +139,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			CreatedBy:     createdBy,
 			TaskType:      strings.TrimSpace(item.TaskType),
 			ExecutionMode: strings.TrimSpace(item.ExecutionMode),
+			Effort:        strings.TrimSpace(item.Effort),
 			DependsOn:     resolvedDeps,
 			CreatedAt:     now,
 			UpdatedAt:     now,
@@ -179,6 +183,7 @@ type plannedTaskInput struct {
 	TaskType         string
 	PipelineID       string
 	ExecutionMode    string
+	Effort           string
 	ReviewState      string
 	SourceSignalID   string
 	SourceDecisionID string
@@ -245,6 +250,9 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		if existing.ExecutionMode == "" && strings.TrimSpace(input.ExecutionMode) != "" {
 			existing.ExecutionMode = strings.TrimSpace(input.ExecutionMode)
 		}
+		if existing.Effort == "" && strings.TrimSpace(input.Effort) != "" {
+			existing.Effort = strings.TrimSpace(input.Effort)
+		}
 		if existing.reviewState == "" && strings.TrimSpace(input.ReviewState) != "" {
 			existing.reviewState = strings.TrimSpace(input.ReviewState)
 		}
@@ -308,6 +316,7 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		TaskType:         strings.TrimSpace(input.TaskType),
 		PipelineID:       strings.TrimSpace(input.PipelineID),
 		ExecutionMode:    strings.TrimSpace(input.ExecutionMode),
+		Effort:           strings.TrimSpace(input.Effort),
 		reviewState:      strings.TrimSpace(input.ReviewState),
 		SourceSignalID:   strings.TrimSpace(input.SourceSignalID),
 		SourceDecisionID: strings.TrimSpace(input.SourceDecisionID),

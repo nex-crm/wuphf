@@ -70,6 +70,12 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	if model := strings.TrimSpace(l.codexModelForAgent(slug)); model != "" {
 		args = append(args, "--model", model)
 	}
+	// Per-task reasoning effort: when the active task carries a composer-set
+	// effort that codex accepts, pass it as `-c model_reasoning_effort=<level>`.
+	// Empty/unknown normalises away so codex keeps the model default.
+	if effort := normalizeCodexEffort(l.activeTaskEffort(slug)); effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+effort)
+	}
 	for _, override := range overrides {
 		args = append(args, "-c", override)
 	}
