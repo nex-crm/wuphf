@@ -34,18 +34,21 @@
 
 **Read this section first on session resume, then the Change log below.**
 
-- **Branch:** `worktree-structural-changes`. **HEAD:** `d5b10eb8`. Base `origin/main` @ `46f06e54`.
+- **Branch:** `worktree-structural-changes`. **HEAD:** `9473517c`. Base `origin/main` @ `46f06e54`.
 - **Commits so far:** `461b578d` Phase 0 · `96877617` Phase 1 · `3f46f328` doc scrub ·
   `5cc95204` Phase 2a-i · `f4c50882` Phase 2a-ii · `e4bf6355` Phase 2b · `a8b17d70` Phase 2a-iii ·
-  `5e43ceb3` **Phase 3a** (backend `effort` field + dispatch wiring) · `d5b10eb8` **Phase 3b**
-  (new-task home composer). All green, all committed.
-- **NEXT: Phase 3c** — create-mode wiring. 3a + 3b DONE + live-verified (effort round-trips
-  to disk as wire key `effort`, task mints its own channel, fresh bundle serves on :7891).
-  3c = make **Backlog** create-without-dispatch (no owner turn), **Routine** prefill
-  /routines/new from the prompt, confirm **Start now** runs the spec→approval→running gate.
-  See Phase 3 "BUILD MAP" + "3c PICKUP" below.
+  `5e43ceb3` **Phase 3a** · `d5b10eb8` **Phase 3b** · `c815f68a` tracker · `35012a1d` **Phase 3c** ·
+  `9473517c` **teammcp regression fix + effort MCP surface**. All green, all committed.
+- **NEXT: Phase 4 (Librarian = Pam agent).** PHASE 3 IS DONE — all three create-modes work
+  end-to-end + live-verified (Backlog → owner=∅/status=open parked; Start now →
+  owner set/status=in_progress executable; effort round-trips to disk as wire key `effort`;
+  Routine → /routines/new prefilled). Then Phase 5 (spec→wiki Specs/), Phase 6 (migration, LAST).
+- **⚠ REGRESSION LESSON (2026-06-03):** Phase 2a (channel-per-task) silently broke 5
+  `internal/teammcp` tests because 2a verification ran only `./internal/team`. Fixed in
+  `9473517c`. **On every phase, run the FULL Go + web suites, not just the package you touched**
+  — channel-per-task ripples into any test that assumed tasks live in #general.
 - **DONE:** Phase 0 ✅, Phase 1 ✅, naming scrub ✅, Phase 2a (i+ii+iii) ✅, Phase 2b ✅,
-  **Phase 3a ✅, Phase 3b ✅**.
+  **Phase 3 (a+b+c) ✅, teammcp regressions ✅**.
   Backend is fully task-scoped: **every real top-level task mints its own `task-<id>`
   channel** (2a-iii dropped the keyword heuristic on 2026-06-03 — only System / incident /
   sub-tasks stay shared; verified live + the human and @ceo always retain channel access
@@ -524,7 +527,7 @@
     (out of this PR's scope). the 🗄 emoji's Unicode name is an unrelated false positive.
   - Gate: new task → its own channel works; no path depends on a default channel;
     app boots to a working tasks-home with no DM/subspace surfaces.
-- [ ] **Phase 3 — new-task home composer.** Home = new-task composer with
+- [x] **Phase 3 — new-task home composer. ✅ DONE (3a+3b+3c).** Home = new-task composer with
     provider / effort / owner-agent selectors + Start now / Backlog / Routine
     actions. Add `effort` field to task model + run wiring (D7). Wire Routine→
     existing scheduler; Backlog→create-without-dispatch; Start now→spec interview→
@@ -582,7 +585,11 @@
         that is the existing lifecycle); add nothing if so, document if it does.
       - Channel members: per-task channel already seeds owner + actor (2a). Librarian seed
         is Phase 4.
-  - Gate: all 3 create-modes work end-to-end from the composer.
+  - Gate: all 3 create-modes work end-to-end from the composer. ✅ MET — live-verified
+    via the broker API (Backlog parks unassigned, Start now dispatches, effort persists to
+    disk, Routine prefills /routines/new). Composer is the landing (`/`); board at /tasks.
+    Note: visual browser click-through still blocked by the Chrome CDP zombie (data path
+    + build + full test suite are the verification surface used instead).
 - [ ] **Phase 4 — Librarian agent (Pam → Librarian).** Promote Pam to first-class
     `librarian` agent, default member of every task. Move wiki write/format/
     organize + promotion + review authority CEO→Librarian (prompts + tool gating).
