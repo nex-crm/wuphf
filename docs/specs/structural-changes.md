@@ -529,6 +529,33 @@
   - **NAMING GUARD (hard rule):** match the reference design, but the external
     app's name must NOT appear in any artifact (code, comments, docs, this
     tracker, PR, branch). Use our own task vocabulary throughout.
+  - **BUILD MAP (explored 2026-06-03, for a fresh window):**
+    - Existing creation surface = `web/src/components/lifecycle/TaskNewForm.tsx`
+      (title/details/channel/assignee → `createTasks()` → `POST /task-plan`
+      `{channel,created_by,tasks:[{title,assignee,details,task_type:"issue"}]}`).
+      The composer REPLACES this as the landing (index → composer instead of the
+      2b interim `/tasks` board); keep `/tasks/new` as a fallback.
+    - Model catalog = `web/src/lib/modelCatalog.ts` (`modelOptionsForKind(kind)`
+      → per-provider model lists; providers are `LLMRuntimeKind`:
+      claude-code / codex / opencode / mlx-lm / ollama / exo).
+    - **`effort` does NOT exist yet** — needs adding. Suggested 3-step build:
+      - **3a (backend):** add `Effort string` to `teamTask` + `teamTaskWire`
+        (wire key `effort`, stable per hard-rule-2) and thread it into the
+        owner's run/dispatch (where provider/model are resolved). Small, commit
+        alone.
+      - **3b (UI):** the composer component (centered chatbox + chips). Add a
+        `modelEffortOptions(kind, model)` capability map next to modelCatalog.
+        DEFAULT (decide w/ user or sensible default): claude-code →
+        none/low/medium/high reasoning; codex → minimal/low/medium/high; local →
+        none. Selecting a model repopulates effort.
+      - **3c (wiring):** Start-now → create + approve→running; Backlog →
+        create-without-dispatch (drafting, no owner turn); Routine → existing
+        scheduler (`/routines/new` flow). Seed channel members owner+CEO
+        (+Librarian once Phase 4 lands).
+    - **OPEN INPUT for fidelity:** user said "use the same components/design as
+      [reference app]" and "effort and model are model-specific as you can do in
+      [it]" — for pixel/UX fidelity, get a screenshot/source of its composer, or
+      build the locked interpretation and let them refine.
   - Gate: all 3 create-modes work end-to-end from the composer.
 - [ ] **Phase 4 — Librarian agent (Pam → Librarian).** Promote Pam to first-class
     `librarian` agent, default member of every task. Move wiki write/format/
