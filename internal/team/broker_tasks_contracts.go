@@ -62,7 +62,16 @@ type TaskPlanInput struct {
 	// Effort is the optional model-specific reasoning-effort level chosen in
 	// the new-task composer (e.g. "high" for claude, "medium" for codex). It
 	// is stored on the task and applied at dispatch. Empty means default.
-	Effort    string   `json:"effort"`
+	Effort string `json:"effort"`
+	// Provider and Model are the optional per-task LLM runtime override
+	// (runtime kind + model id). Stored on the task; dispatch prefers them
+	// over the owner agent's binding. Empty means inherit the binding/default.
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	// Park, when true, creates the task ASSIGNED but parked in the backlog
+	// (non-executable) instead of dispatching the owner now. The "Backlog"
+	// composer action sets this; "Start now" leaves it false.
+	Park      bool     `json:"park"`
 	DependsOn []string `json:"depends_on"`
 }
 

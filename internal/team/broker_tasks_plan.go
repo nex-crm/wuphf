@@ -90,6 +90,12 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			if effort := strings.TrimSpace(item.Effort); effort != "" {
 				existing.Effort = effort
 			}
+			if prov := strings.TrimSpace(item.Provider); prov != "" {
+				existing.Provider = prov
+			}
+			if model := strings.TrimSpace(item.Model); model != "" {
+				existing.Model = model
+			}
 			existing.DependsOn = resolvedDeps
 			b.refreshPlannedTaskBlockStateLocked(existing)
 			syncTaskMemoryWorkflow(existing, now)
@@ -140,11 +146,28 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			TaskType:      strings.TrimSpace(item.TaskType),
 			ExecutionMode: strings.TrimSpace(item.ExecutionMode),
 			Effort:        strings.TrimSpace(item.Effort),
+			Provider:      strings.TrimSpace(item.Provider),
+			Model:         strings.TrimSpace(item.Model),
 			DependsOn:     resolvedDeps,
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
 		b.refreshPlannedTaskBlockStateLocked(&task)
+		// Backlog (Park): assigned but parked. Land in Drafting — a
+		// non-executable state that shows in the Backlog stage and dispatches
+		// nobody. The user activates it from the task surface via "Approve &
+		// Start" (the drafting-only postDecision verb), which transitions
+		// Drafting→Running and wakes the owner. This overrides the in_progress
+		// promotion refreshPlannedTaskBlockStateLocked applies for real owners.
+		// (Drafting does not auto-trigger the CEO spec writer — that is only
+		// invoked from the onboarding first-issue flow.)
+		if item.Park {
+			if err := b.applyLifecycleStateLocked(&task, LifecycleStateDrafting); err != nil {
+				rollbackPlan()
+				http.Error(w, "failed to park task", http.StatusInternalServerError)
+				return
+			}
+		}
 		syncTaskMemoryWorkflow(&task, now)
 		b.ensureTaskOwnerChannelMembershipLocked(taskChannel, task.Owner)
 		b.queueTaskBehindActiveOwnerLaneLocked(&task)
@@ -161,6 +184,11 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		}
 		b.tasks = append(b.tasks, task)
 		b.appendActionLocked("task_created", "office", taskChannel, createdBy, truncateSummary(task.Title, 140), task.ID)
+		// Start-now + Auto: no real owner to dispatch, so ask the CEO to triage
+		// (pick a specialist + start). Parked Auto tasks defer this to activate.
+		if isAutoOwner(task.Owner) && !item.Park {
+			b.requestAutoAssignmentLocked(&task, createdBy)
+		}
 		created = append(created, task)
 	}
 
@@ -184,6 +212,8 @@ type plannedTaskInput struct {
 	PipelineID       string
 	ExecutionMode    string
 	Effort           string
+	Provider         string
+	Model            string
 	ReviewState      string
 	SourceSignalID   string
 	SourceDecisionID string
@@ -200,7 +230,10 @@ func (b *Broker) refreshPlannedTaskBlockStateLocked(task *teamTask) {
 		return
 	}
 	task.blocked = false
-	if strings.TrimSpace(task.Owner) != "" {
+	// An "auto" owner is a triage sentinel, not a real agent — it must not
+	// promote the task to in_progress (there is no @auto to dispatch). The CEO
+	// resolves it to a real specialist first (see requestAutoAssignmentLocked).
+	if strings.TrimSpace(task.Owner) != "" && !isAutoOwner(task.Owner) {
 		task.status = "in_progress"
 	} else if strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
 		task.status = "open"
@@ -252,6 +285,12 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		}
 		if existing.Effort == "" && strings.TrimSpace(input.Effort) != "" {
 			existing.Effort = strings.TrimSpace(input.Effort)
+		}
+		if existing.Provider == "" && strings.TrimSpace(input.Provider) != "" {
+			existing.Provider = strings.TrimSpace(input.Provider)
+		}
+		if existing.Model == "" && strings.TrimSpace(input.Model) != "" {
+			existing.Model = strings.TrimSpace(input.Model)
 		}
 		if existing.reviewState == "" && strings.TrimSpace(input.ReviewState) != "" {
 			existing.reviewState = strings.TrimSpace(input.ReviewState)
@@ -317,6 +356,8 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		PipelineID:       strings.TrimSpace(input.PipelineID),
 		ExecutionMode:    strings.TrimSpace(input.ExecutionMode),
 		Effort:           strings.TrimSpace(input.Effort),
+		Provider:         strings.TrimSpace(input.Provider),
+		Model:            strings.TrimSpace(input.Model),
 		reviewState:      strings.TrimSpace(input.ReviewState),
 		SourceSignalID:   strings.TrimSpace(input.SourceSignalID),
 		SourceDecisionID: strings.TrimSpace(input.SourceDecisionID),

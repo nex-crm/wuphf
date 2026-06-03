@@ -296,6 +296,11 @@ func (l *Launcher) headlessClaudeModel(slug string) string {
 	// (see AgentProfilePanel save path), so the most common edge cases
 	// are already prevented at the source, but the kind check here is
 	// belt-and-suspenders.
+	// Per-task model wins over the agent binding (the model lives on the task,
+	// not the agent). Only when the task's provider is claude-code.
+	if model := l.taskModelForKind(slug, provider.KindClaudeCode); model != "" {
+		return model
+	}
 	if l != nil && l.broker != nil {
 		binding := l.broker.MemberProviderBinding(slug)
 		if binding.Kind == "claude-code" {

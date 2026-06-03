@@ -213,7 +213,16 @@ type teamTask struct {
 	// claude-code passes it as `--effort <level>`, codex as
 	// `-c model_reasoning_effort=<level>`. Empty means "use the runtime's
 	// default effort". The wire key "effort" is stable per the migration plan.
-	Effort           string `json:"effort,omitempty"`
+	Effort string `json:"effort,omitempty"`
+	// Provider and Model are the per-task LLM runtime override chosen in the
+	// new-task composer. The model/provider is a property of the TASK, not the
+	// agent: dispatch prefers these over the owner agent's binding, which is
+	// now only a soft default. Provider is a runtime kind ("claude-code",
+	// "codex", …); Model is the runtime-specific model id. Empty means "fall
+	// back to the owner's binding, then the global default". Wire keys
+	// "provider"/"model" are additive + stable per the migration plan.
+	Provider         string `json:"provider,omitempty"`
+	Model            string `json:"model,omitempty"`
 	reviewState      string
 	SourceSignalID   string   `json:"source_signal_id,omitempty"`
 	SourceDecisionID string   `json:"source_decision_id,omitempty"`
@@ -352,6 +361,8 @@ type teamTaskWire struct {
 	PipelineStage        string          `json:"pipeline_stage,omitempty"`
 	ExecutionMode        string          `json:"execution_mode,omitempty"`
 	Effort               string          `json:"effort,omitempty"`
+	Provider             string          `json:"provider,omitempty"`
+	Model                string          `json:"model,omitempty"`
 	ReviewState          string          `json:"review_state,omitempty"`
 	SourceSignalID       string          `json:"source_signal_id,omitempty"`
 	SourceDecisionID     string          `json:"source_decision_id,omitempty"`
@@ -397,6 +408,8 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		PipelineStage:        t.pipelineStage,
 		ExecutionMode:        t.ExecutionMode,
 		Effort:               t.Effort,
+		Provider:             t.Provider,
+		Model:                t.Model,
 		ReviewState:          t.reviewState,
 		SourceSignalID:       t.SourceSignalID,
 		SourceDecisionID:     t.SourceDecisionID,
@@ -444,6 +457,8 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.pipelineStage = w.PipelineStage
 	t.ExecutionMode = w.ExecutionMode
 	t.Effort = w.Effort
+	t.Provider = w.Provider
+	t.Model = w.Model
 	t.reviewState = w.ReviewState
 	t.SourceSignalID = w.SourceSignalID
 	t.SourceDecisionID = w.SourceDecisionID

@@ -861,7 +861,14 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 		// (start work); terminal Approved decisions don't need a wake.
 		if wasApprovingFromDrafting {
 			if task := b.findTaskByIDLocked(taskID); task != nil {
-				b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), "system", truncateSummary(task.Title+" [approved]", 140), task.ID)
+				if isAutoOwner(task.Owner) {
+					// Activating an "auto"-assigned backlog task: there is no
+					// real owner to wake yet, so ask the CEO to assign a
+					// specialist (which reassigns → in_progress → dispatches).
+					b.requestAutoAssignmentLocked(task, actorSlug)
+				} else {
+					b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), "system", truncateSummary(task.Title+" [approved]", 140), task.ID)
+				}
 			}
 		}
 		packet := b.getOrInitPacketLocked(taskID)

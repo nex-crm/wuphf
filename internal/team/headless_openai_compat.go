@@ -126,10 +126,14 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// Use the ctx-aware StreamFn so cancellation propagates all the way
 	// to the HTTP request — without this a cancelled turn would pin the
 	// local server's inference slot until the model finishes generating.
-	// Per-agent ProviderBinding.Model wins over env/config/default —
-	// this is what makes agents like ceo run kimi-k2.6 while planner
-	// runs deepseek-v4-pro on the same install-wide ollama endpoint.
-	modelOverride := strings.TrimSpace(l.broker.MemberProviderBinding(slug).Model)
+	// Per-task model wins over the agent binding (model lives on the task);
+	// the binding then wins over env/config/default — this is what makes
+	// agents like ceo run kimi-k2.6 while planner runs deepseek-v4-pro on the
+	// same install-wide ollama endpoint.
+	modelOverride := l.taskModelForKind(slug, kind)
+	if modelOverride == "" {
+		modelOverride = strings.TrimSpace(l.broker.MemberProviderBinding(slug).Model)
+	}
 	streamFn := provider.NewOpenAICompatStreamFnWithCtxModelAndAgent(ctx, kind, modelOverride, slug)
 
 	// Live-chat relay streams the model's user-facing text to the channel

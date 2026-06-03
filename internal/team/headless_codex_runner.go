@@ -984,6 +984,11 @@ func codexToolProgressDetail(toolName string) string {
 // the AgentProfilePanel save flow keeps Model and Kind aligned, but
 // belt-and-suspenders matches how headlessClaudeModel reads its binding.
 func (l *Launcher) codexModelForAgent(slug string) string {
+	// Per-task model wins over the agent binding (the model lives on the task,
+	// not the agent). Only when the task's provider is codex.
+	if model := l.taskModelForKind(slug, provider.KindCodex); model != "" {
+		return model
+	}
 	if l != nil && l.broker != nil {
 		binding := l.broker.MemberProviderBinding(slug)
 		if binding.Kind == "codex" {
