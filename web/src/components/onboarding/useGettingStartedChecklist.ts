@@ -24,7 +24,7 @@ export const ONBOARDING_STATE_QUERY_KEY = ["onboarding-state"] as const;
 
 const CHECKLIST_STALE_MS = 3_000;
 
-export interface GettingStartedChecklist {
+export interface GettingStartedChecklistState {
   /** Checklist rows from the server (id + done; label overlaid in the UI). */
   items: OnboardingChecklistItem[];
   /** True once the user has closed the panel. */
@@ -37,7 +37,7 @@ export interface GettingStartedChecklist {
   dismiss: () => void;
 }
 
-export function useGettingStartedChecklist(): GettingStartedChecklist {
+export function useGettingStartedChecklist(): GettingStartedChecklistState {
   const queryClient = useQueryClient();
 
   const query = useQuery({

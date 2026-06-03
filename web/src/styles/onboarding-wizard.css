@@ -441,7 +441,7 @@
   line-height: 1.5;
   /* The mirrored issue can be long; keep it tidy inside the card. */
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .onboarding-handoff-foot {

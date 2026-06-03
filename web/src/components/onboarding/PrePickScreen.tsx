@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { get, post } from "../../api/client";
 import { showNotice } from "../ui/Toast";
@@ -419,11 +419,13 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
 
   // A live verify pass classified this runtime as ready. Record it so the
   // primary advance button can read "Next". Keyed by prereq binary.
-  function handleVerified(runtimeBinary: string): void {
+  // useCallback so RuntimeGuidePanel's effect (which lists onVerified as a
+  // dependency) does not re-run on every parent render.
+  const handleVerified = useCallback((runtimeBinary: string) => {
     setVerifiedReady((prev) =>
       prev[runtimeBinary] ? prev : { ...prev, [runtimeBinary]: true },
     );
-  }
+  }, []);
 
   // The runtime whose guide is currently expanded, if any.
   const expandedRuntime = expandedGuide
@@ -571,7 +573,7 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
             key={expandedRuntime.spec.binary}
             runtime={expandedRuntime.spec.binary}
             label={expandedRuntime.spec.label}
-            onVerified={(runtimeBinary) => handleVerified(runtimeBinary)}
+            onVerified={handleVerified}
           />
         ) : null}
 
