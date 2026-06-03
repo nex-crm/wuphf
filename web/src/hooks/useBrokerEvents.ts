@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { initApi, sseURL } from "../api/client";
+import { initApi } from "../api/client";
+import { openSharedEventStream } from "../api/eventStream";
 import {
   type AgentActivitySnapshot,
   directChannelSlug,
@@ -77,10 +78,8 @@ export function useBrokerEvents(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
 
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES) return;
-
-    const source = new ES(sseURL("/events"));
+    const source = openSharedEventStream();
+    if (!source) return;
     let graceTimer: ReturnType<typeof setTimeout> | null = null;
 
     function clearGrace(): void {
@@ -98,7 +97,7 @@ export function useBrokerEvents(enabled: boolean) {
         // auto-reconnected silently inside the 5s window without firing
         // an onopen we noticed. This avoids flagging a transient blip
         // as a sustained disconnect.
-        if (source.readyState !== source.OPEN) {
+        if (source?.readyState !== source?.OPEN) {
           setIsReconnecting(true);
         }
       }, RECONNECT_GRACE_MS);

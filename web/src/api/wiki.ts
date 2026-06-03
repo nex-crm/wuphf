@@ -3,6 +3,7 @@
  */
 
 import { del, get, post, sseURL } from "./client";
+import { openSharedEventStream, type SharedEventStream } from "./eventStream";
 
 export interface WikiArticle {
   path: string;
@@ -515,16 +516,15 @@ export function subscribeSectionsUpdated(
   handler: (event: WikiSectionsUpdatedEvent) => void,
 ): () => void {
   let closed = false;
-  let source: EventSource | null = null;
+  let source: SharedEventStream | null = null;
   let onEvent: ((ev: MessageEvent) => void) | null = null;
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES)
+    source = openSharedEventStream();
+    if (!source)
       return () => {
         closed = true;
       };
-    source = new ES(sseURL("/events"));
     onEvent = (ev: MessageEvent) => {
       if (closed) return;
       try {
@@ -848,16 +848,15 @@ export function subscribeEditLog(
   handler: (entry: WikiEditLogEntry) => void,
 ): () => void {
   let closed = false;
-  let source: EventSource | null = null;
+  let source: SharedEventStream | null = null;
   let onWrite: ((ev: MessageEvent) => void) | null = null;
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES)
+    source = openSharedEventStream();
+    if (!source)
       return () => {
         closed = true;
       };
-    source = new ES(sseURL("/events"));
     onWrite = (ev: MessageEvent) => {
       if (closed) return;
       try {

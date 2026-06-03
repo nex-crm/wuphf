@@ -12,7 +12,8 @@
  * writes, etc.) in every article view.
  */
 
-import { get, post, sseURL } from "./client";
+import { get, post } from "./client";
+import { openSharedEventStream, type SharedEventStream } from "./eventStream";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -274,7 +275,7 @@ export function subscribeEntityEvents(
   onSynth: (ev: BriefSynthesizedEvent) => void,
 ): () => void {
   let closed = false;
-  let source: EventSource | null = null;
+  let source: SharedEventStream | null = null;
 
   const factHandler = (ev: MessageEvent) => {
     if (closed) return;
@@ -300,10 +301,10 @@ export function subscribeEntityEvents(
   };
 
   try {
-    // EventSource may be undefined in tests that stub SSE away.
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES) return () => {};
-    source = new ES(sseURL("/events"));
+    // openSharedEventStream returns null when EventSource is unavailable
+    // (tests that stub SSE away).
+    source = openSharedEventStream();
+    if (!source) return () => {};
     source.addEventListener(
       "entity:fact_recorded",
       factHandler as EventListener,

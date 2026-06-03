@@ -12,6 +12,7 @@ import {
   mockReview,
 } from "./__fixtures__/notebook-mock";
 import * as client from "./client";
+import { openSharedEventStream, type SharedEventStream } from "./eventStream";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -568,16 +569,15 @@ export function subscribeNotebookEvents(
   handler: (ev: NotebookEvent) => void,
 ): () => void {
   let closed = false;
-  let source: EventSource | null = null;
+  let source: SharedEventStream | null = null;
   const listeners: Array<[string, EventListener]> = [];
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES)
+    source = openSharedEventStream();
+    if (!source)
       return () => {
         closed = true;
       };
-    source = new ES(client.sseURL("/events"));
 
     const onNotebook = (ev: MessageEvent) => {
       if (closed) return;

@@ -21,16 +21,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { get, sseURL } from "../../api/client";
+import { get } from "../../api/client";
+import { openSharedEventStream } from "../../api/eventStream";
 import {
   postDecision,
   postTaskComment,
   postTaskReject,
 } from "../../api/lifecycle";
-import {
-  getOfficeTasks,
-  type Task,
-} from "../../api/tasks";
+import { getOfficeTasks, type Task } from "../../api/tasks";
+import { formatIssueTitleForDisplay } from "../../lib/issueTitle";
 import {
   messageMarkdownComponents,
   messageRemarkPlugins,
@@ -42,12 +41,11 @@ import {
   applyAutocomplete,
 } from "../messages/Autocomplete";
 import { PixelAvatar } from "../ui/PixelAvatar";
-import { formatIssueTitleForDisplay } from "../../lib/issueTitle";
+import { IssueActionToolbar } from "./IssueActionToolbar";
 import { IssueActivityStream } from "./IssueActivityStream";
-import { LifecycleStatePill } from "./LifecycleStatePill";
 import { IssueDescription } from "./IssueDescription";
 import { IssueDetailTabs } from "./IssueDetailTabs";
-import { IssueActionToolbar } from "./IssueActionToolbar";
+import { LifecycleStatePill } from "./LifecycleStatePill";
 import { OwnerPicker } from "./OwnerPicker";
 import { ParentIssueBreadcrumb } from "./ParentIssueBreadcrumb";
 
@@ -374,9 +372,7 @@ export function normalizeIssueDocument(
   // the spec's `assignment` block when neither is set so existing
   // packet-driven Issues still render something.
   const description =
-    (taskRecord
-      ? strField(taskRecord, "details", "description")
-      : undefined) ??
+    (taskRecord ? strField(taskRecord, "details", "description") : undefined) ??
     taskHint?.description ??
     strField(rawSpec, "assignment") ??
     "";
@@ -531,8 +527,7 @@ function CommentItem({ comment }: CommentItemProps) {
     <article
       id={`comment-${comment.id}`}
       className={
-        "issue-comment" +
-        (isSuggestion ? " issue-comment--suggestion" : "")
+        "issue-comment" + (isSuggestion ? " issue-comment--suggestion" : "")
       }
       aria-label={`Comment by ${comment.author}`}
     >
@@ -858,10 +853,8 @@ function useDraftStream(taskId: string, enabled: boolean): DraftAccumulator {
   useEffect(() => {
     if (!enabled) return;
 
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES) return;
-
-    const source = new ES(sseURL("/events"));
+    const source = openSharedEventStream();
+    if (!source) return;
 
     source.addEventListener("issue_draft_section", (event) => {
       if (!("data" in event) || typeof event.data !== "string") return;
@@ -951,7 +944,9 @@ export function CommentsTimeline({
     commentMutation.mutate(trimmedComment);
   }
 
-  function handleCommentKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function handleCommentKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+  ) {
     // Autocomplete keyboard nav runs first so the textarea doesn't
     // swallow Enter when the panel is open. Same pattern as Composer.
     if (acItems.length > 0) {
@@ -1060,7 +1055,9 @@ export function CommentsTimeline({
             value={commentBody}
             onChange={(event) => {
               setCommentBody(event.target.value);
-              setCaret(event.target.selectionStart ?? event.target.value.length);
+              setCaret(
+                event.target.selectionStart ?? event.target.value.length,
+              );
               if (commentError) setCommentError(null);
             }}
             onSelect={(event) => {
@@ -1344,7 +1341,9 @@ export function IssueDocument({
         ) : null}
         <div className="issue-doc-header-row">
           <LifecycleStatePill state={doc.lifecycleState} />
-          <h2 className="issue-doc-title">{formatIssueTitleForDisplay(doc.title)}</h2>
+          <h2 className="issue-doc-title">
+            {formatIssueTitleForDisplay(doc.title)}
+          </h2>
         </div>
         <div className="issue-doc-meta-row">
           <OwnerPicker
@@ -1352,7 +1351,9 @@ export function IssueDocument({
             channel={doc.channel}
             currentOwner={doc.ownerSlug}
             onChanged={() => {
-              void queryClient.invalidateQueries({ queryKey: ["issue", taskId] });
+              void queryClient.invalidateQueries({
+                queryKey: ["issue", taskId],
+              });
               void queryClient.invalidateQueries({ queryKey: ["issues"] });
               void queryClient.invalidateQueries({
                 queryKey: ["issue-children"],
@@ -1397,7 +1398,10 @@ export function IssueDocument({
        *  component is preserved in this file for tests + legacy code
        *  paths but is no longer mounted. */}
       <div className="issue-doc-body">
-        <IssueDescription description={doc.description} isDrafting={isDrafting} />
+        <IssueDescription
+          description={doc.description}
+          isDrafting={isDrafting}
+        />
 
         {/* Live activity stream — surfaces what the owning agent is doing
          *  right now via the SSE-fed agentActivitySnapshots. Stays in the
@@ -1425,4 +1429,3 @@ export function IssueDocument({
     </div>
   );
 }
-

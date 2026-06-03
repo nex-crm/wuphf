@@ -10,7 +10,8 @@
  * message.
  */
 
-import { get, post, sseURL } from "./client";
+import { get, post } from "./client";
+import { openSharedEventStream, type SharedEventStream } from "./eventStream";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -138,7 +139,7 @@ export function subscribePlaybookEvents(
   onExecutionRecorded: (ev: PlaybookExecutionRecordedEvent) => void,
 ): () => void {
   let closed = false;
-  let source: EventSource | null = null;
+  let source: SharedEventStream | null = null;
 
   const handler = (ev: MessageEvent) => {
     if (closed) return;
@@ -153,9 +154,8 @@ export function subscribePlaybookEvents(
   };
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES) return () => {};
-    source = new ES(sseURL("/events"));
+    source = openSharedEventStream();
+    if (!source) return () => {};
     source.addEventListener(
       "playbook:execution_recorded",
       handler as EventListener,
@@ -192,7 +192,7 @@ export function subscribePlaybookSynthesizedEvents(
   onSynthesized: (ev: PlaybookSynthesizedEvent) => void,
 ): () => void {
   let closed = false;
-  let source: EventSource | null = null;
+  let source: SharedEventStream | null = null;
 
   const handler = (ev: MessageEvent) => {
     if (closed) return;
@@ -207,9 +207,8 @@ export function subscribePlaybookSynthesizedEvents(
   };
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
-    if (!ES) return () => {};
-    source = new ES(sseURL("/events"));
+    source = openSharedEventStream();
+    if (!source) return () => {};
     source.addEventListener("playbook:synthesized", handler as EventListener);
     source.onerror = () => {
       // Keep open; EventSource auto-reconnects.
