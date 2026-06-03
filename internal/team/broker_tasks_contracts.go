@@ -71,8 +71,24 @@ type TaskPlanInput struct {
 	// Park, when true, creates the task ASSIGNED but parked in the backlog
 	// (non-executable) instead of dispatching the owner now. The "Backlog"
 	// composer action sets this; "Start now" leaves it false.
-	Park      bool     `json:"park"`
+	Park bool `json:"park"`
+	// PlanFirst controls "Plan mode" (Phase 5): when true, the owner plans
+	// autonomously before executing (Planning state + Approve & Start gate);
+	// when false/absent, the task runs immediately.
+	//
+	// The human composer's toggle DEFAULTS ON and always sends an explicit value.
+	// The wire default (absent/nil) is OFF on purpose: agent- and CEO-created
+	// tasks (team_plan/team_task, self-heal, onboarding) must NOT each block on
+	// human plan-approval, or the autonomous office would stall — so they opt in
+	// explicitly when they want a plan gate.
+	PlanFirst *bool    `json:"plan_first,omitempty"`
 	DependsOn []string `json:"depends_on"`
+}
+
+// PlanFirstEnabled resolves the nullable PlanFirst toggle. Absent (nil) is OFF
+// (see PlanFirst); only an explicit true enables Plan mode.
+func (in TaskPlanInput) PlanFirstEnabled() bool {
+	return in.PlanFirst != nil && *in.PlanFirst
 }
 
 type TaskMemoryWorkflowRequest struct {

@@ -148,23 +148,35 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Effort:        strings.TrimSpace(item.Effort),
 			Provider:      strings.TrimSpace(item.Provider),
 			Model:         strings.TrimSpace(item.Model),
+			PlanFirst:     item.PlanFirstEnabled(),
 			DependsOn:     resolvedDeps,
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
 		b.refreshPlannedTaskBlockStateLocked(&task)
-		// Backlog (Park): assigned but parked. Land in Drafting — a
-		// non-executable state that shows in the Backlog stage and dispatches
-		// nobody. The user activates it from the task surface via "Approve &
-		// Start" (the drafting-only postDecision verb), which transitions
-		// Drafting→Running and wakes the owner. This overrides the in_progress
-		// promotion refreshPlannedTaskBlockStateLocked applies for real owners.
-		// (Drafting does not auto-trigger the CEO spec writer — that is only
-		// invoked from the onboarding first-issue flow.)
-		if item.Park {
+		// Lifecycle routing (Phase 5 Plan mode + Phase 3 Backlog):
+		//   - Backlog (Park): assigned but parked in Drafting — non-executable,
+		//     shows in Backlog, dispatches nobody. Activated via "Approve &
+		//     Start", which routes through PlanFirst (Drafting→Planning or
+		//     Drafting→Running) in the decision handler.
+		//   - Plan first + real owner (start now): land in Planning so the owner
+		//     is dispatched to write a plan first (plan-only packet), then
+		//     "Approve & Start" → Running. Overrides the in_progress promotion.
+		//   - Plan first OFF (start now): leave the in_progress promotion in
+		//     place → runs immediately, no plan/approval gate.
+		// (Auto-owner Plan-first tasks plan after the CEO assigns a specialist;
+		// the reassign path routes them into Planning.)
+		switch {
+		case item.Park:
 			if err := b.applyLifecycleStateLocked(&task, LifecycleStateDrafting); err != nil {
 				rollbackPlan()
 				http.Error(w, "failed to park task", http.StatusInternalServerError)
+				return
+			}
+		case task.PlanFirst && task.status == "in_progress":
+			if err := b.applyLifecycleStateLocked(&task, LifecycleStatePlanning); err != nil {
+				rollbackPlan()
+				http.Error(w, "failed to start planning", http.StatusInternalServerError)
 				return
 			}
 		}

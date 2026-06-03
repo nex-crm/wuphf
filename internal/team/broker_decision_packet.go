@@ -840,13 +840,19 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 		// to Running (start work) instead of Approved (terminal); see
 		// lifecycleStateForDecisionAction for the rationale.
 		var currentState LifecycleState
+		var planFirst bool
 		if task := b.findTaskByIDLocked(taskID); task != nil {
 			currentState = task.LifecycleState
+			planFirst = task.PlanFirst
 		}
-		target, reason = lifecycleStateForDecisionAction(action, currentState)
+		target, reason = lifecycleStateForDecisionAction(action, currentState, planFirst)
 		if action == RecordDecisionApprove && currentState == LifecycleStateDrafting {
 			wasApprovingFromDrafting = true
 		}
+		// Approving from Drafting (activate) or Planning (plan approved) starts
+		// the owner working — on a plan turn or an execution turn respectively.
+		startingWork := action == RecordDecisionApprove &&
+			(currentState == LifecycleStateDrafting || currentState == LifecycleStatePlanning)
 		if _, err := b.transitionLifecycleLocked(taskID, target, reason); err != nil {
 			return fmt.Errorf("record decision: transition: %w", err)
 		}
@@ -859,12 +865,13 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 		// enqueueHeadlessTurnForAgent(owner). Mirrors the status-change
 		// emit in broker_tasks_lifecycle.go. Only on Drafting->Running
 		// (start work); terminal Approved decisions don't need a wake.
-		if wasApprovingFromDrafting {
+		if startingWork {
 			if task := b.findTaskByIDLocked(taskID); task != nil {
 				if isAutoOwner(task.Owner) {
 					// Activating an "auto"-assigned backlog task: there is no
 					// real owner to wake yet, so ask the CEO to assign a
-					// specialist (which reassigns → in_progress → dispatches).
+					// specialist (which reassigns → dispatches, honoring Plan
+					// mode via the reassign path).
 					b.requestAutoAssignmentLocked(task, actorSlug)
 				} else {
 					b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), "system", truncateSummary(task.Title+" [approved]", 140), task.ID)
@@ -945,11 +952,21 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 // disambiguation, clicking "Approve & Start" on a Drafting issue would
 // land in the terminal Approved state and write a misleading wiki
 // "decision" with no execution.
-func lifecycleStateForDecisionAction(action recordDecisionAction, currentState LifecycleState) (LifecycleState, string) {
+func lifecycleStateForDecisionAction(action recordDecisionAction, currentState LifecycleState, planFirst bool) (LifecycleState, string) {
 	switch action {
 	case RecordDecisionApprove:
-		if currentState == LifecycleStateDrafting {
+		switch currentState {
+		case LifecycleStateDrafting:
+			// Activating a parked/backlog task. Plan-first tasks plan first
+			// (owner writes a plan, then a second Approve & Start runs it);
+			// non-plan-first tasks go straight to execution.
+			if planFirst {
+				return LifecycleStatePlanning, "human activated task into planning"
+			}
 			return LifecycleStateRunning, "human approved drafting issue and started work"
+		case LifecycleStatePlanning:
+			// The owner's plan was approved — start executing it.
+			return LifecycleStateRunning, "human approved plan and started work"
 		}
 		return LifecycleStateApproved, "human approved decision"
 	case RecordDecisionRequestChanges:

@@ -590,7 +590,17 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			task.Owner = newOwner
 			status := strings.ToLower(strings.TrimSpace(task.status))
 			if status != "done" && status != "review" {
-				task.status = "in_progress"
+				if task.PlanFirst && taskIsPreExecution(task.LifecycleState) {
+					// Plan mode: a plan-first task that has not started yet plans
+					// under its new owner before executing. This is the default
+					// path for Auto-owner tasks the CEO assigns (composer's
+					// default owner). applyLifecycleStateLocked sets Planning +
+					// status=in_progress + stage=plan; the reindex below
+					// preserves Planning while pre-execution.
+					_ = b.applyLifecycleStateLocked(task, LifecycleStatePlanning)
+				} else {
+					task.status = "in_progress"
+				}
 			}
 			if taskNeedsStructuredReview(task) && strings.TrimSpace(task.reviewState) == "" {
 				task.reviewState = "pending_review"
