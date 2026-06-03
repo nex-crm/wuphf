@@ -24,6 +24,7 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
+const { execFile } = require("node:child_process");
 
 const REGISTRY_URL = "https://registry.npmjs.org/wuphf/latest";
 // Generous enough to survive a cold TLS handshake on a slow network but
@@ -31,15 +32,55 @@ const REGISTRY_URL = "https://registry.npmjs.org/wuphf/latest";
 // per user because the result is cached on disk.
 const FETCH_TIMEOUT_MS = 3000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const backupExcludedCacheDirs = new Set();
+let backupExclusionRunner = (target) =>
+  new Promise((resolve, reject) => {
+    execFile(
+      "/usr/bin/tmutil",
+      ["addexclusion", target],
+      { timeout: 2000 },
+      (err) => {
+        if (err) reject(err);
+        else resolve();
+      },
+    );
+  });
 
 function cacheDir() {
-  // Sits under ~/.wuphf so HOME-override dev environments (see
-  // docs/LOCAL-DEV-PROD-ISOLATION.md) get a separate cache from prod.
-  return path.join(os.homedir(), ".wuphf", "cache");
+  // Sits under the active WUPHF runtime home so workspace/dev overrides get
+  // separate caches from prod.
+  const runtimeHome = process.env.WUPHF_RUNTIME_HOME?.trim() || os.homedir();
+  return path.join(runtimeHome, ".wuphf", "cache");
 }
 
 function latestVersionCachePath() {
   return path.join(cacheDir(), "latest-version.json");
+}
+
+async function markCacheDirExcludedFromBackup(dir = cacheDir()) {
+  if (process.platform !== "darwin") return;
+  const candidates = new Set([dir]);
+  try {
+    candidates.add(await fsp.realpath(dir));
+  } catch {
+    // The cache write path is best-effort; backup metadata is too.
+  }
+  for (const candidate of candidates) {
+    if (backupExcludedCacheDirs.has(candidate)) continue;
+    backupExcludedCacheDirs.add(candidate);
+    try {
+      await backupExclusionRunner(candidate);
+    } catch {
+      backupExcludedCacheDirs.delete(candidate);
+    }
+  }
+}
+
+async function ensureCacheDir() {
+  const dir = cacheDir();
+  await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
+  await markCacheDirExcludedFromBackup(dir);
+  return dir;
 }
 
 async function readCache() {
@@ -59,7 +100,7 @@ async function readCache() {
 
 async function writeCache(version) {
   try {
-    await fsp.mkdir(cacheDir(), { recursive: true });
+    await ensureCacheDir();
     const target = latestVersionCachePath();
     const tmp = `${target}.tmp`;
     await fsp.writeFile(tmp, JSON.stringify({ version, checkedAt: Date.now() }));
@@ -119,9 +160,15 @@ module.exports = {
   getLatestVersion,
   compareVersions,
   cacheDir,
+  ensureCacheDir,
   latestVersionCachePath,
   // Exported for tests.
+  markCacheDirExcludedFromBackup,
   fetchLatestFromRegistry,
   readCache,
   writeCache,
+  setBackupExclusionRunnerForTest(runner) {
+    backupExcludedCacheDirs.clear();
+    backupExclusionRunner = runner;
+  },
 };

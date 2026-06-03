@@ -190,6 +190,10 @@ func initWorkspaces() {
 		// running on the legacy port).
 		fmt.Fprintf(os.Stderr, "workspace migration: %v\n", err)
 	}
+	if err := workspaces.EnsureCacheBackupExclusions(); err != nil {
+		// Non-fatal: cache backup exclusions are best-effort repair.
+		fmt.Fprintf(os.Stderr, "cache backup exclusions: %v\n", err)
+	}
 }
 
 // wireBrokerWorkspaces registers startup wiring for the launcher's broker.

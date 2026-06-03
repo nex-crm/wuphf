@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
@@ -124,6 +125,10 @@ func Create(ctx context.Context, name, blueprint string, opts CreateOptions) err
 	if err := os.MkdirAll(wuphfDir, 0o700); err != nil {
 		releaseLock(lf)
 		return fmt.Errorf("workspaces: create %q: mkdir: %w", name, err)
+	}
+	if err := config.EnsureCacheDir(config.CacheDirForRuntimeHome(runtimeHome)); err != nil {
+		releaseLock(lf)
+		return fmt.Errorf("workspaces: create %q: cache dir: %w", name, err)
 	}
 
 	now := time.Now().UTC()
