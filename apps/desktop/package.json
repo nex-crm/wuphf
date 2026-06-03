@@ -40,7 +40,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.5.0",
-    "ws": "8.20.0"
+    "ws": "8.20.1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
