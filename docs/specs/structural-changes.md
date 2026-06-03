@@ -34,7 +34,7 @@
 
 **Read this section first on session resume, then the Change log below.**
 
-- **Branch:** `worktree-structural-changes`. **HEAD:** `91180e7a`. Base `origin/main` @ `46f06e54`.
+- **Branch:** `worktree-structural-changes`. **HEAD:** `8ae83e6c`. Base `origin/main` @ `46f06e54`.
 - **PHASE 4 DONE (Librarian = Pam; commits `e9b2f1d3` presence + `91180e7a` authority move).**
   Promoted the wiki "Pam the Archivist" to a first-class built-in agent: **slug `librarian`, name
   "Pam", role "Librarian"** (`librarian.go`). Present in every new workspace like the CEO
@@ -88,14 +88,19 @@
   → runs); **Backlog** create sends `park=true` → task lands in `Drafting` (Backlog stage, assigned,
   NOT dispatched), activated via the FE "Approve & Start" (Drafting→Running, wakes owner; Auto→triage
   on approve). Live-verified all 4 flows + disk persistence.
-- **NEXT: Phase 5 — Plan mode (REVISED 2026-06-04). IN PROGRESS.** Per-task "Plan first" toggle
-  (default ON): owner plans autonomously into its notebook → Approve & Start → execute; OFF → run
-  immediately. New `LifecycleStatePlanning` state + plan-only work packet. Specs live in notebooks;
-  Librarian promotes selectively (NOT auto to wiki Specs/). See the Phase 5 checklist entry for the
-  full locked design. Then Phase 6 (migration, LAST). Parallel instances ✅, Phase 4 Librarian ✅,
-  Librarian direct wiki-write ✅ (`5c386594`). Phase 6 migration also folds provider/model/effort +
-  "auto" sentinel + adds the built-in `librarian` member + the new `plan_first`/Planning state into
-  legacy-state migration.
+- **PHASE 5 — Plan mode DONE (2026-06-04; backend `a9aec140` + frontend `8ae83e6c`).** Per-task
+  "Plan first" toggle (composer, default ON): the owner plans autonomously first (new
+  `LifecycleStatePlanning` — executable, the owner gets a PLAN-ONLY work packet: write a plan to its
+  own notebook, post a summary, no repo changes, stop) → "Approve & Start" (Planning→Running) → the
+  owner executes against its plan. OFF → straight to Running. Specs live in the owner's notebook;
+  the Librarian promotes to the wiki only if worth it (NOT auto to Specs/). `plan_first` wire field
+  defaults OFF for agent/CEO/internal creation (so the autonomous office isn't gated on human
+  approval); the composer sends explicit true. Auto-owner (composer default) plans after the CEO
+  reassigns (reassign routes a pre-execution plan-first task → Planning; reindex preserves Planning).
+  Full Go (39) + web (1738) green. **NEXT: Phase 6 (migration, LAST).** Parallel instances ✅, Phase 4
+  Librarian ✅, Librarian direct wiki-write ✅ (`5c386594`). Phase 6 migration also folds
+  provider/model/effort + "auto" sentinel + adds the built-in `librarian` member + the new
+  `plan_first`/Planning state into legacy-state migration.
 - **⚠ REGRESSION LESSON (2026-06-03):** Phase 2a (channel-per-task) silently broke 5
   `internal/teammcp` tests because 2a verification ran only `./internal/team`. Fixed in
   `9473517c`. **On every phase, run the FULL Go + web suites, not just the package you touched**
@@ -649,7 +654,7 @@
     (reviewer resolver prefers librarian-when-present; `team_notebook_review` opened to
     Librarian; prompts delegate). Owning agents still write notebooks. Gradual/legacy-safe.
   - Gate: Librarian present in tasks ✅; promotion/review flows route to Librarian ✅.
-- [ ] **Phase 5 — Plan mode (REVISED 2026-06-04; supersedes the old "spec→wiki Specs/" D3).**
+- [x] **Phase 5 — Plan mode DONE** (`a9aec140` backend + `8ae83e6c` frontend). (REVISED 2026-06-04; supersedes the old "spec→wiki Specs/" D3.)
     Per-task **"Plan first" toggle, default ON** (composer toggle alongside Start now/Backlog).
     **ON →** the owner agent PLANS AUTONOMOUSLY first: a new `LifecycleStatePlanning` state
     dispatches the owner with a PLAN-ONLY work packet — explore, write the plan into its OWN
