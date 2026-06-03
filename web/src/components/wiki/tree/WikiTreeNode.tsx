@@ -6,6 +6,21 @@ import {
   useState,
 } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
+import {
+  AppWindow,
+  File,
+  FileCode2,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  Folder,
+  GitBranch,
+  Globe,
+  type LucideIcon,
+  NotebookText,
+  Presentation,
+} from "lucide-react";
 
 import type { WikiFSTreeNode } from "../../../api/wiki";
 import { type FileKind, fileKindForPath } from "../viewers/fileKind";
@@ -47,36 +62,38 @@ interface WikiTreeNodeProps {
   children?: ReactNode;
 }
 
-const ICON_BY_TYPE: Record<WikiFSTreeNode["type"], string> = {
-  dir: "📁",
-  page: "📄",
-  file: "📎",
-  app: "🖥️",
-  website: "🌐",
+const ICON_BY_TYPE: Record<WikiFSTreeNode["type"], LucideIcon> = {
+  dir: Folder,
+  page: FileText,
+  file: File,
+  app: AppWindow,
+  website: Globe,
 };
 
-// File leaves get an icon that reflects their type, classified the same way the
-// viewer dispatcher routes them (fileKindForPath is React/viewer-free by design).
-const FILE_GLYPH: Record<FileKind, string> = {
-  image: "🖼️",
-  media: "🎬",
-  pdf: "📕",
-  csv: "📊",
-  xlsx: "📊",
-  docx: "📘",
-  pptx: "📙",
-  notebook: "📓",
-  mermaid: "🔷",
-  source: "📜",
-  google: "🟦",
-  fallback: "📎",
+// File leaves get an icon that reflects their file type, classified the same way
+// the viewer dispatcher routes them (fileKindForPath is React/viewer-free by
+// design). Crisp monochrome line icons (not emoji) so the tree reads as a
+// crafted KB surface and inherits the row's text color.
+const FILE_GLYPH: Record<FileKind, LucideIcon> = {
+  image: FileImage,
+  media: FileVideo,
+  pdf: FileText,
+  csv: FileSpreadsheet,
+  xlsx: FileSpreadsheet,
+  docx: FileText,
+  pptx: Presentation,
+  notebook: NotebookText,
+  mermaid: GitBranch,
+  source: FileCode2,
+  google: FileText,
+  fallback: File,
 };
 
 /**
- * The tree-row glyph for a node: file leaves reflect their file type; folders,
+ * The tree-row icon for a node: file leaves reflect their file type; folders,
  * pages, and embedded apps/websites use their structural icon.
  */
-function glyphForNode(node: WikiFSTreeNode): string {
+function iconForNode(node: WikiFSTreeNode): LucideIcon {
   if (node.type === "file") return FILE_GLYPH[fileKindForPath(node.path)];
   return ICON_BY_TYPE[node.type];
 }
@@ -234,7 +251,10 @@ export default function WikiTreeNode({
             onClick={handleRowClick}
           >
             <span className="wk-tree2-icon" aria-hidden="true">
-              {glyphForNode(node)}
+              {(() => {
+                const Icon = iconForNode(node);
+                return <Icon size={15} strokeWidth={1.75} />;
+              })()}
             </span>
             <span className="wk-tree2-title">{node.title}</span>
             {/*

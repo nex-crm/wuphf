@@ -3338,8 +3338,27 @@
 }
 .wk-tree2-icon {
   flex: 0 0 auto;
-  font-size: 12px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  /* Crisp monochrome line icons (lucide) in a muted ink so the tree reads as a
+     calm KB index; the active/selected row lifts its icon to full text color
+     via the rule below. */
+  color: var(--wk-text-tertiary, var(--wk-text-muted));
+}
+.wk-tree2-icon svg {
+  width: 15px;
+  height: 15px;
+}
+/* Folders carry a touch of the warm accent so structure reads at a glance. */
+.wk-tree2-row[data-node-type="dir"] .wk-tree2-icon {
+  color: var(--wk-amber);
+}
+.wk-tree2-row[aria-selected="true"] .wk-tree2-icon,
+.wk-tree2-row.is-selected .wk-tree2-icon {
+  color: var(--wk-text);
 }
 .wk-tree2-title {
   overflow: hidden;
