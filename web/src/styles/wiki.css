@@ -3180,14 +3180,17 @@
   align-items: center;
   gap: 6px;
 }
-/* Give the file-search its own full-width row. In the narrow Files panel it
-   could not fit beside the New page + Upload buttons, so it collapsed to a
-   tiny ~34px square with the placeholder clipped — reading as a useless box.
-   flex-basis:100% forces it onto its own line as a proper search field; the
-   two buttons wrap below it. */
+/* Give the file-search its own full-width row, placed BELOW the action buttons
+   so it sits directly above the tree it filters (actions first, then the
+   filter adjacent to its list). In the narrow Files panel it could not fit
+   beside the New page + Upload buttons, so it collapsed to a tiny ~34px square
+   with the placeholder clipped — reading as a useless box. flex-basis:100%
+   forces it onto its own line; order:1 drops it under the buttons. */
 .wk-tree2-toolbar .wk-tree2-search {
+  order: 1;
   flex: 1 1 100%;
   min-width: 0;
+  margin-top: 2px;
   font-family: var(--wk-chrome);
   font-size: 12px;
   padding: 6px 9px;
