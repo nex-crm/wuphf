@@ -34,26 +34,34 @@
 
 **Read this section first on session resume, then the Change log below.**
 
-- **Branch:** `worktree-structural-changes`. **HEAD:** `eabd09e1`. Base `origin/main` @ `46f06e54`.
+- **Branch:** `worktree-structural-changes`. **HEAD:** `981520db`. Base `origin/main` @ `46f06e54`.
 - **Commits so far:** …Phase 0–2 · `5e43ceb3` Phase 3a · `d5b10eb8` Phase 3b · `35012a1d` Phase 3c ·
   `9473517c` teammcp fix · `b5faabb8` tracker · `96a48401` per-task runtime + backlog/Auto (backend) ·
   `4a1ef8bf` same (frontend) · `9484ce3c` tracker · **`f638c554` parallel-instances A (thread per-turn
   task identity via ctx)** · **`576e972a` B (nest scheduler by lane = (slug, worktree-path))** ·
-  **`e0b3cb7c` C (relax exclusive lane: distinct-worktree owner tasks run concurrently; live_external
-  still serialized)** · **`c18c8a56` D (concurrency verification tests)** · `eabd09e1` (sandbox-bypass
-  per-turn fix). All green, all committed.
-- **PARALLEL INSTANCES DONE (2026-06-03).** One agent now runs multiple tasks at once, each on its
-  own per-task model. Design: the headless scheduler lane key is the turn's **resolved git worktree
-  path** (`headlessLane{slug, key}` + `laneForTurn` in `headless_codex_queue.go`), NOT the task id —
-  so two turns share a lane (serialize) exactly when they write the same directory. Distinct worktrees
-  → distinct lanes → parallel; shared worktree (dependency reuse) / office-mode / chat / lead → the
-  agent's default `""` lane → serialized as before. This makes the scheduler intrinsically
-  collision-proof, which let admission control (`taskRequiresExclusiveOwnerTurn`) relax to
-  `live_external`-only (worktree tasks no longer queue behind each other; external side-effects still
-  do). Per-turn task identity threads via `context.Context` (`withHeadlessTurnTaskID` /
-  `turnTaskForCtx` / `turnTaskIDForCtx`) so model/effort/provider/workspace/sandbox-bypass all resolve
-  THIS turn's task, not "first in_progress" (agentActiveTask). Full Go + team suites green; headless/
-  queue/recovery + the two new parallel tests green under `-race`; golangci-lint 0 issues.
+  **`e0b3cb7c` C (relax exclusive lane: distinct-worktree owner tasks run concurrently)** ·
+  **`c18c8a56` D (concurrency verification tests)** · `eabd09e1` (sandbox-bypass per-turn fix) ·
+  `d91e4540` tracker · `1361dfd8` (atomic MCP-config write) · **`981520db` (non-dependent tasks all run
+  together: office/external own-lane + exclusive lane fully off + resume honors real deps)**. All
+  green, all committed. (`ba5076c0`, a test-go.sh timeout bump, landed on the branch from the user — not
+  my work, left as-is.)
+- **PARALLEL INSTANCES DONE (2026-06-03).** One agent now runs multiple tasks at once, each on its own
+  per-task model. **Rule (user, 2026-06-03): "if they are not dependent, do them all together" — a
+  declared `depends_on` is the ONLY thing that serializes tasks; everything non-dependent runs
+  concurrently, across ALL execution modes.** Design: the headless scheduler lane key
+  (`headlessLane{slug, key}` + `laneForTurn` in `headless_codex_queue.go`) is the turn's **resolved
+  worktree path** for worktree tasks (distinct → parallel; shared tree → one serialized lane) and
+  **`"task:<id>"`** for office/live_external tasks (each its own lane → parallel); chat + lead stay on
+  the agent's default `""` lane. Admission control's synthetic exclusive-owner serialization is fully
+  off (`taskRequiresExclusiveOwnerTurn` → false) — `live_external` no longer serializes by mode.
+  `ResumeTask` now honors real deps explicitly (`hasUnresolvedDepsLocked`) so a dependent task stays
+  blocked on resume (the removed exclusive lane used to re-block as a side effect) — preserving the
+  inverse invariant: dependent tasks do NOT run together. Per-turn task identity threads via
+  `context.Context` (`withHeadlessTurnTaskID` / `turnTaskForCtx` / `turnTaskIDForCtx`) so
+  model/effort/provider/workspace/sandbox-bypass resolve THIS turn's task, not "first in_progress."
+  Per-agent MCP config writes atomically (torn-read guard for concurrent same-slug turns). Full Go
+  (39 pkgs) + web (1738) suites green; lane/parallel/resume/recovery green under `-race`; golangci-lint
+  0 issues.
 - **PHASE 3 REVISION DONE (per-task runtime + backlog/Auto):** the LLM model/provider is now a
   property of the TASK, not the agent (teamTask gains `provider`/`model` next to `effort`; dispatch
   prefers task runtime over the owner's soft-default binding via `effectiveProviderKindForAgent`/
