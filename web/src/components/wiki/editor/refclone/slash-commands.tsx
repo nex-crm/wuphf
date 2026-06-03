@@ -516,7 +516,7 @@ export function SlashCommands({ editor }: SlashCommandsProps) {
       {open && filtered.length > 0 && (
         <div
           ref={menuRef}
-          className="absolute z-50 w-[300px] bg-popover border border-border rounded-xl shadow-lg p-1.5 overflow-hidden max-h-[380px] overflow-y-auto"
+          className="absolute z-50 w-[280px] bg-popover border border-border rounded-lg shadow-lg py-1 overflow-hidden max-h-[380px] overflow-y-auto"
           style={{
             top: position.top,
             left: position.left,
@@ -528,7 +528,7 @@ export function SlashCommands({ editor }: SlashCommandsProps) {
             if (!items || items.length === 0) return null;
             return (
               <div key={group.key}>
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground px-2.5 pt-2 pb-1.5">
+                <div className="text-[9px] uppercase tracking-wider text-muted-foreground px-3 pt-2 pb-1">
                   {group.title}
                 </div>
                 {items.map((cmd) => {
@@ -543,18 +543,18 @@ export function SlashCommands({ editor }: SlashCommandsProps) {
                       }}
                       onMouseEnter={() => setSelectedIndex(flatIndex)}
                       className={cn(
-                        "flex items-start gap-2.5 w-full px-2.5 py-2 text-left rounded-md transition-colors",
+                        "flex items-center gap-3 w-full px-3 py-1.5 text-left transition-colors",
                         flatIndex === selectedIndex
                           ? "bg-accent text-accent-foreground"
                           : "hover:bg-accent/50",
                       )}
                     >
-                      <Icon className="mt-0.5 h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="flex flex-col min-w-0">
-                        <p className="text-[12px] font-medium leading-snug truncate">
+                      <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-medium truncate">
                           {cmd.label}
                         </p>
-                        <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground truncate">
+                        <p className="text-[10px] text-muted-foreground truncate">
                           {cmd.description}
                         </p>
                       </div>
