@@ -514,6 +514,41 @@ export default function WikiArticle({
     setTab("article");
   };
 
+  // Full-page editing surface. In Edit mode we drop the reader chrome (title,
+  // breadcrumb, hatnote, related rails) AND the right sidebar so the editor
+  // takes over the whole content area — the immersive, full-page writing
+  // experience of the reference app. The column spans the article + right-rail
+  // grid tracks (see `.wk-article-col--editing`) and the editor fills its
+  // height. The HatBar stays so the writer can switch back to the article view.
+  if (tab === "edit") {
+    return (
+      <main
+        className="wk-article-col wk-article-col--editing"
+        aria-label={`Editing ${article.title}`}
+      >
+        <LiveEditingBanner liveAgent={liveAgent} article={article} />
+        <HatBar
+          active={tab}
+          onChange={setTab}
+          rightRail={context ? [context] : undefined}
+        />
+        <ArticleTabPanels
+          tab={tab}
+          article={article}
+          catalog={catalog}
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          markdownComponents={markdownComponents}
+          visualArtifact={visualArtifact}
+          inlineArtifacts={inlineArtifacts}
+          onEditorSaved={handleEditorSaved}
+          onEditorCancel={handleEditorCancel}
+          onVersionRestored={handleVersionRestored}
+        />
+      </main>
+    );
+  }
+
   return (
     <>
       <main className="wk-article-col">

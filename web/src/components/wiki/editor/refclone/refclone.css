@@ -31,38 +31,46 @@
   flex-direction: column;
   height: clamp(520px, 78vh, 1100px);
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.4 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Warm WUPHF palette. The ported editor + its vendored primitives reference
+     shadcn token NAMES (--background, --primary, --muted, …); map them to the
+     host's theme-aware --wk-* tokens so the editor wears WUPHF's warm "paper"
+     look (like the notebook surface) and follows the active theme — Nex Light /
+     Dark / Noir Gold — with no separate dark block. Gold/olive is the accent. */
+  --background: var(--wk-paper);
+  --foreground: var(--wk-text);
+  --card: var(--wk-surface);
+  --card-foreground: var(--wk-text);
+  --popover: var(--wk-surface);
+  --popover-foreground: var(--wk-text);
+  --primary: var(--wk-amber);
+  --primary-foreground: var(--wk-paper);
+  --secondary: var(--wk-paper-dark);
+  --secondary-foreground: var(--wk-text);
+  --muted: var(--wk-paper-dark);
+  --muted-foreground: var(--wk-text-muted);
+  /* A soft, refined warm-gold wash for hover/active surfaces (toolbar toggles,
+     slash rows). A fixed low-opacity mix off the gold accent reads as elegant
+     parchment rather than the loud highlighter the raw banner tint can be. */
+  --accent: color-mix(in srgb, var(--wk-amber) 14%, transparent);
+  --accent-foreground: var(--wk-text);
+  --destructive: var(--wk-wikilink-broken, oklch(0.577 0.245 27.325));
+  --border: var(--wk-border);
+  --input: var(--wk-border);
+  --ring: var(--wk-amber);
+  --chart-1: var(--wk-amber);
+  --chart-2: var(--wk-text-muted);
+  --chart-3: var(--wk-text-tertiary, var(--wk-text-muted));
+  --chart-4: var(--wk-border-strong, var(--wk-border));
+  --chart-5: var(--wk-text);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.4 0 0);
+  --sidebar: var(--wk-surface);
+  --sidebar-foreground: var(--wk-text);
+  --sidebar-primary: var(--wk-amber);
+  --sidebar-primary-foreground: var(--wk-paper);
+  --sidebar-accent: var(--wk-amber-bg);
+  --sidebar-accent-foreground: var(--wk-text);
+  --sidebar-border: var(--wk-border);
+  --sidebar-ring: var(--wk-amber);
 
   /* Radius scale the vendored shadcn primitives reference via
      rounded-[min(var(--radius-md),Npx)] / --radius-lg etc. */
@@ -97,40 +105,71 @@
   color: var(--foreground);
 }
 
-/* ── Token scope: dark ──────────────────────────────────────────────────── */
-.refclone-editor.dark,
-.dark .refclone-editor {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+/* Dark theming is inherited automatically: the tokens above map to the host's
+   --wk-* tokens, which already switch per `data-theme` (Nex Dark / Noir Gold).
+   No editor-local dark override is needed. */
+
+/* ── Warm editorial prose ───────────────────────────────────────────────────
+   WYSIWYG should read like the published article. The wiki reader sets article
+   body in the serif face; mirror it in the editor so editing and reading match
+   and the surface feels like the warm notebook pages, not a code box. Chrome
+   (toolbar, menus) keeps the UI sans; code/pre keep mono. */
+.refclone-editor .tiptap {
+  font-family: var(--wk-body-serif, "Newsreader", Georgia, ui-serif, serif);
+  color: var(--wk-text);
+}
+.refclone-editor .tiptap code,
+.refclone-editor .tiptap pre,
+.refclone-editor .tiptap kbd {
+  font-family: var(--wk-mono, ui-monospace, "SF Mono", monospace);
+}
+
+/* ── Menu / popover polish (slash, bubble, link/media/embed, mention) ───────
+   Every floating surface carries `bg-popover`. Give them one warm, soft
+   elevation + hairline border + tightened radius so they read as crafted
+   paper cards rather than the default flat drop-shadow. */
+.refclone-editor .bg-popover {
+  border-radius: 12px;
+  border-color: var(--wk-border);
+  background: var(--wk-surface);
+  box-shadow:
+    0 1px 2px rgba(60, 50, 30, 0.06),
+    0 12px 32px -10px rgba(60, 50, 30, 0.24);
+  backdrop-filter: saturate(1.05);
+}
+/* Slash/mention rows: soft warm hover + a gold rail on the active row. */
+.refclone-editor .bg-popover button:hover,
+.refclone-editor .bg-popover [role="option"]:hover {
+  background: color-mix(in srgb, var(--wk-amber) 10%, transparent);
+}
+.refclone-editor .bg-popover .bg-accent {
+  background: color-mix(in srgb, var(--wk-amber) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--wk-amber);
+}
+
+/* ── Full-page editing ──────────────────────────────────────────────────────
+   In edit mode WikiArticle drops the reader chrome + right rail and tags the
+   column `--editing`; let the editor fill the whole content height so it reads
+   as a full-page writing surface (like the reference app), not a boxed pane. */
+.wk-article-col--editing {
+  grid-column: 2 / -1;
+  padding: 10px 28px 0;
+  overflow-y: auto;
+}
+/* The editor owns its own scroll, so give it a tall, viewport-anchored height
+   rather than relying on a multi-level flex-fill chain through the editor
+   controller's wrappers (which aren't all flex parents). This fills the
+   content area for the full-page writing surface; the prose still centers via
+   the editor's internal max-w-3xl. */
+.wk-article-col--editing .wk-editor,
+.wk-article-col--editing .wk-editor-panes,
+.wk-article-col--editing .wk-editor-pane--rich,
+.wk-article-col--editing .wk-editor-rich {
+  min-height: 0;
+}
+.wk-article-col--editing .refclone-editor {
+  height: calc(100vh - 12rem);
+  min-height: 460px;
 }
 
 /* ── Thin scrollbars (toolbar + scroll regions) ─────────────────────────── */

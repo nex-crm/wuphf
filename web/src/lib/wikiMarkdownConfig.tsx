@@ -15,6 +15,7 @@ import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import type { PluggableList } from "unified";
 
+import { wikiFileUrl } from "../api/wiki";
 import { CalloutBlockquote } from "../components/wiki/Callout";
 import ImageEmbed from "../components/wiki/ImageEmbed";
 import { calloutRemarkPlugin } from "../components/wiki/parseCallout";
@@ -156,12 +157,29 @@ export function buildMarkdownComponents(
     },
     img: ({ src, alt, width, height }: ImageProps): ReactElement | null => {
       if (!src) return null;
+      // Resolve a relative image (`./assets/x.png`, `../img/x.png`, `x.png`)
+      // against the article's directory and route it through the wiki file
+      // API. Absolute/remote/data URLs (caught by NON_WIKI_HREF_RE) pass
+      // through untouched. Without this, a relative asset src resolves against
+      // the SPA base URL (`/assets/x.png`) and 404s.
+      let resolvedSrc = String(src);
+      if (articlePath && !NON_WIKI_HREF_RE.test(resolvedSrc)) {
+        const lastSlash = articlePath.lastIndexOf("/");
+        const baseDir = lastSlash >= 0 ? articlePath.slice(0, lastSlash) : "";
+        const segments = joinWikiSegments(
+          baseDir ? baseDir.split("/") : [],
+          resolvedSrc.split(/[?#]/)[0],
+        );
+        if (segments && segments.length > 0) {
+          resolvedSrc = wikiFileUrl(segments.join("/"));
+        }
+      }
       const w =
         typeof width === "string" ? parseInt(width, 10) || undefined : width;
       const h =
         typeof height === "string" ? parseInt(height, 10) || undefined : height;
       return (
-        <ImageEmbed src={String(src)} alt={alt ?? ""} width={w} height={h} />
+        <ImageEmbed src={resolvedSrc} alt={alt ?? ""} width={w} height={h} />
       );
     },
   };
