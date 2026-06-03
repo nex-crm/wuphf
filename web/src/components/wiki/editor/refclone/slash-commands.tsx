@@ -31,7 +31,7 @@ import {
 
 import { EmbedPopover } from "./embed-popover";
 import { useLocale } from "./lib/use-locale";
-import { cn } from "./lib/utils";
+import { cn, isSafeLinkHref } from "./lib/utils";
 import { type MediaKind, MediaPopover } from "./media-popover";
 import { useEditorStore } from "./stores/editor-store";
 
@@ -423,10 +423,21 @@ export function SlashCommands({ editor }: SlashCommandsProps) {
         })
         .run();
     } else {
+      // Insert as a structured text node + link mark rather than an HTML
+      // string so the user-supplied url/alt can't inject markup, and drop the
+      // link mark entirely for unsafe schemes (javascript:/data:).
       editor
         .chain()
         .focus()
-        .insertContent(`<a href="${url}">${alt ?? url}</a>`)
+        .insertContent(
+          isSafeLinkHref(url)
+            ? {
+                type: "text",
+                text: alt ?? url,
+                marks: [{ type: "link", attrs: { href: url } }],
+              }
+            : { type: "text", text: alt ?? url },
+        )
         .run();
     }
     setPopover(null);

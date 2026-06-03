@@ -40,7 +40,7 @@ import { ColorPalette } from "./color-palette";
 import { EmbedPopover } from "./embed-popover";
 import { HIGHLIGHT_COLORS, TEXT_COLORS } from "./extensions/color-highlight";
 import { useLocale } from "./lib/use-locale";
-import { cn } from "./lib/utils";
+import { cn, isSafeLinkHref } from "./lib/utils";
 import { LinkPopover } from "./link-popover";
 import { type MediaKind, MediaPopover } from "./media-popover";
 import { useEditorStore } from "./stores/editor-store";
@@ -304,10 +304,21 @@ export function EditorToolbar({
         })
         .run();
     } else {
+      // Structured text node + link mark instead of an HTML string, and drop
+      // the link mark for unsafe schemes (javascript:/data:) so a user-typed
+      // url can't become a click-to-execute link.
       editor
         .chain()
         .focus()
-        .insertContent(`<a href="${url}">${alt ?? url}</a>`)
+        .insertContent(
+          isSafeLinkHref(url)
+            ? {
+                type: "text",
+                text: alt ?? url,
+                marks: [{ type: "link", attrs: { href: url } }],
+              }
+            : { type: "text", text: alt ?? url },
+        )
         .run();
     }
     setPopover(null);

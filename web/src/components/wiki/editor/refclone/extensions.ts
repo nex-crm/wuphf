@@ -33,6 +33,7 @@ import { HeadingAnchors } from "./extensions/heading-anchors";
 import { IconExtension } from "./extensions/icon-extension";
 import { RefcloneMath } from "./extensions/math-extension";
 import { ResizableImage } from "./extensions/resizable-image";
+import { isSafeLinkHref } from "./lib/utils";
 import { EditorMentionExtension } from "./mention-extension";
 import { WikiLink } from "./wiki-link-extension";
 
@@ -101,6 +102,11 @@ export const editorExtensions = [
   }),
   Link.configure({
     openOnClick: false, // we handle clicks ourselves in the editor
+    // Reject dangerous schemes (javascript:, data:, vbscript:) so the Mod-e
+    // prompt, paste autolink, and setLink command cannot create a
+    // click-to-execute link. Mirrors isSafeLinkHref used by the inserts.
+    protocols: ["http", "https", "mailto", "tel"],
+    validate: (href: string) => isSafeLinkHref(href),
     HTMLAttributes: {
       class: "text-primary underline cursor-pointer",
     },

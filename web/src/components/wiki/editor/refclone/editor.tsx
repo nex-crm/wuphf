@@ -261,7 +261,11 @@ export function KBEditor() {
                   editor
                     .chain()
                     .focus()
-                    .insertContent(`<a href="${url}">${file.name}</a>`)
+                    .insertContent({
+                      type: "text",
+                      text: file.name,
+                      marks: [{ type: "link", attrs: { href: url } }],
+                    })
                     .run();
                 }
               })
@@ -321,7 +325,11 @@ export function KBEditor() {
                 editor
                   .chain()
                   .focus()
-                  .insertContent(`<a href="${url}">${file.name}</a>`)
+                  .insertContent({
+                    type: "text",
+                    text: file.name,
+                    marks: [{ type: "link", attrs: { href: url } }],
+                  })
                   .run();
               }
             })
