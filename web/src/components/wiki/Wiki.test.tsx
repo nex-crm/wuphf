@@ -1,5 +1,26 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  act,
+  render as rtlRender,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Wiki renders WikiArticle, whose delete control reads the wiki-tree React
+// Query, so renders need a QueryClient in context. Wrap via the `wrapper`
+// option; fresh client per render isolates tests, retries off so error states
+// surface immediately.
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return rtlRender(ui, { wrapper: Wrapper });
+}
 
 // Stub the lazy file-viewer dispatcher so the article-vs-file routing can be
 // asserted without loading the heavy per-format viewer chunks.
