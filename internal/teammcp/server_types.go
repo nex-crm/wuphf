@@ -251,6 +251,7 @@ type TeamTaskArgs struct {
 	ThreadID      string   `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
 	TaskType      string   `json:"task_type,omitempty" jsonschema:"Use \"issue\" for any work scoped from a human request — that is what the Issues board renders (RULE ZERO). Other values (research, feature, launch, follow_up, bugfix, incident) are for sub-tasks created INSIDE an existing Issue, not for the Issue itself. When in doubt, pick \"issue\"."`
 	ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+	Effort        string   `json:"effort,omitempty" jsonschema:"Optional model-specific reasoning-effort level (e.g. \"high\" or \"max\" for claude, \"minimal\" or \"medium\" for codex). Applied at dispatch. Omit for the runtime default."`
 	DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task must wait for before starting (create action only)"`
 	ParentIssueID string   `json:"parent_issue_id,omitempty" jsonschema:"Parent Issue id when this is a sub-issue created INSIDE an existing Issue (create action only). Leave empty for top-level Issues. Sub-issues inherit the parent's channel and surface under the parent on the Issue detail view."`
 	MySlug        string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
@@ -322,6 +323,7 @@ type TeamPlanArgs struct {
 		Details       string   `json:"details,omitempty" jsonschema:"Optional task details"`
 		TaskType      string   `json:"task_type,omitempty" jsonschema:"Optional task type such as research, feature, launch, follow_up, bugfix, or incident"`
 		ExecutionMode string   `json:"execution_mode,omitempty" jsonschema:"Optional execution mode such as office or local_worktree"`
+		Effort        string   `json:"effort,omitempty" jsonschema:"Optional model-specific reasoning-effort level (e.g. \"high\" for claude, \"medium\" for codex). Omit for runtime default."`
 		DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
 	} `json:"tasks" jsonschema:"List of tasks to create in dependency order"`
 	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`

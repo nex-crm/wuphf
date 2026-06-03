@@ -114,6 +114,9 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 		if parentID := strings.TrimSpace(args.ParentIssueID); parentID != "" {
 			payload["parent_issue_id"] = parentID
 		}
+		if effort := strings.TrimSpace(args.Effort); effort != "" {
+			payload["effort"] = effort
+		}
 	}
 	switch action {
 	case "claim":
