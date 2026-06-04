@@ -45,8 +45,8 @@ import { LifecycleStatePill } from "./LifecycleStatePill";
 import { OwnerPicker } from "./OwnerPicker";
 import { ParentTaskBreadcrumb } from "./ParentTaskBreadcrumb";
 import { TaskActionToolbar } from "./TaskActionToolbar";
-import { TaskActivityStream } from "./TaskActivityStream";
-import { TaskDetailTabs } from "./TaskDetailTabs";
+import { TaskChannelChat } from "./TaskChannelChat";
+import { TaskContextRail } from "./TaskContextRail";
 
 // ── Phase 4 constants ──────────────────────────────────────────────────
 
@@ -1338,8 +1338,10 @@ export function TaskDocument({
       data-task-id={taskId}
       data-lifecycle-state={doc.lifecycleState}
     >
-      {/* Sticky header: status pill + title + owner */}
-      <header className="issue-doc-header issue-doc-header--sticky">
+      {/* Compact header: breadcrumb, then a single tight row (pill + title),
+       *  then a meta/action row (owner left, lifecycle actions right). Kept
+       *  deliberately short so the chat below gets the vertical space. */}
+      <header className="issue-doc-header issue-doc-header--sticky issue-doc-header--compact">
         {doc.parentTaskId ? (
           <ParentTaskBreadcrumb parentTaskId={doc.parentTaskId} />
         ) : null}
@@ -1349,7 +1351,7 @@ export function TaskDocument({
             {formatTaskTitleForDisplay(doc.title)}
           </h2>
         </div>
-        <div className="issue-doc-meta-row">
+        <div className="issue-doc-meta-row" data-testid="issue-doc-button-row">
           <OwnerPicker
             taskId={taskId}
             channel={doc.channel}
@@ -1364,17 +1366,9 @@ export function TaskDocument({
               });
             }}
           />
-        </div>
-        {/*
-         * Phase 4 button row. Contains Approve & Start when in Drafting.
-         * Other lifecycle states use the existing Inbox PR-style loop
-         * (PacketActionSidebar / DecisionPacketRoute) which is mounted
-         * by the parent route — this component does not duplicate those.
-         */}
-        <div
-          className="issue-doc-button-row"
-          data-testid="issue-doc-button-row"
-        >
+          {/* Lifecycle actions (Approve & Start when Drafting/Planning, the
+           *  PR-style loop otherwise). Right-aligned on the same row as the
+           *  owner so the header stays two tight rows instead of four. */}
           <TaskActionToolbar
             taskId={taskId}
             channel={doc.channel}
@@ -1395,32 +1389,34 @@ export function TaskDocument({
         </div>
       </header>
 
-      {/* Body: the task's channel, spec, and activity live in the tab
-       *  strip below. The spec is the single rich description the team
-       *  agreed on (Goal/Context/Approach/Acceptance sections were
-       *  collapsed into one body, matching the Linear surface the team
-       *  optimized for); it renders inside the Spec tab. */}
-      <div className="issue-doc-body">
-        {/* Live activity stream — surfaces what the owning agent is doing
-         *  right now via the SSE-fed agentActivitySnapshots. Stays above
-         *  the tabs (always visible) so the human sees the heartbeat no
-         *  matter which tab is active. */}
-        <TaskActivityStream
-          ownerSlug={doc.ownerSlug}
-          lifecycleState={doc.lifecycleState}
-        />
+      {/* Body: chat-primary. The task's channel (the conversation where the
+       *  owner, CEO, and Librarian collaborate) owns the main column at full
+       *  scale; the secondary context — participants, spec, activity,
+       *  sub-tasks — lives in the right rail a glance away. */}
+      <div className="issue-doc-body issue-doc-body--split">
+        <main className="issue-doc-chat" aria-label="Chat">
+          <div className="issue-doc-chat-header">Chat</div>
+          <TaskChannelChat
+            taskId={taskId}
+            channel={doc.channel}
+            onCommentPosted={() => {
+              void queryClient.invalidateQueries({
+                queryKey: ["issue", taskId],
+              });
+              void queryClient.invalidateQueries({ queryKey: ["issues"] });
+              void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
+            }}
+          />
+        </main>
 
-        <TaskDetailTabs
+        <TaskContextRail
           taskId={taskId}
           channel={doc.channel}
           description={doc.description}
           isDrafting={isDrafting}
+          ownerSlug={doc.ownerSlug}
+          lifecycleState={doc.lifecycleState}
           showSubTasks={!doc.parentTaskId}
-          onCommentPosted={() => {
-            void queryClient.invalidateQueries({ queryKey: ["issue", taskId] });
-            void queryClient.invalidateQueries({ queryKey: ["issues"] });
-            void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
-          }}
         />
       </div>
     </div>
