@@ -838,9 +838,13 @@ export default function RootRoute() {
         ceoChannel,
         "Audit our CRM for duplicate accounts, deals missing an owner, and opportunities with no activity in 30 days, then propose a cleanup plan",
       );
+    // The legacy `/dm/$agentSlug` route was removed in the task-scoped
+    // restructure (DMs fold into task channels). It was only sugar over
+    // `/channels/<directChannelSlug(agentSlug)>`, so navigate to the same
+    // destination directly — the channel the draft was just seeded into.
     void router.navigate({
-      to: "/dm/$agentSlug",
-      params: { agentSlug: "ceo" },
+      to: "/channels/$channelSlug",
+      params: { channelSlug: ceoChannel },
     });
     // Deps intentionally empty: router and directChannelSlug are module-level
     // imports and useAppStore.getState() is Zustand's imperative escape hatch,
