@@ -878,12 +878,15 @@ function KeysSection({ cfg, save }: SectionProps) {
 
 function IntegrationsSection({ cfg, save }: SectionProps) {
   const [actionProvider, setActionProvider] = useState<string>("composio");
+  const [actionProviderDirty, setActionProviderDirty] = useState(false);
 
   const onSave = async () => {
-    const patch: ConfigUpdate = {
-      action_provider: actionProvider as ConfigUpdate["action_provider"],
-    };
+    const patch: ConfigUpdate = {};
+    if (actionProviderDirty) {
+      patch.action_provider = actionProvider as ConfigUpdate["action_provider"];
+    }
     await save(patch);
+    setActionProviderDirty(false);
   };
 
   // Gateway-style integrations (OpenClaw, Hermes, Telegram) now live in the
@@ -916,7 +919,10 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
         <select
           style={styles.input}
           value={actionProvider}
-          onChange={(e) => setActionProvider(e.target.value)}
+          onChange={(e) => {
+            setActionProvider(e.target.value);
+            setActionProviderDirty(true);
+          }}
         >
           <option value="composio">Composio</option>
         </select>

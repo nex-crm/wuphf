@@ -146,9 +146,10 @@ func TestIntegrationConnectStatusDisconnectAndAudit(t *testing.T) {
 	})
 	composioMux.HandleFunc("/connected_accounts/link", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":           "ca_123",
-			"redirect_url": "https://connect.composio.dev/abc",
-			"status":       "pending",
+			"id":                   "link_123",
+			"connected_account_id": "ca_123",
+			"redirect_url":         "https://connect.composio.dev/abc",
+			"status":               "pending",
 		})
 	})
 	composioMux.HandleFunc("/connected_accounts/ca_123", func(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +297,7 @@ func TestIntegrationConnectStatusDisconnectAndAudit(t *testing.T) {
 		t.Fatalf("unexpected disconnect status=%d deleted=%q", resp.StatusCode, deletedAccount)
 	}
 
-	resp = integrationRequest(t, srv, b, http.MethodGet, "/integrations/audit?provider=composio&connection_key=ca_123", nil)
+	resp = integrationRequest(t, srv, b, http.MethodGet, "/integrations/audit?provider=composio&platform=gmail&connection_key=ca_123", nil)
 	if err := json.NewDecoder(resp.Body).Decode(&audit); err != nil {
 		t.Fatalf("decode post-disconnect audit: %v", err)
 	}
@@ -307,6 +308,9 @@ func TestIntegrationConnectStatusDisconnectAndAudit(t *testing.T) {
 			foundDisconnect = true
 			if event.Summary != "Disconnected Gmail via Composio" {
 				t.Fatalf("unexpected disconnect summary: %+v", event)
+			}
+			if event.Metadata["platform"] != "gmail" {
+				t.Fatalf("expected disconnect metadata platform gmail: %+v", event)
 			}
 		}
 	}

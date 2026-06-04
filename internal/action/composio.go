@@ -84,7 +84,7 @@ func (c *ComposioREST) Supports(cap Capability) bool {
 }
 
 func (c *ComposioREST) ListIntegrationCatalog(ctx context.Context, opts IntegrationCatalogOptions) (IntegrationCatalogResult, error) {
-	connections, err := c.ListConnections(ctx, ListConnectionsOptions{Search: opts.Search, Limit: 500})
+	connections, err := c.ListConnections(ctx, ListConnectionsOptions{Limit: 500})
 	if err != nil {
 		return IntegrationCatalogResult{}, err
 	}
@@ -218,7 +218,7 @@ func (c *ComposioREST) StartIntegrationConnection(ctx context.Context, req Integ
 		return IntegrationConnectResult{}, fmt.Errorf("parse composio connect link: %w", err)
 	}
 	authURL := firstNonEmpty(result.RedirectURL, result.AuthURL, result.URL)
-	connectID := firstNonEmpty(result.ConnectedAccountID, result.ConnectionRequestID, result.ID)
+	connectID := strings.TrimSpace(result.ConnectedAccountID)
 	status := strings.ToLower(strings.TrimSpace(result.Status))
 	if status == "" {
 		status = "pending"

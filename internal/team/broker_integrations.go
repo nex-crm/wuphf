@@ -211,6 +211,7 @@ func (b *Broker) handleIntegrationDisconnect(w http.ResponseWriter, r *http.Requ
 		"",
 		map[string]string{
 			"provider":       "composio",
+			"platform":       result.Platform,
 			"connection_key": result.ConnectionKey,
 			"status":         "disconnected",
 		},

@@ -192,10 +192,11 @@ func TestComposioRESTIntegrationLifecycle(t *testing.T) {
 	mux.HandleFunc("/connected_accounts/link", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&connectBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":           "ca_123",
-			"redirect_url": "https://connect.composio.dev/abc",
-			"status":       "INITIATED",
-			"expires_at":   "2026-06-04T12:00:00Z",
+			"id":                   "link_123",
+			"connected_account_id": "ca_123",
+			"redirect_url":         "https://connect.composio.dev/abc",
+			"status":               "INITIATED",
+			"expires_at":           "2026-06-04T12:00:00Z",
 		})
 	})
 	mux.HandleFunc("/connected_accounts/ca_123", func(w http.ResponseWriter, r *http.Request) {

@@ -123,12 +123,10 @@ async function waitForScrollSettle(section: Locator): Promise<void> {
 
 async function ensureSidebarExpanded(page: Page): Promise<void> {
   const expandedSidebar = page.locator("aside.sidebar:not(.sidebar-collapsed)");
-  if ((await expandedSidebar.count()) > 0) {
-    await expect(expandedSidebar).toBeVisible();
-    return;
+  const isVisible = await expandedSidebar.isVisible();
+  if (!isVisible) {
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
   }
-
-  await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(expandedSidebar).toBeVisible();
 }
 

@@ -410,9 +410,10 @@ function ToolkitDetail({
       getIntegrationAudit({
         provider: item.provider,
         platform: item.platform,
-        connection_key: connectionKey || undefined,
+        connection_key: connectionKey,
         limit: 30,
       }),
+    enabled: Boolean(connectionKey),
     staleTime: 10_000,
   });
   const statusQuery = useQuery({
