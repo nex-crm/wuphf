@@ -135,14 +135,68 @@ function presentationFor(
 
 export interface TaskLifecycleCardProps {
   payload: TaskLifecyclePayload;
+  /**
+   * True when the card is rendered inside its OWN task's channel. The
+   * transition still shows (useful inline history), but the card becomes
+   * an inert status row — no "Open →" CTA, not clickable — because the
+   * navigation would just reload the page you are already on. Pointing at
+   * a different task keeps the openable button.
+   */
+  sameTask?: boolean;
 }
 
-export function TaskLifecycleCard({ payload }: TaskLifecycleCardProps) {
+export function TaskLifecycleCard({
+  payload,
+  sameTask = false,
+}: TaskLifecycleCardProps) {
   const taskId = payload.task_id ?? "";
   const title = payload.title ?? "(untitled task)";
   const transition = payload.transition ?? "generic";
   const owner = payload.owner;
   const presentation = presentationFor(transition, owner);
+
+  const body = (
+    <>
+      <span className="issue-lifecycle-card-icon" aria-hidden="true">
+        {presentation.icon}
+      </span>
+      <span className="issue-lifecycle-card-body">
+        <span className="issue-lifecycle-card-eyebrow">
+          {presentation.eyebrow}
+          {taskId ? (
+            <span className="issue-lifecycle-card-id"> · {taskId}</span>
+          ) : null}
+        </span>
+        <span className="issue-lifecycle-card-title">{title}</span>
+        {payload.from_state && payload.to_state ? (
+          <span className="issue-lifecycle-card-meta">
+            {payload.from_state} → {payload.to_state}
+          </span>
+        ) : null}
+      </span>
+      {sameTask ? null : (
+        <span className="issue-lifecycle-card-cta" aria-hidden="true">
+          Open →
+        </span>
+      )}
+    </>
+  );
+
+  // Self-referential card (same task channel) → inert status row, not a
+  // clickable button. Drops the "Open →" affordance and navigation.
+  if (sameTask) {
+    return (
+      <div
+        className={`issue-lifecycle-card issue-lifecycle-card--static issue-lifecycle-card--${presentation.accent}`}
+        data-testid="issue-lifecycle-card"
+        data-task-id={taskId}
+        data-transition={transition}
+        data-static="true"
+      >
+        {body}
+      </div>
+    );
+  }
 
   function openTask() {
     if (!taskId) return;
@@ -163,26 +217,7 @@ export function TaskLifecycleCard({ payload }: TaskLifecycleCardProps) {
       aria-label={`Open task ${taskId}: ${title}`}
       disabled={!taskId}
     >
-      <span className="issue-lifecycle-card-icon" aria-hidden="true">
-        {presentation.icon}
-      </span>
-      <span className="issue-lifecycle-card-body">
-        <span className="issue-lifecycle-card-eyebrow">
-          {presentation.eyebrow}
-          {taskId ? (
-            <span className="issue-lifecycle-card-id"> · {taskId}</span>
-          ) : null}
-        </span>
-        <span className="issue-lifecycle-card-title">{title}</span>
-        {payload.from_state && payload.to_state ? (
-          <span className="issue-lifecycle-card-meta">
-            {payload.from_state} → {payload.to_state}
-          </span>
-        ) : null}
-      </span>
-      <span className="issue-lifecycle-card-cta" aria-hidden="true">
-        Open →
-      </span>
+      {body}
     </button>
   );
 }

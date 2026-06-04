@@ -17,7 +17,7 @@ import {
   extractRichArtifactIds,
   stripStandaloneRichArtifactReferenceLines,
 } from "../../lib/richArtifactReferences";
-import { useChannelSlug } from "../../routes/useCurrentRoute";
+import { useChannelSlug, useCurrentTaskId } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
@@ -87,6 +87,12 @@ export function MessageBubble({
   onCopyLink,
 }: MessageBubbleProps) {
   const currentChannel = useChannelSlug() ?? "general";
+  // When the chat is rendered inside a task-detail route, this is that
+  // task's id. Task-pointer cards (created / lifecycle) use it to detect a
+  // self-reference: a card pointing at the very task you are already viewing
+  // would "Open →" nowhere, so we suppress or de-link it (see the card
+  // dispatch below). Null on every non-task-detail surface.
+  const currentTaskId = useCurrentTaskId();
   const { data: members = [] } = useOfficeMembers();
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
   const isHuman =
@@ -189,6 +195,11 @@ export function MessageBubble({
   // agent line — same pattern as SystemErrorCard.
   if (message.kind === "issue_created") {
     const payload = parseTaskCreatedPayload(message.payload);
+    // Suppress the card entirely when it points at the task whose channel
+    // is already on screen — the "Open →" would just reload this page, so
+    // it reads as a dead card. Show it only when it points elsewhere
+    // (e.g. a sub-task created from this conversation).
+    if (payload.task_id && payload.task_id === currentTaskId) return null;
     return <TaskCreatedCard payload={payload} />;
   }
 
@@ -207,7 +218,13 @@ export function MessageBubble({
   // human should see. Same surface treatment as TaskCreatedCard.
   if (message.kind === "issue_lifecycle") {
     const payload = parseTaskLifecyclePayload(message.payload);
-    return <TaskLifecycleCard payload={payload} />;
+    // Same task as the channel on screen → still surface the transition
+    // (useful inline history) but render it inert: no "Open →", not
+    // clickable. Pointing at a different task keeps the openable card.
+    const sameTask = Boolean(
+      payload.task_id && payload.task_id === currentTaskId,
+    );
+    return <TaskLifecycleCard payload={payload} sameTask={sameTask} />;
   }
 
   // Wiki/notebook surface cards. Broker emits these in #general when one

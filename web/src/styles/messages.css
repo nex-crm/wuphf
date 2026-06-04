@@ -2063,6 +2063,15 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   cursor: not-allowed;
   opacity: 0.6;
 }
+/* Inert variant — rendered in the card's own task channel. Shows the
+   transition as a status row but is not clickable (no hover lift, default
+   cursor, no "Open →"). */
+.issue-lifecycle-card--static {
+  cursor: default;
+}
+.issue-lifecycle-card--static:hover {
+  filter: none;
+}
 .issue-lifecycle-card-icon {
   font-size: 20px;
   line-height: 1;

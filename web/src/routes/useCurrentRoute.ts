@@ -240,6 +240,19 @@ export function useChannelSlug(): string | null {
 }
 
 /**
+ * Resolve the task id for the currently-viewed task-detail route, or null
+ * when the matched route is anything else. Chat cards use this to detect
+ * when a Task pointer (created / lifecycle card) refers to the very task
+ * whose channel is already on screen, so a self-referential "Open →" can
+ * be suppressed (created card) or rendered inert (lifecycle card).
+ */
+export function useCurrentTaskId(): string | null {
+  const route = useCurrentRoute();
+  if (route.kind === "task-detail" && route.taskId) return route.taskId;
+  return null;
+}
+
+/**
  * Channel slug consumers that work outside conversation routes (Console,
  * Requests, sidebar request badge) should use this hook so they keep
  * pointing at the user's last-visited channel rather than silently
