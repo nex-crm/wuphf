@@ -5,8 +5,10 @@ import { getScheduler, type SchedulerJob } from "../../api/client";
 import { router } from "../../lib/router";
 import { RoutineCalendarView } from "./routines/RoutineCalendarView";
 import { RoutineListView } from "./routines/RoutineListView";
-import { routineOwner } from "./routines/routineModel";
-import { isCadenceSchedulerJob } from "./schedulerJobClassification";
+import {
+  isCadenceSchedulerJob,
+  isSystemRoutine,
+} from "./schedulerJobClassification";
 
 type ViewMode = "calendar" | "list";
 
@@ -31,10 +33,6 @@ function loadInitialShowSystem(): boolean {
   } catch {
     return false;
   }
-}
-
-function isSystemRoutine(job: SchedulerJob): boolean {
-  return routineOwner(job).kind === "system";
 }
 
 /**

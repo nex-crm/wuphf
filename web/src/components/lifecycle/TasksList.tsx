@@ -36,7 +36,10 @@ import {
   routineLabel,
   routineSchedule,
 } from "../apps/routines/routineModel";
-import { isCadenceSchedulerJob } from "../apps/schedulerJobClassification";
+import {
+  isCadenceSchedulerJob,
+  isSystemRoutine,
+} from "../apps/schedulerJobClassification";
 import { TaskCreateDialog } from "../tasks/TaskCreateDialog";
 import { LifecycleStatePill } from "./LifecycleStatePill";
 import {
@@ -381,7 +384,13 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
 
   const scheduledJobs = useMemo<SchedulerJob[]>(() => {
     const jobs = schedulerResult.data?.jobs ?? [];
-    return jobs.filter(isCadenceSchedulerJob);
+    // The work board shows the operator's own recurring routines, not the
+    // broker's system plumbing (Nex insights, archive sweeps, follow-up
+    // reminders). System routines live in the Scheduled Tasks tool, which
+    // has its own show-system toggle.
+    return jobs.filter(
+      (job) => isCadenceSchedulerJob(job) && !isSystemRoutine(job),
+    );
   }, [schedulerResult.data]);
 
   const filtered = useMemo(() => {
