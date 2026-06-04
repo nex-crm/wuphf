@@ -113,13 +113,18 @@ func (c *ComposioREST) ListIntegrationCatalog(ctx context.Context, opts Integrat
 	}
 	var result struct {
 		Items []struct {
-			Slug        string   `json:"slug"`
-			Name        string   `json:"name"`
-			Description string   `json:"description"`
-			Logo        string   `json:"logo"`
-			LogoURL     string   `json:"logo_url"`
-			Categories  []string `json:"categories"`
-			Category    string   `json:"category"`
+			Slug        string            `json:"slug"`
+			Name        string            `json:"name"`
+			Description string            `json:"description"`
+			Logo        string            `json:"logo"`
+			LogoURL     string            `json:"logo_url"`
+			Categories  []json.RawMessage `json:"categories"`
+			Category    string            `json:"category"`
+			Meta        struct {
+				Description string            `json:"description"`
+				Logo        string            `json:"logo"`
+				Categories  []json.RawMessage `json:"categories"`
+			} `json:"meta"`
 		} `json:"items"`
 		NextCursor string `json:"next_cursor"`
 	}
@@ -154,14 +159,12 @@ func (c *ComposioREST) ListIntegrationCatalog(ctx context.Context, opts Integrat
 			connectionKey = strings.TrimSpace(conns[0].Key)
 			connectionName = strings.TrimSpace(conns[0].Name)
 		}
-		category := strings.TrimSpace(item.Category)
-		if category == "" && len(item.Categories) > 0 {
-			category = strings.TrimSpace(item.Categories[0])
-		}
-		logoURL := strings.TrimSpace(item.LogoURL)
-		if logoURL == "" {
-			logoURL = strings.TrimSpace(item.Logo)
-		}
+		category := firstNonEmpty(
+			item.Category,
+			firstComposioCategory(item.Categories),
+			firstComposioCategory(item.Meta.Categories),
+		)
+		logoURL := firstNonEmpty(item.LogoURL, item.Logo, item.Meta.Logo)
 		name := strings.TrimSpace(item.Name)
 		if name == "" {
 			name = platformDisplayName(platform)
@@ -170,7 +173,7 @@ func (c *ComposioREST) ListIntegrationCatalog(ctx context.Context, opts Integrat
 			Provider:       c.Name(),
 			Platform:       platform,
 			Name:           name,
-			Description:    strings.TrimSpace(item.Description),
+			Description:    firstNonEmpty(item.Description, item.Meta.Description),
 			Category:       category,
 			LogoURL:        logoURL,
 			State:          state,
@@ -854,6 +857,29 @@ func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			return trimmed
+		}
+	}
+	return ""
+}
+
+func firstComposioCategory(rawCategories []json.RawMessage) string {
+	for _, raw := range rawCategories {
+		var label string
+		if err := json.Unmarshal(raw, &label); err == nil {
+			if trimmed := strings.TrimSpace(label); trimmed != "" {
+				return trimmed
+			}
+			continue
+		}
+		var category struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(raw, &category); err != nil {
+			continue
+		}
+		if value := firstNonEmpty(category.Name, category.ID); value != "" {
+			return value
 		}
 	}
 	return ""

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Lock,
+  NavArrowRight,
   OpenNewWindow,
   Refresh,
   Search,
@@ -26,6 +27,7 @@ import {
   IntegrationDetailHeader,
   IntegrationListRow,
 } from "./integrations/CardShell";
+import { ToolkitBrandLogo } from "./integrations/IntegrationLogos";
 import { INTEGRATIONS } from "./integrations/registry";
 import {
   INTEGRATION_CATEGORIES,
@@ -37,7 +39,7 @@ import {
 
 function HelpBanner() {
   return (
-    <div className="op-lock-card" style={{ marginBottom: 28 }}>
+    <div className="op-lock-card op-integrations-help">
       <div className="op-lock-head">
         <div className="op-lock-title">
           <span className="op-lock-icon" aria-hidden="true">
@@ -148,12 +150,37 @@ function RegistryDetailView({
 }
 
 function ToolkitLogo({ item }: { item: IntegrationCatalogItem }) {
+  const [failed, setFailed] = useState(false);
+  const label = item.name.slice(0, 1).toUpperCase();
+  const brandLogo = ToolkitBrandLogo({ platform: item.platform });
   if (item.logo_url) {
-    return <img src={item.logo_url} alt="" style={{ width: 28, height: 28 }} />;
+    return (
+      <span className="op-toolkit-mark">
+        {!failed ? (
+          <img
+            className="op-toolkit-logo"
+            src={item.logo_url}
+            alt=""
+            loading="lazy"
+            onError={() => setFailed(true)}
+          />
+        ) : brandLogo ? (
+          brandLogo
+        ) : (
+          <span className="op-toolkit-monogram" aria-hidden="true">
+            {label}
+          </span>
+        )}
+      </span>
+    );
   }
   return (
-    <span className="op-toolkit-monogram" aria-hidden="true">
-      {item.name.slice(0, 1).toUpperCase()}
+    <span className="op-toolkit-mark">
+      {brandLogo ?? (
+        <span className="op-toolkit-monogram" aria-hidden="true">
+          {label}
+        </span>
+      )}
     </span>
   );
 }
@@ -172,6 +199,19 @@ function toolkitStatus(item: IntegrationCatalogItem): IntegrationStatus {
       return item.can_connect
         ? { tone: "available", label: "Available" }
         : { tone: "unconfigured", label: "Read only" };
+  }
+}
+
+function toolkitToneClass(status: IntegrationStatus) {
+  switch (status.tone) {
+    case "connected":
+      return "on";
+    case "available":
+      return "info";
+    case "warning":
+      return "warn";
+    default:
+      return "off";
   }
 }
 
@@ -209,28 +249,89 @@ function ActionToolkitsSection({
   return (
     <section className="op-category">
       <header className="op-category-head">
-        <h3 className="op-category-title">Action Toolkits</h3>
-        <p className="op-category-blurb">
-          OAuth-backed accounts agents can use for approved external actions.
-        </p>
+        <div>
+          <h3 className="op-category-title">Action Toolkits</h3>
+          <p className="op-category-blurb">
+            OAuth-backed accounts agents can use for approved external actions.
+          </p>
+        </div>
+        <span className="op-section-count">{items.length} toolkits</span>
       </header>
-      <div className="op-list">
+      <div className="op-toolkit-ledger">
         {items.map((item) => (
-          <IntegrationListRow
+          <ToolkitRow
             key={`${item.provider}:${item.platform}:${item.connection_key ?? "catalog"}`}
-            logo={<ToolkitLogo item={item} />}
-            title={item.name}
-            summary={
-              item.last_action_summary ??
-              item.description ??
-              `${item.provider} · ${item.platform}`
-            }
-            status={toolkitStatus(item)}
+            item={item}
             onOpen={() => onOpen(item)}
           />
         ))}
       </div>
     </section>
+  );
+}
+
+function formatToolkitCategory(category?: string) {
+  const value = category?.trim();
+  if (!value) return "Toolkit";
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function toolkitConnectionName(item: IntegrationCatalogItem) {
+  return (
+    item.connection_name ||
+    item.connections?.find((connection) => connection.name)?.name ||
+    item.connection_key ||
+    ""
+  );
+}
+
+function ToolkitRow({
+  item,
+  onOpen,
+}: {
+  item: IntegrationCatalogItem;
+  onOpen: () => void;
+}) {
+  const status = toolkitStatus(item);
+  const tone = toolkitToneClass(status);
+  const connectionName = toolkitConnectionName(item);
+  const summary =
+    item.last_action_summary ??
+    item.description ??
+    `${item.provider} account actions for ${item.platform}`;
+  return (
+    <button
+      type="button"
+      className={`op-toolkit-row is-${tone}`}
+      onClick={onOpen}
+      aria-label={`Open ${item.name} integration settings`}
+    >
+      <span className="op-toolkit-row-logo" aria-hidden="true">
+        <ToolkitLogo item={item} />
+      </span>
+      <span className="op-toolkit-row-body">
+        <span className="op-toolkit-row-top">
+          <span className="op-toolkit-row-title">{item.name}</span>
+          <span className="op-toolkit-row-meta">
+            {formatToolkitCategory(item.category)}
+          </span>
+          {connectionName ? (
+            <span className="op-toolkit-row-meta">{connectionName}</span>
+          ) : null}
+        </span>
+        <span className="op-toolkit-row-summary">{summary}</span>
+      </span>
+      <span className="op-toolkit-row-state">
+        <span className={`op-status is-${tone}`}>
+          <span className={`op-led is-${tone}`} />
+          {status.label}
+        </span>
+        <NavArrowRight width={18} height={18} aria-hidden="true" />
+      </span>
+    </button>
   );
 }
 
@@ -350,6 +451,7 @@ function ToolkitDetail({
 
   const latestStatus = statusQuery.data?.status ?? pending?.status;
   const canDisconnect = item.can_disconnect && connectionKey !== "";
+  const connectionName = toolkitConnectionName(item);
   return (
     <section className="op-detail">
       <IntegrationDetailHeader
@@ -360,35 +462,64 @@ function ToolkitDetail({
         onBack={onBack}
       />
       <div className="op-detail-body">
-        <div className="op-toolkit-actions">
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            disabled={!item.can_connect || connectMutation.isPending}
-            onClick={() => connectMutation.mutate()}
-          >
-            <OpenNewWindow width={14} height={14} aria-hidden="true" />
-            {connectionKey ? "Connect another account" : "Connect"}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={statusQuery.isFetching || !pending}
-            onClick={() => void statusQuery.refetch()}
-          >
-            <Refresh width={14} height={14} aria-hidden="true" />
-            Check status
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={!canDisconnect || disconnectMutation.isPending}
-            onClick={() => setConfirmDisconnect(true)}
-          >
-            <Trash width={14} height={14} aria-hidden="true" />
-            Disconnect
-          </button>
-        </div>
+        <section className="op-toolkit-panel">
+          <div className="op-toolkit-panel-copy">
+            <span className="op-eyebrow">Connection</span>
+            <dl className="op-connection-grid">
+              <div>
+                <dt>Provider</dt>
+                <dd>{item.provider}</dd>
+              </div>
+              <div>
+                <dt>Category</dt>
+                <dd>{formatToolkitCategory(item.category)}</dd>
+              </div>
+              <div>
+                <dt>Account</dt>
+                <dd>{connectionName || "Not connected"}</dd>
+              </div>
+              <div>
+                <dt>Connection key</dt>
+                <dd>
+                  {connectionKey ? (
+                    <code className="op-inline-code">{connectionKey}</code>
+                  ) : (
+                    "None"
+                  )}
+                </dd>
+              </div>
+            </dl>
+          </div>
+          <div className="op-toolkit-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={!item.can_connect || connectMutation.isPending}
+              onClick={() => connectMutation.mutate()}
+            >
+              <OpenNewWindow width={14} height={14} aria-hidden="true" />
+              {connectionKey ? "Connect another account" : "Connect"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={statusQuery.isFetching || !pending}
+              onClick={() => void statusQuery.refetch()}
+            >
+              <Refresh width={14} height={14} aria-hidden="true" />
+              Check status
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={!canDisconnect || disconnectMutation.isPending}
+              onClick={() => setConfirmDisconnect(true)}
+            >
+              <Trash width={14} height={14} aria-hidden="true" />
+              Disconnect
+            </button>
+          </div>
+        </section>
         {confirmDisconnect ? (
           <div className="op-confirm-row">
             <span>Disconnect {item.name}?</span>
@@ -414,16 +545,24 @@ function ToolkitDetail({
             Connection status: <strong>{latestStatus}</strong>
           </p>
         ) : null}
-        {connectionKey ? (
-          <p className="op-runtime-note">
-            Connection key:{" "}
-            <code style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-              {connectionKey}
-            </code>
-          </p>
-        ) : null}
-        <h3 className="op-subhead">Audit</h3>
-        <AuditList events={auditQuery.data ?? []} />
+        <section className="op-audit-panel">
+          <div className="op-audit-head">
+            <div>
+              <h3 className="op-subhead">Audit</h3>
+              <p>External action and approval events for this integration.</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => void auditQuery.refetch()}
+              disabled={auditQuery.isFetching}
+            >
+              <Refresh width={14} height={14} aria-hidden="true" />
+              Refresh
+            </button>
+          </div>
+          <AuditList events={auditQuery.data ?? []} />
+        </section>
       </div>
     </section>
   );
@@ -506,12 +645,8 @@ function EmptyIntegrationsWarning({
 }) {
   if (available.length > 0 || toolkitItems.length > 0) return null;
   return (
-    <p style={{ marginTop: 12, fontSize: 12, color: "var(--text-tertiary)" }}>
-      <WarningTriangle
-        width={12}
-        height={12}
-        style={{ marginRight: 4, verticalAlign: "text-bottom" }}
-      />
+    <p className="op-empty-warning">
+      <WarningTriangle width={12} height={12} />
       No integrations are registered in this build.
     </p>
   );
@@ -564,34 +699,11 @@ export function IntegrationsApp() {
   const toolkitItems = integrationsQuery.data?.items ?? [];
 
   return (
-    <div
-      style={{
-        maxWidth: 900,
-        margin: "0 auto",
-        padding: "28px 24px 56px 24px",
-      }}
-    >
-      <header style={{ marginBottom: 22 }}>
+    <div className="op-page">
+      <header className="op-page-header">
         <span className="op-eyebrow op-eyebrow-strong">PATCH BAY</span>
-        <h2
-          style={{
-            margin: "6px 0 4px 0",
-            fontSize: 24,
-            fontWeight: 700,
-          }}
-        >
-          Integrations
-        </h2>
-        <p
-          style={{
-            margin: 0,
-            fontSize: "var(--text-base)",
-            color: "var(--text-tertiary)",
-            lineHeight: 1.5,
-          }}
-        >
-          Add, manage, and audit external systems connected to the office.
-        </p>
+        <h2>Integrations</h2>
+        <p>Add, manage, and audit external systems connected to the office.</p>
       </header>
 
       {!(selected || selectedToolkit) && <HelpBanner />}

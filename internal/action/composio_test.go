@@ -165,11 +165,16 @@ func TestComposioRESTIntegrationLifecycle(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"items": []map[string]any{{
-				"slug":        "gmail",
-				"name":        "Gmail",
-				"description": "Read and send Gmail messages",
-				"logo_url":    "https://example.com/gmail.png",
-				"categories":  []string{"communication"},
+				"slug": "gmail",
+				"name": "Gmail",
+				"meta": map[string]any{
+					"description": "Read and send Gmail messages",
+					"logo":        "https://example.com/gmail.png",
+					"categories": []map[string]string{{
+						"id":   "communication",
+						"name": "Communication",
+					}},
+				},
 			}},
 		})
 	})
@@ -223,6 +228,12 @@ func TestComposioRESTIntegrationLifecycle(t *testing.T) {
 	}
 	if len(catalog.Items) != 1 || catalog.Items[0].State != "connected" || catalog.Items[0].ConnectionKey != "ca_123" {
 		t.Fatalf("unexpected catalog: %+v", catalog)
+	}
+	if got := catalog.Items[0].LogoURL; got != "https://example.com/gmail.png" {
+		t.Fatalf("expected toolkit logo from meta.logo, got %q", got)
+	}
+	if got := catalog.Items[0].Category; got != "Communication" {
+		t.Fatalf("expected toolkit category from meta.categories, got %q", got)
 	}
 
 	started, err := client.StartIntegrationConnection(context.Background(), IntegrationConnectRequest{Platform: "gmail"})

@@ -60,6 +60,7 @@ const INTEGRATIONS = {
       name: "Gmail",
       description: "Read, draft, and send Gmail messages after approval.",
       category: "communication",
+      logo_url: "https://assets.composio.dev/logos/gmail.png",
       state: "connected",
       connection_key: "ca_gmail_founder",
       connection_name: "Founder Gmail",
@@ -74,6 +75,7 @@ const INTEGRATIONS = {
       name: "Slack",
       description: "Post channel updates and read thread context.",
       category: "communication",
+      logo_url: "https://assets.composio.dev/logos/slack.png",
       state: "available",
       can_connect: true,
       can_disconnect: false,
@@ -84,6 +86,7 @@ const INTEGRATIONS = {
       name: "GitHub",
       description: "Create issues, inspect PRs, and summarize repository work.",
       category: "code",
+      logo_url: "https://assets.composio.dev/logos/github.png",
       state: "connected",
       connection_key: "ca_github_eng",
       connection_name: "Engineering GitHub",
@@ -180,11 +183,31 @@ await page.waitForTimeout(600);
 await shotPage(page, OUT, "01-integrations-catalog");
 
 await page
+  .getByRole("button", { name: /Open Hermes integration settings/i })
+  .scrollIntoViewIfNeeded();
+await page.waitForTimeout(300);
+await shotPage(page, OUT, "02-integrations-gateway-logos");
+
+await page
+  .getByRole("button", { name: /Open Telegram integration settings/i })
+  .scrollIntoViewIfNeeded();
+await page.waitForTimeout(300);
+await shotPage(page, OUT, "03-integrations-channel-logo");
+
+await page
   .getByRole("button", { name: /Open Gmail integration settings/i })
   .click();
-await page.getByText("Connection key:").waitFor({ timeout: 5_000 });
+await page.getByText("Connection key").waitFor({ timeout: 5_000 });
 await page.waitForTimeout(400);
-await shotPage(page, OUT, "02-integrations-gmail-audit");
+await shotPage(page, OUT, "04-integrations-gmail-audit");
+
+await page.getByRole("button", { name: /Back to integrations list/i }).click();
+await page.setViewportSize({ width: 390, height: 844 });
+await page
+  .getByRole("heading", { name: "Integrations" })
+  .waitFor({ timeout: 5_000 });
+await page.waitForTimeout(400);
+await shotPage(page, OUT, "05-integrations-mobile");
 
 console.log(`captured screenshots to ${OUT}`);
 await browser.close();
