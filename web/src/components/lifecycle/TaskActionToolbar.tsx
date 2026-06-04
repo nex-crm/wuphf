@@ -44,7 +44,7 @@ function actionsForState(state: LifecycleState): ActionDef[] {
       return [
         {
           action: "cancel",
-          label: "Cancel issue",
+          label: "Cancel",
           variant: "danger",
           requiresReason: true,
           reasonHint: "Why cancel? One short line.",

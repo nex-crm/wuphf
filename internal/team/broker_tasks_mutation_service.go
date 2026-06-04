@@ -593,7 +593,15 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				return TaskResponse{}, taskMutationError(TaskMutationInvalid, "owner required", nil)
 			}
 			task.Owner = strings.TrimSpace(body.Owner)
-			task.status = "in_progress"
+			// Plan mode: a plan-first task that has not started yet plans under
+			// its new owner before executing. Mirrors the reassign case — this
+			// is the path the CEO uses to triage an Auto-owner task, so without
+			// it Auto + Plan-first would skip Planning and run unapproved.
+			if task.PlanFirst && taskIsPreExecution(task.LifecycleState) {
+				_ = b.applyLifecycleStateLocked(task, LifecycleStatePlanning)
+			} else {
+				task.status = "in_progress"
+			}
 			if taskNeedsStructuredReview(task) {
 				task.reviewState = "pending_review"
 			} else {

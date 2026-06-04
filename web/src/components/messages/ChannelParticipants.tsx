@@ -23,15 +23,31 @@ function memberDisplayName(member: OfficeMember): string {
   return formatAgentName(member.slug);
 }
 
+// Live activity strings can leak raw MCP tool identifiers
+// ("running mcp__wuphf_wiki_lookup") from the agent runtime. Render a
+// human-readable form instead of the code string — a person scanning the
+// participant rail should see "running wiki lookup", not an internal symbol.
+function humanizeActivity(raw: string): string {
+  let s = raw.trim();
+  if (!s) return s;
+  if (s.includes("mcp__")) {
+    s = s
+      .replace(/mcp__[a-z0-9]+_/gi, "") // strip the mcp__<server>_ prefix
+      .replace(/mcp__/gi, "")
+      .replace(/_/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!s || s.toLowerCase() === "running") return "Working…";
+  }
+  return s;
+}
+
 function memberActivity(member: OfficeMember): string {
   if (member.disabled) return "Disabled in this channel";
-  return (
-    member.liveActivity?.trim() ||
-    member.task?.trim() ||
-    member.detail?.trim() ||
-    member.role?.trim() ||
-    "Idle"
-  );
+  const live =
+    member.liveActivity?.trim() || member.task?.trim() || member.detail?.trim();
+  if (live) return humanizeActivity(live);
+  return member.role?.trim() || "Idle";
 }
 
 function sortParticipants(a: OfficeMember, b: OfficeMember): number {

@@ -107,6 +107,45 @@ func TestPlanMode_HumanApproveNotBlockedByGate(t *testing.T) {
 	}
 }
 
+func TestPlanMode_AssignRoutesPlanFirstToPlanning(t *testing.T) {
+	// The Auto-owner triage path: the CEO assigns a real specialist to a
+	// parked plan-first task via team_task action=assign. That must route the
+	// task into Planning (owner plans first), NOT straight to Running —
+	// otherwise Auto + Plan-first silently skips the plan/approval gate.
+	b := newTestBroker(t)
+	b.mu.Lock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	task := teamTask{
+		ID:        "OFFICE-A1",
+		Channel:   "general",
+		Title:     "auto plan-first task",
+		Owner:     "auto",
+		PlanFirst: true,
+		CreatedBy: "human",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := b.applyLifecycleStateLocked(&task, LifecycleStateReady); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("seed ready task: %v", err)
+	}
+	b.tasks = append(b.tasks, task)
+	b.mu.Unlock()
+
+	if _, err := b.MutateTask(TaskPostRequest{
+		Action:    "assign",
+		ID:        "OFFICE-A1",
+		Channel:   "general",
+		Owner:     "executor",
+		CreatedBy: "ceo",
+	}); err != nil {
+		t.Fatalf("CEO assign: %v", err)
+	}
+	if got := lifecycleStateOf(t, b, "OFFICE-A1"); got != LifecycleStatePlanning {
+		t.Fatalf("plan-first task assigned by the CEO should route to Planning, got %q", got)
+	}
+}
+
 func TestPlanMode_GateScopedToPlanningOnly(t *testing.T) {
 	// The gate must NOT touch the normal review-approval path: an agent
 	// reviewer approving COMPLETED work (Review state) is still allowed.
