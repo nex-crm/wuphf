@@ -59,7 +59,7 @@ describe("IntegrationsApp", () => {
   it("renders provider status and dynamic action toolkits", async () => {
     render(wrap(<IntegrationsApp />));
 
-    expect(await screen.findByText("Action Toolkits")).toBeInTheDocument();
+    expect(await screen.findByText("Action Accounts")).toBeInTheDocument();
     expect(screen.getByText("Composio")).toBeInTheDocument();
     expect(screen.getByText("Gmail")).toBeInTheDocument();
     expect(

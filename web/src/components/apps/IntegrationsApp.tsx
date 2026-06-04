@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Lock,
   NavArrowRight,
   OpenNewWindow,
   Refresh,
@@ -39,22 +38,12 @@ import {
 
 function HelpBanner() {
   return (
-    <div className="op-lock-card op-integrations-help">
-      <div className="op-lock-head">
-        <div className="op-lock-title">
-          <span className="op-lock-icon" aria-hidden="true">
-            <Lock width={14} height={14} />
-          </span>
-          <span className="op-lock-title-text">
-            Integrations are gateways and action accounts, not runtimes
-          </span>
-        </div>
-      </div>
-      <p className="op-lock-body" style={{ marginBottom: 0 }}>
-        Connect external accounts agents can use for approved actions, and bring
-        agents or messaging streams in from outside the team. Pick LLM runtimes
-        in <em>Settings → Default runtime</em>.
-      </p>
+    <div className="op-integrations-rule">
+      <strong>Runtime control stays in Settings.</strong>
+      <span>
+        This page manages accounts, gateways, channels, and the audit trail for
+        external actions.
+      </span>
     </div>
   );
 }
@@ -229,10 +218,10 @@ function ProviderStrip({
             className={`op-led ${provider.configured ? "is-on" : "is-off"}`}
             aria-hidden="true"
           />
-          <div>
-            <div className="op-provider-name">{provider.label}</div>
-            <div className="op-provider-detail">{provider.detail}</div>
-          </div>
+          <span className="op-provider-name">{provider.label}</span>
+          <span className="op-provider-detail">
+            {provider.detail || (provider.configured ? "ready" : "missing")}
+          </span>
         </div>
       ))}
     </div>
@@ -250,14 +239,20 @@ function ActionToolkitsSection({
     <section className="op-category">
       <header className="op-category-head">
         <div>
-          <h3 className="op-category-title">Action Toolkits</h3>
+          <h3 className="op-category-title">Action Accounts</h3>
           <p className="op-category-blurb">
-            OAuth-backed accounts agents can use for approved external actions.
+            OAuth accounts agents can request through approval.
           </p>
         </div>
-        <span className="op-section-count">{items.length} toolkits</span>
+        <span className="op-section-count">{items.length} accounts</span>
       </header>
       <div className="op-toolkit-ledger">
+        <div className="op-toolkit-ledger-head" aria-hidden="true">
+          <span>Integration</span>
+          <span>Scope</span>
+          <span>Account</span>
+          <span>Status</span>
+        </div>
         {items.map((item) => (
           <ToolkitRow
             key={`${item.provider}:${item.platform}:${item.connection_key ?? "catalog"}`}
@@ -302,6 +297,7 @@ function ToolkitRow({
     item.last_action_summary ??
     item.description ??
     `${item.provider} account actions for ${item.platform}`;
+  const category = formatToolkitCategory(item.category);
   return (
     <button
       type="button"
@@ -313,16 +309,12 @@ function ToolkitRow({
         <ToolkitLogo item={item} />
       </span>
       <span className="op-toolkit-row-body">
-        <span className="op-toolkit-row-top">
-          <span className="op-toolkit-row-title">{item.name}</span>
-          <span className="op-toolkit-row-meta">
-            {formatToolkitCategory(item.category)}
-          </span>
-          {connectionName ? (
-            <span className="op-toolkit-row-meta">{connectionName}</span>
-          ) : null}
-        </span>
+        <span className="op-toolkit-row-title">{item.name}</span>
         <span className="op-toolkit-row-summary">{summary}</span>
+      </span>
+      <span className="op-toolkit-row-cell">{category}</span>
+      <span className="op-toolkit-row-cell">
+        {connectionName || "No account"}
       </span>
       <span className="op-toolkit-row-state">
         <span className={`op-status is-${tone}`}>
@@ -549,7 +541,7 @@ function ToolkitDetail({
           <div className="op-audit-head">
             <div>
               <h3 className="op-subhead">Audit</h3>
-              <p>External action and approval events for this integration.</p>
+              <p>Action and approval events for this account.</p>
             </div>
             <button
               type="button"
@@ -601,7 +593,7 @@ function IntegrationsHome({
           <Search width={14} height={14} aria-hidden="true" />
           <input
             type="search"
-            placeholder="Search toolkits"
+            placeholder="Search accounts"
             value={search}
             onChange={(event) => onSearch(event.target.value)}
           />
@@ -618,13 +610,12 @@ function IntegrationsHome({
         </select>
       </div>
       {isLoading ? (
-        <div className="app-panel-loading">Loading action toolkits…</div>
+        <div className="app-panel-loading">Loading accounts…</div>
       ) : toolkitItems.length > 0 ? (
         <ActionToolkitsSection items={toolkitItems} onOpen={onOpenToolkit} />
       ) : (
-        <p className="op-runtime-note" style={{ marginBottom: 24 }}>
-          No action toolkits found. Configure Composio in Settings or adjust the
-          search filter.
+        <p className="op-runtime-note op-empty-state">
+          No accounts match this view. Configure Composio or clear the filter.
         </p>
       )}
       <RegistryListView
@@ -701,9 +692,8 @@ export function IntegrationsApp() {
   return (
     <div className="op-page">
       <header className="op-page-header">
-        <span className="op-eyebrow op-eyebrow-strong">PATCH BAY</span>
         <h2>Integrations</h2>
-        <p>Add, manage, and audit external systems connected to the office.</p>
+        <p>External accounts, gateways, channels, and action audit.</p>
       </header>
 
       {!(selected || selectedToolkit) && <HelpBanner />}

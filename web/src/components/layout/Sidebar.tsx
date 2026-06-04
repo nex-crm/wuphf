@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
 
 import { useResizablePane } from "../../hooks/useResizablePane";
@@ -19,6 +20,25 @@ export const SIDEBAR_DEFAULT_WIDTH = 280;
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 420;
 export const SIDEBAR_WIDTH_STORAGE_KEY = "wuphf-sidebar-width";
+const MOBILE_RAIL_QUERY = "(max-width: 430px)";
+
+function useMobileRail(): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia(MOBILE_RAIL_QUERY).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const query = window.matchMedia(MOBILE_RAIL_QUERY);
+    const onChange = (event: MediaQueryListEvent) => setMatches(event.matches);
+    setMatches(query.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  return matches;
+}
 
 export function Sidebar() {
   const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
@@ -30,6 +50,17 @@ export function Sidebar() {
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const currentApp = useCurrentApp();
+  const mobileRail = useMobileRail();
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!mobileRail) setMobileExpanded(false);
+  }, [mobileRail]);
+
+  const effectiveCollapsed = mobileRail ? !mobileExpanded : sidebarCollapsed;
+  const collapseSidebar = mobileRail
+    ? () => setMobileExpanded(false)
+    : toggleSidebarCollapsed;
 
   const resize = useResizablePane({
     storageKey: SIDEBAR_WIDTH_STORAGE_KEY,
@@ -45,16 +76,20 @@ export function Sidebar() {
   // (which clamp the sidebar to 240px / full overlay) can still win
   // — inline `width` would beat them with normal cascade rules.
   const asideStyle = (
-    sidebarCollapsed ? null : { "--sidebar-resize-width": `${resize.width}px` }
+    effectiveCollapsed
+      ? null
+      : { "--sidebar-resize-width": `${resize.width}px` }
   ) as React.CSSProperties | null;
 
   return (
     <aside
-      className={`sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
+      className={`sidebar${effectiveCollapsed ? " sidebar-collapsed" : ""}`}
       style={asideStyle ?? undefined}
     >
-      {sidebarCollapsed ? (
-        <CollapsedSidebar />
+      {effectiveCollapsed ? (
+        <CollapsedSidebar
+          onExpand={mobileRail ? () => setMobileExpanded(true) : undefined}
+        />
       ) : (
         <>
           <div className="sidebar-header">
@@ -66,7 +101,7 @@ export function Sidebar() {
                 className="sidebar-icon-btn"
                 aria-label="Collapse sidebar"
                 title="Collapse sidebar"
-                onClick={toggleSidebarCollapsed}
+                onClick={collapseSidebar}
               >
                 <SidebarCollapse />
               </button>
@@ -129,7 +164,7 @@ export function Sidebar() {
           <UsagePanel />
         </>
       )}
-      {!sidebarCollapsed && (
+      {!(effectiveCollapsed || mobileRail) && (
         <PaneResizeHandle
           edge="right"
           ariaLabel="Resize sidebar"

@@ -2666,6 +2666,9 @@ html[data-theme="nex"]
     height: 100%;
     z-index: 20;
   }
+  .sidebar.sidebar-collapsed {
+    width: 56px;
+  }
   .main {
     width: 100%;
   }
@@ -3608,18 +3611,15 @@ html[data-theme="nex"]
   box-shadow: 0 0 0 1px var(--focus-ring-color, var(--cyan-500, #06b6d4));
 }
 
-/* Globally suppress text selection + force the resize cursor while a
-   drag is in progress, so the cursor doesn't flicker to text-select
-   when the pointer crosses the main content area mid-drag. The
-   high-specificity `*` selector combined with !important is the
-   classic web idiom for this; biome flags it but the override is
-   intentional and scoped to the duration of the drag. */
+/* Globally suppress text selection + force the resize cursor while a drag is
+   in progress, so the cursor doesn't flicker to text-select when the pointer
+   crosses the main content area mid-drag. */
 body.resizing-pane {
-  cursor: col-resize !important;
+  cursor: col-resize;
   user-select: none;
 }
 
 body.resizing-pane * {
-  cursor: col-resize !important;
-  user-select: none !important;
+  cursor: col-resize;
+  user-select: none;
 }

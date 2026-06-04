@@ -63,8 +63,9 @@ type Popover = "team" | "channels" | "usage" | null;
 type HintState = { label: string; y: number } | null;
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
-export function CollapsedSidebar() {
+export function CollapsedSidebar({ onExpand }: { onExpand?: () => void }) {
   const toggleCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
+  const expand = onExpand ?? toggleCollapsed;
   const currentApp = useCurrentApp();
   const [popover, setPopover] = useState<Popover>(null);
   const [hint, setHint] = useState<HintState>(null);
@@ -118,7 +119,7 @@ export function CollapsedSidebar() {
           type="button"
           className="sidebar-icon-btn"
           aria-label="Expand sidebar"
-          onClick={toggleCollapsed}
+          onClick={expand}
           onMouseEnter={(e) => showHint(e, "Expand sidebar")}
           onMouseLeave={hideHint}
         >
