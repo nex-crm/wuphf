@@ -30,6 +30,7 @@ import {
   STAGE_ORDER,
   stageForState,
 } from "../../lib/types/lifecycle";
+import { useAppStore } from "../../stores/app";
 import {
   routineKey,
   routineLabel,
@@ -38,6 +39,10 @@ import {
 import { isCadenceSchedulerJob } from "../apps/schedulerJobClassification";
 import { TaskCreateDialog } from "../tasks/TaskCreateDialog";
 import { LifecycleStatePill } from "./LifecycleStatePill";
+import {
+  activityDotForLifecycleState,
+  TaskStatusDot,
+} from "./TaskActivityStream";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -128,6 +133,16 @@ const STAGE_HINT: Record<LifecycleStage, string> = {
 
 function TaskCard({ task }: { task: Task }) {
   const state = taskToLifecycleState(task);
+  const ownerSlug = task.owner?.trim() || undefined;
+  // Live "what's happening" line: the owner's current activity snapshot
+  // (SSE-fed), surfaced on the card so the board reads at a glance — state,
+  // who owns it, and what they're doing right now. Only shown while running;
+  // other states are conveyed by the state pill.
+  const snapshot = useAppStore((s) =>
+    ownerSlug ? s.agentActivitySnapshots[ownerSlug] : undefined,
+  );
+  const isRunning = activityDotForLifecycleState(state) === "running";
+  const activity = isRunning ? snapshot?.activity?.trim() : undefined;
 
   function navigate() {
     void router.navigate({
@@ -142,20 +157,29 @@ function TaskCard({ task }: { task: Task }) {
       className="issues-kanban-card"
       onClick={navigate}
       data-testid="issue-row"
-      aria-label={`Task: ${formatTaskTitleForDisplay(task.title)}, state: ${state}`}
+      aria-label={`Task: ${formatTaskTitleForDisplay(task.title)}, state: ${state}${
+        ownerSlug ? `, owner: ${ownerSlug}` : ", unassigned"
+      }`}
     >
       <div className="issues-kanban-card-title">
         {formatTaskTitleForDisplay(task.title) || "Untitled"}
       </div>
       <div className="issues-kanban-card-meta">
         <LifecycleStatePill state={state} />
-        {task.owner ? (
-          <span className="issues-kanban-card-owner">@{task.owner}</span>
-        ) : null}
-        {task.channel ? (
-          <span className="issues-kanban-card-channel">#{task.channel}</span>
-        ) : null}
+        {ownerSlug ? (
+          <span className="issues-kanban-card-owner">@{ownerSlug}</span>
+        ) : (
+          <span className="issues-kanban-card-owner issues-kanban-card-owner--unassigned">
+            Unassigned
+          </span>
+        )}
       </div>
+      {activity ? (
+        <div className="issues-kanban-card-activity" title={activity}>
+          <TaskStatusDot lifecycleState={state} />
+          <span className="issues-kanban-card-activity-text">{activity}</span>
+        </div>
+      ) : null}
     </button>
   );
 }

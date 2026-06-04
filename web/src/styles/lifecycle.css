@@ -5342,3 +5342,24 @@ html[data-theme="noir-gold"] {
 .issues-kanban-column.is-collapsed .issues-kanban-column-toggle .issues-kanban-column-count {
   margin-left: 0;
 }
+
+/* Kanban card: live "what's happening" line for running tasks, so the board
+   tells you state + owner + current activity at a glance. */
+.issues-kanban-card-activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.issues-kanban-card-activity-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issues-kanban-card-owner--unassigned {
+  color: var(--text-secondary);
+  font-style: italic;
+}
