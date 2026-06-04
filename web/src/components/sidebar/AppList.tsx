@@ -4,11 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import {
   BookStack,
   ClipboardCheck,
+  Community,
   Flash,
   HomeSimple,
   Package,
   Page,
   Play,
+  Puzzle,
   Repeat,
   Search,
   Settings,
@@ -48,6 +50,11 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   receipts: Page,
   "health-check": Search,
   settings: Settings,
+  // Agents + Integrations previously fell back to emoji (🤖 / 🔌), which read
+  // as AI-template slop next to the clean iconoir line-icon set. Give them
+  // real line icons so every nav row is visually consistent.
+  agents: Community,
+  integrations: Puzzle,
 };
 
 // The sidebar is three labeled groups. `inbox` is special — it renders via
