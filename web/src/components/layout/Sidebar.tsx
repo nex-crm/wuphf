@@ -83,7 +83,15 @@ export function Sidebar() {
       ) : (
         <>
           <div className="sidebar-header">
-            <span className="sidebar-logo">WUPHF</span>
+            <button
+              type="button"
+              className="sidebar-logo"
+              onClick={() => router.navigate({ to: "/" })}
+              title="Home"
+              aria-label="WUPHF — go to home"
+            >
+              WUPHF
+            </button>
             <TeamMemberBadge />
             <div className="sidebar-header-actions">
               <button

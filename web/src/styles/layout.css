@@ -404,6 +404,22 @@ html[data-theme="nex"]
   font-size: 22px;
   letter-spacing: -0.01em;
   cursor: pointer;
+  /* Renders as the home button — reset native button chrome, keep the
+     logo type styling above. */
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  text-align: left;
+}
+.sidebar-logo:hover {
+  opacity: 0.85;
+}
+.sidebar-logo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 .sidebar-btn {
   width: 28px;
@@ -3838,6 +3854,21 @@ body.resizing-pane * {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+/* The agent detail is a full-screen route, but AgentProfilePanel's base
+   `.agent-panel` class is a fixed 400px right-edge slide-in drawer (its other
+   use). Inside the detail route, neutralize the fixed positioning so the panel
+   fills the page instead of floating as a narrow right-hand panel. */
+.agent-detail-panel .agent-profile-panel {
+  position: static;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 1;
+  border-left: none;
+  box-shadow: none;
+  z-index: auto;
+  animation: none;
 }
 
 /* ── New-task home composer ─────────────────────────────────────────────── */
