@@ -1,7 +1,6 @@
 package team
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -57,7 +56,6 @@ func (b *Broker) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	composio := action.NewComposioFromEnv()
-	one := action.NewOneCLIFromEnv()
 	resp := integrationsResponse{Providers: []integrationProviderStatus{
 		{
 			Provider:           "composio",
@@ -66,14 +64,6 @@ func (b *Broker) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 			SupportsConnect:    true,
 			SupportsDisconnect: true,
 			Detail:             providerDetail(composio.Configured(), "COMPOSIO_API_KEY and COMPOSIO_USER_ID are required for OAuth-managed integrations."),
-		},
-		{
-			Provider:           "one",
-			Label:              "One CLI",
-			Configured:         one.Configured(),
-			SupportsConnect:    false,
-			SupportsDisconnect: false,
-			Detail:             providerDetail(one.Configured(), "One connections are visible in WUPHF, but connect/disconnect stays in the One CLI for now."),
 		},
 	}}
 
@@ -89,16 +79,6 @@ func (b *Broker) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			resp.Items = append(resp.Items, curatedComposioCatalog(opts, false)...)
-		}
-	}
-	if providerFilter == "" || providerFilter == "one" {
-		if one.Configured() {
-			rows, err := oneIntegrationRows(r.Context(), one, opts)
-			if err != nil {
-				setIntegrationProviderDetail(resp.Providers, "one", "One unavailable: "+err.Error())
-			} else {
-				resp.Items = append(resp.Items, rows...)
-			}
 		}
 	}
 	b.decorateIntegrationItems(&resp)
@@ -251,37 +231,6 @@ func (b *Broker) handleIntegrationAudit(w http.ResponseWriter, r *http.Request) 
 	)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"events": events})
-}
-
-func oneIntegrationRows(ctx context.Context, one *action.OneCLI, opts action.IntegrationCatalogOptions) ([]action.IntegrationCatalogItem, error) {
-	connections, err := one.ListConnections(ctx, action.ListConnectionsOptions{Search: opts.Search, Limit: opts.Limit})
-	if err != nil {
-		return nil, err
-	}
-	connectedFilter := strings.ToLower(strings.TrimSpace(opts.Connected))
-	var out []action.IntegrationCatalogItem
-	for _, conn := range connections.Connections {
-		if connectedFilter == "false" || connectedFilter == "0" || connectedFilter == "available" {
-			continue
-		}
-		name := strings.TrimSpace(conn.Name)
-		if name == "" {
-			name = displayPlatform(conn.Platform)
-		}
-		out = append(out, action.IntegrationCatalogItem{
-			Provider:       "one",
-			Platform:       strings.TrimSpace(conn.Platform),
-			Name:           name,
-			Category:       "local",
-			State:          normalizeIntegrationState(conn.State),
-			ConnectionKey:  strings.TrimSpace(conn.Key),
-			ConnectionName: name,
-			CanConnect:     false,
-			CanDisconnect:  false,
-			Connections:    []action.Connection{conn},
-		})
-	}
-	return out, nil
 }
 
 type curatedComposioToolkit struct {

@@ -14,6 +14,7 @@ import {
   updateConfig,
   type WorkspaceWipeResult,
 } from "../../api/client";
+import { useOfficeMembers } from "../../hooks/useMembers";
 import { router } from "../../lib/router";
 import { useAppStore } from "../../stores/app";
 import { CredentialRegistrationPanel } from "../cosign";
@@ -26,7 +27,6 @@ import {
 } from "../ui/ShredWarning";
 import { showNotice } from "../ui/Toast";
 import { WipeModal } from "../ui/WipeModal";
-import { useOfficeMembers } from "../../hooks/useMembers";
 import { NexConnectPanel } from "./NexConnectPanel";
 import { ImageGenSection } from "./SettingsApp.imageGen";
 import { Field, KeyField, SaveButton } from "./settings/components";
@@ -187,10 +187,10 @@ function GeneralSection({ cfg, save }: SectionProps) {
         }}
       >
         Picked for new agents at creation time. Existing agents keep whatever
-        runtime they already have — change those one at a time from each
-        agent's profile (Runtime section). To import OpenClaw or Hermes
-        agents into the team, use the Integrations app — those gateways are
-        not runtimes you assign here.
+        runtime they already have — change those one at a time from each agent's
+        profile (Runtime section). To import OpenClaw or Hermes agents into the
+        team, use the Integrations app — those gateways are not runtimes you
+        assign here.
       </p>
       <Field label="Runtime" hint="--provider">
         <select
@@ -819,13 +819,6 @@ const KEY_DEFS: KeyDef[] = [
     env: "MINIMAX_API_KEY",
   },
   {
-    field: "one_api_key",
-    flag: "one_key_set",
-    label: "One (integration)",
-    placeholder: "one_...",
-    env: "ONE_SECRET",
-  },
-  {
     field: "composio_api_key",
     flag: "composio_key_set",
     label: "Composio",
@@ -885,7 +878,7 @@ function KeysSection({ cfg, save }: SectionProps) {
 
 function IntegrationsSection({ cfg, save }: SectionProps) {
   const [actionProvider, setActionProvider] = useState<string>(
-    cfg.action_provider ?? "auto",
+    cfg.action_provider === "one" ? "auto" : (cfg.action_provider ?? "auto"),
   );
 
   const onSave = async () => {
@@ -928,7 +921,6 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
           onChange={(e) => setActionProvider(e.target.value)}
         >
           <option value="auto">Auto</option>
-          <option value="one">One CLI</option>
           <option value="composio">Composio</option>
         </select>
       </Field>

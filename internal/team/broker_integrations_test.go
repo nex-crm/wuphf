@@ -85,8 +85,14 @@ func TestIntegrationsEndpointReportsUnconfiguredProviders(t *testing.T) {
 	if !foundGmail {
 		t.Fatalf("expected gmail in curated catalog: %+v", body.Items)
 	}
+	if len(body.Providers) != 1 {
+		t.Fatalf("expected only composio provider status: %+v", body.Providers)
+	}
 	foundComposio := false
 	for _, provider := range body.Providers {
+		if provider.Provider == "one" {
+			t.Fatalf("did not expect one provider status: %+v", body.Providers)
+		}
 		if provider.Provider == "composio" {
 			foundComposio = true
 			if provider.Configured {

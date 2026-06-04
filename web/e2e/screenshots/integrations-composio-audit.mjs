@@ -26,7 +26,6 @@ const CONFIG = {
   memory_backend: "markdown",
   action_provider: "composio",
   team_lead_slug: "ceo",
-  one_key_set: true,
   composio_key_set: true,
   telegram_token_set: true,
   openclaw_token_set: false,
@@ -43,14 +42,6 @@ const INTEGRATIONS = {
       supports_connect: true,
       supports_disconnect: true,
       detail: "Configured",
-    },
-    {
-      provider: "one",
-      label: "One CLI",
-      configured: true,
-      supports_connect: false,
-      supports_disconnect: false,
-      detail: "Connections visible; connect from the One CLI.",
     },
   ],
   items: [
