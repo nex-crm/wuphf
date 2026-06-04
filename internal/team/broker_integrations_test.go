@@ -216,6 +216,12 @@ func TestIntegrationConnectStatusDisconnectAndAudit(t *testing.T) {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 
+	resp = integrationRequest(t, srv, b, http.MethodGet, "/integrations/connect-status?provider=composio&connect_id=ca_123", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected repeated status code=%d", resp.StatusCode)
+	}
+
 	if err := b.RecordActionWithMetadata("external_action_executed", "composio", "general", "agent", "Sent email", "GMAIL_SEND_EMAIL", nil, "", map[string]string{
 		"provider":       "composio",
 		"platform":       "gmail",
@@ -256,7 +262,11 @@ func TestIntegrationConnectStatusDisconnectAndAudit(t *testing.T) {
 	}
 	foundAction := false
 	foundApproval := false
+	connectedEvents := 0
 	for _, event := range audit.Events {
+		if event.EventType == "integration_connected" {
+			connectedEvents++
+		}
 		if event.EventType == "external_action_executed" {
 			foundAction = true
 			if event.Provider != "composio" || event.Platform != "gmail" || event.ConnectionKey != "ca_123" || event.Metadata["action_id"] != "GMAIL_SEND_EMAIL" {
@@ -275,6 +285,9 @@ func TestIntegrationConnectStatusDisconnectAndAudit(t *testing.T) {
 	}
 	if !foundApproval {
 		t.Fatalf("expected approval audit event: %+v", audit.Events)
+	}
+	if connectedEvents != 1 {
+		t.Fatalf("expected one connected audit event, got %d: %+v", connectedEvents, audit.Events)
 	}
 
 	resp = integrationRequest(t, srv, b, http.MethodPost, "/integrations/disconnect", []byte(`{"provider":"composio","platform":"gmail","connection_key":"ca_123"}`))

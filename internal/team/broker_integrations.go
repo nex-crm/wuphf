@@ -118,7 +118,7 @@ func (b *Broker) handleIntegrationConnect(w http.ResponseWriter, r *http.Request
 		"composio",
 		"general",
 		actor,
-		fmt.Sprintf("Started %s connection via Composio", displayPlatform(result.Platform)),
+		fmt.Sprintf("Started %s connection via Composio", action.DisplayPlatformName(result.Platform)),
 		result.Platform,
 		nil,
 		"",
@@ -155,13 +155,13 @@ func (b *Broker) handleIntegrationConnectStatus(w http.ResponseWriter, r *http.R
 		http.Error(w, fmt.Sprintf("check composio connection: %v", err), http.StatusBadGateway)
 		return
 	}
-	if result.Status == "connected" && result.ConnectionKey != "" {
+	if result.Status == "connected" && result.ConnectionKey != "" && !b.hasIntegrationAction("integration_connected", "composio", result.ConnectionKey) {
 		_ = b.RecordActionWithMetadata(
 			"integration_connected",
 			"composio",
 			"general",
 			integrationRequestActor(r),
-			fmt.Sprintf("Connected %s via Composio", displayPlatform(result.Platform)),
+			fmt.Sprintf("Connected %s via Composio", action.DisplayPlatformName(result.Platform)),
 			result.ConnectionKey,
 			nil,
 			"",
@@ -253,7 +253,7 @@ func integrationAuditPlatform(platform string) string {
 	if platform == "" {
 		return "unknown platform"
 	}
-	return displayPlatform(platform)
+	return action.DisplayPlatformName(platform)
 }
 
 type curatedComposioToolkit struct {
@@ -496,27 +496,33 @@ func isIntegrationActionKind(kind string) bool {
 		strings.HasPrefix(kind, "external_trigger_")
 }
 
+func (b *Broker) hasIntegrationAction(kind, provider, connectionKey string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	connectionKey = strings.ToLower(strings.TrimSpace(connectionKey))
+	if kind == "" || provider == "" || connectionKey == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, act := range b.actions {
+		if strings.TrimSpace(act.Kind) != kind {
+			continue
+		}
+		metadata := sanitizeActionMetadata(act.Metadata)
+		if strings.EqualFold(metadata["provider"], provider) &&
+			strings.EqualFold(metadata["connection_key"], connectionKey) {
+			return true
+		}
+	}
+	return false
+}
+
 func matchesIntegrationFilter(filter, value string) bool {
 	filter = strings.ToLower(strings.TrimSpace(filter))
 	if filter == "" {
 		return true
 	}
 	return strings.EqualFold(filter, strings.TrimSpace(value))
-}
-
-func normalizeIntegrationState(state string) string {
-	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "active", "connected", "enabled":
-		return "connected"
-	case "pending", "initiated":
-		return "pending"
-	case "failed", "error":
-		return "failed"
-	case "":
-		return "connected"
-	default:
-		return strings.ToLower(strings.TrimSpace(state))
-	}
 }
 
 func parseIntegrationLimit(value string, fallback int) int {
@@ -544,31 +550,4 @@ func setIntegrationProviderDetail(providers []integrationProviderStatus, provide
 			return
 		}
 	}
-}
-
-func displayPlatform(platform string) string {
-	platform = strings.TrimSpace(platform)
-	if platform == "" {
-		return "Unknown"
-	}
-	parts := strings.FieldsFunc(strings.ReplaceAll(platform, "_", "-"), func(r rune) bool { return r == '-' })
-	for i, part := range parts {
-		switch strings.ToLower(part) {
-		case "gmail":
-			parts[i] = "Gmail"
-		case "github":
-			parts[i] = "GitHub"
-		case "hubspot":
-			parts[i] = "HubSpot"
-		case "googlecalendar":
-			parts[i] = "Google Calendar"
-		case "googledrive":
-			parts[i] = "Google Drive"
-		default:
-			if part != "" {
-				parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
-			}
-		}
-	}
-	return strings.Join(parts, " ")
 }

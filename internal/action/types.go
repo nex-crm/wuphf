@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 type Capability string
@@ -23,6 +24,35 @@ const (
 	CapabilityRelayEvents     Capability = "relay_events"
 	CapabilityRelayEvent      Capability = "relay_event"
 )
+
+func DisplayPlatformName(platform string) string {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return "Unknown"
+	}
+	parts := strings.FieldsFunc(strings.ReplaceAll(platform, "_", "-"), func(r rune) bool { return r == '-' })
+	for i, part := range parts {
+		switch strings.ToLower(part) {
+		case "gmail":
+			parts[i] = "Gmail"
+		case "github":
+			parts[i] = "GitHub"
+		case "hubspot":
+			parts[i] = "HubSpot"
+		case "slackbot":
+			parts[i] = "Slack"
+		case "googlecalendar":
+			parts[i] = "Google Calendar"
+		case "googledrive":
+			parts[i] = "Google Drive"
+		default:
+			if part != "" {
+				parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
+			}
+		}
+	}
+	return strings.Join(parts, " ")
+}
 
 // Provider exposes a provider-agnostic action plane for external systems.
 type Provider interface {

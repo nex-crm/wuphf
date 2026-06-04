@@ -18,6 +18,7 @@ import {
   type IntegrationCatalogItem,
   type IntegrationConnectResult,
   type IntegrationProviderStatus,
+  type IntegrationsResponse,
   listIntegrations,
   startIntegrationConnection,
 } from "../../api/integrations";
@@ -283,6 +284,10 @@ function toolkitConnectionName(item: IntegrationCatalogItem) {
   );
 }
 
+function toolkitIdentity(item: IntegrationCatalogItem) {
+  return `${item.provider}:${item.platform}`;
+}
+
 function ToolkitRow({
   item,
   onOpen,
@@ -528,7 +533,7 @@ function ToolkitDetail({
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              disabled={statusQuery.isFetching || !pending}
+              disabled={statusQuery.isFetching}
               onClick={() => void statusQuery.refetch()}
             >
               <Refresh width={14} height={14} aria-hidden="true" />
@@ -698,6 +703,31 @@ function EmptyIntegrationsWarning({
   );
 }
 
+function findRegistryIntegration(
+  available: IntegrationDescriptor[],
+  selectedId: string | null,
+) {
+  return available.find((descriptor) => descriptor.id === selectedId) ?? null;
+}
+
+function successfulIntegrationData(
+  isSuccess: boolean,
+  data: IntegrationsResponse | undefined,
+) {
+  if (!isSuccess) return null;
+  return data ?? null;
+}
+
+function findSelectedToolkit(
+  items: IntegrationCatalogItem[],
+  selectedToolkitKey: string | null,
+) {
+  if (!selectedToolkitKey) return null;
+  return (
+    items.find((item) => toolkitIdentity(item) === selectedToolkitKey) ?? null
+  );
+}
+
 export function IntegrationsApp() {
   const cfgQuery = useQuery({
     queryKey: ["config"],
@@ -712,8 +742,9 @@ export function IntegrationsApp() {
   });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedToolkit, setSelectedToolkit] =
-    useState<IntegrationCatalogItem | null>(null);
+  const [selectedToolkitKey, setSelectedToolkitKey] = useState<string | null>(
+    null,
+  );
   const [search, setSearch] = useState("");
   const [connected, setConnected] = useState("");
   const trimmedSearch = search.trim() || undefined;
@@ -741,12 +772,13 @@ export function IntegrationsApp() {
   const available = INTEGRATIONS.filter((descriptor) =>
     descriptor.isAvailable(ctx),
   );
-  const selected =
-    available.find((descriptor) => descriptor.id === selectedId) ?? null;
-  const integrationData = integrationsQuery.isSuccess
-    ? integrationsQuery.data
-    : null;
+  const selected = findRegistryIntegration(available, selectedId);
+  const integrationData = successfulIntegrationData(
+    integrationsQuery.isSuccess,
+    integrationsQuery.data,
+  );
   const toolkitItems = integrationData?.items ?? [];
+  const selectedToolkit = findSelectedToolkit(toolkitItems, selectedToolkitKey);
 
   return (
     <div className="op-page">
@@ -760,7 +792,7 @@ export function IntegrationsApp() {
       {selectedToolkit ? (
         <ToolkitDetail
           item={selectedToolkit}
-          onBack={() => setSelectedToolkit(null)}
+          onBack={() => setSelectedToolkitKey(null)}
         />
       ) : selected ? (
         <RegistryDetailView
@@ -779,7 +811,7 @@ export function IntegrationsApp() {
           ctx={ctx}
           onSearch={setSearch}
           onConnected={setConnected}
-          onOpenToolkit={setSelectedToolkit}
+          onOpenToolkit={(item) => setSelectedToolkitKey(toolkitIdentity(item))}
           onOpenRegistry={setSelectedId}
           isError={integrationsQuery.isError}
           error={integrationsQuery.error}

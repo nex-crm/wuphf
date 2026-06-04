@@ -211,7 +211,7 @@ await installCommonMocks(context, {
         body: JSON.stringify(INTEGRATIONS),
       }),
     );
-    await ctx.route("**/api/integrations/audit?*", (r) =>
+    await ctx.route(/\/api\/integrations\/audit(?:\?.*)?$/, (r) =>
       r.fulfill({
         contentType: "application/json",
         body: JSON.stringify(AUDIT),

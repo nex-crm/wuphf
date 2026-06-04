@@ -167,7 +167,7 @@ func (c *ComposioREST) ListIntegrationCatalog(ctx context.Context, opts Integrat
 		logoURL := firstNonEmpty(item.LogoURL, item.Logo, item.Meta.Logo)
 		name := strings.TrimSpace(item.Name)
 		if name == "" {
-			name = platformDisplayName(platform)
+			name = DisplayPlatformName(platform)
 		}
 		out.Items = append(out.Items, IntegrationCatalogItem{
 			Provider:       c.Name(),
@@ -762,7 +762,7 @@ func (c *ComposioREST) createComposioManagedAuthConfig(ctx context.Context, plat
 	body := map[string]any{
 		"toolkit_slug":        platform,
 		"type":                "use_composio_managed_auth",
-		"name":                "WUPHF " + platformDisplayName(platform),
+		"name":                "WUPHF " + DisplayPlatformName(platform),
 		"is_composio_managed": true,
 	}
 	raw, err := c.post(ctx, "/auth_configs", body)
@@ -824,35 +824,6 @@ func connectionState(state string) string {
 		}
 		return strings.ToLower(strings.TrimSpace(state))
 	}
-}
-
-func platformDisplayName(platform string) string {
-	platform = strings.TrimSpace(platform)
-	if platform == "" {
-		return "Unknown"
-	}
-	parts := strings.FieldsFunc(strings.ReplaceAll(platform, "_", "-"), func(r rune) bool { return r == '-' })
-	for i, part := range parts {
-		switch strings.ToLower(part) {
-		case "gmail":
-			parts[i] = "Gmail"
-		case "github":
-			parts[i] = "GitHub"
-		case "hubspot":
-			parts[i] = "HubSpot"
-		case "slackbot":
-			parts[i] = "Slack"
-		case "googlecalendar":
-			parts[i] = "Google Calendar"
-		case "googledrive":
-			parts[i] = "Google Drive"
-		default:
-			if part != "" {
-				parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
-			}
-		}
-	}
-	return strings.Join(parts, " ")
 }
 
 func firstNonEmpty(values ...string) string {

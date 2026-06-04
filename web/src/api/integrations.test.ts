@@ -66,6 +66,7 @@ describe("integrations api client", () => {
         status: "connected",
         connection_key: "ca_123",
       })
+      .mockResolvedValueOnce({})
       .mockResolvedValueOnce({
         events: [
           {
@@ -74,8 +75,7 @@ describe("integrations api client", () => {
             created_at: "2026-06-04T12:00:00Z",
           },
         ],
-      })
-      .mockResolvedValueOnce({});
+      });
 
     await startIntegrationConnection("composio", "gmail");
     await getIntegrationConnectStatus({
@@ -90,14 +90,14 @@ describe("integrations api client", () => {
         platform: "gmail",
         connection_key: "ca_123",
       }),
-    ).resolves.toHaveLength(1);
+    ).resolves.toHaveLength(0);
     await expect(
       getIntegrationAudit({
         provider: "composio",
         platform: "gmail",
         connection_key: "ca_123",
       }),
-    ).resolves.toHaveLength(0);
+    ).resolves.toHaveLength(1);
 
     expect(postSpy).toHaveBeenNthCalledWith(1, "/integrations/connect", {
       provider: "composio",
