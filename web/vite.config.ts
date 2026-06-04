@@ -56,6 +56,9 @@ export default defineConfig({
         "src/lib/wikilink.ts",
         "src/api/wiki.ts",
       ],
+      // The refclone editor is a large embedded editor surface with its own
+      // coverage ramp; keep the legacy wiki gate scoped to the current baseline.
+      exclude: ["src/components/wiki/editor/refclone/**"],
       // Current scoped wiki baseline. Ratchet these upward as coverage improves
       // instead of letting the CI gate start red.
       thresholds: { statements: 70, lines: 73, branches: 64, functions: 71 },
