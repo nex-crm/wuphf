@@ -569,6 +569,24 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		rejectTriggered := false
 		submitForReviewTriggered := false
 		beforeStatus := task.status
+		// Plan mode (Phase 5) human-approval gate: with Plan-first ON the owner
+		// writes a plan and STOPS in LifecycleStatePlanning until a HUMAN clicks
+		// "Approve plan & Start" (the decision-packet Planning→Running path in
+		// recordTaskDecisionInternal). No agent — not even the CEO — may approve
+		// or otherwise advance the plan toward execution from here; agents can
+		// only comment or request changes. This enforces the gate the composer
+		// promises ("the owner writes a plan for your approval") so the CEO
+		// cannot autonomously approve a plan on the human's behalf.
+		if task.LifecycleState == LifecycleStatePlanning && !isHumanMessageSender(actor) {
+			switch action {
+			case "approve", "complete", "submit_for_review", "review":
+				return TaskResponse{}, taskMutationError(
+					TaskMutationForbidden,
+					fmt.Sprintf("task %s is in Plan mode — its plan is awaiting human approval. Only the human can approve the plan and start the work (the \"Approve plan & Start\" button). To weigh in, use team_task action=comment or request_changes.", task.ID),
+					nil,
+				)
+			}
+		}
 		switch action {
 		case "claim", "assign":
 			if strings.TrimSpace(body.Owner) == "" {

@@ -4007,3 +4007,80 @@ body.resizing-pane * {
   filter: brightness(1.08);
   border-color: transparent;
 }
+
+/* ── Task channel chat (task detail → Channel tab) ──────────────────────
+   The task's own channel rendered as live chat: the agent conversation
+   (owner / CEO / Librarian) plus a composer for the human to post into it.
+   Replaces the old packet-comments timeline so the per-task chat is
+   actually reachable from the task. */
+.task-channel-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--space-3, 12px);
+}
+.task-channel-chat-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  padding: var(--space-2, 8px) 0;
+}
+.task-channel-chat-empty {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding: var(--space-4, 16px);
+  text-align: center;
+}
+.task-channel-chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3, 12px);
+}
+.task-channel-chat-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 2.75rem;
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  line-height: 1.5;
+}
+.task-channel-chat-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.task-channel-chat-error {
+  color: var(--danger, #c0392b);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+.task-channel-chat-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.task-channel-chat-send {
+  padding: var(--space-2, 8px) var(--space-4, 16px);
+  background: var(--accent);
+  color: var(--bg-card);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.task-channel-chat-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.task-channel-chat-send:not(:disabled):hover {
+  filter: brightness(1.08);
+}

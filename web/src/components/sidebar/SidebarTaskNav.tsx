@@ -1,41 +1,40 @@
 /**
  * SidebarTaskNav — the primary sidebar surface in the task-scoped model.
  *
- * Replaces the old Agents + Channels nav sections. Channels are now per
- * task, so the sidebar lists the operator's Tasks grouped by the same
- * seven stages as the /tasks board (see stageForState). Each task links
- * to its detail surface (/tasks/$taskId, which carries its channel);
- * Scheduled entries are routines and link to the routine detail page.
+ * One "Tasks" section: a single flat list of the operator's ACTIVE tasks
+ * (Backlog / In progress / Needs input / Blocked), most-actionable first.
+ * Done, Archive, and Scheduled deliberately do NOT get their own sidebar
+ * sections — they live on the full board, reached by clicking the "Tasks"
+ * header. Each task links to its detail surface (/tasks/$taskId, which
+ * carries its channel).
  *
- * It is navigation, not the board: stages render as collapsible groups,
- * with the active stages (Backlog / In progress / Requires human input)
- * open by default and the quieter ones (Scheduled / Blocked / Done /
- * Archive) collapsed.
+ * This replaces the earlier stage-grouped nav (separate All tasks /
+ * Scheduled / Done sections) per the operator's call: "we just need our
+ * tasks section."
  */
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { getScheduler, type SchedulerJob } from "../../api/scheduler";
 import { getOfficeTasks, type Task } from "../../api/tasks";
 import { router } from "../../lib/router";
 import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import {
   type LifecycleStage,
-  STAGE_LABELS,
   STAGE_ORDER,
   stageForState,
 } from "../../lib/types/lifecycle";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
-import { routineKey, routineLabel } from "../apps/routines/routineModel";
-import { isCadenceSchedulerJob } from "../apps/schedulerJobClassification";
 import { TaskStatusDot } from "../lifecycle/TaskActivityStream";
 import { isTaskSpecTask, taskToLifecycleState } from "../lifecycle/TasksList";
 
-const DEFAULT_OPEN: ReadonlySet<LifecycleStage> = new Set<LifecycleStage>([
-  "backlog",
+// Stages that count as live, actionable work shown in the sidebar. Done,
+// Archive, and Scheduled live on the board (reached via the Tasks header).
+const ACTIVE_STAGES: ReadonlySet<LifecycleStage> = new Set<LifecycleStage>([
   "in_progress",
   "needs_human",
+  "blocked",
+  "backlog",
 ]);
 
 function openBoard(): void {
@@ -52,98 +51,6 @@ function openTask(taskId: string): void {
   void router.navigate({ to: "/tasks/$taskId", params: { taskId } });
 }
 
-function openRoutine(slug: string | undefined): void {
-  if (slug) {
-    void router.navigate({
-      to: "/routines/$routineSlug",
-      params: { routineSlug: slug },
-    });
-    return;
-  }
-  void router.navigate({ to: "/apps/$appId", params: { appId: "routines" } });
-}
-
-// ── Per-stage group ────────────────────────────────────────────────────
-
-interface StageGroupProps {
-  stage: LifecycleStage;
-  count: number;
-  isCollapsed: boolean;
-  onToggle: (stage: LifecycleStage) => void;
-  tasks: Task[];
-  scheduledJobs: SchedulerJob[];
-  activeTaskId: string | null;
-}
-
-function StageGroup({
-  stage,
-  count,
-  isCollapsed,
-  onToggle,
-  tasks,
-  scheduledJobs,
-  activeTaskId,
-}: StageGroupProps) {
-  return (
-    <div className="task-nav-group" data-stage={stage}>
-      <button
-        type="button"
-        className="task-nav-group-header"
-        aria-expanded={!isCollapsed}
-        onClick={() => onToggle(stage)}
-        data-testid={`task-nav-group-${stage}`}
-      >
-        <span className="task-nav-caret" aria-hidden="true">
-          {isCollapsed ? "▸" : "▾"}
-        </span>
-        <span className="task-nav-group-label">{STAGE_LABELS[stage]}</span>
-        <span className="task-nav-group-count">{count}</span>
-      </button>
-      {isCollapsed ? null : (
-        <ul className="task-nav-items">
-          {stage === "scheduled"
-            ? scheduledJobs.map((job) => (
-                <li key={routineKey(job)}>
-                  <button
-                    type="button"
-                    className="task-nav-item"
-                    onClick={() => openRoutine(job.slug)}
-                    data-testid="task-nav-scheduled-item"
-                  >
-                    <span className="task-nav-item-title">
-                      {routineLabel(job) || "Untitled routine"}
-                    </span>
-                  </button>
-                </li>
-              ))
-            : tasks.map((task) => (
-                <li key={task.id}>
-                  <button
-                    type="button"
-                    className={`task-nav-item${
-                      task.id === activeTaskId ? " active" : ""
-                    }`}
-                    onClick={() => openTask(task.id)}
-                    data-testid="task-nav-item"
-                    aria-current={task.id === activeTaskId ? "page" : undefined}
-                  >
-                    <TaskStatusDot
-                      lifecycleState={taskToLifecycleState(task)}
-                    />
-                    <span className="task-nav-item-title">
-                      {formatTaskTitleForDisplay(task.title) || "Untitled"}
-                    </span>
-                  </button>
-                </li>
-              ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-// ── Main component ─────────────────────────────────────────────────────
-
 export function SidebarTaskNav() {
   const route = useCurrentRoute();
   const activeTaskId = route.kind === "task-detail" ? route.taskId : null;
@@ -154,58 +61,20 @@ export function SidebarTaskNav() {
     staleTime: 5_000,
     refetchInterval: 10_000,
   });
-  const schedulerResult = useQuery({
-    queryKey: ["scheduler"],
-    queryFn: () => getScheduler(),
-    refetchInterval: 15_000,
-  });
 
-  const tasks = useMemo(
-    () => (tasksResult.data?.tasks ?? []).filter(isTaskSpecTask),
-    [tasksResult.data],
-  );
-  const scheduledJobs = useMemo<SchedulerJob[]>(
-    () => (schedulerResult.data?.jobs ?? []).filter(isCadenceSchedulerJob),
-    [schedulerResult.data],
-  );
-
-  const byStage = useMemo(() => {
-    const buckets: Record<LifecycleStage, Task[]> = {
-      scheduled: [],
-      backlog: [],
-      in_progress: [],
-      blocked: [],
-      needs_human: [],
-      done: [],
-      archive: [],
-    };
-    for (const task of tasks) {
-      buckets[stageForState(taskToLifecycleState(task))].push(task);
-    }
-    return buckets;
-  }, [tasks]);
-
-  const [collapsed, setCollapsed] = useState<Set<LifecycleStage>>(
-    () => new Set(STAGE_ORDER.filter((s) => !DEFAULT_OPEN.has(s))),
-  );
-
-  function toggle(stage: LifecycleStage) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(stage)) {
-        next.delete(stage);
-      } else {
-        next.add(stage);
-      }
-      return next;
-    });
-  }
-
-  function countFor(stage: LifecycleStage): number {
-    return stage === "scheduled" ? scheduledJobs.length : byStage[stage].length;
-  }
-
-  const totalTasks = tasks.length + scheduledJobs.length;
+  // Active tasks only, ordered by stage (in progress → needs input →
+  // blocked → backlog) so the most actionable sit at the top. Done /
+  // archive / scheduled are filtered out — they belong on the board.
+  const activeTasks = useMemo(() => {
+    const stageRank = (task: Task): number =>
+      STAGE_ORDER.indexOf(stageForState(taskToLifecycleState(task)));
+    return (tasksResult.data?.tasks ?? [])
+      .filter(isTaskSpecTask)
+      .filter((task) =>
+        ACTIVE_STAGES.has(stageForState(taskToLifecycleState(task))),
+      )
+      .sort((a, b) => stageRank(a) - stageRank(b));
+  }, [tasksResult.data]);
 
   return (
     <div className="task-nav" data-testid="sidebar-task-nav">
@@ -214,9 +83,10 @@ export function SidebarTaskNav() {
           type="button"
           className="task-nav-board-link"
           onClick={openBoard}
+          title="Open the full task board (incl. done, archive, scheduled)"
           data-testid="task-nav-board-link"
         >
-          All tasks
+          Tasks
         </button>
         <button
           type="button"
@@ -231,27 +101,31 @@ export function SidebarTaskNav() {
 
       {tasksResult.isPending ? (
         <div className="task-nav-hint">Loading tasks…</div>
-      ) : totalTasks === 0 ? (
+      ) : activeTasks.length === 0 ? (
         <div className="task-nav-hint">
           No tasks yet. Start one with “+ New”.
         </div>
       ) : (
-        STAGE_ORDER.map((stage) => {
-          const count = countFor(stage);
-          if (count === 0) return null;
-          return (
-            <StageGroup
-              key={stage}
-              stage={stage}
-              count={count}
-              isCollapsed={collapsed.has(stage)}
-              onToggle={toggle}
-              tasks={byStage[stage]}
-              scheduledJobs={scheduledJobs}
-              activeTaskId={activeTaskId}
-            />
-          );
-        })
+        <ul className="task-nav-items" data-testid="task-nav-list">
+          {activeTasks.map((task) => (
+            <li key={task.id}>
+              <button
+                type="button"
+                className={`task-nav-item${
+                  task.id === activeTaskId ? " active" : ""
+                }`}
+                onClick={() => openTask(task.id)}
+                data-testid="task-nav-item"
+                aria-current={task.id === activeTaskId ? "page" : undefined}
+              >
+                <TaskStatusDot lifecycleState={taskToLifecycleState(task)} />
+                <span className="task-nav-item-title">
+                  {formatTaskTitleForDisplay(task.title) || "Untitled"}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

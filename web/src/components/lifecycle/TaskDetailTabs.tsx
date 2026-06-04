@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 
 import { SubTasksList } from "./SubTasksList";
 import { TaskActivityFeed } from "./TaskActivityFeed";
+import { TaskChannelChat } from "./TaskChannelChat";
 import { TaskDescription } from "./TaskDescription";
-import type { TaskComment } from "./TaskDocument";
-import { CommentsTimeline } from "./TaskDocument";
 
 // ── Task detail tabs ─────────────────────────────────────────────────
 
@@ -15,10 +14,8 @@ interface TaskDetailTabsProps {
   channel: string;
   /** Linear-style task body (the spec). Rendered in the Spec tab. */
   description: string;
-  comments: TaskComment[];
   isDrafting: boolean;
   showSubTasks: boolean;
-  timelineRef: React.RefObject<HTMLDivElement | null>;
   onCommentPosted: () => void;
 }
 
@@ -37,10 +34,8 @@ export function TaskDetailTabs({
   taskId,
   channel,
   description,
-  comments,
   isDrafting,
   showSubTasks,
-  timelineRef,
   onCommentPosted,
 }: TaskDetailTabsProps) {
   const [tab, setTab] = useState<TaskDetailTab>(
@@ -54,7 +49,6 @@ export function TaskDetailTabs({
       setTab("channel");
     }
   }, [showSubTasks, tab]);
-  const commentCount = comments.length;
 
   return (
     <div className="issue-doc-tabs">
@@ -67,7 +61,6 @@ export function TaskDetailTabs({
           active={tab === "channel"}
           onClick={() => setTab("channel")}
           label="Channel"
-          count={commentCount}
         />
         <TabButton
           active={tab === "spec"}
@@ -90,12 +83,9 @@ export function TaskDetailTabs({
 
       <div className="issue-doc-tabs-panel" role="tabpanel">
         {tab === "channel" ? (
-          <CommentsTimeline
+          <TaskChannelChat
             taskId={taskId}
             channel={channel}
-            comments={comments}
-            isDrafting={isDrafting}
-            timelineRef={timelineRef}
             onCommentPosted={onCommentPosted}
           />
         ) : null}

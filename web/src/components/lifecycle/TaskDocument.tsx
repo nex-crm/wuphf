@@ -1299,8 +1299,7 @@ export function TaskDocument({
     draftAccumulator,
   );
 
-  // Scroll to last-unread comment on mount (URL param or data attr).
-  const timelineRef = useRef<HTMLDivElement>(null);
+  // Deep-link: scroll to a specific comment when ?comment=<id> is present.
   useEffect(() => {
     if (!doc || doc.comments.length === 0) return;
     const params = new URLSearchParams(window.location.search);
@@ -1415,10 +1414,8 @@ export function TaskDocument({
           taskId={taskId}
           channel={doc.channel}
           description={doc.description}
-          comments={doc.comments}
           isDrafting={isDrafting}
           showSubTasks={!doc.parentTaskId}
-          timelineRef={timelineRef}
           onCommentPosted={() => {
             void queryClient.invalidateQueries({ queryKey: ["issue", taskId] });
             void queryClient.invalidateQueries({ queryKey: ["issues"] });
