@@ -153,7 +153,7 @@ export function RoutineEditPanel({
 
       <Field
         label="Owner"
-        hint="The agent that runs this routine when it fires."
+        hint="The agent that runs this scheduled task when it fires."
       >
         <select
           className="input"
@@ -177,7 +177,7 @@ export function RoutineEditPanel({
 
       <Field
         label="Run in"
-        hint="Where the routine posts when it fires. Defaults to the owner's DM."
+        hint="Where the scheduled task posts when it fires. Defaults to the owner's DM."
       >
         <RoutineChannelSelect
           value={channel}

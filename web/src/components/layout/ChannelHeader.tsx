@@ -50,7 +50,7 @@ function headerTitleAndDesc(
     case "routine-detail":
       return { title: route.routineSlug, desc: "Routine" };
     case "routine-new":
-      return { title: "New routine", desc: "" };
+      return { title: "New scheduled task", desc: "" };
     case "home":
       return { title: "", desc: "" };
     case "unknown":

@@ -183,7 +183,7 @@ function RoutinesHeader({
           cursor: "pointer",
         }}
       >
-        + New routine
+        + New scheduled task
       </button>
     </header>
   );
@@ -221,7 +221,7 @@ function ShowSystemToggle({
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        aria-label="Show system-managed routines"
+        aria-label="Show system-managed scheduled tasks"
         style={{ cursor: "pointer" }}
       />
       {label}
@@ -238,7 +238,7 @@ function ViewToggle({ view, onChange }: ViewToggleProps) {
   return (
     <div
       role="tablist"
-      aria-label="Routines view"
+      aria-label="Scheduled tasks view"
       className="routines-view-toggle"
     >
       <button
@@ -306,7 +306,7 @@ function EmptyState({ hiddenSystemCount, onShowSystem }: EmptyStateProps) {
       >
         {onlySystemHidden
           ? `Only system routines (${hiddenSystemCount})`
-          : "No routines yet"}
+          : "No scheduled tasks yet"}
       </div>
       <div
         style={{
@@ -337,7 +337,7 @@ function EmptyState({ hiddenSystemCount, onShowSystem }: EmptyStateProps) {
           </>
         ) : (
           <>
-            Routines are scheduled work assigned to an agent. They appear here
+            Scheduled tasks run on a schedule, assigned to an agent. They appear here
             once an agent registers a cron job, a workflow gets a schedule, or a
             system loop publishes a heartbeat.
           </>
@@ -358,7 +358,7 @@ function LoadingState() {
         fontSize: "var(--text-sm)",
       }}
     >
-      Loading routines…
+      Loading scheduled tasks…
     </div>
   );
 }

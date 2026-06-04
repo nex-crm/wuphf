@@ -48,7 +48,7 @@ export const FALLBACK_SLASH_COMMANDS: SlashCommand[] = [
   { name: "/task", desc: "Task actions", icon: "✅" },
   { name: "/cancel", desc: "Cancel a task", icon: "❌" },
   { name: "/policies", desc: "View policies", icon: "📜" },
-  { name: "/routines", desc: "View scheduled routines", icon: "🔁" },
+  { name: "/routines", desc: "View scheduled tasks", icon: "🔁" },
   { name: "/skills", desc: "View skills", icon: "⚡" },
   { name: "/focus", desc: "Switch to delegation mode", icon: "🎯" },
   { name: "/collab", desc: "Switch to collaborative mode", icon: "🤝" },

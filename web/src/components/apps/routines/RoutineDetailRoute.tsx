@@ -55,12 +55,12 @@ export function RoutineDetailRoute({ routineSlug }: RoutineDetailRouteProps) {
   }, [scheduler.data, routineSlug]);
 
   if (scheduler.isLoading) {
-    return <CenteredMessage>Loading routine…</CenteredMessage>;
+    return <CenteredMessage>Loading scheduled task…</CenteredMessage>;
   }
   if (scheduler.error) {
     return (
       <CenteredMessage>
-        Could not load this routine. Check your connection and try again.
+        Could not load this scheduled task. Check your connection and try again.
       </CenteredMessage>
     );
   }
@@ -661,13 +661,13 @@ function TriggersTab({ routine }: { routine: SchedulerJob }) {
           icon="🌐"
           title="Webhook"
           status="coming-soon"
-          body="External callers will be able to fire this routine over HTTP with an HMAC signature."
+          body="External callers will be able to fire this scheduled task over HTTP with an HMAC signature."
         />
         <TriggerCard
           icon="✦"
           title="Context change"
           status="coming-soon"
-          body="Fire the routine when a watched context value (entity attribute, tag, status) changes in the graph."
+          body="Fire the scheduled task when a watched context value (entity attribute, tag, status) changes in the graph."
         />
       </div>
     </Section>
@@ -765,7 +765,7 @@ function BackLink({ onClick }: BackLinkProps) {
       }}
       data-testid="routine-detail-back"
     >
-      ← All routines
+      ← All scheduled tasks
     </button>
   );
 }

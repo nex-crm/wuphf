@@ -152,7 +152,7 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
       ];
     case "routine-detail":
       return [
-        { label: "Routines", href: "#/apps/routines" },
+        { label: "Scheduled Tasks", href: "#/apps/routines" },
         {
           label: route.routineSlug,
           href: `#/routines/${encodeURIComponent(route.routineSlug)}`,
@@ -160,8 +160,8 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
       ];
     case "routine-new":
       return [
-        { label: "Routines", href: "#/apps/routines" },
-        { label: "New routine", href: "#/routines/new" },
+        { label: "Scheduled Tasks", href: "#/apps/routines" },
+        { label: "New scheduled task", href: "#/routines/new" },
       ];
     case "home":
       return [];

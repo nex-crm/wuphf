@@ -40,7 +40,7 @@ export function RoutineListView({ routines, onSelect }: RoutineListViewProps) {
       }}
     >
       <div className="routine-header-row">
-        <span>Routine</span>
+        <span>Scheduled task</span>
         <span>Schedule</span>
         <span>Owner</span>
         <span>Last run</span>

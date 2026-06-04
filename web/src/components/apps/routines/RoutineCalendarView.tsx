@@ -199,7 +199,7 @@ function DayCell({ day, fires, inMonth, isToday, onSelect }: DayCellProps) {
             cursor: "pointer",
             textAlign: "left",
           }}
-          aria-label={`Show ${overflow} more routines on ${day.toDateString()}`}
+          aria-label={`Show ${overflow} more scheduled tasks on ${day.toDateString()}`}
         >
           +{overflow} more
         </button>

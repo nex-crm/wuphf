@@ -123,7 +123,7 @@ export function taskToLifecycleState(task: Task): LifecycleState {
  *  column is fed by routines, not lifecycle_state, so its hint reflects
  *  that. */
 const STAGE_HINT: Record<LifecycleStage, string> = {
-  scheduled: "Recurring routines on a schedule",
+  scheduled: "Recurring scheduled tasks",
   backlog: "Filed, awaiting pickup",
   in_progress: "Owner agent working — includes revising",
   blocked: "Blocked on an upstream merge",
