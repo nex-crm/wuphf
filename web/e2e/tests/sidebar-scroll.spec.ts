@@ -121,6 +121,17 @@ async function waitForScrollSettle(section: Locator): Promise<void> {
   );
 }
 
+async function ensureSidebarExpanded(page: Page): Promise<void> {
+  const expandedSidebar = page.locator("aside.sidebar:not(.sidebar-collapsed)");
+  if ((await expandedSidebar.count()) > 0) {
+    await expect(expandedSidebar).toBeVisible();
+    return;
+  }
+
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(expandedSidebar).toBeVisible();
+}
+
 /**
  * Reachability check for the crowded sidebar. The scroll architecture has
  * moved more than once (PR #919 unified it into `.sidebar-scroll`; the v3
@@ -169,10 +180,7 @@ test.describe("left sidebar scrolling", () => {
 
       await page.goto("/");
       await waitForReactMount(page);
-
-      await expect(
-        page.locator("aside.sidebar:not(.sidebar-collapsed)"),
-      ).toBeVisible();
+      await ensureSidebarExpanded(page);
       await expect(
         page
           .locator("aside.sidebar")
@@ -209,6 +217,7 @@ test.describe("left sidebar scrolling", () => {
 
       await page.goto("/");
       await waitForReactMount(page);
+      await ensureSidebarExpanded(page);
 
       const scroll = page.locator(".sidebar-scroll");
       await expect(scroll).toBeVisible();
@@ -252,6 +261,7 @@ test.describe("left sidebar scrolling", () => {
 
       await page.goto("/");
       await waitForReactMount(page);
+      await ensureSidebarExpanded(page);
 
       // Collapse the Channels section.
       const channelsToggle = page
