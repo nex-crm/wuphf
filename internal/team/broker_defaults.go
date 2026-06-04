@@ -228,12 +228,17 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		if member.Role == "" {
 			member.Role = member.Name
 		}
-		member.BuiltIn = member.Slug == "ceo"
+		member.BuiltIn = member.Slug == "ceo" || isLibrarianSlug(member.Slug)
 		member.Expertise = normalizeStringList(member.Expertise)
 		member.AllowedTools = normalizeStringList(member.AllowedTools)
 		normalizedMembers = append(normalizedMembers, member)
 	}
-	b.members = normalizedMembers
+	// Phase 6 migration: the Librarian (Pam) is a built-in agent like the CEO,
+	// added to every NEW workspace at seed time. Existing rosters loaded from
+	// disk predate her, and ensureDefaultOfficeMembersLocked only seeds when the
+	// roster is empty — so append her here on every load. Idempotent (no-op once
+	// present); the BuiltIn line above keeps her flag set on subsequent loads.
+	b.members = ensureLibrarianMember(normalizedMembers)
 	for i := range b.channels {
 		b.channels[i].Slug = normalizeChannelSlug(b.channels[i].Slug)
 		if strings.TrimSpace(b.channels[i].Name) == "" {

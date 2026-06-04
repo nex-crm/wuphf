@@ -389,8 +389,20 @@ func (b *Broker) migrateLifecycleStatesLocked() {
 		}
 		derived := deriveLifecycleStateFromLegacy(task.pipelineStage, task.reviewState, task.status, task.blocked)
 		if derived == LifecycleStateUnknown {
-			log.Printf("broker: lifecycle migration: unknown tuple for task %q (pipeline_stage=%q review_state=%q status=%q blocked=%v) — falling back to %s",
-				task.ID, task.pipelineStage, task.reviewState, task.status, task.blocked, LifecycleStateUnknown)
+			// The on-disk pipeline_stage/review_state may use a newer
+			// pipeline-template scheme (e.g. ActiveStage="act") that postdates
+			// this map, or normalizeTaskPlan may have filled them in before
+			// migration runs. Fall back to the bare status signal, which the
+			// map covers for ad-hoc tasks — this rescues clean in-flight / open
+			// / done / archived tasks regardless of the template stage names,
+			// while genuinely contradictory tuples (e.g. status=in_progress AND
+			// blocked) stay Unknown and are logged for operator triage.
+			if byStatus := deriveLifecycleStateFromLegacy("", "", task.status, task.blocked); byStatus != LifecycleStateUnknown {
+				derived = byStatus
+			} else {
+				log.Printf("broker: lifecycle migration: unknown tuple for task %q (pipeline_stage=%q review_state=%q status=%q blocked=%v) — falling back to %s",
+					task.ID, task.pipelineStage, task.reviewState, task.status, task.blocked, LifecycleStateUnknown)
+			}
 		}
 		task.LifecycleState = derived
 		b.indexLifecycleLocked(task.ID, "", derived)

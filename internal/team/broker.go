@@ -441,6 +441,12 @@ func (b *Broker) Start() error {
 	// lifecycle index. Idempotent across restarts and per-process
 	// guarded so additional startup hooks invoking it are no-ops.
 	b.MigrateLifecycleStatesOnce()
+	// Phase 6 migration: the product is now pure task-scoped, so every chat
+	// channel must be owned by a task to stay navigable. Fold any legacy
+	// free-standing channel or DM with history into an archived owning task
+	// (mirrors the Backup & Migration task that owns #general). Idempotent;
+	// runs after lifecycle migration + channel/member seeding above.
+	b.MigrateLegacyChannelsOnce()
 	// Seed company context from previous onboarding skip, if pending.
 	// configMu guards the read-modify-write so a concurrent broker retry
 	// goroutine re-arming the flag under the same lock cannot race with
