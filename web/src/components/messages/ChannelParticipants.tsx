@@ -23,23 +23,23 @@ function memberDisplayName(member: OfficeMember): string {
   return formatAgentName(member.slug);
 }
 
-// Live activity strings can leak raw MCP tool identifiers
-// ("running mcp__wuphf_wiki_lookup") from the agent runtime. Render a
-// human-readable form instead of the code string — a person scanning the
-// participant rail should see "running wiki lookup", not an internal symbol.
+// Live activity strings can leak raw runtime internals — MCP tool ids
+// ("running mcp__wuphf_wiki_lookup"), snake_case tool names
+// ("running wuphf_office_members"), or whole tool-call JSON blobs
+// ([{"tool name":"wuphf_…"}]). A person scanning the participant rail should
+// never see code. Collapse anything that looks like a raw identifier/payload
+// to a clean "Working…"; pass through genuine prose ("waiting for work").
 function humanizeActivity(raw: string): string {
-  let s = raw.trim();
+  const s = raw.trim();
   if (!s) return s;
-  if (s.includes("mcp__")) {
-    s = s
-      .replace(/mcp__[a-z0-9]+_/gi, "") // strip the mcp__<server>_ prefix
-      .replace(/mcp__/gi, "")
-      .replace(/_/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (!s || s.toLowerCase() === "running") return "Working…";
-  }
-  return s;
+  const looksRaw =
+    s.startsWith("[") ||
+    s.startsWith("{") ||
+    s.includes('"tool') ||
+    s.includes("mcp__") ||
+    // optional "running"/"using" verb + a snake_case identifier and nothing else
+    /^(?:running|using)?\s*[a-z0-9]+(?:_[a-z0-9]+)+$/i.test(s);
+  return looksRaw ? "Working…" : s;
 }
 
 function memberActivity(member: OfficeMember): string {

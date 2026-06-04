@@ -1,10 +1,8 @@
 import { type ReactNode, useState } from "react";
 
-import type { LifecycleState } from "../../lib/types/lifecycle";
 import { ChannelParticipants } from "../messages/ChannelParticipants";
 import { SubTasksList } from "./SubTasksList";
 import { TaskActivityFeed } from "./TaskActivityFeed";
-import { TaskActivityStream } from "./TaskActivityStream";
 import { TaskDescription } from "./TaskDescription";
 
 interface TaskContextRailProps {
@@ -13,8 +11,6 @@ interface TaskContextRailProps {
   /** Linear-style task body (the spec). */
   description: string;
   isDrafting: boolean;
-  ownerSlug: string | undefined;
-  lifecycleState: LifecycleState;
   showSubTasks: boolean;
 }
 
@@ -59,25 +55,20 @@ function RailSection({
  * In the chat-primary layout the conversation owns the main column; the
  * secondary context (who's in the channel, the agreed spec, the activity
  * log, sub-tasks) lives here so it's a glance away without stealing space
- * from the chat. The live owner heartbeat sits at the top, then collapsible
- * sections. Spec opens by default while drafting (you're reviewing it);
- * once running, the chat leads and the rail sections start collapsed.
+ * from the chat. Participants lead (the owner's live status shows there,
+ * single source — the header names the owner), then collapsible sections.
+ * Spec opens by default while drafting (you're reviewing it); once running,
+ * the chat leads and the rail sections start collapsed.
  */
 export function TaskContextRail({
   taskId,
   channel,
   description,
   isDrafting,
-  ownerSlug,
-  lifecycleState,
   showSubTasks,
 }: TaskContextRailProps) {
   return (
     <aside className="task-context-rail" aria-label="Task details">
-      <TaskActivityStream
-        ownerSlug={ownerSlug}
-        lifecycleState={lifecycleState}
-      />
       {/* ChannelParticipants carries its own "Participants" header + add
        *  control, so it renders directly (not inside a RailSection) to avoid
        *  a duplicate header. It stays always-visible — who's in the channel

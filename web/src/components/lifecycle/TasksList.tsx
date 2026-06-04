@@ -317,18 +317,20 @@ interface TasksListProps {
   initialTasks?: Task[];
 }
 
-// Collapsed Kanban lanes persist across reloads so an operator who hides the
-// quiet columns (empty backlog, archive) keeps their focused board.
-const BOARD_COLLAPSED_KEY = "wuphf-board-collapsed-lanes";
+// Per-lane collapse preference, persisted across reloads. A lane with no
+// explicit preference auto-collapses when EMPTY so the board leads with active
+// work instead of a row of empty columns. An explicit click (expand/collapse)
+// wins over the auto-default and is remembered.
+const BOARD_LANE_PREFS_KEY = "wuphf-board-lane-prefs";
 
-function readCollapsedLanes(): Set<LifecycleStage> {
+function readLanePrefs(): Record<string, boolean> {
   try {
-    const raw = window.localStorage.getItem(BOARD_COLLAPSED_KEY);
-    if (raw) return new Set(JSON.parse(raw) as LifecycleStage[]);
+    const raw = window.localStorage.getItem(BOARD_LANE_PREFS_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, boolean>;
   } catch {
-    // Corrupt/blocked storage — fall back to all-expanded.
+    // Corrupt/blocked storage — fall back to the auto (empty-collapsed) default.
   }
-  return new Set();
+  return {};
 }
 
 export function TasksList({ initialTasks }: TasksListProps = {}) {
@@ -336,22 +338,20 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
   // Inline dialog replaces /tasks/new full-page form for the in-app path.
   // The route stays mounted as a fallback for direct URL navigation.
   const [createOpen, setCreateOpen] = useState(false);
-  const [collapsedLanes, setCollapsedLanes] =
-    useState<Set<LifecycleStage>>(readCollapsedLanes);
+  // stage -> true (collapsed) / false (expanded). Absent = auto (collapse when
+  // the lane is empty). Read isLaneCollapsed() for the resolved value.
+  const [lanePrefs, setLanePrefs] =
+    useState<Record<string, boolean>>(readLanePrefs);
 
-  function toggleLane(stage: LifecycleStage) {
-    setCollapsedLanes((prev) => {
-      const next = new Set(prev);
-      if (next.has(stage)) {
-        next.delete(stage);
-      } else {
-        next.add(stage);
-      }
+  function isLaneCollapsed(stage: LifecycleStage, count: number): boolean {
+    return lanePrefs[stage] ?? count === 0;
+  }
+
+  function toggleLane(stage: LifecycleStage, currentlyCollapsed: boolean) {
+    setLanePrefs((prev) => {
+      const next = { ...prev, [stage]: !currentlyCollapsed };
       try {
-        window.localStorage.setItem(
-          BOARD_COLLAPSED_KEY,
-          JSON.stringify([...next]),
-        );
+        window.localStorage.setItem(BOARD_LANE_PREFS_KEY, JSON.stringify(next));
       } catch {
         // Persistence is best-effort; the in-memory state still updates.
       }
@@ -493,8 +493,8 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
       */}
       <div className="issues-kanban" data-testid="issues-list-rows">
         {STAGE_ORDER.map((stage) => {
-          const collapsed = collapsedLanes.has(stage);
           const count = columnCount(stage);
+          const collapsed = isLaneCollapsed(stage, count);
           return (
             <section
               key={stage}
@@ -508,7 +508,7 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
                   type="button"
                   className="issues-kanban-column-toggle"
                   aria-expanded={!collapsed}
-                  onClick={() => toggleLane(stage)}
+                  onClick={() => toggleLane(stage, collapsed)}
                   title={
                     collapsed
                       ? `Expand ${STAGE_LABELS[stage]}`

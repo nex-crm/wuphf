@@ -1414,8 +1414,6 @@ export function TaskDocument({
           channel={doc.channel}
           description={doc.description}
           isDrafting={isDrafting}
-          ownerSlug={doc.ownerSlug}
-          lifecycleState={doc.lifecycleState}
           showSubTasks={!doc.parentTaskId}
         />
       </div>

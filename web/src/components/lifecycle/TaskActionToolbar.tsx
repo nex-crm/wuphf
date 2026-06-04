@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
 import { type TaskStatusAction, updateTaskStatus } from "../../api/tasks";
 import type { LifecycleState } from "../../lib/types/lifecycle";
 import { ReopenTaskButton } from "./ReopenTaskButton";
-import { ApproveAndStartButton, CloseTaskButton } from "./TaskDocument";
+import { ApproveAndStartButton } from "./TaskDocument";
 
 // ── State-aware Issue action toolbar ─────────────────────────────────
 
@@ -162,6 +162,15 @@ export function TaskActionToolbar({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Focus the reason input when the reason row opens (a danger action was
+  // clicked). Keyed on the action id so it fires on open, not on every
+  // keystroke — the a11y-correct replacement for the autoFocus attribute.
+  const reasonInputRef = useRef<HTMLInputElement>(null);
+  const pendingActionId = pendingReason?.action.action ?? null;
+  useEffect(() => {
+    if (pendingActionId) reasonInputRef.current?.focus();
+  }, [pendingActionId]);
+
   const isDrafting = lifecycleState === "drafting";
   const isPlanning = lifecycleState === "planning";
   const isTerminal =
@@ -287,7 +296,7 @@ export function TaskActionToolbar({
                 setPendingReason(null);
               }
             }}
-            autoFocus={true}
+            ref={reasonInputRef}
             data-testid="action-reason-input"
           />
           <button
@@ -313,14 +322,6 @@ export function TaskActionToolbar({
         <span className="issue-action-error" role="alert">
           {error}
         </span>
-      ) : null}
-
-      {/* CloseTaskButton is intentionally NOT shown here — its old
-       * meaning ("reject") is now subsumed into Cancel for non-terminal
-       * states and is irrelevant for terminal ones. The void below
-       * silences the unused-import warning. */}
-      {false ? (
-        <CloseTaskButton taskId={taskId} onClosed={onAfterAction} />
       ) : null}
     </div>
   );
