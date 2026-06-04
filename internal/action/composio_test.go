@@ -141,6 +141,124 @@ func TestComposioRESTActionHappyPath(t *testing.T) {
 	}
 }
 
+func TestComposioRESTIntegrationLifecycle(t *testing.T) {
+	mux := http.NewServeMux()
+	var createdAuthConfig bool
+	var connectBody map[string]any
+	var deletedAccount string
+	mux.HandleFunc("/connected_accounts", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{{
+				"id":     "ca_123",
+				"status": "ACTIVE",
+				"toolkit": map[string]any{
+					"slug": "gmail",
+					"name": "Gmail",
+				},
+				"connection": map[string]any{"name": "Founder Gmail"},
+			}},
+		})
+	})
+	mux.HandleFunc("/toolkits", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("search"); got != "gmail" {
+			t.Fatalf("expected toolkit search=gmail, got %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{{
+				"slug":        "gmail",
+				"name":        "Gmail",
+				"description": "Read and send Gmail messages",
+				"logo_url":    "https://example.com/gmail.png",
+				"categories":  []string{"communication"},
+			}},
+		})
+	})
+	mux.HandleFunc("/auth_configs", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{}})
+		case http.MethodPost:
+			createdAuthConfig = true
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "auth_123"})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/connected_accounts/link", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&connectBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":           "ca_123",
+			"redirect_url": "https://connect.composio.dev/abc",
+			"status":       "INITIATED",
+			"expires_at":   "2026-06-04T12:00:00Z",
+		})
+	})
+	mux.HandleFunc("/connected_accounts/ca_123", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deletedAccount = "ca_123"
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":     "ca_123",
+			"status": "ACTIVE",
+			"toolkit": map[string]any{
+				"slug": "gmail",
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := &ComposioREST{
+		APIKey:  "cmp_test",
+		UserID:  "ceo@example.com",
+		BaseURL: server.URL,
+		Client:  server.Client(),
+	}
+
+	catalog, err := client.ListIntegrationCatalog(context.Background(), IntegrationCatalogOptions{Search: "gmail", Limit: 10})
+	if err != nil {
+		t.Fatalf("catalog: %v", err)
+	}
+	if len(catalog.Items) != 1 || catalog.Items[0].State != "connected" || catalog.Items[0].ConnectionKey != "ca_123" {
+		t.Fatalf("unexpected catalog: %+v", catalog)
+	}
+
+	started, err := client.StartIntegrationConnection(context.Background(), IntegrationConnectRequest{Platform: "gmail"})
+	if err != nil {
+		t.Fatalf("start connection: %v", err)
+	}
+	if !createdAuthConfig {
+		t.Fatalf("expected auth config creation")
+	}
+	if got := connectBody["auth_config_id"]; got != "auth_123" {
+		t.Fatalf("expected auth_config_id auth_123, got %#v", got)
+	}
+	if got := connectBody["user_id"]; got != "ceo@example.com" {
+		t.Fatalf("expected user_id ceo@example.com, got %#v", got)
+	}
+	if started.AuthURL == "" || started.ConnectID != "ca_123" || started.Status != "initiated" {
+		t.Fatalf("unexpected start result: %+v", started)
+	}
+
+	status, err := client.GetIntegrationConnectionStatus(context.Background(), IntegrationStatusRequest{ConnectID: "ca_123"})
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.Status != "connected" || status.ConnectionKey != "ca_123" || status.Platform != "gmail" {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+
+	disconnected, err := client.DisconnectIntegration(context.Background(), IntegrationDisconnectRequest{ConnectionKey: "ca_123"})
+	if err != nil {
+		t.Fatalf("disconnect: %v", err)
+	}
+	if !disconnected.OK || deletedAccount != "ca_123" {
+		t.Fatalf("unexpected disconnect: %+v deleted=%q", disconnected, deletedAccount)
+	}
+}
+
 func TestComposioRESTWorkflowDigestHappyPath(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_API_KEY", "nex-test-key")

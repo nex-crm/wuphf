@@ -341,14 +341,15 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"actions": actions})
 	case http.MethodPost:
 		var body struct {
-			Kind       string   `json:"kind"`
-			Source     string   `json:"source"`
-			Channel    string   `json:"channel"`
-			Actor      string   `json:"actor"`
-			Summary    string   `json:"summary"`
-			RelatedID  string   `json:"related_id"`
-			SignalIDs  []string `json:"signal_ids"`
-			DecisionID string   `json:"decision_id"`
+			Kind       string            `json:"kind"`
+			Source     string            `json:"source"`
+			Channel    string            `json:"channel"`
+			Actor      string            `json:"actor"`
+			Summary    string            `json:"summary"`
+			RelatedID  string            `json:"related_id"`
+			SignalIDs  []string          `json:"signal_ids"`
+			DecisionID string            `json:"decision_id"`
+			Metadata   map[string]string `json:"metadata"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -361,7 +362,7 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 		if actor, ok := requestActorFromContext(r.Context()); ok && actor.Kind == requestActorKindHuman {
 			body.Actor = humanMessageSender(actor.Slug)
 		}
-		if err := b.RecordAction(
+		if err := b.RecordActionWithMetadata(
 			body.Kind,
 			body.Source,
 			body.Channel,
@@ -370,6 +371,7 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 			body.RelatedID,
 			body.SignalIDs,
 			body.DecisionID,
+			body.Metadata,
 		); err != nil {
 			http.Error(w, "failed to persist action", http.StatusInternalServerError)
 			return

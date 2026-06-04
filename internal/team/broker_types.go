@@ -497,16 +497,17 @@ type officeMember struct {
 }
 
 type officeActionLog struct {
-	ID         string   `json:"id"`
-	Kind       string   `json:"kind"`
-	Source     string   `json:"source,omitempty"`
-	Channel    string   `json:"channel,omitempty"`
-	Actor      string   `json:"actor,omitempty"`
-	Summary    string   `json:"summary"`
-	RelatedID  string   `json:"related_id,omitempty"`
-	SignalIDs  []string `json:"signal_ids,omitempty"`
-	DecisionID string   `json:"decision_id,omitempty"`
-	CreatedAt  string   `json:"created_at"`
+	ID         string            `json:"id"`
+	Kind       string            `json:"kind"`
+	Source     string            `json:"source,omitempty"`
+	Channel    string            `json:"channel,omitempty"`
+	Actor      string            `json:"actor,omitempty"`
+	Summary    string            `json:"summary"`
+	RelatedID  string            `json:"related_id,omitempty"`
+	SignalIDs  []string          `json:"signal_ids,omitempty"`
+	DecisionID string            `json:"decision_id,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	CreatedAt  string            `json:"created_at"`
 }
 
 type agentActivitySnapshot struct {

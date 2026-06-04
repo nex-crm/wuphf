@@ -45,6 +45,16 @@ type Provider interface {
 	GetRelayEvent(ctx context.Context, id string) (RelayEventDetail, error)
 }
 
+// IntegrationProvider is implemented by action providers that can manage
+// external account connections, not just use already-connected accounts.
+type IntegrationProvider interface {
+	Provider
+	ListIntegrationCatalog(ctx context.Context, opts IntegrationCatalogOptions) (IntegrationCatalogResult, error)
+	StartIntegrationConnection(ctx context.Context, req IntegrationConnectRequest) (IntegrationConnectResult, error)
+	GetIntegrationConnectionStatus(ctx context.Context, req IntegrationStatusRequest) (IntegrationConnectResult, error)
+	DisconnectIntegration(ctx context.Context, req IntegrationDisconnectRequest) (IntegrationDisconnectResult, error)
+}
+
 type GuideResult struct {
 	Topic  string          `json:"topic,omitempty"`
 	Guide  string          `json:"guide,omitempty"`
@@ -71,6 +81,70 @@ type ConnectionsResult struct {
 	Search      string       `json:"search,omitempty"`
 	Hint        string       `json:"hint,omitempty"`
 	Connections []Connection `json:"connections"`
+}
+
+type IntegrationCatalogOptions struct {
+	Search    string
+	Connected string
+	Limit     int
+	Cursor    string
+}
+
+type IntegrationCatalogItem struct {
+	Provider          string       `json:"provider"`
+	Platform          string       `json:"platform"`
+	Name              string       `json:"name"`
+	Description       string       `json:"description,omitempty"`
+	Category          string       `json:"category,omitempty"`
+	LogoURL           string       `json:"logo_url,omitempty"`
+	State             string       `json:"state"`
+	ConnectionKey     string       `json:"connection_key,omitempty"`
+	ConnectionName    string       `json:"connection_name,omitempty"`
+	CanConnect        bool         `json:"can_connect"`
+	CanDisconnect     bool         `json:"can_disconnect"`
+	Connections       []Connection `json:"connections,omitempty"`
+	LastActionAt      string       `json:"last_action_at,omitempty"`
+	LastActionSummary string       `json:"last_action_summary,omitempty"`
+}
+
+type IntegrationCatalogResult struct {
+	Items      []IntegrationCatalogItem `json:"items"`
+	NextCursor string                   `json:"next_cursor,omitempty"`
+	Hint       string                   `json:"hint,omitempty"`
+}
+
+type IntegrationConnectRequest struct {
+	Provider string `json:"provider,omitempty"`
+	Platform string `json:"platform"`
+}
+
+type IntegrationStatusRequest struct {
+	Provider  string `json:"provider,omitempty"`
+	Platform  string `json:"platform,omitempty"`
+	ConnectID string `json:"connect_id,omitempty"`
+}
+
+type IntegrationConnectResult struct {
+	Provider      string `json:"provider"`
+	Platform      string `json:"platform"`
+	Status        string `json:"status"`
+	AuthURL       string `json:"auth_url,omitempty"`
+	ConnectID     string `json:"connect_id,omitempty"`
+	ConnectionKey string `json:"connection_key,omitempty"`
+	ExpiresAt     string `json:"expires_at,omitempty"`
+	Instructions  string `json:"instructions,omitempty"`
+}
+
+type IntegrationDisconnectRequest struct {
+	Provider      string `json:"provider,omitempty"`
+	ConnectionKey string `json:"connection_key"`
+}
+
+type IntegrationDisconnectResult struct {
+	OK            bool   `json:"ok"`
+	Provider      string `json:"provider"`
+	ConnectionKey string `json:"connection_key"`
+	Status        string `json:"status"`
 }
 
 type Action struct {

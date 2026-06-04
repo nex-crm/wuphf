@@ -24,6 +24,26 @@ type ComposioREST struct {
 	Client  *http.Client
 }
 
+type ComposioAPIError struct {
+	Method     string
+	Path       string
+	StatusCode int
+	Status     string
+	RequestID  string
+	RetryAfter string
+}
+
+func (e *ComposioAPIError) Error() string {
+	parts := []string{"composio API failed", strings.TrimSpace(e.Method), strings.TrimSpace(e.Path), strings.TrimSpace(e.Status)}
+	if requestID := strings.TrimSpace(e.RequestID); requestID != "" {
+		parts = append(parts, "request_id="+requestID)
+	}
+	if retryAfter := strings.TrimSpace(e.RetryAfter); retryAfter != "" {
+		parts = append(parts, "retry_after="+retryAfter)
+	}
+	return strings.Join(compactStrings(parts), " ")
+}
+
 func NewComposioFromEnv() *ComposioREST {
 	baseURL := strings.TrimSpace(strings.TrimRight(configResolveComposioBaseURL(), "/"))
 	if baseURL == "" {
@@ -61,6 +81,212 @@ func (c *ComposioREST) Supports(cap Capability) bool {
 	default:
 		return false
 	}
+}
+
+func (c *ComposioREST) ListIntegrationCatalog(ctx context.Context, opts IntegrationCatalogOptions) (IntegrationCatalogResult, error) {
+	connections, err := c.ListConnections(ctx, ListConnectionsOptions{Search: opts.Search, Limit: 500})
+	if err != nil {
+		return IntegrationCatalogResult{}, err
+	}
+	byPlatform := make(map[string][]Connection)
+	for _, conn := range connections.Connections {
+		platform := normalizeComposioPlatform(conn.Platform)
+		byPlatform[platform] = append(byPlatform[platform], conn)
+	}
+
+	query := url.Values{}
+	if search := strings.TrimSpace(opts.Search); search != "" {
+		query.Set("search", search)
+		query.Set("query", search)
+	}
+	if opts.Limit > 0 {
+		query.Set("limit", fmt.Sprintf("%d", opts.Limit))
+	} else {
+		query.Set("limit", "50")
+	}
+	if cursor := strings.TrimSpace(opts.Cursor); cursor != "" {
+		query.Set("cursor", cursor)
+	}
+	raw, err := c.get(ctx, "/toolkits", query)
+	if err != nil {
+		return IntegrationCatalogResult{}, err
+	}
+	var result struct {
+		Items []struct {
+			Slug        string   `json:"slug"`
+			Name        string   `json:"name"`
+			Description string   `json:"description"`
+			Logo        string   `json:"logo"`
+			LogoURL     string   `json:"logo_url"`
+			Categories  []string `json:"categories"`
+			Category    string   `json:"category"`
+		} `json:"items"`
+		NextCursor string `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return IntegrationCatalogResult{}, fmt.Errorf("parse composio toolkits: %w", err)
+	}
+
+	connectedFilter := strings.ToLower(strings.TrimSpace(opts.Connected))
+	out := IntegrationCatalogResult{NextCursor: strings.TrimSpace(result.NextCursor)}
+	for _, item := range result.Items {
+		platform := normalizeComposioPlatform(item.Slug)
+		if platform == "" {
+			continue
+		}
+		conns := byPlatform[platform]
+		hasConnection := len(conns) > 0
+		switch connectedFilter {
+		case "true", "1", "connected":
+			if !hasConnection {
+				continue
+			}
+		case "false", "0", "available":
+			if hasConnection {
+				continue
+			}
+		}
+		state := "available"
+		connectionKey := ""
+		connectionName := ""
+		if hasConnection {
+			state = connectionState(conns[0].State)
+			connectionKey = strings.TrimSpace(conns[0].Key)
+			connectionName = strings.TrimSpace(conns[0].Name)
+		}
+		category := strings.TrimSpace(item.Category)
+		if category == "" && len(item.Categories) > 0 {
+			category = strings.TrimSpace(item.Categories[0])
+		}
+		logoURL := strings.TrimSpace(item.LogoURL)
+		if logoURL == "" {
+			logoURL = strings.TrimSpace(item.Logo)
+		}
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = platformDisplayName(platform)
+		}
+		out.Items = append(out.Items, IntegrationCatalogItem{
+			Provider:       c.Name(),
+			Platform:       platform,
+			Name:           name,
+			Description:    strings.TrimSpace(item.Description),
+			Category:       category,
+			LogoURL:        logoURL,
+			State:          state,
+			ConnectionKey:  connectionKey,
+			ConnectionName: connectionName,
+			CanConnect:     true,
+			CanDisconnect:  hasConnection,
+			Connections:    append([]Connection(nil), conns...),
+		})
+	}
+	return out, nil
+}
+
+func (c *ComposioREST) StartIntegrationConnection(ctx context.Context, req IntegrationConnectRequest) (IntegrationConnectResult, error) {
+	platform := normalizeComposioPlatform(req.Platform)
+	if platform == "" {
+		return IntegrationConnectResult{}, fmt.Errorf("platform is required")
+	}
+	authConfigID, err := c.composioManagedAuthConfigID(ctx, platform)
+	if err != nil {
+		return IntegrationConnectResult{}, err
+	}
+	body := map[string]any{
+		"auth_config_id": authConfigID,
+		"user_id":        strings.TrimSpace(c.UserID),
+	}
+	raw, err := c.post(ctx, "/connected_accounts/link", body)
+	if err != nil {
+		return IntegrationConnectResult{}, err
+	}
+	var result struct {
+		ID                  string `json:"id"`
+		RedirectURL         string `json:"redirect_url"`
+		AuthURL             string `json:"auth_url"`
+		URL                 string `json:"url"`
+		Status              string `json:"status"`
+		ExpiresAt           string `json:"expires_at"`
+		ConnectedAccountID  string `json:"connected_account_id"`
+		ConnectionRequestID string `json:"connection_request_id"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return IntegrationConnectResult{}, fmt.Errorf("parse composio connect link: %w", err)
+	}
+	authURL := firstNonEmpty(result.RedirectURL, result.AuthURL, result.URL)
+	connectID := firstNonEmpty(result.ConnectedAccountID, result.ConnectionRequestID, result.ID)
+	status := strings.ToLower(strings.TrimSpace(result.Status))
+	if status == "" {
+		status = "pending"
+	}
+	if authURL == "" && connectID == "" {
+		return IntegrationConnectResult{}, fmt.Errorf("composio connect link response did not include auth_url or connection id")
+	}
+	return IntegrationConnectResult{
+		Provider:  c.Name(),
+		Platform:  platform,
+		Status:    status,
+		AuthURL:   authURL,
+		ConnectID: connectID,
+		ExpiresAt: strings.TrimSpace(result.ExpiresAt),
+	}, nil
+}
+
+func (c *ComposioREST) GetIntegrationConnectionStatus(ctx context.Context, req IntegrationStatusRequest) (IntegrationConnectResult, error) {
+	platform := normalizeComposioPlatform(req.Platform)
+	connectID := strings.TrimSpace(req.ConnectID)
+	if connectID != "" {
+		account, err := c.connectedAccount(ctx, connectID)
+		if err != nil {
+			return IntegrationConnectResult{}, err
+		}
+		if platform == "" {
+			platform = normalizeComposioPlatform(firstNonEmpty(account.ToolkitSlug, account.Toolkit.Slug))
+		}
+		return IntegrationConnectResult{
+			Provider:      c.Name(),
+			Platform:      platform,
+			Status:        connectionState(account.Status),
+			ConnectID:     connectID,
+			ConnectionKey: strings.TrimSpace(account.ID),
+		}, nil
+	}
+	if platform == "" {
+		return IntegrationConnectResult{}, fmt.Errorf("connect_id or platform is required")
+	}
+	connections, err := c.ListConnections(ctx, ListConnectionsOptions{Search: platform, Limit: 100})
+	if err != nil {
+		return IntegrationConnectResult{}, err
+	}
+	for _, conn := range connections.Connections {
+		if normalizeComposioPlatform(conn.Platform) == platform {
+			return IntegrationConnectResult{
+				Provider:      c.Name(),
+				Platform:      platform,
+				Status:        connectionState(conn.State),
+				ConnectID:     conn.Key,
+				ConnectionKey: conn.Key,
+			}, nil
+		}
+	}
+	return IntegrationConnectResult{Provider: c.Name(), Platform: platform, Status: "pending"}, nil
+}
+
+func (c *ComposioREST) DisconnectIntegration(ctx context.Context, req IntegrationDisconnectRequest) (IntegrationDisconnectResult, error) {
+	connectionKey := strings.TrimSpace(req.ConnectionKey)
+	if connectionKey == "" {
+		return IntegrationDisconnectResult{}, fmt.Errorf("connection_key is required")
+	}
+	if _, err := c.delete(ctx, "/connected_accounts/"+url.PathEscape(connectionKey)); err != nil {
+		return IntegrationDisconnectResult{}, err
+	}
+	return IntegrationDisconnectResult{
+		OK:            true,
+		Provider:      c.Name(),
+		ConnectionKey: connectionKey,
+		Status:        "disconnected",
+	}, nil
 }
 
 func (c *ComposioREST) Guide(_ context.Context, topic string) (GuideResult, error) {
@@ -411,6 +637,10 @@ func (c *ComposioREST) patch(ctx context.Context, path string, body any) ([]byte
 	return c.do(ctx, http.MethodPatch, path, nil, body)
 }
 
+func (c *ComposioREST) delete(ctx context.Context, path string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
 func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Values, body any) ([]byte, error) {
 	if !c.Configured() {
 		return nil, fmt.Errorf("composio is not configured; set COMPOSIO_API_KEY and a user identity")
@@ -443,15 +673,26 @@ func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Va
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("composio API failed: %s %s", resp.Status, strings.TrimSpace(string(raw)))
+		return nil, &ComposioAPIError{
+			Method:     method,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			RequestID:  firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("request-id")),
+			RetryAfter: resp.Header.Get("Retry-After"),
+		}
 	}
 	return raw, nil
 }
 
 type composioConnectedAccount struct {
-	ID     string `json:"id"`
-	UserID string `json:"user_id"`
-	Status string `json:"status"`
+	ID      string `json:"id"`
+	UserID  string `json:"user_id"`
+	Status  string `json:"status"`
+	Toolkit struct {
+		Slug string `json:"slug"`
+	} `json:"toolkit"`
+	ToolkitSlug string `json:"toolkit_slug"`
 }
 
 func (c *ComposioREST) connectedAccount(ctx context.Context, id string) (composioConnectedAccount, error) {
@@ -464,6 +705,82 @@ func (c *ComposioREST) connectedAccount(ctx context.Context, id string) (composi
 		return composioConnectedAccount{}, fmt.Errorf("parse composio connected account: %w", err)
 	}
 	return result, nil
+}
+
+type composioAuthConfig struct {
+	ID                 string `json:"id"`
+	Status             string `json:"status"`
+	IsComposioManaged  bool   `json:"is_composio_managed"`
+	IsComposioProvided bool   `json:"is_composio_provided"`
+	Toolkit            struct {
+		Slug string `json:"slug"`
+	} `json:"toolkit"`
+	ToolkitSlug string `json:"toolkit_slug"`
+}
+
+func (c *ComposioREST) composioManagedAuthConfigID(ctx context.Context, platform string) (string, error) {
+	configs, err := c.listAuthConfigs(ctx, platform)
+	if err != nil {
+		return "", err
+	}
+	for _, cfg := range configs {
+		if !strings.EqualFold(normalizeComposioPlatform(firstNonEmpty(cfg.ToolkitSlug, cfg.Toolkit.Slug)), platform) {
+			continue
+		}
+		if cfg.IsComposioManaged || cfg.IsComposioProvided || strings.EqualFold(strings.TrimSpace(cfg.Status), "active") {
+			if id := strings.TrimSpace(cfg.ID); id != "" {
+				return id, nil
+			}
+		}
+	}
+	return c.createComposioManagedAuthConfig(ctx, platform)
+}
+
+func (c *ComposioREST) listAuthConfigs(ctx context.Context, platform string) ([]composioAuthConfig, error) {
+	query := url.Values{}
+	query.Set("toolkit_slug", platform)
+	query.Set("limit", "100")
+	raw, err := c.get(ctx, "/auth_configs", query)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Items []composioAuthConfig `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("parse composio auth configs: %w", err)
+	}
+	return result.Items, nil
+}
+
+func (c *ComposioREST) createComposioManagedAuthConfig(ctx context.Context, platform string) (string, error) {
+	body := map[string]any{
+		"toolkit_slug":        platform,
+		"type":                "use_composio_managed_auth",
+		"name":                "WUPHF " + platformDisplayName(platform),
+		"is_composio_managed": true,
+	}
+	raw, err := c.post(ctx, "/auth_configs", body)
+	if err != nil {
+		return "", err
+	}
+	var result composioAuthConfig
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("parse composio auth config create: %w", err)
+	}
+	if id := strings.TrimSpace(result.ID); id != "" {
+		return id, nil
+	}
+	var wrapped struct {
+		Item composioAuthConfig `json:"item"`
+		Data composioAuthConfig `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err == nil {
+		if id := strings.TrimSpace(firstNonEmpty(wrapped.Item.ID, wrapped.Data.ID)); id != "" {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("composio auth config response did not include id")
 }
 
 func normalizeComposioPlatform(platform string) string {
@@ -484,6 +801,62 @@ func normalizeComposioPlatform(platform string) string {
 	default:
 		return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(platform)), "_", "")
 	}
+}
+
+func connectionState(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "active", "connected", "enabled":
+		return "connected"
+	case "initiated", "pending", "in_progress":
+		return "pending"
+	case "failed", "error":
+		return "failed"
+	case "disabled", "inactive", "disconnected":
+		return "disconnected"
+	default:
+		if strings.TrimSpace(state) == "" {
+			return "available"
+		}
+		return strings.ToLower(strings.TrimSpace(state))
+	}
+}
+
+func platformDisplayName(platform string) string {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return "Unknown"
+	}
+	parts := strings.FieldsFunc(strings.ReplaceAll(platform, "_", "-"), func(r rune) bool { return r == '-' })
+	for i, part := range parts {
+		switch strings.ToLower(part) {
+		case "gmail":
+			parts[i] = "Gmail"
+		case "github":
+			parts[i] = "GitHub"
+		case "hubspot":
+			parts[i] = "HubSpot"
+		case "slackbot":
+			parts[i] = "Slack"
+		case "googlecalendar":
+			parts[i] = "Google Calendar"
+		case "googledrive":
+			parts[i] = "Google Drive"
+		default:
+			if part != "" {
+				parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
+			}
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func composioCompactStrings(items []string) []string {

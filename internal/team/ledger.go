@@ -7,6 +7,10 @@ import (
 )
 
 func (b *Broker) appendActionWithRefsLocked(kind, source, channel, actor, summary, relatedID string, signalIDs []string, decisionID string) {
+	b.appendActionWithMetadataLocked(kind, source, channel, actor, summary, relatedID, signalIDs, decisionID, nil)
+}
+
+func (b *Broker) appendActionWithMetadataLocked(kind, source, channel, actor, summary, relatedID string, signalIDs []string, decisionID string, metadata map[string]string) {
 	record := officeActionLog{
 		ID:         fmt.Sprintf("action-%d", len(b.actions)+1),
 		Kind:       strings.TrimSpace(kind),
@@ -17,6 +21,7 @@ func (b *Broker) appendActionWithRefsLocked(kind, source, channel, actor, summar
 		RelatedID:  strings.TrimSpace(relatedID),
 		SignalIDs:  append([]string(nil), signalIDs...),
 		DecisionID: strings.TrimSpace(decisionID),
+		Metadata:   sanitizeActionMetadata(metadata),
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
 	b.actions = append(b.actions, record)
@@ -146,6 +151,13 @@ func (b *Broker) RecordAction(kind, source, channel, actor, summary, relatedID s
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.appendActionWithRefsLocked(kind, source, channel, actor, summary, relatedID, signalIDs, decisionID)
+	return b.saveLocked()
+}
+
+func (b *Broker) RecordActionWithMetadata(kind, source, channel, actor, summary, relatedID string, signalIDs []string, decisionID string, metadata map[string]string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.appendActionWithMetadataLocked(kind, source, channel, actor, summary, relatedID, signalIDs, decisionID, metadata)
 	return b.saveLocked()
 }
 

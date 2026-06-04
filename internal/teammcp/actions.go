@@ -778,7 +778,7 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 	executedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if err != nil {
 		failSummary := fallbackSummary(args.Summary, fmt.Sprintf("%s action %s on %s failed", titleCaser.String(provider.Name()), args.ActionID, args.Platform))
-		_ = brokerRecordAction(ctx, "external_action_failed", provider.Name(), channel, slug, failSummary, args.ActionID)
+		_ = brokerRecordActionWithMetadata(ctx, "external_action_failed", provider.Name(), channel, slug, failSummary, args.ActionID, actionLogMetadata(provider.Name(), args, "failed"))
 		// Failure ALWAYS posts (no dedupe, no read-only skip) — silent
 		// failures are the worst UX. Clean the error of CLI/JSON noise
 		// before showing it; the agent's followup human_message can
@@ -796,10 +796,12 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 		return toolError(err), nil, nil
 	}
 	kind := "external_action_executed"
+	status := "executed"
 	if args.DryRun {
 		kind = "external_action_planned"
+		status = "planned"
 	}
-	_ = brokerRecordAction(ctx, kind, provider.Name(), channel, slug, intent, args.ActionID)
+	_ = brokerRecordActionWithMetadata(ctx, kind, provider.Name(), channel, slug, intent, args.ActionID, actionLogMetadata(provider.Name(), args, status))
 	// Decide whether to post to chat. Three rules:
 	//   1. Read-only actions (list/search/get/...) bypass the approval
 	//      gate and are agent-internal lookups; posting every one would
@@ -1128,6 +1130,31 @@ func brokerRecordAction(ctx context.Context, kind, source, channel, actor, summa
 		"summary":    strings.TrimSpace(summary),
 		"related_id": strings.TrimSpace(relatedID),
 	}, nil)
+}
+
+func brokerRecordActionWithMetadata(ctx context.Context, kind, source, channel, actor, summary, relatedID string, metadata map[string]string) error {
+	return brokerPostJSON(ctx, "/actions", map[string]any{
+		"kind":       strings.TrimSpace(kind),
+		"source":     strings.TrimSpace(source),
+		"channel":    resolveChannel(channel),
+		"actor":      strings.TrimSpace(actor),
+		"summary":    strings.TrimSpace(summary),
+		"related_id": strings.TrimSpace(relatedID),
+		"metadata":   metadata,
+	}, nil)
+}
+
+func actionLogMetadata(provider string, args TeamActionExecuteArgs, status string) map[string]string {
+	metadata := map[string]string{
+		"provider":  strings.TrimSpace(provider),
+		"platform":  strings.TrimSpace(args.Platform),
+		"action_id": strings.TrimSpace(args.ActionID),
+		"status":    strings.TrimSpace(status),
+	}
+	if connectionKey := strings.TrimSpace(args.ConnectionKey); connectionKey != "" {
+		metadata["connection_key"] = connectionKey
+	}
+	return metadata
 }
 
 type workflowSkillSpec struct {
