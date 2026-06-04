@@ -101,6 +101,30 @@ func TestHandleAnswerPersistsTaskPrompt(t *testing.T) {
 	})
 }
 
+func TestHandleAnswerPersistsOwnerEmail(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/onboarding/answer",
+			bytes.NewReader([]byte(`{"field":"owner_email","value":"  maya@nex.ai  "}`)),
+		)
+		w := httptest.NewRecorder()
+
+		HandleAnswer(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want %d body=%s", w.Code, http.StatusOK, w.Body.String())
+		}
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if s.FormAnswers.OwnerEmail != "maya@nex.ai" {
+			t.Fatalf("owner email = %q, want %q", s.FormAnswers.OwnerEmail, "maya@nex.ai")
+		}
+	})
+}
+
 func TestHandleAnswerRejectsEmptyTaskPrompt(t *testing.T) {
 	withTempHome(t, func(_ string) {
 		req := httptest.NewRequest(

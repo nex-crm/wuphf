@@ -13,12 +13,19 @@
  * The wizard's advance gate requires non-empty text, so the Finish button is
  * disabled while the field is blank. Copy from
  * ONBOARDING_WIZARD_COPY.first-issue.
+ *
+ * As the final step, this is also where the "keep me in touch" consent box
+ * lives. It is only shown when an email was captured on the welcome step, is
+ * checked by default, and gates whether that address is attached to the PostHog
+ * person at Finish (the email is still stored locally either way). See
+ * useOnboardingWizard + lib/analytics.
  */
 
 import { useCallback } from "react";
 
 import { PixelAvatar } from "../../../ui/PixelAvatar";
 import {
+  ONBOARDING_EMAIL_COPY,
   ONBOARDING_FIRST_ISSUE_EXAMPLE,
   ONBOARDING_WIZARD_COPY,
   type OnboardingWizardStepProps,
@@ -82,6 +89,23 @@ export function StepFirstIssue({
             Your team picks this up the moment you walk into the office.
           </p>
         </div>
+
+        {answers.email.trim() ? (
+          <label className="onboarding-keep-in-touch">
+            <input
+              type="checkbox"
+              className="onboarding-keep-in-touch-box"
+              checked={answers.keepInTouch}
+              onChange={(event) =>
+                setAnswers({ keepInTouch: event.target.checked })
+              }
+              data-testid="onboarding-keep-in-touch"
+            />
+            <span className="onboarding-keep-in-touch-copy">
+              {ONBOARDING_EMAIL_COPY.consent}
+            </span>
+          </label>
+        ) : null}
       </div>
 
       <div className="office-tour-slide-stage office-tour-slide-stage--first-issue">

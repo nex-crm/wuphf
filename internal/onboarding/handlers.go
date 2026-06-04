@@ -1136,6 +1136,10 @@ func applyFormAnswer(s *State, field string, value interface{}) error {
 		s.FormAnswers.OwnerName = sanitizeStr(value)
 	case "owner_role":
 		s.FormAnswers.OwnerRole = sanitizeStr(value)
+	case "owner_email":
+		// Founder email captured on the welcome step. PII, stored locally; the
+		// remote keep-in-touch send is gated separately on the web side.
+		s.FormAnswers.OwnerEmail = sanitizeStr(value)
 	case "blueprint_id":
 		s.FormAnswers.BlueprintID = normalizeBlueprintAnswer(sanitizeStr(value))
 	case "picked_agents":

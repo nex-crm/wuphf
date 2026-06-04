@@ -38,6 +38,10 @@ import {
   postOnboardingAnswer,
   postOnboardingProgress,
 } from "../../../api/onboarding";
+import {
+  isValidEmail,
+  recordOnboardingEmailCaptured,
+} from "../../../lib/analytics";
 import { directChannelSlug, useAppStore } from "../../../stores/app";
 import type { BlueprintOption } from "./types";
 import { toBlueprintOption } from "./types";
@@ -67,6 +71,7 @@ async function persistOnboardingIdentity(
   companyName: string,
   ownerName: string,
   ownerRole: string,
+  email: string,
 ): Promise<void> {
   if (companyName) {
     await postOnboardingProgress("identity", { company_name: companyName });
@@ -74,6 +79,23 @@ async function persistOnboardingIdentity(
   }
   if (ownerName) await postOnboardingAnswer("owner_name", ownerName);
   if (ownerRole) await postOnboardingAnswer("owner_role", ownerRole);
+  // The email is persisted locally regardless of the keep-in-touch consent —
+  // consent only gates the remote send (handled in runFinish), not the local
+  // record of who the founder is. Only a well-formed address is stored.
+  if (email && isValidEmail(email))
+    await postOnboardingAnswer("owner_email", email);
+}
+
+/**
+ * Attach the welcome-step email to the PostHog person, but only when the user
+ * left the keep-in-touch box checked and the address is well-formed. This is
+ * the single PII egress point; it is dormant unless a PostHog project key is
+ * configured (see lib/analytics). Fire-and-forget, so it never blocks the office.
+ */
+function maybeRecordOnboardingEmail(email: string, keepInTouch: boolean): void {
+  if (keepInTouch && isValidEmail(email)) {
+    recordOnboardingEmailCaptured(email);
+  }
 }
 
 /** Initial answers. The first issue is prefilled with the RevOps example. */
@@ -82,6 +104,8 @@ function initialAnswers(): OnboardingAnswers {
     companyName: "",
     ownerName: "",
     ownerRole: "",
+    email: "",
+    keepInTouch: true,
     blueprintId: "",
     pickedAgents: [],
     startFromScratch: false,
@@ -217,12 +241,19 @@ export function useOnboardingWizard(
       const companyName = answers.companyName.trim();
       const ownerName = answers.ownerName.trim();
       const ownerRole = answers.ownerRole.trim();
+      const email = answers.email.trim();
       const firstIssue = answers.firstIssue.trim();
       const blueprintId = answers.blueprintId.trim();
 
       async function run(): Promise<void> {
         // 1. Persist identity so the office seed reads it back at complete time.
-        await persistOnboardingIdentity(companyName, ownerName, ownerRole);
+        //    The email rides along here as owner_email (stored locally always).
+        await persistOnboardingIdentity(
+          companyName,
+          ownerName,
+          ownerRole,
+          email,
+        );
 
         // 2. Seed the team + post the first CEO turn + flip onboarded=true.
         //    blueprint empty => scratch path; agents filters the roster.
@@ -242,6 +273,11 @@ export function useOnboardingWizard(
         if (result.ok !== true && result.already_completed !== true) {
           throw new Error("Onboarding did not complete");
         }
+
+        // 2b. With consent, register the welcome-step email with the collector.
+        //     Runs after complete has succeeded so a lead capture never blocks
+        //     landing in the office. See maybeRecordOnboardingEmail.
+        maybeRecordOnboardingEmail(email, answers.keepInTouch);
 
         // 3. Seed the CEO DM composer so the office opens with the issue ready
         //    to send (same pendingComposerDraft path the old tour finish used).
@@ -272,6 +308,8 @@ export function useOnboardingWizard(
       answers.companyName,
       answers.ownerName,
       answers.ownerRole,
+      answers.email,
+      answers.keepInTouch,
       answers.firstIssue,
       answers.blueprintId,
       answers.pickedAgents,

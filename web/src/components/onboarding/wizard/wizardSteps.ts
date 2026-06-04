@@ -52,6 +52,11 @@ export const ONBOARDING_WIZARD_STEP_IDS: OnboardingWizardStepId[] = [
  *                   broker can read it back at complete time (seed contract).
  * - `ownerName`     optional founder name, persisted via /onboarding/answer.
  * - `ownerRole`     optional founder role, persisted via /onboarding/answer.
+ * - `email`         optional founder email captured on the welcome step.
+ *                   Persisted locally as owner_email; attached to the PostHog
+ *                   person at finish ONLY when `keepInTouch` is left checked.
+ * - `keepInTouch`   consent for the remote email send. Defaults to true; the
+ *                   email is still stored locally when it is unchecked.
  * - `blueprintId`   the picked starter roster id, or "" for the scratch path.
  * - `pickedAgents`  the agent slugs kept from the blueprint roster.
  * - `agentName`     the name briefed for the first agent (team step).
@@ -63,6 +68,8 @@ export interface OnboardingAnswers {
   companyName: string;
   ownerName: string;
   ownerRole: string;
+  email: string;
+  keepInTouch: boolean;
   blueprintId: string;
   pickedAgents: string[];
   /**
@@ -144,6 +151,24 @@ export const ONBOARDING_WIZARD_COPY: Record<
     body: "Write the first thing you want your office to handle. We prefilled a CRM cleanup so your team has real work the moment you walk in. Edit it, or write your own.",
   },
 };
+
+/**
+ * Email-capture copy. The email is optional and never gates advancing: it is a
+ * "keep in touch" ask, not a signup wall. The consent line is the verbatim
+ * promise we make about how the address is used, so it lives here as the single
+ * source of truth. WUPHF voice: no contractions, no em-dashes, Oxford comma.
+ */
+export const ONBOARDING_EMAIL_COPY = {
+  /** Field label on the welcome (meet) step. */
+  label: "Your email",
+  /** Placeholder for the email input. */
+  placeholder: "you@company.com",
+  /** Hint under the field. Sets the expectation before anyone types. */
+  hint: "Optional. We use it to keep you posted on WUPHF, and nothing else.",
+  /** Consent checkbox label on the final step. Checked by default. */
+  consent:
+    "Keep me posted on WUPHF. It is open source and built in the open, and we would love to learn what to build next. No spam, we promise.",
+} as const;
 
 /** UI chrome labels for the wizard host. WUPHF voice, no contractions. */
 export const ONBOARDING_WIZARD_LABELS = {
