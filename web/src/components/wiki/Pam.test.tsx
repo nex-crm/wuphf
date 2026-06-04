@@ -2,11 +2,16 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { listPamActions, subscribePamEvents } from "../../api/pam";
+import { drawKnownPixelAvatar } from "../../lib/pixelAvatar";
 import Pam from "./Pam";
 
 vi.mock("../../api/pam", () => ({
   listPamActions: vi.fn(),
   subscribePamEvents: vi.fn(),
+}));
+
+vi.mock("../../lib/pixelAvatar", () => ({
+  drawKnownPixelAvatar: vi.fn(),
 }));
 
 vi.mock("../ui/PixelAvatar", () => ({
@@ -46,9 +51,9 @@ describe("<Pam>", () => {
 
     const visitor = screen.getByTestId("jim-pam-visitor");
     expect(visitor).toHaveClass("is-away");
-    const jim = screen.getByTestId("jim-pixel-avatar");
+    const jim = screen.getByTestId("jim-full-body-sprite");
     expect(jim).toHaveClass("pixel-avatar", "jim-pixel");
-    expect(jim).toHaveAttribute("data-size", "46");
+    expect(drawKnownPixelAvatar).toHaveBeenCalledWith(jim, "hybridJim", 46);
 
     act(() => {
       vi.advanceTimersByTime(5000);

@@ -13,8 +13,6 @@ describe("pixel avatar sprite resolution", () => {
       ["planner", "hybridPm"],
       ["builder", "hybridEng"],
       ["growth", "hybridGtm"],
-      ["jim", "hybridJim"],
-      ["halpert", "hybridJim"],
       ["reviewer", "hybridQa"],
       ["operator", "hybridNex"],
     ]);
@@ -33,12 +31,14 @@ describe("pixel avatar sprite resolution", () => {
     expect(mixedCase.palette).toEqual(normalized.palette);
   });
 
-  it("keeps Jim on the sheet-derived full-body sprite", () => {
+  it("keeps Jim's shared avatar on a square portrait", () => {
     const jim = resolvePortraitSprite("jim");
 
-    expect(jim.id).toBe("hybridJim");
-    expect(jim.portrait).toHaveLength(24);
-    expect(jim.portrait[0]).toHaveLength(17);
+    expect(jim.id).toBe("office20");
+    expect(jim.portrait).toHaveLength(16);
+    expect(jim.portrait[0]).toHaveLength(16);
+    expect(resolvePortraitSprite("halpert").id).toBe("office20");
+    expect(resolvePortraitSprite("jim-halpert").id).toBe("office20");
   });
 
   it("keeps arbitrary new-agent slugs on generated office sprites", () => {
@@ -83,6 +83,8 @@ describe("pixel avatar sprite resolution", () => {
     expect(getAgentColor("planner")).toBe(getAgentColor("pm"));
     expect(getAgentColor("builder")).toBe(getAgentColor("eng"));
     expect(getAgentColor("growth")).toBe(getAgentColor("gtm"));
+    expect(getAgentColor("halpert")).toBe(getAgentColor("jim"));
+    expect(getAgentColor("jim-halpert")).toBe(getAgentColor("jim"));
     expect(getAgentColor("operator")).toBe(getAgentColor("nex"));
   });
 

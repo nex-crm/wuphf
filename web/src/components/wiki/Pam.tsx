@@ -13,6 +13,7 @@ import {
   subscribePamEvents,
 } from "../../api/pam";
 import { buildPamMenu, type PamMenuEntry } from "../../lib/pamActions";
+import { drawKnownPixelAvatar } from "../../lib/pixelAvatar";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import "../../styles/pam.css";
 
@@ -436,8 +437,33 @@ function JimPamVisit({ visit }: { visit: JimPamVisitState }) {
           {bubble.text}
         </div>
       ) : null}
-      <PixelAvatar slug="jim" size={46} className="jim-pixel" />
+      <JimFullBodySprite size={46} className="jim-pixel" />
     </div>
+  );
+}
+
+function JimFullBodySprite({
+  size,
+  className,
+}: {
+  size: number;
+  className?: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    drawKnownPixelAvatar(canvas, "hybridJim", size);
+  }, [size]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className={["pixel-avatar", className].filter(Boolean).join(" ")}
+      data-testid="jim-full-body-sprite"
+    />
   );
 }
 
