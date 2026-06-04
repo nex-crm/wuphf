@@ -8,9 +8,6 @@ import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
 import { AppList } from "../sidebar/AppList";
-import { InboxButton } from "../sidebar/InboxButton";
-import { SidebarSection } from "../sidebar/SidebarSection";
-import { SidebarTaskNav } from "../sidebar/SidebarTaskNav";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { CollapsedSidebar } from "./CollapsedSidebar";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -40,8 +37,6 @@ function useMobileRail(): boolean {
 }
 
 export function Sidebar() {
-  const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
-  const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const currentApp = useCurrentApp();
@@ -117,24 +112,12 @@ export function Sidebar() {
             </div>
           </div>
 
-          <div className="sidebar-primary">
-            <InboxButton />
-          </div>
-
           <div className="sidebar-scroll">
-            {/* Tasks are the primary primitive — the sidebar lists them
-                grouped by stage. Channels are per task (reached via the
-                task detail) and agents live in the Agents tool, so neither
-                gets its own nav section anymore. */}
-            <SidebarTaskNav />
-
-            <SidebarSection
-              label="Tools"
-              open={sidebarAppsOpen}
-              onToggle={toggleSidebarApps}
-            >
-              <AppList />
-            </SidebarSection>
+            {/* The sidebar nav is three labeled groups — Work / Knowledge /
+                Config — rendered by AppList. Inbox lives in Work; there is no
+                separate flat task list, and "Tasks" in Work opens the task
+                surface. Channels are per task (reached via the task detail). */}
+            <AppList />
 
             {/* Phase 2 onboarding preview overlay — shows staged channels/agents
                 forming as the user answers CEO questions. Hidden once onboarded. */}

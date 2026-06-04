@@ -160,7 +160,7 @@ function RoutinesHeader({
       >
         <span className="routines-eyebrow">Scheduled work</span>
         <h2 className="routines-title" data-testid="routines-title">
-          Routines
+          Scheduled Tasks
           <span className="routines-count">{total}</span>
         </h2>
       </div>

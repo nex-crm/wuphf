@@ -67,7 +67,7 @@ export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
   policies: "Policies",
   receipts: "Receipts",
   requests: "Requests",
-  routines: "Routines",
+  routines: "Scheduled Tasks",
   settings: "Settings",
   skills: "Skills",
 };
