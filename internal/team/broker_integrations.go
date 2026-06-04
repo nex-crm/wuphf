@@ -82,10 +82,13 @@ func (b *Broker) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 			catalog, err := composio.ListIntegrationCatalog(r.Context(), opts)
 			if err != nil {
 				setIntegrationProviderDetail(resp.Providers, "composio", "Composio unavailable: "+err.Error())
+				resp.Items = append(resp.Items, curatedComposioCatalog(opts, true)...)
 			} else {
 				resp.Items = append(resp.Items, catalog.Items...)
 				resp.NextCursor = catalog.NextCursor
 			}
+		} else {
+			resp.Items = append(resp.Items, curatedComposioCatalog(opts, false)...)
 		}
 	}
 	if providerFilter == "" || providerFilter == "one" {
@@ -279,6 +282,121 @@ func oneIntegrationRows(ctx context.Context, one *action.OneCLI, opts action.Int
 		})
 	}
 	return out, nil
+}
+
+type curatedComposioToolkit struct {
+	platform    string
+	name        string
+	description string
+	category    string
+	logoURL     string
+}
+
+var curatedComposioToolkits = []curatedComposioToolkit{
+	{
+		platform:    "gmail",
+		name:        "Gmail",
+		description: "Read, draft, search, and send Gmail messages after approval.",
+		category:    "Communication",
+	},
+	{
+		platform:    "slack",
+		name:        "Slack",
+		description: "Post channel updates, read threads, and route workspace context.",
+		category:    "Communication",
+	},
+	{
+		platform:    "github",
+		name:        "GitHub",
+		description: "Inspect pull requests, create issues, and update repository work.",
+		category:    "Code",
+	},
+	{
+		platform:    "googlecalendar",
+		name:        "Google Calendar",
+		description: "Read availability, schedule meetings, and manage calendar events.",
+		category:    "Productivity",
+		logoURL:     "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/googlecalendar.svg",
+	},
+	{
+		platform:    "googledrive",
+		name:        "Google Drive",
+		description: "Find, read, and organize workspace files with approval.",
+		category:    "Documents",
+		logoURL:     "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/googledrive.svg",
+	},
+	{
+		platform:    "notion",
+		name:        "Notion",
+		description: "Search pages, update databases, and keep project notes current.",
+		category:    "Knowledge",
+		logoURL:     "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/notion.svg",
+	},
+	{
+		platform:    "linear",
+		name:        "Linear",
+		description: "Create issues, update cycles, and track engineering work.",
+		category:    "Project Management",
+		logoURL:     "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/linear.svg",
+	},
+	{
+		platform:    "jira",
+		name:        "Jira",
+		description: "Read tickets, transition issues, and synchronize delivery state.",
+		category:    "Project Management",
+		logoURL:     "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/jira.svg",
+	},
+	{
+		platform:    "hubspot",
+		name:        "HubSpot",
+		description: "Update contacts, companies, deals, and revenue workflow records.",
+		category:    "Revenue",
+		logoURL:     "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/hubspot.svg",
+	},
+	{
+		platform:    "salesforce",
+		name:        "Salesforce",
+		description: "Read and update account, opportunity, and lead records.",
+		category:    "Revenue",
+		logoURL:     "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/salesforce.svg",
+	},
+}
+
+func curatedComposioCatalog(opts action.IntegrationCatalogOptions, configured bool) []action.IntegrationCatalogItem {
+	connectedFilter := strings.ToLower(strings.TrimSpace(opts.Connected))
+	if connectedFilter == "true" || connectedFilter == "1" || connectedFilter == "connected" {
+		return nil
+	}
+	query := strings.ToLower(strings.TrimSpace(opts.Search))
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	state := "unconfigured"
+	if configured {
+		state = "available"
+	}
+	out := make([]action.IntegrationCatalogItem, 0, len(curatedComposioToolkits))
+	for _, toolkit := range curatedComposioToolkits {
+		if query != "" && !strings.Contains(strings.ToLower(toolkit.platform), query) && !strings.Contains(strings.ToLower(toolkit.name), query) && !strings.Contains(strings.ToLower(toolkit.category), query) {
+			continue
+		}
+		out = append(out, action.IntegrationCatalogItem{
+			Provider:      "composio",
+			Platform:      toolkit.platform,
+			Name:          toolkit.name,
+			Description:   toolkit.description,
+			Category:      toolkit.category,
+			LogoURL:       toolkit.logoURL,
+			State:         state,
+			CanConnect:    configured,
+			CanDisconnect: false,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 func (b *Broker) decorateIntegrationItems(resp *integrationsResponse) {

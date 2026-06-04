@@ -79,12 +79,46 @@ export function HermesLogo(): ReactElement {
     <svg
       width={SIZE}
       height={SIZE}
-      viewBox="0 0 64 64"
+      viewBox="0 0 16 16"
       aria-hidden="true"
       style={{ display: "block" }}
     >
-      <rect width="64" height="64" rx="12" fill="#FFB02E" />
-      <path d="M18 15h8v14h16V15h8v34h-8V36H26v13h-8z" fill="#090A0C" />
+      <rect width="16" height="16" rx="3" fill="#3730A3" />
+      <path
+        d="M8 1.5v13"
+        stroke="#FFFFFF"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8 3.25c-2.35-1.4-4.7-.95-6.25.35 1.85-.2 3.8.2 5.55 1.55"
+        stroke="#FFFFFF"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 3.25c2.35-1.4 4.7-.95 6.25.35-1.85-.2-3.8.2-5.55 1.55"
+        stroke="#FFFFFF"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 13.25c-2.3-1-3.05-2.65-1.35-4.15-2 .8-2.35 2.95-.35 4"
+        stroke="#FFFFFF"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 13.25c2.3-1 3.05-2.65 1.35-4.15 2 .8 2.35 2.95.35 4"
+        stroke="#FFFFFF"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="1.8" r="1.1" fill="#FFFFFF" />
     </svg>
   );
 }

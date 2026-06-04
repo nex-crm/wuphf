@@ -57,13 +57,33 @@ func TestIntegrationsEndpointReportsUnconfiguredProviders(t *testing.T) {
 			Provider   string `json:"provider"`
 			Configured bool   `json:"configured"`
 		} `json:"providers"`
-		Items []json.RawMessage `json:"items"`
+		Items []struct {
+			Provider   string `json:"provider"`
+			Platform   string `json:"platform"`
+			State      string `json:"state"`
+			CanConnect bool   `json:"can_connect"`
+		} `json:"items"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(body.Items) != 0 {
-		t.Fatalf("expected no catalog items without config, got %d", len(body.Items))
+	if len(body.Items) == 0 {
+		t.Fatalf("expected curated catalog items without config")
+	}
+	foundGmail := false
+	for _, item := range body.Items {
+		if item.Provider != "composio" {
+			continue
+		}
+		if item.Platform == "gmail" {
+			foundGmail = true
+			if item.State != "unconfigured" || item.CanConnect {
+				t.Fatalf("unexpected unconfigured gmail item: %+v", item)
+			}
+		}
+	}
+	if !foundGmail {
+		t.Fatalf("expected gmail in curated catalog: %+v", body.Items)
 	}
 	foundComposio := false
 	for _, provider := range body.Providers {
