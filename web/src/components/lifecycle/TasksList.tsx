@@ -290,11 +290,47 @@ interface TasksListProps {
   initialTasks?: Task[];
 }
 
+// Collapsed Kanban lanes persist across reloads so an operator who hides the
+// quiet columns (empty backlog, archive) keeps their focused board.
+const BOARD_COLLAPSED_KEY = "wuphf-board-collapsed-lanes";
+
+function readCollapsedLanes(): Set<LifecycleStage> {
+  try {
+    const raw = window.localStorage.getItem(BOARD_COLLAPSED_KEY);
+    if (raw) return new Set(JSON.parse(raw) as LifecycleStage[]);
+  } catch {
+    // Corrupt/blocked storage — fall back to all-expanded.
+  }
+  return new Set();
+}
+
 export function TasksList({ initialTasks }: TasksListProps = {}) {
   const [query, setQuery] = useState("");
   // Inline dialog replaces /tasks/new full-page form for the in-app path.
   // The route stays mounted as a fallback for direct URL navigation.
   const [createOpen, setCreateOpen] = useState(false);
+  const [collapsedLanes, setCollapsedLanes] =
+    useState<Set<LifecycleStage>>(readCollapsedLanes);
+
+  function toggleLane(stage: LifecycleStage) {
+    setCollapsedLanes((prev) => {
+      const next = new Set(prev);
+      if (next.has(stage)) {
+        next.delete(stage);
+      } else {
+        next.add(stage);
+      }
+      try {
+        window.localStorage.setItem(
+          BOARD_COLLAPSED_KEY,
+          JSON.stringify([...next]),
+        );
+      } catch {
+        // Persistence is best-effort; the in-memory state still updates.
+      }
+      return next;
+    });
+  }
 
   const result = useQuery({
     queryKey: ["issues", "list"],
@@ -423,46 +459,74 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
         be invalid ARIA, so the wrapper is left as a plain <div>.
       */}
       <div className="issues-kanban" data-testid="issues-list-rows">
-        {STAGE_ORDER.map((stage) => (
-          <section
-            key={stage}
-            className="issues-kanban-column"
-            data-column={stage}
-            data-testid={`issues-kanban-column-${stage}`}
-          >
-            <header className="issues-kanban-column-header">
-              <span className="issues-kanban-column-title">
-                {STAGE_LABELS[stage]}
-              </span>
-              <span className="issues-kanban-column-count">
-                {columnCount(stage)}
-              </span>
-            </header>
-            <p className="issues-kanban-column-hint">{STAGE_HINT[stage]}</p>
-            <ul className="issues-kanban-column-cards">
-              {columnCount(stage) === 0 ? (
-                <li
-                  className="issues-kanban-column-empty"
-                  aria-label={`No tasks in ${STAGE_LABELS[stage]}`}
+        {STAGE_ORDER.map((stage) => {
+          const collapsed = collapsedLanes.has(stage);
+          const count = columnCount(stage);
+          return (
+            <section
+              key={stage}
+              className={`issues-kanban-column${collapsed ? " is-collapsed" : ""}`}
+              data-column={stage}
+              data-collapsed={collapsed}
+              data-testid={`issues-kanban-column-${stage}`}
+            >
+              <header className="issues-kanban-column-header">
+                <button
+                  type="button"
+                  className="issues-kanban-column-toggle"
+                  aria-expanded={!collapsed}
+                  onClick={() => toggleLane(stage)}
+                  title={
+                    collapsed
+                      ? `Expand ${STAGE_LABELS[stage]}`
+                      : `Collapse ${STAGE_LABELS[stage]}`
+                  }
+                  data-testid={`issues-kanban-column-toggle-${stage}`}
                 >
-                  —
-                </li>
-              ) : stage === "scheduled" ? (
-                filteredScheduled.map((job) => (
-                  <li key={routineKey(job)}>
-                    <ScheduledTaskCard job={job} />
-                  </li>
-                ))
-              ) : (
-                columns[stage].map((task) => (
-                  <li key={task.id}>
-                    <TaskCard task={task} />
-                  </li>
-                ))
+                  <span
+                    className="issues-kanban-column-caret"
+                    aria-hidden="true"
+                  >
+                    {collapsed ? "›" : "⌄"}
+                  </span>
+                  <span className="issues-kanban-column-title">
+                    {STAGE_LABELS[stage]}
+                  </span>
+                  <span className="issues-kanban-column-count">{count}</span>
+                </button>
+              </header>
+              {collapsed ? null : (
+                <>
+                  <p className="issues-kanban-column-hint">
+                    {STAGE_HINT[stage]}
+                  </p>
+                  <ul className="issues-kanban-column-cards">
+                    {count === 0 ? (
+                      <li
+                        className="issues-kanban-column-empty"
+                        aria-label={`No tasks in ${STAGE_LABELS[stage]}`}
+                      >
+                        —
+                      </li>
+                    ) : stage === "scheduled" ? (
+                      filteredScheduled.map((job) => (
+                        <li key={routineKey(job)}>
+                          <ScheduledTaskCard job={job} />
+                        </li>
+                      ))
+                    ) : (
+                      columns[stage].map((task) => (
+                        <li key={task.id}>
+                          <TaskCard task={task} />
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </>
               )}
-            </ul>
-          </section>
-        ))}
+            </section>
+          );
+        })}
       </div>
     </div>
   );

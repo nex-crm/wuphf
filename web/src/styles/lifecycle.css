@@ -5265,3 +5265,80 @@ html[data-theme="noir-gold"] {
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
+
+/* ── Kanban: collapsible lanes + Linear-style uplift ──────────────────────
+   The board was a fixed 7-column grid that forced horizontal scroll and let
+   empty lanes hog space. Switch to flex so any lane can collapse to a thin
+   vertical strip (click its header), giving the active lanes the room. */
+.issues-kanban {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+.issues-kanban-column {
+  flex: 1 1 240px;
+  min-width: 240px;
+  max-width: 420px;
+  transition:
+    flex-basis 0.16s ease,
+    min-width 0.16s ease;
+}
+.issues-kanban-column.is-collapsed {
+  flex: 0 0 40px;
+  min-width: 40px;
+  max-width: 40px;
+  padding: 8px 4px;
+  cursor: pointer;
+  align-items: center;
+}
+
+/* The column header is now the collapse toggle (a button). */
+.issues-kanban-column-header {
+  margin: 0;
+  padding: 0;
+}
+.issues-kanban-column-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 2px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.issues-kanban-column-caret {
+  flex: 0 0 auto;
+  width: 0.8em;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+.issues-kanban-column-toggle .issues-kanban-column-count {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.issues-kanban-column-toggle:hover .issues-kanban-column-caret {
+  color: var(--text);
+}
+
+/* Collapsed: a vertical strip — caret on top, title rotated, count below. */
+.issues-kanban-column.is-collapsed .issues-kanban-column-toggle {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  height: 100%;
+  padding: 4px 0;
+}
+.issues-kanban-column.is-collapsed .issues-kanban-column-title {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  white-space: nowrap;
+}
+.issues-kanban-column.is-collapsed .issues-kanban-column-toggle .issues-kanban-column-count {
+  margin-left: 0;
+}
