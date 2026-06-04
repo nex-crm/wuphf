@@ -30,11 +30,35 @@
 - Hard rule reminder: broker embeds `web/dist` at build time — always
   `bun run build` before rebuilding the binary when verifying UI changes.
 
-## ▶ RESUME HERE — current state (2026-06-03)
+## ▶ RESUME HERE — current state (2026-06-04)
 
 **Read this section first on session resume, then the Change log below.**
 
-- **Branch:** `worktree-structural-changes`. **HEAD:** `8ae83e6c`. Base `origin/main` @ `46f06e54`.
+- **ALL PHASES 0–6 DONE. The structural-changes initiative is complete** (pending
+  whatever review/PR the user wants next). Tasks are the primary primitive end to
+  end: channel-per-task backend, pure task-scoped frontend, composer landing with
+  per-task provider/model/effort, parallel non-dependent instances, Librarian
+  (Pam) as a built-in universal agent owning the wiki, per-task Plan-mode toggle,
+  and the one-shot persisted-state migration that loads a pre-change workspace
+  clean. There is no "NEXT" phase queued — ask the user for direction (PR? review
+  rhythm? follow-ups below?).
+- **PHASE 6 — persisted-state migration DONE (2026-06-04).** Librarian appended to
+  existing rosters on load (+BuiltIn fix) in `normalizeLoadedStateLocked`; every
+  orphaned legacy channel + DM folded into an archived owning Task
+  (`broker_migration_channels.go` + `MigrateLegacyChannelsOnce` in `Start()`),
+  mirroring the Backup & Migration pattern (user invariant: "no more DMs; every
+  chat channel is a task channel"); lifecycle migration gained a bare-status
+  fallback so clean legacy in-flight tasks resume Running instead of Unknown
+  (adversarial-Unknown contract preserved). Lifecycle remap + incident rename +
+  additive keys were already back-compatible (no transform). Verified by a
+  legacy-fixture test booting the real production path + FULL Go (39/39) + web
+  (1738) + tsc + golangci-lint(0) + clean broker build. See the Phase 6 checklist
+  entry for the 3 ICP upgrade scenarios. Commit: (this session — see git log).
+- **Optional follow-ups (NOT requested, not blocking):** hard plan-only runtime
+  enforcement (read-only/plan permission mode); broader Librarian `team_wiki_write`
+  for reorganizing; remove internal onboarding direct-channel plumbing once a DM-free
+  onboarding path exists; live browser/screenshot pass once Chrome CDP is restored.
+- **Branch:** `worktree-structural-changes`. **Prior HEAD:** `b08cbff0` (Phase 5). Base `origin/main` @ `46f06e54`.
 - **PHASE 4 DONE (Librarian = Pam; commits `e9b2f1d3` presence + `91180e7a` authority move).**
   Promoted the wiki "Pam the Archivist" to a first-class built-in agent: **slug `librarian`, name
   "Pam", role "Librarian"** (`librarian.go`). Present in every new workspace like the CEO
@@ -670,10 +694,70 @@
     permission-mode is a noted follow-up.
   - Gate: create with Plan-first ON → owner plans into notebook + posts → Approve & Start →
     owner executes; Plan-first OFF → runs immediately, no gate.
-- [ ] **Phase 6 — Persisted-state migration + cleanup + E2E.** One-shot
-    `broker-state.json` migration (lifecycle remap, fold legacy channels/DMs into
-    archived Tasks, rename keys, incident rename). 3 ICP tutorial E2E scenarios +
-    screenshots.
-  - Gate: load a pre-change workspace → comes up clean as Tasks; tutorials pass.
+- [x] **Phase 6 — Persisted-state migration + E2E. ✅ DONE 2026-06-04.** The only
+    irreversible-on-real-user-data step. Exploration found the surface is small
+    because Phases 0–5 kept wire keys stable: lifecycle remap (merged→approved +
+    full legacy tuple space) is already handled by `UnmarshalJSON` +
+    `migrateLifecycleStatesLocked`; incident rename is back-compatible
+    (`incidentRecord` keeps `json:"agent_issues"`; `issue-N` IDs load as-is);
+    provider/model/effort/plan_first/Planning are additive (absent→defaults, no
+    transform); no wire keys were actually renamed. Two real gaps closed + one
+    lifecycle-cleanliness fix:
+    1. **Librarian into existing rosters** (`normalizeLoadedStateLocked` in
+       `broker_defaults.go`): append `ensureLibrarianMember` on every load +
+       `member.BuiltIn = ceo || isLibrarianSlug`. `ensureDefaultOfficeMembersLocked`
+       only seeded an EMPTY roster, so upgraders never got Pam.
+    2. **Fold every orphaned channel + DM into an archived owning Task**
+       (new `broker_migration_channels.go`, `MigrateLegacyChannelsOnce` called from
+       `Start()` after lifecycle migration). User invariant 2026-06-04: "no more
+       DMs; every chat channel is a task channel, or else no chat possible." So
+       every legacy channel slug with message history that isn't already
+       task-owned (office channels AND `agent__human` DMs alike) gets one archived
+       `task-archived-<slug>` System task owning it — mirrors the Backup &
+       Migration task that owns #general. ZERO message rewrites; idempotent;
+       Archived tasks are never GC-pruned (`isTerminalTask` is Approved-only).
+       #general stays owned by Backup & Migration.
+    3. **Lifecycle migration bare-status fallback** (`migrateLifecycleStatesLocked`):
+       when the strict `lifecycleMigrationMap` returns Unknown (because
+       `normalizeTaskPlan` stamped a current pipeline-template stage like "act"
+       the pre-Lane-A map predates), fall back to
+       `deriveLifecycleStateFromLegacy("", "", status, blocked)` so clean legacy
+       in-flight/open/done tasks resume as Running/Ready/Approved instead of
+       landing in the Unknown bucket — while genuinely contradictory tuples
+       (e.g. in_progress AND blocked) still surface as Unknown for triage (the
+       existing adversarial-Unknown test contract is preserved).
+  - **Verification:** new `broker_phase6_migration_test.go` boots a real broker
+    against a hand-written PRE-CHANGE legacy `broker-state.json` via the exact
+    production constructor + migration entry points and asserts: Librarian added
+    (BuiltIn) without clobbering specialists; merged→approved; in-flight task →
+    Running; #product + a `dwight__human` DM each folded into archived tasks
+    surfaced by `ListTasks(IncludeDone)`; messages preserved per channel;
+    incident loaded from `agent_issues` with `issue-1` intact; additive keys
+    default cleanly (no forced Planning/auto); idempotent; round-trips through
+    save+reload with no duplicates. Updated `TestLoadDoesNotAppendDefaultsAfterBlueprintSeed`
+    to expect the universal Librarian (still guards against generic-default leak).
+    FULL Go suite (39/39 green), web (1738 pass / 40 skip), tsc clean,
+    golangci-lint 0 issues. Broker binary builds + embeds dist cleanly.
+  - **3 ICP upgrade scenarios (gate met — each covered by an automated test):**
+    1. **Sam (OSS founder)** upgrades an old single-#general workspace with a
+       couple of in-flight issues. → tasks intact, in-flight task resumes Running,
+       Pam joins the roster, #general stays under Backup & Migration. *(covered by
+       task-1/task-2 + roster assertions in `TestPhase6MigrationLoadsLegacyWorkspaceClean`.)*
+    2. **Maya (RevOps operator)** has extra office channels + a 1:1 with a
+       specialist. → #product folded into an archived task, the `dwight__human`
+       DM folded into "Chat with Dwight", both navigable in Archive, all messages
+       preserved. *(covered by the #product + DM fold + message-count assertions.)*
+    3. **Power user** on a curated blueprint roster (no generic defaults) with a
+       `merged` done task + an old `agent_issues`/`issue-N` incident. → roster
+       preserved + Pam, merged→approved, incident loads with `issue-1`.
+       *(covered by `TestLoadDoesNotAppendDefaultsAfterBlueprintSeed` + the
+       lifecycle/incident assertions.)*
+    Live binary HTTP boot deferred (CDP down; the fixture test exercises the
+    identical production boot path, so it is the data-path gate — consistent with
+    this branch's verification posture).
+  - Gate: load a pre-change workspace → comes up clean as Tasks; tutorials pass. ✅ MET.
+  - **OUT OF SCOPE (deliberate):** ripping out internal onboarding direct-channel
+    plumbing (`DMView`/`directChannelSlug`/CEO-echo) — onboarding still uses it;
+    separate cleanup. Hard plan-only runtime enforcement (Phase 5 follow-up).
 
 **Status of plan:** awaiting user go-ahead to start **Phase 0**.
