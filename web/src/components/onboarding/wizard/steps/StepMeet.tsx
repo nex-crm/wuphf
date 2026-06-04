@@ -32,6 +32,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import {
+  isValidEmail,
   recordOnboardingEmailStarted,
   recordOnboardingEmailViewed,
 } from "../../../../lib/analytics";
@@ -83,6 +84,13 @@ export function StepMeet({
     },
     [setAnswers],
   );
+
+  // Non-blocking validity signal. The email is optional and never gates
+  // advancing, so an invalid entry is not an error that stops onboarding — it is
+  // simply dropped (run() only persists / sends a valid address). We surface a
+  // quiet warning so the drop is never silent, but we do not block Finish.
+  const emailInvalid =
+    answers.email.trim().length > 0 && !isValidEmail(answers.email);
 
   return (
     <div
@@ -149,11 +157,22 @@ export function StepMeet({
             placeholder={ONBOARDING_EMAIL_COPY.placeholder}
             autoComplete="email"
             inputMode="email"
+            aria-invalid={emailInvalid}
+            aria-describedby="onboarding-owner-email-hint"
             onChange={(event) => setEmail(event.target.value)}
             data-testid="onboarding-owner-email"
           />
-          <p className="onboarding-meet-name-hint">
-            {ONBOARDING_EMAIL_COPY.hint}
+          <p
+            id="onboarding-owner-email-hint"
+            className={`onboarding-meet-name-hint${
+              emailInvalid ? " onboarding-meet-email-hint--invalid" : ""
+            }`}
+            aria-live="polite"
+            data-testid="onboarding-owner-email-hint"
+          >
+            {emailInvalid
+              ? ONBOARDING_EMAIL_COPY.invalid
+              : ONBOARDING_EMAIL_COPY.hint}
           </p>
         </div>
       </div>

@@ -1138,8 +1138,14 @@ func applyFormAnswer(s *State, field string, value interface{}) error {
 		s.FormAnswers.OwnerRole = sanitizeStr(value)
 	case "owner_email":
 		// Founder email captured on the welcome step. PII, stored locally; the
-		// remote keep-in-touch send is gated separately on the web side.
-		s.FormAnswers.OwnerEmail = sanitizeStr(value)
+		// remote keep-in-touch send is gated separately on the web side. Reject
+		// non-string payloads (as picked_agents / scan_complete do) so a
+		// malformed request cannot silently clear a previously stored address.
+		raw, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("owner_email must be a string")
+		}
+		s.FormAnswers.OwnerEmail = sanitizeStr(raw)
 	case "blueprint_id":
 		s.FormAnswers.BlueprintID = normalizeBlueprintAnswer(sanitizeStr(value))
 	case "picked_agents":

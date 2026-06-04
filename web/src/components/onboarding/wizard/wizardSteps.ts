@@ -165,6 +165,13 @@ export const ONBOARDING_EMAIL_COPY = {
   placeholder: "you@company.com",
   /** Hint under the field. Sets the expectation before anyone types. */
   hint: "Optional. We use it to keep you posted on WUPHF, and nothing else.",
+  /**
+   * Non-blocking warning shown under the field when the value is non-empty but
+   * not a valid address. The field never gates advancing, so this nudges rather
+   * than blocks: an invalid email is simply dropped, and this says so.
+   */
+  invalid:
+    "That does not look like an email. Leave it blank, or fix it to stay in touch.",
   /** Consent checkbox label on the final step. Checked by default. */
   consent:
     "Keep me posted on WUPHF. It is open source and built in the open, and we would love to learn what to build next. No spam, we promise.",

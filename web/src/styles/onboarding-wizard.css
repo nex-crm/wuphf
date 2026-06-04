@@ -224,6 +224,13 @@
   max-width: 360px;
 }
 
+/* Non-blocking "that is not an email" warning under the optional email field.
+   The field never gates advancing, so this nudges in the danger tone without
+   reading as a hard error. */
+.onboarding-meet-email-hint--invalid {
+  color: var(--danger);
+}
+
 /* ── Team-step inputs (the one real input step) ──────────────────────────── */
 
 .onboarding-team-field {
