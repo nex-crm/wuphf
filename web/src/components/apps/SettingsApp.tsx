@@ -877,9 +877,7 @@ function KeysSection({ cfg, save }: SectionProps) {
 }
 
 function IntegrationsSection({ cfg, save }: SectionProps) {
-  const [actionProvider, setActionProvider] = useState<string>(
-    cfg.action_provider === "one" ? "auto" : (cfg.action_provider ?? "auto"),
-  );
+  const [actionProvider, setActionProvider] = useState<string>("composio");
 
   const onSave = async () => {
     const patch: ConfigUpdate = {
@@ -920,7 +918,6 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
           value={actionProvider}
           onChange={(e) => setActionProvider(e.target.value)}
         >
-          <option value="auto">Auto</option>
           <option value="composio">Composio</option>
         </select>
       </Field>

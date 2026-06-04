@@ -420,6 +420,12 @@
   border-color: var(--warning-300);
   background: var(--warning-100);
 }
+.op-error-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 
 .op-runtime-actions {
   display: flex;

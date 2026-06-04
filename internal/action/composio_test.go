@@ -261,11 +261,11 @@ func TestComposioRESTIntegrationLifecycle(t *testing.T) {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 
-	disconnected, err := client.DisconnectIntegration(context.Background(), IntegrationDisconnectRequest{ConnectionKey: "ca_123"})
+	disconnected, err := client.DisconnectIntegration(context.Background(), IntegrationDisconnectRequest{Platform: "gmail", ConnectionKey: "ca_123"})
 	if err != nil {
 		t.Fatalf("disconnect: %v", err)
 	}
-	if !disconnected.OK || deletedAccount != "ca_123" {
+	if !disconnected.OK || disconnected.Platform != "gmail" || deletedAccount != "ca_123" {
 		t.Fatalf("unexpected disconnect: %+v deleted=%q", disconnected, deletedAccount)
 	}
 }

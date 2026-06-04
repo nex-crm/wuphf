@@ -64,6 +64,7 @@ export interface IntegrationConnectResult {
 export interface IntegrationDisconnectResult {
   ok: boolean;
   provider: IntegrationProvider;
+  platform?: string;
   connection_key: string;
   status: string;
 }
@@ -117,9 +118,11 @@ export async function getIntegrationConnectStatus(params: {
 export async function disconnectIntegration(
   provider: IntegrationProvider,
   connectionKey: string,
+  platform?: string,
 ): Promise<IntegrationDisconnectResult> {
   return post<IntegrationDisconnectResult>("/integrations/disconnect", {
     provider,
+    platform,
     connection_key: connectionKey,
   });
 }

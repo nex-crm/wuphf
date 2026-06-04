@@ -351,6 +351,38 @@ function AuditList({ events }: { events: IntegrationAuditEvent[] }) {
   );
 }
 
+function integrationErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim() !== "") {
+    return error.message;
+  }
+  return "Unable to load integration data.";
+}
+
+function IntegrationErrorState({
+  error,
+  isFetching,
+  onRetry,
+}: {
+  error: unknown;
+  isFetching: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="op-runtime-note is-warn op-error-state">
+      <span>{integrationErrorMessage(error)}</span>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={onRetry}
+        disabled={isFetching}
+      >
+        <Refresh width={14} height={14} aria-hidden="true" />
+        Retry
+      </button>
+    </div>
+  );
+}
+
 function ToolkitDetail({
   item,
   onBack,
@@ -423,7 +455,8 @@ function ToolkitDetail({
     },
   });
   const disconnectMutation = useMutation({
-    mutationFn: () => disconnectIntegration(item.provider, connectionKey),
+    mutationFn: () =>
+      disconnectIntegration(item.provider, connectionKey, item.platform),
     onSuccess: () => {
       setConfirmDisconnect(false);
       showNotice(`${item.name} disconnected.`, "success");
@@ -553,7 +586,15 @@ function ToolkitDetail({
               Refresh
             </button>
           </div>
-          <AuditList events={auditQuery.data ?? []} />
+          {auditQuery.isError ? (
+            <IntegrationErrorState
+              error={auditQuery.error}
+              isFetching={auditQuery.isFetching}
+              onRetry={() => void auditQuery.refetch()}
+            />
+          ) : (
+            <AuditList events={auditQuery.data ?? []} />
+          )}
         </section>
       </div>
     </section>
@@ -566,24 +607,32 @@ function IntegrationsHome({
   connected,
   toolkitItems,
   isLoading,
+  isError,
+  error,
+  isFetching,
   available,
   ctx,
   onSearch,
   onConnected,
   onOpenToolkit,
   onOpenRegistry,
+  onRetry,
 }: {
   providers: IntegrationProviderStatus[];
   search: string;
   connected: string;
   toolkitItems: IntegrationCatalogItem[];
   isLoading: boolean;
+  isError: boolean;
+  error: unknown;
+  isFetching: boolean;
   available: IntegrationDescriptor[];
   ctx: IntegrationContext;
   onSearch: (value: string) => void;
   onConnected: (value: string) => void;
   onOpenToolkit: (item: IntegrationCatalogItem) => void;
   onOpenRegistry: (id: string) => void;
+  onRetry: () => void;
 }) {
   return (
     <>
@@ -611,6 +660,12 @@ function IntegrationsHome({
       </div>
       {isLoading ? (
         <div className="app-panel-loading">Loading accounts…</div>
+      ) : isError ? (
+        <IntegrationErrorState
+          error={error}
+          isFetching={isFetching}
+          onRetry={onRetry}
+        />
       ) : toolkitItems.length > 0 ? (
         <ActionToolkitsSection items={toolkitItems} onOpen={onOpenToolkit} />
       ) : (
@@ -661,12 +716,14 @@ export function IntegrationsApp() {
     useState<IntegrationCatalogItem | null>(null);
   const [search, setSearch] = useState("");
   const [connected, setConnected] = useState("");
+  const trimmedSearch = search.trim() || undefined;
+  const connectedFilter = connected || undefined;
   const integrationsQuery = useQuery({
-    queryKey: ["integrations", search, connected],
+    queryKey: ["integrations", trimmedSearch, connectedFilter],
     queryFn: () =>
       listIntegrations({
-        search: search.trim() || undefined,
-        connected: connected || undefined,
+        search: trimmedSearch,
+        connected: connectedFilter,
         limit: 60,
       }),
     staleTime: 10_000,
@@ -684,10 +741,12 @@ export function IntegrationsApp() {
   const available = INTEGRATIONS.filter((descriptor) =>
     descriptor.isAvailable(ctx),
   );
-  const selected = selectedId
-    ? (available.find((descriptor) => descriptor.id === selectedId) ?? null)
+  const selected =
+    available.find((descriptor) => descriptor.id === selectedId) ?? null;
+  const integrationData = integrationsQuery.isSuccess
+    ? integrationsQuery.data
     : null;
-  const toolkitItems = integrationsQuery.data?.items ?? [];
+  const toolkitItems = integrationData?.items ?? [];
 
   return (
     <div className="op-page">
@@ -711,7 +770,7 @@ export function IntegrationsApp() {
         />
       ) : (
         <IntegrationsHome
-          providers={integrationsQuery.data?.providers ?? []}
+          providers={integrationData?.providers ?? []}
           search={search}
           connected={connected}
           toolkitItems={toolkitItems}
@@ -722,6 +781,10 @@ export function IntegrationsApp() {
           onConnected={setConnected}
           onOpenToolkit={setSelectedToolkit}
           onOpenRegistry={setSelectedId}
+          isError={integrationsQuery.isError}
+          error={integrationsQuery.error}
+          isFetching={integrationsQuery.isFetching}
+          onRetry={() => void integrationsQuery.refetch()}
         />
       )}
 

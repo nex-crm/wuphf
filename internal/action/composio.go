@@ -281,12 +281,14 @@ func (c *ComposioREST) DisconnectIntegration(ctx context.Context, req Integratio
 	if connectionKey == "" {
 		return IntegrationDisconnectResult{}, fmt.Errorf("connection_key is required")
 	}
+	platform := normalizeComposioPlatform(req.Platform)
 	if _, err := c.delete(ctx, "/connected_accounts/"+url.PathEscape(connectionKey)); err != nil {
 		return IntegrationDisconnectResult{}, err
 	}
 	return IntegrationDisconnectResult{
 		OK:            true,
 		Provider:      c.Name(),
+		Platform:      platform,
 		ConnectionKey: connectionKey,
 		Status:        "disconnected",
 	}, nil

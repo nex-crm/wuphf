@@ -20,7 +20,7 @@ export const SIDEBAR_DEFAULT_WIDTH = 280;
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 420;
 export const SIDEBAR_WIDTH_STORAGE_KEY = "wuphf-sidebar-width";
-const MOBILE_RAIL_QUERY = "(max-width: 430px)";
+const MOBILE_RAIL_QUERY = "(max-width: 768px)";
 
 function useMobileRail(): boolean {
   const [matches, setMatches] = useState(() => {

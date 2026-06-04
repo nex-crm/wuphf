@@ -17,6 +17,11 @@ if (!OUT) {
   process.exit(2);
 }
 
+const fixtureLogo = (label) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="4" fill="#fff"/><rect x="1" y="1" width="30" height="30" rx="3" fill="none" stroke="#e5e7eb"/><text x="16" y="21" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="#111827">${label}</text></svg>`,
+  )}`;
+
 const CONFIG = {
   llm_provider: "claude-code",
   llm_provider_configured: true,
@@ -89,8 +94,7 @@ const INTEGRATIONS = {
       name: "Google Calendar",
       description: "Read availability and schedule meetings after approval.",
       category: "productivity",
-      logo_url:
-        "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/googlecalendar.svg",
+      logo_url: fixtureLogo("31"),
       state: "available",
       can_connect: true,
       can_disconnect: false,
@@ -101,8 +105,7 @@ const INTEGRATIONS = {
       name: "Google Drive",
       description: "Find, read, and organize workspace files.",
       category: "documents",
-      logo_url:
-        "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/googledrive.svg",
+      logo_url: fixtureLogo("GD"),
       state: "available",
       can_connect: true,
       can_disconnect: false,
@@ -113,8 +116,7 @@ const INTEGRATIONS = {
       name: "Notion",
       description: "Search pages and update project databases.",
       category: "knowledge",
-      logo_url:
-        "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/notion.svg",
+      logo_url: fixtureLogo("N"),
       state: "available",
       can_connect: true,
       can_disconnect: false,
@@ -125,8 +127,7 @@ const INTEGRATIONS = {
       name: "Linear",
       description: "Create issues and update engineering cycles.",
       category: "project management",
-      logo_url:
-        "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/linear.svg",
+      logo_url: fixtureLogo("L"),
       state: "available",
       can_connect: true,
       can_disconnect: false,
@@ -137,8 +138,7 @@ const INTEGRATIONS = {
       name: "HubSpot",
       description: "Update contacts, companies, and deals.",
       category: "revenue",
-      logo_url:
-        "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/hubspot.svg",
+      logo_url: fixtureLogo("H"),
       state: "available",
       can_connect: true,
       can_disconnect: false,
@@ -205,7 +205,7 @@ await installCommonMocks(context, {
         body: JSON.stringify([]),
       }),
     );
-    await ctx.route("**/api/integrations?*", (r) =>
+    await ctx.route(/\/api\/integrations(?:\?.*)?$/, (r) =>
       r.fulfill({
         contentType: "application/json",
         body: JSON.stringify(INTEGRATIONS),

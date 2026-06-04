@@ -2,6 +2,7 @@ package team
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/action"
 )
+
+const maxIntegrationRequestBytes = 1 << 20
 
 type integrationProviderStatus struct {
 	Provider           string `json:"provider"`
@@ -92,8 +95,7 @@ func (b *Broker) handleIntegrationConnect(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req action.IntegrationConnectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+	if !decodeIntegrationRequest(w, r, &req) {
 		return
 	}
 	provider := strings.ToLower(strings.TrimSpace(req.Provider))
@@ -181,8 +183,7 @@ func (b *Broker) handleIntegrationDisconnect(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req action.IntegrationDisconnectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+	if !decodeIntegrationRequest(w, r, &req) {
 		return
 	}
 	provider := strings.ToLower(strings.TrimSpace(req.Provider))
@@ -204,7 +205,7 @@ func (b *Broker) handleIntegrationDisconnect(w http.ResponseWriter, r *http.Requ
 		"composio",
 		"general",
 		integrationRequestActor(r),
-		"Disconnected Composio integration",
+		fmt.Sprintf("Disconnected %s via Composio", integrationAuditPlatform(result.Platform)),
 		result.ConnectionKey,
 		nil,
 		"",
@@ -231,6 +232,28 @@ func (b *Broker) handleIntegrationAudit(w http.ResponseWriter, r *http.Request) 
 	)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"events": events})
+}
+
+func decodeIntegrationRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxIntegrationRequestBytes))
+	if err := decoder.Decode(dst); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+		}
+		return false
+	}
+	return true
+}
+
+func integrationAuditPlatform(platform string) string {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return "unknown platform"
+	}
+	return displayPlatform(platform)
 }
 
 type curatedComposioToolkit struct {

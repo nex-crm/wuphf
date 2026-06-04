@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -242,6 +243,7 @@ func TestIntegrationConnectStatusDisconnectAndAudit(t *testing.T) {
 			Provider      string            `json:"provider"`
 			Platform      string            `json:"platform"`
 			ConnectionKey string            `json:"connection_key"`
+			Summary       string            `json:"summary"`
 			Metadata      map[string]string `json:"metadata"`
 		} `json:"events"`
 	}
@@ -275,9 +277,41 @@ func TestIntegrationConnectStatusDisconnectAndAudit(t *testing.T) {
 		t.Fatalf("expected approval audit event: %+v", audit.Events)
 	}
 
-	resp = integrationRequest(t, srv, b, http.MethodPost, "/integrations/disconnect", []byte(`{"provider":"composio","connection_key":"ca_123"}`))
+	resp = integrationRequest(t, srv, b, http.MethodPost, "/integrations/disconnect", []byte(`{"provider":"composio","platform":"gmail","connection_key":"ca_123"}`))
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || deletedAccount != "ca_123" {
 		t.Fatalf("unexpected disconnect status=%d deleted=%q", resp.StatusCode, deletedAccount)
+	}
+
+	resp = integrationRequest(t, srv, b, http.MethodGet, "/integrations/audit?provider=composio&connection_key=ca_123", nil)
+	if err := json.NewDecoder(resp.Body).Decode(&audit); err != nil {
+		t.Fatalf("decode post-disconnect audit: %v", err)
+	}
+	resp.Body.Close()
+	foundDisconnect := false
+	for _, event := range audit.Events {
+		if event.EventType == "integration_disconnected" {
+			foundDisconnect = true
+			if event.Summary != "Disconnected Gmail via Composio" {
+				t.Fatalf("unexpected disconnect summary: %+v", event)
+			}
+		}
+	}
+	if !foundDisconnect {
+		t.Fatalf("expected disconnect audit event: %+v", audit.Events)
+	}
+}
+
+func TestIntegrationConnectRejectsOversizedBody(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "state.json"))
+	srv := newIntegrationsTestServer(t, b)
+	defer srv.Close()
+
+	oversized := []byte(`{"provider":"composio","platform":"` + strings.Repeat("a", maxIntegrationRequestBytes) + `"}`)
+	resp := integrationRequest(t, srv, b, http.MethodPost, "/integrations/connect", oversized)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized body, got %d", resp.StatusCode)
 	}
 }

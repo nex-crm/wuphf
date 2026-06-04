@@ -55,6 +55,7 @@ describe("integrations api client", () => {
       .mockResolvedValueOnce({
         ok: true,
         provider: "composio",
+        platform: "gmail",
         connection_key: "ca_123",
         status: "disconnected",
       });
@@ -73,7 +74,8 @@ describe("integrations api client", () => {
             created_at: "2026-06-04T12:00:00Z",
           },
         ],
-      });
+      })
+      .mockResolvedValueOnce({});
 
     await startIntegrationConnection("composio", "gmail");
     await getIntegrationConnectStatus({
@@ -81,7 +83,7 @@ describe("integrations api client", () => {
       platform: "gmail",
       connect_id: "ca_123",
     });
-    await disconnectIntegration("composio", "ca_123");
+    await disconnectIntegration("composio", "ca_123", "gmail");
     await expect(
       getIntegrationAudit({
         provider: "composio",
@@ -89,6 +91,13 @@ describe("integrations api client", () => {
         connection_key: "ca_123",
       }),
     ).resolves.toHaveLength(1);
+    await expect(
+      getIntegrationAudit({
+        provider: "composio",
+        platform: "gmail",
+        connection_key: "ca_123",
+      }),
+    ).resolves.toHaveLength(0);
 
     expect(postSpy).toHaveBeenNthCalledWith(1, "/integrations/connect", {
       provider: "composio",
@@ -101,6 +110,7 @@ describe("integrations api client", () => {
     });
     expect(postSpy).toHaveBeenNthCalledWith(2, "/integrations/disconnect", {
       provider: "composio",
+      platform: "gmail",
       connection_key: "ca_123",
     });
     expect(getSpy).toHaveBeenNthCalledWith(2, "/integrations/audit", {

@@ -137,12 +137,14 @@ type IntegrationConnectResult struct {
 
 type IntegrationDisconnectRequest struct {
 	Provider      string `json:"provider,omitempty"`
+	Platform      string `json:"platform,omitempty"`
 	ConnectionKey string `json:"connection_key"`
 }
 
 type IntegrationDisconnectResult struct {
 	OK            bool   `json:"ok"`
 	Provider      string `json:"provider"`
+	Platform      string `json:"platform,omitempty"`
 	ConnectionKey string `json:"connection_key"`
 	Status        string `json:"status"`
 }
