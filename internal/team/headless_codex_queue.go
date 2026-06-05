@@ -299,15 +299,16 @@ func (l *Launcher) headlessLeadTurnNeedsImmediateWakeLocked(slug, taskID string)
 	if taskID == "" {
 		return false
 	}
-	for _, task := range l.broker.AllTasks() {
-		if task.ID != taskID {
-			continue
-		}
-		status := strings.ToLower(strings.TrimSpace(task.status))
-		review := strings.ToLower(strings.TrimSpace(task.reviewState))
-		return status == "review" || review == "ready_for_review" || status == "blocked"
+	// TaskByID does the same single-task lookup without AllTasks()'s full
+	// slice copy — this runs on every enqueue (every dispatch/wake/message),
+	// and the channel-per-task model makes the task set grow with the office.
+	task := l.broker.TaskByID(taskID)
+	if task == nil {
+		return false
 	}
-	return false
+	status := strings.ToLower(strings.TrimSpace(task.status))
+	review := strings.ToLower(strings.TrimSpace(task.reviewState))
+	return status == "review" || review == "ready_for_review" || status == "blocked"
 }
 
 // spawnHeadlessWorker starts a runHeadlessCodexQueue goroutine and registers

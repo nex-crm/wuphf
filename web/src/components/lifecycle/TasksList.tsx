@@ -16,7 +16,7 @@
  * Every other card opens the TaskDocument detail surface at /tasks/$taskId.
  */
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getScheduler, type SchedulerJob } from "../../api/scheduler";
@@ -134,7 +134,11 @@ const STAGE_HINT: Record<LifecycleStage, string> = {
 
 // ── Sub-components ─────────────────────────────────────────────────────
 
-function TaskCard({ task }: { task: Task }) {
+// Memoized: the board re-derives its columns on every 10s task poll. Without
+// memo, every card in every lane re-renders even when its own task is
+// unchanged. Props are a single `task` object — React Query keeps the
+// reference stable when the row's data hasn't changed.
+const TaskCard = memo(function TaskCard({ task }: { task: Task }) {
   const state = taskToLifecycleState(task);
   const ownerSlug = task.owner?.trim() || undefined;
   // Live "what's happening" line: the owner's current activity snapshot
@@ -185,7 +189,7 @@ function TaskCard({ task }: { task: Task }) {
       ) : null}
     </button>
   );
-}
+});
 
 /** Human-readable "next run" sub-line for a scheduled-task card. Prefers
  *  the routine's stored next_run timestamp, falling back to the cadence
@@ -209,7 +213,11 @@ function scheduledSubLine(job: SchedulerJob): string {
  *  shell (title + meta sub-line) so the column reads consistently with
  *  the lifecycle columns, but navigates to the routine detail surface
  *  instead of a task detail. */
-function ScheduledTaskCard({ job }: { job: SchedulerJob }) {
+const ScheduledTaskCard = memo(function ScheduledTaskCard({
+  job,
+}: {
+  job: SchedulerJob;
+}) {
   const title = routineLabel(job);
   const { slug } = job;
 
@@ -241,7 +249,7 @@ function ScheduledTaskCard({ job }: { job: SchedulerJob }) {
       </div>
     </button>
   );
-}
+});
 
 function TasksListSkeleton() {
   return (
@@ -324,9 +332,23 @@ interface TasksListProps {
 const BOARD_LANE_PREFS_KEY = "wuphf-board-lane-prefs";
 
 function readLanePrefs(): Record<string, boolean> {
+  if (typeof window === "undefined") return {};
   try {
     const raw = window.localStorage.getItem(BOARD_LANE_PREFS_KEY);
-    if (raw) return JSON.parse(raw) as Record<string, boolean>;
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    // Keep only boolean values — a stale/tampered entry with a string or
+    // number would otherwise pass through and break isLaneCollapsed's
+    // `lanePrefs[stage] ?? count === 0` (a truthy string short-circuits the
+    // empty-lane auto-collapse default).
+    const clean: Record<string, boolean> = {};
+    for (const [stage, collapsed] of Object.entries(parsed)) {
+      if (typeof collapsed === "boolean") clean[stage] = collapsed;
+    }
+    return clean;
   } catch {
     // Corrupt/blocked storage — fall back to the auto (empty-collapsed) default.
   }

@@ -83,8 +83,17 @@ export function TaskComposer() {
   const localStatuses: LocalProviderStatus[] = localStatusQuery.data ?? [];
   const llmKinds = (configQuery.data?.llm_provider_kinds ??
     DEFAULT_LLM_KINDS) as LLMRuntimeKind[];
-  const globalDefaultKind = (configQuery.data?.llm_provider ??
-    "claude-code") as LLMRuntimeKind;
+  // configQuery.data.llm_provider is an LLMProvider (LLMRuntimeKind |
+  // GatewayKind). Casting it straight to LLMRuntimeKind is unsound: if the
+  // install's default provider is a gateway (e.g. "openrouter"), downstream
+  // model/effort lookups receive a kind they don't recognize. Narrow through
+  // the runtime allow-list and fall back to the first available kind.
+  const rawDefaultProvider = configQuery.data?.llm_provider;
+  const globalDefaultKind: LLMRuntimeKind =
+    rawDefaultProvider &&
+    (llmKinds as readonly string[]).includes(rawDefaultProvider)
+      ? (rawDefaultProvider as LLMRuntimeKind)
+      : (llmKinds[0] ?? "claude-code");
 
   const [prompt, setPrompt] = useState("");
   const [ownerSlug, setOwnerSlug] = useState<string>(AUTO_OWNER);

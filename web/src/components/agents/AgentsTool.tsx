@@ -86,14 +86,16 @@ export function AgentsTool() {
   const defaultHarness = useDefaultHarness();
   const wizard = useAgentWizard();
 
-  const agents = members.filter((m) => m.slug && m.slug !== "human");
   // CEO first (orchestrator), then the rest in broker order. Keeps the
   // default agents (CEO + Librarian) reading as the spine of the roster.
+  // Key on `members` (stable across polls): filtering inline outside the memo
+  // produced a new array every render, so the memo never actually cached.
   const ordered = useMemo<OfficeMember[]>(() => {
+    const agents = members.filter((m) => m.slug && m.slug !== "human");
     const ceo = agents.find((a) => a.slug === "ceo");
     const rest = agents.filter((a) => a.slug !== "ceo");
     return ceo ? [ceo, ...rest] : rest;
-  }, [agents]);
+  }, [members]);
 
   return (
     <div className="app-panel active agents-tool" data-testid="agents-tool">

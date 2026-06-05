@@ -67,6 +67,7 @@ type Broker struct {
 	memberPresence    map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
 	presenceKeyToSlug map[string]string               // "adapter:key" → slug; guarded by mu
 	channels          []teamChannel
+	channelIndex      map[string]int // slug → index into channels; guarded by mu
 	sessionMode       string
 	oneOnOneAgent     string
 	focusMode         bool
@@ -1179,12 +1180,35 @@ func (b *Broker) FocusModeEnabled() bool {
 
 func (b *Broker) findChannelLocked(slug string) *teamChannel {
 	slug = normalizeChannelSlug(slug)
-	for i := range b.channels {
-		if b.channels[i].Slug == slug {
-			return &b.channels[i]
-		}
+	// Channel-per-task makes b.channels grow with the office, so the old
+	// linear scan was O(channels) per call on hot paths (membership checks,
+	// access control, startup reconciliation). Index by slug instead.
+	if len(b.channelIndex) != len(b.channels) {
+		b.rebuildChannelIndexLocked()
+	}
+	if i, ok := b.channelIndex[slug]; ok && i < len(b.channels) && b.channels[i].Slug == slug {
+		return &b.channels[i]
+	}
+	// A miss may be genuine OR a stale index left by a same-length slice
+	// replacement (snapshot rollback / state load) that the length check
+	// can't detect. Rebuild once and retry so we never return a false
+	// negative for a channel that actually exists. Hits never reach here, so
+	// the hot lookup path stays O(1).
+	b.rebuildChannelIndexLocked()
+	if i, ok := b.channelIndex[slug]; ok && i < len(b.channels) && b.channels[i].Slug == slug {
+		return &b.channels[i]
 	}
 	return nil
+}
+
+// rebuildChannelIndexLocked rebuilds channelIndex from b.channels. Callers must
+// hold b.mu. findChannelLocked's length-check + rebuild-on-miss keep the map in
+// sync with the slice across appends, removes, and same-length replacements.
+func (b *Broker) rebuildChannelIndexLocked() {
+	b.channelIndex = make(map[string]int, len(b.channels))
+	for i := range b.channels {
+		b.channelIndex[b.channels[i].Slug] = i
+	}
 }
 
 // ensureDMConversationLocked returns the DM conversation for the given slug,
