@@ -133,11 +133,14 @@ func (b *Broker) migrateLegacyChannelsIntoArchivedTasksLocked() {
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
+		// Append first, then apply state to the slice element so the
+		// lifecycle index and b.tasks never diverge mid-call (no split-brain
+		// window where the index references a task not yet in the slice).
 		// Errors are intentionally ignored: LifecycleStateArchived is canonical
 		// and derivedFieldsFor always resolves it (matches
 		// ensureBackupMigrationTaskLocked).
-		_ = b.applyLifecycleStateLocked(&task, LifecycleStateArchived)
 		b.tasks = append(b.tasks, task)
+		_ = b.applyLifecycleStateLocked(&b.tasks[len(b.tasks)-1], LifecycleStateArchived)
 	}
 }
 
@@ -158,6 +161,12 @@ func (b *Broker) archivedChannelDescriptorLocked(slug string) (title, details st
 	if ch := b.findChannelLocked(slug); ch != nil && strings.TrimSpace(ch.Name) != "" {
 		name = strings.TrimSpace(ch.Name)
 	}
+	// ch.Name is a user-supplied display string. It is interpolated into the
+	// archived task's Title + Details, which are delivered verbatim in agent
+	// execution packets — so a name containing newlines or instruction-like
+	// markers would be a stored prompt-injection vector. Strip control
+	// characters, collapse whitespace, and bound the length.
+	name = sanitizeChannelDisplayName(name)
 	display := "#" + strings.TrimPrefix(name, "#")
 	return "Archived " + display,
 		"Archived on upgrade: preserves the history of the legacy " + display +
@@ -219,4 +228,28 @@ func sanitizeIDSegment(s string) string {
 		return "channel"
 	}
 	return trimmed
+}
+
+// sanitizeChannelDisplayName makes a user-supplied channel name safe to embed
+// in an archived task's Title/Details (which reach agents verbatim). It drops
+// control characters, turns tabs/newlines into spaces, collapses whitespace
+// runs, and bounds the length so a crafted name cannot inject newlines or
+// instruction-like markers into an agent's execution packet.
+func sanitizeChannelDisplayName(name string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t':
+			return ' '
+		}
+		if r < 0x20 {
+			return -1 // drop other control characters
+		}
+		return r
+	}, name)
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+	const maxLen = 120
+	if len(cleaned) > maxLen {
+		cleaned = strings.TrimSpace(cleaned[:maxLen])
+	}
+	return cleaned
 }

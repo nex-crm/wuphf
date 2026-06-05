@@ -845,6 +845,17 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 			currentState = task.LifecycleState
 			planFirst = task.PlanFirst
 		}
+		// Plan-mode (Phase 5) human-only gate — single-sourced here so it
+		// covers EVERY approval path into recordTaskDecisionInternal: the
+		// /tasks/{id}/decision HTTP endpoint (the "Approve plan & Start"
+		// button, but also any broker-token caller), the team_task MCP path,
+		// and internal callers like RecordTaskDecision(id, "approve", "ceo").
+		// A plan awaiting approval may only be started by the human; an agent
+		// or the CEO approving on the human's behalf defeats the gate.
+		if action == RecordDecisionApprove && currentState == LifecycleStatePlanning &&
+			!isHumanMessageSender(actorSlug) {
+			return fmt.Errorf("record decision: task %s is in Plan mode — only the human can approve the plan and start work (actor %q)", taskID, actorSlug)
+		}
 		target, reason = lifecycleStateForDecisionAction(action, currentState, planFirst)
 		if action == RecordDecisionApprove && currentState == LifecycleStateDrafting {
 			wasApprovingFromDrafting = true

@@ -124,7 +124,6 @@ func (b *Broker) checkTaskActionAuthLocked(action, actor, targetTaskID string) e
 		"request_changes": true,
 		"approve":         true,
 		"reject":          true,
-		"archive":         true,
 	}
 	if targetTaskID != "" {
 		if task := b.findTaskByIDLocked(strings.TrimSpace(targetTaskID)); task != nil {

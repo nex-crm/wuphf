@@ -234,7 +234,12 @@ export async function postDecision(
   if (USE_MOCKS) {
     return Promise.resolve({ taskId, action, status: "recorded-mock" });
   }
-  const body: { action: DecisionAction; comment?: string } = { action };
+  // created_by: "human" self-attributes this decision as the human's. The
+  // local UI shares the broker token with agents, so the broker cannot tell
+  // them apart by auth; this explicit signal is what clears the Plan-mode
+  // human-only approval gate (mirrors the team_task created_by field).
+  const body: { action: DecisionAction; comment?: string; created_by: string } =
+    { action, created_by: "human" };
   const trimmed = (comment ?? "").trim();
   if (trimmed) body.comment = trimmed;
   return post(`/tasks/${encodeURIComponent(taskId)}/decision`, body);
