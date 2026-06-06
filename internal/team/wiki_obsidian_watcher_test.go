@@ -163,6 +163,45 @@ func TestObsidianWatcher_NotifyWriteFiltersOwnEvents(t *testing.T) {
 	requireHEADStable(t, repo, first, 500*time.Millisecond)
 }
 
+func TestObsidianWatcher_DoesNotReCommitOwnSentinelWrite(t *testing.T) {
+	repo, _, _, teardown := newObsidianWatcherFixture(t)
+	defer teardown()
+
+	prev, err := repo.HeadSHA(context.Background())
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+
+	// A brief WITH YAML frontmatter: applyHumanEditSentinel stamps a fresh
+	// last_human_edit_ts (time.Now) on every commit, so the watcher's own
+	// write-back differs byte-for-byte from the prior commit and the
+	// diff --cached no-op guard in Repo.Commit never trips. Before the
+	// NotifyWrite(rel) suppression in fire(), that echo re-triggered the
+	// watcher in an unbounded commit loop (HEAD advancing forever, the wiki
+	// mutex saturated, and each commit's context budget burned on lock-wait —
+	// the "git add ...: context deadline exceeded" flood). Assert the watcher
+	// commits exactly once and then goes quiet.
+	rel := "team/people/loopy.md"
+	full := filepath.Join(repo.Root(), filepath.FromSlash(rel))
+	writeFile(t, full, "---\ntitle: Loopy\n---\n\n# Loopy\n\nhuman edit\n")
+
+	first := waitForHEADChange(t, repo, prev, 3*time.Second)
+
+	// Confirm the sentinel was actually stamped, so the echo path is live and
+	// the stability assertion below is meaningful rather than trivially true.
+	got, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatalf("read after commit: %v", err)
+	}
+	if !strings.Contains(string(got), lastHumanEditKey) {
+		t.Fatalf("expected %s sentinel stamped; got %q", lastHumanEditKey, got)
+	}
+
+	// No further commits: the watcher's own write-back is suppressed by the
+	// writeTTL filter, so HEAD must stay at the single commit.
+	requireHEADStable(t, repo, first, 1*time.Second)
+}
+
 func TestObsidianWatcher_DebounceCoalescesRapidWrites(t *testing.T) {
 	repo, _, watcher, teardown := newObsidianWatcherFixture(t)
 	defer teardown()

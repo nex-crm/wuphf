@@ -374,6 +374,22 @@ func (w *ObsidianWatcher) fire(ctx context.Context, rel string) {
 		}
 	}
 
+	// Record our own impending write BEFORE committing so the fsnotify event
+	// that Repo.Commit's os.WriteFile generates for rel is dropped by the
+	// writeTTL filter in fire() instead of being re-read as a fresh external
+	// edit. This is the same self-write suppression we already do for ingested
+	// image siblings above (w.NotifyWrite(p)).
+	//
+	// Without it the watcher re-commits its own output forever: every pass
+	// stamps a new last_human_edit_ts (applyHumanEditSentinel uses time.Now),
+	// so the written body always differs from the last commit, the
+	// diff --cached no-op guard in Repo.Commit never trips, and each commit's
+	// write-back schedules the next commit. That storm saturates the wiki's
+	// process-wide mutex (starving broker requests) and consumes each commit's
+	// context budget on lock-wait — which is what surfaces as the
+	// "git add ...: context deadline exceeded" flood.
+	w.NotifyWrite(rel)
+
 	commitCtx, cancel := context.WithTimeout(ctx, obsidianWatcherCommitTimout)
 	defer cancel()
 	msg := fmt.Sprintf("wiki: external edit to %s", rel)
