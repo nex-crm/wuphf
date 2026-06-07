@@ -79,23 +79,31 @@ test.describe("wuphf web chat round-trip", () => {
     // fails — even when no real LLM is wired up.
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/#/channels/general");
-    await waitForShellReady(page);
-
-    // Pick an agent that the seeded broker is guaranteed to know about. Read
-    // the slug AND the user-facing name from the sidebar so the assertion
-    // tracks the actual seeded roster instead of hard-coding "ceo".
-    const firstAgent = page.locator("button[data-agent-slug]").first();
+    // Pick an agent the seeded broker is guaranteed to know about. Read the
+    // slug AND the user-facing name from the Agents tool (agents moved there
+    // from the sidebar) so the assertion tracks the actual seeded roster
+    // instead of hard-coding "ceo".
+    await page.goto("/#/agents");
+    // Not waitForShellReady here — that waits for the channel composer, which
+    // the Agents tool does not render. The card visibility check is the mount
+    // signal for this surface.
+    const firstAgent = page
+      .locator(".agents-tool-card[data-agent-slug]")
+      .first();
     await expect(firstAgent).toBeVisible({ timeout: 10_000 });
     const agentSlug = await firstAgent.getAttribute("data-agent-slug");
     expect(
       agentSlug,
-      "sidebar must expose at least one agent slug",
+      "Agents tool must expose at least one agent slug",
     ).toBeTruthy();
     const agentName = (
-      await firstAgent.locator(".sidebar-agent-name").textContent()
+      await firstAgent.locator(".agents-tool-card-name").textContent()
     )?.trim();
-    expect(agentName, "sidebar agent must have a visible name").toBeTruthy();
+    expect(agentName, "agent card must have a visible name").toBeTruthy();
+
+    // Inject + assert the inbound render on the channel surface.
+    await page.goto("/#/channels/general");
+    await waitForShellReady(page);
 
     const payload = `synthetic agent reply ${Date.now()}`;
 

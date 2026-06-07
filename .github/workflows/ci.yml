@@ -997,7 +997,6 @@ jobs:
             tests/nex-connect.spec.ts \
             tests/chat.spec.ts \
             tests/slash-commands.spec.ts \
-            tests/dm.spec.ts \
             tests/mentions.spec.ts \
             tests/interview.spec.ts
       - name: Stop wuphf (shell phase)

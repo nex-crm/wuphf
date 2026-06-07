@@ -36,16 +36,20 @@ test.describe("wuphf web human interview", () => {
     test.setTimeout(60_000);
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/#/channels/general");
-    await waitForShellReady(page);
-
-    // Seed a blocking request via the same endpoint the broker uses to
-    // emit interviews. `from` must be a real seeded agent slug so the
-    // bar's `@<from>` chip renders against a known role.
-    const firstAgent = page.locator("button[data-agent-slug]").first();
+    // `from` must be a real seeded agent slug so the bar's `@<from>` chip
+    // renders against a known role. Read it from the Agents tool (agents
+    // moved there from the sidebar); no waitForShellReady on /#/agents — that
+    // waits for the channel composer, which this surface lacks.
+    await page.goto("/#/agents");
+    const firstAgent = page
+      .locator(".agents-tool-card[data-agent-slug]")
+      .first();
     await expect(firstAgent).toBeVisible({ timeout: 10_000 });
     const agentSlug = await firstAgent.getAttribute("data-agent-slug");
     expect(agentSlug).toBeTruthy();
+
+    await page.goto("/#/channels/general");
+    await waitForShellReady(page);
 
     const question = `should we ship feature X? (interview ${Date.now()})`;
     const resp = await request.post("/api/requests", {

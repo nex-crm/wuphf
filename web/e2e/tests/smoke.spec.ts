@@ -53,9 +53,10 @@ test.describe("wuphf web UI smoke (shell)", () => {
     await waitForReactMount(page);
 
     // Sidebar appearing is our "React committed and effects ran" signal.
-    // networkidle does NOT work here — wuphf opens a long-lived SSE stream
-    // as soon as the shell mounts, so the page is never idle.
-    await expect(page.locator("button[data-agent-slug]").first()).toBeVisible({
+    // (Agents moved to the Agents tool, so the old sidebar agent buttons are
+    // no longer a home-page mount signal.) networkidle does NOT work here —
+    // wuphf opens a long-lived SSE stream as soon as the shell mounts.
+    await expect(page.locator("aside.sidebar")).toBeVisible({
       timeout: 10_000,
     });
 
@@ -68,15 +69,18 @@ test.describe("wuphf web UI smoke (shell)", () => {
     ).toHaveLength(0);
   });
 
-  test("sidebar renders the seeded agents (broker wired)", async ({ page }) => {
+  test("the Agents tool renders the seeded agents (broker wired)", async ({
+    page,
+  }) => {
     // Hard assertion: the broker seeds default agents on every boot
-    // (see internal/team — 4+ default roles). Zero agents is NEVER the
-    // happy path; treating it as "skip" lets real regressions through
-    // (seed broken, /api/members failing, useOfficeMembers broken, etc.).
-    await page.goto("/");
+    // (see internal/team — 4+ default roles). Agents live in the Agents tool
+    // now (not the sidebar). Zero agents is NEVER the happy path; treating it
+    // as "skip" lets real regressions through (seed broken, /api/members
+    // failing, useOfficeMembers broken, etc.).
+    await page.goto("/#/agents");
     await waitForReactMount(page);
 
-    const agentButtons = page.locator("button[data-agent-slug]");
+    const agentButtons = page.locator(".agents-tool-card[data-agent-slug]");
     await expect(agentButtons.first()).toBeVisible({ timeout: 10_000 });
     expect(await agentButtons.count()).toBeGreaterThan(0);
   });
@@ -88,21 +92,20 @@ test.describe("wuphf web UI smoke (shell)", () => {
     // path: click any agent in the sidebar and assert no crash.
     const getErrors = collectReactErrors(page);
 
-    await page.goto("/");
+    await page.goto("/#/agents");
     await waitForReactMount(page);
 
-    const agentButtons = page.locator("button[data-agent-slug]");
+    const agentButtons = page.locator(".agents-tool-card[data-agent-slug]");
     await expect(agentButtons.first()).toBeVisible({ timeout: 10_000 });
     await agentButtons.first().click();
 
-    // Deterministic post-click signal: in v3 a sidebar agent click navigates
-    // to that agent's subspace (AgentSubspaceRoute → `[data-testid=
-    // "agent-subspace"]`) rather than opening the old AgentPanel overlay.
-    // Waiting on the subspace root — instead of networkidle, which never
-    // settles due to the live SSE stream — gives the route a cycle to render
-    // and any errors a cycle to fire.
-    await expect(page).toHaveURL(/#\/agents\//, { timeout: 10_000 });
-    await expect(page.getByTestId("agent-subspace")).toBeVisible({
+    // Deterministic post-click signal: an Agents-tool card click navigates to
+    // that agent's full-screen detail (AgentsTool AgentDetail → `[data-testid=
+    // "agent-detail"]`). Waiting on the detail root — instead of networkidle,
+    // which never settles due to the live SSE stream — gives the route a cycle
+    // to render and any errors a cycle to fire.
+    await expect(page).toHaveURL(/#\/agents\/[^/]+/, { timeout: 10_000 });
+    await expect(page.getByTestId("agent-detail")).toBeVisible({
       timeout: 10_000,
     });
     await expect(page.getByTestId("error-boundary")).toHaveCount(0);

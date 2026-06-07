@@ -131,6 +131,29 @@ describe("useBrokerEvents unread counts", () => {
     expect(useAppStore.getState().unreadByChannel.general ?? 0).toBe(0);
   });
 
+  it("ignores a query-string suffix on the active-channel hash (no unread bump)", () => {
+    // Regression (PR #634): a hash like "#/channels/general?modal=settings"
+    // once parsed the slug as "general?modal=settings", so the active-channel
+    // check failed and inbound messages bumped #general's unread while the
+    // user was watching it. activeBrokerChannel() must split on "?" first.
+    // (Migrated here from route-regressions.spec.ts, whose sidebar unread
+    // badge surface was removed in the task-scoped restructure.)
+    renderHarness();
+    const [source] = FakeEventSource.created;
+    window.location.hash = "#/channels/general?probe=1";
+
+    act(() => {
+      source.emit("message", {
+        message: {
+          id: "msg-q",
+          channel: "general",
+        },
+      });
+    });
+
+    expect(useAppStore.getState().unreadByChannel.general ?? 0).toBe(0);
+  });
+
   it("counts messages for the selected channel while an app is open", () => {
     navigateRouter("/apps/tasks");
     useAppStore.setState({ unreadByChannel: {} });
