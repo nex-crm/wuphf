@@ -979,6 +979,13 @@ func (b *Broker) createChannelLocked(in channelCreateInput) (*teamChannel, *chan
 	}
 	b.channels = append(b.channels, ch)
 	if err := b.saveLocked(); err != nil {
+		// Roll back the in-memory append so a failed persist never leaves a
+		// ghost channel (one with no owning task that the UI can't reach, and
+		// that blocks a later create of the same slug with a phantom
+		// StatusConflict). Without this, createPerTaskChannelLocked's caller
+		// silently routes the task to #general instead of its own channel.
+		b.channels = b.channels[:len(b.channels)-1]
+		b.rebuildChannelIndexLocked()
 		return nil, &channelCreateError{Code: http.StatusInternalServerError, Msg: "failed to persist broker state"}
 	}
 	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_created", Slug: slug})

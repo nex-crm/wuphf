@@ -30,6 +30,36 @@ export type LifecycleState =
   | "archived";
 
 /**
+ * Runtime membership for LifecycleState, exhaustive by construction: a
+ * `Record<LifecycleState, true>` fails to compile if a union member is
+ * missing, so `isLifecycleState` can never silently omit a state (a prior
+ * hand-maintained copy had dropped `queued_behind_owner`). Lets wire-shape
+ * `string` values — `Task.lifecycle_state`, card payload `lifecycle_state` —
+ * be narrowed to the typed union.
+ */
+const ALL_LIFECYCLE_STATES: Record<LifecycleState, true> = {
+  drafting: true,
+  planning: true,
+  intake: true,
+  ready: true,
+  running: true,
+  review: true,
+  decision: true,
+  blocked_on_pr_merge: true,
+  queued_behind_owner: true,
+  changes_requested: true,
+  approved: true,
+  rejected: true,
+  archived: true,
+};
+
+export function isLifecycleState(value: unknown): value is LifecycleState {
+  return (
+    typeof value === "string" && Object.hasOwn(ALL_LIFECYCLE_STATES, value)
+  );
+}
+
+/**
  * User-facing board stage. The board groups the granular
  * `LifecycleState` values into a smaller set of columns it derives in
  * TypeScript via `stageForState`. The `scheduled` stage is the one

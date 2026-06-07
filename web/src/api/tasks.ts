@@ -1,3 +1,4 @@
+import { isLifecycleState, type LifecycleState } from "../lib/types/lifecycle";
 import { get, post } from "./client";
 
 export interface TaskMemoryWorkflowCitation {
@@ -138,6 +139,40 @@ export interface Task {
   updated_at?: string;
   issue_draft_spec?: TaskDraftSpec;
   memory_workflow?: TaskMemoryWorkflow;
+}
+
+/**
+ * Resolve a Task's typed LifecycleState from its (legacy) pipeline_stage /
+ * lifecycle_state / status fields. Single source of truth so the board and the
+ * task-detail surface can't drift — the detail copy previously omitted the
+ * `archived` case and rendered an "intake" pill for archived tasks. `task.
+ * lifecycle_state` is read off the typed field (no cast); it's `string` on the
+ * wire so an unknown value from a newer broker falls through to the status map
+ * rather than failing.
+ */
+export function taskToLifecycleState(task: Task | undefined): LifecycleState {
+  if (task?.pipeline_stage === "draft") return "drafting";
+  if (task?.pipeline_stage === "plan") return "planning";
+  const ls = task?.lifecycle_state;
+  if (ls && isLifecycleState(ls)) return ls;
+  switch (task?.status) {
+    case "open":
+      return "intake";
+    case "in_progress":
+      return "running";
+    case "done":
+      return "approved";
+    case "blocked":
+      return "blocked_on_pr_merge";
+    case "review":
+      return "review";
+    case "rejected":
+      return "rejected";
+    case "archived":
+      return "archived";
+    default:
+      return "intake";
+  }
 }
 
 export interface CreateTaskInput {

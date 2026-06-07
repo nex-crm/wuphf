@@ -58,11 +58,13 @@ func (b *Broker) ensureBackupMigrationTaskLocked() {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	// Apply LifecycleStateArchived so derived fields (status="archived",
-	// pipeline_stage="archived", review_state="approved", blocked=false)
-	// are set correctly and the lifecycle index is updated.  Errors are
+	// Append first, then apply state to the slice element so the lifecycle
+	// index and b.tasks never diverge mid-call (same pattern as the channel
+	// migration). Apply LifecycleStateArchived so derived fields
+	// (status="archived", pipeline_stage="archived", review_state="approved",
+	// blocked=false) are set and the lifecycle index is updated. Errors are
 	// intentionally ignored: LifecycleStateArchived is canonical and
 	// derivedFieldsFor will always find it.
-	_ = b.applyLifecycleStateLocked(&task, LifecycleStateArchived)
 	b.tasks = append(b.tasks, task)
+	_ = b.applyLifecycleStateLocked(&b.tasks[len(b.tasks)-1], LifecycleStateArchived)
 }

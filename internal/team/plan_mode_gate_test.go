@@ -173,3 +173,63 @@ func TestPlanMode_GateScopedToPlanningOnly(t *testing.T) {
 		t.Fatalf("review-state approve must not hit the Plan-mode gate, got: %v", err)
 	}
 }
+
+func TestPlanMode_AgentCannotSubmitForReviewOnPlanningTask(t *testing.T) {
+	// submit_for_review is in the gated action set: an agent must not be able
+	// to push a Planning task to review (which would pull it out of the
+	// Planning state the human expects to approve).
+	b := newTestBroker(t)
+	seedPlanningTask(t, b, "OFFICE-SR1", "executor")
+
+	_, err := b.MutateTask(TaskPostRequest{
+		Action:    "submit_for_review",
+		ID:        "OFFICE-SR1",
+		Channel:   "general",
+		CreatedBy: "executor",
+	})
+	if err == nil {
+		t.Fatalf("agent submit_for_review on a Planning task must be forbidden; got nil")
+	}
+	if got := lifecycleStateOf(t, b, "OFFICE-SR1"); got != LifecycleStatePlanning {
+		t.Fatalf("task must stay in Planning, got %q", got)
+	}
+}
+
+func TestPlanMode_ReassignRoutesPlanFirstToPlanning(t *testing.T) {
+	// Parallel to the assign path: reassigning a parked plan-first task to a
+	// new specialist must route it into Planning (owner plans first), not
+	// straight to Running — the reassign branch is separate from assign and
+	// could regress independently.
+	b := newTestBroker(t)
+	b.mu.Lock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	task := teamTask{
+		ID:        "OFFICE-RA1",
+		Channel:   "general",
+		Title:     "reassigned plan-first task",
+		Owner:     "executor",
+		PlanFirst: true,
+		CreatedBy: "human",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := b.applyLifecycleStateLocked(&task, LifecycleStateReady); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("seed ready task: %v", err)
+	}
+	b.tasks = append(b.tasks, task)
+	b.mu.Unlock()
+
+	if _, err := b.MutateTask(TaskPostRequest{
+		Action:    "reassign",
+		ID:        "OFFICE-RA1",
+		Channel:   "general",
+		Owner:     "reviewer",
+		CreatedBy: "ceo",
+	}); err != nil {
+		t.Fatalf("CEO reassign: %v", err)
+	}
+	if got := lifecycleStateOf(t, b, "OFFICE-RA1"); got != LifecycleStatePlanning {
+		t.Fatalf("plan-first task reassigned by the CEO should route to Planning, got %q", got)
+	}
+}

@@ -2,6 +2,7 @@ package team
 
 import (
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -360,6 +361,12 @@ func (b *Broker) createPerTaskChannelLocked(taskID, title, owner, actor string) 
 		CreatedBy: actorNorm,
 	})
 	if cerr != nil {
+		// The caller falls back to #general when this returns nil, so a silent
+		// failure would route the task into the shared channel and break the
+		// channel-per-task invariant with no operator signal. createChannelLocked
+		// rolls back its own ghost append on a persist failure (see
+		// broker_office_channels.go); we log so the fallback is visible.
+		log.Printf("broker: createPerTaskChannel %q for task %s failed (falling back to #general): %s", slug, taskID, cerr.Msg)
 		return nil
 	}
 	// Link channel back to its owning task so the UI can correlate.

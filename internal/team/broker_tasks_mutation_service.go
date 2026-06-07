@@ -154,13 +154,13 @@ func (b *Broker) checkTaskActionAuthLocked(action, actor, targetTaskID string) e
 }
 
 // defaultTaskTypeForCreate is the broker safety net for RULE ZERO. When an
-// agent creates a top-level task via team_task action=create, the Issues
-// board only renders rows with task_type="issue" (see web IssuesList
-// isIssueSpecTask). Pre-fix the team_task tool schema listed example
+// agent creates a top-level task via team_task action=create, the Tasks
+// board only renders rows with task_type="issue" (see web TasksList
+// isTaskSpecTask). Pre-fix the team_task tool schema listed example
 // values "research, feature, launch, follow_up, bugfix, incident" without
 // mentioning "issue", so LLMs picked one of those for human-asked work —
 // the task landed in broker state but never reached the user-visible
-// Issues board, defeating RULE ZERO. The prompt was updated to instruct
+// Tasks board, defeating RULE ZERO. The prompt was updated to instruct
 // task_type="issue", and the schema description rewritten, but we also
 // override here so a regressed prompt cannot silently break the surface.
 //
@@ -170,8 +170,9 @@ func (b *Broker) checkTaskActionAuthLocked(action, actor, targetTaskID string) e
 // bugfix / incident / custom) pass through — sub-tasks INSIDE an Issue
 // are allowed to carry those typed values per the canonical workflow,
 // and tests asserting pipeline-specific behaviour rely on explicit types.
-// Part 2 ships parent_issue_id; once that lands, this override should
-// only fire when parent_issue_id is empty (top-level work).
+// parent_issue_id now ships; callers that set it pass an explicit task_type,
+// so the "follow_up" override rarely fires for sub-tasks in practice. The
+// override stays as a safety net for bare top-level creates.
 func defaultTaskTypeForCreate(in string) string {
 	s := strings.ToLower(strings.TrimSpace(in))
 	if s == "" {

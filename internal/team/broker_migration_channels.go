@@ -19,6 +19,7 @@ package team
 // the fold survives saves. Runs once per Broker via MigrateLegacyChannelsOnce.
 
 import (
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -104,6 +105,7 @@ func (b *Broker) migrateLegacyChannelsIntoArchivedTasksLocked() {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	folded := make([]string, 0)
 	for _, slug := range candidates {
 		if owned[slug] {
 			continue
@@ -141,6 +143,17 @@ func (b *Broker) migrateLegacyChannelsIntoArchivedTasksLocked() {
 		// ensureBackupMigrationTaskLocked).
 		b.tasks = append(b.tasks, task)
 		_ = b.applyLifecycleStateLocked(&b.tasks[len(b.tasks)-1], LifecycleStateArchived)
+		folded = append(folded, slug)
+	}
+
+	// Operator-visible record of what was folded, and a best-effort persist so
+	// the result survives even if no later request triggers a save. Both are
+	// best-effort: the migration is idempotent, so a failed save just re-runs
+	// (harmlessly) on the next boot. Without the log, "where did my #project-x
+	// channel go?" is untriageable on an upgraded deployment.
+	if len(folded) > 0 {
+		log.Printf("broker: MigrateLegacyChannels: folded %d legacy channel(s) into archived tasks: %v", len(folded), folded)
+		_ = b.saveLocked()
 	}
 }
 

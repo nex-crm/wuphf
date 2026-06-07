@@ -276,7 +276,7 @@ export function useFallbackChannelSlug(): string {
  *   - "wiki-lookup" for /wiki/lookup,
  *   - "notebooks" for any notebook route,
  *   - "reviews" for /reviews,
- *   - null when the matched route is a conversation (channel/dm) or
+ *   - null when the matched route is a conversation (channel) or
  *     unknown.
  */
 export function useCurrentApp(): string | null {

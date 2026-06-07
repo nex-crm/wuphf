@@ -20,7 +20,11 @@ import { memo, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getScheduler, type SchedulerJob } from "../../api/scheduler";
-import { getOfficeTasks, type Task } from "../../api/tasks";
+import {
+  getOfficeTasks,
+  type Task,
+  taskToLifecycleState,
+} from "../../api/tasks";
 import { router } from "../../lib/router";
 import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import {
@@ -49,29 +53,6 @@ import {
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-const KNOWN_LIFECYCLE_STATES: ReadonlySet<LifecycleState> =
-  new Set<LifecycleState>([
-    "drafting",
-    "planning",
-    "intake",
-    "ready",
-    "running",
-    "review",
-    "decision",
-    "blocked_on_pr_merge",
-    "changes_requested",
-    "approved",
-    "rejected",
-    "archived",
-  ]);
-
-function isLifecycleState(value: unknown): value is LifecycleState {
-  return (
-    typeof value === "string" &&
-    KNOWN_LIFECYCLE_STATES.has(value as LifecycleState)
-  );
-}
-
 export function isTaskSpecTask(task: Task): boolean {
   // Sub-tasks live on the parent Task's detail surface, not on the
   // top-level board. Filtering them out here keeps the board scoped
@@ -84,39 +65,6 @@ export function isTaskSpecTask(task: Task): boolean {
     task.pipeline_id === "issue" ||
     Boolean(task.issue_draft_spec)
   );
-}
-
-/**
- * Map a Task's raw status/lifecycle_state fields to a LifecycleState.
- * Prefers `lifecycle_state` (set by the broker post Lane-A); falls back
- * to the legacy `status` string so pre-Lane-A tasks still render a pill.
- * Unknown wire-shape strings (legacy broker rows) fall through to the
- * status-driven mapping so `LifecycleStatePill` never receives a value
- * outside the typed union.
- */
-export function taskToLifecycleState(task: Task): LifecycleState {
-  if (task.pipeline_stage === "draft") return "drafting";
-  if (task.pipeline_stage === "plan") return "planning";
-  const raw = (task as unknown as Record<string, unknown>).lifecycle_state;
-  if (isLifecycleState(raw)) return raw;
-  switch (task.status) {
-    case "open":
-      return "intake";
-    case "in_progress":
-      return "running";
-    case "done":
-      return "approved";
-    case "blocked":
-      return "blocked_on_pr_merge";
-    case "review":
-      return "review";
-    case "rejected":
-      return "rejected";
-    case "archived":
-      return "archived";
-    default:
-      return "intake";
-  }
 }
 
 /** Per-stage hint copy shown under the column header. The `scheduled`

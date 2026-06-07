@@ -28,7 +28,11 @@ import {
   postTaskComment,
   postTaskReject,
 } from "../../api/lifecycle";
-import { getOfficeTasks, type Task } from "../../api/tasks";
+import {
+  getOfficeTasks,
+  type Task,
+  taskToLifecycleState,
+} from "../../api/tasks";
 import {
   messageMarkdownComponents,
   messageRemarkPlugins,
@@ -79,9 +83,9 @@ export interface TaskSpec {
 }
 
 /**
- * A single comment on the Issue. Used by both human and agent authors.
+ * A single comment on the Task. Used by both human and agent authors.
  * Reuses the FeedbackItem shape from the existing comment infrastructure
- * (broker_inbox_handler.go:229 / lifecycle.ts FeedbackItem), extended
+ * (broker_intake_types.go FeedbackItem / lifecycle.ts FeedbackItem), extended
  * with an id for scroll-targeting.
  */
 export interface TaskComment {
@@ -188,36 +192,6 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function taskStatusToLifecycleState(task: Task | undefined): LifecycleState {
-  if (task?.pipeline_stage === "draft") return "drafting";
-  if (task?.pipeline_stage === "plan") return "planning";
-  const state = task?.lifecycle_state ?? task?.status;
-  switch (state) {
-    case "drafting":
-    case "planning":
-    case "intake":
-    case "ready":
-    case "running":
-    case "review":
-    case "decision":
-    case "blocked_on_pr_merge":
-    case "changes_requested":
-    case "approved":
-    case "rejected":
-      return state as LifecycleState;
-    case "open":
-      return "intake";
-    case "in_progress":
-      return "running";
-    case "done":
-      return "approved";
-    case "blocked":
-      return "blocked_on_pr_merge";
-    default:
-      return "intake";
-  }
-}
-
 function normalizeAcceptanceCriteria(value: unknown): string | undefined {
   if (!Array.isArray(value)) return undefined;
   const lines = value
@@ -303,7 +277,7 @@ function resolveTaskLifecycleState(
   const rawState = strField(packet, "lifecycleState", "lifecycle_state");
   return rawState
     ? (rawState as LifecycleState)
-    : taskStatusToLifecycleState(taskHint);
+    : taskToLifecycleState(taskHint);
 }
 
 function normalizeTaskComments(

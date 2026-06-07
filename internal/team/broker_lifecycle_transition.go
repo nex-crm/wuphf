@@ -94,12 +94,12 @@ const (
 	// because the work did not land.
 	LifecycleStateRejected LifecycleState = "rejected"
 
-	// LifecycleStateDrafting is the Phase 3 Issue-surface pre-Intake mode.
-	// Agents can post comments on a Drafting issue; they CANNOT dispatch
-	// tool calls or execution work. The broker dispatch gate is enforced
-	// in Phase 4 (broker_lifecycle_dispatch_test.go + isExecutableTeamTaskStatus).
-	// Phase 3 only registers the state value so it round-trips cleanly
-	// through JSON and the lifecycle index.
+	// LifecycleStateDrafting is the pre-Intake mode for a task awaiting
+	// activation. Agents can post comments on a Drafting task; they CANNOT
+	// dispatch tool calls or execution work — isExecutableTeamTaskStatus is
+	// the dispatch gate that refuses execution turns in this state (tested in
+	// broker_lifecycle_dispatch_test.go). The state value also round-trips
+	// cleanly through JSON and the lifecycle index.
 	//
 	// PipelineStage choice: "draft" (matches the spec's `draft` phase name
 	// in the CEO state machine and is shorter/clearer than "drafting" at
@@ -198,9 +198,9 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 	// Drafting: pre-Intake mode where agents comment but cannot dispatch.
 	// PipelineStage="draft" matches the spec's draft phase name. Status="open"
 	// keeps the task visible in the open-tasks view; Blocked=false so it is
-	// not confused with a waiting-on-upstream state. Phase 4 will add a
-	// dispatch guard (isExecutableTeamTaskStatus) that refuses tool calls
-	// for tasks in this state.
+	// not confused with a waiting-on-upstream state. isExecutableTeamTaskStatus
+	// (above) is the dispatch guard that refuses execution turns for tasks in
+	// this state.
 	LifecycleStateDrafting: {PipelineStage: "draft", ReviewState: "pending_review", Status: "open", Blocked: false},
 	// Planning: owner is dispatched to write a plan. Status="in_progress" +
 	// executable so the planning turn fires; PipelineStage="plan".
