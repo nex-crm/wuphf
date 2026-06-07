@@ -145,4 +145,45 @@ test.describe("canonical route matrix", () => {
       await expectNoReactErrors(page, getErrors, `while rendering ${route}`);
     }
   });
+
+  test("a business task's channel redirects to its task; #general stays", async ({
+    page,
+    request,
+  }) => {
+    // ARCH-H1: a business task's channel is reached through the task, not as a
+    // parallel chat surface, so /channels/$slug for a business-owned channel
+    // redirects to the task detail. System channels (#general, owned by the
+    // archived Backup & Migration task) stay directly readable.
+    const resp = await request.post("/api/task-plan", {
+      data: {
+        channel: "general",
+        created_by: "human",
+        tasks: [{ title: "channel redirect probe", assignee: "ceo" }],
+      },
+    });
+    expect(resp.ok(), `task-plan failed: ${resp.status()}`).toBeTruthy();
+    const created = (await resp.json()) as {
+      tasks?: { id?: string; channel?: string }[];
+    };
+    const biz = created.tasks?.[0];
+    expect(
+      biz?.channel,
+      "business task should mint its own channel",
+    ).toBeTruthy();
+    expect(biz?.id, "business task should have an id").toBeTruthy();
+
+    // Business channel → redirects to its task detail.
+    await page.goto(`/#/channels/${biz?.channel}`);
+    await expect(page).toHaveURL(new RegExp(`#/tasks/${biz?.id}`), {
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId("route-not-found")).toHaveCount(0);
+
+    // System channel #general → stays on the conversation view (no redirect).
+    await gotoRoute(page, "/#/channels/general");
+    await expect(page.locator(".composer-input")).toHaveAttribute(
+      "placeholder",
+      "Message #general",
+    );
+  });
 });

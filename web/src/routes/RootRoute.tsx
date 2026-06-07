@@ -6,6 +6,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import {
@@ -34,6 +35,7 @@ import type { WikiTab } from "../components/wiki/WikiTabs";
 import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { useOfficeTasks } from "../hooks/useOfficeTasks";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
 import { directChannelSlug, useAppStore } from "../stores/app";
@@ -380,6 +382,46 @@ function ConversationView() {
   );
 }
 
+/**
+ * In the task-scoped model a business task's channel is reached through the
+ * task, not as a parallel chat surface. A direct `/channels/$slug` visit
+ * (typed URL, search hit, command palette) for a channel owned by a business
+ * task redirects to that task's detail, closing the dual-surface gap.
+ *
+ * System-managed channels are deliberately NOT redirected: #general (owned by
+ * the archived Backup & Migration task) and folded legacy channels stay
+ * directly readable via the conversation view, because redirecting the
+ * coordination channel to an archived system task is worse than the dual
+ * surface. A channel with no owning task also falls through to the view, so a
+ * channel with history is never dead-ended.
+ */
+function ChannelRedirect({ channelSlug }: { channelSlug: string }) {
+  const { data: tasks, isPending } = useOfficeTasks();
+  const owningTaskId = useMemo(() => {
+    const slug = channelSlug.trim().toLowerCase();
+    const owner = (tasks ?? []).find(
+      (t) => (t.channel ?? "").trim().toLowerCase() === slug,
+    );
+    return owner && !owner.system ? owner.id : undefined;
+  }, [tasks, channelSlug]);
+
+  useEffect(() => {
+    if (owningTaskId) {
+      void router.navigate({
+        to: "/tasks/$taskId",
+        params: { taskId: owningTaskId },
+        replace: true,
+      });
+    }
+  }, [owningTaskId]);
+
+  // Redirecting (owning task found) or still resolving the task list → render
+  // nothing so the conversation surface never flashes. Resolved with no owning
+  // task → fall back to the conversation view so the channel stays reachable.
+  if (owningTaskId || isPending) return null;
+  return <ConversationView />;
+}
+
 interface WikiSurfaceProps {
   current: "wiki" | "notebooks" | "reviews";
   route: CurrentRoute;
@@ -620,7 +662,7 @@ function MainContent() {
     case "home":
       return <TaskComposer />;
     case "channel":
-      return <ConversationView />;
+      return <ChannelRedirect channelSlug={route.channelSlug} />;
     case "app":
       // `/apps/wiki` and `/apps/inbox` are not app-panel routes — the
       // sidebar navigates to `/wiki` and `/inbox` directly — but users

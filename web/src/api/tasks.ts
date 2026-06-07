@@ -95,6 +95,14 @@ export interface Task {
   owner?: string;
   created_by?: string;
   channel?: string;
+  /**
+   * True for broker-managed system tasks (the Backup & Migration task that
+   * owns #general, and the archived tasks that legacy channels/DMs were
+   * folded into). Business tasks are false/absent. Used to keep system-owned
+   * channels directly readable rather than redirecting them to an archived
+   * system task.
+   */
+  system?: boolean;
   thread_id?: string;
   task_type?: string;
   pipeline_id?: string;
