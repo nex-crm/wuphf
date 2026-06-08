@@ -116,6 +116,7 @@ func humanRouteAllowed(r *http.Request) bool {
 			path == "/status/local-providers",
 			path == "/humans",
 			path == "/wiki/read",
+			path == "/messages/search",
 			path == "/wiki/search",
 			path == "/wiki/lookup",
 			path == "/wiki/list",

@@ -712,6 +712,46 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSearchMessages searches across all channels for messages matching a
+// substring pattern. Returns results newest-first, capped at `limit`.
+//
+//	GET /messages/search?q={pattern}&limit=8&viewer_slug=human
+func (b *Broker) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pattern := strings.TrimSpace(r.URL.Query().Get("q"))
+	if pattern == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q is required"})
+		return
+	}
+	limit := 8
+	if l, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && l > 0 && l <= 50 {
+		limit = l
+	}
+
+	needle := strings.ToLower(pattern)
+	viewerSlug := strings.TrimSpace(r.URL.Query().Get("viewer_slug"))
+
+	b.mu.Lock()
+	var hits []channelMessage
+	for i := len(b.messages) - 1; i >= 0 && len(hits) < limit; i-- {
+		msg := b.messages[i]
+		if !strings.Contains(strings.ToLower(msg.Content), needle) {
+			continue
+		}
+		if viewerSlug != "" && !b.canAccessChannelLocked(viewerSlug, normalizeChannelSlug(msg.Channel)) {
+			continue
+		}
+		hits = append(hits, cloneChannelMessageForRead(msg))
+	}
+	b.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"messages": hits})
+}
+
 func messageInThread(msg channelMessage, threadID string) bool {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {

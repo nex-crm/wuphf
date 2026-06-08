@@ -380,6 +380,26 @@ export function getMessages(
   });
 }
 
+export async function searchMessages(
+  query: string,
+  limit = 8,
+  signal?: AbortSignal,
+): Promise<Message[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const url =
+    baseURL() +
+    `/messages/search?q=${encodeURIComponent(trimmed)}&limit=${limit}&viewer_slug=human`;
+  try {
+    const r = await fetch(url, { headers: authHeaders(), signal });
+    if (!r.ok) return [];
+    const res = await r.json();
+    return Array.isArray(res?.messages) ? res.messages : [];
+  } catch {
+    return [];
+  }
+}
+
 export function postMessage(
   content: string,
   channel: string,
@@ -715,25 +735,25 @@ export function deletePolicy(id: string) {
 // Moved to ./scheduler.ts; re-exported here for back-compat with existing
 // imports from "./api/client" or "../api/client".
 export type {
-  SchedulerJob,
+  CreateSchedulerJobBody,
   PatchSchedulerJobBody,
   PatchSchedulerJobResponse,
-  SystemCronSpec,
-  SchedulerRun,
   SchedulerActivity,
+  SchedulerJob,
   SchedulerRevision,
-  CreateSchedulerJobBody,
+  SchedulerRun,
+  SystemCronSpec,
 } from "./scheduler";
 export {
+  createSchedulerJob,
   getScheduler,
-  patchSchedulerJob,
-  getSystemCronSpecs,
-  runSchedulerJob,
-  getSchedulerRuns,
   getSchedulerActivity,
   getSchedulerRevisions,
+  getSchedulerRuns,
+  getSystemCronSpecs,
+  patchSchedulerJob,
   restoreSchedulerRevision,
-  createSchedulerJob,
+  runSchedulerJob,
 } from "./scheduler";
 
 // ── Skills ──
@@ -1013,10 +1033,9 @@ export function editSkillContent(
   name: string,
   content: string,
 ): Promise<EditSkillContentResponse> {
-  return put<EditSkillContentResponse>(
-    `/skills/${encodeURIComponent(name)}`,
-    { content },
-  );
+  return put<EditSkillContentResponse>(`/skills/${encodeURIComponent(name)}`, {
+    content,
+  });
 }
 
 // ── Memory ──

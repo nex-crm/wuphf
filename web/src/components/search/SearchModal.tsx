@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { getMessages, type Message, post } from "../../api/client";
+import { type Message, post, searchMessages } from "../../api/client";
 import { type NotebookSearchHit, searchNotebook } from "../../api/notebook";
 import { searchWiki, type WikiSearchHit } from "../../api/wiki";
 import { useChannels } from "../../hooks/useChannels";
@@ -121,41 +121,31 @@ export function SearchModal() {
   const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const close = useCallback(() => setSearchOpen(false), [setSearchOpen]);
+  const close = useCallback(() => {
+    abortRef.current?.abort();
+    setSearchOpen(false);
+  }, [setSearchOpen]);
 
   const runSearch = useCallback(
     async (raw: string) => {
       const trimmed = raw.trim();
       const needle = trimmed.toLowerCase();
-      if (needle.length < 2 || channels.length === 0) {
+      if (needle.length < 3) {
         setMessageHits([]);
         setWikiHits([]);
         setNotebookHits([]);
         return;
       }
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       setSearching(true);
       try {
-        const messagesP = Promise.all(
-          channels.map(async (ch) => {
-            try {
-              const { messages } = await getMessages(ch.slug, null, 100);
-              return messages
-                .filter((m) => m.content?.toLowerCase().includes(needle))
-                .map((m): MessageHit => ({ ...m, matchedChannel: ch.slug }));
-            } catch {
-              return [] as MessageHit[];
-            }
-          }),
-        ).then((messageGroups) =>
-          messageGroups
-            .flat()
-            .sort(
-              (a, b) =>
-                new Date(b.timestamp).getTime() -
-                new Date(a.timestamp).getTime(),
-            )
-            .slice(0, 8),
+        const messagesP = searchMessages(trimmed, 8, controller.signal).then(
+          (msgs) =>
+            msgs.map((m): MessageHit => ({ ...m, matchedChannel: m.channel })),
         );
 
         const wikiP = searchWiki(trimmed).then((hits) => hits.slice(0, 8));
@@ -182,6 +172,7 @@ export function SearchModal() {
           wikiP,
           notebookP,
         ]);
+        if (controller.signal.aborted) return;
         setMessageHits(msg);
         setWikiHits(wiki);
         setNotebookHits(nb);
@@ -189,7 +180,7 @@ export function SearchModal() {
         setSearching(false);
       }
     },
-    [channels, members],
+    [members],
   );
 
   const handleQueryChange = useCallback(
@@ -197,7 +188,7 @@ export function SearchModal() {
       setQuery(value);
       setSelectedIdx(0);
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => runSearch(value), 250);
+      debounceRef.current = setTimeout(() => runSearch(value), 400);
     },
     [runSearch],
   );
@@ -286,7 +277,7 @@ export function SearchModal() {
       });
     }
 
-    if (q.length >= 2) {
+    if (q.length >= 3) {
       for (const hit of messageHits) {
         const snippet =
           hit.content.length > 100
@@ -450,7 +441,7 @@ export function SearchModal() {
             <div className="cmd-palette-empty">
               {query
                 ? `No results for "${query}"`
-                : "Start typing to search..."}
+                : "Type at least 3 characters to search..."}
             </div>
           ) : (
             grouped.map((g) => (

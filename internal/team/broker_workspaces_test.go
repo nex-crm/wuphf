@@ -1021,6 +1021,7 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/session-mode",
 		"/focus-mode",
 		"/messages",
+		"/messages/search",
 		"/reactions",
 		"/notifications/nex",
 		// office members + channels
