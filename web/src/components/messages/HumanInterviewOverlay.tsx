@@ -12,6 +12,7 @@ import { parseApprovalContext } from "../../lib/parseApprovalContext";
 import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 import { ApprovalContextView } from "./ApprovalContextView";
+import { ConnectIntegrationCard } from "./ConnectIntegrationCard";
 import {
   type ApprovalGrantTarget,
   ExternalActionApprovalCard,
@@ -136,6 +137,7 @@ function BlockingInterview({
     ? (request.metadata?.enhances_slug as string | undefined)
     : undefined;
   const isApproval = request.kind === "approval";
+  const isConnect = request.kind === "connect";
   const parsedApproval = isApproval
     ? parseApprovalContext(request.context)
     : null;
@@ -161,10 +163,25 @@ function BlockingInterview({
             <RedactedBadge reasons={request.redaction_reasons} />
           ) : null}
         </div>
-        {/* External-action approvals get the dedicated trust card, which owns
-            its own heading, payload view, and Approve / Always-allow / Reject
-            actions. Everything else keeps the generic interview layout. */}
-        {isApproval ? (
+        {/* Integration cards get dedicated surfaces: a Connect card that drives
+            the OAuth flow, and an external-action approval card that owns its
+            payload view + Approve / Always-allow / Reject. Everything else keeps
+            the generic interview layout. */}
+        {isConnect ? (
+          <>
+            <h2 id="interview-title" className="sr-only">
+              {request.title && request.title !== "Request"
+                ? request.title
+                : "Connect an integration"}
+            </h2>
+            <ConnectIntegrationCard
+              request={request}
+              submitting={submitting}
+              onSkip={() => onAnswer("skip")}
+              onDismiss={onDismiss}
+            />
+          </>
+        ) : isApproval ? (
           <>
             <h2 id="interview-title" className="sr-only">
               {request.title && request.title !== "Request"

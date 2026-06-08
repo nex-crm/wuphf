@@ -124,13 +124,22 @@ Integrations app.
   `internal/teammcp/action_resolve_gate.go` (+ `request_id` in block message).
   Tested: `broker_integrations_connect_test.go` (decision kind, raise+dedupe,
   fan-out resume + idempotence, connect-status E2E).
-- [ ] **Slice 3b** — web Connect card (reads `humanInterview.Platform`/`LogoURL`,
-  drives the shipped `IntegrationsApp` `window.open(auth_url)` + 2s poll; the
-  backend fan-out auto-resolves on completion, so the card is mostly wiring) +
-  hard connect-timeout → task back to backlog + `integration_connect_timed_out`
-  audit (the connect card currently rides the standard reminder/follow-up
-  lifecycle; a hard timeout-to-backlog is a separate scheduler-tick concern,
-  deferred from 3a to keep the commit atomic).
+- [x] **Slice 3b (web Connect card)** — `ConnectIntegrationCard.tsx`: a
+  `connect`-kind blocking card with the integration logo + "Connect <Platform>"
+  + the agent's reason; Connect drives the shipped Composio OAuth
+  (`startIntegrationConnection` → `window.open(auth_url)` → poll
+  `getIntegrationConnectStatus`). Each poll hits `/integrations/connect-status`,
+  which fires the backend `fanOutConnected` that auto-answers this card — so on
+  connection the card just refetches `["requests"]` and disappears, parked
+  action resuming with no second prompt. Waiting + failed states; Skip answers
+  `skip`. Wired into `HumanInterviewOverlay` (`connect` kind). 3-theme verified
+  (`/tmp/connect-{light,dark,noir}.png`). Tests + story co-located.
+- [ ] **Slice 3b (hard timeout)** — connect-timeout → task back to backlog +
+  `integration_connect_timed_out` audit. STILL DEFERRED: the connect flow does
+  not explicitly park a task today (agent gets a tool error + the card is
+  raised), so "move the parked task to backlog" has no referent yet — needs the
+  connect task-linkage model. The card already rides the standard reminder
+  lifecycle. Scheduler-tick concern.
 - [x] **Slice 4a** — `ExternalActionApprovalCard` (web), reading the legacy
   approval-context parse. The Go side embeds `<action_id> via <Platform>` in the
   `Action:` footer and `<verb> via <Platform>` in the title, so the card
@@ -177,14 +186,13 @@ Integrations app.
   integrations_resolve.go` (eval), `internal/teammcp/actions.go` (preApproved +
   bypass). Tests: `broker_action_grants_test.go` + a teammcp grant-bypass test.
   Persisted wire shape → triangulate before merge.
-- [~] **Slice 5b** — Grant UI. DONE: the approval card's "Approve & always
-  allow" button mints a grant via `createActionGrant(agent, platform, action_id,
-  channel)` then approves; grant-write failure still approves this once (the
-  immediate action is not blocked on a grant-write error). Client fns
-  `createActionGrant`/`getActionGrants`/`revokeActionGrant` shipped. The button
-  is suppressed when the action cannot be scoped (no derivable agent+platform+
-  action_id). STILL TODO: a revoke list in the Integrations app (GET grants →
-  POST `action:revoke`).
+- [x] **Slice 5b** — Grant UI, complete. (1) The approval card's "Approve &
+  always allow" button mints a grant via `createActionGrant(agent, platform,
+  action_id, channel)` then approves; grant-write failure still approves once.
+  (2) `ActionGrantsPanel.tsx` ("Always-allowed actions") in the Integrations app
+  home: lists every active grant (logo + mono action_scope + agent + platform +
+  since-date) with a Revoke button (`revokeActionGrant` → invalidate); renders
+  nothing when there are no grants. Tests co-located.
 - [x] **Slice 6** — `fallback` manual-handoff decision kind (backend; done
   early, alongside 3a, since it mirrors the connect card). On a `fallback`
   decision (platform has no Composio path) the resolver raises a blocking

@@ -1230,6 +1230,54 @@ body {
   margin-left: auto;
   color: var(--text-tertiary, var(--text-secondary));
 }
+/* Connect card specifics */
+.eac-connect-sub {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+.eac-connect-question {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.eac-connect-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--overlay-soft);
+  border: 1px solid var(--border-dark, var(--border));
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.eac-connect-failed {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-bg, var(--overlay-soft));
+}
+.eac-spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full, 999px);
+  border: 2px solid var(--border-dark, var(--border));
+  border-top-color: var(--accent, var(--text));
+  animation: eac-spin 0.7s linear infinite;
+}
+@keyframes eac-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .eac-spinner {
+    animation: none;
+  }
+}
 @media (max-width: 480px) {
   .eac-field {
     grid-template-columns: 64px 1fr;
@@ -1238,6 +1286,84 @@ body {
   .eac-actions .eac-dismiss {
     margin-left: 0;
   }
+}
+
+/* ─── Always-allowed actions (scoped-grant revoke list, slice 5b) ─── */
+.grants-panel-head {
+  margin-bottom: 12px;
+}
+.grants-panel-title {
+  margin: 0 0 2px;
+  font-size: var(--text-md, 15px);
+  font-weight: 600;
+  color: var(--text);
+}
+.grants-panel-sub {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.grant-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.grant-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.grant-logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--overlay-soft);
+}
+.grant-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.grant-scope {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+.grant-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.grant-agent {
+  font-weight: 500;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.grant-sep {
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.grant-revoke {
+  flex: none;
+}
+.grant-revoke:hover:not(:disabled) {
+  color: var(--red);
+  border-color: var(--red);
 }
 .badge-muted {
   background: var(--bg-warm);

@@ -23,6 +23,7 @@ import {
   startIntegrationConnection,
 } from "../../api/integrations";
 import { showNotice } from "../ui/Toast";
+import { ActionGrantsPanel } from "./integrations/ActionGrantsPanel";
 import {
   IntegrationDetailHeader,
   IntegrationListRow,
@@ -802,23 +803,26 @@ export function IntegrationsApp() {
           onBack={() => setSelectedId(null)}
         />
       ) : (
-        <IntegrationsHome
-          providers={integrationData?.providers ?? []}
-          search={search}
-          connected={connected}
-          toolkitItems={toolkitItems}
-          isLoading={integrationsQuery.isLoading}
-          available={available}
-          ctx={ctx}
-          onSearch={setSearch}
-          onConnected={setConnected}
-          onOpenToolkit={(item) => setSelectedToolkitKey(toolkitIdentity(item))}
-          onOpenRegistry={setSelectedId}
-          isError={integrationsQuery.isError}
-          error={integrationsQuery.error}
-          isFetching={integrationsQuery.isFetching}
-          onRetry={() => void integrationsQuery.refetch()}
-        />
+        <>
+          <IntegrationsHome
+            providers={integrationData?.providers ?? []}
+            search={search}
+            connected={connected}
+            toolkitItems={toolkitItems}
+            isLoading={integrationsQuery.isLoading}
+            available={available}
+            ctx={ctx}
+            onSearch={setSearch}
+            onConnected={setConnected}
+            onOpenToolkit={(item) => setSelectedToolkitKey(toolkitIdentity(item))}
+            onOpenRegistry={setSelectedId}
+            isError={integrationsQuery.isError}
+            error={integrationsQuery.error}
+            isFetching={integrationsQuery.isFetching}
+            onRetry={() => void integrationsQuery.refetch()}
+          />
+          <ActionGrantsPanel />
+        </>
       )}
 
       <EmptyIntegrationsWarning
