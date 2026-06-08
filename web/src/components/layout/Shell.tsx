@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { AgentPanel } from "../agents/AgentPanel";
 import { CommandPaletteHost } from "../command/CommandPalette";
 import { TeamMemberWelcome } from "../join/TeamMemberWelcome";
+import { InterviewBar } from "../messages/InterviewBar";
 import { ThreadPanel } from "../messages/ThreadPanel";
 import { GettingStartedChecklist } from "../onboarding/GettingStartedChecklist";
 import { SearchModal } from "../search/SearchModal";
@@ -34,6 +35,13 @@ export function Shell({ children }: ShellProps) {
         <ChannelHeader />
         <RuntimeStrip />
         {children}
+        {/* Pending interviews + external-action approvals are answerable from
+            ANY surface, not just the raw channel view. InterviewBar reads the
+            office-wide request queue (useRequests) and is channel-agnostic, so
+            a single global mount here covers the home composer and the task
+            chat — where it used to be absent, leaving an agent's clarifying
+            question unanswerable without navigating to #general. */}
+        <InterviewBar />
         {/* Post-onboarding "Settle into your office" nudge. The component
             self-hides while loading, once dismissed, or after every item is
             done, so an unconditional mount inside the onboarded Shell is

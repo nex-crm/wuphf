@@ -22,7 +22,6 @@ import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
 import { ChannelParticipants } from "../components/messages/ChannelParticipants";
 import { Composer } from "../components/messages/Composer";
-import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
 import { PrePickScreen } from "../components/onboarding/PrePickScreen";
 import { OfficeTour } from "../components/onboarding/tour/OfficeTour";
@@ -374,7 +373,6 @@ function ConversationView() {
     <div className="conversation-shell">
       <div className="conversation-chat">
         <MessageFeed />
-        <InterviewBar />
         <Composer />
       </div>
       <ChannelParticipants channelSlug={channelSlug} />
