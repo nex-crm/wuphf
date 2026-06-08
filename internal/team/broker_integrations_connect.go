@@ -41,9 +41,52 @@ func (b *Broker) ensureConnectRequestLocked(platform, channel, agent, name, logo
 	if platform == "" {
 		return ""
 	}
-	dedupeKey := connectRequestDedupeKey(platform)
+	display := strings.TrimSpace(name)
+	if display == "" {
+		display = action.DisplayPlatformName(platform)
+	}
+	return b.ensureIntegrationDecisionLocked(integrationDecisionCard{
+		Kind:      "connect",
+		DedupeKey: connectRequestDedupeKey(platform),
+		Platform:  platform,
+		Channel:   channel,
+		Agent:     agent,
+		Title:     "Connect " + display,
+		Question:  fmt.Sprintf("Connect %s so the team can run this action.", display),
+		LogoURL:   logoURL,
+		AuditKind: "integration_connect_requested",
+	})
+}
+
+// integrationDecisionCard describes a blocking integration decision card
+// (connect or fallback). Both share the same lifecycle: dedupe on a key, mint a
+// blocking human-decision request anchored to a platform, schedule reminders,
+// audit. ensureIntegrationDecisionLocked is the single mint path so the two
+// kinds cannot drift in how they block, persist, or get scheduled.
+type integrationDecisionCard struct {
+	Kind      string
+	DedupeKey string
+	Platform  string
+	Channel   string
+	Agent     string
+	Title     string
+	Question  string
+	Context   string
+	LogoURL   string
+	AuditKind string
+}
+
+// ensureIntegrationDecisionLocked returns the ID of the active card matching
+// spec.DedupeKey, or mints one. Caller holds b.mu.
+func (b *Broker) ensureIntegrationDecisionLocked(spec integrationDecisionCard) string {
+	platform := strings.TrimSpace(spec.Platform)
+	dedupeKey := strings.TrimSpace(spec.DedupeKey)
+	kind := normalizeRequestKind(spec.Kind)
+	if platform == "" || dedupeKey == "" || kind == "" {
+		return ""
+	}
 	for i := range b.requests {
-		if normalizeRequestKind(b.requests[i].Kind) != "connect" {
+		if normalizeRequestKind(b.requests[i].Kind) != kind {
 			continue
 		}
 		if strings.TrimSpace(b.requests[i].DedupeKey) != dedupeKey {
@@ -54,35 +97,33 @@ func (b *Broker) ensureConnectRequestLocked(platform, channel, agent, name, logo
 		}
 	}
 
-	display := strings.TrimSpace(name)
-	if display == "" {
-		display = action.DisplayPlatformName(platform)
-	}
-	channel = normalizeChannelSlug(channel)
+	channel := normalizeChannelSlug(spec.Channel)
 	if channel == "" {
 		channel = "general"
 	}
-	from := strings.TrimSpace(agent)
+	from := strings.TrimSpace(spec.Agent)
 	if from == "" {
 		from = "office"
 	}
-	options, recommended := requestOptionDefaults("connect")
+	title := strings.TrimSpace(spec.Title)
+	options, recommended := requestOptionDefaults(kind)
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.counter++
 	req := humanInterview{
 		ID:            fmt.Sprintf("request-%d", b.counter),
-		Kind:          "connect",
+		Kind:          kind,
 		Status:        "pending",
 		From:          from,
 		Channel:       channel,
-		Title:         "Connect " + display,
-		Question:      fmt.Sprintf("Connect %s so the team can run this action.", display),
+		Title:         title,
+		Question:      strings.TrimSpace(spec.Question),
+		Context:       strings.TrimSpace(spec.Context),
 		Options:       options,
 		RecommendedID: recommended,
 		Blocking:      true,
 		Required:      true,
 		Platform:      platform,
-		LogoURL:       strings.TrimSpace(logoURL),
+		LogoURL:       strings.TrimSpace(spec.LogoURL),
 		DedupeKey:     dedupeKey,
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -91,7 +132,11 @@ func (b *Broker) ensureConnectRequestLocked(platform, channel, agent, name, logo
 	b.scheduleRequestLifecycleLocked(&req)
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)
-	b.appendActionLocked("integration_connect_requested", "office", channel, from, truncateSummary("Connect "+display, 140), req.ID)
+	auditKind := strings.TrimSpace(spec.AuditKind)
+	if auditKind == "" {
+		auditKind = "integration_decision_requested"
+	}
+	b.appendActionLocked(auditKind, "office", channel, from, truncateSummary(title, 140), req.ID)
 	// Best-effort persist: the card is rebuildable by the next resolve probe, so a
 	// failed write must not block the action gate that triggered it.
 	_ = b.saveLocked()

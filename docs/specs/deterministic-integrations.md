@@ -1,11 +1,13 @@
 # Deterministic External Integrations — Connection Lifecycle State Machine
 
-> ▶ RESUME HERE: Build order below. Slices 1, 2, and 3a are DONE (backend
-> deterministic spine + the `connect` decision kind/raise/fan-out). Next target
-> is slice 3b (web Connect card wiring + hard connect-timeout→backlog), then
-> slice 4 (ExternalActionApprovalCard via /frontend-design). Each slice ships
-> behind the prior, E2E-verified. Full design rationale in the office-hours
-> design doc (gstack projects dir, 2026-06-07).
+> ▶ RESUME HERE: Build order below. Slices 1, 2, 3a, and 6 are DONE (backend
+> deterministic spine + `connect` raise/fan-out + `fallback` handoff kind).
+> Remaining backend: slice 5 (scoped-grant record + resolver `HasGrant` eval)
+> and slice 3b's hard connect-timeout→backlog. Then ONE /frontend-design session
+> for the web surfaces: slice 3b Connect card, slice 4 ExternalActionApprovalCard,
+> slice 5 grant modal + revoke UI. Each slice ships behind the prior,
+> E2E-verified. Full design rationale in the office-hours design doc (gstack
+> projects dir, 2026-06-07).
 
 ## Why
 
@@ -132,7 +134,18 @@ Integrations app.
   (4b) swap to structured payload (the long pole; triangulate).
 - [ ] **Slice 5** — Scoped grants (record + modal action + resolver eval +
   revoke UI). De-scope candidate if the PR runs long.
-- [ ] **Slice 6** — `fallback` manual-handoff decision kind.
+- [x] **Slice 6** — `fallback` manual-handoff decision kind (backend; done
+  early, alongside 3a, since it mirrors the connect card). On a `fallback`
+  decision (platform has no Composio path) the resolver raises a blocking
+  handoff card — options `[mark_done, skip]` — scoped to `(platform, action_id)`
+  so retries collapse but distinct action types each get a card. No fan-out:
+  the human answers via the normal decision path, which runs the standard
+  unblock cascade. The card-mint path is shared with connect via
+  `ensureIntegrationDecisionLocked` (one mint path, no drift). Files:
+  `broker_integrations_fallback.go` (new), `broker_integrations_connect.go`
+  (extracted shared mint helper), `broker_requests_interviews.go`,
+  `broker_integrations_resolve.go` (+ ensure-call on fallback),
+  `internal/teammcp/action_resolve_gate.go` (+ card ref in block message).
 
 ## Verification
 

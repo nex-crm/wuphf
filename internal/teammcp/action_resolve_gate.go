@@ -87,9 +87,13 @@ func actionResolveBlockMessage(decision actionResolveResponse, platformLabel str
 			platformLabel, suffix,
 		)
 	case "fallback":
+		card := ""
+		if id := strings.TrimSpace(decision.RequestID); id != "" {
+			card = fmt.Sprintf(" A manual-handoff card (%s) is now waiting for the human.", id)
+		}
 		return fmt.Sprintf(
-			"%s is not available via Composio%s, so this action cannot be automated. Surface it to the human to perform manually.",
-			platformLabel, suffix,
+			"%s is not available via Composio%s, so this action cannot be automated.%s Do NOT retry — the human will complete it manually.",
+			platformLabel, suffix, card,
 		)
 	default:
 		return fmt.Sprintf("action on %s cannot proceed (state=%s)%s.", platformLabel, strings.TrimSpace(decision.State), suffix)

@@ -41,7 +41,7 @@ func requestIsHumanInterview(req humanInterview) bool {
 
 func requestNeedsHumanDecision(req humanInterview) bool {
 	switch strings.TrimSpace(req.Kind) {
-	case "approval", "confirm", "choice", "connect":
+	case "approval", "confirm", "choice", "connect", "fallback":
 		return true
 	default:
 		return req.Required
@@ -66,6 +66,14 @@ func requestOptionDefaults(kind string) ([]interviewOption, string) {
 			{ID: "connect", Label: "Connect", Description: "Authorize this integration so the team can run the action."},
 			{ID: "skip", Label: "Skip", Description: "Do not connect. Cancel this external action."},
 		}, "connect"
+	case "fallback":
+		// A platform with no Composio path: the human completes the action
+		// manually (mark_done) or abandons it (skip). One CLI is product-removed,
+		// so manual handoff is the only fallback.
+		return []interviewOption{
+			{ID: "mark_done", Label: "Mark done", Description: "I completed this manually outside the team."},
+			{ID: "skip", Label: "Skip", Description: "Do not do this. Cancel the action."},
+		}, "mark_done"
 	case "confirm":
 		return []interviewOption{
 			{ID: "confirm_proceed", Label: "Confirm", Description: "Looks good. Proceed as planned."},
@@ -223,8 +231,10 @@ func formatRequestAnswerMessage(req humanInterview, answer interviewAnswer) stri
 		return fmt.Sprintf("Asked @%s for more information.", req.From)
 	case "connect":
 		return fmt.Sprintf("Connected the integration @%s needs.", req.From)
+	case "mark_done":
+		return fmt.Sprintf("Marked @%s's manual handoff done.", req.From)
 	case "skip":
-		return fmt.Sprintf("Skipped the connection @%s requested.", req.From)
+		return fmt.Sprintf("Skipped @%s's request.", req.From)
 	}
 	if custom != "" && strings.TrimSpace(answer.ChoiceText) != "" {
 		return fmt.Sprintf("Answered @%s's request with %s: %s", req.From, answer.ChoiceText, custom)

@@ -43,6 +43,68 @@ func activeConnectCards(b *Broker, platform string) []humanInterview {
 	return out
 }
 
+func activeCardsWithDedupe(b *Broker, kind, dedupeKey string) []humanInterview {
+	var out []humanInterview
+	for _, req := range b.requests {
+		if normalizeRequestKind(req.Kind) == kind &&
+			req.DedupeKey == dedupeKey && requestIsActive(req) {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
+// The fallback decision kind is a blocking manual-handoff: mark_done (the human
+// did it by hand) or skip. One CLI is product-removed, so this is the only
+// fallback for a platform with no Composio path.
+func TestFallbackDecisionKindDefaults(t *testing.T) {
+	options, recommended := requestOptionDefaults("fallback")
+	if recommended != "mark_done" {
+		t.Fatalf("recommended option = %q, want mark_done", recommended)
+	}
+	if len(options) != 2 || options[0].ID != "mark_done" || options[1].ID != "skip" {
+		t.Fatalf("fallback options = %+v, want [mark_done, skip]", options)
+	}
+	if !requestNeedsHumanDecision(humanInterview{Kind: "fallback"}) {
+		t.Fatalf("fallback kind must register as a human decision")
+	}
+}
+
+// A fallback handoff card is scoped to (platform, action): retries of the same
+// unsupported action collapse onto one card, but a different action type on the
+// same platform raises its own. (The unsupported -> fallback classification
+// itself is covered by the action resolver unit tests.)
+func TestEnsureFallbackRequestDedupesPerAction(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "state.json"))
+
+	id1 := b.ensureFallbackRequest("notion", "NOTION_CREATE_PAGE", "general", "ceo", "Notion", "", "Create the launch page")
+	id1b := b.ensureFallbackRequest("notion", "NOTION_CREATE_PAGE", "general", "ceo", "Notion", "", "Create the launch page")
+	if id1 == "" || id1 != id1b {
+		t.Fatalf("same (platform, action) must dedupe: id1=%q id1b=%q", id1, id1b)
+	}
+	if got := len(activeCardsWithDedupe(b, "fallback", fallbackRequestDedupeKey("notion", "NOTION_CREATE_PAGE"))); got != 1 {
+		t.Fatalf("expected one handoff card for the repeated action, got %d", got)
+	}
+
+	id2 := b.ensureFallbackRequest("notion", "NOTION_APPEND_BLOCK", "general", "ceo", "Notion", "", "Append a block")
+	if id2 == id1 {
+		t.Fatalf("a different action type must raise its own card, got %q for both", id2)
+	}
+
+	// The card is a blocking human decision anchored to the platform.
+	var card *humanInterview
+	for i := range b.requests {
+		if b.requests[i].ID == id1 {
+			card = &b.requests[i]
+			break
+		}
+	}
+	if card == nil || !card.Blocking || !card.Required || card.Platform != "notion" {
+		t.Fatalf("fallback card malformed: %+v", card)
+	}
+}
+
 // A mutating action against a missing connection routes to connect AND raises a
 // single blocking Connect card. A second resolve of the same platform dedupes
 // onto the same card (workspace-wide) rather than stacking duplicates.

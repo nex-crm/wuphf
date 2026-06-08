@@ -176,6 +176,13 @@ func (b *Broker) resolveExternalAction(ctx context.Context, req integrationResol
 		resp.RequestID = b.ensureConnectRequest(platform, req.Channel, req.Agent, resp.Name, resp.LogoURL)
 	}
 
+	// A `fallback` decision means the platform has no Composio path at all: raise
+	// a manual-handoff card scoped to this (platform, action) so the human can
+	// complete it by hand and mark it done.
+	if decision == action.DecisionFallback {
+		resp.RequestID = b.ensureFallbackRequest(platform, actionID, req.Channel, req.Agent, resp.Name, resp.LogoURL, req.Summary)
+	}
+
 	// Build the preview envelope only when the human will actually see the modal.
 	if decision == action.DecisionApprove {
 		dry, err := composio.ExecuteAction(ctx, action.ExecuteRequest{
