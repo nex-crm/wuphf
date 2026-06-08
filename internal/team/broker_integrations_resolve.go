@@ -135,13 +135,20 @@ func (b *Broker) resolveExternalAction(ctx context.Context, req integrationResol
 	}
 	lastFresh := hasLast && connectionRegistryFresh(lastEntry, time.Now().UTC())
 
+	// A standing, human-issued grant for this exact (agent, platform, action_id)
+	// lets a connected mutating action skip the approval modal. Read-only actions
+	// already proceed without a grant, so only evaluate it for mutating actions.
+	// The grant is re-read on every resolve, which runs immediately before
+	// execute — the accepted TOCTOU window is just the resolve→execute gap.
+	hasGrant := !readOnly && b.hasActiveActionGrant(req.Agent, platform, actionID, time.Now().UTC())
+
 	decision, effective := action.Resolve(action.ResolveInput{
 		ReadOnly:       readOnly,
 		Probed:         probed,
 		ProbeOK:        probeOK,
 		LastKnown:      lastKnown,
 		LastKnownFresh: lastFresh,
-		HasGrant:       false, // scoped grants land in slice 5
+		HasGrant:       hasGrant,
 	})
 	resp.Decision = string(decision)
 	resp.State = string(effective)

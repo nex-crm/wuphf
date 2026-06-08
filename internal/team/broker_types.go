@@ -667,6 +667,7 @@ type brokerState struct {
 	Requests           []humanInterview                   `json:"requests,omitempty"`
 	ApprovalAudit      []ApprovalAuditEntry               `json:"approval_audit,omitempty"`
 	ConnectionRegistry map[string]connectionRegistryEntry `json:"connection_registry,omitempty"`
+	ActionGrants       []actionGrant                      `json:"action_grants,omitempty"`
 	Actions            []officeActionLog                  `json:"actions,omitempty"`
 	Signals            []officeSignalRecord               `json:"signals,omitempty"`
 	Decisions          []officeDecisionRecord             `json:"decisions,omitempty"`

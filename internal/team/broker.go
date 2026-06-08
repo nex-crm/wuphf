@@ -103,7 +103,11 @@ type Broker struct {
 	// platform — a dedicated map in broker state, NOT a projection over the
 	// 150-entry action ring. Read by the action resolver to gate external
 	// actions; refreshed by probe + connect/disconnect events. Guarded by b.mu.
-	connectionRegistry  map[string]connectionRegistryEntry
+	connectionRegistry map[string]connectionRegistryEntry
+	// actionGrants are persisted, human-issued standing approvals for a specific
+	// (agent, platform, action_id). The resolver reads them to skip the approval
+	// modal for pre-authorized actions. Human-minted only. Guarded by b.mu.
+	actionGrants        []actionGrant
 	humanInvites        []humanInvite
 	humanSessions       []humanSession
 	humanSessionRevoke  map[string]chan struct{} // session ID → closed on revoke
@@ -648,6 +652,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/integrations/disconnect", b.requireAuth(b.handleIntegrationDisconnect))
 	mux.HandleFunc("/integrations/audit", b.requireAuth(b.handleIntegrationAudit))
 	mux.HandleFunc("/integrations/resolve", b.requireAuth(b.handleIntegrationResolve))
+	mux.HandleFunc("/integrations/grants", b.requireAuth(b.handleIntegrationGrants))
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/scheduler/", b.requireAuth(b.handleSchedulerSubpath))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
@@ -1088,6 +1093,7 @@ func (b *Broker) Reset() {
 	b.requests = nil
 	b.approvalAudit = nil
 	b.connectionRegistry = nil
+	b.actionGrants = nil
 	b.humanInvites = nil
 	b.humanSessions = nil
 	b.humanSessionRevoke = nil

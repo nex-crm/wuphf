@@ -1,13 +1,14 @@
 # Deterministic External Integrations — Connection Lifecycle State Machine
 
-> ▶ RESUME HERE: Build order below. Slices 1, 2, 3a, and 6 are DONE (backend
-> deterministic spine + `connect` raise/fan-out + `fallback` handoff kind).
-> Remaining backend: slice 5 (scoped-grant record + resolver `HasGrant` eval)
-> and slice 3b's hard connect-timeout→backlog. Then ONE /frontend-design session
-> for the web surfaces: slice 3b Connect card, slice 4 ExternalActionApprovalCard,
-> slice 5 grant modal + revoke UI. Each slice ships behind the prior,
-> E2E-verified. Full design rationale in the office-hours design doc (gstack
-> projects dir, 2026-06-07).
+> ▶ RESUME HERE: Build order below. ALL BACKEND SLICES DONE — 1, 2, 3a, 5a, 6
+> (deterministic spine + `connect` raise/fan-out + `fallback` handoff + scoped
+> grants). The only remaining backend is slice 3b's hard connect-timeout→backlog
+> (a scheduler-tick concern, small). Everything else is the FRONTEND SESSION
+> (/frontend-design): slice 3b Connect card, slice 4 ExternalActionApprovalCard,
+> slice 5b grant button + revoke UI. New persisted/wire shapes (connect kind,
+> humanInterview.Platform/LogoURL, actionGrant) need triangulation before merge.
+> Full design rationale in the office-hours design doc (gstack projects dir,
+> 2026-06-07).
 
 ## Why
 
@@ -132,8 +133,33 @@ Integrations app.
   deferred from 3a to keep the commit atomic).
 - [ ] **Slice 4** — `ExternalActionApprovalCard` reading legacy parse first;
   (4b) swap to structured payload (the long pole; triangulate).
-- [ ] **Slice 5** — Scoped grants (record + modal action + resolver eval +
-  revoke UI). De-scope candidate if the PR runs long.
+- [x] **Slice 5a** — Scoped grants, backend. Persisted `actionGrant{id,
+  agent_slug, platform, action_scope, channel?, issue_id?, granted_by,
+  granted_at, expires_at?, revoked_at?}`; the scope is ALWAYS a concrete
+  action_id (wildcards rejected at the endpoint). The resolver evaluates
+  `hasActiveActionGrant(agent, platform, action_id)` (exact match on all three,
+  case-insensitive; expired/revoked/unparseable-expiry fail closed) for mutating
+  actions and, when connected + granted, returns `proceed`. The gate
+  (`actions.go`) splits `proceed` (granted → skip the approval modal) from
+  `approve` (→ modal); `requireTeamActionApproval` gained a `preApproved` param
+  and short-circuits AFTER the Issue/drafting gate (a grant for the integration
+  can NEVER bypass an Issue still awaiting approval) with a synthetic `grant`
+  audit marker so the run stays visible. CRUD via `GET/POST
+  /integrations/grants`. **AUTH-MODEL FINDING (load-bearing):** the broker token
+  is the host-trust boundary — the local owner's web app AND the MCP server both
+  use it (broker kind); human-SESSION actors are shared-link guests that
+  `withAuth` 403s off non-allowlisted routes. So a "require human kind" gate is
+  BACKWARDS (rejects the owner). The real control that an agent cannot self-grant
+  is that NO MCP tool reaches `/integrations/grants` — agents act only through
+  the fixed teammcp tool surface. Files: `broker_action_grants.go` (new),
+  `broker.go`/`broker_types.go`/`broker_persistence.go` (persist), `broker_
+  integrations_resolve.go` (eval), `internal/teammcp/actions.go` (preApproved +
+  bypass). Tests: `broker_action_grants_test.go` + a teammcp grant-bypass test.
+  Persisted wire shape → triangulate before merge.
+- [ ] **Slice 5b** — Grant UI: the approval modal's "Approve & always allow"
+  button (POST `/integrations/grants` with the card's agent/platform/action_id)
+  + a revoke list in the Integrations app (GET, then POST `action:revoke`).
+  Ships in the frontend session.
 - [x] **Slice 6** — `fallback` manual-handoff decision kind (backend; done
   early, alongside 3a, since it mirrors the connect card). On a `fallback`
   decision (platform has no Composio path) the resolver raises a blocking

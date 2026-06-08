@@ -67,6 +67,7 @@ func brokerStateActivityScore(state brokerState) int {
 	score += len(activeRequests(state.Requests)) * 10
 	score += len(state.ApprovalAudit) * 4
 	score += len(state.ConnectionRegistry) * 4
+	score += len(state.ActionGrants) * 4
 	score += len(state.Actions) * 4
 	score += len(state.Signals) * 4
 	score += len(state.Decisions) * 4
@@ -138,6 +139,7 @@ func (b *Broker) loadState() error {
 		b.approvalAudit[i] = sanitizeApprovalAuditEntry(b.approvalAudit[i])
 	}
 	b.connectionRegistry = state.ConnectionRegistry
+	b.actionGrants = state.ActionGrants
 	b.humanInvites = state.HumanInvites
 	b.humanSessions = state.HumanSessions
 	b.actions = state.Actions
@@ -319,6 +321,7 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		Requests:           requests,
 		ApprovalAudit:      approvalAudit,
 		ConnectionRegistry: b.cloneConnectionRegistryLocked(),
+		ActionGrants:       cloneActionGrants(b.actionGrants),
 		Actions:            actions,
 		Signals:            signals,
 		Decisions:          decisions,
@@ -404,6 +407,7 @@ func (b *Broker) isDefaultBrokerStateLocked() bool {
 		len(activeRequests(b.requests)) == 0 &&
 		len(b.approvalAudit) == 0 &&
 		len(b.connectionRegistry) == 0 &&
+		len(b.actionGrants) == 0 &&
 		len(b.humanInvites) == 0 &&
 		len(b.humanSessions) == 0 &&
 		len(b.actions) == 0 &&

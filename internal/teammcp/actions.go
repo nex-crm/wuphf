@@ -52,6 +52,12 @@ type approvalContext struct {
 	AnsweredAt  string
 }
 
+// grantApprovalMarker is the synthetic approval RequestID used when a standing
+// grant pre-authorized an action (no human request was created). It is
+// non-empty so recordExecuteAudit still writes an executed-OK audit row — the
+// run stays visible even though the modal was skipped.
+const grantApprovalMarker = "grant"
+
 // requireTeamActionApproval gates mutating external-action calls behind a
 // human approval request. Returns the approval context (request id + Issue
 // id + timestamps) and a nil error when the call may proceed; returns a
@@ -74,7 +80,7 @@ type approvalContext struct {
 //
 // The point: a prompt-injected agent cannot send email, write to a CRM, or
 // post a Slack message without the human explicitly clicking approve.
-func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs) (approvalContext, error) {
+func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs, preApproved bool) (approvalContext, error) {
 	if args.DryRun {
 		return approvalContext{}, nil
 	}
@@ -116,6 +122,22 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 				resolvedIssueID,
 			)
 		}
+	}
+
+	// Standing-grant short-circuit. A human-issued grant covers this exact
+	// action, so the resolver returned `proceed` and the gate set preApproved.
+	// Skip the human prompt — but only AFTER the Issue/drafting gate above, so a
+	// grant for the integration can never bypass an Issue that is still awaiting
+	// human approval. The synthetic "grant" request id keeps recordExecuteAudit
+	// writing a trail (transparency: the human still sees the action ran).
+	if preApproved {
+		grantedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		return approvalContext{
+			RequestID:   grantApprovalMarker,
+			IssueID:     strings.TrimSpace(args.IssueID),
+			RequestedAt: grantedAt,
+			AnsweredAt:  grantedAt,
+		}, nil
 	}
 
 	spec := buildActionApprovalSpec(slug, channel, args)
@@ -695,6 +717,7 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 	// a dry run sends nothing, and unsafe is the operator escape hatch. If the
 	// resolver itself is unreachable we degrade to the human approval gate
 	// below rather than bricking every external action.
+	preApproved := false
 	if !args.DryRun && os.Getenv("WUPHF_UNSAFE") != "1" && !actionIsReadOnly(args.ActionID) {
 		decision, derr := resolveActionDecision(ctx, slug, channel, args)
 		if derr != nil {
@@ -703,7 +726,18 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 			switch strings.ToLower(strings.TrimSpace(decision.Decision)) {
 			case "connect", "wait", "fail_safe", "fallback":
 				return toolError(fmt.Errorf("%s", actionResolveBlockMessage(decision, platformDisplay(args.Platform)))), nil, nil
-			case "proceed", "approve":
+			case "proceed":
+				// `proceed` for a MUTATING action means a standing, human-issued
+				// grant covers this exact (agent, platform, action_id): skip the
+				// approval modal. The resolver is the sole authority for this —
+				// the grant store is human-minted broker state, so a
+				// prompt-injected agent cannot forge its way to `proceed`. The
+				// Issue/drafting gate inside requireTeamActionApproval still runs.
+				if decision.Account != nil && strings.TrimSpace(decision.Account.Key) != "" {
+					args.ConnectionKey = strings.TrimSpace(decision.Account.Key)
+				}
+				preApproved = true
+			case "approve":
 				// Use the connection the resolver actually verified, not the
 				// (often blank or stale) key the agent guessed. This is what
 				// closes the "fires into the wrong/missing connection" gap.
@@ -729,7 +763,7 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 	// approval unless --unsafe was passed or the action is a read-only
 	// lookup. A prompt-injected agent must not be able to trigger real
 	// side-effects silently.
-	approvalCtx, err := requireTeamActionApproval(ctx, slug, channel, args)
+	approvalCtx, err := requireTeamActionApproval(ctx, slug, channel, args, preApproved)
 	if err != nil {
 		return toolError(err), nil, nil
 	}

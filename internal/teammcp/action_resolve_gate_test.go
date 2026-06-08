@@ -183,3 +183,54 @@ func TestHandleTeamActionExecuteFailsClosedOnUnknownDecision(t *testing.T) {
 		t.Fatalf("provider executed on an unknown decision; the gate must fail closed (calls=%d)", calls)
 	}
 }
+
+// A `proceed` decision (a standing human grant covers this exact action) must
+// skip the approval modal AND still execute: the provider is called and no
+// approval request blocks the run. This is the scoped-grant fast path.
+func TestHandleTeamActionExecuteGrantProceedSkipsModalAndExecutes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	approvalPosted := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/integrations/resolve":
+			// Granted: resolver returns proceed with the verified connection.
+			_, _ = w.Write([]byte(`{"decision":"proceed","platform":"gmail","account":{"key":"ca_123"}}`))
+		case "/requests":
+			// If the gate ever creates an approval request for a granted action,
+			// the modal was NOT skipped — record it so the test can fail.
+			approvalPosted = true
+			_, _ = w.Write([]byte(`{"id":"request-should-not-exist"}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("WUPHF_TEAM_BROKER_URL", srv.URL)
+	t.Setenv("WUPHF_BROKER_TOKEN", "test-token")
+
+	calls := 0
+	prev := externalActionProvider
+	externalActionProvider = &recordingActionProvider{calls: &calls}
+	defer func() { externalActionProvider = prev }()
+
+	res, _, err := handleTeamActionExecute(context.Background(), nil, TeamActionExecuteArgs{
+		Platform: "gmail",
+		ActionID: "GMAIL_SEND_EMAIL",
+		MySlug:   "ceo",
+		Channel:  "general",
+		Data:     map[string]any{"to": "lead@acme.com"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected go error: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("granted action should execute, got error result: %+v", res)
+	}
+	if calls != 1 {
+		t.Fatalf("granted action should execute via the provider exactly once, got %d", calls)
+	}
+	if approvalPosted {
+		t.Fatalf("granted action created an approval request; the modal must be skipped on a proceed decision")
+	}
+}
