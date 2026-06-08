@@ -1019,6 +1019,226 @@ body {
     white-space: normal;
   }
 }
+
+/* ─── External-action approval card (deterministic-integrations slice 4) ───
+   The dedicated approval surface for a mutating integration action. Built on
+   the same tokens as .approval-* so it reads as one family, with a stronger
+   identity header (logo + verb) because this card is a trust decision: the
+   human is authorizing a real, external side-effect. Tokens only — verified
+   against Nex Light, Nex Dark, and Noir Gold. */
+.eac {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 2px 0 4px;
+}
+.eac-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.eac-logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px var(--overlay-soft);
+}
+.eac-headings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.eac-eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.eac-headline {
+  margin: 0;
+  font-size: var(--text-lg, 17px);
+  line-height: 1.25;
+  font-weight: 600;
+  color: var(--text);
+}
+.eac-action-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary, var(--text-secondary));
+  word-break: break-all;
+}
+.eac-why {
+  display: block;
+  margin: 0;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--accent, var(--border-dark, var(--border)));
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.eac-why-label {
+  display: inline-block;
+  margin-right: 8px;
+  font-size: var(--text-2xs, 10px);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  vertical-align: 1px;
+}
+.eac-payload {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--overlay-soft);
+  border: 1px solid var(--border-dark, var(--border));
+  border-radius: var(--radius-md);
+}
+.eac-payload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.eac-payload-title {
+  font-size: var(--text-2xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.eac-raw-toggle {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--duration-base, 120ms) ease,
+    border-color var(--duration-base, 120ms) ease;
+}
+.eac-raw-toggle:hover {
+  color: var(--text);
+  border-color: var(--border-dark, var(--text-tertiary));
+}
+.eac-raw-toggle[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--accent, var(--text-tertiary));
+}
+.eac-fields {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.eac-field {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.eac-field-label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.eac-field-value {
+  margin: 0;
+  color: var(--text);
+  word-break: break-word;
+}
+.eac-trunc {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--warning-100, var(--bg-warm));
+  color: var(--warning-500);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}
+.eac-raw {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
+.eac-payload-empty {
+  margin: 0;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+.eac-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.eac-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.eac-meta-label {
+  font-weight: 500;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.eac-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full, 999px);
+  background: var(--success, var(--green));
+  box-shadow: 0 0 0 2px var(--green-bg, transparent);
+}
+.eac-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+.eac-actions .eac-reject:hover:not(:disabled) {
+  color: var(--red);
+  border-color: var(--red);
+}
+.eac-actions .eac-dismiss {
+  margin-left: auto;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+@media (max-width: 480px) {
+  .eac-field {
+    grid-template-columns: 64px 1fr;
+    gap: 8px;
+  }
+  .eac-actions .eac-dismiss {
+    margin-left: 0;
+  }
+}
 .badge-muted {
   background: var(--bg-warm);
   color: var(--text-tertiary);

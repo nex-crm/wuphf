@@ -5,12 +5,17 @@ import {
   type AgentRequest,
   answerRequest,
   cancelRequest,
+  createActionGrant,
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
 import { parseApprovalContext } from "../../lib/parseApprovalContext";
 import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 import { ApprovalContextView } from "./ApprovalContextView";
+import {
+  type ApprovalGrantTarget,
+  ExternalActionApprovalCard,
+} from "./ExternalActionApprovalCard";
 
 /**
  * Global blocking-request overlay. Always renders the first blocking pending
@@ -55,6 +60,40 @@ export function HumanInterviewOverlay() {
           setSubmitting(false);
         }
       }}
+      onApproveAlways={async (grant: ApprovalGrantTarget) => {
+        if (submitting) return;
+        const requestId = blockingPending.id;
+        setSubmitting(true);
+        try {
+          try {
+            await createActionGrant({
+              agentSlug: grant.agentSlug,
+              platform: grant.platform,
+              actionScope: grant.actionId,
+              channel: grant.channel,
+              issueId: blockingPending.issue_id,
+            });
+          } catch (grantErr: unknown) {
+            // The standing grant did not stick, but the human still wants THIS
+            // run approved — surface the failure and proceed with the approval
+            // rather than blocking the action on a grant-write error.
+            const m =
+              grantErr instanceof Error
+                ? grantErr.message
+                : "could not save the always-allow rule";
+            showNotice(`Approving this once — ${m}`, "error");
+          }
+          await answerRequest(requestId, "approve");
+          await queryClient.invalidateQueries({ queryKey: ["requests"] });
+          await queryClient.invalidateQueries({ queryKey: ["requests-badge"] });
+        } catch (err: unknown) {
+          const message =
+            err instanceof Error ? err.message : "Failed to approve";
+          showNotice(message, "error");
+        } finally {
+          setSubmitting(false);
+        }
+      }}
       onDismiss={async () => {
         if (submitting) return;
         const requestId = blockingPending.id;
@@ -80,6 +119,7 @@ interface BlockingInterviewProps {
   request: AgentRequest;
   submitting: boolean;
   onAnswer: (choiceId: string) => void;
+  onApproveAlways: (grant: ApprovalGrantTarget) => void;
   onDismiss: () => void;
 }
 
@@ -87,6 +127,7 @@ function BlockingInterview({
   request,
   submitting,
   onAnswer,
+  onApproveAlways,
   onDismiss,
 }: BlockingInterviewProps) {
   const options = request.options ?? request.choices ?? [];
@@ -116,10 +157,68 @@ function BlockingInterview({
           {request.channel ? (
             <span className="interview-channel">in #{request.channel}</span>
           ) : null}
-          {request.redacted ? (
+          {request.redacted && !isApproval ? (
             <RedactedBadge reasons={request.redaction_reasons} />
           ) : null}
         </div>
+        {/* External-action approvals get the dedicated trust card, which owns
+            its own heading, payload view, and Approve / Always-allow / Reject
+            actions. Everything else keeps the generic interview layout. */}
+        {isApproval ? (
+          <>
+            <h2 id="interview-title" className="sr-only">
+              {request.title && request.title !== "Request"
+                ? request.title
+                : "Approve external action"}
+            </h2>
+            <ExternalActionApprovalCard
+              request={request}
+              submitting={submitting}
+              onAnswer={onAnswer}
+              onApproveAlways={onApproveAlways}
+              onDismiss={onDismiss}
+            />
+          </>
+        ) : (
+          <BlockingInterviewBody
+            request={request}
+            options={options}
+            submitting={submitting}
+            isEnhanceInterview={isEnhanceInterview}
+            enhancesSlug={enhancesSlug}
+            parsedApproval={parsedApproval}
+            onAnswer={onAnswer}
+            onDismiss={onDismiss}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface BlockingInterviewBodyProps {
+  request: AgentRequest;
+  options: NonNullable<AgentRequest["options"]>;
+  submitting: boolean;
+  isEnhanceInterview: boolean;
+  enhancesSlug: string | undefined;
+  parsedApproval: ReturnType<typeof parseApprovalContext>;
+  onAnswer: (choiceId: string) => void;
+  onDismiss: () => void;
+}
+
+function BlockingInterviewBody({
+  request,
+  options,
+  submitting,
+  isEnhanceInterview,
+  enhancesSlug,
+  parsedApproval,
+  onAnswer,
+  onDismiss,
+}: BlockingInterviewBodyProps) {
+  return (
+    <>
         <h2 id="interview-title" className="interview-title">
           {request.title && request.title !== "Request"
             ? request.title
@@ -203,7 +302,6 @@ function BlockingInterview({
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </>
   );
 }

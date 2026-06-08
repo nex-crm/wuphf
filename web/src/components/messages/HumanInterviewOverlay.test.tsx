@@ -128,20 +128,26 @@ describe("<HumanInterviewOverlay>", () => {
 
     expect(screen.getByText("EXTERNAL ACTION")).toBeInTheDocument();
     expect(screen.getByText("BLOCKING")).toBeInTheDocument();
-    expect(screen.getByText("Send Email via Gmail")).toBeInTheDocument();
+    // The dedicated card splits the verb headline from the platform eyebrow.
+    expect(screen.getByText("Send Email")).toBeInTheDocument();
+    expect(screen.getByText("Gmail")).toBeInTheDocument();
     // Why surface
     expect(screen.getByText("Sending welcome note.")).toBeInTheDocument();
-    // Details inset: each label/value is a <dt>/<dd> pair
+    // Payload fields: each label/value is a <dt>/<dd> pair
     expect(screen.getByText("To")).toBeInTheDocument();
     expect(screen.getByText("alex@nex.ai")).toBeInTheDocument();
     expect(screen.getByText("Subject")).toBeInTheDocument();
     expect(screen.getByText("Welcome to Nex")).toBeInTheDocument();
     expect(screen.getByText("Body")).toBeInTheDocument();
     expect(screen.getByText("Hi Alex, welcome aboard!")).toBeInTheDocument();
-    // Footer
-    expect(screen.getByText(/GMAIL_SEND_EMAIL via Gmail/)).toBeInTheDocument();
+    // Raw action id + connected account
+    expect(screen.getByText("GMAIL_SEND_EMAIL")).toBeInTheDocument();
     expect(
       screen.getByText("live::gmail::default::abc123"),
+    ).toBeInTheDocument();
+    // The trust escalation is offered.
+    expect(
+      screen.getByRole("button", { name: /always allow/i }),
     ).toBeInTheDocument();
   });
 
@@ -160,7 +166,7 @@ describe("<HumanInterviewOverlay>", () => {
     });
     useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
     render(wrap(<HumanInterviewOverlay />));
-    expect(screen.getByText("(truncated)")).toBeInTheDocument();
+    expect(screen.getByText("truncated")).toBeInTheDocument();
   });
 
   it("renders the empty fallback when neither Why nor details are present", () => {
@@ -175,7 +181,7 @@ describe("<HumanInterviewOverlay>", () => {
     useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
     render(wrap(<HumanInterviewOverlay />));
     expect(
-      screen.getByText(/No additional details available/i),
+      screen.getByText(/No structured payload/i),
     ).toBeInTheDocument();
   });
 

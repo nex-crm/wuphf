@@ -1,14 +1,14 @@
 # Deterministic External Integrations — Connection Lifecycle State Machine
 
-> ▶ RESUME HERE: Build order below. ALL BACKEND SLICES DONE — 1, 2, 3a, 5a, 6
-> (deterministic spine + `connect` raise/fan-out + `fallback` handoff + scoped
-> grants). The only remaining backend is slice 3b's hard connect-timeout→backlog
-> (a scheduler-tick concern, small). Everything else is the FRONTEND SESSION
-> (/frontend-design): slice 3b Connect card, slice 4 ExternalActionApprovalCard,
-> slice 5b grant button + revoke UI. New persisted/wire shapes (connect kind,
-> humanInterview.Platform/LogoURL, actionGrant) need triangulation before merge.
-> Full design rationale in the office-hours design doc (gstack projects dir,
-> 2026-06-07).
+> ▶ RESUME HERE: Build order below. DONE: all backend (1, 2, 3a, 5a, 6) PLUS
+> frontend slice 4a (ExternalActionApprovalCard, legacy parse, 3-theme verified)
+> and the slice 5b "Approve & always allow" grant button. REMAINING: slice 3b
+> (web Connect card + hard connect-timeout→backlog), slice 4b (structured
+> action-approval payload with the real HTTP envelope behind the raw toggle —
+> the long pole, triangulate), slice 5b revoke list in the Integrations app. New
+> persisted/wire shapes (connect kind, humanInterview.Platform/LogoURL,
+> actionGrant, future 4b payload) need triangulation before merge. Full design
+> rationale in the office-hours design doc (gstack projects dir, 2026-06-07).
 
 ## Why
 
@@ -131,8 +131,29 @@ Integrations app.
   audit (the connect card currently rides the standard reminder/follow-up
   lifecycle; a hard timeout-to-backlog is a separate scheduler-tick concern,
   deferred from 3a to keep the commit atomic).
-- [ ] **Slice 4** — `ExternalActionApprovalCard` reading legacy parse first;
-  (4b) swap to structured payload (the long pole; triangulate).
+- [x] **Slice 4a** — `ExternalActionApprovalCard` (web), reading the legacy
+  approval-context parse. The Go side embeds `<action_id> via <Platform>` in the
+  `Action:` footer and `<verb> via <Platform>` in the title, so the card
+  recovers the platform, action id, verb, account, channel, why, and payload
+  summary from `parseApprovalContext` with NO Go change. Layout: integration
+  logo tile + platform eyebrow + verb headline + mono action_id; a "Why" rule
+  with the agent's intent; an inset "What will be sent" panel with the
+  secret-masked payload fields and a **Show/Hide raw** toggle (the raw view is a
+  reformat of the SAME masked fields — never a new data source); a connected-
+  account dot + channel meta; actions Approve / Approve & always allow / Reject /
+  Dismiss. Token-only, verified across Nex Light, Nex Dark, and Noir Gold
+  (Storybook screenshots /tmp/eac-{light,dark,noir}.png — gold theme auto-themes
+  the accent rule + primary button). Wired into `HumanInterviewOverlay`
+  (approval kind only; everything else keeps the generic interview body). Files:
+  `web/src/components/messages/ExternalActionApprovalCard.tsx` (+ `.test.tsx`,
+  `.stories.tsx`), `HumanInterviewOverlay.tsx`/`.test.tsx`, `web/src/api/client.ts`
+  (AgentRequest +platform/logo_url, grant client fns), `web/src/styles/global.css`
+  (`.eac-*`). tsc clean, biome clean, 214 messages tests pass, web build green.
+- [ ] **Slice 4b** — swap the card to a structured action-approval payload with
+  the real HTTP envelope (method/url/headers/body) behind the raw toggle,
+  populated by the resolver's DryRun envelope. New wire shape — the long pole;
+  triangulate. Also surfaces deferred review LOW #5 ("connection unverified"
+  when the gate degraded to approval-only).
 - [x] **Slice 5a** — Scoped grants, backend. Persisted `actionGrant{id,
   agent_slug, platform, action_scope, channel?, issue_id?, granted_by,
   granted_at, expires_at?, revoked_at?}`; the scope is ALWAYS a concrete
@@ -156,10 +177,14 @@ Integrations app.
   integrations_resolve.go` (eval), `internal/teammcp/actions.go` (preApproved +
   bypass). Tests: `broker_action_grants_test.go` + a teammcp grant-bypass test.
   Persisted wire shape → triangulate before merge.
-- [ ] **Slice 5b** — Grant UI: the approval modal's "Approve & always allow"
-  button (POST `/integrations/grants` with the card's agent/platform/action_id)
-  + a revoke list in the Integrations app (GET, then POST `action:revoke`).
-  Ships in the frontend session.
+- [~] **Slice 5b** — Grant UI. DONE: the approval card's "Approve & always
+  allow" button mints a grant via `createActionGrant(agent, platform, action_id,
+  channel)` then approves; grant-write failure still approves this once (the
+  immediate action is not blocked on a grant-write error). Client fns
+  `createActionGrant`/`getActionGrants`/`revokeActionGrant` shipped. The button
+  is suppressed when the action cannot be scoped (no derivable agent+platform+
+  action_id). STILL TODO: a revoke list in the Integrations app (GET grants →
+  POST `action:revoke`).
 - [x] **Slice 6** — `fallback` manual-handoff decision kind (backend; done
   early, alongside 3a, since it mirrors the connect card). On a `fallback`
   decision (platform has no Composio path) the resolver raises a blocking
