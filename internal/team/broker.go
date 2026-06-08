@@ -99,24 +99,29 @@ type Broker struct {
 	reviewerGradesByTask map[string][]ReviewerGrade
 	requests             []humanInterview
 	approvalAudit        []ApprovalAuditEntry
-	humanInvites         []humanInvite
-	humanSessions        []humanSession
-	humanSessionRevoke   map[string]chan struct{} // session ID → closed on revoke
-	actions              []officeActionLog
-	signals              []officeSignalRecord
-	decisions            []officeDecisionRecord
-	watchdogs            []watchdogAlert
-	scheduler            []schedulerJob
-	schedulerRuns        map[string][]schedulerRun      // per-slug fire history; ring buffer
-	schedulerActivity    map[string][]schedulerActivity // per-slug lifecycle log; ring buffer
-	schedulerRevisions   map[string][]schedulerRevision // per-slug edit snapshots; ring buffer
-	skills               []teamSkill
-	skillDescEmbeddings  map[string][]float32         // slug → description embedding vector; guarded by mu
-	sharedMemory         map[string]map[string]string // namespace → key → value
-	lastTaggedAt         map[string]time.Time         // when each agent was last @mentioned
-	lastPaneSnapshot     map[string]string            // last captured pane content per agent (for change detection)
-	seenTelegramGroups   map[int64]string             // chat_id -> title, populated by transport
-	counter              int
+	// connectionRegistry is the persisted, last-known connection state per
+	// platform — a dedicated map in broker state, NOT a projection over the
+	// 150-entry action ring. Read by the action resolver to gate external
+	// actions; refreshed by probe + connect/disconnect events. Guarded by b.mu.
+	connectionRegistry  map[string]connectionRegistryEntry
+	humanInvites        []humanInvite
+	humanSessions       []humanSession
+	humanSessionRevoke  map[string]chan struct{} // session ID → closed on revoke
+	actions             []officeActionLog
+	signals             []officeSignalRecord
+	decisions           []officeDecisionRecord
+	watchdogs           []watchdogAlert
+	scheduler           []schedulerJob
+	schedulerRuns       map[string][]schedulerRun      // per-slug fire history; ring buffer
+	schedulerActivity   map[string][]schedulerActivity // per-slug lifecycle log; ring buffer
+	schedulerRevisions  map[string][]schedulerRevision // per-slug edit snapshots; ring buffer
+	skills              []teamSkill
+	skillDescEmbeddings map[string][]float32         // slug → description embedding vector; guarded by mu
+	sharedMemory        map[string]map[string]string // namespace → key → value
+	lastTaggedAt        map[string]time.Time         // when each agent was last @mentioned
+	lastPaneSnapshot    map[string]string            // last captured pane content per agent (for change detection)
+	seenTelegramGroups  map[int64]string             // chat_id -> title, populated by transport
+	counter             int
 	// idPrefix is the Linear-style prefix used for new Issue IDs (e.g.
 	// "NEX" → NEX-1, NEX-2). Derived from the workspace's company_name
 	// via deriveIDPrefix; refreshed on broker init + when the human
@@ -642,6 +647,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/integrations/connect-status", b.requireAuth(b.handleIntegrationConnectStatus))
 	mux.HandleFunc("/integrations/disconnect", b.requireAuth(b.handleIntegrationDisconnect))
 	mux.HandleFunc("/integrations/audit", b.requireAuth(b.handleIntegrationAudit))
+	mux.HandleFunc("/integrations/resolve", b.requireAuth(b.handleIntegrationResolve))
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/scheduler/", b.requireAuth(b.handleSchedulerSubpath))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
@@ -1081,6 +1087,7 @@ func (b *Broker) Reset() {
 	b.tasks = []teamTask{}
 	b.requests = nil
 	b.approvalAudit = nil
+	b.connectionRegistry = nil
 	b.humanInvites = nil
 	b.humanSessions = nil
 	b.humanSessionRevoke = nil

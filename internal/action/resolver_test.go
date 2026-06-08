@@ -103,6 +103,49 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestResolve(t *testing.T) {
+	cases := []struct {
+		name          string
+		in            ResolveInput
+		wantDecision  Decision
+		wantEffective ConnectionState
+	}{
+		// probe succeeded: effective == probed
+		{"probe connected mutating -> approve", ResolveInput{ProbeOK: true, Probed: StateConnected}, DecisionApprove, StateConnected},
+		{"probe connected read-only -> proceed", ResolveInput{ProbeOK: true, Probed: StateConnected, ReadOnly: true}, DecisionProceed, StateConnected},
+		{"probe missing -> connect", ResolveInput{ProbeOK: true, Probed: StateMissing}, DecisionConnect, StateMissing},
+		{"probe unsupported -> fallback", ResolveInput{ProbeOK: true, Probed: StateUnsupported}, DecisionFallback, StateUnsupported},
+		// probe FAILED (provider unreachable): serve fresh connected last-known-good
+		{"outage + fresh connected LKG -> approve", ResolveInput{ProbeOK: false, LastKnown: StateConnected, LastKnownFresh: true}, DecisionApprove, StateConnected},
+		{"outage + fresh connected LKG read-only -> proceed", ResolveInput{ProbeOK: false, LastKnown: StateConnected, LastKnownFresh: true, ReadOnly: true}, DecisionProceed, StateConnected},
+		// probe FAILED + last-known NOT fresh -> indeterminate (block-with-retry), never connect
+		{"outage + stale connected LKG -> fail_safe", ResolveInput{ProbeOK: false, LastKnown: StateConnected, LastKnownFresh: false}, DecisionFailSafe, StateIndeterminate},
+		// probe FAILED + last-known not connected -> indeterminate, never connect (no false prompt)
+		{"outage + missing LKG -> fail_safe", ResolveInput{ProbeOK: false, LastKnown: StateMissing, LastKnownFresh: true}, DecisionFailSafe, StateIndeterminate},
+		{"outage + no LKG -> fail_safe", ResolveInput{ProbeOK: false, LastKnown: StateUnknown}, DecisionFailSafe, StateIndeterminate},
+	}
+	for _, c := range cases {
+		gotDecision, gotEffective := Resolve(c.in)
+		if gotDecision != c.wantDecision || gotEffective != c.wantEffective {
+			t.Errorf("%s: Resolve(%+v) = (%q, %q), want (%q, %q)", c.name, c.in, gotDecision, gotEffective, c.wantDecision, c.wantEffective)
+		}
+	}
+}
+
+// TestResolveOutageNeverConnects guards the fail-safe invariant: a provider
+// outage must never produce a connect decision (which would be a false prompt),
+// regardless of the last-known state, unless that state is a fresh connection.
+func TestResolveOutageNeverConnects(t *testing.T) {
+	for _, lk := range []ConnectionState{StateUnknown, StateMissing, StateFailed, StatePending, StateConnected} {
+		for _, fresh := range []bool{false, true} {
+			d, _ := Resolve(ResolveInput{ProbeOK: false, LastKnown: lk, LastKnownFresh: fresh})
+			if d == DecisionConnect {
+				t.Errorf("outage with last-known %q (fresh=%v) produced connect; outages must never prompt connect", lk, fresh)
+			}
+		}
+	}
+}
+
 // TestClassifyNeverProceedsUnconnectedMutating is the load-bearing invariant:
 // no mutating action may proceed without a connected state. This guards the
 // core promise of the resolver against future edits to Classify.

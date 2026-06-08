@@ -125,6 +125,46 @@ func Classify(in ClassifyInput) Decision {
 	}
 }
 
+// ResolveInput combines a fresh probe with the last-known-good registry state so
+// the resolver can decide deterministically even when the provider API is
+// unreachable. It is pure data (no I/O) so the fail-safe logic — the bug-prone
+// part — is exhaustively testable.
+type ResolveInput struct {
+	// ReadOnly reports whether the action is a pure information read.
+	ReadOnly bool
+	// Probed is the state returned by the live probe. Ignored when ProbeOK is
+	// false.
+	Probed ConnectionState
+	// ProbeOK is false when the probe CALL itself failed (provider unreachable).
+	ProbeOK bool
+	// LastKnown is the registry's cached state for this platform, or
+	// StateUnknown if the registry has no entry.
+	LastKnown ConnectionState
+	// LastKnownFresh reports whether LastKnown was verified within the staleness
+	// TTL. Only a fresh, connected last-known state is trusted during an outage.
+	LastKnownFresh bool
+	// HasGrant reports whether a live, in-scope grant authorizes this action.
+	HasGrant bool
+}
+
+// Resolve folds a fresh probe and the cached registry state into a single
+// Decision plus the effective ConnectionState that produced it. When the probe
+// call fails, it serves a fresh, connected last-known-good state so a provider
+// outage does not manufacture a false "connect" prompt; otherwise it surfaces
+// the outage as indeterminate (→ fail-safe, block-with-retry). It never trusts a
+// stale or non-connected last-known state during an outage.
+func Resolve(in ResolveInput) (Decision, ConnectionState) {
+	effective := in.Probed
+	if !in.ProbeOK {
+		if in.LastKnown == StateConnected && in.LastKnownFresh {
+			effective = StateConnected
+		} else {
+			effective = StateIndeterminate
+		}
+	}
+	return Classify(ClassifyInput{ReadOnly: in.ReadOnly, State: effective, HasGrant: in.HasGrant}), effective
+}
+
 // readOnlyActionVerbs are unambiguous information-read verbs. Matched as WHOLE
 // TOKENS (splitting action_id on - _ . / space), never as substrings —
 // substring matching is too permissive (e.g. "get" inside "budget", "find"
