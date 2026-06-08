@@ -19,44 +19,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-// readOnlyActionVerbs are unambiguous information-read verbs. Matched as
-// WHOLE TOKENS (splitting action_id on - _ . / space), never as substrings —
-// substring matching is too permissive (e.g. "get" matches inside "budget",
-// "find" inside "findone_and_update", "view" inside "review_delete"). The
-// list is intentionally narrower than the operator might expect: ambiguous
-// nouns like "status", "count", "view", "query", "find", "summary" appear in
-// both read and write action names ("update_status", "post_summary",
-// "findone_and_update") and are excluded so mutating actions can never be
-// misclassified.
-var readOnlyActionVerbs = map[string]struct{}{
-	"search":    {},
-	"list":      {},
-	"read":      {},
-	"get":       {},
-	"fetch":     {},
-	"browse":    {},
-	"describe":  {},
-	"show":      {},
-	"lookup":    {},
-	"summarize": {},
-}
-
-// mutatingActionVerbs are unambiguous state-changing verbs. If ANY of these
-// appears as a whole token in the action_id, the action is never classified
-// read-only — even if a read verb is also present. This guards against
-// composite action names like "GMAIL_LIST_AND_DELETE" or "FIND_AND_UPDATE":
-// a single read verb is not enough; a single mutating verb vetoes.
-var mutatingActionVerbs = map[string]struct{}{
-	"send": {}, "create": {}, "update": {}, "delete": {}, "post": {},
-	"put": {}, "patch": {}, "remove": {}, "insert": {}, "write": {},
-	"clear": {}, "reset": {}, "archive": {}, "star": {}, "unstar": {},
-	"mark": {}, "publish": {}, "add": {}, "move": {}, "invite": {},
-	"accept": {}, "reject": {}, "approve": {}, "cancel": {}, "refund": {},
-	"charge": {}, "pay": {}, "enable": {}, "disable": {}, "revoke": {},
-	"grant": {}, "set": {}, "draft": {}, "schedule": {}, "upload": {},
-	"replace": {}, "transfer": {}, "merge": {}, "split": {},
-}
-
 // actionApprovalTimeout is how long handleTeamActionExecute will wait for a
 // human decision on a pending approval request before giving up.
 const actionApprovalTimeout = 30 * time.Minute
@@ -70,24 +32,11 @@ func actionIDSeparator(r rune) bool {
 }
 
 // actionIsReadOnly reports whether an action_id is safe to run without human
-// approval. A read-only action has at least one read verb AND no mutating
-// verb appearing as a whole token.
+// approval. It delegates to action.ActionIsReadOnly so the read/write verb
+// tables live in exactly one place — the gate and the broker resolver classify
+// identically, with no drift risk between two copies.
 func actionIsReadOnly(actionID string) bool {
-	id := strings.ToLower(strings.TrimSpace(actionID))
-	if id == "" {
-		return false
-	}
-	tokens := strings.FieldsFunc(id, actionIDSeparator)
-	hasRead := false
-	for _, tok := range tokens {
-		if _, ok := mutatingActionVerbs[tok]; ok {
-			return false
-		}
-		if _, ok := readOnlyActionVerbs[tok]; ok {
-			hasRead = true
-		}
-	}
-	return hasRead
+	return action.ActionIsReadOnly(actionID)
 }
 
 // approvalContext is the metadata requireTeamActionApproval surfaces to the
@@ -761,6 +710,16 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 				if decision.Account != nil && strings.TrimSpace(decision.Account.Key) != "" {
 					args.ConnectionKey = strings.TrimSpace(decision.Account.Key)
 				}
+			default:
+				// Fail closed. The resolver answered (derr == nil) but with a
+				// decision this gate does not recognize — an empty body, a new
+				// verdict the broker added without updating the gate, or a
+				// tampered response. An unrecognized decision must NEVER become
+				// an implicit proceed; block and let the agent retry.
+				return toolError(fmt.Errorf(
+					"%s could not be resolved (unrecognized decision %q); not running the action — retry shortly",
+					platformDisplay(args.Platform), strings.TrimSpace(decision.Decision),
+				)), nil, nil
 			}
 		}
 	}

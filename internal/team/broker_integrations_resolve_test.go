@@ -131,6 +131,59 @@ func TestResolveConnectedApproveAndReadOnlyProceed(t *testing.T) {
 	}
 }
 
+func TestMaskSensitivePayload(t *testing.T) {
+	in := map[string]any{
+		"to":                   "lead@acme.com",
+		"token":                "secret-1",
+		"connected_account_id": "ca_123",
+		"user_id":              "u_456",
+		"nested": map[string]any{
+			"api_key": "secret-2",
+			"subject": "Hi",
+		},
+		"recipients": []any{
+			map[string]any{"email": "a@b.com", "access_token": "secret-3"},
+			"plain-string",
+		},
+	}
+	out := maskSensitivePayload(in)
+
+	if out["to"] != "lead@acme.com" {
+		t.Errorf("non-sensitive value altered: %v", out["to"])
+	}
+	for _, k := range []string{"token", "connected_account_id", "user_id"} {
+		if out[k] != "***" {
+			t.Errorf("top-level sensitive key %q not masked: %v", k, out[k])
+		}
+	}
+	nested, _ := out["nested"].(map[string]any)
+	if nested == nil || nested["api_key"] != "***" {
+		t.Errorf("nested map secret not masked: %v", out["nested"])
+	}
+	if nested["subject"] != "Hi" {
+		t.Errorf("nested non-secret altered: %v", nested["subject"])
+	}
+	arr, _ := out["recipients"].([]any)
+	if len(arr) != 2 {
+		t.Fatalf("array shape changed: %v", out["recipients"])
+	}
+	first, _ := arr[0].(map[string]any)
+	if first == nil || first["access_token"] != "***" {
+		t.Errorf("secret inside array-of-maps escaped the mask: %v", arr[0])
+	}
+	if first["email"] != "a@b.com" {
+		t.Errorf("non-secret inside array altered: %v", first["email"])
+	}
+	if arr[1] != "plain-string" {
+		t.Errorf("scalar array element altered: %v", arr[1])
+	}
+
+	// The original input must never be mutated.
+	if in["token"] != "secret-1" {
+		t.Errorf("maskSensitivePayload mutated its input")
+	}
+}
+
 func TestResolveRejectsMissingFields(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	b := NewBrokerAt(filepath.Join(t.TempDir(), "state.json"))

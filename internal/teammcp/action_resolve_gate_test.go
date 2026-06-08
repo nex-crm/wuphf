@@ -2,6 +2,8 @@ package teammcp
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -135,5 +137,49 @@ func TestHandleTeamActionExecuteReadOnlyBypassesGate(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("read-only action should execute via the provider exactly once, got %d", calls)
+	}
+}
+
+// A resolver response with an unrecognized decision string must fail CLOSED:
+// the action is blocked and the provider is never called. This guards the
+// fail-open hole where an empty/garbled/novel decision fell through the switch.
+func TestHandleTeamActionExecuteFailsClosedOnUnknownDecision(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/integrations/resolve" {
+			_, _ = w.Write([]byte(`{"decision":"bogus","platform":"gmail"}`))
+			return
+		}
+		// Other broker calls (e.g. channel resolution) get a benign response;
+		// the gate must block before reaching the approval/execute path.
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	t.Setenv("WUPHF_TEAM_BROKER_URL", srv.URL)
+	t.Setenv("WUPHF_BROKER_TOKEN", "test-token")
+
+	calls := 0
+	prev := externalActionProvider
+	externalActionProvider = &recordingActionProvider{calls: &calls}
+	defer func() { externalActionProvider = prev }()
+
+	res, _, err := handleTeamActionExecute(context.Background(), nil, TeamActionExecuteArgs{
+		Platform: "gmail",
+		ActionID: "GMAIL_SEND_EMAIL",
+		MySlug:   "ceo",
+		Channel:  "general",
+	})
+	if err != nil {
+		t.Fatalf("unexpected go error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected a fail-closed error result, got %+v", res)
+	}
+	if text := resolveGateResultText(t, res); !strings.Contains(text, "unrecognized decision") {
+		t.Fatalf("expected unrecognized-decision message, got: %s", text)
+	}
+	if calls != 0 {
+		t.Fatalf("provider executed on an unknown decision; the gate must fail closed (calls=%d)", calls)
 	}
 }

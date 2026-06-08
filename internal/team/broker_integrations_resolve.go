@@ -241,10 +241,15 @@ var sensitivePayloadKeys = map[string]struct{}{
 	"authorization": {}, "api_key": {}, "apikey": {}, "token": {},
 	"access_token": {}, "refresh_token": {}, "secret": {}, "client_secret": {},
 	"password": {}, "private_key": {}, "bearer": {},
+	// Composio-internal routing identifiers: they authenticate future calls
+	// against the connected account and carry no human-readable meaning for the
+	// approver, so they are masked rather than surfaced in the modal or logs.
+	"connected_account_id": {}, "user_id": {},
 }
 
 // maskSensitivePayload returns a copy of m with sensitive values replaced by a
-// fixed mask, recursing into nested maps. The original map is never mutated.
+// fixed mask, recursing into nested maps AND into arrays of maps so a secret
+// nested inside a list cannot escape the mask. The original is never mutated.
 func maskSensitivePayload(m map[string]any) map[string]any {
 	if len(m) == 0 {
 		return nil
@@ -255,11 +260,24 @@ func maskSensitivePayload(m map[string]any) map[string]any {
 			out[k] = "***"
 			continue
 		}
-		if nested, ok := v.(map[string]any); ok {
-			out[k] = maskSensitivePayload(nested)
-			continue
-		}
-		out[k] = v
+		out[k] = maskSensitiveValue(v)
 	}
 	return out
+}
+
+// maskSensitiveValue masks nested maps and arrays-of-maps, leaving scalars
+// untouched.
+func maskSensitiveValue(v any) any {
+	switch nested := v.(type) {
+	case map[string]any:
+		return maskSensitivePayload(nested)
+	case []any:
+		masked := make([]any, len(nested))
+		for i, elem := range nested {
+			masked[i] = maskSensitiveValue(elem)
+		}
+		return masked
+	default:
+		return v
+	}
 }
