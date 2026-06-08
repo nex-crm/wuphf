@@ -9,6 +9,32 @@ package team
 
 import "testing"
 
+// TestDecisionActorFromSlug pins the attribution rule the gate trusts: a
+// human-sender slug is human; an agent/CEO/system slug is not; and — the
+// footgun — an EMPTY slug is NOT human even though isHumanMessageSender("")
+// returns true. The empty check inside decisionActorFromSlug is load-bearing.
+func TestDecisionActorFromSlug(t *testing.T) {
+	cases := []struct {
+		slug        string
+		wantIsHuman bool
+	}{
+		{"human", true},
+		{"human:nazz", true},
+		{humanMessageSender("nazz"), true},
+		{"ceo", false},
+		{"owner", false},
+		{"system", false},
+		{"executor", false},
+		{"", false},    // footgun: isHumanMessageSender("") is true
+		{"   ", false}, // trims to empty
+	}
+	for _, tc := range cases {
+		if got := decisionActorFromSlug(tc.slug); got.isHuman != tc.wantIsHuman {
+			t.Errorf("decisionActorFromSlug(%q).isHuman = %v, want %v", tc.slug, got.isHuman, tc.wantIsHuman)
+		}
+	}
+}
+
 func TestPlanMode_DecisionPathRejectsNonHumanApprove(t *testing.T) {
 	b := newTestBroker(t)
 	seedPlanningTask(t, b, "OFFICE-D1", "executor")

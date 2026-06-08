@@ -596,6 +596,19 @@ func taskCanMatchScopedIdentity(task *teamTask, match taskReuseMatch) bool {
 // must still find the already-minted task in its per-task channel.
 // The Backup & Migration system task has a unique title so it is never
 // matched accidentally.
+//
+// Dedup scope (intentional, bounded): with no thread or scoped identity the
+// match is title + owner only, so two genuinely-distinct intents that share a
+// title AND owner can collapse into one. That over-match is bounded two ways —
+// terminal tasks are skipped (a finished same-title task is never reused; a
+// fresh one is minted), and the only collision that survives is between two
+// concurrently-active identical-title-and-owner tasks, which in practice is a
+// resubmission of the same intent (idempotent re-plan) — exactly the case the
+// channel-agnostic search exists to dedup. Callers that need precise identity
+// (distinct intents sharing a title) pass a ThreadID or a scoped identity
+// (PipelineID / SourceSignalID / SourceDecisionID), which narrows the match.
+// TestReuseIsChannelAgnostic and TestFindReusableTaskSkipsTerminal pin both
+// halves of this contract.
 func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 	title := strings.TrimSpace(match.Title)
 	threadID := strings.TrimSpace(match.ThreadID)

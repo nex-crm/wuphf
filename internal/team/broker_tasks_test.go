@@ -2462,6 +2462,35 @@ func TestReuseIsChannelAgnostic(t *testing.T) {
 	}
 }
 
+// TestFindReusableTaskSkipsTerminal pins the boundary that keeps the
+// channel-agnostic title+owner dedup safe (see findReusableTaskLocked's doc):
+// a TERMINAL same-title task is never reused, while a concurrently-ACTIVE
+// same-title task is — regardless of channel. Together with
+// TestReuseIsChannelAgnostic this fixes the documented dedup scope.
+func TestFindReusableTaskSkipsTerminal(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.tasks = append(b.tasks,
+		teamTask{ID: "OFFICE-T1", Title: "Same title", Owner: "builder", status: "done", Channel: "general"},
+		teamTask{ID: "OFFICE-T2", Title: "Active dup", Owner: "builder", status: "in_progress", Channel: "task-office-t2"},
+	)
+	b.mu.Unlock()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// A terminal same-title task must NOT be reused — a fresh one is minted.
+	if got := b.findReusableTaskLocked(taskReuseMatch{Title: "Same title", Owner: "builder", Channel: "general"}); got != nil {
+		t.Fatalf("terminal same-title task must not be reused; got %s", got.ID)
+	}
+
+	// A concurrently-active same-title task IS reused, even when the create
+	// request names a different channel (channel-agnostic dedup).
+	if got := b.findReusableTaskLocked(taskReuseMatch{Title: "Active dup", Owner: "builder", Channel: "general"}); got == nil || got.ID != "OFFICE-T2" {
+		t.Fatalf("active same-title task must be reused channel-agnostically; got %+v", got)
+	}
+}
+
 func TestBrokerBlockTaskAllowsReadOnlyBlockWhenWriteProbeFails(t *testing.T) {
 	worktreeDir := t.TempDir()
 	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {

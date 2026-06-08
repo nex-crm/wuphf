@@ -2,7 +2,10 @@ package team
 
 import (
 	"context"
+	"fmt"
 	"strings"
+
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 // Per-task reasoning-effort wiring. The new-task composer lets a user pick a
@@ -36,6 +39,49 @@ var codexEffortLevels = map[string]bool{
 	"medium":  true,
 	"high":    true,
 	"xhigh":   true,
+}
+
+// knownEffortLevels is the union of every reasoning-effort level any runner
+// accepts (claudeEffortLevels ∪ codexEffortLevels). The task-create boundary
+// validates an incoming Effort against this union; each runner then
+// re-validates against its own runtime-specific set at dispatch
+// (normalizeClaudeEffort / normalizeCodexEffort). Deriving the union from the
+// two source maps keeps this from drifting into a third hand-maintained copy.
+var knownEffortLevels = func() map[string]bool {
+	levels := make(map[string]bool, len(claudeEffortLevels)+len(codexEffortLevels))
+	for level := range claudeEffortLevels {
+		levels[level] = true
+	}
+	for level := range codexEffortLevels {
+		levels[level] = true
+	}
+	return levels
+}()
+
+// maxTaskModelLen bounds a persisted per-task Model id. The model is free-form
+// (the runtime validates it), but the boundary still caps the length so a
+// stray or hostile payload never lands in broker-state.json. 256 comfortably
+// fits every real provider/model id.
+const maxTaskModelLen = 256
+
+// validateTaskRuntimeFields rejects a task create/update whose per-task LLM
+// runtime override is malformed, validating at the system boundary instead of
+// trusting the composer to have done it. Provider must be a known runtime kind
+// (provider.ValidateKind); Effort must be a recognised reasoning level (the
+// claude ∪ codex union — dispatch refines it per the resolved runtime); Model
+// is free-form but length-bounded. Empty values are always valid and mean
+// "fall back to the owner binding, then the global default".
+func validateTaskRuntimeFields(providerKind, model, effort string) error {
+	if err := provider.ValidateKind(strings.TrimSpace(providerKind)); err != nil {
+		return fmt.Errorf("invalid task provider: %w", err)
+	}
+	if level := strings.ToLower(strings.TrimSpace(effort)); level != "" && !knownEffortLevels[level] {
+		return fmt.Errorf("invalid task effort %q (valid: minimal, low, medium, high, xhigh, max, or empty)", effort)
+	}
+	if trimmed := strings.TrimSpace(model); len(trimmed) > maxTaskModelLen {
+		return fmt.Errorf("task model id too long (%d characters; max %d)", len(trimmed), maxTaskModelLen)
+	}
+	return nil
 }
 
 // normalizeClaudeEffort lower-cases and validates effort against the claude

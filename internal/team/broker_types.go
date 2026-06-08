@@ -696,8 +696,11 @@ type teamSkill struct {
 }
 
 type brokerState struct {
-	ChannelStore       json.RawMessage                `json:"channel_store,omitempty"`
-	Messages           []channelMessage               `json:"messages"`
+	ChannelStore json.RawMessage  `json:"channel_store,omitempty"`
+	Messages     []channelMessage `json:"messages"`
+	// Incidents keeps the legacy wire key "agent_issues" so broker-state.json
+	// files written before the Issue→Incident rename still load unchanged. The
+	// in-memory/Go name is Incident; only the persisted JSON tag is frozen.
 	Incidents          []incidentRecord               `json:"agent_issues,omitempty"`
 	Members            []officeMember                 `json:"members,omitempty"`
 	Channels           []teamChannel                  `json:"channels,omitempty"`

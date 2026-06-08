@@ -1,4 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+
+import { collectReactErrors, waitForReactMount } from "./_helpers";
 
 // Guards the class of regression that broke for users after the Garry Tan RT:
 // React render-time crash ("Minified React error #31 — Objects are not valid
@@ -8,40 +10,9 @@ import { expect, type Page, test } from "@playwright/test";
 // Assumes wuphf was started with ~/.wuphf/onboarded.json pre-seeded so the
 // app lands in the Shell (where the React #31 crash lived) rather than the
 // onboarding Wizard. Wizard coverage lives in wizard.spec.ts.
-
-function collectReactErrors(page: Page): () => string[] {
-  const errors: string[] = [];
-  page.on("pageerror", (err) => errors.push(err.message));
-  page.on("console", (msg) => {
-    if (msg.type() === "error") {
-      const text = msg.text();
-      // The boundary's own log line is `[WUPHF ErrorBoundary]` (single word,
-      // no space) — see web/src/App.tsx:69. The previous "Error boundary"
-      // substring never matched and was silent dead code.
-      if (
-        text.includes("Minified React error") ||
-        text.includes("WUPHF ErrorBoundary")
-      ) {
-        errors.push(text);
-      }
-    }
-  });
-  return () => errors;
-}
-
-// Wait for React's first commit: the static #skeleton placeholder is gone
-// and React has committed something into #root.
-async function waitForReactMount(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () => {
-      const root = document.getElementById("root");
-      if (!root) return false;
-      if (document.getElementById("skeleton")) return false;
-      return root.children.length > 0;
-    },
-    { timeout: 10_000 },
-  );
-}
+//
+// The React-error and shell-readiness helpers live in `_helpers.ts` so the
+// contract stays in one place (this spec used to inline its own copies).
 
 test.describe("wuphf web UI smoke (shell)", () => {
   test("initial page render does not trip the React error boundary", async ({

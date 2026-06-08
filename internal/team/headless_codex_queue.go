@@ -50,25 +50,25 @@ func (l *Launcher) laneForTurn(slug string, turn headlessCodexTurn) headlessLane
 	slug = strings.TrimSpace(slug)
 	taskID := strings.TrimSpace(turn.TaskID)
 	if taskID == "" || l == nil || l.broker == nil {
-		return headlessLane{slug: slug}
+		return slugLane(slug)
 	}
 	if slug == l.targeter().LeadSlug() {
-		return headlessLane{slug: slug}
+		return slugLane(slug)
 	}
 	task := l.broker.TaskByID(taskID)
 	if task == nil {
-		return headlessLane{slug: slug}
+		return slugLane(slug)
 	}
 	if taskRunsInIsolatedWorktree(task) {
-		return headlessLane{slug: slug, key: strings.TrimSpace(task.WorktreePath)}
+		return worktreeLane(slug, task.WorktreePath)
 	}
 	if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
 		// Worktree mode but no path assigned yet — serialize on the default lane
 		// until syncTaskWorktreeLocked prepares the tree, so it can't race a
 		// sibling turn in cwd before its workspace exists.
-		return headlessLane{slug: slug}
+		return slugLane(slug)
 	}
-	return headlessLane{slug: slug, key: "task:" + taskID}
+	return taskLane(slug, taskID)
 }
 
 func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string, channel ...string) {
@@ -500,7 +500,7 @@ func (l *Launcher) finishHeadlessTurn(lane headlessLane) {
 	}
 	// Check if the lead already has work queued — no need to wake it. The lead
 	// always runs in its one default lane.
-	if shouldWakeLead && len(l.headless.queues[headlessLane{slug: lead}]) > 0 {
+	if shouldWakeLead && len(l.headless.queues[slugLane(lead)]) > 0 {
 		shouldWakeLead = false
 	}
 	if shouldWakeLead && l.headless.deferredLead != nil {

@@ -858,10 +858,10 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		if requestChangesTriggered {
 			feedback := strings.TrimSpace(body.Details)
 			b.postTaskRequestChangesNotificationsLocked(actor, task, feedback)
-			b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, feedback)
+			b.AppendPacketFeedbackLocked(task.ID, actor, feedback)
 		}
 		if action == "comment" {
-			b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, strings.TrimSpace(body.Details))
+			b.AppendPacketFeedbackLocked(task.ID, actor, strings.TrimSpace(body.Details))
 		}
 		if submitForReviewTriggered {
 			// Capture the submitted artifact (code, copy, plan) into
@@ -869,13 +869,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// the exact submission inline in the unified Inbox.
 			artifact := strings.TrimSpace(body.Details)
 			if artifact != "" {
-				b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, "📤 Submitted for review:\n"+artifact)
+				b.AppendPacketFeedbackLocked(task.ID, actor, "📤 Submitted for review:\n"+artifact)
 			}
 		}
 		if rejectTriggered {
 			feedback := strings.TrimSpace(body.Details)
 			b.postTaskRejectedNotificationsLocked(actor, task, feedback)
-			b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, feedback)
+			b.AppendPacketFeedbackLocked(task.ID, actor, feedback)
 		}
 		if err := b.saveLocked(); err != nil {
 			rollbackTask()

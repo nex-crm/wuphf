@@ -62,6 +62,15 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Validate the per-task LLM runtime override at the boundary (covers
+		// both the reuse-merge and fresh-create branches below) so a malformed
+		// provider/effort never lands in broker-state.json.
+		if err := validateTaskRuntimeFields(item.Provider, item.Model, item.Effort); err != nil {
+			rollbackPlan()
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
 		// Resolve depends_on: accept both task IDs and titles
 		resolvedDeps := make([]string, 0, len(item.DependsOn))
 		for _, dep := range item.DependsOn {
@@ -261,6 +270,11 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 	}
 	if !b.canAccessChannelLocked(input.CreatedBy, channel) {
 		return teamTask{}, false, fmt.Errorf("channel access denied")
+	}
+	// Validate the per-task LLM runtime override at the boundary (covers both
+	// the reuse-merge and fresh-create branches below).
+	if err := validateTaskRuntimeFields(input.Provider, input.Model, input.Effort); err != nil {
+		return teamTask{}, false, err
 	}
 	mutationSnapshot := snapshotBrokerTaskMutationLocked(b)
 	rollbackTask := func() {

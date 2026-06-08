@@ -756,6 +756,29 @@ func (a recordDecisionAction) IsCanonical() bool {
 // surfaces it as 400 to distinguish from internal failures (500).
 var ErrUnknownDecisionAction = errors.New("record decision: action is not canonical")
 
+// decisionActor identifies who is recording a task decision and, critically,
+// whether they are a human. Human-ness is resolved ONCE — at the request
+// boundary (handleTaskDecision distinguishes a remote human session from a
+// shared-broker-token caller) or by the slug-based wrappers below — and then
+// carried as a typed bool, so the Plan-mode gate in recordTaskDecisionInternal
+// asserts on actor.isHuman instead of re-deriving it from a slug string. That
+// closes the isHumanMessageSender("") == true footgun on the gate's hot path
+// and makes the soft gate's trust boundary explicit.
+type decisionActor struct {
+	slug    string
+	isHuman bool
+}
+
+// decisionActorFromSlug derives a decisionActor from a slug alone, preserving
+// the legacy attribution rule (a human-sender slug is a human; an empty slug is
+// not — isHumanMessageSender("") is true, so the empty check is load-bearing).
+// Used by the string-based public wrappers; the HTTP boundary builds its actor
+// directly so it never round-trips human-ness through a spoofable string.
+func decisionActorFromSlug(slug string) decisionActor {
+	slug = strings.TrimSpace(slug)
+	return decisionActor{slug: slug, isHuman: slug != "" && isHumanMessageSender(slug)}
+}
+
 // RecordTaskDecisionWithComment is the same as RecordTaskDecision but
 // also appends an optional human-authored comment to the Decision
 // Packet's spec.feedback log. The feedback append, the lifecycle
@@ -769,7 +792,7 @@ func (b *Broker) RecordTaskDecisionWithComment(taskID, rawAction, comment, autho
 	if actorSlug == "" {
 		actorSlug = "human"
 	}
-	return b.recordTaskDecisionInternal(taskID, rawAction, actorSlug, comment)
+	return b.recordTaskDecisionInternal(taskID, rawAction, decisionActorFromSlug(actorSlug), comment)
 }
 
 // RecordTaskDecision records a decision attributed to actorSlug. When
@@ -778,14 +801,14 @@ func (b *Broker) RecordTaskDecisionWithComment(taskID, rawAction, comment, autho
 // requestActor.Slug; internal callers (timeout sweeper, tests) can
 // pass "" to opt into the system fallback.
 func (b *Broker) RecordTaskDecision(taskID, rawAction, actorSlug string) error {
-	return b.recordTaskDecisionInternal(taskID, rawAction, actorSlug, "")
+	return b.recordTaskDecisionInternal(taskID, rawAction, decisionActorFromSlug(actorSlug), "")
 }
 
 // recordTaskDecisionInternal is the shared chokepoint behind
 // RecordTaskDecision and RecordTaskDecisionWithComment. It transitions
 // the lifecycle, stamps the packet, optionally appends a FeedbackItem,
 // then persists / emits / broadcasts — all inside one locked section.
-func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, comment string) error {
+func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor decisionActor, comment string) error {
 	if b == nil {
 		return fmt.Errorf("record decision: nil broker")
 	}
@@ -808,7 +831,7 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 	if !action.IsCanonical() {
 		return fmt.Errorf("%w: %q", ErrUnknownDecisionAction, rawAction)
 	}
-	actorSlug = strings.TrimSpace(actorSlug)
+	actorSlug := strings.TrimSpace(actor.slug)
 	if actorSlug == "" {
 		actorSlug = "system"
 	}
@@ -853,7 +876,7 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 		// A plan awaiting approval may only be started by the human; an agent
 		// or the CEO approving on the human's behalf defeats the gate.
 		if action == RecordDecisionApprove && currentState == LifecycleStatePlanning &&
-			!isHumanMessageSender(actorSlug) {
+			!actor.isHuman {
 			return fmt.Errorf("record decision: task %s is in Plan mode — only the human can approve the plan and start work (actor %q)", taskID, actorSlug)
 		}
 		target, reason = lifecycleStateForDecisionAction(action, currentState, planFirst)

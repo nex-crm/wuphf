@@ -150,6 +150,19 @@ type headlessLane struct {
 	key  string // resolved worktree path, or "" for the agent's default lane
 }
 
+// Lane constructors. Three shapes exist; routing them through named
+// constructors keeps the empty-key default-lane intent and the "task:" key
+// prefix in one place instead of scattered struct literals (laneForTurn).
+func slugLane(slug string) headlessLane { return headlessLane{slug: slug} }
+
+func worktreeLane(slug, worktreePath string) headlessLane {
+	return headlessLane{slug: slug, key: strings.TrimSpace(worktreePath)}
+}
+
+func taskLane(slug, taskID string) headlessLane {
+	return headlessLane{slug: slug, key: "task:" + taskID}
+}
+
 // headlessWorkerPool groups the per-launcher headless-dispatch state
 // (PLAN.md §C7). All fields are lowercase package-internal — the pool
 // is never used outside `internal/team` and stays an embedded value

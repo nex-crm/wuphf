@@ -53,6 +53,44 @@ func TestNormalizeCodexEffort(t *testing.T) {
 	}
 }
 
+func TestValidateTaskRuntimeFields(t *testing.T) {
+	longModel := strings.Repeat("m", maxTaskModelLen+1)
+	cases := []struct {
+		name        string
+		provider    string
+		model       string
+		effort      string
+		wantErr     bool
+		errContains string
+	}{
+		{name: "all empty falls back to defaults"},
+		{name: "valid claude-code + model + effort", provider: "claude-code", model: "claude-opus-4-8", effort: "max"},
+		{name: "valid codex + minimal effort", provider: "codex", model: "gpt-5.5", effort: "minimal"},
+		{name: "effort case-insensitive", provider: "codex", effort: " High "},
+		{name: "claude-only level accepted at boundary (union)", provider: "codex", effort: "max"},
+		{name: "unknown provider rejected", provider: "made-up", wantErr: true, errContains: "provider"},
+		{name: "unknown effort rejected", provider: "claude-code", effort: "turbo", wantErr: true, errContains: "effort"},
+		{name: "oversized model rejected", model: longModel, wantErr: true, errContains: "too long"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateTaskRuntimeFields(tc.provider, tc.model, tc.effort)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("validateTaskRuntimeFields(%q,%q,%q) = nil, want error", tc.provider, tc.model, tc.effort)
+				}
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
+					t.Errorf("error %q does not contain %q", err.Error(), tc.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("validateTaskRuntimeFields(%q,%q,%q) = %v, want nil", tc.provider, tc.model, tc.effort, err)
+			}
+		})
+	}
+}
+
 // TestEffortRoundTripsThroughWire confirms the new effort field survives a
 // marshal/unmarshal cycle with the stable wire key "effort".
 func TestEffortRoundTripsThroughWire(t *testing.T) {
