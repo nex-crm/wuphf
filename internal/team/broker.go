@@ -67,6 +67,7 @@ type Broker struct {
 	memberPresence    map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
 	presenceKeyToSlug map[string]string               // "adapter:key" → slug; guarded by mu
 	channels          []teamChannel
+	channelIndex      map[string]int // slug → index into channels; guarded by mu
 	sessionMode       string
 	oneOnOneAgent     string
 	focusMode         bool
@@ -1173,10 +1174,11 @@ func (b *Broker) FocusModeEnabled() bool {
 
 func (b *Broker) findChannelLocked(slug string) *teamChannel {
 	slug = normalizeChannelSlug(slug)
-	for i := range b.channels {
-		if b.channels[i].Slug == slug {
-			return &b.channels[i]
-		}
+	if len(b.channelIndex) != len(b.channels) {
+		b.rebuildChannelIndexLocked()
+	}
+	if i, ok := b.channelIndex[slug]; ok && i < len(b.channels) && b.channels[i].Slug == slug {
+		return &b.channels[i]
 	}
 	return nil
 }
@@ -1238,6 +1240,17 @@ func (b *Broker) rebuildMemberIndexLocked() {
 	b.memberIndex = make(map[string]int, len(b.members))
 	for i, m := range b.members {
 		b.memberIndex[m.Slug] = i
+	}
+}
+
+// rebuildChannelIndexLocked rebuilds channelIndex from b.channels. Callers must
+// hold b.mu. Called on load and after any structural mutation (remove, reorder)
+// to keep the map in sync with the slice. Appends and in-place updates are
+// handled by findChannelLocked's length-check lazy rebuild.
+func (b *Broker) rebuildChannelIndexLocked() {
+	b.channelIndex = make(map[string]int, len(b.channels))
+	for i, ch := range b.channels {
+		b.channelIndex[ch.Slug] = i
 	}
 }
 

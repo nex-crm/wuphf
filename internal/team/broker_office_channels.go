@@ -831,18 +831,16 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "cannot remove channel", http.StatusBadRequest)
 				return
 			}
-			idx := -1
-			for i := range b.channels {
-				if b.channels[i].Slug == slug {
-					idx = i
-					break
-				}
+			if len(b.channelIndex) != len(b.channels) {
+				b.rebuildChannelIndexLocked()
 			}
-			if idx == -1 {
+			idx, ok := b.channelIndex[slug]
+			if !ok || idx >= len(b.channels) || b.channels[idx].Slug != slug {
 				http.Error(w, "channel not found", http.StatusNotFound)
 				return
 			}
 			b.channels = append(b.channels[:idx], b.channels[idx+1:]...)
+			b.rebuildChannelIndexLocked()
 			filteredMessages := b.messages[:0]
 			for _, msg := range b.messages {
 				if normalizeChannelSlug(msg.Channel) != slug {
