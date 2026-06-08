@@ -94,11 +94,14 @@ func (r *Registry) ProviderNamed(name string, cap Capability) (Provider, error) 
 }
 
 // preferredProvidersFor returns providers in the order they should be tried
-// for a capability. One CLI wins by default because it is local-first and
-// personal — no SaaS account required, auth handled by the local CLI.
-// Composio is the fallback for tools One does not cover, since Composio has
-// a broader third-party catalog but requires a paid API key and cloud auth.
-// The user can still pin a specific provider via `/config set action_provider`.
+// for a capability. Composio wins by default: it is the canonical integration
+// plane the product surfaces (the Integrations app, OAuth, the catalog, and the
+// connection resolver all speak Composio). The connection a human establishes in
+// the Integrations app is a Composio connection, so execution must route there
+// too — trying One first let a Composio-connected action misroute to a provider
+// the human never connected. One CLI remains a fallback for the local-first
+// power user, and a specific provider can still be pinned via
+// `/config set action_provider`.
 func preferredProvidersFor(cap Capability) []string {
 	switch cap {
 	case CapabilityConnections,
@@ -109,14 +112,14 @@ func preferredProvidersFor(cap Capability) []string {
 		CapabilityRelayEventTypes,
 		CapabilityRelayCreate,
 		CapabilityRelayActivate:
-		return []string{"one", "composio"}
+		return []string{"composio", "one"}
 	case CapabilityWorkflowCreate,
 		CapabilityWorkflowExecute,
 		CapabilityWorkflowRuns,
 		CapabilityRelayEvents,
 		CapabilityRelayEvent:
-		return []string{"one", "composio"}
+		return []string{"composio", "one"}
 	default:
-		return []string{"one", "composio"}
+		return []string{"composio", "one"}
 	}
 }

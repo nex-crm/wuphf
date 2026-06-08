@@ -737,6 +737,34 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 	}
 	channel := resolveConversationChannel(ctx, slug, args.Channel)
 
+	// Deterministic pre-flight connection gate. Before any human approval or
+	// provider call, classify a MUTATING action against the live connection
+	// state so it can never fire blind into a missing, expired, or unreachable
+	// integration. Read-only actions skip this gate: gating them would double
+	// the provider calls on the hot lookup path, and the hard guarantee only
+	// needs to cover side-effecting actions. DryRun and WUPHF_UNSAFE bypass —
+	// a dry run sends nothing, and unsafe is the operator escape hatch. If the
+	// resolver itself is unreachable we degrade to the human approval gate
+	// below rather than bricking every external action.
+	if !args.DryRun && os.Getenv("WUPHF_UNSAFE") != "1" && !actionIsReadOnly(args.ActionID) {
+		decision, derr := resolveActionDecision(ctx, slug, channel, args)
+		if derr != nil {
+			fmt.Fprintf(os.Stderr, "teammcp: action resolve failed for %s/%s: %v; falling back to approval-only gate\n", args.Platform, args.ActionID, derr)
+		} else {
+			switch strings.ToLower(strings.TrimSpace(decision.Decision)) {
+			case "connect", "wait", "fail_safe", "fallback":
+				return toolError(fmt.Errorf("%s", actionResolveBlockMessage(decision, platformDisplay(args.Platform)))), nil, nil
+			case "proceed", "approve":
+				// Use the connection the resolver actually verified, not the
+				// (often blank or stale) key the agent guessed. This is what
+				// closes the "fires into the wrong/missing connection" gap.
+				if decision.Account != nil && strings.TrimSpace(decision.Account.Key) != "" {
+					args.ConnectionKey = strings.TrimSpace(decision.Account.Key)
+				}
+			}
+		}
+	}
+
 	// Human-in-the-loop gate. Mutating external actions — sending email,
 	// posting to Slack, writing a CRM row, etc. — require explicit human
 	// approval unless --unsafe was passed or the action is a read-only

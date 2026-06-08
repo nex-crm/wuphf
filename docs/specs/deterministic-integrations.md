@@ -85,10 +85,20 @@ Integrations app.
 
 ## Build order
 
-- [ ] **Slice 1** — `ConnectionResolver` + persisted registry +
+- [x] **Slice 1** — `ConnectionResolver` + persisted registry +
   `/integrations/resolve` (backend, unit-tested incl. indeterminate/wait/fail-safe).
-- [ ] **Slice 2** — Wire the gate: classify before approval/execute; close the
-  blind execute path; flip provider routing Composio-first.
+  Commits `d291ebb4` (core) + `cdf016ee` (registry + endpoint).
+- [x] **Slice 2** — Wire the gate (`internal/teammcp/actions.go` +
+  `action_resolve_gate.go`): a mutating action is classified before approval/
+  execute; connect/wait/fail_safe/fallback block the provider call; proceed/
+  approve inject the resolver-verified connection key. Provider routing flipped
+  Composio-first (`registry.go`). **Decisions:** (a) only MUTATING actions hit
+  the gate — read-only bypasses it to avoid doubling provider calls on the hot
+  lookup path; the resolver still *supports* gating reads (`Classify`), it is
+  just not wired on that path. (b) If `/integrations/resolve` is unreachable the
+  gate degrades to the existing human approval gate rather than bricking all
+  actions. **Follow-up:** resolver re-probes Composio on every mutating action;
+  add a "skip probe when registry entry is fresh" path for hot-path latency.
 - [ ] **Slice 3** — `connect` decision kind + web Connect card (reuse shipped
   OAuth); resume blocked action (dedupe + fan-out + timeout).
 - [ ] **Slice 4** — `ExternalActionApprovalCard` reading legacy parse first;
