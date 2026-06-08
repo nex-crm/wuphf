@@ -74,6 +74,14 @@ interface MessageBubbleProps {
   onQuoteReply?: (message: Message) => void;
   /** Copy a permalink to this message. Shown as a hover action when provided. */
   onCopyLink?: (id: string) => void;
+  /**
+   * Channel this bubble belongs to. Required on surfaces that are NOT a
+   * `/channels/$slug` route — e.g. the task-detail chat (`/tasks/$id`), where
+   * `useChannelSlug()` returns null and would otherwise fall back to "general",
+   * sending reactions and the artifact-skeleton probe to the wrong channel.
+   * Omit on the channel route to keep deriving it from the URL.
+   */
+  channel?: string;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -85,8 +93,10 @@ export function MessageBubble({
   onOpenThread,
   onQuoteReply,
   onCopyLink,
+  channel,
 }: MessageBubbleProps) {
-  const currentChannel = useChannelSlug() ?? "general";
+  const routeChannel = useChannelSlug();
+  const currentChannel = channel ?? routeChannel ?? "general";
   // When the chat is rendered inside a task-detail route, this is that
   // task's id. Task-pointer cards (created / lifecycle) use it to detect a
   // self-reference: a card pointing at the very task you are already viewing

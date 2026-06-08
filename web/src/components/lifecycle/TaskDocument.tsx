@@ -1370,17 +1370,7 @@ export function TaskDocument({
       <div className="issue-doc-body issue-doc-body--split">
         <main className="issue-doc-chat" aria-label="Chat">
           <div className="issue-doc-chat-header">Chat</div>
-          <TaskChannelChat
-            taskId={taskId}
-            channel={doc.channel}
-            onCommentPosted={() => {
-              void queryClient.invalidateQueries({
-                queryKey: ["issue", taskId],
-              });
-              void queryClient.invalidateQueries({ queryKey: ["issues"] });
-              void queryClient.invalidateQueries({ queryKey: ["lifecycle"] });
-            }}
-          />
+          <TaskChannelChat channel={doc.channel} />
         </main>
 
         <TaskContextRail

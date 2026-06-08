@@ -40,8 +40,11 @@ export function messagesAfterClearMarker(
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
-export function MessageFeed() {
-  const currentChannel = useChannelSlug() ?? "general";
+export function MessageFeed({ channel }: { channel?: string } = {}) {
+  // Prefer an explicit channel (the task-detail chat passes the task's channel,
+  // where useChannelSlug() is null). Fall back to the channel route slug.
+  const routeChannel = useChannelSlug();
+  const currentChannel = channel ?? routeChannel ?? "general";
   const clearMarkerId = useAppStore(
     (s) => s.clearedMessageIdsByChannel[currentChannel] ?? null,
   );
@@ -106,7 +109,7 @@ export function MessageFeed() {
             Michael would be proud. Probably.
           </span>
         </div>
-        <TypingIndicator />
+        <TypingIndicator channel={currentChannel} />
       </div>
     );
   }
@@ -213,6 +216,7 @@ export function MessageFeed() {
                 setActiveThread({ id, channelSlug: currentChannel })
               }
               onCopyLink={copyMessageLink}
+              channel={currentChannel}
             />
             {hasReplies && (
               <button
@@ -254,6 +258,7 @@ export function MessageFeed() {
                       setActiveThread({ id, channelSlug: currentChannel })
                     }
                     onCopyLink={copyMessageLink}
+                    channel={currentChannel}
                   />
                 ))}
               </div>
@@ -261,7 +266,7 @@ export function MessageFeed() {
           </div>
         );
       })}
-      <TypingIndicator />
+      <TypingIndicator channel={currentChannel} />
     </div>
   );
 }
