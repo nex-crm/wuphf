@@ -44,6 +44,7 @@ import {
   runtimeKindFromMember,
 } from "../../lib/providerBinding";
 import { router } from "../../lib/router";
+import { HOME_COMPOSER_DRAFT_CHANNEL, useAppStore } from "../../stores/app";
 
 type CreateMode = "start" | "backlog" | "routine";
 
@@ -67,6 +68,10 @@ function deriveTitle(prompt: string): string {
 
 export function TaskComposer() {
   const queryClient = useQueryClient();
+  const pendingComposerDraft = useAppStore((s) => s.pendingComposerDraft);
+  const consumePendingComposerDraft = useAppStore(
+    (s) => s.consumePendingComposerDraft,
+  );
   const membersQuery = useOfficeMembers();
   const members = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
 
@@ -131,6 +136,25 @@ export function TaskComposer() {
   useEffect(() => {
     promptRef.current?.focus();
   }, []);
+
+  // Consume the onboarding wizard's first-issue handoff. The wizard seeds a
+  // one-shot draft under HOME_COMPOSER_DRAFT_CHANNEL so a fresh founder lands
+  // here with their issue pre-filled instead of a blank box (the wizard used to
+  // seed the CEO DM, which this home composer never read — the issue was
+  // silently dropped). consumePendingComposerDraft clears it so it never
+  // re-applies on a later mount.
+  useEffect(() => {
+    if (
+      !pendingComposerDraft ||
+      pendingComposerDraft.channel !== HOME_COMPOSER_DRAFT_CHANNEL
+    ) {
+      return;
+    }
+    const draft = consumePendingComposerDraft(HOME_COMPOSER_DRAFT_CHANNEL);
+    if (draft === null) return;
+    setPrompt(draft);
+    requestAnimationFrame(() => promptRef.current?.focus());
+  }, [pendingComposerDraft, consumePendingComposerDraft]);
 
   const modelOptions = useMemo(
     () => modelOptionsForKind(providerKind, localStatuses),

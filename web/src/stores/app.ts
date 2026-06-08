@@ -117,6 +117,15 @@ export function directChannelSlug(
   return a > b ? `${b}__${a}` : `${a}__${b}`;
 }
 
+/**
+ * Sentinel "channel" the onboarding wizard seeds the first-issue draft under so
+ * the home composer (TaskComposer) picks it up on landing. It is NOT a real
+ * channel slug — the leading "@" can never collide with one — so the #general
+ * ConversationView Composer can't consume the handoff out from under the home
+ * surface the founder actually lands on.
+ */
+export const HOME_COMPOSER_DRAFT_CHANNEL = "@home";
+
 export interface AppStore {
   // Connection
   brokerConnected: boolean;

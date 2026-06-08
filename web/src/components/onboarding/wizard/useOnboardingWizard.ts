@@ -21,9 +21,10 @@
  *      team from that blueprint (or synthesizes one when blueprint is empty),
  *      honors the agents filter, posts the first CEO turn, and flips
  *      onboarded=true. An already_completed response is treated as success.
- *   3. Seed the CEO DM composer with the first issue (pendingComposerDraft on
- *      the app store, keyed to directChannelSlug("ceo")) so the office opens
- *      with the issue ready to send.
+ *   3. Seed the home composer with the first issue (pendingComposerDraft on the
+ *      app store, keyed to HOME_COMPOSER_DRAFT_CHANNEL, which the home
+ *      TaskComposer consumes on landing) so the office opens with the issue
+ *      ready to send.
  *   4. Call the caller-supplied onComplete() to flip RootRoute into the office.
  *
  * Errors surface on `error` (never silently swallowed); the caller renders
@@ -42,7 +43,7 @@ import {
   isValidEmail,
   recordOnboardingEmailCaptured,
 } from "../../../lib/analytics";
-import { directChannelSlug, useAppStore } from "../../../stores/app";
+import { HOME_COMPOSER_DRAFT_CHANNEL, useAppStore } from "../../../stores/app";
 import type { BlueprintOption } from "./types";
 import { toBlueprintOption } from "./types";
 import {
@@ -51,9 +52,6 @@ import {
   type OnboardingAnswers,
   type OnboardingWizardStepId,
 } from "./wizardSteps";
-
-/** The CEO agent slug, matching the broker configuration. */
-const CEO_AGENT_SLUG = "ceo";
 
 /**
  * Persist the load-bearing identity fields before completing onboarding.
@@ -279,17 +277,16 @@ export function useOnboardingWizard(
         //     landing in the office. See maybeRecordOnboardingEmail.
         maybeRecordOnboardingEmail(email, answers.keepInTouch);
 
-        // 3. Seed the CEO DM composer so the office opens with the issue ready
-        //    to send (same pendingComposerDraft path the old tour finish used).
-        //    Skipped when the user chose to explore first: there is no issue, so
-        //    the office should open clean rather than with a queued draft.
+        // 3. Seed the home composer so the office opens with the first issue
+        //    ready to send. Keyed to HOME_COMPOSER_DRAFT_CHANNEL, the sentinel
+        //    the home TaskComposer consumes on landing — the old code seeded the
+        //    CEO DM, which the post-restructure home composer never read, so the
+        //    issue was silently dropped. Skipped when the user chose to explore
+        //    first: no issue, so open clean.
         if (!skipTask) {
           useAppStore
             .getState()
-            .setPendingComposerDraft(
-              directChannelSlug(CEO_AGENT_SLUG),
-              firstIssue,
-            );
+            .setPendingComposerDraft(HOME_COMPOSER_DRAFT_CHANNEL, firstIssue);
         }
 
         // 4. Hand control back to the caller to mount the office.
