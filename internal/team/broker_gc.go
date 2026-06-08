@@ -61,6 +61,7 @@ func (b *Broker) pruneCompletedTasksLocked() int {
 
 	if pruned > 0 {
 		b.tasks = kept
+		b.rebuildTaskIndexLocked()
 		slog.Info("broker_gc: pruned completed tasks",
 			"pruned", pruned, "remaining", len(b.tasks),
 			"retention_days", int(retention.Hours()/24))

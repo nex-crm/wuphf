@@ -127,6 +127,7 @@ func (b *Broker) loadState() error {
 	if b.tasks == nil {
 		b.tasks = []teamTask{}
 	}
+	b.rebuildTaskIndexLocked()
 	b.requests = state.Requests
 	b.approvalAudit = state.ApprovalAudit
 	// Sanitize loaded audit entries — older persisted state (pre-sanitizer)

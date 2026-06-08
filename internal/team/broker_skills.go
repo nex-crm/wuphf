@@ -740,6 +740,7 @@ func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now s
 	b.queueTaskBehindActiveOwnerLaneLocked(&task)
 	b.scheduleTaskLifecycleLocked(&task)
 	b.tasks = append(b.tasks, task)
+	b.indexTaskLocked(task.ID, len(b.tasks)-1)
 	b.appendActionLocked("task_created", "office", channel, invoker, truncateSummary(task.Title, 140), task.ID)
 	return task.ID, nil
 }

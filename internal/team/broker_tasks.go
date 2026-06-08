@@ -28,6 +28,7 @@ func snapshotBrokerTaskMutationLocked(b *Broker) brokerTaskMutationSnapshot {
 
 func (snapshot brokerTaskMutationSnapshot) restore(b *Broker) {
 	b.tasks = cloneTeamTasksForRollback(snapshot.tasks)
+	b.rebuildTaskIndexLocked()
 	b.channels = cloneTeamChannelsForRollback(snapshot.channels)
 	b.messages = cloneChannelMessagesForRollback(snapshot.messages)
 	b.agentIssues = append([]agentIssueRecord(nil), snapshot.agentIssues...)

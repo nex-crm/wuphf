@@ -857,6 +857,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			b.tasks = filteredTasks
+			b.rebuildTaskIndexLocked()
 			filteredRequests := b.requests[:0]
 			for _, req := range b.requests {
 				if normalizeChannelSlug(req.Channel) != slug {

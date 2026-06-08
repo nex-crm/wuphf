@@ -281,6 +281,7 @@ func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents
 	}
 	b.channels = blankSlateOfficeChannelsFromBlueprint(bp, b.members)
 	b.tasks = blankSlateOfficeTasksFromBlueprint(bp)
+	b.rebuildTaskIndexLocked()
 	if len(b.channels) == 0 {
 		b.channels = []teamChannel{{
 			Slug:        "general",

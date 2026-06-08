@@ -200,6 +200,7 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 	}
 	b.reindexTaskLifecycleFromLegacyLocked(&task)
 	b.tasks = append(b.tasks, task)
+	b.indexTaskLocked(task.ID, len(b.tasks)-1)
 	b.appendActionLocked("task_created", "office", channel, createdBy, truncateSummary(task.Title, 140), task.ID)
 	if err := b.saveLocked(); err != nil {
 		return teamTask{}, false, err

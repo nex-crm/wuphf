@@ -453,6 +453,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		b.reindexTaskLifecycleFromLegacyLocked(&task)
 		b.tasks = append(b.tasks, task)
+		b.indexTaskLocked(task.ID, len(b.tasks)-1)
 		// Issues start in `drafting` regardless of whether an owner is
 		// set, so the human sees the new Issue in the Drafting column
 		// with an Approve & Start button before the agent begins work.

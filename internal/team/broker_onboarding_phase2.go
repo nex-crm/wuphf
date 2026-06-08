@@ -253,6 +253,7 @@ func (b *Broker) ensureOnboardingFirstIssueDraft(s *onboarding.State) error {
 		syncTaskMemoryWorkflow(&task, now)
 		b.scheduleTaskLifecycleLocked(&task)
 		b.tasks = append(b.tasks, task)
+		b.indexTaskLocked(task.ID, len(b.tasks)-1)
 		taskID = task.ID
 		s.FirstIssueID = taskID
 		changedState = true
@@ -340,6 +341,7 @@ func (b *Broker) seedMinimalScratchLocked(s *onboarding.State) error {
 
 	// Clear tasks and message history for a fresh start.
 	b.tasks = nil
+	b.taskIndex = nil
 	b.messages = nil
 	b.counter = 0
 	b.lastTaggedAt = make(map[string]time.Time)

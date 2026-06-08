@@ -71,6 +71,7 @@ type Broker struct {
 	oneOnOneAgent     string
 	focusMode         bool
 	tasks             []teamTask
+	taskIndex         map[string]int // task ID → index into tasks; guarded by mu
 	// lifecycleIndex is the inverse-index map maintained by the
 	// broker_lifecycle_transition.go layer. Inbox queries for "all tasks
 	// in state X" are O(1) lookups against this map instead of O(N) scans
@@ -1063,6 +1064,7 @@ func (b *Broker) Purge() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.tasks = nil
+	b.taskIndex = nil
 	if err := b.saveLocked(); err != nil {
 		log.Printf("broker: Purge: save failed: %v", err)
 	}
@@ -1079,6 +1081,7 @@ func (b *Broker) Reset() {
 	b.sessionMode = mode
 	b.oneOnOneAgent = agent
 	b.tasks = []teamTask{}
+	b.taskIndex = make(map[string]int)
 	b.requests = nil
 	b.approvalAudit = nil
 	b.humanInvites = nil
@@ -1239,6 +1242,25 @@ func (b *Broker) rebuildMemberIndexLocked() {
 	for i, m := range b.members {
 		b.memberIndex[m.Slug] = i
 	}
+}
+
+// rebuildTaskIndexLocked rebuilds taskIndex from b.tasks. Callers must
+// hold b.mu. Called after bulk mutations (load, GC, channel delete) that
+// invalidate slice indices. Appends update the map inline.
+func (b *Broker) rebuildTaskIndexLocked() {
+	b.taskIndex = make(map[string]int, len(b.tasks))
+	for i, t := range b.tasks {
+		b.taskIndex[t.ID] = i
+	}
+}
+
+// indexTaskLocked updates taskIndex for a newly-appended task.
+// Initializes the map if nil (test paths that skip load).
+func (b *Broker) indexTaskLocked(id string, idx int) {
+	if b.taskIndex == nil {
+		b.taskIndex = make(map[string]int, len(b.tasks))
+	}
+	b.taskIndex[id] = idx
 }
 
 // OpenClaw bridge wiring, provider binding, persistence cursors, pane capture,

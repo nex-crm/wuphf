@@ -73,6 +73,7 @@ func (b *Broker) fireSkillReviewNudgeLocked(agentSlug string) (string, error) {
 		return "", fmt.Errorf("syncTaskWorktree: %w", err)
 	}
 	b.tasks = append(b.tasks, task)
+	b.indexTaskLocked(task.ID, len(b.tasks)-1)
 	b.appendActionLocked(
 		"task_created",
 		"office",

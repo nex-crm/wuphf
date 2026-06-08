@@ -143,6 +143,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b.tasks = append(b.tasks, task)
+		b.indexTaskLocked(task.ID, len(b.tasks)-1)
 		b.appendActionLocked("task_created", "office", taskChannel, createdBy, truncateSummary(task.Title, 140), task.ID)
 		created = append(created, task)
 	}
@@ -299,6 +300,7 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		return teamTask{}, false, err
 	}
 	b.tasks = append(b.tasks, task)
+	b.indexTaskLocked(task.ID, len(b.tasks)-1)
 	b.appendActionWithRefsLocked("task_created", "office", channel, input.CreatedBy, truncateSummary(task.Title, 140), task.ID, compactStringList([]string{task.SourceSignalID}), task.SourceDecisionID)
 	if err := b.saveLocked(); err != nil {
 		rollbackTask()

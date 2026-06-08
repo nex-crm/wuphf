@@ -417,17 +417,17 @@ func mergedAtTimestamp(task *teamTask) time.Time {
 }
 
 // findTaskByIDLocked returns a pointer to the task with the given ID
-// or nil if not present. Caller must hold b.mu. Linear scan is OK
-// because the inbox row builder calls this once per row, NOT once per
-// task in the broker.
+// or nil if not present. Caller must hold b.mu. Uses taskIndex for
+// O(1) lookup with a lazy-rebuild guard (same pattern as findMemberLocked).
 func (b *Broker) findTaskByIDLocked(id string) *teamTask {
 	if id == "" {
 		return nil
 	}
-	for i := range b.tasks {
-		if b.tasks[i].ID == id {
-			return &b.tasks[i]
-		}
+	if len(b.taskIndex) != len(b.tasks) {
+		b.rebuildTaskIndexLocked()
+	}
+	if i, ok := b.taskIndex[id]; ok && i < len(b.tasks) && b.tasks[i].ID == id {
+		return &b.tasks[i]
 	}
 	return nil
 }

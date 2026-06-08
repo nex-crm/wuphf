@@ -739,6 +739,7 @@ func (b *Broker) createIntakeTask(intent string) string {
 		log.Printf("intake: applyLifecycleStateLocked(intake) for new task: %v", err)
 	}
 	b.tasks = append(b.tasks, task)
+	b.indexTaskLocked(task.ID, len(b.tasks)-1)
 	b.appendActionLocked("intake_started", "office", task.Channel, intakeAgentSlug, truncateSummary(title, 140), task.ID)
 	if err := b.saveLocked(); err != nil {
 		log.Printf("intake: saveLocked after createIntakeTask: %v", err)
@@ -781,6 +782,7 @@ func (b *Broker) discardIntakeTask(taskID string) {
 		// bucket. Then splice it out of the slice.
 		b.indexLifecycleLocked(taskID, b.tasks[i].LifecycleState, "")
 		b.tasks = append(b.tasks[:i], b.tasks[i+1:]...)
+		b.rebuildTaskIndexLocked()
 		break
 	}
 	if err := b.saveLocked(); err != nil {
