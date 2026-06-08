@@ -679,7 +679,7 @@ func TestResumeUpdatesStateToRunning(t *testing.T) {
 	withOrchestratorHome(t)
 
 	bp := freePort(t)
-	wp := freePort(t)
+	wp := bp + 1
 	now := time.Now().UTC()
 	if err := Write(&Registry{
 		Version:    Version,
