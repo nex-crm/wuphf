@@ -50,14 +50,22 @@ func (b *Broker) lookupConnectionRegistry(platform string) (connectionRegistryEn
 // state: a provider outage must never overwrite a good last-known entry, or the
 // fail-safe path would lose the very last-known-good it depends on. Locks b.mu.
 func (b *Broker) upsertConnectionRegistry(entry connectionRegistryEntry) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.upsertConnectionRegistryLocked(entry)
+}
+
+// upsertConnectionRegistryLocked is the body of upsertConnectionRegistry for
+// callers that already hold b.mu (the connect fan-out resumes parked work under
+// the lock). Same invariants: refuses indeterminate, skips redundant writes,
+// best-effort persists.
+func (b *Broker) upsertConnectionRegistryLocked(entry connectionRegistryEntry) {
 	key := connectionRegistryKey(entry.Platform)
 	if key == "" || entry.State == "" || entry.State == string(action.StateIndeterminate) {
 		return
 	}
 	entry.Platform = key
 	entry.LastVerifiedAt = time.Now().UTC().Format(time.RFC3339)
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.connectionRegistry == nil {
 		b.connectionRegistry = make(map[string]connectionRegistryEntry)
 	}

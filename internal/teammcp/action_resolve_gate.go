@@ -28,6 +28,9 @@ type actionResolveResponse struct {
 	ReadOnly bool                  `json:"read_only"`
 	Account  *actionResolveAccount `json:"account,omitempty"`
 	Detail   string                `json:"detail,omitempty"`
+	// RequestID is the connect card the broker raised for a `connect` decision,
+	// so the gate can point the human at the waiting card by name.
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // resolveActionDecision asks the broker to classify an external action against
@@ -63,9 +66,15 @@ func actionResolveBlockMessage(decision actionResolveResponse, platformLabel str
 	}
 	switch strings.ToLower(strings.TrimSpace(decision.Decision)) {
 	case "connect":
+		card := ""
+		if id := strings.TrimSpace(decision.RequestID); id != "" {
+			card = fmt.Sprintf(" A Connect card (%s) is now waiting for the human; it resumes this action automatically once connected.", id)
+		} else {
+			card = fmt.Sprintf(" Ask the human to connect %s in the Integrations app.", platformLabel)
+		}
 		return fmt.Sprintf(
-			"%s is not connected%s. Ask the human to connect %s in the Integrations app, then resume. Do NOT retry this action until it is connected.",
-			platformLabel, suffix, platformLabel,
+			"%s is not connected%s.%s Do NOT retry this action until it is connected.",
+			platformLabel, suffix, card,
 		)
 	case "wait":
 		return fmt.Sprintf(

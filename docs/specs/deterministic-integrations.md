@@ -1,7 +1,9 @@
 # Deterministic External Integrations — Connection Lifecycle State Machine
 
-> ▶ RESUME HERE: Build order below. Slice 1 (ConnectionResolver + persisted
-> registry + `/integrations/resolve`) is the current target. Each slice ships
+> ▶ RESUME HERE: Build order below. Slices 1, 2, and 3a are DONE (backend
+> deterministic spine + the `connect` decision kind/raise/fan-out). Next target
+> is slice 3b (web Connect card wiring + hard connect-timeout→backlog), then
+> slice 4 (ExternalActionApprovalCard via /frontend-design). Each slice ships
 > behind the prior, E2E-verified. Full design rationale in the office-hours
 > design doc (gstack projects dir, 2026-06-07).
 
@@ -99,8 +101,33 @@ Integrations app.
   gate degrades to the existing human approval gate rather than bricking all
   actions. **Follow-up:** resolver re-probes Composio on every mutating action;
   add a "skip probe when registry entry is fresh" path for hot-path latency.
-- [ ] **Slice 3** — `connect` decision kind + web Connect card (reuse shipped
-  OAuth); resume blocked action (dedupe + fan-out + timeout).
+- [x] **Slice 3a** — `connect` decision kind + raise/dedupe + connection
+  fan-out (backend). `requestOptionDefaults("connect")` → `[connect, skip]`;
+  `requestNeedsHumanDecision` treats `connect` as a blocking human decision (the
+  user's "block on a typed Connect decision" call). The resolver raises ONE
+  blocking Connect card per platform (workspace-wide dedupe via
+  `connect:<platform>`) on a `connect` decision and returns its `request_id`;
+  the gate surfaces that card to the agent instead of telling it to retry. When
+  `/integrations/connect-status` observes the OAuth completion,
+  `fanOutConnected` flips the registry to `connected`, auto-answers the open
+  card (`choice=connect`), and runs the standard unblock cascade so the parked
+  action resumes with zero re-asking. Disconnect flips the registry to
+  `missing`. New typed `humanInterview.Platform`/`LogoURL` fields anchor the
+  card to a toolkit (additive wire-shape extension → triangulate pre-merge).
+  Files: `broker_integrations_connect.go` (new), `broker_requests_interviews.go`,
+  `broker_types.go`, `broker_connection_registry.go` (extracted
+  `upsertConnectionRegistryLocked`), `broker_integrations_resolve.go` (+
+  `request_id`), `broker_integrations.go` (connect-status fan-out + disconnect),
+  `internal/teammcp/action_resolve_gate.go` (+ `request_id` in block message).
+  Tested: `broker_integrations_connect_test.go` (decision kind, raise+dedupe,
+  fan-out resume + idempotence, connect-status E2E).
+- [ ] **Slice 3b** — web Connect card (reads `humanInterview.Platform`/`LogoURL`,
+  drives the shipped `IntegrationsApp` `window.open(auth_url)` + 2s poll; the
+  backend fan-out auto-resolves on completion, so the card is mostly wiring) +
+  hard connect-timeout → task back to backlog + `integration_connect_timed_out`
+  audit (the connect card currently rides the standard reminder/follow-up
+  lifecycle; a hard timeout-to-backlog is a separate scheduler-tick concern,
+  deferred from 3a to keep the commit atomic).
 - [ ] **Slice 4** — `ExternalActionApprovalCard` reading legacy parse first;
   (4b) swap to structured payload (the long pole; triangulate).
 - [ ] **Slice 5** — Scoped grants (record + modal action + resolver eval +

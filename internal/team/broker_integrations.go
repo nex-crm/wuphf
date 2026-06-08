@@ -173,6 +173,12 @@ func (b *Broker) handleIntegrationConnectStatus(w http.ResponseWriter, r *http.R
 			},
 		)
 	}
+	// Fan out the moment the OAuth flow reports the connection live: flip the
+	// registry to connected and auto-answer any open Connect card so the parked
+	// action resumes without re-asking. Idempotent across the 2s status polls.
+	if result.Status == "connected" && strings.TrimSpace(result.ConnectionKey) != "" {
+		b.fanOutConnected(result.Platform, result.ConnectionKey, "", integrationRequestActor(r))
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
 }
@@ -216,6 +222,14 @@ func (b *Broker) handleIntegrationDisconnect(w http.ResponseWriter, r *http.Requ
 			"status":         "disconnected",
 		},
 	)
+	// Keep the registry honest: a disconnect must flip the cached state to
+	// missing so the next mutating action re-routes to a Connect decision rather
+	// than firing into a connection that is no longer there.
+	b.upsertConnectionRegistry(connectionRegistryEntry{
+		Platform: result.Platform,
+		Provider: "composio",
+		State:    string(action.StateMissing),
+	})
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
 }

@@ -144,7 +144,13 @@ type humanInterview struct {
 	// auto-resolve gate (resolveActionIssue) so every approval card has
 	// an Issue to anchor its audit trail to. Empty when the request was
 	// not action-execute-driven (e.g. raw team_request from an agent).
-	IssueID    string           `json:"issue_id,omitempty"`
+	IssueID string `json:"issue_id,omitempty"`
+	// Platform and LogoURL anchor integration-scoped cards (connect, and later
+	// the external-action approval card) to a concrete toolkit. The web Connect
+	// card reads Platform to drive the existing Composio OAuth flow and LogoURL
+	// to render the toolkit logo. Empty for non-integration requests.
+	Platform   string           `json:"platform,omitempty"`
+	LogoURL    string           `json:"logo_url,omitempty"`
 	DueAt      string           `json:"due_at,omitempty"`
 	FollowUpAt string           `json:"follow_up_at,omitempty"`
 	ReminderAt string           `json:"reminder_at,omitempty"`

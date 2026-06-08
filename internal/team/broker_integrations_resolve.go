@@ -54,6 +54,10 @@ type integrationResolveResponse struct {
 	Account     *integrationResolveAccount  `json:"account,omitempty"`
 	RawEnvelope *integrationResolveEnvelope `json:"raw_envelope,omitempty"`
 	Detail      string                      `json:"detail,omitempty"`
+	// RequestID is the connect card the resolver raised for a `connect` decision.
+	// The gate surfaces it to the agent so it can point the human at the waiting
+	// card instead of retrying blind. Empty for every other decision.
+	RequestID string `json:"request_id,omitempty"`
 }
 
 func (b *Broker) handleIntegrationResolve(w http.ResponseWriter, r *http.Request) {
@@ -163,6 +167,13 @@ func (b *Broker) resolveExternalAction(ctx context.Context, req integrationResol
 	}
 	if acctKey != "" || acctName != "" {
 		resp.Account = &integrationResolveAccount{Name: acctName, Key: acctKey}
+	}
+
+	// A `connect` decision raises (or reattaches to) the blocking Connect card so
+	// the human has a concrete OAuth call-to-action. Dedupe is workspace-wide, so
+	// repeated resolves of the same missing platform collapse onto one card.
+	if decision == action.DecisionConnect {
+		resp.RequestID = b.ensureConnectRequest(platform, req.Channel, req.Agent, resp.Name, resp.LogoURL)
 	}
 
 	// Build the preview envelope only when the human will actually see the modal.

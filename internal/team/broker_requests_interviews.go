@@ -41,7 +41,7 @@ func requestIsHumanInterview(req humanInterview) bool {
 
 func requestNeedsHumanDecision(req humanInterview) bool {
 	switch strings.TrimSpace(req.Kind) {
-	case "approval", "confirm", "choice":
+	case "approval", "confirm", "choice", "connect":
 		return true
 	default:
 		return req.Required
@@ -58,6 +58,14 @@ func requestOptionDefaults(kind string) ([]interviewOption, string) {
 			{ID: "reject", Label: "Reject", Description: "Do not proceed with this."},
 			{ID: "reject_with_steer", Label: "Reject with steer", Description: "Do not proceed as proposed. Redirect the team with clearer steering.", RequiresText: true, TextHint: "Type the steering, redirect, or rationale for rejecting this request."},
 		}, "approve"
+	case "connect":
+		// A typed connection decision (the user's "block on a Connect decision"
+		// call). connect drives the existing Composio OAuth flow; skip abandons
+		// the parked external action. Neither needs free text.
+		return []interviewOption{
+			{ID: "connect", Label: "Connect", Description: "Authorize this integration so the team can run the action."},
+			{ID: "skip", Label: "Skip", Description: "Do not connect. Cancel this external action."},
+		}, "connect"
 	case "confirm":
 		return []interviewOption{
 			{ID: "confirm_proceed", Label: "Confirm", Description: "Looks good. Proceed as planned."},
@@ -213,6 +221,10 @@ func formatRequestAnswerMessage(req humanInterview, answer interviewAnswer) stri
 			return fmt.Sprintf("Asked @%s for more information: %s", req.From, custom)
 		}
 		return fmt.Sprintf("Asked @%s for more information.", req.From)
+	case "connect":
+		return fmt.Sprintf("Connected the integration @%s needs.", req.From)
+	case "skip":
+		return fmt.Sprintf("Skipped the connection @%s requested.", req.From)
 	}
 	if custom != "" && strings.TrimSpace(answer.ChoiceText) != "" {
 		return fmt.Sprintf("Answered @%s's request with %s: %s", req.From, answer.ChoiceText, custom)
