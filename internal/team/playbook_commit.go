@@ -51,7 +51,7 @@ func (r *Repo) CommitPlaybookSkill(ctx context.Context, slug, relPath, content, 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
 		return "", 0, fmt.Errorf("playbook commit: mkdir: %w", err)
 	}
-	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
+	if err := writeFileAtomic(fullPath, []byte(content), 0o600); err != nil {
 		return "", 0, fmt.Errorf("playbook commit: write: %w", err)
 	}
 
@@ -107,7 +107,7 @@ func (r *Repo) CommitPlaybookExecution(ctx context.Context, slug, relPath, conte
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
 		return "", 0, fmt.Errorf("playbook execution: mkdir: %w", err)
 	}
-	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
+	if err := writeFileAtomic(fullPath, []byte(content), 0o600); err != nil {
 		return "", 0, fmt.Errorf("playbook execution: write: %w", err)
 	}
 	if out, err := r.runGitLocked(ctx, slug, "add", "--", clean); err != nil {
