@@ -524,3 +524,35 @@ No direct disagreements required escalation: severity divergences (architecture
 BLOCK vs security HIGH on H3/H5) agreed *that* each was a problem; the higher
 severity was taken.
 ```
+
+## Implementation status
+
+The egress core is implemented in `internal/packer` (decoupled package; imports
+only `internal/scanner` + stdlib — the cloud-portability seam). Three code
+prerequisites the review surfaced shipped first:
+
+- `scanner.RedactForEgress` — fail-closed redaction (deny on poison / entropy
+  cap), `internal/scanner/egress_redaction.go`.
+- `LearningSearchFilters.TaskID` — exact task-scope filter, `learnings.go`.
+- `teamTask.WikiRefs` — the task→article backing link, `broker_types.go` +
+  `broker_tasks_mutation_service.go`.
+
+Implemented stages: `Gather → Classify → budget → render → Deliver`, the
+`DefaultEgressPolicy` table, audience-aware classification, the sealed-delegation
+gate, snapshot binding, and the fail-closed `Deliver`. Brain / bridge / validator
+/ audit-sink are interfaces; the team-side adapter and the real Slack bridge land
+with the bridge PR.
+
+### Implementation review dispositions (verification agent, 2026-06-09)
+
+An adversarial verification agent on the implemented classifier found 6 issues;
+all FIXED (see the `fix(packer)` commit).
+
+| # | Finding | Sev | Disposition |
+|---|---------|-----|-------------|
+| F1 | `Render`/`Budget` exported + `PackedDelegation` hand-constructible = scanner bypass | HIGH | FIXED — `budget`/`render` unexported; `sealed` marker only `render` sets; `Deliver` refuses unsealed |
+| F2 | Guard lines skipped `policy.Classify` | HIGH | FIXED — each guard line is policy-classified before scan |
+| F3 | `Pack` took a raw audience tier (footgun); `Gather` retrieved on target tier | BLOCK | FIXED — `Pack` computes audience from a typed `DeliveryAudience`; Gather + Classify use it |
+| F4 | `Deliver` validated `req`, not the packed snapshot | BLOCK | FIXED — `snapshotMatches` binds delivery to the `InjectionRecord` snapshot |
+| F5 | Idempotency not atomic; pending didn't block re-post | HIGH | FIXED — pending blocks re-post; sink-atomicity + bridge-idempotency contract documented |
+| F6 | Budget could evict the required plan / overflow caps | MEDIUM | FIXED — plan + envelope reserved and capped; only non-essentials trimmed |
