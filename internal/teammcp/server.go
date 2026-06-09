@@ -177,6 +177,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		// private chat. Same gate as the office and DM branches below.
 		if slug == "" || slug == "ceo" || slug == team.LibrarianSlug {
 			registerNotebookReviewTool(server)
+			// The wiki-curation roles also link wiki articles to tasks, so the
+			// context-packer can hand those refs to first-party agents.
+			registerWikiLinkTool(server)
 		}
 
 		if hasActionProvider() {
@@ -221,6 +224,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		registerSkillAuthoringTools(server)
 		if isLead || isLibrarian {
 			registerNotebookReviewTool(server)
+			registerWikiLinkTool(server)
 		}
 		if hasActionProvider() {
 			registerActionTools(server)
@@ -366,6 +370,10 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 	// team_plan / team_channel / team_member.
 	if isLead || isLibrarian {
 		registerNotebookReviewTool(server)
+		// link_task_wiki rides with the wiki-curation roles: the CEO/Librarian
+		// link the canonical articles a task needs so the context-packer can
+		// hand exactly those refs to first-party agents.
+		registerWikiLinkTool(server)
 	}
 }
 
