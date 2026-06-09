@@ -73,4 +73,9 @@ func TestEmitHeadlessPlanWireShape(t *testing.T) {
 	if !strings.Contains(event.Text, "Goal: X") {
 		t.Fatalf("plan text missing: %+v", event)
 	}
+	// The StreamLineView "plan ready" card and useAgentStream's clean-close on a
+	// live idle event both depend on status=idle — pin it here too.
+	if event.Status != "idle" {
+		t.Fatalf("status: want idle, got %q", event.Status)
+	}
 }

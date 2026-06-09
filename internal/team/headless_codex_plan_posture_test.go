@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -65,15 +65,28 @@ func TestRunHeadlessCodexTurnPlanPostureReadOnly(t *testing.T) {
 		t.Fatalf("runHeadlessCodexTurn: %v", err)
 	}
 
+	// Assert on discrete arg tokens (not a space-joined substring) so a value
+	// that merely contains "-s read-only" can't produce a false positive on this
+	// security-boundary check.
 	record := readHeadlessCodexRecord(t, recordFile)
-	joinedArgs := strings.Join(record.Args, " ")
-	if !strings.Contains(joinedArgs, "-a never") || !strings.Contains(joinedArgs, "-s read-only") {
+	if !hasArgPair(record.Args, "-a", "never") || !hasArgPair(record.Args, "-s", "read-only") {
 		t.Fatalf("expected read-only sandbox for planning turn, got %#v", record.Args)
 	}
-	if strings.Contains(joinedArgs, "-s workspace-write") {
+	if hasArgPair(record.Args, "-s", "workspace-write") {
 		t.Fatalf("planning turn must not be workspace-write, got %#v", record.Args)
 	}
-	if strings.Contains(joinedArgs, "--dangerously-bypass-approvals-and-sandbox") {
+	if slices.Contains(record.Args, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Fatalf("planning turn must not bypass the sandbox, got %#v", record.Args)
 	}
+}
+
+// hasArgPair reports whether flag immediately followed by value appears as two
+// adjacent discrete entries in args (e.g. "-s", "read-only").
+func hasArgPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
