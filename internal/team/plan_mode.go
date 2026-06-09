@@ -123,7 +123,7 @@ func (b *Broker) ownerDefaultsToPlanFirstLocked(owner string) bool {
 // providers this directive remains the sole enforcement.
 func planModeDirective(task teamTask) string {
 	notebookPath := "agents/<your-slug>/notebook/plan-" + task.ID + ".md"
-	return "[PLAN MODE] This task is in planning and your runtime is read-only — you literally cannot change the repo, run build/deploy steps, or take external actions this turn. Plan first:\n" +
+	return "[PLAN MODE] This task is in planning and your runtime is read-only — do NOT change the repo, run build/deploy steps, or take external actions this turn (the sandbox will block them anyway). Plan first:\n" +
 		"1. Read only what you need to understand the work; do not do the work.\n" +
 		"2. Produce a tight PLAN: the goal, a concrete step-by-step approach, acceptance criteria, and risks/open questions. Present it as your final answer (in plan mode this goes through the plan/ExitPlanMode surface). If your runtime still allows writes, also save it to your notebook with notebook_write (path like " + notebookPath + ") — a draft for you and the human, NOT promoted to the team wiki unless @librarian decides it is worth it.\n" +
 		"3. Then STOP — the plan is surfaced to the human automatically. Execution starts only after the human clicks \"Approve & Start\"; you will be re-notified to begin the work then. Do NOT try to start implementing in this turn.\n" +
