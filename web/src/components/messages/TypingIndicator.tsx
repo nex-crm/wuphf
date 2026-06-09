@@ -21,9 +21,13 @@ import { ThinkingLoader } from "../ui/ThinkingLoader";
  * the typing label. Falls back to the classic typing bubble when no detail is
  * available, so the indicator never goes silent while an agent is active.
  */
-export function TypingIndicator() {
+export function TypingIndicator({ channel }: { channel?: string } = {}) {
   const route = useCurrentRoute();
-  const currentChannel = route.kind === "channel" ? route.channelSlug : "general";
+  // Prefer an explicit channel (the task-detail chat passes it, since
+  // useCurrentRoute reports kind "task-detail" there, not "channel"). Fall back
+  // to the channel route slug so the channel surface keeps working unchanged.
+  const currentChannel =
+    channel ?? (route.kind === "channel" ? route.channelSlug : "general");
   const { data: members = [] } = useOfficeMembers();
   const { data: channelMembers = [] } = useChannelMembers(currentChannel);
   const channelMemberSlugs = new Set(channelMembers.map((m) => m.slug));

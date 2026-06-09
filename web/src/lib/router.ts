@@ -165,10 +165,16 @@ export const indexRoute = createRoute({
   path: ROUTE_PATHS.index,
 });
 
-// Back-compat redirects for the legacy /issues surface. Task is the
-// primary primitive now; these forward old bookmarks and chat links to
-// the canonical /tasks routes. legacyIssueNewRoute must be listed BEFORE
-// legacyIssueDetailRoute so the static `new` segment wins over `$issueId`.
+// Back-compat redirects for the legacy /issues surface. Task is the primary
+// primitive now; these forward old bookmarks and chat links to the canonical
+// /tasks routes.
+//
+// All three are FLAT siblings under rootRoute with full paths — NOT
+// parent/child. A child of legacyIssuesRoute would never run: the parent's
+// beforeLoad redirect to /tasks fires top-down and short-circuits, so
+// /issues/new and /issues/OFFICE-7 would both wrongly land on the board
+// instead of /tasks/new and /tasks/OFFICE-7. Static `/issues/new` still
+// out-ranks the dynamic `/issues/$issueId` via TanStack route ranking.
 export const legacyIssuesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: ROUTE_PATHS.legacyIssues,
@@ -178,16 +184,16 @@ export const legacyIssuesRoute = createRoute({
 });
 
 export const legacyIssueNewRoute = createRoute({
-  getParentRoute: () => legacyIssuesRoute,
-  path: "new",
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.legacyIssueNew,
   beforeLoad: () => {
     throw redirect({ to: "/tasks/new", replace: true });
   },
 });
 
 export const legacyIssueDetailRoute = createRoute({
-  getParentRoute: () => legacyIssuesRoute,
-  path: "$issueId",
+  getParentRoute: () => rootRoute,
+  path: ROUTE_PATHS.legacyIssueDetail,
   beforeLoad: ({ params }) => {
     throw redirect({
       to: "/tasks/$taskId",
@@ -282,10 +288,13 @@ export const routeTree = rootRoute.addChildren([
   articleRoute,
   inboxRoute,
   taskDecisionRoute,
-  // Back-compat redirects for the legacy /issues surface.
-  // legacyIssueNewRoute must be listed BEFORE legacyIssueDetailRoute so the
-  // static segment "new" wins over the dynamic "$issueId" catch-all.
-  legacyIssuesRoute.addChildren([legacyIssueNewRoute, legacyIssueDetailRoute]),
+  // Back-compat redirects for the legacy /issues surface. Flat siblings (NOT
+  // children of legacyIssuesRoute, whose beforeLoad redirect would otherwise
+  // shadow them — see their definitions). New before detail so the static
+  // segment "new" wins over the dynamic "$issueId" catch-all.
+  legacyIssuesRoute,
+  legacyIssueNewRoute,
+  legacyIssueDetailRoute,
   routinesRoute,
   routineNewRoute,
   routineDetailRoute,

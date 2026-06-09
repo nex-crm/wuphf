@@ -87,7 +87,13 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Owner:   strings.TrimSpace(item.Assignee),
 		}); existing != nil {
 			titleToID[strings.TrimSpace(item.Title)] = existing.ID
-			if details := strings.TrimSpace(item.Details); details != "" {
+			// Spec freeze: a re-plan must not rewrite an already-approved
+			// (Running+/terminal) task's human-approved spec BODY (Details).
+			// Classification/routing (TaskType/ExecutionMode), dependency wiring,
+			// and runtime config (effort/provider/model) stay adjustable — the
+			// system recomputes these. See specIsFrozen.
+			specFrozen := specIsFrozen(existing.LifecycleState)
+			if details := strings.TrimSpace(item.Details); details != "" && !specFrozen {
 				existing.Details = details
 			}
 			if taskType := strings.TrimSpace(item.TaskType); taskType != "" {

@@ -74,12 +74,19 @@ test.describe("canonical route matrix", () => {
     page,
   }) => {
     // Tasks-as-primary reversed the earlier Issues consolidation: /tasks is
-    // now canonical and the legacy /issues + /issues/$id routes redirect to
-    // the /tasks board + /tasks/$id detail (see legacyIssues* in
-    // lib/router.ts).
-    for (const route of ["/#/issues", "/#/issues/OFFICE-7"]) {
+    // now canonical and the legacy /issues routes redirect to the /tasks board,
+    // /tasks/new, and /tasks/$id detail (see legacyIssues* in lib/router.ts).
+    // Assert the EXACT target (anchored $): a previous bug nested new/$id under
+    // legacyIssuesRoute, whose beforeLoad redirect shadowed them so BOTH landed
+    // on the /tasks board — a loose /#\/tasks/ match would not have caught it.
+    const cases: Array<[string, RegExp]> = [
+      ["/#/issues", /#\/tasks$/],
+      ["/#/issues/new", /#\/tasks\/new$/],
+      ["/#/issues/OFFICE-7", /#\/tasks\/OFFICE-7$/],
+    ];
+    for (const [route, expected] of cases) {
       await page.goto(route);
-      await expect(page).toHaveURL(/#\/tasks/, { timeout: 10_000 });
+      await expect(page).toHaveURL(expected, { timeout: 10_000 });
       await expect(page.getByTestId("route-not-found")).toHaveCount(0);
     }
   });

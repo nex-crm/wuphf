@@ -25,6 +25,34 @@ func taskIsPreExecution(s LifecycleState) bool {
 	return false
 }
 
+// specIsFrozen reports whether a task's human-approved spec BODY (its Details —
+// the problem / approach / acceptance criteria the human signed off on) may no
+// longer be rewritten. Once the owner is executing an approved plan (Running)
+// or the task has moved into review/decision/blocked or a terminal state, that
+// body is locked: a duplicate create / plan request, or an update, must NOT
+// silently overwrite it. This enforces the product rule "once a spec is
+// approved it must not change after that."
+//
+// Scope note: only Details is frozen. Classification/routing (TaskType,
+// ExecutionMode), dependency wiring (DependsOn), and runtime config
+// (effort/provider/model) are NOT — the system legitimately recomputes them on
+// reuse (e.g. the memory-workflow completion gate keys off TaskType).
+//
+// Editable states are the pre-approval ones (Drafting/Intake/Ready/Planning/
+// QueuedBehindOwner) plus ChangesRequested — the request_changes revise loop
+// intentionally re-opens the spec, so it is NOT frozen. To edit an
+// approved/running spec, a reviewer first request_changes it back into that
+// loop.
+func specIsFrozen(s LifecycleState) bool {
+	switch s {
+	case LifecycleStateRunning, LifecycleStateReview, LifecycleStateDecision,
+		LifecycleStateBlockedOnPRMerge, LifecycleStateApproved,
+		LifecycleStateRejected, LifecycleStateArchived:
+		return true
+	}
+	return false
+}
+
 // planModeDirective is prepended to the work packet for a task in
 // LifecycleStatePlanning. It tells the owner to plan only (no repo changes, no
 // external actions), capture the plan in its notebook, post a summary, and

@@ -330,7 +330,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 		}); existing != nil {
 			beforeStatus := existing.status
-			if details := strings.TrimSpace(body.Details); details != "" {
+			// Once the spec is approved (Running+/terminal), a duplicate create
+			// must NOT silently rewrite the human-approved spec BODY (Details).
+			// Owner, classification (TaskType — which the memory-workflow gate
+			// recomputes), and operational metadata stay mutable. See
+			// specIsFrozen.
+			specFrozen := specIsFrozen(existing.LifecycleState)
+			if details := strings.TrimSpace(body.Details); details != "" && !specFrozen {
 				existing.Details = details
 			}
 			if owner := strings.TrimSpace(body.Owner); owner != "" {
@@ -773,13 +779,21 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		default:
 			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "unknown action", nil)
 		}
+		// Spec freeze: after approval (Running+/terminal) the human-approved spec
+		// BODY is locked. Appended feedback/notes (appendDetails: comment,
+		// resume, request_changes, submit) still flow; only a wholesale Details
+		// REWRITE is rejected. To edit an approved spec, reviewers request_changes
+		// it (→ ChangesRequested, which is not frozen). TaskType/ExecutionMode are
+		// classification/routing the system recomputes (e.g. the memory-workflow
+		// gate), so they stay mutable. See specIsFrozen.
+		specFrozen := specIsFrozen(task.LifecycleState)
 		if strings.TrimSpace(body.Details) != "" {
 			if appendDetails {
 				if err := appendTaskDetailLocked(task, body.Details); err != nil {
 					rollbackTask()
 					return TaskResponse{}, taskMutationError(TaskMutationInvalid, err.Error(), err)
 				}
-			} else {
+			} else if !specFrozen {
 				task.Details = strings.TrimSpace(body.Details)
 			}
 		}
