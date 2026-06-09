@@ -5,7 +5,11 @@
 **Source analysis:** 30-agent gap analysis vs SOTA (Anthropic multi-agent research system, Cognition/Devin, LangGraph/OpenAI Agents SDK/Magentic-One, Letta/Mem0/ACE/Voyager, Codex/Cursor/Factory). 14 claims adversarially verified against `main@b9d0c878`.
 **Supersedes:** the sequencing of the 2026-06-09 multi-agent overhaul plan. Its Phase 1 (chat-only tasks, PR #1052) lands independently; its Phases 2–4 are absorbed below (U3.4, U5.1).
 
-▶ **RESUME HERE:** Phase U0 in progress on branch `feat/sota-uplift-phase0` (worktree `.worktrees/sota-uplift`). Next unstarted slice: U0.1 outcome eval harness.
+▶ **RESUME HERE (2026-06-10, overnight run):** U0, U1, U2, U3.2/U3.3, U4.1 SHIPPED on branch `feat/sota-uplift-phase0` (worktree `.worktrees/sota-uplift`, PR #1062). Eval harness: **13/13 checks green, 0 known gaps** (`go run ./cmd/office-eval`). The moat loop is closed and regression-guarded: verified done → auto-distilled trusted learning → injected into the next similar task's packet, zero human steps.
+
+Shipped: U0.1 eval harness (`internal/team/office_eval.go` + `cmd/office-eval`, runs in CI via TestOfficeEvals; known-gap markers auto-demand promotion to regression guards) · U0.2 packet/prompt economics flip · U1.1 verification-gated done (`task_verification.go`; gate runs outside b.mu; failures re-enter the owner's next packet) · U1.2 web evidence surfaces (VerificationBadge + proof panel + DoD rail) · U2.1/U2.2 task-scoped knowledge injection (`context_assembler.go`, IDF token-overlap, dense-rerank seam behind `relevantLearnings`) · U2.3/U3.3 per-task turn journal (`task_ledger.go`, broker-observed facts, packet-rendered) · U3.2 dependency edges carry upstream outcomes · U4.1 auto-distillation of verified outcomes (`task_distill.go`, `AppendVerified` trust path).
+
+Next unstarted: U3.1 rest (objective/inputs/expected_artifact on team_task — reconcile with PR #1057's surface after it merges) · U3.4 (covered by open PR #1057) · U3.5 prompt-rule demolition · U4.2 one knowledge view · U4.3 skills-from-verified-runs · U4.4 human-facing knowledge-used UI (agent-side citation already in packets) · U5.1 (covered by open PR #1060) · U5.2/U5.3. NOTE: open PRs #1052/#1053/#1057/#1060 overlap prompt_builder/broker/queue — merge main promptly after any of them lands.
 
 ---
 
