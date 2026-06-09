@@ -2689,8 +2689,8 @@ func TestBuildPromptToolHygieneSection(t *testing.T) {
 		if !strings.Contains(prompt, "registered for this session") {
 			t.Errorf("%s prompt missing 'registered for this session' line", slug)
 		}
-		if !strings.Contains(prompt, "Do not read unrelated files") {
-			t.Errorf("%s prompt missing unrelated-files guidance", slug)
+		if !strings.Contains(prompt, "Gather the context the task needs") {
+			t.Errorf("%s prompt missing gather-context guidance", slug)
 		}
 		if !strings.Contains(prompt, "AT MOST one team_broadcast per turn") {
 			t.Errorf("%s prompt missing broadcast throttle guidance", slug)
