@@ -353,7 +353,24 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 		// tasks above may be advancing in parallel right now (its own lanes and
 		// specialists'). Push non-dependent tasks forward together rather than
 		// serializing them, and reuse a live task before creating an overlapping one.
-		result += "\nCoordination: your tasks run on separate lanes and may be progressing in parallel right now. Advance non-dependent tasks together instead of one at a time, and reuse or update a task already listed above before creating a new one for the same work."
+		// The phrasing avoids implying the printed list is complete — the list is
+		// truncated to `limit`, so a reusable task may not be shown.
+		result += "\nCoordination: your tasks run on separate lanes and may be progressing in parallel right now. Advance non-dependent tasks together instead of one at a time, and reuse or update an existing task for the same work before creating a new one."
+		// If more eligible (non-done) tasks exist than were shown, the reusable
+		// task the lead should update may have been truncated away. Tell it to
+		// check the full list before creating a new one, so it doesn't duplicate.
+		// Dedup by ID to mirror the `seen` filter the printed list applies, so a
+		// repeated task can't trip a false-positive truncation cue.
+		eligibleIDs := make(map[string]struct{}, len(tasks))
+		for _, task := range tasks {
+			if strings.EqualFold(strings.TrimSpace(task.status), "done") {
+				continue
+			}
+			eligibleIDs[task.ID] = struct{}{}
+		}
+		if len(eligibleIDs) > len(lines) {
+			result += "\nNote: more active tasks exist than shown here — check the full task list before creating a new one."
+		}
 		reviewCount := 0
 		for _, task := range tasks {
 			if strings.EqualFold(strings.TrimSpace(task.status), "done") {

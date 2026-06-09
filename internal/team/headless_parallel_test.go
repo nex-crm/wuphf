@@ -219,8 +219,13 @@ func TestLeadSameTaskTurnDedupesWhileActive(t *testing.T) {
 		EnqueuedAt: time.Now(),
 	})
 
-	if got := len(l.headless.queues[lane]); got != 0 {
-		t.Fatalf("expected duplicate lead turn for same task to be dropped, got %d queued", got)
+	// Read queue depth under the lock — the pool maps are guarded by mu and a
+	// worker goroutine may touch them concurrently (race-clean assertion).
+	l.headless.mu.Lock()
+	queued := len(l.headless.queues[lane])
+	l.headless.mu.Unlock()
+	if queued != 0 {
+		t.Fatalf("expected duplicate lead turn for same task to be dropped, got %d queued", queued)
 	}
 }
 
@@ -245,11 +250,20 @@ func TestLeadTaskTurnNotHeldByUnrelatedSpecialist(t *testing.T) {
 		EnqueuedAt: time.Now(),
 	})
 
-	if l.headless.deferredLead != nil {
+	// Snapshot the pool maps under the lock before asserting — a worker goroutine
+	// spawned by the enqueue can be mutating workers/queues concurrently, so an
+	// unlocked read here is a data race (and a potential map panic under -race).
+	l.headless.mu.Lock()
+	deferredLead := l.headless.deferredLead
+	lane := taskLane("ceo", "task-ceo")
+	workerRunning := l.headless.workers[lane]
+	queued := len(l.headless.queues[lane])
+	l.headless.mu.Unlock()
+
+	if deferredLead != nil {
 		t.Fatal("task-carrying lead turn must not be deferred by an unrelated busy specialist")
 	}
-	lane := taskLane("ceo", "task-ceo")
-	if !l.headless.workers[lane] && len(l.headless.queues[lane]) == 0 {
+	if !workerRunning && queued == 0 {
 		t.Fatal("expected the lead task turn to be queued/dispatched on its own per-task lane")
 	}
 }
@@ -268,7 +282,12 @@ func TestLeadTriageTurnStillHeldByBusySpecialist(t *testing.T) {
 	// → treated as channel triage, which still honors the hold.
 	l.enqueueHeadlessCodexTurn("ceo", "general status, anything I should know?")
 
-	if l.headless.deferredLead == nil {
+	// Read deferredLead under the lock — it is guarded by mu and may be touched
+	// by a worker goroutine concurrently (race-clean assertion).
+	l.headless.mu.Lock()
+	deferredLead := l.headless.deferredLead
+	l.headless.mu.Unlock()
+	if deferredLead == nil {
 		t.Fatal("expected a no-task lead triage turn to be deferred while a specialist is active")
 	}
 }
@@ -328,5 +347,74 @@ func TestHeadlessConcurrencyCapParksAndDrains(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("expected the parked lead task to start after a slot freed")
+	}
+}
+
+// TestHeadlessGlobalConcurrencyCapParksAndDrains is the GLOBAL-pool sibling of
+// the per-agent cap test: with maxConcurrent=1 (and the per-agent cap left
+// unset/0), two non-dependent office tasks owned by DIFFERENT agents cannot both
+// run — only the GLOBAL cap binds — so one starts, the other PARKS, and the
+// parked lane DRAINS once the first turn finishes and frees the single slot.
+func TestHeadlessGlobalConcurrencyCapParksAndDrains(t *testing.T) {
+	b := brokerWithTasks(t,
+		teamTask{ID: "task-eng", Title: "eng work", Owner: "eng", status: "in_progress", ExecutionMode: "office"},
+		teamTask{ID: "task-gtm", Title: "gtm work", Owner: "gtm", status: "in_progress", ExecutionMode: "office"},
+	)
+	// Register the second owner so its task resolves to a real member lane.
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "gtm", Name: "gtm"})
+	b.memberIndex = nil
+	b.mu.Unlock()
+
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+	l.headless.maxConcurrent = 1 // only one turn may run across the whole pool
+
+	started := make(chan string, 8)
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+		select {
+		case started <- headlessTurnTaskID(ctx):
+		default:
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	l.enqueueHeadlessCodexTurnRecord("eng", headlessCodexTurn{Prompt: "work #task-eng", Channel: "general", TaskID: "task-eng"})
+	l.enqueueHeadlessCodexTurnRecord("gtm", headlessCodexTurn{Prompt: "work #task-gtm", Channel: "general", TaskID: "task-gtm"})
+
+	// Exactly one should start; the other parks under the global cap.
+	var first string
+	select {
+	case first = <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the first task to start")
+	}
+	select {
+	case second := <-started:
+		t.Fatalf("global cap=1 violated: a second task (%s) started while %s was active", second, first)
+	case <-time.After(250 * time.Millisecond):
+		// correct: the second lane is parked behind the global cap
+	}
+
+	// Free the single slot by cancelling the active turn; the parked lane drains.
+	firstOwner := "eng"
+	if first == "task-gtm" {
+		firstOwner = "gtm"
+	}
+	firstLane := taskLane(firstOwner, first)
+	l.headless.mu.Lock()
+	if active := l.headless.active[firstLane]; active != nil && active.Cancel != nil {
+		active.Cancel()
+	}
+	l.headless.mu.Unlock()
+
+	select {
+	case second := <-started:
+		if second == first {
+			t.Fatalf("expected the parked task to drain, but %s started again", second)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the parked task to start after the global slot freed")
 	}
 }

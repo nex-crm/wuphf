@@ -524,19 +524,42 @@ func (l *Launcher) finishHeadlessTurn(lane headlessLane) {
 		deferredLead = &turn
 		shouldWakeLead = false
 	}
-	// A turn just finished, freeing an active slot. Re-spawn any lane the
-	// concurrency cap parked (queued work but no running worker). Collect under
+	// A turn just finished, freeing an active slot. Re-spawn the lanes the
+	// concurrency cap parked (queued work but no running worker). Only the
+	// subset that fits the newly-available global/per-agent slots is woken:
+	// we simulate admission under the lock — seed counts from the lanes still
+	// active, then admit parked lanes one at a time, incrementing the running
+	// tallies as we go — so a single completion never spawns the whole herd
+	// only to have almost all of them immediately re-park and exit (O(n)
+	// goroutine/log churn per finished turn under a tight cap). Collect under
 	// the lock and mark workers=true so a concurrent enqueue won't also spawn;
 	// the actual spawn happens after unlocking. Only meaningful when a cap is
 	// active — with no cap every queued lane already has a worker.
 	var parkedLanes []headlessLane
 	if global, perAgent := l.headlessConcurrencyCaps(); global > 0 || perAgent > 0 {
+		total := 0
+		byAgent := map[string]int{}
+		for activeLane, active := range l.headless.active {
+			if active == nil {
+				continue
+			}
+			total++
+			byAgent[activeLane.slug]++
+		}
 		for parkedLane, queue := range l.headless.queues {
 			if len(queue) == 0 || l.headless.workers[parkedLane] {
 				continue
 			}
+			if global > 0 && total >= global {
+				break
+			}
+			if perAgent > 0 && byAgent[parkedLane.slug] >= perAgent {
+				continue
+			}
 			l.headless.workers[parkedLane] = true
 			parkedLanes = append(parkedLanes, parkedLane)
+			total++
+			byAgent[parkedLane.slug]++
 		}
 	}
 	l.headless.mu.Unlock()
