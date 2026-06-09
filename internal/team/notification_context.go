@@ -406,8 +406,13 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 			threadRoot = replyTo
 		}
 	}
-	var domainOwned teamTask
-	bestOwnedScore := 0.0
+	rawMsgCh := strings.TrimSpace(msg.Channel)
+	var (
+		domainOwned    teamTask
+		bestOwnedScore = 0.0
+		channelMatch   teamTask
+		channelMatches int
+	)
 	for _, task := range b.allTasks() {
 		if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			continue
@@ -424,12 +429,20 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 		// general office chat in #general — owned by the archived Backup &
 		// Migration task — keeps routing normally. (Done is skipped above.)
 		// Legacy shared channels fall through to the thread/score checks below.
-		if rawMsgCh := strings.TrimSpace(msg.Channel); rawMsgCh != "" {
+		//
+		// Accumulate channel matches across ALL owned tasks instead of
+		// early-returning the first one: a single human can own several tasks
+		// that share a legacy channel, and binding to whichever happened to be
+		// scanned first attaches the wrong task. Only trust the channel binding
+		// when it is unambiguous (exactly one owned task in that channel);
+		// otherwise fall through to the thread/score logic below.
+		if rawMsgCh != "" {
 			rawTaskCh := strings.TrimSpace(task.Channel)
 			st := strings.ToLower(strings.TrimSpace(task.status))
 			if rawTaskCh != "" && st != "archived" &&
 				normalizeChannelSlug(rawTaskCh) == normalizeChannelSlug(rawMsgCh) {
-				return task, true
+				channelMatches++
+				channelMatch = task
 			}
 		}
 		if task.ThreadID != "" && (task.ThreadID == msg.ID || task.ThreadID == threadRoot) {
@@ -443,6 +456,9 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 			domainOwned = task
 			bestOwnedScore = score
 		}
+	}
+	if channelMatches == 1 {
+		return channelMatch, true
 	}
 	if domainOwned.ID != "" {
 		return domainOwned, true

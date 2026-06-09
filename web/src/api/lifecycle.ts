@@ -173,8 +173,18 @@ export async function getDecisionPacket(
  * sees the contract their types promise.
  */
 function normalizeDecisionPacket(p: DecisionPacket): DecisionPacket {
+  // The GET /tasks/{id} response carries the source teamTask snapshot under
+  // `task` (see taskDetailResponse). The packet itself has no channel, so lift
+  // the task's channel onto it for the discussion empty-state link. Stay
+  // defensive: `task` is not on the DecisionPacket type and may be absent.
+  const taskSnapshot = (p as { task?: { channel?: unknown } }).task;
+  const channel =
+    typeof taskSnapshot?.channel === "string" && taskSnapshot.channel.trim()
+      ? taskSnapshot.channel.trim()
+      : p.channel;
   return {
     ...p,
+    channel,
     banners: p.banners ?? [],
     changedFiles: p.changedFiles ?? [],
     reviewerGrades: p.reviewerGrades ?? [],

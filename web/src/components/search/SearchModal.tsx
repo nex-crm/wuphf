@@ -213,6 +213,14 @@ export function SearchModal() {
   // reset out onto the stable `searchOpen` boolean breaks that loop.
   useEffect(() => {
     if (searchOpen) return;
+    // Cancel any in-flight debounced search before clearing state, so a
+    // timer queued just before close cannot fire against the now-reset
+    // modal and resurrect stale results / the searching spinner.
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    setSearching(false);
     setQuery("");
     setMessageHits([]);
     setWikiHits([]);

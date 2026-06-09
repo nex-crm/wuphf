@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { router } from "../../lib/router";
 import type {
   DecisionPacket,
   FeedbackItem,
@@ -223,7 +224,10 @@ export function DecisionPacketView({
           </div>
         </section>
 
-        <DiscussionSection feedback={packet.spec.feedback ?? []} />
+        <DiscussionSection
+          feedback={packet.spec.feedback ?? []}
+          channel={packet.channel}
+        />
       </main>
       <PacketActionSidebar
         packet={packet}
@@ -410,9 +414,12 @@ function formatHoursAgo(iso: string): string {
 
 interface DiscussionSectionProps {
   feedback: FeedbackItem[];
+  /** The task's own channel slug, used to link to the conversation. */
+  channel?: string;
 }
 
-function DiscussionSection({ feedback }: DiscussionSectionProps) {
+function DiscussionSection({ feedback, channel }: DiscussionSectionProps) {
+  const channelSlug = channel?.trim();
   return (
     <section
       className="packet-section packet-discussion"
@@ -428,7 +435,27 @@ function DiscussionSection({ feedback }: DiscussionSectionProps) {
       {feedback.length === 0 ? (
         <p className="packet-discussion-empty">
           No review notes yet. Approvals, requested changes, and reviewer notes
-          appear here — chat about this task in its channel.
+          appear here.{" "}
+          {channelSlug ? (
+            <>
+              Chat about this task in{" "}
+              <button
+                type="button"
+                className="packet-discussion-channel-link"
+                onClick={() =>
+                  void router.navigate({
+                    to: "/channels/$channelSlug",
+                    params: { channelSlug },
+                  })
+                }
+              >
+                #{channelSlug}
+              </button>
+              .
+            </>
+          ) : (
+            "Chat about this task in its channel."
+          )}
         </p>
       ) : (
         <ol className="packet-discussion-thread">

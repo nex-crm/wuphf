@@ -533,7 +533,20 @@ func (b *Broker) handleTaskComment(w http.ResponseWriter, r *http.Request, actor
 		channel = "general"
 	}
 	if _, err := b.PostMessage(sender, channel, trimmed, nil, ""); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to post message"})
+		// Map PostMessage failures to distinct HTTP statuses so the client can
+		// tell a transient server error apart from an auth/route problem.
+		// Substrings match the errors PostMessage returns in broker_messages.go.
+		msg := strings.ToLower(err.Error())
+		status := http.StatusInternalServerError
+		switch {
+		case strings.Contains(msg, "access denied"):
+			status = http.StatusForbidden
+		case strings.Contains(msg, "not found"):
+			status = http.StatusNotFound
+		case strings.Contains(msg, "request pending"):
+			status = http.StatusConflict
+		}
+		writeJSON(w, status, map[string]string{"error": "failed to post message"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{

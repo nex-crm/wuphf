@@ -3074,6 +3074,30 @@ html[data-theme="noir-gold"] {
   margin: 4px 0 0;
 }
 
+/* Inline link to the task's own channel from the discussion empty state. */
+.packet-discussion-channel-link {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-style: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.packet-discussion-channel-link:hover {
+  text-decoration: none;
+}
+
+.packet-discussion-channel-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 .packet-discussion-thread {
   list-style: none;
   padding: 0;

@@ -32,6 +32,8 @@ func (l *Launcher) taskOwnerForMessage(msg channelMessage) string {
 	// legacy shared channels (e.g. #general) where several tasks share one.
 	if rawMsgCh := strings.TrimSpace(msg.Channel); rawMsgCh != "" {
 		msgChannel := normalizeChannelSlug(rawMsgCh)
+		matchedOwner := ""
+		ambiguous := false
 		for _, task := range l.broker.AllTasks() {
 			st := strings.ToLower(strings.TrimSpace(task.status))
 			// Skip terminal tasks: an unset channel normalizes to "general",
@@ -49,8 +51,21 @@ func (l *Launcher) taskOwnerForMessage(msg channelMessage) string {
 			// task does not bind to every #general message.
 			if rawTaskCh := strings.TrimSpace(task.Channel); rawTaskCh != "" &&
 				normalizeChannelSlug(rawTaskCh) == msgChannel {
-				return taskOwner
+				// Accumulate matches instead of returning the first one: a
+				// legacy shared channel can hold tasks owned by DIFFERENT
+				// agents, and binding to whichever was scanned first wakes the
+				// wrong owner. Trust the channel binding only when every match
+				// resolves to the same owner; otherwise mark it ambiguous and
+				// fall through to content-scoring below.
+				if matchedOwner == "" {
+					matchedOwner = taskOwner
+				} else if matchedOwner != taskOwner {
+					ambiguous = true
+				}
 			}
+		}
+		if matchedOwner != "" && !ambiguous {
+			return matchedOwner
 		}
 	}
 	var owner string
