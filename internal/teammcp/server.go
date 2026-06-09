@@ -149,7 +149,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 		mcp.AddTool(server, readOnlyTool(
 			"read_conversation",
-			"LAST RESORT: Read recent 1:1 messages only when the pushed notification is missing context you genuinely need. Do NOT call this before every reply.",
+			"Read recent 1:1 messages when the pushed notification is missing context you need. Pull freely rather than guessing; skip it only when the push already answers the question.",
 		), handleTeamPoll)
 
 		mcp.AddTool(server, officeWriteTool(

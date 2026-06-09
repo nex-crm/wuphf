@@ -20,6 +20,30 @@ import (
 	"github.com/nex-crm/wuphf/internal/channel"
 )
 
+// Context-packet sizing. These were historically tuned down to minimize
+// per-turn token cost (specialists woke with 4 thread messages and
+// 512-char task details, which starved them into re-asking answered
+// questions and contradicting prior decisions). The SOTA uplift
+// (docs/specs/sota-uplift.md, U0.2) inverts that: packets are sized for
+// outcome quality, and token cost is no longer a design constraint.
+const (
+	// threadContextLimit is how many recent thread messages every agent
+	// (lead and specialist alike) receives in a work packet.
+	threadContextLimit = 20
+	// threadMessageClipChars clips a single message inside the context block.
+	threadMessageClipChars = 2000
+	// taskDetailsClipChars clips the task spec text injected into packets.
+	taskDetailsClipChars = 4096
+	// taskListTitleClipChars / taskListDetailsClipChars clip per-task lines
+	// in multi-task summary lists.
+	taskListTitleClipChars   = 120
+	taskListDetailsClipChars = 512
+	// triggerContentClipChars clips the trigger message in execution packets.
+	triggerContentClipChars = 4000
+	// leadTaskContextLimit is how many task summaries the lead's packet carries.
+	leadTaskContextLimit = 10
+)
+
 // recipientHasTaskVisibility reports whether the given recipient slug
 // is authorized to see in-flight messages from `task`. Used by the
 // pre-review-message filter in NotificationContext. The owner of the
@@ -140,7 +164,7 @@ func (b *notificationContextBuilder) NotificationContext(recipientSlug, channel,
 	formatContext := func(items []channelMessage) string {
 		var sb strings.Builder
 		for _, m := range items {
-			sb.WriteString(fmt.Sprintf("@%s: %s\n", m.From, truncate(m.Content, 600)))
+			sb.WriteString(fmt.Sprintf("@%s: %s\n", m.From, truncate(m.Content, threadMessageClipChars)))
 		}
 		return strings.TrimRight(sb.String(), "\n")
 	}
@@ -302,9 +326,9 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 		if taskChannel == "" {
 			taskChannel = "general"
 		}
-		line := fmt.Sprintf("- #%s on #%s %s (%s)", task.ID, taskChannel, truncate(task.Title, 72), meta)
+		line := fmt.Sprintf("- #%s on #%s %s (%s)", task.ID, taskChannel, truncate(task.Title, taskListTitleClipChars), meta)
 		if details := strings.TrimSpace(task.Details); details != "" {
-			line += ": " + truncate(details, 96)
+			line += ": " + truncate(details, taskListDetailsClipChars)
 		}
 		return line
 	}
@@ -489,27 +513,23 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 		lines = append(lines, "- Trigger: you were explicitly tagged")
 	}
 	if task, ok := b.RelevantTaskForTarget(msg, slug); ok {
-		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, 96), strings.TrimSpace(task.status)))
+		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, taskListTitleClipChars), strings.TrimSpace(task.status)))
 		if details := strings.TrimSpace(task.Details); details != "" {
-			lines = append(lines, fmt.Sprintf("- Task details: %s", truncate(details, 512)))
+			lines = append(lines, fmt.Sprintf("- Task details: %s", truncate(details, taskDetailsClipChars)))
 		}
 		if path := strings.TrimSpace(task.WorktreePath); path != "" {
 			lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 		}
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, msg.ReplyTo)
-	// Lead (CEO) gets a wider context window so it can remember the
-	// active human goal verbatim across noisy multi-agent threads.
-	// Specialists keep the tighter window to stay token-efficient.
-	contextLimit := 4
-	if slug == b.targeter.LeadSlug() {
-		contextLimit = 20
-	}
-	if ctx := b.NotificationContext(slug, channelSlug, msg.ID, threadRoot, contextLimit); ctx != "" {
+	// Every agent gets the full thread window. Specialists used to be
+	// capped at 4 messages "to stay token-efficient", which starved them
+	// into improvising from a keyhole view of the thread (sota-uplift U0.2).
+	if ctx := b.NotificationContext(slug, channelSlug, msg.ID, threadRoot, threadContextLimit); ctx != "" {
 		lines = append(lines, ctx)
 	}
 	if slug == b.targeter.LeadSlug() {
-		if taskCtx := b.TaskNotificationContext("", slug, 3); taskCtx != "" {
+		if taskCtx := b.TaskNotificationContext("", slug, leadTaskContextLimit); taskCtx != "" {
 			lines = append(lines, taskCtx)
 		}
 		activeAgents := map[string]struct{}{}
@@ -557,12 +577,12 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 	lines := []string{
 		fmt.Sprintf("[Task update from @%s]", action.Actor),
 		"Work packet:",
-		fmt.Sprintf("- Task: #%s %s", task.ID, truncate(task.Title, 120)),
+		fmt.Sprintf("- Task: #%s %s", task.ID, truncate(task.Title, taskListTitleClipChars)),
 		fmt.Sprintf("- Status: %s", strings.TrimSpace(task.status)),
 		fmt.Sprintf("- Owner: @%s", slug),
 	}
 	if details := strings.TrimSpace(task.Details); details != "" {
-		lines = append(lines, fmt.Sprintf("- Details: %s", truncate(details, 512)))
+		lines = append(lines, fmt.Sprintf("- Details: %s", truncate(details, taskDetailsClipChars)))
 	}
 	if targets := extractTaskFileTargets(task.Title + " " + task.Details); len(targets) > 0 {
 		lines = append(lines, fmt.Sprintf("- Named file targets: %s", strings.Join(targets, ", ")))
@@ -600,12 +620,12 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 		lines = append(lines, "Task hygiene rule: if this lane drifts into a proof packet, review bundle, blueprint-derived scaffold, rubric, or other internal artifact shell, rewrite it immediately into either the next real deliverable step or the exact capability-enablement task that will unlock that deliverable.")
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, task.ThreadID)
-	if ctx := b.NotificationContext(slug, channelSlug, "", threadRoot, 3); ctx != "" {
+	if ctx := b.NotificationContext(slug, channelSlug, "", threadRoot, threadContextLimit); ctx != "" {
 		lines = append(lines, ctx)
 	}
 	lines = append(lines, fmt.Sprintf("If you deliver the substantive result for #%s in this turn, you MUST call team_task complete or review-ready for \"%s\" before any completion post and before you stop. A channel reply alone does not unblock dependent work, and a completion post without the task mutation is a failure.", task.ID, task.ID))
 	lines = append(lines, "Runtime rule: never launch another WUPHF office, copied wuphf binary, browser instance, or local web server/--web-port process from inside this turn. The office is already running; use the existing repo, broker state, and assigned worktree instead.")
-	lines = append(lines, fmt.Sprintf("%s Use team_task with my_slug \"%s\" to update status as you go.", truncate(content, 1000), slug))
+	lines = append(lines, fmt.Sprintf("%s Use team_task with my_slug \"%s\" to update status as you go.", truncate(content, triggerContentClipChars), slug))
 	return strings.Join(lines, "\n")
 }
 

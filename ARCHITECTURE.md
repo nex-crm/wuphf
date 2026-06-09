@@ -40,13 +40,16 @@ How WUPHF works under the hood, anchored to files you can open. One page. Read i
 
 ## Three load-bearing choices
 
-With the file that implements each:
+With the file that implements each. The original rationale for all three was
+token cost; as of the SOTA uplift (`docs/specs/sota-uplift.md`) the design
+optimizes for outcome quality first — packets are sized for what the agent
+needs to do the work well, and token spend is no longer a constraint.
 
-1. **Fresh session per turn** (`headless_claude.go`). Every agent turn is `claude -p "<prompt>"` from scratch. No `--resume`, no growing history. Combined with identical prompt prefixes, Anthropic's prompt cache gives ~97% read hit rates — the primary driver of the benchmark's token savings.
+1. **Fresh session per turn** (`headless_claude.go`). Every agent turn is `claude -p "<prompt>"` from scratch. No `--resume`, no growing history. Kept because it makes turns crash-safe, provider-agnostic, and replayable — continuity comes from rich work packets (full thread context, full task spec) and, per the uplift plan, a per-(agent,task) state ledger, not from a growing in-process history. Prompt caching still applies but is a side effect, not the goal.
 
-2. **Per-agent scoped MCP** (`internal/teammcp/`). An agent in DM mode sees only the handful of tools that mode needs. Smaller tool schema → smaller prompt → cheaper turn → better cache alignment. Each agent role gets exactly the tools it needs, nothing more.
+2. **Per-agent scoped MCP** (`internal/teammcp/`). An agent in DM mode sees only the handful of tools that mode needs. Kept for tool-use accuracy: smaller, role-shaped tool surfaces measurably beat exhaustive ones. Each agent role gets exactly the tools it needs, nothing more.
 
-3. **Push-driven broker** (`broker.go`). Agents sleep until the broker pushes them a message. No heartbeat polling an empty inbox. Idle cost is zero.
+3. **Push-driven broker** (`broker.go`). Agents sleep until the broker pushes them a message. No heartbeat polling an empty inbox. The push carries a generous work packet, and agents are free to pull more (thread history, wiki, learnings) whenever the packet isn't enough.
 
 ## Data flow of one message
 
