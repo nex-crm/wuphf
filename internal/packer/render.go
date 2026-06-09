@@ -8,7 +8,12 @@ import "strings"
 const (
 	mentionTokenCap = 600  // ReadMentionOnly hard cap
 	threadTokenCap  = 2400 // ReadThread: ~400 mention + up to ~2000 thread block
-	askTokenCap     = 220  // the Ask is length-capped, never dropped
+
+	// Essentials are never dropped, only length-capped so they always fit.
+	askTokenCap        = 220
+	returnPactTokenCap = 160
+	guardsTokenCap     = 160 // total across all guard lines
+	planTokenCap       = 600
 
 	defaultLearningLimit = 6
 	maxRosterLines       = 3
@@ -40,14 +45,15 @@ func capTokens(s string, maxTokens int) string {
 	return strings.TrimRight(cut, " \n\t") + " …"
 }
 
-// Render shapes a classified, budgeted bundle into a neutral PackedDelegation.
+// render shapes a classified, budgeted bundle into a neutral PackedDelegation.
+// It is unexported and sets the `sealed` marker, so a delivered delegation can
+// only come from Pack — never a hand-constructed bundle that skipped Classify.
 // The Slack-specific surface (Block Kit) is the bridge's job; here we produce
 // MentionText (always carries the essentials: ask, return pact, guards, plan)
 // and ThreadContext (the remaining items, only when the bot is verified to read
-// the thread). ThreadContext was already classified against the least-trusted
-// reader in Classify. The InjectionRecord is seeded as DeliveryPending; Deliver
-// fills RenderedHash, TokenCount, MessageTS, and the final status.
-func Render(b ContextBundle, req ContextRequest, audit []ItemAudit) PackedDelegation {
+// the thread). The InjectionRecord is seeded DeliveryPending; Deliver fills
+// RenderedHash, TokenCount, MessageTS, and the final status.
+func render(b ContextBundle, req ContextRequest, audit []ItemAudit, audienceTier BotTrust) PackedDelegation {
 	mention := renderMention(b, req.Target.ReadScope)
 
 	thread := ""
@@ -58,10 +64,12 @@ func Render(b ContextBundle, req ContextRequest, audit []ItemAudit) PackedDelega
 	rec := InjectionRecord{
 		IdempotencyKey: req.IdempotencyKey,
 		TaskID:         req.TaskID,
+		TaskUpdatedAt:  req.TaskUpdatedAt,
 		PlanID:         req.PlanID,
 		PlanVersion:    req.PlanVersion,
 		Identity:       req.Target.Identity,
 		BotTrust:       req.Target.Trust,
+		AudienceTrust:  audienceTier,
 		ProfileVersion: req.Target.Version,
 		PolicyVersion:  req.EgressPolicyVer,
 		WorkspaceID:    req.Thread.WorkspaceID,
@@ -71,7 +79,24 @@ func Render(b ContextBundle, req ContextRequest, audit []ItemAudit) PackedDelega
 		Status:         DeliveryPending,
 	}
 
-	return PackedDelegation{MentionText: mention, ThreadContext: thread, Injection: rec}
+	return PackedDelegation{MentionText: mention, ThreadContext: thread, Injection: rec, sealed: true}
+}
+
+// capGuards trims a guard list so its combined token estimate stays under total,
+// dropping whole lines from the end (guards are advisory, so the earliest /
+// most-important survive).
+func capGuards(guards []string, total int) []string {
+	used := 0
+	kept := make([]string, 0, len(guards))
+	for _, g := range guards {
+		t := estimateTokens(g)
+		if used+t > total {
+			break
+		}
+		used += t
+		kept = append(kept, g)
+	}
+	return kept
 }
 
 // renderMention builds the always-delivered mention. For ReadMentionOnly bots it

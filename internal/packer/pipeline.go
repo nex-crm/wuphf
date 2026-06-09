@@ -45,13 +45,15 @@ type GatherOptions struct {
 	LearningLimit int
 }
 
-// Gather retrieves candidates, task-scoped, for the target tier. Tainted intent
-// does NOT drive retrieval: retrieval is keyed by task id, and the Ask carries
-// the (CEO-restated) intent text only as an export to be classified, never as a
-// query. Untrusted bots get only the envelope + the approved plan step;
-// first-party (and hosted) additionally get task-scoped learnings, task-linked
-// wiki refs, and roster lines.
-func Gather(brain BrainHandle, req ContextRequest, opts GatherOptions) (RawBundle, error) {
+// Gather retrieves candidates, task-scoped, for the AUDIENCE tier (the
+// least-trusted reader, computed by Pack), not the target's own tier — a
+// downgraded audience must not even pull first-party content into the pipeline.
+// Tainted intent does NOT drive retrieval: retrieval is keyed by task id, and
+// the Ask carries the (CEO-restated) intent text only as an export to be
+// classified, never as a query. An untrusted audience gets only the envelope +
+// the approved plan step; first-party (and hosted) additionally get task-scoped
+// learnings, task-linked wiki refs, and roster lines.
+func Gather(brain BrainHandle, req ContextRequest, opts GatherOptions, audienceTier BotTrust) (RawBundle, error) {
 	rb := RawBundle{
 		Ask:        req.Intent.Text,
 		ReturnPact: opts.ReturnPact,
@@ -66,9 +68,10 @@ func Gather(brain BrainHandle, req ContextRequest, opts GatherOptions) (RawBundl
 		rb.Items = append(rb.Items, RawItem{Ref: "plan:" + req.TaskID, Kind: KindPlan, Body: plan})
 	}
 
-	if req.Target.Trust == BotUntrusted {
-		// Untrusted gets envelope + approved plan step only. No learnings, no
-		// wiki, no roster — nothing retrieved from the brain at large.
+	if audienceTier == BotUntrusted {
+		// Untrusted audience gets envelope + approved plan step only. No
+		// learnings, no wiki, no roster — nothing retrieved from the brain at
+		// large, regardless of the target bot's own tier.
 		return rb, nil
 	}
 
@@ -138,20 +141,27 @@ func Classify(raw RawBundle, audience BotTrust, policy EgressPolicy, sc SecretSc
 		audit = append(audit, ItemAudit{Ref: "returnpact", Kind: KindReturnPact, Class: ExportRedacted, Redactions: pactRed})
 	}
 
-	// Guards — advisory list. A guard line that cannot be sanitized is dropped,
-	// not a held delegation.
+	// Guards — advisory list. Each line is policy-classified like any item (so a
+	// policy/tenant that denies KindGuard is enforced) and then scanned. A guard
+	// line that is denied or cannot be sanitized is dropped — not a held
+	// delegation, since guards are advisory.
 	for i, g := range raw.Guards {
 		if strings.TrimSpace(g) == "" {
 			continue
 		}
-		res := sc.Scan(g)
 		ref := fmt.Sprintf("guard:%d", i)
+		class := policy.Classify(KindGuard, audience)
+		if class == ExportDenied {
+			audit = append(audit, ItemAudit{Ref: ref, Kind: KindGuard, Class: ExportDenied})
+			continue
+		}
+		res := sc.Scan(g)
 		if !res.OK {
 			audit = append(audit, ItemAudit{Ref: ref, Kind: KindGuard, Class: ExportDenied})
 			continue
 		}
 		out.Guards = append(out.Guards, res.Content)
-		audit = append(audit, ItemAudit{Ref: ref, Kind: KindGuard, Class: ExportRedacted, Redactions: res.Redactions})
+		audit = append(audit, ItemAudit{Ref: ref, Kind: KindGuard, Class: class, Redactions: res.Redactions})
 	}
 
 	// Items — drop ExportDenied (policy) and anything the scanner cannot prove
@@ -195,32 +205,51 @@ func scanEnvelopeField(text string, kind ItemKind, audience BotTrust, policy Egr
 	return res.Content, res.Redactions, nil
 }
 
-// Budget ranks the surviving items and trims them to the profile's token tier.
-// Ask, ReturnPact, and Guards are never dropped (already classified); the Ask is
-// length-capped. Items are trimmed from the bottom in rank order:
-// plan -> learning -> wiki -> roster -> skill.
-func Budget(b ContextBundle, p BotProfile) ContextBundle {
+// budget ranks the surviving items and trims them to the profile's token tier.
+// The ESSENTIALS — Ask, ReturnPact, Guards, and the approved plan step — are
+// never dropped: the bot cannot act without them. They are length-capped
+// instead, and only the non-essential items (learning -> wiki -> roster ->
+// skill) are trimmed from the bottom to fit whatever budget remains. This means
+// a large ReturnPact can never evict the plan step.
+func budget(b ContextBundle, p BotProfile) ContextBundle {
 	limit := mentionTokenCap
 	if p.ReadScope == ReadThread {
 		limit = threadTokenCap
 	}
 
+	// Cap the critical envelope fields so essentials always fit.
 	b.Ask = capTokens(b.Ask, askTokenCap)
+	b.ReturnPact = capTokens(b.ReturnPact, returnPactTokenCap)
+	b.Guards = capGuards(b.Guards, guardsTokenCap)
 
-	sort.SliceStable(b.Items, func(i, j int) bool {
-		return kindRank(b.Items[i].Kind) < kindRank(b.Items[j].Kind)
+	// Split essentials (plan) from trimmable items, preserving plan unconditionally.
+	var plan []ContextItem
+	var trimmable []ContextItem
+	for _, it := range b.Items {
+		if it.Kind == KindPlan {
+			plan = append(plan, ContextItem{Ref: it.Ref, Kind: it.Kind, Class: it.Class, Redactions: it.Redactions, Body: capTokens(it.Body, planTokenCap)})
+			continue
+		}
+		trimmable = append(trimmable, it)
+	}
+
+	sort.SliceStable(trimmable, func(i, j int) bool {
+		return kindRank(trimmable[i].Kind) < kindRank(trimmable[j].Kind)
 	})
 
 	used := estimateTokens(b.Ask) + estimateTokens(b.ReturnPact)
 	for _, g := range b.Guards {
 		used += estimateTokens(g)
 	}
+	for _, it := range plan {
+		used += estimateTokens(it.Body)
+	}
 
-	kept := make([]ContextItem, 0, len(b.Items))
-	for _, it := range b.Items {
+	kept := plan
+	for _, it := range trimmable {
 		t := estimateTokens(it.Body)
 		if used+t > limit {
-			continue // drop lower-ranked items that do not fit
+			continue // drop lower-ranked non-essential items that do not fit
 		}
 		used += t
 		kept = append(kept, it)

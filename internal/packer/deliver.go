@@ -14,6 +14,11 @@ import (
 // pre-render item scan never saw, so the last scan is over what actually leaves.
 var ErrFinalScanFailed = errors.New("packer: delivery aborted — final egress scan failed")
 
+// ErrUnsealed is returned when Deliver is handed a PackedDelegation that did not
+// come from Pack. Only render() sets the seal, so an unsealed delegation skipped
+// classification and must never be delivered.
+var ErrUnsealed = errors.New("packer: refusing to deliver an unsealed delegation (must come from Pack)")
+
 // SlackBridge posts a packed delegation and returns the Slack message ts. The
 // real implementation lives in the Slack bridge adapter (a separate spec); tests
 // use a fake.
@@ -65,20 +70,43 @@ func Deliver(
 	}
 	now := clock().Format(time.RFC3339Nano)
 
-	// 1. Idempotency: never ship the same delegation twice. Only a SENT record
-	//    short-circuits — a prior pending/failed attempt may be retried. (The
-	//    real broker-backed sink uses the pending marker as a lock to also close
-	//    the concurrent-send window; the in-process broker mutex covers it here.)
-	if prior, ok := sink.Lookup(req.IdempotencyKey); ok && prior.Status == DeliverySent {
-		return prior, nil
+	// 0. Only a sealed delegation (produced by Pack -> render) may be delivered.
+	//    A hand-constructed PackedDelegation skipped Classify, so it is refused.
+	if !d.sealed {
+		return InjectionRecord{}, ErrUnsealed
+	}
+
+	// 1. Idempotency. A SENT record short-circuits (already delivered). A PENDING
+	//    record means an attempt is in flight or crashed mid-flight: do NOT
+	//    re-post — return it for the caller/reconciler to resolve. Only an absent
+	//    or FAILED record proceeds to a fresh attempt. The sink's Lookup+Write
+	//    must be atomic in the real adapter (broker mutex / row lock) to fully
+	//    close the concurrent-send window, and the bridge Post must be idempotent
+	//    on the key so a post-success / write-failure retry cannot duplicate.
+	if prior, ok := sink.Lookup(req.IdempotencyKey); ok {
+		switch prior.Status {
+		case DeliverySent, DeliveryPending:
+			return prior, nil
+		}
 	}
 
 	rec := d.Injection
 	rec.IdempotencyKey = req.IdempotencyKey
 	rec.Timestamp = now
 
-	// 2. Re-validate the snapshot. A downgrade/edit between Classify and Deliver
-	//    must not ship stale-authorized context.
+	// 2. Bind delivery to the PACKED snapshot. The delegation's own
+	//    InjectionRecord records the task / plan / profile / policy / identity /
+	//    destination it was built for; refuse if the caller paired it with a
+	//    different req (e.g. a stale high-trust payload + a fresh downgraded req).
+	if err := snapshotMatches(d.Injection, req); err != nil {
+		rec.Status = DeliveryFailed
+		rec.FailureReason = "snapshot mismatch: " + err.Error()
+		_ = sink.Write(rec)
+		return rec, fmt.Errorf("packer: delivery aborted: %w", err)
+	}
+
+	// 3. Re-validate against LIVE state. A trust downgrade or task edit between
+	//    Classify and Deliver must not ship stale-authorized context.
 	if val != nil {
 		if err := val.Validate(req); err != nil {
 			rec.Status = DeliveryFailed
@@ -88,7 +116,8 @@ func Deliver(
 		}
 	}
 
-	// 3. Final redaction scan over the EXACT bytes that will leave.
+	// 4. Final redaction scan over the EXACT bytes that will leave. Render can
+	//    reintroduce raw refs/titles a pre-render item scan never saw.
 	finalMention := sc.Scan(d.MentionText)
 	finalThread := sc.Scan(d.ThreadContext)
 	if !finalMention.OK || !finalThread.OK {
@@ -98,20 +127,21 @@ func Deliver(
 		return rec, ErrFinalScanFailed
 	}
 
-	sealed := PackedDelegation{
+	final := PackedDelegation{
 		MentionText:   finalMention.Content,
 		ThreadContext: finalThread.Content,
+		sealed:        true,
 	}
-	rec.RenderedHash = hashBytes(sealed.MentionText, sealed.ThreadContext)
-	rec.TokenCount = estimateTokens(sealed.MentionText) + estimateTokens(sealed.ThreadContext)
+	rec.RenderedHash = hashBytes(final.MentionText, final.ThreadContext)
+	rec.TokenCount = estimateTokens(final.MentionText) + estimateTokens(final.ThreadContext)
 
-	// 4. Pending -> post -> sent/failed.
+	// 5. Pending -> post -> sent/failed.
 	rec.Status = DeliveryPending
 	if err := sink.Write(rec); err != nil {
 		return rec, fmt.Errorf("packer: write pending audit: %w", err)
 	}
 
-	ts, err := br.Post(ctx, sealed, req.IdempotencyKey)
+	ts, err := br.Post(ctx, final, req.IdempotencyKey)
 	if err != nil {
 		rec.Status = DeliveryFailed
 		rec.FailureReason = err.Error()
@@ -125,6 +155,34 @@ func Deliver(
 		return rec, fmt.Errorf("packer: write sent audit: %w", err)
 	}
 	return rec, nil
+}
+
+// snapshotMatches refuses a delivery whose packed snapshot does not correspond
+// to the req it is being delivered under. This stops a caller from pairing a
+// stale, higher-trust PackedDelegation with a fresh, downgraded req that happens
+// to pass the live validator.
+func snapshotMatches(rec InjectionRecord, req ContextRequest) error {
+	switch {
+	case rec.TaskID != req.TaskID:
+		return fmt.Errorf("task id %q != %q", rec.TaskID, req.TaskID)
+	case rec.TaskUpdatedAt != req.TaskUpdatedAt:
+		return fmt.Errorf("task updated-at %q != %q", rec.TaskUpdatedAt, req.TaskUpdatedAt)
+	case rec.PlanID != req.PlanID:
+		return fmt.Errorf("plan id %q != %q", rec.PlanID, req.PlanID)
+	case rec.PlanVersion != req.PlanVersion:
+		return fmt.Errorf("plan version %d != %d", rec.PlanVersion, req.PlanVersion)
+	case rec.BotTrust != req.Target.Trust:
+		return fmt.Errorf("trust tier %d != %d", rec.BotTrust, req.Target.Trust)
+	case rec.ProfileVersion != req.Target.Version:
+		return fmt.Errorf("profile version %d != %d", rec.ProfileVersion, req.Target.Version)
+	case rec.PolicyVersion != req.EgressPolicyVer:
+		return fmt.Errorf("policy version %d != %d", rec.PolicyVersion, req.EgressPolicyVer)
+	case rec.Identity != req.Target.Identity:
+		return fmt.Errorf("identity tuple mismatch")
+	case rec.WorkspaceID != req.Thread.WorkspaceID || rec.ChannelID != req.Thread.ChannelID || rec.ThreadTS != req.Thread.ThreadTS:
+		return fmt.Errorf("destination mismatch")
+	}
+	return nil
 }
 
 // hashBytes hashes exactly what was sent (mention + thread) with a NUL separator

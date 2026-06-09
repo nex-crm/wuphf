@@ -9,6 +9,7 @@ package packer
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -116,7 +117,7 @@ func TestICP1_UntrustedRedactsAndWithholds(t *testing.T) {
 	req := baseRequest(untrustedProfile(), "Reconcile June invoices and report totals.")
 	policy := NewDefaultEgressPolicy(7)
 
-	packed, audit, err := Pack(brain, policy, EgressScanner{}, req, GatherOptions{ReturnPact: "Reply in this thread with the totals."}, BotUntrusted)
+	packed, audit, err := Pack(brain, policy, EgressScanner{}, req, GatherOptions{ReturnPact: "Reply in this thread with the totals."}, DeliveryAudience{LeastTrustedPresent: BotUntrusted})
 	if err != nil {
 		t.Fatalf("Pack: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestICP2_FirstPartyThreadGetsScopedKnowledge(t *testing.T) {
 		roster:    []BrainItem{{Ref: "roster-1", Body: "warehouse-bot owns counts"}},
 	}
 	req := baseRequest(firstPartyThreadProfile(), "Audit SKU-42 counts.")
-	packed, audit, err := Pack(brain, NewDefaultEgressPolicy(7), EgressScanner{}, req, GatherOptions{ReturnPact: "Post the reconciled count here."}, BotFirstParty)
+	packed, audit, err := Pack(brain, NewDefaultEgressPolicy(7), EgressScanner{}, req, GatherOptions{ReturnPact: "Post the reconciled count here."}, DeliveryAudience{LeastTrustedPresent: BotFirstParty})
 	if err != nil {
 		t.Fatalf("Pack: %v", err)
 	}
@@ -196,7 +197,7 @@ func TestICP3_HostedGetsEverythingAllowed(t *testing.T) {
 	p := firstPartyThreadProfile()
 	p.Trust = BotHosted
 	req := baseRequest(p, "Cut the release.")
-	_, audit, err := Pack(brain, NewDefaultEgressPolicy(7), EgressScanner{}, req, GatherOptions{}, BotHosted)
+	_, audit, err := Pack(brain, NewDefaultEgressPolicy(7), EgressScanner{}, req, GatherOptions{}, DeliveryAudience{TargetOnly: true})
 	if err != nil {
 		t.Fatalf("Pack: %v", err)
 	}
@@ -259,14 +260,26 @@ func TestPolicy_RawTaskBodyDeniedForNonHosted(t *testing.T) {
 	}
 }
 
-// Deliver aborts on a stale snapshot (trust downgrade / version bump) and never
-// calls the bridge.
+// packForDelivery builds a real, sealed, snapshot-valid delegation via Pack so
+// Deliver tests exercise the actual seal + snapshot binding rather than a
+// hand-constructed payload.
+func packForDelivery(t *testing.T, key string) (PackedDelegation, ContextRequest) {
+	t.Helper()
+	brain := fakeBrain{plan: "Reconcile the open invoices."}
+	req := baseRequest(untrustedProfile(), "Reconcile June invoices.")
+	req.IdempotencyKey = key
+	packed, _, err := Pack(brain, NewDefaultEgressPolicy(7), EgressScanner{}, req, GatherOptions{ReturnPact: "Reply here."}, DeliveryAudience{LeastTrustedPresent: BotUntrusted})
+	if err != nil {
+		t.Fatalf("packForDelivery: %v", err)
+	}
+	return packed, req
+}
+
+// Deliver aborts on a stale live snapshot and never calls the bridge.
 func TestDeliver_StaleSnapshotAbortsBeforePost(t *testing.T) {
+	packed, req := packForDelivery(t, "k1")
 	bridge := &fakeBridge{ts: "200.2"}
 	sink := newMemSink()
-	packed := PackedDelegation{MentionText: "hello", Injection: InjectionRecord{IdempotencyKey: "k1"}}
-	req := baseRequest(untrustedProfile(), "x")
-	req.IdempotencyKey = "k1"
 
 	rec, err := Deliver(context.Background(), bridge, fakeValidator{err: errStale()}, EgressScanner{}, sink, fixedClock, packed, req)
 	if err == nil {
@@ -280,14 +293,13 @@ func TestDeliver_StaleSnapshotAbortsBeforePost(t *testing.T) {
 	}
 }
 
-// Deliver's final byte-scan catches a secret in the rendered bytes even if it
-// somehow survived earlier stages, and never posts it.
+// Deliver's final byte-scan catches a secret reintroduced into the rendered
+// bytes after classification, and never posts it.
 func TestDeliver_FinalScanCatchesReintroducedSecret(t *testing.T) {
+	packed, req := packForDelivery(t, "k2")
+	packed.MentionText = "ship it with " + fixturePEMKey // simulate render reintroducing a secret
 	bridge := &fakeBridge{ts: "200.2"}
 	sink := newMemSink()
-	packed := PackedDelegation{MentionText: "ship it with " + fixturePEMKey, Injection: InjectionRecord{IdempotencyKey: "k2"}}
-	req := baseRequest(untrustedProfile(), "x")
-	req.IdempotencyKey = "k2"
 
 	_, err := Deliver(context.Background(), bridge, fakeValidator{}, EgressScanner{}, sink, fixedClock, packed, req)
 	if err == nil {
@@ -300,11 +312,9 @@ func TestDeliver_FinalScanCatchesReintroducedSecret(t *testing.T) {
 
 // Delivering the same idempotency key twice posts exactly once.
 func TestDeliver_IdempotentOnKey(t *testing.T) {
+	packed, req := packForDelivery(t, "k3")
 	bridge := &fakeBridge{ts: "200.2"}
 	sink := newMemSink()
-	packed := PackedDelegation{MentionText: "clean mention", Injection: InjectionRecord{IdempotencyKey: "k3"}}
-	req := baseRequest(untrustedProfile(), "x")
-	req.IdempotencyKey = "k3"
 
 	if _, err := Deliver(context.Background(), bridge, fakeValidator{}, EgressScanner{}, sink, fixedClock, packed, req); err != nil {
 		t.Fatalf("first deliver: %v", err)
@@ -314,6 +324,62 @@ func TestDeliver_IdempotentOnKey(t *testing.T) {
 	}
 	if bridge.calls != 1 {
 		t.Fatalf("bridge.calls = %d, want 1 (idempotent)", bridge.calls)
+	}
+}
+
+// Deliver refuses an unsealed (hand-constructed) delegation that skipped Classify.
+func TestDeliver_RefusesUnsealedDelegation(t *testing.T) {
+	bridge := &fakeBridge{ts: "200.2"}
+	sink := newMemSink()
+	hand := PackedDelegation{MentionText: "trust me", Injection: InjectionRecord{IdempotencyKey: "k4"}}
+	req := baseRequest(untrustedProfile(), "x")
+	req.IdempotencyKey = "k4"
+
+	_, err := Deliver(context.Background(), bridge, fakeValidator{}, EgressScanner{}, sink, fixedClock, hand, req)
+	if !errors.Is(err, ErrUnsealed) {
+		t.Fatalf("expected ErrUnsealed, got %v", err)
+	}
+	if bridge.calls != 0 {
+		t.Fatalf("bridge must not be called for an unsealed delegation, calls=%d", bridge.calls)
+	}
+}
+
+// Deliver refuses a delegation whose packed snapshot does not match the req it is
+// delivered under (a stale payload paired with a downgraded req).
+func TestDeliver_RefusesSnapshotMismatch(t *testing.T) {
+	packed, req := packForDelivery(t, "k5")
+	mismatch := req
+	mismatch.Target.Trust = BotFirstParty // packed snapshot says untrusted
+	bridge := &fakeBridge{ts: "200.2"}
+	sink := newMemSink()
+
+	_, err := Deliver(context.Background(), bridge, fakeValidator{}, EgressScanner{}, sink, fixedClock, packed, mismatch)
+	if err == nil {
+		t.Fatal("expected snapshot-mismatch abort")
+	}
+	if bridge.calls != 0 {
+		t.Fatalf("bridge must not be called on snapshot mismatch, calls=%d", bridge.calls)
+	}
+}
+
+// A first-party bot on a SHARED thread with an untrusted reader present is
+// classified against the untrusted audience: no learnings/wiki are retrieved or
+// exported, even though the target itself is first-party. This is the H5/F3 fix.
+func TestPack_SharedThreadDowngradesFirstPartyAudience(t *testing.T) {
+	brain := fakeBrain{
+		plan:      "Audit SKU-42.",
+		learnings: []BrainItem{{Ref: "learn-1", Body: "reconcile twice"}},
+		wiki:      []BrainItem{{Ref: "wiki/x.md", Body: "playbook"}},
+	}
+	req := baseRequest(firstPartyThreadProfile(), "Audit SKU-42.")
+	_, audit, err := Pack(brain, NewDefaultEgressPolicy(7), EgressScanner{}, req, GatherOptions{}, DeliveryAudience{LeastTrustedPresent: BotUntrusted})
+	if err != nil {
+		t.Fatalf("Pack: %v", err)
+	}
+	for _, a := range audit {
+		if a.Kind == KindLearning || a.Kind == KindWiki {
+			t.Fatalf("downgraded audience must not export %s; audit=%+v", a.Kind, audit)
+		}
 	}
 }
 

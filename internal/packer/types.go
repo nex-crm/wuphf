@@ -230,11 +230,16 @@ type ItemAudit struct {
 	Redactions int
 }
 
-// PackedDelegation is the output the bridge posts to Slack.
+// PackedDelegation is the output the bridge posts to Slack. It can only be
+// produced by Pack: the unexported `sealed` marker is set by render(), and
+// Deliver refuses any delegation that is not sealed. This forces every delivered
+// payload through the classifier — a hand-constructed PackedDelegation (which
+// would skip Classify) cannot be delivered.
 type PackedDelegation struct {
 	MentionText   string // ALWAYS carries the essentials
 	ThreadContext string // CHANNEL-VISIBLE: classified against the least-trusted reader
 	Injection     InjectionRecord
+	sealed        bool // set only by render(); gate-checked by Deliver
 }
 
 // InjectionRecord is the append-only egress audit row. It is strong enough for
@@ -243,10 +248,12 @@ type PackedDelegation struct {
 type InjectionRecord struct {
 	IdempotencyKey string
 	TaskID         string
+	TaskUpdatedAt  string // the task snapshot the delegation was built against
 	PlanID         string
 	PlanVersion    int
 	Identity       BotIdentity // full tuple, not a bare id
-	BotTrust       BotTrust
+	BotTrust       BotTrust    // the target's own tier
+	AudienceTrust  BotTrust    // the tier the content was actually classified against
 	ProfileVersion int
 	PolicyVersion  int
 	WorkspaceID    string
