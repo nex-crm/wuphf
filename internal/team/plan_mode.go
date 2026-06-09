@@ -1,5 +1,10 @@
 package team
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 // plan_mode.go owns "Plan mode" (Phase 5): a per-task "Plan first" toggle
 // (default ON) that makes the owner plan autonomously before executing. A
 // Plan-first task enters LifecycleStatePlanning, where the owner is dispatched
@@ -64,6 +69,31 @@ func specIsFrozen(s LifecycleState) bool {
 	return false
 }
 
+// extractClaudePlanArtifact pulls the plan text out of an ExitPlanMode tool_use
+// input. Under Claude's native plan mode the finished plan is delivered as the
+// ExitPlanMode tool call ({"plan": "..."}), NOT as assistant text — so a
+// planning turn must harvest it from the tool input. Returns "" when toolInput
+// is not ExitPlanMode-shaped or carries no plan.
+func extractClaudePlanArtifact(toolInput string) string {
+	var parsed struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(toolInput)), &parsed); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Plan)
+}
+
+// isExitPlanModeTool reports whether a tool name is Claude's ExitPlanMode tool,
+// tolerant of the MCP-style prefixes Claude may surface it under.
+func isExitPlanModeTool(toolName string) bool {
+	name := strings.TrimSpace(toolName)
+	if idx := strings.LastIndex(name, "__"); idx >= 0 {
+		name = name[idx+2:]
+	}
+	return strings.EqualFold(name, "ExitPlanMode")
+}
+
 // planModeDirective is prepended to the work packet for a task in
 // LifecycleStatePlanning. It tells the owner to plan only (no repo changes, no
 // external actions), capture the plan in its notebook, post a summary, and
@@ -75,10 +105,9 @@ func specIsFrozen(s LifecycleState) bool {
 // providers this directive remains the sole enforcement.
 func planModeDirective(task teamTask) string {
 	notebookPath := "agents/<your-slug>/notebook/plan-" + task.ID + ".md"
-	return "[PLAN MODE] This task is in planning — do NOT change the repo, run build/deploy steps, or take external actions yet. Plan first:\n" +
+	return "[PLAN MODE] This task is in planning and your runtime is read-only — you literally cannot change the repo, run build/deploy steps, or take external actions this turn. Plan first:\n" +
 		"1. Read only what you need to understand the work; do not do the work.\n" +
-		"2. Write a tight PLAN to your notebook with notebook_write (path like " + notebookPath + "): the goal, a concrete step-by-step approach, acceptance criteria, and risks/open questions. This is a draft for you and the human — it is NOT promoted to the team wiki unless @librarian decides it is worth it.\n" +
-		"3. Post a short summary of the plan to the task channel so the human can review it.\n" +
-		"4. Then STOP. Execution starts only after the human clicks \"Approve & Start\"; you will be re-notified to begin the work then. Do NOT start implementing in this turn.\n" +
+		"2. Produce a tight PLAN: the goal, a concrete step-by-step approach, acceptance criteria, and risks/open questions. Present it as your final answer (in plan mode this goes through the plan/ExitPlanMode surface). If your runtime still allows writes, also save it to your notebook with notebook_write (path like " + notebookPath + ") — a draft for you and the human, NOT promoted to the team wiki unless @librarian decides it is worth it.\n" +
+		"3. Then STOP — the plan is surfaced to the human automatically. Execution starts only after the human clicks \"Approve & Start\"; you will be re-notified to begin the work then. Do NOT try to start implementing in this turn.\n" +
 		"---\n"
 }

@@ -352,6 +352,13 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	relay.Flush()
 	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
 		appendHeadlessCodexLog(slug, "result: "+text)
+		// In plan posture (-s read-only) the final message IS the plan; surface
+		// it as a plan card. Codex has no ExitPlanMode, and read-only does not
+		// block MCP, so the owner may also have written its notebook + posted —
+		// the silent-gated post below avoids a duplicate channel message.
+		if l.resolveTurnPosture(ctx, slug) == posturePlan {
+			emitHeadlessPlan(agentStream, turnID, HeadlessProviderCodex, slug, taskID, text)
+		}
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
 		if err != nil {
 			appendHeadlessCodexLog(slug, "fallback-post-error: "+err.Error())
