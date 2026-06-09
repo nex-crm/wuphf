@@ -54,7 +54,10 @@ export function ConnectIntegrationCard({
       pending?.connect_id,
       pending?.platform,
     ],
-    enabled: Boolean(pending?.connect_id),
+    // Poll once a connection is pending, even if Composio returned no
+    // connect_id — fall back to polling by platform so the card cannot deadlock
+    // in `connecting` with no status progression.
+    enabled: Boolean(pending),
     queryFn: () =>
       getIntegrationConnectStatus({
         provider: pending?.provider ?? "composio",
@@ -144,7 +147,10 @@ export function ConnectIntegrationCard({
           type="button"
           className="btn btn-sm btn-primary"
           onClick={() => connectMutation.mutate()}
-          disabled={submitting || !platform || connecting}
+          // Only disabled while the start-connect call is in flight — NOT for
+          // the whole polling wait — so the human can always reopen a popup that
+          // was closed or blocked.
+          disabled={submitting || !platform || connectMutation.isPending}
         >
           {pending && !failed ? "Reopen connect window" : `Connect ${name}`}
         </button>

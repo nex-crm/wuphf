@@ -74,6 +74,9 @@ export function HumanInterviewOverlay() {
               channel: grant.channel,
               issueId: blockingPending.issue_id,
             });
+            // Refresh the grants list so the Integrations app reflects the new
+            // grant immediately rather than after its staleTime.
+            await queryClient.invalidateQueries({ queryKey: ["action-grants"] });
           } catch (grantErr: unknown) {
             // The standing grant did not stick, but the human still wants THIS
             // run approved — surface the failure and proceed with the approval

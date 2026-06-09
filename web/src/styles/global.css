@@ -1179,7 +1179,7 @@ body {
 .eac-field-value {
   margin: 0;
   color: var(--text);
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .eac-trunc {
   display: inline-block;
@@ -1204,7 +1204,7 @@ body {
   line-height: 1.5;
   color: var(--text);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   max-height: 200px;
   overflow: auto;
 }

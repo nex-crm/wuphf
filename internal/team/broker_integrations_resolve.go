@@ -3,7 +3,9 @@ package team
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -209,6 +211,11 @@ func (b *Broker) resolveExternalAction(ctx context.Context, req integrationResol
 				Headers: maskSensitivePayload(dry.Request.Headers),
 				Data:    maskSensitivePayload(dry.Request.Data),
 			}
+		} else {
+			// Log so operators can diagnose a broken approval preview, but do not
+			// block the modal — the human can still decide from the action id and
+			// account alone (resp.RawEnvelope stays nil).
+			fmt.Fprintf(os.Stderr, "broker: dry-run preview for %s/%s failed: %v\n", platform, actionID, err)
 		}
 	}
 	return resp

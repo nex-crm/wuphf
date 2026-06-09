@@ -111,7 +111,10 @@ export function ActionGrantsPanel() {
             key={grant.id}
             grant={grant}
             onRevoke={(id) => revokeMutation.mutate(id)}
-            revoking={revokeMutation.isPending}
+            // Disable only the row being revoked so other grants stay actionable.
+            revoking={
+              revokeMutation.isPending && revokeMutation.variables === grant.id
+            }
           />
         ))}
       </ul>

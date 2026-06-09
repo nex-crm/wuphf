@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRequest } from "../../api/client";
 
@@ -46,6 +46,10 @@ describe("<ConnectIntegrationCard>", () => {
     startConnect.mockReset();
     getStatus.mockReset();
     vi.stubGlobal("open", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("renders the integration identity and the connect/skip actions", () => {
