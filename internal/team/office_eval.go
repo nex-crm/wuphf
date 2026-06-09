@@ -158,6 +158,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"thread-context", evalJobThreadContext},
 		{"knowledge-injection", evalJobKnowledgeInjection},
 		{"dependency-handoff", evalJobDependencyHandoff},
+		{"turn-journal", evalJobTurnJournal},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))
@@ -352,5 +353,25 @@ func evalJobDependencyHandoff(fx *officeEvalFixture, r *OfficeEvalReport) error 
 	packet := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *unblocked, "Task unblocked.")
 	r.add(job, "dependent's packet carries the upstream outcome", strings.Contains(packet, outcome),
 		"B depends on A; A finished with a concrete finding; B's packet must contain it (U3.2 regression guard)", "")
+	return nil
+}
+
+// evalJobTurnJournal: the living task brief (U2.3/U3.3) — what one turn
+// tried must reach the next turn's packet, including a teammate's.
+func evalJobTurnJournal(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "turn-journal"
+	task, _, err := fx.broker.EnsureTask("general", "Stabilize the flaky auth test", "Find and fix the flaky auth test.", "eng", "ceo", "")
+	if err != nil {
+		return err
+	}
+	fx.broker.AppendTaskLedgerEntry(task.ID, TaskLedgerEntry{
+		Agent: "eng", Outcome: "turn timed out after 20m",
+		Said:    "Reproduced the flake: auth_test.go races on the shared fixture. Next: isolate the fixture per test.",
+		Actions: []string{"task_updated: noted reproduction steps"},
+	})
+	packet := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *fx.broker.TaskByID(task.ID), "Continue.")
+	r.add(job, "next turn's packet carries the task journal",
+		strings.Contains(packet, "TASK JOURNAL") && strings.Contains(packet, "isolate the fixture"),
+		"turn N+1 must start from what turn N tried, not from amnesia (U2.3/U3.3 regression guard)", "")
 	return nil
 }

@@ -314,9 +314,14 @@ type teamTask struct {
 	// done card can show proof.
 	Verification       *TaskVerification       `json:"verification,omitempty"`
 	VerificationResult *TaskVerificationResult `json:"verification_result,omitempty"`
-	CreatedAt          string                  `json:"created_at"`
-	UpdatedAt          string                  `json:"updated_at"`
-	CompletedAt        string                  `json:"completed_at,omitempty"`
+	// Ledger is the per-turn journal (task_ledger.go, U2.3): distilled
+	// records of what each headless turn on this task said, mutated, and
+	// how it ended. Rendered into every participant's packet as the living
+	// task brief. Bounded to taskLedgerMaxEntries.
+	Ledger      []TaskLedgerEntry `json:"ledger,omitempty"`
+	CreatedAt   string            `json:"created_at"`
+	UpdatedAt   string            `json:"updated_at"`
+	CompletedAt string            `json:"completed_at,omitempty"`
 	// System marks a task as a permanent system-owned task that may not
 	// be deleted or removed. The "Backup & Migration" task (ID: task-general)
 	// is the only current system task; it owns the #general channel so all
@@ -415,6 +420,7 @@ type teamTaskWire struct {
 	IssueDraftSpec       *IssueDraftSpec         `json:"issue_draft_spec,omitempty"`
 	Verification         *TaskVerification       `json:"verification,omitempty"`
 	VerificationResult   *TaskVerificationResult `json:"verification_result,omitempty"`
+	Ledger               []TaskLedgerEntry       `json:"ledger,omitempty"`
 	CreatedAt            string                  `json:"created_at"`
 	UpdatedAt            string                  `json:"updated_at"`
 	CompletedAt          string                  `json:"completed_at,omitempty"`
@@ -465,6 +471,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		IssueDraftSpec:       t.IssueDraftSpec,
 		Verification:         t.Verification,
 		VerificationResult:   t.VerificationResult,
+		Ledger:               t.Ledger,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
 		CompletedAt:          t.CompletedAt,
@@ -517,6 +524,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.IssueDraftSpec = w.IssueDraftSpec
 	t.Verification = w.Verification
 	t.VerificationResult = w.VerificationResult
+	t.Ledger = w.Ledger
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt
 	t.CompletedAt = w.CompletedAt

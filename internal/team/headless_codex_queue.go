@@ -448,6 +448,7 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
 				l.recoverFailedHeadlessTurn(slug, turn, startedAt, err.Error())
 			}
+			l.recordTaskLedgerEntry(slug, turn, startedAt, err)
 			l.finishHeadlessTurn(lane)
 		}()
 		l.headless.mu.Lock()

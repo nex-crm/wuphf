@@ -533,6 +533,9 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 		if upstream := b.upstreamOutcomesContext(task); upstream != "" {
 			lines = append(lines, upstream)
 		}
+		if journal := taskLedgerContext(task); journal != "" {
+			lines = append(lines, journal)
+		}
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, msg.ReplyTo)
 	// Every agent gets the full thread window. Specialists used to be
@@ -613,6 +616,9 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 	}
 	if upstream := b.upstreamOutcomesContext(task); upstream != "" {
 		lines = append(lines, upstream)
+	}
+	if journal := taskLedgerContext(task); journal != "" {
+		lines = append(lines, journal)
 	}
 	if targets := extractTaskFileTargets(task.Title + " " + task.Details); len(targets) > 0 {
 		lines = append(lines, fmt.Sprintf("- Named file targets: %s", strings.Join(targets, ", ")))
