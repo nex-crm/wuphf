@@ -167,6 +167,119 @@ func (r *Repo) CommitAgentFile(ctx context.Context, slug, relPath, content, mode
 	return r.commitAgentFileLocked(ctx, slug, relPath, content, mode, message)
 }
 
+// CommitAgentFileHuman writes one agent instruction file as a HUMAN edit with
+// optimistic-concurrency: the caller passes the per-file short SHA it last saw
+// and the write is rejected with ErrWikiSHAMismatch when HEAD has moved past it.
+// This is the editor's save path (mirrors CommitHuman) — but, like the agent
+// commit path, it does NOT regenerate the team/ article index: instruction
+// files are per-agent and never feed the team catalog. Returns the new short
+// SHA, bytes written, and an error.
+func (r *Repo) CommitAgentFileHuman(ctx context.Context, relPath, content, expectedSHA, message string, identity HumanIdentity) (string, int, error) {
+	// Resolve the effective identity before touching the filesystem so every
+	// downstream git sub-call stamps the same author. Mirrors CommitHuman.
+	name := strings.TrimSpace(identity.Name)
+	email := strings.TrimSpace(identity.Email)
+	slug := strings.TrimSpace(identity.Slug)
+	if name == "" || email == "" || slug == "" {
+		name = FallbackHumanIdentity.Name
+		email = FallbackHumanIdentity.Email
+		slug = FallbackHumanIdentity.Slug
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if err := validateAgentFilePath(relPath); err != nil {
+		return "", 0, err
+	}
+	if strings.TrimSpace(content) == "" {
+		return "", 0, fmt.Errorf("agent file: content is required")
+	}
+
+	fullPath := filepath.Join(r.root, relPath)
+	exists := false
+	if _, err := os.Stat(fullPath); err == nil {
+		exists = true
+	}
+
+	// Optimistic concurrency pre-check BEFORE any filesystem mutation, so a
+	// rejection leaves the working tree clean (matches CommitHuman).
+	if exists {
+		if expectedSHA == "" {
+			curSHA, serr := r.currentArticleSHALocked(ctx, relPath)
+			if serr != nil {
+				return "", 0, fmt.Errorf("agent file: resolve current sha: %w", serr)
+			}
+			return curSHA, 0, fmt.Errorf("%w: file exists but no expected_sha supplied", ErrWikiSHAMismatch)
+		}
+		curSHA, serr := r.currentArticleSHALocked(ctx, relPath)
+		if serr != nil {
+			return "", 0, fmt.Errorf("agent file: resolve current sha: %w", serr)
+		}
+		if !shaEquivalent(curSHA, expectedSHA) {
+			return curSHA, 0, fmt.Errorf("%w: current %s, expected %s", ErrWikiSHAMismatch, curSHA, expectedSHA)
+		}
+	} else if expectedSHA != "" {
+		return "", 0, fmt.Errorf("%w: file not found but expected_sha supplied", ErrWikiSHAMismatch)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
+		return "", 0, fmt.Errorf("agent file: mkdir %s: %w", filepath.Dir(fullPath), err)
+	}
+	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
+		return "", 0, fmt.Errorf("agent file: write %s: %w", relPath, err)
+	}
+	bytesWritten := len(content)
+
+	relForGit := filepath.ToSlash(relPath)
+	if out, err := r.runGitLockedAs(ctx, name, email, "add", "--", relForGit); err != nil {
+		return "", 0, fmt.Errorf("agent file: git add %s: %w: %s", relPath, err, out)
+	}
+	// Byte-identical re-write short-circuits to current HEAD; mirrors CommitHuman.
+	cachedDiff, err := r.runGitLockedAs(ctx, name, email, "diff", "--cached", "--name-only")
+	if err != nil {
+		return "", 0, fmt.Errorf("agent file: git diff --cached: %w", err)
+	}
+	if strings.TrimSpace(cachedDiff) == "" {
+		headSha, herr := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+		if herr != nil {
+			return "", 0, fmt.Errorf("agent file: resolve HEAD sha: %w", herr)
+		}
+		return strings.TrimSpace(headSha), bytesWritten, nil
+	}
+	// Build the bare message, then stamp the "human:" provenance prefix below
+	// (the agent commit path uses "agent:" instead) so git log --oneline makes
+	// the author class obvious at a glance.
+	commitMsg := strings.TrimSpace(message)
+	if commitMsg == "" {
+		commitMsg = fmt.Sprintf("update %s", relPath)
+	}
+	if !strings.HasPrefix(commitMsg, "human:") {
+		commitMsg = "human: " + commitMsg
+	}
+	if out, err := r.runGitLockedAs(ctx, name, email, "commit", "-q", "-m", commitMsg); err != nil {
+		return "", 0, fmt.Errorf("agent file: git commit: %w: %s", err, out)
+	}
+	_ = slug // retained for future author_slug plumbing, mirrors CommitHuman.
+	sha, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return "", 0, fmt.Errorf("agent file: resolve HEAD sha: %w", err)
+	}
+	return strings.TrimSpace(sha), bytesWritten, nil
+}
+
+// AgentFileSHA returns the short SHA of the most recent commit touching the
+// agent instruction file at relPath, or "" (no error) when the file has no
+// commit history yet. Used to seed the editor's expected_sha on open.
+func (r *Repo) AgentFileSHA(ctx context.Context, relPath string) (string, error) {
+	if err := validateAgentFilePath(relPath); err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.currentArticleSHALocked(ctx, relPath)
+}
+
 // AgentFileRead reads one agent instruction file by repo-relative path. Returns
 // (nil, nil) when the file does not exist so callers can treat "absent" as
 // "empty" without special-casing os.IsNotExist.
@@ -300,6 +413,25 @@ func renderAgentTools(member officeMember) string {
 	b.WriteString("- Prefer the smallest real action over a proof or preview artifact unless the task explicitly asks for one.\n")
 	b.WriteString("- Request a skill or capability when one is missing rather than faking the result.\n")
 	return b.String()
+}
+
+// renderAgentFileContent dispatches to the right deterministic generator for a
+// canonical instruction file name. Returns "" for an unknown name. Used by the
+// HTTP read handler to seed the editor with real content when a file has not
+// been backfilled to disk yet (the first save then persists it).
+func renderAgentFileContent(member officeMember, name string, isLead bool) string {
+	switch name {
+	case "SOUL":
+		return renderAgentSoul(member, isLead)
+	case "IDENTITY":
+		return renderAgentIdentity(member)
+	case "OPERATIONS":
+		return renderAgentOperations(member, isLead)
+	case "TOOLS":
+		return renderAgentTools(member)
+	default:
+		return ""
+	}
 }
 
 func renderOfficeUserFile() string {

@@ -569,6 +569,11 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/memory", b.requireAuth(b.handleMemory))
 	mux.HandleFunc("/wiki/write", b.requireAuth(b.handleWikiWrite))
 	mux.HandleFunc("/wiki/write-human", b.requireAuth(b.handleWikiWriteHuman))
+	// Per-agent instruction files (SOUL/IDENTITY/OPERATIONS/TOOLS + office
+	// USER.md). Separate from /wiki/* so they use the strict agent-file path
+	// allowlist and skip the team/ article index. See broker_agent_files_http.go.
+	mux.HandleFunc("/agent-files/read", b.requireAuth(b.handleAgentFileRead))
+	mux.HandleFunc("/agent-files/write", b.requireAuth(b.handleAgentFileWrite))
 	mux.HandleFunc("/humans", b.requireAuth(b.handleHumans))
 	mux.HandleFunc("/humans/me", b.handleHumanMe)
 	mux.HandleFunc("/humans/invites", b.requireAuth(b.handleHumanInvites))
