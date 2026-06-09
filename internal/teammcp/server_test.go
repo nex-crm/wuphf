@@ -292,6 +292,11 @@ func TestIsOneOnOneModeFromEnv(t *testing.T) {
 
 func TestHandleTeamMemberCreateTriggersReconfigure(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	// This test exercises the create mechanics (broker POST + reconfigure), not
+	// the human-approval gate (which has its own tests in member_approval_test.go).
+	// WUPHF_UNSAFE=1 is the intended bypass so the create proceeds without a human
+	// answering the approval card.
+	t.Setenv("WUPHF_UNSAFE", "1")
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)

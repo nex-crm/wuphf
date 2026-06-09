@@ -478,6 +478,39 @@ func TestNotificationContext_BuildTaskExecutionPacket_LocalWorktreeAddsCutLineAn
 	}
 }
 
+// TestNotificationContext_BuildTaskExecutionPacket_LeadGetsDecomposeBranch is
+// the Phase 3 behavioral fix: when the LEAD (ceo) executes an owned task, the
+// packet tells it to decompose-and-delegate (create owned sub-tasks under this
+// task, reuse existing specialists, new agents need human approval) rather than
+// only doing the work itself. A specialist must NOT get that lead block.
+func TestNotificationContext_BuildTaskExecutionPacket_LeadGetsDecomposeBranch(t *testing.T) {
+	b := newTestNotifyContextBuilder(t)
+	task := teamTask{
+		ID:            "OFFICE-7",
+		Title:         "launch the referral program",
+		status:        "in_progress",
+		ExecutionMode: "office",
+	}
+
+	lead := b.BuildTaskExecutionPacket("ceo", officeActionLog{Actor: "ceo", Kind: "task_assigned"}, task, "kickoff")
+	for _, want := range []string{
+		"Lead execution rule: you are the coordinator",
+		"parent_issue_id=OFFICE-7",
+		"REUSE the existing specialist",
+		"creating a new agent ALWAYS requires explicit human approval",
+		"complete the parent only after the children are done",
+	} {
+		if !strings.Contains(lead, want) {
+			t.Errorf("lead packet missing %q in:\n%s", want, lead)
+		}
+	}
+
+	specialist := b.BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo", Kind: "task_assigned"}, task, "kickoff")
+	if strings.Contains(specialist, "Lead execution rule") {
+		t.Errorf("specialist packet must NOT contain the lead decompose block:\n%s", specialist)
+	}
+}
+
 func TestNotificationContext_BuildTaskExecutionPacket_NamesFileTargetsFromTitleAndDetails(t *testing.T) {
 	b := newTestNotifyContextBuilder(t)
 	task := teamTask{

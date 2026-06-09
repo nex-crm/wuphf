@@ -576,6 +576,23 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 	}
+	if slug == b.targeter.LeadSlug() {
+		// The lead (CEO) is the coordinator, not the sole worker. The default
+		// execution framing below pushes solo direct-implementation, which is
+		// right for a specialist in a worktree but wrong for the CEO on a broad
+		// owned task. Give the lead an explicit decompose-and-delegate path so
+		// it breaks large or cross-functional work into owned sub-tasks that
+		// spin off and run concurrently (Phase 2 lanes), instead of doing it
+		// all itself.
+		lines = append(lines,
+			"Lead execution rule: you are the coordinator, not the sole worker. For anything larger than a single owned step, DECOMPOSE this task instead of doing it all yourself:",
+			fmt.Sprintf("- Break the work into concrete sub-tasks with team_task action=create, each carrying parent_issue_id=%s so they nest under this task.", task.ID),
+			"- Give each sub-task an `owner`: REUSE the existing specialist whose expertise best fits (see AVAILABLE AGENTS). Only when no current teammate fits, propose a new specialist with team_member — creating a new agent ALWAYS requires explicit human approval (the tool blocks until the human decides), so prefer reusing the roster.",
+			"- Sub-tasks spin off automatically: once created with an owner they wake that owner and run concurrently on their own lanes. You do not need to tag or chase each one separately.",
+			"- Keep THIS task as the umbrella: track its sub-tasks, aggregate their results here as they land, and complete the parent only after the children are done. Do not mark the parent complete while children are still open.",
+			"- Do the work directly yourself only when it is genuinely a single step in your own domain, or when decomposition would not help.",
+		)
+	}
 	if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
 		lines = append(lines, "Execution rule: this is a local_worktree build task. Work inside the assigned working_directory and default to direct implementation. Do not spend this turn on another repo audit, architecture memo, or nested office launch unless the packet explicitly asks for that.")
 		lines = append(lines, "First-turn rule: choose the smallest shippable implementation slice you can finish in this turn and edit files for that slice now. If the overall MVP is broad, narrow it yourself and ship the first runnable sub-piece instead of trying to map the whole system.")
