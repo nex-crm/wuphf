@@ -27,6 +27,13 @@ import {
 type ProviderChoice = "inherit" | LLMRuntimeKind;
 type WizardMode = "describe" | "manual";
 
+// PermissionMode is the agent's default autonomy. "plan" makes the agent's
+// tasks plan-first by default: the owner runs read-only in the provider's
+// native plan mode, produces a plan, and waits for "Approve & Start" before
+// executing. "auto" skips planning and executes immediately. Per-task "Plan
+// first" can still override this default at task-creation time.
+type PermissionModeChoice = "plan" | "auto";
+
 interface AgentFormData {
   name: string;
   slug: string;
@@ -35,6 +42,7 @@ interface AgentFormData {
   provider: ProviderChoice;
   model: string;
   expertise: string;
+  permissionMode: PermissionModeChoice;
 }
 
 const INITIAL_FORM: AgentFormData = {
@@ -45,6 +53,7 @@ const INITIAL_FORM: AgentFormData = {
   provider: "inherit",
   model: "",
   expertise: "",
+  permissionMode: "plan",
 };
 
 // Human-readable labels for the runtime picker. Kinds the broker hasn't
@@ -226,6 +235,7 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
         provider: providerInList ? suggestedProvider : "inherit",
         model: tmpl.model || "",
         expertise: (tmpl.expertise || []).join(", "),
+        permissionMode: "plan",
       });
       setSlugEdited(generatedSlug.length > 0);
       setMode("manual");
@@ -287,6 +297,7 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
         emoji: form.emoji || undefined,
         provider: providerBody,
         expertise: expertiseTags.length > 0 ? expertiseTags : undefined,
+        permission_mode: form.permissionMode,
       };
 
       await post("/office-members", body);
@@ -465,6 +476,31 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
                 value={form.role}
                 onChange={(e) => updateField("role", e.target.value)}
               />
+            </div>
+
+            {/* Autonomy / Plan mode */}
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-permission-mode">
+                Autonomy
+              </label>
+              <select
+                id="agent-permission-mode"
+                value={form.permissionMode}
+                onChange={(e) =>
+                  updateField(
+                    "permissionMode",
+                    e.target.value as PermissionModeChoice,
+                  )
+                }
+              >
+                <option value="plan">Plan first (default)</option>
+                <option value="auto">Auto</option>
+              </select>
+              <span className="op-hint">
+                {form.permissionMode === "plan"
+                  ? "This agent's tasks plan first: it runs read-only in the provider's native plan mode and waits for your Approve & Start before executing."
+                  : "This agent executes its tasks immediately, with no planning gate. Per-task “Plan first” can still override this."}
+              </span>
             </div>
 
             {/* Emoji */}

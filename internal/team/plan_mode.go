@@ -94,6 +94,24 @@ func isExitPlanModeTool(toolName string) bool {
 	return strings.EqualFold(name, "ExitPlanMode")
 }
 
+// ownerDefaultsToPlanFirstLocked reports whether a task assigned to owner should
+// default to Plan-first because the owner agent's autonomy (PermissionMode) is
+// "plan". Used only when the task-create request did not set plan_first
+// explicitly, so an explicit per-task choice (e.g. the composer's "Plan first"
+// toggle) always wins. The "auto" triage sentinel and unknown owners default to
+// OFF — there is no real agent autonomy to read yet.
+func (b *Broker) ownerDefaultsToPlanFirstLocked(owner string) bool {
+	owner = strings.TrimSpace(owner)
+	if owner == "" || isAutoOwner(owner) {
+		return false
+	}
+	member := b.findMemberLocked(owner)
+	if member == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(member.PermissionMode), "plan")
+}
+
 // planModeDirective is prepended to the work packet for a task in
 // LifecycleStatePlanning. It tells the owner to plan only (no repo changes, no
 // external actions), capture the plan in its notebook, post a summary, and

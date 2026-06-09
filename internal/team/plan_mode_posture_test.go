@@ -67,3 +67,37 @@ func TestResolveTurnPostureNilLauncher(t *testing.T) {
 		t.Fatal("nil launcher must default to execute posture")
 	}
 }
+
+// TestOwnerDefaultsToPlanFirst pins the config wiring: a task with no explicit
+// plan_first defaults to Plan-first iff the owner agent's PermissionMode is
+// "plan". The "auto" triage sentinel and unknown owners default OFF.
+func TestOwnerDefaultsToPlanFirst(t *testing.T) {
+	b := newTestBroker(t)
+	b.mu.Lock()
+	b.members = append(b.members,
+		officeMember{Slug: "planner", PermissionMode: "plan"},
+		officeMember{Slug: "doer", PermissionMode: "auto"},
+		officeMember{Slug: "blank", PermissionMode: ""},
+	)
+	b.mu.Unlock()
+
+	cases := []struct {
+		owner string
+		want  bool
+	}{
+		{"planner", true},
+		{"doer", false},
+		{"blank", false},
+		{"auto", false}, // triage sentinel, not a real agent
+		{"", false},
+		{"ghost", false}, // unknown owner
+	}
+	for _, tc := range cases {
+		b.mu.Lock()
+		got := b.ownerDefaultsToPlanFirstLocked(tc.owner)
+		b.mu.Unlock()
+		if got != tc.want {
+			t.Fatalf("ownerDefaultsToPlanFirstLocked(%q) = %v, want %v", tc.owner, got, tc.want)
+		}
+	}
+}

@@ -287,6 +287,8 @@ function taskStatusBadgeClass(raw: string): string {
 
 function PermissionsSection({ agent }: { agent: OfficeMember }) {
   const isLead = agent.built_in === true || agent.slug === "ceo";
+  // Default matches the broker's blank → "plan" fallback.
+  const planFirst = (agent.permission_mode ?? "plan") !== "auto";
 
   return (
     <div className="agent-profile-section">
@@ -296,6 +298,12 @@ function PermissionsSection({ agent }: { agent: OfficeMember }) {
           <span className="agent-profile-perm-label">role</span>
           <span className="agent-profile-perm-value">
             {isLead ? "lead agent" : "team member"}
+          </span>
+        </div>
+        <div className="agent-profile-perm-row">
+          <span className="agent-profile-perm-label">autonomy</span>
+          <span className="agent-profile-perm-value">
+            {planFirst ? "plan first" : "auto"}
           </span>
         </div>
         <div className="agent-profile-perm-row">
@@ -813,9 +821,7 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
   >({
     queryKey: ["channels"],
     queryFn: () =>
-      getChannels().then((r) =>
-        arrayOrEmpty<ChannelLite>(r?.channels),
-      ),
+      getChannels().then((r) => arrayOrEmpty<ChannelLite>(r?.channels)),
     refetchInterval: 30_000,
     select: (data): ChannelLite[] => {
       if (Array.isArray(data)) return data as ChannelLite[];
