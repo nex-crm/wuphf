@@ -52,7 +52,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		// failure mode (~30s tax on first turn) over the hard one
 		// (agent dies before producing any output).
 	}
-	args = append(args, strings.Fields(l.resolvePermissionFlags(slug))...)
+	args = append(args, strings.Fields(l.resolvePermissionFlags(ctx, slug))...)
 
 	// Per-task reasoning effort: when the active task carries a composer-set
 	// effort that claude accepts, pass it as `--effort <level>`. Empty/unknown

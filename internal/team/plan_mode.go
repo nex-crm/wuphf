@@ -25,6 +25,17 @@ func taskIsPreExecution(s LifecycleState) bool {
 	return false
 }
 
+// isPlanningLifecycleState reports whether a task is in the autonomous planning
+// phase (LifecycleStatePlanning), where the owner is dispatched to write a plan
+// read-only before execution. It is the single trigger for running a turn in the
+// provider's NATIVE plan/read-only permission mode (Claude --permission-mode
+// plan, Codex -s read-only) instead of full bypass — see resolveTurnPosture. A
+// task in any other state (office/conversational turns, Running/Approved work)
+// stays execute-posture with full autonomy.
+func isPlanningLifecycleState(s LifecycleState) bool {
+	return s == LifecycleStatePlanning
+}
+
 // specIsFrozen reports whether a task's human-approved spec BODY (its Details —
 // the problem / approach / acceptance criteria the human signed off on) may no
 // longer be rewritten. Once the owner is executing an approved plan (Running)
@@ -56,9 +67,12 @@ func specIsFrozen(s LifecycleState) bool {
 // planModeDirective is prepended to the work packet for a task in
 // LifecycleStatePlanning. It tells the owner to plan only (no repo changes, no
 // external actions), capture the plan in its notebook, post a summary, and
-// stop. v1 enforcement is this instruction plus the owner self-limiting; a
-// future hardening can run the planning turn in the runtime's read-only/plan
-// permission mode.
+// stop. Enforcement is now two layers: this instruction PLUS the runtime running
+// the planning turn in the provider's native read-only/plan permission mode
+// (Claude --permission-mode plan, Codex -s read-only — see resolveTurnPosture),
+// so a planning turn cannot change the repo even if the model ignores the
+// directive. opencode / openai-compat have no native sandbox, so for those
+// providers this directive remains the sole enforcement.
 func planModeDirective(task teamTask) string {
 	notebookPath := "agents/<your-slug>/notebook/plan-" + task.ID + ".md"
 	return "[PLAN MODE] This task is in planning — do NOT change the repo, run build/deploy steps, or take external actions yet. Plan first:\n" +

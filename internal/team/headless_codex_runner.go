@@ -49,13 +49,24 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	}
 
 	args := make([]string, 0, 16+len(overrides)*2)
-	// Nested Codex local-worktree turns need full bypass here. The child Codex
-	// sandbox rejects both apply_patch and shell writes even with
-	// workspace-write, which leaves coding tasks permanently unable to land
-	// edits. Keep office/non-editing turns on workspace-write.
-	if l.unsafe || l.headlessCodexNeedsDangerousBypass(ctx, slug) {
+	// Sandbox posture for this turn:
+	//   - plan posture (task in LifecycleStatePlanning): -s read-only — Codex's
+	//     native plan/read-only mode. The repo cannot change, so the owner
+	//     explores and writes its plan (via MCP notebook_write + a channel post,
+	//     which read-only does not block) without risk of touching the repo
+	//     before "Approve & Start". Wins over unsafe/worktree bypass: a planning
+	//     turn must stay read-only even for local_worktree coding tasks.
+	//   - local-worktree / unsafe execute turn: full bypass. The child Codex
+	//     sandbox rejects both apply_patch and shell writes even with
+	//     workspace-write, which leaves coding tasks permanently unable to land
+	//     edits.
+	//   - office / non-editing execute turn: workspace-write.
+	switch {
+	case l.resolveTurnPosture(ctx, slug) == posturePlan:
+		args = append(args, "-a", "never", "-s", "read-only")
+	case l.unsafe || l.headlessCodexNeedsDangerousBypass(ctx, slug):
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
-	} else {
+	default:
 		args = append(args, "-a", "never", "-s", "workspace-write")
 	}
 	args = append(args, "--disable", "plugins")
