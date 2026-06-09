@@ -677,6 +677,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/verify", b.requireAuth(b.handleTelegramVerify))
 	mux.HandleFunc("/telegram/discover", b.requireAuth(b.handleTelegramDiscover))
 	mux.HandleFunc("/telegram/connect", b.requireAuth(b.handleTelegramConnect))
+	mux.HandleFunc("/slack/connect", b.requireAuth(b.handleSlackConnect))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
