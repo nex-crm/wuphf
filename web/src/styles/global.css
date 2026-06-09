@@ -1386,6 +1386,128 @@ body {
   color: var(--red);
   border-color: var(--red);
 }
+
+/* ─── Composio first-run onboarding ─── */
+.composio-onb {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0 8px;
+}
+.composio-onb-card {
+  width: 100%;
+  max-width: 540px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px 30px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 8px 32px var(--overlay-soft);
+}
+.composio-onb-eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent, var(--text-secondary));
+}
+.composio-onb-title {
+  margin: 0;
+  font-size: var(--text-xl, 22px);
+  line-height: 1.2;
+  font-weight: 600;
+  color: var(--text);
+}
+.composio-onb-lead {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.composio-onb-logos {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+}
+.composio-onb-logo {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: var(--overlay-soft);
+  border: 1px solid var(--border);
+}
+.composio-onb-more {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.composio-onb-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.composio-onb-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.composio-onb-field {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.composio-onb-input {
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.composio-onb-reveal {
+  flex: none;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.composio-onb-reveal:hover {
+  color: var(--text);
+  border-color: var(--border-dark, var(--text-tertiary));
+}
+.composio-onb-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+}
+.composio-onb-submit {
+  min-width: 160px;
+}
+.composio-onb-getkey {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent, var(--text-secondary));
+  text-decoration: none;
+}
+.composio-onb-getkey:hover {
+  text-decoration: underline;
+}
+.composio-onb-foot {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary, var(--text-secondary));
+}
 .badge-muted {
   background: var(--bg-warm);
   color: var(--text-tertiary);

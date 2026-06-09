@@ -9,8 +9,13 @@ vi.mock("../../api/client", () => ({
   getConfig: vi.fn(async () => ({
     gateway_kinds: ["openclaw", "hermes-agent"],
     action_provider: "composio",
+    // Composio key present → the catalog renders (no key shows the
+    // ComposioOnboarding gate instead, covered in ComposioOnboarding.test.tsx).
+    composio_key_set: true,
   })),
   getLocalProvidersStatus: vi.fn(async () => []),
+  getActionGrants: vi.fn(async () => ({ grants: [] })),
+  revokeActionGrant: vi.fn(async () => ({})),
 }));
 
 vi.mock("../../api/integrations", () => ({
