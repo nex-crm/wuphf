@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -47,12 +48,13 @@ func newSlackBridge(api slackAPI) *SlackBridge {
 // dedupe; the current Web API has no native idempotency token, so the packer's
 // sink remains the dedupe authority (it short-circuits a re-Post of a SENT key).
 //
-// The mention ts is returned even if the thread-context follow-up fails: the
-// delegation's essentials (the mention) landed, the audit hash already covers
-// both fields, and a missing follow-up is a degraded — not failed — delivery. A
-// failed follow-up is surfaced via the returned error so the caller can log it,
-// but the returned ts stays valid so Deliver records DeliverySent with the real
-// anchor rather than discarding a delivered mention.
+// The thread-context follow-up is BEST-EFFORT: if it fails, Post still returns
+// (mentionTS, nil). The mention carries the essentials (ask + plan) and is the
+// audit anchor; returning an error here would make the packer's Deliver mark the
+// whole delegation FAILED, and because a FAILED record does not short-circuit
+// idempotency, a retry would DUPLICATE the mention. A dropped thread block is a
+// degraded — never an over- — delivery, so it is logged loudly rather than
+// surfaced as a failure. (Only the mention failing is a real delivery failure.)
 func (b *SlackBridge) Post(ctx context.Context, d packer.PackedDelegation, idempotencyKey string) (string, error) {
 	channelID := strings.TrimSpace(d.Injection.ChannelID)
 	if channelID == "" {
@@ -95,7 +97,7 @@ func (b *SlackBridge) Post(ctx context.Context, d packer.PackedDelegation, idemp
 			slack.MsgOptionTS(threadTS),
 		)
 		if ferr != nil {
-			return mentionTS, fmt.Errorf("slack bridge: post thread context: %w", ferr)
+			log.Printf("[slack-bridge] thread-context follow-up failed (key %q, channel %s): %v — mention delivered, thread block dropped", idempotencyKey, channelID, ferr)
 		}
 	}
 

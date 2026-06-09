@@ -149,19 +149,24 @@ func TestSlackBridgePostEscapesControlSequences(t *testing.T) {
 	}
 }
 
-func TestSlackBridgePostThreadContextErrorReturnsMentionTS(t *testing.T) {
+func TestSlackBridgePostThreadContextFailureIsBestEffort(t *testing.T) {
 	api := newFakeSlackAPI()
 	// Fail only the SECOND post (the thread follow-up); the mention succeeds.
 	api.postErr = errors.New("thread_locked")
 	api.postErrAt = 2
 	br := newSlackBridge(api)
 
+	// A dropped thread block is degraded, not failed: Post returns the mention ts
+	// and NO error, so the packer's Deliver records DeliverySent (not FAILED) and
+	// a retry cannot duplicate the mention. The mention must have landed.
 	ts, err := br.Post(context.Background(), newTestDelegation("@pam", "ctx", "C0123", ""), "key-7")
-	if err == nil || !contains(err.Error(), "post thread context") {
-		t.Fatalf("expected wrapped thread error, got %v", err)
+	if err != nil {
+		t.Fatalf("follow-up failure must be best-effort (nil error), got %v", err)
 	}
-	// The mention landed, so its ts must still be returned for the audit anchor.
 	if ts == "" {
-		t.Fatal("expected the mention ts to be returned even when the follow-up fails")
+		t.Fatal("expected the mention ts to be returned")
+	}
+	if len(api.snapshotPosts()) != 1 {
+		t.Fatalf("only the mention should be recorded (follow-up failed), got %d", len(api.snapshotPosts()))
 	}
 }

@@ -232,9 +232,9 @@ func TestSlackRouteInbound(t *testing.T) {
 	if msgs[0].Source != "slack" {
 		t.Fatalf("source = %q, want slack", msgs[0].Source)
 	}
-	// Participant should be cached after resolution.
-	if got := tr.UserMap["U7"]; got != "Alice Dev" {
-		t.Fatalf("UserMap[U7] = %q, want Alice Dev", got)
+	// Participant should be cached after resolution, with humanity recorded.
+	if got := tr.UserMap["U7"]; got.name != "Alice Dev" || !got.human {
+		t.Fatalf("UserMap[U7] = %+v, want {name:Alice Dev human:true}", got)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
+	"github.com/slack-go/slack/slackutilsx"
 	"github.com/slack-go/slack/socketmode"
 
 	"github.com/nex-crm/wuphf/internal/team/transport"
@@ -48,6 +49,12 @@ type slackAPI interface {
 	GetUsersInConversationContext(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error)
 }
 
+// slackUserInfo is the cached resolution of a Slack user id.
+type slackUserInfo struct {
+	name  string
+	human bool
+}
+
 // slackClient is the real slackAPI backed by *slack.Client.
 type slackClient struct {
 	api *slack.Client
@@ -70,11 +77,13 @@ func (c *slackClient) GetUsersInConversationContext(ctx context.Context, params 
 }
 
 // socketRunner is the inbound seam: it blocks reading Socket Mode events and
-// hands each to handle until ctx is cancelled. The real implementation wraps
-// *socketmode.Client; tests drive routeInbound directly and do not need a fake
-// socket connection.
+// hands each to handle until ctx is cancelled. handle returns whether the event
+// should be Ack'd; returning false (a Host write failed) leaves the event
+// un-Ack'd so Slack redelivers it. The real implementation wraps
+// *socketmode.Client; tests drive routeInbound/handleEvent directly and do not
+// need a fake socket connection.
 type socketRunner interface {
-	Run(ctx context.Context, handle func(socketmode.Event)) error
+	Run(ctx context.Context, handle func(socketmode.Event) bool) error
 }
 
 // socketModeRunner is the real socketRunner over *socketmode.Client.
@@ -87,7 +96,7 @@ type socketModeRunner struct {
 // cancelled or RunContext returns. RunContext owns reconnection internally; a
 // returned error means the connection gave up and the caller (Run) should
 // surface it for supervised restart.
-func (r *socketModeRunner) Run(ctx context.Context, handle func(socketmode.Event)) error {
+func (r *socketModeRunner) Run(ctx context.Context, handle func(socketmode.Event) bool) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- r.client.RunContext(ctx) }()
 	for {
@@ -106,12 +115,14 @@ func (r *socketModeRunner) Run(ctx context.Context, handle func(socketmode.Event
 					return err
 				}
 			}
-			// Ack request-bearing events before processing so Slack does not
-			// redeliver while the office write is in flight.
-			if evt.Request != nil {
+			// Ack AFTER handling and only when handle reports success. A failed
+			// Host write returns false → no Ack → Slack redelivers (the broker
+			// dedupes by ExternalID = the message ts). This makes inbound
+			// at-least-once instead of silently at-most-once.
+			ack := handle(evt)
+			if evt.Request != nil && ack {
 				_ = r.client.Ack(*evt.Request)
 			}
-			handle(evt)
 		}
 	}
 }
@@ -127,10 +138,12 @@ type SlackTransport struct {
 	Broker   *Broker
 	// ChannelMap maps slack channel id (e.g. "C0123") -> office channel slug.
 	ChannelMap map[string]string
-	// UserMap maps slack user id (e.g. "U0123") -> office member slug. Populated
-	// lazily from users.info on first contact and eagerly from conversation
-	// membership at startup. Misses fall back to the user's display name.
-	UserMap map[string]string
+	// UserMap maps slack user id (e.g. "U0123") -> resolved identity (display
+	// name + humanity). Populated lazily from users.info on first contact and
+	// eagerly from conversation membership at startup. Misses fall back to the
+	// raw user id. Caching humanity (not just the name) means a warmed bot/app
+	// user stays classified non-human even if a later message lacks bot_id.
+	UserMap map[string]slackUserInfo
 
 	api    slackAPI
 	socket socketRunner
@@ -181,7 +194,7 @@ func newSlackTransport(broker *Broker, botToken, appToken string, api slackAPI) 
 		AppToken:    appToken,
 		Broker:      broker,
 		ChannelMap:  channelMap,
-		UserMap:     make(map[string]string),
+		UserMap:     make(map[string]slackUserInfo),
 		api:         api,
 		healthState: transport.HealthDisconnected,
 	}
@@ -229,11 +242,13 @@ func (t *SlackTransport) Run(ctx context.Context, host transport.Host) error {
 		return fmt.Errorf("no slack channels configured")
 	}
 
-	// Resolve our own bot user id so we can drop self-authored messages.
-	if auth, err := t.api.AuthTestContext(ctx); err == nil && auth != nil {
-		t.botUserID = auth.UserID
-	} else if err != nil {
-		log.Printf("[slack] auth.test failed (self-echo guard disabled): %v", err)
+	// Resolve our own bot user id (with a short retry) so we can drop
+	// self-authored messages. If it never resolves we still start: the bot_id /
+	// subtype guards in routeInbound are the primary self/bot drop, and this id
+	// is a belt-and-suspenders third check.
+	t.botUserID = t.resolveBotUserID(ctx)
+	if t.botUserID == "" {
+		log.Printf("[slack] auth.test failed after retries — self-echo guard relies on bot_id/subtype only")
 	}
 
 	// Pre-warm the user map from each mapped channel's membership. Best-effort:
@@ -250,13 +265,22 @@ func (t *SlackTransport) Run(ctx context.Context, host transport.Host) error {
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- t.socket.Run(ctx2, func(evt socketmode.Event) {
-			t.handleEvent(ctx2, host, evt)
+		errCh <- t.socket.Run(ctx2, func(evt socketmode.Event) bool {
+			return t.handleEvent(ctx2, host, evt)
 		})
 	}()
 
 	select {
 	case <-ctx.Done():
+		// Stop the socket loop and wait (bounded) for it to actually return, so
+		// the Host is not used after Run returns and the launcher proceeds with
+		// shutdown.
+		cancel()
+		select {
+		case <-errCh:
+		case <-time.After(5 * time.Second):
+			log.Printf("[slack] socket loop did not stop within 5s of cancellation")
+		}
 		return nil
 	case err := <-errCh:
 		cancel()
@@ -267,6 +291,22 @@ func (t *SlackTransport) Run(ctx context.Context, host transport.Host) error {
 	}
 }
 
+// resolveBotUserID calls auth.test with a short bounded retry, returning the
+// bot's own Slack user id or "" if it never resolves.
+func (t *SlackTransport) resolveBotUserID(ctx context.Context) string {
+	for attempt := 0; attempt < 3; attempt++ {
+		if auth, err := t.api.AuthTestContext(ctx); err == nil && auth != nil && auth.UserID != "" {
+			return auth.UserID
+		}
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
+		}
+	}
+	return ""
+}
+
 // Start is a compatibility shim for callers that predate the transport.Transport
 // contract. It creates a brokerTransportHost and delegates to Run.
 func (t *SlackTransport) Start(ctx context.Context) error {
@@ -274,10 +314,13 @@ func (t *SlackTransport) Start(ctx context.Context) error {
 	return t.Run(ctx, host)
 }
 
-// handleEvent dispatches one Socket Mode event. Only EventsAPI message events are
-// routed inbound; connection lifecycle events update health. Everything else is
-// ignored.
-func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, evt socketmode.Event) {
+// handleEvent dispatches one Socket Mode event and reports whether it should be
+// Ack'd. Only EventsAPI message events are routed inbound; connection lifecycle
+// events update health. It returns false ONLY when a routable message failed to
+// reach the Host (a transient broker error) so the event is left un-Ack'd and
+// Slack redelivers it; everything else (handled, ignored, or non-routable) is
+// Ack'd.
+func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, evt socketmode.Event) bool {
 	switch evt.Type {
 	case socketmode.EventTypeConnected, socketmode.EventTypeHello:
 		t.setHealth(transport.HealthConnected, nil)
@@ -286,17 +329,19 @@ func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, e
 	case socketmode.EventTypeEventsAPI:
 		apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 		if !ok {
-			return
+			return true
 		}
 		msg, ok := apiEvent.InnerEvent.Data.(*slackevents.MessageEvent)
 		if !ok {
-			return
+			return true
 		}
 		if err := t.routeInbound(ctx, host, msg); err != nil {
 			t.setHealth(transport.HealthDegraded, err)
-			log.Printf("[slack] route inbound error: %v", err)
+			log.Printf("[slack] route inbound error (leaving un-acked for redelivery): %v", err)
+			return false
 		}
 	}
+	return true
 }
 
 // routeInbound resolves the office channel for a Slack message event and delivers
@@ -426,10 +471,7 @@ func (t *SlackTransport) resolveUser(ctx context.Context, userID string) (name s
 	cached, ok := t.UserMap[userID]
 	t.mapsMu.RUnlock()
 	if ok {
-		// Cached slug never re-classifies humanity; a cached entry is advisory
-		// display data. Bots are dropped at routeInbound via BotID, so a cached
-		// hit here is, in practice, a human or a deliberately mapped member.
-		return cached, true
+		return cached.name, cached.human
 	}
 
 	if t.api == nil {
@@ -439,11 +481,11 @@ func (t *SlackTransport) resolveUser(ctx context.Context, userID string) (name s
 	if err != nil || user == nil {
 		return userID, true
 	}
-	name = slackDisplayName(user)
+	info := slackUserInfo{name: slackDisplayName(user), human: !user.IsBot}
 	t.mapsMu.Lock()
-	t.UserMap[userID] = name
+	t.UserMap[userID] = info
 	t.mapsMu.Unlock()
-	return name, !user.IsBot
+	return info.name, info.human
 }
 
 // warmUserMap pre-populates UserMap from the membership of every mapped channel.
@@ -523,12 +565,23 @@ func slackDisplayName(user *slack.User) string {
 // formatSlackOutbound renders a broker message as Slack mrkdwn. It mirrors the
 // kind taxonomy of formatTelegramOutbound but emits Slack-flavored markup
 // (*bold* / _italic_) instead of Telegram HTML.
+//
+// Every DYNAMIC field (From, Title, Content, SourceLabel) is run through
+// slackEscape before composition, so a broker message that carries hostile text
+// cannot inject Slack control sequences (<!channel>/<!here> mass-pings, <@U…>
+// pings, or fake <url|label> links). The structural markup this function adds
+// (*, _, [, ]) is intentionally left literal so it still renders. Posts then use
+// escapeText=false (in Send) because escaping already happened here at field
+// granularity.
 func formatSlackOutbound(msg channelMessage) string {
+	from := slackEscape(msg.From)
+	content := slackEscape(msg.Content)
+	title := slackEscape(msg.Title)
 	switch {
 	case msg.Kind == "skill_invocation":
-		return fmt.Sprintf("⚡ *@%s* invoked a skill", msg.From)
+		return fmt.Sprintf("⚡ *@%s* invoked a skill", from)
 	case msg.Kind == "skill_proposal":
-		return fmt.Sprintf("💡 *Skill proposed*: %s", msg.Content)
+		return fmt.Sprintf("💡 *Skill proposed*: %s", content)
 	case msg.Kind == "automation":
 		source := msg.Source
 		if msg.SourceLabel != "" {
@@ -537,42 +590,50 @@ func formatSlackOutbound(msg channelMessage) string {
 		if source == "" {
 			source = "automation"
 		}
-		return fmt.Sprintf("🤖 *[%s]*: %s", source, msg.Content)
+		return fmt.Sprintf("🤖 *[%s]*: %s", slackEscape(source), content)
 	case isHumanDecisionKind(msg.Kind):
 		return formatSlackDecision(msg)
 	case msg.From == "system":
-		return fmt.Sprintf("→ _%s_", msg.Content)
+		return fmt.Sprintf("→ _%s_", content)
 	default:
 		var sb strings.Builder
-		if msg.From != "" {
+		if from != "" {
 			sb.WriteString("*@")
-			sb.WriteString(msg.From)
+			sb.WriteString(from)
 			sb.WriteString("*: ")
 		}
-		if msg.Title != "" {
+		if title != "" {
 			sb.WriteString("[")
-			sb.WriteString(msg.Title)
+			sb.WriteString(title)
 			sb.WriteString("] ")
 		}
-		sb.WriteString(msg.Content)
+		sb.WriteString(content)
 		return sb.String()
 	}
 }
 
 // formatSlackDecision renders a human decision/interview message as Slack mrkdwn.
+// Dynamic fields are escaped (see formatSlackOutbound).
 func formatSlackDecision(msg channelMessage) string {
 	var sb strings.Builder
 	sb.WriteString("📋 *Decision needed*")
 	if msg.From != "" {
 		sb.WriteString(" from @")
-		sb.WriteString(msg.From)
+		sb.WriteString(slackEscape(msg.From))
 	}
 	sb.WriteString("\n\n")
-	sb.WriteString(msg.Content)
+	sb.WriteString(slackEscape(msg.Content))
 	if msg.Title != "" {
 		sb.WriteString("\n\n_")
-		sb.WriteString(msg.Title)
+		sb.WriteString(slackEscape(msg.Title))
 		sb.WriteString("_")
 	}
 	return sb.String()
+}
+
+// slackEscape neutralizes Slack control characters (& < >) in a dynamic field so
+// composed mrkdwn cannot smuggle pings or fake links. Wraps slack-go's canonical
+// EscapeMessage.
+func slackEscape(s string) string {
+	return slackutilsx.EscapeMessage(s)
 }
