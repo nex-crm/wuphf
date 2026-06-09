@@ -2,6 +2,7 @@ package teammcp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,56 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/action"
 )
+
+// TestActionResolveWireDecode pins the CONSUMER side of the resolve wire shape:
+// the broker emits these keys (pinned in internal/team/
+// broker_integrations_wire_test.go), and the gate must decode every field it
+// relies on. If the broker renames a tag, that golden test fails; if the gate's
+// struct tags drift, this test fails — together they catch silent field drops
+// across the two hand-mirrored copies.
+func TestActionResolveWireDecode(t *testing.T) {
+	// This literal is the broker's integrationResolveResponse JSON for an
+	// `approve` decision (keys must match broker_integrations_wire_test.go).
+	const brokerJSON = `{
+		"decision":"approve","state":"connected","provider":"composio",
+		"platform":"gmail","action_id":"GMAIL_SEND_EMAIL","name":"Gmail",
+		"logo_url":"logo","read_only":false,
+		"account":{"name":"Founder Gmail","key":"ca_1"},
+		"raw_envelope":{"method":"POST","url":"https://x/y","headers":{"h":"1"},"data":{"to":"a@b.com","token":"***"}},
+		"detail":"","request_id":"request-1"
+	}`
+	var resp actionResolveResponse
+	if err := json.Unmarshal([]byte(brokerJSON), &resp); err != nil {
+		t.Fatalf("decode broker resolve JSON: %v", err)
+	}
+	if resp.Decision != "approve" || resp.State != "connected" || resp.Platform != "gmail" ||
+		resp.ActionID != "GMAIL_SEND_EMAIL" || resp.Name != "Gmail" || resp.LogoURL != "logo" {
+		t.Fatalf("scalar fields dropped: %+v", resp)
+	}
+	if resp.Account == nil || resp.Account.Name != "Founder Gmail" || resp.Account.Key != "ca_1" {
+		t.Fatalf("account dropped: %+v", resp.Account)
+	}
+	if resp.RawEnvelope == nil || resp.RawEnvelope.Method != "POST" || resp.RawEnvelope.URL != "https://x/y" {
+		t.Fatalf("raw envelope dropped: %+v", resp.RawEnvelope)
+	}
+	if resp.RawEnvelope.Data["token"] != "***" {
+		t.Fatalf("envelope body dropped/altered: %+v", resp.RawEnvelope.Data)
+	}
+
+	// The gate re-emits the structured payload as integration_action; round-trip
+	// it through actionCardPayload to pin that the producer key matches.
+	card := buildActionCardPayload(TeamActionExecuteArgs{Platform: "gmail", ActionID: "GMAIL_SEND_EMAIL"}, resp)
+	raw, _ := json.Marshal(card)
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("re-marshal card: %v", err)
+	}
+	for _, k := range []string{"platform", "action_id", "verb", "name", "logo_url", "account", "raw_envelope"} {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("actionCardPayload missing key %q: %v", k, m)
+		}
+	}
+}
 
 func TestActionResolveBlockMessage(t *testing.T) {
 	cases := []struct {

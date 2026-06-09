@@ -1096,6 +1096,14 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		"/requests/answer",
 		"/interview",
 		"/interview/answer",
+		// integrations (catalog, OAuth lifecycle, action resolver, scoped grants)
+		"/integrations",
+		"/integrations/connect",
+		"/integrations/connect-status",
+		"/integrations/disconnect",
+		"/integrations/audit",
+		"/integrations/resolve",
+		"/integrations/grants",
 		// reset/usage/policies/signals/decisions/watchdogs/actions/scheduler
 		"/reset",
 		"/reset-dm",

@@ -17,9 +17,20 @@ import (
 // action_id — never a wildcard — so a grant can never widen the blast radius
 // beyond the single action the human actually saw and authorized.
 //
-// SECURITY: only a human may mint or revoke a grant (handleMutateActionGrant
-// rejects non-human actors). A prompt-injected agent must never be able to grant
-// itself a standing bypass of the human approval gate.
+// SECURITY (host-trust model — read before changing): grant CRUD is broker-
+// token-gated, exactly like connect/disconnect/resolve. The broker token IS the
+// host-trust boundary in this single-trust-domain OSS deployment: the owner's
+// web app and the MCP server both present it (actor kind = broker), and human
+// SESSION actors are restricted shared-link guests that withAuth already 403s
+// off non-allowlisted routes. So an actor-kind == human gate would be BACKWARDS
+// — it would reject the owner. The practical control is that no MCP tool reaches
+// /integrations/grants, so an agent can only get here with a shell tool + the
+// broker token — at which point it already owns the broker (it could likewise
+// curl /requests/answer to approve its own card). Grants do raise the stakes
+// over that pre-existing exposure because they are STANDING and SILENT, so as
+// defense-in-depth every grant is capped to maxGrantTTL and the residual
+// (whether grants deserve a stronger control than the broker token) is flagged
+// for human review on the PR. Multi-tenant auth is out of scope for this repo.
 
 type actionGrant struct {
 	ID          string `json:"id"`
@@ -40,6 +51,28 @@ func actionGrantPlatformKey(platform string) string {
 }
 func actionGrantScopeKey(actionID string) string { return strings.ToLower(strings.TrimSpace(actionID)) }
 
+// maxGrantTTL caps how long any standing grant can authorize a modal bypass.
+// Even a grant minted with no expiry (or a far-future one) self-expires after
+// this window — defense in depth so a forgotten or maliciously-created grant
+// cannot silently bypass approval forever. Capped at mint time in addActionGrant.
+const maxGrantTTL = 30 * 24 * time.Hour
+
+// parseGrantTime parses a grant timestamp accepting both second and nanosecond
+// RFC3339 precision (a client may send either), returning ok=false otherwise.
+func parseGrantTime(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	if ts, err := time.Parse(time.RFC3339, s); err == nil {
+		return ts, true
+	}
+	if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return ts, true
+	}
+	return time.Time{}, false
+}
+
 // actionGrantActive reports whether a grant currently authorizes actions: not
 // revoked and not past expiry. An unparseable expiry is treated as expired —
 // fail closed, never let a malformed grant silently authorize an action.
@@ -48,8 +81,8 @@ func actionGrantActive(g actionGrant, now time.Time) bool {
 		return false
 	}
 	if exp := strings.TrimSpace(g.ExpiresAt); exp != "" {
-		ts, err := time.Parse(time.RFC3339, exp)
-		if err != nil || !now.Before(ts) {
+		ts, ok := parseGrantTime(exp)
+		if !ok || !now.Before(ts) {
 			return false
 		}
 	}
@@ -114,6 +147,12 @@ func (b *Broker) addActionGrant(g actionGrant) actionGrant {
 	g.GrantedAt = now.Format(time.RFC3339)
 	if strings.TrimSpace(g.GrantedBy) == "" {
 		g.GrantedBy = "human"
+	}
+	// Cap the expiry to maxGrantTTL: an empty/unparseable/too-far-future expiry
+	// is clamped so no grant outlives the policy ceiling.
+	ceiling := now.Add(maxGrantTTL)
+	if exp, ok := parseGrantTime(g.ExpiresAt); !ok || exp.After(ceiling) {
+		g.ExpiresAt = ceiling.Format(time.RFC3339)
 	}
 	b.actionGrants = append(b.actionGrants, g)
 	b.appendActionLocked(

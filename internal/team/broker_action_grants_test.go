@@ -84,6 +84,41 @@ func TestActionGrantIdempotent(t *testing.T) {
 	}
 }
 
+// Every grant is capped to maxGrantTTL even when minted with no expiry, so a
+// forgotten or maliciously-created standing grant self-expires (defense in
+// depth against the broker-token trust boundary).
+func TestActionGrantCappedToMaxTTL(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "state.json"))
+	now := time.Now().UTC()
+
+	g := b.addActionGrant(actionGrant{AgentSlug: "ceo", Platform: "gmail", ActionScope: "GMAIL_SEND_EMAIL"})
+	if g.ExpiresAt == "" {
+		t.Fatalf("grant minted with no expiry; max TTL cap not applied")
+	}
+	exp, ok := parseGrantTime(g.ExpiresAt)
+	if !ok {
+		t.Fatalf("capped expiry is unparseable: %q", g.ExpiresAt)
+	}
+	if exp.After(now.Add(maxGrantTTL + time.Minute)) {
+		t.Fatalf("expiry %v exceeds the max TTL cap", exp)
+	}
+	if !b.hasActiveActionGrant("ceo", "gmail", "GMAIL_SEND_EMAIL", now) {
+		t.Fatalf("a freshly capped grant should authorize now")
+	}
+	if b.hasActiveActionGrant("ceo", "gmail", "GMAIL_SEND_EMAIL", now.Add(maxGrantTTL+time.Hour)) {
+		t.Fatalf("grant must not authorize past the cap")
+	}
+
+	// A request for a longer-than-policy expiry is clamped down.
+	far := now.Add(365 * 24 * time.Hour).Format(time.RFC3339)
+	g2 := b.addActionGrant(actionGrant{AgentSlug: "ceo", Platform: "slack", ActionScope: "SLACK_SEND_MESSAGE", ExpiresAt: far})
+	exp2, _ := parseGrantTime(g2.ExpiresAt)
+	if exp2.After(now.Add(maxGrantTTL + time.Minute)) {
+		t.Fatalf("over-long expiry not clamped: %v", exp2)
+	}
+}
+
 // A connected mutating action with a standing grant resolves to `proceed` (skip
 // the modal) instead of `approve`. Without the grant it resolves to `approve`.
 func TestResolveProceedsWithGrant(t *testing.T) {

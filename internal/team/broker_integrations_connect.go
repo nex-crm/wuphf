@@ -2,6 +2,7 @@ package team
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -154,6 +155,7 @@ func (b *Broker) fanOutConnected(platform, connectionKey, accountName, actor str
 		return
 	}
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.upsertConnectionRegistryLocked(connectionRegistryEntry{
 		Platform:      platform,
 		Provider:      "composio",
@@ -162,12 +164,14 @@ func (b *Broker) fanOutConnected(platform, connectionKey, accountName, actor str
 		AccountName:   strings.TrimSpace(accountName),
 	})
 	pending := b.resolveConnectRequestsLocked(platform, actor, "connect", "")
+	// Best-effort persist. Even if the disk write fails the cards are already
+	// answered in memory and the parked work must still flush — a save error is
+	// recoverable on the next probe, a wedged task is not. defer Unlock guards
+	// against a mid-flight panic leaking the lock.
 	if err := b.saveLocked(); err != nil {
-		b.mu.Unlock()
-		return
+		fmt.Fprintf(os.Stderr, "team: fanOutConnected save failed for %s: %v\n", platform, err)
 	}
 	b.flushPendingAutoNotebookTransitionsLocked(pending, "system")
-	b.mu.Unlock()
 }
 
 // resolveConnectRequestsLocked terminally answers every active connect card for
