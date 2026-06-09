@@ -1,14 +1,13 @@
 # Deterministic External Integrations — Connection Lifecycle State Machine
 
-> ▶ RESUME HERE: Build order below. DONE: all backend (1, 2, 3a, 5a, 6) PLUS
-> frontend slice 4a (ExternalActionApprovalCard, legacy parse, 3-theme verified)
-> and the slice 5b "Approve & always allow" grant button. REMAINING: slice 3b
-> (web Connect card + hard connect-timeout→backlog), slice 4b (structured
-> action-approval payload with the real HTTP envelope behind the raw toggle —
-> the long pole, triangulate), slice 5b revoke list in the Integrations app. New
-> persisted/wire shapes (connect kind, humanInterview.Platform/LogoURL,
-> actionGrant, future 4b payload) need triangulation before merge. Full design
-> rationale in the office-hours design doc (gstack projects dir, 2026-06-07).
+> ▶ RESUME HERE: ALL SLICES DONE — 1, 2, 3a, 3b (Connect card + hard timeout),
+> 4a, 4b (structured payload + real envelope + connection-unverified), 5a, 5b
+> (grant button + revoke list), 6. Draft PR #1049. The ONLY remaining gate before
+> marking ready: triangulate the new wire shapes (connect/fallback decision
+> kinds, humanInterview.Platform/LogoURL/action/connection_unverified,
+> actionGrant) per repo CLAUDE.md + full-app screenshots via publish.sh. Full
+> design rationale in the office-hours design doc (gstack projects dir,
+> 2026-06-07).
 
 ## Why
 
@@ -134,12 +133,16 @@ Integrations app.
   action resuming with no second prompt. Waiting + failed states; Skip answers
   `skip`. Wired into `HumanInterviewOverlay` (`connect` kind). 3-theme verified
   (`/tmp/connect-{light,dark,noir}.png`). Tests + story co-located.
-- [ ] **Slice 3b (hard timeout)** — connect-timeout → task back to backlog +
-  `integration_connect_timed_out` audit. STILL DEFERRED: the connect flow does
-  not explicitly park a task today (agent gets a tool error + the card is
-  raised), so "move the parked task to backlog" has no referent yet — needs the
-  connect task-linkage model. The card already rides the standard reminder
-  lifecycle. Scheduler-tick concern.
+- [x] **Slice 3b (hard timeout)** — `expireStaleIntegrationDecisionsLocked`
+  auto-cancels connect/fallback cards older than `integrationDecisionTimeout`
+  (60m) and audits `integration_connect_timed_out` /
+  `integration_fallback_timed_out`, freeing the blocking channel. Hooked into the
+  per-minute `runActivityWatchdog` tick so it fires regardless of who is polling.
+  NOTE: "task back to backlog" reduces to cancel + audit — the connect flow does
+  not park a task (the agent already got its tool error when blocked), so there
+  is nothing to re-queue; the realized behavior is unblock + audit. The human can
+  always Skip sooner; this is the backstop. Test: fresh card kept, stale card
+  expired + audited.
 - [x] **Slice 4a** — `ExternalActionApprovalCard` (web), reading the legacy
   approval-context parse. The Go side embeds `<action_id> via <Platform>` in the
   `Action:` footer and `<verb> via <Platform>` in the title, so the card
@@ -158,11 +161,23 @@ Integrations app.
   `.stories.tsx`), `HumanInterviewOverlay.tsx`/`.test.tsx`, `web/src/api/client.ts`
   (AgentRequest +platform/logo_url, grant client fns), `web/src/styles/global.css`
   (`.eac-*`). tsc clean, biome clean, 214 messages tests pass, web build green.
-- [ ] **Slice 4b** — swap the card to a structured action-approval payload with
-  the real HTTP envelope (method/url/headers/body) behind the raw toggle,
-  populated by the resolver's DryRun envelope. New wire shape — the long pole;
-  triangulate. Also surfaces deferred review LOW #5 ("connection unverified"
-  when the gate degraded to approval-only).
+- [x] **Slice 4b** — structured action-approval payload with the real masked
+  HTTP envelope behind the raw toggle. New wire shape `humanInterview.action =
+  {platform, action_id, verb, name, logo_url, account, raw_envelope{method, url,
+  headers, data}}` + `connection_unverified`. The gate decodes the resolver's
+  already-masked envelope (built for the `approve` decision) and threads it onto
+  the approval request via `requireTeamActionApproval`; the broker **re-masks on
+  store** (`sanitizeApprovalActionPayload`) and strips the internal connection
+  key — defense in depth on the surface a human reads. The card prefers the
+  structured payload for identity + shows the real envelope behind the raw
+  toggle, falling back to the legacy parse when absent. Review **LOW #5** shipped
+  with it: when the gate could not reach the resolver and degraded to
+  approval-only, `connection_unverified` raises a "connection unverified" warning
+  on the card. Files: `broker_approval_action.go` (new) + `broker_types.go` +
+  `broker_requests_interviews.go` (store), `internal/teammcp/action_resolve_gate.go`
+  + `actions.go` (thread), `web/src/api/client.ts` + `ExternalActionApprovalCard.tsx`
+  + CSS. Tests: broker storage+mask, gate threading, card structured/envelope/
+  unverified. Full Go suites green; 229 web tests green; 3-theme verified.
 - [x] **Slice 5a** — Scoped grants, backend. Persisted `actionGrant{id,
   agent_slug, platform, action_scope, channel?, issue_id?, granted_by,
   granted_at, expires_at?, revoked_at?}`; the scope is ALWAYS a concrete

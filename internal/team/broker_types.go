@@ -149,15 +149,24 @@ type humanInterview struct {
 	// the external-action approval card) to a concrete toolkit. The web Connect
 	// card reads Platform to drive the existing Composio OAuth flow and LogoURL
 	// to render the toolkit logo. Empty for non-integration requests.
-	Platform   string           `json:"platform,omitempty"`
-	LogoURL    string           `json:"logo_url,omitempty"`
-	DueAt      string           `json:"due_at,omitempty"`
-	FollowUpAt string           `json:"follow_up_at,omitempty"`
-	ReminderAt string           `json:"reminder_at,omitempty"`
-	RecheckAt  string           `json:"recheck_at,omitempty"`
-	CreatedAt  string           `json:"created_at"`
-	UpdatedAt  string           `json:"updated_at,omitempty"`
-	Answered   *interviewAnswer `json:"answered,omitempty"`
+	Platform string `json:"platform,omitempty"`
+	LogoURL  string `json:"logo_url,omitempty"`
+	// Action is the structured external-action payload (slice 4b): typed fields
+	// plus the masked raw HTTP envelope the approval card renders behind its raw
+	// toggle. Nil for non-approval requests and for legacy approvals that only
+	// carry the parsed context string.
+	Action *approvalActionPayload `json:"action,omitempty"`
+	// ConnectionUnverified is set when the action gate could not reach the
+	// resolver and degraded to approval-only, so the connection state is
+	// unconfirmed. The card surfaces a warning (review LOW #5).
+	ConnectionUnverified bool             `json:"connection_unverified,omitempty"`
+	DueAt                string           `json:"due_at,omitempty"`
+	FollowUpAt           string           `json:"follow_up_at,omitempty"`
+	ReminderAt           string           `json:"reminder_at,omitempty"`
+	RecheckAt            string           `json:"recheck_at,omitempty"`
+	CreatedAt            string           `json:"created_at"`
+	UpdatedAt            string           `json:"updated_at,omitempty"`
+	Answered             *interviewAnswer `json:"answered,omitempty"`
 }
 
 type humanInvite struct {

@@ -17,20 +17,62 @@ type actionResolveAccount struct {
 	Key  string `json:"key,omitempty"`
 }
 
+// actionResolveEnvelope mirrors the broker's masked preview envelope — the real
+// HTTP request the action would send, secrets already masked. Carried onto the
+// approval card so the raw toggle shows what actually goes over the wire.
+type actionResolveEnvelope struct {
+	Method  string         `json:"method,omitempty"`
+	URL     string         `json:"url,omitempty"`
+	Headers map[string]any `json:"headers,omitempty"`
+	Data    map[string]any `json:"data,omitempty"`
+}
+
 // actionResolveResponse mirrors the broker's integrationResolveResponse. Only
 // the fields the gate acts on are decoded.
 type actionResolveResponse struct {
-	Decision string                `json:"decision"`
-	State    string                `json:"state"`
-	Platform string                `json:"platform"`
-	ActionID string                `json:"action_id"`
-	Name     string                `json:"name,omitempty"`
-	ReadOnly bool                  `json:"read_only"`
-	Account  *actionResolveAccount `json:"account,omitempty"`
-	Detail   string                `json:"detail,omitempty"`
+	Decision    string                 `json:"decision"`
+	State       string                 `json:"state"`
+	Platform    string                 `json:"platform"`
+	ActionID    string                 `json:"action_id"`
+	Name        string                 `json:"name,omitempty"`
+	ReadOnly    bool                   `json:"read_only"`
+	LogoURL     string                 `json:"logo_url,omitempty"`
+	Account     *actionResolveAccount  `json:"account,omitempty"`
+	RawEnvelope *actionResolveEnvelope `json:"raw_envelope,omitempty"`
+	Detail      string                 `json:"detail,omitempty"`
 	// RequestID is the connect card the broker raised for a `connect` decision,
 	// so the gate can point the human at the waiting card by name.
 	RequestID string `json:"request_id,omitempty"`
+}
+
+// actionCardPayload is the structured external-action payload the gate attaches
+// to an approval request (slice 4b). It marshals to the broker's
+// integration_action shape. The raw envelope is the masked preview the resolver
+// already built — the gate only relays it, never the unmasked args.
+type actionCardPayload struct {
+	Platform    string                 `json:"platform,omitempty"`
+	ActionID    string                 `json:"action_id,omitempty"`
+	Verb        string                 `json:"verb,omitempty"`
+	Name        string                 `json:"name,omitempty"`
+	LogoURL     string                 `json:"logo_url,omitempty"`
+	Account     *actionResolveAccount  `json:"account,omitempty"`
+	RawEnvelope *actionResolveEnvelope `json:"raw_envelope,omitempty"`
+}
+
+// buildActionCardPayload composes the structured approval payload from the args
+// the agent passed and the resolver's verdict (account + masked envelope).
+func buildActionCardPayload(args TeamActionExecuteArgs, decision actionResolveResponse) *actionCardPayload {
+	platform := strings.TrimSpace(args.Platform)
+	actionID := strings.TrimSpace(args.ActionID)
+	return &actionCardPayload{
+		Platform:    platform,
+		ActionID:    actionID,
+		Verb:        actionVerbLabel(platform, actionID),
+		Name:        strings.TrimSpace(decision.Name),
+		LogoURL:     strings.TrimSpace(decision.LogoURL),
+		Account:     decision.Account,
+		RawEnvelope: decision.RawEnvelope,
+	}
 }
 
 // resolveActionDecision asks the broker to classify an external action against

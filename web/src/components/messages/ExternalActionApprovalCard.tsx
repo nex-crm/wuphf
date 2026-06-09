@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { AgentRequest } from "../../api/client";
+import type { ActionEnvelope, AgentRequest } from "../../api/client";
 import {
   type ApprovalContext,
   parseApprovalContext,
@@ -52,14 +52,40 @@ interface ActionIdentity {
   platformSlug: string;
 }
 
-// The Go side (buildActionApprovalSpec) writes the footer as
-// "Action: GMAIL_SEND_EMAIL via Gmail" and the title as "Send Email via Gmail".
-// deriveActionIdentity recovers the structured pieces from those strings, with
-// the platform slug also derivable from the action id prefix as a fallback.
+// deriveActionIdentity resolves the card's identity, preferring the structured
+// payload (slice 4b) when present and falling back to the legacy strings: the Go
+// side writes the footer as "Action: GMAIL_SEND_EMAIL via Gmail" and the title
+// as "Send Email via Gmail", with the platform slug also derivable from the
+// action id prefix.
 export function deriveActionIdentity(
   request: AgentRequest,
   parsed: ApprovalContext | null,
 ): ActionIdentity {
+  const structured = request.action;
+  if (structured && (structured.action_id || structured.platform)) {
+    const actionId = (structured.action_id ?? "").trim();
+    const platformSlug = (
+      structured.platform ||
+      actionId.split("_")[0] ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
+    return {
+      headline:
+        (structured.verb ?? "").trim() ||
+        stripVia(request.title) ||
+        titleCaseTokens(actionId) ||
+        "Run an action",
+      actionId,
+      platformName:
+        (structured.name ?? "").trim() ||
+        titleCaseTokens(structured.platform ?? "") ||
+        "",
+      platformSlug,
+    };
+  }
+
   const footerAction = parsed?.footer.action ?? "";
   const viaIdx = footerAction.lastIndexOf(" via ");
   const actionId = (
@@ -130,9 +156,16 @@ export function ExternalActionApprovalCard({
   const identity = deriveActionIdentity(request, parsed);
   const details = parsed?.details ?? [];
   const why = parsed?.why ?? null;
-  const account = parsed?.footer.account ?? null;
+  const account =
+    request.action?.account?.name ?? parsed?.footer.account ?? null;
   const channel = parsed?.footer.channel ?? request.channel ?? null;
   const grant = grantTarget(request, identity);
+  // The masked HTTP envelope (slice 4b) is the real request behind the raw
+  // toggle. When absent (legacy approvals), the raw view reformats the parsed
+  // summary fields instead.
+  const rawEnvelope = request.action?.raw_envelope ?? null;
+  const hasRaw = Boolean(rawEnvelope) || details.length > 0;
+  const hasPayload = hasRaw;
 
   const brandLogo = identity.platformSlug ? (
     <ToolkitBrandLogo platform={identity.platformSlug} />
@@ -158,6 +191,15 @@ export function ExternalActionApprovalCard({
         ) : null}
       </header>
 
+      {request.connection_unverified ? (
+        <p className="eac-unverified" role="status">
+          <span className="eac-unverified-dot" aria-hidden="true" />
+          Connection unverified — we could not confirm {identity.platformName ||
+            "this integration"} is connected. Approve only if you trust it is
+          set up.
+        </p>
+      ) : null}
+
       {why ? (
         <p className="eac-why">
           <span className="eac-why-label">Why</span>
@@ -168,7 +210,7 @@ export function ExternalActionApprovalCard({
       <section className="eac-payload" aria-label="What will be sent">
         <div className="eac-payload-head">
           <span className="eac-payload-title">What will be sent</span>
-          {details.length > 0 ? (
+          {hasRaw ? (
             <button
               type="button"
               className="eac-raw-toggle"
@@ -180,13 +222,15 @@ export function ExternalActionApprovalCard({
           ) : null}
         </div>
 
-        {details.length === 0 ? (
+        {!hasPayload ? (
           <p className="eac-payload-empty">
             No structured payload — approve based on the action above.
           </p>
         ) : showRaw ? (
-          <pre className="eac-raw mono">{rawPayload(details)}</pre>
-        ) : (
+          <pre className="eac-raw mono">
+            {rawEnvelope ? formatEnvelope(rawEnvelope) : rawPayload(details)}
+          </pre>
+        ) : details.length > 0 ? (
           <dl className="eac-fields">
             {details.map((detail) => (
               <div key={detail.label} className="eac-field">
@@ -200,6 +244,11 @@ export function ExternalActionApprovalCard({
               </div>
             ))}
           </dl>
+        ) : (
+          // Only the raw envelope is available (no parsed summary) — show it.
+          <pre className="eac-raw mono">
+            {rawEnvelope ? formatEnvelope(rawEnvelope) : ""}
+          </pre>
         )}
       </section>
 
@@ -270,4 +319,30 @@ function rawPayload(details: ApprovalContext["details"]): string {
     return `${d.label}: ${value}`;
   });
   return lines.join("\n");
+}
+
+// formatEnvelope renders the masked HTTP request (slice 4b) as a request line,
+// optional headers, and a pretty-printed body. Values are already masked
+// server-side, so this is purely a display transform.
+function formatEnvelope(env: ActionEnvelope): string {
+  const lines: string[] = [];
+  const requestLine = [env.method, env.url].filter(Boolean).join(" ");
+  if (requestLine) lines.push(requestLine);
+  if (env.headers && Object.keys(env.headers).length > 0) {
+    if (lines.length > 0) lines.push("");
+    for (const [k, v] of Object.entries(env.headers)) {
+      lines.push(`${k}: ${formatScalar(v)}`);
+    }
+  }
+  if (env.data && Object.keys(env.data).length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push(JSON.stringify(env.data, null, 2));
+  }
+  return lines.join("\n");
+}
+
+function formatScalar(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
 }

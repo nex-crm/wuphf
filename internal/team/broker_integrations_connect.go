@@ -241,3 +241,64 @@ func connectChoiceLabel(choiceID string) string {
 		return strings.TrimSpace(choiceID)
 	}
 }
+
+// integrationDecisionTimeout is how long a blocking connect/fallback card may sit
+// unanswered before the broker expires it. The card blocks its channel, so an
+// integration the human never connects (and never explicitly skips) would
+// otherwise wedge the channel forever. The human can always Skip sooner; this is
+// the backstop. 60 minutes leaves ample time to complete an OAuth round-trip.
+const integrationDecisionTimeout = 60 * time.Minute
+
+// expireStaleIntegrationDecisionsLocked terminally cancels connect/fallback
+// cards older than integrationDecisionTimeout and audits the timeout, freeing
+// the blocking channel. Caller holds b.mu. Returns true if anything changed.
+//
+// Slice 3b's "task back to backlog" reduces to cancel + audit here: the connect
+// flow does not park a task (the agent already got its tool error when the
+// action was blocked), so there is no task to re-queue — the realized behavior
+// is unblock + an integration_*_timed_out audit trail.
+func (b *Broker) expireStaleIntegrationDecisionsLocked(now time.Time) bool {
+	changed := false
+	for i := range b.requests {
+		kind := normalizeRequestKind(b.requests[i].Kind)
+		if kind != "connect" && kind != "fallback" {
+			continue
+		}
+		if !requestIsActive(b.requests[i]) {
+			continue
+		}
+		created, err := time.Parse(time.RFC3339, strings.TrimSpace(b.requests[i].CreatedAt))
+		if err != nil || now.Sub(created) < integrationDecisionTimeout {
+			continue
+		}
+		req := &b.requests[i]
+		stamp := now.UTC().Format(time.RFC3339)
+		req.Status = "canceled"
+		req.UpdatedAt = stamp
+		req.ReminderAt = ""
+		req.FollowUpAt = ""
+		req.RecheckAt = ""
+		req.DueAt = ""
+		b.completeSchedulerJobsLocked("request", req.ID, req.Channel)
+		b.resolveWatchdogAlertsLocked("request", req.ID, req.Channel)
+		auditKind := "integration_connect_timed_out"
+		if kind == "fallback" {
+			auditKind = "integration_fallback_timed_out"
+		}
+		display := strings.TrimSpace(req.Platform)
+		if display == "" {
+			display = "integration"
+		}
+		b.appendActionLocked(
+			auditKind, "office", req.Channel, "system",
+			truncateSummary(fmt.Sprintf("%s decision timed out after %s — card auto-canceled", display, integrationDecisionTimeout), 140),
+			req.ID,
+		)
+		changed = true
+	}
+	if changed {
+		b.pendingInterview = firstBlockingRequest(b.requests)
+		_ = b.saveLocked()
+	}
+	return changed
+}

@@ -144,7 +144,7 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 		defer cancel()
 		_, err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
 			Platform: "gmail", ActionID: "GMAIL_SEND_EMAIL", DryRun: true,
-		}, false)
+		}, false, nil, false)
 		if err != nil {
 			t.Fatalf("DryRun must bypass approval, got err=%v", err)
 		}
@@ -156,7 +156,7 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 		defer cancel()
 		_, err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
 			Platform: "gmail", ActionID: "GMAIL_SEND_EMAIL", DryRun: false,
-		}, false)
+		}, false, nil, false)
 		if err != nil {
 			t.Fatalf("WUPHF_UNSAFE=1 must bypass approval, got err=%v", err)
 		}
@@ -167,7 +167,7 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 		defer cancel()
 		_, err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
 			Platform: "gmail", ActionID: "GMAIL_FETCH_MAILS", DryRun: false,
-		}, false)
+		}, false, nil, false)
 		if err != nil {
 			t.Fatalf("read-only action_id must bypass approval, got err=%v", err)
 		}

@@ -1094,6 +1094,27 @@ body {
   color: var(--text-secondary);
   vertical-align: 1px;
 }
+.eac-unverified {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--warning-100, var(--overlay-soft));
+  border: 1px solid var(--warning-200, var(--border));
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--warning-500, var(--text));
+}
+.eac-unverified-dot {
+  flex: none;
+  margin-top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full, 999px);
+  background: var(--warning-500, var(--amber-600));
+}
 .eac-payload {
   display: flex;
   flex-direction: column;

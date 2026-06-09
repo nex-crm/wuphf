@@ -127,3 +127,38 @@ export const Redacted: Story = {
     },
   },
 };
+
+// Slice 4b: a structured payload carrying the real masked HTTP envelope. The
+// raw toggle shows the actual request (method + url + masked body).
+export const StructuredWithEnvelope: Story = {
+  args: {
+    request: {
+      ...gmailSend,
+      action: {
+        platform: "gmail",
+        action_id: "GMAIL_SEND_EMAIL",
+        verb: "Send Email",
+        name: "Gmail",
+        account: { name: "Founder Gmail (alex@foundermail.com)" },
+        raw_envelope: {
+          method: "POST",
+          url: "https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL",
+          data: {
+            recipient_email: "alex@nex.ai",
+            subject: "Great meeting you — next steps",
+            body: "Hi Alex, thanks for the time today…",
+            user_id: "***",
+          },
+        },
+      },
+    },
+  },
+};
+
+// Review LOW #5: the gate could not reach the resolver, so the connection is
+// unconfirmed — the card warns the human before they approve.
+export const ConnectionUnverified: Story = {
+  args: {
+    request: { ...gmailSend, connection_unverified: true },
+  },
+};

@@ -414,6 +414,10 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		ReplyTo       string            `json:"reply_to"`
 		DedupeKey     string            `json:"dedupe_key"`
 		IssueID       string            `json:"issue_id"`
+		// IntegrationAction carries the structured external-action payload
+		// (slice 4b) for approval cards: typed fields + the masked raw envelope.
+		IntegrationAction    *approvalActionPayload `json:"integration_action,omitempty"`
+		ConnectionUnverified bool                   `json:"connection_unverified,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -522,24 +526,26 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		b.counter++
 		req := humanInterview{
-			ID:            fmt.Sprintf("request-%d", b.counter),
-			Kind:          normalizeRequestKind(body.Kind),
-			Status:        "pending",
-			From:          strings.TrimSpace(body.From),
-			Channel:       channel,
-			Title:         strings.TrimSpace(body.Title),
-			Question:      strings.TrimSpace(body.Question),
-			Context:       strings.TrimSpace(body.Context),
-			Options:       body.Options,
-			RecommendedID: "",
-			Blocking:      body.Blocking,
-			Required:      body.Required,
-			Secret:        body.Secret,
-			ReplyTo:       strings.TrimSpace(body.ReplyTo),
-			DedupeKey:     dedupeKey,
-			IssueID:       strings.TrimSpace(body.IssueID),
-			CreatedAt:     time.Now().UTC().Format(time.RFC3339),
-			UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+			ID:                   fmt.Sprintf("request-%d", b.counter),
+			Kind:                 normalizeRequestKind(body.Kind),
+			Status:               "pending",
+			From:                 strings.TrimSpace(body.From),
+			Channel:              channel,
+			Title:                strings.TrimSpace(body.Title),
+			Question:             strings.TrimSpace(body.Question),
+			Context:              strings.TrimSpace(body.Context),
+			Options:              body.Options,
+			RecommendedID:        "",
+			Blocking:             body.Blocking,
+			Required:             body.Required,
+			Secret:               body.Secret,
+			ReplyTo:              strings.TrimSpace(body.ReplyTo),
+			DedupeKey:            dedupeKey,
+			IssueID:              strings.TrimSpace(body.IssueID),
+			Action:               sanitizeApprovalActionPayload(body.IntegrationAction),
+			ConnectionUnverified: body.ConnectionUnverified,
+			CreatedAt:            time.Now().UTC().Format(time.RFC3339),
+			UpdatedAt:            time.Now().UTC().Format(time.RFC3339),
 		}
 		req.Options, req.RecommendedID = normalizeRequestOptions(req.Kind, strings.TrimSpace(body.RecommendedID), req.Options)
 		if requestNeedsHumanDecision(req) {

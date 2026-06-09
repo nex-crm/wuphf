@@ -587,6 +587,9 @@ func (b *Broker) runActivityWatchdog(ctx context.Context) {
 			for _, snap := range reset {
 				b.publishActivityLocked(snap)
 			}
+			// Expire blocking connect/fallback cards the human never answered so
+			// they cannot wedge a channel forever (slice 3b backstop).
+			b.expireStaleIntegrationDecisionsLocked(now)
 			b.mu.Unlock()
 		}
 	}

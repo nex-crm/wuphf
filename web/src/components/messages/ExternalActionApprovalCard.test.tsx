@@ -136,3 +136,56 @@ describe("<ExternalActionApprovalCard>", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
   });
 });
+
+describe("<ExternalActionApprovalCard> structured payload (slice 4b)", () => {
+  it("derives identity from the structured action when present", () => {
+    const parsed = parseApprovalContext(GMAIL_CONTEXT);
+    const identity = deriveActionIdentity(
+      makeApprovalRequest({
+        title: "ignored legacy title",
+        action: {
+          platform: "slack",
+          action_id: "SLACK_SEND_MESSAGE",
+          verb: "Post Message",
+          name: "Slack",
+        },
+      }),
+      parsed,
+    );
+    expect(identity).toEqual({
+      headline: "Post Message",
+      actionId: "SLACK_SEND_MESSAGE",
+      platformName: "Slack",
+      platformSlug: "slack",
+    });
+  });
+
+  it("shows the real masked HTTP envelope behind the raw toggle", () => {
+    renderCard({
+      action: {
+        platform: "gmail",
+        action_id: "GMAIL_SEND_EMAIL",
+        verb: "Send Email",
+        name: "Gmail",
+        raw_envelope: {
+          method: "POST",
+          url: "https://backend.composio.dev/api/v3/tools/execute",
+          data: { to: "lead@acme.com", token: "***" },
+        },
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /show raw/i }));
+    expect(
+      screen.getByText(/POST https:\/\/backend\.composio\.dev/),
+    ).toBeInTheDocument();
+    // The masked secret is shown as-is (already redacted server-side); never raw.
+    expect(screen.getByText(/"token": "\*\*\*"/)).toBeInTheDocument();
+  });
+
+  it("warns when the connection could not be verified (review LOW #5)", () => {
+    renderCard({ connection_unverified: true });
+    expect(
+      screen.getByText(/connection unverified/i),
+    ).toBeInTheDocument();
+  });
+});

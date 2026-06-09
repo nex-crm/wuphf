@@ -80,7 +80,7 @@ const grantApprovalMarker = "grant"
 //
 // The point: a prompt-injected agent cannot send email, write to a CRM, or
 // post a Slack message without the human explicitly clicking approve.
-func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs, preApproved bool) (approvalContext, error) {
+func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs, preApproved bool, actionCard *actionCardPayload, connectionUnverified bool) (approvalContext, error) {
 	if args.DryRun {
 		return approvalContext{}, nil
 	}
@@ -154,7 +154,7 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 	var created struct {
 		ID string `json:"id"`
 	}
-	if err := brokerPostJSON(ctx, "/requests", map[string]any{
+	requestBody := map[string]any{
 		"kind":           "approval",
 		"channel":        channel,
 		"from":           slug,
@@ -171,7 +171,17 @@ func requireTeamActionApproval(ctx context.Context, slug, channel string, args T
 		// (Bug B Layer 2). The broker ignores unknown fields today, so
 		// shipping this is safe and unblocks the follow-up slice.
 		"issue_id": strings.TrimSpace(args.IssueID),
-	}, &created); err != nil {
+	}
+	// Structured action payload + connection-unverified signal (slice 4b /
+	// review LOW #5). Only attached when present so legacy consumers are
+	// unaffected.
+	if actionCard != nil {
+		requestBody["integration_action"] = actionCard
+	}
+	if connectionUnverified {
+		requestBody["connection_unverified"] = true
+	}
+	if err := brokerPostJSON(ctx, "/requests", requestBody, &created); err != nil {
 		return approvalContext{}, fmt.Errorf("create approval request: %w", err)
 	}
 	if strings.TrimSpace(created.ID) == "" {
@@ -718,10 +728,15 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 	// resolver itself is unreachable we degrade to the human approval gate
 	// below rather than bricking every external action.
 	preApproved := false
+	var actionCard *actionCardPayload
+	connectionUnverified := false
 	if !args.DryRun && os.Getenv("WUPHF_UNSAFE") != "1" && !actionIsReadOnly(args.ActionID) {
 		decision, derr := resolveActionDecision(ctx, slug, channel, args)
 		if derr != nil {
 			fmt.Fprintf(os.Stderr, "teammcp: action resolve failed for %s/%s: %v; falling back to approval-only gate\n", args.Platform, args.ActionID, derr)
+			// The connection state is unconfirmed — the approval card warns
+			// the human that we could not verify the integration (review LOW #5).
+			connectionUnverified = true
 		} else {
 			switch strings.ToLower(strings.TrimSpace(decision.Decision)) {
 			case "connect", "wait", "fail_safe", "fallback":
@@ -744,6 +759,10 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 				if decision.Account != nil && strings.TrimSpace(decision.Account.Key) != "" {
 					args.ConnectionKey = strings.TrimSpace(decision.Account.Key)
 				}
+				// Carry the structured payload (typed fields + masked envelope)
+				// onto the approval card so it renders the real request, not a
+				// reconstruction (slice 4b).
+				actionCard = buildActionCardPayload(args, decision)
 			default:
 				// Fail closed. The resolver answered (derr == nil) but with a
 				// decision this gate does not recognize — an empty body, a new
@@ -763,7 +782,7 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 	// approval unless --unsafe was passed or the action is a read-only
 	// lookup. A prompt-injected agent must not be able to trigger real
 	// side-effects silently.
-	approvalCtx, err := requireTeamActionApproval(ctx, slug, channel, args, preApproved)
+	approvalCtx, err := requireTeamActionApproval(ctx, slug, channel, args, preApproved, actionCard, connectionUnverified)
 	if err != nil {
 		return toolError(err), nil, nil
 	}

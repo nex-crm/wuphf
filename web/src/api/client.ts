@@ -647,6 +647,34 @@ export interface AgentRequest {
    * toolkit logo + OAuth target. Empty for non-integration requests. */
   platform?: string;
   logo_url?: string;
+  /** Structured external-action payload (slice 4b): typed fields + the
+   * masked raw HTTP envelope the approval card renders behind its raw
+   * toggle. Absent for legacy approvals (the card falls back to the
+   * parsed context string). */
+  action?: ActionApprovalPayload;
+  /** Set when the action gate could not reach the resolver and degraded
+   * to approval-only, so the connection state is unconfirmed. The card
+   * surfaces a warning (review LOW #5). */
+  connection_unverified?: boolean;
+}
+
+/** The masked HTTP request an external action would send. Secrets are
+ * already redacted server-side; this is display-only. */
+export interface ActionEnvelope {
+  method?: string;
+  url?: string;
+  headers?: Record<string, unknown>;
+  data?: Record<string, unknown>;
+}
+
+export interface ActionApprovalPayload {
+  platform?: string;
+  action_id?: string;
+  verb?: string;
+  name?: string;
+  logo_url?: string;
+  account?: { name?: string; key?: string };
+  raw_envelope?: ActionEnvelope;
 }
 
 export function getRequests(channel: string) {

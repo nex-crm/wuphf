@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/action"
 )
@@ -208,6 +209,59 @@ func TestFanOutConnectedResolvesParkedCard(t *testing.T) {
 	b.fanOutConnected("gmail", "ca_123", "Founder Gmail", "you")
 	if got := len(activeConnectCards(b, "gmail")); got != 0 {
 		t.Fatalf("fan-out not idempotent: %d active connect cards remain", got)
+	}
+}
+
+// A blocking connect card that sits unanswered past the timeout is auto-canceled
+// so it cannot wedge the channel forever; a fresh card is left alone. (Slice 3b
+// backstop.)
+func TestExpireStaleConnectCard(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := NewBrokerAt(filepath.Join(t.TempDir(), "state.json"))
+
+	id := b.ensureConnectRequest("gmail", "general", "ceo", "Gmail", "")
+	if id == "" {
+		t.Fatalf("ensureConnectRequest returned no id")
+	}
+
+	// A fresh card is not expired.
+	b.mu.Lock()
+	changed := b.expireStaleIntegrationDecisionsLocked(time.Now().UTC())
+	b.mu.Unlock()
+	if changed {
+		t.Fatalf("a fresh connect card must not expire")
+	}
+	if got := len(activeConnectCards(b, "gmail")); got != 1 {
+		t.Fatalf("fresh card should still be active, got %d", got)
+	}
+
+	// Backdate it past the timeout, then sweep.
+	b.mu.Lock()
+	for i := range b.requests {
+		if b.requests[i].ID == id {
+			b.requests[i].CreatedAt = time.Now().UTC().
+				Add(-integrationDecisionTimeout - time.Minute).Format(time.RFC3339)
+		}
+	}
+	changed = b.expireStaleIntegrationDecisionsLocked(time.Now().UTC())
+	b.mu.Unlock()
+	if !changed {
+		t.Fatalf("a stale connect card must expire")
+	}
+	if got := len(activeConnectCards(b, "gmail")); got != 0 {
+		t.Fatalf("expired card should no longer be active, got %d", got)
+	}
+
+	// The timeout is audited.
+	found := false
+	for _, a := range b.actions {
+		if a.Kind == "integration_connect_timed_out" && a.RelatedID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected an integration_connect_timed_out audit for %s", id)
 	}
 }
 
