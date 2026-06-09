@@ -22,18 +22,26 @@ interface TaskActivityFeedProps {
 }
 
 /**
- * Activity tab content — Paperclip-style chronological feed of everything
- * that happened to this Issue. Mounted under the TaskDocument's Activity
- * tab. Sources:
+ * Activity is a structured audit of an Issue's state changes — NOT a second
+ * copy of the conversation. It surfaces only:
  *   - lifecycle transitions (officeActionLog kind=lifecycle_*)
- *   - workflow actions (task_created, task_updated, …)
- *   - comments tied to this Issue
  *   - human_interview requests with their resolution
  *   - sub-issue creations
+ *
+ * Comments are deliberately excluded — they render in the chat stream
+ * (TaskCommentCard) which is the canonical reply thread, so duplicating
+ * them here would just be the chat again. Generic `action` log entries are
+ * excluded too; only the three state-event kinds above belong in the audit.
  *
  * Open requests are clickable — they deep-link into the Inbox so the
  * human can answer without leaving the Activity view.
  */
+const FEED_KINDS: ReadonlySet<TaskActivityEventKind> = new Set([
+  "lifecycle",
+  "request",
+  "sub_issue",
+]);
+
 export function TaskActivityFeed({ taskId }: TaskActivityFeedProps) {
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["issue", taskId, "activity"],
@@ -42,11 +50,11 @@ export function TaskActivityFeed({ taskId }: TaskActivityFeedProps) {
     staleTime: 4_000,
   });
 
-  // Newest events first — the broker returns oldest → newest for stable
-  // server-side rendering; reverse here so the most recent activity is
-  // visible at the top.
+  // Keep only state-event kinds (lifecycle / request / sub-issue), then show
+  // newest first — the broker returns oldest → newest for stable server-side
+  // rendering, so reverse here for most-recent-on-top.
   const events = useMemo(() => {
-    const list = data?.events ?? [];
+    const list = (data?.events ?? []).filter((ev) => FEED_KINDS.has(ev.kind));
     return [...list].reverse();
   }, [data]);
 

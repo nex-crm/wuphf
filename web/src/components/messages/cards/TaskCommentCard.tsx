@@ -10,7 +10,8 @@
  *
  * This card surfaces the comment as a clear "this happened on Task X"
  * affordance with a Read & Reply CTA that routes to the Task detail
- * view (where the activity feed is the canonical reply thread).
+ * view (where the chat stream is the canonical reply thread; the
+ * Activity rail is a state-change audit only — no comments).
  *
  * Security: payload fields are plain text only. The broker-side
  * sanitizer is authoritative; this component is defense-in-depth.
