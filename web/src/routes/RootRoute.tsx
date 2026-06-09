@@ -95,11 +95,6 @@ const RoutineComposer = lazy(() =>
     default: m.RoutineComposer,
   })),
 );
-const ConsoleApp = lazy(() =>
-  import("../components/apps/ConsoleApp").then((m) => ({
-    default: m.ConsoleApp,
-  })),
-);
 const GraphApp = lazy(() => import("../components/apps/GraphApp"));
 const HealthCheckApp = lazy(() =>
   import("../components/apps/HealthCheckApp").then((m) => ({
@@ -109,11 +104,6 @@ const HealthCheckApp = lazy(() =>
 const PoliciesApp = lazy(() =>
   import("../components/apps/PoliciesApp").then((m) => ({
     default: m.PoliciesApp,
-  })),
-);
-const ReceiptsApp = lazy(() =>
-  import("../components/apps/ReceiptsApp").then((m) => ({
-    default: m.ReceiptsApp,
   })),
 );
 const SettingsApp = lazy(() =>
@@ -359,11 +349,9 @@ const APP_PANELS = {
   routines: RoutinesApp,
   skills: SkillsApp,
   activity: ArtifactsApp,
-  receipts: ReceiptsApp,
   "health-check": HealthCheckApp,
   integrations: IntegrationsApp,
   settings: SettingsApp,
-  console: ConsoleApp,
 } satisfies Record<AppPanelId, ComponentType>;
 
 function ConversationView() {
@@ -619,7 +607,7 @@ function AppPanel({ appId }: { appId: AppPanelId }) {
 /**
  * On every conversation-route mount: (1) record the channel as the
  * `lastConversationalChannel` fallback so off-conversation surfaces
- * (ConsoleApp, RequestsApp, sidebar request badge) keep pointing at
+ * (RequestsApp, sidebar request badge) keep pointing at
  * the user's working channel; (2) clear the unread badge for that
  * channel — the legacy `setCurrentChannel` / `enterDM` callers used to
  * zero `unreadByChannel[ch]` as part of the same atomic write, and

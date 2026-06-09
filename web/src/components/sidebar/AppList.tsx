@@ -8,7 +8,6 @@ import {
   Flash,
   HomeSimple,
   Package,
-  Page,
   Play,
   Puzzle,
   Repeat,
@@ -17,7 +16,6 @@ import {
   ShareAndroid,
   Shield,
   TaskList,
-  Terminal,
 } from "iconoir-react";
 
 import { fetchReviews } from "../../api/notebook";
@@ -39,7 +37,6 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   overview: HomeSimple,
   studio: Play,
   wiki: BookStack,
-  console: Terminal,
   tasks: ClipboardCheck,
   requests: TaskList,
   graph: ShareAndroid,
@@ -47,7 +44,6 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   routines: Repeat,
   skills: Flash,
   activity: Package,
-  receipts: Page,
   "health-check": Search,
   settings: Settings,
   // Agents + Integrations previously fell back to emoji (🤖 / 🔌), which read
@@ -67,7 +63,7 @@ const NAV_SECTIONS: ReadonlyArray<{
 }> = [
   {
     label: "Work",
-    items: ["inbox", "activity", "tasks", "routines", "console", "receipts"],
+    items: ["inbox", "activity", "tasks", "routines"],
   },
   { label: "Knowledge", items: ["wiki", "graph"] },
   {

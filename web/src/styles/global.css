@@ -501,7 +501,7 @@ body {
 /* ─── Section header — the small caps + tracking label that sits above
    sidebar groups, settings sections, panel rails. Replaces ~6 ad-hoc
    `font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;`
-   declarations across agents.css / console.css / lifecycle.css. */
+   declarations across agents.css / lifecycle.css. */
 .section-header {
   font-size: var(--text-xs);
   font-weight: 600;

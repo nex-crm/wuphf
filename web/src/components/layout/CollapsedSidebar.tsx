@@ -16,7 +16,6 @@ import {
   Flash,
   Group,
   Package,
-  Page,
   Play,
   Repeat,
   Search,
@@ -25,7 +24,6 @@ import {
   Shield,
   SidebarExpand,
   TaskList,
-  Terminal,
 } from "iconoir-react";
 
 import { getUsage } from "../../api/platform";
@@ -46,7 +44,6 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   issues: ClipboardCheck,
   wiki: BookStack,
-  console: Terminal,
   tasks: CheckCircle,
   requests: TaskList,
   graph: ShareAndroid,
@@ -54,7 +51,6 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   routines: Repeat,
   skills: Flash,
   activity: Package,
-  receipts: Page,
   "health-check": Search,
   settings: SettingsIcon,
 };
