@@ -181,6 +181,20 @@ func ValidateLearningInput(rec LearningRecord) error {
 }
 
 func (l *LearningLog) Append(ctx context.Context, rec LearningRecord) (LearningRecord, error) {
+	return l.append(ctx, rec, rec.Source == LearningSourceUserStated)
+}
+
+// AppendVerified appends a learning whose trust derives from a broker-run
+// machine verification (task_distill.go, U4.1) rather than from the
+// author's claim. In-package callers only: no MCP or HTTP surface reaches
+// this path, so agents cannot mint trusted records by asserting
+// source=execution — Append's source-based trust reset still governs every
+// externally reachable write.
+func (l *LearningLog) AppendVerified(ctx context.Context, rec LearningRecord) (LearningRecord, error) {
+	return l.append(ctx, rec, true)
+}
+
+func (l *LearningLog) append(ctx context.Context, rec LearningRecord, trusted bool) (LearningRecord, error) {
 	if l == nil || l.worker == nil {
 		return LearningRecord{}, ErrLearningLogNotRunning
 	}
@@ -199,11 +213,7 @@ func (l *LearningLog) Append(ctx context.Context, rec LearningRecord) (LearningR
 	rec.Supersedes = strings.TrimSpace(rec.Supersedes)
 	rec.Files = cleanStringList(rec.Files)
 	rec.Entities = cleanStringList(rec.Entities)
-	if rec.Source == LearningSourceUserStated {
-		rec.Trusted = true
-	} else {
-		rec.Trusted = false
-	}
+	rec.Trusted = trusted
 	if err := ValidateLearningInput(rec); err != nil {
 		return LearningRecord{}, fmt.Errorf("%w: %w", ErrInvalidLearning, err)
 	}

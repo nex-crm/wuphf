@@ -159,6 +159,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"knowledge-injection", evalJobKnowledgeInjection},
 		{"dependency-handoff", evalJobDependencyHandoff},
 		{"turn-journal", evalJobTurnJournal},
+		{"compounding-loop", evalJobCompoundingLoop},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))
@@ -373,5 +374,39 @@ func evalJobTurnJournal(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	r.add(job, "next turn's packet carries the task journal",
 		strings.Contains(packet, "TASK JOURNAL") && strings.Contains(packet, "isolate the fixture"),
 		"turn N+1 must start from what turn N tried, not from amnesia (U2.3/U3.3 regression guard)", "")
+	return nil
+}
+
+// evalJobCompoundingLoop: the full moat loop (U4.1 + U2.2) — a verified
+// outcome auto-distills into the learning store, and the NEXT similar task's
+// packet carries it without any human or agent touching the knowledge layer.
+func evalJobCompoundingLoop(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "compounding-loop"
+	created, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Migrate the billing webhooks to the signed-endpoint format",
+		Details: "Switch billing webhooks to signed endpoints and confirm delivery.", Owner: "eng", CreatedBy: "ceo",
+		VerificationKind: "command", VerificationSpec: "exit 0", VerificationRequired: true,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: created.Task.ID, Channel: "general", CreatedBy: "eng"}); err != nil {
+		return err
+	}
+	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "approve", ID: created.Task.ID, Channel: "general", CreatedBy: "ceo"}); err != nil {
+		return err
+	}
+	// The mutation queues distillation async; run it synchronously here for
+	// a deterministic eval (idempotency makes the double-run safe).
+	fx.broker.distillCompletedTask(created.Task.ID)
+
+	next, _, err := fx.broker.EnsureTask("general", "Add retry handling to the billing webhooks delivery", "Harden billing webhooks delivery with retries.", "eng", "ceo", "")
+	if err != nil {
+		return err
+	}
+	packet := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *fx.broker.TaskByID(next.ID), "Task assigned to you.")
+	r.add(job, "verified outcome compounds into the next similar task's packet",
+		strings.Contains(packet, "Verified outcome") && strings.Contains(packet, "billing webhooks"),
+		"done(verified) → auto-learning → injected into the next matching task with zero human steps (the moat loop, U4.1+U2.2)", "")
 	return nil
 }

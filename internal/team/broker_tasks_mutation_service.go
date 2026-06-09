@@ -914,6 +914,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		b.emitTaskTransitionAutoNotebook(task, beforeStatus, actor)
 		b.flushPendingAutoNotebookTransitionsLocked(pendingCascade, "system")
+		// U4.1 auto-distillation: a task that just reached done with a
+		// passing verification becomes a learning automatically. Queued as
+		// a goroutine so the learning-log write runs after b.mu releases
+		// (same hazard class that killed the old auto-notebook-writer).
+		if strings.EqualFold(strings.TrimSpace(task.status), "done") && !strings.EqualFold(strings.TrimSpace(beforeStatus), "done") {
+			b.queueTaskDistillation(task.ID)
+		}
 		return TaskResponse{Task: *task}, nil
 	}
 
