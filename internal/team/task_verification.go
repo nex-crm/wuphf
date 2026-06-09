@@ -140,7 +140,14 @@ func runTaskVerification(v TaskVerification, workDir string) TaskVerificationRes
 		res.Detail = "artifacts: " + strings.Join(found, ", ")
 	case taskVerificationKindURL:
 		client := &http.Client{Timeout: 15 * time.Second}
-		resp, err := client.Get(v.Spec)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.Spec, nil)
+		if err != nil {
+			res.Detail = fmt.Sprintf("GET %s: %v", v.Spec, err)
+			return res
+		}
+		resp, err := client.Do(req)
 		if err != nil {
 			res.Detail = fmt.Sprintf("GET %s: %v", v.Spec, err)
 			return res

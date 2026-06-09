@@ -27,7 +27,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "office-eval:", err)
 		os.Exit(2)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	report, err := team.RunOfficeEvals(dir)
 	if err != nil {
