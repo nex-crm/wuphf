@@ -34,6 +34,7 @@ type TaskPostRequest struct {
 	WorktreePath                 string   `json:"worktree_path"`
 	WorktreeBranch               string   `json:"worktree_branch"`
 	DependsOn                    []string `json:"depends_on"`
+	WikiRefs                     []string `json:"wiki_refs"`
 	ParentIssueID                string   `json:"parent_issue_id"`
 	MemoryWorkflowOverride       bool     `json:"memory_workflow_override"`
 	MemoryWorkflowOverrideActor  string   `json:"memory_workflow_override_actor"`

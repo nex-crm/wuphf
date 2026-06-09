@@ -66,6 +66,8 @@ type Config struct {
 	TaskReminderMinutes int      `json:"task_reminder_minutes,omitempty"`
 	TaskRecheckMinutes  int      `json:"task_recheck_minutes,omitempty"`
 	TelegramBotToken    string   `json:"telegram_bot_token,omitempty"`
+	SlackBotToken       string   `json:"slack_bot_token,omitempty"`
+	SlackAppToken       string   `json:"slack_app_token,omitempty"`
 	CompanyName         string   `json:"company_name,omitempty"`
 	CompanyDescription  string   `json:"company_description,omitempty"`
 	CompanyGoals        string   `json:"company_goals,omitempty"`
@@ -599,6 +601,40 @@ func ResolveTelegramBotToken() string {
 func SaveTelegramBotToken(token string) {
 	cfg, _ := Load()
 	cfg.TelegramBotToken = strings.TrimSpace(token)
+	_ = Save(cfg)
+}
+
+// ResolveSlackBotToken returns the Slack bot token used for the Web API
+// (chat.postMessage, users.info, conversations.members). This is the
+// workspace-scoped "xoxb-" token issued when the app is installed.
+// Resolution: SLACK_BOT_TOKEN env > config file.
+func ResolveSlackBotToken() string {
+	if v := strings.TrimSpace(os.Getenv("SLACK_BOT_TOKEN")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.SlackBotToken)
+}
+
+// ResolveSlackAppToken returns the Slack app-level token used to open a
+// Socket Mode connection for inbound events. This is the app-scoped "xapp-"
+// token with the connections:write scope; it is distinct from the bot token
+// and is required only for the inbound (Socket Mode) half of the bridge.
+// Resolution: SLACK_APP_TOKEN env > config file.
+func ResolveSlackAppToken() string {
+	if v := strings.TrimSpace(os.Getenv("SLACK_APP_TOKEN")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.SlackAppToken)
+}
+
+// SaveSlackTokens persists the Slack bot and app tokens to config.json. Empty
+// values are stored as-is so a caller can clear a token by passing "".
+func SaveSlackTokens(botToken, appToken string) {
+	cfg, _ := Load()
+	cfg.SlackBotToken = strings.TrimSpace(botToken)
+	cfg.SlackAppToken = strings.TrimSpace(appToken)
 	_ = Save(cfg)
 }
 
