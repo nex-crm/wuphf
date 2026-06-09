@@ -31,6 +31,8 @@ import {
 import {
   getOfficeTasks,
   type Task,
+  type TaskVerification,
+  type TaskVerificationResult,
   taskToLifecycleState,
 } from "../../api/tasks";
 import {
@@ -51,6 +53,7 @@ import { ParentTaskBreadcrumb } from "./ParentTaskBreadcrumb";
 import { TaskActionToolbar } from "./TaskActionToolbar";
 import { TaskChannelChat } from "./TaskChannelChat";
 import { TaskContextRail } from "./TaskContextRail";
+import { VerificationBadge } from "./VerificationBadge";
 
 // ── Phase 4 constants ──────────────────────────────────────────────────
 
@@ -120,6 +123,10 @@ export interface TaskDocument {
   parentTaskId?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** Machine-checkable definition of done (U1). Absent on legacy tasks. */
+  verification?: TaskVerification;
+  /** Outcome of the most recent verification run. Absent until first run. */
+  verificationResult?: TaskVerificationResult;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -222,6 +229,42 @@ function normalizeSpec(
     acceptance:
       strField(rawSpec, "acceptance") ??
       normalizeAcceptanceCriteria(rawSpec.acceptanceCriteria),
+  };
+}
+
+/**
+ * Narrow an unknown wire value into a TaskVerification. The broker emits
+ * `{kind, spec?, required?}`; anything without a string `kind` is treated
+ * as absent so a malformed payload degrades to "Unverified" rather than
+ * crashing the document.
+ */
+function normalizeVerification(value: unknown): TaskVerification | undefined {
+  const rec = recordValue(value);
+  if (!rec || typeof rec.kind !== "string" || rec.kind === "") {
+    return undefined;
+  }
+  return {
+    kind: rec.kind,
+    spec: typeof rec.spec === "string" ? rec.spec : undefined,
+    required: typeof rec.required === "boolean" ? rec.required : undefined,
+  };
+}
+
+/**
+ * Narrow an unknown wire value into a TaskVerificationResult. `pass` is
+ * the load-bearing field; a payload without a boolean `pass` is treated
+ * as "no result yet".
+ */
+function normalizeVerificationResult(
+  value: unknown,
+): TaskVerificationResult | undefined {
+  const rec = recordValue(value);
+  if (!rec || typeof rec.pass !== "boolean") return undefined;
+  return {
+    pass: rec.pass,
+    kind: typeof rec.kind === "string" ? rec.kind : "",
+    detail: typeof rec.detail === "string" ? rec.detail : undefined,
+    checked_at: typeof rec.checked_at === "string" ? rec.checked_at : "",
   };
 }
 
@@ -360,6 +403,16 @@ export function normalizeTaskDocument(
     resolveAliasedField(r, taskRecord, "parentIssueId", "parent_issue_id") ??
     taskHint?.parent_issue_id;
 
+  // Verification fields (U1) live on the task record (snake_case wire) or
+  // at the packet top level; the office-tasks taskHint is the fallback.
+  const verification =
+    normalizeVerification(taskRecord?.verification ?? r.verification) ??
+    taskHint?.verification;
+  const verificationResult =
+    normalizeVerificationResult(
+      taskRecord?.verification_result ?? r.verification_result,
+    ) ?? taskHint?.verification_result;
+
   return {
     taskId,
     title,
@@ -378,6 +431,8 @@ export function normalizeTaskDocument(
     updatedAt:
       resolveAliasedField(r, taskRecord, "updatedAt", "updated_at") ??
       taskHint?.updated_at,
+    verification,
+    verificationResult,
   };
 }
 
@@ -1321,6 +1376,10 @@ export function TaskDocument({
         ) : null}
         <div className="issue-doc-header-row">
           <LifecycleStatePill state={doc.lifecycleState} />
+          <VerificationBadge
+            verification={doc.verification}
+            result={doc.verificationResult}
+          />
           <h2 className="issue-doc-title">
             {formatTaskTitleForDisplay(doc.title)}
           </h2>
@@ -1379,6 +1438,7 @@ export function TaskDocument({
           description={doc.description}
           isDrafting={isDrafting}
           showSubTasks={!doc.parentTaskId}
+          verification={doc.verification}
         />
       </div>
     </div>

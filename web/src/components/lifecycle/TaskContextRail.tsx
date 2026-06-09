@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react";
 
+import type { TaskVerification } from "../../api/tasks";
 import { ChannelParticipants } from "../messages/ChannelParticipants";
 import { SubTasksList } from "./SubTasksList";
 import { TaskActivityFeed } from "./TaskActivityFeed";
@@ -12,6 +13,8 @@ interface TaskContextRailProps {
   description: string;
   isDrafting: boolean;
   showSubTasks: boolean;
+  /** Machine-checkable definition of done (U1); renders atop the Spec. */
+  verification?: TaskVerification;
 }
 
 interface RailSectionProps {
@@ -66,7 +69,9 @@ export function TaskContextRail({
   description,
   isDrafting,
   showSubTasks,
+  verification,
 }: TaskContextRailProps) {
+  const hasCheck = Boolean(verification && verification.kind !== "none");
   return (
     <aside className="task-context-rail" aria-label="Task details">
       {/* ChannelParticipants carries its own "Participants" header + add
@@ -84,6 +89,22 @@ export function TaskContextRail({
         defaultOpen={isDrafting}
         testId="task-rail-spec"
       >
+        {hasCheck && verification ? (
+          <div
+            className="task-verification-dod"
+            data-testid="task-verification-dod"
+          >
+            <span className="task-verification-dod-label">
+              Definition of done
+              {verification.required ? " (required)" : ""}
+            </span>
+            <code className="task-verification-dod-spec">
+              {verification.spec
+                ? `${verification.kind}: ${verification.spec}`
+                : verification.kind}
+            </code>
+          </div>
+        ) : null}
         <TaskDescription description={description} isDrafting={isDrafting} />
       </RailSection>
       <RailSection

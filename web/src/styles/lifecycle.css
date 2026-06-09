@@ -2049,6 +2049,131 @@ html[data-theme="noir-gold"] {
   }
 }
 
+/* ─── VerificationBadge — machine-checkable definition of done (U1.2) ───
+   Sits next to the lifecycle pill in the issue header. Four states:
+   verified (success), failing (danger), pending (neutral), unverified
+   (muted outline — honest default, deliberately quiet). */
+.verification-badge-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.verification-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: none;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+button.verification-badge {
+  cursor: pointer;
+}
+
+.verification-badge-glyph {
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.verification-badge--verified {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.verification-badge--failing {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.verification-badge--pending {
+  background: var(--neutral-100);
+  color: var(--neutral-600);
+}
+
+.verification-badge--unverified {
+  border-color: var(--border-subtle);
+  color: var(--text-tertiary);
+}
+
+/* Expandable proof panel: check kind, spec, output tail, timestamp. */
+.verification-badge-detail {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 260px;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+}
+
+.verification-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.verification-detail-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.verification-detail-value {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.verification-detail-empty {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* Definition-of-done line atop the Spec rail section. */
+.task-verification-dod {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.task-verification-dod-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.task-verification-dod-spec {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .severity-summary {
   display: inline-flex;
   align-items: center;
@@ -3247,7 +3372,9 @@ html[data-theme="noir-gold"] {
   font-size: var(--text-sm);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 .issue-doc-sub-issues-add:hover {
   border-color: var(--accent);
@@ -3288,7 +3415,10 @@ html[data-theme="noir-gold"] {
   transition: background 120ms ease;
 }
 .issue-doc-sub-issue-link:hover {
-  background: var(--bg-row-active, color-mix(in srgb, var(--accent) 6%, transparent));
+  background: var(
+    --bg-row-active,
+    color-mix(in srgb, var(--accent) 6%, transparent)
+  );
 }
 .issue-doc-sub-issue-id {
   font-family: var(--font-mono);
@@ -3407,7 +3537,9 @@ html[data-theme="noir-gold"] {
   background: var(--bg-card);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 .issue-doc-owner-pill:hover {
   border-color: var(--accent);
@@ -3481,7 +3613,9 @@ html[data-theme="noir-gold"] {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill, 999px);
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 .issue-doc-parent-breadcrumb:hover {
   border-color: var(--accent);
@@ -3529,7 +3663,10 @@ html[data-theme="noir-gold"] {
   font-weight: 500;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
   border: 1px solid var(--border-subtle);
   background: var(--bg-card);
   color: var(--text);
@@ -3551,7 +3688,11 @@ html[data-theme="noir-gold"] {
   filter: brightness(1.05);
 }
 .issue-action-button--danger {
-  border-color: color-mix(in srgb, var(--text-danger, #b42318) 60%, var(--border-subtle));
+  border-color: color-mix(
+    in srgb,
+    var(--text-danger, #b42318) 60%,
+    var(--border-subtle)
+  );
   color: var(--text-danger, #b42318);
 }
 .issue-action-button--danger:hover:not(:disabled) {
@@ -3747,8 +3888,16 @@ html[data-theme="noir-gold"] {
 /* [SUGGESTION] comments stand out so CEO can scan them. Amber border +
  * subtle tint, "Suggestion" badge next to the author. */
 .issue-comment--suggestion {
-  border-color: color-mix(in srgb, var(--amber-600, #d97706) 60%, var(--border-subtle));
-  background: color-mix(in srgb, var(--amber-600, #d97706) 5%, var(--bg-primary));
+  border-color: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 60%,
+    var(--border-subtle)
+  );
+  background: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 5%,
+    var(--bg-primary)
+  );
 }
 .issue-comment-suggestion-badge {
   display: inline-flex;
@@ -4810,7 +4959,11 @@ html[data-theme="noir-gold"] {
 }
 
 .issue-activity-stream[data-state="running"] {
-  border-color: color-mix(in srgb, var(--green-500, #16a34a) 30%, var(--border));
+  border-color: color-mix(
+    in srgb,
+    var(--green-500, #16a34a) 30%,
+    var(--border)
+  );
 }
 
 .issue-activity-stream[data-state="blocked"] {
@@ -4818,7 +4971,11 @@ html[data-theme="noir-gold"] {
 }
 
 .issue-activity-stream[data-state="needs-input"] {
-  border-color: color-mix(in srgb, var(--orange-500, #f97316) 30%, var(--border));
+  border-color: color-mix(
+    in srgb,
+    var(--orange-500, #f97316) 30%,
+    var(--border)
+  );
 }
 
 .issue-activity-stream .issue-activity-dot {
@@ -4903,7 +5060,9 @@ html[data-theme="noir-gold"] {
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 .issue-doc-tab:hover {
@@ -5339,7 +5498,9 @@ html[data-theme="noir-gold"] {
   text-orientation: mixed;
   white-space: nowrap;
 }
-.issues-kanban-column.is-collapsed .issues-kanban-column-toggle .issues-kanban-column-count {
+.issues-kanban-column.is-collapsed
+  .issues-kanban-column-toggle
+  .issues-kanban-column-count {
   margin-left: 0;
 }
 

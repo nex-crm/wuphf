@@ -87,6 +87,34 @@ export interface TaskDraftSpec {
   drafted_at?: string;
 }
 
+/**
+ * Machine-checkable definition of done on a task (U1.1, broker
+ * task_verification.go). Mirrors the Go `TaskVerification` wire shape.
+ * `kind` is one of "command" | "artifact" | "url" | "none", kept as
+ * `string` (same convention as `lifecycle_state`) so an unknown kind
+ * from a newer broker doesn't fail parsing.
+ */
+export interface TaskVerification {
+  kind: string;
+  /** Kind-specific: shell command, artifact path/glob, or http(s) URL. */
+  spec?: string;
+  /** When true the broker blocks complete/approve until the check passes. */
+  required?: boolean;
+}
+
+/**
+ * Stamped outcome of the most recent verification run. Mirrors the Go
+ * `TaskVerificationResult` wire shape.
+ */
+export interface TaskVerificationResult {
+  pass: boolean;
+  kind: string;
+  /** Check output tail / failure detail — the proof. */
+  detail?: string;
+  /** RFC3339 timestamp of the run. */
+  checked_at: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -139,6 +167,10 @@ export interface Task {
   updated_at?: string;
   issue_draft_spec?: TaskDraftSpec;
   memory_workflow?: TaskMemoryWorkflow;
+  /** Machine-checkable definition of done (U1). Absent on legacy tasks. */
+  verification?: TaskVerification;
+  /** Outcome of the most recent verification run. Absent until first run. */
+  verification_result?: TaskVerificationResult;
 }
 
 /**
