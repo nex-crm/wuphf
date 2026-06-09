@@ -45,12 +45,57 @@ type promptBuilder struct {
 	// Issues already exist and ends up duplicating scope.
 	activeIssues func() []IssueSummary
 
+	// agentInstruction reads one of an agent's instruction files (SOUL /
+	// IDENTITY / OPERATIONS / TOOLS) from the wiki repo, or "" when absent or
+	// the wiki backend is off. officeUser reads the office-wide USER.md. Both
+	// are optional so promptBuilder stays usable from tests that don't wire a
+	// wiki backend; when nil the agent-files block is simply omitted.
+	agentInstruction func(slug, name string) string
+	officeUser       func() string
+
 	// Captured-at-construction config flags. They control major branches
 	// (markdown notebook section, no-Nex fallbacks) and are stable for the
 	// lifetime of a launcher session, so they're snapshot once rather than
 	// re-resolved on every Build call.
 	markdownMemory bool
 	nexDisabled    bool
+}
+
+// agentFilesPromptBlock assembles the per-agent instruction files (SOUL,
+// IDENTITY, OPERATIONS, TOOLS) plus the office-wide USER file into one prompt
+// section, in precedence order. Returns "" when no files are present (or no
+// reader is wired), so callers can append unconditionally. The content is
+// human/seed-authored markdown loaded verbatim; it is authoritative over the
+// inline persona defaults above it.
+func (p *promptBuilder) agentFilesPromptBlock(slug string) string {
+	if p.agentInstruction == nil {
+		return ""
+	}
+	var sections []string
+	for _, name := range agentInstructionFiles {
+		if content := strings.TrimSpace(p.agentInstruction(slug, name)); content != "" {
+			sections = append(sections, content)
+		}
+	}
+	var user string
+	if p.officeUser != nil {
+		user = strings.TrimSpace(p.officeUser())
+	}
+	if len(sections) == 0 && user == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("== YOUR FILES (authoritative) ==\n")
+	b.WriteString("These are your durable instruction files. They take precedence over the brief persona lines above; follow them.\n\n")
+	for _, s := range sections {
+		b.WriteString(s)
+		b.WriteString("\n\n")
+	}
+	if user != "" {
+		b.WriteString(user)
+		b.WriteString("\n\n")
+	}
+	return b.String()
 }
 
 // Build returns the system prompt for the agent identified by slug. The
@@ -115,6 +160,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(fmt.Sprintf("Your expertise: %s\n\n", strings.Join(agentCfg.Expertise, ", ")))
 		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
 		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
+		sb.WriteString(p.agentFilesPromptBlock(slug))
 		sb.WriteString("== DIRECT SESSION ==\n")
 		sb.WriteString("This is not the shared office. There are no teammates, no channels, and no collaboration mechanics in this mode.\n")
 		sb.WriteString("You are only talking to the human.\n")
@@ -158,6 +204,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(companyCtx)
 		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
 		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
+		sb.WriteString(p.agentFilesPromptBlock(slug))
 		sb.WriteString("== YOUR TEAM ==\n")
 		for _, member := range officeMembers {
 			if member.Slug == slug {
@@ -299,6 +346,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(fmt.Sprintf("Your expertise: %s\n\n", strings.Join(agentCfg.Expertise, ", ")))
 		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
 		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
+		sb.WriteString(p.agentFilesPromptBlock(slug))
 		sb.WriteString("== YOUR TEAM ==\n")
 		sb.WriteString(fmt.Sprintf("- @%s (%s): TEAM LEAD — has final say on decisions\n", lead, p.nameFor(lead)))
 		for _, member := range officeMembers {
