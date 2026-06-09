@@ -10,12 +10,16 @@ export const APP_PANEL_IDS = [
   "routines",
   "settings",
   "skills",
-  "tasks",
 ] as const;
 
 export type AppPanelId = (typeof APP_PANEL_IDS)[number];
 
-export const FIRST_CLASS_APP_IDS = ["wiki", "inbox", "issues"] as const;
+export const FIRST_CLASS_APP_IDS = [
+  "wiki",
+  "inbox",
+  "tasks",
+  "agents",
+] as const;
 export type FirstClassAppId = (typeof FIRST_CLASS_APP_IDS)[number];
 
 export const WIKI_SURFACE_APP_IDS = ["wiki", "notebooks", "reviews"] as const;
@@ -49,7 +53,8 @@ export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
   // First-class surfaces (live at dedicated routes, not `/apps/$id`).
   wiki: "Wiki",
   inbox: "Inbox",
-  issues: "Issues",
+  tasks: "Tasks",
+  agents: "Agents",
   // Routed app panels under `/apps/$appId`. The `activity` id keeps its
   // historical slug so existing /apps/activity URLs still resolve; the
   // human-facing label is "Dashboard" (renamed in #1002). The `calendar`
@@ -62,10 +67,9 @@ export const APP_LABELS: Record<AppPanelId | FirstClassAppId, string> = {
   policies: "Policies",
   receipts: "Receipts",
   requests: "Requests",
-  routines: "Routines",
+  routines: "Scheduled Tasks",
   settings: "Settings",
   skills: "Skills",
-  tasks: "Tasks",
 };
 
 /**
@@ -77,8 +81,8 @@ const SIDEBAR_TOOL_EMOJIS: Partial<
   Record<AppPanelId | FirstClassAppId, string>
 > = {
   activity: "🏠",
-  issues: "#",
   tasks: "✓",
+  agents: "🤖",
   wiki: "📖",
   console: ">",
   graph: "🕸",
@@ -115,10 +119,8 @@ export interface SidebarTool {
  */
 export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
   { id: "activity", kind: "app-panel" },
-  { id: "issues", kind: "first-class" },
-  // `tasks` retired — every unit of work is an Issue or Sub-Issue now.
-  // Legacy /tasks routes redirect to /issues; keep the registry entries
-  // for backwards-compatible URL parsing but no sidebar slot.
+  { id: "tasks", kind: "first-class" },
+  { id: "agents", kind: "first-class" },
   { id: "wiki", kind: "first-class" },
   { id: "console", kind: "app-panel" },
   { id: "graph", kind: "app-panel" },
@@ -138,10 +140,14 @@ export const SIDEBAR_TOOLS: readonly SidebarTool[] = [
 export const ROUTE_PATHS = {
   index: "/",
   channel: "/channels/$channelSlug",
-  dm: "/dm/$agentSlug",
   app: "/apps/$appId",
+  /** Task list surface (first-class; all human work-items render as Tasks). */
   tasks: "/tasks",
+  /** Task detail surface (renders TaskDocument). */
   taskDetail: "/tasks/$taskId",
+  /** New Task creation form. Listed before taskDetail so `new` wins. */
+  taskNew: "/tasks/new",
+  /** Back-compat redirect: `/apps/tasks/$taskId` → `/tasks/$taskId`. */
   appTaskDetail: "/apps/tasks/$taskId",
   legacyWorkbench: "/apps/workbench",
   legacyWorkbenchAgent: "/apps/workbench/$agentSlug",
@@ -157,40 +163,31 @@ export const ROUTE_PATHS = {
   article: "/articles/$articleId",
   inbox: "/inbox",
   taskDecision: "/task/$taskId",
-  /** Phase 3 — Issue list surface (all tasks rendered as Issues). */
-  issues: "/issues",
-  /** Phase 3 — Issue detail surface (renders IssueDocument). */
-  issueDetail: "/issues/$issueId",
-  /**
-   * Phase 4 stub — new issue creation. Returns 501 in Phase 3.
-   * Wired so `+ New issue` can navigate here without a 404.
-   */
-  issueNew: "/issues/new",
+  /** Back-compat redirect: `/issues` → `/tasks`. */
+  legacyIssues: "/issues",
+  /** Back-compat redirect: `/issues/$issueId` → `/tasks/$taskId`. */
+  legacyIssueDetail: "/issues/$issueId",
+  /** Back-compat redirect: `/issues/new` → `/tasks/new`. */
+  legacyIssueNew: "/issues/new",
   /** Routines surface index — alias for /apps/routines. */
   routines: "/routines",
   /** Composer for creating a routine from scratch. */
   routineNew: "/routines/new",
   /** Routine detail page (full-screen, not the legacy drawer). */
   routineDetail: "/routines/$routineSlug",
-  /**
-   * v3 MVP — per-agent subspace shell.
-   * Renders the uniform Chat | App | Notebooks | Calendar | Settings tabs.
-   */
-  agentSubspace: "/agents/$agentSlug",
-  agentSubspaceTab: "/agents/$agentSlug/$tab",
+  /** Agents tool — roster grid of every agent (CEO, Librarian, specialists). */
+  agents: "/agents",
+  /** Agent detail/config page — provider, role, persona, skills. */
+  agentDetail: "/agents/$agentSlug",
   /** Full-screen skill SKILL.md detail editor + viewer. */
   skillDetail: "/skills/$skillName",
 } as const;
 
 export type RouteKey = keyof typeof ROUTE_PATHS;
 
-/** Phase 3 — surface IDs for the Issues section (list + detail + new). */
-export const ISSUES_SURFACE_IDS = [
-  "issues",
-  "issueDetail",
-  "issueNew",
-] as const;
-export type IssuesSurfaceId = (typeof ISSUES_SURFACE_IDS)[number];
+/** Surface IDs for the Tasks section (list + detail + new). */
+export const TASKS_SURFACE_IDS = ["tasks", "taskDetail", "taskNew"] as const;
+export type TasksSurfaceId = (typeof TASKS_SURFACE_IDS)[number];
 
 /**
  * Route → URL params it carries. Used to document the URL contract for
@@ -215,7 +212,6 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     params: ["channelSlug"],
     search: [],
   },
-  { key: "dm", path: ROUTE_PATHS.dm, params: ["agentSlug"], search: [] },
   { key: "app", path: ROUTE_PATHS.app, params: ["appId"], search: [] },
   { key: "tasks", path: ROUTE_PATHS.tasks, params: [], search: [] },
   {
@@ -224,6 +220,7 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     params: ["taskId"],
     search: [],
   },
+  { key: "taskNew", path: ROUTE_PATHS.taskNew, params: [], search: [] },
   {
     key: "appTaskDetail",
     path: ROUTE_PATHS.appTaskDetail,
@@ -288,15 +285,25 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     params: ["taskId"],
     search: [],
   },
-  // Phase 3 — Issues surface
-  { key: "issues", path: ROUTE_PATHS.issues, params: [], search: [] },
+  // Back-compat redirects for the legacy /issues surface.
   {
-    key: "issueDetail",
-    path: ROUTE_PATHS.issueDetail,
+    key: "legacyIssues",
+    path: ROUTE_PATHS.legacyIssues,
+    params: [],
+    search: [],
+  },
+  {
+    key: "legacyIssueDetail",
+    path: ROUTE_PATHS.legacyIssueDetail,
     params: ["issueId"],
     search: [],
   },
-  { key: "issueNew", path: ROUTE_PATHS.issueNew, params: [], search: [] },
+  {
+    key: "legacyIssueNew",
+    path: ROUTE_PATHS.legacyIssueNew,
+    params: [],
+    search: [],
+  },
   { key: "routines", path: ROUTE_PATHS.routines, params: [], search: [] },
   { key: "routineNew", path: ROUTE_PATHS.routineNew, params: [], search: [] },
   {
@@ -305,16 +312,11 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     params: ["routineSlug"],
     search: [],
   },
+  { key: "agents", path: ROUTE_PATHS.agents, params: [], search: [] },
   {
-    key: "agentSubspace",
-    path: ROUTE_PATHS.agentSubspace,
+    key: "agentDetail",
+    path: ROUTE_PATHS.agentDetail,
     params: ["agentSlug"],
-    search: [],
-  },
-  {
-    key: "agentSubspaceTab",
-    path: ROUTE_PATHS.agentSubspaceTab,
-    params: ["agentSlug", "tab"],
     search: [],
   },
   {

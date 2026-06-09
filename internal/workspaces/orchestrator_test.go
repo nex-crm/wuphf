@@ -26,6 +26,18 @@ func startFakeServer(t *testing.T) (port int, shutdown func()) {
 	return ln.Addr().(*net.TCPAddr).Port, func() { _ = srv.Close() }
 }
 
+// freePort returns a TCP port that is not currently in use.
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("freePort: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	return port
+}
+
 // withOrchestratorHome isolates HOME (and WUPHF_RUNTIME_HOME) for orchestrator
 // tests. spacesDir uses real HOME because ~/.wuphf-spaces is shared
 // cross-workspace; overriding only WUPHF_RUNTIME_HOME would leak into the
@@ -666,13 +678,15 @@ func TestDoctorRecreatesSymlink(t *testing.T) {
 func TestResumeUpdatesStateToRunning(t *testing.T) {
 	withOrchestratorHome(t)
 
+	bp := freePort(t)
+	wp := bp + 1
 	now := time.Now().UTC()
 	if err := Write(&Registry{
 		Version:    Version,
 		CLICurrent: "main",
 		Workspaces: []*Workspace{
 			{Name: "paused-ws", RuntimeHome: t.TempDir(),
-				BrokerPort: 7910, WebPort: 7911,
+				BrokerPort: bp, WebPort: wp,
 				State: StatePaused, PausedAt: now,
 				CreatedAt: now, LastUsedAt: now},
 		},

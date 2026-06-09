@@ -2,8 +2,8 @@ package team
 
 import (
 	"fmt"
+	"log"
 	"strings"
-	"time"
 )
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -69,19 +69,27 @@ func rejectFalseLocalWorktreeBlock(task *teamTask, reason string) error {
 	return nil
 }
 
+// taskRequiresExclusiveOwnerTurn used to force a task to be the owner's only
+// active task of its kind — admission control queued a second such task behind
+// the first by injecting a synthetic dependency. That synthetic serialization
+// is gone: the product rule is that ONLY a real, declared dependency
+// (`depends_on`, gated by hasUnresolvedDepsLocked) holds a task back. Anything
+// non-dependent runs concurrently.
+//
+// Safety is now enforced at the right layers, not by withholding the task:
+//   - worktree tasks: the headless scheduler keys dispatch lanes by worktree
+//     path (see laneForTurn), so two worktree turns run in parallel only when
+//     their worktrees differ and serialize the moment they share a tree.
+//   - office / live_external: no shared worktree; concurrent turns are the same
+//     concurrency the system already runs across different agents (broker
+//     mediates shared state). If two external actions must be ordered, the
+//     caller declares a dependency.
+//
+// Always false now — kept (with its callers) as the single switch so the
+// admission lane can be re-armed for a specific mode later without re-threading
+// every call site.
 func taskRequiresExclusiveOwnerTurn(task *teamTask) bool {
-	if task == nil {
-		return false
-	}
-	if strings.TrimSpace(task.Owner) == "" {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(task.ExecutionMode)) {
-	case "local_worktree", "live_external":
-		return true
-	default:
-		return false
-	}
+	return false
 }
 
 func taskStatusConsumesExclusiveOwnerTurn(status string) bool {
@@ -91,17 +99,6 @@ func taskStatusConsumesExclusiveOwnerTurn(status string) bool {
 	default:
 		return false
 	}
-}
-
-func taskChannelCandidateOwnerAllowed(ch *teamChannel, owner string) bool {
-	if ch == nil {
-		return false
-	}
-	owner = strings.TrimSpace(owner)
-	if owner == "" {
-		return true
-	}
-	return stringSliceContainsFold(ch.Members, owner) || strings.EqualFold(strings.TrimSpace(ch.CreatedBy), owner)
 }
 
 func (b *Broker) syncTaskWorktreeLocked(task *teamTask) error {
@@ -247,53 +244,132 @@ func (b *Broker) queueTaskBehindActiveOwnerLaneLocked(task *teamTask) {
 	}
 }
 
-func (b *Broker) preferredTaskChannelLocked(requestedChannel, createdBy, owner, title, details string) string {
+// preferredTaskChannelLocked resolves the channel slug for a task.
+// If the caller supplied an explicit non-empty channel it is returned
+// as-is (after normalisation).  An empty / whitespace-only request
+// falls back to "general".
+//
+// The old behaviour of scanning recent execution channels and routing
+// business-objective tasks there has been removed.  Each new
+// business-objective task now gets its own dedicated channel (minted
+// by createPerTaskChannelLocked in the individual create paths); this
+// function is now purely a slug normaliser.
+func (b *Broker) preferredTaskChannelLocked(requestedChannel, _, _, _, _ string) string {
 	channel := normalizeChannelSlug(requestedChannel)
 	if channel == "" {
-		channel = "general"
+		return "general"
 	}
-	if channel != "general" || b == nil {
-		return channel
+	return channel
+}
+
+// shouldMintPerTaskChannel reports whether a newly created task
+// warrants a dedicated task-<id> channel.
+//
+// The product vision is "every task spins up its own channel", so the
+// default is to mint for any real, top-level task. We only withhold a
+// channel for the three internal-plumbing cases that genuinely belong in
+// #general (or on a parent):
+//  1. The resolved channel is "general" — an explicit non-general channel
+//     request is already a real channel, so leave it alone.
+//  2. It is not a system task (System==true is the Backup & Migration
+//     entry, which always owns "general").
+//  3. It is not an incident self-heal (PipelineID=="incident") — those are
+//     internal tooling, not user work.
+//  4. It is not a sub-issue (ParentIssueID!="") — sub-issues share their
+//     parent task's channel.
+//
+// Note: this used to additionally require taskLooksLikeLiveBusinessObjective
+// (a keyword heuristic). That under-delivered the vision — a real task whose
+// title lacked execution keywords ("Draft Q3 outbound sequence") stayed in
+// #general — so the heuristic was dropped (2026-06-03). The function is still
+// used elsewhere (notifications / pipeline), just not as a channel gate.
+func shouldMintPerTaskChannel(channel string, task *teamTask) bool {
+	if normalizeChannelSlug(channel) != "general" {
+		return false
 	}
-	createdBy = strings.TrimSpace(createdBy)
-	if createdBy == "" {
-		return channel
+	if task == nil {
+		return false
 	}
-	probe := teamTask{
-		Channel: channel,
-		Owner:   strings.TrimSpace(owner),
-		Title:   strings.TrimSpace(title),
-		Details: strings.TrimSpace(details),
+	if task.System {
+		return false
 	}
-	if !taskLooksLikeLiveBusinessObjective(&probe) {
-		return channel
+	if strings.TrimSpace(task.PipelineID) == "incident" {
+		return false
 	}
-	now := time.Now().UTC()
-	var best *teamChannel
-	var bestCreated time.Time
-	for i := range b.channels {
-		ch := &b.channels[i]
-		slug := normalizeChannelSlug(ch.Slug)
-		if slug == "" || slug == "general" || ch.isDM() {
-			continue
+	if strings.TrimSpace(task.ParentIssueID) != "" {
+		return false
+	}
+	return true
+}
+
+// createPerTaskChannelLocked mints a dedicated channel for a task.
+// Slug: "task-<taskID>".  Name: task title (or slug if title is empty).
+// Members: owner (if a registered member) + actor (the creator).
+// TaskID is set on the returned channel so the UI can correlate the
+// two.  Caller MUST hold b.mu.  Returns nil if channel creation fails
+// (caller should keep the task in "general" in that case).
+func (b *Broker) createPerTaskChannelLocked(taskID, title, owner, actor string) *teamChannel {
+	slug := "task-" + taskID
+	name := strings.TrimSpace(title)
+	if name == "" {
+		name = slug
+	}
+	// Build the member list from known-registered actors only —
+	// createChannelLocked validates every entry against findMemberLocked
+	// and returns an error for unknown slugs.
+	members := make([]string, 0, 2)
+	if o := normalizeActorSlug(owner); o != "" && o != "ceo" && b.findMemberLocked(o) != nil {
+		members = append(members, o)
+	}
+	// Actor may be "human", "you", "system", "ceo", or a specialist
+	// slug.  Trusted senders are not in the members list so skip them;
+	// createChannelLocked will return an error for unknown slugs.
+	actorNorm := normalizeActorSlug(actor)
+	isAlreadyMember := false
+	for _, m := range members {
+		if m == actorNorm {
+			isAlreadyMember = true
+			break
 		}
-		if !strings.EqualFold(strings.TrimSpace(ch.CreatedBy), createdBy) {
-			continue
+	}
+	if !isAlreadyMember && actorNorm != "" && actorNorm != "ceo" &&
+		!isHumanMessageSender(actorNorm) && actorNorm != "system" &&
+		actorNorm != "nex" && b.findMemberLocked(actorNorm) != nil {
+		members = append(members, actorNorm)
+	}
+	// Seed the Librarian as a default member of every task channel (owner + CEO
+	// + Librarian — CEO has all-channel access via the reserved-slug bypass, so
+	// it isn't listed explicitly). Added only when the workspace actually has a
+	// Librarian member: new workspaces do; existing ones gain it in the Phase 6
+	// migration, so this no-ops there. Never duplicated.
+	if b.findMemberLocked(LibrarianSlug) != nil {
+		alreadyMember := false
+		for _, m := range members {
+			if m == LibrarianSlug {
+				alreadyMember = true
+				break
+			}
 		}
-		if !taskChannelCandidateOwnerAllowed(ch, owner) {
-			continue
-		}
-		createdAt := parseBrokerTimestamp(ch.CreatedAt)
-		if !createdAt.IsZero() && now.Sub(createdAt) > 20*time.Minute {
-			continue
-		}
-		if best == nil || (!createdAt.IsZero() && createdAt.After(bestCreated)) {
-			best = ch
-			bestCreated = createdAt
+		if !alreadyMember {
+			members = append(members, LibrarianSlug)
 		}
 	}
-	if best == nil {
-		return channel
+	ch, cerr := b.createChannelLocked(channelCreateInput{
+		Slug:      slug,
+		Name:      name,
+		Members:   members,
+		CreatedBy: actorNorm,
+	})
+	if cerr != nil {
+		// The caller falls back to #general when this returns nil, so a silent
+		// failure would route the task into the shared channel and break the
+		// channel-per-task invariant with no operator signal. createChannelLocked
+		// rolls back its own ghost append on a persist failure (see
+		// broker_office_channels.go); we log so the fallback is visible.
+		log.Printf("broker: createPerTaskChannel %q for task %s failed (falling back to #general): %s", slug, taskID, cerr.Msg)
+		return nil
 	}
-	return normalizeChannelSlug(best.Slug)
+	// Link channel back to its owning task so the UI can correlate.
+	ch.TaskID = taskID
+	return ch
 }

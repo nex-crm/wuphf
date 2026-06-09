@@ -7,7 +7,7 @@ import {
   getOfficeMembers,
   type OfficeMember,
 } from "../../../api/client";
-import { router } from "../../../lib/router";
+import { router, routineNewRoute } from "../../../lib/router";
 import { RoutineChannelSelect } from "./RoutineChannelSelect";
 import {
   compileSchedule,
@@ -23,10 +23,16 @@ import {
  */
 export function RoutineComposer() {
   const queryClient = useQueryClient();
-  const [label, setLabel] = useState("");
+  // Optional prefill carried from the new-task composer's "Routine" action.
+  // useState initialisers run once, so the composer stays fully editable after
+  // seeding (a later navigation with new params remounts via the route key).
+  const prefill = routineNewRoute.useSearch();
+  const [label, setLabel] = useState(() => prefill.label ?? "");
   const [slug, setSlug] = useState("");
   const [schedule, setSchedule] = useState<ScheduleValue>(DEFAULT_SCHEDULE);
-  const [instructions, setInstructions] = useState("");
+  const [instructions, setInstructions] = useState(
+    () => prefill.instructions ?? "",
+  );
   const [ownerSlug, setOwnerSlug] = useState<string>("");
   const [channel, setChannel] = useState<string>("");
   const [enabled, setEnabled] = useState(true);
@@ -112,7 +118,7 @@ export function RoutineComposer() {
       }}
     >
       <button type="button" onClick={goBack} style={backLinkStyle}>
-        ← All routines
+        ← All scheduled tasks
       </button>
 
       <header
@@ -124,8 +130,8 @@ export function RoutineComposer() {
           borderBottom: "1px solid var(--border)",
         }}
       >
-        <span style={eyebrowStyle}>New routine</span>
-        <h1 style={titleStyle}>Create a scheduled routine</h1>
+        <span style={eyebrowStyle}>New scheduled task</span>
+        <h1 style={titleStyle}>Create a scheduled task</h1>
         <p
           style={{
             margin: 0,
@@ -133,7 +139,7 @@ export function RoutineComposer() {
             fontSize: "var(--text-sm)",
           }}
         >
-          Routines fire on a schedule and run as a specific agent. Webhook and
+          Scheduled tasks fire on a schedule and run as a specific agent. Webhook and
           context-change triggers are coming soon.
         </p>
       </header>
@@ -146,7 +152,7 @@ export function RoutineComposer() {
           gap: "var(--space-5)",
         }}
       >
-        <FormField label="Title" hint="What this routine should do.">
+        <FormField label="Title" hint="What this scheduled task should do.">
           <input
             type="text"
             className="input"
@@ -179,7 +185,7 @@ export function RoutineComposer() {
 
         <FormField
           label="Owner"
-          hint="The agent that runs this routine when it fires."
+          hint="The agent that runs this scheduled task when it fires."
         >
           <OwnerSelect
             value={ownerSlug}
@@ -195,14 +201,14 @@ export function RoutineComposer() {
                 marginTop: 4,
               }}
             >
-              No agents available. Add a teammate before creating a routine.
+              No agents available. Add a teammate before creating a scheduled task.
             </span>
           )}
         </FormField>
 
         <FormField
           label="Run in"
-          hint="Where the routine posts when it fires. Defaults to the owner's DM."
+          hint="Where the scheduled task posts when it fires. Defaults to the owner's DM."
         >
           <RoutineChannelSelect
             value={channel}
@@ -212,7 +218,10 @@ export function RoutineComposer() {
           />
         </FormField>
 
-        <FormField label="Schedule" hint="When this routine should fire.">
+        <FormField
+          label="Schedule"
+          hint="When this scheduled task should fire."
+        >
           <ScheduleBuilder value={schedule} onChange={setSchedule} />
         </FormField>
 
@@ -233,7 +242,7 @@ export function RoutineComposer() {
 
         <FormField
           label="State"
-          hint="Routine can be started paused and enabled later."
+          hint="A scheduled task can be started paused and enabled later."
         >
           <label
             style={{
@@ -298,7 +307,7 @@ export function RoutineComposer() {
             }}
             disabled={mutation.isPending || !label.trim() || !ownerSlug}
           >
-            {mutation.isPending ? "Creating…" : "Create routine"}
+            {mutation.isPending ? "Creating…" : "Create scheduled task"}
           </button>
         </div>
       </form>

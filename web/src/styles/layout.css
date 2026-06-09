@@ -404,6 +404,22 @@ html[data-theme="nex"]
   font-size: 22px;
   letter-spacing: -0.01em;
   cursor: pointer;
+  /* Renders as the home button — reset native button chrome, keep the
+     logo type styling above. */
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  text-align: left;
+}
+.sidebar-logo:hover {
+  opacity: 0.85;
+}
+.sidebar-logo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 .sidebar-btn {
   width: 28px;
@@ -3622,4 +3638,480 @@ body.resizing-pane {
 body.resizing-pane * {
   cursor: col-resize;
   user-select: none;
+}
+
+/* ── Task nav (primary sidebar surface, task-scoped model) ───────────
+   Replaces the old Agents + Channels nav sections. Lists the operator's
+   tasks grouped by the seven board stages; each item opens the task
+   detail (which carries its channel). */
+.task-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px var(--sidebar-pad-x) 12px;
+}
+.task-nav-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 6px;
+}
+.task-nav-board-link {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.task-nav-board-link:hover {
+  color: var(--text);
+}
+.task-nav-new-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.task-nav-new-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.task-nav-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 8px 10px;
+  line-height: 1.4;
+}
+.task-nav-group {
+  display: flex;
+  flex-direction: column;
+}
+.task-nav-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 5px 6px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.task-nav-group-header:hover {
+  background: var(--bg-warm);
+}
+.task-nav-caret {
+  font-size: 9px;
+  width: 10px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+.task-nav-group-label {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.task-nav-group-count {
+  min-width: 16px;
+  padding: 0 6px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-warm);
+  border-radius: var(--radius-full);
+}
+.task-nav-items {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+}
+.task-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 5px 8px 5px 22px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.task-nav-item:hover {
+  background: var(--bg-warm);
+  color: var(--text);
+}
+.task-nav-item.active {
+  background: var(--accent-bg);
+  color: var(--text);
+}
+.task-nav-item-title {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Agents tool (roster grid + per-agent detail) ───────────────────
+   The dedicated Agents surface. Agents are first-class but not chat
+   surfaces; this is where the roster lives and agents are configured. */
+.agents-tool {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+.agents-tool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.agents-tool-heading {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+.agents-tool-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 24px;
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+.agents-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+.agents-tool-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+.agents-tool-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.agents-tool-card-avatar {
+  position: relative;
+  display: inline-flex;
+}
+.agents-tool-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.agents-tool-card-role {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+}
+.agents-tool-card-status {
+  margin-top: 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.agents-tool-card-status.is-active {
+  color: var(--green);
+}
+.agent-detail-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* The agent detail is a full-screen route, but AgentProfilePanel's base
+   `.agent-panel` class is a fixed 400px right-edge slide-in drawer (its other
+   use). Inside the detail route, neutralize the fixed positioning so the panel
+   fills the page instead of floating as a narrow right-hand panel. */
+.agent-detail-panel .agent-profile-panel {
+  position: static;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 1;
+  border-left: none;
+  box-shadow: none;
+  z-index: auto;
+  animation: none;
+}
+
+/* ── New-task home composer ─────────────────────────────────────────────── */
+.task-composer-screen {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 32px 24px;
+}
+.task-composer {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.task-composer-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text, #111);
+  text-align: center;
+}
+.task-composer-subtitle {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-align: center;
+}
+.task-composer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal, 0 8px 28px rgba(0, 0, 0, 0.12));
+}
+.task-composer-input {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.55;
+  padding: 12px 14px;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--bg-input, var(--bg-primary, #fff));
+  color: var(--text, var(--text-primary));
+}
+.task-composer-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.task-composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.task-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 12px;
+  background: var(--bg-input, var(--bg-primary, #fff));
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: var(--radius-full, 999px);
+  font-size: 12px;
+}
+.task-chip[data-disabled="true"] {
+  opacity: 0.55;
+}
+.task-chip-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.task-chip-select {
+  font: inherit;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: var(--text, var(--text-primary));
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  max-width: 180px;
+}
+.task-chip-select:focus {
+  outline: none;
+}
+.task-chip-select:disabled {
+  cursor: not-allowed;
+}
+.task-composer-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.task-composer-hint strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.task-composer-planfirst {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary, var(--text-secondary));
+  cursor: pointer;
+}
+.task-composer-planfirst input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+.task-composer-planfirst strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.task-composer-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--red, #d33);
+}
+.task-composer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.task-composer-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text, var(--text-primary));
+  cursor: pointer;
+  transition:
+    filter 120ms ease,
+    border-color 120ms ease;
+}
+.task-composer-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.task-composer-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.task-composer-btn-primary {
+  background: var(--accent, #5b8def);
+  color: var(--bg-primary, #fff);
+  border-color: transparent;
+}
+.task-composer-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: transparent;
+}
+
+/* ── Task channel chat (task detail → Channel tab) ──────────────────────
+   The task's own channel rendered as live chat: the agent conversation
+   (owner / CEO / Librarian) plus a composer for the human to post into it.
+   Replaces the old packet-comments timeline so the per-task chat is
+   actually reachable from the task. */
+.task-channel-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--space-3, 12px);
+}
+.task-channel-chat-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  padding: var(--space-2, 8px) 0;
+}
+.task-channel-chat-empty {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding: var(--space-4, 16px);
+  text-align: center;
+}
+.task-channel-chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3, 12px);
+}
+.task-channel-chat-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 2.75rem;
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  line-height: 1.5;
+}
+.task-channel-chat-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.task-channel-chat-error {
+  color: var(--danger, #c0392b);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+.task-channel-chat-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.task-channel-chat-send {
+  padding: var(--space-2, 8px) var(--space-4, 16px);
+  background: var(--accent);
+  color: var(--bg-card);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.task-channel-chat-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.task-channel-chat-send:not(:disabled):hover {
+  filter: brightness(1.08);
 }

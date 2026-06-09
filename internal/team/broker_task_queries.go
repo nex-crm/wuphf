@@ -14,6 +14,9 @@ func (b *Broker) ChannelTasks(channel string) []teamTask {
 	}
 	out := make([]teamTask, 0, len(b.tasks))
 	for _, task := range b.tasks {
+		if task.System {
+			continue
+		}
 		if normalizeChannelSlug(task.Channel) == channel {
 			out = append(out, task)
 		}
@@ -21,13 +24,20 @@ func (b *Broker) ChannelTasks(channel string) []teamTask {
 	return out
 }
 
-// AllTasks returns a copy of all tasks across all channels. Use this when the
-// caller needs to search across channels rather than in a single known channel.
+// AllTasks returns a copy of all non-system tasks across all channels. Use
+// this when the caller needs to search across channels rather than in a single
+// known channel. System tasks (task.System == true) are excluded because they
+// are permanent infrastructure entries — not business work — and callers that
+// check len(AllTasks()) would otherwise need to account for them.
 func (b *Broker) AllTasks() []teamTask {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]teamTask, len(b.tasks))
-	copy(out, b.tasks)
+	out := make([]teamTask, 0, len(b.tasks))
+	for _, t := range b.tasks {
+		if !t.System {
+			out = append(out, t)
+		}
+	}
 	return out
 }
 

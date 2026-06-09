@@ -253,9 +253,9 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		oneOnOne:           oneOnOne,
 		provider:           config.ResolveLLMProvider(""),
 		headless: headlessWorkerPool{
-			workers: make(map[string]bool),
-			active:  make(map[string]*headlessCodexActiveTurn),
-			queues:  make(map[string][]headlessCodexTurn),
+			workers: make(map[headlessLane]bool),
+			active:  make(map[headlessLane]*headlessCodexActiveTurn),
+			queues:  make(map[headlessLane][]headlessCodexTurn),
 		},
 		notifyLastDelivered: make(map[notifyDedupKey]time.Time),
 	}, nil

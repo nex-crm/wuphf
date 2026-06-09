@@ -72,7 +72,7 @@ type channelMessage struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-type agentIssueRecord struct {
+type incidentRecord struct {
 	ID                string `json:"id"`
 	Agent             string `json:"agent"`
 	Channel           string `json:"channel"`
@@ -214,13 +214,35 @@ type teamTask struct {
 	// accessor methods. The wire format is preserved verbatim by the custom
 	// MarshalJSON / UnmarshalJSON below, so persisted broker state and HTTP
 	// responses look identical to pre-Lane-A clients.
-	status           string
-	CreatedBy        string `json:"created_by"`
-	ThreadID         string `json:"thread_id,omitempty"`
-	TaskType         string `json:"task_type,omitempty"`
-	PipelineID       string `json:"pipeline_id,omitempty"`
-	pipelineStage    string
-	ExecutionMode    string `json:"execution_mode,omitempty"`
+	status        string
+	CreatedBy     string `json:"created_by"`
+	ThreadID      string `json:"thread_id,omitempty"`
+	TaskType      string `json:"task_type,omitempty"`
+	PipelineID    string `json:"pipeline_id,omitempty"`
+	pipelineStage string
+	ExecutionMode string `json:"execution_mode,omitempty"`
+	// Effort is the per-task reasoning-effort override chosen in the
+	// new-task composer. It is model-specific: the composer only offers the
+	// levels the selected runtime supports, so the stored value is already
+	// validated against that runtime. It is applied at dispatch time —
+	// claude-code passes it as `--effort <level>`, codex as
+	// `-c model_reasoning_effort=<level>`. Empty means "use the runtime's
+	// default effort". The wire key "effort" is stable per the migration plan.
+	Effort string `json:"effort,omitempty"`
+	// Provider and Model are the per-task LLM runtime override chosen in the
+	// new-task composer. The model/provider is a property of the TASK, not the
+	// agent: dispatch prefers these over the owner agent's binding, which is
+	// now only a soft default. Provider is a runtime kind ("claude-code",
+	// "codex", …); Model is the runtime-specific model id. Empty means "fall
+	// back to the owner's binding, then the global default". Wire keys
+	// "provider"/"model" are additive + stable per the migration plan.
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	// PlanFirst records whether the task ran (or will run) the "Plan mode"
+	// planning phase before execution (Phase 5). Set from the composer's
+	// "Plan first" toggle (default ON). Used to route a parked Plan-first task
+	// into Planning on activation. Wire key "plan_first" is additive + stable.
+	PlanFirst        bool `json:"plan_first,omitempty"`
 	reviewState      string
 	SourceSignalID   string   `json:"source_signal_id,omitempty"`
 	SourceDecisionID string   `json:"source_decision_id,omitempty"`
@@ -287,6 +309,11 @@ type teamTask struct {
 	CreatedAt      string          `json:"created_at"`
 	UpdatedAt      string          `json:"updated_at"`
 	CompletedAt    string          `json:"completed_at,omitempty"`
+	// System marks a task as a permanent system-owned task that may not
+	// be deleted or removed. The "Backup & Migration" task (ID: task-general)
+	// is the only current system task; it owns the #general channel so all
+	// 141 fallback call sites that post to "general" keep working unchanged.
+	System bool `json:"system,omitempty"`
 }
 
 // IssueDraftSpec holds the four spec sections the CEO draft writer
@@ -353,6 +380,10 @@ type teamTaskWire struct {
 	PipelineID           string          `json:"pipeline_id,omitempty"`
 	PipelineStage        string          `json:"pipeline_stage,omitempty"`
 	ExecutionMode        string          `json:"execution_mode,omitempty"`
+	Effort               string          `json:"effort,omitempty"`
+	Provider             string          `json:"provider,omitempty"`
+	Model                string          `json:"model,omitempty"`
+	PlanFirst            bool            `json:"plan_first,omitempty"`
 	ReviewState          string          `json:"review_state,omitempty"`
 	SourceSignalID       string          `json:"source_signal_id,omitempty"`
 	SourceDecisionID     string          `json:"source_decision_id,omitempty"`
@@ -377,6 +408,7 @@ type teamTaskWire struct {
 	CreatedAt            string          `json:"created_at"`
 	UpdatedAt            string          `json:"updated_at"`
 	CompletedAt          string          `json:"completed_at,omitempty"`
+	System               bool            `json:"system,omitempty"`
 }
 
 // MarshalJSON preserves the pre-Lane-A wire format (status/review_state/
@@ -396,6 +428,10 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		PipelineID:           t.PipelineID,
 		PipelineStage:        t.pipelineStage,
 		ExecutionMode:        t.ExecutionMode,
+		Effort:               t.Effort,
+		Provider:             t.Provider,
+		Model:                t.Model,
+		PlanFirst:            t.PlanFirst,
 		ReviewState:          t.reviewState,
 		SourceSignalID:       t.SourceSignalID,
 		SourceDecisionID:     t.SourceDecisionID,
@@ -420,6 +456,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
 		CompletedAt:          t.CompletedAt,
+		System:               t.System,
 	})
 }
 
@@ -441,6 +478,10 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.PipelineID = w.PipelineID
 	t.pipelineStage = w.PipelineStage
 	t.ExecutionMode = w.ExecutionMode
+	t.Effort = w.Effort
+	t.Provider = w.Provider
+	t.Model = w.Model
+	t.PlanFirst = w.PlanFirst
 	t.reviewState = w.ReviewState
 	t.SourceSignalID = w.SourceSignalID
 	t.SourceDecisionID = w.SourceDecisionID
@@ -465,6 +506,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt
 	t.CompletedAt = w.CompletedAt
+	t.System = w.System
 	return nil
 }
 
@@ -488,6 +530,11 @@ type teamChannel struct {
 	CreatedBy   string          `json:"created_by,omitempty"`
 	CreatedAt   string          `json:"created_at,omitempty"`
 	UpdatedAt   string          `json:"updated_at,omitempty"`
+	// TaskID links a per-task dedicated channel back to its owning task.
+	// Empty for shared channels (e.g. #general) and DM channels.
+	// Set to the owning task's ID when createPerTaskChannelLocked creates
+	// a task-<id> channel during task creation.
+	TaskID string `json:"task_id,omitempty"`
 }
 
 type officeMember struct {
@@ -664,9 +711,12 @@ type teamSkill struct {
 }
 
 type brokerState struct {
-	ChannelStore       json.RawMessage                    `json:"channel_store,omitempty"`
-	Messages           []channelMessage                   `json:"messages"`
-	AgentIssues        []agentIssueRecord                 `json:"agent_issues,omitempty"`
+	ChannelStore json.RawMessage  `json:"channel_store,omitempty"`
+	Messages     []channelMessage `json:"messages"`
+	// Incidents keeps the legacy wire key "agent_issues" so broker-state.json
+	// files written before the Issue→Incident rename still load unchanged. The
+	// in-memory/Go name is Incident; only the persisted JSON tag is frozen.
+	Incidents          []incidentRecord                   `json:"agent_issues,omitempty"`
 	Members            []officeMember                     `json:"members,omitempty"`
 	Channels           []teamChannel                      `json:"channels,omitempty"`
 	SessionMode        string                             `json:"session_mode,omitempty"`

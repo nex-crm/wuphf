@@ -976,7 +976,10 @@ func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
 		t.Fatalf("expected 200 answering request, got %d: %s", resp.StatusCode, raw)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, base+"/tasks?channel=general", nil)
+	// "Ship the launch packet after approval" is a business-objective task
+	// (title contains "launch") so it gets its own per-task channel — query
+	// using all_channels=true so the check is channel-location-agnostic.
+	req, _ = http.NewRequest(http.MethodGet, base+"/tasks?all_channels=true&viewer=ceo", nil)
 	req.Header.Set("Authorization", "Bearer "+b.Token())
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
@@ -1167,11 +1170,21 @@ func TestRequestAnswerUnblocksReferencedTask(t *testing.T) {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if got := b.tasks[0]; got.Blocked() {
-		t.Fatalf("expected task to unblock after request answer, got %+v", got)
+	var got *teamTask
+	for i := range b.tasks {
+		if b.tasks[i].ID == "task-3" {
+			got = &b.tasks[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("expected task-3 to exist after answer")
+	}
+	if got.Blocked() {
+		t.Fatalf("expected task to unblock after request answer, got %+v", *got)
 	} else {
 		if got.Status() != "in_progress" {
-			t.Fatalf("expected task status to move to in_progress, got %+v", got)
+			t.Fatalf("expected task status to move to in_progress, got %+v", *got)
 		}
 		if !strings.Contains(got.Details, "Meridian Growth Studio") {
 			t.Fatalf("expected task details to include human answer, got %q", got.Details)

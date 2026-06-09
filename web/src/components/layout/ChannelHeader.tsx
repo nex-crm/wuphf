@@ -18,8 +18,6 @@ function headerTitleAndDesc(
         desc: ch?.description || "",
       };
     }
-    case "dm":
-      return { title: `@${route.agentSlug}`, desc: "" };
     case "app":
       return { title: appTitle(route.appId), desc: "" };
     case "task-board":
@@ -41,21 +39,20 @@ function headerTitleAndDesc(
       return { title: "Decision Inbox", desc: "" };
     case "task-decision":
       return { title: `Task ${route.taskId}`, desc: "" };
-    // Phase 3 — Issues surface
-    case "issues-list":
-      return { title: "Issues", desc: "" };
-    case "issue-detail":
-      return { title: `Issue ${route.issueId}`, desc: "" };
-    case "issue-new":
-      return { title: "New issue", desc: "" };
-    case "agent-subspace":
+    case "task-new":
+      return { title: "New task", desc: "" };
+    case "agents":
+      return { title: "Agents", desc: "" };
+    case "agent-detail":
       return { title: `@${route.agentSlug}`, desc: "" };
     case "skill-detail":
       return { title: `Skill: ${route.skillName}`, desc: "" };
     case "routine-detail":
       return { title: route.routineSlug, desc: "Routine" };
     case "routine-new":
-      return { title: "New routine", desc: "" };
+      return { title: "New scheduled task", desc: "" };
+    case "home":
+      return { title: "", desc: "" };
     case "unknown":
       return { title: "", desc: "" };
     default: {

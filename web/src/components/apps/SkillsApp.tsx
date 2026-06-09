@@ -804,10 +804,7 @@ function SkillActions({
 
   const handleViewTask = useCallback(() => {
     if (!activeTaskId) return;
-    void router.navigate({
-      to: "/apps/$appId",
-      params: { appId: "tasks" },
-    });
+    void router.navigate({ to: "/tasks" });
   }, [activeTaskId]);
 
   const handleResetInvoke = useCallback(() => {

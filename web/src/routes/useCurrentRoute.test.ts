@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agentDetailRoute,
+  agentsRoute,
   appRoute,
   appTaskDetailRoute,
   channelRoute,
-  dmRoute,
   inboxRoute,
+  indexRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
@@ -49,19 +51,13 @@ describe("deriveCurrentRoute (URL → discriminated union)", () => {
       {},
       { kind: "channel", channelSlug: "general" },
     ],
+    ["agents roster grid", agentsRoute.id, {}, {}, { kind: "agents" }],
     [
-      "dm pairs lower__higher (human < pm)",
-      dmRoute.id,
+      "agent detail",
+      agentDetailRoute.id,
       { agentSlug: "pm" },
       {},
-      { kind: "dm", agentSlug: "pm", channelSlug: "human__pm" },
-    ],
-    [
-      "dm pairs lower__higher (ceo < human)",
-      dmRoute.id,
-      { agentSlug: "ceo" },
-      {},
-      { kind: "dm", agentSlug: "ceo", channelSlug: "ceo__human" },
+      { kind: "agent-detail", agentSlug: "pm" },
     ],
     [
       "app",
@@ -70,6 +66,7 @@ describe("deriveCurrentRoute (URL → discriminated union)", () => {
       {},
       { kind: "app", appId: "tasks" },
     ],
+    ["home composer", indexRoute.id, {}, {}, { kind: "home" }],
     ["task board", tasksRoute.id, {}, {}, { kind: "task-board" }],
     [
       "task detail",

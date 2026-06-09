@@ -23,15 +23,31 @@ function memberDisplayName(member: OfficeMember): string {
   return formatAgentName(member.slug);
 }
 
+// Live activity strings can leak raw runtime internals — MCP tool ids
+// ("running mcp__wuphf_wiki_lookup"), snake_case tool names
+// ("running wuphf_office_members"), or whole tool-call JSON blobs
+// ([{"tool name":"wuphf_…"}]). A person scanning the participant rail should
+// never see code. Collapse anything that looks like a raw identifier/payload
+// to a clean "Working…"; pass through genuine prose ("waiting for work").
+function humanizeActivity(raw: string): string {
+  const s = raw.trim();
+  if (!s) return s;
+  const looksRaw =
+    s.startsWith("[") ||
+    s.startsWith("{") ||
+    s.includes('"tool') ||
+    s.includes("mcp__") ||
+    // optional "running"/"using" verb + a snake_case identifier and nothing else
+    /^(?:running|using)?\s*[a-z0-9]+(?:_[a-z0-9]+)+$/i.test(s);
+  return looksRaw ? "Working…" : s;
+}
+
 function memberActivity(member: OfficeMember): string {
   if (member.disabled) return "Disabled in this channel";
-  return (
-    member.liveActivity?.trim() ||
-    member.task?.trim() ||
-    member.detail?.trim() ||
-    member.role?.trim() ||
-    "Idle"
-  );
+  const live =
+    member.liveActivity?.trim() || member.task?.trim() || member.detail?.trim();
+  if (live) return humanizeActivity(live);
+  return member.role?.trim() || "Idle";
 }
 
 function sortParticipants(a: OfficeMember, b: OfficeMember): number {

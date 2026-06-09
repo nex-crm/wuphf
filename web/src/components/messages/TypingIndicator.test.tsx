@@ -32,11 +32,10 @@ describe("<TypingIndicator>", () => {
     });
   });
 
-  it("shows the active DM agent as typing", () => {
+  it("scopes typing to the agents present in the channel", () => {
     mockUseCurrentRoute.mockReturnValue({
-      kind: "dm",
-      agentSlug: "ceo",
-      channelSlug: "ceo__human",
+      kind: "channel",
+      channelSlug: "general",
     });
     mockUseOfficeMembers.mockReturnValue({
       data: [
@@ -86,9 +85,8 @@ describe("<TypingIndicator>", () => {
 
   it("surfaces the live progress detail for a single active agent", () => {
     mockUseCurrentRoute.mockReturnValue({
-      kind: "dm",
-      agentSlug: "pm",
-      channelSlug: "pm__human",
+      kind: "channel",
+      channelSlug: "product",
     });
     mockUseOfficeMembers.mockReturnValue({
       data: [
@@ -112,9 +110,8 @@ describe("<TypingIndicator>", () => {
 
   it("falls back to lower-priority progress fields when liveActivity is absent", () => {
     mockUseCurrentRoute.mockReturnValue({
-      kind: "dm",
-      agentSlug: "pm",
-      channelSlug: "pm__human",
+      kind: "channel",
+      channelSlug: "product",
     });
     mockUseOfficeMembers.mockReturnValue({
       data: [

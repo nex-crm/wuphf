@@ -61,12 +61,13 @@ type ipRateLimitBucket struct {
 type Broker struct {
 	channelStore      *channel.Store
 	messages          []channelMessage
-	agentIssues       []agentIssueRecord
+	incidents         []incidentRecord
 	members           []officeMember
 	memberIndex       map[string]int                  // slug → index into members; guarded by mu
 	memberPresence    map[string]memberPresenceRecord // slug → presence; guarded by mu, populated via brokerTransportHost
 	presenceKeyToSlug map[string]string               // "adapter:key" → slug; guarded by mu
 	channels          []teamChannel
+	channelIndex      map[string]int // slug → index into channels; guarded by mu
 	sessionMode       string
 	oneOnOneAgent     string
 	focusMode         bool
@@ -450,6 +451,12 @@ func (b *Broker) Start() error {
 	// lifecycle index. Idempotent across restarts and per-process
 	// guarded so additional startup hooks invoking it are no-ops.
 	b.MigrateLifecycleStatesOnce()
+	// Phase 6 migration: the product is now pure task-scoped, so every chat
+	// channel must be owned by a task to stay navigable. Fold any legacy
+	// free-standing channel or DM with history into an archived owning task
+	// (mirrors the Backup & Migration task that owns #general). Idempotent;
+	// runs after lifecycle migration + channel/member seeding above.
+	b.MigrateLegacyChannelsOnce()
 	// Seed company context from previous onboarding skip, if pending.
 	// configMu guards the read-modify-write so a concurrent broker retry
 	// goroutine re-arming the flag under the same lock cannot race with
@@ -1084,7 +1091,7 @@ func (b *Broker) Reset() {
 	mode := b.sessionMode
 	agent := b.oneOnOneAgent
 	b.messages = nil
-	b.agentIssues = nil
+	b.incidents = nil
 	b.members = defaultOfficeMembers()
 	b.channels = defaultTeamChannels()
 	b.sessionMode = mode
@@ -1186,12 +1193,35 @@ func (b *Broker) FocusModeEnabled() bool {
 
 func (b *Broker) findChannelLocked(slug string) *teamChannel {
 	slug = normalizeChannelSlug(slug)
-	for i := range b.channels {
-		if b.channels[i].Slug == slug {
-			return &b.channels[i]
-		}
+	// Channel-per-task makes b.channels grow with the office, so the old
+	// linear scan was O(channels) per call on hot paths (membership checks,
+	// access control, startup reconciliation). Index by slug instead.
+	if len(b.channelIndex) != len(b.channels) {
+		b.rebuildChannelIndexLocked()
+	}
+	if i, ok := b.channelIndex[slug]; ok && i < len(b.channels) && b.channels[i].Slug == slug {
+		return &b.channels[i]
+	}
+	// A miss may be genuine OR a stale index left by a same-length slice
+	// replacement (snapshot rollback / state load) that the length check
+	// can't detect. Rebuild once and retry so we never return a false
+	// negative for a channel that actually exists. Hits never reach here, so
+	// the hot lookup path stays O(1).
+	b.rebuildChannelIndexLocked()
+	if i, ok := b.channelIndex[slug]; ok && i < len(b.channels) && b.channels[i].Slug == slug {
+		return &b.channels[i]
 	}
 	return nil
+}
+
+// rebuildChannelIndexLocked rebuilds channelIndex from b.channels. Callers must
+// hold b.mu. findChannelLocked's length-check + rebuild-on-miss keep the map in
+// sync with the slice across appends, removes, and same-length replacements.
+func (b *Broker) rebuildChannelIndexLocked() {
+	b.channelIndex = make(map[string]int, len(b.channels))
+	for i := range b.channels {
+		b.channelIndex[b.channels[i].Slug] = i
+	}
 }
 
 // ensureDMConversationLocked returns the DM conversation for the given slug,
@@ -1241,6 +1271,18 @@ func (b *Broker) findMemberLocked(slug string) *officeMember {
 		return &b.members[i]
 	}
 	return nil
+}
+
+// hasMember reports whether the roster contains slug. Lock-safe wrapper around
+// findMemberLocked for callers that do not already hold b.mu (e.g. HTTP
+// handlers).
+func (b *Broker) hasMember(slug string) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.findMemberLocked(slug) != nil
 }
 
 // rebuildMemberIndexLocked rebuilds memberIndex from b.members. Callers must

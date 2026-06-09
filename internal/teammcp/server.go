@@ -172,10 +172,10 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
 		), handleTeamRuntimeState)
 
-		// CEO-only: in 1:1 / DM mode the CEO can still call review to see
-		// the office's promotion candidates from a private chat. Same lead
-		// gate as the office and DM branches below.
-		if slug == "" || slug == "ceo" {
+		// In 1:1 / DM mode the CEO (and the Librarian, the wiki curator) can
+		// still call review to see the office's promotion candidates from a
+		// private chat. Same gate as the office and DM branches below.
+		if slug == "" || slug == "ceo" || slug == team.LibrarianSlug {
 			registerNotebookReviewTool(server)
 		}
 
@@ -190,6 +190,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 	// from ~125k tokens (27 tools) down to ~15k (4 tools in DM mode).
 	isDM := strings.HasPrefix(channel, "dm-")
 	isLead := slug == "" || slug == "ceo"
+	// The Librarian curates the wiki: it gets the promotion-review tool (like the
+	// lead) WITHOUT the lead's structural powers (team_plan/channel/member).
+	isLibrarian := slug == team.LibrarianSlug
 
 	// DM mode: minimal tool set (same as 1:1 mode)
 	if isDM {
@@ -216,7 +219,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
 		registerSkillAuthoringTools(server)
-		if isLead {
+		if isLead || isLibrarian {
 			registerNotebookReviewTool(server)
 		}
 		if hasActionProvider() {
@@ -357,6 +360,11 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_member",
 			"Create or remove an office-wide member. Only create new members when the human explicitly wants to expand the team.",
 		), handleTeamMember)
+	}
+	// Promotion-review tool: the lead AND the Librarian (wiki curator) get it.
+	// Kept out of the lead-only block above so the Librarian does not also gain
+	// team_plan / team_channel / team_member.
+	if isLead || isLibrarian {
 		registerNotebookReviewTool(server)
 	}
 }

@@ -196,7 +196,7 @@ export function handleSlashCommand(
       createDM(slug)
         .then(() => {
           void router.navigate({
-            to: "/dm/$agentSlug",
+            to: "/agents/$agentSlug",
             params: { agentSlug: slug },
           });
         })

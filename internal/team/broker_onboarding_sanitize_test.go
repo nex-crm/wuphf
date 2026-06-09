@@ -383,7 +383,7 @@ func TestAdvancePhasePostsSanitizedMessages(t *testing.T) {
 // TestSeedMinimalScratchLocked verifies the scratch seed creates exactly:
 //   - CEO as the sole member (BuiltIn=true)
 //   - #general as the sole channel
-//   - No tasks
+//   - Exactly one task: the "Backup & Migration" system task (task-general)
 func TestSeedMinimalScratchLocked(t *testing.T) {
 	b := newTestBroker(t)
 	s := &onboarding.State{
@@ -422,9 +422,19 @@ func TestSeedMinimalScratchLocked(t *testing.T) {
 		t.Errorf("expected #general as sole channel, got %q", b.channels[0].Slug)
 	}
 
-	// No tasks.
-	if len(b.tasks) != 0 {
-		t.Errorf("expected 0 tasks after scratch seed, got %d", len(b.tasks))
+	// Exactly one task: the "Backup & Migration" system task that owns #general.
+	if len(b.tasks) != 1 {
+		t.Errorf("expected 1 task (Backup & Migration) after scratch seed, got %d: %v", len(b.tasks), b.tasks)
+		return
+	}
+	if b.tasks[0].ID != backupMigrationTaskID {
+		t.Errorf("expected task-general as sole task, got %q", b.tasks[0].ID)
+	}
+	if !b.tasks[0].System {
+		t.Error("Backup & Migration task should have System=true")
+	}
+	if b.tasks[0].LifecycleState != LifecycleStateArchived {
+		t.Errorf("expected archived lifecycle state, got %q", b.tasks[0].LifecycleState)
 	}
 }
 

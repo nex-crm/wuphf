@@ -154,13 +154,13 @@ func (b *Broker) checkTaskActionAuthLocked(action, actor, targetTaskID string) e
 }
 
 // defaultTaskTypeForCreate is the broker safety net for RULE ZERO. When an
-// agent creates a top-level task via team_task action=create, the Issues
-// board only renders rows with task_type="issue" (see web IssuesList
-// isIssueSpecTask). Pre-fix the team_task tool schema listed example
+// agent creates a top-level task via team_task action=create, the Tasks
+// board only renders rows with task_type="issue" (see web TasksList
+// isTaskSpecTask). Pre-fix the team_task tool schema listed example
 // values "research, feature, launch, follow_up, bugfix, incident" without
 // mentioning "issue", so LLMs picked one of those for human-asked work —
 // the task landed in broker state but never reached the user-visible
-// Issues board, defeating RULE ZERO. The prompt was updated to instruct
+// Tasks board, defeating RULE ZERO. The prompt was updated to instruct
 // task_type="issue", and the schema description rewritten, but we also
 // override here so a regressed prompt cannot silently break the surface.
 //
@@ -170,8 +170,9 @@ func (b *Broker) checkTaskActionAuthLocked(action, actor, targetTaskID string) e
 // bugfix / incident / custom) pass through — sub-tasks INSIDE an Issue
 // are allowed to carry those typed values per the canonical workflow,
 // and tests asserting pipeline-specific behaviour rely on explicit types.
-// Part 2 ships parent_issue_id; once that lands, this override should
-// only fire when parent_issue_id is empty (top-level work).
+// parent_issue_id now ships; callers that set it pass an explicit task_type,
+// so the "follow_up" override rarely fires for sub-tasks in practice. The
+// override stays as a safety net for bare top-level creates.
 func defaultTaskTypeForCreate(in string) string {
 	s := strings.ToLower(strings.TrimSpace(in))
 	if s == "" {
@@ -235,11 +236,11 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 	if task == nil {
 		return
 	}
-	// PR-style review-loop actions write reviewState directly; the
-	// reconciler must not overwrite their authoritative value with a
-	// status-derived guess.
+	// PR-style review-loop actions and terminal actions write reviewState
+	// directly via applyLifecycleStateLocked; the reconciler must not
+	// overwrite their authoritative value with a status-derived guess.
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "request_changes", "submit_for_review", "comment", "reject":
+	case "request_changes", "submit_for_review", "comment", "reject", "archive":
 		return
 	}
 	if !taskNeedsStructuredReview(task) {
@@ -329,7 +330,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 		}); existing != nil {
 			beforeStatus := existing.status
-			if details := strings.TrimSpace(body.Details); details != "" {
+			// Once the spec is approved (Running+/terminal), a duplicate create
+			// must NOT silently rewrite the human-approved spec BODY (Details).
+			// Owner, classification (TaskType — which the memory-workflow gate
+			// recomputes), and operational metadata stay mutable. See
+			// specIsFrozen.
+			specFrozen := specIsFrozen(existing.LifecycleState)
+			if details := strings.TrimSpace(body.Details); details != "" && !specFrozen {
 				existing.Details = details
 			}
 			if owner := strings.TrimSpace(body.Owner); owner != "" {
@@ -385,9 +392,29 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			b.emitTaskTransitionAutoNotebook(existing, beforeStatus, actor)
 			return TaskResponse{Task: *existing}, nil
 		}
+		// Allocate the task ID before choosing the channel so we can
+		// name the per-task channel "task-<id>" deterministically.
 		b.counter++
+		taskID := b.allocateIssueIDLocked()
+		// For new business-objective tasks that defaulted to "general",
+		// mint a dedicated task-<id> channel so each goal runs in
+		// isolation.  Non-business / system / sub-issue / incident tasks
+		// stay in "general" (shouldMintPerTaskChannel guards all that).
+		if shouldMintPerTaskChannel(channel, &teamTask{
+			Title:         strings.TrimSpace(body.Title),
+			Details:       strings.TrimSpace(body.Details),
+			Owner:         strings.TrimSpace(body.Owner),
+			TaskType:      defaultTaskTypeForCreate(body.TaskType),
+			PipelineID:    strings.TrimSpace(body.PipelineID),
+			ExecutionMode: strings.TrimSpace(body.ExecutionMode),
+			ParentIssueID: strings.TrimSpace(body.ParentIssueID),
+		}) {
+			if ch := b.createPerTaskChannelLocked(taskID, strings.TrimSpace(body.Title), strings.TrimSpace(body.Owner), actor); ch != nil {
+				channel = ch.Slug
+			}
+		}
 		task := teamTask{
-			ID:               b.allocateIssueIDLocked(),
+			ID:               taskID,
 			Channel:          channel,
 			Title:            strings.TrimSpace(body.Title),
 			Details:          strings.TrimSpace(body.Details),
@@ -548,13 +575,39 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		rejectTriggered := false
 		submitForReviewTriggered := false
 		beforeStatus := task.status
+		// Plan mode (Phase 5) human-approval gate: with Plan-first ON the owner
+		// writes a plan and STOPS in LifecycleStatePlanning until a HUMAN clicks
+		// "Approve plan & Start" (the decision-packet Planning→Running path in
+		// recordTaskDecisionInternal). No agent — not even the CEO — may approve
+		// or otherwise advance the plan toward execution from here; agents can
+		// only comment or request changes. This enforces the gate the composer
+		// promises ("the owner writes a plan for your approval") so the CEO
+		// cannot autonomously approve a plan on the human's behalf.
+		if task.LifecycleState == LifecycleStatePlanning && !isHumanMessageSender(actor) {
+			switch action {
+			case "approve", "complete", "submit_for_review", "review":
+				return TaskResponse{}, taskMutationError(
+					TaskMutationForbidden,
+					fmt.Sprintf("task %s is in Plan mode — its plan is awaiting human approval. Only the human can approve the plan and start the work (the \"Approve plan & Start\" button). To weigh in, use team_task action=comment or request_changes.", task.ID),
+					nil,
+				)
+			}
+		}
 		switch action {
 		case "claim", "assign":
 			if strings.TrimSpace(body.Owner) == "" {
 				return TaskResponse{}, taskMutationError(TaskMutationInvalid, "owner required", nil)
 			}
 			task.Owner = strings.TrimSpace(body.Owner)
-			task.status = "in_progress"
+			// Plan mode: a plan-first task that has not started yet plans under
+			// its new owner before executing. Mirrors the reassign case — this
+			// is the path the CEO uses to triage an Auto-owner task, so without
+			// it Auto + Plan-first would skip Planning and run unapproved.
+			if task.PlanFirst && taskIsPreExecution(task.LifecycleState) {
+				_ = b.applyLifecycleStateLocked(task, LifecycleStatePlanning)
+			} else {
+				task.status = "in_progress"
+			}
 			if taskNeedsStructuredReview(task) {
 				task.reviewState = "pending_review"
 			} else {
@@ -569,7 +622,17 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			task.Owner = newOwner
 			status := strings.ToLower(strings.TrimSpace(task.status))
 			if status != "done" && status != "review" {
-				task.status = "in_progress"
+				if task.PlanFirst && taskIsPreExecution(task.LifecycleState) {
+					// Plan mode: a plan-first task that has not started yet plans
+					// under its new owner before executing. This is the default
+					// path for Auto-owner tasks the CEO assigns (composer's
+					// default owner). applyLifecycleStateLocked sets Planning +
+					// status=in_progress + stage=plan; the reindex below
+					// preserves Planning while pre-execution.
+					_ = b.applyLifecycleStateLocked(task, LifecycleStatePlanning)
+				} else {
+					task.status = "in_progress"
+				}
 			}
 			if taskNeedsStructuredReview(task) && strings.TrimSpace(task.reviewState) == "" {
 				task.reviewState = "pending_review"
@@ -700,16 +763,37 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			}
 			appendDetails = true
 			rejectTriggered = true
+		case "archive":
+			// Move the task off the active board. Archived tasks are
+			// terminal (excluded from default active listings, included
+			// with include_done=true for the Archive board column). An
+			// optional note is captured via appendDetails so the actor
+			// can document why the work was archived. Unlike reject,
+			// no reason is required — archiving is a housekeeping act,
+			// not a quality judgement. The task can be reopened via
+			// the reopen action which resets it to Drafting.
+			if err := b.applyLifecycleStateLocked(task, LifecycleStateArchived); err != nil {
+				return TaskResponse{}, taskMutationError(TaskMutationInvalid, err.Error(), err)
+			}
+			appendDetails = true
 		default:
 			return TaskResponse{}, taskMutationError(TaskMutationInvalid, "unknown action", nil)
 		}
+		// Spec freeze: after approval (Running+/terminal) the human-approved spec
+		// BODY is locked. Appended feedback/notes (appendDetails: comment,
+		// resume, request_changes, submit) still flow; only a wholesale Details
+		// REWRITE is rejected. To edit an approved spec, reviewers request_changes
+		// it (→ ChangesRequested, which is not frozen). TaskType/ExecutionMode are
+		// classification/routing the system recomputes (e.g. the memory-workflow
+		// gate), so they stay mutable. See specIsFrozen.
+		specFrozen := specIsFrozen(task.LifecycleState)
 		if strings.TrimSpace(body.Details) != "" {
 			if appendDetails {
 				if err := appendTaskDetailLocked(task, body.Details); err != nil {
 					rollbackTask()
 					return TaskResponse{}, taskMutationError(TaskMutationInvalid, err.Error(), err)
 				}
-			} else {
+			} else if !specFrozen {
 				task.Details = strings.TrimSpace(body.Details)
 			}
 		}
@@ -788,10 +872,10 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		if requestChangesTriggered {
 			feedback := strings.TrimSpace(body.Details)
 			b.postTaskRequestChangesNotificationsLocked(actor, task, feedback)
-			b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, feedback)
+			b.AppendPacketFeedbackLocked(task.ID, actor, feedback)
 		}
 		if action == "comment" {
-			b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, strings.TrimSpace(body.Details))
+			b.AppendPacketFeedbackLocked(task.ID, actor, strings.TrimSpace(body.Details))
 		}
 		if submitForReviewTriggered {
 			// Capture the submitted artifact (code, copy, plan) into
@@ -799,13 +883,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// the exact submission inline in the unified Inbox.
 			artifact := strings.TrimSpace(body.Details)
 			if artifact != "" {
-				b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, "📤 Submitted for review:\n"+artifact)
+				b.AppendPacketFeedbackLocked(task.ID, actor, "📤 Submitted for review:\n"+artifact)
 			}
 		}
 		if rejectTriggered {
 			feedback := strings.TrimSpace(body.Details)
 			b.postTaskRejectedNotificationsLocked(actor, task, feedback)
-			b.AppendPacketFeedbackLocked(strings.TrimSpace(task.ID), actor, feedback)
+			b.AppendPacketFeedbackLocked(task.ID, actor, feedback)
 		}
 		if err := b.saveLocked(); err != nil {
 			rollbackTask()

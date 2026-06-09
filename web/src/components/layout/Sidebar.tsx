@@ -7,11 +7,7 @@ import { useCurrentApp } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { TeamMemberBadge } from "../join/TeamMemberBadge";
 import { SidebarPreviewOverlay } from "../onboarding/SidebarPreviewOverlay";
-import { AgentList } from "../sidebar/AgentList";
 import { AppList } from "../sidebar/AppList";
-import { ChannelList } from "../sidebar/ChannelList";
-import { InboxButton } from "../sidebar/InboxButton";
-import { SidebarSection } from "../sidebar/SidebarSection";
 import { UsagePanel } from "../sidebar/UsagePanel";
 import { CollapsedSidebar } from "./CollapsedSidebar";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -41,12 +37,6 @@ function useMobileRail(): boolean {
 }
 
 export function Sidebar() {
-  const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
-  const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
-  const sidebarChannelsOpen = useAppStore((s) => s.sidebarChannelsOpen);
-  const toggleSidebarChannels = useAppStore((s) => s.toggleSidebarChannels);
-  const sidebarAppsOpen = useAppStore((s) => s.sidebarAppsOpen);
-  const toggleSidebarApps = useAppStore((s) => s.toggleSidebarApps);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const currentApp = useCurrentApp();
@@ -93,7 +83,15 @@ export function Sidebar() {
       ) : (
         <>
           <div className="sidebar-header">
-            <span className="sidebar-logo">WUPHF</span>
+            <button
+              type="button"
+              className="sidebar-logo"
+              onClick={() => router.navigate({ to: "/" })}
+              title="Home"
+              aria-label="WUPHF — go to home"
+            >
+              WUPHF
+            </button>
             <TeamMemberBadge />
             <div className="sidebar-header-actions">
               <button
@@ -122,35 +120,12 @@ export function Sidebar() {
             </div>
           </div>
 
-          <div className="sidebar-primary">
-            <InboxButton />
-          </div>
-
           <div className="sidebar-scroll">
-            <SidebarSection
-              label="Agents"
-              variant="team"
-              open={sidebarAgentsOpen}
-              onToggle={toggleSidebarAgents}
-            >
-              <AgentList />
-            </SidebarSection>
-
-            <SidebarSection
-              label="Channels"
-              open={sidebarChannelsOpen}
-              onToggle={toggleSidebarChannels}
-            >
-              <ChannelList />
-            </SidebarSection>
-
-            <SidebarSection
-              label="Tools"
-              open={sidebarAppsOpen}
-              onToggle={toggleSidebarApps}
-            >
-              <AppList />
-            </SidebarSection>
+            {/* The sidebar nav is three labeled groups — Work / Knowledge /
+                Config — rendered by AppList. Inbox lives in Work; there is no
+                separate flat task list, and "Tasks" in Work opens the task
+                surface. Channels are per task (reached via the task detail). */}
+            <AppList />
 
             {/* Phase 2 onboarding preview overlay — shows staged channels/agents
                 forming as the user answers CEO questions. Hidden once onboarded. */}
@@ -158,9 +133,9 @@ export function Sidebar() {
           </div>
           {/* WorkspaceSummary intentionally not rendered here — the stats
               it shows (agents active, tasks open, tokens) are redundant
-              with the Agents/Issues sections and the Usage footer. The
-              component file is preserved so it can be re-used inside a
-              future Usage popover or Settings surface. */}
+              with the Tasks nav and the Usage footer. The component file is
+              preserved so it can be re-used inside a future Usage popover
+              or Settings surface. */}
           <UsagePanel />
         </>
       )}

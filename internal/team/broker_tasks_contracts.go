@@ -54,12 +54,41 @@ type TaskPlanRequest struct {
 }
 
 type TaskPlanInput struct {
-	Title         string   `json:"title"`
-	Assignee      string   `json:"assignee"`
-	Details       string   `json:"details"`
-	TaskType      string   `json:"task_type"`
-	ExecutionMode string   `json:"execution_mode"`
-	DependsOn     []string `json:"depends_on"`
+	Title         string `json:"title"`
+	Assignee      string `json:"assignee"`
+	Details       string `json:"details"`
+	TaskType      string `json:"task_type"`
+	ExecutionMode string `json:"execution_mode"`
+	// Effort is the optional model-specific reasoning-effort level chosen in
+	// the new-task composer (e.g. "high" for claude, "medium" for codex). It
+	// is stored on the task and applied at dispatch. Empty means default.
+	Effort string `json:"effort"`
+	// Provider and Model are the optional per-task LLM runtime override
+	// (runtime kind + model id). Stored on the task; dispatch prefers them
+	// over the owner agent's binding. Empty means inherit the binding/default.
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	// Park, when true, creates the task ASSIGNED but parked in the backlog
+	// (non-executable) instead of dispatching the owner now. The "Backlog"
+	// composer action sets this; "Start now" leaves it false.
+	Park bool `json:"park"`
+	// PlanFirst controls "Plan mode" (Phase 5): when true, the owner plans
+	// autonomously before executing (Planning state + Approve & Start gate);
+	// when false/absent, the task runs immediately.
+	//
+	// The human composer's toggle DEFAULTS ON and always sends an explicit value.
+	// The wire default (absent/nil) is OFF on purpose: agent- and CEO-created
+	// tasks (team_plan/team_task, self-heal, onboarding) must NOT each block on
+	// human plan-approval, or the autonomous office would stall — so they opt in
+	// explicitly when they want a plan gate.
+	PlanFirst *bool    `json:"plan_first,omitempty"`
+	DependsOn []string `json:"depends_on"`
+}
+
+// PlanFirstEnabled resolves the nullable PlanFirst toggle. Absent (nil) is OFF
+// (see PlanFirst); only an explicit true enables Plan mode.
+func (in TaskPlanInput) PlanFirstEnabled() bool {
+	return in.PlanFirst != nil && *in.PlanFirst
 }
 
 type TaskMemoryWorkflowRequest struct {

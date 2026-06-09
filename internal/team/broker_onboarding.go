@@ -292,6 +292,9 @@ func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents
 	b.messages = nil
 	b.counter = 0
 	b.lastTaggedAt = make(map[string]time.Time)
+	// Seed the "Backup & Migration" system task that owns #general so the
+	// ~141 fallback call sites that post to "general" keep working.
+	b.ensureBackupMigrationTaskLocked()
 	if err := b.postKickoffLocked(bp, selectedAgents, task, skipTask, synthesized); err != nil {
 		return err
 	}
@@ -309,8 +312,16 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 
 	// Lead-only warning: the wizard sent agents=[] (explicit empty = every
 	// toggle unchecked). The seed helper fell back to lead-only; surface
-	// that via a system message so the user knows the team is minimal.
-	if selectedAgents != nil && len(selectedAgents) == 0 && len(b.members) == 1 {
+	// that via a system message so the user knows the team is minimal. The
+	// built-in Librarian is always present and doesn't count as a specialist,
+	// so a roster of lead + Librarian is still "lead only".
+	nonLibrarianMembers := 0
+	for i := range b.members {
+		if !isLibrarianSlug(b.members[i].Slug) {
+			nonLibrarianMembers++
+		}
+	}
+	if selectedAgents != nil && len(selectedAgents) == 0 && nonLibrarianMembers == 1 {
 		b.counter++
 		b.appendMessageLocked(channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -483,17 +494,19 @@ func blankSlateOfficeMembersFromBlueprint(blueprint operations.Blueprint, select
 		members = blankSlateOfficeMembersFromAgents(agents, leadSlug, nil)
 	}
 	if len(members) > 0 {
-		return members
+		// The Librarian is built-in, like the lead — present in every workspace
+		// regardless of blueprint or agent selection.
+		return ensureLibrarianMember(members)
 	}
 	// Defensive fallback used only when the blueprint had zero parseable
 	// agents. Keeps the broker from crashing on empty rosters.
 	now := time.Now().UTC().Format(time.RFC3339)
-	return []officeMember{
+	return ensureLibrarianMember([]officeMember{
 		{Slug: "founder", Name: "Founder", Role: "Founder", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
 		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "auto", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
 		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
 		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
-	}
+	})
 }
 
 func blankSlateOfficeMembersFromAgents(agents []operations.StarterAgent, leadSlug string, filter func(string) bool) []officeMember {

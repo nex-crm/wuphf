@@ -29,10 +29,6 @@ export interface BreadcrumbItem {
  */
 export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
   switch (route.kind) {
-    case "dm": {
-      const res = resolveObjectRoute({ kind: "agent", slug: route.agentSlug });
-      return [breadcrumbItem(res, `@${route.agentSlug}`)];
-    }
     case "task-board": {
       return [{ label: "Tasks", href: "#/tasks" }];
     }
@@ -88,9 +84,7 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
       return [{ label: "Reviews", href: "#/reviews" }];
     }
     case "article": {
-      return [
-        { label: "Article", href: `#/articles/${route.articleId}` },
-      ];
+      return [{ label: "Article", href: `#/articles/${route.articleId}` }];
     }
     case "app": {
       if (route.appId === "settings" || isSettingsSection(route.appId)) {
@@ -133,37 +127,21 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
     }
     case "channel":
       return [];
-    // Phase 3 — Issues surface breadcrumbs
-    case "issues-list":
-      return [{ label: "Issues", href: "#/issues" }];
-    case "issue-detail":
+    // Tasks surface breadcrumbs
+    case "task-new":
       return [
-        { label: "Issues", href: "#/issues" },
-        {
-          label: route.issueId,
-          href: `#/issues/${encodeURIComponent(route.issueId)}`,
-        },
+        { label: "Tasks", href: "#/tasks" },
+        { label: "New task", href: "#/tasks/new" },
       ];
-    case "issue-new":
+    case "agents":
+      return [{ label: "Agents", href: "#/agents" }];
+    case "agent-detail": {
+      const res = resolveObjectRoute({ kind: "agent", slug: route.agentSlug });
       return [
-        { label: "Issues", href: "#/issues" },
-        { label: "New issue", href: "#/issues/new" },
+        { label: "Agents", href: "#/agents" },
+        breadcrumbItem(res, `@${route.agentSlug}`),
       ];
-    case "agent-subspace":
-      return [
-        {
-          label: route.agentSlug,
-          href: `#/agents/${encodeURIComponent(route.agentSlug)}`,
-        },
-        ...(route.tab === "chat"
-          ? []
-          : [
-              {
-                label: route.tab,
-                href: `#/agents/${encodeURIComponent(route.agentSlug)}/${route.tab}`,
-              },
-            ]),
-      ];
+    }
     case "skill-detail":
       return [
         { label: "Skills", href: "#/apps/skills" },
@@ -174,7 +152,7 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
       ];
     case "routine-detail":
       return [
-        { label: "Routines", href: "#/apps/routines" },
+        { label: "Scheduled Tasks", href: "#/apps/routines" },
         {
           label: route.routineSlug,
           href: `#/routines/${encodeURIComponent(route.routineSlug)}`,
@@ -182,9 +160,11 @@ export function deriveBreadcrumbs(route: CurrentRoute): BreadcrumbItem[] {
       ];
     case "routine-new":
       return [
-        { label: "Routines", href: "#/apps/routines" },
-        { label: "New routine", href: "#/routines/new" },
+        { label: "Scheduled Tasks", href: "#/apps/routines" },
+        { label: "New scheduled task", href: "#/routines/new" },
       ];
+    case "home":
+      return [];
     case "unknown":
       return [];
     default: {

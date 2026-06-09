@@ -6,6 +6,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import {
@@ -21,8 +22,6 @@ import { Shell } from "../components/layout/Shell";
 import { UpgradeBanner } from "../components/layout/UpgradeBanner";
 import { ChannelParticipants } from "../components/messages/ChannelParticipants";
 import { Composer } from "../components/messages/Composer";
-import { DMView } from "../components/messages/DMView";
-import { InterviewBar } from "../components/messages/InterviewBar";
 import { MessageFeed } from "../components/messages/MessageFeed";
 import { PrePickScreen } from "../components/onboarding/PrePickScreen";
 import { OfficeTour } from "../components/onboarding/tour/OfficeTour";
@@ -35,6 +34,7 @@ import type { WikiTab } from "../components/wiki/WikiTabs";
 import WikiTabs from "../components/wiki/WikiTabs";
 import { useBrokerEvents } from "../hooks/useBrokerEvents";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { useOfficeTasks } from "../hooks/useOfficeTasks";
 import { rootRoute, router } from "../lib/router";
 import { getTheme } from "../lib/themes";
 import { directChannelSlug, useAppStore } from "../stores/app";
@@ -131,11 +131,6 @@ const SkillsApp = lazy(() =>
     default: m.SkillsApp,
   })),
 );
-const TasksApp = lazy(() =>
-  import("../components/apps/TasksApp").then((m) => ({
-    default: m.TasksApp,
-  })),
-);
 const Notebook = lazy(() => import("../components/notebook/Notebook"));
 const DecisionInbox = lazy(() =>
   import("../components/lifecycle/DecisionInbox").then((m) => ({
@@ -157,24 +152,39 @@ const ArticleView = lazy(() =>
 const ReviewQueueKanban = lazy(
   () => import("../components/review/ReviewQueueKanban"),
 );
-// Phase 3 — Issues surface.
-const IssuesList = lazy(() =>
-  import("../components/lifecycle/IssuesList").then((m) => ({
-    default: m.IssuesList,
+// Tasks surface (list + detail + new).
+const TasksList = lazy(() =>
+  import("../components/lifecycle/TasksList").then((m) => ({
+    default: m.TasksList,
   })),
 );
-const IssueDocumentRoute = lazy(() =>
-  import("../components/lifecycle/IssueDocumentRoute").then((m) => ({
-    default: m.IssueDocumentRoute,
+const TaskDocumentRoute = lazy(() =>
+  import("../components/lifecycle/TaskDocumentRoute").then((m) => ({
+    default: m.TaskDocumentRoute,
   })),
 );
-const IssueNewForm = lazy(() =>
-  import("../components/lifecycle/IssueNewForm").then((m) => ({
-    default: m.IssueNewForm,
+const TaskNewForm = lazy(() =>
+  import("../components/lifecycle/TaskNewForm").then((m) => ({
+    default: m.TaskNewForm,
   })),
 );
-// v3 MVP — per-agent subspace shell.
-const AgentSubspaceRoute = lazy(() => import("./AgentSubspaceRoute"));
+// New-task home composer — the app's landing surface (index route).
+const TaskComposer = lazy(() =>
+  import("../components/tasks/TaskComposer").then((m) => ({
+    default: m.TaskComposer,
+  })),
+);
+// Agents tool — roster grid (/agents) + per-agent config (/agents/$slug).
+const AgentsTool = lazy(() =>
+  import("../components/agents/AgentsTool").then((m) => ({
+    default: m.AgentsTool,
+  })),
+);
+const AgentDetail = lazy(() =>
+  import("../components/agents/AgentsTool").then((m) => ({
+    default: m.AgentDetail,
+  })),
+);
 // Full-screen skill SKILL.md editor + preview.
 const SkillDetailRoute = lazy(() =>
   import("./SkillDetailRoute").then((m) => ({
@@ -343,7 +353,6 @@ function navigateNotebookEntry(
 }
 
 const APP_PANELS = {
-  tasks: TasksApp,
   requests: InboxRedirect,
   graph: GraphApp,
   policies: PoliciesApp,
@@ -364,12 +373,51 @@ function ConversationView() {
     <div className="conversation-shell">
       <div className="conversation-chat">
         <MessageFeed />
-        <InterviewBar />
         <Composer />
       </div>
       <ChannelParticipants channelSlug={channelSlug} />
     </div>
   );
+}
+
+/**
+ * In the task-scoped model a business task's channel is reached through the
+ * task, not as a parallel chat surface. A direct `/channels/$slug` visit
+ * (typed URL, search hit, command palette) for a channel owned by a business
+ * task redirects to that task's detail, closing the dual-surface gap.
+ *
+ * System-managed channels are deliberately NOT redirected: #general (owned by
+ * the archived Backup & Migration task) and folded legacy channels stay
+ * directly readable via the conversation view, because redirecting the
+ * coordination channel to an archived system task is worse than the dual
+ * surface. A channel with no owning task also falls through to the view, so a
+ * channel with history is never dead-ended.
+ */
+function ChannelRedirect({ channelSlug }: { channelSlug: string }) {
+  const { data: tasks, isPending } = useOfficeTasks();
+  const owningTaskId = useMemo(() => {
+    const slug = channelSlug.trim().toLowerCase();
+    const owner = (tasks ?? []).find(
+      (t) => (t.channel ?? "").trim().toLowerCase() === slug,
+    );
+    return owner && !owner.system ? owner.id : undefined;
+  }, [tasks, channelSlug]);
+
+  useEffect(() => {
+    if (owningTaskId) {
+      void router.navigate({
+        to: "/tasks/$taskId",
+        params: { taskId: owningTaskId },
+        replace: true,
+      });
+    }
+  }, [owningTaskId]);
+
+  // Redirecting (owning task found) or still resolving the task list → render
+  // nothing so the conversation surface never flashes. Resolved with no owning
+  // task → fall back to the conversation view so the channel stays reachable.
+  if (owningTaskId || isPending) return null;
+  return <ConversationView />;
 }
 
 interface WikiSurfaceProps {
@@ -498,20 +546,26 @@ function InboxRedirect() {
 
 /**
  * FirstClassAppRedirect navigates the user from a `/apps/$id` URL whose
- * `$id` is a first-class app (wiki, inbox) to that app's canonical
- * dedicated route. Users who type a sidebar-label-style URL by hand
- * (e.g. `/#/apps/wiki`) used to hit "Page not found" because first-class
- * apps live at `/wiki` and `/inbox`, not under `/apps`. Mirrors
+ * `$id` is a first-class app (wiki, inbox, tasks, agents) to that app's
+ * canonical dedicated route. Users who type a sidebar-label-style URL by
+ * hand (e.g. `/#/apps/wiki`) used to hit "Page not found" because
+ * first-class apps live at their own paths, not under `/apps`. Mirrors
  * `InboxRedirect` so the route ↔ sidebar mapping is forgiving without
  * the route registry sprouting alias entries.
  */
+const FIRST_CLASS_APP_TARGETS: Record<
+  FirstClassAppId,
+  "/wiki" | "/inbox" | "/tasks" | "/agents"
+> = {
+  wiki: "/wiki",
+  inbox: "/inbox",
+  tasks: "/tasks",
+  agents: "/agents",
+};
+
 function FirstClassAppRedirect({ appId }: { appId: FirstClassAppId }) {
   useEffect(() => {
-    if (appId === "wiki") {
-      void router.navigate({ to: "/wiki", replace: true });
-    } else {
-      void router.navigate({ to: "/inbox", replace: true });
-    }
+    void router.navigate({ to: FIRST_CLASS_APP_TARGETS[appId], replace: true });
   }, [appId]);
   return (
     <div
@@ -584,8 +638,7 @@ function useTrackLastConversationalChannel(route: CurrentRoute): void {
     (s) => s.setLastConversationalChannel,
   );
   const clearUnread = useAppStore((s) => s.clearUnread);
-  const channelSlug =
-    route.kind === "channel" || route.kind === "dm" ? route.channelSlug : null;
+  const channelSlug = route.kind === "channel" ? route.channelSlug : null;
   useEffect(() => {
     if (channelSlug) {
       setLastConversationalChannel(channelSlug);
@@ -604,12 +657,10 @@ function MainContent() {
   useTrackLastConversationalChannel(route);
 
   switch (route.kind) {
+    case "home":
+      return <TaskComposer />;
     case "channel":
-      return <ConversationView />;
-    case "dm":
-      return (
-        <DMView agentSlug={route.agentSlug} channelSlug={route.channelSlug} />
-      );
+      return <ChannelRedirect channelSlug={route.channelSlug} />;
     case "app":
       // `/apps/wiki` and `/apps/inbox` are not app-panel routes — the
       // sidebar navigates to `/wiki` and `/inbox` directly — but users
@@ -624,17 +675,11 @@ function MainContent() {
       }
       return <AppPanel appId={route.appId} />;
     case "task-board":
-      return (
-        <div className="app-panel active" data-testid="app-page-tasks">
-          <TasksApp />
-        </div>
-      );
+      return <TasksList />;
     case "task-detail":
-      return (
-        <div className="app-panel active" data-testid="app-page-tasks">
-          <TasksApp taskId={route.taskId} />
-        </div>
-      );
+      return <TaskDocumentRoute taskId={route.taskId} />;
+    case "task-new":
+      return <TaskNewForm />;
     case "wiki":
     case "wiki-article":
       return <WikiSurface current="wiki" route={route} />;
@@ -659,14 +704,10 @@ function MainContent() {
       return <DecisionInbox />;
     case "task-decision":
       return <DecisionPacketRoute taskId={route.taskId} />;
-    case "issues-list":
-      return <IssuesList />;
-    case "issue-detail":
-      return <IssueDocumentRoute issueId={route.issueId} />;
-    case "issue-new":
-      return <IssueNewForm />;
-    case "agent-subspace":
-      return <AgentSubspaceRoute agentSlug={route.agentSlug} tab={route.tab} />;
+    case "agents":
+      return <AgentsTool />;
+    case "agent-detail":
+      return <AgentDetail agentSlug={route.agentSlug} />;
     case "skill-detail":
       return <SkillDetailRoute skillName={route.skillName} />;
     case "routine-detail":
@@ -789,30 +830,25 @@ export default function RootRoute() {
   // onboarding phase from /onboarding/state — set once on boot if available.
   const [bootPhase, setBootPhase] = useState<string | undefined>(undefined);
 
-  // When CEO onboarding is active (phase set, not "complete"), redirect any
-  // root or /channels/general URL to the CEO DM so the Shell always shows
-  // the CEO conversation regardless of the URL the user landed on.
-  // This is a TanStack-level navigate (not a beforeLoad, because onboarding
-  // state is only known after the /onboarding/state API call in the effect
-  // below). Already-onboarded users (onboardingComplete === true) skip the
+  // When CEO onboarding is active (phase set, not "complete"), pin a
+  // generic landing URL (#general) to the home composer (index `/`) so the
+  // URL is sensible the moment the broker flips onboarded=true and the
+  // office Shell mounts. The new-task composer is the app's landing surface,
+  // so completing onboarding drops the user there. The onboarding
+  // conversation itself renders full-screen via OnboardingChat regardless of
+  // the URL, so this only governs where the user lands once onboarding
+  // completes. Already-onboarded users (onboardingComplete === true) skip the
   // whole inCeoOnboarding branch and never hit this redirect.
   useEffect(() => {
     if (!(inCeoOnboarding || bootPhase)) return;
-    // Only redirect when the user is on a generic destination (root, general).
-    // Other explicit URLs (e.g. /dm/some-agent) should not be redirected so
-    // deep-links remain functional during onboarding.
+    // Only redirect when the user is on a non-home generic destination
+    // (#general). Root (`#/`, `""`) already renders the composer, and
+    // explicit deep-links (e.g. a specific /tasks/$id) should be preserved.
     const hash = typeof window !== "undefined" ? window.location.hash : "";
     const onGenericRoute =
-      hash === "" ||
-      hash === "#/" ||
-      hash === "#/channels/general" ||
-      hash.startsWith("#/?");
+      hash === "#/channels/general" || hash.startsWith("#/?");
     if (onGenericRoute) {
-      void router.navigate({
-        to: "/dm/$agentSlug",
-        params: { agentSlug: "ceo" },
-        replace: true,
-      });
+      void router.navigate({ to: "/", replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inCeoOnboarding, bootPhase]);
@@ -842,9 +878,13 @@ export default function RootRoute() {
         ceoChannel,
         "Audit our CRM for duplicate accounts, deals missing an owner, and opportunities with no activity in 30 days, then propose a cleanup plan",
       );
+    // The legacy `/dm/$agentSlug` route was removed in the task-scoped
+    // restructure (DMs fold into task channels). It was only sugar over
+    // `/channels/<directChannelSlug(agentSlug)>`, so navigate to the same
+    // destination directly — the channel the draft was just seeded into.
     void router.navigate({
-      to: "/dm/$agentSlug",
-      params: { agentSlug: "ceo" },
+      to: "/channels/$channelSlug",
+      params: { channelSlug: ceoChannel },
     });
     // Deps intentionally empty: router and directChannelSlug are module-level
     // imports and useAppStore.getState() is Zustand's imperative escape hatch,

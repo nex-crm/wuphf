@@ -62,6 +62,15 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Validate the per-task LLM runtime override at the boundary (covers
+		// both the reuse-merge and fresh-create branches below) so a malformed
+		// provider/effort never lands in broker-state.json.
+		if err := validateTaskRuntimeFields(item.Provider, item.Model, item.Effort); err != nil {
+			rollbackPlan()
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
 		// Resolve depends_on: accept both task IDs and titles
 		resolvedDeps := make([]string, 0, len(item.DependsOn))
 		for _, dep := range item.DependsOn {
@@ -78,7 +87,13 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Owner:   strings.TrimSpace(item.Assignee),
 		}); existing != nil {
 			titleToID[strings.TrimSpace(item.Title)] = existing.ID
-			if details := strings.TrimSpace(item.Details); details != "" {
+			// Spec freeze: a re-plan must not rewrite an already-approved
+			// (Running+/terminal) task's human-approved spec BODY (Details).
+			// Classification/routing (TaskType/ExecutionMode), dependency wiring,
+			// and runtime config (effort/provider/model) stay adjustable — the
+			// system recomputes these. See specIsFrozen.
+			specFrozen := specIsFrozen(existing.LifecycleState)
+			if details := strings.TrimSpace(item.Details); details != "" && !specFrozen {
 				existing.Details = details
 			}
 			if taskType := strings.TrimSpace(item.TaskType); taskType != "" {
@@ -86,6 +101,15 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			}
 			if executionMode := strings.TrimSpace(item.ExecutionMode); executionMode != "" {
 				existing.ExecutionMode = executionMode
+			}
+			if effort := strings.TrimSpace(item.Effort); effort != "" {
+				existing.Effort = effort
+			}
+			if prov := strings.TrimSpace(item.Provider); prov != "" {
+				existing.Provider = prov
+			}
+			if model := strings.TrimSpace(item.Model); model != "" {
+				existing.Model = model
 			}
 			existing.DependsOn = resolvedDeps
 			b.refreshPlannedTaskBlockStateLocked(existing)
@@ -112,6 +136,19 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		b.counter++
 		taskID := b.allocateIssueIDLocked()
 		titleToID[strings.TrimSpace(item.Title)] = taskID
+		// Mint a dedicated channel for new business-objective tasks
+		// that defaulted to "general".
+		if shouldMintPerTaskChannel(taskChannel, &teamTask{
+			Title:         strings.TrimSpace(item.Title),
+			Details:       strings.TrimSpace(item.Details),
+			Owner:         strings.TrimSpace(item.Assignee),
+			TaskType:      strings.TrimSpace(item.TaskType),
+			ExecutionMode: strings.TrimSpace(item.ExecutionMode),
+		}) {
+			if ch := b.createPerTaskChannelLocked(taskID, strings.TrimSpace(item.Title), strings.TrimSpace(item.Assignee), createdBy); ch != nil {
+				taskChannel = ch.Slug
+			}
+		}
 
 		task := teamTask{
 			ID:            taskID,
@@ -123,11 +160,41 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			CreatedBy:     createdBy,
 			TaskType:      strings.TrimSpace(item.TaskType),
 			ExecutionMode: strings.TrimSpace(item.ExecutionMode),
+			Effort:        strings.TrimSpace(item.Effort),
+			Provider:      strings.TrimSpace(item.Provider),
+			Model:         strings.TrimSpace(item.Model),
+			PlanFirst:     item.PlanFirstEnabled(),
 			DependsOn:     resolvedDeps,
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
 		b.refreshPlannedTaskBlockStateLocked(&task)
+		// Lifecycle routing (Phase 5 Plan mode + Phase 3 Backlog):
+		//   - Backlog (Park): assigned but parked in Drafting — non-executable,
+		//     shows in Backlog, dispatches nobody. Activated via "Approve &
+		//     Start", which routes through PlanFirst (Drafting→Planning or
+		//     Drafting→Running) in the decision handler.
+		//   - Plan first + real owner (start now): land in Planning so the owner
+		//     is dispatched to write a plan first (plan-only packet), then
+		//     "Approve & Start" → Running. Overrides the in_progress promotion.
+		//   - Plan first OFF (start now): leave the in_progress promotion in
+		//     place → runs immediately, no plan/approval gate.
+		// (Auto-owner Plan-first tasks plan after the CEO assigns a specialist;
+		// the reassign path routes them into Planning.)
+		switch {
+		case item.Park:
+			if err := b.applyLifecycleStateLocked(&task, LifecycleStateDrafting); err != nil {
+				rollbackPlan()
+				http.Error(w, "failed to park task", http.StatusInternalServerError)
+				return
+			}
+		case task.PlanFirst && task.status == "in_progress":
+			if err := b.applyLifecycleStateLocked(&task, LifecycleStatePlanning); err != nil {
+				rollbackPlan()
+				http.Error(w, "failed to start planning", http.StatusInternalServerError)
+				return
+			}
+		}
 		syncTaskMemoryWorkflow(&task, now)
 		b.ensureTaskOwnerChannelMembershipLocked(taskChannel, task.Owner)
 		b.queueTaskBehindActiveOwnerLaneLocked(&task)
@@ -144,6 +211,11 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		}
 		b.tasks = append(b.tasks, task)
 		b.appendActionLocked("task_created", "office", taskChannel, createdBy, truncateSummary(task.Title, 140), task.ID)
+		// Start-now + Auto: no real owner to dispatch, so ask the CEO to triage
+		// (pick a specialist + start). Parked Auto tasks defer this to activate.
+		if isAutoOwner(task.Owner) && !item.Park {
+			b.requestAutoAssignmentLocked(&task, createdBy)
+		}
 		created = append(created, task)
 	}
 
@@ -166,6 +238,9 @@ type plannedTaskInput struct {
 	TaskType         string
 	PipelineID       string
 	ExecutionMode    string
+	Effort           string
+	Provider         string
+	Model            string
 	ReviewState      string
 	SourceSignalID   string
 	SourceDecisionID string
@@ -182,7 +257,10 @@ func (b *Broker) refreshPlannedTaskBlockStateLocked(task *teamTask) {
 		return
 	}
 	task.blocked = false
-	if strings.TrimSpace(task.Owner) != "" {
+	// An "auto" owner is a triage sentinel, not a real agent — it must not
+	// promote the task to in_progress (there is no @auto to dispatch). The CEO
+	// resolves it to a real specialist first (see requestAutoAssignmentLocked).
+	if strings.TrimSpace(task.Owner) != "" && !isAutoOwner(task.Owner) {
 		task.status = "in_progress"
 	} else if strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
 		task.status = "open"
@@ -198,6 +276,11 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 	}
 	if !b.canAccessChannelLocked(input.CreatedBy, channel) {
 		return teamTask{}, false, fmt.Errorf("channel access denied")
+	}
+	// Validate the per-task LLM runtime override at the boundary (covers both
+	// the reuse-merge and fresh-create branches below).
+	if err := validateTaskRuntimeFields(input.Provider, input.Model, input.Effort); err != nil {
+		return teamTask{}, false, err
 	}
 	mutationSnapshot := snapshotBrokerTaskMutationLocked(b)
 	rollbackTask := func() {
@@ -232,6 +315,15 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		if existing.ExecutionMode == "" && strings.TrimSpace(input.ExecutionMode) != "" {
 			existing.ExecutionMode = strings.TrimSpace(input.ExecutionMode)
 		}
+		if existing.Effort == "" && strings.TrimSpace(input.Effort) != "" {
+			existing.Effort = strings.TrimSpace(input.Effort)
+		}
+		if existing.Provider == "" && strings.TrimSpace(input.Provider) != "" {
+			existing.Provider = strings.TrimSpace(input.Provider)
+		}
+		if existing.Model == "" && strings.TrimSpace(input.Model) != "" {
+			existing.Model = strings.TrimSpace(input.Model)
+		}
 		if existing.reviewState == "" && strings.TrimSpace(input.ReviewState) != "" {
 			existing.reviewState = strings.TrimSpace(input.ReviewState)
 		}
@@ -265,9 +357,26 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		return *existing, true, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Allocate the task ID before choosing the channel so we can name
+	// the per-task channel deterministically.
 	b.counter++
+	taskID := b.allocateIssueIDLocked()
+	// Mint a dedicated channel for new business-objective tasks that
+	// defaulted to "general".
+	if shouldMintPerTaskChannel(channel, &teamTask{
+		Title:         title,
+		Details:       strings.TrimSpace(input.Details),
+		Owner:         strings.TrimSpace(input.Owner),
+		TaskType:      strings.TrimSpace(input.TaskType),
+		PipelineID:    strings.TrimSpace(input.PipelineID),
+		ExecutionMode: strings.TrimSpace(input.ExecutionMode),
+	}) {
+		if ch := b.createPerTaskChannelLocked(taskID, title, strings.TrimSpace(input.Owner), strings.TrimSpace(input.CreatedBy)); ch != nil {
+			channel = ch.Slug
+		}
+	}
 	task := teamTask{
-		ID:               b.allocateIssueIDLocked(),
+		ID:               taskID,
 		Channel:          channel,
 		Title:            title,
 		Details:          strings.TrimSpace(input.Details),
@@ -278,6 +387,9 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		TaskType:         strings.TrimSpace(input.TaskType),
 		PipelineID:       strings.TrimSpace(input.PipelineID),
 		ExecutionMode:    strings.TrimSpace(input.ExecutionMode),
+		Effort:           strings.TrimSpace(input.Effort),
+		Provider:         strings.TrimSpace(input.Provider),
+		Model:            strings.TrimSpace(input.Model),
 		reviewState:      strings.TrimSpace(input.ReviewState),
 		SourceSignalID:   strings.TrimSpace(input.SourceSignalID),
 		SourceDecisionID: strings.TrimSpace(input.SourceDecisionID),

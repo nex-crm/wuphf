@@ -4069,7 +4069,10 @@ html[data-theme="noir-gold"] {
 
 .issues-kanban {
   display: grid;
-  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  /* Seven user-facing stages. Each column holds a min width so the row
+     scrolls horizontally rather than crushing columns when the viewport
+     is narrow. */
+  grid-template-columns: repeat(7, minmax(160px, 1fr));
   gap: 12px;
   flex: 1;
   min-height: 0;
@@ -4180,6 +4183,11 @@ html[data-theme="noir-gold"] {
 
 .issues-kanban-card-owner,
 .issues-kanban-card-channel {
+  font-variant-numeric: tabular-nums;
+}
+
+.issues-kanban-card-schedule {
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -5125,4 +5133,233 @@ html[data-theme="noir-gold"] {
 
 .issue-activity-feed-resolution--open {
   color: var(--orange-500, #f97316);
+}
+
+/* ── Chat-primary task detail (chat main column + right context rail) ──────
+   The task detail is chat-first: the conversation fills the main column at
+   full height (messages scroll internally, composer pins) and the secondary
+   context — participants, spec, activity, sub-tasks — lives in a right rail.
+   The whole surface fills the panel instead of page-scrolling, so the chat
+   gets the vertical space instead of a tall header + a tab panel. */
+.issue-document {
+  height: 100%;
+  min-height: 0;
+}
+.issue-doc-header--compact {
+  gap: 8px;
+  padding: 12px 20px;
+}
+.issue-doc-header--compact .issue-doc-title {
+  font-size: 1.0625rem;
+  line-height: 1.3;
+}
+.issue-doc-header--compact .issue-doc-meta-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* Owner picker sits left; lifecycle action toolbar pushed to the right so
+   the header stays two tight rows instead of four. */
+.issue-doc-header--compact .issue-doc-meta-row > :last-child {
+  margin-left: auto;
+}
+
+.issue-doc-body--split {
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: row;
+  gap: 0;
+  padding: 0;
+  align-items: stretch;
+}
+.issue-doc-chat {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+.issue-doc-chat-header {
+  flex: 0 0 auto;
+  padding: 10px 20px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.issue-doc-chat .task-channel-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 20px 16px;
+}
+
+.task-context-rail {
+  flex: 0 0 320px;
+  width: 320px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-card);
+}
+.task-context-rail .issue-activity-stream {
+  margin-bottom: 8px;
+}
+.task-rail-section {
+  border-top: 1px solid var(--border);
+}
+.task-rail-section:first-of-type {
+  border-top: none;
+}
+.task-rail-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  text-align: left;
+}
+.task-rail-caret {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  width: 0.8em;
+}
+.task-rail-section-body {
+  padding: 0 4px 12px;
+}
+
+/* Stack the rail under the chat on narrow viewports. */
+@media (max-width: 900px) {
+  .issue-doc-body--split {
+    flex-direction: column;
+  }
+  .issue-doc-chat {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .task-context-rail {
+    flex: 0 0 auto;
+    width: auto;
+  }
+}
+
+/* Participants render directly (self-headed) above the collapsible rail
+   sections; give them a divider so they read as a distinct block. */
+.task-rail-participants {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Kanban: collapsible lanes + Linear-style uplift ──────────────────────
+   The board was a fixed 7-column grid that forced horizontal scroll and let
+   empty lanes hog space. Switch to flex so any lane can collapse to a thin
+   vertical strip (click its header), giving the active lanes the room. */
+.issues-kanban {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+.issues-kanban-column {
+  flex: 1 1 240px;
+  min-width: 240px;
+  max-width: 420px;
+  transition:
+    flex-basis 0.16s ease,
+    min-width 0.16s ease;
+}
+.issues-kanban-column.is-collapsed {
+  flex: 0 0 40px;
+  min-width: 40px;
+  max-width: 40px;
+  padding: 8px 4px;
+  cursor: pointer;
+  align-items: center;
+}
+
+/* The column header is now the collapse toggle (a button). */
+.issues-kanban-column-header {
+  margin: 0;
+  padding: 0;
+}
+.issues-kanban-column-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 2px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.issues-kanban-column-caret {
+  flex: 0 0 auto;
+  width: 0.8em;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+.issues-kanban-column-toggle .issues-kanban-column-count {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.issues-kanban-column-toggle:hover .issues-kanban-column-caret {
+  color: var(--text);
+}
+
+/* Collapsed: a vertical strip — caret on top, title rotated, count below. */
+.issues-kanban-column.is-collapsed .issues-kanban-column-toggle {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  height: 100%;
+  padding: 4px 0;
+}
+.issues-kanban-column.is-collapsed .issues-kanban-column-title {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  white-space: nowrap;
+}
+.issues-kanban-column.is-collapsed .issues-kanban-column-toggle .issues-kanban-column-count {
+  margin-left: 0;
+}
+
+/* Kanban card: live "what's happening" line for running tasks, so the board
+   tells you state + owner + current activity at a glance. */
+.issues-kanban-card-activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.issues-kanban-card-activity-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.issues-kanban-card-owner--unassigned {
+  color: var(--text-secondary);
+  font-style: italic;
 }

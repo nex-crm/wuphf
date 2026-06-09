@@ -1076,11 +1076,11 @@ func makeFocusModeLauncher(t *testing.T) (*Launcher, *Broker) {
 		broker: b,
 		headless: headlessWorkerPool{
 
-			workers: make(map[string]bool),
+			workers: make(map[headlessLane]bool),
 
-			active: make(map[string]*headlessCodexActiveTurn),
+			active: make(map[headlessLane]*headlessCodexActiveTurn),
 
-			queues: make(map[string][]headlessCodexTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 	return l, b
@@ -1168,11 +1168,11 @@ func TestFocusModeRouting_CollaborativeUntaggedWakesLead(t *testing.T) {
 		broker: b,
 		headless: headlessWorkerPool{
 
-			workers: make(map[string]bool),
+			workers: make(map[headlessLane]bool),
 
-			active: make(map[string]*headlessCodexActiveTurn),
+			active: make(map[headlessLane]*headlessCodexActiveTurn),
 
-			queues: make(map[string][]headlessCodexTurn),
+			queues: make(map[headlessLane][]headlessCodexTurn),
 		},
 	}
 

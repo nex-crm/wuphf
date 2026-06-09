@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Xmark } from "iconoir-react";
 
 import type { OfficeMember } from "../../api/client";
-import { createDM, post } from "../../api/client";
+import { post } from "../../api/client";
 import { listAgentLogTasks, type TaskLogSummary } from "../../api/tasks";
 import { useAgentStream } from "../../hooks/useAgentStream";
 import { useDefaultHarness } from "../../hooks/useConfig";
@@ -34,8 +34,6 @@ function routeIdentityKey(route: CurrentRoute): string {
   switch (route.kind) {
     case "channel":
       return `channel:${route.channelSlug}`;
-    case "dm":
-      return `dm:${route.agentSlug}`;
     case "app":
       return `app:${route.appId}`;
     case "task-board":
@@ -62,21 +60,20 @@ function routeIdentityKey(route: CurrentRoute): string {
       return "inbox";
     case "task-decision":
       return `task-decision:${route.taskId}`;
-    // Phase 3 — Issues surface
-    case "issues-list":
-      return "issues-list";
-    case "issue-detail":
-      return `issue-detail:${route.issueId}`;
-    case "issue-new":
-      return "issue-new";
-    case "agent-subspace":
-      return `agent-subspace:${route.agentSlug}/${route.tab}`;
+    case "task-new":
+      return "task-new";
+    case "agents":
+      return "agents";
+    case "agent-detail":
+      return `agent-detail:${route.agentSlug}`;
     case "skill-detail":
       return `skill-detail:${route.skillName}`;
     case "routine-detail":
       return `routine-detail:${route.routineSlug}`;
     case "routine-new":
       return "routine-new";
+    case "home":
+      return "home";
     case "unknown":
       return "unknown";
     default: {
@@ -207,7 +204,6 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   // which is destructive. Off-conversation routes hide the toggle entirely.
   const currentChannel = useChannelSlug();
   const queryClient = useQueryClient();
-  const [dmLoading, setDmLoading] = useState(false);
   const [view, setView] = useState<"stream" | "logs">("stream");
   const [toggling, setToggling] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -240,27 +236,15 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   // dispatch against a stale fallback channel.
   const canToggle = !isLead && currentChannel !== null;
 
-  async function handleOpenDM() {
-    setDmLoading(true);
-    // Optimistic navigation: take the user to the DM immediately. If
-    // createDM fails we surface a toast and let the user act — we do
-    // not auto-revert. An earlier href-equality guard couldn't tell
-    // whether the user had since back-navigated to the same DM
-    // intentionally, and stomped legit navigation in long-tail timing.
+  function handleOpenAgent() {
+    // Agents are reached via the Agents tool now: navigate to the
+    // per-agent config/detail page. Agents are no longer chat surfaces,
+    // so there is no DM channel to create.
     void router.navigate({
-      to: "/dm/$agentSlug",
+      to: "/agents/$agentSlug",
       params: { agentSlug: agent.slug },
     });
     setActiveAgentSlug(null);
-    try {
-      await createDM(agent.slug);
-      void queryClient.invalidateQueries({ queryKey: ["channels"] });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to open DM";
-      showNotice(message, "error");
-    } finally {
-      setDmLoading(false);
-    }
   }
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: handleToggleEnabled — existing cognitive complexity is baselined for a focused follow-up refactor.
@@ -449,10 +433,9 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
         <button
           type="button"
           className="btn btn-primary btn-sm"
-          onClick={handleOpenDM}
-          disabled={dmLoading}
+          onClick={handleOpenAgent}
         >
-          {dmLoading ? "Opening..." : "Open DM"}
+          Open agent
         </button>
         <button
           type="button"

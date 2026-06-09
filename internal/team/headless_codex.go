@@ -37,7 +37,8 @@ var (
 // turn runner. Tests substitute via setHeadlessCodexRunTurnForTest.
 func defaultHeadlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
 	if l != nil {
-		kind := l.targeter().MemberEffectiveProviderKind(slug)
+		// Per-task provider wins over the agent binding (then global default).
+		kind := l.effectiveProviderKindForAgent(ctx, slug)
 		switch {
 		case kind == provider.KindCodex:
 			return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
@@ -133,6 +134,35 @@ type headlessCodexActiveTurn struct {
 	WorkspaceSnapshot string
 }
 
+// headlessLane identifies one serialized dispatch lane. An agent used to have
+// exactly one lane (its slug); parallel instances split an agent into several
+// lanes so it can run more than one task at once. The key is the turn's
+// resolved git worktree path, so two turns share a lane — and therefore
+// serialize — exactly when they would write the same directory. Turns with no
+// isolated worktree (chat, office-mode, external) and all lead turns use the
+// agent's default lane (key ""), preserving today's per-agent serialization.
+// Keying on the workspace (not the task id) makes the scheduler intrinsically
+// collision-proof: distinct worktrees ⇒ distinct lanes ⇒ safe to run at once;
+// a shared worktree (e.g. a dependency reusing its parent's tree) ⇒ same lane
+// ⇒ serialized, regardless of how admission control routed the tasks.
+type headlessLane struct {
+	slug string
+	key  string // resolved worktree path, or "" for the agent's default lane
+}
+
+// Lane constructors. Three shapes exist; routing them through named
+// constructors keeps the empty-key default-lane intent and the "task:" key
+// prefix in one place instead of scattered struct literals (laneForTurn).
+func slugLane(slug string) headlessLane { return headlessLane{slug: slug} }
+
+func worktreeLane(slug, worktreePath string) headlessLane {
+	return headlessLane{slug: slug, key: strings.TrimSpace(worktreePath)}
+}
+
+func taskLane(slug, taskID string) headlessLane {
+	return headlessLane{slug: slug, key: "task:" + taskID}
+}
+
 // headlessWorkerPool groups the per-launcher headless-dispatch state
 // (PLAN.md §C7). All fields are lowercase package-internal — the pool
 // is never used outside `internal/team` and stays an embedded value
@@ -140,13 +170,18 @@ type headlessCodexActiveTurn struct {
 // in tests gets a usable pool with sane lazy-allocated maps. PR #320's
 // goroutine-leak fix relies on stopCh being lazily allocated under mu
 // before any worker can read it; that contract is preserved here.
+//
+// The maps are keyed by headlessLane (was: by slug). Slug-level coordination
+// (the lead queue-hold/wake, activeHeadlessSlugs) iterates lanes and groups by
+// lane.slug. deferredLead stays a single pointer because the lead always runs
+// in its one default lane.
 type headlessWorkerPool struct {
 	mu           sync.Mutex
 	ctx          context.Context
 	cancel       context.CancelFunc
-	workers      map[string]bool
-	active       map[string]*headlessCodexActiveTurn
-	queues       map[string][]headlessCodexTurn
+	workers      map[headlessLane]bool
+	active       map[headlessLane]*headlessCodexActiveTurn
+	queues       map[headlessLane][]headlessCodexTurn
 	deferredLead *headlessCodexTurn
 	stopCh       chan struct{}
 	workerWg     sync.WaitGroup

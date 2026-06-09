@@ -17,12 +17,13 @@ export function navigateToSidebarApp(appId: string): void {
     void router.navigate({ to: "/inbox" });
     return;
   }
-  if (appId === "issues") {
-    void router.navigate({ to: "/issues" });
+  // `issues` is a back-compat alias for the first-class Tasks surface.
+  if (appId === "tasks" || appId === "issues") {
+    void router.navigate({ to: "/tasks" });
     return;
   }
-  if (appId === "tasks") {
-    void router.navigate({ to: "/tasks" });
+  if (appId === "agents") {
+    void router.navigate({ to: "/agents" });
     return;
   }
   void router.navigate({

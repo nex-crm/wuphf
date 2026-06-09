@@ -26,6 +26,45 @@ func TestHandleTeamWikiWriteRequiresHumanRequestByDefault(t *testing.T) {
 	}
 }
 
+func TestHandleTeamWikiWriteLibrarianWritesDirectlyWithoutHumanRequest(t *testing.T) {
+	// Phase 4: the Librarian owns the wiki, so it writes canonical articles
+	// directly — no human_request gate (unlike every other agent, see
+	// TestHandleTeamWikiWriteRequiresHumanRequestByDefault).
+	srv, auth := stubBroker(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/wiki/write":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"path":          "team/runbooks/onboarding.md",
+				"commit_sha":    "def5678",
+				"bytes_written": 12,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer srv.Close()
+	withBrokerURL(t, srv.URL)
+	t.Setenv("WUPHF_ENABLE_AGENT_WIKI_WRITE", "") // admin bypass OFF
+	t.Setenv("WUPHF_AGENT_SLUG", "librarian")
+
+	res, _, err := handleTeamWikiWrite(context.Background(), nil, TeamWikiWriteArgs{
+		ArticlePath: "team/runbooks/onboarding.md",
+		Mode:        "create",
+		Content:     "# Onboarding\n",
+		CommitMsg:   "wiki: organize onboarding runbook",
+		// No HumanRequest — the Librarian does not need one.
+	})
+	if err != nil {
+		t.Fatalf("handler returned transport error: %v", err)
+	}
+	if isToolError(res) {
+		t.Fatalf("librarian direct write should bypass the human-request gate, got tool error: %s", toolErrorText(res))
+	}
+	if auth.lastPath != "/wiki/write" {
+		t.Fatalf("posted path = %q, want /wiki/write", auth.lastPath)
+	}
+}
+
 func TestHandleTeamWikiWriteHumanRequestedPostsToBroker(t *testing.T) {
 	srv, auth := stubBroker(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

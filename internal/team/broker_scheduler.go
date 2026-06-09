@@ -232,7 +232,7 @@ func (b *Broker) scheduleTaskLifecycleLocked(task *teamTask) {
 	recheckMinutes := config.ResolveTaskRecheckInterval()
 	reminderMinutes := config.ResolveTaskReminderInterval()
 	now := time.Now().UTC()
-	if strings.EqualFold(task.status, "done") || strings.EqualFold(task.status, "canceled") || strings.EqualFold(task.status, "cancelled") {
+	if strings.EqualFold(task.status, "done") || strings.EqualFold(task.status, "canceled") || strings.EqualFold(task.status, "cancelled") || strings.EqualFold(task.status, "archived") {
 		task.FollowUpAt = ""
 		task.ReminderAt = ""
 		task.RecheckAt = ""

@@ -175,16 +175,10 @@ function SidebarAgentRow({
 export function AgentList() {
   const { data: members = [] } = useOfficeMembers();
   const route = useCurrentRoute();
-  // v3 MVP — active row matches the agent subspace OR the legacy DM URL
-  // so the sidebar highlights stay coherent across both shapes during the
-  // migration. The DM branch keeps the floating-panel store affordances
-  // working until /agents/$slug fully replaces /dm/$slug.
+  // The active sidebar row matches the agent-detail page (/agents/$slug)
+  // so the highlight tracks the per-agent config surface.
   const activeAgentSlug =
-    route.kind === "agent-subspace"
-      ? route.agentSlug
-      : route.kind === "dm"
-        ? route.agentSlug
-        : null;
+    route.kind === "agent-detail" ? route.agentSlug : null;
   const wizard = useAgentWizard();
   const overflowRef = useOverflow<HTMLDivElement>();
   const defaultHarness = useDefaultHarness();

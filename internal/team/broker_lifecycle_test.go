@@ -47,6 +47,9 @@ func TestLifecycleForwardMapAllStates(t *testing.T) {
 		// treats the upstream as unresolved; reviewState="rejected"
 		// is the durable filter signal in the inbox.
 		{LifecycleStateRejected, "review", "rejected", "rejected", true},
+		// Archived: terminal, off-board. Blocked=false (not waiting on
+		// anything), ReviewState="approved" (clean terminal).
+		{LifecycleStateArchived, "archived", "approved", "archived", false},
 	}
 
 	// The canonical state list and the forward-map must agree on which

@@ -141,7 +141,14 @@ func (b *Broker) ResumeTask(taskID, actor, reason string) (teamTask, bool, error
 			task.Details = cleaned
 			changed = true
 		}
-		if task.blocked || strings.EqualFold(strings.TrimSpace(task.status), "blocked") {
+		// Honor real dependencies on resume. Clearing a transient block (a
+		// rate-limit cooldown, a capability self-heal) must not jump a task
+		// ahead of a declared dependency: a task with unresolved DependsOn stays
+		// blocked, and unblockDependentsLocked activates it when its dependency
+		// completes. This is the inverse of "non-dependent tasks run together" —
+		// dependent tasks do NOT. (Previously the now-removed exclusive-owner
+		// lane re-blocked here as a side effect; the gate is now explicit.)
+		if (task.blocked || strings.EqualFold(strings.TrimSpace(task.status), "blocked")) && !b.hasUnresolvedDepsLocked(task) {
 			targetState := LifecycleStateReady
 			if strings.TrimSpace(task.Owner) != "" {
 				targetState = LifecycleStateRunning
@@ -267,9 +274,23 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		return *existing, true, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Allocate the task ID before choosing the channel so we can name
+	// the per-task channel deterministically.
 	b.counter++
+	taskID := b.allocateIssueIDLocked()
+	// Mint a dedicated channel for new business-objective tasks that
+	// defaulted to "general".
+	if shouldMintPerTaskChannel(channel, &teamTask{
+		Title:   title,
+		Details: strings.TrimSpace(details),
+		Owner:   strings.TrimSpace(owner),
+	}) {
+		if ch := b.createPerTaskChannelLocked(taskID, title, strings.TrimSpace(owner), strings.TrimSpace(createdBy)); ch != nil {
+			channel = ch.Slug
+		}
+	}
 	task := teamTask{
-		ID:        b.allocateIssueIDLocked(),
+		ID:        taskID,
 		Channel:   channel,
 		Title:     title,
 		Details:   strings.TrimSpace(details),
@@ -567,17 +588,34 @@ func taskCanMatchScopedIdentity(task *teamTask, match taskReuseMatch) bool {
 	return strings.TrimSpace(match.PipelineID) != "" && strings.TrimSpace(task.PipelineID) != ""
 }
 
+// findReusableTaskLocked looks for an existing non-terminal task that
+// matches the given intent (title + owner + optional thread / scoped
+// identity).  The search is deliberately channel-agnostic: since each
+// new business-objective task now gets its own dedicated channel
+// (task-<id>), a duplicate create request that arrives against "general"
+// must still find the already-minted task in its per-task channel.
+// The Backup & Migration system task has a unique title so it is never
+// matched accidentally.
+//
+// Dedup scope (intentional, bounded): with no thread or scoped identity the
+// match is title + owner only, so two genuinely-distinct intents that share a
+// title AND owner can collapse into one. That over-match is bounded two ways —
+// terminal tasks are skipped (a finished same-title task is never reused; a
+// fresh one is minted), and the only collision that survives is between two
+// concurrently-active identical-title-and-owner tasks, which in practice is a
+// resubmission of the same intent (idempotent re-plan) — exactly the case the
+// channel-agnostic search exists to dedup. Callers that need precise identity
+// (distinct intents sharing a title) pass a ThreadID or a scoped identity
+// (PipelineID / SourceSignalID / SourceDecisionID), which narrows the match.
+// TestReuseIsChannelAgnostic and TestFindReusableTaskSkipsTerminal pin both
+// halves of this contract.
 func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
-	channel := normalizeChannelSlug(match.Channel)
 	title := strings.TrimSpace(match.Title)
 	threadID := strings.TrimSpace(match.ThreadID)
 	owner := strings.TrimSpace(match.Owner)
 	scopedIdentity := match.hasScopedIdentity()
 	for i := range b.tasks {
 		task := &b.tasks[i]
-		if normalizeChannelSlug(task.Channel) != channel {
-			continue
-		}
 		if isTerminalTeamTaskStatus(task.status) {
 			continue
 		}
@@ -618,7 +656,7 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 
 func isTerminalTeamTaskStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "done", "completed", "canceled", "cancelled":
+	case "done", "completed", "canceled", "cancelled", "archived":
 		return true
 	default:
 		return false

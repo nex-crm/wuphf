@@ -1,17 +1,14 @@
 import { useMatches } from "@tanstack/react-router";
 
 import {
-  agentSubspaceRoute,
-  agentSubspaceTabRoute,
+  agentDetailRoute,
+  agentsRoute,
   appRoute,
   appTaskDetailRoute,
   articleRoute,
   channelRoute,
-  dmRoute,
   inboxRoute,
-  issueDetailRoute,
-  issueNewRoute,
-  issuesRoute,
+  indexRoute,
   notebookAgentRoute,
   notebookEntryRoute,
   notebooksRoute,
@@ -21,32 +18,13 @@ import {
   skillDetailRoute,
   taskDecisionRoute,
   taskDetailRoute,
+  taskNewRoute,
   tasksRoute,
   wikiArticleRoute,
   wikiIndexRoute,
   wikiLookupRoute,
 } from "../lib/router";
-import { directChannelSlug, useAppStore } from "../stores/app";
-
-/**
- * v3 MVP — uniform per-agent subspace tabs.
- * The tab segment is optional in the URL; "chat" is the default.
- */
-export const AGENT_SUBSPACE_TABS = [
-  "chat",
-  "app",
-  "notebooks",
-  "skills",
-  "calendar",
-  "settings",
-] as const;
-export type AgentSubspaceTab = (typeof AGENT_SUBSPACE_TABS)[number];
-
-const AGENT_SUBSPACE_TAB_SET = new Set<string>(AGENT_SUBSPACE_TABS);
-
-export function isAgentSubspaceTab(value: string): value is AgentSubspaceTab {
-  return AGENT_SUBSPACE_TAB_SET.has(value);
-}
+import { useAppStore } from "../stores/app";
 
 /**
  * Discriminated union describing the matched leaf route. Replaces the
@@ -60,10 +38,12 @@ export function isAgentSubspaceTab(value: string): value is AgentSubspaceTab {
  */
 export type CurrentRoute =
   | { kind: "channel"; channelSlug: string }
-  | { kind: "dm"; agentSlug: string; channelSlug: string }
   | { kind: "app"; appId: string }
+  // New-task home composer (index route).
+  | { kind: "home" }
   | { kind: "task-board" }
   | { kind: "task-detail"; taskId: string }
+  | { kind: "task-new" }
   | { kind: "wiki" }
   | { kind: "wiki-article"; articlePath: string }
   | { kind: "wiki-lookup"; query: string | null }
@@ -74,12 +54,9 @@ export type CurrentRoute =
   | { kind: "article"; articleId: string }
   | { kind: "inbox" }
   | { kind: "task-decision"; taskId: string }
-  // Phase 3 — Issues surface
-  | { kind: "issues-list" }
-  | { kind: "issue-detail"; issueId: string }
-  | { kind: "issue-new" }
-  // v3 MVP — per-agent subspace shell.
-  | { kind: "agent-subspace"; agentSlug: string; tab: AgentSubspaceTab }
+  // Agents tool — roster grid + per-agent config/detail page.
+  | { kind: "agents" }
+  | { kind: "agent-detail"; agentSlug: string }
   // Full-screen skill detail editor + viewer.
   | { kind: "skill-detail"; skillName: string }
   | { kind: "routine-detail"; routineSlug: string }
@@ -93,7 +70,6 @@ interface ParamsShape {
   entrySlug?: string;
   taskId?: string;
   _splat?: string;
-  issueId?: string;
   articleId?: string;
   tab?: string;
   skillName?: string;
@@ -106,11 +82,12 @@ interface SearchShape {
 
 type RouteDeriver = (params: ParamsShape, search: SearchShape) => CurrentRoute;
 type CurrentRouteId =
+  | typeof indexRoute.id
   | typeof channelRoute.id
-  | typeof dmRoute.id
   | typeof appRoute.id
   | typeof tasksRoute.id
   | typeof taskDetailRoute.id
+  | typeof taskNewRoute.id
   | typeof appTaskDetailRoute.id
   | typeof wikiIndexRoute.id
   | typeof wikiLookupRoute.id
@@ -122,21 +99,19 @@ type CurrentRouteId =
   | typeof articleRoute.id
   | typeof inboxRoute.id
   | typeof taskDecisionRoute.id
-  | typeof issuesRoute.id
-  | typeof issueDetailRoute.id
-  | typeof issueNewRoute.id
-  | typeof agentSubspaceRoute.id
-  | typeof agentSubspaceTabRoute.id
+  | typeof agentsRoute.id
+  | typeof agentDetailRoute.id
   | typeof skillDetailRoute.id
   | typeof routineDetailRoute.id
   | typeof routineNewRoute.id;
 
 const CURRENT_ROUTE_IDS = [
+  indexRoute.id,
   channelRoute.id,
-  dmRoute.id,
   appRoute.id,
   tasksRoute.id,
   taskDetailRoute.id,
+  taskNewRoute.id,
   appTaskDetailRoute.id,
   wikiIndexRoute.id,
   wikiLookupRoute.id,
@@ -148,11 +123,8 @@ const CURRENT_ROUTE_IDS = [
   articleRoute.id,
   inboxRoute.id,
   taskDecisionRoute.id,
-  issuesRoute.id,
-  issueDetailRoute.id,
-  issueNewRoute.id,
-  agentSubspaceRoute.id,
-  agentSubspaceTabRoute.id,
+  agentsRoute.id,
+  agentDetailRoute.id,
   skillDetailRoute.id,
   routineDetailRoute.id,
   routineNewRoute.id,
@@ -165,24 +137,20 @@ function isCurrentRouteId(routeId: string): routeId is CurrentRouteId {
 }
 
 const ROUTE_DERIVERS = {
+  [indexRoute.id]: () => ({ kind: "home" }),
   [channelRoute.id]: (params) => ({
     kind: "channel",
     channelSlug: params.channelSlug ?? "general",
   }),
-  [dmRoute.id]: (params) => {
-    const agentSlug = params.agentSlug ?? "";
-    return {
-      kind: "dm",
-      agentSlug,
-      channelSlug: directChannelSlug(agentSlug),
-    };
-  },
   [appRoute.id]: (params) => ({ kind: "app", appId: params.appId ?? "" }),
   [tasksRoute.id]: () => ({ kind: "task-board" }),
   [taskDetailRoute.id]: (params) => ({
     kind: "task-detail",
     taskId: params.taskId ?? "",
   }),
+  [taskNewRoute.id]: () => ({ kind: "task-new" }),
+  // `/apps/tasks/$taskId` redirects before matching; the deriver mirrors
+  // taskDetail for completeness so the registry type stays exhaustive.
   [appTaskDetailRoute.id]: (params) => ({
     kind: "task-detail",
     taskId: params.taskId ?? "",
@@ -220,28 +188,12 @@ const ROUTE_DERIVERS = {
     kind: "task-decision",
     taskId: params.taskId ?? "",
   }),
-  // Phase 3 — Issues surface
-  [issuesRoute.id]: () => ({ kind: "issues-list" }),
-  [issueDetailRoute.id]: (params) => ({
-    kind: "issue-detail",
-    issueId: params.issueId ?? "",
-  }),
-  [issueNewRoute.id]: () => ({ kind: "issue-new" }),
-  // v3 MVP — agent subspace. Default tab = "chat".
-  [agentSubspaceRoute.id]: (params) => ({
-    kind: "agent-subspace",
+  // Agents tool — roster grid (/agents) + per-agent config (/agents/$slug).
+  [agentsRoute.id]: () => ({ kind: "agents" }),
+  [agentDetailRoute.id]: (params) => ({
+    kind: "agent-detail",
     agentSlug: params.agentSlug ?? "",
-    tab: "chat",
   }),
-  [agentSubspaceTabRoute.id]: (params) => {
-    const raw = typeof params.tab === "string" ? params.tab : "";
-    const tab: AgentSubspaceTab = isAgentSubspaceTab(raw) ? raw : "chat";
-    return {
-      kind: "agent-subspace",
-      agentSlug: params.agentSlug ?? "",
-      tab,
-    };
-  },
   [skillDetailRoute.id]: (params) => ({
     kind: "skill-detail",
     skillName: params.skillName ?? "",
@@ -284,7 +236,19 @@ export function useCurrentRoute(): CurrentRoute {
 export function useChannelSlug(): string | null {
   const route = useCurrentRoute();
   if (route.kind === "channel") return route.channelSlug;
-  if (route.kind === "dm") return route.channelSlug;
+  return null;
+}
+
+/**
+ * Resolve the task id for the currently-viewed task-detail route, or null
+ * when the matched route is anything else. Chat cards use this to detect
+ * when a Task pointer (created / lifecycle card) refers to the very task
+ * whose channel is already on screen, so a self-referential "Open →" can
+ * be suppressed (created card) or rendered inert (lifecycle card).
+ */
+export function useCurrentTaskId(): string | null {
+  const route = useCurrentRoute();
+  if (route.kind === "task-detail" && route.taskId) return route.taskId;
   return null;
 }
 
@@ -300,7 +264,6 @@ export function useFallbackChannelSlug(): string {
   const route = useCurrentRoute();
   const lastChannel = useAppStore((s) => s.lastConversationalChannel);
   if (route.kind === "channel") return route.channelSlug;
-  if (route.kind === "dm") return route.channelSlug;
   return lastChannel ?? "general";
 }
 
@@ -313,7 +276,7 @@ export function useFallbackChannelSlug(): string {
  *   - "wiki-lookup" for /wiki/lookup,
  *   - "notebooks" for any notebook route,
  *   - "reviews" for /reviews,
- *   - null when the matched route is a conversation (channel/dm) or
+ *   - null when the matched route is a conversation (channel) or
  *     unknown.
  */
 export function useCurrentApp(): string | null {
@@ -323,6 +286,7 @@ export function useCurrentApp(): string | null {
       return route.appId;
     case "task-board":
     case "task-detail":
+    case "task-new":
       return "tasks";
     case "wiki":
     case "wiki-article":
@@ -341,16 +305,14 @@ export function useCurrentApp(): string | null {
       return "inbox";
     case "task-decision":
       return "inbox";
-    case "issues-list":
-    case "issue-detail":
-    case "issue-new":
-      return "issues";
     case "routine-detail":
     case "routine-new":
       return "routines";
+    case "agents":
+    case "agent-detail":
+      return "agents";
+    case "home":
     case "channel":
-    case "dm":
-    case "agent-subspace":
     case "skill-detail":
     case "unknown":
       return null;

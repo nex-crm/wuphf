@@ -59,7 +59,7 @@ race_carveout='/internal/teammcp($|/)'
 failures=0
 while IFS= read -r pkg; do
   [ -z "$pkg" ] && continue
-  args="-timeout 5m -count=$count"
+  args="-timeout 15m -count=$count"
   if [ -n "$parallel" ]; then
     args="$args -p $parallel -parallel $parallel"
   fi

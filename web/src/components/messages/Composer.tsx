@@ -140,8 +140,12 @@ function emptyHistoryState(): HistoryState {
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
-export function Composer() {
-  const currentChannel = useChannelSlug() ?? "general";
+export function Composer({ channel }: { channel?: string } = {}) {
+  // Prefer an explicit channel (the task-detail chat passes the task's channel,
+  // where useChannelSlug() is null). Fall back to the channel route slug so the
+  // channel surface behaves exactly as before.
+  const routeChannel = useChannelSlug();
+  const currentChannel = channel ?? routeChannel ?? "general";
   const setLastMessageId = useAppStore((s) => s.setLastMessageId);
   const setChannelClearMarker = useAppStore((s) => s.setChannelClearMarker);
   const pendingComposerDraft = useAppStore((s) => s.pendingComposerDraft);

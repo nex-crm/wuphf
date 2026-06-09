@@ -28,9 +28,9 @@ const APP_CASES = [
   },
   {
     app: "routines",
-    label: "Routines",
+    label: "Scheduled Tasks",
     content:
-      /Loading routines|Could not load routines|No routines yet|Routines/i,
+      /Loading scheduled tasks|Could not load|No scheduled tasks|Scheduled Tasks/i,
   },
   {
     app: "skills",

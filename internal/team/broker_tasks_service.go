@@ -107,7 +107,7 @@ func (b *Broker) ListTasks(req TaskListRequest) (TaskListResponse, error) {
 		if !channelAllowed(taskChannel) {
 			continue
 		}
-		if task.status == "done" && !includeDone && statusFilter == "" {
+		if (task.status == "done" || task.status == "archived") && !includeDone && statusFilter == "" {
 			continue
 		}
 		if statusFilter != "" && task.status != statusFilter {

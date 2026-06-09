@@ -64,6 +64,7 @@ vi.mock("../../hooks/useConfig", () => ({
 
 vi.mock("../../routes/useCurrentRoute", () => ({
   useChannelSlug: () => "general",
+  useCurrentTaskId: () => null,
 }));
 
 describe("<MessageBubble> rich artifact references", () => {

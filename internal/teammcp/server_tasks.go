@@ -114,6 +114,15 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 		if parentID := strings.TrimSpace(args.ParentIssueID); parentID != "" {
 			payload["parent_issue_id"] = parentID
 		}
+		if effort := strings.TrimSpace(args.Effort); effort != "" {
+			payload["effort"] = effort
+		}
+		if prov := strings.TrimSpace(args.Provider); prov != "" {
+			payload["provider"] = prov
+		}
+		if model := strings.TrimSpace(args.Model); model != "" {
+			payload["model"] = model
+		}
 	}
 	switch action {
 	case "claim":
@@ -404,6 +413,9 @@ func handleTeamPlan(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlanAr
 		Details       string   `json:"details,omitempty"`
 		TaskType      string   `json:"task_type,omitempty"`
 		ExecutionMode string   `json:"execution_mode,omitempty"`
+		Effort        string   `json:"effort,omitempty"`
+		Provider      string   `json:"provider,omitempty"`
+		Model         string   `json:"model,omitempty"`
 		DependsOn     []string `json:"depends_on,omitempty"`
 	}
 	items := make([]planItem, 0, len(args.Tasks))
@@ -414,6 +426,9 @@ func handleTeamPlan(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlanAr
 			Details:       strings.TrimSpace(t.Details),
 			TaskType:      strings.TrimSpace(t.TaskType),
 			ExecutionMode: strings.TrimSpace(t.ExecutionMode),
+			Effort:        strings.TrimSpace(t.Effort),
+			Provider:      strings.TrimSpace(t.Provider),
+			Model:         strings.TrimSpace(t.Model),
 			DependsOn:     t.DependsOn,
 		})
 	}

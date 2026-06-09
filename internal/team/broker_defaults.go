@@ -33,12 +33,13 @@ func defaultOfficeMembers() []officeMember {
 	if err != nil || len(manifest.Members) == 0 {
 		manifest = company.DefaultManifest()
 	}
-	members := make([]officeMember, 0, len(manifest.Members))
+	members := make([]officeMember, 0, len(manifest.Members)+1)
 	for _, cfg := range manifest.Members {
 		builtIn := cfg.System || cfg.Slug == manifest.Lead || cfg.Slug == "ceo"
 		members = append(members, memberFromSpec(cfg, "wuphf", now, builtIn))
 	}
-	return members
+	// The Librarian is built-in, present in every workspace alongside the lead.
+	return ensureLibrarianMember(members)
 }
 
 func defaultOfficeMemberSlugs() []string {
@@ -146,44 +147,47 @@ func normalizeActorSlug(slug string) string {
 func (b *Broker) ensureDefaultChannelsLocked() {
 	if len(b.channels) == 0 {
 		b.channels = defaultTeamChannels()
-		return
-	}
-	hasGeneral := false
-	for _, ch := range b.channels {
-		if ch.Slug == "general" {
-			hasGeneral = true
-			break
-		}
-	}
-	if !hasGeneral {
-		for _, def := range defaultTeamChannels() {
-			if def.Slug == "general" {
-				b.channels = append([]teamChannel{def}, b.channels...)
+	} else {
+		hasGeneral := false
+		for _, ch := range b.channels {
+			if ch.Slug == "general" {
+				hasGeneral = true
 				break
 			}
 		}
-	}
-	// Merge surface metadata from manifest into existing channels
-	// (handles case where state was saved without surfaces by an older binary)
-	defaults := defaultTeamChannels()
-	for _, def := range defaults {
-		if def.Surface == nil {
-			continue
-		}
-		found := false
-		for i := range b.channels {
-			if b.channels[i].Slug == def.Slug {
-				if b.channels[i].Surface == nil {
-					b.channels[i].Surface = def.Surface
+		if !hasGeneral {
+			for _, def := range defaultTeamChannels() {
+				if def.Slug == "general" {
+					b.channels = append([]teamChannel{def}, b.channels...)
+					break
 				}
-				found = true
-				break
 			}
 		}
-		if !found {
-			b.channels = append(b.channels, def)
+		// Merge surface metadata from manifest into existing channels
+		// (handles case where state was saved without surfaces by an older binary)
+		defaults := defaultTeamChannels()
+		for _, def := range defaults {
+			if def.Surface == nil {
+				continue
+			}
+			found := false
+			for i := range b.channels {
+				if b.channels[i].Slug == def.Slug {
+					if b.channels[i].Surface == nil {
+						b.channels[i].Surface = def.Surface
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				b.channels = append(b.channels, def)
+			}
 		}
 	}
+	// Always seed the "Backup & Migration" system task that owns #general,
+	// now that we have guaranteed #general exists.
+	b.ensureBackupMigrationTaskLocked()
 }
 
 // ensureDefaultOfficeMembersLocked seeds the DefaultManifest roster ONLY when
@@ -224,12 +228,17 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		if member.Role == "" {
 			member.Role = member.Name
 		}
-		member.BuiltIn = member.Slug == "ceo"
+		member.BuiltIn = member.Slug == "ceo" || isLibrarianSlug(member.Slug)
 		member.Expertise = normalizeStringList(member.Expertise)
 		member.AllowedTools = normalizeStringList(member.AllowedTools)
 		normalizedMembers = append(normalizedMembers, member)
 	}
-	b.members = normalizedMembers
+	// Phase 6 migration: the Librarian (Pam) is a built-in agent like the CEO,
+	// added to every NEW workspace at seed time. Existing rosters loaded from
+	// disk predate her, and ensureDefaultOfficeMembersLocked only seeds when the
+	// roster is empty — so append her here on every load. Idempotent (no-op once
+	// present); the BuiltIn line above keeps her flag set on subsequent loads.
+	b.members = ensureLibrarianMember(normalizedMembers)
 	for i := range b.channels {
 		b.channels[i].Slug = normalizeChannelSlug(b.channels[i].Slug)
 		if strings.TrimSpace(b.channels[i].Name) == "" {
@@ -270,17 +279,17 @@ func (b *Broker) normalizeLoadedStateLocked() {
 			b.messages[i].Channel = "general"
 		}
 	}
-	for i := range b.agentIssues {
-		issueChannel := normalizeChannelSlug(channel.MigrateDMSlugString(b.agentIssues[i].Channel))
-		if issueChannel == "" {
-			issueChannel = "general"
+	for i := range b.incidents {
+		incChannel := normalizeChannelSlug(channel.MigrateDMSlugString(b.incidents[i].Channel))
+		if incChannel == "" {
+			incChannel = "general"
 		}
-		b.agentIssues[i].Channel = issueChannel
-		if strings.TrimSpace(b.agentIssues[i].UpdatedAt) == "" {
-			b.agentIssues[i].UpdatedAt = b.agentIssues[i].CreatedAt
+		b.incidents[i].Channel = incChannel
+		if strings.TrimSpace(b.incidents[i].UpdatedAt) == "" {
+			b.incidents[i].UpdatedAt = b.incidents[i].CreatedAt
 		}
-		if b.agentIssues[i].Count <= 0 {
-			b.agentIssues[i].Count = 1
+		if b.incidents[i].Count <= 0 {
+			b.incidents[i].Count = 1
 		}
 	}
 	for i := range b.tasks {

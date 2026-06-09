@@ -196,20 +196,22 @@ func (l *Launcher) activeHeadlessSlugs(except string) map[string]struct{} {
 	l.headless.mu.Lock()
 	defer l.headless.mu.Unlock()
 	out := map[string]struct{}{}
-	for workerSlug, queue := range l.headless.queues {
-		if workerSlug == except {
+	// An agent may now span several lanes; group by lane.slug so a slug counts
+	// as active when ANY of its lanes has queued or in-flight work.
+	for workerLane, queue := range l.headless.queues {
+		if workerLane.slug == except {
 			continue
 		}
 		if len(queue) > 0 {
-			out[workerSlug] = struct{}{}
+			out[workerLane.slug] = struct{}{}
 		}
 	}
-	for workerSlug, active := range l.headless.active {
-		if workerSlug == except {
+	for workerLane, active := range l.headless.active {
+		if workerLane.slug == except {
 			continue
 		}
 		if active != nil {
-			out[workerSlug] = struct{}{}
+			out[workerLane.slug] = struct{}{}
 		}
 	}
 	return out
@@ -244,7 +246,14 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 }
 
 func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog, task teamTask, content string) string {
-	return l.notifyCtx().BuildTaskExecutionPacket(slug, action, task, content)
+	packet := l.notifyCtx().BuildTaskExecutionPacket(slug, action, task, content)
+	// Plan mode (Phase 5): a task in Planning gets a plan-only directive in
+	// front of the packet so the owner writes a plan (to its notebook) and stops
+	// before executing.
+	if task.LifecycleState == LifecycleStatePlanning {
+		return planModeDirective(task) + packet
+	}
+	return packet
 }
 
 func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessage) {

@@ -43,17 +43,19 @@ import (
 // "## Eng review decisions → Architecture → Approval gate".
 var ErrIssueNotApproved = errors.New("issue not approved for dispatch")
 
-// isExecutableTeamTaskStatus reports whether a LifecycleState permits
-// dispatch of execution work (tool calls, code execution, file writes).
-// Only Running and Approved are executable; all other states — including
-// Drafting, Intake, Review, and ChangesRequested — must NOT trigger agent
-// execution turns.
+// isExecutableTeamTaskStatus reports whether a LifecycleState permits dispatch
+// of a turn to the owner. Running and Approved dispatch EXECUTION turns;
+// Planning dispatches a PLAN-ONLY turn (the owner writes a plan, does not change
+// the repo — enforced by the plan-only work packet, see taskNotificationContent).
+// All other states — Drafting, Intake, Review, ChangesRequested, etc. — must NOT
+// trigger any owner turn.
 //
-// This is the single chokepoint: every dispatch entry point in the broker
-// must call isExecutableTeamTaskStatus before enqueuing work. Comments are
-// always allowed in any state; only execution is gated.
+// This is the single chokepoint: every dispatch entry point in the broker must
+// call isExecutableTeamTaskStatus before enqueuing work. Comments are always
+// allowed in any state. Callers that must distinguish "plan only" from "execute"
+// check the state directly (Planning vs Running/Approved).
 func isExecutableTeamTaskStatus(s LifecycleState) bool {
-	return s == LifecycleStateRunning || s == LifecycleStateApproved
+	return s == LifecycleStateRunning || s == LifecycleStateApproved || s == LifecycleStatePlanning
 }
 
 // lifecycleMigrationOnce ensures migrateLifecycleStatesLocked runs at most
@@ -92,18 +94,39 @@ const (
 	// because the work did not land.
 	LifecycleStateRejected LifecycleState = "rejected"
 
-	// LifecycleStateDrafting is the Phase 3 Issue-surface pre-Intake mode.
-	// Agents can post comments on a Drafting issue; they CANNOT dispatch
-	// tool calls or execution work. The broker dispatch gate is enforced
-	// in Phase 4 (broker_lifecycle_dispatch_test.go + isExecutableTeamTaskStatus).
-	// Phase 3 only registers the state value so it round-trips cleanly
-	// through JSON and the lifecycle index.
+	// LifecycleStateDrafting is the pre-Intake mode for a task awaiting
+	// activation. Agents can post comments on a Drafting task; they CANNOT
+	// dispatch tool calls or execution work — isExecutableTeamTaskStatus is
+	// the dispatch gate that refuses execution turns in this state (tested in
+	// broker_lifecycle_dispatch_test.go). The state value also round-trips
+	// cleanly through JSON and the lifecycle index.
 	//
 	// PipelineStage choice: "draft" (matches the spec's `draft` phase name
 	// in the CEO state machine and is shorter/clearer than "drafting" at
 	// the data layer; the presentation layer uses "Drafting" for the UI
 	// label via STATE_PILL_TOKENS on the frontend).
 	LifecycleStateDrafting LifecycleState = "drafting"
+
+	// LifecycleStatePlanning is the autonomous-planning phase of "Plan mode"
+	// (Phase 5). A Plan-first task enters Planning so the owner is DISPATCHED to
+	// write a plan (into its own notebook) before any execution — the work
+	// packet is plan-only (explore, write the plan, post a summary, do NOT change
+	// the repo, then stop and await approval). It is executable (the owner must
+	// be woken to plan), Status="in_progress" so it shows as actively worked, and
+	// maps to the in_progress display stage. "Approve & Start" transitions
+	// Planning→Running, after which the owner executes against its own plan. A
+	// Plan-first=OFF task skips this state and goes straight to Running.
+	LifecycleStatePlanning LifecycleState = "planning"
+
+	// LifecycleStateArchived marks work that has been intentionally moved
+	// off the active board. Archived tasks are terminal and are excluded
+	// from default active listings (same gate as done/approved), but are
+	// returned when the caller passes include_done=true so the board's
+	// Archive column can fetch them. Distinct from Rejected (reviewer
+	// rejected the work as un-landable) and Approved (work landed). An
+	// archived task can be reopened via the reopen action which resets
+	// it to Drafting.
+	LifecycleStateArchived LifecycleState = "archived"
 )
 
 // normalizeLegacyLifecycleStateName maps pre-Phase-1 lifecycle state
@@ -139,6 +162,7 @@ func CanonicalLifecycleStates() []LifecycleState {
 		LifecycleStateChangesRequested,
 		LifecycleStateApproved,
 		LifecycleStateRejected,
+		LifecycleStateArchived,
 	}
 }
 
@@ -174,10 +198,13 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 	// Drafting: pre-Intake mode where agents comment but cannot dispatch.
 	// PipelineStage="draft" matches the spec's draft phase name. Status="open"
 	// keeps the task visible in the open-tasks view; Blocked=false so it is
-	// not confused with a waiting-on-upstream state. Phase 4 will add a
-	// dispatch guard (isExecutableTeamTaskStatus) that refuses tool calls
-	// for tasks in this state.
-	LifecycleStateDrafting:          {PipelineStage: "draft", ReviewState: "pending_review", Status: "open", Blocked: false},
+	// not confused with a waiting-on-upstream state. isExecutableTeamTaskStatus
+	// (above) is the dispatch guard that refuses execution turns for tasks in
+	// this state.
+	LifecycleStateDrafting: {PipelineStage: "draft", ReviewState: "pending_review", Status: "open", Blocked: false},
+	// Planning: owner is dispatched to write a plan. Status="in_progress" +
+	// executable so the planning turn fires; PipelineStage="plan".
+	LifecycleStatePlanning:          {PipelineStage: "plan", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
 	LifecycleStateIntake:            {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
 	LifecycleStateReady:             {PipelineStage: "triage", ReviewState: "pending_review", Status: "open", Blocked: false},
 	LifecycleStateRunning:           {PipelineStage: "implement", ReviewState: "pending_review", Status: "in_progress", Blocked: false},
@@ -192,6 +219,12 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 	// downstream tasks STAY blocked permanently. Status="rejected" is
 	// NOT in isTerminalTeamTaskStatus, which is what we want.
 	LifecycleStateRejected: {PipelineStage: "review", ReviewState: "rejected", Status: "rejected", Blocked: true},
+	// Archived: terminal, off-board. Status="archived" is added to
+	// isTerminalTeamTaskStatus so archived tasks are treated as closed
+	// (not re-dispatched). Blocked=false because the task is not waiting
+	// on anything; it is simply off the active board. ReviewState="approved"
+	// mirrors the approved path (clean terminal, not a failure).
+	LifecycleStateArchived: {PipelineStage: "archived", ReviewState: "approved", Status: "archived", Blocked: false},
 }
 
 // derivedFieldsFor returns the forward-map row for a state, plus a flag
@@ -201,6 +234,56 @@ var lifecycleDerivedFields = map[LifecycleState]lifecycleDerivedFieldsRow{
 func derivedFieldsFor(state LifecycleState) (lifecycleDerivedFieldsRow, bool) {
 	row, ok := lifecycleDerivedFields[state]
 	return row, ok
+}
+
+// LifecycleStage is the 7-value display grouping that collapses the 12
+// execution substrate LifecycleState values into the user-facing board
+// columns. The stage concept lives only in Go-side canonical use and
+// tests; the web frontend derives its own grouping from the lifecycle_state
+// wire field and does NOT receive a stage field over the wire.
+type LifecycleStage string
+
+const (
+	// StageScheduled is reserved for routines/scheduled work. No
+	// LifecycleState maps to StageScheduled — it comes from a different
+	// scheduling primitive. lifecycleStageFor never returns StageScheduled.
+	StageScheduled  LifecycleStage = "scheduled"
+	StageBacklog    LifecycleStage = "backlog"
+	StageInProgress LifecycleStage = "in_progress"
+	StageBlocked    LifecycleStage = "blocked"
+	StageNeedsHuman LifecycleStage = "needs_human"
+	StageDone       LifecycleStage = "done"
+	StageArchive    LifecycleStage = "archive"
+)
+
+// lifecycleStageFor maps a LifecycleState to its display LifecycleStage.
+// The mapping is:
+//   - backlog     ← drafting, intake, ready, unknown
+//   - in_progress ← planning, running, review, changes_requested
+//   - blocked     ← blocked_on_pr_merge, queued_behind_owner
+//   - needs_human ← decision
+//   - done        ← approved
+//   - archive     ← archived, rejected
+//
+// StageScheduled is never returned (it comes from a different scheduling
+// primitive). Any unmapped state defaults to StageBacklog.
+func lifecycleStageFor(s LifecycleState) LifecycleStage {
+	switch s {
+	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady, LifecycleStateUnknown:
+		return StageBacklog
+	case LifecycleStatePlanning, LifecycleStateRunning, LifecycleStateReview, LifecycleStateChangesRequested:
+		return StageInProgress
+	case LifecycleStateBlockedOnPRMerge, LifecycleStateQueuedBehindOwner:
+		return StageBlocked
+	case LifecycleStateDecision:
+		return StageNeedsHuman
+	case LifecycleStateApproved:
+		return StageDone
+	case LifecycleStateArchived, LifecycleStateRejected:
+		return StageArchive
+	default:
+		return StageBacklog
+	}
 }
 
 // lifecycleMigrationKey is the legacy (pipelineStage, reviewState, status,
@@ -260,6 +343,12 @@ var lifecycleMigrationMap = map[lifecycleMigrationKey]LifecycleState{
 	// dedicated cancelled state.
 	{PipelineStage: "", ReviewState: "", Status: "canceled", Blocked: false}:  LifecycleStateApproved,
 	{PipelineStage: "", ReviewState: "", Status: "cancelled", Blocked: false}: LifecycleStateApproved,
+
+	// Archived — tasks stored on disk with status="archived" (bare or
+	// canonical tuple) resolve to LifecycleStateArchived so pre-existing
+	// broker-state.json files load cleanly after the archive action ships.
+	{PipelineStage: "", ReviewState: "", Status: "archived", Blocked: false}:                 LifecycleStateArchived,
+	{PipelineStage: "archived", ReviewState: "approved", Status: "archived", Blocked: false}: LifecycleStateArchived,
 }
 
 // deriveLifecycleStateFromLegacy looks the legacy tuple up in the
@@ -300,8 +389,20 @@ func (b *Broker) migrateLifecycleStatesLocked() {
 		}
 		derived := deriveLifecycleStateFromLegacy(task.pipelineStage, task.reviewState, task.status, task.blocked)
 		if derived == LifecycleStateUnknown {
-			log.Printf("broker: lifecycle migration: unknown tuple for task %q (pipeline_stage=%q review_state=%q status=%q blocked=%v) — falling back to %s",
-				task.ID, task.pipelineStage, task.reviewState, task.status, task.blocked, LifecycleStateUnknown)
+			// The on-disk pipeline_stage/review_state may use a newer
+			// pipeline-template scheme (e.g. ActiveStage="act") that postdates
+			// this map, or normalizeTaskPlan may have filled them in before
+			// migration runs. Fall back to the bare status signal, which the
+			// map covers for ad-hoc tasks — this rescues clean in-flight / open
+			// / done / archived tasks regardless of the template stage names,
+			// while genuinely contradictory tuples (e.g. status=in_progress AND
+			// blocked) stay Unknown and are logged for operator triage.
+			if byStatus := deriveLifecycleStateFromLegacy("", "", task.status, task.blocked); byStatus != LifecycleStateUnknown {
+				derived = byStatus
+			} else {
+				log.Printf("broker: lifecycle migration: unknown tuple for task %q (pipeline_stage=%q review_state=%q status=%q blocked=%v) — falling back to %s",
+					task.ID, task.pipelineStage, task.reviewState, task.status, task.blocked, LifecycleStateUnknown)
+			}
 		}
 		task.LifecycleState = derived
 		b.indexLifecycleLocked(task.ID, "", derived)
@@ -341,6 +442,18 @@ func (b *Broker) reindexTaskLifecycleFromLegacyLocked(task *teamTask) {
 			derived = LifecycleStateRunning
 		default:
 			derived = LifecycleStateReady
+		}
+	}
+	// Plan mode (Phase 5): legacy fields can't distinguish Planning
+	// (status=in_progress, stage=plan) from Running, so once a task is in
+	// Planning keep it there across legacy reindexes while it is still
+	// pre-execution. Only the explicit Approve transition (Planning→Running) or
+	// a submit/terminal action — which change the legacy status away from
+	// in_progress/open — move it out of Planning.
+	if task.LifecycleState == LifecycleStatePlanning {
+		switch strings.ToLower(strings.TrimSpace(task.status)) {
+		case "", "open", "in_progress":
+			derived = LifecycleStatePlanning
 		}
 	}
 	// This helper is used after legacy mutation paths have deliberately

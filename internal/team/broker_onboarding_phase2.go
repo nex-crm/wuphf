@@ -343,6 +343,9 @@ func (b *Broker) seedMinimalScratchLocked(s *onboarding.State) error {
 	b.messages = nil
 	b.counter = 0
 	b.lastTaggedAt = make(map[string]time.Time)
+	// Seed the "Backup & Migration" system task that owns #general so the
+	// ~141 fallback call sites that post to "general" keep working.
+	b.ensureBackupMigrationTaskLocked()
 
 	// Signal subscribers that the office roster was replaced.
 	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "office_reseeded"})

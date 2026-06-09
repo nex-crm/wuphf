@@ -4,7 +4,7 @@ import {
   collectReactErrors,
   expectNoReactErrors,
   resetBroker,
-  waitForShellReady,
+  waitForReactMount,
 } from "./_helpers";
 
 // Regression pins for behaviours that broke during the TanStack Router
@@ -42,7 +42,12 @@ async function seedTestChannel(page: Page): Promise<void> {
 
 async function gotoShell(page: Page, route: string): Promise<void> {
   await page.goto(route);
-  await waitForShellReady(page);
+  await waitForReactMount(page);
+  // Wait on the always-present sidebar, not the channel composer: the index
+  // route ("/") now renders the home composer (no `.composer-input`), and
+  // these tests assert channel-specific composer placeholders explicitly
+  // where they need them.
+  await expect(page.locator("aside.sidebar")).toBeVisible({ timeout: 10_000 });
 }
 
 test.afterEach(async ({ request }) => {
@@ -320,65 +325,5 @@ test.describe("PR #634 review pins", () => {
     );
 
     await expectNoReactErrors(page, getErrors, "not-found link");
-  });
-
-  test("hash with a query-string suffix doesn't bump unread for the active channel", async ({
-    page,
-  }) => {
-    // Repro: useBrokerEvents.activeBrokerChannel parsed
-    // window.location.hash with a bare path.split("/"). When the hash
-    // carried a search-string suffix
-    // (e.g. "#/channels/general?modal=settings") the slug bled into the
-    // next segment as "general?modal=settings", the comparison failed,
-    // and every inbound message bumped #general's unread counter while
-    // the user was staring at it. The fix splits on "?" before parsing.
-    //
-    // We can't easily fake a future suffix the app will write (no code
-    // generates that yet). But we can simulate it: visit #general, then
-    // append "?ts=…" via location.hash and post a message. Pre-fix:
-    // unread for #general bumps to 1. Post-fix: stays 0.
-    const getErrors = collectReactErrors(page);
-    await gotoShell(page, "/");
-    await gotoShell(page, "/#/channels/general");
-
-    // Append a synthetic query string to the hash. Avoids `page.goto`
-    // round-trips so the channel's unread state isn't reset by a fresh
-    // mount. The SSE handler reads `window.location.hash` at the moment
-    // a message arrives (not on hashchange), so all we need is for the
-    // hash mutation to be observable in-page before the broker post —
-    // wait deterministically for that property instead of a fixed
-    // sleep (which is both flaky and forbidden by repo memory).
-    await page.evaluate(() => {
-      window.location.hash = "#/channels/general?probe=1";
-    });
-    await page.waitForFunction(
-      () => window.location.hash === "#/channels/general?probe=1",
-    );
-
-    const payload = `unread-suppression probe ${Date.now()}`;
-    const post = await page.request.post("/api/messages", {
-      data: { from: "ceo", channel: "general", content: payload },
-    });
-    expect(post.ok()).toBeTruthy();
-
-    // The freshly-posted message must render in the feed (the human IS
-    // watching #general). If unread bumped, MessageFeed would still show
-    // the message but the sidebar would carry a non-zero badge.
-    await expect(
-      page.locator(".message", { hasText: payload }).first(),
-    ).toBeVisible({ timeout: 10_000 });
-
-    // Sidebar #general entry — read its unread badge. ChannelList renders
-    // the count inside .sidebar-channel; absence means zero.
-    const generalRow = page
-      .locator(".sidebar-channels button", { hasText: /general/i })
-      .first();
-    await expect(generalRow).toBeVisible();
-    const badge = generalRow.locator(".sidebar-badge");
-    // 0 unread → no badge. Anything else means the query-string slipped
-    // past the parser.
-    await expect(badge).toHaveCount(0);
-
-    await expectNoReactErrors(page, getErrors, "unread suppression");
   });
 });

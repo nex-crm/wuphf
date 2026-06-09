@@ -41,7 +41,10 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		return fmt.Errorf("broker is not running")
 	}
 
-	kind := l.targeter().MemberEffectiveProviderKind(slug)
+	// Use the turn's task-aware kind (the same resolution the dispatch switch
+	// used to route here) so Lookup and the model override below agree with the
+	// per-task provider, not just the agent binding.
+	kind := l.effectiveProviderKindForAgent(ctx, slug)
 	entry := provider.Lookup(kind)
 	if entry == nil || entry.StreamFn == nil {
 		return fmt.Errorf("openai-compat runtime %q is not registered", kind)
@@ -68,7 +71,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// repeat calls, so a single lookup is sufficient for both the bridge-
 	// failure notice and the per-chunk pushes in the loop callbacks below.
 	var agentStream *agentStreamBuffer
-	activeTaskID := l.agentActiveTaskID(slug)
+	activeTaskID := l.turnTaskIDForCtx(ctx, slug)
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}
@@ -126,10 +129,14 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// Use the ctx-aware StreamFn so cancellation propagates all the way
 	// to the HTTP request — without this a cancelled turn would pin the
 	// local server's inference slot until the model finishes generating.
-	// Per-agent ProviderBinding.Model wins over env/config/default —
-	// this is what makes agents like ceo run kimi-k2.6 while planner
-	// runs deepseek-v4-pro on the same install-wide ollama endpoint.
-	modelOverride := strings.TrimSpace(l.broker.MemberProviderBinding(slug).Model)
+	// Per-task model wins over the agent binding (model lives on the task);
+	// the binding then wins over env/config/default — this is what makes
+	// agents like ceo run kimi-k2.6 while planner runs deepseek-v4-pro on the
+	// same install-wide ollama endpoint.
+	modelOverride := l.taskModelForKind(ctx, slug, kind)
+	if modelOverride == "" {
+		modelOverride = strings.TrimSpace(l.broker.MemberProviderBinding(slug).Model)
+	}
 	streamFn := provider.NewOpenAICompatStreamFnWithCtxModelAndAgent(ctx, kind, modelOverride, slug)
 
 	// Live-chat relay streams the model's user-facing text to the channel

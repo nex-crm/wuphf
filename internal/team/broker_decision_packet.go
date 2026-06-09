@@ -756,6 +756,29 @@ func (a recordDecisionAction) IsCanonical() bool {
 // surfaces it as 400 to distinguish from internal failures (500).
 var ErrUnknownDecisionAction = errors.New("record decision: action is not canonical")
 
+// decisionActor identifies who is recording a task decision and, critically,
+// whether they are a human. Human-ness is resolved ONCE — at the request
+// boundary (handleTaskDecision distinguishes a remote human session from a
+// shared-broker-token caller) or by the slug-based wrappers below — and then
+// carried as a typed bool, so the Plan-mode gate in recordTaskDecisionInternal
+// asserts on actor.isHuman instead of re-deriving it from a slug string. That
+// closes the isHumanMessageSender("") == true footgun on the gate's hot path
+// and makes the soft gate's trust boundary explicit.
+type decisionActor struct {
+	slug    string
+	isHuman bool
+}
+
+// decisionActorFromSlug derives a decisionActor from a slug alone, preserving
+// the legacy attribution rule (a human-sender slug is a human; an empty slug is
+// not — isHumanMessageSender("") is true, so the empty check is load-bearing).
+// Used by the string-based public wrappers; the HTTP boundary builds its actor
+// directly so it never round-trips human-ness through a spoofable string.
+func decisionActorFromSlug(slug string) decisionActor {
+	slug = strings.TrimSpace(slug)
+	return decisionActor{slug: slug, isHuman: slug != "" && isHumanMessageSender(slug)}
+}
+
 // RecordTaskDecisionWithComment is the same as RecordTaskDecision but
 // also appends an optional human-authored comment to the Decision
 // Packet's spec.feedback log. The feedback append, the lifecycle
@@ -769,7 +792,7 @@ func (b *Broker) RecordTaskDecisionWithComment(taskID, rawAction, comment, autho
 	if actorSlug == "" {
 		actorSlug = "human"
 	}
-	return b.recordTaskDecisionInternal(taskID, rawAction, actorSlug, comment)
+	return b.recordTaskDecisionInternal(taskID, rawAction, decisionActorFromSlug(actorSlug), comment)
 }
 
 // RecordTaskDecision records a decision attributed to actorSlug. When
@@ -778,14 +801,14 @@ func (b *Broker) RecordTaskDecisionWithComment(taskID, rawAction, comment, autho
 // requestActor.Slug; internal callers (timeout sweeper, tests) can
 // pass "" to opt into the system fallback.
 func (b *Broker) RecordTaskDecision(taskID, rawAction, actorSlug string) error {
-	return b.recordTaskDecisionInternal(taskID, rawAction, actorSlug, "")
+	return b.recordTaskDecisionInternal(taskID, rawAction, decisionActorFromSlug(actorSlug), "")
 }
 
 // recordTaskDecisionInternal is the shared chokepoint behind
 // RecordTaskDecision and RecordTaskDecisionWithComment. It transitions
 // the lifecycle, stamps the packet, optionally appends a FeedbackItem,
 // then persists / emits / broadcasts — all inside one locked section.
-func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, comment string) error {
+func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor decisionActor, comment string) error {
 	if b == nil {
 		return fmt.Errorf("record decision: nil broker")
 	}
@@ -808,7 +831,7 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 	if !action.IsCanonical() {
 		return fmt.Errorf("%w: %q", ErrUnknownDecisionAction, rawAction)
 	}
-	actorSlug = strings.TrimSpace(actorSlug)
+	actorSlug := strings.TrimSpace(actor.slug)
 	if actorSlug == "" {
 		actorSlug = "system"
 	}
@@ -840,13 +863,30 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 		// to Running (start work) instead of Approved (terminal); see
 		// lifecycleStateForDecisionAction for the rationale.
 		var currentState LifecycleState
+		var planFirst bool
 		if task := b.findTaskByIDLocked(taskID); task != nil {
 			currentState = task.LifecycleState
+			planFirst = task.PlanFirst
 		}
-		target, reason = lifecycleStateForDecisionAction(action, currentState)
+		// Plan-mode (Phase 5) human-only gate — single-sourced here so it
+		// covers EVERY approval path into recordTaskDecisionInternal: the
+		// /tasks/{id}/decision HTTP endpoint (the "Approve plan & Start"
+		// button, but also any broker-token caller), the team_task MCP path,
+		// and internal callers like RecordTaskDecision(id, "approve", "ceo").
+		// A plan awaiting approval may only be started by the human; an agent
+		// or the CEO approving on the human's behalf defeats the gate.
+		if action == RecordDecisionApprove && currentState == LifecycleStatePlanning &&
+			!actor.isHuman {
+			return fmt.Errorf("record decision: task %s is in Plan mode — only the human can approve the plan and start work (actor %q)", taskID, actorSlug)
+		}
+		target, reason = lifecycleStateForDecisionAction(action, currentState, planFirst)
 		if action == RecordDecisionApprove && currentState == LifecycleStateDrafting {
 			wasApprovingFromDrafting = true
 		}
+		// Approving from Drafting (activate) or Planning (plan approved) starts
+		// the owner working — on a plan turn or an execution turn respectively.
+		startingWork := action == RecordDecisionApprove &&
+			(currentState == LifecycleStateDrafting || currentState == LifecycleStatePlanning)
 		if _, err := b.transitionLifecycleLocked(taskID, target, reason); err != nil {
 			return fmt.Errorf("record decision: transition: %w", err)
 		}
@@ -859,9 +899,17 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 		// enqueueHeadlessTurnForAgent(owner). Mirrors the status-change
 		// emit in broker_tasks_lifecycle.go. Only on Drafting->Running
 		// (start work); terminal Approved decisions don't need a wake.
-		if wasApprovingFromDrafting {
+		if startingWork {
 			if task := b.findTaskByIDLocked(taskID); task != nil {
-				b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), "system", truncateSummary(task.Title+" [approved]", 140), task.ID)
+				if isAutoOwner(task.Owner) {
+					// Activating an "auto"-assigned backlog task: there is no
+					// real owner to wake yet, so ask the CEO to assign a
+					// specialist (which reassigns → dispatches, honoring Plan
+					// mode via the reassign path).
+					b.requestAutoAssignmentLocked(task, actorSlug)
+				} else {
+					b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), "system", truncateSummary(task.Title+" [approved]", 140), task.ID)
+				}
 			}
 		}
 		packet := b.getOrInitPacketLocked(taskID)
@@ -938,11 +986,21 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction, actorSlug, commen
 // disambiguation, clicking "Approve & Start" on a Drafting issue would
 // land in the terminal Approved state and write a misleading wiki
 // "decision" with no execution.
-func lifecycleStateForDecisionAction(action recordDecisionAction, currentState LifecycleState) (LifecycleState, string) {
+func lifecycleStateForDecisionAction(action recordDecisionAction, currentState LifecycleState, planFirst bool) (LifecycleState, string) {
 	switch action {
 	case RecordDecisionApprove:
-		if currentState == LifecycleStateDrafting {
+		switch currentState {
+		case LifecycleStateDrafting:
+			// Activating a parked/backlog task. Plan-first tasks plan first
+			// (owner writes a plan, then a second Approve & Start runs it);
+			// non-plan-first tasks go straight to execution.
+			if planFirst {
+				return LifecycleStatePlanning, "human activated task into planning"
+			}
 			return LifecycleStateRunning, "human approved drafting issue and started work"
+		case LifecycleStatePlanning:
+			// The owner's plan was approved — start executing it.
+			return LifecycleStateRunning, "human approved plan and started work"
 		}
 		return LifecycleStateApproved, "human approved decision"
 	case RecordDecisionRequestChanges:

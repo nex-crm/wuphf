@@ -3,7 +3,7 @@
 ## Who and why
 
 **Persona:** Riley Walsh, product engineer at a 30-person startup.
-Cabinet ICP. Skeptical of agent tools after a bad year of "confident
+skeptical-engineer ICP. Skeptical of agent tools after a bad year of "confident
 nonsense". They are willing to try one mundane, specific goal and see
 whether the agent surfaces a real engineering question rather than
 producing a wall of pseudo-code.

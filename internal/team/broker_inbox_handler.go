@@ -390,6 +390,12 @@ func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, acto
 	var body struct {
 		Action  string `json:"action"`
 		Comment string `json:"comment,omitempty"`
+		// CreatedBy lets the local web UI (which shares the broker token with
+		// agents and is therefore indistinguishable by auth) self-attribute as
+		// the human, mirroring the team_task created_by field. Only an explicit
+		// human value clears the Plan-mode approval gate below; agents that omit
+		// it fall back to "owner" and are blocked.
+		CreatedBy string `json:"created_by,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
@@ -418,11 +424,26 @@ func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, acto
 		return
 	}
 
-	authorSlug := strings.TrimSpace(actor.Slug)
-	if actor.Kind == requestActorKindBroker {
-		authorSlug = "owner"
+	// Resolve the decision actor for the audit trail AND the Plan-mode gate in
+	// recordTaskDecisionInternal. A human session (remote share cookie) is a
+	// human. A broker-token caller is the local UI or an agent — both share the
+	// token, so we trust only an explicit human created_by from the body (the
+	// local UI sends it) and otherwise attribute a non-human "owner". Building
+	// the typed actor here, at the boundary, lets the gate assert on isHuman
+	// instead of re-deriving human-ness from a slug string downstream.
+	dActor := decisionActor{slug: "owner", isHuman: false}
+	switch actor.Kind {
+	case requestActorKindHuman:
+		dActor = decisionActor{slug: humanMessageSender(actor.Slug), isHuman: true}
+	default:
+		// isHumanMessageSender("") is true, so require a non-empty value before
+		// honoring it — otherwise a broker-token caller that omits created_by
+		// (an agent) would be mis-attributed as human.
+		if bodyAuthor := strings.TrimSpace(body.CreatedBy); bodyAuthor != "" && isHumanMessageSender(bodyAuthor) {
+			dActor = decisionActor{slug: bodyAuthor, isHuman: true}
+		}
 	}
-	if err := b.RecordTaskDecisionWithComment(id, action, comment, authorSlug); err != nil {
+	if err := b.recordTaskDecisionInternal(id, action, dActor, comment); err != nil {
 		if errors.Is(err, ErrUnknownDecisionAction) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return

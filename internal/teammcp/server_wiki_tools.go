@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/nex-crm/wuphf/internal/team"
 )
 
 const humanWikiDelegationMaxAge = 24 * time.Hour
@@ -31,7 +33,12 @@ func handleTeamWikiWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamW
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	if !adminDirectWikiWriteBypassEnabled() {
+	// The Librarian owns the wiki (Phase 4): writing, formatting, and organizing
+	// canonical articles is its job, so it writes directly without the per-write
+	// human-delegation gate that other agents need. Other agents still go
+	// through notebook_write -> notebook_promote -> @librarian review, or pass a
+	// human_request for a one-off direct write.
+	if !adminDirectWikiWriteBypassEnabled() && !strings.EqualFold(strings.TrimSpace(slug), team.LibrarianSlug) {
 		if err := verifyHumanWikiWriteDelegation(ctx, slug, args.HumanRequest); err != nil {
 			return toolError(err), nil, nil
 		}

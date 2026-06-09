@@ -25,38 +25,30 @@ async function expectCanonicalRoute(
 }
 
 test.describe("canonical route matrix", () => {
-  test("index redirects to the CEO subspace", async ({ page }) => {
+  test("index renders the new-task home composer", async ({ page }) => {
     const getErrors = collectReactErrors(page);
     await gotoRoute(page, "/");
 
-    // v3 MVP default landing is the CEO's subspace (Chat tab), not #general
-    // (see indexRoute.beforeLoad in lib/router.ts). Channels are demoted to
-    // "Legacy".
-    await expect(page).toHaveURL(/#\/agents\/ceo$/);
-    await expect(page.getByTestId("agent-subspace")).toBeVisible({
+    // Tasks-as-primary landing: the index route renders the new-task home
+    // composer in place (no redirect to a subspace) so the founder can
+    // describe an outcome and file it. The composer heading rendering at the
+    // root URL is the proof it landed (a redirect would mount another
+    // surface). See indexRoute in lib/router.ts.
+    await expect(page).toHaveURL(/localhost:\d+\/(#\/?)?$/);
+    await expect(page.getByText(/What do you want to get done/i)).toBeVisible({
       timeout: 10_000,
     });
-    await expectNoReactErrors(page, getErrors, "while redirecting /");
+    await expectNoReactErrors(page, getErrors, "while rendering /");
   });
 
   test("conversation routes mount their message surfaces", async ({ page }) => {
+    // The /dm/$agent route was removed in the task-scoped restructure (DMs
+    // fold into task channels). The channel conversation surface remains.
     await expectCanonicalRoute(page, "/#/channels/general", async (p) => {
       await expect(p.locator(".composer-input")).toHaveAttribute(
         "placeholder",
         "Message #general",
       );
-    });
-
-    await expectCanonicalRoute(page, "/#/dm/pm", async (p) => {
-      await expect(p.locator(".composer-input")).toHaveAttribute(
-        "placeholder",
-        "Message #human__pm",
-      );
-      // The DM workbench surfaces the agent's SSE feed under a "Live stream"
-      // collapsible section (see AgentWorkbenchPane). The title is the
-      // user-visible affordance proving the stream surface mounted on the
-      // DM route.
-      await expect(p.getByText("Live stream")).toBeVisible();
     });
   });
 
@@ -78,35 +70,37 @@ test.describe("canonical route matrix", () => {
     }
   });
 
-  test("legacy /tasks URLs redirect to the Issues surface", async ({
+  test("legacy /issues URLs redirect to the Tasks surface", async ({
     page,
   }) => {
-    // Tasks were consolidated into Issues (#1002): top-level /tasks and
-    // /tasks/$id redirect to the Issues list, which renders IssuesList
-    // (kanban or its empty state). The /apps/tasks app-panel still mounts
-    // separately and is covered by the app-panel matrix test above.
-    for (const route of ["/#/tasks", "/#/tasks/task-7"]) {
+    // Tasks-as-primary reversed the earlier Issues consolidation: /tasks is
+    // now canonical and the legacy /issues routes redirect to the /tasks board,
+    // /tasks/new, and /tasks/$id detail (see legacyIssues* in lib/router.ts).
+    // Assert the EXACT target (anchored $): a previous bug nested new/$id under
+    // legacyIssuesRoute, whose beforeLoad redirect shadowed them so BOTH landed
+    // on the /tasks board — a loose /#\/tasks/ match would not have caught it.
+    const cases: Array<[string, RegExp]> = [
+      ["/#/issues", /#\/tasks$/],
+      ["/#/issues/new", /#\/tasks\/new$/],
+      ["/#/issues/OFFICE-7", /#\/tasks\/OFFICE-7$/],
+    ];
+    for (const [route, expected] of cases) {
       await page.goto(route);
-      await expect(page).toHaveURL(/#\/issues$/, { timeout: 10_000 });
-      await expect(
-        page.locator("[data-testid^='issues-list']").first(),
-      ).toBeVisible({ timeout: 10_000 });
+      await expect(page).toHaveURL(expected, { timeout: 10_000 });
       await expect(page.getByTestId("route-not-found")).toHaveCount(0);
     }
   });
 
-  test("legacy workbench URLs redirect through to the Issues surface", async ({
+  test("legacy workbench URLs redirect through to the Tasks surface", async ({
     page,
   }) => {
     const getErrors = collectReactErrors(page);
     await gotoRoute(page, "/#/apps/workbench/pm/tasks/task-7");
 
-    // workbench → legacy task redirect → Issues surface (#1002 consolidation).
-    await expect(page).toHaveURL(/#\/issues/, { timeout: 10_000 });
+    // workbench → legacy task redirect → /tasks/$id detail (see
+    // legacyWorkbenchTaskRoute in lib/router.ts).
+    await expect(page).toHaveURL(/#\/tasks/, { timeout: 10_000 });
     await expect(page.getByTestId("route-not-found")).toHaveCount(0);
-    await expect(
-      page.locator("[data-testid^='issues-list']").first(),
-    ).toBeVisible({ timeout: 10_000 });
     await expectNoReactErrors(
       page,
       getErrors,
@@ -157,5 +151,46 @@ test.describe("canonical route matrix", () => {
       await expect(page.getByTestId("route-not-found")).toBeVisible();
       await expectNoReactErrors(page, getErrors, `while rendering ${route}`);
     }
+  });
+
+  test("a business task's channel redirects to its task; #general stays", async ({
+    page,
+    request,
+  }) => {
+    // ARCH-H1: a business task's channel is reached through the task, not as a
+    // parallel chat surface, so /channels/$slug for a business-owned channel
+    // redirects to the task detail. System channels (#general, owned by the
+    // archived Backup & Migration task) stay directly readable.
+    const resp = await request.post("/api/task-plan", {
+      data: {
+        channel: "general",
+        created_by: "human",
+        tasks: [{ title: "channel redirect probe", assignee: "ceo" }],
+      },
+    });
+    expect(resp.ok(), `task-plan failed: ${resp.status()}`).toBeTruthy();
+    const created = (await resp.json()) as {
+      tasks?: { id?: string; channel?: string }[];
+    };
+    const biz = created.tasks?.[0];
+    expect(
+      biz?.channel,
+      "business task should mint its own channel",
+    ).toBeTruthy();
+    expect(biz?.id, "business task should have an id").toBeTruthy();
+
+    // Business channel → redirects to its task detail.
+    await page.goto(`/#/channels/${biz?.channel}`);
+    await expect(page).toHaveURL(new RegExp(`#/tasks/${biz?.id}`), {
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId("route-not-found")).toHaveCount(0);
+
+    // System channel #general → stays on the conversation view (no redirect).
+    await gotoRoute(page, "/#/channels/general");
+    await expect(page.locator(".composer-input")).toHaveAttribute(
+      "placeholder",
+      "Message #general",
+    );
   });
 });

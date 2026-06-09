@@ -35,7 +35,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	}
 
 	workspaceDir := strings.TrimSpace(l.cwd)
-	if worktreeDir := l.headlessTaskWorkspaceDir(slug); worktreeDir != "" {
+	if worktreeDir := l.headlessTaskWorkspaceDir(slug, headlessTurnTaskID(ctx)); worktreeDir != "" {
 		workspaceDir = worktreeDir
 	}
 	workspaceDir = normalizeHeadlessWorkspaceDir(workspaceDir)
@@ -53,7 +53,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	// sandbox rejects both apply_patch and shell writes even with
 	// workspace-write, which leaves coding tasks permanently unable to land
 	// edits. Keep office/non-editing turns on workspace-write.
-	if l.unsafe || l.headlessCodexNeedsDangerousBypass(slug) {
+	if l.unsafe || l.headlessCodexNeedsDangerousBypass(ctx, slug) {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	} else {
 		args = append(args, "-a", "never", "-s", "workspace-write")
@@ -67,8 +67,14 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		"--color", "never",
 		"--json",
 	)
-	if model := strings.TrimSpace(l.codexModelForAgent(slug)); model != "" {
+	if model := strings.TrimSpace(l.codexModelForAgent(ctx, slug)); model != "" {
 		args = append(args, "--model", model)
+	}
+	// Per-task reasoning effort: when the active task carries a composer-set
+	// effort that codex accepts, pass it as `-c model_reasoning_effort=<level>`.
+	// Empty/unknown normalises away so codex keeps the model default.
+	if effort := normalizeCodexEffort(l.activeTaskEffort(ctx, slug)); effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+effort)
 	}
 	for _, override := range overrides {
 		args = append(args, "-c", override)
@@ -95,7 +101,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	// The ReadCodexJSONStream parser doesn't emit streaming events for exec mode's
 	// item.started/item.completed format, so we pipe raw lines directly.
 	var agentStream *agentStreamBuffer
-	taskID := l.agentActiveTaskID(slug)
+	taskID := l.turnTaskIDForCtx(ctx, slug)
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}
@@ -330,7 +336,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderCodex, slug, taskID, summary, "", metricsSnap, codexUsageToTokenUsage(result.Usage))
 	emitHeadlessManifest(agentStream, turnID, HeadlessProviderCodex, slug, taskID, "", turnToolNames, turnTextLen, metricsSnap, codexUsageToTokenUsage(result.Usage))
 	if l.broker != nil && (result.Usage.InputTokens != 0 || result.Usage.OutputTokens != 0 || result.Usage.CacheReadTokens != 0 || result.Usage.CacheCreationTokens != 0 || result.Usage.CostUSD != 0) {
-		l.broker.RecordAgentUsage(slug, l.codexModelForAgent(slug), result.Usage)
+		l.broker.RecordAgentUsage(slug, l.codexModelForAgent(ctx, slug), result.Usage)
 	}
 	relay.Flush()
 	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
@@ -359,11 +365,14 @@ func codexUsageToTokenUsage(u provider.ClaudeUsage) *headlessTokenUsage {
 	return &headlessTokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 }
 
-func (l *Launcher) headlessCodexNeedsDangerousBypass(slug string) bool {
+func (l *Launcher) headlessCodexNeedsDangerousBypass(ctx context.Context, slug string) bool {
 	if l == nil || l.broker == nil {
 		return false
 	}
-	task := l.agentActiveTask(slug)
+	// Resolve THIS turn's task: with parallel instances an agent can run a
+	// worktree turn and a chat/office turn at once, and only the worktree turn
+	// should get the sandbox bypass.
+	task := l.turnTaskForCtx(ctx, slug)
 	if task == nil {
 		return false
 	}
@@ -582,11 +591,21 @@ func (l *Launcher) headlessCodexWorkspaceCacheDir(workspaceDir string) string {
 	return filepath.Join(base, ".wuphf", "cache")
 }
 
-func (l *Launcher) headlessTaskWorkspaceDir(slug string) string {
+// headlessTaskWorkspaceDir resolves the git worktree a turn should run in.
+// taskID is the running turn's task (from the turn record / ctx); it disambiguates
+// when an agent has several in_progress tasks. An empty taskID falls back to the
+// agent's first in_progress task for non-turn / single-task callers.
+func (l *Launcher) headlessTaskWorkspaceDir(slug, taskID string) string {
 	if l == nil || l.broker == nil {
 		return ""
 	}
-	task := l.agentActiveTask(slug)
+	var task *teamTask
+	if taskID = strings.TrimSpace(taskID); taskID != "" {
+		task = l.broker.TaskByID(taskID)
+	}
+	if task == nil {
+		task = l.agentActiveTask(slug)
+	}
 	if task == nil {
 		return ""
 	}
@@ -977,7 +996,12 @@ func codexToolProgressDetail(toolName string) string {
 // switch-back if the per-agent binding wasn't fully cleared. In practice
 // the AgentProfilePanel save flow keeps Model and Kind aligned, but
 // belt-and-suspenders matches how headlessClaudeModel reads its binding.
-func (l *Launcher) codexModelForAgent(slug string) string {
+func (l *Launcher) codexModelForAgent(ctx context.Context, slug string) string {
+	// Per-task model wins over the agent binding (the model lives on the task,
+	// not the agent). Only when the task's provider is codex.
+	if model := l.taskModelForKind(ctx, slug, provider.KindCodex); model != "" {
+		return model
+	}
 	if l != nil && l.broker != nil {
 		binding := l.broker.MemberProviderBinding(slug)
 		if binding.Kind == "codex" {

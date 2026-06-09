@@ -2,11 +2,12 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
 
 import {
+  agentDetailRoute,
+  agentsRoute,
   appRoute,
   appTaskDetailRoute,
   channelRoute,
   createAppRouter,
-  dmRoute,
   inboxRoute,
   indexRoute,
   legacyWorkbenchAgentRoute,
@@ -44,7 +45,10 @@ function unique<T>(values: readonly T[]): T[] {
 describe("route registry", () => {
   it("keeps app panel ids unique and validated", () => {
     expect(unique(APP_PANEL_IDS)).toHaveLength(APP_PANEL_IDS.length);
-    expect(isAppPanelId("tasks")).toBe(true);
+    expect(isAppPanelId("console")).toBe(true);
+    // `tasks` is now a first-class surface (lives at /tasks), not an
+    // /apps/$id panel.
+    expect(isAppPanelId("tasks")).toBe(false);
     expect(isAppPanelId("wiki")).toBe(false);
     expect(isAppPanelId("notebooks")).toBe(false);
   });
@@ -80,6 +84,7 @@ describe("route registry", () => {
   it("recognises first-class app ids that live outside /apps", () => {
     expect(isFirstClassAppId("wiki")).toBe(true);
     expect(isFirstClassAppId("inbox")).toBe(true);
+    expect(isFirstClassAppId("tasks")).toBe(true);
     expect(isFirstClassAppId("console")).toBe(false);
   });
 
@@ -97,7 +102,8 @@ describe("TanStack route tree", () => {
   const expectedLeafRoutes = [
     ["/", indexRoute.id],
     ["/channels/launch", channelRoute.id],
-    ["/dm/pm", dmRoute.id],
+    ["/agents", agentsRoute.id],
+    ["/agents/pm", agentDetailRoute.id],
     ["/apps/tasks", appRoute.id],
     ["/tasks", tasksRoute.id],
     ["/tasks/task-7", taskDetailRoute.id],

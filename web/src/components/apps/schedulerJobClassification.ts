@@ -1,4 +1,16 @@
 import type { SchedulerJob } from "../../api/client";
+import { routineOwner } from "./routines/routineModel";
+
+/**
+ * True when a routine is broker/system-managed (internal plumbing — e.g.
+ * "Nex insights", "Wiki archive sweep", follow-up reminders) rather than
+ * something the operator created. System routines are hidden by default on
+ * the Routines surface and never shown on the work board, where they would
+ * otherwise bury the operator's actual tasks under cron noise.
+ */
+export function isSystemRoutine(job: SchedulerJob): boolean {
+  return routineOwner(job).kind === "system";
+}
 
 /**
  * True when a scheduler job is a recurring *routine* — a broker-managed

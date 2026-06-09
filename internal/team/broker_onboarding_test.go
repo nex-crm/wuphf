@@ -204,7 +204,8 @@ func TestOnboardingCompleteHonorsAgentFilter(t *testing.T) {
 
 // TestOnboardingCompleteAgentsEmptySeedsLeadOnly verifies that an empty
 // agents array (user unchecked every toggle) seeds only the blueprint's
-// lead and posts a system message explaining the fallback.
+// lead (plus the built-in Librarian, which is always present) and posts a
+// system message explaining the fallback.
 func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	b := newTestBroker(t)
@@ -213,10 +214,9 @@ func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	}
 
 	b.mu.Lock()
-	memberCount := len(b.members)
-	var leadSlug string
-	if memberCount == 1 {
-		leadSlug = b.members[0].Slug
+	slugs := make([]string, 0, len(b.members))
+	for _, m := range b.members {
+		slugs = append(slugs, m.Slug)
 	}
 	var foundSystemMsg bool
 	for _, msg := range b.messages {
@@ -227,11 +227,9 @@ func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	if memberCount != 1 {
-		t.Fatalf("expected lead-only roster (1 member), got %d", memberCount)
-	}
-	if leadSlug != "ceo" {
-		t.Errorf("expected lead slug ceo, got %q", leadSlug)
+	// Lead + the always-present built-in Librarian.
+	if len(slugs) != 2 || slugs[0] != "ceo" || slugs[1] != LibrarianSlug {
+		t.Fatalf("expected lead + librarian roster [ceo %s], got %v", LibrarianSlug, slugs)
 	}
 	if !foundSystemMsg {
 		t.Errorf("expected system message explaining lead-only fallback; messages seen")
@@ -280,7 +278,9 @@ func TestOnboardingCompleteFromScratchHonorsSelectedFoundingAgents(t *testing.T)
 	}
 	b.mu.Unlock()
 
-	want := []string{"ceo", "founding-engineer"}
+	// Selected founding agents, plus the always-present built-in Librarian
+	// (appended last).
+	want := []string{"ceo", "founding-engineer", LibrarianSlug}
 	if len(slugs) != len(want) {
 		t.Fatalf("from-scratch selected roster got %v, want %v", slugs, want)
 	}
@@ -328,8 +328,10 @@ func TestBlankSlateMembersExplicitLeadOnlySelectionStaysLeadOnly(t *testing.T) {
 
 	members := blankSlateOfficeMembersFromBlueprint(blueprint, []string{"operator"})
 
-	if len(members) != 1 || members[0].Slug != "operator" {
-		t.Fatalf("explicit lead-only selection got %+v, want only operator", members)
+	// Lead-only selection keeps just the lead — plus the always-present
+	// built-in Librarian (appended last).
+	if len(members) != 2 || members[0].Slug != "operator" || members[1].Slug != LibrarianSlug {
+		t.Fatalf("explicit lead-only selection got %+v, want [operator %s]", members, LibrarianSlug)
 	}
 }
 
@@ -460,6 +462,9 @@ func TestTaskIDsUseBlueprintPrefix(t *testing.T) {
 	b.mu.Lock()
 	ids := make([]string, 0, len(b.tasks))
 	for _, tk := range b.tasks {
+		if tk.System {
+			continue // skip permanent system tasks (e.g. task-general)
+		}
 		ids = append(ids, tk.ID)
 	}
 	b.mu.Unlock()

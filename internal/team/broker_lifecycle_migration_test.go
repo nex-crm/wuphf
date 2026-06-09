@@ -25,9 +25,9 @@ func TestLifecycleMigrationCartesianSweep(t *testing.T) {
 	// LifecycleState. Any tuple outside the canonical set must cleanly
 	// fall through to LifecycleStateUnknown — never to a partial or
 	// surprising in-between value.
-	pipelineStages := []string{"", "triage", "implement", "review", "ship"}
+	pipelineStages := []string{"", "triage", "implement", "review", "ship", "archived"}
 	reviewStates := []string{"", "pending_review", "ready_for_review", "approved", "not_required"}
-	statuses := []string{"", "open", "in_progress", "review", "blocked", "done", "completed", "canceled", "cancelled"}
+	statuses := []string{"", "open", "in_progress", "review", "blocked", "done", "completed", "canceled", "cancelled", "archived"}
 	blockedValues := []bool{false, true}
 
 	// Sanity: all canonical migration map keys must resolve to a canonical

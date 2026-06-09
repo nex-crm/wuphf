@@ -33,7 +33,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 
 	args := []string{
-		"--model", l.headlessClaudeModel(slug),
+		"--model", l.headlessClaudeModel(ctx, slug),
 		"--print", "-",
 		"--output-format", "stream-json",
 		"--verbose",
@@ -54,11 +54,19 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	args = append(args, strings.Fields(l.resolvePermissionFlags(slug))...)
 
-	// Workspace isolation: coding agents get their own git worktree.
+	// Per-task reasoning effort: when the active task carries a composer-set
+	// effort that claude accepts, pass it as `--effort <level>`. Empty/unknown
+	// normalises away so the CLI keeps its default (high).
+	if effort := normalizeClaudeEffort(l.activeTaskEffort(ctx, slug)); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+
+	// Workspace isolation: coding agents get their own git worktree. Resolve the
+	// worktree for THIS turn's task (via ctx) so a parallel instance writes its
+	// own per-task worktree instead of whichever in_progress task is first.
 	worktreeDir := ""
 	if codingAgentSlugs[slug] && l.broker != nil {
-		task := l.agentActiveTask(slug)
-		if task != nil && strings.TrimSpace(task.ID) != "" {
+		if task := l.turnTaskForCtx(ctx, slug); task != nil && strings.TrimSpace(task.ID) != "" {
 			if wPath, _, err := prepareTaskWorktree(task.ID); err == nil {
 				worktreeDir = wPath
 			}
@@ -100,7 +108,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 
 	// Pipe raw stdout to the agent stream for the web UI's live output pane.
 	var agentStream *agentStreamBuffer
-	taskID := l.agentActiveTaskID(slug)
+	taskID := l.turnTaskIDForCtx(ctx, slug)
 	if l.broker != nil {
 		agentStream = l.broker.AgentStream(slug)
 	}
@@ -259,7 +267,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	emitHeadlessTerminalWithTurn(agentStream, turnID, HeadlessProviderClaude, slug, taskID, summary, "", metrics, claudeUsageToTokenUsage(result.Usage))
 	emitHeadlessManifest(agentStream, turnID, HeadlessProviderClaude, slug, taskID, "", turnToolNames, turnTextLen, metrics, claudeUsageToTokenUsage(result.Usage))
 	if l.broker != nil {
-		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(slug), result.Usage)
+		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(ctx, slug), result.Usage)
 	}
 	relay.Flush()
 	if text := strings.TrimSpace(result.FinalMessage); text != "" {
@@ -274,7 +282,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	return nil
 }
 
-func (l *Launcher) headlessClaudeModel(slug string) string {
+func (l *Launcher) headlessClaudeModel(ctx context.Context, slug string) string {
 	// Per-agent override wins: when the user picks a specific model in the
 	// AgentProfilePanel runtime section (or AgentWizard), that's the
 	// model the next dispatch must use. Without this check the picker
@@ -289,6 +297,11 @@ func (l *Launcher) headlessClaudeModel(slug string) string {
 	// (see AgentProfilePanel save path), so the most common edge cases
 	// are already prevented at the source, but the kind check here is
 	// belt-and-suspenders.
+	// Per-task model wins over the agent binding (the model lives on the task,
+	// not the agent). Only when the task's provider is claude-code.
+	if model := l.taskModelForKind(ctx, slug, provider.KindClaudeCode); model != "" {
+		return model
+	}
 	if l != nil && l.broker != nil {
 		binding := l.broker.MemberProviderBinding(slug)
 		if binding.Kind == "claude-code" {
