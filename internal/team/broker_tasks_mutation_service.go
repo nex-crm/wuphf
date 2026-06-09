@@ -18,6 +18,9 @@ const (
 	TaskMutationConflict       TaskMutationErrorKind = "conflict"
 	TaskMutationWorktreeFailed TaskMutationErrorKind = "worktree_failed"
 	TaskMutationPersistFailed  TaskMutationErrorKind = "persist_failed"
+	// TaskMutationVerificationFailed marks a complete/approve blocked by a
+	// failing definition-of-done check (task_verification.go, U1.1).
+	TaskMutationVerificationFailed TaskMutationErrorKind = "verification_failed"
 )
 
 type TaskMutationError struct {
@@ -283,6 +286,14 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		channel = "general"
 	}
 
+	// U1.1 verification gate: a complete/approve on a task with a required
+	// definition-of-done check must pass that check first. Runs BEFORE the
+	// lock below because checks execute external commands (lock discipline
+	// in task_verification.go).
+	if err := b.gateTaskCompletionVerification(body); err != nil {
+		return TaskResponse{}, err
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -413,6 +424,11 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				channel = ch.Slug
 			}
 		}
+		verification, verr := normalizeTaskVerification(body.VerificationKind, body.VerificationSpec, body.VerificationRequired)
+		if verr != nil {
+			rollbackTask()
+			return TaskResponse{}, taskMutationError(TaskMutationInvalid, verr.Error(), nil)
+		}
 		task := teamTask{
 			ID:               taskID,
 			Channel:          channel,
@@ -432,6 +448,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			WorktreeBranch:   strings.TrimSpace(body.WorktreeBranch),
 			DependsOn:        trimTaskDependencies(body.DependsOn),
 			ParentIssueID:    strings.TrimSpace(body.ParentIssueID),
+			Verification:     verification,
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		}

@@ -17,28 +17,34 @@ type TaskListRequest struct {
 }
 
 type TaskPostRequest struct {
-	Action                       string   `json:"action"`
-	Channel                      string   `json:"channel"`
-	ID                           string   `json:"id"`
-	Title                        string   `json:"title"`
-	Details                      string   `json:"details"`
-	Owner                        string   `json:"owner"`
-	CreatedBy                    string   `json:"created_by"`
-	ThreadID                     string   `json:"thread_id"`
-	TaskType                     string   `json:"task_type"`
-	PipelineID                   string   `json:"pipeline_id"`
-	ExecutionMode                string   `json:"execution_mode"`
-	ReviewState                  string   `json:"review_state"`
-	SourceSignalID               string   `json:"source_signal_id"`
-	SourceDecisionID             string   `json:"source_decision_id"`
-	WorktreePath                 string   `json:"worktree_path"`
-	WorktreeBranch               string   `json:"worktree_branch"`
-	DependsOn                    []string `json:"depends_on"`
-	ParentIssueID                string   `json:"parent_issue_id"`
-	MemoryWorkflowOverride       bool     `json:"memory_workflow_override"`
-	MemoryWorkflowOverrideActor  string   `json:"memory_workflow_override_actor"`
-	MemoryWorkflowOverrideReason string   `json:"memory_workflow_override_reason"`
-	OverrideReason               string   `json:"override_reason"`
+	Action           string   `json:"action"`
+	Channel          string   `json:"channel"`
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	Details          string   `json:"details"`
+	Owner            string   `json:"owner"`
+	CreatedBy        string   `json:"created_by"`
+	ThreadID         string   `json:"thread_id"`
+	TaskType         string   `json:"task_type"`
+	PipelineID       string   `json:"pipeline_id"`
+	ExecutionMode    string   `json:"execution_mode"`
+	ReviewState      string   `json:"review_state"`
+	SourceSignalID   string   `json:"source_signal_id"`
+	SourceDecisionID string   `json:"source_decision_id"`
+	WorktreePath     string   `json:"worktree_path"`
+	WorktreeBranch   string   `json:"worktree_branch"`
+	DependsOn        []string `json:"depends_on"`
+	ParentIssueID    string   `json:"parent_issue_id"`
+	// VerificationKind/Spec/Required set the machine-checkable definition
+	// of done on create (U1.1, task_verification.go). Kind is one of
+	// command|artifact|url|none.
+	VerificationKind             string `json:"verification_kind,omitempty"`
+	VerificationSpec             string `json:"verification_spec,omitempty"`
+	VerificationRequired         bool   `json:"verification_required,omitempty"`
+	MemoryWorkflowOverride       bool   `json:"memory_workflow_override"`
+	MemoryWorkflowOverrideActor  string `json:"memory_workflow_override_actor"`
+	MemoryWorkflowOverrideReason string `json:"memory_workflow_override_reason"`
+	OverrideReason               string `json:"override_reason"`
 }
 
 type TaskAckRequest struct {

@@ -114,6 +114,11 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 		if parentID := strings.TrimSpace(args.ParentIssueID); parentID != "" {
 			payload["parent_issue_id"] = parentID
 		}
+		if vk := strings.TrimSpace(args.VerificationKind); vk != "" {
+			payload["verification_kind"] = vk
+			payload["verification_spec"] = strings.TrimSpace(args.VerificationSpec)
+			payload["verification_required"] = args.VerificationRequired
+		}
 		if effort := strings.TrimSpace(args.Effort); effort != "" {
 			payload["effort"] = effort
 		}

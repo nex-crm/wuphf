@@ -255,6 +255,9 @@ type TeamTaskArgs struct {
 	Provider      string   `json:"provider,omitempty" jsonschema:"Optional per-task LLM runtime kind (claude-code, codex, opencode, …). The model/provider is a property of the task, not the agent; dispatch prefers it over the owner's binding. Omit to inherit the owner's runtime."`
 	Model         string   `json:"model,omitempty" jsonschema:"Optional per-task model id for the chosen provider (e.g. claude-opus-4-8, gpt-5.5). Omit to inherit the owner's binding or the install default."`
 	DependsOn     []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task must wait for before starting (create action only)"`
+	VerificationKind     string `json:"verification_kind,omitempty" jsonschema:"Machine-checkable definition of done (create action only). One of: command (shell command that must exit 0), artifact (file path or glob that must exist non-empty in the task worktree), url (http(s) URL that must answer 2xx), none. Set this on every task whose outcome can be checked mechanically — a test command for code, an artifact path for documents."`
+	VerificationSpec     string `json:"verification_spec,omitempty" jsonschema:"The check itself: the shell command, artifact path/glob, or URL for verification_kind"`
+	VerificationRequired bool   `json:"verification_required,omitempty" jsonschema:"When true the broker runs the check on complete/approve and BLOCKS the transition until it passes. Prefer true whenever a reliable check exists."`
 	ParentIssueID string   `json:"parent_issue_id,omitempty" jsonschema:"Parent Issue id when this is a sub-issue created INSIDE an existing Issue (create action only). Leave empty for top-level Issues. Sub-issues inherit the parent's channel and surface under the parent on the Issue detail view."`
 	MySlug        string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }

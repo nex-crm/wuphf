@@ -156,6 +156,26 @@ func newNotifyCtx(l *Launcher) *notificationContextBuilder {
 			}
 			return l.broker.TaskByID(id)
 		},
+		searchLearnings: func(query string, limit int) []LearningSearchResult {
+			if l.broker == nil {
+				return nil
+			}
+			return relevantLearnings(l.broker.TeamLearningLog(), query, limit)
+		},
+		searchWiki: func(ctx context.Context, query string, topK int) []SearchHit {
+			if l.broker == nil {
+				return nil
+			}
+			idx := l.broker.WikiIndex()
+			if idx == nil {
+				return nil
+			}
+			hits, err := idx.Search(ctx, query, topK)
+			if err != nil {
+				return nil
+			}
+			return hits
+		},
 	}
 }
 

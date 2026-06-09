@@ -18,6 +18,7 @@ package team
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -80,12 +81,30 @@ func (r *OfficeEvalReport) add(job, check string, pass bool, detail, knownGap st
 	})
 }
 
+// launcherForBrokerFixture builds a bare ceo+eng launcher bound to the
+// given broker — enough for packet construction in evals and tests without
+// pane/tmux state.
+func launcherForBrokerFixture(b *Broker) *Launcher {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "eng", Name: "Engineer"},
+			},
+		},
+	}
+	l.installBroker(b)
+	return l
+}
+
 // officeEvalFixture is one scratch office: an in-process broker with a wiki
 // worker + learning log, and a bare launcher bound to it for packet builds.
 type officeEvalFixture struct {
-	broker   *Broker
-	launcher *Launcher
-	cleanup  func()
+	broker     *Broker
+	launcher   *Launcher
+	scratchDir string
+	cleanup    func()
 }
 
 func newOfficeEvalFixture(dir string) (*officeEvalFixture, error) {
@@ -112,20 +131,12 @@ func newOfficeEvalFixture(dir string) (*officeEvalFixture, error) {
 	b.mu.Unlock()
 	b.ensureTeamLearningLog()
 
-	l := &Launcher{
-		pack: &agent.PackDefinition{
-			LeadSlug: "ceo",
-			Agents: []agent.AgentConfig{
-				{Slug: "ceo", Name: "CEO"},
-				{Slug: "eng", Name: "Engineer"},
-			},
-		},
-	}
-	l.installBroker(b)
+	l := launcherForBrokerFixture(b)
 
 	return &officeEvalFixture{
-		broker:   b,
-		launcher: l,
+		broker:     b,
+		launcher:   l,
+		scratchDir: dir,
 		cleanup: func() {
 			cancel()
 			<-worker.Done()
@@ -187,12 +198,47 @@ func evalJobLifecycleBasic(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	r.add(job, "approved task reaches a done status", done != nil && strings.EqualFold(strings.TrimSpace(done.status), "done"),
 		fmt.Sprintf("status=%q lifecycle=%s", strings.TrimSpace(done.status), done.LifecycleState), "")
 
-	// The honest part of the check: today nothing verified that outcome.
-	// U1.1 adds verification-gated done; this assertion flips when an
-	// unverified complete on a verification-required task starts failing.
-	r.add(job, "completion was machine-verified before done", false,
-		"complete succeeded with no verification spec, no artifact check, no evidence — self-declared done",
-		"U1.1 verification-gated done")
+	// U1.1 regression guard: a task with a required definition-of-done
+	// check cannot be completed while the check fails, and the failure is
+	// stamped on the task; once the check passes, completion proceeds.
+	gated, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Ship the export with a passing check",
+		Details: "gated work", Owner: "eng", CreatedBy: "ceo",
+		VerificationKind: "command", VerificationSpec: "test -f proof.txt", VerificationRequired: true,
+	})
+	if err != nil {
+		return err
+	}
+	_, completeErr := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: gated.Task.ID, Channel: "general", CreatedBy: "eng"})
+	stamped := fx.broker.TaskByID(gated.Task.ID)
+	r.add(job, "failing definition-of-done check blocks completion", completeErr != nil &&
+		stamped != nil && stamped.VerificationResult != nil && !stamped.VerificationResult.Pass &&
+		!strings.EqualFold(strings.TrimSpace(stamped.status), "done"),
+		fmt.Sprintf("completeErr=%v", completeErr), "")
+
+	// Produce the artifact the check demands, then complete again: the
+	// harness — not the agent's claim — decides done.
+	workDir := strings.TrimSpace(stamped.WorktreePath)
+	if workDir == "" {
+		workDir = fx.scratchDir
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "proof.txt"), []byte("export shipped"), 0o644); err != nil {
+		return err
+	}
+	if workDir == fx.scratchDir {
+		// No task worktree in the fixture: pin the check's cwd by
+		// rewriting the spec to an absolute path probe.
+		fx.broker.mu.Lock()
+		if t := fx.broker.taskByIDLocked(gated.Task.ID); t != nil && t.Verification != nil {
+			t.Verification.Spec = "test -f " + filepath.Join(workDir, "proof.txt")
+		}
+		fx.broker.mu.Unlock()
+	}
+	_, completeErr = fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: gated.Task.ID, Channel: "general", CreatedBy: "eng"})
+	verified := fx.broker.TaskByID(gated.Task.ID)
+	r.add(job, "completion was machine-verified before done", completeErr == nil &&
+		verified != nil && verified.VerificationResult != nil && verified.VerificationResult.Pass,
+		fmt.Sprintf("completeErr=%v result=%+v", completeErr, verified.VerificationResult), "")
 	return nil
 }
 
@@ -269,8 +315,7 @@ func evalJobKnowledgeInjection(fx *officeEvalFixture, r *OfficeEvalReport) error
 	}
 	packet := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *fx.broker.TaskByID(task.ID), "Task assigned to you.")
 	r.add(job, "warm: task-relevant learning reaches the work packet", strings.Contains(packet, insight),
-		"the office knows the playbook; the packet for the exact matching task should carry it",
-		"U2.2 task-scoped context assembler")
+		"the office knows the playbook; the packet for the exact matching task must carry it (U2.2 regression guard)", "")
 
 	// Cold control: an unrelated task must NOT receive that learning, or
 	// the warm check is measuring spray, not relevance.

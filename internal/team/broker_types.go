@@ -306,9 +306,17 @@ type teamTask struct {
 	// ambiguity between "a task with a long Details string" and "an issue
 	// with a structured spec".
 	IssueDraftSpec *IssueDraftSpec `json:"issue_draft_spec,omitempty"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-	CompletedAt    string          `json:"completed_at,omitempty"`
+	// Verification is the machine-checkable definition of done (U1.1,
+	// task_verification.go). When Required, the broker runs the check and
+	// blocks complete/approve until it passes. VerificationResult is the
+	// stamped outcome of the most recent run (pass or fail), kept so the
+	// failure output rides into the owner's next execution packet and the
+	// done card can show proof.
+	Verification       *TaskVerification       `json:"verification,omitempty"`
+	VerificationResult *TaskVerificationResult `json:"verification_result,omitempty"`
+	CreatedAt          string                  `json:"created_at"`
+	UpdatedAt          string                  `json:"updated_at"`
+	CompletedAt        string                  `json:"completed_at,omitempty"`
 	// System marks a task as a permanent system-owned task that may not
 	// be deleted or removed. The "Backup & Migration" task (ID: task-general)
 	// is the only current system task; it owns the #general channel so all
@@ -368,47 +376,49 @@ func (t *teamTask) Blocked() bool {
 // the on-disk and HTTP wire formats. teamTask.MarshalJSON / UnmarshalJSON
 // route through this shadow type.
 type teamTaskWire struct {
-	ID                   string          `json:"id"`
-	Channel              string          `json:"channel,omitempty"`
-	Title                string          `json:"title"`
-	Details              string          `json:"details,omitempty"`
-	Owner                string          `json:"owner,omitempty"`
-	Status               string          `json:"status"`
-	CreatedBy            string          `json:"created_by"`
-	ThreadID             string          `json:"thread_id,omitempty"`
-	TaskType             string          `json:"task_type,omitempty"`
-	PipelineID           string          `json:"pipeline_id,omitempty"`
-	PipelineStage        string          `json:"pipeline_stage,omitempty"`
-	ExecutionMode        string          `json:"execution_mode,omitempty"`
-	Effort               string          `json:"effort,omitempty"`
-	Provider             string          `json:"provider,omitempty"`
-	Model                string          `json:"model,omitempty"`
-	PlanFirst            bool            `json:"plan_first,omitempty"`
-	ReviewState          string          `json:"review_state,omitempty"`
-	SourceSignalID       string          `json:"source_signal_id,omitempty"`
-	SourceDecisionID     string          `json:"source_decision_id,omitempty"`
-	WorktreePath         string          `json:"worktree_path,omitempty"`
-	WorktreeBranch       string          `json:"worktree_branch,omitempty"`
-	DependsOn            []string        `json:"depends_on,omitempty"`
-	BlockedOn            []string        `json:"blocked_on,omitempty"`
-	ParentIssueID        string          `json:"parent_issue_id,omitempty"`
-	Blocked              bool            `json:"blocked,omitempty"`
-	LifecycleState       LifecycleState  `json:"lifecycle_state,omitempty"`
-	Reviewers            []string        `json:"reviewers,omitempty"`
-	Tags                 []string        `json:"tags,omitempty"`
-	ReviewStartedAt      string          `json:"review_started_at,omitempty"`
-	ReviewTimeoutSeconds int             `json:"review_timeout_seconds,omitempty"`
-	AckedAt              string          `json:"acked_at,omitempty"`
-	DueAt                string          `json:"due_at,omitempty"`
-	FollowUpAt           string          `json:"follow_up_at,omitempty"`
-	ReminderAt           string          `json:"reminder_at,omitempty"`
-	RecheckAt            string          `json:"recheck_at,omitempty"`
-	MemoryWorkflow       *MemoryWorkflow `json:"memory_workflow,omitempty"`
-	IssueDraftSpec       *IssueDraftSpec `json:"issue_draft_spec,omitempty"`
-	CreatedAt            string          `json:"created_at"`
-	UpdatedAt            string          `json:"updated_at"`
-	CompletedAt          string          `json:"completed_at,omitempty"`
-	System               bool            `json:"system,omitempty"`
+	ID                   string                  `json:"id"`
+	Channel              string                  `json:"channel,omitempty"`
+	Title                string                  `json:"title"`
+	Details              string                  `json:"details,omitempty"`
+	Owner                string                  `json:"owner,omitempty"`
+	Status               string                  `json:"status"`
+	CreatedBy            string                  `json:"created_by"`
+	ThreadID             string                  `json:"thread_id,omitempty"`
+	TaskType             string                  `json:"task_type,omitempty"`
+	PipelineID           string                  `json:"pipeline_id,omitempty"`
+	PipelineStage        string                  `json:"pipeline_stage,omitempty"`
+	ExecutionMode        string                  `json:"execution_mode,omitempty"`
+	Effort               string                  `json:"effort,omitempty"`
+	Provider             string                  `json:"provider,omitempty"`
+	Model                string                  `json:"model,omitempty"`
+	PlanFirst            bool                    `json:"plan_first,omitempty"`
+	ReviewState          string                  `json:"review_state,omitempty"`
+	SourceSignalID       string                  `json:"source_signal_id,omitempty"`
+	SourceDecisionID     string                  `json:"source_decision_id,omitempty"`
+	WorktreePath         string                  `json:"worktree_path,omitempty"`
+	WorktreeBranch       string                  `json:"worktree_branch,omitempty"`
+	DependsOn            []string                `json:"depends_on,omitempty"`
+	BlockedOn            []string                `json:"blocked_on,omitempty"`
+	ParentIssueID        string                  `json:"parent_issue_id,omitempty"`
+	Blocked              bool                    `json:"blocked,omitempty"`
+	LifecycleState       LifecycleState          `json:"lifecycle_state,omitempty"`
+	Reviewers            []string                `json:"reviewers,omitempty"`
+	Tags                 []string                `json:"tags,omitempty"`
+	ReviewStartedAt      string                  `json:"review_started_at,omitempty"`
+	ReviewTimeoutSeconds int                     `json:"review_timeout_seconds,omitempty"`
+	AckedAt              string                  `json:"acked_at,omitempty"`
+	DueAt                string                  `json:"due_at,omitempty"`
+	FollowUpAt           string                  `json:"follow_up_at,omitempty"`
+	ReminderAt           string                  `json:"reminder_at,omitempty"`
+	RecheckAt            string                  `json:"recheck_at,omitempty"`
+	MemoryWorkflow       *MemoryWorkflow         `json:"memory_workflow,omitempty"`
+	IssueDraftSpec       *IssueDraftSpec         `json:"issue_draft_spec,omitempty"`
+	Verification         *TaskVerification       `json:"verification,omitempty"`
+	VerificationResult   *TaskVerificationResult `json:"verification_result,omitempty"`
+	CreatedAt            string                  `json:"created_at"`
+	UpdatedAt            string                  `json:"updated_at"`
+	CompletedAt          string                  `json:"completed_at,omitempty"`
+	System               bool                    `json:"system,omitempty"`
 }
 
 // MarshalJSON preserves the pre-Lane-A wire format (status/review_state/
@@ -453,6 +463,8 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		RecheckAt:            t.RecheckAt,
 		MemoryWorkflow:       t.MemoryWorkflow,
 		IssueDraftSpec:       t.IssueDraftSpec,
+		Verification:         t.Verification,
+		VerificationResult:   t.VerificationResult,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
 		CompletedAt:          t.CompletedAt,
@@ -503,6 +515,8 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.RecheckAt = w.RecheckAt
 	t.MemoryWorkflow = w.MemoryWorkflow
 	t.IssueDraftSpec = w.IssueDraftSpec
+	t.Verification = w.Verification
+	t.VerificationResult = w.VerificationResult
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt
 	t.CompletedAt = w.CompletedAt

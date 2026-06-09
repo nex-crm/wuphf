@@ -13,6 +13,7 @@ package team
 // the reverse — see the trap discussion in PLAN.md.
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -94,6 +95,12 @@ type notificationContextBuilder struct {
 	// it as opaque. The except parameter is the slug being notified —
 	// the lead must not list itself as "already active".
 	activeHeadlessAgents func(except string) map[string]struct{}
+
+	// searchLearnings / searchWiki feed the task-scoped knowledge block
+	// (context_assembler.go, U2.2). Nil-safe: when unset the packet simply
+	// carries no knowledge block.
+	searchLearnings func(query string, limit int) []LearningSearchResult
+	searchWiki      func(ctx context.Context, query string, topK int) []SearchHit
 
 	// taskByID returns the task with the given ID (or nil). Used by the
 	// pre-review filter to decide whether a message tagged with
@@ -520,6 +527,9 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 		if path := strings.TrimSpace(task.WorktreePath); path != "" {
 			lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 		}
+		if knowledge := b.taskKnowledgeContext(task); knowledge != "" {
+			lines = append(lines, knowledge)
+		}
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, msg.ReplyTo)
 	// Every agent gets the full thread window. Specialists used to be
@@ -583,6 +593,20 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 	}
 	if details := strings.TrimSpace(task.Details); details != "" {
 		lines = append(lines, fmt.Sprintf("- Details: %s", truncate(details, taskDetailsClipChars)))
+	}
+	if v := task.Verification; v != nil && v.Kind != taskVerificationKindNone {
+		gate := "advisory"
+		if v.Required {
+			gate = "REQUIRED — complete/approve is blocked until this passes"
+		}
+		lines = append(lines, fmt.Sprintf("- Definition of done (%s, %s): %s", v.Kind, gate, v.Spec))
+	}
+	if res := task.VerificationResult; res != nil && !res.Pass {
+		lines = append(lines, fmt.Sprintf("- LAST VERIFICATION FAILED (%s at %s): %s", res.Kind, res.CheckedAt, truncate(strings.TrimSpace(res.Detail), 2000)))
+		lines = append(lines, "  Fix the work so the definition-of-done check passes, then complete again. Do not try to bypass the check.")
+	}
+	if knowledge := b.taskKnowledgeContext(task); knowledge != "" {
+		lines = append(lines, knowledge)
 	}
 	if targets := extractTaskFileTargets(task.Title + " " + task.Details); len(targets) > 0 {
 		lines = append(lines, fmt.Sprintf("- Named file targets: %s", strings.Join(targets, ", ")))
