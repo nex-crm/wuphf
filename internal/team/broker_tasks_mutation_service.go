@@ -431,6 +431,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			WorktreePath:     strings.TrimSpace(body.WorktreePath),
 			WorktreeBranch:   strings.TrimSpace(body.WorktreeBranch),
 			DependsOn:        trimTaskDependencies(body.DependsOn),
+			WikiRefs:         dedupePaths(body.WikiRefs),
 			ParentIssueID:    strings.TrimSpace(body.ParentIssueID),
 			CreatedAt:        now,
 			UpdatedAt:        now,
@@ -799,6 +800,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		if taskType := strings.TrimSpace(body.TaskType); taskType != "" {
 			task.TaskType = taskType
+		}
+		if len(body.WikiRefs) > 0 {
+			// Wiki links are routing metadata, not the spec body, so they stay
+			// mutable after approval (like TaskType/ExecutionMode) and are not
+			// gated by the spec freeze. Replace semantics: the caller sends the
+			// full linked set; dedupePaths trims/normalizes/dedupes.
+			task.WikiRefs = dedupePaths(body.WikiRefs)
 		}
 		if pipelineID := strings.TrimSpace(body.PipelineID); pipelineID != "" {
 			task.PipelineID = pipelineID
