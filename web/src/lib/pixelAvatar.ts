@@ -32,6 +32,12 @@ const AGENT_COLORS: Record<string, string> = {
 const AGENT_COLOR_ALIASES: Record<string, string> = {
   halpert: "jim",
   "jim-halpert": "jim",
+  // Pam the librarian commits to the wiki under the "archivist" git identity
+  // (see ArchivistAuthor in internal/team). Bylines, audit rows, and history
+  // therefore arrive with slug "archivist" — alias it (and "librarian") onto
+  // Pam so her accent colour matches the desk avatar everywhere she appears.
+  archivist: "pam",
+  librarian: "pam",
   planner: "pm",
   product: "pm",
   "product-manager": "pm",
@@ -105,6 +111,13 @@ const PORTRAIT_SPRITE_ALIASES: Record<string, string> = {
   jim: "office20",
   halpert: "office20",
   "jim-halpert": "office20",
+  // Pam's wiki contributions are authored under the "archivist" git identity,
+  // so her bylines/audit/edit-log surface with slug "archivist" rather than
+  // "pam". Map both that identity and the "librarian" label onto the exact
+  // sprite the desk avatar uses (slug "pam" → hybridPam) so Pam wears one face
+  // everywhere, not a procedural fallback.
+  archivist: "hybridPam",
+  librarian: "hybridPam",
 };
 
 function hashSlug(slug: string): number {

@@ -41,6 +41,21 @@ describe("pixel avatar sprite resolution", () => {
     expect(resolvePortraitSprite("jim-halpert").id).toBe("office20");
   });
 
+  it("renders Pam's archivist byline identity with the desk avatar", () => {
+    // The wiki desk avatar uses slug "pam"; Pam's commits are authored under
+    // the "archivist" git identity, so her bylines/audit/history arrive with
+    // that slug. Both must resolve to the same sprite — not a procedural face.
+    const desk = resolvePortraitSprite("pam");
+    expect(desk.id).toBe("hybridPam");
+
+    for (const slug of ["archivist", "librarian", " Archivist "]) {
+      const avatar = resolvePortraitSprite(slug);
+      expect(avatar.id).toBe(desk.id);
+      expect(avatar.palette).toEqual(desk.palette);
+      expect(avatar.portrait).toEqual(desk.portrait);
+    }
+  });
+
   it("keeps arbitrary new-agent slugs on generated office sprites", () => {
     const avatar = resolvePortraitSprite("custom-ops-agent");
     const idParts = avatar.id.split(":");
@@ -85,6 +100,8 @@ describe("pixel avatar sprite resolution", () => {
     expect(getAgentColor("growth")).toBe(getAgentColor("gtm"));
     expect(getAgentColor("halpert")).toBe(getAgentColor("jim"));
     expect(getAgentColor("jim-halpert")).toBe(getAgentColor("jim"));
+    expect(getAgentColor("archivist")).toBe(getAgentColor("pam"));
+    expect(getAgentColor("librarian")).toBe(getAgentColor("pam"));
     expect(getAgentColor("operator")).toBe(getAgentColor("nex"));
   });
 
