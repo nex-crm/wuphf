@@ -349,6 +349,11 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 
 	result := "Active tasks:\n" + strings.Join(lines, "\n")
 	if slug == lead {
+		// Concurrency awareness: the lead runs one dispatch lane per task, so the
+		// tasks above may be advancing in parallel right now (its own lanes and
+		// specialists'). Push non-dependent tasks forward together rather than
+		// serializing them, and reuse a live task before creating an overlapping one.
+		result += "\nCoordination: your tasks run on separate lanes and may be progressing in parallel right now. Advance non-dependent tasks together instead of one at a time, and reuse or update a task already listed above before creating a new one for the same work."
 		reviewCount := 0
 		for _, task := range tasks {
 			if strings.EqualFold(strings.TrimSpace(task.status), "done") {

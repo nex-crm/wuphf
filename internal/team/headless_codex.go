@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -137,11 +138,14 @@ type headlessCodexActiveTurn struct {
 // headlessLane identifies one serialized dispatch lane. An agent used to have
 // exactly one lane (its slug); parallel instances split an agent into several
 // lanes so it can run more than one task at once. The key is the turn's
-// resolved git worktree path, so two turns share a lane — and therefore
-// serialize — exactly when they would write the same directory. Turns with no
-// isolated worktree (chat, office-mode, external) and all lead turns use the
-// agent's default lane (key ""), preserving today's per-agent serialization.
-// Keying on the workspace (not the task id) makes the scheduler intrinsically
+// resolved git worktree path (worktree tasks) or "task:"+id (office/external
+// tasks), so two turns share a lane — and therefore serialize — exactly when
+// they would write the same directory or are the same office task. Turns with
+// no task (chat / channel triage) use the agent's default lane (key ""),
+// preserving conversational coherence; this is true for the lead too, but a
+// lead turn that DOES carry a task id now gets its own per-task lane (CEO
+// multitasking — non-dependent tasks run concurrently). Keying on the workspace
+// (not the task id) for worktree tasks makes the scheduler intrinsically
 // collision-proof: distinct worktrees ⇒ distinct lanes ⇒ safe to run at once;
 // a shared worktree (e.g. a dependency reusing its parent's tree) ⇒ same lane
 // ⇒ serialized, regardless of how admission control routed the tasks.
@@ -163,6 +167,72 @@ func taskLane(slug, taskID string) headlessLane {
 	return headlessLane{slug: slug, key: "task:" + taskID}
 }
 
+// Headless concurrency caps bound how many dispatch lanes may run a turn at
+// once — the cost guard that keeps CEO multitasking (per-task lead lanes) from
+// spawning an unbounded number of concurrent LLM subprocesses.
+//
+// Semantics: a pool cap field <= 0 means "unlimited" for that dimension. The
+// zero value is therefore unlimited, so a bare &Launcher{} (and every existing
+// concurrency test) is NOT retroactively throttled. Production resolves
+// positive caps at boot via resolveHeadlessConcurrencyCaps; tests that exercise
+// the cap set l.headless.maxConcurrent / maxConcurrentPerAgent directly.
+const headlessCapGlobalClamp = 6 // upper clamp on the cores-derived global default
+
+// resolveHeadlessConcurrencyCaps sets this launcher's caps from the environment
+// with strong-opinion defaults (global ≈ clamp(cores, 2, 6); per-agent 3).
+// Called once at launcher boot so production is always bounded.
+func (l *Launcher) resolveHeadlessConcurrencyCaps() {
+	cores := runtime.NumCPU()
+	global := cores
+	if global < 2 {
+		global = 2 // allow some concurrency even on a single-core host
+	}
+	if global > headlessCapGlobalClamp {
+		global = headlessCapGlobalClamp
+	}
+	// envIntDefault (notebook_signal_scanner.go) returns the env value as-is when
+	// set, so an explicit WUPHF_MAX_CONCURRENT_TURNS=0 disables the cap (unlimited
+	// — see headlessConcurrencyCaps); an unset value falls back to the default.
+	l.headless.maxConcurrent = envIntDefault("WUPHF_MAX_CONCURRENT_TURNS", global)
+	l.headless.maxConcurrentPerAgent = envIntDefault("WUPHF_MAX_CONCURRENT_PER_AGENT", 3)
+}
+
+// headlessConcurrencyCaps returns this launcher's effective (global, per-agent)
+// caps. <= 0 means unlimited for that dimension.
+func (l *Launcher) headlessConcurrencyCaps() (global, perAgent int) {
+	return l.headless.maxConcurrent, l.headless.maxConcurrentPerAgent
+}
+
+// headlessLaneMayStartLocked reports whether starting a turn on lane would stay
+// within the global and per-agent concurrency caps. Caller holds l.headless.mu.
+// The lane being checked has no active turn at call time (the worker just
+// finished its previous turn before looping back to begin), so counting active
+// lanes never double-counts the candidate.
+func (l *Launcher) headlessLaneMayStartLocked(lane headlessLane) bool {
+	global, perAgent := l.headlessConcurrencyCaps()
+	if global <= 0 && perAgent <= 0 {
+		return true
+	}
+	total := 0
+	sameAgent := 0
+	for activeLane, active := range l.headless.active {
+		if active == nil {
+			continue
+		}
+		total++
+		if activeLane.slug == lane.slug {
+			sameAgent++
+		}
+	}
+	if global > 0 && total >= global {
+		return false
+	}
+	if perAgent > 0 && sameAgent >= perAgent {
+		return false
+	}
+	return true
+}
+
 // headlessWorkerPool groups the per-launcher headless-dispatch state
 // (PLAN.md §C7). All fields are lowercase package-internal — the pool
 // is never used outside `internal/team` and stays an embedded value
@@ -173,18 +243,26 @@ func taskLane(slug, taskID string) headlessLane {
 //
 // The maps are keyed by headlessLane (was: by slug). Slug-level coordination
 // (the lead queue-hold/wake, activeHeadlessSlugs) iterates lanes and groups by
-// lane.slug. deferredLead stays a single pointer because the lead always runs
-// in its one default lane.
+// lane.slug. deferredLead stays a single pointer because only no-task lead
+// turns (channel triage) are ever deferred — those always run on the lead's one
+// default lane; task-carrying lead turns run on per-task lanes and are not held.
+//
+// maxConcurrent / maxConcurrentPerAgent bound how many lanes may run a turn at
+// once (the cost guard for CEO multitasking). 0 ⇒ use the env/default resolved
+// by headlessConcurrencyCaps; a negative value ⇒ unlimited (tests). Production
+// always resolves to a positive cap so concurrency can't blow up LLM spend.
 type headlessWorkerPool struct {
-	mu           sync.Mutex
-	ctx          context.Context
-	cancel       context.CancelFunc
-	workers      map[headlessLane]bool
-	active       map[headlessLane]*headlessCodexActiveTurn
-	queues       map[headlessLane][]headlessCodexTurn
-	deferredLead *headlessCodexTurn
-	stopCh       chan struct{}
-	workerWg     sync.WaitGroup
+	mu                    sync.Mutex
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	workers               map[headlessLane]bool
+	active                map[headlessLane]*headlessCodexActiveTurn
+	queues                map[headlessLane][]headlessCodexTurn
+	deferredLead          *headlessCodexTurn
+	stopCh                chan struct{}
+	workerWg              sync.WaitGroup
+	maxConcurrent         int
+	maxConcurrentPerAgent int
 }
 
 // headlessCodexWorkspaceStatusSnapshotFn is the seam type swapped by tests

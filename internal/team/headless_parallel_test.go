@@ -23,11 +23,13 @@ func brokerWithTasks(t *testing.T, tasks ...teamTask) *Broker {
 }
 
 // TestLaneForTurnKeysByWorktree pins the core safety invariant of parallel
-// instances: a turn earns its own dispatch lane only when it is a non-lead turn
-// for an isolated-worktree task, and the lane key is that worktree path. Two
+// instances: a turn earns its own dispatch lane when it is a task turn, keyed by
+// worktree path (isolated-worktree tasks) or task id (office/external). Two
 // turns therefore share a lane — and serialize — exactly when they write the
-// same directory. Everything else (office-mode, chat, lead) collapses to the
-// agent's default lane.
+// same directory or are the same office task. Chat / channel-triage turns (no
+// task) collapse to the agent's default lane. This is true for the LEAD too: a
+// lead turn carrying a task id gets its own per-task lane (CEO multitasking),
+// while a lead turn with no task id stays on the default triage lane.
 func TestLaneForTurnKeysByWorktree(t *testing.T) {
 	b := brokerWithTasks(t,
 		teamTask{ID: "task-a", Title: "a", Owner: "eng", status: "in_progress", ExecutionMode: "local_worktree", WorktreePath: "/wt/a"},
@@ -37,7 +39,8 @@ func TestLaneForTurnKeysByWorktree(t *testing.T) {
 		teamTask{ID: "task-office2", Title: "d2", Owner: "eng", status: "in_progress", ExecutionMode: "office"},
 		teamTask{ID: "task-ext", Title: "x", Owner: "eng", status: "in_progress", ExecutionMode: "live_external"},
 		teamTask{ID: "task-nopath", Title: "e", Owner: "eng", status: "in_progress", ExecutionMode: "local_worktree"},
-		teamTask{ID: "task-lead", Title: "f", Owner: "ceo", status: "in_progress", ExecutionMode: "local_worktree", WorktreePath: "/wt/lead"},
+		teamTask{ID: "task-lead-office", Title: "f", Owner: "ceo", status: "in_progress", ExecutionMode: "office"},
+		teamTask{ID: "task-lead-wt", Title: "g", Owner: "ceo", status: "in_progress", ExecutionMode: "local_worktree", WorktreePath: "/wt/lead"},
 	)
 	l := newHeadlessLauncherForTest(t)
 	l.broker = b
@@ -56,7 +59,9 @@ func TestLaneForTurnKeysByWorktree(t *testing.T) {
 		{"live_external task -> own per-task lane", "eng", headlessCodexTurn{TaskID: "task-ext"}, headlessLane{slug: "eng", key: "task:task-ext"}},
 		{"worktree without a path yet -> default lane", "eng", headlessCodexTurn{TaskID: "task-nopath"}, headlessLane{slug: "eng"}},
 		{"chat turn (no task) -> default lane", "eng", headlessCodexTurn{}, headlessLane{slug: "eng"}},
-		{"lead never forks -> default lane", "ceo", headlessCodexTurn{TaskID: "task-lead"}, headlessLane{slug: "ceo"}},
+		{"lead office task -> own per-task lane", "ceo", headlessCodexTurn{TaskID: "task-lead-office"}, headlessLane{slug: "ceo", key: "task:task-lead-office"}},
+		{"lead worktree task -> own worktree lane", "ceo", headlessCodexTurn{TaskID: "task-lead-wt"}, headlessLane{slug: "ceo", key: "/wt/lead"}},
+		{"lead triage turn (no task) -> default lane", "ceo", headlessCodexTurn{}, headlessLane{slug: "ceo"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,5 +154,179 @@ func TestParallelInstancesRunNonDependentOfficeTasksConcurrently(t *testing.T) {
 	}
 	if !got["task-a"] || !got["task-b"] {
 		t.Fatalf("expected both office tasks to run concurrently, got %v", got)
+	}
+}
+
+// TestLeadRunsNonDependentTasksConcurrently is the headline Phase 2 behavior:
+// the LEAD (ceo) owning two non-dependent office tasks runs BOTH at once, each
+// on its own per-task lane. Before per-task lead lanes, every lead turn
+// serialized on one default lane and only one would start in the window.
+func TestLeadRunsNonDependentTasksConcurrently(t *testing.T) {
+	b := brokerWithTasks(t,
+		teamTask{ID: "task-a", Title: "a", Owner: "ceo", status: "in_progress", ExecutionMode: "office"},
+		teamTask{ID: "task-b", Title: "b", Owner: "ceo", status: "in_progress", ExecutionMode: "office"},
+	)
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+
+	started := make(chan string, 8)
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+		select {
+		case started <- headlessTurnTaskID(ctx):
+		default:
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{Prompt: "work #task-a", Channel: "general", TaskID: "task-a"})
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{Prompt: "work #task-b", Channel: "general", TaskID: "task-b"})
+
+	got := map[string]bool{}
+	deadline := time.After(10 * time.Second)
+	for len(got) < 2 {
+		select {
+		case id := <-started:
+			got[id] = true
+		case <-deadline:
+			t.Fatalf("only %d/2 lead instances started concurrently (serialized?): %v", len(got), got)
+		}
+	}
+	if !got["task-a"] || !got["task-b"] {
+		t.Fatalf("expected both lead tasks to run concurrently, got %v", got)
+	}
+}
+
+// TestLeadSameTaskTurnDedupesWhileActive pins the anti-double-dispatch guard:
+// even with per-task lead lanes, a second lead turn for a task already in flight
+// on that lane is dropped (not piled up). urgentLeadTurn is false here (the task
+// is plain in_progress, not review/blocked), so the same-task drop applies.
+func TestLeadSameTaskTurnDedupesWhileActive(t *testing.T) {
+	b := brokerWithTasks(t,
+		teamTask{ID: "task-x", Title: "x", Owner: "ceo", status: "in_progress", ExecutionMode: "office"},
+	)
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+	lane := taskLane("ceo", "task-x")
+	l.headless.active[lane] = &headlessCodexActiveTurn{
+		Turn:      headlessCodexTurn{Prompt: "first #task-x", TaskID: "task-x"},
+		StartedAt: time.Now(),
+	}
+
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{
+		Prompt:     "second #task-x",
+		TaskID:     "task-x",
+		EnqueuedAt: time.Now(),
+	})
+
+	if got := len(l.headless.queues[lane]); got != 0 {
+		t.Fatalf("expected duplicate lead turn for same task to be dropped, got %d queued", got)
+	}
+}
+
+// TestLeadTaskTurnNotHeldByUnrelatedSpecialist proves the per-task scoping of
+// the lead-hold: a lead turn that CARRIES a task id is NOT deferred just because
+// an unrelated specialist is busy — non-dependent tasks proceed concurrently.
+func TestLeadTaskTurnNotHeldByUnrelatedSpecialist(t *testing.T) {
+	b := brokerWithTasks(t,
+		teamTask{ID: "task-ceo", Title: "ceo work", Owner: "ceo", status: "in_progress", ExecutionMode: "office"},
+	)
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+	// An unrelated specialist is mid-flight on its own task.
+	l.headless.active[taskLane("eng", "task-eng")] = &headlessCodexActiveTurn{
+		Turn:      headlessCodexTurn{Prompt: "specialist working #task-eng", TaskID: "task-eng"},
+		StartedAt: time.Now(),
+	}
+
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{
+		Prompt:     "advance #task-ceo",
+		TaskID:     "task-ceo",
+		EnqueuedAt: time.Now(),
+	})
+
+	if l.headless.deferredLead != nil {
+		t.Fatal("task-carrying lead turn must not be deferred by an unrelated busy specialist")
+	}
+	lane := taskLane("ceo", "task-ceo")
+	if !l.headless.workers[lane] && len(l.headless.queues[lane]) == 0 {
+		t.Fatal("expected the lead task turn to be queued/dispatched on its own per-task lane")
+	}
+}
+
+// TestLeadTriageTurnStillHeldByBusySpecialist is the other half of the scoping:
+// a NO-TASK lead turn (channel triage) still respects the hold while a
+// specialist is active — that is where the redundant-re-route race lives.
+func TestLeadTriageTurnStillHeldByBusySpecialist(t *testing.T) {
+	l := newHeadlessLauncherForTest(t) // lead = "ceo" by default
+	l.headless.active[headlessLane{slug: "eng"}] = &headlessCodexActiveTurn{
+		Turn:      headlessCodexTurn{Prompt: "specialist still working"},
+		StartedAt: time.Now(),
+	}
+
+	// 2-arg enqueue with a prompt that has no #task- prefix → TaskID stays empty
+	// → treated as channel triage, which still honors the hold.
+	l.enqueueHeadlessCodexTurn("ceo", "general status, anything I should know?")
+
+	if l.headless.deferredLead == nil {
+		t.Fatal("expected a no-task lead triage turn to be deferred while a specialist is active")
+	}
+}
+
+// TestHeadlessConcurrencyCapParksAndDrains proves the cost guard: with the
+// per-agent cap set to 1, the lead's two task lanes cannot both run at once —
+// one starts, the other PARKS (queued, no worker) — and the parked lane DRAINS
+// once the first turn finishes and frees a slot.
+func TestHeadlessConcurrencyCapParksAndDrains(t *testing.T) {
+	b := brokerWithTasks(t,
+		teamTask{ID: "task-a", Title: "a", Owner: "ceo", status: "in_progress", ExecutionMode: "office"},
+		teamTask{ID: "task-b", Title: "b", Owner: "ceo", status: "in_progress", ExecutionMode: "office"},
+	)
+	l := newHeadlessLauncherForTest(t)
+	l.broker = b
+	l.headless.maxConcurrentPerAgent = 1 // CEO may run only one task at a time
+
+	started := make(chan string, 8)
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+		select {
+		case started <- headlessTurnTaskID(ctx):
+		default:
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{Prompt: "work #task-a", Channel: "general", TaskID: "task-a"})
+	l.enqueueHeadlessCodexTurnRecord("ceo", headlessCodexTurn{Prompt: "work #task-b", Channel: "general", TaskID: "task-b"})
+
+	// Exactly one should start; the other parks under the cap.
+	var first string
+	select {
+	case first = <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the first lead task to start")
+	}
+	select {
+	case second := <-started:
+		t.Fatalf("cap=1 violated: a second task (%s) started while %s was active", second, first)
+	case <-time.After(250 * time.Millisecond):
+		// correct: the second lane is parked behind the cap
+	}
+
+	// Free the slot by cancelling the active turn; the parked lane must drain.
+	firstLane := taskLane("ceo", first)
+	l.headless.mu.Lock()
+	if active := l.headless.active[firstLane]; active != nil && active.Cancel != nil {
+		active.Cancel()
+	}
+	l.headless.mu.Unlock()
+
+	select {
+	case second := <-started:
+		if second == first {
+			t.Fatalf("expected the parked task to drain, but %s started again", second)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the parked lead task to start after a slot freed")
 	}
 }

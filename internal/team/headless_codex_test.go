@@ -1115,8 +1115,12 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
 	l.broker = b
-	l.headless.workers[headlessLane{slug: "ceo"}] = true
-	l.headless.active[headlessLane{slug: "ceo"}] = &headlessCodexActiveTurn{
+	// The lead now runs office tasks on their own per-task lane (CEO
+	// multitasking), so the in-flight turn for this task lives on taskLane,
+	// not the default slug lane.
+	leadLane := taskLane("ceo", task.ID)
+	l.headless.workers[leadLane] = true
+	l.headless.active[leadLane] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
 			Prompt: "first prompt about #" + task.ID,
 			TaskID: task.ID,
@@ -1133,7 +1137,7 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 		EnqueuedAt: time.Now(),
 	})
 
-	if got := len(l.headless.queues[headlessLane{slug: "ceo"}]); got != 1 {
+	if got := len(l.headless.queues[leadLane]); got != 1 {
 		t.Fatalf("expected urgent lead wake to queue behind same task, got %d", got)
 	}
 	if !cancelled {

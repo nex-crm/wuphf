@@ -144,6 +144,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	// Headless context is used for codex runtime, default dispatch, and
 	// per-turn operations that don't fit a long-lived pane session.
 	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
+	l.resolveHeadlessConcurrencyCaps()
 	l.resumeInFlightWork()
 
 	// Stream tmux pane output to the web UI's per-agent stream so users see
