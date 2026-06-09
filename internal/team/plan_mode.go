@@ -41,6 +41,24 @@ func isPlanningLifecycleState(s LifecycleState) bool {
 	return s == LifecycleStatePlanning
 }
 
+// taskSpecOpenToChat reports whether a human chat message in a task's channel
+// should be folded into the task spec by the owner. True only for EXPLICIT
+// pre-execution states — unlike taskIsPreExecution it excludes ""/Unknown, so a
+// legacy task carrying status="in_progress" with an empty LifecycleState is not
+// mistaken for drafting and bounced out of execution. Frozen (post-approval)
+// states are excluded too (matching specIsFrozen), so once a plan is approved
+// the chat is treated as execution discussion, not spec input. ChangesRequested
+// is included: the request_changes loop intentionally re-opens the spec.
+func taskSpecOpenToChat(s LifecycleState) bool {
+	switch s {
+	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady,
+		LifecycleStatePlanning, LifecycleStateQueuedBehindOwner,
+		LifecycleStateChangesRequested:
+		return true
+	}
+	return false
+}
+
 // specIsFrozen reports whether a task's human-approved spec BODY (its Details —
 // the problem / approach / acceptance criteria the human signed off on) may no
 // longer be rewritten. Once the owner is executing an approved plan (Running)

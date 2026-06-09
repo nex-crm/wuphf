@@ -24,7 +24,6 @@ interface DecisionPacketViewProps {
   onRequestChanges: () => void;
   onDefer: () => void;
   onBlock: () => void;
-  onComment?: (body: string) => void | Promise<void>;
   onReject?: (body: string) => void | Promise<void>;
   onOpenInWorktree: () => void;
 }
@@ -53,7 +52,6 @@ export function DecisionPacketView({
   onRequestChanges,
   onDefer,
   onBlock,
-  onComment,
   onReject,
   onOpenInWorktree,
 }: DecisionPacketViewProps) {
@@ -234,7 +232,6 @@ export function DecisionPacketView({
         onRequestChanges={onRequestChanges}
         onDefer={onDefer}
         onBlock={onBlock}
-        onComment={onComment}
         onReject={onReject}
         onOpenInWorktree={onOpenInWorktree}
       />
@@ -430,8 +427,8 @@ function DiscussionSection({ feedback }: DiscussionSectionProps) {
       </h3>
       {feedback.length === 0 ? (
         <p className="packet-discussion-empty">
-          No comments yet. Leave one in the sidebar, request changes with inline
-          feedback, or wait for the reviewer to post.
+          No review notes yet. Approvals, requested changes, and reviewer notes
+          appear here — chat about this task in its channel.
         </p>
       ) : (
         <ol className="packet-discussion-thread">

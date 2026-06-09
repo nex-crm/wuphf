@@ -5,7 +5,6 @@ import {
   getDecisionPacket,
   postDecision,
   postInboxCursor,
-  postTaskComment,
   postTaskReject,
   postTaskResume,
 } from "../../api/lifecycle";
@@ -105,22 +104,6 @@ export function DecisionPacketRoute({
 
   function submitDecision(action: DecisionAction, comment?: string) {
     decisionMutation.mutate({ action, comment });
-  }
-
-  async function submitComment(body: string) {
-    // Broker resolves the real channel from the task itself when we POST
-    // by task id; "general" is a safe default the auth path will rewrite.
-    try {
-      await postTaskComment(taskId, "general", body);
-      void queryClient.invalidateQueries({
-        queryKey: ["lifecycle", "task", taskId],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["lifecycle", "inbox-items"],
-      });
-    } catch (err) {
-      console.error("postTaskComment failed", err);
-    }
   }
 
   async function submitReject(body: string) {
@@ -227,7 +210,6 @@ export function DecisionPacketRoute({
       onBlock={(_comment?: string) => {
         /* block flow lives behind its own modal (Lane F follow-up). */
       }}
-      onComment={(body) => submitComment(body)}
       onReject={(body) => submitReject(body)}
       onOpenInWorktree={() => {
         if (typeof window !== "undefined" && packet?.worktreePath) {

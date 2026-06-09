@@ -415,6 +415,23 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 		if strings.TrimSpace(task.Owner) != slug {
 			continue
 		}
+		// Channel-per-task: the message's channel directly names the task it
+		// belongs to, so a channel match is the strongest binding — stronger
+		// than a thread or content-similarity match, which can drift for a
+		// short human chat. Guard on the RAW channels being non-empty (an
+		// unset channel normalizes to "general", which would otherwise let a
+		// channel-less task collide with #general) and skip archived tasks so
+		// general office chat in #general — owned by the archived Backup &
+		// Migration task — keeps routing normally. (Done is skipped above.)
+		// Legacy shared channels fall through to the thread/score checks below.
+		if rawMsgCh := strings.TrimSpace(msg.Channel); rawMsgCh != "" {
+			rawTaskCh := strings.TrimSpace(task.Channel)
+			st := strings.ToLower(strings.TrimSpace(task.status))
+			if rawTaskCh != "" && st != "archived" &&
+				normalizeChannelSlug(rawTaskCh) == normalizeChannelSlug(rawMsgCh) {
+				return task, true
+			}
+		}
 		if task.ThreadID != "" && (task.ThreadID == msg.ID || task.ThreadID == threadRoot) {
 			return task, true
 		}
@@ -437,6 +454,25 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 // appended to a notification. Branches: lead-from-human, lead-from-
 // specialist, DM, tagged, owns-matching-task, default-domain-chime-in.
 func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMessage, slug string) string {
+	// Spec-from-chat: when a human messages in the channel of a task that is
+	// still being scoped and `slug` owns that task, the chat IS the spec
+	// conversation. Tell the owner — CEO or specialist — to fold the message
+	// into the task body via team_task action=update and summarize the change
+	// in chat, and to hold execution until the human approves. Checked before
+	// the lead branch so it wins for a CEO-owned drafting task too.
+	//
+	// Gate on an EXPLICIT pre-execution lifecycle state (not the broader
+	// taskIsPreExecution, which also treats ""/Unknown as pre-execution): a
+	// legacy task carrying status="in_progress" with an empty LifecycleState
+	// is actually executing and must keep its execution instruction.
+	// (specIsFrozen blocks Details writes once approved, so this is also
+	// defended at the data layer.)
+	if isHumanMessageSender(strings.TrimSpace(msg.From)) || strings.TrimSpace(msg.From) == "nex" {
+		if task, ok := b.RelevantTaskForTarget(msg, slug); ok &&
+			strings.TrimSpace(task.Owner) == slug && taskSpecOpenToChat(task.LifecycleState) {
+			return fmt.Sprintf("You are @%s and you own task %s, which is still being scoped (not yet approved). Treat the human's message as input to the spec: revise the task body to reflect it by calling team_task action=update with id=%q and the full updated details, then post a one-line summary of what changed in chat via team_broadcast. Do NOT start building or take external actions until the human approves.", slug, task.ID, task.ID)
+		}
+	}
 	lead := b.targeter.LeadSlug()
 	if slug == lead {
 		from := strings.TrimSpace(msg.From)

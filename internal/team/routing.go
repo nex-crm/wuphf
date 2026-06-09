@@ -24,6 +24,35 @@ func (l *Launcher) taskOwnerForMessage(msg channelMessage) string {
 	if l == nil || l.broker == nil {
 		return ""
 	}
+	// Channel-per-task: in the post-restructure model every task owns its own
+	// channel (`task-<id>`), so the message's channel deterministically names
+	// the task. Match on it first — a short human chat ("actually, target
+	// SMBs") rarely clears the content-similarity threshold, but it must still
+	// wake the owning task's owner. The content-scoring pass below stays for
+	// legacy shared channels (e.g. #general) where several tasks share one.
+	if rawMsgCh := strings.TrimSpace(msg.Channel); rawMsgCh != "" {
+		msgChannel := normalizeChannelSlug(rawMsgCh)
+		for _, task := range l.broker.AllTasks() {
+			st := strings.ToLower(strings.TrimSpace(task.status))
+			// Skip terminal tasks: an unset channel normalizes to "general",
+			// and #general is owned by the archived Backup & Migration task —
+			// general office chat there must keep routing normally, not wake
+			// that task's owner.
+			if st == "done" || st == "archived" {
+				continue
+			}
+			taskOwner := strings.TrimSpace(task.Owner)
+			if taskOwner == "" {
+				continue
+			}
+			// Guard on the RAW task channel being non-empty so a channel-less
+			// task does not bind to every #general message.
+			if rawTaskCh := strings.TrimSpace(task.Channel); rawTaskCh != "" &&
+				normalizeChannelSlug(rawTaskCh) == msgChannel {
+				return taskOwner
+			}
+		}
+	}
 	var owner string
 	bestScore := 0.0
 	for _, task := range l.broker.AllTasks() {

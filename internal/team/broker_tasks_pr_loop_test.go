@@ -267,9 +267,10 @@ func TestPRLoop_RejectIsTerminalAndDoesNotUnblockDependents(t *testing.T) {
 }
 
 // TestPRLoop_CommentEndpointResolvesActorFromAuth covers the HTTP layer:
-// POST /tasks/{id}/comment authenticates the actor via the bearer token
-// (not body.CreatedBy) so human comments show up with a real author,
-// not "@unknown".
+// POST /tasks/{id}/comment is retained for back-compat but now posts the
+// body as a chat message into the task's channel, authored by the
+// bearer-token actor (not body.CreatedBy) so it shows a real human
+// sender, never "@unknown" — and never a packet-feedback comment.
 func TestPRLoop_CommentEndpointResolvesActorFromAuth(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
@@ -310,19 +311,34 @@ func TestPRLoop_CommentEndpointResolvesActorFromAuth(t *testing.T) {
 	if got.Author == "" || got.Author == "unknown" {
 		t.Fatalf("expected non-empty resolved actor, got %q", got.Author)
 	}
-	if got.Status != "recorded" {
-		t.Fatalf("status: want recorded, got %q", got.Status)
+	if got.Status != "posted" {
+		t.Fatalf("status: want posted, got %q", got.Status)
+	}
+	if !isHumanMessageSender(got.Author) {
+		t.Fatalf("author must be a human sender resolved from auth, got %q", got.Author)
 	}
 
+	// The body must land as a chat message in the task's channel, authored
+	// by the auth-resolved sender — not as a packet-feedback comment.
 	b.mu.Lock()
+	var posted *channelMessage
+	for i := range b.messages {
+		if normalizeChannelSlug(b.messages[i].Channel) == "general" &&
+			strings.Contains(b.messages[i].Content, "ship it after the doc bump") {
+			posted = &b.messages[i]
+			break
+		}
+	}
 	packet, _ := b.findDecisionPacketLocked("task-http-1")
 	b.mu.Unlock()
-	if packet == nil || len(packet.Spec.Feedback) == 0 {
-		t.Fatalf("expected FeedbackItem appended via /comment endpoint")
+	if posted == nil {
+		t.Fatalf("expected the comment body to be posted as a chat message in #general")
 	}
-	last := packet.Spec.Feedback[len(packet.Spec.Feedback)-1]
-	if last.Author == "" || last.Author == "unknown" {
-		t.Fatalf("FeedbackItem author must come from auth, got %q", last.Author)
+	if posted.From != got.Author {
+		t.Fatalf("chat author %q must match the auth-resolved sender %q", posted.From, got.Author)
+	}
+	if packet != nil && len(packet.Spec.Feedback) != 0 {
+		t.Fatalf("comments are retired: /comment must NOT append packet feedback, got %d items", len(packet.Spec.Feedback))
 	}
 }
 

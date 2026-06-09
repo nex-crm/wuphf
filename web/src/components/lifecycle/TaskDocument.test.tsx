@@ -23,9 +23,6 @@ const lifecycleApi = vi.hoisted(() => ({
   postDecision: vi.fn(() =>
     Promise.resolve({ taskId: "task-001", action: "approve", status: "ok" }),
   ),
-  postTaskComment: vi.fn(() =>
-    Promise.resolve({ taskId: "task-001", status: "ok", author: "human" }),
-  ),
 }));
 
 vi.mock("../../api/lifecycle", () => lifecycleApi);
@@ -74,29 +71,6 @@ const BASE_DOC: TaskDocumentType = {
     acceptance:
       "- Webhook endpoint at POST /stripe/webhook\n- Signature verified",
   },
-  comments: [
-    {
-      id: "c1",
-      author: "ceo",
-      isAgent: true,
-      body: "Drafted spec based on our chat.",
-      appendedAt: "2026-05-17T10:03:00Z",
-    },
-    {
-      id: "c2",
-      author: "engineer",
-      isAgent: true,
-      body: "Approach looks good. Add idempotency via the Stripe Event ID.",
-      appendedAt: "2026-05-17T10:04:00Z",
-    },
-    {
-      id: "c3",
-      author: "human",
-      isAgent: false,
-      body: "Yes please add to acceptance criteria.",
-      appendedAt: "2026-05-17T10:05:00Z",
-    },
-  ],
 };
 
 const APPROVED_DOC: TaskDocumentType = {
@@ -173,7 +147,6 @@ describe.skip("<TaskDocument>", () => {
 
   afterEach(() => {
     lifecycleApi.postDecision.mockClear();
-    lifecycleApi.postTaskComment.mockClear();
     vi.restoreAllMocks();
   });
 
@@ -251,120 +224,6 @@ describe.skip("<TaskDocument>", () => {
     // What we still want to guarantee is that the Approve & Start button
     // is suppressed off the drafting state.
     expect(row.querySelector("[data-testid='approve-and-start']")).toBeNull();
-  });
-
-  // ── Comment timeline ────────────────────────────────────────────────
-
-  it("renders all comments in the timeline", async () => {
-    renderDoc(BASE_DOC);
-    activateCommentsTab();
-    const list = screen.getByTestId("issue-comments-list");
-    expect(list).toBeInTheDocument();
-    expect(
-      screen.getByText(/Drafted spec based on our chat/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/idempotency via the Stripe Event ID/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Yes please add to acceptance criteria/i),
-    ).toBeInTheDocument();
-  });
-
-  it("renders a PixelAvatar canvas for each comment author", async () => {
-    renderDoc(BASE_DOC);
-    activateCommentsTab();
-    // Three comments, each gets a canvas (PixelAvatar renders a <canvas>).
-    const canvases = document.querySelectorAll(".issue-comment canvas");
-    expect(canvases.length).toBe(BASE_DOC.comments.length);
-  });
-
-  it("renders empty-state message when there are no comments", async () => {
-    renderDoc({ ...BASE_DOC, comments: [] });
-    activateCommentsTab();
-    expect(screen.getByTestId("issue-comments-empty")).toBeInTheDocument();
-  });
-
-  it("interleaves human and agent comments in order", async () => {
-    renderDoc(BASE_DOC);
-    activateCommentsTab();
-    const authors = screen
-      .getAllByRole("article")
-      .map((el) => el.querySelector(".issue-comment-author")?.textContent);
-    expect(authors).toEqual(["ceo", "engineer", "human"]);
-  });
-
-  // ── Timeline shape (#937) ──────────────────────────────────────────────
-
-  it("renders the timeline as a semantic ordered list (#937)", async () => {
-    renderDoc(BASE_DOC);
-    activateCommentsTab();
-    const list = screen.getByTestId("issue-comments-list");
-    expect(list.tagName.toLowerCase()).toBe("ol");
-    expect(list).toHaveAttribute(
-      "aria-label",
-      "Timeline entries (chronological)",
-    );
-    // Each entry is wrapped in an <li> for assistive-tech step counting.
-    expect(list.querySelectorAll("li").length).toBe(BASE_DOC.comments.length);
-  });
-
-  it("labels the timeline section 'Timeline' (#937)", async () => {
-    renderDoc(BASE_DOC);
-    activateCommentsTab();
-    expect(
-      screen.getByRole("heading", { name: /timeline/i }),
-    ).toBeInTheDocument();
-    // Aria-label on the section uses the same vocabulary.
-    expect(screen.getByLabelText(/^Timeline$/i)).toBeInTheDocument();
-  });
-
-  it("empty state explains the timeline purpose in drafting state (#937)", async () => {
-    renderDoc({ ...BASE_DOC, comments: [] });
-    activateCommentsTab();
-    const empty = screen.getByTestId("issue-comments-empty");
-    expect(empty).toBeInTheDocument();
-    expect(empty.textContent).toMatch(/CEO will start asking questions/i);
-    expect(empty.textContent).toMatch(/Answer inline/i);
-  });
-
-  it("empty state uses a non-drafting copy for approved issues (#937)", async () => {
-    renderDoc({ ...APPROVED_DOC, comments: [] });
-    activateCommentsTab();
-    const empty = screen.getByTestId("issue-comments-empty");
-    expect(empty.textContent).toMatch(/Nothing on the timeline yet/i);
-    expect(empty.textContent).toMatch(/Status changes/i);
-  });
-
-  it("renders a human comment form", async () => {
-    renderDoc(BASE_DOC);
-    activateCommentsTab();
-    expect(screen.getByTestId("issue-comment-form")).toBeInTheDocument();
-    expect(screen.getByLabelText(/add a comment/i)).toBeInTheDocument();
-    expect(screen.getByTestId("issue-comment-submit")).toBeDisabled();
-  });
-
-  it("posts a human comment and clears the editor", async () => {
-    renderDoc(BASE_DOC);
-    activateCommentsTab();
-    const input = screen.getByTestId("issue-comment-input");
-    fireEvent.change(input, {
-      target: { value: "Please confirm the webhook retry policy." },
-    });
-    const submit = screen.getByTestId("issue-comment-submit");
-    expect(submit).not.toBeDisabled();
-    fireEvent.click(submit);
-
-    await waitFor(() => {
-      expect(lifecycleApi.postTaskComment).toHaveBeenCalledWith(
-        "task-001",
-        "issue-specs",
-        "Please confirm the webhook retry policy.",
-      );
-    });
-    await waitFor(() => {
-      expect(input).toHaveValue("");
-    });
   });
 
   // ── Collapse on approved ─────────────────────────────────────────────
@@ -476,8 +335,6 @@ describe("normalizeTaskDocument", () => {
       "Pull unread email context and seed wiki profiles.",
     );
     expect(doc.spec.acceptance).toContain("Unread senders are listed.");
-    expect(doc.comments).toHaveLength(1);
-    expect(doc.comments[0]?.body).toContain("self-heal diagnosis");
   });
 
   it("rejects task documents without a channel", () => {

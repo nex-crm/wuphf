@@ -17,17 +17,13 @@
  * Phase 3 behaviour is fully preserved for non-Drafting states.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { get } from "../../api/client";
 import { openSharedEventStream } from "../../api/eventStream";
-import {
-  postDecision,
-  postTaskComment,
-  postTaskReject,
-} from "../../api/lifecycle";
+import { postDecision, postTaskReject } from "../../api/lifecycle";
 import {
   getOfficeTasks,
   type Task,
@@ -39,12 +35,6 @@ import {
 } from "../../lib/messageMarkdown";
 import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import type { LifecycleState } from "../../lib/types/lifecycle";
-import {
-  Autocomplete,
-  type AutocompleteItem,
-  applyAutocomplete,
-} from "../messages/Autocomplete";
-import { PixelAvatar } from "../ui/PixelAvatar";
 import { LifecycleStatePill } from "./LifecycleStatePill";
 import { OwnerPicker } from "./OwnerPicker";
 import { ParentTaskBreadcrumb } from "./ParentTaskBreadcrumb";
@@ -83,22 +73,6 @@ export interface TaskSpec {
 }
 
 /**
- * A single comment on the Task. Used by both human and agent authors.
- * Reuses the FeedbackItem shape from the existing comment infrastructure
- * (broker_intake_types.go FeedbackItem / lifecycle.ts FeedbackItem), extended
- * with an id for scroll-targeting.
- */
-export interface TaskComment {
-  id: string;
-  author: string;
-  /** True when the author is an agent slug (vs. "human"). */
-  isAgent: boolean;
-  body: string;
-  /** RFC3339 / ISO datetime. */
-  appendedAt: string;
-}
-
-/**
  * Full Issue document payload.
  * Fetched from GET /tasks/<taskId>. Fields mirror the broker's `teamTask`
  * JSON shape (camelCase on the wire from the Go side).
@@ -114,7 +88,6 @@ export interface TaskDocument {
   /** Retained for back-compat with stream-handler code; unused by
    * the Linear-style body. New work should write to `description`. */
   spec: TaskSpec;
-  comments: TaskComment[];
   channel: string;
   ownerSlug?: string;
   parentTaskId?: string;
@@ -151,22 +124,6 @@ function writeSpecExpanded(taskId: string, expanded: boolean): void {
     sessionStorage.setItem(sessionStorageKey(taskId), String(expanded));
   } catch {
     // private-mode tabs — in-memory state only.
-  }
-}
-
-function formatTimestamp(iso: string): string {
-  try {
-    const d = new Date(iso);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMin = Math.floor(diffMs / 60_000);
-    if (diffMin < 1) return "just now";
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    return d.toLocaleDateString();
-  } catch {
-    return iso;
   }
 }
 
@@ -225,21 +182,6 @@ function normalizeSpec(
   };
 }
 
-/** Normalize one comment entry from the raw broker response. */
-function normalizeComment(c: unknown, idx: number): TaskComment {
-  const comment = (c ?? {}) as Record<string, unknown>;
-  const id = strField(comment, "id") ?? `comment-${String(idx)}`;
-  const author = strField(comment, "author") ?? "unknown";
-  const body = strField(comment, "body") ?? strField(comment, "text") ?? "";
-  const appendedAt =
-    strField(comment, "appendedAt") ??
-    strField(comment, "created_at") ??
-    new Date().toISOString();
-  const isAgent =
-    typeof comment.isAgent === "boolean" ? comment.isAgent : author !== "human";
-  return { id, author, isAgent, body, appendedAt };
-}
-
 function resolveTaskId(
   packet: Record<string, unknown>,
   taskRecord: Record<string, unknown> | undefined,
@@ -278,20 +220,6 @@ function resolveTaskLifecycleState(
   return rawState
     ? (rawState as LifecycleState)
     : taskToLifecycleState(taskHint);
-}
-
-function normalizeTaskComments(
-  packet: Record<string, unknown>,
-  spec: Record<string, unknown>,
-): TaskComment[] {
-  const rawComments: unknown[] = Array.isArray(packet.comments)
-    ? packet.comments
-    : Array.isArray(packet.feedback)
-      ? packet.feedback
-      : Array.isArray(spec.feedback)
-        ? spec.feedback
-        : [];
-  return rawComments.map(normalizeComment);
 }
 
 function resolveAliasedField(
@@ -340,7 +268,6 @@ export function normalizeTaskDocument(
   const title = resolveTaskTitle(r, taskRecord, rawSpec, taskHint, taskId);
   const lifecycleState = resolveTaskLifecycleState(r, taskHint);
   const spec = normalizeSpec(rawSpec, taskHint);
-  const comments = normalizeTaskComments(r, rawSpec);
 
   // Linear-style description: the broker writes `details` on the task
   // record; legacy clients may still write `description`. Fall back to
@@ -366,7 +293,6 @@ export function normalizeTaskDocument(
     description,
     lifecycleState,
     spec,
-    comments,
     channel: resolveTaskChannel(r, taskRecord, taskHint),
     ownerSlug:
       resolveAliasedField(r, taskRecord, "ownerSlug", "owner") ??
@@ -481,65 +407,6 @@ function SpecSummaryCard({
         Expand spec
       </button>
     </section>
-  );
-}
-
-interface CommentItemProps {
-  comment: TaskComment;
-}
-
-function CommentItem({ comment }: CommentItemProps) {
-  const label = comment.isAgent ? `Agent ${comment.author}` : "Human";
-  // [SUGGESTION] prefix → specialist scope proposal (Slice 7). Highlight
-  // the card so CEO scans them quickly + strip the marker from the
-  // visible body since it duplicates the label.
-  const trimmed = comment.body.trimStart();
-  const isSuggestion = /^\[SUGGESTION\]/i.test(trimmed);
-  const body = isSuggestion
-    ? trimmed.replace(/^\[SUGGESTION\]\s*/i, "")
-    : comment.body;
-  return (
-    <article
-      id={`comment-${comment.id}`}
-      className={
-        "issue-comment" + (isSuggestion ? " issue-comment--suggestion" : "")
-      }
-      aria-label={`Comment by ${comment.author}`}
-    >
-      <div className="issue-comment-meta">
-        <PixelAvatar
-          slug={comment.author}
-          size={24}
-          className="issue-comment-avatar"
-        />
-        <span className="issue-comment-author" title={label}>
-          {comment.author}
-        </span>
-        {isSuggestion ? (
-          <span
-            className="issue-comment-suggestion-badge"
-            title="Specialist suggestion — CEO decides"
-          >
-            Suggestion
-          </span>
-        ) : null}
-        <time
-          className="issue-comment-time"
-          dateTime={comment.appendedAt}
-          title={comment.appendedAt}
-        >
-          {formatTimestamp(comment.appendedAt)}
-        </time>
-      </div>
-      <div className="issue-comment-body">
-        <ReactMarkdown
-          remarkPlugins={messageRemarkPlugins}
-          components={messageMarkdownComponents}
-        >
-          {body}
-        </ReactMarkdown>
-      </div>
-    </article>
   );
 }
 
@@ -854,232 +721,6 @@ function useDraftStream(taskId: string, enabled: boolean): DraftAccumulator {
   return draft;
 }
 
-// ── Comments timeline sub-component ───────────────────────────────────
-
-interface CommentsTimelineProps {
-  taskId: string;
-  channel: string;
-  comments: TaskComment[];
-  isDrafting: boolean;
-  timelineRef: React.RefObject<HTMLDivElement | null>;
-  onCommentPosted: () => void;
-}
-
-export function CommentsTimeline({
-  taskId,
-  channel,
-  comments,
-  isDrafting,
-  timelineRef,
-  onCommentPosted,
-}: CommentsTimelineProps) {
-  const [commentBody, setCommentBody] = useState("");
-  const [commentError, setCommentError] = useState<string | null>(null);
-  const [caret, setCaret] = useState(0);
-  const [acItems, setAcItems] = useState<AutocompleteItem[]>([]);
-  const [acIdx, setAcIdx] = useState(0);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const trimmedComment = commentBody.trim();
-
-  const commentMutation = useMutation({
-    mutationFn: (body: string) => postTaskComment(taskId, channel, body),
-    onSuccess: () => {
-      setCommentBody("");
-      setCaret(0);
-      setCommentError(null);
-      onCommentPosted();
-    },
-    onError: (err: unknown) => {
-      setCommentError(
-        err instanceof Error ? err.message : "Could not post comment.",
-      );
-    },
-  });
-
-  const pickAutocomplete = useCallback(
-    (item: AutocompleteItem) => {
-      const next = applyAutocomplete(commentBody, caret, item);
-      setCommentBody(next.text);
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        el.focus();
-        el.setSelectionRange(next.caret, next.caret);
-        setCaret(next.caret);
-      });
-    },
-    [commentBody, caret],
-  );
-
-  const handleAcItems = useCallback((items: AutocompleteItem[]) => {
-    setAcItems(items);
-    setAcIdx((prev) => (prev >= items.length ? 0 : prev));
-  }, []);
-
-  function submitComment(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!trimmedComment || commentMutation.isPending) return;
-    setCommentError(null);
-    commentMutation.mutate(trimmedComment);
-  }
-
-  function handleCommentKeyDown(
-    event: React.KeyboardEvent<HTMLTextAreaElement>,
-  ) {
-    // Autocomplete keyboard nav runs first so the textarea doesn't
-    // swallow Enter when the panel is open. Same pattern as Composer.
-    if (acItems.length > 0) {
-      switch (event.key) {
-        case "ArrowDown":
-          event.preventDefault();
-          setAcIdx((prev) => (prev + 1) % acItems.length);
-          return;
-        case "ArrowUp":
-          event.preventDefault();
-          setAcIdx((prev) => (prev - 1 + acItems.length) % acItems.length);
-          return;
-        case "Tab":
-        case "Enter": {
-          event.preventDefault();
-          const pick = acItems[acIdx];
-          if (pick) pickAutocomplete(pick);
-          return;
-        }
-        case "Escape":
-          event.preventDefault();
-          setAcItems([]);
-          return;
-      }
-    }
-    // Cmd/Ctrl+Enter submits when autocomplete is not active.
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      if (trimmedComment && !commentMutation.isPending) {
-        commentMutation.mutate(trimmedComment);
-      }
-    }
-  }
-
-  return (
-    <section
-      className="issue-doc-comments"
-      aria-label="Timeline"
-      aria-live="polite"
-      ref={timelineRef}
-    >
-      <h3 className="issue-comments-heading">Timeline</h3>
-      {comments.length === 0 ? (
-        <div
-          className="issue-comments-empty"
-          data-testid="issue-comments-empty"
-          role="note"
-        >
-          <p className="issue-comments-empty-title">
-            {isDrafting
-              ? "CEO will start asking questions here."
-              : "Nothing on the timeline yet."}
-          </p>
-          <p className="issue-comments-empty-hint">
-            {isDrafting
-              ? "Answer inline to refine the spec. Each turn from the CEO, the team, and you lands here as a card."
-              : "Status changes, reviewer comments, and human↔CEO replies will appear here as they happen."}
-          </p>
-        </div>
-      ) : (
-        <ol
-          className="issue-comments-list"
-          data-testid="issue-comments-list"
-          aria-label="Timeline entries (chronological)"
-        >
-          {comments.map((c) => (
-            <li key={c.id} className="issue-comments-list-item">
-              <CommentItem comment={c} />
-            </li>
-          ))}
-        </ol>
-      )}
-      {/*
-       * Drafting-state comment helper. Lets reviewers know they can
-       * comment before execution starts. Server-side gating is the
-       * source of truth; this is a UX affordance only.
-       */}
-      {isDrafting ? (
-        <p
-          className="issue-comments-drafting-helper"
-          data-testid="drafting-comment-helper"
-        >
-          Anyone can comment — execution starts after Approve &amp; Start.
-        </p>
-      ) : null}
-      <form
-        className="issue-comment-form"
-        onSubmit={submitComment}
-        data-testid="issue-comment-form"
-      >
-        <label className="issue-comment-form-label" htmlFor="issue-comment">
-          Add a comment
-        </label>
-        <div className="issue-comment-input-wrap">
-          <Autocomplete
-            value={commentBody}
-            caret={caret}
-            selectedIdx={acIdx}
-            onItems={handleAcItems}
-            onPick={pickAutocomplete}
-          />
-          <textarea
-            id="issue-comment"
-            ref={textareaRef}
-            className="issue-comment-input"
-            value={commentBody}
-            onChange={(event) => {
-              setCommentBody(event.target.value);
-              setCaret(
-                event.target.selectionStart ?? event.target.value.length,
-              );
-              if (commentError) setCommentError(null);
-            }}
-            onSelect={(event) => {
-              const target = event.currentTarget;
-              setCaret(target.selectionStart ?? target.value.length);
-            }}
-            onKeyUp={(event) => {
-              const target = event.currentTarget;
-              setCaret(target.selectionStart ?? target.value.length);
-            }}
-            onClick={(event) => {
-              const target = event.currentTarget;
-              setCaret(target.selectionStart ?? target.value.length);
-            }}
-            onKeyDown={handleCommentKeyDown}
-            placeholder="Ask a question, clarify scope, or leave review notes. Type @ to mention."
-            rows={4}
-            disabled={commentMutation.isPending}
-            data-testid="issue-comment-input"
-          />
-        </div>
-        {commentError ? (
-          <p
-            className="issue-comment-error"
-            role="alert"
-            data-testid="issue-comment-error"
-          >
-            {commentError}
-          </p>
-        ) : null}
-        <button
-          type="submit"
-          className="issue-comment-submit"
-          disabled={!trimmedComment || commentMutation.isPending}
-          data-testid="issue-comment-submit"
-        >
-          {commentMutation.isPending ? "Posting…" : "Comment"}
-        </button>
-      </form>
-    </section>
-  );
-}
-
 // ── Spec body sub-component ───────────────────────────────────────────
 
 interface SpecBodyProps {
@@ -1272,17 +913,6 @@ export function TaskDocument({
     streamingStarted,
     draftAccumulator,
   );
-
-  // Deep-link: scroll to a specific comment when ?comment=<id> is present.
-  useEffect(() => {
-    if (!doc || doc.comments.length === 0) return;
-    const params = new URLSearchParams(window.location.search);
-    const commentId = params.get("comment");
-    if (commentId) {
-      const el = document.getElementById(`comment-${commentId}`);
-      el?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [doc]);
 
   if (query.isPending && !initialDocument) {
     return <TaskDocumentSkeleton />;

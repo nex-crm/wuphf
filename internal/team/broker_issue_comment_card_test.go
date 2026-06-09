@@ -9,16 +9,13 @@ package team
 //     and emitted a redundant "<legacy> → drafting" lifecycle card on
 //     top of the proper issue_created card.
 //
-//  2. POST /tasks/{id}/comment broadcasts an instructional brief in
-//     Content (telling the woken agent to reply via team_task comment
-//     and NOT change lifecycle state) instead of the raw comment body.
-//     The comment text itself flows through the structured Payload so
-//     the FE IssueCommentCard can render it, but the agent loop reads
-//     Content. Without the brief, woken agents historically interpreted
-//     the comment text as a chat directive and started executing the
-//     work, even on un-approved Issues.
+//  2. POST /tasks/{id}/comment no longer creates a packet-feedback
+//     "comment" + an issue_comment card. Task comments are retired:
+//     the endpoint posts the body as a normal chat message into the
+//     task's channel (visible in the feed, wakes the owner via the
+//     standard path). See TestPostTaskCommentPostsChatMessage.
 //
-//  3. Issue chat cards (created / lifecycle / comment) carry ReplyTo =
+//  3. Issue chat cards (created / lifecycle) carry ReplyTo =
 //     task.ThreadID so they fold into the originating thread instead
 //     of seeding new top-level messages that visually float above
 //     subsequent chat replies.
@@ -106,7 +103,7 @@ func TestCreateIssueEmitsOnlyOneCardKind(t *testing.T) {
 	}
 }
 
-func TestPostIssueCommentBroadcastsInstructionalBrief(t *testing.T) {
+func TestPostTaskCommentPostsChatMessage(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "ceo", "CEO")
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
@@ -168,85 +165,57 @@ func TestPostIssueCommentBroadcastsInstructionalBrief(t *testing.T) {
 		t.Fatalf("unexpected comment status %d: %s", commentResp.StatusCode, raw)
 	}
 
-	var (
-		commentMsg channelMessage
-		found      bool
-	)
+	// Resolve the task's channel, then assert the comment body landed there
+	// as a plain human chat message — not a packet-feedback "issue_comment"
+	// card. Task comments are retired: human input on a task is just chat.
 	b.mu.Lock()
+	taskChannel := ""
+	if tk := b.findTaskByIDLocked(taskID); tk != nil {
+		taskChannel = normalizeChannelSlug(tk.Channel)
+	}
+	var (
+		chatMsg channelMessage
+		found   bool
+	)
 	for i := range b.messages {
 		msg := &b.messages[i]
-		if msg.SourceTaskID == taskID && msg.Kind == "issue_comment" {
-			commentMsg = *msg
+		if normalizeChannelSlug(msg.Channel) == taskChannel &&
+			strings.TrimSpace(msg.Content) == commentText {
+			chatMsg = *msg
 			found = true
+			break
+		}
+	}
+	sawCommentCard := false
+	for i := range b.messages {
+		if b.messages[i].Kind == "issue_comment" {
+			sawCommentCard = true
 			break
 		}
 	}
 	b.mu.Unlock()
 
 	if !found {
-		t.Fatalf("expected an issue_comment chat message for task %s", taskID)
+		t.Fatalf("expected the comment body to be posted as a chat message in channel %q", taskChannel)
 	}
-
-	// The broadcast must come from "system" so the FE can route it
-	// through the IssueCommentCard rather than rendering as a human
-	// chat bubble.
-	if commentMsg.From != "system" {
-		t.Fatalf("expected From=system on issue_comment broadcast, got %q", commentMsg.From)
+	// A human-shaped sender so it renders as a normal chat bubble, not a
+	// system card.
+	if !isHumanMessageSender(chatMsg.From) {
+		t.Fatalf("expected chat message From to be a human sender, got %q", chatMsg.From)
 	}
-
-	// Content is the agent-facing brief. It MUST tell the agent to
-	// reply via team_task action=comment and MUST forbid changing
-	// the Issue's lifecycle state. It MUST NOT inline the full
-	// comment body (that's what tripped agents into executing
-	// pre-fix — the body looked like a chat directive).
-	content := commentMsg.Content
-	if !strings.Contains(content, "team_task action=comment") {
-		t.Fatalf("expected Content to instruct team_task action=comment, got %q", content)
+	if chatMsg.Kind == "issue_comment" {
+		t.Fatalf("expected a plain chat message, got an issue_comment card")
 	}
-	if !strings.Contains(content, "Do NOT change") {
-		t.Fatalf("expected Content to forbid lifecycle change, got %q", content)
-	}
-	if strings.Contains(content, commentText) {
-		t.Fatalf("expected Content to omit raw comment body, got %q", content)
-	}
-
-	// The structured payload carries the body for the FE card.
-	if len(commentMsg.Payload) == 0 {
-		t.Fatalf("expected non-empty Payload on issue_comment broadcast")
-	}
-	var payload map[string]string
-	if err := json.Unmarshal(commentMsg.Payload, &payload); err != nil {
-		t.Fatalf("decode Payload: %v", err)
-	}
-	if payload["task_id"] != taskID {
-		t.Fatalf("payload.task_id mismatch: got %q want %q", payload["task_id"], taskID)
-	}
-	if payload["excerpt"] != commentText {
-		t.Fatalf("payload.excerpt mismatch: got %q want %q", payload["excerpt"], commentText)
-	}
-	if payload["lifecycle_state"] == "" {
-		t.Fatalf("expected payload.lifecycle_state to be populated, got empty")
-	}
-
-	// CEO must be in the tagged list so an untagged comment still
-	// wakes the channel leader. Owner should also be tagged.
-	taggedSet := map[string]bool{}
-	for _, slug := range commentMsg.Tagged {
-		taggedSet[slug] = true
-	}
-	if !taggedSet["ceo"] {
-		t.Fatalf("expected ceo to be tagged, got %v", commentMsg.Tagged)
-	}
-	if !taggedSet["builder"] {
-		t.Fatalf("expected owner (builder) to be tagged, got %v", commentMsg.Tagged)
+	if sawCommentCard {
+		t.Fatalf("comments are retired: expected NO issue_comment card to be created")
 	}
 }
 
-// TestIssueCardsReplyInOriginatingThread verifies that the three Issue
-// chat cards (created / lifecycle / comment) all set ReplyTo to the
-// originating thread id stored on the task. Pre-fix, cards seeded
-// their own top-level chat slot, which left subsequent chat replies
-// appearing visually below them as if the card were "newer".
+// TestIssueCardsReplyInOriginatingThread verifies that the Issue chat
+// cards (created / lifecycle) all set ReplyTo to the originating thread
+// id stored on the task. Pre-fix, cards seeded their own top-level chat
+// slot, which left subsequent chat replies appearing visually below
+// them as if the card were "newer".
 func TestIssueCardsReplyInOriginatingThread(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "ceo", "CEO")
@@ -291,21 +260,6 @@ func TestIssueCardsReplyInOriginatingThread(t *testing.T) {
 	createResp.Body.Close()
 	taskID := strings.TrimSpace(createResult.Task.ID)
 
-	// Comment to emit an issue_comment card.
-	commentBody, _ := json.Marshal(map[string]string{"body": "Quick question on scope."})
-	commentReq, _ := http.NewRequest(
-		http.MethodPost,
-		base+"/tasks/"+taskID+"/comment",
-		bytes.NewReader(commentBody),
-	)
-	commentReq.Header.Set("Authorization", "Bearer "+b.Token())
-	commentReq.Header.Set("Content-Type", "application/json")
-	commentResp, err := http.DefaultClient.Do(commentReq)
-	if err != nil {
-		t.Fatalf("comment: %v", err)
-	}
-	commentResp.Body.Close()
-
 	// Force a lifecycle transition (Drafting → Review) to emit an
 	// issue_lifecycle card. transitionLifecycleLocked is the public
 	// chokepoint and only requires the lock to be held by the caller.
@@ -318,7 +272,6 @@ func TestIssueCardsReplyInOriginatingThread(t *testing.T) {
 
 	wantKinds := map[string]bool{
 		"issue_created":   false,
-		"issue_comment":   false,
 		"issue_lifecycle": false,
 	}
 	b.mu.Lock()
