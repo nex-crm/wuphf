@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { BookStack, HomeSimple, Terminal } from "iconoir-react";
+import { BookStack, HomeSimple, ShareAndroid } from "iconoir-react";
 
 import { Kbd, MOD_KEY } from "../ui/Kbd";
 import { SidebarItem } from "./SidebarItem";
@@ -93,8 +93,8 @@ function ToolsBody() {
         badge={badge(2)}
       />
       <SidebarItem
-        icon={<Terminal className="sidebar-item-icon" />}
-        label="Console"
+        icon={<ShareAndroid className="sidebar-item-icon" />}
+        label="Graph"
       />
     </div>
   );

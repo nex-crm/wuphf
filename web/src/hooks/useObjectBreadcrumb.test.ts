@@ -122,10 +122,10 @@ describe("deriveBreadcrumbs", () => {
     expect(crumbs[0].label).toBe("Settings");
   });
 
-  it("returns [Console] for console app route", () => {
-    const route: CurrentRoute = { kind: "app", appId: "console" };
+  it("returns [Graph] for graph app route", () => {
+    const route: CurrentRoute = { kind: "app", appId: "graph" };
     const crumbs = deriveBreadcrumbs(route);
     expect(crumbs).toHaveLength(1);
-    expect(crumbs[0].label).toBe("Console");
+    expect(crumbs[0].label).toBe("Graph");
   });
 });

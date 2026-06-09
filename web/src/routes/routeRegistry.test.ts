@@ -45,7 +45,7 @@ function unique<T>(values: readonly T[]): T[] {
 describe("route registry", () => {
   it("keeps app panel ids unique and validated", () => {
     expect(unique(APP_PANEL_IDS)).toHaveLength(APP_PANEL_IDS.length);
-    expect(isAppPanelId("console")).toBe(true);
+    expect(isAppPanelId("graph")).toBe(true);
     // `tasks` is now a first-class surface (lives at /tasks), not an
     // /apps/$id panel.
     expect(isAppPanelId("tasks")).toBe(false);
@@ -85,7 +85,7 @@ describe("route registry", () => {
     expect(isFirstClassAppId("wiki")).toBe(true);
     expect(isFirstClassAppId("inbox")).toBe(true);
     expect(isFirstClassAppId("tasks")).toBe(true);
-    expect(isFirstClassAppId("console")).toBe(false);
+    expect(isFirstClassAppId("graph")).toBe(false);
   });
 
   it("keeps the planned route contracts unique", () => {
@@ -161,10 +161,9 @@ describe("TanStack route tree", () => {
     );
     const leaf = router.matchRoutes(path).at(-1);
 
-    // /console and /threads were temporary aliases during phase 0. They
-    // should now only match the root (no leaf), so the canonical
-    // /apps/console URL is the single source of truth (and /apps/threads
-    // is no longer a recognized app panel — see APP_PANEL_IDS).
+    // /console and /threads were temporary aliases during phase 0. Neither
+    // is a recognized app panel any longer (see APP_PANEL_IDS), so both
+    // should only match the root (no leaf).
     expect(leaf?.routeId).toBe(rootRoute.id);
   });
 

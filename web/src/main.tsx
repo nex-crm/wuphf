@@ -15,7 +15,6 @@ import "./styles/search.css";
 import "./styles/command.css";
 import "./styles/wiki-shell.css";
 import "./styles/kbd.css";
-import "./styles/console.css";
 import "./styles/pixel-skill-card.css";
 import "./styles/lifecycle.css";
 import "./styles/onboarding.css";

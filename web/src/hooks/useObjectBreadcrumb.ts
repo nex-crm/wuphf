@@ -185,7 +185,6 @@ function breadcrumbItem(
 /** Map an app id to a friendly label without importing SIDEBAR_APPS. */
 function appLabel(appId: string): string {
   const LABELS: Record<string, string> = {
-    console: "Console",
     tasks: "Tasks",
     requests: "Requests",
     graph: "Graph",
@@ -193,7 +192,6 @@ function appLabel(appId: string): string {
     routines: "Routines",
     skills: "Skills",
     activity: "Activity",
-    receipts: "Receipts",
     "health-check": "Access & Health",
   };
   return (
