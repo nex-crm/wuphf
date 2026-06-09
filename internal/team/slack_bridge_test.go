@@ -123,6 +123,32 @@ func TestSlackBridgePostMentionAPIError(t *testing.T) {
 	}
 }
 
+func TestSlackBridgePostEscapesControlSequences(t *testing.T) {
+	api := newFakeSlackAPI()
+	br := newSlackBridge(api)
+
+	// A tainted Ask could smuggle Slack control sequences into the egress text.
+	// The bridge posts with escapeText=true so &<> are neutralized — no mass-ping
+	// (<!channel>/<!here>) and no fake <url|label> link reaches the workspace.
+	_, err := br.Post(context.Background(),
+		newTestDelegation("ping <!channel> and <http://evil|click here>", "also <!here>", "C0123", ""), "key-escape")
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	posts := api.snapshotPosts()
+	if len(posts) != 2 {
+		t.Fatalf("expected 2 posts, got %d", len(posts))
+	}
+	for _, p := range posts {
+		if contains(p.Text, "<!channel>") || contains(p.Text, "<!here>") || contains(p.Text, "<http://evil|click here>") {
+			t.Fatalf("egress text must escape Slack control sequences, got %q", p.Text)
+		}
+	}
+	if !contains(posts[0].Text, "&lt;!channel&gt;") {
+		t.Fatalf("expected escaped control sequence in mention, got %q", posts[0].Text)
+	}
+}
+
 func TestSlackBridgePostThreadContextErrorReturnsMentionTS(t *testing.T) {
 	api := newFakeSlackAPI()
 	// Fail only the SECOND post (the thread follow-up); the mention succeeds.

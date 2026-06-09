@@ -66,10 +66,14 @@ func (b *SlackBridge) Post(ctx context.Context, d packer.PackedDelegation, idemp
 	postCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Post the mention. If the delegation targets an existing thread, anchor the
-	// mention to it; otherwise the mention starts a new thread whose ts we reuse
-	// for the follow-up.
-	mentionOpts := []slack.MsgOption{slack.MsgOptionText(mention, false)}
+	// Post the mention. escapeText=true is deliberate and security-relevant: this
+	// is the foreign-facing egress boundary, and the packer redacts SECRETS, not
+	// Slack control sequences. Escaping &<> neutralizes injected mrkdwn like
+	// <!channel>/<!here> mass-pings and fake <url|text> links that a tainted Ask
+	// could otherwise smuggle into the workspace. If the delegation targets an
+	// existing thread, anchor the mention to it; otherwise the mention starts a
+	// new thread whose ts we reuse for the follow-up.
+	mentionOpts := []slack.MsgOption{slack.MsgOptionText(mention, true)}
 	if ts := strings.TrimSpace(d.Injection.ThreadTS); ts != "" {
 		mentionOpts = append(mentionOpts, slack.MsgOptionTS(ts))
 	}
@@ -87,7 +91,7 @@ func (b *SlackBridge) Post(ctx context.Context, d packer.PackedDelegation, idemp
 			threadTS = mentionTS
 		}
 		_, _, ferr := b.api.PostMessageContext(postCtx, channelID,
-			slack.MsgOptionText(thread, false),
+			slack.MsgOptionText(thread, true),
 			slack.MsgOptionTS(threadTS),
 		)
 		if ferr != nil {
