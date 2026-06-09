@@ -188,3 +188,60 @@ func (b *notificationContextBuilder) taskKnowledgeContext(task teamTask) string 
 	header := "RELEVANT TEAM KNOWLEDGE (matched to this task — apply it; cite the learning/wiki id when you do):"
 	return header + "\n" + strings.Join(lines, "\n")
 }
+
+// tailClip keeps the LAST max bytes of s — task outcomes accrete at the end
+// of Details, so the tail is where findings live.
+func tailClip(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	return "…" + s[len(s)-max:]
+}
+
+// upstreamOutcomesContext renders the outcomes of completed upstream
+// dependencies into a dependent task's packet (U3.2): dependency edges
+// carry data, not just scheduling. Without this, agent B starts a task
+// that depends on agent A's finished work without A's findings in
+// context — side-by-side work, not collaboration.
+func (b *notificationContextBuilder) upstreamOutcomesContext(task teamTask) string {
+	if b == nil || b.taskByID == nil {
+		return ""
+	}
+	seen := map[string]struct{}{}
+	ids := make([]string, 0, len(task.DependsOn)+len(task.BlockedOn))
+	for _, id := range append(append([]string(nil), task.DependsOn...), task.BlockedOn...) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	var lines []string
+	for _, id := range ids {
+		up := b.taskByID(id)
+		if up == nil {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(up.status))
+		if status != "done" && status != "review" {
+			continue
+		}
+		line := fmt.Sprintf("- #%s %s (%s)", up.ID, truncate(strings.TrimSpace(up.Title), taskListTitleClipChars), status)
+		if details := strings.TrimSpace(up.Details); details != "" {
+			line += "\n  Outcome: " + tailClip(details, 1500)
+		}
+		if res := up.VerificationResult; res != nil && res.Pass && strings.TrimSpace(res.Detail) != "" {
+			line += "\n  Verified (" + res.Kind + "): " + truncate(strings.TrimSpace(res.Detail), 400)
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "UPSTREAM RESULTS (work this task depends on — build on it, do not redo it):\n" + strings.Join(lines, "\n")
+}

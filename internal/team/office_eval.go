@@ -351,7 +351,6 @@ func evalJobDependencyHandoff(fx *officeEvalFixture, r *OfficeEvalReport) error 
 
 	packet := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *unblocked, "Task unblocked.")
 	r.add(job, "dependent's packet carries the upstream outcome", strings.Contains(packet, outcome),
-		"B depends on A; A finished with a concrete finding; B's packet should contain it",
-		"U3.2 dependency edges carry upstream artifacts")
+		"B depends on A; A finished with a concrete finding; B's packet must contain it (U3.2 regression guard)", "")
 	return nil
 }
