@@ -463,20 +463,26 @@ func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, err
 	// leave author_slug empty rather than abort. Surface the underlying
 	// error at warn level — silent swallow used to mask corrupt-repo and
 	// `git log` failures so backlinks rendered with no author + no signal.
-	commitBounds, err := r.commitBoundsByPath(ctx)
+	//
+	// Scope the lookup to just the hit paths. The old path walked the entire
+	// repo history (commitBoundsByPath → AuditLog over every commit) on every
+	// article open, which made wiki article loads block past the client's
+	// patience window on busy wikis. Backlink attribution only needs the latest
+	// author of the handful of articles that actually link here.
+	hitPaths := make([]string, len(hits))
+	for i, h := range hits {
+		hitPaths[i] = h.relPath
+	}
+	authorByPath, err := r.latestCommitAuthorsByPath(ctx, hitPaths)
 	if err != nil {
-		log.Printf("wiki backlinks: commitBoundsByPath failed, author_slug fields will be empty: %v", err)
+		log.Printf("wiki backlinks: latest-author lookup failed, author_slug fields will be empty: %v", err)
 	}
 	backs := make([]Backlink, 0, len(hits))
 	for _, h := range hits {
-		author := ""
-		if bounds, ok := commitBounds[h.relPath]; ok && bounds.Has {
-			author = bounds.Latest.Author
-		}
 		backs = append(backs, Backlink{
 			Path:       h.relPath,
 			Title:      h.title,
-			AuthorSlug: author,
+			AuthorSlug: authorByPath[h.relPath],
 		})
 	}
 	return backs, nil

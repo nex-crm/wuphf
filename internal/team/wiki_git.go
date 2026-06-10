@@ -744,6 +744,49 @@ func (r *Repo) RestoreToCommit(ctx context.Context, relPath, sha string, identit
 	return commitSHA, nil
 }
 
+// latestCommitAuthorsByPath returns the most-recent commit author for each
+// supplied path, in a single git invocation scoped to just those paths.
+//
+// This is the hot-path alternative to commitBoundsByPath for callers that only
+// need the latest author of a known, small set of articles (e.g. backlink
+// attribution on article open). Unlike AuditLog/commitBoundsByPath, it does NOT
+// walk the entire repo history — git limits the log to commits touching the
+// given pathspecs, so cost scales with those files' history rather than the
+// whole wiki. Paths absent from the result simply have no recorded commit.
+func (r *Repo) latestCommitAuthorsByPath(ctx context.Context, paths []string) (map[string]string, error) {
+	if len(paths) == 0 {
+		return map[string]string{}, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	args := []string{
+		"log",
+		"--format=%h%x1f%an%x1f%aI%x1f%s",
+		"--name-only",
+		"--no-merges",
+		"--",
+	}
+	for _, p := range paths {
+		args = append(args, filepath.ToSlash(p))
+	}
+	out, err := r.runGitLocked(ctx, "system", args...)
+	if err != nil {
+		return nil, fmt.Errorf("wiki: latest-author log: %w", err)
+	}
+	// parseAuditLog returns commits most-recent-first; the first author we see
+	// for a path is therefore its latest committer.
+	authors := make(map[string]string, len(paths))
+	for _, entry := range parseAuditLog(out) {
+		for _, p := range entry.Paths {
+			if _, seen := authors[p]; !seen {
+				authors[p] = entry.Author
+			}
+		}
+	}
+	return authors, nil
+}
+
 // AuditEntry is a single cross-article commit surfaced by AuditLog. Unlike
 // CommitRef (which powers per-article history), this carries the list of
 // files touched by the commit so reviewers can reconstruct the full diff
