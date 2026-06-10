@@ -174,17 +174,42 @@ export async function getDecisionPacket(
  */
 function normalizeDecisionPacket(p: DecisionPacket): DecisionPacket {
   // The GET /tasks/{id} response carries the source teamTask snapshot under
-  // `task` (see taskDetailResponse). The packet itself has no channel, so lift
-  // the task's channel onto it for the discussion empty-state link. Stay
-  // defensive: `task` is not on the DecisionPacket type and may be absent.
-  const taskSnapshot = (p as { task?: { channel?: unknown } }).task;
+  // `task` (see taskDetailResponse). The packet itself has no channel, and a
+  // DIRECT detail fetch (no inbox list row to backfill from) can also arrive
+  // with empty title/owner, so lift the channel + display fields off the
+  // snapshot. Stay defensive: `task` is not on the DecisionPacket type and may
+  // be absent. The Go teamTask wire keys are `title` and `owner`; accept
+  // `ownerSlug` too in case a snapshot ever carries the packet-side name.
+  const taskSnapshot = (
+    p as {
+      task?: {
+        channel?: unknown;
+        title?: unknown;
+        owner?: unknown;
+        ownerSlug?: unknown;
+      };
+    }
+  ).task;
   const channel =
     typeof taskSnapshot?.channel === "string" && taskSnapshot.channel.trim()
       ? taskSnapshot.channel.trim()
       : p.channel;
+  const title =
+    typeof taskSnapshot?.title === "string" && taskSnapshot.title.trim()
+      ? taskSnapshot.title.trim()
+      : p.title;
+  const snapshotOwner =
+    typeof taskSnapshot?.ownerSlug === "string" && taskSnapshot.ownerSlug.trim()
+      ? taskSnapshot.ownerSlug.trim()
+      : typeof taskSnapshot?.owner === "string" && taskSnapshot.owner.trim()
+        ? taskSnapshot.owner.trim()
+        : undefined;
+  const ownerSlug = snapshotOwner ?? p.ownerSlug;
   return {
     ...p,
     channel,
+    title,
+    ownerSlug,
     banners: p.banners ?? [],
     changedFiles: p.changedFiles ?? [],
     reviewerGrades: p.reviewerGrades ?? [],
