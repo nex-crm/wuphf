@@ -84,4 +84,49 @@ describe("<AgentWizard>", () => {
     expect(path).toBe("/office-members");
     expect((body as { permission_mode?: string }).permission_mode).toBe("auto");
   });
+
+  it("sends the soul field as `personality` in the create body", async () => {
+    postMock.mockResolvedValue({});
+    render(
+      wrap(<AgentWizard open={true} onClose={vi.fn()} onCreated={vi.fn()} />),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Manual" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Revenue Ops" },
+    });
+    fireEvent.change(screen.getByLabelText(/Soul/i), {
+      target: { value: "Relentless about pipeline." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(postMock).toHaveBeenCalled());
+    const [url, body] = postMock.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(url).toBe("/office-members");
+    expect(body).toMatchObject({
+      action: "create",
+      personality: "Relentless about pipeline.",
+    });
+  });
+
+  it("omits `personality` when the soul field is left blank", async () => {
+    postMock.mockResolvedValue({});
+    render(wrap(<AgentWizard open={true} onClose={vi.fn()} />));
+
+    fireEvent.click(screen.getByRole("button", { name: "Manual" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Quiet Agent" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(postMock).toHaveBeenCalled());
+    const [, body] = postMock.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(body.personality).toBeUndefined();
+  });
 });

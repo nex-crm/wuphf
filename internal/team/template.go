@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
@@ -119,6 +120,100 @@ func parseGeneratedMemberTemplate(raw string) (generatedMemberTemplate, error) {
 	}
 	tmpl.Model = strings.TrimSpace(tmpl.Model)
 	return tmpl, nil
+}
+
+// GenerateAgentFileFromContext authors a richer version of one prose
+// instruction file (SOUL / OPERATIONS, or the office USER.md) for human review.
+// It NEVER commits — the caller hands the result to the editor so the human
+// approves it with a save. On any LLM failure it returns an error (the file
+// already exists, so there is nothing to half-initialize); the UI surfaces it.
+//
+// Reuses the same one-shot provider call as member/channel generation. The
+// WUPHF_AGENT_FILE_STUB env var short-circuits the model for tests.
+func (l *Launcher) GenerateAgentFileFromContext(ctx context.Context, relPath, hint string) (string, error) {
+	if err := validateAgentFilePath(relPath); err != nil {
+		return "", err
+	}
+	relPath = strings.TrimSpace(relPath)
+
+	var slug, name string
+	if relPath == officeUserFileRel {
+		name = "USER"
+	} else {
+		parts := strings.Split(relPath, "/") // agents/<slug>/<NAME>.md
+		slug = parts[1]
+		name = strings.TrimSuffix(parts[2], ".md")
+	}
+	if name != "USER" && !aiGeneratableFile(name) {
+		return "", fmt.Errorf("AI generation is available only for SOUL, OPERATIONS, and USER; got %q", name)
+	}
+
+	if stub := strings.TrimSpace(os.Getenv("WUPHF_AGENT_FILE_STUB")); stub != "" {
+		return stub, nil
+	}
+
+	leadSlug := l.targeter().LeadSlug()
+	var info strings.Builder
+	var example string
+	if name == "USER" {
+		if cb := strings.TrimSpace(config.CompanyContextBlock()); cb != "" {
+			fmt.Fprintf(&info, "Company context:\n%s\n", cb)
+		}
+		example = renderOfficeUserFile()
+	} else {
+		member := l.officeMemberBySlug(slug)
+		isLead := slug == leadSlug
+		fmt.Fprintf(&info, "Agent: @%s\n", slug)
+		if r := strings.TrimSpace(member.Role); r != "" {
+			fmt.Fprintf(&info, "Role: %s\n", r)
+		}
+		if len(member.Expertise) > 0 {
+			fmt.Fprintf(&info, "Expertise: %s\n", strings.Join(member.Expertise, ", "))
+		}
+		if p := strings.TrimSpace(member.Personality); p != "" {
+			fmt.Fprintf(&info, "Persona: %s\n", p)
+		}
+		if isLead {
+			info.WriteString("This agent is the office lead: it coordinates and delegates rather than doing all the work itself.\n")
+		}
+		example = renderAgentFileContent(member, name, isLead)
+	}
+
+	systemPrompt := l.buildPrompt(leadSlug) + fmt.Sprintf(`
+
+You are authoring the %s.md instruction file for a WUPHF office agent. This
+file is loaded verbatim into the agent's system prompt, so write it as direct
+second-person instructions to that agent ("You ...").
+
+Purpose of %s.md: %s
+
+Return ONLY the markdown body of the file. Do not wrap it in code fences and do
+not explain your reasoning. Start with a level-1 heading.
+
+Match the section structure and style of the current version below, but make
+the content specific, vivid, and genuinely useful — not generic filler.
+
+----- CURRENT VERSION -----
+%s
+---------------------------
+`, name, name, agentFilePurpose(name), example)
+
+	var ub strings.Builder
+	ub.WriteString(info.String())
+	if hint = strings.TrimSpace(hint); hint != "" {
+		fmt.Fprintf(&ub, "\nExtra guidance from the human:\n%s\n", hint)
+	}
+	fmt.Fprintf(&ub, "\nWrite the improved %s.md now.", name)
+
+	raw, err := provider.RunConfiguredOneShotCtx(ctx, systemPrompt, ub.String(), l.cwd)
+	if err != nil {
+		return "", err
+	}
+	content := stripMarkdownFences(raw)
+	if content == "" {
+		return "", fmt.Errorf("model returned no content")
+	}
+	return content, nil
 }
 
 type generatedChannelTemplate struct {

@@ -35,6 +35,7 @@ import {
 import { router } from "../../lib/router";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { AgentInstructionsSection } from "./AgentInstructionsSection";
 
 const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
   "claude-code": "Claude Code",
@@ -921,6 +922,9 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
             <p className="agent-profile-current-task">{agent.task}</p>
           </div>
         ) : null}
+
+        {/* Instruction files (SOUL / IDENTITY / OPERATIONS / TOOLS + office USER) */}
+        <AgentInstructionsSection agent={agent} />
 
         {/* Per-agent runtime picker */}
         <RuntimeSection agent={agent} defaultHarness={defaultHarness} />

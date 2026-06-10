@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useMemo } from "react";
 
-import type { WikiCatalogEntry } from "../../api/wiki";
+import type { WikiCatalogEntry, WriteHumanResult } from "../../api/wiki";
 import { useWikiEditorController } from "../../hooks/useWikiEditorController";
 
 /**
@@ -27,6 +27,23 @@ interface WikiEditorProps {
   onSaved: (newSha: string) => void;
   /** Called when the user cancels. */
   onCancel: () => void;
+  /**
+   * Override the save transport. Defaults to the wiki human-write endpoint.
+   * AgentInstructionsSection passes an agent-file writer so the same editor can
+   * edit SOUL/IDENTITY/OPERATIONS/TOOLS/USER without touching the wiki path.
+   */
+  writeArticle?: (params: {
+    path: string;
+    content: string;
+    commitMessage: string;
+    expectedSha: string;
+  }) => Promise<WriteHumanResult>;
+  /**
+   * Hide the wiki-specific footer hint (wikilinks / mention picker). Set true
+   * when editing a non-wiki file (e.g. an agent instruction file) where those
+   * affordances don't apply.
+   */
+  hideWikiHelp?: boolean;
 }
 
 function formatAgo(isoOrMs: string): string {
@@ -64,6 +81,8 @@ export default function WikiEditor({
   catalog = [],
   onSaved,
   onCancel,
+  writeArticle,
+  hideWikiHelp = false,
 }: WikiEditorProps) {
   const {
     content,
@@ -84,6 +103,7 @@ export default function WikiEditor({
     expectedSha,
     serverLastEditedTs,
     onSaved,
+    writeHumanArticle: writeArticle,
   });
 
   const catalogSlugs = useMemo(
@@ -205,13 +225,22 @@ export default function WikiEditor({
           Cancel
         </button>
       </div>
-      <p className="wk-editor-help">
-        <code>[[slug]]</code> creates a wikilink. Saved as commit author{" "}
-        <strong>Human &lt;human@wuphf.local&gt;</strong>. Type <code>/</code>{" "}
-        for inserts; <code>@</code> opens the mention picker. Select text, then{" "}
-        <code>Mod-e</code> adds a link and <code>Mod-Shift-h</code> toggles
-        highlight.
-      </p>
+      {hideWikiHelp ? (
+        <p className="wk-editor-help">
+          Saved as commit author{" "}
+          <strong>Human &lt;human@wuphf.local&gt;</strong>. This file is loaded
+          into the agent's system prompt — changes take effect on the agent's
+          next turn.
+        </p>
+      ) : (
+        <p className="wk-editor-help">
+          <code>[[slug]]</code> creates a wikilink. Saved as commit author{" "}
+          <strong>Human &lt;human@wuphf.local&gt;</strong>. Type <code>/</code>{" "}
+          for inserts; <code>@</code> opens the mention picker. Select text,
+          then <code>Mod-e</code> adds a link and <code>Mod-Shift-h</code>{" "}
+          toggles highlight.
+        </p>
+      )}
     </div>
   );
 }
