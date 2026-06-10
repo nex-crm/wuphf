@@ -236,6 +236,106 @@ func TestHumanRouteAllowedAgentFiles(t *testing.T) {
 	}
 }
 
+func postGenerate(t *testing.T, b *Broker, path string, human bool) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{"path": path, "hint": ""})
+	req := httptest.NewRequest(http.MethodPost, "/agent-files/generate", bytes.NewReader(raw))
+	if human {
+		req = requestWithActor(req, requestActor{Kind: requestActorKindHuman, Slug: "human"})
+	}
+	rec := httptest.NewRecorder()
+	b.handleAgentFileGenerate(rec, req)
+	return rec
+}
+
+// TestAgentFileGenerateEndpoint covers the draft-authoring endpoint: a human
+// gets the generated content, a non-human is rejected, a missing generator is
+// 503, a bad path is 400, and a generator error surfaces as 500.
+func TestAgentFileGenerateEndpoint(t *testing.T) {
+	worker, _, _, teardown := newStartedWorker(t)
+	defer teardown()
+	b := brokerForTest(t, worker)
+	b.SetGenerateAgentFileFn(func(_ context.Context, relPath, _ string) (string, error) {
+		return "# SOUL — generated\nrich content for " + relPath, nil
+	})
+
+	// Happy path: human gets a draft, never committed.
+	rec := postGenerate(t, b, "agents/growth/SOUL.md", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("generate: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if c, _ := out["content"].(string); !strings.Contains(c, "rich content") {
+		t.Errorf("expected generated content, got %v", out["content"])
+	}
+	// The file must NOT have been written (generate is review-only).
+	if data, _ := worker.AgentFileRead("agents/growth/SOUL.md"); len(data) != 0 {
+		t.Errorf("generate must not commit; file exists: %q", data)
+	}
+
+	// Non-human is rejected.
+	if rec := postGenerate(t, b, "agents/growth/SOUL.md", false); rec.Code != http.StatusForbidden {
+		t.Errorf("non-human generate: want 403, got %d", rec.Code)
+	}
+	// Bad path is rejected.
+	if rec := postGenerate(t, b, "team/people/x.md", true); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad path: want 400, got %d", rec.Code)
+	}
+	// Generator error surfaces as 500.
+	b.SetGenerateAgentFileFn(func(_ context.Context, _, _ string) (string, error) {
+		return "", errors.New("model unavailable")
+	})
+	if rec := postGenerate(t, b, "agents/growth/SOUL.md", true); rec.Code != http.StatusInternalServerError {
+		t.Errorf("generator error: want 500, got %d", rec.Code)
+	}
+	// No generator wired -> 503.
+	b.SetGenerateAgentFileFn(nil)
+	if rec := postGenerate(t, b, "agents/growth/SOUL.md", true); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("nil generator: want 503, got %d", rec.Code)
+	}
+}
+
+// TestGenerateAgentFileGating verifies the prose-only allowlist (SOUL/OPERATIONS
+// + office USER) and the test stub short-circuit, without needing a real model.
+func TestGenerateAgentFileGating(t *testing.T) {
+	t.Setenv("WUPHF_AGENT_FILE_STUB", "# stub content")
+	l := &Launcher{}
+	ctx := context.Background()
+
+	for _, ok := range []string{"agents/x/SOUL.md", "agents/x/OPERATIONS.md", officeUserFileRel} {
+		got, err := l.GenerateAgentFileFromContext(ctx, ok, "")
+		if err != nil || got != "# stub content" {
+			t.Errorf("path %q: want stub content, got %q err=%v", ok, got, err)
+		}
+	}
+	// Factual files are not AI-generatable.
+	for _, bad := range []string{"agents/x/IDENTITY.md", "agents/x/TOOLS.md"} {
+		if _, err := l.GenerateAgentFileFromContext(ctx, bad, ""); err == nil {
+			t.Errorf("path %q: expected gating error, got nil", bad)
+		}
+	}
+	// An invalid path is rejected before anything else.
+	if _, err := l.GenerateAgentFileFromContext(ctx, "team/people/x.md", ""); err == nil {
+		t.Error("invalid path must be rejected")
+	}
+}
+
+// TestStripMarkdownFences guards the fence-stripping helper used on model output.
+func TestStripMarkdownFences(t *testing.T) {
+	cases := map[string]string{
+		"# Title\nbody":             "# Title\nbody",
+		"```markdown\n# Title\n```": "# Title",
+		"```\n# Title\nbody\n```":   "# Title\nbody",
+		"  \n# Title\n":             "# Title",
+	}
+	for in, want := range cases {
+		if got := stripMarkdownFences(in); got != want {
+			t.Errorf("stripMarkdownFences(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TestCommitAgentFileHumanRoundTrip exercises the repo-level human-write path:
 // create, replace with the correct sha, and a stale-sha replace that must be
 // rejected with ErrWikiSHAMismatch.

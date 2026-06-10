@@ -30,10 +30,12 @@ package team
 //     and bytes so the editor can prompt re-apply without a second round trip.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // agentFileReadResponse is the JSON shape returned by GET /agent-files/read.
@@ -211,4 +213,66 @@ func (b *Broker) handleAgentFileWrite(w http.ResponseWriter, r *http.Request) {
 		"commit_sha":    sha,
 		"bytes_written": n,
 	})
+}
+
+// handleAgentFileGenerate authors a richer DRAFT of one prose instruction file
+// with the LLM and returns it for human review. It never commits — the editor
+// opens with the draft and the human saves (or discards) it.
+//
+//	POST /agent-files/generate  { path, hint }
+//	200 { "path", "content" }
+//	400 / 403 / 500 / 503 { "error" }
+//
+// Human-only (same as write): triggering a model call is a human authoring
+// action, not something an agent should drive over HTTP.
+func (b *Broker) handleAgentFileGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	actor, ok := requestActorFromContext(r.Context())
+	if !ok || actor.Kind != requestActorKindHuman {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "human session required"})
+		return
+	}
+	if b.generateAgentFileFn == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent-file generation is not available"})
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+		Hint string `json:"hint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if err := validateAgentFilePath(body.Path); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+
+	type genResult struct {
+		content string
+		err     error
+	}
+	ch := make(chan genResult, 1)
+	go func() {
+		c, e := b.generateAgentFileFn(ctx, body.Path, body.Hint)
+		ch <- genResult{c, e}
+	}()
+	select {
+	case <-ctx.Done():
+		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "generation timed out"})
+		return
+	case res := <-ch:
+		if res.err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": res.err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"path": body.Path, "content": res.content})
+	}
 }

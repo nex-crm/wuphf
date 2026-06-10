@@ -924,7 +924,9 @@
   background: var(--bg-card, var(--bg));
   border: 1px solid var(--border);
   border-radius: 8px;
-  transition: border-color 120ms ease, background-color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 
 .agent-skills-row:hover {
@@ -981,7 +983,10 @@
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 .agent-skills-row-add:hover:not(:disabled) {
@@ -1054,7 +1059,9 @@
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .agent-skills-mode-btn:hover {
@@ -1117,7 +1124,10 @@
   font-weight: 500;
   color: var(--text);
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 .agent-skills-card-btn:hover:not(:disabled) {
@@ -1265,7 +1275,8 @@
   color: var(--text-tertiary);
 }
 
-.agent-file-edit {
+.agent-file-edit,
+.agent-file-generate {
   display: inline-flex;
   align-items: center;
   gap: 4px;

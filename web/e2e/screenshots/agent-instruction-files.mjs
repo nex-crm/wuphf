@@ -161,6 +161,33 @@ async function mockFeature(context) {
       body: JSON.stringify({ path: p, content, sha: "a1b2c3d", exists: true }),
     });
   });
+  // 4c: LLM authoring returns a richer draft for review (never committed).
+  await context.route("**/api/agent-files/generate", (route) => {
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        path: "agents/growth/SOUL.md",
+        content: `# SOUL — @growth
+
+## Who you are
+You are the office's growth engine: every week you turn one sharp hypothesis
+into a live experiment, measure it honestly, and kill it fast if the numbers
+don't move. Pipeline is the only scoreboard you trust.
+
+## Values
+- Evidence over opinion: a 20-lead test beats a 40-slide narrative.
+- Compounding: prefer the channel you can run again next week over a one-off spike.
+- Radical candor with the founder: surface a flat funnel the day you see it.
+
+## Voice
+Crisp, numbers-first, allergic to hedging. Lead with the result, then the why.
+
+## Boundaries
+- Own demand generation end to end; route product or pricing calls to the lead.
+- Never ship a vanity metric as a win. If it didn't move pipeline, say so.`,
+      }),
+    });
+  });
 }
 
 const { browser, context, page } = await launchBrowser({
@@ -209,21 +236,21 @@ await page
   .waitFor({ state: "visible", timeout: 8_000 });
 await shotElement(page, ".agent-profile-panel", OUT, "02-soul-expanded");
 
-// Enter the editor (reused wiki rich editor). Lazy Tiptap chunk — give it room;
-// fall back to a debug shot rather than failing the whole capture if it stalls.
+// 4c: click "Generate with AI" → the LLM drafts a richer SOUL and the reused
+// wiki rich editor opens seeded with it for human review. Lazy Tiptap chunk —
+// give it room; fall back to a debug shot rather than failing the whole run.
 try {
-  await page.getByRole("button", { name: "Edit" }).first().click();
+  await page.getByRole("button", { name: /Generate with AI/i }).first().click();
   await page.waitForSelector(".wk-editor", { timeout: 12_000 });
-  // Wait for the rich editor surface (or its loading fallback to resolve).
   await page
     .locator(".wk-editor-rich, .wk-editor-rich-fallback")
     .first()
     .waitFor({ state: "visible", timeout: 12_000 });
   await page.waitForTimeout(900);
-  await shotElement(page, ".agent-profile-panel", OUT, "03-soul-editor");
+  await shotElement(page, ".agent-profile-panel", OUT, "03-soul-ai-draft");
 } catch (err) {
   console.warn(`editor shot skipped: ${err.message}`);
-  await shotPage(page, OUT, "03-soul-editor-DEBUG");
+  await shotPage(page, OUT, "03-soul-ai-draft-DEBUG");
 }
 
 // ── 04: lead office USER.md ────────────────────────────────────────────

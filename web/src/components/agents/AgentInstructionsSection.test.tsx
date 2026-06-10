@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const readAgentFileMock = vi.hoisted(() => vi.fn());
 const writeAgentFileMock = vi.hoisted(() => vi.fn());
+const generateAgentFileMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../api/agentFiles", async () => {
   const actual = await vi.importActual<typeof import("../../api/agentFiles")>(
@@ -15,6 +16,7 @@ vi.mock("../../api/agentFiles", async () => {
     ...actual,
     readAgentFile: readAgentFileMock,
     writeAgentFile: writeAgentFileMock,
+    generateAgentFile: generateAgentFileMock,
   };
 });
 
@@ -23,15 +25,18 @@ vi.mock("../../api/agentFiles", async () => {
 vi.mock("../wiki/WikiEditor", () => ({
   default: ({
     path,
+    initialContent,
     onSaved,
     onCancel,
   }: {
     path: string;
+    initialContent: string;
     onSaved: (sha: string) => void;
     onCancel: () => void;
   }) => (
     <div data-testid="wiki-editor-stub">
       <span data-testid="editor-path">{path}</span>
+      <span data-testid="editor-initial">{initialContent}</span>
       <button type="button" onClick={() => onSaved("newsha")}>
         stub-save
       </button>
@@ -147,5 +152,65 @@ describe("<AgentInstructionsSection>", () => {
 
     await user.click(screen.getByText("SOUL"));
     expect(await screen.findByText(/seeded/)).toBeInTheDocument();
+  });
+
+  it("offers Generate with AI on prose files but not factual ones", async () => {
+    const user = userEvent.setup();
+    render(wrap(<AgentInstructionsSection agent={specialist} />));
+
+    // SOUL (prose) → Generate offered.
+    await user.click(screen.getByText("SOUL"));
+    await screen.findByText("Edit");
+    expect(screen.getByText("Generate with AI")).toBeInTheDocument();
+
+    // IDENTITY (factual) → no Generate affordance.
+    readAgentFileMock.mockResolvedValue({
+      path: "agents/growth/IDENTITY.md",
+      content: "# IDENTITY — @growth",
+      sha: "i1",
+      exists: true,
+    });
+    await user.click(screen.getByText("IDENTITY"));
+    await waitFor(() => {
+      expect(screen.getAllByText("Edit").length).toBeGreaterThan(0);
+    });
+    // Only the SOUL card's Generate button exists; IDENTITY adds none.
+    expect(screen.getAllByText("Generate with AI")).toHaveLength(1);
+  });
+
+  it("generates a draft and opens the editor seeded with it", async () => {
+    generateAgentFileMock.mockResolvedValue({
+      path: "agents/growth/SOUL.md",
+      content: "# SOUL — @growth\nAI-authored, vivid and specific",
+    });
+    const user = userEvent.setup();
+    render(wrap(<AgentInstructionsSection agent={specialist} />));
+
+    await user.click(screen.getByText("SOUL"));
+    await user.click(await screen.findByText("Generate with AI"));
+
+    await waitFor(() => {
+      expect(generateAgentFileMock).toHaveBeenCalledWith(
+        "agents/growth/SOUL.md",
+      );
+    });
+    // Editor opens seeded with the generated draft (not the on-disk content).
+    const editor = await screen.findByTestId("wiki-editor-stub");
+    expect(editor).toBeInTheDocument();
+    expect(screen.getByTestId("editor-initial")).toHaveTextContent(
+      "AI-authored, vivid and specific",
+    );
+  });
+
+  it("surfaces a generation error without opening the editor", async () => {
+    generateAgentFileMock.mockRejectedValue(new Error("model unavailable"));
+    const user = userEvent.setup();
+    render(wrap(<AgentInstructionsSection agent={specialist} />));
+
+    await user.click(screen.getByText("SOUL"));
+    await user.click(await screen.findByText("Generate with AI"));
+
+    expect(await screen.findByText("model unavailable")).toBeInTheDocument();
+    expect(screen.queryByTestId("wiki-editor-stub")).not.toBeInTheDocument();
   });
 });

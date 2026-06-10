@@ -52,6 +52,47 @@ func isAgentInstructionFileName(name string) bool {
 	return false
 }
 
+// aiGeneratableFile reports whether an instruction file is prose worth handing
+// to an LLM to author. IDENTITY and TOOLS are factual (name/role/runtime,
+// tool inventory) and are derived deterministically from member data, so AI
+// generation is deliberately NOT offered for them — only SOUL and OPERATIONS
+// (and, separately, the office USER file) carry prose the model improves.
+func aiGeneratableFile(name string) bool {
+	return name == "SOUL" || name == "OPERATIONS"
+}
+
+// agentFilePurpose returns a one-line description of what a file governs, used
+// to brief the LLM when it authors a richer version.
+func agentFilePurpose(name string) string {
+	switch name {
+	case "SOUL":
+		return "the agent's persona, values, voice, and hard boundaries"
+	case "OPERATIONS":
+		return "how the agent works day to day and when it escalates"
+	case "USER":
+		return "the single human this office serves and how to optimize for their time"
+	default:
+		return "the agent's instructions"
+	}
+}
+
+// stripMarkdownFences removes a single wrapping ```...``` code fence if the
+// model returned one despite being told not to. Idempotent on unfenced input.
+func stripMarkdownFences(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+		s = s[nl+1:]
+	} else {
+		s = strings.TrimPrefix(s, "```")
+	}
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, "```")
+	return strings.TrimSpace(s)
+}
+
 // validateAgentFilePath allows ONLY the canonical agent-instruction files:
 // agents/{slug}/{SOUL|IDENTITY|OPERATIONS|TOOLS}.md and office/USER.md. Anything
 // else (arbitrary agents/ paths, traversal, the notebook subtree) is rejected,

@@ -199,6 +199,9 @@ func humanRouteAllowed(r *http.Request) bool {
 			// exposed via MCP, identity resolved server-side. Allowed here so the
 			// agent-profile editor does not 403 in a human session.
 			"/agent-files/write",
+			// POST /agent-files/generate — human-triggered LLM authoring of a
+			// prose instruction file (returns a draft for review, never commits).
+			"/agent-files/generate",
 			"/notebook/visual-artifacts":
 			return true
 		}

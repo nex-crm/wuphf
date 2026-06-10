@@ -225,14 +225,15 @@ type Broker struct {
 	// (so admit + revoke + invite-create all flow through the same surface)
 	// instead of the legacy HTTP path. Atomic so the controller's read does
 	// not contend with adapter registration on a different goroutine.
-	shareTransport     atomic.Pointer[ShareTransport]
-	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
-	generateChannelFn  func(context.Context, string) (generatedChannelTemplate, error)
-	policies           []officePolicy // active office operating rules
-	rateLimitBuckets   map[string]ipRateLimitBucket
-	rateLimitWindow    time.Duration
-	rateLimitRequests  int
-	lastRateLimitPrune time.Time
+	shareTransport      atomic.Pointer[ShareTransport]
+	generateMemberFn    func(prompt string) (generatedMemberTemplate, error)
+	generateChannelFn   func(context.Context, string) (generatedChannelTemplate, error)
+	generateAgentFileFn func(ctx context.Context, relPath, hint string) (string, error)
+	policies            []officePolicy // active office operating rules
+	rateLimitBuckets    map[string]ipRateLimitBucket
+	rateLimitWindow     time.Duration
+	rateLimitRequests   int
+	lastRateLimitPrune  time.Time
 
 	// Agent-scoped buckets — applied to authenticated agent traffic even though
 	// the IP-scoped bucket above exempts callers with a valid Bearer token. This
@@ -574,6 +575,7 @@ func (b *Broker) StartOnPort(port int) error {
 	// allowlist and skip the team/ article index. See broker_agent_files_http.go.
 	mux.HandleFunc("/agent-files/read", b.requireAuth(b.handleAgentFileRead))
 	mux.HandleFunc("/agent-files/write", b.requireAuth(b.handleAgentFileWrite))
+	mux.HandleFunc("/agent-files/generate", b.requireAuth(b.handleAgentFileGenerate))
 	mux.HandleFunc("/humans", b.requireAuth(b.handleHumans))
 	mux.HandleFunc("/humans/me", b.handleHumanMe)
 	mux.HandleFunc("/humans/invites", b.requireAuth(b.handleHumanInvites))
@@ -1180,6 +1182,13 @@ func (b *Broker) SetGenerateMemberFn(fn func(string) (generatedMemberTemplate, e
 
 func (b *Broker) SetGenerateChannelFn(fn func(context.Context, string) (generatedChannelTemplate, error)) {
 	b.generateChannelFn = fn
+}
+
+// SetGenerateAgentFileFn injects the LLM authoring path for prose instruction
+// files (SOUL/OPERATIONS/USER). Optional: when unset, /agent-files/generate
+// returns 503 and the UI simply hides the "Generate with AI" affordance.
+func (b *Broker) SetGenerateAgentFileFn(fn func(ctx context.Context, relPath, hint string) (string, error)) {
+	b.generateAgentFileFn = fn
 }
 
 // SetAgentLogRoot overrides where /agent-logs reads task JSONL from.

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { EditPencil, NavArrowDown, NavArrowRight } from "iconoir-react";
+import { EditPencil, NavArrowDown, NavArrowRight, Sparks } from "iconoir-react";
 import remarkGfm from "remark-gfm";
 
 import {
@@ -9,6 +9,8 @@ import {
   type AgentFileResponse,
   type AgentInstructionFile,
   agentFilePath,
+  generateAgentFile,
+  isAIGeneratableFile,
   OFFICE_USER_FILE_PATH,
   readAgentFile,
   writeAgentFile,
@@ -35,6 +37,12 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
+  // An LLM-authored draft, held only for the editor session (never written to
+  // the query cache, so disk stays the source of truth). When set, the editor
+  // opens seeded with it; Save commits it, Cancel discards it.
+  const [generatedDraft, setGeneratedDraft] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["agent-file", path],
@@ -47,10 +55,36 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
   const toggle = () => {
     setExpanded((v) => {
       const next = !v;
-      if (!next) setEditing(false);
+      if (!next) {
+        setEditing(false);
+        setGeneratedDraft(null);
+        setGenError(null);
+      }
       return next;
     });
   };
+
+  const closeEditor = () => {
+    setEditing(false);
+    setGeneratedDraft(null);
+  };
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setGenError(null);
+    try {
+      const { content } = await generateAgentFile(path);
+      // Open the editor seeded with the draft so the human reviews + saves it.
+      setGeneratedDraft(content);
+      setEditing(true);
+    } catch (err: unknown) {
+      setGenError(err instanceof Error ? err.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  const canGenerate = isAIGeneratableFile(label);
 
   return (
     <div className={`agent-file-card${expanded ? " expanded" : ""}`}>
@@ -84,7 +118,7 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
           ) : editing && data ? (
             <WikiEditor
               path={path}
-              initialContent={data.content}
+              initialContent={generatedDraft ?? data.content}
               expectedSha={data.sha}
               writeArticle={writeAgentFile}
               hideWikiHelp={true}
@@ -100,9 +134,9 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
                 void queryClient.invalidateQueries({
                   queryKey: ["agent-file", path],
                 });
-                setEditing(false);
+                closeEditor();
               }}
-              onCancel={() => setEditing(false)}
+              onCancel={closeEditor}
             />
           ) : data ? (
             <>
@@ -111,16 +145,34 @@ function AgentFileCard({ path, label, description }: FileCardConfig) {
                   {data.content || "_This file is empty._"}
                 </ReactMarkdown>
               </div>
+              {genError ? (
+                <div className="agent-file-card-error" role="alert">
+                  {genError}
+                </div>
+              ) : null}
               <div className="agent-file-card-actions">
                 {!data.exists ? (
                   <span className="agent-file-card-badge">
                     not saved yet — seeded
                   </span>
                 ) : null}
+                {canGenerate ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm agent-file-generate"
+                    onClick={handleGenerate}
+                    disabled={generating}
+                    title="Draft a richer version with AI for your review"
+                  >
+                    <Sparks width={13} height={13} />
+                    {generating ? "Generating…" : "Generate with AI"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm agent-file-edit"
                   onClick={() => setEditing(true)}
+                  disabled={generating}
                 >
                   <EditPencil width={13} height={13} />
                   Edit

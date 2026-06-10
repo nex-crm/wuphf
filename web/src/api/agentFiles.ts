@@ -84,3 +84,25 @@ export async function writeAgentFile(params: {
     throw err;
   }
 }
+
+/** Files the broker will author with the LLM (prose only; IDENTITY/TOOLS are
+ *  factual and excluded). Gates the "Generate with AI" affordance. */
+export function isAIGeneratableFile(label: string): boolean {
+  return label === "SOUL" || label === "OPERATIONS" || label === "USER";
+}
+
+/**
+ * Ask the broker to author a richer DRAFT of one prose instruction file with
+ * the LLM. Returns the draft markdown — NOT committed; the caller opens the
+ * editor with it so the human reviews and saves (or discards). Throws on any
+ * failure (the file already exists, so there is nothing to fall back to).
+ */
+export async function generateAgentFile(
+  path: string,
+  hint = "",
+): Promise<{ path: string; content: string }> {
+  return post<{ path: string; content: string }>("/agent-files/generate", {
+    path,
+    hint,
+  });
+}
