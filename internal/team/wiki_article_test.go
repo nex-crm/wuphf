@@ -212,6 +212,57 @@ func TestBuildArticle_Backlinks(t *testing.T) {
 	}
 }
 
+// latestCommitAuthorsByPath returns the most-recent author per path and is
+// scoped to the supplied paths only. This is the hot-path replacement for the
+// full-history commitBoundsByPath walk on article open, so its two invariants
+// matter: (1) latest commit wins when a path is edited by multiple authors,
+// and (2) paths not in the argument list are absent from the result even if
+// they have commits.
+func TestLatestCommitAuthorsByPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	root := t.TempDir()
+	repo := NewRepoAt(root, filepath.Join(t.TempDir(), "bak"))
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// a.md is created by ceo, then edited by cro — latest author is cro.
+	if _, _, err := repo.Commit(ctx, "ceo", "team/people/a.md", "# A\n\nv1\n", "create", "add a"); err != nil {
+		t.Fatalf("Commit a v1: %v", err)
+	}
+	if _, _, err := repo.Commit(ctx, "cro", "team/people/a.md", "# A\n\nv2 edited\n", "replace", "edit a"); err != nil {
+		t.Fatalf("Commit a v2: %v", err)
+	}
+	// b.md exists but is intentionally left out of the query set.
+	if _, _, err := repo.Commit(ctx, "pm", "team/people/b.md", "# B\n\nv1\n", "create", "add b"); err != nil {
+		t.Fatalf("Commit b: %v", err)
+	}
+
+	authors, err := repo.latestCommitAuthorsByPath(ctx, []string{"team/people/a.md"})
+	if err != nil {
+		t.Fatalf("latestCommitAuthorsByPath: %v", err)
+	}
+	if got := authors["team/people/a.md"]; got != "cro" {
+		t.Errorf("a.md author = %q, want cro (latest edit wins)", got)
+	}
+	if _, present := authors["team/people/b.md"]; present {
+		t.Errorf("b.md should be absent: not requested, got %q", authors["team/people/b.md"])
+	}
+
+	// Empty input is a cheap no-op, not a full-repo log.
+	empty, err := repo.latestCommitAuthorsByPath(ctx, nil)
+	if err != nil {
+		t.Fatalf("latestCommitAuthorsByPath(nil): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("empty input = %v, want empty map", empty)
+	}
+}
+
 // BuildArticle on a missing article returns an error without panicking.
 func TestBuildArticle_NotFound(t *testing.T) {
 	if testing.Short() {
