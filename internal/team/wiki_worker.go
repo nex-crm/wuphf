@@ -949,9 +949,14 @@ func (b *Broker) handleWikiRead(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(bytes)
 }
 
-// handleWikiSearch returns literal-substring matches across team/.
+// handleWikiSearch returns literal-substring matches across team/. When a
+// ?reader=<agent-slug> is supplied (set by the MCP layer from the trusted
+// WUPHF_AGENT_SLUG env), the same call ALSO searches that agent's OWN
+// notebook shelf, so a single retrieval spans wiki + private notes (B4).
+// Permissioned boundary: only the reader's own notebooks are merged —
+// cross-agent notebook access stays on the explicit notebook_read path.
 //
-//	GET /wiki/search?pattern=launch
+//	GET /wiki/search?pattern=launch[&reader=eng]
 func (b *Broker) handleWikiSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -971,6 +976,12 @@ func (b *Broker) handleWikiSearch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if reader := sanitizeReader(r.URL.Query().Get("reader")); reader != "" && reader != ReaderHuman {
+		// Notebook misses are non-fatal: the wiki hits still answer.
+		if nbHits, nbErr := worker.NotebookSearch(reader, pattern); nbErr == nil {
+			hits = append(hits, nbHits...)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
 }

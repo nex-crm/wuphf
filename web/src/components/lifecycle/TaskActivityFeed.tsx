@@ -40,6 +40,7 @@ const FEED_KINDS: ReadonlySet<TaskActivityEventKind> = new Set([
   "lifecycle",
   "request",
   "sub_issue",
+  "turn",
 ]);
 
 export function TaskActivityFeed({ taskId }: TaskActivityFeedProps) {
@@ -168,8 +169,25 @@ function ActivityRow({ event }: { event: TaskActivityEvent }) {
         {event.kind === "request" && event.request ? (
           <RequestResolution req={event.request} />
         ) : null}
+        {event.kind === "turn" ? (
+          <TurnContextList items={event.context_used} />
+        ) : null}
       </div>
     </li>
+  );
+}
+
+/**
+ * B4 context transparency: the knowledge-item ids a turn's work packet
+ * injected ("learning:<id>", "wiki:<ref>", ...), recorded deterministically
+ * at packet-build time and surfaced under the turn's activity entry.
+ */
+function TurnContextList({ items }: { items?: string[] }) {
+  if (!items || items.length === 0) {
+    return null;
+  }
+  return (
+    <p className="issue-activity-feed-context">context: {items.join(", ")}</p>
   );
 }
 
@@ -215,6 +233,8 @@ function iconForKind(kind: TaskActivityEventKind) {
       return <HelpCircle width={14} height={14} aria-hidden="true" />;
     case "sub_issue":
       return <GitFork width={14} height={14} aria-hidden="true" />;
+    case "turn":
+      return <Refresh width={14} height={14} aria-hidden="true" />;
     case "action":
     default:
       return <CheckCircle width={14} height={14} aria-hidden="true" />;
@@ -233,6 +253,8 @@ function verbForEvent(event: TaskActivityEvent): string {
       return "asked";
     case "sub_issue":
       return "added a sub-task";
+    case "turn":
+      return "ran a turn";
     case "action":
     default:
       return event.summary || "took action";

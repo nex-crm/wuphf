@@ -52,6 +52,22 @@ func learningKeyFromTitle(title string) string {
 	return key
 }
 
+// taskDistillInsight renders the verified-outcome learning text. Pure
+// string assembly, shared by the learning record and the notebook
+// post-task bookend.
+func taskDistillInsight(task teamTask, res *TaskVerificationResult) string {
+	insight := fmt.Sprintf("Verified outcome: %s.", strings.TrimSpace(task.Title))
+	if details := tailClip(task.Details, taskDistillInsightDetailClip); details != "" {
+		insight += " " + details
+	}
+	if res != nil {
+		if proof := strings.TrimSpace(res.Detail); proof != "" {
+			insight += fmt.Sprintf(" Proof (%s): %s", res.Kind, truncate(proof, 200))
+		}
+	}
+	return insight
+}
+
 // queueTaskDistillation schedules distillation off the mutation hot path.
 func (b *Broker) queueTaskDistillation(taskID string) {
 	go func() {
@@ -115,13 +131,22 @@ func (b *Broker) distillCompletedTask(taskID string) {
 	// already off the broker hot path, and no LLM is involved.
 	regenerateTaskEntityArticles(ctx, worker, factLog, graph, task)
 
-	if llog == nil {
-		return
-	}
 	res := task.VerificationResult
 	if res == nil || !res.Pass {
 		// No machine proof → no automatic memory. The wiki/notebook path
 		// (agent-initiated, librarian-curated) still covers these.
+		return
+	}
+
+	insight := taskDistillInsight(task, res)
+
+	// B4 post-task bookend (task_notebook_bookends.go): verified done
+	// appends the deliverable link + distilled learning + ledger highlights
+	// to the owner's per-task notebook note. Idempotent — replays of this
+	// goroutine append exactly once.
+	appendTaskNotebookPostBookend(ctx, worker, task, insight)
+
+	if llog == nil {
 		return
 	}
 
@@ -133,14 +158,6 @@ func (b *Broker) distillCompletedTask(taskID string) {
 		if rec.TaskID == task.ID {
 			return
 		}
-	}
-
-	insight := fmt.Sprintf("Verified outcome: %s.", strings.TrimSpace(task.Title))
-	if details := tailClip(task.Details, taskDistillInsightDetailClip); details != "" {
-		insight += " " + details
-	}
-	if proof := strings.TrimSpace(res.Detail); proof != "" {
-		insight += fmt.Sprintf(" Proof (%s): %s", res.Kind, truncate(proof, 200))
 	}
 
 	createdBy := strings.TrimSpace(task.Owner)

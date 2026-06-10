@@ -49,6 +49,14 @@ const EVENTS: TaskActivityEvent[] = [
     sub_issue: { sub_issue_id: "task-9", title: "Child task" },
   },
   {
+    id: "ev-turn",
+    kind: "turn",
+    timestamp: "2026-06-09T10:02:30Z",
+    actor: "engineer",
+    summary: "AUDIT_TURN_LINE",
+    context_used: ["learning:l-7", "wiki:companies/acme"],
+  },
+  {
     id: "ev-comment",
     kind: "comment",
     timestamp: "2026-06-09T10:03:00Z",
@@ -98,6 +106,19 @@ describe("<TaskActivityFeed>", () => {
     expect(await screen.findByText("AUDIT_LIFECYCLE_LINE")).toBeInTheDocument();
     expect(screen.getByText("AUDIT_REQUEST_LINE")).toBeInTheDocument();
     expect(screen.getByText("AUDIT_SUBISSUE_LINE")).toBeInTheDocument();
+  });
+
+  it("shows turn events with the context-used manifest (B4 transparency)", async () => {
+    tasksApi.getTaskActivity.mockResolvedValue({
+      task_id: "task-1",
+      events: EVENTS,
+    });
+    renderFeed();
+
+    expect(await screen.findByText("AUDIT_TURN_LINE")).toBeInTheDocument();
+    expect(
+      screen.getByText(/context: learning:l-7, wiki:companies\/acme/),
+    ).toBeInTheDocument();
   });
 
   it("hides comments — they belong in the chat, not the audit", async () => {

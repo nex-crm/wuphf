@@ -80,13 +80,18 @@ func learningSearchText(rec LearningRecord) string {
 // relevantLearnings scores every learning against the query by IDF-weighted
 // distinct-token overlap and returns the top `limit` above the overlap
 // floor, ordered by score then effective confidence. Deterministic and
-// offline; the dense-rerank seam lives here.
+// offline. When an embedding provider is configured (hybrid_retrieval.go),
+// a dense cosine ranking over the same corpus is fused with the lexical
+// ranking via RRF — dense-only candidates can surface even with zero token
+// overlap, gated by the dense cosine floor. With no provider the behavior
+// is byte-identical to the lexical-only path.
 func relevantLearnings(log *LearningLog, query string, limit int) []LearningSearchResult {
 	if log == nil || limit <= 0 {
 		return nil
 	}
+	provider := retrievalEmbeddingProvider()
 	queryTokens := contextTokenSet(query)
-	if len(queryTokens) == 0 {
+	if len(queryTokens) == 0 && provider == nil {
 		return nil
 	}
 	// Pull the deduped corpus through the existing search path (no query →
@@ -110,12 +115,12 @@ func relevantLearnings(log *LearningLog, query string, limit int) []LearningSear
 	n := float64(len(corpus))
 
 	type scored struct {
-		res     LearningSearchResult
+		idx     int
 		score   float64
 		overlap int
 	}
 	var hits []scored
-	for i, rec := range corpus {
+	for i := range corpus {
 		score := 0.0
 		overlap := 0
 		for tok := range queryTokens {
@@ -128,34 +133,80 @@ func relevantLearnings(log *LearningLog, query string, limit int) []LearningSear
 		if overlap < taskKnowledgeMinOverlap {
 			continue
 		}
-		hits = append(hits, scored{res: rec, score: score, overlap: overlap})
+		hits = append(hits, scored{idx: i, score: score, overlap: overlap})
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
 		if hits[i].score != hits[j].score {
 			return hits[i].score > hits[j].score
 		}
-		return hits[i].res.EffectiveConfidence > hits[j].res.EffectiveConfidence
+		return corpus[hits[i].idx].EffectiveConfidence > corpus[hits[j].idx].EffectiveConfidence
 	})
-	if len(hits) > limit {
-		hits = hits[:limit]
+
+	if provider == nil {
+		// Lexical only — exactly the pre-B4 behavior.
+		if len(hits) > limit {
+			hits = hits[:limit]
+		}
+		out := make([]LearningSearchResult, 0, len(hits))
+		for _, h := range hits {
+			out = append(out, corpus[h.idx])
+		}
+		return out
 	}
-	out := make([]LearningSearchResult, 0, len(hits))
+
+	// Hybrid: dense cosine ranking over the same corpus, fused with the
+	// lexical ranking via RRF (hybrid_retrieval.go).
+	embedCtx, cancel := context.WithTimeout(context.Background(), denseEmbedTimeout)
+	defer cancel()
+	cache := retrievalEmbeddingCache()
+	texts := make([]string, len(corpus))
+	for i, rec := range corpus {
+		texts[i] = learningSearchText(rec.LearningRecord)
+	}
+	lexRanking := make([]int, 0, len(hits))
 	for _, h := range hits {
-		out = append(out, h.res)
+		lexRanking = append(lexRanking, h.idx)
+	}
+	denseRanking := denseRankIndices(embedCtx, provider, cache, query, texts)
+	fused := rrfFuseIndices(lexRanking, denseRanking)
+
+	order := make([]int, 0, len(fused))
+	for idx := range fused {
+		order = append(order, idx)
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		if fused[order[i]] != fused[order[j]] {
+			return fused[order[i]] > fused[order[j]]
+		}
+		if corpus[order[i]].EffectiveConfidence != corpus[order[j]].EffectiveConfidence {
+			return corpus[order[i]].EffectiveConfidence > corpus[order[j]].EffectiveConfidence
+		}
+		return order[i] < order[j]
+	})
+	if len(order) > limit {
+		order = order[:limit]
+	}
+	out := make([]LearningSearchResult, 0, len(order))
+	for _, idx := range order {
+		out = append(out, corpus[idx])
 	}
 	return out
 }
 
 // taskKnowledgeContext builds the RELEVANT TEAM KNOWLEDGE block for a task
 // packet: top-scored learnings plus wiki hits for the task's own text.
-// Returns "" when nothing clears the relevance floor — an empty block is
-// worse than no block.
-func (b *notificationContextBuilder) taskKnowledgeContext(task teamTask) string {
+// Returns ("", nil) when nothing clears the relevance floor — an empty
+// block is worse than no block. The second return is the context manifest:
+// the ids of every injected item ("learning:<id>", "wiki:<ref>"), recorded
+// on the turn's ledger entry so the human can see exactly what context the
+// agent was handed (B4 transparency).
+func (b *notificationContextBuilder) taskKnowledgeContext(task teamTask) (string, []string) {
 	query := strings.TrimSpace(task.Title + " " + task.Details)
 	if query == "" {
-		return ""
+		return "", nil
 	}
 	var lines []string
+	var manifest []string
 
 	if b.searchLearnings != nil {
 		for _, rec := range b.searchLearnings(query, taskKnowledgeLearningLimit) {
@@ -164,6 +215,7 @@ func (b *notificationContextBuilder) taskKnowledgeContext(task teamTask) string 
 				line += " (key: " + rec.Key + ")"
 			}
 			lines = append(lines, line)
+			manifest = append(manifest, "learning:"+rec.ID)
 		}
 	}
 	if b.searchWiki != nil {
@@ -180,13 +232,15 @@ func (b *notificationContextBuilder) taskKnowledgeContext(task teamTask) string 
 				ref = h.FactID
 			}
 			lines = append(lines, fmt.Sprintf("- [wiki:%s] %s", ref, truncate(snippet, 400)))
+			manifest = append(manifest, "wiki:"+ref)
 		}
 	}
 	if len(lines) == 0 {
-		return ""
+		return "", nil
 	}
 	header := "RELEVANT TEAM KNOWLEDGE (matched to this task — apply it; cite the learning/wiki id when you do):"
-	return header + "\n" + strings.Join(lines, "\n")
+	footer := "When you use retrieved context, cite its id in your messages."
+	return header + "\n" + strings.Join(lines, "\n") + "\n" + footer, manifest
 }
 
 // tailClip keeps the LAST max bytes of s — task outcomes accrete at the end
@@ -203,10 +257,12 @@ func tailClip(s string, max int) string {
 // dependencies into a dependent task's packet (U3.2): dependency edges
 // carry data, not just scheduling. Without this, agent B starts a task
 // that depends on agent A's finished work without A's findings in
-// context — side-by-side work, not collaboration.
-func (b *notificationContextBuilder) upstreamOutcomesContext(task teamTask) string {
+// context — side-by-side work, not collaboration. The second return is
+// the manifest of injected upstream task ids ("upstream:<id>") for the
+// turn's context-used record (B4 transparency).
+func (b *notificationContextBuilder) upstreamOutcomesContext(task teamTask) (string, []string) {
 	if b == nil || b.taskByID == nil {
-		return ""
+		return "", nil
 	}
 	seen := map[string]struct{}{}
 	ids := make([]string, 0, len(task.DependsOn)+len(task.BlockedOn))
@@ -222,6 +278,7 @@ func (b *notificationContextBuilder) upstreamOutcomesContext(task teamTask) stri
 		ids = append(ids, id)
 	}
 	var lines []string
+	var manifest []string
 	for _, id := range ids {
 		up := b.taskByID(id)
 		if up == nil {
@@ -239,9 +296,10 @@ func (b *notificationContextBuilder) upstreamOutcomesContext(task teamTask) stri
 			line += "\n  Verified (" + res.Kind + "): " + truncate(strings.TrimSpace(res.Detail), 400)
 		}
 		lines = append(lines, line)
+		manifest = append(manifest, "upstream:"+up.ID)
 	}
 	if len(lines) == 0 {
-		return ""
+		return "", nil
 	}
-	return "UPSTREAM RESULTS (work this task depends on — build on it, do not redo it):\n" + strings.Join(lines, "\n")
+	return "UPSTREAM RESULTS (work this task depends on — build on it, do not redo it):\n" + strings.Join(lines, "\n"), manifest
 }

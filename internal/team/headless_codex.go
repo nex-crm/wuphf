@@ -124,6 +124,12 @@ type headlessCodexTurn struct {
 	// and the staleness/min-age preemption floors so the agent absorbs
 	// the human input before resuming any prior agent-originated work.
 	FromHuman bool
+	// ContextUsed is the manifest of knowledge items the work packet
+	// injected ("learning:<id>", "wiki:<ref>", "upstream:<task>",
+	// "journal:<task>"). Recorded at packet-build time — deterministic,
+	// not model-self-reported — and stamped onto the task ledger entry
+	// when the turn settles (B4 context transparency).
+	ContextUsed []string
 }
 
 type headlessCodexActiveTurn struct {

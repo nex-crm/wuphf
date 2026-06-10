@@ -532,6 +532,15 @@ func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMes
 // the lead) a list of agents who have already acted in this thread or
 // have pending headless turns ("do NOT re-route").
 func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, slug string) string {
+	packet, _ := b.BuildMessageWorkPacketWithContext(msg, slug)
+	return packet
+}
+
+// BuildMessageWorkPacketWithContext is BuildMessageWorkPacket plus the
+// context manifest: the ids of every knowledge/upstream/journal item the
+// packet injected, recorded on the turn so the ledger (and the Activity
+// rail) can show the human what context the agent was handed (B4).
+func (b *notificationContextBuilder) BuildMessageWorkPacketWithContext(msg channelMessage, slug string) (string, []string) {
 	channelSlug := normalizeChannelSlug(msg.Channel)
 	if channelSlug == "" {
 		channelSlug = "general"
@@ -571,6 +580,7 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 	if containsSlug(msg.Tagged, slug) {
 		lines = append(lines, "- Trigger: you were explicitly tagged")
 	}
+	var contextUsed []string
 	if task, ok := b.RelevantTaskForTarget(msg, slug); ok {
 		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, taskListTitleClipChars), strings.TrimSpace(task.status)))
 		if defLines := taskDefinitionPacketLines(task.Definition); len(defLines) > 0 {
@@ -583,14 +593,17 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 		if path := strings.TrimSpace(task.WorktreePath); path != "" {
 			lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 		}
-		if knowledge := b.taskKnowledgeContext(task); knowledge != "" {
+		if knowledge, manifest := b.taskKnowledgeContext(task); knowledge != "" {
 			lines = append(lines, knowledge)
+			contextUsed = append(contextUsed, manifest...)
 		}
-		if upstream := b.upstreamOutcomesContext(task); upstream != "" {
+		if upstream, manifest := b.upstreamOutcomesContext(task); upstream != "" {
 			lines = append(lines, upstream)
+			contextUsed = append(contextUsed, manifest...)
 		}
 		if journal := taskLedgerContext(task); journal != "" {
 			lines = append(lines, journal)
+			contextUsed = append(contextUsed, "journal:"+task.ID)
 		}
 	}
 	threadRoot := b.UltimateThreadRoot(channelSlug, msg.ReplyTo)
@@ -634,7 +647,7 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 			lines = append(lines, fmt.Sprintf("- Already active in this thread (do NOT re-route): %s", strings.Join(names, ", ")))
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), contextUsed
 }
 
 // BuildTaskExecutionPacket returns the work packet for a task assignment
@@ -642,6 +655,15 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 // pulled from title+details, local-worktree guardrails, external-execution
 // guidance for live business tasks, and the recent thread context.
 func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, action officeActionLog, task teamTask, content string) string {
+	packet, _ := b.BuildTaskExecutionPacketWithContext(slug, action, task, content)
+	return packet
+}
+
+// BuildTaskExecutionPacketWithContext is BuildTaskExecutionPacket plus the
+// context manifest (B4 transparency): ids of the injected knowledge,
+// upstream-outcome, and journal blocks. Recorded on the headless turn and
+// stamped onto the task ledger entry when the turn settles.
+func (b *notificationContextBuilder) BuildTaskExecutionPacketWithContext(slug string, action officeActionLog, task teamTask, content string) (string, []string) {
 	channelSlug := normalizeChannelSlug(task.Channel)
 	if channelSlug == "" {
 		channelSlug = "general"
@@ -679,14 +701,18 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 		lines = append(lines, fmt.Sprintf("- LAST VERIFICATION FAILED (%s at %s): %s", res.Kind, res.CheckedAt, truncate(strings.TrimSpace(res.Detail), 2000)))
 		lines = append(lines, "  Fix the work so the definition-of-done check passes, then complete again. Do not try to bypass the check.")
 	}
-	if knowledge := b.taskKnowledgeContext(task); knowledge != "" {
+	var contextUsed []string
+	if knowledge, manifest := b.taskKnowledgeContext(task); knowledge != "" {
 		lines = append(lines, knowledge)
+		contextUsed = append(contextUsed, manifest...)
 	}
-	if upstream := b.upstreamOutcomesContext(task); upstream != "" {
+	if upstream, manifest := b.upstreamOutcomesContext(task); upstream != "" {
 		lines = append(lines, upstream)
+		contextUsed = append(contextUsed, manifest...)
 	}
 	if journal := taskLedgerContext(task); journal != "" {
 		lines = append(lines, journal)
+		contextUsed = append(contextUsed, "journal:"+task.ID)
 	}
 	if targets := extractTaskFileTargets(task.Title + " " + task.Details); len(targets) > 0 {
 		lines = append(lines, fmt.Sprintf("- Named file targets: %s", strings.Join(targets, ", ")))
@@ -747,7 +773,7 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 	lines = append(lines, fmt.Sprintf("If you deliver the substantive result for #%s in this turn, you MUST call team_task complete or review-ready for \"%s\" before any completion post and before you stop. A channel reply alone does not unblock dependent work, and a completion post without the task mutation is a failure.", task.ID, task.ID))
 	lines = append(lines, "Runtime rule: never launch another WUPHF office, copied wuphf binary, browser instance, or local web server/--web-port process from inside this turn. The office is already running; use the existing repo, broker state, and assigned worktree instead.")
 	lines = append(lines, fmt.Sprintf("%s Use team_task with my_slug \"%s\" to update status as you go.", truncate(content, triggerContentClipChars), slug))
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), contextUsed
 }
 
 // TaskNotificationContent returns the short single-line task notification

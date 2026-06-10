@@ -5258,6 +5258,21 @@ button.verification-badge {
   color: var(--green-500, #16a34a);
 }
 
+.issue-activity-feed-icon--turn {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text-secondary);
+}
+
+/* B4 context transparency: the "context: learning:X, wiki:Y" list under a
+   turn event — the knowledge items the turn's work packet injected. */
+.issue-activity-feed-context {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary, var(--text-secondary));
+  overflow-wrap: anywhere;
+}
+
 .issue-activity-feed-body {
   min-width: 0;
   display: flex;

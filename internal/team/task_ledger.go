@@ -28,6 +28,12 @@ type TaskLedgerEntry struct {
 	Outcome string   `json:"outcome"`           // "ok" or a short error reason
 	Said    string   `json:"said,omitempty"`    // tail of the agent's last message this turn
 	Actions []string `json:"actions,omitempty"` // task/action-log mutations made this turn
+	// ContextUsed is the manifest of knowledge items the turn's work packet
+	// injected ("learning:<id>", "wiki:<ref>", "upstream:<task>",
+	// "journal:<task>"). Recorded deterministically at packet-build time —
+	// never model-self-reported — so the human can audit exactly what
+	// context the agent was handed (B4). Additive wire field.
+	ContextUsed []string `json:"context_used,omitempty"`
 }
 
 const (
@@ -74,9 +80,10 @@ func (l *Launcher) recordTaskLedgerEntry(slug string, turn headlessCodexTurn, st
 		return
 	}
 	entry := TaskLedgerEntry{
-		Agent:   slug,
-		At:      time.Now().UTC().Format(time.RFC3339),
-		Outcome: "ok",
+		Agent:       slug,
+		At:          time.Now().UTC().Format(time.RFC3339),
+		Outcome:     "ok",
+		ContextUsed: append([]string(nil), turn.ContextUsed...),
 	}
 	if turnErr != nil {
 		entry.Outcome = truncate(turnErr.Error(), 200)

@@ -166,15 +166,10 @@ func newNotifyCtx(l *Launcher) *notificationContextBuilder {
 			if l.broker == nil {
 				return nil
 			}
-			idx := l.broker.WikiIndex()
-			if idx == nil {
-				return nil
-			}
-			hits, err := idx.Search(ctx, query, topK)
-			if err != nil {
-				return nil
-			}
-			return hits
+			// hybridWikiSearch (hybrid_retrieval.go) is BM25-only when no
+			// embedding provider is configured — identical to the pre-B4
+			// behavior — and BM25 ∪ dense with RRF fusion when one is.
+			return hybridWikiSearch(ctx, l.broker.WikiIndex(), query, topK)
 		},
 	}
 }

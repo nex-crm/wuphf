@@ -205,16 +205,24 @@ func handleTeamWikiRead(ctx context.Context, _ *mcp.CallToolRequest, args TeamWi
 	return textResult(string(bytes)), nil, nil
 }
 
-// handleTeamWikiSearch runs a literal substring search.
+// handleTeamWikiSearch runs a literal substring search across the team
+// wiki AND the calling agent's own notebook shelf (B4: one retrieval call
+// spans wiki + private notes). The reader identity comes from the trusted
+// launcher-set WUPHF_AGENT_SLUG env — never from a model-supplied arg — so
+// an agent can only widen the search into its OWN notebooks.
 func handleTeamWikiSearch(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiSearchArgs) (*mcp.CallToolResult, any, error) {
 	pattern := strings.TrimSpace(args.Pattern)
 	if pattern == "" {
 		return toolError(fmt.Errorf("pattern is required")), nil, nil
 	}
+	path := "/wiki/search?pattern=" + url.QueryEscape(pattern)
+	if slug := strings.TrimSpace(trustedEnvAgentSlug()); slug != "" {
+		path += "&reader=" + url.QueryEscape(slug)
+	}
 	var result struct {
 		Hits []map[string]any `json:"hits"`
 	}
-	if err := brokerGetJSON(ctx, "/wiki/search?pattern="+url.QueryEscape(pattern), &result); err != nil {
+	if err := brokerGetJSON(ctx, path, &result); err != nil {
 		return toolError(err), nil, nil
 	}
 	payload, _ := json.Marshal(result.Hits)

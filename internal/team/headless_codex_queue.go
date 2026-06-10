@@ -104,6 +104,14 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	if turn.EnqueuedAt.IsZero() {
 		turn.EnqueuedAt = time.Now()
 	}
+	// B4 pre-task bookend: the FIRST headless-turn enqueue for an
+	// (agent, task) pair queues the agent's pre-task research note
+	// (task_notebook_bookends.go). Only the in-memory dedupe runs on this
+	// path; the broker reads + notebook write happen in a queued goroutine
+	// and ride the wiki worker queue.
+	if turn.TaskID != "" {
+		l.queueTaskNotebookPreBookend(slug, turn.TaskID)
+	}
 
 	var cancel context.CancelFunc
 	var staleAge time.Duration

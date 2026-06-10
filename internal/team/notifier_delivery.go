@@ -166,9 +166,16 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 	if channel == "" {
 		channel = "general"
 	}
-	notification := l.buildTaskExecutionPacket(target.Slug, action, task, content)
+	notification, contextUsed := l.notifyCtx().BuildTaskExecutionPacketWithContext(target.Slug, action, task, content)
 	if l.targeter().ShouldUseHeadlessForTarget(target) {
-		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
+		prompt := headlessSandboxNote() + notification
+		l.enqueueHeadlessCodexTurnRecord(target.Slug, headlessCodexTurn{
+			Prompt:      prompt,
+			Channel:     channel,
+			TaskID:      task.ID,
+			ContextUsed: contextUsed,
+			EnqueuedAt:  time.Now(),
+		})
 		return
 	}
 	l.paneDispatch().Enqueue(target.Slug, target.PaneTarget, notification)
@@ -244,6 +251,7 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		channel = "general"
 	}
 	notification := ""
+	var contextUsed []string
 	humanPrefix := ""
 	fromHuman := isHumanMessageSender(msg.From)
 	if fromHuman {
@@ -261,7 +269,8 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 			humanPrefix, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
 		)
 	} else {
-		packet := l.buildMessageWorkPacket(msg, target.Slug)
+		var packet string
+		packet, contextUsed = l.notifyCtx().BuildMessageWorkPacketWithContext(msg, target.Slug)
 		notification = fmt.Sprintf(
 			"%s%s\n---\n[New from @%s]: %s\n%s This packet is your complete context — do NOT call team_poll or team_tasks. Just do the work and reply via team_broadcast with my_slug \"%s\", channel \"%s\", reply_to_id \"%s\". Once you have posted the needed update, STOP and wait for the next pushed notification.",
 			humanPrefix, packet, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
@@ -271,11 +280,12 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 	if l.targeter().ShouldUseHeadlessForTarget(target) {
 		prompt := headlessSandboxNote() + notification
 		l.enqueueHeadlessCodexTurnRecord(target.Slug, headlessCodexTurn{
-			Prompt:     prompt,
-			Channel:    channel,
-			TaskID:     headlessCodexTaskID(prompt),
-			FromHuman:  fromHuman,
-			EnqueuedAt: time.Now(),
+			Prompt:      prompt,
+			Channel:     channel,
+			TaskID:      headlessCodexTaskID(prompt),
+			FromHuman:   fromHuman,
+			ContextUsed: contextUsed,
+			EnqueuedAt:  time.Now(),
 		})
 		return
 	}

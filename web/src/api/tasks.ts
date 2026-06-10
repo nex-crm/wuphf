@@ -366,7 +366,8 @@ export type TaskActivityEventKind =
   | "comment"
   | "action"
   | "request"
-  | "sub_issue";
+  | "sub_issue"
+  | "turn";
 
 export type TaskActivityRequestStatus = "open" | "answered" | "canceled";
 
@@ -401,6 +402,9 @@ export interface TaskActivityEvent {
   lifecycle?: TaskActivityLifecycle;
   request?: TaskActivityRequest;
   sub_issue?: TaskActivitySubIssue;
+  /** kind="turn" only: knowledge-item ids the turn's work packet injected
+   *  ("learning:<id>", "wiki:<ref>", "upstream:<task>", "journal:<task>"). */
+  context_used?: string[];
 }
 
 export interface TaskActivityResponse {

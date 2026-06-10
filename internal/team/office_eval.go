@@ -20,12 +20,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
+	"github.com/nex-crm/wuphf/internal/embedding"
 )
 
 // OfficeEvalCheck is one scored assertion inside an eval job.
@@ -151,6 +155,12 @@ func newOfficeEvalFixture(dir string) (*officeEvalFixture, error) {
 // (the caller owns its lifetime; t.TempDir() or os.MkdirTemp both work).
 func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 	report := &OfficeEvalReport{}
+	// Force lexical-only retrieval for the whole run so a host env with a
+	// real embedding key (OPENAI_API_KEY / VOYAGE_API_KEY) cannot make the
+	// deterministic checks network-dependent. The hybrid-retrieval job
+	// installs the deterministic stub for its own scope.
+	setRetrievalEmbedding(nil, nil)
+	defer resetRetrievalEmbedding()
 	jobs := []struct {
 		name string
 		run  func(*officeEvalFixture, *OfficeEvalReport) error
@@ -166,6 +176,8 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"completion-hook", evalJobCompletionHook},
 		{"entity-articles", evalJobEntityArticles},
 		{"playbook-compilation", evalJobPlaybookCompilation},
+		{"notebook-bookends", evalJobNotebookBookends},
+		{"hybrid-retrieval", evalJobHybridRetrieval},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))
@@ -457,7 +469,9 @@ func evalJobDependencyHandoff(fx *officeEvalFixture, r *OfficeEvalReport) error 
 }
 
 // evalJobTurnJournal: the living task brief (U2.3/U3.3) — what one turn
-// tried must reach the next turn's packet, including a teammate's.
+// tried must reach the next turn's packet, including a teammate's. Extended
+// for B4: the packet build deterministically records its injected context
+// manifest on the turn, and the settled turn's ledger entry carries it.
 func evalJobTurnJournal(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	const job = "turn-journal"
 	task, _, err := fx.broker.EnsureTask("general", "Stabilize the flaky auth test", "Find and fix the flaky auth test.", "eng", "ceo", "")
@@ -473,6 +487,73 @@ func evalJobTurnJournal(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	r.add(job, "next turn's packet carries the task journal",
 		strings.Contains(packet, "TASK JOURNAL") && strings.Contains(packet, "isolate the fixture"),
 		"turn N+1 must start from what turn N tried, not from amnesia (U2.3/U3.3 regression guard)", "")
+
+	// B4 context transparency: seed a learning that matches this task, then
+	// dispatch the owner through the real wake path. The packet build (not
+	// the model) records the injected item ids on the turn; the settled
+	// turn's ledger entry must carry them.
+	llog := fx.broker.TeamLearningLog()
+	if llog == nil {
+		return fmt.Errorf("learning log not wired")
+	}
+	seeded, err := llog.Append(context.Background(), LearningRecord{
+		Type: "operational", Key: "flaky-auth-fixture", Insight: "Flaky auth test: always isolate the shared fixture per test.",
+		Confidence: 8, Source: "execution", Trusted: true, Scope: "team", CreatedBy: "eng", CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return fmt.Errorf("seed learning: %w", err)
+	}
+	// Force the task executable so sendTaskUpdate dispatches (fresh fixture
+	// tasks may sit pre-Running; the gate under test is the packet→ledger
+	// manifest, not lifecycle admission).
+	fx.broker.mu.Lock()
+	if t := fx.broker.taskByIDLocked(task.ID); t != nil {
+		t.LifecycleState = LifecycleStateRunning
+		t.status = "in_progress"
+	}
+	fx.broker.mu.Unlock()
+	woke := make(chan struct{}, 1)
+	stub := func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+		select {
+		case woke <- struct{}{}:
+		default:
+		}
+		// Park until cancelled so the recovery paths never fire; the
+		// ledger entry is recorded when the turn settles on cancel.
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	prior := headlessCodexRunTurnOverride.Load()
+	headlessCodexRunTurnOverride.Store(&stub)
+	defer headlessCodexRunTurnOverride.Store(prior)
+	current := fx.broker.TaskByID(task.ID)
+	fx.launcher.sendTaskUpdate(
+		notificationTarget{Slug: "eng"},
+		officeActionLog{Kind: "task_updated", Actor: "ceo", Channel: current.Channel, RelatedID: task.ID},
+		*current,
+		"Continue work.",
+	)
+	select {
+	case <-woke:
+	case <-time.After(8 * time.Second):
+	}
+	fx.launcher.stopHeadlessWorkers()
+	var contextUsed []string
+	if after := fx.broker.TaskByID(task.ID); after != nil {
+		for _, entry := range after.Ledger {
+			if len(entry.ContextUsed) > 0 {
+				contextUsed = entry.ContextUsed
+			}
+		}
+	}
+	found := false
+	for _, item := range contextUsed {
+		if item == "learning:"+seeded.ID {
+			found = true
+		}
+	}
+	r.add(job, "packet build records ContextUsed on the ledger entry", found,
+		fmt.Sprintf("context_used=%v want learning:%s", contextUsed, seeded.ID), "")
 	return nil
 }
 
@@ -1086,5 +1167,224 @@ description: Send renewal outreach emails to existing customers.
 	r.add(job, "agent prompt carries its assigned compiled skill (always loaded)",
 		strings.Contains(engPrompt, "qualify-inbound-leads"),
 		"", "")
+	return nil
+}
+
+// evalJobNotebookBookends: the B4 deterministic notebook bookends
+// (task_notebook_bookends.go, core-loop step 5). (a) The FIRST headless
+// turn enqueue for a (agent, defined-task) pair creates the agent's
+// pre-task research note at agents/{slug}/notebook/{task-id}.md with the
+// Definition and an empty Research section; (b) a single team_wiki_search
+// retrieval with the agent's reader identity spans wiki + that agent's OWN
+// notebook (permissioned: another reader does not see it); (c) verified
+// done appends the post-task section with the artifact link.
+func evalJobNotebookBookends(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "notebook-bookends"
+	worker := fx.broker.WikiWorker()
+	if worker == nil {
+		return fmt.Errorf("wiki worker not wired")
+	}
+	root := worker.Repo().Root()
+
+	created, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Publish the onboarding teardown brief",
+		Details: "Write up the onboarding teardown findings.", Owner: "eng", CreatedBy: "ceo",
+		VerificationKind: "command", VerificationSpec: "exit 0", VerificationRequired: true,
+	})
+	if err != nil {
+		return err
+	}
+	id := created.Task.ID
+	const goal = "Ship the onboarding teardown brief to the wiki with one actionable fix list"
+	if _, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "define", ID: id, Channel: "general", CreatedBy: "ceo",
+		Definition: &TaskDefinition{
+			Goal:            goal,
+			Deliverables:    []TaskDeliverable{{Name: "teardown brief", Format: "markdown in the wiki"}},
+			SuccessCriteria: []string{"Brief published to the wiki"},
+		},
+	}); err != nil {
+		return err
+	}
+
+	// (a) First headless enqueue for (eng, task) queues the pre-task note.
+	// The parked stub keeps the turn pending so no recovery path fires.
+	stub := func(_ *Launcher, ctx context.Context, _, _ string, _ ...string) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	prior := headlessCodexRunTurnOverride.Load()
+	headlessCodexRunTurnOverride.Store(&stub)
+	defer headlessCodexRunTurnOverride.Store(prior)
+	fx.launcher.enqueueHeadlessCodexTurnRecord("eng", headlessCodexTurn{
+		Prompt:  "Work packet:\n- Task: #" + id,
+		Channel: "general",
+		TaskID:  id,
+	})
+	notePath := filepath.Join(root, "agents", "eng", "notebook", id+".md")
+	waitForNote := func(needles ...string) string {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			content, err := os.ReadFile(notePath)
+			if err == nil {
+				body := string(content)
+				ok := true
+				for _, n := range needles {
+					if !strings.Contains(body, n) {
+						ok = false
+						break
+					}
+				}
+				if ok {
+					return body
+				}
+			}
+			if time.Now().After(deadline) {
+				return string(content)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	pre := waitForNote(goal, "## Definition", "## Research")
+	fx.launcher.stopHeadlessWorkers()
+	r.add(job, "task start creates the pre-task note with the Definition",
+		strings.Contains(pre, goal) && strings.Contains(pre, "## Definition") &&
+			strings.Contains(pre, "## Research") && strings.Contains(pre, "## Retrieved context"),
+		fmt.Sprintf("note=%dB at agents/eng/notebook/%s.md", len(pre), id), "")
+
+	// (b) One retrieval call spans wiki + the agent's OWN notebook: the
+	// /wiki/search surface behind team_wiki_search merges the reader's own
+	// shelf, and only theirs.
+	searchHits := func(reader string) string {
+		target := "/wiki/search?pattern=" + url.QueryEscape("onboarding teardown brief")
+		if reader != "" {
+			target += "&reader=" + url.QueryEscape(reader)
+		}
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		fx.broker.handleWikiSearch(rec, req)
+		return rec.Body.String()
+	}
+	ownBody := searchHits("eng")
+	otherBody := searchHits("ceo")
+	r.add(job, "wiki search with the agent's reader identity spans its own notebook",
+		strings.Contains(ownBody, "agents/eng/notebook/"+id+".md") &&
+			!strings.Contains(otherBody, "agents/eng/notebook/"),
+		fmt.Sprintf("own=%dB other=%dB", len(ownBody), len(otherBody)), "")
+
+	// (c) Verified done appends the post-task section with the artifact link.
+	const artifact = "team/briefs/onboarding-teardown.md"
+	if _, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "complete", ID: id, Channel: "general", CreatedBy: "eng", ArtifactPath: artifact,
+	}); err != nil {
+		return err
+	}
+	if cur := fx.broker.TaskByID(id); cur != nil && !strings.EqualFold(strings.TrimSpace(cur.status), "done") {
+		if _, err := fx.broker.MutateTask(TaskPostRequest{
+			Action: "approve", ID: id, Channel: "general", CreatedBy: "ceo", ArtifactPath: artifact,
+		}); err != nil {
+			return err
+		}
+	}
+	fx.broker.distillCompletedTask(id)
+	post := waitForNote("## Post-task", artifact)
+	r.add(job, "verified done appends the post-task section with the artifact link",
+		strings.Contains(post, "## Post-task") && strings.Contains(post, "["+artifact+"]("+artifact+")") &&
+			strings.Contains(post, "Learnings distilled"),
+		fmt.Sprintf("note=%dB", len(post)), "")
+	return nil
+}
+
+// evalJobHybridRetrieval: the B4 hybrid retrieval spine
+// (hybrid_retrieval.go behind the U2 relevantLearnings seam). With no
+// embedding provider the lexical behavior is unchanged; with the
+// deterministic stub configured, a learning whose wording shares NO
+// lexical tokens with the query but is dense-adjacent per the stub's
+// vectors ranks in the top-k, lexical hits survive the fusion, and record
+// texts are embedded once through the content-hash cache.
+func evalJobHybridRetrieval(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "hybrid-retrieval"
+	llog := fx.broker.TeamLearningLog()
+	if llog == nil {
+		return fmt.Errorf("learning log not wired")
+	}
+	ctx := context.Background()
+	// The adjacent learning shares ONLY sub-3-char tokens ("q3", "ai",
+	// "ux") with the query — invisible to the lexical tokenizer (length
+	// floor 3), visible to the stub's dense vectors (length floor 2).
+	adjacent, err := llog.Append(ctx, LearningRecord{
+		Type: "operational", Key: "q3-ai-ux", Insight: "q3 ai ux: cap nav depth at two levels",
+		Confidence: 8, Source: "execution", Trusted: true, Scope: "team", CreatedBy: "eng", CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return err
+	}
+	lexical, err := llog.Append(ctx, LearningRecord{
+		Type: "operational", Key: "acme-renewal-email", Insight: "Acme renewals: always CC the CSM and lead with the usage-growth chart.",
+		Confidence: 9, Source: "execution", Trusted: true, Scope: "team", CreatedBy: "eng", CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := llog.Append(ctx, LearningRecord{
+		Type: "operational", Key: "webhook-signing", Insight: "Billing webhooks: rotate signing keys quarterly.",
+		Confidence: 7, Source: "execution", Trusted: true, Scope: "team", CreatedBy: "eng", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		return err
+	}
+	const denseQuery = "Q3 AI UX pass"
+	const lexicalQuery = "Draft the Acme renewal email for the Q3 renewals"
+
+	contains := func(results []LearningSearchResult, id string) bool {
+		for _, rec := range results {
+			if rec.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	// (a) No provider configured → exact lexical behavior: the dense-only
+	// adjacent learning is NOT retrievable, the token-overlap one is.
+	// RunOfficeEvals already forces lexical-only for the run.
+	coldDense := relevantLearnings(llog, denseQuery, 5)
+	coldLexical := relevantLearnings(llog, lexicalQuery, 5)
+	r.add(job, "no provider: lexical behavior unchanged (dense-only record absent, lexical hit present)",
+		!contains(coldDense, adjacent.ID) && contains(coldLexical, lexical.ID),
+		fmt.Sprintf("dense-query results=%d lexical-query results=%d", len(coldDense), len(coldLexical)), "")
+
+	// (b) Stub provider + scratch content-hash cache configured.
+	cache := embedding.NewCache(filepath.Join(fx.scratchDir, "embeddings.jsonl"))
+	setRetrievalEmbedding(embedding.NewStubProvider(), cache)
+	// Restore the run-wide lexical forcing when this job ends.
+	defer setRetrievalEmbedding(nil, nil)
+
+	warm := relevantLearnings(llog, denseQuery, 5)
+	r.add(job, "stub provider: zero-token-overlap semantically-adjacent learning ranks in top-k",
+		contains(warm, adjacent.ID),
+		fmt.Sprintf("results=%d want id=%s", len(warm), adjacent.ID), "")
+	stillLexical := relevantLearnings(llog, lexicalQuery, 5)
+	r.add(job, "stub provider: lexical hits survive RRF fusion",
+		contains(stillLexical, lexical.ID), "", "")
+
+	// (c) Record texts embed once through the content-hash cache: the
+	// second identical retrieval adds no new cache rows.
+	entriesAfterFirst := cache.Stats().Entries
+	_ = relevantLearnings(llog, denseQuery, 5)
+	entriesAfterSecond := cache.Stats().Entries
+	r.add(job, "embeddings are cached by content hash (no re-embedding unchanged texts)",
+		entriesAfterFirst > 0 && entriesAfterSecond == entriesAfterFirst,
+		fmt.Sprintf("entries first=%d second=%d", entriesAfterFirst, entriesAfterSecond), "")
+
+	// (d) End to end: the work packet for the dense-only task carries the
+	// adjacent insight when the provider is configured.
+	task, _, err := fx.broker.EnsureTask("general", denseQuery, "", "eng", "ceo", "")
+	if err != nil {
+		return err
+	}
+	packet := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *fx.broker.TaskByID(task.ID), "Task assigned to you.")
+	r.add(job, "hybrid: dense-adjacent learning reaches the work packet",
+		strings.Contains(packet, "cap nav depth at two levels"),
+		fmt.Sprintf("packet=%d chars", len(packet)), "")
 	return nil
 }
