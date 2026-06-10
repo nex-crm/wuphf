@@ -106,6 +106,15 @@ func socketEventNeedsAck(t socketmode.EventType) bool {
 	}
 }
 
+// shouldAckEvent is the full Ack decision the socket loop makes for one event:
+// Ack only when the event carries a request envelope, the handler reports it was
+// handled, AND the type is one Slack expects an Ack for. Extracted as a pure
+// function so the loop's Ack behavior is testable without a live WebSocket — the
+// gap that let a "hello" Ack (which drops the connection) ship undetected.
+func shouldAckEvent(evt socketmode.Event, handled bool) bool {
+	return evt.Request != nil && handled && socketEventNeedsAck(evt.Type)
+}
+
 // Run starts the Socket Mode WebSocket loop in a sibling goroutine, drains the
 // Events channel and dispatches each event to handle, and blocks until ctx is
 // cancelled or RunContext returns. RunContext owns reconnection internally; a
@@ -139,8 +148,7 @@ func (r *socketModeRunner) Run(ctx context.Context, handle func(socketmode.Event
 			// interactive, slash_command). Acking a connection-lifecycle envelope
 			// like "hello" makes Slack drop the connection — that caused a ~10s
 			// reconnect loop where no event ever landed.
-			ack := handle(evt)
-			if evt.Request != nil && ack && socketEventNeedsAck(evt.Type) {
+			if shouldAckEvent(evt, handle(evt)) {
 				_ = r.client.Ack(*evt.Request)
 			}
 		}

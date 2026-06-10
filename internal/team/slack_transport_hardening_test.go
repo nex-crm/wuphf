@@ -146,3 +146,34 @@ func TestSocketEventNeedsAck(t *testing.T) {
 		}
 	}
 }
+
+// TestShouldAckEvent exercises the FULL ack decision the socket loop makes — the
+// behavior that had no coverage (the loop was hidden behind the socketRunner
+// seam), which let an Ack on the connection-handshake "hello" ship and trigger a
+// ~10s reconnect loop in which no message or interaction was ever delivered.
+func TestShouldAckEvent(t *testing.T) {
+	req := &socketmode.Request{}
+	cases := []struct {
+		name    string
+		evt     socketmode.Event
+		handled bool
+		want    bool
+	}{
+		// The exact bug: a hello envelope carries a Request, but acking it makes
+		// Slack drop the connection. Must NOT ack.
+		{"hello with request", socketmode.Event{Type: socketmode.EventTypeHello, Request: req}, true, false},
+		{"connected with request", socketmode.Event{Type: socketmode.EventTypeConnected, Request: req}, true, false},
+		{"events_api handled", socketmode.Event{Type: socketmode.EventTypeEventsAPI, Request: req}, true, true},
+		{"events_api not handled (host failure → redeliver)", socketmode.Event{Type: socketmode.EventTypeEventsAPI, Request: req}, false, false},
+		{"interactive handled", socketmode.Event{Type: socketmode.EventTypeInteractive, Request: req}, true, true},
+		{"slash_command handled", socketmode.Event{Type: socketmode.EventTypeSlashCommand, Request: req}, true, true},
+		{"events_api no request envelope", socketmode.Event{Type: socketmode.EventTypeEventsAPI, Request: nil}, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldAckEvent(tc.evt, tc.handled); got != tc.want {
+				t.Fatalf("shouldAckEvent(%s, handled=%v) = %v, want %v", tc.evt.Type, tc.handled, got, tc.want)
+			}
+		})
+	}
+}
