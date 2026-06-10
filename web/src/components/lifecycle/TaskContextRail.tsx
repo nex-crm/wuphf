@@ -1,9 +1,10 @@
 import { type ReactNode, useState } from "react";
 
-import type { TaskVerification } from "../../api/tasks";
+import type { TaskDefinition, TaskVerification } from "../../api/tasks";
 import { ChannelParticipants } from "../messages/ChannelParticipants";
 import { SubTasksList } from "./SubTasksList";
 import { TaskActivityFeed } from "./TaskActivityFeed";
+import { TaskDefinitionView } from "./TaskDefinitionView";
 import { TaskDescription } from "./TaskDescription";
 
 interface TaskContextRailProps {
@@ -15,6 +16,8 @@ interface TaskContextRailProps {
   showSubTasks: boolean;
   /** Machine-checkable definition of done (U1); renders atop the Details. */
   verification?: TaskVerification;
+  /** Structured intake contract (R4); leads the Details section. */
+  definition?: TaskDefinition;
 }
 
 interface RailSectionProps {
@@ -71,6 +74,7 @@ export function TaskContextRail({
   isDrafting,
   showSubTasks,
   verification,
+  definition,
 }: TaskContextRailProps) {
   const hasCheck = Boolean(verification && verification.kind !== "none");
   return (
@@ -90,6 +94,7 @@ export function TaskContextRail({
         defaultOpen={isDrafting}
         testId="task-rail-details"
       >
+        {definition ? <TaskDefinitionView definition={definition} /> : null}
         {hasCheck && verification ? (
           <div
             className="task-verification-dod"

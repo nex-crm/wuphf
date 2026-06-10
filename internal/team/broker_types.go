@@ -302,6 +302,12 @@ type teamTask struct {
 	// done card can show proof.
 	Verification       *TaskVerification       `json:"verification,omitempty"`
 	VerificationResult *TaskVerificationResult `json:"verification_result,omitempty"`
+	// Definition is the R4 structured intake contract (task_definition.go):
+	// goal, deliverables (+format), success criteria, and the tool/context
+	// access the work needs. Set by the CEO/human via team_task action=define
+	// before the task is staffed; rendered prominently in execution packets.
+	// Nil on legacy tasks and on work created before intake defined it.
+	Definition *TaskDefinition `json:"definition,omitempty"`
 	// Ledger is the per-turn journal (task_ledger.go, U2.3): distilled
 	// records of what each headless turn on this task said, mutated, and
 	// how it ended. Rendered into every participant's packet as the living
@@ -393,6 +399,7 @@ type teamTaskWire struct {
 	MemoryWorkflow       *MemoryWorkflow         `json:"memory_workflow,omitempty"`
 	Verification         *TaskVerification       `json:"verification,omitempty"`
 	VerificationResult   *TaskVerificationResult `json:"verification_result,omitempty"`
+	Definition           *TaskDefinition         `json:"definition,omitempty"`
 	Ledger               []TaskLedgerEntry       `json:"ledger,omitempty"`
 	CreatedAt            string                  `json:"created_at"`
 	UpdatedAt            string                  `json:"updated_at"`
@@ -442,6 +449,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		MemoryWorkflow:       t.MemoryWorkflow,
 		Verification:         t.Verification,
 		VerificationResult:   t.VerificationResult,
+		Definition:           t.Definition,
 		Ledger:               t.Ledger,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
@@ -493,6 +501,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.MemoryWorkflow = w.MemoryWorkflow
 	t.Verification = w.Verification
 	t.VerificationResult = w.VerificationResult
+	t.Definition = w.Definition
 	t.Ledger = w.Ledger
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt

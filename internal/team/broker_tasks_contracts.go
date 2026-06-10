@@ -38,13 +38,20 @@ type TaskPostRequest struct {
 	// VerificationKind/Spec/Required set the machine-checkable definition
 	// of done on create (U1.1, task_verification.go). Kind is one of
 	// command|artifact|url|none.
-	VerificationKind             string `json:"verification_kind,omitempty"`
-	VerificationSpec             string `json:"verification_spec,omitempty"`
-	VerificationRequired         bool   `json:"verification_required,omitempty"`
-	MemoryWorkflowOverride       bool   `json:"memory_workflow_override"`
-	MemoryWorkflowOverrideActor  string `json:"memory_workflow_override_actor"`
-	MemoryWorkflowOverrideReason string `json:"memory_workflow_override_reason"`
-	OverrideReason               string `json:"override_reason"`
+	VerificationKind     string `json:"verification_kind,omitempty"`
+	VerificationSpec     string `json:"verification_spec,omitempty"`
+	VerificationRequired bool   `json:"verification_required,omitempty"`
+	// Definition is the R4 structured intake contract for action=define
+	// (task_definition.go): goal (required), deliverables (+format),
+	// success_criteria (entries non-empty), access_needed. CEO/human only —
+	// same auth class as the other scope-shaping actions. When a success
+	// criterion is machine-checkable and the task has no verification yet,
+	// pass VerificationKind/Spec/Required in the same define call.
+	Definition                   *TaskDefinition `json:"definition,omitempty"`
+	MemoryWorkflowOverride       bool            `json:"memory_workflow_override"`
+	MemoryWorkflowOverrideActor  string          `json:"memory_workflow_override_actor"`
+	MemoryWorkflowOverrideReason string          `json:"memory_workflow_override_reason"`
+	OverrideReason               string          `json:"override_reason"`
 }
 
 type TaskAckRequest struct {

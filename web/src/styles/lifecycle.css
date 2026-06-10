@@ -2174,6 +2174,87 @@ button.verification-badge {
   overflow-wrap: anywhere;
 }
 
+/* Structured task definition (R4 intake contract) inside the rail's
+   Details section: Goal / Deliverables (+format chips) / Success criteria
+   checklist / Access needed. */
+.task-definition {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.task-definition-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-definition-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.task-definition-goal {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.task-definition-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-definition-deliverable {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.task-definition-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.task-definition-criterion {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.task-definition-check {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.task-definition-access {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .severity-summary {
   display: inline-flex;
   align-items: center;

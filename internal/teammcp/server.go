@@ -288,7 +288,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 	mcp.AddTool(server, officeWriteTool(
 		"team_task",
-		"Create, claim, assign, complete, block, resume, or release a shared task in the office task list.",
+		"Create, define, claim, assign, complete, block, resume, or release a shared task in the office task list. action=define sets the structured task definition (goal, deliverables+format, success_criteria, access_needed) — the intake contract the owner executes against.",
 	), handleTeamTask)
 
 	if slug == "artist" {

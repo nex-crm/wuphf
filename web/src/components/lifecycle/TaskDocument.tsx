@@ -19,6 +19,8 @@ import { postDecision, postTaskReject } from "../../api/lifecycle";
 import {
   getOfficeTasks,
   type Task,
+  type TaskDefinition as TaskDefinitionShape,
+  type TaskDeliverable,
   type TaskVerification,
   type TaskVerificationResult,
   taskToLifecycleState,
@@ -56,6 +58,8 @@ export interface TaskDocument {
   verification?: TaskVerification;
   /** Outcome of the most recent verification run. Absent until first run. */
   verificationResult?: TaskVerificationResult;
+  /** Structured intake contract (R4). Absent until the CEO/human defines. */
+  definition?: TaskDefinitionShape;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -115,6 +119,58 @@ function normalizeVerificationResult(
     kind: typeof rec.kind === "string" ? rec.kind : "",
     detail: typeof rec.detail === "string" ? rec.detail : undefined,
     checked_at: typeof rec.checked_at === "string" ? rec.checked_at : "",
+  };
+}
+
+/** Keep only non-empty strings from an unknown wire array. */
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is string => typeof item === "string" && item !== "",
+  );
+}
+
+/** Narrow an unknown value to a non-empty string, else undefined. */
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/** Narrow an unknown wire array into well-formed deliverables. Entries
+ *  without a non-empty string `name` are dropped. */
+function normalizeDeliverables(value: unknown): TaskDeliverable[] {
+  if (!Array.isArray(value)) return [];
+  const out: TaskDeliverable[] = [];
+  for (const item of value) {
+    const d = recordValue(item);
+    const name = d ? nonEmptyString(d.name) : undefined;
+    if (!d || !name) continue;
+    out.push({ name, format: nonEmptyString(d.format) });
+  }
+  return out;
+}
+
+/**
+ * Narrow an unknown wire value into a TaskDefinition (R4). `goal` is the
+ * load-bearing field; a payload without a non-empty string goal is treated
+ * as absent so a malformed definition degrades to the plain description.
+ */
+function normalizeTaskDefinition(
+  value: unknown,
+): TaskDefinitionShape | undefined {
+  const rec = recordValue(value);
+  const goal = rec ? nonEmptyString(rec.goal) : undefined;
+  if (!rec || !goal) {
+    return undefined;
+  }
+  const deliverables = normalizeDeliverables(rec.deliverables);
+  const criteria = stringArray(rec.success_criteria);
+  const access = stringArray(rec.access_needed);
+  return {
+    goal,
+    deliverables: deliverables.length > 0 ? deliverables : undefined,
+    success_criteria: criteria.length > 0 ? criteria : undefined,
+    access_needed: access.length > 0 ? access : undefined,
+    defined_at: nonEmptyString(rec.defined_at),
   };
 }
 
@@ -229,6 +285,12 @@ export function normalizeTaskDocument(
       taskRecord?.verification_result ?? r.verification_result,
     ) ?? taskHint?.verification_result;
 
+  // The structured intake contract (R4) rides the same paths as
+  // verification: wrapped task record, packet top level, taskHint fallback.
+  const definition =
+    normalizeTaskDefinition(taskRecord?.definition ?? r.definition) ??
+    taskHint?.definition;
+
   return {
     taskId,
     title,
@@ -247,6 +309,7 @@ export function normalizeTaskDocument(
       taskHint?.updated_at,
     verification,
     verificationResult,
+    definition,
   };
 }
 
@@ -628,6 +691,7 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
           isDrafting={isDrafting}
           showSubTasks={!doc.parentTaskId}
           verification={doc.verification}
+          definition={doc.definition}
         />
       </div>
     </div>

@@ -222,6 +222,48 @@ describe("normalizeTaskDocument", () => {
       }),
     ).toThrow("task channel is missing");
   });
+
+  it("normalizes the structured definition from the wrapped task record", () => {
+    const doc = normalizeTaskDocument({
+      taskId: "task-7",
+      lifecycleState: "running",
+      task: {
+        id: "task-7",
+        channel: "growth",
+        title: "Launch the newsletter",
+        definition: {
+          goal: "first partner newsletter shipped",
+          deliverables: [{ name: "draft", format: "markdown" }, { name: 42 }],
+          success_criteria: ["human approved the draft", ""],
+          access_needed: ["mailing-list account"],
+          defined_at: "2026-06-10T09:14:00Z",
+        },
+      },
+    });
+
+    expect(doc.definition).toEqual({
+      goal: "first partner newsletter shipped",
+      deliverables: [{ name: "draft", format: "markdown" }],
+      success_criteria: ["human approved the draft"],
+      access_needed: ["mailing-list account"],
+      defined_at: "2026-06-10T09:14:00Z",
+    });
+  });
+
+  it("treats a goal-less definition payload as absent", () => {
+    const doc = normalizeTaskDocument({
+      taskId: "task-8",
+      lifecycleState: "running",
+      task: {
+        id: "task-8",
+        channel: "growth",
+        title: "Launch the newsletter",
+        definition: { deliverables: [{ name: "draft" }] },
+      },
+    });
+
+    expect(doc.definition).toBeUndefined();
+  });
 });
 
 // ── Approve & Start button ────────────────────────────────────────────

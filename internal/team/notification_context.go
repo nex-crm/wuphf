@@ -576,6 +576,10 @@ func (b *notificationContextBuilder) BuildMessageWorkPacket(msg channelMessage, 
 	}
 	if task, ok := b.RelevantTaskForTarget(msg, slug); ok {
 		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, taskListTitleClipChars), strings.TrimSpace(task.status)))
+		if defLines := taskDefinitionPacketLines(task.Definition); len(defLines) > 0 {
+			lines = append(lines, "- Task definition (the contract this work executes against):")
+			lines = append(lines, defLines...)
+		}
 		if details := strings.TrimSpace(task.Details); details != "" {
 			lines = append(lines, fmt.Sprintf("- Task details: %s", truncate(details, taskDetailsClipChars)))
 		}
@@ -652,6 +656,13 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 		fmt.Sprintf("- Status: %s", strings.TrimSpace(task.status)),
 		fmt.Sprintf("- Owner: @%s", slug),
 	}
+	// R4 definition: the structured intake contract leads the packet — the
+	// goal, deliverables (+format), success criteria, and access this work
+	// is executed against (task_definition.go).
+	if defLines := taskDefinitionPacketLines(task.Definition); len(defLines) > 0 {
+		lines = append(lines, "- DEFINITION (the contract you execute against):")
+		lines = append(lines, defLines...)
+	}
 	if details := strings.TrimSpace(task.Details); details != "" {
 		lines = append(lines, fmt.Sprintf("- Details: %s", truncate(details, taskDetailsClipChars)))
 	}
@@ -660,7 +671,7 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 		if v.Required {
 			gate = "REQUIRED — complete/approve is blocked until this passes"
 		}
-		lines = append(lines, fmt.Sprintf("- Definition of done (%s, %s): %s", v.Kind, gate, v.Spec))
+		lines = append(lines, fmt.Sprintf("- Machine check (%s, %s): %s", v.Kind, gate, v.Spec))
 	}
 	if res := task.VerificationResult; res != nil && !res.Pass {
 		lines = append(lines, fmt.Sprintf("- LAST VERIFICATION FAILED (%s at %s): %s", res.Kind, res.CheckedAt, truncate(strings.TrimSpace(res.Detail), 2000)))

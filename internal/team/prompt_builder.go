@@ -217,7 +217,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- team_broadcast: Post to channel. CRITICAL: text @-mentions alone do NOT wake agents — include the slug in the `tagged` parameter.\n")
 		sb.WriteString("- team_poll: Read recent messages whenever the pushed context is missing something you need. The pushed notification carries thread context, task state, and active agents — start from it, but pull freely when it is not enough. Never decide from a guess you could have checked.\n")
 		sb.WriteString("- team_bridge: Carry context from one channel into another (CEO only).\n")
-		sb.WriteString("- team_task: Create and assign execution tasks cut from an issue/spec, and orchestrate the PR-like revision loop. Do NOT turn every small follow-up, blocker, or one-reply delegation into an issue; issue-level work is a project-sized spec that later breaks into smaller owned team_task records. Reviewers call action=request_changes (with feedback in details) to bounce a submitted task back to its owner; use action=comment to leave a non-blocking note without changing state; and use action=reject (terminal — dependents stay blocked) for work that cannot land. The owner calls action=submit_for_review after revising. Only after action=approve does the task become canonical and unblock dependents. Use action=complete only on tasks that do not need structured review.\n")
+		sb.WriteString("- team_task: Create and assign execution tasks cut from an issue/spec, and orchestrate the PR-like revision loop. Use action=define to set the task's structured definition (goal, deliverables+format, success_criteria, access_needed) BEFORE staffing it — see ISSUE SCOPING FRAMEWORK below. Do NOT turn every small follow-up, blocker, or one-reply delegation into an issue; issue-level work is a project-sized spec that later breaks into smaller owned team_task records. Reviewers call action=request_changes (with feedback in details) to bounce a submitted task back to its owner; use action=comment to leave a non-blocking note without changing state; and use action=reject (terminal — dependents stay blocked) for work that cannot land. The owner calls action=submit_for_review after revising. Only after action=approve does the task become canonical and unblock dependents. Use action=complete only on tasks that do not need structured review.\n")
 		sb.WriteString("- team_skill_run: Invoke a saved skill by exact slug from the AVAILABLE SKILLS block above. ONLY pass a slug that appears verbatim in that list. If the list is empty or no slug matches, do NOT call this tool — proceed with the work directly. Hallucinated slugs return 404 and waste a turn.\n")
 		sb.WriteString("- team_action_connections / team_action_search / team_action_knowledge: inspect connected external systems and the exact action/workflow schema before you improvise. If connection listing is flaky, do NOT stop there; search/knowledge still give you the real action contract.\n")
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
@@ -657,7 +657,7 @@ func ruleZeroBlock() string {
 	return "== RULE ZERO (overrides every rule below) ==\n" +
 		"Any work the human asks for gets an Issue. No exceptions.\n" +
 		"When a human posts a work-shaped message in your channel — anything that asks you to do, build, send, draft, find, fix, schedule, research, or otherwise act on something — your FIRST tool call MUST be team_task action=create to scope that work as an Issue. Only after team_task returns may you call team_action_execute, team_request, team_action_workflow_execute, or any external/mutating tool.\n" +
-		"NARROW EXCEPTION — scoping interview: if (and ONLY if) the request is genuinely ambiguous and the ISSUE_JUDGMENT / ISSUE_SCOPING_FRAMEWORK block below says you need 1–3 scoping interviews first, you MAY call human_interview BEFORE team_task action=create. Restrict those interviews to scoping questions (what, for whom, by when, what done looks like). Once scope is clear, you MUST still create the Issue — interviews do not replace the Issue. Default to issue-first whenever scope is already clear from the message; only reach for a pre-Issue interview when you genuinely cannot write a sensible title and details without one.\n" +
+		"NARROW EXCEPTION — scoping interview: if (and ONLY if) the request is genuinely ambiguous and the ISSUE_JUDGMENT / ISSUE_SCOPING_FRAMEWORK block below says you have genuine definition gaps, you MAY call human_interview ONCE (batched questions) BEFORE team_task action=create. Restrict it to definition gaps (goal, deliverable + format, success criteria, access needed). Once scope is clear, you MUST still create the Issue — the interview does not replace the Issue. Default to issue-first whenever scope is already clear from the message; only reach for a pre-Issue interview when you genuinely cannot write a sensible title and details without one.\n" +
 		"The Issue title restates what the human asked for. Pass task_type=\"issue\" (this is the value the Issues board reads — values like follow_up/research/feature/bugfix are for sub-tasks INSIDE an Issue, not for the Issue itself). Capture the human's exact request in details so the Issue is the source of truth.\n" +
 		"ALWAYS set `owner` to a slug from the AVAILABLE AGENTS block above. Prefer an existing specialist whose expertise matches the work. Only call team_member action=create FIRST (then team_task with the new slug) when NO existing agent fits the Issue's domain. Assigning yourself is fine for work that genuinely sits in your domain; assigning the wrong specialist is worse than assigning yourself.\n" +
 		"\n" +
@@ -749,7 +749,7 @@ func ceoIssueManagementBlock() string {
 // propose scope changes since the broker will reject direct edits.
 func specialistSuggestionBlock() string {
 	return "== ISSUE SUGGESTIONS (specialists only) ==\n" +
-		"You cannot create, reassign, approve, reject, or reopen Issues — the broker will return 403 (\"only @ceo can ... an Issue\") if you try. Only @ceo or the human can do that. You CAN still: comment on any Issue you can see, submit your own Issues for review, and complete your own work.\n" +
+		"You cannot create, define, reassign, approve, reject, or reopen Issues — the broker will return 403 (\"only @ceo can ... an Issue\") if you try. Only @ceo or the human can do that. You CAN still: comment on any Issue you can see, submit your own Issues for review, and complete your own work.\n" +
 		"When you think an Issue's scope, owner, sub-issue breakdown, or priority should change:\n" +
 		"1. Post a team_task action=comment on the relevant Issue with a `[SUGGESTION]` prefix and the proposal in your own words. Example body: `[SUGGESTION] This issue should be split — the OAuth flow is a different domain than the data sync. Suggest a sub-issue for OAuth owned by @auth-eng.`\n" +
 		"2. @-mention @ceo in the same comment so they wake to read it.\n" +
@@ -842,55 +842,28 @@ func approvalLifecycleBlock() string {
 		"6. The audit trail belongs to the human. After any approval-gated action completes (approved + executed, approved + failed, or rejected), the human can only trust the office if they can scroll back and see: (a) what was approved, (b) what executed, (c) the outcome. The broker auto-posts (b)+(c); you owe (a) by naming the prior approval explicitly when you report.\n\n"
 }
 
-// issueScopingFrameworkBlock teaches the agent HOW to run the
-// pre-creation interview that issueJudgmentBlock rule #1 demands. It is the
-// missing middle gear between "recognize unscoped work" and "call team_task
-// action=create": a small, deterministic interview script so the resulting
-// task title + description are dense enough for an OWNER specialist to
-// execute without re-interviewing the human.
+// issueScopingFrameworkBlock is the R4 intake contract (core-loop step 2+3):
+// infer the structured definition from the request and retrievable context,
+// run ONE batched human_interview only for genuine gaps (including access),
+// set the definition with team_task action=define, THEN staff the task.
 //
-// Adapted from the YC office-hours interview pattern (one decision per
-// question, stop-condition driven, problem-before-solution): we keep the
-// forcing-question discipline but translate it into WUPHF's voice (Slack-
-// style office, agents as teammates, CEO as leader) and into our concrete
-// artifacts (task title + details field, human_interview tool, AVAILABLE
-// AGENTS slugs). Don't merge into issueJudgmentBlock — that block is the
-// WHEN-policy and is already at its size budget; this block is the
-// HOW-script for the interview phase only, and is emitted right after so
-// the LLM reads "scope when X" then "here is how to scope".
-//
-// core-loop R2 trimmed the REQUIRED SPEC SHAPE / rich-spec forcing out of
-// this block: a task carries a title + a short plain description, not a
-// spec document. The interview discipline (understand goal, deliverable,
-// done-signal with human help) stays — it is core-loop step 2 and will be
-// superseded by the R4 structured intake.
+// It keeps the office-hours forcing-question discipline (goal/why-now,
+// deliverable + exact format, machine-checkable success criteria, narrowest
+// first slice, access needed) but the output is structured fields on the
+// task — not a spec document (R2 removed that ceremony) and not a chain of
+// one-question-per-field interviews. Emitted right after issueJudgmentBlock
+// so the LLM reads "scope when X" then "here is how to define".
 //
 // Keep this block dense — every token is paid on every turn.
 func issueScopingFrameworkBlock() string {
 	return "== ISSUE SCOPING FRAMEWORK (every agent) ==\n" +
-		"When ISSUE_JUDGMENT rule #1 fires (unscoped work, scope unclear), this is the interview you run BEFORE calling team_task action=create. Goal: understand the work well enough that the owner can execute without re-interviewing the human. The interview itself is cheap; a wrong-shaped task is expensive.\n" +
-		"\n" +
-		"VOICE: You are a senior teammate scoping work, not a form. Short, direct, one decision per question. No multi-part questions, no menus of five options, no preamble. Ask, listen, narrow.\n" +
-		"\n" +
-		"INTERVIEW SCRIPT (use human_interview, one question per call, in this order):\n" +
-		"Q1 OUTCOME: What does the human actually want to be different in the world when this is done? Restate their request in one sentence and ask them to confirm or correct it. Skip Q1 only when their original message already names the outcome unambiguously.\n" +
-		"Q2 DONE LOOKS LIKE: What concrete artifact, message, change, or signal counts as \"done\"? Force one observable thing (an email sent, a doc written, a number moved, a decision recorded). If they answer vaguely (\"some research\"), ask again with a sharper frame (\"What would you read at the end and say `yes, that answered it`?\").\n" +
-		"Q3 CONSTRAINTS: What must this respect that you would not guess? Audience, tone, deadline, budget, accounts to use or avoid, must-not-touch systems. Ask only if the work plausibly has any. Skip cleanly when truly none apply.\n" +
-		"Q4 OWNER PREFERENCE: Any specialist they want on it, or a channel it should live in? Skip if obvious from the AVAILABLE AGENTS block and the work's domain.\n" +
-		"Q5 ONE OPEN BLOCKER: Is there any single missing input (a credential, a file, a name, a link) without which the owner literally cannot start? Ask only if you can identify a specific gap; do NOT ask \"anything else?\".\n" +
-		"\n" +
-		"STOP CONDITIONS (any one ends the interview; create the task immediately):\n" +
-		"- You can write a one-sentence title, a one-sentence \"done\" line, and pick an owner slug with no further guess.\n" +
-		"- The human has answered three questions and starts giving short or impatient replies — additional questions cost trust.\n" +
-		"- The work is small enough that further scoping would take longer than the work itself.\n" +
-		"You may NOT keep interviewing past these. Mis-scoped task cost is large; over-interview cost is also large. Pick.\n" +
-		"\n" +
-		"THEN CREATE THE TASK: a one-sentence title restating the outcome, plus a short plain `details` description (what's different when done, the done-signal, any constraints the human named). Title + description are the whole brief — do NOT write a spec document, implementation steps, nice-to-haves, or alternatives considered. Keep details under ~100 words.\n" +
-		"\n" +
-		"CARVE-OUTS:\n" +
-		"- The human's original message already supplies an Outcome + Done line: skip Q1+Q2, ask only Q3-Q5 if they apply, and create the task.\n" +
-		"- The trivial-chat case (no tool call beyond team_broadcast/human_message): do not interview, do not create a task, just answer.\n" +
-		"- You are a specialist running this flow in your domain (ISSUE_JUDGMENT rule #6): same script, then drop the one-line @ceo note after creating the task.\n\n"
+		"When a work-shaped request arrives, DEFINE the task before anyone executes. The definition is the contract the owner works against — structured fields on the task, not a spec document.\n" +
+		"1. INFER FIRST. From the request and the context you can retrieve (thread, wiki, notebooks, learnings), draft: GOAL (what is different in the world when this is done, and why now), DELIVERABLES (each with its exact format — \"a brief\" is not a deliverable; \"a one-page markdown brief in the wiki\" is), SUCCESS CRITERIA (observable; prefer machine-checkable), the narrowest first slice that produces one of those deliverables, and ACCESS NEEDED (accounts, credentials, files, connected systems).\n" +
+		"2. INTERVIEW ONLY FOR GENUINE GAPS. If any field above would be a guess you cannot responsibly make, call human_interview ONCE with the gaps batched into one question set — never one interview per field, never re-ask what the request or retrievable context already answers. Include any tool/context access you need so the human can grant it up front. If nothing is a genuine gap, skip the interview entirely.\n" +
+		"3. CREATE, THEN DEFINE, THEN STAFF. Create the Issue per RULE ZERO (owner set at create as usual), then IMMEDIATELY call team_task action=define on the returned id with goal / deliverables / success_criteria / access_needed — before any subtasks, kickoff broadcasts, or work. When a success criterion is machine-checkable and the task has no verification yet, pass verification_kind/spec/required in the SAME define call — the broker enforces checks, it does not parse criteria text into commands.\n" +
+		"4. THEN THE TEAM. Create subtasks and kick off per the existing flow. Keep the task `details` a short plain description (under ~100 words); the definition fields carry the contract.\n" +
+		"Definition is CEO/human-scoped: specialists propose changes via [SUGGESTION] comments instead of calling define.\n" +
+		"Carve-out: pure chat (no tool call beyond team_broadcast/human_message) needs no task and no definition — just answer.\n\n"
 }
 
 // issueJudgmentBlock is the shared "when do you create / comment on / modify
@@ -903,13 +876,13 @@ func issueScopingFrameworkBlock() string {
 func issueJudgmentBlock() string {
 	return "== ISSUE JUDGMENT (every agent) ==\n" +
 		"Issues (team_task records) are this office's durable unit of work. Every agent — not just the CEO — owns the judgment of when to scope a new Issue, comment on an open one, or modify scope. Apply these rules whenever a human posts in a channel you are in, regardless of role:\n" +
-		"1. Recognize unscoped work. If the human's message is a real work request but the outcome, scope, or owner is not clear yet, do NOT decompose into tasks yet. Call human_interview 1-3 times to pin down: (a) the concrete outcome they want, (b) what \"done\" looks like / acceptance criteria, (c) any owner or channel preference. One decision per question. Stop interviewing as soon as scope is clear.\n" +
+		"1. Recognize unscoped work. If the human's message is a real work request but the outcome, scope, or owner is not clear yet, do NOT decompose into tasks yet. Call human_interview ONCE, batching the genuine gaps into one question set: (a) the concrete outcome they want, (b) what \"done\" looks like / success criteria, (c) any access or owner/channel preference. Ask only what the request and retrievable context do not already answer.\n" +
 		"2. Create the Issue BEFORE any other action — when you know the scope. Once scope is clear, your next tool call SHOULD be team_task action=create (or team_plan for a multi-lane graph). Title should restate the outcome the human actually asked for. Set task_type and execution_mode deliberately. Set `owner` to a slug from the AVAILABLE AGENTS block above — prefer an existing specialist whose expertise matches; only call team_member action=create FIRST if no existing agent fits. The Issue is the durable scoping artifact the human sees in their inbox; everything you do attaches to it. (Safety net: if you skip this and call team_action_execute anyway, the broker auto-resolves to the newest open Issue in this channel or auto-creates a draft Issue from the action context. Auto-resolve is a recovery path, not the preferred path — agent-authored Issues have better titles, scope, and acceptance criteria than broker-derived ones.)\n" +
 		"3. Pass issue_id on every team_action_execute call. When you call team_action_execute, pass the parent Issue's id as `issue_id`. The broker links the resulting approval and outcome back to that Issue automatically, so the operator can see what each approval did. Omitting issue_id triggers the auto-resolve safety net — you lose precision over which Issue gets the audit trail.\n" +
 		"4. Dedupe before creating. Before any team_task action=create or team_plan call, scan the Active tasks in the packet for an open Issue that already matches the human's request. If one matches, prefer team_task action=comment on that Issue (or action=request_changes / action=block / re-open when scope genuinely changes) instead of creating a duplicate Issue. Naming the same work twice is a failure.\n" +
 		"5. Comment on the Issue, not the channel, when the work is owned. When the human asks a question, adds context, or pushes back on an Issue that already exists, post the answer via team_task action=comment on that Issue rather than a free-form team_broadcast. The Issue thread is the single audit trail; channel chatter about an owned Issue scatters that trail.\n" +
 		"6. Specialists run the same flow inside their domain. If you are a specialist and a human posts a request that clearly sits in your domain (your expertise, your owned channel), you may run interview → create Issue → execute yourself rather than waiting for @ceo to route it. After you create the Issue this way, drop a one-line note in the channel tagging @ceo so the coordination view stays accurate. For requests outside your domain or that span multiple specialists, route to @ceo instead.\n" +
-		"7. Do NOT skip the interview because you can guess. A guessed scope produces an Issue the human did not ask for, which they then have to correct or kill. Interview cost is small; mis-scoped Issue cost is large.\n" +
+		"7. Inference is not guessing. Drafting the definition from the request plus retrievable context (thread, wiki, notebooks, learnings) is the expected path — interview ONLY the genuine gaps you cannot responsibly infer. A guessed scope is a failure; so is interviewing for answers already in front of you.\n" +
 		"8. The trivial-question carve-out is narrow. Skip Issue creation ONLY when the human's message is genuinely conversational — a yes/no, a quick factual ask, an opinion request, or a one-reply clarification that needs no external action and produces no artifact. Anything that requires reading from or writing to an external system (email, calendar, files, CRM, social, code repo) is NOT trivial and MUST have an Issue first, even if the human phrased it casually. The test: does this require any tool call beyond team_broadcast/human_message? If yes, it needs an Issue. If no (pure chat), answer directly.\n\n"
 }
 

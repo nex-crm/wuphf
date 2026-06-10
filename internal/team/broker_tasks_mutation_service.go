@@ -243,7 +243,9 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 	// directly via applyLifecycleStateLocked; the reconciler must not
 	// overwrite their authoritative value with a status-derived guess.
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "request_changes", "submit_for_review", "comment", "reject", "archive":
+	case "request_changes", "submit_for_review", "comment", "reject", "archive", "define":
+		// define is a metadata-only mutation (R4 intake contract); it must
+		// not nudge reviewState off whatever the lifecycle layer set.
 		return
 	}
 	if !taskNeedsStructuredReview(task) {
@@ -717,6 +719,38 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// before anyone decides to approve / request changes /
 			// reject. The actual append happens below via the
 			// appendDetails branch.
+			appendDetails = true
+		case "define":
+			// R4 intake contract: the CEO (or human) sets/updates the
+			// structured Definition — goal, deliverables (+format),
+			// success criteria, access needed — BEFORE the task is
+			// staffed. Auth: define is not owner- or reviewer-allowed,
+			// so checkTaskActionAuthLocked above already restricted it
+			// to CEO + human (same class as the scope-shaping actions).
+			// No status change: this is metadata the execution packet
+			// renders as the contract the owner works against.
+			def, derr := normalizeTaskDefinition(body.Definition, now)
+			if derr != nil {
+				return TaskResponse{}, taskMutationError(TaskMutationInvalid, derr.Error(), nil)
+			}
+			// Validate the optional verification BEFORE mutating the
+			// task so an invalid spec cannot leave a half-applied define.
+			var defVerification *TaskVerification
+			if strings.TrimSpace(body.VerificationKind) != "" {
+				v, verr := normalizeTaskVerification(body.VerificationKind, body.VerificationSpec, body.VerificationRequired)
+				if verr != nil {
+					return TaskResponse{}, taskMutationError(TaskMutationInvalid, verr.Error(), nil)
+				}
+				defVerification = v
+			}
+			task.Definition = def
+			// Machine-checkable success criteria arrive WITH their check
+			// in the same call (the broker never parses criteria text
+			// into commands). Only set when no check exists yet so a
+			// re-define cannot silently replace an established gate.
+			if defVerification != nil && task.Verification == nil {
+				task.Verification = defVerification
+			}
 			appendDetails = true
 		case "reject":
 			// Terminal "this work cannot land" outcome. Distinct from

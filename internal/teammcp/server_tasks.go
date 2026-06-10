@@ -110,14 +110,42 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 	if action == "create" && len(args.DependsOn) > 0 {
 		payload["depends_on"] = args.DependsOn
 	}
-	if action == "create" {
-		if parentID := strings.TrimSpace(args.ParentIssueID); parentID != "" {
-			payload["parent_issue_id"] = parentID
+	if action == "define" {
+		// R4 intake contract: forward the structured definition under the
+		// single "definition" wire key. The broker validates (goal required,
+		// success_criteria entries non-empty) and stamps defined_at.
+		definition := map[string]any{"goal": strings.TrimSpace(args.Goal)}
+		if len(args.Deliverables) > 0 {
+			deliverables := make([]map[string]string, 0, len(args.Deliverables))
+			for _, d := range args.Deliverables {
+				deliverables = append(deliverables, map[string]string{
+					"name":   strings.TrimSpace(d.Name),
+					"format": strings.TrimSpace(d.Format),
+				})
+			}
+			definition["deliverables"] = deliverables
 		}
+		if len(args.SuccessCriteria) > 0 {
+			definition["success_criteria"] = args.SuccessCriteria
+		}
+		if len(args.AccessNeeded) > 0 {
+			definition["access_needed"] = args.AccessNeeded
+		}
+		payload["definition"] = definition
+	}
+	if action == "create" || action == "define" {
+		// Machine-checkable definition of done. On create it scopes the
+		// task; on define it rides alongside a machine-checkable success
+		// criterion (the broker only applies it when no check is set yet).
 		if vk := strings.TrimSpace(args.VerificationKind); vk != "" {
 			payload["verification_kind"] = vk
 			payload["verification_spec"] = strings.TrimSpace(args.VerificationSpec)
 			payload["verification_required"] = args.VerificationRequired
+		}
+	}
+	if action == "create" {
+		if parentID := strings.TrimSpace(args.ParentIssueID); parentID != "" {
+			payload["parent_issue_id"] = parentID
 		}
 		if effort := strings.TrimSpace(args.Effort); effort != "" {
 			payload["effort"] = effort

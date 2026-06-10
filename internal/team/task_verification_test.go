@@ -153,7 +153,7 @@ func TestVerificationFailureRendersInExecutionPacket(t *testing.T) {
 
 	l := launcherForBrokerFixture(b)
 	packet := l.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *b.TaskByID(id), "Back to you.")
-	if !strings.Contains(packet, "Definition of done") {
+	if !strings.Contains(packet, "Machine check") {
 		t.Fatalf("packet must carry the verification spec; got:\n%s", packet)
 	}
 	if !strings.Contains(packet, "LAST VERIFICATION FAILED") || !strings.Contains(packet, "missing-export-file") {

@@ -17,6 +17,8 @@ package team
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -154,6 +156,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		run  func(*officeEvalFixture, *OfficeEvalReport) error
 	}{
 		{"lifecycle-basic", evalJobLifecycleBasic},
+		{"intake-definition", evalJobIntakeDefinition},
 		{"spec-fidelity", evalJobSpecFidelity},
 		{"thread-context", evalJobThreadContext},
 		{"knowledge-injection", evalJobKnowledgeInjection},
@@ -241,6 +244,99 @@ func evalJobLifecycleBasic(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	r.add(job, "completion was machine-verified before done", completeErr == nil &&
 		verified != nil && verified.VerificationResult != nil && verified.VerificationResult.Pass,
 		fmt.Sprintf("completeErr=%v result=%+v", completeErr, verified.VerificationResult), "")
+	return nil
+}
+
+// evalJobIntakeDefinition: the R4 intake contract (core-loop step 2). The CEO
+// defines a created task via team_task action=define; the definition must
+// persist, round-trip the teamTask wire shape, and lead the owner's execution
+// packet. A non-CEO specialist must NOT be able to define — same auth class
+// as the other scope-shaping actions.
+func evalJobIntakeDefinition(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "intake-definition"
+	created, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Launch the partner newsletter",
+		Details: "Get the first partner newsletter out the door.", Owner: "eng", CreatedBy: "ceo",
+	})
+	if err != nil {
+		return err
+	}
+	def := &TaskDefinition{
+		Goal: "Ship the first partner newsletter to the approved partner list this week",
+		Deliverables: []TaskDeliverable{
+			{Name: "newsletter draft", Format: "markdown in the wiki"},
+			{Name: "send report", Format: "CSV"},
+		},
+		SuccessCriteria: []string{
+			"Draft approved by the human before sending",
+			"newsletter.md exists in the task worktree",
+		},
+		AccessNeeded: []string{"mailing-list account"},
+	}
+	if _, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "define", ID: created.Task.ID, Channel: "general", CreatedBy: "ceo",
+		Definition:       def,
+		VerificationKind: "artifact", VerificationSpec: "newsletter.md", VerificationRequired: true,
+	}); err != nil {
+		r.add(job, "ceo can define the task", false, err.Error(), "")
+		return nil
+	}
+	r.add(job, "ceo can define the task", true, "", "")
+
+	stored := fx.broker.TaskByID(created.Task.ID)
+	persisted := stored != nil && stored.Definition != nil &&
+		stored.Definition.Goal == def.Goal &&
+		len(stored.Definition.Deliverables) == 2 &&
+		len(stored.Definition.SuccessCriteria) == 2 &&
+		len(stored.Definition.AccessNeeded) == 1 &&
+		strings.TrimSpace(stored.Definition.DefinedAt) != "" &&
+		stored.Verification != nil && stored.Verification.Spec == "newsletter.md"
+	r.add(job, "definition persists with verification alongside", persisted,
+		fmt.Sprintf("definition=%+v verification=%+v", stored.Definition, stored.Verification), "")
+
+	// (a) wire round-trip: marshal the task through the teamTaskWire shadow
+	// and back; the definition must survive byte-for-byte under the single
+	// snake_case "definition" key.
+	blob, err := json.Marshal(stored)
+	if err != nil {
+		return err
+	}
+	var roundTripped teamTask
+	if err := json.Unmarshal(blob, &roundTripped); err != nil {
+		return err
+	}
+	rt := roundTripped.Definition
+	roundTrips := strings.Contains(string(blob), `"definition"`) &&
+		strings.Contains(string(blob), `"success_criteria"`) &&
+		strings.Contains(string(blob), `"access_needed"`) &&
+		rt != nil && rt.Goal == def.Goal &&
+		len(rt.Deliverables) == 2 && rt.Deliverables[0].Format == "markdown in the wiki" &&
+		len(rt.SuccessCriteria) == 2 && rt.DefinedAt == stored.Definition.DefinedAt
+	r.add(job, "definition round-trips the teamTask wire", roundTrips,
+		fmt.Sprintf("roundTripped=%+v", rt), "")
+
+	// (b) the execution packet leads with the contract: goal, deliverable
+	// format, success criteria, and access all reach the owner.
+	packet := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *stored, "Task assigned to you.")
+	carried := strings.Contains(packet, def.Goal) &&
+		strings.Contains(packet, "markdown in the wiki") &&
+		strings.Contains(packet, "Draft approved by the human before sending") &&
+		strings.Contains(packet, "mailing-list account")
+	r.add(job, "execution packet carries goal + deliverable format + success criteria", carried,
+		fmt.Sprintf("packet=%d chars", len(packet)), "")
+
+	// (c) define is CEO/human-scoped: a registered specialist (even the task
+	// owner) is rejected with a forbidden steer.
+	_, defineErr := fx.broker.MutateTask(TaskPostRequest{
+		Action: "define", ID: created.Task.ID, Channel: "general", CreatedBy: "eng",
+		Definition: &TaskDefinition{Goal: "specialist rewrite of the contract"},
+	})
+	var mutationErr *TaskMutationError
+	rejected := errors.As(defineErr, &mutationErr) && mutationErr.Kind == TaskMutationForbidden
+	after := fx.broker.TaskByID(created.Task.ID)
+	r.add(job, "define by a non-CEO specialist is rejected", rejected &&
+		after != nil && after.Definition != nil && after.Definition.Goal == def.Goal,
+		fmt.Sprintf("err=%v", defineErr), "")
 	return nil
 }
 

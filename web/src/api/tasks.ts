@@ -107,6 +107,31 @@ export interface TaskVerificationResult {
   checked_at: string;
 }
 
+/**
+ * One concrete artifact a task must produce, with the exact format the
+ * human expects. Mirrors the Go `TaskDeliverable` wire shape (R4 intake).
+ */
+export interface TaskDeliverable {
+  name: string;
+  /** Exact format (e.g. "markdown table in the wiki", "CSV", "PR"). */
+  format?: string;
+}
+
+/**
+ * Structured task definition set at intake (core-loop R4, broker
+ * task_definition.go). The contract the owner executes against: goal,
+ * deliverables (+format), success criteria, and the tool/context access
+ * the work needs. Mirrors the Go `TaskDefinition` wire shape.
+ */
+export interface TaskDefinition {
+  goal: string;
+  deliverables?: TaskDeliverable[];
+  success_criteria?: string[];
+  access_needed?: string[];
+  /** RFC3339 timestamp stamped by the broker when the definition was set. */
+  defined_at?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -162,6 +187,8 @@ export interface Task {
   verification?: TaskVerification;
   /** Outcome of the most recent verification run. Absent until first run. */
   verification_result?: TaskVerificationResult;
+  /** Structured intake contract (R4). Absent until the CEO/human defines. */
+  definition?: TaskDefinition;
 }
 
 /**
