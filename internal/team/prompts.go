@@ -64,6 +64,18 @@ func (l *Launcher) newPromptBuilder() *promptBuilder {
 			}
 			return l.broker.ListActiveIssueSummariesForPrompt()
 		},
+		agentInstruction: func(slug, name string) string {
+			if l == nil || l.broker == nil {
+				return ""
+			}
+			return l.broker.ReadAgentInstruction(slug, name)
+		},
+		officeUser: func() string {
+			if l == nil || l.broker == nil {
+				return ""
+			}
+			return l.broker.ReadOfficeUserFile()
+		},
 		nameFor: l.targeter().NameFor,
 		learnings: func(slug string) []LearningSearchResult {
 			if l == nil || l.broker == nil || memoryBackend != config.MemoryBackendMarkdown {
