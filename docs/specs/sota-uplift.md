@@ -9,6 +9,8 @@
 
 Shipped: U0.1 eval harness (`internal/team/office_eval.go` + `cmd/office-eval`, runs in CI via TestOfficeEvals; known-gap markers auto-demand promotion to regression guards) · U0.2 packet/prompt economics flip · U1.1 verification-gated done (`task_verification.go`; gate runs outside b.mu; failures re-enter the owner's next packet) · U1.2 web evidence surfaces (VerificationBadge + proof panel + DoD rail) · U2.1/U2.2 task-scoped knowledge injection (`context_assembler.go`, IDF token-overlap, dense-rerank seam behind `relevantLearnings`) · U2.3/U3.3 per-task turn journal (`task_ledger.go`, broker-observed facts, packet-rendered) · U3.2 dependency edges carry upstream outcomes · U4.1 auto-distillation of verified outcomes (`task_distill.go`, `AppendVerified` trust path).
 
+Review follow-ups (staff review 2026-06-10, MEDIUM/LOW deferred with reason): ActionsSince is O(N) under b.mu per turn-ledger write — add ActionsSinceForTask or per-task index when the action log grows; upstreamOutcomesContext injects upstream Details verbatim — run packet-bound Details through the secret redactor as defense-in-depth.
+
 Next unstarted: U3.1 rest (objective/inputs/expected_artifact on team_task — reconcile with PR #1057's surface after it merges) · U3.4 (covered by open PR #1057) · U3.5 prompt-rule demolition · U4.2 one knowledge view · U4.3 skills-from-verified-runs · U4.4 human-facing knowledge-used UI (agent-side citation already in packets) · U5.1 (covered by open PR #1060) · U5.2/U5.3. NOTE: open PRs #1052/#1053/#1057/#1060 overlap prompt_builder/broker/queue — merge main promptly after any of them lands.
 
 ---
