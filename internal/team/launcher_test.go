@@ -1251,6 +1251,110 @@ func TestResponseInstructionForTargetLiveExternalTaskPromptsCapabilityCreation(t
 	}
 }
 
+// TestResponseInstructionForTargetPreExecutionFoldsChatIntoSpec covers the
+// spec-from-chat behavior: when a human messages in the channel of a task that
+// is still being scoped (drafting/planning) and the recipient owns it, the
+// owner is told to fold the message into the task spec via team_task
+// action=update and to hold execution until the human approves — instead of
+// starting work.
+func TestResponseInstructionForTargetPreExecutionFoldsChatIntoSpec(t *testing.T) {
+	b := &Broker{
+		tasks: []teamTask{{
+			ID:             "task-spec-1",
+			Channel:        "task-spec-1",
+			Title:          "Pricing page revamp",
+			Details:        "Initial scope.",
+			Owner:          "builder",
+			status:         "drafting",
+			LifecycleState: LifecycleStateDrafting,
+		}},
+	}
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "builder", Name: "Builder"},
+			},
+		},
+	}
+	got := l.responseInstructionForTarget(
+		channelMessage{ID: "m1", From: "you", Channel: "task-spec-1"},
+		"builder",
+	)
+	if !strings.Contains(got, "team_task action=update") {
+		t.Fatalf("expected a spec-update instruction for the drafting task owner: %q", got)
+	}
+	if !strings.Contains(got, "still being scoped") {
+		t.Fatalf("expected pre-execution framing: %q", got)
+	}
+	if !strings.Contains(got, "Do NOT start building") {
+		t.Fatalf("expected hold-execution-until-approval guidance: %q", got)
+	}
+}
+
+// TestResponseInstructionForTargetFrozenSpecDoesNotFoldChat is the inverse: an
+// already-executing (Running → spec frozen) task does NOT get the spec-fold
+// instruction, so post-approval chat is treated as execution discussion. This
+// also guards against the empty-LifecycleState trap (a legacy in_progress task
+// must not be mistaken for drafting — see TestResponseInstructionForTarget...
+// CapabilityCreation, which exercises the empty-state path).
+func TestResponseInstructionForTargetFrozenSpecDoesNotFoldChat(t *testing.T) {
+	b := &Broker{
+		tasks: []teamTask{{
+			ID:             "task-run-1",
+			Channel:        "task-run-1",
+			Title:          "Ship the importer",
+			Details:        "Approved scope.",
+			Owner:          "builder",
+			status:         "in_progress",
+			LifecycleState: LifecycleStateRunning,
+		}},
+	}
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "builder", Name: "Builder"},
+			},
+		},
+	}
+	got := l.responseInstructionForTarget(
+		channelMessage{ID: "m1", From: "you", Channel: "task-run-1"},
+		"builder",
+	)
+	if strings.Contains(got, "team_task action=update") {
+		t.Fatalf("a running (frozen-spec) task must NOT get the spec-fold instruction: %q", got)
+	}
+}
+
+// TestTaskOwnerForMessageResolvesByChannel covers channel-first routing: a short
+// human chat in a task's own channel wakes that task's owner even when the
+// content would not clear the similarity threshold — while #general (owned by
+// the terminal Backup & Migration task) keeps routing normally.
+func TestTaskOwnerForMessageResolvesByChannel(t *testing.T) {
+	b := &Broker{
+		tasks: []teamTask{
+			{ID: "task-a", Channel: "task-a", Title: "Onboarding revamp", Owner: "builder", status: "drafting"},
+			{ID: "task-bkp", Channel: "general", Title: "Backup & Migration", Owner: "system", status: "archived"},
+		},
+	}
+	l := &Launcher{broker: b, pack: &agent.PackDefinition{LeadSlug: "ceo"}}
+
+	// Short, content-mismatched chat in the task's own channel → its owner.
+	if owner := l.taskOwnerForMessage(channelMessage{ID: "m1", From: "you", Channel: "task-a", Content: "actually, target SMBs"}); owner != "builder" {
+		t.Fatalf("expected channel-first resolution to builder, got %q", owner)
+	}
+	// #general is owned only by the archived Backup & Migration task → no
+	// channel-first binding, so general chat is not bound to that owner.
+	if owner := l.taskOwnerForMessage(channelMessage{ID: "m2", From: "you", Channel: "general", Content: "hello team"}); owner == "system" {
+		t.Fatalf("general chat must not bind to the archived Backup & Migration owner, got %q", owner)
+	}
+}
+
 func TestTaskNotificationContentIncludesCapabilityGapRecovery(t *testing.T) {
 	l := &Launcher{}
 	got := l.taskNotificationContent(officeActionLog{

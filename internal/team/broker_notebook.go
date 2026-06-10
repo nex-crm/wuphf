@@ -93,6 +93,10 @@ func (b *Broker) ensureNotebookDirsForRoster() {
 	if sha != "" {
 		log.Printf("notebook: initialized roster shelves %s", sha)
 	}
+	// Seed each agent's instruction file set (SOUL/IDENTITY/OPERATIONS/TOOLS +
+	// office USER) on the same hook. Idempotent and deterministic — never
+	// overwrites existing files, so this is safe to run on every roster-ensure.
+	b.backfillAgentFilesForRoster()
 }
 
 // handleNotebookWrite is the broker HTTP endpoint the MCP subprocess posts to

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { router } from "../../lib/router";
 import type {
   DecisionPacket,
   FeedbackItem,
@@ -24,7 +25,6 @@ interface DecisionPacketViewProps {
   onRequestChanges: () => void;
   onDefer: () => void;
   onBlock: () => void;
-  onComment?: (body: string) => void | Promise<void>;
   onReject?: (body: string) => void | Promise<void>;
   onOpenInWorktree: () => void;
 }
@@ -53,7 +53,6 @@ export function DecisionPacketView({
   onRequestChanges,
   onDefer,
   onBlock,
-  onComment,
   onReject,
   onOpenInWorktree,
 }: DecisionPacketViewProps) {
@@ -225,7 +224,10 @@ export function DecisionPacketView({
           </div>
         </section>
 
-        <DiscussionSection feedback={packet.spec.feedback ?? []} />
+        <DiscussionSection
+          feedback={packet.spec.feedback ?? []}
+          channel={packet.channel}
+        />
       </main>
       <PacketActionSidebar
         packet={packet}
@@ -234,7 +236,6 @@ export function DecisionPacketView({
         onRequestChanges={onRequestChanges}
         onDefer={onDefer}
         onBlock={onBlock}
-        onComment={onComment}
         onReject={onReject}
         onOpenInWorktree={onOpenInWorktree}
       />
@@ -413,9 +414,12 @@ function formatHoursAgo(iso: string): string {
 
 interface DiscussionSectionProps {
   feedback: FeedbackItem[];
+  /** The task's own channel slug, used to link to the conversation. */
+  channel?: string;
 }
 
-function DiscussionSection({ feedback }: DiscussionSectionProps) {
+function DiscussionSection({ feedback, channel }: DiscussionSectionProps) {
+  const channelSlug = channel?.trim();
   return (
     <section
       className="packet-section packet-discussion"
@@ -430,8 +434,28 @@ function DiscussionSection({ feedback }: DiscussionSectionProps) {
       </h3>
       {feedback.length === 0 ? (
         <p className="packet-discussion-empty">
-          No comments yet. Leave one in the sidebar, request changes with inline
-          feedback, or wait for the reviewer to post.
+          No review notes yet. Approvals, requested changes, and reviewer notes
+          appear here.{" "}
+          {channelSlug ? (
+            <>
+              Chat about this task in{" "}
+              <button
+                type="button"
+                className="packet-discussion-channel-link"
+                onClick={() =>
+                  void router.navigate({
+                    to: "/channels/$channelSlug",
+                    params: { channelSlug },
+                  })
+                }
+              >
+                #{channelSlug}
+              </button>
+              .
+            </>
+          ) : (
+            "Chat about this task in its channel."
+          )}
         </p>
       ) : (
         <ol className="packet-discussion-thread">

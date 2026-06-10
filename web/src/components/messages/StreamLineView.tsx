@@ -255,6 +255,28 @@ function HeadlessEventView({
     );
   }
 
+  if (eventType === "plan") {
+    // A read-only planning turn finished and produced a plan (Claude's
+    // ExitPlanMode payload or a read-only final message). Surface it as a
+    // distinct, accented card so the human can review it and "Approve & Start"
+    // from the task surface.
+    if (!summary) return null;
+    return (
+      <div className="stream-card stream-card-plan">
+        <div className="stream-card-header">
+          <span className="stream-card-phase stream-phase-plan">
+            plan ready
+          </span>
+          {provider && <span className="stream-card-agent">{provider}</span>}
+        </div>
+        <div className="stream-card-plan-body">{summary}</div>
+        <div className="stream-card-plan-hint">
+          Review and Approve &amp; Start to begin execution.
+        </div>
+      </div>
+    );
+  }
+
   // Unknown HeadlessEvent type — fall back to the generic card so future
   // variants render something useful before they earn a dedicated branch.
   return <GenericEventCard parsed={parsed} compact={compact} />;

@@ -91,7 +91,12 @@ export async function writeHumanArticle(params: {
   }
 }
 
-function tryParseConflict(text: string): WriteHumanConflict | null {
+/**
+ * Parse a 409 conflict body (raw error text from the shared post() helper) into
+ * a typed WriteHumanConflict, or null when the text is not a conflict envelope.
+ * Shared by the wiki and agent-file write clients (same 409 shape).
+ */
+export function tryParseConflict(text: string): WriteHumanConflict | null {
   try {
     const data = JSON.parse(text) as Partial<WriteHumanConflict> & {
       error?: string;

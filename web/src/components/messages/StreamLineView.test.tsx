@@ -131,6 +131,32 @@ describe("<StreamLineView>", () => {
     expect(screen.getByText(/reply ready/)).toBeInTheDocument();
   });
 
+  it("renders a HeadlessEvent plan envelope as a plan-ready card", () => {
+    // A read-only planning turn (Claude --permission-mode plan / Codex
+    // -s read-only) harvests the plan and emits a `plan` event; the view must
+    // surface it as an actionable "plan ready" card, not the generic fallback.
+    const { container } = render(
+      <StreamLineView
+        line={{
+          id: 1,
+          data: "",
+          parsed: {
+            kind: "headless_event",
+            type: "plan",
+            provider: "claude",
+            agent: "ceo",
+            text: "Goal: ship webhook\n1. read handler\n2. add route",
+            status: "idle",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("plan ready")).toBeInTheDocument();
+    expect(screen.getByText(/Goal: ship webhook/)).toBeInTheDocument();
+    expect(screen.getByText(/Approve & Start/)).toBeInTheDocument();
+    expect(container.querySelector(".stream-card-plan")).not.toBeNull();
+  });
+
   it("renders a HeadlessEvent error envelope with the failure detail", () => {
     render(
       <StreamLineView

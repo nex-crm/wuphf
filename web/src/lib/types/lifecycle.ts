@@ -330,6 +330,13 @@ export interface InboxPayload {
  */
 export interface DecisionPacket {
   taskId: string;
+  /**
+   * Slug of the task's own channel (channel-per-task model). Not part of the
+   * persisted packet — the GET /tasks/{id} response carries it on the `task`
+   * snapshot, and the API layer lifts it onto the packet so the discussion
+   * empty state can link to the conversation.
+   */
+  channel?: string;
   title: string;
   lifecycleState: LifecycleState;
   ownerSlug: string;

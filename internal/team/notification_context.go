@@ -380,6 +380,28 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 
 	result := "Active tasks:\n" + strings.Join(lines, "\n")
 	if slug == lead {
+		// Concurrency awareness: the lead runs one dispatch lane per task, so the
+		// tasks above may be advancing in parallel right now (its own lanes and
+		// specialists'). Push non-dependent tasks forward together rather than
+		// serializing them, and reuse a live task before creating an overlapping one.
+		// The phrasing avoids implying the printed list is complete — the list is
+		// truncated to `limit`, so a reusable task may not be shown.
+		result += "\nCoordination: your tasks run on separate lanes and may be progressing in parallel right now. Advance non-dependent tasks together instead of one at a time, and reuse or update an existing task for the same work before creating a new one."
+		// If more eligible (non-done) tasks exist than were shown, the reusable
+		// task the lead should update may have been truncated away. Tell it to
+		// check the full list before creating a new one, so it doesn't duplicate.
+		// Dedup by ID to mirror the `seen` filter the printed list applies, so a
+		// repeated task can't trip a false-positive truncation cue.
+		eligibleIDs := make(map[string]struct{}, len(tasks))
+		for _, task := range tasks {
+			if strings.EqualFold(strings.TrimSpace(task.status), "done") {
+				continue
+			}
+			eligibleIDs[task.ID] = struct{}{}
+		}
+		if len(eligibleIDs) > len(lines) {
+			result += "\nNote: more active tasks exist than shown here — check the full task list before creating a new one."
+		}
 		reviewCount := 0
 		for _, task := range tasks {
 			if strings.EqualFold(strings.TrimSpace(task.status), "done") {
@@ -415,14 +437,44 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 			threadRoot = replyTo
 		}
 	}
-	var domainOwned teamTask
-	bestOwnedScore := 0.0
+	rawMsgCh := strings.TrimSpace(msg.Channel)
+	var (
+		domainOwned    teamTask
+		bestOwnedScore = 0.0
+		channelMatch   teamTask
+		channelMatches int
+	)
 	for _, task := range b.allTasks() {
 		if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			continue
 		}
 		if strings.TrimSpace(task.Owner) != slug {
 			continue
+		}
+		// Channel-per-task: the message's channel directly names the task it
+		// belongs to, so a channel match is the strongest binding — stronger
+		// than a thread or content-similarity match, which can drift for a
+		// short human chat. Guard on the RAW channels being non-empty (an
+		// unset channel normalizes to "general", which would otherwise let a
+		// channel-less task collide with #general) and skip archived tasks so
+		// general office chat in #general — owned by the archived Backup &
+		// Migration task — keeps routing normally. (Done is skipped above.)
+		// Legacy shared channels fall through to the thread/score checks below.
+		//
+		// Accumulate channel matches across ALL owned tasks instead of
+		// early-returning the first one: a single human can own several tasks
+		// that share a legacy channel, and binding to whichever happened to be
+		// scanned first attaches the wrong task. Only trust the channel binding
+		// when it is unambiguous (exactly one owned task in that channel);
+		// otherwise fall through to the thread/score logic below.
+		if rawMsgCh != "" {
+			rawTaskCh := strings.TrimSpace(task.Channel)
+			st := strings.ToLower(strings.TrimSpace(task.status))
+			if rawTaskCh != "" && st != "archived" &&
+				normalizeChannelSlug(rawTaskCh) == normalizeChannelSlug(rawMsgCh) {
+				channelMatches++
+				channelMatch = task
+			}
 		}
 		if task.ThreadID != "" && (task.ThreadID == msg.ID || task.ThreadID == threadRoot) {
 			return task, true
@@ -436,6 +488,9 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 			bestOwnedScore = score
 		}
 	}
+	if channelMatches == 1 {
+		return channelMatch, true
+	}
 	if domainOwned.ID != "" {
 		return domainOwned, true
 	}
@@ -446,6 +501,25 @@ func (b *notificationContextBuilder) RelevantTaskForTarget(msg channelMessage, s
 // appended to a notification. Branches: lead-from-human, lead-from-
 // specialist, DM, tagged, owns-matching-task, default-domain-chime-in.
 func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMessage, slug string) string {
+	// Spec-from-chat: when a human messages in the channel of a task that is
+	// still being scoped and `slug` owns that task, the chat IS the spec
+	// conversation. Tell the owner — CEO or specialist — to fold the message
+	// into the task body via team_task action=update and summarize the change
+	// in chat, and to hold execution until the human approves. Checked before
+	// the lead branch so it wins for a CEO-owned drafting task too.
+	//
+	// Gate on an EXPLICIT pre-execution lifecycle state (not the broader
+	// taskIsPreExecution, which also treats ""/Unknown as pre-execution): a
+	// legacy task carrying status="in_progress" with an empty LifecycleState
+	// is actually executing and must keep its execution instruction.
+	// (specIsFrozen blocks Details writes once approved, so this is also
+	// defended at the data layer.)
+	if isHumanMessageSender(strings.TrimSpace(msg.From)) || strings.TrimSpace(msg.From) == "nex" {
+		if task, ok := b.RelevantTaskForTarget(msg, slug); ok &&
+			strings.TrimSpace(task.Owner) == slug && taskSpecOpenToChat(task.LifecycleState) {
+			return fmt.Sprintf("You are @%s and you own task %s, which is still being scoped (not yet approved). Treat the human's message as input to the spec: revise the task body to reflect it by calling team_task action=update with id=%q and the full updated details, then post a one-line summary of what changed in chat via team_broadcast. Do NOT start building or take external actions until the human approves.", slug, task.ID, task.ID)
+		}
+	}
 	lead := b.targeter.LeadSlug()
 	if slug == lead {
 		from := strings.TrimSpace(msg.From)
@@ -631,6 +705,23 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 	lines = append(lines, fmt.Sprintf("- Mutation channel: use #%s when claiming or completing #%s", channelSlug, task.ID))
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
+	}
+	if slug == b.targeter.LeadSlug() {
+		// The lead (CEO) is the coordinator, not the sole worker. The default
+		// execution framing below pushes solo direct-implementation, which is
+		// right for a specialist in a worktree but wrong for the CEO on a broad
+		// owned task. Give the lead an explicit decompose-and-delegate path so
+		// it breaks large or cross-functional work into owned sub-tasks that
+		// spin off and run concurrently (Phase 2 lanes), instead of doing it
+		// all itself.
+		lines = append(lines,
+			"Lead execution rule: you are the coordinator, not the sole worker. For anything larger than a single owned step, DECOMPOSE this task instead of doing it all yourself:",
+			fmt.Sprintf("- Break the work into concrete sub-tasks with team_task action=create, each carrying parent_issue_id=%s so they nest under this task.", task.ID),
+			"- Give each sub-task an `owner`: REUSE the existing specialist whose expertise best fits (see AVAILABLE AGENTS). Only when no current teammate fits, propose a new specialist with team_member — creating a new agent ALWAYS requires explicit human approval (the tool blocks until the human decides), so prefer reusing the roster.",
+			"- Sub-tasks spin off automatically: once created with an owner they wake that owner and run concurrently on their own lanes. You do not need to tag or chase each one separately.",
+			"- Keep THIS task as the umbrella: track its sub-tasks, aggregate their results here as they land, and complete the parent only after the children are done. Do not mark the parent complete while children are still open.",
+			"- Do the work directly yourself only when it is genuinely a single step in your own domain, or when decomposition would not help.",
+		)
 	}
 	if strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
 		lines = append(lines, "Execution rule: this is a local_worktree build task. Work inside the assigned working_directory and default to direct implementation. Do not spend this turn on another repo audit, architecture memo, or nested office launch unless the packet explicitly asks for that.")

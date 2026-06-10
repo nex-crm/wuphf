@@ -133,6 +133,15 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// Effective Plan-first: honor an explicit per-task choice; otherwise
+		// default from the owner agent's autonomy (PermissionMode "plan" →
+		// plan-first). This is what makes a "plan" agent's delegated work run
+		// the owner through the provider's native plan mode before executing.
+		planFirst := item.PlanFirstEnabled()
+		if item.PlanFirst == nil {
+			planFirst = b.ownerDefaultsToPlanFirstLocked(strings.TrimSpace(item.Assignee))
+		}
+
 		b.counter++
 		taskID := b.allocateIssueIDLocked()
 		titleToID[strings.TrimSpace(item.Title)] = taskID
@@ -163,7 +172,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Effort:        strings.TrimSpace(item.Effort),
 			Provider:      strings.TrimSpace(item.Provider),
 			Model:         strings.TrimSpace(item.Model),
-			PlanFirst:     item.PlanFirstEnabled(),
+			PlanFirst:     planFirst,
 			DependsOn:     resolvedDeps,
 			CreatedAt:     now,
 			UpdatedAt:     now,

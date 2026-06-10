@@ -173,8 +173,43 @@ export async function getDecisionPacket(
  * sees the contract their types promise.
  */
 function normalizeDecisionPacket(p: DecisionPacket): DecisionPacket {
+  // The GET /tasks/{id} response carries the source teamTask snapshot under
+  // `task` (see taskDetailResponse). The packet itself has no channel, and a
+  // DIRECT detail fetch (no inbox list row to backfill from) can also arrive
+  // with empty title/owner, so lift the channel + display fields off the
+  // snapshot. Stay defensive: `task` is not on the DecisionPacket type and may
+  // be absent. The Go teamTask wire keys are `title` and `owner`; accept
+  // `ownerSlug` too in case a snapshot ever carries the packet-side name.
+  const taskSnapshot = (
+    p as {
+      task?: {
+        channel?: unknown;
+        title?: unknown;
+        owner?: unknown;
+        ownerSlug?: unknown;
+      };
+    }
+  ).task;
+  const channel =
+    typeof taskSnapshot?.channel === "string" && taskSnapshot.channel.trim()
+      ? taskSnapshot.channel.trim()
+      : p.channel;
+  const title =
+    typeof taskSnapshot?.title === "string" && taskSnapshot.title.trim()
+      ? taskSnapshot.title.trim()
+      : p.title;
+  const snapshotOwner =
+    typeof taskSnapshot?.ownerSlug === "string" && taskSnapshot.ownerSlug.trim()
+      ? taskSnapshot.ownerSlug.trim()
+      : typeof taskSnapshot?.owner === "string" && taskSnapshot.owner.trim()
+        ? taskSnapshot.owner.trim()
+        : undefined;
+  const ownerSlug = snapshotOwner ?? p.ownerSlug;
   return {
     ...p,
+    channel,
+    title,
+    ownerSlug,
     banners: p.banners ?? [],
     changedFiles: p.changedFiles ?? [],
     reviewerGrades: p.reviewerGrades ?? [],
@@ -243,36 +278,6 @@ export async function postDecision(
   const trimmed = (comment ?? "").trim();
   if (trimmed) body.comment = trimmed;
   return post(`/tasks/${encodeURIComponent(taskId)}/decision`, body);
-}
-
-/**
- * POST a PR-style comment on a task without making a decision. The
- * broker appends the body as a FeedbackItem on the task's Decision
- * Packet so it shows up in the unified Inbox discussion thread for
- * other humans and agents to react to. State does not change.
- *
- * In mock mode this is a no-op resolved promise so the button remains
- * clickable in the screenshot harness without spinning up a broker.
- */
-export async function postTaskComment(
-  taskId: string,
-  _channel: string,
-  body: string,
-): Promise<{ taskId: string; status: string; author: string }> {
-  const trimmed = body.trim();
-  if (!trimmed) {
-    throw new Error("comment body required");
-  }
-  if (USE_MOCKS) {
-    return Promise.resolve({
-      taskId,
-      status: "comment-mock",
-      author: "human",
-    });
-  }
-  return post(`/tasks/${encodeURIComponent(taskId)}/comment`, {
-    body: trimmed,
-  });
 }
 
 /**

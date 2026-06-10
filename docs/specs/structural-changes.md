@@ -54,10 +54,28 @@
   legacy-fixture test booting the real production path + FULL Go (39/39) + web
   (1738) + tsc + golangci-lint(0) + clean broker build. See the Phase 6 checklist
   entry for the 3 ICP upgrade scenarios. Commit: (this session — see git log).
-- **Optional follow-ups (NOT requested, not blocking):** hard plan-only runtime
-  enforcement (read-only/plan permission mode); broader Librarian `team_wiki_write`
-  for reorganizing; remove internal onboarding direct-channel plumbing once a DM-free
-  onboarding path exists; live browser/screenshot pass once Chrome CDP is restored.
+- **PHASE 5b — Native plan-mode enforcement DONE (`feat/provider-native-plan-mode`).**
+  Closes the Phase 5 follow-up "hard plan-only runtime enforcement (read-only/plan
+  permission mode)". A turn whose task is in `LifecycleStatePlanning` now runs in the
+  provider's NATIVE plan mode instead of full bypass, so "do not change the repo" is
+  enforced by the runtime, not just the `planModeDirective` prompt:
+  - `resolveTurnPosture(ctx, slug)` → plan posture iff `turnTaskForCtx` is Planning.
+  - Claude: `--permission-mode plan` (drops `--dangerously-skip-permissions`); the plan
+    arrives via the `ExitPlanMode` tool call, harvested (`extractClaudePlanArtifact`) into
+    a `plan` HeadlessEvent + the channel summary so the human can Approve & Start.
+  - Codex: `-a never -s read-only` (wins over the local_worktree/unsafe bypass); MCP is
+    not blocked so the owner still writes its notebook + posts; the same `plan` card is
+    emitted. opencode/openai-compat have no native sandbox → `planModeDirective` stays
+    their sole enforcement.
+  - Per-agent `PermissionMode` is now first-class: AgentWizard "Autonomy" selector +
+    AgentProfilePanel pill, and `handleTaskPlan` defaults Plan-first from the owner's
+    PermissionMode when `plan_first` is not set explicitly.
+- **Optional follow-ups (NOT requested, not blocking):** broader Librarian
+  `team_wiki_write` for reorganizing; remove internal onboarding direct-channel plumbing
+  once a DM-free onboarding path exists; persist the harvested plan to the owner notebook
+  for Claude plan turns (today it lands in the channel + plan card); editable
+  PermissionMode from the agent profile; live browser/screenshot pass once Chrome CDP is
+  restored.
 - **Branch:** `worktree-structural-changes`. **Prior HEAD:** `b08cbff0` (Phase 5). Base `origin/main` @ `46f06e54`.
 - **PHASE 4 DONE (Librarian = Pam; commits `e9b2f1d3` presence + `91180e7a` authority move).**
   Promoted the wiki "Pam the Archivist" to a first-class built-in agent: **slug `librarian`, name

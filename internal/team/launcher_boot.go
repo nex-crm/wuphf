@@ -155,6 +155,7 @@ func (l *Launcher) Launch() error {
 	// Headless context for per-turn Claude invocations. Used by both TUI and
 	// web modes since agent dispatch is headless by default.
 	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
+	l.resolveHeadlessConcurrencyCaps()
 	l.resumeInFlightWork()
 
 	go func() { defer recoverPanicTo("watchChannelPaneLoop", ""); l.watchChannelPaneLoop(channelCmd) }()
@@ -214,6 +215,7 @@ func (l *Launcher) launchHeadlessCodex() error {
 	}
 
 	l.headless.ctx, l.headless.cancel = context.WithCancel(context.Background())
+	l.resolveHeadlessConcurrencyCaps()
 
 	l.resumeInFlightWork()
 	go l.notifyAgentsLoop()

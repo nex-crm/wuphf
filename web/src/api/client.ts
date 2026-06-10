@@ -483,6 +483,12 @@ export interface OfficeMember {
   task?: string;
   channel?: string;
   provider?: ProviderBinding | string;
+  /**
+   * Agent autonomy. "plan" → the agent's tasks plan-first by default (the owner
+   * runs read-only in the provider's native plan mode and waits for Approve &
+   * Start); "auto" → executes immediately. Serialized as `permission_mode`.
+   */
+  permission_mode?: string;
   /** Broker-provided: serialized as `built_in`. Built-ins cannot be removed. (CEO is guarded by a separate slug check.) */
   built_in?: boolean;
   /** Per-channel disabled state when the list is sourced from `/members?channel=…`. */
@@ -795,25 +801,25 @@ export function deletePolicy(id: string) {
 // Moved to ./scheduler.ts; re-exported here for back-compat with existing
 // imports from "./api/client" or "../api/client".
 export type {
-  SchedulerJob,
+  CreateSchedulerJobBody,
   PatchSchedulerJobBody,
   PatchSchedulerJobResponse,
-  SystemCronSpec,
-  SchedulerRun,
   SchedulerActivity,
+  SchedulerJob,
   SchedulerRevision,
-  CreateSchedulerJobBody,
+  SchedulerRun,
+  SystemCronSpec,
 } from "./scheduler";
 export {
+  createSchedulerJob,
   getScheduler,
-  patchSchedulerJob,
-  getSystemCronSpecs,
-  runSchedulerJob,
-  getSchedulerRuns,
   getSchedulerActivity,
   getSchedulerRevisions,
+  getSchedulerRuns,
+  getSystemCronSpecs,
+  patchSchedulerJob,
   restoreSchedulerRevision,
-  createSchedulerJob,
+  runSchedulerJob,
 } from "./scheduler";
 
 // ── Skills ──
@@ -1093,10 +1099,9 @@ export function editSkillContent(
   name: string,
   content: string,
 ): Promise<EditSkillContentResponse> {
-  return put<EditSkillContentResponse>(
-    `/skills/${encodeURIComponent(name)}`,
-    { content },
-  );
+  return put<EditSkillContentResponse>(`/skills/${encodeURIComponent(name)}`, {
+    content,
+  });
 }
 
 // ── Memory ──

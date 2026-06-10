@@ -36,8 +36,9 @@ func taskRunsInIsolatedWorktree(task *teamTask) bool {
 // l.headless.mu; the broker lookup respects the established headless.mu →
 // broker.mu order (see headlessLeadTurnNeedsImmediateWakeLocked).
 //
-//   - chat turns (no task) and all lead turns → the agent's default lane (""):
-//     conversational coherence for the agent, and the coordinator never forks.
+//   - chat / channel-triage turns (no task) → the agent's default lane (""):
+//     conversational coherence, and the lead's triage never forks. This is the
+//     ONLY lane the lead (CEO) uses for non-task turns.
 //   - worktree tasks → keyed by worktree PATH: distinct worktrees run in
 //     parallel; a shared worktree (a dependent reusing its parent's tree)
 //     collapses to one serialized lane. A worktree task with no path assigned
@@ -45,14 +46,14 @@ func taskRunsInIsolatedWorktree(task *teamTask) bool {
 //   - office / live_external / other → keyed by TASK id: no shared worktree to
 //     collide on (concurrent office turns share cwd exactly as different agents'
 //     turns already do; the broker mediates shared state), so each task runs in
-//     its own lane and non-dependent tasks of one agent run at once.
+//     its own lane and non-dependent tasks of one agent run at once. This now
+//     applies to the LEAD too: a CEO turn carrying a task id gets its own
+//     per-task lane so the CEO can work several tasks concurrently. A lead turn
+//     with no task id still serializes on the default lane (channel triage).
 func (l *Launcher) laneForTurn(slug string, turn headlessCodexTurn) headlessLane {
 	slug = strings.TrimSpace(slug)
 	taskID := strings.TrimSpace(turn.TaskID)
 	if taskID == "" || l == nil || l.broker == nil {
-		return slugLane(slug)
-	}
-	if slug == l.targeter().LeadSlug() {
 		return slugLane(slug)
 	}
 	task := l.broker.TaskByID(taskID)
@@ -162,17 +163,23 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 			}
 		}
 	}
-	// For the lead (CEO) agent, suppress the notification if any other specialist
-	// is still active or has pending work. The lead should only step in when all
-	// parallel work is done — not when one specialist finishes while others are
-	// still running. This eliminates the race condition where CEO fires after the
-	// first specialist completes and redundantly re-routes to still-running agents.
-	// Scans every non-lead lane (an agent may now hold several).
+	// For the lead (CEO) agent, suppress a NO-TASK triage notification if any
+	// other specialist is still active or has pending work. The lead should only
+	// step in on general channel chatter when all parallel work is done — not
+	// when one specialist finishes while others are still running. This is where
+	// the re-route race lives (the CEO reacting to chatter mid-flight and
+	// redundantly re-routing to still-running agents). Scans every non-lead lane
+	// (an agent may now hold several).
+	//
+	// A TASK-carrying lead turn is NOT held here: the CEO runs it on its own
+	// per-task lane so non-dependent tasks proceed concurrently (CEO
+	// multitasking). The same-task drop/replace above already prevents
+	// double-dispatching the same task, and the concurrency cap bounds the total.
 	//
 	// Human turns bypass this hold: a person addressing the lead must be absorbed
 	// immediately even if specialists are still working — the lead can decide
 	// whether to stop, give a status update, or queue the request for later.
-	if isLead && !urgentLeadTurn && !humanPriority {
+	if isLead && !urgentLeadTurn && !humanPriority && strings.TrimSpace(turn.TaskID) == "" {
 		for workerLane, queue := range l.headless.queues {
 			if workerLane.slug == slug {
 				continue
@@ -196,13 +203,15 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 			}
 		}
 	}
-	// For the lead (CEO) agent, cap the pending queue at 1 turn.
+	// For the lead (CEO) agent, cap the pending queue at 1 turn PER LANE.
 	// Multiple rapid-fire notifications (agent completions, status pings) can
 	// stack up redundant CEO turns that each re-route the same task. One pending
 	// turn is enough to catch the latest state; extras are dropped — except for
 	// urgent task wakes and human-originated messages, which replace the pending
 	// turn so the freshest signal wins instead of being silently dropped.
-	// The lead always runs in its one default lane, so the cap is per-lane.
+	// The lead now runs several lanes (one per task + the default triage lane),
+	// and the cap is checked against THIS turn's lane (l.headless.queues[lane]),
+	// so each task lane keeps its own single-pending budget independently.
 	const leadMaxPending = 1
 	if isLead && len(l.headless.queues[lane]) >= leadMaxPending {
 		if urgentLeadTurn || humanPriority {
@@ -500,9 +509,15 @@ func (l *Launcher) finishHeadlessTurn(lane headlessLane) {
 		}
 	}
 	// Check if the lead already has work queued — no need to wake it. The lead
-	// always runs in its one default lane.
-	if shouldWakeLead && len(l.headless.queues[slugLane(lead)]) > 0 {
-		shouldWakeLead = false
+	// now runs several lanes (its default triage lane + one per task), so scan
+	// every lead lane; any queued lead work means it'll process state on its own.
+	if shouldWakeLead {
+		for workerLane, queue := range l.headless.queues {
+			if workerLane.slug == lead && len(queue) > 0 {
+				shouldWakeLead = false
+				break
+			}
+		}
 	}
 	if shouldWakeLead && l.headless.deferredLead != nil {
 		turn := *l.headless.deferredLead
@@ -510,7 +525,49 @@ func (l *Launcher) finishHeadlessTurn(lane headlessLane) {
 		deferredLead = &turn
 		shouldWakeLead = false
 	}
+	// A turn just finished, freeing an active slot. Re-spawn the lanes the
+	// concurrency cap parked (queued work but no running worker). Only the
+	// subset that fits the newly-available global/per-agent slots is woken:
+	// we simulate admission under the lock — seed counts from the lanes still
+	// active, then admit parked lanes one at a time, incrementing the running
+	// tallies as we go — so a single completion never spawns the whole herd
+	// only to have almost all of them immediately re-park and exit (O(n)
+	// goroutine/log churn per finished turn under a tight cap). Collect under
+	// the lock and mark workers=true so a concurrent enqueue won't also spawn;
+	// the actual spawn happens after unlocking. Only meaningful when a cap is
+	// active — with no cap every queued lane already has a worker.
+	var parkedLanes []headlessLane
+	if global, perAgent := l.headlessConcurrencyCaps(); global > 0 || perAgent > 0 {
+		total := 0
+		byAgent := map[string]int{}
+		for activeLane, active := range l.headless.active {
+			if active == nil {
+				continue
+			}
+			total++
+			byAgent[activeLane.slug]++
+		}
+		for parkedLane, queue := range l.headless.queues {
+			if len(queue) == 0 || l.headless.workers[parkedLane] {
+				continue
+			}
+			if global > 0 && total >= global {
+				break
+			}
+			if perAgent > 0 && byAgent[parkedLane.slug] >= perAgent {
+				continue
+			}
+			l.headless.workers[parkedLane] = true
+			parkedLanes = append(parkedLanes, parkedLane)
+			total++
+			byAgent[parkedLane.slug]++
+		}
+	}
 	l.headless.mu.Unlock()
+
+	for _, parked := range parkedLanes {
+		l.spawnHeadlessWorker(parked)
+	}
 
 	if deferredLead != nil {
 		l.enqueueHeadlessCodexTurn(lead, deferredLead.Prompt, deferredLead.Channel)
@@ -632,6 +689,17 @@ func (l *Launcher) beginHeadlessCodexTurn(lane headlessLane) (headlessCodexTurn,
 	}
 
 	turn := queue[0]
+	// Concurrency cap (cost guard for CEO multitasking): if starting this lane
+	// would exceed the global or per-agent in-flight cap, PARK the worker without
+	// consuming the queued turn — the lane keeps its queued work and
+	// finishHeadlessTurn re-spawns parked lanes as active slots free. A
+	// human-priority turn bypasses the cap so a real person is never starved
+	// behind agent work.
+	if !turn.FromHuman && !l.headlessLaneMayStartLocked(lane) {
+		delete(l.headless.workers, lane)
+		appendHeadlessCodexLog(slug, "queue-park: at concurrency cap, deferring lane until a slot frees")
+		return headlessCodexTurn{}, nil, time.Time{}, 0, false
+	}
 	if len(queue) == 1 {
 		delete(l.headless.queues, lane)
 	} else {

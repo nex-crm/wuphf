@@ -461,13 +461,15 @@ func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, acto
 
 // handleTaskComment serves POST /tasks/{id}/comment. Body shape:
 //
-//	{"body": "<PR-style comment, no state change>"}
+//	{"body": "<free text>"}
 //
-// Uses the auth-resolved actor so humans appear under their session
-// slug ("human" by default) instead of the broker default "unknown".
-// The append is purely additive — no lifecycle transition, no broadcast.
-// Mirrors a GitHub PR review comment that does not approve or request
-// changes.
+// Retained only for back-compat with older clients: task "comments" are
+// gone, so this now posts the body as a normal chat message into the
+// task's channel (the same place the composer posts) rather than writing
+// a packet-feedback entry. The author is the auth-resolved actor so humans
+// appear under their session slug ("human" by default). No lifecycle
+// transition; the message wakes the owner via the standard notification
+// path.
 func (b *Broker) handleTaskComment(w http.ResponseWriter, r *http.Request, actor requestActor, id string) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -503,37 +505,55 @@ func (b *Broker) handleTaskComment(w http.ResponseWriter, r *http.Request, actor
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
-	authorSlug := strings.TrimSpace(actor.Slug)
-	if actor.Kind == requestActorKindBroker {
-		authorSlug = "owner"
-	}
-	if authorSlug == "" {
-		authorSlug = "human"
-	}
+	// Post as a human-shaped sender so channel access allows it (a real human
+	// session resolves to its own slug; the broker/host token falls back to the
+	// generic team-member identity). "owner" — the old feedback-author label —
+	// is NOT a valid channel sender, so it cannot be reused here.
+	sender := humanMessageSender(actor.Slug)
+	// Comments on tasks are retired: a human's input on a task is just chat.
+	// Resolve the task's channel under the lock, release it, then post the
+	// body as a normal channel message via PostMessage (which takes its own
+	// lock). The message lands in the conversation feed AND wakes the owner
+	// through the standard message-notification path — instead of a
+	// packet-feedback entry plus a "Comment on task" card that never appears
+	// in the chat. The packet feedback log stays reserved for the structured
+	// review/decision trail written by lifecycle actions, not human chat.
 	b.mu.Lock()
 	// Re-resolve the task under the lock — the pointer captured before the
-	// earlier Unlock can be stale if b.tasks was mutated meanwhile (the
-	// underlying slice may have been re-sliced/grown by a concurrent
-	// writer, invalidating the pointer into the old backing array).
+	// earlier Unlock can be stale if b.tasks was mutated meanwhile.
 	task = b.findTaskByIDLocked(id)
 	if task == nil {
 		b.mu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
-	b.AppendPacketFeedbackLocked(id, authorSlug, trimmed)
-	// Wake the agents whose attention this comment needs. Parse any
-	// @slug mentions; always add the channel leader (ceo) so an untagged
-	// comment is picked up by CEO. The channel message is what triggers
-	// agent loops to fetch new context — without it the feedback sits on
-	// the packet but no one ever notices. Mirrors how
-	// postTaskReassignNotificationsLocked works for ownership changes.
-	b.postIssueCommentBroadcastLocked(authorSlug, task, trimmed)
+	channel := normalizeChannelSlug(task.Channel)
 	b.mu.Unlock()
+	if channel == "" {
+		channel = "general"
+	}
+	if _, err := b.PostMessage(sender, channel, trimmed, nil, ""); err != nil {
+		// Map PostMessage failures to distinct HTTP statuses so the client can
+		// tell a transient server error apart from an auth/route problem.
+		// Substrings match the errors PostMessage returns in broker_messages.go.
+		msg := strings.ToLower(err.Error())
+		status := http.StatusInternalServerError
+		switch {
+		case strings.Contains(msg, "access denied"):
+			status = http.StatusForbidden
+		case strings.Contains(msg, "not found"):
+			status = http.StatusNotFound
+		case strings.Contains(msg, "request pending"):
+			status = http.StatusConflict
+		}
+		writeJSON(w, status, map[string]string{"error": "failed to post message"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{
-		"taskId": id,
-		"status": "recorded",
-		"author": authorSlug,
+		"taskId":  id,
+		"status":  "posted",
+		"author":  sender,
+		"channel": channel,
 	})
 }
 

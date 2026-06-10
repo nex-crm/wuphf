@@ -35,6 +35,7 @@ import {
 import { router } from "../../lib/router";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
+import { AgentInstructionsSection } from "./AgentInstructionsSection";
 
 const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
   "claude-code": "Claude Code",
@@ -287,6 +288,12 @@ function taskStatusBadgeClass(raw: string): string {
 
 function PermissionsSection({ agent }: { agent: OfficeMember }) {
   const isLead = agent.built_in === true || agent.slug === "ceo";
+  // The broker normalizes a blank permission_mode to "plan" at member
+  // construction (broker_member_construction.go), so only an explicit "auto"
+  // is non-plan-first; blank/unset displays as plan-first. Trim + lowercase so
+  // " Auto " / "AUTO" don't slip through as plan-first.
+  const planFirst =
+    (agent.permission_mode ?? "").trim().toLowerCase() !== "auto";
 
   return (
     <div className="agent-profile-section">
@@ -296,6 +303,12 @@ function PermissionsSection({ agent }: { agent: OfficeMember }) {
           <span className="agent-profile-perm-label">role</span>
           <span className="agent-profile-perm-value">
             {isLead ? "lead agent" : "team member"}
+          </span>
+        </div>
+        <div className="agent-profile-perm-row">
+          <span className="agent-profile-perm-label">autonomy</span>
+          <span className="agent-profile-perm-value">
+            {planFirst ? "plan first" : "auto"}
           </span>
         </div>
         <div className="agent-profile-perm-row">
@@ -813,9 +826,7 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
   >({
     queryKey: ["channels"],
     queryFn: () =>
-      getChannels().then((r) =>
-        arrayOrEmpty<ChannelLite>(r?.channels),
-      ),
+      getChannels().then((r) => arrayOrEmpty<ChannelLite>(r?.channels)),
     refetchInterval: 30_000,
     select: (data): ChannelLite[] => {
       if (Array.isArray(data)) return data as ChannelLite[];
@@ -911,6 +922,9 @@ export function AgentProfilePanel({ agent, onClose }: AgentProfilePanelProps) {
             <p className="agent-profile-current-task">{agent.task}</p>
           </div>
         ) : null}
+
+        {/* Instruction files (SOUL / IDENTITY / OPERATIONS / TOOLS + office USER) */}
+        <AgentInstructionsSection agent={agent} />
 
         {/* Per-agent runtime picker */}
         <RuntimeSection agent={agent} defaultHarness={defaultHarness} />
