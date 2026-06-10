@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+
+	"github.com/nex-crm/wuphf/internal/company"
 )
 
 // broker_slack_connect.go is the Slack equivalent of broker_telegram_connect.go:
@@ -50,7 +53,46 @@ func (b *Broker) handleSlackConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
+	// Persist the binding to company.yaml so it survives a restart — otherwise
+	// the transport, which only starts when a slack surface channel exists at
+	// boot, would silently skip after every restart (mirrors the Telegram flow).
+	syncManifestForSlackChannel(ch.Slug, channelID, name)
 	writeJSON(w, http.StatusOK, map[string]any{"channel_slug": ch.Slug, "name": ch.Name})
+}
+
+// syncManifestForSlackChannel appends the slack-bridged channel to company.yaml
+// so a future restart re-reads it. Best-effort: the in-memory channel is already
+// created and persisted via saveLocked; a manifest failure is logged, not fatal.
+func syncManifestForSlackChannel(slug, channelID, name string) {
+	err := company.UpdateManifest(func(manifest *company.Manifest) error {
+		for _, ch := range manifest.Channels {
+			if ch.Slug == slug {
+				return nil
+			}
+		}
+		members := []string{manifest.Lead}
+		for _, m := range manifest.Members {
+			if m.Slug != "" && m.Slug != manifest.Lead {
+				members = append(members, m.Slug)
+			}
+		}
+		manifest.Channels = append(manifest.Channels, company.ChannelSpec{
+			Slug:        slug,
+			Name:        name,
+			Description: fmt.Sprintf("Slack bridge for %s.", name),
+			Members:     members,
+			Surface: &company.ChannelSurfaceSpec{
+				Provider:    "slack",
+				RemoteID:    channelID,
+				RemoteTitle: name,
+				BotTokenEnv: "SLACK_BOT_TOKEN",
+			},
+		})
+		return nil
+	})
+	if err != nil {
+		log.Printf("[slack] manifest sync failed for %s: %v", slug, err)
+	}
 }
 
 // createSlackChannel binds channelID to an office channel with a "slack" surface.
