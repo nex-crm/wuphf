@@ -27,6 +27,52 @@ The simplest end-to-end flow we want to work reliably:
 
 **Memory tiers implied by step 5 + 7:** private per-agent knowledge graph → generates that agent's notebooks (personal, focused); team knowledge graph → generates the wiki (shared, curated). Both written deterministically by hooks, not ad-hoc LLM whim.
 
+
+## Architecture map (from the founder's diagrams, 2026-06-10)
+
+Four pillars; KGs are the substrate, notebooks/wiki are their generated views; rules feed back to govern execution.
+
+```mermaid
+flowchart LR
+  subgraph WORK
+    T[Tasks]
+    I[Inbox<br/>Requests & Output]
+  end
+  subgraph EXECUTION
+    A[Agents<br/>AI & Automation]
+  end
+  subgraph KNOWLEDGE
+    N[Notebooks<br/>Scratchpads / Drafts]
+    W[Wiki<br/>Capabilities & Content]
+    PKG[(PRIVATE KG<br/>→ Notebooks)]
+    TKG[(TEAM KG<br/>→ Wiki)]
+  end
+  subgraph RULES
+    SK[Skills<br/>Capabilities & Tools]
+    PO[Policies<br/>Constraints & Compliance]
+  end
+  T -- Trigger / Assign --> A
+  A -- Read / Write --> N
+  A -- Publish Artifacts --> W
+  A -- Learning Hook<br/>Observation & Feedback --> PKG
+  A -- Learning Hook --> TKG
+  PKG -. Permissioned Access .- TKG
+  N --- PKG
+  W --- TKG
+  TKG -- Compiles to<br/>Update & Refine --> SK
+  TKG -- Compiles to --> PO
+  SK -- Feed back into<br/>Govern & Guide --> A
+  PO -- Feed back into --> A
+  A -- Output --> I
+```
+
+Pipeline (work → reusable knowledge): Task chat → Artifact (Wiki/KB) → Structured extraction (Knowledge Graph) → Playbooks → Skills & Policies → Future tasks (retrieval + dedupe).
+
+Load-bearing details from the diagrams:
+- **Permissioned access** between private (notebooks/private KG) and team (wiki/team KG) knowledge — the private/team boundary is a real access control, not a convention.
+- The **learning hook observes execution AND completion** ("Observation & Feedback"), writing facts/insights to both KGs deterministically.
+- **Rules govern**: skills (capabilities & tools) and policies (constraints & compliance) are the feedback edge into every agent turn — always loaded.
+
 ## Removals (R-phases — the subtraction)
 
 | ID | Remove | Notes |
