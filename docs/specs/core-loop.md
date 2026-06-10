@@ -4,7 +4,7 @@
 **Author:** Najmuzzaman (directive) + Claude (decisions), 2026-06-10
 **Doctrine:** Everything that does not support the core loop is waste. Remove those surfaces from FE and BE. The system stays super focused on delivering this one loop excellently.
 
-▶ **RESUME HERE (2026-06-10 late):** R1/R2/R3/R4/R5 ALL SHIPPED on `feat/sota-uplift-phase0` / PR #1062 — office-eval 18/18 (R4 added 5 intake-definition checks), CI fully green, main merged through #1065. NEXT: R6 surface sweep (Dashboard/activity app, DMs beyond task channels & #general, decision-packet surfaces not used by interviews/done-posts, legacy /issues remnants, demo seeds, channel ceremony, settle-checklist, unused apps — each removal one commit, eval green after each). Then B1–B6.
+▶ **RESUME HERE (2026-06-10 night): SUBTRACTION COMPLETE.** R1–R6(sweep 1) ALL SHIPPED on `feat/sota-uplift-phase0` / PR #1062: redactor gone, spec surface gone, plan mode gone, R4 definition intake shipped (triangulated, 6 findings fixed), skills-from-playbooks-only (−9k lines, compiler hardened), R6 sweep 1 (demo seeds, vibe mandates out of coordination prompts, settle overlay, dead routes). office-eval 18/18 after every cut. R6 sweep 2 backlog: transports, decision-packet kind audit, FE joke-phrase prominence, dead-component scan, my_slug=ceo spoofing hardening (one-liner in teammcp server_broker_client.go isProtectedActorSlug). NEXT: B1 (deterministic completion hook — EXTEND the existing entity fact-log/brief system in the wiki worker, do not invent a new KG schema) → B2 → B3 → B4 → B5 → B6.
 
 ---
 
