@@ -55,34 +55,19 @@ test.afterEach(async ({ request }) => {
 });
 
 test.describe("PR #634 review pins", () => {
-  test("Console keeps the user's last-visited channel after nav off-conversation", async ({
+  test("/apps/console no longer mounts a Console app panel", async ({
     page,
   }) => {
-    // Repro: legacy `s.currentChannel` retained the last-visited slug
-    // across non-conversation navigation. After the TanStack migration,
-    // ConsoleApp read `useChannelSlug() ?? "general"` directly off the
-    // URL, so opening Console from #launch silently snapped to #general.
-    // useFallbackChannelSlug threads URL → lastConversationalChannel →
-    // "general" so the user's working channel survives the hop.
+    // The Console surface was intentionally removed in #1055. The generic
+    // /apps/$appId route still accepts the URL, but MainContent must narrow
+    // it into the unknown-app fallback instead of trying to mount stale UI.
     const getErrors = collectReactErrors(page);
-    await seedTestChannel(page);
-    await gotoShell(page, "/");
-    await gotoShell(page, `/#/channels/${TEST_CHANNEL}`);
-    await expect(page.locator(".composer-input")).toHaveAttribute(
-      "placeholder",
-      `Message #${TEST_CHANNEL}`,
-    );
-
     await page.goto(`/#/apps/console`);
     const consolePage = page.getByTestId("app-page-console");
     await expect(consolePage).toBeVisible({ timeout: 10_000 });
-    // ConsoleApp echoes the channel in two visible places: the header
-    // chip and the prompt. Both should track #launch, not #general.
-    await expect(consolePage).toContainText(`#${TEST_CHANNEL}`);
-    await expect(consolePage).toContainText(`wuphf:${TEST_CHANNEL}$`);
-    await expect(consolePage).not.toContainText("wuphf:general$");
+    await expect(consolePage).toContainText("Unknown app: console");
 
-    await expectNoReactErrors(page, getErrors, "during console fallback");
+    await expectNoReactErrors(page, getErrors, "console app removal");
   });
 
   test("Legacy /#/apps/requests redirects to the unified Inbox", async ({
@@ -140,8 +125,8 @@ test.describe("PR #634 review pins", () => {
 
     // Leaving the conversation surface closes the panel, so the per-channel
     // toggle can never render against a non-conversation route.
-    await page.goto("/#/apps/console");
-    await expect(page.getByTestId("app-page-console")).toBeVisible({
+    await page.goto("/#/apps/graph");
+    await expect(page.getByTestId("app-page-graph")).toBeVisible({
       timeout: 10_000,
     });
     await expect(page.locator(".agent-panel")).toHaveCount(0);
@@ -155,7 +140,7 @@ test.describe("PR #634 review pins", () => {
   }) => {
     // Repro: activeThreadId was a bare string on the store; ThreadPanel
     // resolved its channel via `useChannelSlug() ?? "general"`. Open a
-    // thread on #launch, navigate to /apps/console, and the panel
+    // thread on #launch, navigate to /apps/graph, and the panel
     // header silently flipped to "#general" — and any reply posted from
     // there would land in general. The fix promotes activeThread to
     // {id, channelSlug} captured at open time so the panel header (and
@@ -211,8 +196,8 @@ test.describe("PR #634 review pins", () => {
 
     // Navigate to a non-conversation route. ThreadPanel is mounted in
     // Shell so it persists across navigation.
-    await page.goto("/#/apps/console");
-    await expect(page.getByTestId("app-page-console")).toBeVisible({
+    await page.goto("/#/apps/graph");
+    await expect(page.getByTestId("app-page-graph")).toBeVisible({
       timeout: 10_000,
     });
 

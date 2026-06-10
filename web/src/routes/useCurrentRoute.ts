@@ -253,9 +253,9 @@ export function useCurrentTaskId(): string | null {
 }
 
 /**
- * Channel slug consumers that work outside conversation routes (Console,
- * Requests, sidebar request badge) should use this hook so they keep
- * pointing at the user's last-visited channel rather than silently
+ * Channel slug consumers that work outside conversation routes (thread
+ * panels, request badges, cross-surface actions) should use this hook so
+ * they keep pointing at the user's last-visited channel rather than silently
  * collapsing to `"general"` whenever the URL is on `/apps/...` or
  * `/wiki/...`. Falls through to `"general"` only on a cold start where
  * the user has not yet visited any conversation route.

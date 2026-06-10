@@ -110,6 +110,11 @@ async function openTelegramWizard(page: Page) {
   await expect(page.getByTestId("tg-step-token")).toBeVisible();
 }
 
+async function gotoCommandChannel(page: Page) {
+  await page.goto("/#/channels/general");
+  await waitForShellReady(page);
+}
+
 async function verifyTokenToMode(page: Page, token = "123456:ABC") {
   await page.getByTestId("tg-token-input").fill(token);
   await page.getByTestId("tg-token-submit").click();
@@ -130,8 +135,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
   test("[1] /connect telegram opens the Telegram wizard at the token step", async ({
     page,
   }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     await openTelegramWizard(page);
     await expect(page.getByTestId("tg-step-token")).toBeVisible();
@@ -140,8 +144,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
   test("[1a] bare /connect opens the provider picker with TUI parity", async ({
     page,
   }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     const composer = page.locator(".composer-input");
     await composer.click();
@@ -167,8 +170,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
   test("[1b] picker → Telegram advances to the token step", async ({
     page,
   }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     const composer = page.locator(".composer-input");
     await composer.click();
@@ -187,8 +189,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
     // previous behaviour silently routed every /connect to Telegram, which
     // was the bug bornaware reported. This test guards against regressing
     // back to that.
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     const composer = page.locator(".composer-input");
     await composer.click();
@@ -202,8 +203,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
   });
 
   test("[2,3] empty token shows inline validation", async ({ page }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
     await openTelegramWizard(page);
 
     // Click verify with the input still empty — should NOT call the broker.
@@ -219,8 +219,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
   });
 
   test("[4] verify failure keeps user on token step", async ({ page }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     await page.route("**/telegram/verify", (route) =>
       route.fulfill(verifyFail),
@@ -235,8 +234,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
   });
 
   test("[5,7] verify success → pick → connect → done", async ({ page }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     await page.route("**/telegram/verify", (route) => route.fulfill(verifyOK));
     await page.route("**/telegram/discover", (route) =>
@@ -272,8 +270,7 @@ test.describe("wuphf web /connect Telegram wizard", () => {
   test("[6] empty group list shows retry/manual/dm controls", async ({
     page,
   }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     await page.route("**/telegram/verify", (route) => route.fulfill(verifyOK));
     await page.route("**/telegram/discover", (route) =>
@@ -294,8 +291,7 @@ test.describe("wuphf web /connect Telegram wizard connect modes", () => {
   test("[8] manual chat ID validates and posts integer chat_id", async ({
     page,
   }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     await page.route("**/telegram/verify", (route) => route.fulfill(verifyOK));
     await page.route("**/telegram/discover", (route) =>
@@ -340,8 +336,7 @@ test.describe("wuphf web /connect Telegram wizard connect modes", () => {
   test("[8b] manual connect failure stays on the manual step", async ({
     page,
   }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     await page.route("**/telegram/verify", (route) => route.fulfill(verifyOK));
     await page.route("**/telegram/discover", (route) =>
@@ -363,8 +358,7 @@ test.describe("wuphf web /connect Telegram wizard connect modes", () => {
   });
 
   test("[9] choosing DM mode posts chat_id=0", async ({ page }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     await page.route("**/telegram/verify", (route) => route.fulfill(verifyOK));
 
@@ -387,8 +381,7 @@ test.describe("wuphf web /connect Telegram wizard connect modes", () => {
   test("[10] connect failure keeps picker step active with error", async ({
     page,
   }) => {
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     await page.route("**/telegram/verify", (route) => route.fulfill(verifyOK));
     await page.route("**/telegram/discover", (route) =>
@@ -424,8 +417,7 @@ test.describe("wuphf web /connect Telegram wizard regressions", () => {
     // catch this — the testids were present, just unstyled. We assert the
     // computed background and border on the modal card so any future
     // "class exists but variables undefined" regression fails loudly.
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
     await page.route("**/telegram/verify", (r) => r.fulfill(verifyOK));
     await openTelegramWizard(page);
 
@@ -470,8 +462,7 @@ test.describe("wuphf web /connect Telegram wizard regressions", () => {
     // styles correctly regardless of route. This test guards against a
     // regression where a contributor scopes the variables back to
     // .wiki-root, which would re-introduce the unstyled-modal bug.
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
     await page.route("**/telegram/verify", (r) => r.fulfill(verifyOK));
     await openTelegramWizard(page);
 
@@ -505,8 +496,7 @@ test.describe("wuphf web /connect Telegram wizard regressions", () => {
     // token, sees 401, types a good token, and the modal advances. If
     // verifyAndDiscover doesn't clear `error` on the new attempt, the
     // banner sticks around on the picker step — confusing at best.
-    await page.goto("/");
-    await waitForShellReady(page);
+    await gotoCommandChannel(page);
 
     let verifyCallCount = 0;
     await page.route("**/telegram/verify", async (route) => {
