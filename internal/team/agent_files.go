@@ -72,6 +72,14 @@ func validateAgentFilePath(relPath string) error {
 		return fmt.Errorf("agent file: path must not contain ..; got %q", relPath)
 	}
 	clean := filepath.ToSlash(filepath.Clean(relPath))
+	// Require the input to already be canonical. Cleaning collapses inputs like
+	// "agents/ceo/SOUL.md/." or a trailing slash to a valid in-tree path, but the
+	// write/read callers use the RAW relPath for the filesystem op — so a
+	// non-canonical input that only passes after Clean could create unintended
+	// directories or fail mid-write. Reject the divergence outright.
+	if clean != filepath.ToSlash(relPath) {
+		return fmt.Errorf("agent file: path must be canonical; got %q", relPath)
+	}
 	if clean == officeUserFileRel {
 		return nil
 	}
@@ -275,13 +283,17 @@ func renderAgentTools(member officeMember) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# TOOLS — @%s\n\n", member.Slug)
 	b.WriteString("## Available tools\n")
-	if len(member.AllowedTools) > 0 {
-		for _, t := range member.AllowedTools {
-			if t = strings.TrimSpace(t); t != "" {
-				fmt.Fprintf(&b, "- %s\n", t)
-			}
+	// Track whether any non-blank tool was written: an AllowedTools slice of
+	// only whitespace entries has len>0 but yields no lines, which would leave
+	// an empty section — fall back to the default toolset in that case too.
+	wroteTool := false
+	for _, t := range member.AllowedTools {
+		if t = strings.TrimSpace(t); t != "" {
+			fmt.Fprintf(&b, "- %s\n", t)
+			wroteTool = true
 		}
-	} else {
+	}
+	if !wroteTool {
 		b.WriteString("- The default office toolset (team_task, team_status, team_broadcast, notebook, wiki, and any skills enabled for you).\n")
 	}
 	b.WriteString("\n## Notes\n")

@@ -65,6 +65,8 @@ func TestValidateAgentFilePath(t *testing.T) {
 
 	bad := []string{
 		"",
+		"agents/ceo/SOUL.md/.",                // non-canonical (trailing /.)
+		"agents/ceo/SOUL.md/",                 // non-canonical (trailing slash)
 		"agents/ceo/MEMORY.md",                // not a canonical file
 		"agents/ceo/HEARTBEAT.md",             // dropped by design
 		"agents/ceo/soul.md",                  // wrong case
@@ -134,6 +136,11 @@ func TestRenderAgentFilesDeterministic(t *testing.T) {
 	// Empty allowed-tools falls back to the default toolset line.
 	if fallback := renderAgentTools(officeMember{Slug: "x"}); !strings.Contains(fallback, "default office toolset") {
 		t.Errorf("empty tools should fall back to default toolset:\n%s", fallback)
+	}
+	// Blank-only allowed-tools (whitespace entries) must also fall back, not
+	// emit an empty "Available tools" section.
+	if fallback := renderAgentTools(officeMember{Slug: "x", AllowedTools: []string{" ", "\t"}}); !strings.Contains(fallback, "default office toolset") {
+		t.Errorf("blank-only tools should fall back to default toolset:\n%s", fallback)
 	}
 
 	if user := renderOfficeUserFile(); !strings.Contains(user, "# USER") || !strings.Contains(user, "single human operator") {
