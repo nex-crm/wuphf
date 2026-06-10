@@ -164,5 +164,13 @@ func (b *Broker) distillCompletedTask(taskID string) {
 		// Surface, never swallow: a verified outcome that fails to land in
 		// team memory is a broken compounding loop, not a cosmetic miss.
 		log.Printf("task distill: failed to record verified learning for %s: %v", taskID, err)
+		return
 	}
+
+	// B3 (playbook_draft.go): a verified-done task whose Definition shows a
+	// repeatable shape (≥2 success criteria) — and whose learning record
+	// just landed — drafts (or updates, by slug similarity) a playbook
+	// article under team/playbooks/. Deterministic skeleton, no LLM; the
+	// skill-compile cron later turns the playbook into skills + policies.
+	draftPlaybookFromTask(ctx, worker, task)
 }

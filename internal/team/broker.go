@@ -644,6 +644,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/reset", b.requireAuth(b.handleReset))
 	mux.HandleFunc("/reset-dm", b.requireAuth(b.handleResetDM))
 	mux.HandleFunc("/policies", b.requireAuth(b.handlePolicies))
+	mux.HandleFunc("/policies/", b.requireAuth(b.handlePoliciesSubpath))
 	mux.HandleFunc("/signals", b.requireAuth(b.handleSignals))
 	mux.HandleFunc("/decisions", b.requireAuth(b.handleDecisions))
 	mux.HandleFunc("/watchdogs", b.requireAuth(b.handleWatchdogs))

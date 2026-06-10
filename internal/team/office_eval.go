@@ -165,6 +165,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"compounding-loop", evalJobCompoundingLoop},
 		{"completion-hook", evalJobCompletionHook},
 		{"entity-articles", evalJobEntityArticles},
+		{"playbook-compilation", evalJobPlaybookCompilation},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))
@@ -818,5 +819,272 @@ func evalJobEntityArticles(fx *officeEvalFixture, r *OfficeEvalReport) error {
 			companyFiles == 1 && strings.Count(updated, "\n# ") == 1 &&
 			strings.Contains(updated, "[^2]"),
 		fmt.Sprintf("files=%d len=%dB", companyFiles, len(updated)), "")
+	return nil
+}
+
+// evalPlaybookFastPathProvider is the deterministic scanner provider for the
+// playbook-compilation eval: it promotes ONLY articles carrying explicit
+// Anthropic skill frontmatter (the same fast path defaultLLMProvider has)
+// and classifies everything else as not-a-skill. No LLM call ever happens,
+// so the eval is hermetic.
+type evalPlaybookFastPathProvider struct{}
+
+func (evalPlaybookFastPathProvider) AskIsSkill(_ context.Context, _, articleContent, _ string) (bool, SkillFrontmatter, string, string, error) {
+	if fm, body, parseErr := ParseSkillMarkdown([]byte(articleContent)); parseErr == nil {
+		return true, fm, body, "", nil
+	}
+	// No explicit skill frontmatter → not a skill. The parse error is
+	// intentionally not propagated: it is the classification signal, the
+	// same contract as defaultLLMProvider's fast path.
+	return false, SkillFrontmatter{}, "", "", nil
+}
+
+// evalJobPlaybookCompilation: the B3 loop (playbook_draft.go +
+// policy_compile.go, core-loop steps 7.2/7.3/8/11). (a) A verified-done
+// defined task with two success criteria and a distilled learning produces
+// a draft playbook article at the stable team/playbooks path with task +
+// artifact citations; (b) a second similar task UPDATES the same playbook
+// (worked example appended, no duplicate file); (c) a playbook with a
+// "## Rules" section, run through the compile funnel, yields a skill AND
+// atomic policies carrying the skill's agent assignment; (d) duplicate rule
+// text does not mint a second policy; (e) an agent's system prompt carries
+// its assigned policies and NOT one assigned exclusively to another agent —
+// and carries its assigned compiled skill (the step-8 always-loaded check).
+func evalJobPlaybookCompilation(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "playbook-compilation"
+	fx.broker.mu.Lock()
+	worker := fx.broker.wikiWorker
+	fx.broker.mu.Unlock()
+	root := worker.Repo().Root()
+
+	// runVerifiedTask drives one defined task with a passing machine check
+	// to done and runs the distillation trigger synchronously (idempotent +
+	// single-flight against the goroutine MutateTask already queued).
+	runVerifiedTask := func(title, goal, artifact string, criteria []string) (string, error) {
+		created, err := fx.broker.MutateTask(TaskPostRequest{
+			Action: "create", Channel: "general", Title: title,
+			Details: "Repeatable office workflow.", Owner: "eng", CreatedBy: "ceo",
+			VerificationKind: "command", VerificationSpec: "exit 0", VerificationRequired: true,
+		})
+		if err != nil {
+			return "", err
+		}
+		id := created.Task.ID
+		if _, err := fx.broker.MutateTask(TaskPostRequest{
+			Action: "define", ID: id, Channel: "general", CreatedBy: "ceo",
+			Definition: &TaskDefinition{
+				Goal:            goal,
+				Deliverables:    []TaskDeliverable{{Name: "investor update", Format: "markdown in the wiki"}},
+				SuccessCriteria: criteria,
+			},
+		}); err != nil {
+			return "", err
+		}
+		if _, err := fx.broker.MutateTask(TaskPostRequest{
+			Action: "complete", ID: id, Channel: "general", CreatedBy: "eng", ArtifactPath: artifact,
+		}); err != nil {
+			return "", err
+		}
+		if cur := fx.broker.TaskByID(id); cur != nil && !strings.EqualFold(strings.TrimSpace(cur.status), "done") {
+			if _, err := fx.broker.MutateTask(TaskPostRequest{
+				Action: "approve", ID: id, Channel: "general", CreatedBy: "ceo", ArtifactPath: artifact,
+			}); err != nil {
+				return "", err
+			}
+		}
+		fx.broker.distillCompletedTask(id)
+		return id, nil
+	}
+
+	waitForFile := func(relPath string, needles ...string) string {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+			if err == nil {
+				body := string(content)
+				ok := true
+				for _, n := range needles {
+					if !strings.Contains(body, n) {
+						ok = false
+						break
+					}
+				}
+				if ok {
+					return body
+				}
+			}
+			if time.Now().After(deadline) {
+				if err != nil {
+					return ""
+				}
+				return string(content)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	// (a) Verified-done defined task with 2 criteria → draft playbook at the
+	// stable path, frontmatter draft: true, citations to task + artifact.
+	const (
+		playbookRel = "team/playbooks/send-the-weekly-investor-update.md"
+		artifact1   = "team/reports/investor-update-week-23.md"
+		artifact2   = "team/reports/investor-update-week-24.md"
+	)
+	task1, err := runVerifiedTask(
+		"Send the weekly investor update",
+		"Get the weekly investor update out to the approved list",
+		artifact1,
+		[]string{"Update published to the wiki", "Email sent to the investor list"},
+	)
+	if err != nil {
+		return err
+	}
+	draft := waitForFile(playbookRel, task1)
+	r.add(job, "verified-done defined task drafts a playbook at the stable path",
+		strings.Contains(draft, "draft: true") && strings.Contains(draft, playbookDraftMarker) &&
+			strings.Contains(draft, "## Checklist") && strings.Contains(draft, "Email sent to the investor list"),
+		fmt.Sprintf("%s=%dB", playbookRel, len(draft)), "")
+	r.add(job, "draft playbook cites the source task and artifact",
+		strings.Contains(draft, "Task "+task1) && strings.Contains(draft, "["+artifact1+"]("+artifact1+")") &&
+			strings.Contains(draft, "[^1]"),
+		"", "")
+
+	// (b) A second similar task UPDATES the same playbook — worked example
+	// appended, no duplicate file.
+	task2, err := runVerifiedTask(
+		"Send the weekly investor update for week 24",
+		"Get the week-24 investor update out to the approved list",
+		artifact2,
+		[]string{"Update published to the wiki", "Email sent to the investor list"},
+	)
+	if err != nil {
+		return err
+	}
+	updated := waitForFile(playbookRel, task2)
+	entries, _ := os.ReadDir(filepath.Join(root, "team", "playbooks"))
+	playbookFiles := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "send-the-weekly-investor-update") && strings.HasSuffix(e.Name(), ".md") {
+			playbookFiles++
+		}
+	}
+	r.add(job, "second similar task appends a worked example — no duplicate playbook",
+		playbookFiles == 1 && strings.Contains(updated, task1) && strings.Contains(updated, task2) &&
+			strings.Contains(updated, "[^2]"),
+		fmt.Sprintf("files=%d len=%dB", playbookFiles, len(updated)), "")
+
+	// (c) A playbook with a ## Rules section through the compile funnel
+	// yields a skill AND atomic policies with the skill's agent assignment.
+	// The fixture scanner promotes explicit-frontmatter articles only — no
+	// LLM — mirroring defaultLLMProvider's fast path.
+	fx.broker.SetSkillScanner(NewSkillScanner(fx.broker, evalPlaybookFastPathProvider{}, 10))
+	const ruleOne = "Always CC the CSM on renewal emails"
+	const ruleTwo = "Never send pricing before the demo call"
+	playbookWithRules := `---
+name: qualify-inbound-leads
+description: Qualify inbound leads before routing them to sales.
+---
+# Qualify inbound leads
+
+## Steps
+
+1. Check the lead against the ICP notes in the wiki.
+2. Score the lead and record the score.
+3. Route qualified leads to the AE channel.
+
+## Rules
+
+- ` + ruleOne + `
+- ` + ruleTwo + `
+`
+	if _, _, err := worker.Enqueue(context.Background(), ArchivistAuthor,
+		"team/playbooks/qualify-inbound-leads.md", playbookWithRules, "replace",
+		"fixture: playbook with rules"); err != nil {
+		return err
+	}
+	if _, err := fx.broker.compileWikiSkills(context.Background(), "team/playbooks", false, "manual"); err != nil {
+		return fmt.Errorf("compile pass: %w", err)
+	}
+	skills := fx.broker.ListActiveSkillSummaries()
+	var compiledSkill *SkillSummary
+	for i := range skills {
+		if skills[i].Slug == "qualify-inbound-leads" {
+			compiledSkill = &skills[i]
+			break
+		}
+	}
+	r.add(job, "compile funnel yields the playbook's skill, roster-assigned",
+		compiledSkill != nil && len(compiledSkill.OwnerAgents) == 2,
+		fmt.Sprintf("skills=%d", len(skills)), "")
+
+	findPolicy := func(rule string) *officePolicy {
+		for _, p := range fx.broker.ListPolicies() {
+			if normalizePolicyRuleText(p.Rule) == normalizePolicyRuleText(rule) {
+				out := p
+				return &out
+			}
+		}
+		return nil
+	}
+	p1, p2 := findPolicy(ruleOne), findPolicy(ruleTwo)
+	r.add(job, "compile funnel yields atomic policies with the skill's agent assignment",
+		p1 != nil && p2 != nil &&
+			len(p1.Agents) == 2 && policyAppliesToAgent(*p1, "eng") && policyAppliesToAgent(*p1, "ceo"),
+		fmt.Sprintf("policies=%d", len(fx.broker.ListPolicies())), "")
+
+	// (d) Duplicate rule text (different casing, second playbook) does not
+	// mint a second policy.
+	dupPlaybook := `---
+name: renewal-email-outreach
+description: Send renewal outreach emails to existing customers.
+---
+# Renewal email outreach
+
+## Steps
+
+1. Pull the renewal list.
+2. Draft the email from the template.
+3. Send and log the outcome.
+
+## Rules
+
+- ALWAYS CC the CSM on renewal emails
+`
+	if _, _, err := worker.Enqueue(context.Background(), ArchivistAuthor,
+		"team/playbooks/renewal-email-outreach.md", dupPlaybook, "replace",
+		"fixture: playbook with duplicate rule"); err != nil {
+		return err
+	}
+	if _, err := fx.broker.compileWikiSkills(context.Background(), "team/playbooks", false, "manual"); err != nil {
+		return fmt.Errorf("second compile pass: %w", err)
+	}
+	dupCount := 0
+	for _, p := range fx.broker.ListPolicies() {
+		if normalizePolicyRuleText(p.Rule) == normalizePolicyRuleText(ruleOne) {
+			dupCount++
+		}
+	}
+	r.add(job, "duplicate rule text does not create a second policy", dupCount == 1,
+		fmt.Sprintf("matching policies=%d", dupCount), "")
+
+	// (e) Always-loaded (core-loop step 8): an agent's prompt carries its
+	// assigned policies + skills and NOT a policy assigned exclusively to
+	// another agent.
+	const engOnlyRule = "Run the deploy checklist before every release"
+	const ceoOnlyRule = "Review specialist hiring proposals within one day"
+	if _, err := fx.broker.RecordPolicyScoped("human_directed", engOnlyRule, []string{"eng"}); err != nil {
+		return err
+	}
+	if _, err := fx.broker.RecordPolicyScoped("human_directed", ceoOnlyRule, []string{"ceo"}); err != nil {
+		return err
+	}
+	engPrompt := fx.launcher.buildPrompt("eng")
+	r.add(job, "agent prompt carries its assigned policy and not another agent's",
+		strings.Contains(engPrompt, engOnlyRule) && !strings.Contains(engPrompt, ceoOnlyRule) &&
+			strings.Contains(engPrompt, ruleOne),
+		fmt.Sprintf("prompt=%d chars", len(engPrompt)), "")
+	r.add(job, "agent prompt carries its assigned compiled skill (always loaded)",
+		strings.Contains(engPrompt, "qualify-inbound-leads"),
+		"", "")
 	return nil
 }

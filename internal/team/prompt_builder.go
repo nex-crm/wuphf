@@ -127,10 +127,18 @@ func (p *promptBuilder) Build(slug string) string {
 	markdownMemory := p.markdownMemory
 	noNex := p.nexDisabled
 
-	// Sort policies by ID inside the builder so prompt-cache byte-stability
-	// no longer depends on every caller pre-sorting before handing the
-	// snapshot in. Same reason as officeMembers above.
-	activePolicies := append([]officePolicy(nil), p.policies()...)
+	// Filter policies to the ones assigned to THIS agent (core-loop step 8:
+	// assigned policies are always loaded; a policy scoped to other agents
+	// stays out of this prompt). Nil/empty Agents = applies to everyone.
+	// Sort by ID inside the builder so prompt-cache byte-stability no longer
+	// depends on every caller pre-sorting before handing the snapshot in.
+	// Same reason as officeMembers above.
+	var activePolicies []officePolicy
+	for _, pol := range p.policies() {
+		if policyAppliesToAgent(pol, slug) {
+			activePolicies = append(activePolicies, pol)
+		}
+	}
 	sort.Slice(activePolicies, func(i, j int) bool { return activePolicies[i].ID < activePolicies[j].ID })
 
 	// Snapshot the active skill catalog at prompt-build time. The accessor
@@ -226,6 +234,7 @@ func (p *promptBuilder) Build(slug string) string {
 		}
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human a cancelable interview question; it never blocks chat, and dismiss/send cancels it.\n")
+		sb.WriteString("- team_policy_record: When the human gives explicit operating feedback in chat (\"always …\", \"never …\", \"from now on …\"), record it as an office policy in the SAME turn — one atomic rule per call (never bundle several rules into one). It applies to ALL agents unless the human names specific agents (then pass `agents`). ONLY human feedback creates policies in chat; never mint one from your own judgment — the compiler derives the rest from playbooks automatically.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
 		sb.WriteString("== TOOL HYGIENE ==\n")
 		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are registered for this session. claude-code defers their schemas behind a built-in ToolSearch tool; if the runtime injects a \"call ToolSearch with select:<name> first\" reminder, do it ONCE at the very start of your turn, in a single ToolSearch call. Load ONLY the schemas you actually plan to use this turn — for a typical answer that is team_broadcast (and maybe human_message); add notebook_visual_artifact_create ONLY when the HTML article rule below actually fires. Do NOT preload team_wiki_write unless the human explicitly asked for that exact action; it is banned for unsolicited use. (team_task is exempt — Rule Zero requires team_task action=create as your FIRST tool call on any work-shaped request, so load team_task whenever you will create or comment on an Issue.) Then proceed with the real work in the same assistant response. Never call ToolSearch a second time in the same turn.\n")

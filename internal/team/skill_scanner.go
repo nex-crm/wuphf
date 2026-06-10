@@ -282,6 +282,10 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		if enhanceSlug != "" {
 			s.broker.mu.Lock()
 			enhanced, enhErr := s.broker.enhanceSkillLocked(enhanceSlug, body, fm.Description, skillSlug(fm.Name))
+			var enhancedOwners []string
+			if enhErr == nil && enhanced != nil {
+				enhancedOwners = append([]string(nil), enhanced.OwnerAgents...)
+			}
 			s.broker.mu.Unlock()
 			if enhErr != nil {
 				slog.Warn("skill_scanner: enhance failed, falling through to new-skill write",
@@ -290,6 +294,10 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 			} else if enhanced != nil {
 				slog.Info("skill_scanner: enhanced existing skill",
 					"slug", enhanceSlug, "source", c.relPath)
+				// B3 policy compilation: a playbook's ## Rules / ## Policies
+				// bullets ride the same compile pass, assigned to the same
+				// agents as the (enhanced) skill.
+				s.broker.recordPlaybookPolicies(c.relPath, c.content, enhancedOwners)
 				res.Proposed++
 				continue
 			}
@@ -308,7 +316,11 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		spec.DisabledFromStatus = ""
 
 		s.broker.mu.Lock()
-		_, writeErr := s.broker.writeCompiledSkillLocked(spec)
+		compiled, writeErr := s.broker.writeCompiledSkillLocked(spec)
+		var compiledOwners []string
+		if writeErr == nil && compiled != nil {
+			compiledOwners = append([]string(nil), compiled.OwnerAgents...)
+		}
 		s.broker.mu.Unlock()
 		if writeErr != nil {
 			// Existing skills come back nil-error, *teamSkill non-nil — counted
@@ -321,6 +333,12 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 			delete(updatedCache, c.relPath)
 			continue
 		}
+		// B3 policy compilation (core-loop step 7.3): when the compiled
+		// article is a playbook, its ## Rules / ## Policies bullets become
+		// atomic officePolicy records with the SAME agent assignment the
+		// compiled skill got. Dedup by normalized rule text absorbs
+		// re-compiles of the same playbook.
+		s.broker.recordPlaybookPolicies(c.relPath, c.content, compiledOwners)
 		res.Proposed++
 	}
 

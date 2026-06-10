@@ -360,6 +360,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_member",
 			"Propose creating (or remove) an office-wide member. Reuse an existing teammate whenever one can cover the work. Creating a NEW member ALWAYS requires explicit human approval: this tool raises an approval request and blocks until the human decides, then returns an error if they decline so you assign the work to an existing specialist instead.",
 		), handleTeamMember)
+		// Human-chat-feedback policy writer (core-loop step 11): CEO-only,
+		// fires only on explicit human operating feedback.
+		registerPolicyTools(server)
 	}
 	// Promotion-review tool: the lead AND the Librarian (wiki curator) get it.
 	// Kept out of the lead-only block above so the Librarian does not also gain

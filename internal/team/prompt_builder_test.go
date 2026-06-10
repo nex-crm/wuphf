@@ -982,3 +982,43 @@ func TestVisualArtifactForcingBlock_CoversIssueSpecs(t *testing.T) {
 		}
 	}
 }
+
+// TestPromptBuilder_PoliciesFilteredByAgentAssignment pins the B3
+// always-loaded contract for policies: a policy scoped to another agent
+// stays OUT of this agent's prompt; nil-scope (all agents) and own-scope
+// policies are rendered.
+func TestPromptBuilder_PoliciesFilteredByAgentAssignment(t *testing.T) {
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "WUPHF Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "eng", Name: "Engineer"},
+			}
+		},
+		policies: func() []officePolicy {
+			return []officePolicy{
+				{ID: "a", Rule: "applies to everyone"},
+				{ID: "b", Rule: "eng-only deploy checklist", Agents: []string{"eng"}},
+				{ID: "c", Rule: "ceo-only hiring review", Agents: []string{"ceo"}},
+			}
+		},
+		nameFor: func(slug string) string { return slug },
+	}
+
+	eng := pb.Build("eng")
+	if !strings.Contains(eng, "applies to everyone") || !strings.Contains(eng, "eng-only deploy checklist") {
+		t.Fatalf("eng prompt must carry all-agents + eng-scoped policies:\n%s", eng)
+	}
+	if strings.Contains(eng, "ceo-only hiring review") {
+		t.Fatalf("eng prompt must NOT carry a policy scoped to another agent")
+	}
+
+	ceo := pb.Build("ceo")
+	if !strings.Contains(ceo, "ceo-only hiring review") || strings.Contains(ceo, "eng-only deploy checklist") {
+		t.Fatalf("ceo prompt scope filter broken:\n%s", ceo)
+	}
+}
