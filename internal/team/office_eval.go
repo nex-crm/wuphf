@@ -164,6 +164,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"turn-journal", evalJobTurnJournal},
 		{"compounding-loop", evalJobCompoundingLoop},
 		{"completion-hook", evalJobCompletionHook},
+		{"entity-articles", evalJobEntityArticles},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))
@@ -667,5 +668,155 @@ func evalJobCompletionHook(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	r.add(job, "reopen re-enqueues the owner's headless turn",
 		executable && strings.HasPrefix(dispatched, "eng\n") && strings.Contains(dispatched, taskID),
 		fmt.Sprintf("lifecycle=%s status=%q dispatched=%d chars", reopened.LifecycleState, strings.TrimSpace(reopened.status), len(dispatched)), "")
+	return nil
+}
+
+// evalJobEntityArticles: the B2 entity wiki articles (entity_article.go,
+// core-loop step 7.2). A done task whose facts touch two entities must
+// deterministically produce one article per entity at the stable brief
+// path, each [[wikilinking]] the other (backlinks via the entity graph),
+// each citing its claims with footnotes that reference the source task and
+// artifact. A second done task touching the same entity UPDATES the same
+// file — no duplicate article, the new fact appended. No LLM anywhere: the
+// skeleton is pure template assembly.
+func evalJobEntityArticles(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "entity-articles"
+	fx.broker.mu.Lock()
+	worker := fx.broker.wikiWorker
+	fx.broker.factLog = NewFactLog(worker)
+	fx.broker.entityGraph = NewEntityGraph(worker)
+	fx.broker.mu.Unlock()
+	root := worker.Repo().Root()
+
+	// runTask drives one defined task to done (complete → approve when the
+	// review template demands it) and runs the distillation trigger
+	// synchronously — idempotent + single-flight against the goroutine
+	// MutateTask already queued.
+	runTask := func(title, details, goal, deliverable, artifact string) (string, error) {
+		created, err := fx.broker.MutateTask(TaskPostRequest{
+			Action: "create", Channel: "general", Title: title,
+			Details: details, Owner: "eng", CreatedBy: "ceo",
+		})
+		if err != nil {
+			return "", err
+		}
+		id := created.Task.ID
+		if _, err := fx.broker.MutateTask(TaskPostRequest{
+			Action: "define", ID: id, Channel: "general", CreatedBy: "ceo",
+			Definition: &TaskDefinition{
+				Goal:            goal,
+				Deliverables:    []TaskDeliverable{{Name: deliverable, Format: "markdown in the wiki"}},
+				SuccessCriteria: []string{deliverable + " published to the wiki"},
+			},
+		}); err != nil {
+			return "", err
+		}
+		if _, err := fx.broker.MutateTask(TaskPostRequest{
+			Action: "complete", ID: id, Channel: "general", CreatedBy: "eng", ArtifactPath: artifact,
+		}); err != nil {
+			return "", err
+		}
+		if cur := fx.broker.TaskByID(id); cur != nil && !strings.EqualFold(strings.TrimSpace(cur.status), "done") {
+			if _, err := fx.broker.MutateTask(TaskPostRequest{
+				Action: "approve", ID: id, Channel: "general", CreatedBy: "ceo", ArtifactPath: artifact,
+			}); err != nil {
+				return "", err
+			}
+		}
+		fx.broker.distillCompletedTask(id)
+		return id, nil
+	}
+
+	// waitForArticle polls the stable article path until it contains every
+	// needle (the async distill goroutine may own the single-flight slot).
+	waitForArticle := func(relPath string, needles ...string) string {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+			if err == nil {
+				body := string(content)
+				ok := true
+				for _, n := range needles {
+					if !strings.Contains(body, n) {
+						ok = false
+						break
+					}
+				}
+				if ok {
+					return body
+				}
+			}
+			if time.Now().After(deadline) {
+				if err != nil {
+					return ""
+				}
+				return string(content)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	const (
+		companyPath = "team/companies/acme-corp.md"
+		peoplePath  = "team/people/eng.md"
+		artifact1   = "team/playbooks/acme-renewal.md"
+		artifact2   = "team/playbooks/acme-expansion.md"
+	)
+	task1, err := runTask(
+		"Close the Acme Corp renewal",
+		"Coordinate with @eng on the renewal brief for Acme Corp.",
+		"Secure a 12-month renewal from Acme Corp at current seat count",
+		"renewal brief", artifact1,
+	)
+	if err != nil {
+		return err
+	}
+
+	// (a) Both entity articles exist at stable wiki paths.
+	companyArticle := waitForArticle(companyPath, task1)
+	peopleArticle := waitForArticle(peoplePath, task1)
+	r.add(job, "done task writes one article per touched entity at the stable path",
+		companyArticle != "" && peopleArticle != "",
+		fmt.Sprintf("%s=%dB %s=%dB", companyPath, len(companyArticle), peoplePath, len(peopleArticle)), "")
+
+	// (b) Each article wikilinks the other — backlinks render on BOTH sides
+	// from the entity graph's edges.
+	r.add(job, "articles wikilink each other in both directions",
+		strings.Contains(companyArticle, "[[people/eng]]") && strings.Contains(peopleArticle, "[[companies/acme-corp]]"),
+		"", "")
+
+	// (c) Claims carry footnote citations referencing the source task +
+	// artifact: a [^n] marker in the body and a footnote definition that
+	// names the task and links the artifact.
+	cited := strings.Contains(companyArticle, "[^1]") &&
+		strings.Contains(companyArticle, "## References") &&
+		strings.Contains(companyArticle, "Task "+task1) &&
+		strings.Contains(companyArticle, "["+artifact1+"]("+artifact1+")")
+	r.add(job, "every fact-sourced claim carries a footnote citation to its task/artifact", cited, "", "")
+
+	// (d) A second done task touching the same entities UPDATES the same
+	// article file — no duplicate — and appends the new fact.
+	task2, err := runTask(
+		"Draft the Acme Corp expansion proposal",
+		"Work with @eng on the expansion sizing for Acme Corp.",
+		"Draft the Acme Corp expansion proposal for the spring renewal",
+		"expansion proposal", artifact2,
+	)
+	if err != nil {
+		return err
+	}
+	updated := waitForArticle(companyPath, task2)
+	entries, _ := os.ReadDir(filepath.Join(root, "team", "companies"))
+	companyFiles := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "acme-corp") && strings.HasSuffix(e.Name(), ".md") {
+			companyFiles++
+		}
+	}
+	r.add(job, "regeneration updates the same article in place — no duplicate, new fact appended",
+		strings.Contains(updated, task1) && strings.Contains(updated, task2) &&
+			companyFiles == 1 && strings.Count(updated, "\n# ") == 1 &&
+			strings.Contains(updated, "[^2]"),
+		fmt.Sprintf("files=%d len=%dB", companyFiles, len(updated)), "")
 	return nil
 }

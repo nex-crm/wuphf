@@ -17,7 +17,9 @@ package team
 //     multi-word names in goal/deliverables) and records them through the
 //     EXISTING entity fact log + cross-entity graph (entity_facts.go,
 //     entity_graph.go) from the queued distillation goroutine — off the
-//     broker hot path, never under b.mu. LLM enrichment is B2's job.
+//     broker hot path, never under b.mu. After the facts land, B2
+//     (entity_article.go) deterministically regenerates the touched
+//     entities' wiki articles from the same goroutine.
 
 import (
 	"context"

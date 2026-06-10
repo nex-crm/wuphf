@@ -18,6 +18,11 @@ import (
 	"time"
 )
 
+// minimalBriefDisclaimer is the fixed placeholder line MinimalBrief writes.
+// Shared with the entity-article generator (entity_article.go), which drops
+// it when folding a legacy brief into the article's prose section.
+const minimalBriefDisclaimer = "_This page was auto-created when the team encountered a new entity. Facts will be synthesized here as they accumulate._"
+
 // MinimalBrief returns the canonical placeholder brief content for a
 // freshly-minted (ghost) entity that has no synthesized facts yet. The
 // output is deterministic for a given IndexEntity — same input always
@@ -107,7 +112,8 @@ func MinimalBrief(ent IndexEntity) string {
 	// Disclaimer line — italicised so the next synthesis can replace
 	// the body without leaving conflicting prose. Fixed wording so
 	// substrate-rebuild round-trips hold.
-	b.WriteString("_This page was auto-created when the team encountered a new entity. Facts will be synthesized here as they accumulate._\n")
+	b.WriteString(minimalBriefDisclaimer)
+	b.WriteString("\n")
 
 	return b.String()
 }

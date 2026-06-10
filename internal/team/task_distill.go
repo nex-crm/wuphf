@@ -85,6 +85,7 @@ func (b *Broker) distillCompletedTask(taskID string) {
 	llog := b.teamLearningLog
 	factLog := b.factLog
 	graph := b.entityGraph
+	worker := b.wikiWorker
 	b.mu.Unlock()
 	defer func() {
 		b.mu.Lock()
@@ -107,6 +108,12 @@ func (b *Broker) distillCompletedTask(taskID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	recordTaskCompletionEntityFacts(ctx, factLog, graph, task)
+
+	// B2 (entity_article.go): with the facts + graph edges committed, the
+	// touched entities' wiki articles are regenerated deterministically —
+	// the wiki-worker queue serializes the commits, this goroutine is
+	// already off the broker hot path, and no LLM is involved.
+	regenerateTaskEntityArticles(ctx, worker, factLog, graph, task)
 
 	if llog == nil {
 		return
