@@ -255,9 +255,7 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		}
 	}
 	messages := make([]channelMessage, len(b.messages))
-	for i, msg := range b.messages {
-		messages[i] = msg
-	}
+	copy(messages, b.messages)
 	actions := make([]officeActionLog, len(b.actions))
 	for i, action := range b.actions {
 		actions[i] = sanitizeOfficeActionLog(action)
@@ -267,33 +265,21 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 		incidents[i] = sanitizeIncidentRecord(inc)
 	}
 	requests := make([]humanInterview, len(b.requests))
-	for i, req := range b.requests {
-		requests[i] = req
-	}
+	copy(requests, b.requests)
 	approvalAudit := make([]ApprovalAuditEntry, len(b.approvalAudit))
 	for i, entry := range b.approvalAudit {
 		approvalAudit[i] = sanitizeApprovalAuditEntry(entry)
 	}
 	signals := make([]officeSignalRecord, len(b.signals))
-	for i, sig := range b.signals {
-		signals[i] = sig
-	}
+	copy(signals, b.signals)
 	decisions := make([]officeDecisionRecord, len(b.decisions))
-	for i, dec := range b.decisions {
-		decisions[i] = dec
-	}
+	copy(decisions, b.decisions)
 	watchdogs := make([]watchdogAlert, len(b.watchdogs))
-	for i, alert := range b.watchdogs {
-		watchdogs[i] = alert
-	}
+	copy(watchdogs, b.watchdogs)
 	tasks := make([]teamTask, len(b.tasks))
-	for i, task := range b.tasks {
-		tasks[i] = task
-	}
+	copy(tasks, b.tasks)
 	scheduler := make([]schedulerJob, len(b.scheduler))
-	for i, job := range b.scheduler {
-		scheduler[i] = job
-	}
+	copy(scheduler, b.scheduler)
 	state := brokerState{
 		ChannelStore:       channelStoreRaw,
 		Messages:           messages,
