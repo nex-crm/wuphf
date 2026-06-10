@@ -163,6 +163,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"dependency-handoff", evalJobDependencyHandoff},
 		{"turn-journal", evalJobTurnJournal},
 		{"compounding-loop", evalJobCompoundingLoop},
+		{"completion-hook", evalJobCompletionHook},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))
@@ -504,5 +505,167 @@ func evalJobCompoundingLoop(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	r.add(job, "verified outcome compounds into the next similar task's packet",
 		strings.Contains(packet, "Verified outcome") && strings.Contains(packet, "billing webhooks"),
 		"done(verified) → auto-learning → injected into the next matching task with zero human steps (the moat loop, U4.1+U2.2)", "")
+	return nil
+}
+
+// evalJobCompletionHook: the B1 deterministic completion hook
+// (task_completion_hook.go, core-loop steps 6–7.1). One task journeys
+// through all four contracts: (a) a task with a Definition cannot reach
+// done without a delivered artifact; (b) reaching done with the artifact
+// posts the done-post to the task channel and raises the Inbox notice;
+// (c) entity facts for the mentioned entities land in the team knowledge
+// graph through the existing fact-log path; (d) reopen re-engages the
+// owner through the same wake path a fresh assignment uses.
+func evalJobCompletionHook(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "completion-hook"
+	// Wire the entity fact log + cross-entity graph onto the fixture broker.
+	// Production wiring rides ensureEntitySynthesizer; the eval skips the
+	// LLM synthesizer — the hook writes facts directly.
+	fx.broker.mu.Lock()
+	worker := fx.broker.wikiWorker
+	fx.broker.factLog = NewFactLog(worker)
+	fx.broker.entityGraph = NewEntityGraph(worker)
+	factLog := fx.broker.factLog
+	fx.broker.mu.Unlock()
+
+	created, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Close the Acme Corp renewal",
+		Details: "Coordinate with @eng on the renewal brief for Acme Corp.",
+		Owner:   "eng", CreatedBy: "ceo",
+	})
+	if err != nil {
+		return err
+	}
+	taskID := created.Task.ID
+	if _, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "define", ID: taskID, Channel: "general", CreatedBy: "ceo",
+		Definition: &TaskDefinition{
+			Goal:            "Secure a 12-month renewal from Acme Corp at current seat count",
+			Deliverables:    []TaskDeliverable{{Name: "renewal brief", Format: "markdown in the wiki"}},
+			SuccessCriteria: []string{"Renewal brief published to the wiki"},
+		},
+	}); err != nil {
+		return err
+	}
+
+	// (a) Whichever action would land the task in done must be blocked while
+	// no artifact is on record. complete may route through review first
+	// depending on the task's review template, so drive the path generically.
+	finish := func(artifactPath string) error {
+		if _, err := fx.broker.MutateTask(TaskPostRequest{
+			Action: "complete", ID: taskID, Channel: "general", CreatedBy: "eng",
+			ArtifactPath: artifactPath,
+		}); err != nil {
+			return err
+		}
+		if cur := fx.broker.TaskByID(taskID); cur != nil && !strings.EqualFold(strings.TrimSpace(cur.status), "done") {
+			_, err := fx.broker.MutateTask(TaskPostRequest{
+				Action: "approve", ID: taskID, Channel: "general", CreatedBy: "ceo",
+				ArtifactPath: artifactPath,
+			})
+			return err
+		}
+		return nil
+	}
+	gateErr := finish("")
+	var mutationErr *TaskMutationError
+	notDone := fx.broker.TaskByID(taskID) != nil && !strings.EqualFold(strings.TrimSpace(fx.broker.TaskByID(taskID).status), "done")
+	r.add(job, "defined task cannot reach done without an artifact",
+		errors.As(gateErr, &mutationErr) && mutationErr.Kind == TaskMutationArtifactRequired &&
+			strings.Contains(mutationErr.Message, "artifact_path") && notDone,
+		fmt.Sprintf("err=%v", gateErr), "")
+
+	// (b) Same finishing action with artifact_path lands done, posts the
+	// done-post to the task channel, and raises the non-blocking Inbox notice.
+	const artifact = "team/playbooks/acme-renewal.md"
+	if err := finish(artifact); err != nil {
+		r.add(job, "defined task reaches done once artifact_path is passed", false, err.Error(), "")
+		return nil
+	}
+	done := fx.broker.TaskByID(taskID)
+	r.add(job, "defined task reaches done once artifact_path is passed",
+		done != nil && strings.EqualFold(strings.TrimSpace(done.status), "done") && done.Artifact == artifact,
+		fmt.Sprintf("status=%q artifact=%q", strings.TrimSpace(done.status), done.Artifact), "")
+
+	fx.broker.mu.Lock()
+	donePost := ""
+	for _, msg := range fx.broker.messages {
+		if msg.Kind == taskDeliveredMessageKind && msg.SourceTaskID == taskID {
+			donePost = msg.Content
+		}
+	}
+	noticeFound := false
+	for _, req := range fx.broker.requests {
+		if req.Kind == "notice" && strings.TrimSpace(req.IssueID) == taskID && requestIsActive(req) && !req.Blocking {
+			noticeFound = true
+		}
+	}
+	fx.broker.mu.Unlock()
+	r.add(job, "done-post lands in the task channel with summary + artifact link",
+		strings.Contains(donePost, "delivered:") && strings.Contains(donePost, "Renewal brief published to the wiki") && strings.Contains(donePost, artifact),
+		fmt.Sprintf("post=%q", donePost), "")
+	r.add(job, "done raises a non-blocking Inbox notice", noticeFound, "", "")
+
+	// (c) Entity facts: the task mentions two entities (@eng, "Acme Corp").
+	// The distillation goroutine records them via the existing fact-log
+	// path. MutateTask already queued it; run it synchronously too
+	// (idempotent + single-flight) and poll for the async wiki commits.
+	fx.broker.distillCompletedTask(taskID)
+	waitForFacts := func(kind EntityKind, slug string) []Fact {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			facts, _ := factLog.List(kind, slug)
+			if len(facts) > 0 || time.Now().After(deadline) {
+				return facts
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	companyFacts := waitForFacts(EntityKindCompanies, "acme-corp")
+	peopleFacts := waitForFacts(EntityKindPeople, "eng")
+	factsCarryTask := len(companyFacts) > 0 && len(peopleFacts) > 0 &&
+		strings.Contains(companyFacts[0].Text, taskID) && strings.Contains(companyFacts[0].Text, artifact) &&
+		strings.Contains(peopleFacts[0].Text, taskID)
+	r.add(job, "entity facts for both mentioned entities reach the team KG",
+		factsCarryTask,
+		fmt.Sprintf("companies/acme-corp=%d people/eng=%d", len(companyFacts), len(peopleFacts)), "")
+
+	// (d) Reopen re-engages the owner: the task lands back in an executable
+	// lifecycle state (the exact gate sendTaskUpdate dispatches on) and the
+	// owner's headless turn is enqueued through the same wake path a fresh
+	// assignment uses. The run-turn override captures the dispatched turn.
+	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "reopen", ID: taskID, Channel: "general", CreatedBy: "ceo"}); err != nil {
+		r.add(job, "reopen re-enqueues the owner's headless turn", false, err.Error(), "")
+		return nil
+	}
+	reopened := fx.broker.TaskByID(taskID)
+	executable := reopened != nil && isExecutableTeamTaskStatus(reopened.LifecycleState) &&
+		strings.EqualFold(strings.TrimSpace(reopened.status), "in_progress")
+	woke := make(chan string, 1)
+	stub := func(_ *Launcher, _ context.Context, slug, notification string, _ ...string) error {
+		select {
+		case woke <- slug + "\n" + notification:
+		default:
+		}
+		return nil
+	}
+	prior := headlessCodexRunTurnOverride.Load()
+	headlessCodexRunTurnOverride.Store(&stub)
+	defer headlessCodexRunTurnOverride.Store(prior)
+	fx.launcher.sendTaskUpdate(
+		notificationTarget{Slug: "eng"},
+		officeActionLog{Kind: "task_updated", Actor: "ceo", Channel: reopened.Channel, RelatedID: taskID},
+		*reopened,
+		"Task reopened — resume work.",
+	)
+	dispatched := ""
+	select {
+	case dispatched = <-woke:
+	case <-time.After(8 * time.Second):
+	}
+	fx.launcher.stopHeadlessWorkers()
+	r.add(job, "reopen re-enqueues the owner's headless turn",
+		executable && strings.HasPrefix(dispatched, "eng\n") && strings.Contains(dispatched, taskID),
+		fmt.Sprintf("lifecycle=%s status=%q dispatched=%d chars", reopened.LifecycleState, strings.TrimSpace(reopened.status), len(dispatched)), "")
 	return nil
 }

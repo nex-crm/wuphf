@@ -660,6 +660,11 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacket(slug string, actio
 		lines = append(lines, "- DEFINITION (the contract you execute against):")
 		lines = append(lines, defLines...)
 	}
+	if artifact := strings.TrimSpace(task.Artifact); artifact != "" {
+		lines = append(lines, fmt.Sprintf("- Delivered artifact: %s", artifact))
+	} else if task.Definition != nil {
+		lines = append(lines, "- Artifact gate: this task has a Definition, so it cannot reach done until you publish the deliverable to the wiki and pass artifact_path (wiki-relative path or visual-artifact id) on team_task action=complete.")
+	}
 	if details := strings.TrimSpace(task.Details); details != "" {
 		lines = append(lines, fmt.Sprintf("- Details: %s", truncate(details, taskDetailsClipChars)))
 	}

@@ -83,6 +83,8 @@ func (b *Broker) distillCompletedTask(taskID string) {
 		found = true
 	}
 	llog := b.teamLearningLog
+	factLog := b.factLog
+	graph := b.entityGraph
 	b.mu.Unlock()
 	defer func() {
 		b.mu.Lock()
@@ -90,10 +92,23 @@ func (b *Broker) distillCompletedTask(taskID string) {
 		b.mu.Unlock()
 	}()
 
-	if !found || llog == nil || task.System {
+	if !found || task.System {
 		return
 	}
 	if !strings.EqualFold(strings.TrimSpace(task.status), "done") {
+		return
+	}
+
+	// B1 entity extraction (task_completion_hook.go): every non-system done
+	// task records its deterministically extracted entities + associations
+	// into the team knowledge graph via the existing fact-log path. Runs
+	// before the verification gate below — entity facts do not require a
+	// machine-verified outcome, learnings do.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	recordTaskCompletionEntityFacts(ctx, factLog, graph, task)
+
+	if llog == nil {
 		return
 	}
 	res := task.VerificationResult
@@ -138,8 +153,6 @@ func (b *Broker) distillCompletedTask(taskID string) {
 		CreatedBy:  createdBy,
 		CreatedAt:  time.Now().UTC(),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	if _, err := llog.AppendVerified(ctx, rec); err != nil {
 		// Surface, never swallow: a verified outcome that fails to land in
 		// team memory is a broken compounding loop, not a cosmetic miss.

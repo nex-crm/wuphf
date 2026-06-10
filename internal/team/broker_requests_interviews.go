@@ -94,6 +94,15 @@ func requestOptionDefaults(kind string) ([]interviewOption, string) {
 			{ID: "answer_directly", Label: "Answer directly", Description: "Respond in your own words below.", RequiresText: true, TextHint: "Type your answer for the team."},
 			{ID: "need_more_context", Label: "Need more context", Description: "Ask the office to bring back more context before you decide.", RequiresText: true, TextHint: "Type what context is missing or what should be clarified next."},
 		}, "answer_directly"
+	case "notice":
+		// Non-blocking FYI raised by the deterministic completion hook
+		// (task_completion_hook.go): "<task> delivered ...". One option —
+		// acknowledging clears the row from the Inbox. Never blocking,
+		// never required (requestNeedsHumanDecision falls through to
+		// req.Required for this kind).
+		return []interviewOption{
+			{ID: "acknowledge", Label: "Acknowledge", Description: "Got it — clear this notice."},
+		}, "acknowledge"
 	case "freeform", "secret":
 		return []interviewOption{
 			{ID: "proceed", Label: "Proceed", Description: "Let the team handle it with their best judgment."},
@@ -233,6 +242,8 @@ func formatRequestAnswerMessage(req humanInterview, answer interviewAnswer) stri
 		return fmt.Sprintf("Connected the integration @%s needs.", req.From)
 	case "mark_done":
 		return fmt.Sprintf("Marked @%s's manual handoff done.", req.From)
+	case "acknowledge":
+		return fmt.Sprintf("Acknowledged @%s's notice.", req.From)
 	case "skip":
 		return fmt.Sprintf("Skipped @%s's request.", req.From)
 	}

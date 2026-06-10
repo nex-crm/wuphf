@@ -21,6 +21,11 @@ const (
 	// TaskMutationVerificationFailed marks a complete/approve blocked by a
 	// failing definition-of-done check (task_verification.go, U1.1).
 	TaskMutationVerificationFailed TaskMutationErrorKind = "verification_failed"
+	// TaskMutationArtifactRequired marks a mutation that would land a task
+	// with a Definition in done without a delivered artifact on record
+	// (core-loop B1, task_completion_hook.go). Pass artifact_path on the
+	// completing call to clear it.
+	TaskMutationArtifactRequired TaskMutationErrorKind = "artifact_required"
 )
 
 type TaskMutationError struct {
@@ -204,7 +209,7 @@ func writeTaskMutationHTTPError(w http.ResponseWriter, err error) {
 		status = http.StatusForbidden
 	case TaskMutationNotFound:
 		status = http.StatusNotFound
-	case TaskMutationConflict:
+	case TaskMutationConflict, TaskMutationArtifactRequired, TaskMutationVerificationFailed:
 		status = http.StatusConflict
 	case TaskMutationWorktreeFailed, TaskMutationPersistFailed:
 		status = http.StatusInternalServerError
@@ -243,9 +248,12 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 	// directly via applyLifecycleStateLocked; the reconciler must not
 	// overwrite their authoritative value with a status-derived guess.
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "request_changes", "submit_for_review", "comment", "reject", "archive", "define":
+	case "request_changes", "submit_for_review", "comment", "reject", "archive", "define", "reopen":
 		// define is a metadata-only mutation (R4 intake contract); it must
 		// not nudge reviewState off whatever the lifecycle layer set.
+		// reopen writes the full Drafting/Running tuple via
+		// applyLifecycleStateLocked; reconciling it back to not_required
+		// breaks the inverse migration map (Drafting → Ready drift).
 		return
 	}
 	if !taskNeedsStructuredReview(task) {
@@ -663,17 +671,28 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			}
 			appendDetails = true
 		case "reopen":
-			// Reopen a closed (rejected/cancelled/approved) Issue back
-			// into drafting so the human can re-approve to restart work.
-			// Clears the terminal state markers; applyLifecycleStateLocked
-			// below restores the rest of the drafting tuple.
-			task.status = "open"
-			task.reviewState = "pending_review"
-			task.pipelineStage = "draft"
-			task.blocked = false
+			// Reopen a closed (rejected/cancelled/approved) Issue. When the
+			// task still has a real owner, reopen straight into Running so
+			// the owner is RE-ENGAGED through the same wake path a fresh
+			// assignment uses: the task_updated action appended below routes
+			// through notifyTaskActionsLoop → deliverTaskNotification →
+			// enqueueHeadlessCodexTurn, and sendTaskUpdate only dispatches
+			// executable lifecycle states. Reopening into Drafting left
+			// reopened tasks as conversational dead zones (core-loop B1 /
+			// ICP-eval finding) — the human's reopen click IS the restart
+			// authorization, and reopen is already CEO/human-scoped.
+			// Ownerless (or auto-parked) tasks keep the Drafting landing so
+			// the human can staff + approve as before.
+			reopenTarget := LifecycleStateDrafting
+			if owner := strings.TrimSpace(task.Owner); owner != "" && !isAutoOwner(owner) {
+				reopenTarget = LifecycleStateRunning
+			}
 			task.CompletedAt = ""
-			task.LifecycleState = LifecycleStateDrafting
-			if err := b.applyLifecycleStateLocked(task, LifecycleStateDrafting); err != nil {
+			// Pre-set LifecycleState so applyLifecycleStateLocked sees
+			// prev==new and suppresses the redundant lifecycle chat card
+			// (same pattern the Drafting-only reopen used).
+			task.LifecycleState = reopenTarget
+			if err := b.applyLifecycleStateLocked(task, reopenTarget); err != nil {
 				return TaskResponse{}, taskMutationError(TaskMutationConflict, "could not reopen issue", err)
 			}
 			appendDetails = true
@@ -822,12 +841,35 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		if worktreeBranch := strings.TrimSpace(body.WorktreeBranch); worktreeBranch != "" {
 			task.WorktreeBranch = worktreeBranch
 		}
+		if artifactPath := strings.TrimSpace(body.ArtifactPath); artifactPath != "" {
+			if err := validateTaskArtifactPath(artifactPath); err != nil {
+				rollbackTask()
+				return TaskResponse{}, taskMutationError(TaskMutationInvalid, err.Error(), err)
+			}
+			task.Artifact = artifactPath
+		}
 		if !strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			task.CompletedAt = ""
 		}
 		reconcileTaskReviewState(task, action)
 		b.reindexTaskLifecycleFromLegacyLocked(task)
 		syncTaskMemoryWorkflow(task, now)
+		reachedDone := strings.EqualFold(strings.TrimSpace(task.status), "done") &&
+			!strings.EqualFold(strings.TrimSpace(beforeStatus), "done")
+		// Artifact gate (core-loop B1): a task with a Definition cannot land
+		// in done without a delivered artifact on record. Tasks without a
+		// Definition keep legacy behavior — additive rollout.
+		if reachedDone && task.Definition != nil && strings.TrimSpace(task.Artifact) == "" {
+			rollbackTask()
+			return TaskResponse{}, taskMutationError(
+				TaskMutationArtifactRequired,
+				fmt.Sprintf(
+					"task %s has a Definition, so it cannot reach done without a delivered artifact. Publish the deliverable to the wiki, then retry this %s with artifact_path set to the wiki-relative path (e.g. \"team/playbooks/launch.md\") or the visual-artifact id.",
+					task.ID, action,
+				),
+				nil,
+			)
+		}
 		if strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			overrideActor := strings.TrimSpace(body.MemoryWorkflowOverrideActor)
 			if overrideActor == "" {
@@ -892,17 +934,25 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			b.postTaskRejectedNotificationsLocked(actor, task, feedback)
 			b.AppendPacketFeedbackLocked(task.ID, actor, feedback)
 		}
+		if reachedDone {
+			// Deterministic done-post (core-loop B1): announce the delivery
+			// in the task channel and raise a non-blocking Inbox notice.
+			// Runs before saveLocked so the message + notice persist with
+			// the completing mutation. No LLM, no I/O — string assembly only.
+			b.postTaskDeliveredLocked(task)
+		}
 		if err := b.saveLocked(); err != nil {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
 		}
 		b.emitTaskTransitionAutoNotebook(task, beforeStatus, actor)
 		b.flushPendingAutoNotebookTransitionsLocked(pendingCascade, "system")
-		// U4.1 auto-distillation: a task that just reached done with a
-		// passing verification becomes a learning automatically. Queued as
-		// a goroutine so the learning-log write runs after b.mu releases
-		// (same hazard class that killed the old auto-notebook-writer).
-		if strings.EqualFold(strings.TrimSpace(task.status), "done") && !strings.EqualFold(strings.TrimSpace(beforeStatus), "done") {
+		// U4.1 auto-distillation + B1 entity extraction: a task that just
+		// reached done becomes a learning (when machine-verified) and its
+		// entities/associations land in the team knowledge graph. Queued as
+		// a goroutine so the learning-log + fact-log writes run after b.mu
+		// releases (same hazard class that killed the old auto-notebook-writer).
+		if reachedDone {
 			b.queueTaskDistillation(task.ID)
 		}
 		return TaskResponse{Task: *task}, nil

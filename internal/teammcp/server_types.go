@@ -265,6 +265,7 @@ type TeamTaskArgs struct {
 	VerificationSpec     string   `json:"verification_spec,omitempty" jsonschema:"The check itself: the shell command, artifact path/glob, or URL for verification_kind"`
 	VerificationRequired bool     `json:"verification_required,omitempty" jsonschema:"When true the broker runs the check on complete/approve and BLOCKS the transition until it passes. Prefer true whenever a reliable check exists."`
 	ParentIssueID        string   `json:"parent_issue_id,omitempty" jsonschema:"Parent Issue id when this is a sub-issue created INSIDE an existing Issue (create action only). Leave empty for top-level Issues. Sub-issues inherit the parent's channel and surface under the parent on the Issue detail view."`
+	ArtifactPath         string   `json:"artifact_path,omitempty" jsonschema:"Delivered-artifact reference: a wiki-relative path (e.g. team/playbooks/launch.md) or a visual-artifact id. Pass it on complete/approve (or submit_for_review). A task with a Definition CANNOT reach done until an artifact is recorded — publish the deliverable to the wiki first, then complete with this set."`
 	// action=define fields — the R4 structured intake contract. Goal is
 	// required for define; the broker stamps defined_at itself.
 	Goal            string                `json:"goal,omitempty" jsonschema:"For the define action only (required there): what is different in the world when this task is done, and why now. One or two sentences."`

@@ -47,11 +47,18 @@ type TaskPostRequest struct {
 	// same auth class as the other scope-shaping actions. When a success
 	// criterion is machine-checkable and the task has no verification yet,
 	// pass VerificationKind/Spec/Required in the same define call.
-	Definition                   *TaskDefinition `json:"definition,omitempty"`
-	MemoryWorkflowOverride       bool            `json:"memory_workflow_override"`
-	MemoryWorkflowOverrideActor  string          `json:"memory_workflow_override_actor"`
-	MemoryWorkflowOverrideReason string          `json:"memory_workflow_override_reason"`
-	OverrideReason               string          `json:"override_reason"`
+	Definition *TaskDefinition `json:"definition,omitempty"`
+	// ArtifactPath records the delivered artifact on the task (core-loop B1):
+	// a wiki-relative path (e.g. "team/playbooks/launch.md") or a
+	// visual-artifact id. Pass it on complete/approve (or any earlier
+	// mutation). A task WITH a Definition cannot reach done until an
+	// artifact is recorded; the gate returns TaskMutationArtifactRequired
+	// explaining exactly this field.
+	ArtifactPath                 string `json:"artifact_path,omitempty"`
+	MemoryWorkflowOverride       bool   `json:"memory_workflow_override"`
+	MemoryWorkflowOverrideActor  string `json:"memory_workflow_override_actor"`
+	MemoryWorkflowOverrideReason string `json:"memory_workflow_override_reason"`
+	OverrideReason               string `json:"override_reason"`
 }
 
 type TaskAckRequest struct {

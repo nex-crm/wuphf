@@ -308,6 +308,12 @@ type teamTask struct {
 	// before the task is staffed; rendered prominently in execution packets.
 	// Nil on legacy tasks and on work created before intake defined it.
 	Definition *TaskDefinition `json:"definition,omitempty"`
+	// Artifact is the delivered-artifact reference for the completion hook
+	// (core-loop B1, task_completion_hook.go): a wiki-relative path or
+	// visual-artifact id recorded via TaskPostRequest.ArtifactPath. Tasks
+	// WITH a Definition cannot reach done until this is set; tasks without
+	// one keep legacy behavior. Wire key "artifact" is additive.
+	Artifact string `json:"artifact,omitempty"`
 	// Ledger is the per-turn journal (task_ledger.go, U2.3): distilled
 	// records of what each headless turn on this task said, mutated, and
 	// how it ended. Rendered into every participant's packet as the living
@@ -400,6 +406,7 @@ type teamTaskWire struct {
 	Verification         *TaskVerification       `json:"verification,omitempty"`
 	VerificationResult   *TaskVerificationResult `json:"verification_result,omitempty"`
 	Definition           *TaskDefinition         `json:"definition,omitempty"`
+	Artifact             string                  `json:"artifact,omitempty"`
 	Ledger               []TaskLedgerEntry       `json:"ledger,omitempty"`
 	CreatedAt            string                  `json:"created_at"`
 	UpdatedAt            string                  `json:"updated_at"`
@@ -450,6 +457,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		Verification:         t.Verification,
 		VerificationResult:   t.VerificationResult,
 		Definition:           t.Definition,
+		Artifact:             t.Artifact,
 		Ledger:               t.Ledger,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
@@ -502,6 +510,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.Verification = w.Verification
 	t.VerificationResult = w.VerificationResult
 	t.Definition = w.Definition
+	t.Artifact = w.Artifact
 	t.Ledger = w.Ledger
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt

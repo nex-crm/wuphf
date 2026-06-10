@@ -189,6 +189,12 @@ export interface Task {
   verification_result?: TaskVerificationResult;
   /** Structured intake contract (R4). Absent until the CEO/human defines. */
   definition?: TaskDefinition;
+  /**
+   * Delivered-artifact reference (core-loop B1): a wiki-relative path or
+   * visual-artifact id recorded by the completing mutation. Tasks with a
+   * `definition` cannot reach done until this is set.
+   */
+  artifact?: string;
 }
 
 /**

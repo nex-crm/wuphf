@@ -133,6 +133,11 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 		}
 		payload["definition"] = definition
 	}
+	if ap := strings.TrimSpace(args.ArtifactPath); ap != "" {
+		// Delivered-artifact reference (core-loop B1). The broker records it
+		// on any mutation; tasks with a Definition are gated on it at done.
+		payload["artifact_path"] = ap
+	}
 	if action == "create" || action == "define" {
 		// Machine-checkable definition of done. On create it scopes the
 		// task; on define it rides alongside a machine-checkable success
