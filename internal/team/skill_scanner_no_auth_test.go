@@ -153,3 +153,22 @@ func TestSkillScannerOnlyWrapsAuthErrors(t *testing.T) {
 		}
 	}
 }
+
+// syncLogBuffer is a mutex-guarded buffer safe to install as the global
+// slog sink while unrelated goroutines may still be logging.
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
