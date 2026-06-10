@@ -127,13 +127,18 @@ func Deliver(
 		return rec, ErrFinalScanFailed
 	}
 
+	rec.RenderedHash = hashBytes(finalMention.Content, finalThread.Content)
+	rec.TokenCount = estimateTokens(finalMention.Content) + estimateTokens(finalThread.Content)
 	final := PackedDelegation{
 		MentionText:   finalMention.Content,
 		ThreadContext: finalThread.Content,
-		sealed:        true,
+		// Carry the audit record — including the destination ChannelID/ThreadTS —
+		// on the sealed delegation: the bridge reads where to post from
+		// d.Injection. Dropping it ships an undeliverable delegation (the live
+		// Slack probe caught exactly that).
+		Injection: rec,
+		sealed:    true,
 	}
-	rec.RenderedHash = hashBytes(final.MentionText, final.ThreadContext)
-	rec.TokenCount = estimateTokens(final.MentionText) + estimateTokens(final.ThreadContext)
 
 	// 5. Pending -> post -> sent/failed.
 	rec.Status = DeliveryPending
