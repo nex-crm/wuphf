@@ -120,3 +120,29 @@ func TestSlackResolveUserCachesBotAsNonHuman(t *testing.T) {
 		t.Fatal("cached bot user must stay non-human")
 	}
 }
+
+// Only request-bearing payload envelopes may be Acked. Acking a connection-
+// lifecycle event like "hello" makes Slack drop the Socket Mode connection,
+// which caused a ~10s reconnect loop where no event ever landed (caught live).
+func TestSocketEventNeedsAck(t *testing.T) {
+	for _, et := range []socketmode.EventType{
+		socketmode.EventTypeEventsAPI,
+		socketmode.EventTypeInteractive,
+		socketmode.EventTypeSlashCommand,
+	} {
+		if !socketEventNeedsAck(et) {
+			t.Fatalf("%q should be acked", et)
+		}
+	}
+	for _, et := range []socketmode.EventType{
+		socketmode.EventTypeHello,
+		socketmode.EventTypeConnected,
+		socketmode.EventTypeConnecting,
+		socketmode.EventTypeDisconnect,
+		socketmode.EventTypeIncomingError,
+	} {
+		if socketEventNeedsAck(et) {
+			t.Fatalf("%q must NOT be acked (acking it drops the Socket Mode connection)", et)
+		}
+	}
+}

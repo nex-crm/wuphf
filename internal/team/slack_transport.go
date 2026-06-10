@@ -91,6 +91,21 @@ type socketModeRunner struct {
 	client *socketmode.Client
 }
 
+// socketEventNeedsAck reports whether a Socket Mode envelope expects an Ack.
+// Only the request-bearing payload types do; connection-lifecycle events
+// (connecting/connected/hello/disconnect/incoming_error) must NOT be Acked —
+// acking them makes Slack drop the connection.
+func socketEventNeedsAck(t socketmode.EventType) bool {
+	switch t {
+	case socketmode.EventTypeEventsAPI,
+		socketmode.EventTypeInteractive,
+		socketmode.EventTypeSlashCommand:
+		return true
+	default:
+		return false
+	}
+}
+
 // Run starts the Socket Mode WebSocket loop in a sibling goroutine, drains the
 // Events channel and dispatches each event to handle, and blocks until ctx is
 // cancelled or RunContext returns. RunContext owns reconnection internally; a
@@ -119,8 +134,13 @@ func (r *socketModeRunner) Run(ctx context.Context, handle func(socketmode.Event
 			// Host write returns false → no Ack → Slack redelivers (the broker
 			// dedupes by ExternalID = the message ts). This makes inbound
 			// at-least-once instead of silently at-most-once.
+			//
+			// Only Ack the envelope types Slack expects an ack for (events_api,
+			// interactive, slash_command). Acking a connection-lifecycle envelope
+			// like "hello" makes Slack drop the connection — that caused a ~10s
+			// reconnect loop where no event ever landed.
 			ack := handle(evt)
-			if evt.Request != nil && ack {
+			if evt.Request != nil && ack && socketEventNeedsAck(evt.Type) {
 				_ = r.client.Ack(*evt.Request)
 			}
 		}
