@@ -95,7 +95,14 @@ export function TypingIndicator({ channel }: { channel?: string } = {}) {
             </>
           ) : null}
         </div>
-        <ThinkingLoader label={label} phrases={OFFICE_LOADING_PHRASES} />
+        {/* When the broker reports REAL progress (detail), the bubble leads
+            with it — the rotating Office gags only fill genuinely unknown
+            waits. ICP-eval finding: jokes must never be the only signal
+            while real work (and real money) is in flight. */}
+        <ThinkingLoader
+          label={label}
+          phrases={detail ? [detail] : OFFICE_LOADING_PHRASES}
+        />
       </div>
     </div>
   );

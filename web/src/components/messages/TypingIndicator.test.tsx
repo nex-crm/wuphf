@@ -105,7 +105,9 @@ describe("<TypingIndicator>", () => {
     render(<TypingIndicator />);
 
     expect(screen.getByText("PM is typing...")).toBeInTheDocument();
-    expect(screen.getByText("drafting figure")).toBeInTheDocument();
+    // Header detail AND the bubble now both lead with the honest progress
+    // string (jokes only fill unknown waits) — assert the doubled presence.
+    expect(screen.getAllByText("drafting figure")).toHaveLength(2);
   });
 
   it("falls back to lower-priority progress fields when liveActivity is absent", () => {
@@ -124,7 +126,7 @@ describe("<TypingIndicator>", () => {
 
     render(<TypingIndicator />);
 
-    expect(screen.getByText("scoping issue")).toBeInTheDocument();
+    expect(screen.getAllByText("scoping issue")).toHaveLength(2);
   });
 
   it("suppresses the detail when several agents are active to avoid implying shared progress", () => {
