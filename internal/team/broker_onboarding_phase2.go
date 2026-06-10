@@ -72,8 +72,8 @@ func (b *Broker) advancePhase(s *onboarding.State, next string) error {
 	}
 
 	if next == onboarding.PhaseDraft || next == onboarding.PhaseApprove {
-		if err := b.ensureOnboardingFirstIssueDraft(s); err != nil {
-			return fmt.Errorf("onboarding: first issue draft: %w", err)
+		if err := b.ensureOnboardingFirstIssue(s); err != nil {
+			return fmt.Errorf("onboarding: first issue: %w", err)
 		}
 	}
 
@@ -217,7 +217,11 @@ func (b *Broker) runSeedPhase(s *onboarding.State) error {
 	return nil
 }
 
-func (b *Broker) ensureOnboardingFirstIssueDraft(s *onboarding.State) error {
+// ensureOnboardingFirstIssue creates the first task from the onboarding
+// TaskPrompt (idempotent on s.FirstIssueID). core-loop R2 removed the CEO
+// draft-writer that used to follow this creation — the task's understanding
+// lives in its title + description, not a generated spec document.
+func (b *Broker) ensureOnboardingFirstIssue(s *onboarding.State) error {
 	if b == nil || s == nil {
 		return nil
 	}
@@ -273,13 +277,7 @@ func (b *Broker) ensureOnboardingFirstIssueDraft(s *onboarding.State) error {
 			return err
 		}
 	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if err := b.draftIssueLocked(b.wikiPromotionContext(), taskID, prompt, nil); err != nil {
-		return err
-	}
-	return b.saveLocked()
+	return nil
 }
 
 func onboardingFirstIssueTitle(prompt string) string {
@@ -301,10 +299,9 @@ func onboardingFirstIssueTitle(prompt string) string {
 // Caller MUST hold b.mu.
 //
 // This is intentionally minimal. No fake team is seeded. When the user
-// describes a first task at the draft phase, CEO proposes agents inline
-// (Phase 4 LLM path). See spec hard rule: "Scratch path uses
-// seedMinimalScratchLocked (NEW function you write), not
-// synthesizeBlueprintFromState."
+// describes a first task at the draft phase, the CEO scopes it in chat.
+// See spec hard rule: "Scratch path uses seedMinimalScratchLocked (NEW
+// function you write), not synthesizeBlueprintFromState."
 func (b *Broker) seedMinimalScratchLocked(s *onboarding.State) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 

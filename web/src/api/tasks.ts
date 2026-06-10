@@ -79,14 +79,6 @@ export interface TaskMemoryWorkflow {
   completed_at?: string;
 }
 
-export interface TaskDraftSpec {
-  goal?: string;
-  context?: string;
-  approach?: string;
-  acceptance?: string;
-  drafted_at?: string;
-}
-
 /**
  * Machine-checkable definition of done on a task (U1.1, broker
  * task_verification.go). Mirrors the Go `TaskVerification` wire shape.
@@ -165,7 +157,6 @@ export interface Task {
   recheck_at?: string;
   created_at?: string;
   updated_at?: string;
-  issue_draft_spec?: TaskDraftSpec;
   memory_workflow?: TaskMemoryWorkflow;
   /** Machine-checkable definition of done (U1). Absent on legacy tasks. */
   verification?: TaskVerification;

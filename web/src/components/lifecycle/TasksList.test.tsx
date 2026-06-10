@@ -44,22 +44,7 @@ describe("<TasksList>", () => {
     expect(screen.queryByText("Fix button spacing")).not.toBeInTheDocument();
   });
 
-  it("treats drafted issue specs as issues even when legacy task type is absent", () => {
-    renderList([
-      makeTask({
-        id: "task-draft",
-        title: "Draft Stripe webhook spec",
-        issue_draft_spec: {
-          goal: "Receive Stripe webhook events.",
-          drafted_at: "2026-05-20T12:00:00Z",
-        },
-      }),
-    ]);
-
-    expect(screen.getByText("Draft Stripe webhook spec")).toBeInTheDocument();
-  });
-
-  it("shows the issue-spec empty state when only small tasks exist", () => {
+  it("shows the empty state when only small tasks exist", () => {
     renderList([
       makeTask({
         id: "task-small",
@@ -69,7 +54,7 @@ describe("<TasksList>", () => {
     ]);
 
     expect(screen.getByTestId("issues-list-empty")).toHaveTextContent(
-      "No task specs yet.",
+      "No tasks yet.",
     );
     expect(screen.queryByText("Reply with status")).not.toBeInTheDocument();
   });

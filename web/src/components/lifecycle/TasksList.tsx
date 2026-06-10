@@ -1,7 +1,7 @@
 /**
  * TasksList — /tasks surface.
  *
- * Renders spec-level tasks (back-compat read of GET /tasks?all_channels=true)
+ * Renders issue-level tasks (back-compat read of GET /tasks?all_channels=true)
  * as a 7-stage board. The data substrate keeps the broker's granular
  * `lifecycle_state` values; the board groups them into the seven
  * user-facing STAGES it derives in TypeScript (see `stageForState` in
@@ -53,18 +53,14 @@ import {
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-export function isTaskSpecTask(task: Task): boolean {
+export function isIssueTask(task: Task): boolean {
   // Sub-tasks live on the parent Task's detail surface, not on the
   // top-level board. Filtering them out here keeps the board scoped
   // to "real" Tasks; children stay reachable via the parent Task.
   if (task.parent_issue_id && task.parent_issue_id.length > 0) {
     return false;
   }
-  return (
-    task.task_type === "issue" ||
-    task.pipeline_id === "issue" ||
-    Boolean(task.issue_draft_spec)
-  );
+  return task.task_type === "issue" || task.pipeline_id === "issue";
 }
 
 /** Per-stage hint copy shown under the column header. The `scheduled`
@@ -251,7 +247,7 @@ function TasksEmptyState({ onOpenCreate }: { onOpenCreate: () => void }) {
       data-testid="issues-list-empty"
     >
       <p className="issues-empty-copy">
-        No task specs yet. File larger project work here, then cut it into agent
+        No tasks yet. File larger project work here, then cut it into agent
         tasks.
       </p>
       <button
@@ -350,7 +346,7 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
   });
 
   const allTasks = result.data?.tasks ?? [];
-  const tasks = useMemo(() => allTasks.filter(isTaskSpecTask), [allTasks]);
+  const tasks = useMemo(() => allTasks.filter(isIssueTask), [allTasks]);
 
   const scheduledJobs = useMemo<SchedulerJob[]>(() => {
     const jobs = schedulerResult.data?.jobs ?? [];

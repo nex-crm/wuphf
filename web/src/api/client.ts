@@ -333,7 +333,6 @@ export interface Message {
    * Server-assigned message kind. Empty/absent for plain chat. Known kinds:
    *  - "agent_issue"        legacy agent-authored issue banner
    *  - "system_auth_error"  system-authored provider-auth failure card (#933)
-   *  - "issue_draft_section" CEO-authored issue draft section
    *  - "ceo_*"              onboarding cards (form_field, chip_row, etc.)
    * The SPA's MessageBubble dispatches on this field to pick a renderer.
    */

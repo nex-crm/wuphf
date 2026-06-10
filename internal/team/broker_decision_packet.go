@@ -849,10 +849,6 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 	// never observe the decided packet without its comment.
 	// Wrap the locked section in an inner function so we can defer the
 	// unlock and stay panic-safe across the Locked helpers below.
-	// wasApprovingFromDrafting is set inside the lock and used after unlock
-	// to decide whether to emit the execution lineup card. Declaring it here
-	// (outside the closure) avoids a variable-capture hazard.
-	var wasApprovingFromDrafting bool
 	var target LifecycleState
 	var reason string
 	if err := func() error {
@@ -880,9 +876,6 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 			return fmt.Errorf("record decision: task %s is in Plan mode — only the human can approve the plan and start work (actor %q)", taskID, actorSlug)
 		}
 		target, reason = lifecycleStateForDecisionAction(action, currentState, planFirst)
-		if action == RecordDecisionApprove && currentState == LifecycleStateDrafting {
-			wasApprovingFromDrafting = true
-		}
 		// Approving from Drafting (activate) or Planning (plan approved) starts
 		// the owner working — on a plan turn or an execution turn respectively.
 		startingWork := action == RecordDecisionApprove &&
@@ -963,18 +956,6 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 	// OnDecisionRecorded acquires b.mu itself; call it after Unlock
 	// to avoid a self-deadlock through the unblock cascade.
 	b.OnDecisionRecorded(taskID)
-	// Phase 4: after Approve & Start on a Drafting issue, emit the
-	// execution lineup card to the CEO DM channel. Runs post-unlock in a
-	// goroutine so the approve HTTP handler returns without waiting on
-	// the optional LLM call (scratch path agent inference).
-	if wasApprovingFromDrafting {
-		lineupCtx := b.wikiPromotionContext()
-		go func() {
-			b.mu.Lock()
-			b.emitExecutionLineupCardLocked(lineupCtx, taskID)
-			b.mu.Unlock()
-		}()
-	}
 	return nil
 }
 

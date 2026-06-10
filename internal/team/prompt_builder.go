@@ -268,7 +268,6 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString(issueJudgmentBlock())
 		sb.WriteString(issueScopingFrameworkBlock())
-		sb.WriteString(issueRichDraftForcingBlock())
 		sb.WriteString(approvalLifecycleBlock())
 		sb.WriteString(ownershipContractBlock())
 		sb.WriteString(ceoIssueManagementBlock())
@@ -413,7 +412,6 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString(issueJudgmentBlock())
 		sb.WriteString(issueScopingFrameworkBlock())
-		sb.WriteString(issueRichDraftForcingBlock())
 		sb.WriteString(approvalLifecycleBlock())
 		sb.WriteString(ownershipContractBlock())
 		sb.WriteString(specialistSuggestionBlock())
@@ -884,26 +882,30 @@ func approvalLifecycleBlock() string {
 // issueScopingFrameworkBlock teaches the agent HOW to run the
 // pre-creation interview that issueJudgmentBlock rule #1 demands. It is the
 // missing middle gear between "recognize unscoped work" and "call team_task
-// action=create": a small, deterministic interview script + a required spec
-// shape so the resulting Issue is dense enough for an OWNER specialist to
+// action=create": a small, deterministic interview script so the resulting
+// task title + description are dense enough for an OWNER specialist to
 // execute without re-interviewing the human.
 //
 // Adapted from the YC office-hours interview pattern (one decision per
 // question, stop-condition driven, problem-before-solution): we keep the
 // forcing-question discipline but translate it into WUPHF's voice (Slack-
 // style office, agents as teammates, CEO as leader) and into our concrete
-// artifacts (Issue title + details field, human_interview tool, AVAILABLE
+// artifacts (task title + details field, human_interview tool, AVAILABLE
 // AGENTS slugs). Don't merge into issueJudgmentBlock — that block is the
 // WHEN-policy and is already at its size budget; this block is the
 // HOW-script for the interview phase only, and is emitted right after so
 // the LLM reads "scope when X" then "here is how to scope".
 //
-// Keep this block dense — every token is paid on every turn. If you find
-// yourself adding a sixth question or a new sub-bullet, ask first whether
-// the spec section list already covers it.
+// core-loop R2 trimmed the REQUIRED SPEC SHAPE / rich-spec forcing out of
+// this block: a task carries a title + a short plain description, not a
+// spec document. The interview discipline (understand goal, deliverable,
+// done-signal with human help) stays — it is core-loop step 2 and will be
+// superseded by the R4 structured intake.
+//
+// Keep this block dense — every token is paid on every turn.
 func issueScopingFrameworkBlock() string {
 	return "== ISSUE SCOPING FRAMEWORK (every agent) ==\n" +
-		"When ISSUE_JUDGMENT rule #1 fires (unscoped work, scope unclear), this is the interview you run BEFORE calling team_task action=create. Goal: produce an Issue spec so complete the owner specialist can execute without re-interviewing the human. The interview itself is cheap; a wrong-shaped Issue is expensive.\n" +
+		"When ISSUE_JUDGMENT rule #1 fires (unscoped work, scope unclear), this is the interview you run BEFORE calling team_task action=create. Goal: understand the work well enough that the owner can execute without re-interviewing the human. The interview itself is cheap; a wrong-shaped task is expensive.\n" +
 		"\n" +
 		"VOICE: You are a senior teammate scoping work, not a form. Short, direct, one decision per question. No multi-part questions, no menus of five options, no preamble. Ask, listen, narrow.\n" +
 		"\n" +
@@ -914,54 +916,18 @@ func issueScopingFrameworkBlock() string {
 		"Q4 OWNER PREFERENCE: Any specialist they want on it, or a channel it should live in? Skip if obvious from the AVAILABLE AGENTS block and the work's domain.\n" +
 		"Q5 ONE OPEN BLOCKER: Is there any single missing input (a credential, a file, a name, a link) without which the owner literally cannot start? Ask only if you can identify a specific gap; do NOT ask \"anything else?\".\n" +
 		"\n" +
-		"STOP CONDITIONS (any one ends the interview; create the Issue immediately):\n" +
+		"STOP CONDITIONS (any one ends the interview; create the task immediately):\n" +
 		"- You can write a one-sentence title, a one-sentence \"done\" line, and pick an owner slug with no further guess.\n" +
 		"- The human has answered three questions and starts giving short or impatient replies — additional questions cost trust.\n" +
 		"- The work is small enough that further scoping would take longer than the work itself.\n" +
-		"You may NOT keep interviewing past these. Mis-scoped Issue cost is large; over-interview cost is also large. Pick.\n" +
+		"You may NOT keep interviewing past these. Mis-scoped task cost is large; over-interview cost is also large. Pick.\n" +
 		"\n" +
-		"REQUIRED SPEC SHAPE (the team_task `details` field MUST contain these labelled sections, in this order, plain markdown):\n" +
-		"**Outcome:** one sentence — what is different in the world when done.\n" +
-		"**Done looks like:** one or two bullets — the observable artifact or signal.\n" +
-		"**Constraints:** bullets, or `none` if truly none. Include deadline if any.\n" +
-		"**Owner rationale:** one line — why this slug from AVAILABLE AGENTS fits. \"Self\" is fine when the work sits in your domain.\n" +
-		"**Open questions:** bullets the owner must resolve before they can finish, or `none`. Do NOT use this section as a parking lot for things you should have asked the human.\n" +
-		"\n" +
-		"DO NOT include in the spec: implementation steps (that's the owner's job), nice-to-haves, alternatives considered, or a status update. Keep details under ~200 words — denser specs get read; long ones get skimmed.\n" +
+		"THEN CREATE THE TASK: a one-sentence title restating the outcome, plus a short plain `details` description (what's different when done, the done-signal, any constraints the human named). Title + description are the whole brief — do NOT write a spec document, implementation steps, nice-to-haves, or alternatives considered. Keep details under ~100 words.\n" +
 		"\n" +
 		"CARVE-OUTS:\n" +
-		"- The human's original message already supplies an Outcome + Done line: skip Q1+Q2, ask only Q3-Q5 if they apply, and create the Issue.\n" +
-		"- The trivial-chat case (no tool call beyond team_broadcast/human_message): do not interview, do not create an Issue, just answer.\n" +
-		"- You are a specialist running this flow in your domain (ISSUE_JUDGMENT rule #6): same script, then drop the one-line @ceo note after creating the Issue.\n\n"
-}
-
-// issueRichDraftForcingBlock is the load-bearing rule that makes issue
-// descriptions readable. Same forcing-block pattern as PR #997's
-// VISUAL ARTIFACT RULE — agents were producing plain-text dumps because
-// the spec section requirement was phrased as "should contain", not "MUST".
-// Result: Issue cards read like terminal output instead of like a real
-// scoped brief.
-//
-// This block restates the rule with MUST triggers and an explicit
-// carve-out for trivial issues so the default is "rich structured
-// markdown" rather than "single paragraph".
-//
-// Applies to: team_task action=create + sub-issue creation paths. Both
-// the CEO scoping flow and any specialist auto-creating in their domain.
-func issueRichDraftForcingBlock() string {
-	return "== ISSUE DRAFT RULE (load-bearing) ==\n" +
-		"When you call team_task action=create (top-level Issue OR sub-issue), the `details` field MUST be drafted as rich, structured markdown — not a single paragraph dump. The Issue surface renders the body as formatted HTML; a paragraph blob reads like log output and gets skimmed past.\n" +
-		"Required:\n" +
-		"- Use the REQUIRED SPEC SHAPE headings from ISSUE SCOPING FRAMEWORK (`**Outcome:**`, `**Done looks like:**`, etc.) so every Issue has the same scannable structure.\n" +
-		"- Use markdown lists (`- ` / `1. `) for any enumeration of two or more items. Inline prose for multi-item content is a regression to the failure mode this rule fixes.\n" +
-		"- Use fenced code blocks for any commands, identifiers, URLs, file paths, or structured snippets the owner will copy-paste.\n" +
-		"- Use blockquotes (`> `) for quoted human asks or upstream context the owner needs verbatim.\n" +
-		"- Use `**bold**` sparingly to flag the single most important constraint or deadline; never the whole line.\n" +
-		"Carve-outs (rich draft NOT required):\n" +
-		"- Trivially small Issues (one tool call, < ~20 words of context). Example: \"Re-run the deploy\", \"Fix typo in landing copy\". A one-line `details` is acceptable here.\n" +
-		"- Self-heal Issues created by the broker (PipelineID=incident). Those carry their own template.\n" +
-		"- Pure status / lifecycle update tasks where the title says everything.\n" +
-		"Default to rich format. Only fall back to plain when the carve-out clearly applies — markdown-only replies are the failure mode, plain-text Issue bodies are the same mistake at a different surface.\n\n"
+		"- The human's original message already supplies an Outcome + Done line: skip Q1+Q2, ask only Q3-Q5 if they apply, and create the task.\n" +
+		"- The trivial-chat case (no tool call beyond team_broadcast/human_message): do not interview, do not create a task, just answer.\n" +
+		"- You are a specialist running this flow in your domain (ISSUE_JUDGMENT rule #6): same script, then drop the one-line @ceo note after creating the task.\n\n"
 }
 
 // issueJudgmentBlock is the shared "when do you create / comment on / modify

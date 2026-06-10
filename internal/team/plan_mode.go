@@ -41,52 +41,6 @@ func isPlanningLifecycleState(s LifecycleState) bool {
 	return s == LifecycleStatePlanning
 }
 
-// taskSpecOpenToChat reports whether a human chat message in a task's channel
-// should be folded into the task spec by the owner. True only for EXPLICIT
-// pre-execution states — unlike taskIsPreExecution it excludes ""/Unknown, so a
-// legacy task carrying status="in_progress" with an empty LifecycleState is not
-// mistaken for drafting and bounced out of execution. Frozen (post-approval)
-// states are excluded too (matching specIsFrozen), so once a plan is approved
-// the chat is treated as execution discussion, not spec input. ChangesRequested
-// is included: the request_changes loop intentionally re-opens the spec.
-func taskSpecOpenToChat(s LifecycleState) bool {
-	switch s {
-	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady,
-		LifecycleStatePlanning, LifecycleStateQueuedBehindOwner,
-		LifecycleStateChangesRequested:
-		return true
-	}
-	return false
-}
-
-// specIsFrozen reports whether a task's human-approved spec BODY (its Details —
-// the problem / approach / acceptance criteria the human signed off on) may no
-// longer be rewritten. Once the owner is executing an approved plan (Running)
-// or the task has moved into review/decision/blocked or a terminal state, that
-// body is locked: a duplicate create / plan request, or an update, must NOT
-// silently overwrite it. This enforces the product rule "once a spec is
-// approved it must not change after that."
-//
-// Scope note: only Details is frozen. Classification/routing (TaskType,
-// ExecutionMode), dependency wiring (DependsOn), and runtime config
-// (effort/provider/model) are NOT — the system legitimately recomputes them on
-// reuse (e.g. the memory-workflow completion gate keys off TaskType).
-//
-// Editable states are the pre-approval ones (Drafting/Intake/Ready/Planning/
-// QueuedBehindOwner) plus ChangesRequested — the request_changes revise loop
-// intentionally re-opens the spec, so it is NOT frozen. To edit an
-// approved/running spec, a reviewer first request_changes it back into that
-// loop.
-func specIsFrozen(s LifecycleState) bool {
-	switch s {
-	case LifecycleStateRunning, LifecycleStateReview, LifecycleStateDecision,
-		LifecycleStateBlockedOnPRMerge, LifecycleStateApproved,
-		LifecycleStateRejected, LifecycleStateArchived:
-		return true
-	}
-	return false
-}
-
 // extractClaudePlanArtifact pulls the plan text out of an ExitPlanMode tool_use
 // input. Under Claude's native plan mode the finished plan is delivered as the
 // ExitPlanMode tool call ({"plan": "..."}), NOT as assistant text — so a

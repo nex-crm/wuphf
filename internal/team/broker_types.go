@@ -299,13 +299,6 @@ type teamTask struct {
 	ReminderAt           string          `json:"reminder_at,omitempty"`
 	RecheckAt            string          `json:"recheck_at,omitempty"`
 	MemoryWorkflow       *MemoryWorkflow `json:"memory_workflow,omitempty"`
-	// IssueDraftSpec holds the four-section spec produced by the CEO draft
-	// writer (Phase 4). Stored as a typed struct rather than a JSON blob in
-	// Details so callers can read sections without re-parsing.
-	// Design choice: explicit typed field over JSON-in-Details avoids
-	// ambiguity between "a task with a long Details string" and "an issue
-	// with a structured spec".
-	IssueDraftSpec *IssueDraftSpec `json:"issue_draft_spec,omitempty"`
 	// Verification is the machine-checkable definition of done (U1.1,
 	// task_verification.go). When Required, the broker runs the check and
 	// blocks complete/approve until it passes. VerificationResult is the
@@ -327,19 +320,6 @@ type teamTask struct {
 	// is the only current system task; it owns the #general channel so all
 	// 141 fallback call sites that post to "general" keep working unchanged.
 	System bool `json:"system,omitempty"`
-}
-
-// IssueDraftSpec holds the four spec sections the CEO draft writer
-// (Phase 4) produces when a user describes a first issue.
-type IssueDraftSpec struct {
-	Goal       string `json:"goal,omitempty"`
-	Context    string `json:"context,omitempty"`
-	Approach   string `json:"approach,omitempty"`
-	Acceptance string `json:"acceptance,omitempty"`
-	// DraftedAt is an RFC3339 timestamp set when the spec is written.
-	// The CEO draft writer checks DraftedAt != "" to short-circuit
-	// duplicate calls (idempotency sentinel).
-	DraftedAt string `json:"drafted_at,omitempty"`
 }
 
 // Status returns the persisted status string. Read accessor for callers
@@ -417,7 +397,6 @@ type teamTaskWire struct {
 	ReminderAt           string                  `json:"reminder_at,omitempty"`
 	RecheckAt            string                  `json:"recheck_at,omitempty"`
 	MemoryWorkflow       *MemoryWorkflow         `json:"memory_workflow,omitempty"`
-	IssueDraftSpec       *IssueDraftSpec         `json:"issue_draft_spec,omitempty"`
 	Verification         *TaskVerification       `json:"verification,omitempty"`
 	VerificationResult   *TaskVerificationResult `json:"verification_result,omitempty"`
 	Ledger               []TaskLedgerEntry       `json:"ledger,omitempty"`
@@ -468,7 +447,6 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		ReminderAt:           t.ReminderAt,
 		RecheckAt:            t.RecheckAt,
 		MemoryWorkflow:       t.MemoryWorkflow,
-		IssueDraftSpec:       t.IssueDraftSpec,
 		Verification:         t.Verification,
 		VerificationResult:   t.VerificationResult,
 		Ledger:               t.Ledger,
@@ -521,7 +499,6 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.ReminderAt = w.ReminderAt
 	t.RecheckAt = w.RecheckAt
 	t.MemoryWorkflow = w.MemoryWorkflow
-	t.IssueDraftSpec = w.IssueDraftSpec
 	t.Verification = w.Verification
 	t.VerificationResult = w.VerificationResult
 	t.Ledger = w.Ledger

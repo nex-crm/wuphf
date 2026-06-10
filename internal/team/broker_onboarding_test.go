@@ -99,9 +99,6 @@ func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 
 func TestOnboardingDraftPhaseCreatesFirstIssueFromTaskPrompt(t *testing.T) {
 	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
-	dir := t.TempDir()
-	fakePath := installFakeClaude(t, dir, "success")
-	withFakeClaude(t, fakePath)
 
 	b := newTestBroker(t)
 	b.mu.Lock()
@@ -148,20 +145,12 @@ func TestOnboardingDraftPhaseCreatesFirstIssueFromTaskPrompt(t *testing.T) {
 		t.Fatalf("unexpected first issue task: %+v", task)
 	}
 	if task.TaskType != "issue" || task.PipelineID != "issue" {
-		t.Fatalf("expected first issue to be issue spec task, got type=%q pipeline=%q", task.TaskType, task.PipelineID)
+		t.Fatalf("expected first issue to be an issue task, got type=%q pipeline=%q", task.TaskType, task.PipelineID)
 	}
-	if task.IssueDraftSpec == nil || task.IssueDraftSpec.Goal != "Fake goal from CLI subprocess." {
-		t.Fatalf("expected drafted issue spec, got %+v", task.IssueDraftSpec)
-	}
-
-	var sectionCount int
-	for _, msg := range b.ChannelMessages(onboarding.CEOOnboardingDMSlug) {
-		if msg.Kind == "issue_draft_section" {
-			sectionCount++
-		}
-	}
-	if sectionCount == 0 {
-		t.Fatal("expected issue draft section messages in the CEO DM")
+	// core-loop R2: the task carries the human's prompt as its description —
+	// no CEO draft-writer, no generated spec document.
+	if task.Details != state.FormAnswers.TaskPrompt {
+		t.Fatalf("expected first issue details to be the task prompt, got %q", task.Details)
 	}
 }
 

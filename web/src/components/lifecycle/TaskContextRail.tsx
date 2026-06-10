@@ -9,11 +9,11 @@ import { TaskDescription } from "./TaskDescription";
 interface TaskContextRailProps {
   taskId: string;
   channel: string;
-  /** Linear-style task body (the spec). */
+  /** Linear-style task body (task.details). */
   description: string;
   isDrafting: boolean;
   showSubTasks: boolean;
-  /** Machine-checkable definition of done (U1); renders atop the Spec. */
+  /** Machine-checkable definition of done (U1); renders atop the Details. */
   verification?: TaskVerification;
 }
 
@@ -56,12 +56,13 @@ function RailSection({
  * TaskContextRail — the right-hand details panel of the task detail view.
  *
  * In the chat-primary layout the conversation owns the main column; the
- * secondary context (who's in the channel, the agreed spec, the activity
- * log, sub-tasks) lives here so it's a glance away without stealing space
- * from the chat. Participants lead (the owner's live status shows there,
- * single source — the header names the owner), then collapsible sections.
- * Spec opens by default while drafting (you're reviewing it); once running,
- * the chat leads and the rail sections start collapsed.
+ * secondary context (who's in the channel, the task description, the
+ * activity log, sub-tasks) lives here so it's a glance away without
+ * stealing space from the chat. Participants lead (the owner's live status
+ * shows there, single source — the header names the owner), then
+ * collapsible sections. Details opens by default while drafting (you're
+ * reviewing it); once running, the chat leads and the rail sections start
+ * collapsed.
  */
 export function TaskContextRail({
   taskId,
@@ -85,9 +86,9 @@ export function TaskContextRail({
         <ChannelParticipants channelSlug={channel} />
       </div>
       <RailSection
-        title="Spec"
+        title="Details"
         defaultOpen={isDrafting}
-        testId="task-rail-spec"
+        testId="task-rail-details"
       >
         {hasCheck && verification ? (
           <div
