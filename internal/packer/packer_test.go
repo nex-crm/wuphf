@@ -327,6 +327,29 @@ func TestDeliver_IdempotentOnKey(t *testing.T) {
 	}
 }
 
+// Deliver must hand the bridge a delegation that still carries the destination
+// (Injection.ChannelID/ThreadTS) — the bridge reads where to post from it. The
+// live Slack probe caught Deliver stripping it when sealing the final bytes.
+func TestDeliver_FinalDelegationCarriesDestination(t *testing.T) {
+	packed, req := packForDelivery(t, "k-dest")
+	bridge := &fakeBridge{ts: "200.2"}
+	sink := newMemSink()
+
+	if _, err := Deliver(context.Background(), bridge, fakeValidator{}, EgressScanner{}, sink, fixedClock, packed, req); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if len(bridge.posted) != 1 {
+		t.Fatalf("expected 1 post, got %d", len(bridge.posted))
+	}
+	got := bridge.posted[0].Injection
+	if got.ChannelID != req.Thread.ChannelID || got.ChannelID == "" {
+		t.Fatalf("posted delegation lost its destination: ChannelID=%q want %q", got.ChannelID, req.Thread.ChannelID)
+	}
+	if got.ThreadTS != req.Thread.ThreadTS {
+		t.Fatalf("posted delegation thread = %q, want %q", got.ThreadTS, req.Thread.ThreadTS)
+	}
+}
+
 // Deliver refuses an unsealed (hand-constructed) delegation that skipped Classify.
 func TestDeliver_RefusesUnsealedDelegation(t *testing.T) {
 	bridge := &fakeBridge{ts: "200.2"}
