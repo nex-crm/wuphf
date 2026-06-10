@@ -856,6 +856,100 @@ func TestBrokerTaskPlanAssignsWorktreeForLocalWorktreeTask(t *testing.T) {
 	}
 }
 
+func TestBrokerTaskPlanPersistsConfiguredProvider(t *testing.T) {
+	t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	if err := config.Save(config.Config{
+		LLMProvider:         "claude-code",
+		LLMProviderPriority: []string{"claude-code", "codex"},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "operator", "Operator")
+	ensureTestMemberAccess(b, "general", "builder", "Builder")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	body, _ := json.Marshal(map[string]any{
+		"channel":    "general",
+		"created_by": "operator",
+		"tasks": []map[string]any{
+			{
+				"title":    "Wire provider picker",
+				"assignee": "builder",
+				"provider": "codex",
+			},
+		},
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/task-plan", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("task plan request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected status %d: %s", resp.StatusCode, raw)
+	}
+
+	var result struct {
+		Tasks []teamTask `json:"tasks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode task plan response: %v", err)
+	}
+	if len(result.Tasks) != 1 || result.Tasks[0].Provider != "codex" {
+		t.Fatalf("expected codex provider on created task, got %+v", result.Tasks)
+	}
+}
+
+func TestBrokerTaskPlanRejectsUnconfiguredProvider(t *testing.T) {
+	t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	if err := config.Save(config.Config{
+		LLMProvider:         "claude-code",
+		LLMProviderPriority: []string{"claude-code"},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "operator", "Operator")
+	ensureTestMemberAccess(b, "general", "builder", "Builder")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	body, _ := json.Marshal(map[string]any{
+		"channel":    "general",
+		"created_by": "operator",
+		"tasks": []map[string]any{
+			{
+				"title":    "Wire provider picker",
+				"assignee": "builder",
+				"provider": "codex",
+			},
+		},
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/task-plan", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("task plan request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected bad request for unconfigured provider, got %d: %s", resp.StatusCode, raw)
+	}
+}
+
 func TestBrokerTaskCreateAddsAssignedOwnerToChannelMembers(t *testing.T) {
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "youtube-factory", "operator", "Operator")

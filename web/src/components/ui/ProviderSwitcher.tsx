@@ -2,7 +2,18 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { getConfig, type LLMProvider, updateConfig } from "../../api/client";
+import {
+  get,
+  getConfig,
+  getLocalProvidersStatus,
+  type LLMProvider,
+  updateConfig,
+} from "../../api/client";
+import {
+  configuredConnectedRuntimeProviders,
+  type RuntimeProviderOption,
+} from "../../lib/runtimeProviders";
+import type { PrereqResult } from "../onboarding/runtimes";
 import { confirm } from "./ConfirmDialog";
 import { showNotice } from "./Toast";
 
@@ -17,39 +28,10 @@ export function openProviderSwitcher() {
   requestOpen();
 }
 
-interface ProviderOption {
-  id: LLMProvider;
-  name: string;
-  desc: string;
-}
-
-const PROVIDERS: ProviderOption[] = [
-  {
-    id: "claude-code",
-    name: "Claude Code",
-    desc: "Anthropic Claude via Claude Code CLI",
-  },
-  { id: "codex", name: "Codex", desc: "OpenAI Codex CLI agent" },
-  {
-    id: "opencode",
-    name: "Opencode",
-    desc: "Opencode CLI — routes to Claude, OpenAI, or local/Ollama",
-  },
-  {
-    id: "hermes-agent",
-    name: "Hermes Agent",
-    desc: "Local Hermes gateway via OpenAI-compatible API",
-  },
-  {
-    id: "openclaw-http",
-    name: "OpenClaw Gateway",
-    desc: "Local OpenClaw Gateway via OpenAI-compatible API",
-  },
-];
-
 export function ProviderSwitcherHost() {
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState<LLMProvider | null>(null);
+  const [providers, setProviders] = useState<RuntimeProviderOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState<LLMProvider | null>(null);
   const queryClient = useQueryClient();
@@ -58,9 +40,32 @@ export function ProviderSwitcherHost() {
     requestOpen = () => {
       setOpen(true);
       setLoading(true);
-      getConfig()
-        .then((cfg) => setCurrent(cfg.llm_provider ?? "claude-code"))
-        .catch(() => setCurrent("claude-code"))
+      Promise.all([
+        getConfig(),
+        get<{ prereqs?: PrereqResult[] } | PrereqResult[]>(
+          "/onboarding/prereqs",
+        ),
+        getLocalProvidersStatus(),
+      ])
+        .then(([cfg, prereqsPayload, localStatuses]) => {
+          const prereqs = Array.isArray(prereqsPayload)
+            ? prereqsPayload
+            : (prereqsPayload.prereqs ?? []);
+          const available = configuredConnectedRuntimeProviders(cfg, {
+            prereqs,
+            localStatuses,
+          });
+          setProviders(available);
+          setCurrent(
+            available.find((option) => option.id === cfg.llm_provider)?.id ??
+              available[0]?.id ??
+              null,
+          );
+        })
+        .catch(() => {
+          setProviders([]);
+          setCurrent(null);
+        })
         .finally(() => setLoading(false));
     };
     return () => {
@@ -79,20 +84,28 @@ export function ProviderSwitcherHost() {
 
   if (!open) return null;
 
-  async function switchTo(p: ProviderOption) {
+  async function switchTo(p: RuntimeProviderOption) {
     if (!current || p.id === current) return;
     confirm({
       title: "Switch runtime provider?",
-      message: `Agents will be restarted on ${p.name}.`,
+      message: `Agents will be restarted on ${p.label}.`,
       confirmLabel: "Switch",
       onConfirm: async () => {
         setPending(p.id);
         try {
-          await updateConfig({ llm_provider: p.id });
+          await updateConfig({
+            llm_provider: p.id,
+            llm_provider_priority: [
+              p.id,
+              ...providers
+                .filter((option) => option.id !== p.id)
+                .map((option) => option.id),
+            ],
+          });
           await queryClient.invalidateQueries({ queryKey: ["config"] });
           await queryClient.invalidateQueries({ queryKey: ["health"] });
           setCurrent(p.id);
-          showNotice(`Provider switched to ${p.name}`, "success");
+          showNotice(`Provider switched to ${p.label}`, "success");
           setOpen(false);
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Switch failed";
@@ -120,9 +133,13 @@ export function ProviderSwitcherHost() {
         </h3>
         {loading ? (
           <p className="provider-loading">Loading current provider...</p>
+        ) : providers.length === 0 ? (
+          <p className="provider-loading">
+            No configured provider is connected. Check Settings.
+          </p>
         ) : (
           <div className="provider-options">
-            {PROVIDERS.map((p) => {
+            {providers.map((p) => {
               const isActive = current === p.id;
               const isPending = pending === p.id;
               return (
@@ -134,7 +151,7 @@ export function ProviderSwitcherHost() {
                   disabled={isActive || isPending}
                 >
                   <div className="provider-option-text">
-                    <div className="provider-option-name">{p.name}</div>
+                    <div className="provider-option-name">{p.label}</div>
                     <div className="provider-option-desc">{p.desc}</div>
                   </div>
                   {isActive && (

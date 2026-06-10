@@ -3271,7 +3271,9 @@ html[data-theme="noir-gold"] {
   font-size: var(--text-sm);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 .issue-doc-sub-issues-add:hover {
   border-color: var(--accent);
@@ -3312,7 +3314,10 @@ html[data-theme="noir-gold"] {
   transition: background 120ms ease;
 }
 .issue-doc-sub-issue-link:hover {
-  background: var(--bg-row-active, color-mix(in srgb, var(--accent) 6%, transparent));
+  background: var(
+    --bg-row-active,
+    color-mix(in srgb, var(--accent) 6%, transparent)
+  );
 }
 .issue-doc-sub-issue-id {
   font-family: var(--font-mono);
@@ -3431,7 +3436,9 @@ html[data-theme="noir-gold"] {
   background: var(--bg-card);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 .issue-doc-owner-pill:hover {
   border-color: var(--accent);
@@ -3505,7 +3512,9 @@ html[data-theme="noir-gold"] {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill, 999px);
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 .issue-doc-parent-breadcrumb:hover {
   border-color: var(--accent);
@@ -3553,7 +3562,10 @@ html[data-theme="noir-gold"] {
   font-weight: 500;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
   border: 1px solid var(--border-subtle);
   background: var(--bg-card);
   color: var(--text);
@@ -3575,7 +3587,11 @@ html[data-theme="noir-gold"] {
   filter: brightness(1.05);
 }
 .issue-action-button--danger {
-  border-color: color-mix(in srgb, var(--text-danger, #b42318) 60%, var(--border-subtle));
+  border-color: color-mix(
+    in srgb,
+    var(--text-danger, #b42318) 60%,
+    var(--border-subtle)
+  );
   color: var(--text-danger, #b42318);
 }
 .issue-action-button--danger:hover:not(:disabled) {
@@ -3771,8 +3787,16 @@ html[data-theme="noir-gold"] {
 /* [SUGGESTION] comments stand out so CEO can scan them. Amber border +
  * subtle tint, "Suggestion" badge next to the author. */
 .issue-comment--suggestion {
-  border-color: color-mix(in srgb, var(--amber-600, #d97706) 60%, var(--border-subtle));
-  background: color-mix(in srgb, var(--amber-600, #d97706) 5%, var(--bg-primary));
+  border-color: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 60%,
+    var(--border-subtle)
+  );
+  background: color-mix(
+    in srgb,
+    var(--amber-600, #d97706) 5%,
+    var(--bg-primary)
+  );
 }
 .issue-comment-suggestion-badge {
   display: inline-flex;
@@ -4326,6 +4350,7 @@ html[data-theme="noir-gold"] {
 }
 
 .issue-new-form-field input,
+.issue-new-form-field select,
 .issue-new-form-field textarea {
   font: inherit;
   font-size: var(--text-md);
@@ -4343,6 +4368,7 @@ html[data-theme="noir-gold"] {
 }
 
 .issue-new-form-field input:focus,
+.issue-new-form-field select:focus,
 .issue-new-form-field textarea:focus {
   outline: none;
   border-color: var(--accent, #5b8def);
@@ -4834,7 +4860,11 @@ html[data-theme="noir-gold"] {
 }
 
 .issue-activity-stream[data-state="running"] {
-  border-color: color-mix(in srgb, var(--green-500, #16a34a) 30%, var(--border));
+  border-color: color-mix(
+    in srgb,
+    var(--green-500, #16a34a) 30%,
+    var(--border)
+  );
 }
 
 .issue-activity-stream[data-state="blocked"] {
@@ -4842,7 +4872,11 @@ html[data-theme="noir-gold"] {
 }
 
 .issue-activity-stream[data-state="needs-input"] {
-  border-color: color-mix(in srgb, var(--orange-500, #f97316) 30%, var(--border));
+  border-color: color-mix(
+    in srgb,
+    var(--orange-500, #f97316) 30%,
+    var(--border)
+  );
 }
 
 .issue-activity-stream .issue-activity-dot {
@@ -4927,7 +4961,9 @@ html[data-theme="noir-gold"] {
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 .issue-doc-tab:hover {
@@ -5363,7 +5399,9 @@ html[data-theme="noir-gold"] {
   text-orientation: mixed;
   white-space: nowrap;
 }
-.issues-kanban-column.is-collapsed .issues-kanban-column-toggle .issues-kanban-column-count {
+.issues-kanban-column.is-collapsed
+  .issues-kanban-column-toggle
+  .issues-kanban-column-count {
   margin-left: 0;
 }
 

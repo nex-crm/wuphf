@@ -40,6 +40,22 @@ describe("tasks api client", () => {
     });
   });
 
+  it("createTasks forwards an optional provider", async () => {
+    const response: api.CreateTasksResponse = { tasks: [] };
+    const postSpy = vi.spyOn(client, "post").mockResolvedValue(response);
+
+    await expect(
+      api.createTasks([
+        { title: "Write contract", assignee: "pm", provider: "codex" },
+      ]),
+    ).resolves.toEqual(response);
+    expect(postSpy).toHaveBeenCalledWith("/task-plan", {
+      channel: "general",
+      created_by: "human",
+      tasks: [{ title: "Write contract", assignee: "pm", provider: "codex" }],
+    });
+  });
+
   it("updateTaskStatus includes memory workflow override evidence", async () => {
     const response: api.TaskResponse = {
       task: { id: "task-1", title: "Write contract", status: "done" },

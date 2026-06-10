@@ -7,11 +7,17 @@
  * detail surface so they can iterate from there.
  */
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { get, getConfig, getLocalProvidersStatus } from "../../api/client";
 import { createTasks } from "../../api/tasks";
 import { router } from "../../lib/router";
+import {
+  configuredConnectedRuntimeProviders,
+  runtimeProviderLabel,
+} from "../../lib/runtimeProviders";
+import type { PrereqResult } from "../onboarding/runtimes";
 
 const DEFAULT_CHANNEL = "general";
 
@@ -20,6 +26,7 @@ export function TaskNewForm() {
   const [details, setDetails] = useState("");
   const [channel, setChannel] = useState(DEFAULT_CHANNEL);
   const [assignee, setAssignee] = useState("");
+  const [provider, setProvider] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
@@ -30,10 +37,42 @@ export function TaskNewForm() {
   const submitLockRef = useRef(false);
 
   const queryClient = useQueryClient();
+  const configQuery = useQuery({
+    queryKey: ["config"],
+    queryFn: getConfig,
+    staleTime: 10_000,
+  });
+  const prereqsQuery = useQuery({
+    queryKey: ["task-create-runtime-prereqs"],
+    queryFn: () =>
+      get<{ prereqs?: PrereqResult[] } | PrereqResult[]>("/onboarding/prereqs"),
+    staleTime: 10_000,
+  });
+  const localProvidersQuery = useQuery({
+    queryKey: ["task-create-local-providers"],
+    queryFn: getLocalProvidersStatus,
+    staleTime: 10_000,
+  });
+  const availableProviders = useMemo(() => {
+    const cfg = configQuery.data;
+    if (!cfg) return [];
+    const prereqs = Array.isArray(prereqsQuery.data)
+      ? prereqsQuery.data
+      : (prereqsQuery.data?.prereqs ?? []);
+    return configuredConnectedRuntimeProviders(cfg, {
+      prereqs,
+      localStatuses: localProvidersQuery.data,
+    });
+  }, [configQuery.data, prereqsQuery.data, localProvidersQuery.data]);
 
   useEffect(() => {
     titleRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (provider && availableProviders.some((p) => p.id === provider)) return;
+    setProvider(availableProviders[0]?.id ?? "");
+  }, [availableProviders, provider]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -55,6 +94,7 @@ export function TaskNewForm() {
             assignee: assignee.trim() || "human",
             details: details.trim() || undefined,
             task_type: "issue",
+            provider: provider || undefined,
           },
         ],
         { channel: channel.trim() || DEFAULT_CHANNEL, createdBy: "human" },
@@ -151,6 +191,27 @@ export function TaskNewForm() {
               data-testid="issue-new-assignee"
             />
           </div>
+        </div>
+
+        <div className="issue-new-form-field">
+          <label htmlFor="issue-new-provider">Provider</label>
+          <select
+            id="issue-new-provider"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            disabled={availableProviders.length === 0}
+            data-testid="issue-new-provider"
+          >
+            {availableProviders.length === 0 ? (
+              <option value="">No connected provider configured</option>
+            ) : (
+              availableProviders.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {runtimeProviderLabel(p.id)}
+                </option>
+              ))
+            )}
+          </select>
         </div>
 
         {error ? (

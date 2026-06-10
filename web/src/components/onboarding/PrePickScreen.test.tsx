@@ -87,7 +87,7 @@ function mockPrereqs(
   });
 }
 
-describe("PrePickScreen", () => {
+describe("PrePickScreen runtime selection", () => {
   it("renders the three dispatchable runtime cards plus a skip affordance", async () => {
     mockPrereqs({ claude: true, codex: true });
     render(<PrePickScreen onComplete={vi.fn()} />);
@@ -100,14 +100,19 @@ describe("PrePickScreen", () => {
     expect(screen.getByTestId("pre-pick-skip")).toBeInTheDocument();
   });
 
-  it("posts /config and hands off to the onboarding wizard when a detected runtime is picked", async () => {
-    mockPrereqs({ claude: true });
+  it("posts /config and hands off to the onboarding wizard with selected runtimes", async () => {
+    mockPrereqs({ claude: true, codex: true });
     const onComplete = vi.fn();
     render(<PrePickScreen onComplete={onComplete} />);
 
-    const card = await screen.findByTestId("pre-pick-card-claude-code");
-    await waitFor(() => expect(card).not.toBeDisabled());
-    fireEvent.click(card);
+    const claudeCard = await screen.findByTestId("pre-pick-card-claude-code");
+    const codexCard = await screen.findByTestId("pre-pick-card-codex");
+    await waitFor(() => expect(claudeCard).not.toBeDisabled());
+    fireEvent.click(claudeCard);
+    fireEvent.click(codexCard);
+
+    const submit = await screen.findByTestId("pre-pick-form-submit");
+    fireEvent.click(submit);
 
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
 
@@ -115,7 +120,7 @@ describe("PrePickScreen", () => {
       "/config",
       expect.objectContaining({
         llm_provider: "claude-code",
-        llm_provider_priority: ["claude-code"],
+        llm_provider_priority: ["claude-code", "codex"],
         memory_backend: "markdown",
       }),
     );
@@ -340,6 +345,7 @@ describe("PrePickScreen", () => {
     const card = await screen.findByTestId("pre-pick-card-claude-code");
     await waitFor(() => expect(card).not.toBeDisabled());
     fireEvent.click(card);
+    fireEvent.click(await screen.findByTestId("pre-pick-form-submit"));
 
     await waitFor(() =>
       expect(onComplete).toHaveBeenCalledWith({ phaseAlreadyComplete: true }),
@@ -370,321 +376,318 @@ describe("PrePickScreen", () => {
     const card = await screen.findByTestId("pre-pick-card-codex");
     await waitFor(() => expect(card).not.toBeDisabled());
     fireEvent.click(card);
+    fireEvent.click(await screen.findByTestId("pre-pick-form-submit"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /broker unreachable/i,
     );
     expect(onComplete).not.toHaveBeenCalled();
   });
+});
 
-  // ── New tests for Phase 5 ported sections ──────────────────────────────
+// ── New tests for Phase 5 ported sections ──────────────────────────────
 
-  describe("API key row", () => {
-    it("renders API key rows for Anthropic, OpenAI, and Google", async () => {
-      mockPrereqs({});
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      await screen.findByTestId("pre-pick-api-keys");
-      expect(
-        screen.getByTestId("pre-pick-api-row-ANTHROPIC_API_KEY"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("pre-pick-api-row-OPENAI_API_KEY"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("pre-pick-api-row-GOOGLE_API_KEY"),
-      ).toBeInTheDocument();
-    });
-
-    it("defaults to CLI login mode (no password input visible)", async () => {
-      mockPrereqs({});
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      await screen.findByTestId("pre-pick-api-keys");
-      // In CLI mode the paste tab is present but the password input is not rendered
-      expect(
-        screen.queryByTestId("pre-pick-api-input-ANTHROPIC_API_KEY"),
-      ).toBeNull();
-    });
-
-    it("switches to paste mode and shows password input when API key tab clicked", async () => {
-      mockPrereqs({});
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      await screen.findByTestId("pre-pick-api-keys");
-
-      const pasteTab = screen.getByTestId(
-        "pre-pick-api-paste-ANTHROPIC_API_KEY",
-      );
-      fireEvent.click(pasteTab);
-
-      expect(
-        screen.getByTestId("pre-pick-api-input-ANTHROPIC_API_KEY"),
-      ).toBeInTheDocument();
-    });
-
-    it("posts anthropic_api_key to /config after paste and submit", async () => {
-      mockPrereqs({});
-      const onComplete = vi.fn();
-      render(<PrePickScreen onComplete={onComplete} />);
-      await screen.findByTestId("pre-pick-api-keys");
-
-      // Switch to paste mode
-      fireEvent.click(
-        screen.getByTestId("pre-pick-api-paste-ANTHROPIC_API_KEY"),
-      );
-      const input = screen.getByTestId("pre-pick-api-input-ANTHROPIC_API_KEY");
-      fireEvent.change(input, { target: { value: "sk-ant-test123" } });
-
-      // Submit button should now appear
-      const submitBtn = await screen.findByTestId("pre-pick-form-submit");
-      fireEvent.click(submitBtn);
-
-      await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
-      expect(postMock).toHaveBeenCalledWith(
-        "/config",
-        expect.objectContaining({ anthropic_api_key: "sk-ant-test123" }),
-      );
-    });
-
-    it("strips control characters from a pasted API key before posting", async () => {
-      mockPrereqs({});
-      const onComplete = vi.fn();
-      render(<PrePickScreen onComplete={onComplete} />);
-      await screen.findByTestId("pre-pick-api-keys");
-
-      fireEvent.click(
-        screen.getByTestId("pre-pick-api-paste-ANTHROPIC_API_KEY"),
-      );
-      const input = screen.getByTestId("pre-pick-api-input-ANTHROPIC_API_KEY");
-      // Include a null byte in the value to verify sanitization
-      fireEvent.change(input, { target: { value: "sk-\x00bad\x1Fkey" } });
-
-      const submitBtn = await screen.findByTestId("pre-pick-form-submit");
-      fireEvent.click(submitBtn);
-
-      await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
-      expect(postMock).toHaveBeenCalledWith(
-        "/config",
-        expect.objectContaining({ anthropic_api_key: "sk-badkey" }),
-      );
-    });
+describe("API key row", () => {
+  it("renders API key rows for Anthropic, OpenAI, and Google", async () => {
+    mockPrereqs({});
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    await screen.findByTestId("pre-pick-api-keys");
+    expect(
+      screen.getByTestId("pre-pick-api-row-ANTHROPIC_API_KEY"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("pre-pick-api-row-OPENAI_API_KEY"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("pre-pick-api-row-GOOGLE_API_KEY"),
+    ).toBeInTheDocument();
   });
 
-  describe("local provider picker", () => {
-    it("renders the local provider section", async () => {
-      mockPrereqs({});
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      await screen.findByTestId("pre-pick-local-section");
-      expect(screen.getByTestId("pre-pick-local-picker")).toBeInTheDocument();
-    });
-
-    it("selecting a local provider and submitting form posts llm_provider", async () => {
-      mockPrereqs({});
-      // Make ollama tile available
-      getLocalProvidersStatusMock.mockResolvedValue([
-        {
-          kind: "ollama",
-          binary_installed: true,
-          endpoint: "http://localhost:11434",
-          model: "llama3",
-          reachable: true,
-          probed: true,
-          platform_supported: true,
-        },
-      ]);
-      const onComplete = vi.fn();
-      render(<PrePickScreen onComplete={onComplete} />);
-
-      // Wait for local picker to load
-      const tile = await screen.findByTestId("pre-pick-local-tile-ollama");
-      await waitFor(() => expect(tile).not.toBeDisabled());
-      fireEvent.click(tile);
-
-      const submitBtn = await screen.findByTestId("pre-pick-form-submit");
-      fireEvent.click(submitBtn);
-
-      await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
-      expect(postMock).toHaveBeenCalledWith(
-        "/config",
-        expect.objectContaining({
-          llm_provider: "ollama",
-          llm_provider_priority: ["ollama"],
-        }),
-      );
-    });
-
-    it("deselecting a local provider hides the submit button when no other form input filled", async () => {
-      mockPrereqs({});
-      getLocalProvidersStatusMock.mockResolvedValue([
-        {
-          kind: "ollama",
-          binary_installed: true,
-          endpoint: "http://localhost:11434",
-          model: "llama3",
-          reachable: false,
-          probed: true,
-          platform_supported: true,
-        },
-      ]);
-      render(<PrePickScreen onComplete={vi.fn()} />);
-
-      const tile = await screen.findByTestId("pre-pick-local-tile-ollama");
-      await waitFor(() => expect(tile).not.toBeDisabled());
-
-      // Select then deselect
-      fireEvent.click(tile);
-      await screen.findByTestId("pre-pick-form-submit");
-      fireEvent.click(tile);
-
-      await waitFor(() =>
-        expect(screen.queryByTestId("pre-pick-form-submit")).toBeNull(),
-      );
-    });
+  it("defaults to CLI login mode (no password input visible)", async () => {
+    mockPrereqs({});
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    await screen.findByTestId("pre-pick-api-keys");
+    // In CLI mode the paste tab is present but the password input is not rendered
+    expect(
+      screen.queryByTestId("pre-pick-api-input-ANTHROPIC_API_KEY"),
+    ).toBeNull();
   });
 
-  describe("OpenAI-compatible endpoint", () => {
-    it("renders the OAI-compatible section", async () => {
-      mockPrereqs({});
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      await screen.findByTestId("pre-pick-oai-section");
-      expect(screen.getByTestId("pre-pick-oai-compat")).toBeInTheDocument();
+  it("switches to paste mode and shows password input when API key tab clicked", async () => {
+    mockPrereqs({});
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    await screen.findByTestId("pre-pick-api-keys");
+
+    const pasteTab = screen.getByTestId("pre-pick-api-paste-ANTHROPIC_API_KEY");
+    fireEvent.click(pasteTab);
+
+    expect(
+      screen.getByTestId("pre-pick-api-input-ANTHROPIC_API_KEY"),
+    ).toBeInTheDocument();
+  });
+
+  it("posts anthropic_api_key to /config after paste and submit", async () => {
+    mockPrereqs({});
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+    await screen.findByTestId("pre-pick-api-keys");
+
+    // Switch to paste mode
+    fireEvent.click(screen.getByTestId("pre-pick-api-paste-ANTHROPIC_API_KEY"));
+    const input = screen.getByTestId("pre-pick-api-input-ANTHROPIC_API_KEY");
+    fireEvent.change(input, { target: { value: "sk-ant-test123" } });
+
+    // Submit button should now appear
+    const submitBtn = await screen.findByTestId("pre-pick-form-submit");
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(postMock).toHaveBeenCalledWith(
+      "/config",
+      expect.objectContaining({ anthropic_api_key: "sk-ant-test123" }),
+    );
+  });
+
+  it("strips control characters from a pasted API key before posting", async () => {
+    mockPrereqs({});
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+    await screen.findByTestId("pre-pick-api-keys");
+
+    fireEvent.click(screen.getByTestId("pre-pick-api-paste-ANTHROPIC_API_KEY"));
+    const input = screen.getByTestId("pre-pick-api-input-ANTHROPIC_API_KEY");
+    // Include a null byte in the value to verify sanitization
+    fireEvent.change(input, { target: { value: "sk-\x00bad\x1Fkey" } });
+
+    const submitBtn = await screen.findByTestId("pre-pick-form-submit");
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(postMock).toHaveBeenCalledWith(
+      "/config",
+      expect.objectContaining({ anthropic_api_key: "sk-badkey" }),
+    );
+  });
+});
+
+describe("local provider picker", () => {
+  it("renders the local provider section", async () => {
+    mockPrereqs({});
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    await screen.findByTestId("pre-pick-local-section");
+    expect(screen.getByTestId("pre-pick-local-picker")).toBeInTheDocument();
+  });
+
+  it("selecting local providers and submitting form posts provider priority", async () => {
+    mockPrereqs({});
+    getLocalProvidersStatusMock.mockResolvedValue([
+      {
+        kind: "ollama",
+        binary_installed: true,
+        endpoint: "http://localhost:11434",
+        model: "llama3",
+        reachable: true,
+        probed: true,
+        platform_supported: true,
+      },
+      {
+        kind: "exo",
+        binary_installed: true,
+        endpoint: "http://localhost:52415",
+        model: "llama3",
+        reachable: true,
+        probed: true,
+        platform_supported: true,
+      },
+    ]);
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+
+    const ollamaTile = await screen.findByTestId("pre-pick-local-tile-ollama");
+    const exoTile = await screen.findByTestId("pre-pick-local-tile-exo");
+    await waitFor(() => expect(ollamaTile).not.toBeDisabled());
+    fireEvent.click(ollamaTile);
+    fireEvent.click(exoTile);
+
+    const submitBtn = await screen.findByTestId("pre-pick-form-submit");
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(postMock).toHaveBeenCalledWith(
+      "/config",
+      expect.objectContaining({
+        llm_provider: "ollama",
+        llm_provider_priority: ["ollama", "exo"],
+      }),
+    );
+  });
+
+  it("deselecting a local provider hides the submit button when no other form input filled", async () => {
+    mockPrereqs({});
+    getLocalProvidersStatusMock.mockResolvedValue([
+      {
+        kind: "ollama",
+        binary_installed: true,
+        endpoint: "http://localhost:11434",
+        model: "llama3",
+        reachable: false,
+        probed: true,
+        platform_supported: true,
+      },
+    ]);
+    render(<PrePickScreen onComplete={vi.fn()} />);
+
+    const tile = await screen.findByTestId("pre-pick-local-tile-ollama");
+    await waitFor(() => expect(tile).not.toBeDisabled());
+
+    // Select then deselect
+    fireEvent.click(tile);
+    await screen.findByTestId("pre-pick-form-submit");
+    fireEvent.click(tile);
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("pre-pick-form-submit")).toBeNull(),
+    );
+  });
+});
+
+describe("OpenAI-compatible endpoint", () => {
+  it("renders the OAI-compatible section", async () => {
+    mockPrereqs({});
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    await screen.findByTestId("pre-pick-oai-section");
+    expect(screen.getByTestId("pre-pick-oai-compat")).toBeInTheDocument();
+  });
+
+  it("does not show submit button when only an invalid URL is entered", async () => {
+    mockPrereqs({});
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    await screen.findByTestId("pre-pick-oai-url");
+
+    fireEvent.change(screen.getByTestId("pre-pick-oai-url"), {
+      target: { value: "not-a-url" },
     });
 
-    it("does not show submit button when only an invalid URL is entered", async () => {
-      mockPrereqs({});
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      await screen.findByTestId("pre-pick-oai-url");
+    // URL error message should appear
+    expect(
+      await screen.findByTestId("pre-pick-oai-url-error"),
+    ).toBeInTheDocument();
+    // Submit button must NOT appear
+    expect(screen.queryByTestId("pre-pick-form-submit")).toBeNull();
+  });
 
-      fireEvent.change(screen.getByTestId("pre-pick-oai-url"), {
-        target: { value: "not-a-url" },
-      });
+  it("shows submit button and posts provider_endpoints when a valid URL is entered", async () => {
+    mockPrereqs({});
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+    await screen.findByTestId("pre-pick-oai-url");
 
-      // URL error message should appear
-      expect(
-        await screen.findByTestId("pre-pick-oai-url-error"),
-      ).toBeInTheDocument();
-      // Submit button must NOT appear
-      expect(screen.queryByTestId("pre-pick-form-submit")).toBeNull();
+    fireEvent.change(screen.getByTestId("pre-pick-oai-url"), {
+      target: { value: "https://my-server.example.com/v1" },
     });
 
-    it("shows submit button and posts provider_endpoints when a valid URL is entered", async () => {
-      mockPrereqs({});
-      const onComplete = vi.fn();
-      render(<PrePickScreen onComplete={onComplete} />);
-      await screen.findByTestId("pre-pick-oai-url");
+    const submitBtn = await screen.findByTestId("pre-pick-form-submit");
+    fireEvent.click(submitBtn);
 
-      fireEvent.change(screen.getByTestId("pre-pick-oai-url"), {
-        target: { value: "https://my-server.example.com/v1" },
-      });
-
-      const submitBtn = await screen.findByTestId("pre-pick-form-submit");
-      fireEvent.click(submitBtn);
-
-      await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
-      expect(postMock).toHaveBeenCalledWith(
-        "/config",
-        expect.objectContaining({
-          provider_endpoints: expect.objectContaining({
-            "openai-compatible": expect.objectContaining({
-              base_url: "https://my-server.example.com/v1",
-            }),
+    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(postMock).toHaveBeenCalledWith(
+      "/config",
+      expect.objectContaining({
+        provider_endpoints: expect.objectContaining({
+          "openai-compatible": expect.objectContaining({
+            base_url: "https://my-server.example.com/v1",
           }),
         }),
-      );
-    });
-
-    it("does not conflate the OAI-compat endpoint with OpenClaw config", async () => {
-      // Locks in the redesign: filling the Custom endpoint section must
-      // write only to provider_endpoints, never to openclaw_token /
-      // openclaw_gateway_url. OpenClaw is a gateway managed through the
-      // Integrations app; persisting an unrelated OAI-compat URL as the
-      // OpenClaw gateway was the exact "OpenClaw treated as a provider"
-      // bug this redesign closes.
-      mockPrereqs({});
-      const onComplete = vi.fn();
-      render(<PrePickScreen onComplete={onComplete} />);
-      await screen.findByTestId("pre-pick-oai-url");
-
-      fireEvent.change(screen.getByTestId("pre-pick-oai-url"), {
-        target: { value: "https://example.com/v1" },
-      });
-      fireEvent.change(screen.getByTestId("pre-pick-oai-key"), {
-        target: { value: "tok-secret" },
-      });
-
-      const submitBtn = await screen.findByTestId("pre-pick-form-submit");
-      fireEvent.click(submitBtn);
-
-      await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
-      const calledPayload = postMock.mock.calls[0]?.[1] as Record<
-        string,
-        unknown
-      >;
-      expect(calledPayload.openclaw_token).toBeUndefined();
-      expect(calledPayload.openclaw_gateway_url).toBeUndefined();
-      expect(calledPayload.provider_endpoints).toMatchObject({
-        "openai-compatible": { base_url: "https://example.com/v1" },
-      });
-    });
+      }),
+    );
   });
 
-  describe("canContinue predicate", () => {
-    it("does not show form submit button when no form section is filled", async () => {
-      mockPrereqs({});
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      await screen.findByTestId("pre-pick-api-keys");
-      expect(screen.queryByTestId("pre-pick-form-submit")).toBeNull();
+  it("does not conflate the OAI-compat endpoint with OpenClaw config", async () => {
+    // Filling the Custom endpoint section writes only to provider_endpoints.
+    // OpenClaw is a gateway managed through Integrations, not a runtime.
+    mockPrereqs({});
+    const onComplete = vi.fn();
+    render(<PrePickScreen onComplete={onComplete} />);
+    await screen.findByTestId("pre-pick-oai-url");
+
+    fireEvent.change(screen.getByTestId("pre-pick-oai-url"), {
+      target: { value: "https://example.com/v1" },
+    });
+    fireEvent.change(screen.getByTestId("pre-pick-oai-key"), {
+      target: { value: "tok-secret" },
     });
 
-    it("shows form submit button as soon as one API key is entered", async () => {
-      mockPrereqs({});
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      await screen.findByTestId("pre-pick-api-keys");
+    const submitBtn = await screen.findByTestId("pre-pick-form-submit");
+    fireEvent.click(submitBtn);
 
-      fireEvent.click(screen.getByTestId("pre-pick-api-paste-OPENAI_API_KEY"));
-      fireEvent.change(
-        screen.getByTestId("pre-pick-api-input-OPENAI_API_KEY"),
-        { target: { value: "sk-openai-xyz" } },
-      );
-
-      expect(
-        await screen.findByTestId("pre-pick-form-submit"),
-      ).toBeInTheDocument();
-    });
-
-    it("skip button always remains visible as sandbox path regardless of form state", async () => {
-      mockPrereqs({});
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      await screen.findByTestId("pre-pick-skip");
-
-      // Fill an API key
-      fireEvent.click(
-        screen.getByTestId("pre-pick-api-paste-ANTHROPIC_API_KEY"),
-      );
-      fireEvent.change(
-        screen.getByTestId("pre-pick-api-input-ANTHROPIC_API_KEY"),
-        { target: { value: "sk-ant-hello" } },
-      );
-
-      // Skip button must still be present
-      expect(screen.getByTestId("pre-pick-skip")).toBeInTheDocument();
+    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    const calledPayload = postMock.mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(calledPayload.openclaw_token).toBeUndefined();
+    expect(calledPayload.openclaw_gateway_url).toBeUndefined();
+    expect(calledPayload.provider_endpoints).toMatchObject({
+      "openai-compatible": { base_url: "https://example.com/v1" },
     });
   });
+});
 
-  describe("CodeRabbit click-handler guard (PR #889)", () => {
-    it("cards are disabled until prereqs have loaded", () => {
-      // Prereqs never resolves in this test -- cards stay disabled.
-      getMock.mockReturnValue(new Promise(() => {}));
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      // Cards should be in the DOM but disabled (prereqsLoaded=false)
-      const claudeCard = screen.getByTestId("pre-pick-card-claude-code");
-      expect(claudeCard).toBeDisabled();
+describe("canContinue predicate", () => {
+  it("does not show form submit button when no form section is filled", async () => {
+    mockPrereqs({});
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    await screen.findByTestId("pre-pick-api-keys");
+    expect(screen.queryByTestId("pre-pick-form-submit")).toBeNull();
+  });
+
+  it("shows form submit button as soon as one API key is entered", async () => {
+    mockPrereqs({});
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    await screen.findByTestId("pre-pick-api-keys");
+
+    fireEvent.click(screen.getByTestId("pre-pick-api-paste-OPENAI_API_KEY"));
+    fireEvent.change(screen.getByTestId("pre-pick-api-input-OPENAI_API_KEY"), {
+      target: { value: "sk-openai-xyz" },
     });
 
-    it("cards become enabled after prereqs load", async () => {
-      mockPrereqs({ claude: true });
-      render(<PrePickScreen onComplete={vi.fn()} />);
-      const card = await screen.findByTestId("pre-pick-card-claude-code");
-      await waitFor(() => expect(card).not.toBeDisabled());
-    });
+    expect(
+      await screen.findByTestId("pre-pick-form-submit"),
+    ).toBeInTheDocument();
+  });
+
+  it("skip button always remains visible as sandbox path regardless of form state", async () => {
+    mockPrereqs({});
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    await screen.findByTestId("pre-pick-skip");
+
+    // Fill an API key
+    fireEvent.click(screen.getByTestId("pre-pick-api-paste-ANTHROPIC_API_KEY"));
+    fireEvent.change(
+      screen.getByTestId("pre-pick-api-input-ANTHROPIC_API_KEY"),
+      { target: { value: "sk-ant-hello" } },
+    );
+
+    // Skip button must still be present
+    expect(screen.getByTestId("pre-pick-skip")).toBeInTheDocument();
+  });
+});
+
+describe("CodeRabbit click-handler guard (PR #889)", () => {
+  it("cards are disabled until prereqs have loaded", () => {
+    // Prereqs never resolves in this test -- cards stay disabled.
+    getMock.mockReturnValue(new Promise(() => {}));
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    // Cards should be in the DOM but disabled (prereqsLoaded=false)
+    const claudeCard = screen.getByTestId("pre-pick-card-claude-code");
+    expect(claudeCard).toBeDisabled();
+  });
+
+  it("cards become enabled after prereqs load", async () => {
+    mockPrereqs({ claude: true });
+    render(<PrePickScreen onComplete={vi.fn()} />);
+    const card = await screen.findByTestId("pre-pick-card-claude-code");
+    await waitFor(() => expect(card).not.toBeDisabled());
   });
 
   // ── Guided setup + verify loop (spec section B) ────────────────────────

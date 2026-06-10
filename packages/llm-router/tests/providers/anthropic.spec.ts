@@ -198,6 +198,7 @@ describe("AnthropicProvider", () => {
     const provider = createAnthropicProvider({ client: fakeClient(() => emptyMessage()).client });
     expect(provider.models).toEqual(Object.keys(DEFAULT_ANTHROPIC_PRICING));
     expect(provider.models).toContain("claude-opus-4-7");
+    expect(provider.models).toContain("claude-fable-5");
     expect(provider.models).toContain("claude-sonnet-4-6");
     expect(provider.models).toContain("claude-haiku-4-5");
   });

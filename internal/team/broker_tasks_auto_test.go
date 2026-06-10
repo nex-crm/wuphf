@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"testing"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 func TestIsAutoOwner(t *testing.T) {
@@ -29,6 +31,10 @@ func TestIsAutoOwner(t *testing.T) {
 //   - Start now + Auto → owner "auto", not dispatched, and a @ceo triage
 //     message posted in the task's channel.
 func TestBrokerTaskPlanParkAndAuto(t *testing.T) {
+	withWuphfHomeDir(t)
+	if err := config.Save(config.Config{LLMProvider: "codex"}); err != nil {
+		t.Fatalf("seed provider config: %v", err)
+	}
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
 	if err := b.StartOnPort(0); err != nil {

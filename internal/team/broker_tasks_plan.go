@@ -2,11 +2,16 @@ package team
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
+
+var errTaskPlanProviderConfigLoad = errors.New("task-plan provider config load failed")
 
 func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -81,6 +86,12 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 				resolvedDeps = append(resolvedDeps, dep) // assume it's a task ID
 			}
 		}
+		providerKind, err := validateTaskPlanProvider(item.Provider)
+		if err != nil {
+			rollbackPlan()
+			writeTaskPlanProviderError(w, err)
+			return
+		}
 		if existing := b.findReusableTaskLocked(taskReuseMatch{
 			Channel: taskChannel,
 			Title:   strings.TrimSpace(item.Title),
@@ -105,8 +116,8 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			if effort := strings.TrimSpace(item.Effort); effort != "" {
 				existing.Effort = effort
 			}
-			if prov := strings.TrimSpace(item.Provider); prov != "" {
-				existing.Provider = prov
+			if providerKind != "" {
+				existing.Provider = providerKind
 			}
 			if model := strings.TrimSpace(item.Model); model != "" {
 				existing.Model = model
@@ -170,7 +181,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			TaskType:      strings.TrimSpace(item.TaskType),
 			ExecutionMode: strings.TrimSpace(item.ExecutionMode),
 			Effort:        strings.TrimSpace(item.Effort),
-			Provider:      strings.TrimSpace(item.Provider),
+			Provider:      providerKind,
 			Model:         strings.TrimSpace(item.Model),
 			PlanFirst:     planFirst,
 			DependsOn:     resolvedDeps,
@@ -235,6 +246,37 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(TaskListResponse{Tasks: created})
+}
+
+func validateTaskPlanProvider(raw string) (string, error) {
+	kind := strings.TrimSpace(strings.ToLower(raw))
+	if kind == "" {
+		return "", nil
+	}
+	if !config.IsLLMProviderKindAllowed(kind) {
+		return "", fmt.Errorf("unsupported task provider %q", kind)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", errTaskPlanProviderConfigLoad, err)
+	}
+	for _, configured := range cfg.LLMProviderPriority {
+		if strings.EqualFold(strings.TrimSpace(configured), kind) {
+			return kind, nil
+		}
+	}
+	if len(cfg.LLMProviderPriority) == 0 && strings.EqualFold(strings.TrimSpace(cfg.LLMProvider), kind) {
+		return kind, nil
+	}
+	return "", fmt.Errorf("task provider %q is not configured", kind)
+}
+
+func writeTaskPlanProviderError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errTaskPlanProviderConfigLoad) {
+		http.Error(w, "failed to load provider configuration", http.StatusInternalServerError)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusBadRequest)
 }
 
 type plannedTaskInput struct {
