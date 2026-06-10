@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -97,7 +96,7 @@ func runTaskVerification(v TaskVerification, workDir string) TaskVerificationRes
 	case taskVerificationKindCommand:
 		ctx, cancel := context.WithTimeout(context.Background(), taskVerificationTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "sh", "-c", v.Spec)
+		cmd := verificationShellCommand(ctx, v.Spec)
 		if strings.TrimSpace(workDir) != "" {
 			cmd.Dir = workDir
 		}
