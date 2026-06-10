@@ -2,7 +2,7 @@
 
 **Status:** Evaluation protocol — run live against `feat/sota-uplift-phase0`, observed as a human, graded by an independent sub-agent.
 **Personas (per founder direction 2026-06-10: Maya primary, Sam secondary):**
-- **Maya (PRIMARY)** — RevOps lead at a 200-person SaaS company. Designs, monitors, and tunes standing revenue automations: renewal motions, CRM hygiene, partner referrals, pipeline checks. Operates a fleet of agents; does not write code. Evaluates WUPHF as the operator workspace where automations compound in value over time. Journeys 1–2 are hers.
+- **Maya (PRIMARY, per persona memory)** — RevOps operator at a Series B B2B SaaS. Owns CRM hygiene, lead routing, forecasting; runs renewal motions, pipeline cleanup, sales enablement. Operates a fleet of agents; does not write code. Her secondary buyer is the CRO, who approves renewal after walking the audit trail — so legibility of WHO did WHAT and WHY is purchase-critical, not nice-to-have. Natural pack: revops. Journeys 1–2 are hers.
 - **Sam (secondary)** — founder of a 3-person startup; wants a team that takes initiative and produces visible artifacts, approves the right thing in 30 seconds. Journey 3 is his (the buildable-artifact + definition-of-done path).
 
 Both are actively deciding whether to keep this software — every step is also an evaluation of whether WUPHF earns a place in their stack.
@@ -23,7 +23,7 @@ The runner records raw observations only (what was on screen, what was clicked, 
 Maya heard about WUPHF from a founder friend. She gives it one hour to prove it can run a real piece of her renewal motion.
 
 1. **Boot & onboarding.** Launch a fresh office (clean workspace). Go through whatever first-run flow appears, reading every screen like a stranger: does he know what he's setting up, why a provider is needed, what the packs mean? Pick the default/starter path.
-2. **First paint.** Land in the office. What does he see first — does it feel staffed and real, or staged? Can he tell which messages are real vs. seeded? Where do his eyes go? Is it obvious where to type?
+2. **First paint.** Land in the office, choosing the RevOps team/pack if onboarding offers one (Maya's natural fit). Does the office feel staffed and real, or staged? Real vs. seeded messages distinguishable? Obvious where to type?
 3. **First real ask.** In the CEO chat, type exactly:
    > "We have three renewals coming up: Acme Corp (Q3, $48k, champion left in May), Brightline (Q3, $22k, usage up 40%), and Corti Labs (Q4, $61k, two unresolved support escalations). Draft a tailored renewal email for each, capture a per-account brief on the wiki, and write a renewal-outreach playbook we can reuse every quarter."
 4. **Watch the machine think.** Does the CEO acknowledge fast? Does it ask a smart question or just run? Does an Issue/task appear somewhere Sam can find? Is the spec it wrote faithful to the ask?
@@ -44,6 +44,7 @@ A few days later, same workspace. The moat test through an operator's eyes: is w
 4. **Knowledge legibility.** Maya goes looking for "what does my office know now?" — wiki, notebooks, anywhere. Can she find and trust the accumulated account knowledge? Canonical vs. draft clear?
 5. **Interrupt & steer.** Mid-task: "keep the one-pager to a single page, lead with the usage data." Absorbed or lost?
 6. **Fleet view.** Maya checks: what is running right now, what is scheduled (her Monday check from J1), what needs her (inbox)? Can she answer all three in under a minute?
+6b. **The CRO walk.** Maya imagines showing her CRO "here's what the office did and why" — is there an audit-walkable trail (who did what, what was approved, what proof exists) she'd be comfortable presenting?
 7. **The stay-or-churn moment.** After two journeys: does this workspace feel like a compounding asset she'd protect, or disposable chat logs?
 
 ## Journey 3 (Sam) — "Ship something real": a buildable artifact with a definition of done
