@@ -52,13 +52,12 @@ type brokerChannelSummary struct {
 
 type brokerOfficeMembersResponse struct {
 	Members []struct {
-		Slug           string   `json:"slug"`
-		Name           string   `json:"name"`
-		Role           string   `json:"role"`
-		Expertise      []string `json:"expertise"`
-		Personality    string   `json:"personality"`
-		PermissionMode string   `json:"permission_mode"`
-		BuiltIn        bool     `json:"built_in"`
+		Slug        string   `json:"slug"`
+		Name        string   `json:"name"`
+		Role        string   `json:"role"`
+		Expertise   []string `json:"expertise"`
+		Personality string   `json:"personality"`
+		BuiltIn     bool     `json:"built_in"`
 	} `json:"members"`
 }
 
@@ -302,13 +301,12 @@ type TeamBridgeArgs struct {
 type TeamOfficeMembersArgs struct{}
 
 type TeamMemberArgs struct {
-	Action         string   `json:"action" jsonschema:"One of: create, remove"`
-	Slug           string   `json:"slug" jsonschema:"Stable agent slug like growthops or research-lead"`
-	Name           string   `json:"name,omitempty" jsonschema:"Display name for the office member"`
-	Role           string   `json:"role,omitempty" jsonschema:"Role/job title"`
-	Expertise      []string `json:"expertise,omitempty" jsonschema:"Optional expertise list"`
-	Personality    string   `json:"personality,omitempty" jsonschema:"Optional short personality description"`
-	PermissionMode string   `json:"permission_mode,omitempty" jsonschema:"Optional Claude permission mode"`
+	Action      string   `json:"action" jsonschema:"One of: create, remove"`
+	Slug        string   `json:"slug" jsonschema:"Stable agent slug like growthops or research-lead"`
+	Name        string   `json:"name,omitempty" jsonschema:"Display name for the office member"`
+	Role        string   `json:"role,omitempty" jsonschema:"Role/job title"`
+	Expertise   []string `json:"expertise,omitempty" jsonschema:"Optional expertise list"`
+	Personality string   `json:"personality,omitempty" jsonschema:"Optional short personality description"`
 	// Per-agent provider selection. Empty Provider means the agent inherits the
 	// install-wide default runtime. Set Provider to pick a specific runtime and
 	// (optionally) model for this agent: one team can mix Claude, Codex,

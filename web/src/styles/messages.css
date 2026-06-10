@@ -1432,29 +1432,6 @@ html[data-theme] .interview-bar-actions .btn-primary:hover {
   white-space: nowrap;
 }
 
-/* Plan-ready card: a read-only planning turn produced a plan awaiting the
-   human's "Approve & Start". Accent left rail marks it as needing attention. */
-.stream-card-plan {
-  border-left: 2px solid var(--accent);
-  background: var(--accent-bg);
-}
-.stream-phase-plan {
-  color: var(--accent);
-  background: var(--accent-bg);
-}
-.stream-card-plan-body {
-  font-size: var(--text-sm);
-  color: var(--text);
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-.stream-card-plan-hint {
-  margin-top: 6px;
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: var(--text-secondary);
-}
-
 /* ─── Composer ─── */
 .composer {
   padding: 12px 24px 16px;

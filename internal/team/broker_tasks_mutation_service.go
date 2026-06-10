@@ -586,39 +586,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		rejectTriggered := false
 		submitForReviewTriggered := false
 		beforeStatus := task.status
-		// Plan mode (Phase 5) human-approval gate: with Plan-first ON the owner
-		// writes a plan and STOPS in LifecycleStatePlanning until a HUMAN clicks
-		// "Approve plan & Start" (the decision-packet Planning→Running path in
-		// recordTaskDecisionInternal). No agent — not even the CEO — may approve
-		// or otherwise advance the plan toward execution from here; agents can
-		// only comment or request changes. This enforces the gate the composer
-		// promises ("the owner writes a plan for your approval") so the CEO
-		// cannot autonomously approve a plan on the human's behalf.
-		if task.LifecycleState == LifecycleStatePlanning && !isHumanMessageSender(actor) {
-			switch action {
-			case "approve", "complete", "submit_for_review", "review":
-				return TaskResponse{}, taskMutationError(
-					TaskMutationForbidden,
-					fmt.Sprintf("task %s is in Plan mode — its plan is awaiting human approval. Only the human can approve the plan and start the work (the \"Approve plan & Start\" button). To weigh in, use team_task action=comment or request_changes.", task.ID),
-					nil,
-				)
-			}
-		}
 		switch action {
 		case "claim", "assign":
 			if strings.TrimSpace(body.Owner) == "" {
 				return TaskResponse{}, taskMutationError(TaskMutationInvalid, "owner required", nil)
 			}
 			task.Owner = strings.TrimSpace(body.Owner)
-			// Plan mode: a plan-first task that has not started yet plans under
-			// its new owner before executing. Mirrors the reassign case — this
-			// is the path the CEO uses to triage an Auto-owner task, so without
-			// it Auto + Plan-first would skip Planning and run unapproved.
-			if task.PlanFirst && taskIsPreExecution(task.LifecycleState) {
-				_ = b.applyLifecycleStateLocked(task, LifecycleStatePlanning)
-			} else {
-				task.status = "in_progress"
-			}
+			task.status = "in_progress"
 			if taskNeedsStructuredReview(task) {
 				task.reviewState = "pending_review"
 			} else {
@@ -633,17 +607,7 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			task.Owner = newOwner
 			status := strings.ToLower(strings.TrimSpace(task.status))
 			if status != "done" && status != "review" {
-				if task.PlanFirst && taskIsPreExecution(task.LifecycleState) {
-					// Plan mode: a plan-first task that has not started yet plans
-					// under its new owner before executing. This is the default
-					// path for Auto-owner tasks the CEO assigns (composer's
-					// default owner). applyLifecycleStateLocked sets Planning +
-					// status=in_progress + stage=plan; the reindex below
-					// preserves Planning while pre-execution.
-					_ = b.applyLifecycleStateLocked(task, LifecycleStatePlanning)
-				} else {
-					task.status = "in_progress"
-				}
+				task.status = "in_progress"
 			}
 			if taskNeedsStructuredReview(task) && strings.TrimSpace(task.reviewState) == "" {
 				task.reviewState = "pending_review"

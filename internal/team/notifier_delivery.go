@@ -246,14 +246,7 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 }
 
 func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog, task teamTask, content string) string {
-	packet := l.notifyCtx().BuildTaskExecutionPacket(slug, action, task, content)
-	// Plan mode (Phase 5): a task in Planning gets a plan-only directive in
-	// front of the packet so the owner writes a plan (to its notebook) and stops
-	// before executing.
-	if task.LifecycleState == LifecycleStatePlanning {
-		return planModeDirective(task) + packet
-	}
-	return packet
+	return l.notifyCtx().BuildTaskExecutionPacket(slug, action, task, content)
 }
 
 func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessage) {

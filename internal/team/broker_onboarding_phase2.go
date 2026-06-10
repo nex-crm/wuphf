@@ -308,13 +308,12 @@ func (b *Broker) seedMinimalScratchLocked(s *onboarding.State) error {
 	// Seed CEO as the sole member.
 	b.members = []officeMember{
 		{
-			Slug:           "ceo",
-			Name:           "CEO",
-			Role:           "lead",
-			PermissionMode: "plan",
-			BuiltIn:        true,
-			CreatedBy:      "wuphf",
-			CreatedAt:      now,
+			Slug:      "ceo",
+			Name:      "CEO",
+			Role:      "lead",
+			BuiltIn:   true,
+			CreatedBy: "wuphf",
+			CreatedAt: now,
 		},
 	}
 	b.memberIndex = map[string]int{"ceo": 0}

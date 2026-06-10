@@ -36,11 +36,8 @@ interface ActionDef {
 function actionsForState(state: LifecycleState): ActionDef[] {
   switch (state) {
     case "drafting":
-    case "planning":
       // Approve & Start has its own button (special verb postDecision).
-      // From drafting/planning we offer Cancel as the close path. (Planning =
-      // Plan mode: the owner is writing/has written a plan; Approve & Start
-      // accepts it and starts the work.)
+      // From drafting we offer Cancel as the close path.
       return [
         {
           action: "cancel",
@@ -172,7 +169,6 @@ export function TaskActionToolbar({
   }, [pendingActionId]);
 
   const isDrafting = lifecycleState === "drafting";
-  const isPlanning = lifecycleState === "planning";
   const isTerminal =
     lifecycleState === "approved" || lifecycleState === "rejected";
   // Archive is a filing affordance available on every task that is not
@@ -223,14 +219,12 @@ export function TaskActionToolbar({
   return (
     <div className="issue-action-toolbar">
       {/* Approve & Start — uses postDecision via the existing button so the
-       * special drafting→running and planning→running transitions keep their
-       * server-side behavior. In Planning (Plan mode) the label reflects that
-       * the human is approving the owner's plan. */}
-      {isDrafting || isPlanning ? (
+       * special drafting→running transition keeps its server-side behavior. */}
+      {isDrafting ? (
         <ApproveAndStartButton
           taskId={taskId}
           onApproved={onAfterAction}
-          label={isPlanning ? "Approve plan & Start" : "Approve & Start"}
+          label="Approve & Start"
         />
       ) : null}
 

@@ -482,12 +482,6 @@ export interface OfficeMember {
   task?: string;
   channel?: string;
   provider?: ProviderBinding | string;
-  /**
-   * Agent autonomy. "plan" → the agent's tasks plan-first by default (the owner
-   * runs read-only in the provider's native plan mode and waits for Approve &
-   * Start); "auto" → executes immediately. Serialized as `permission_mode`.
-   */
-  permission_mode?: string;
   /** Broker-provided: serialized as `built_in`. Built-ins cannot be removed. (CEO is guarded by a separate slug check.) */
   built_in?: boolean;
   /** Per-channel disabled state when the list is sourced from `/members?channel=…`. */

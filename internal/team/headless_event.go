@@ -106,12 +106,6 @@ const (
 	HeadlessEventTypeIdle       = "idle"
 	HeadlessEventTypeError      = "error"
 	HeadlessEventTypeManifest   = "manifest"
-	// HeadlessEventTypePlan is the read-only plan an agent produced during a
-	// LifecycleStatePlanning turn — Claude's ExitPlanMode payload, or a
-	// read-only Codex/other turn's final message. The frontend renders it as a
-	// "Plan ready — review & approve" card so the human can act on the plan
-	// without digging through the raw tool stream.
-	HeadlessEventTypePlan = "plan"
 
 	HeadlessProviderClaude       = "claude"
 	HeadlessProviderCodex        = "codex"
@@ -257,26 +251,6 @@ func emitHeadlessToolUse(stream *agentStreamBuffer, turnID, provider, slug, task
 		Detail:   toolInput,
 		Status:   "active",
 		RawType:  rawType,
-	})
-}
-
-// emitHeadlessPlan pushes a plan-phase HeadlessEvent carrying the read-only
-// plan an agent produced during a LifecycleStatePlanning turn. plan is the full
-// plan text (Claude's ExitPlanMode payload or a read-only final message). Empty
-// plans are dropped. Status is "idle" because the turn has stopped to await the
-// human's "Approve & Start".
-func emitHeadlessPlan(stream *agentStreamBuffer, turnID, provider, slug, taskID, plan string) {
-	if stream == nil || strings.TrimSpace(plan) == "" {
-		return
-	}
-	pushHeadlessEvent(stream, HeadlessEvent{
-		Type:     HeadlessEventTypePlan,
-		Provider: provider,
-		Agent:    slug,
-		TurnID:   strings.TrimSpace(turnID),
-		TaskID:   strings.TrimSpace(taskID),
-		Text:     strings.TrimSpace(plan),
-		Status:   "idle",
 	})
 }
 

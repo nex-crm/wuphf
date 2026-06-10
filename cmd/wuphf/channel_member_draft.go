@@ -23,7 +23,6 @@ var memberDraftSteps = []string{
 	"role",
 	"expertise",
 	"personality",
-	"permission",
 }
 
 func (m channelModel) startEditMemberDraft(slug string) (*channelMemberDraft, bool) {
@@ -84,11 +83,6 @@ func (m channelModel) submitMemberDraft() (tea.Model, tea.Cmd) {
 		draft.Step++
 	case "personality":
 		draft.Personality = value
-		draft.Step++
-	case "permission":
-		if value != "" {
-			draft.PermissionMode = value
-		}
 		m.memberDraft = nil
 		m.input = nil
 		m.inputPos = 0
@@ -125,8 +119,6 @@ func memberDraftComposerLabel(d channelMemberDraft) string {
 		return "Expertise list"
 	case "personality":
 		return "Personality"
-	case "permission":
-		return "Permission mode"
 	default:
 		return "Agent setup"
 	}
@@ -144,8 +136,6 @@ func memberDraftStepHint(d channelMemberDraft) string {
 		return "List expertise separated by commas."
 	case "personality":
 		return "Give them a short personality blurb."
-	case "permission":
-		return "Set permission mode, usually plan or auto."
 	default:
 		return ""
 	}
@@ -174,7 +164,6 @@ func renderMemberDraftCard(draft channelMemberDraft, width int) string {
 		{"Role", draft.Role, draft.currentStep() == "role"},
 		{"Expertise", draft.Expertise, draft.currentStep() == "expertise"},
 		{"Personality", draft.Personality, draft.currentStep() == "personality"},
-		{"Permission", draft.PermissionMode, draft.currentStep() == "permission"},
 	}
 
 	lines := []string{
@@ -212,14 +201,13 @@ func mutateOfficeMemberSpec(draft channelMemberDraft, activeChannel string) tea.
 			action = "update"
 		}
 		body, _ := json.Marshal(map[string]any{
-			"action":          action,
-			"slug":            draft.Slug,
-			"name":            draft.Name,
-			"role":            draft.Role,
-			"expertise":       channelui.ParseExpertiseInput(draft.Expertise),
-			"personality":     draft.Personality,
-			"permission_mode": strings.TrimSpace(draft.PermissionMode),
-			"created_by":      "you",
+			"action":      action,
+			"slug":        draft.Slug,
+			"name":        draft.Name,
+			"role":        draft.Role,
+			"expertise":   channelui.ParseExpertiseInput(draft.Expertise),
+			"personality": draft.Personality,
+			"created_by":  "you",
 		})
 		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/office-members", bytes.NewReader(body))
 		if err != nil {
@@ -275,13 +263,12 @@ func generateOfficeMemberFromPrompt(prompt, activeChannel string) tea.Cmd {
 			return channelMemberDraftDoneMsg{err: err}
 		}
 		draft := channelMemberDraft{
-			Mode:           "create",
-			Slug:           tmpl.Slug,
-			Name:           tmpl.Name,
-			Role:           tmpl.Role,
-			Expertise:      strings.Join(tmpl.Expertise, ", "),
-			Personality:    tmpl.Personality,
-			PermissionMode: tmpl.PermissionMode,
+			Mode:        "create",
+			Slug:        tmpl.Slug,
+			Name:        tmpl.Name,
+			Role:        tmpl.Role,
+			Expertise:   strings.Join(tmpl.Expertise, ", "),
+			Personality: tmpl.Personality,
 		}
 		return mutateOfficeMemberSpec(draft, activeChannel)()
 	}

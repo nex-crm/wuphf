@@ -127,15 +127,6 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Effective Plan-first: honor an explicit per-task choice; otherwise
-		// default from the owner agent's autonomy (PermissionMode "plan" →
-		// plan-first). This is what makes a "plan" agent's delegated work run
-		// the owner through the provider's native plan mode before executing.
-		planFirst := item.PlanFirstEnabled()
-		if item.PlanFirst == nil {
-			planFirst = b.ownerDefaultsToPlanFirstLocked(strings.TrimSpace(item.Assignee))
-		}
-
 		b.counter++
 		taskID := b.allocateIssueIDLocked()
 		titleToID[strings.TrimSpace(item.Title)] = taskID
@@ -166,35 +157,20 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 			Effort:        strings.TrimSpace(item.Effort),
 			Provider:      strings.TrimSpace(item.Provider),
 			Model:         strings.TrimSpace(item.Model),
-			PlanFirst:     planFirst,
 			DependsOn:     resolvedDeps,
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
 		b.refreshPlannedTaskBlockStateLocked(&task)
-		// Lifecycle routing (Phase 5 Plan mode + Phase 3 Backlog):
-		//   - Backlog (Park): assigned but parked in Drafting — non-executable,
-		//     shows in Backlog, dispatches nobody. Activated via "Approve &
-		//     Start", which routes through PlanFirst (Drafting→Planning or
-		//     Drafting→Running) in the decision handler.
-		//   - Plan first + real owner (start now): land in Planning so the owner
-		//     is dispatched to write a plan first (plan-only packet), then
-		//     "Approve & Start" → Running. Overrides the in_progress promotion.
-		//   - Plan first OFF (start now): leave the in_progress promotion in
-		//     place → runs immediately, no plan/approval gate.
-		// (Auto-owner Plan-first tasks plan after the CEO assigns a specialist;
-		// the reassign path routes them into Planning.)
-		switch {
-		case item.Park:
+		// Lifecycle routing (Phase 3 Backlog): Backlog (Park) creates the task
+		// assigned but parked in Drafting — non-executable, shows in Backlog,
+		// dispatches nobody. Activated via "Approve & Start" (Drafting→Running)
+		// in the decision handler. Start-now tasks keep the in_progress
+		// promotion and run immediately.
+		if item.Park {
 			if err := b.applyLifecycleStateLocked(&task, LifecycleStateDrafting); err != nil {
 				rollbackPlan()
 				http.Error(w, "failed to park task", http.StatusInternalServerError)
-				return
-			}
-		case task.PlanFirst && task.status == "in_progress":
-			if err := b.applyLifecycleStateLocked(&task, LifecycleStatePlanning); err != nil {
-				rollbackPlan()
-				http.Error(w, "failed to start planning", http.StatusInternalServerError)
 				return
 			}
 		}

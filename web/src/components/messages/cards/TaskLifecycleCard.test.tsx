@@ -12,7 +12,7 @@ const BASE = {
   task_id: "OFFICE-7",
   title: "Ship the migration",
   owner: "pam",
-  from_state: "planning",
+  from_state: "drafting",
   to_state: "in_progress",
   transition: "started" as const,
 };
@@ -30,7 +30,7 @@ describe("TaskLifecycleCard", () => {
     expect(card.tagName).toBe("BUTTON");
     expect(card).not.toHaveAttribute("data-static");
     expect(card.textContent).toMatch(/Open →/);
-    expect(card.textContent).toMatch(/planning → in_progress/);
+    expect(card.textContent).toMatch(/drafting → in_progress/);
 
     fireEvent.click(card);
     expect(navigate).toHaveBeenCalledWith({
@@ -48,7 +48,7 @@ describe("TaskLifecycleCard", () => {
     expect(card.className).toMatch(/issue-lifecycle-card--static/);
     expect(card.textContent).not.toMatch(/Open →/);
     // The transition itself is still surfaced as inline history.
-    expect(card.textContent).toMatch(/planning → in_progress/);
+    expect(card.textContent).toMatch(/drafting → in_progress/);
 
     fireEvent.click(card);
     expect(navigate).not.toHaveBeenCalled();

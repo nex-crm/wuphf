@@ -12,74 +12,8 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Unit Tests: MemberSpec from StarterAgent with explicit permission_mode
+// Unit Tests: MemberSpec from EmployeeBlueprint domain enrichment
 // ---------------------------------------------------------------------------
-
-func TestMemberSpecFromStarterAgent_ExplicitPermissionMode(t *testing.T) {
-	agent := operations.StarterAgent{
-		Slug:           "builder",
-		Name:           "Builder",
-		Role:           "Builds things",
-		PermissionMode: "auto",
-		Type:           "specialist",
-	}
-	member := memberSpecFromStarterAgent(agent, "ceo")
-	if member.PermissionMode != "auto" {
-		t.Fatalf("expected explicit permission_mode=auto to flow through, got %q", member.PermissionMode)
-	}
-}
-
-func TestMemberSpecFromStarterAgent_DefaultPermissionMode(t *testing.T) {
-	agent := operations.StarterAgent{
-		Slug: "operator",
-		Name: "Operator",
-		Role: "Operates",
-		Type: "lead",
-	}
-	member := memberSpecFromStarterAgent(agent, "ceo")
-	if member.PermissionMode != "plan" {
-		t.Fatalf("expected default permission_mode=plan, got %q", member.PermissionMode)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Unit Tests: MemberSpec from EmployeeBlueprint with permission_mode override
-// ---------------------------------------------------------------------------
-
-func TestMemberSpecFromEmployeeBlueprint_PermissionModeOverride(t *testing.T) {
-	blueprint := operations.EmployeeBlueprint{
-		ID:               "executor",
-		Name:             "Executor",
-		Summary:          "Executes work",
-		Role:             "implement and build",
-		Responsibilities: []string{"implement features"},
-		AutomatedLoops:   []string{"execute tasks"},
-		Skills:           []string{"building"},
-		Tools:            []string{"hammer"},
-	}
-	starter := operations.StarterAgent{
-		Slug:           "executor",
-		Name:           "Executor",
-		PermissionMode: "plan",
-		Type:           "specialist",
-	}
-	member := memberSpecFromEmployeeBlueprint(blueprint, starter, "ceo")
-	// StarterAgent.PermissionMode takes precedence; the employee blueprint text is ignored
-	if member.PermissionMode != "plan" {
-		t.Fatalf("expected explicit permission_mode=plan to override, got %q", member.PermissionMode)
-	}
-
-	// Without explicit PermissionMode, should default to "plan"
-	starterNoMode := operations.StarterAgent{
-		Slug: "executor",
-		Name: "Executor",
-		Type: "specialist",
-	}
-	memberDefault := memberSpecFromEmployeeBlueprint(blueprint, starterNoMode, "ceo")
-	if memberDefault.PermissionMode != "plan" {
-		t.Fatalf("expected default permission_mode=plan, got %q", memberDefault.PermissionMode)
-	}
-}
 
 func TestMemberSpecFromEmployeeBlueprint_DomainExpertise(t *testing.T) {
 	blueprint := operations.EmployeeBlueprint{
@@ -206,18 +140,17 @@ func TestDomainBlueprintEnrichment(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Regression Tests: StarterAgent PermissionMode JSON roundtrip
+// Regression Tests: StarterAgent JSON roundtrip
 // ---------------------------------------------------------------------------
 
 func TestOperationBootstrapProjection(t *testing.T) {
 	agent := operations.StarterAgent{
-		Slug:           "test-agent",
-		Name:           "Test Agent",
-		Role:           "testing",
-		PermissionMode: "auto",
-		Type:           "specialist",
-		Checked:        true,
-		Expertise:      []string{"testing", "validation"},
+		Slug:      "test-agent",
+		Name:      "Test Agent",
+		Role:      "testing",
+		Type:      "specialist",
+		Checked:   true,
+		Expertise: []string{"testing", "validation"},
 	}
 	data, err := json.Marshal(agent)
 	if err != nil {
@@ -226,9 +159,6 @@ func TestOperationBootstrapProjection(t *testing.T) {
 	var restored operations.StarterAgent
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatalf("unmarshal: %v", err)
-	}
-	if restored.PermissionMode != "auto" {
-		t.Fatalf("expected permission_mode=auto after roundtrip, got %q", restored.PermissionMode)
 	}
 	if restored.Slug != "test-agent" {
 		t.Fatalf("expected slug=test-agent after roundtrip, got %q", restored.Slug)
@@ -242,10 +172,10 @@ func TestOperationBootstrapProjection(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Feature Tests: MaterializeManifest with permission_mode
+// Feature Tests: MaterializeManifest from operation + employee blueprints
 // ---------------------------------------------------------------------------
 
-func TestMaterializeManifest_WithPermissionMode(t *testing.T) {
+func TestMaterializeManifest_FromBlueprints(t *testing.T) {
 	root := t.TempDir()
 
 	writeCompanyEmployeeBlueprint(t, root, "operator", `
@@ -293,7 +223,7 @@ expected_results:
 id: test-pm-operation
 name: Test PM Operation
 kind: general
-objective: Validate permission_mode flows through materialization.
+objective: Validate blueprint materialization end to end.
 employee_blueprints:
   - operator
   - executor
@@ -305,7 +235,6 @@ starter:
       name: Operator
       role: Owns priorities and approvals.
       employee_blueprint: operator
-      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -313,7 +242,6 @@ starter:
       name: Executor
       role: Builds and ships.
       employee_blueprint: executor
-      permission_mode: auto
       checked: true
       type: specialist
 `)
@@ -331,20 +259,13 @@ starter:
 		t.Fatalf("expected at least 2 members, got %d", len(resolved.Members))
 	}
 
-	operatorMember := findMemberBySlug(resolved.Members, "operator")
-	if operatorMember == nil {
+	if findMemberBySlug(resolved.Members, "operator") == nil {
 		t.Fatal("expected operator member in resolved manifest")
-	}
-	if operatorMember.PermissionMode == "" {
-		t.Fatal("expected operator to have a permission_mode")
 	}
 
 	executorMember := findMemberBySlug(resolved.Members, "executor")
 	if executorMember == nil {
 		t.Fatal("expected executor member in resolved manifest")
-	}
-	if executorMember.PermissionMode == "" {
-		t.Fatal("expected executor to have a permission_mode")
 	}
 
 	// Verify AllowedTools from employee blueprint flow through
@@ -365,7 +286,7 @@ starter:
 // Feature Tests: Materialized manifest from every curated fixture
 // ---------------------------------------------------------------------------
 
-func TestMaterializedManifestPermissionModes(t *testing.T) {
+func TestMaterializedManifestMembers(t *testing.T) {
 	repoRoot := testRepoRoot(t)
 	ids := operationFixtureIDs(t, repoRoot)
 	if len(ids) == 0 {
@@ -386,8 +307,8 @@ func TestMaterializedManifestPermissionModes(t *testing.T) {
 				t.Fatalf("expected members for %s", id)
 			}
 			for _, member := range resolved.Members {
-				if member.PermissionMode == "" {
-					t.Fatalf("member %q in %s has empty permission_mode", member.Slug, id)
+				if strings.TrimSpace(member.Slug) == "" {
+					t.Fatalf("member with empty slug in %s", id)
 				}
 			}
 		})

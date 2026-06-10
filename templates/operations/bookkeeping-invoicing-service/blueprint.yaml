@@ -59,7 +59,6 @@ starter:
       emoji: "⚙️"
       name: CEO
       role: Owns priorities, approvals, and escalation decisions
-      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -67,7 +66,6 @@ starter:
       emoji: "🧭"
       name: Planner
       role: Turns client finance goals into workstreams and milestones
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -80,7 +78,6 @@ starter:
       name: Bookkeeper
       role: Owns reconciliation, categorization, and monthly close assets
       employee_blueprint: bookkeeper-financial-analyst
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -92,7 +89,6 @@ starter:
       emoji: "🧾"
       name: Invoicing
       role: Owns invoice cadence, collections, and billing follow-up
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -104,7 +100,6 @@ starter:
       emoji: "🔎"
       name: Reviewer
       role: Owns QA, evidence, and approval gates
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:

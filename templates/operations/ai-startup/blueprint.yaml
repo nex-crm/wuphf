@@ -59,7 +59,6 @@ starter:
       emoji: "⚙️"
       name: CEO
       role: Owns priorities, approvals, and escalation decisions
-      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -68,7 +67,6 @@ starter:
       name: Founding Engineer
       role: Ships the product, schema, and integrations
       employee_blueprint: workflow-automation-builder
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -80,7 +78,6 @@ starter:
       emoji: "📈"
       name: Growth
       role: Owns positioning, outbound, and the first adoption loop
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -92,7 +89,6 @@ starter:
       emoji: "🎨"
       name: Designer
       role: Owns the product surface, flows, and first-run experience
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -104,7 +100,6 @@ starter:
       emoji: "🔎"
       name: Reviewer
       role: Owns QA, evidence, and approval gates
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:

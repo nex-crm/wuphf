@@ -106,7 +106,6 @@ starter:
       name: CEO
       role: lead
       employee_blueprint: workflow-automation-builder
-      permission_mode: plan
       checked: true
       type: lead
       built_in: true

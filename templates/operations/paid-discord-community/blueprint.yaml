@@ -63,7 +63,6 @@ starter:
       emoji: "⚙️"
       name: CEO
       role: Owns priorities, approvals, and escalation decisions
-      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -71,7 +70,6 @@ starter:
       emoji: "🧭"
       name: Planner
       role: Turns community goals into workstreams and milestones
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -84,7 +82,6 @@ starter:
       name: Community Manager
       role: Owns onboarding, moderation, and engagement assets
       employee_blueprint: discord-server-community-manager
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -96,7 +93,6 @@ starter:
       emoji: "📣"
       name: Growth
       role: Owns sponsors, member growth, and promotion
-      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -108,7 +104,6 @@ starter:
       emoji: "🔎"
       name: Reviewer
       role: Owns QA, evidence, and approval gates
-      permission_mode: plan
       checked: true
       type: specialist
       expertise:

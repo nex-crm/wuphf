@@ -230,11 +230,11 @@ func scratchFoundingTeamBlueprint(companyName, description, directive string) op
 		displayName = "Your company"
 	}
 	agents := []operations.StarterAgent{
-		{Slug: "ceo", Name: "CEO", Role: "lead", PermissionMode: "plan", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"strategy", "prioritization", "delegation"}, Personality: "Sets direction, breaks directives into specialist assignments, and owns the outcome."},
-		{Slug: "gtm-lead", Name: "GTM Lead", Role: "go-to-market", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"positioning", "sales", "marketing", "growth"}, Personality: "Turns the product into pipeline — messaging, outbound, launches, and early revenue."},
-		{Slug: "founding-engineer", Name: "Founding Engineer", Role: "engineering", PermissionMode: "auto", Checked: true, Type: "assistant", Expertise: []string{"full-stack", "architecture", "infrastructure", "shipping"}, Personality: "Full-stack engineer who ships end-to-end and makes pragmatic architectural calls."},
-		{Slug: "pm", Name: "Product Manager", Role: "product", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"roadmap", "user-stories", "requirements", "specs"}, Personality: "Translates business goals into specs the engineering and design functions can execute against."},
-		{Slug: "designer", Name: "Designer", Role: "design", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"UI-UX-design", "branding", "prototyping"}, Personality: "Owns the look, feel, and flow — from first sketch to shipped interface."},
+		{Slug: "ceo", Name: "CEO", Role: "lead", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"strategy", "prioritization", "delegation"}, Personality: "Sets direction, breaks directives into specialist assignments, and owns the outcome."},
+		{Slug: "gtm-lead", Name: "GTM Lead", Role: "go-to-market", Checked: true, Type: "assistant", Expertise: []string{"positioning", "sales", "marketing", "growth"}, Personality: "Turns the product into pipeline — messaging, outbound, launches, and early revenue."},
+		{Slug: "founding-engineer", Name: "Founding Engineer", Role: "engineering", Checked: true, Type: "assistant", Expertise: []string{"full-stack", "architecture", "infrastructure", "shipping"}, Personality: "Full-stack engineer who ships end-to-end and makes pragmatic architectural calls."},
+		{Slug: "pm", Name: "Product Manager", Role: "product", Checked: true, Type: "assistant", Expertise: []string{"roadmap", "user-stories", "requirements", "specs"}, Personality: "Translates business goals into specs the engineering and design functions can execute against."},
+		{Slug: "designer", Name: "Designer", Role: "design", Checked: true, Type: "assistant", Expertise: []string{"UI-UX-design", "branding", "prototyping"}, Personality: "Owns the look, feel, and flow — from first sketch to shipped interface."},
 	}
 	channels := []operations.StarterChannel{
 		{Slug: "general", Name: "general", Description: "Primary coordination channel.", Members: []string{"ceo", "gtm-lead", "founding-engineer", "pm", "designer"}},
@@ -502,10 +502,10 @@ func blankSlateOfficeMembersFromBlueprint(blueprint operations.Blueprint, select
 	// agents. Keeps the broker from crashing on empty rosters.
 	now := time.Now().UTC().Format(time.RFC3339)
 	return ensureLibrarianMember([]officeMember{
-		{Slug: "founder", Name: "Founder", Role: "Founder", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "auto", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "founder", Name: "Founder", Role: "Founder", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "operator", Name: "Operator", Role: "Operator", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", CreatedBy: "wuphf", CreatedAt: now},
 	})
 }
 
@@ -529,16 +529,15 @@ func blankSlateOfficeMembersFromAgents(agents []operations.StarterAgent, leadSlu
 			role = name
 		}
 		members = append(members, officeMember{
-			Slug:           slug,
-			Name:           name,
-			Role:           role,
-			Expertise:      normalizeStringList(agent.Expertise),
-			Personality:    strings.TrimSpace(agent.Personality),
-			PermissionMode: blankSlatePermissionMode(agent.Type),
-			AllowedTools:   nil,
-			CreatedBy:      "wuphf",
-			CreatedAt:      now,
-			BuiltIn:        agent.BuiltIn || slug == leadSlug || slug == "operator" || slug == "founder" || slug == "ceo",
+			Slug:         slug,
+			Name:         name,
+			Role:         role,
+			Expertise:    normalizeStringList(agent.Expertise),
+			Personality:  strings.TrimSpace(agent.Personality),
+			AllowedTools: nil,
+			CreatedBy:    "wuphf",
+			CreatedAt:    now,
+			BuiltIn:      agent.BuiltIn || slug == leadSlug || slug == "operator" || slug == "founder" || slug == "ceo",
 		})
 	}
 	return members
@@ -684,15 +683,6 @@ func taskIDPrefix(bp operations.Blueprint) string {
 		return id
 	}
 	return "blank-slate"
-}
-
-func blankSlatePermissionMode(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "lead", "human":
-		return "plan"
-	default:
-		return "auto"
-	}
 }
 
 func memberSlugsFromMembers(members []officeMember) []string {

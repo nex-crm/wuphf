@@ -6,7 +6,7 @@
  * sub-tasks) lives in the right rail (TaskContextRail).
  *
  * The header carries title + lifecycle pill + verification badge and the
- * lifecycle action toolbar (Approve & Start while Drafting/Planning, the
+ * lifecycle action toolbar (Approve & Start while Drafting, the
  * PR-style loop otherwise). The task's understanding lives in its title +
  * description (Details) — there is no spec document (core-loop R2).
  */
@@ -329,8 +329,7 @@ function TaskDocumentError({
 interface ApproveAndStartButtonProps {
   taskId: string;
   onApproved: () => void;
-  /** Button label. Defaults to "Approve & Start"; Plan mode passes
-   *  "Approve plan & Start" so the human knows they are accepting the plan. */
+  /** Button label. Defaults to "Approve & Start". */
   label?: string;
 }
 
@@ -589,7 +588,7 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
               });
             }}
           />
-          {/* Lifecycle actions (Approve & Start when Drafting/Planning, the
+          {/* Lifecycle actions (Approve & Start when Drafting, the
            *  PR-style loop otherwise). Right-aligned on the same row as the
            *  owner so the header stays two tight rows instead of four. */}
           <TaskActionToolbar

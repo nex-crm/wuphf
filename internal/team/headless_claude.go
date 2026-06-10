@@ -52,7 +52,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		// failure mode (~30s tax on first turn) over the hard one
 		// (agent dies before producing any output).
 	}
-	args = append(args, strings.Fields(l.resolvePermissionFlags(ctx, slug))...)
+	args = append(args, strings.Fields(l.resolvePermissionFlags())...)
 
 	// Per-task reasoning effort: when the active task carries a composer-set
 	// effort that claude accepts, pass it as `--effort <level>`. Empty/unknown
@@ -178,11 +178,6 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	turnID := newHeadlessTurnID()
 	var turnToolNames []string
 	var turnTextLen int
-	// Plan posture (task in LifecycleStatePlanning): the agent runs read-only
-	// and delivers its plan via the ExitPlanMode tool call, which we harvest
-	// here so it can be surfaced to the human for "Approve & Start".
-	planning := l.resolveTurnPosture(ctx, slug) == posturePlan
-	var planArtifact string
 
 	result, parseErr := provider.ReadClaudeJSONStream(teedStdout, func(event provider.ClaudeStreamEvent) {
 		if firstEventAt.IsZero() {
@@ -212,11 +207,6 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			}
 			appendHeadlessClaudeLog(slug, fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120)))
 			l.updateHeadlessProgress(slug, "active", "tool_use", fmt.Sprintf("running %s", strings.TrimSpace(event.ToolName)), metrics)
-			if planning && isExitPlanModeTool(event.ToolName) {
-				if plan := extractClaudePlanArtifact(event.ToolInput); plan != "" {
-					planArtifact = plan
-				}
-			}
 			turnToolNames = append(turnToolNames, event.ToolName)
 			emitHeadlessToolUse(agentStream, turnID, HeadlessProviderClaude, slug, taskID, event.ToolName, event.ToolInput, "claude.tool_use")
 		case "tool_result":
@@ -281,16 +271,6 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	relay.Flush()
 	finalText := strings.TrimSpace(result.FinalMessage)
-	if planning && planArtifact != "" {
-		// Surface the plan as its own stream card, and use it as the channel
-		// summary the human reviews: under plan mode Claude delivers the plan
-		// via ExitPlanMode (a tool call), so result.FinalMessage is usually
-		// empty and the plan would otherwise sit only in the raw tool stream.
-		emitHeadlessPlan(agentStream, turnID, HeadlessProviderClaude, slug, taskID, planArtifact)
-		if finalText == "" {
-			finalText = planArtifact
-		}
-	}
 	if finalText != "" {
 		appendHeadlessClaudeLog(slug, "result: "+finalText)
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, finalText, startedAt)

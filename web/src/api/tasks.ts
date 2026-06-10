@@ -175,7 +175,9 @@ export interface Task {
  */
 export function taskToLifecycleState(task: Task | undefined): LifecycleState {
   if (task?.pipeline_stage === "draft") return "drafting";
-  if (task?.pipeline_stage === "plan") return "planning";
+  // Legacy plan-mode tasks (removed core-loop R3) persisted pipeline_stage
+  // "plan" with status in_progress; the status map below resolves them to
+  // "running", matching the broker's legacy-state shim.
   const ls = task?.lifecycle_state;
   if (ls && isLifecycleState(ls)) return ls;
   switch (task?.status) {
@@ -219,13 +221,6 @@ export interface CreateTaskInput {
    * "Backlog" action sets this; "Start now" leaves it false.
    */
   park?: boolean;
-  /**
-   * Plan mode (Phase 5): when true, the owner plans autonomously before
-   * executing — it writes a plan to its notebook and waits for "Approve &
-   * Start". When false, the task runs immediately with no plan/approval gate.
-   * The composer's "Plan first" toggle defaults ON and always sends a value.
-   */
-  plan_first?: boolean;
   depends_on?: string[];
 }
 

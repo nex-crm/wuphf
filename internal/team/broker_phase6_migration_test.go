@@ -15,7 +15,7 @@ package team
 //     channel is a task channel);
 //   - #general stays owned by the Backup & Migration system task;
 //   - messages + incidents (agent_issues wire key, issue-N IDs) are preserved;
-//   - additive task keys default cleanly (no forced Planning / "auto" owner);
+//   - additive task keys default cleanly (no coerced "auto" owner);
 //   - the migration is idempotent and the result round-trips through save+reload.
 
 import (
@@ -28,8 +28,10 @@ import (
 // a roster WITHOUT the Librarian, a free-standing #product channel, a
 // message-only DM slug (dwight__human, no channels[] record — the legacy DM
 // shape), tasks with a legacy lifecycle_state and none of the new
-// provider/model/effort/plan_first keys, and an incident persisted under the
-// historical `agent_issues` wire key with an `issue-N` ID.
+// provider/model/effort keys, a removed-plan-mode task (lifecycle_state
+// "planning" + plan_first key) that must load as Running with the key
+// ignored, and an incident persisted under the historical `agent_issues`
+// wire key with an `issue-N` ID.
 const legacyBrokerStateFixture = `{
   "messages": [
     {"id":"m1","from":"human","channel":"general","content":"morning all","timestamp":"2026-01-02T10:00:00Z","tagged":[]},
@@ -52,9 +54,10 @@ const legacyBrokerStateFixture = `{
   ],
   "tasks": [
     {"id":"task-1","channel":"general","title":"shipped before the rename","status":"done","lifecycle_state":"merged","owner":"dwight"},
-    {"id":"task-2","channel":"general","title":"still in flight","status":"in_progress","owner":"angela"}
+    {"id":"task-2","channel":"general","title":"still in flight","status":"in_progress","owner":"angela"},
+    {"id":"task-3","channel":"general","title":"was mid-plan when plan mode was removed","status":"in_progress","pipeline_stage":"plan","review_state":"pending_review","lifecycle_state":"planning","plan_first":true,"owner":"dwight"}
   ],
-  "counter": 2
+  "counter": 3
 }`
 
 // writeLegacyFixture writes the fixture to a temp broker-state.json and returns
@@ -195,19 +198,23 @@ func TestPhase6MigrationLoadsLegacyWorkspaceClean(t *testing.T) {
 		t.Fatalf("in-flight task-2 should migrate to Running, got %q", t2.LifecycleState)
 	}
 
-	// --- Additive keys default cleanly; no forced Planning / "auto" owner. ---
+	// --- Additive keys default cleanly; no coerced "auto" owner. ---
 	if t2.Provider != "" || t2.Model != "" || t2.Effort != "" {
 		t.Fatalf("legacy task-2 should have empty provider/model/effort, got %q/%q/%q",
 			t2.Provider, t2.Model, t2.Effort)
 	}
-	if t2.PlanFirst {
-		t.Fatalf("legacy task-2 should not be plan-first")
-	}
-	if t2.LifecycleState == LifecycleStatePlanning {
-		t.Fatalf("legacy task-2 must not be forced into Planning")
-	}
 	if isAutoOwner(t2.Owner) {
 		t.Fatalf("legacy task-2 owner must stay %q, not be coerced to auto", "angela")
+	}
+
+	// --- Removed plan mode (core-loop R3): persisted "planning" loads as
+	// Running and the legacy plan_first key is ignored without error. ---
+	t3, ok := taskByID(t, b, "task-3")
+	if !ok {
+		t.Fatalf("legacy planning task-3 was lost")
+	}
+	if t3.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("legacy planning task-3 should load as Running, got %q", t3.LifecycleState)
 	}
 
 	// --- #general stays owned by the Backup & Migration system task. ---

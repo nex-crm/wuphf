@@ -257,7 +257,7 @@ export const MOCK_AGENTS: NotebookAgentSummary[] = [
   {
     agent_slug: "planner",
     name: "Planner",
-    role: "Planning agent",
+    role: "Research agent",
     entries: summarizeEntries(PLANNER_ENTRIES),
     total: PLANNER_ENTRIES.length,
     promoted_count: PLANNER_ENTRIES.filter((e) => e.status === "promoted")
