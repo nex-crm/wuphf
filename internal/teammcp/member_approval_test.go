@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -36,11 +37,11 @@ func TestRequireTeamMemberApprovalProceedsOnApprove(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_UNSAFE", "")
 
-	var sawRequest bool
+	var sawRequest atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/requests":
-			sawRequest = true
+			sawRequest.Store(true)
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "req-member-approve"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/interview/answer"):
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -64,7 +65,7 @@ func TestRequireTeamMemberApprovalProceedsOnApprove(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("approved request must return nil, got err=%v", err)
 	}
-	if !sawRequest {
+	if !sawRequest.Load() {
 		t.Fatal("expected the gate to POST an approval request to /requests")
 	}
 }

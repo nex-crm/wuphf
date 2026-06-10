@@ -71,7 +71,17 @@ func requireTeamMemberApproval(ctx context.Context, actor string, args TeamMembe
 		question = fmt.Sprintf("Add %s (@%s, %s) to the team?", name, slug, role)
 	}
 
-	options, recommendedID := normalizeHumanRequestOptions("approval", "", nil)
+	// Advertise ONLY a binary approve/reject pair. The create path has a
+	// binary outcome — nil (proceed) or error (don't) — and reads no typed
+	// guidance, so the stock "approval" set (which adds approve_with_note,
+	// reject_with_steer, and hold) would offer steering whose semantics this
+	// handler silently discards. Passing an explicit minimal set keeps
+	// normalizeHumanRequestOptions from auto-injecting those options; it still
+	// enriches the labels/descriptions from the "approval" defaults by ID.
+	options, recommendedID := normalizeHumanRequestOptions("approval", "approve", []HumanInterviewOption{
+		{ID: "approve"},
+		{ID: "reject"},
+	})
 
 	var created struct {
 		ID string `json:"id"`
@@ -97,14 +107,15 @@ func requireTeamMemberApproval(ctx context.Context, actor string, args TeamMembe
 		return fmt.Errorf("member-approval request did not return an ID")
 	}
 
-	timeout := time.After(actionApprovalTimeout)
+	timeout := time.NewTimer(actionApprovalTimeout)
+	defer timeout.Stop()
 	ticker := time.NewTicker(actionApprovalPollInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-timeout:
+		case <-timeout.C:
 			return fmt.Errorf("timed out waiting for human approval to create @%s after %s; do NOT retry — assign this work to an existing specialist instead", slug, actionApprovalTimeout)
 		case <-ticker.C:
 			var result brokerInterviewAnswerResponse
