@@ -113,6 +113,7 @@ type Broker struct {
 	humanSessions       []humanSession
 	humanSessionRevoke  map[string]chan struct{} // session ID → closed on revoke
 	actions             []officeActionLog
+	distillInFlight     map[string]struct{}
 	signals             []officeSignalRecord
 	decisions           []officeDecisionRecord
 	watchdogs           []watchdogAlert

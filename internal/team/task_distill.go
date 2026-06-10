@@ -17,11 +17,40 @@ package team
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
 
 const taskDistillInsightDetailClip = 400
+
+// learningKeyFromTitle produces a key that satisfies the learning store's
+// ^[a-z0-9][a-z0-9_-]*$ pattern from an arbitrary task title. Titles with
+// punctuation ("Fix #42: crash v2.0") previously produced invalid keys and
+// the distillation silently no-opped (review HIGH finding).
+func learningKeyFromTitle(title string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(title)) {
+		isAlnum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		switch {
+		case isAlnum:
+			b.WriteRune(r)
+			lastDash = false
+		case !lastDash && b.Len() > 0:
+			b.WriteRune('-')
+			lastDash = true
+		}
+	}
+	key := strings.Trim(b.String(), "-")
+	if key == "" {
+		key = "task"
+	}
+	if len(key) > MaxLearningKeyLen {
+		key = strings.Trim(key[:MaxLearningKeyLen], "-")
+	}
+	return key
+}
 
 // queueTaskDistillation schedules distillation off the mutation hot path.
 func (b *Broker) queueTaskDistillation(taskID string) {
@@ -36,16 +65,32 @@ func (b *Broker) queueTaskDistillation(taskID string) {
 // so approve-after-complete and watchdog replays do not duplicate.
 func (b *Broker) distillCompletedTask(taskID string) {
 	b.mu.Lock()
+	// Single-flight per task: two distillation goroutines for the same task
+	// (approve-after-complete double fire) could both pass the Search-based
+	// dedup below and write twice (review MEDIUM finding).
+	if b.distillInFlight == nil {
+		b.distillInFlight = map[string]struct{}{}
+	}
+	if _, busy := b.distillInFlight[taskID]; busy {
+		b.mu.Unlock()
+		return
+	}
+	b.distillInFlight[taskID] = struct{}{}
 	var task teamTask
 	found := false
 	if t := b.taskByIDLocked(taskID); t != nil {
 		task = *t
 		found = true
 	}
-	log := b.teamLearningLog
+	llog := b.teamLearningLog
 	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		delete(b.distillInFlight, taskID)
+		b.mu.Unlock()
+	}()
 
-	if !found || log == nil || task.System {
+	if !found || llog == nil || task.System {
 		return
 	}
 	if !strings.EqualFold(strings.TrimSpace(task.status), "done") {
@@ -58,7 +103,7 @@ func (b *Broker) distillCompletedTask(taskID string) {
 		return
 	}
 
-	existing, err := log.Search(LearningSearchFilters{Limit: MaxLearningLimit})
+	existing, err := llog.Search(LearningSearchFilters{Limit: MaxLearningLimit})
 	if err != nil {
 		return
 	}
@@ -82,7 +127,7 @@ func (b *Broker) distillCompletedTask(taskID string) {
 	}
 	rec := LearningRecord{
 		Type:       "operational",
-		Key:        normalizeChannelSlug(strings.TrimSpace(task.Title)),
+		Key:        learningKeyFromTitle(task.Title),
 		Insight:    insight,
 		Confidence: 7,
 		Source:     "execution",
@@ -95,5 +140,9 @@ func (b *Broker) distillCompletedTask(taskID string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_, _ = log.AppendVerified(ctx, rec)
+	if _, err := llog.AppendVerified(ctx, rec); err != nil {
+		// Surface, never swallow: a verified outcome that fails to land in
+		// team memory is a broken compounding loop, not a cosmetic miss.
+		log.Printf("task distill: failed to record verified learning for %s: %v", taskID, err)
+	}
 }

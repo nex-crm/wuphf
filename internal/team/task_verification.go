@@ -211,12 +211,25 @@ func (b *Broker) gateTaskCompletionVerification(body TaskPostRequest) error {
 	res := runTaskVerification(v, workDir)
 
 	// Stamp phase: re-find by ID (the task may have been mutated while the
-	// check ran) and persist the result either way.
+	// check ran) and persist the result. Specs are immutable after create
+	// today, but fail closed anyway: if the task's spec no longer matches
+	// the one we executed (task replaced under the same ID), discard the
+	// result instead of stamping a stale verdict (review TOCTOU finding).
+	// UpdatedAt is deliberately NOT touched here — a verification attempt
+	// is not a mutation of the task's logical state; CheckedAt on the
+	// result carries the attempt time.
 	b.mu.Lock()
 	if task := b.taskByIDLocked(id); task != nil {
+		if task.Verification == nil || task.Verification.Kind != v.Kind || task.Verification.Spec != v.Spec {
+			b.mu.Unlock()
+			return taskMutationError(
+				TaskMutationConflict,
+				fmt.Sprintf("task %s verification spec changed while the check ran — retry the action", id),
+				nil,
+			)
+		}
 		resCopy := res
 		task.VerificationResult = &resCopy
-		task.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if err := b.saveLocked(); err != nil {
 			b.mu.Unlock()
 			return fmt.Errorf("verification: persist result: %w", err)

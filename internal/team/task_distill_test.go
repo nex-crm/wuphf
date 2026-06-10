@@ -94,3 +94,43 @@ func TestDistillSkipsUnverifiedDone(t *testing.T) {
 		}
 	}
 }
+
+func TestLearningKeyFromTitle(t *testing.T) {
+	cases := map[string]string{
+		"Fix #42: crash v2.0":          "fix-42-crash-v2-0",
+		"Deploy API v2.0 (prod/eu-1)!": "deploy-api-v2-0-prod-eu-1",
+		"   ":                          "task",
+		"___":                          "task",
+	}
+	for in, want := range cases {
+		if got := learningKeyFromTitle(in); got != want {
+			t.Errorf("learningKeyFromTitle(%q) = %q; want %q", in, got, want)
+		}
+	}
+}
+
+func TestDistillHandlesPunctuatedTitles(t *testing.T) {
+	b := newDistillTestBroker(t)
+	created, err := b.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Fix #42: crash in v2.0 (prod)",
+		Details: "gated", Owner: "eng", CreatedBy: "ceo",
+		VerificationKind: "command", VerificationSpec: "exit 0", VerificationRequired: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.MutateTask(TaskPostRequest{Action: "complete", ID: created.Task.ID, Channel: "general", CreatedBy: "eng"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.MutateTask(TaskPostRequest{Action: "approve", ID: created.Task.ID, Channel: "general", CreatedBy: "ceo"}); err != nil {
+		t.Fatal(err)
+	}
+	b.distillCompletedTask(created.Task.ID)
+	recs, _ := b.TeamLearningLog().Search(LearningSearchFilters{Limit: MaxLearningLimit})
+	for _, r := range recs {
+		if r.TaskID == created.Task.ID {
+			return
+		}
+	}
+	t.Fatalf("punctuated-title task must still distill (key sanitizer); got %d records, none for %s", len(recs), created.Task.ID)
+}
