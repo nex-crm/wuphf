@@ -242,10 +242,26 @@ func (t *SlackTransport) handleInteractive(ctx context.Context, callback slack.I
 			continue
 		}
 
-		// The clicker is a human pressing a button in Slack; the gate is
-		// human-only. Resolve their display name (best-effort) for the answer
-		// actor and the message rewrite.
-		name, _ := t.resolveUser(ctx, callback.User.ID)
+		// The gate is human-only. Reject the bot's own id and any confirmed
+		// bot/app user so a non-human is never recorded as the approving actor.
+		name, human := t.resolveUser(ctx, callback.User.ID)
+		if callback.User.ID == "" || callback.User.ID == t.botUserID || !human {
+			log.Printf("[slack] gate: rejecting non-human approval actor %q", callback.User.ID)
+			t.postGateEphemeral(ctx, channelID, callback.User.ID, "Only a human can approve this request.")
+			return true
+		}
+
+		// Bind the click to its channel: the interview being answered must be the
+		// ACTIVE decision in the channel the click came from. This stops a crafted
+		// or replayed interaction from resolving another channel's gate by id
+		// (request ids are predictable), independent of option validation.
+		officeSlug := t.channelSlugForID(channelID)
+		decision, found := t.activeDecisionForChannel(officeSlug)
+		if officeSlug == "" || !found || decision.ID != interviewID {
+			t.postGateEphemeral(ctx, channelID, callback.User.ID, "This decision is no longer available in this channel.")
+			return true
+		}
+
 		actorSlug := slackHumanActorSlug(callback.User.ID, name)
 		answerActor := humanMessageSender(actorSlug)
 
@@ -294,7 +310,9 @@ func (t *SlackTransport) postGateEphemeral(ctx context.Context, channelID, userI
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if _, err := t.api.PostEphemeralContext(ctx, channelID, userID, slack.MsgOptionText(text, false)); err != nil {
+	// escapeText=true: the text can include request-derived reasons (e.g. an
+	// option's TextHint), so neutralize any injected Slack control sequences.
+	if _, err := t.api.PostEphemeralContext(ctx, channelID, userID, slack.MsgOptionText(text, true)); err != nil {
 		log.Printf("[slack] gate: ephemeral to %s in %s: %v", userID, channelID, err)
 	}
 }

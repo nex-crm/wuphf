@@ -254,7 +254,7 @@ func TestSlackGateClickUnknownInterviewIsEphemeral(t *testing.T) {
 	if len(eph) != 1 {
 		t.Fatalf("expected 1 ephemeral notice, got %d", len(eph))
 	}
-	if eph[0].UserID != "U999" || !strings.Contains(eph[0].Text, "no longer active") {
+	if eph[0].UserID != "U999" || !strings.Contains(eph[0].Text, "no longer available in this channel") {
 		t.Fatalf("ephemeral notice wrong: %+v", eph[0])
 	}
 }
@@ -284,8 +284,32 @@ func TestSlackGateClickExpiredInterviewIsEphemeral(t *testing.T) {
 		t.Fatalf("second click should not rewrite the message again, got %d updates", len(up))
 	}
 	eph := api.snapshotEphemerals()
-	if len(eph) != 1 || !strings.Contains(eph[0].Text, "no longer active") {
+	if len(eph) != 1 || !strings.Contains(eph[0].Text, "no longer available in this channel") {
 		t.Fatalf("expected one 'no longer active' ephemeral, got %+v", eph)
+	}
+}
+
+// A confirmed bot/app user must never resolve a human-only approval gate.
+func TestSlackGateRejectsNonHumanClicker(t *testing.T) {
+	api := newFakeSlackAPI()
+	api.users["UBOT"] = &slack.User{ID: "UBOT", IsBot: true, Profile: slack.UserProfile{DisplayName: "Notetaker"}}
+	tr, b := newTestSlackTransport(t, "C0123", api)
+	id := seedSlackDecision(t, b, "slack-general")
+
+	cb := blockActionsCallback("C0123", "1700000000.0001", "UBOT", slackGateValue(id, "approve"))
+	if !tr.handleInteractive(context.Background(), cb) {
+		t.Fatalf("handleInteractive returned false")
+	}
+	// The gate must stay unanswered and the bot gets an ephemeral, not an approval.
+	if got := findRequestByID(b, id); got.Answered != nil {
+		t.Fatalf("a bot click resolved the gate: %+v", got.Answered)
+	}
+	if up := api.snapshotUpdates(); len(up) != 0 {
+		t.Fatalf("bot click should not rewrite the message, got %d", len(up))
+	}
+	eph := api.snapshotEphemerals()
+	if len(eph) != 1 || !strings.Contains(eph[0].Text, "Only a human") {
+		t.Fatalf("expected a human-only ephemeral, got %+v", eph)
 	}
 }
 

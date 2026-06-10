@@ -496,6 +496,15 @@ func (t *SlackTransport) channelIDForSlug(slug string) string {
 	return ""
 }
 
+// channelSlugForID returns the office channel slug bound to a Slack channel id,
+// or "" if the channel is not bridged. Used by the gate handler to bind a click
+// to the channel it came from.
+func (t *SlackTransport) channelSlugForID(channelID string) string {
+	t.mapsMu.RLock()
+	defer t.mapsMu.RUnlock()
+	return t.ChannelMap[channelID]
+}
+
 // resolveUser maps a Slack user id to an office member slug (or display name
 // fallback) and reports whether the user is a human. The result is cached in
 // UserMap so repeat senders skip the users.info round-trip. A lookup failure
