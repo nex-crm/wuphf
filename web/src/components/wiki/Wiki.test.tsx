@@ -56,7 +56,7 @@ describe("<Wiki>", () => {
     vi.spyOn(api, "fetchHistory").mockResolvedValue({ commits: [] });
   });
 
-  it("shows the catalog when no article is selected", async () => {
+  it("shows the search-first home when no article is selected", async () => {
     vi.spyOn(api, "fetchCatalog").mockResolvedValue([
       {
         path: "people/nazz",
@@ -68,11 +68,48 @@ describe("<Wiki>", () => {
     ]);
     render(<Wiki articlePath={null} onNavigate={() => {}} />);
     await waitFor(() =>
-      expect(screen.getByTestId("wk-catalog")).toBeInTheDocument(),
+      expect(screen.getByTestId("wk-home")).toBeInTheDocument(),
     );
     expect(
       screen.getByRole("heading", { name: "Team Wiki" }),
     ).toBeInTheDocument();
+    expect(screen.getByTestId("wk-home-search")).toBeInTheDocument();
+  });
+
+  it("keeps the legacy tree + catalog behind the All files escape hatch", async () => {
+    vi.spyOn(api, "fetchCatalog").mockResolvedValue([
+      {
+        path: "people/nazz",
+        title: "Nazz",
+        author_slug: "pm",
+        last_edited_ts: new Date().toISOString(),
+        group: "people",
+      },
+    ]);
+    render(<Wiki articlePath="_files" onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("wk-catalog")).toBeInTheDocument(),
+    );
+  });
+
+  it("renders a category index page for a _category path", async () => {
+    vi.spyOn(api, "fetchCatalog").mockResolvedValue([
+      {
+        path: "team/people/nazz.md",
+        title: "Nazz",
+        author_slug: "pm",
+        last_edited_ts: new Date().toISOString(),
+        group: "people",
+      },
+    ]);
+    render(<Wiki articlePath="_category/people" onNavigate={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("wk-category-page")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Category: People" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Nazz" })).toBeInTheDocument();
   });
 
   it("shows an article when a path is provided", async () => {
@@ -181,7 +218,7 @@ describe("<Wiki>", () => {
 
     render(<Wiki articlePath={null} onNavigate={() => {}} />);
     await waitFor(() =>
-      expect(screen.getByTestId("wk-catalog")).toBeInTheDocument(),
+      expect(screen.getByTestId("wk-home")).toBeInTheDocument(),
     );
 
     await act(async () => {

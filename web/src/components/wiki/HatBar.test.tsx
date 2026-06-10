@@ -20,9 +20,7 @@ describe("<HatBar>", () => {
     render(<HatBar active="article" />);
     const talk = screen.getByRole("button", { name: "Talk" });
     expect(talk).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Article" })).toHaveClass(
-      "active",
-    );
+    expect(screen.getByRole("button", { name: "Read" })).toHaveClass("active");
   });
 
   it("fires onChange when a non-active, non-disabled tab is clicked", () => {
@@ -39,10 +37,10 @@ describe("<HatBar>", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("fires onChange when the Edit source tab is clicked", () => {
+  it("fires onChange when the Edit tab is clicked", () => {
     const onChange = vi.fn();
     render(<HatBar active="article" onChange={onChange} />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(onChange).toHaveBeenCalledWith("edit");
   });
 

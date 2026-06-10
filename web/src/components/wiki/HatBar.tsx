@@ -12,9 +12,9 @@ interface HatBarProps {
 }
 
 const LABELS: Record<HatBarTab, string> = {
-  article: "Article",
+  article: "Read",
   talk: "Talk",
-  edit: "Edit source",
+  edit: "Edit",
   history: "History",
   raw: "Raw markdown",
 };

@@ -54,11 +54,18 @@
   );
   --wk-display: var(--font-sans);
   --wk-body-serif: "Newsreader", "Georgia", ui-serif, serif;
+  /* Wikipedia-parity tokens (core-loop B5): serif display titles over a
+     sans reading body — the inverse of the app's editorial register, scoped
+     to the wiki so the rest of the shell keeps its own voice. */
+  --wk-title-serif:
+    "Linux Libertine", "Georgia", "Times New Roman", ui-serif, serif;
+  --wk-body-sans: var(--font-sans);
   --wk-chrome: var(--font-sans);
   --wk-mono: var(--font-mono);
   --wk-sidebar-left: 240px;
   --wk-sidebar-right: 280px;
-  --wk-article-max: 640px;
+  --wk-article-max: 880px;
+  --wk-infobox-width: 280px;
 }
 .wiki-root {
   /* Warm-journal cohesion. Shift the wiki's surface tokens off pure white
@@ -105,13 +112,110 @@
 }
 .wiki-layout > .wk-catalog,
 .wiki-layout > .wk-article-col,
+.wiki-layout > .wk-home,
+.wiki-layout > .wk-category-page,
 .wiki-layout > .wk-toc-col {
   min-height: 0;
   overflow-y: auto;
 }
-/* Catalog has no right rail — give the main column all the remaining space. */
-.wiki-layout[data-view="catalog"] {
+/* Views without an article right rail: nav rail (or tree) + main only. */
+.wiki-layout[data-view="home"],
+.wiki-layout[data-view="category"],
+.wiki-layout[data-view="files"],
+.wiki-layout[data-view="audit"],
+.wiki-layout[data-view="lint"],
+.wiki-layout[data-view="file"],
+.wiki-layout[data-view="app"] {
   grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr);
+}
+/* Full-page editor spans the article + right-rail tracks. */
+.wk-article-col--editing {
+  grid-column: 2 / -1;
+}
+
+/* ─── Wikipedia-style left nav rail (Main page / Recent changes / …) ─── */
+.wk-nav-rail {
+  padding: 20px 16px 80px 20px;
+  border-right: 1px solid var(--wk-border-light);
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.wk-nav-rail-links {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+}
+.wk-nav-rail-links li {
+  margin: 0 0 2px;
+}
+.wk-nav-rail-links a {
+  display: block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--wk-wikilink);
+}
+.wk-nav-rail-links a:hover {
+  background: var(--wk-paper-dark);
+}
+.wk-nav-rail-links a.is-active {
+  color: var(--wk-text);
+  font-weight: 600;
+  background: var(--wk-paper-dark);
+}
+
+/* ─── Sticky Contents panel (left, Vector-2022 style) ─── */
+.wk-contents {
+  position: sticky;
+  top: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--wk-border-light);
+}
+.wk-contents-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.wk-contents-title {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wk-text-muted);
+}
+.wk-contents-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-contents-item a {
+  display: block;
+  padding: 3px 8px;
+  border-left: 2px solid transparent;
+  border-radius: 0 4px 4px 0;
+  color: var(--wk-wikilink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.wk-contents-item a:hover {
+  background: var(--wk-paper-dark);
+}
+.wk-contents-item.is-active > a {
+  border-left-color: var(--wk-text);
+  color: var(--wk-text);
+  font-weight: 600;
+}
+.wk-contents-lvl-2 a {
+  padding-left: 22px;
+  font-size: 12px;
+}
+.wk-contents-item .wk-num {
+  color: var(--wk-text-tertiary);
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ─── LEFT NAV ─── */
@@ -213,8 +317,13 @@
 /* position: relative creates the positioning context for .pam-wrap (see
  * styles/pam.css) — Pam's desk hangs off the top-right of the column. */
 .wk-article-col {
-  padding: 0 64px 120px;
+  padding: 0 48px 120px;
   position: relative;
+}
+/* Centered content column (~880px), Wikipedia reading measure. */
+.wk-article-page {
+  max-width: var(--wk-article-max);
+  margin: 0 auto;
 }
 
 .wk-article-col-visual {
@@ -329,15 +438,14 @@
   color: var(--wk-text-tertiary);
 }
 
-/* ─── Title ─── */
+/* ─── Title — serif display heading, Wikipedia-style ─── */
 .wk-article-title {
-  font-family: var(--wk-display);
-  font-size: 52px;
-  font-weight: 500;
-  line-height: 1.05;
-  letter-spacing: -0.015em;
+  font-family: var(--wk-title-serif);
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: 0;
   color: var(--wk-text);
-  font-variation-settings: "opsz" 100;
   margin: 0 0 4px;
 }
 .wk-strapline {
@@ -347,12 +455,13 @@
   color: var(--wk-text-muted);
   margin-bottom: 14px;
 }
-.wk-title-divider {
+/* Thin rule under the article title (Wikipedia's single hairline). */
+.wk-title-divider,
+.wk-title-rule {
   border: 0;
-  border-top: 1px solid var(--wk-text);
-  border-bottom: 1px solid var(--wk-text);
-  height: 3px;
-  margin: 14px 0 24px;
+  border-top: 1px solid var(--wk-border-strong);
+  height: 0;
+  margin: 10px 0 20px;
 }
 
 /* ─── Byline ─── */
@@ -496,35 +605,141 @@
   text-underline-offset: 3px;
 }
 
-/* ─── Body ─── */
+/* ─── Body — sans reading face, Wikipedia register ─── */
 .wk-article-body {
-  font-family: var(--wk-body-serif);
-  font-size: 18px;
-  line-height: 1.72;
+  font-family: var(--wk-body-sans);
+  font-size: 16px;
+  line-height: 1.6;
   color: var(--wk-text);
-  max-width: var(--wk-article-max);
+  max-width: none;
 }
 .wk-article-body p {
-  margin: 0 0 18px;
+  margin: 0 0 16px;
 }
 .wk-article-body h2 {
-  font-family: var(--wk-display);
-  font-size: 28px;
-  font-weight: 500;
-  line-height: 1.2;
-  margin: 40px 0 14px;
-  letter-spacing: -0.01em;
-  font-variation-settings: "opsz" 36;
+  font-family: var(--wk-title-serif);
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1.25;
+  margin: 36px 0 12px;
+  letter-spacing: 0;
   border-bottom: 1px solid var(--wk-border);
-  padding-bottom: 6px;
+  padding-bottom: 4px;
+}
+.wk-article-body h2 a {
+  color: inherit;
 }
 .wk-article-body h3 {
-  font-family: var(--wk-display);
+  font-family: var(--wk-title-serif);
   font-size: 20px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.3;
-  margin: 28px 0 10px;
-  font-variation-settings: "opsz" 24;
+  margin: 26px 0 8px;
+}
+.wk-article-body h3 a {
+  color: inherit;
+}
+/* Wikipedia's per-section [ edit ] affordance, right of each H2. */
+.wk-article-body h2 .wk-section-edit {
+  float: right;
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--wk-text-tertiary);
+  user-select: none;
+  margin-top: 10px;
+}
+.wk-section-edit-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--wk-wikilink);
+  cursor: pointer;
+}
+.wk-section-edit-btn:hover {
+  text-decoration: underline;
+}
+
+/* ─── Footnote citations ([^n] → superscript [n] + References block) ─── */
+.wk-article-body sup:has(> a[data-footnote-ref]) {
+  line-height: 0;
+}
+.wk-article-body a[data-footnote-ref] {
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-wikilink);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wk-article-body a[data-footnote-ref]::before {
+  content: "[";
+}
+.wk-article-body a[data-footnote-ref]::after {
+  content: "]";
+}
+.wk-article-body section[data-footnotes] {
+  margin-top: 40px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--wk-text);
+}
+.wk-article-body section[data-footnotes] h2 {
+  font-size: 26px;
+}
+.wk-article-body section[data-footnotes] ol {
+  margin-left: 22px;
+}
+.wk-article-body section[data-footnotes] li {
+  margin-bottom: 5px;
+}
+.wk-article-body a[data-footnote-backref] {
+  font-family: var(--wk-chrome);
+  text-decoration: none;
+  color: var(--wk-wikilink);
+  margin-left: 4px;
+}
+/* Brief highlight wash on the jump target after a citation/TOC click. */
+.wk-jump-flash {
+  animation: wk-jump-flash-fade 1.6s ease-out;
+}
+@keyframes wk-jump-flash-fade {
+  0%,
+  40% {
+    background-color: var(--wk-amber-bg);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wk-jump-flash {
+    animation: none;
+    background-color: var(--wk-amber-bg);
+  }
+}
+
+/* ─── Hover previews (page preview card + citation popover) ─── */
+.wk-hover-preview {
+  position: fixed;
+  z-index: 60;
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border-strong);
+  border-radius: 4px;
+  box-shadow: var(--wk-shadow-popover);
+  padding: 12px 14px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--wk-text);
+}
+.wk-hover-preview-title {
+  font-family: var(--wk-title-serif);
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+.wk-hover-preview-body {
+  color: var(--wk-text-muted);
 }
 .wk-article-body ul,
 .wk-article-body ol {
@@ -594,45 +809,53 @@
   background: rgba(0, 0, 0, 0.02);
 }
 
-/* ─── Infobox ─── */
+/* ─── Infobox (right-floating, from B2's `## Summary` definition list) ─── */
 .wk-infobox {
   float: right;
-  width: 260px;
+  width: var(--wk-infobox-width);
   margin: 4px 0 18px 24px;
   padding: 0;
-  border: 1px solid var(--wk-text);
+  border: 1px solid var(--wk-border-strong);
   background: var(--wk-paper-dark);
   font-family: var(--wk-chrome);
   font-size: 13px;
   line-height: 1.45;
 }
 .wk-infobox .wk-ib-title {
-  background: var(--wk-text);
-  color: var(--wk-paper);
-  font-family: var(--wk-display);
-  font-size: 14px;
-  font-weight: 500;
+  background: var(--wk-amber-bg);
+  color: var(--wk-text);
+  border-bottom: 1px solid var(--wk-border-strong);
+  font-family: var(--wk-title-serif);
+  font-size: 15px;
+  font-weight: 600;
   padding: 8px 12px;
   text-align: center;
 }
 .wk-infobox .wk-ib-body {
-  padding: 12px;
+  padding: 10px 12px;
 }
 .wk-infobox dl {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px 10px;
   margin: 0;
 }
+.wk-infobox .wk-ib-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 0 10px;
+  padding: 4px 0;
+}
+.wk-infobox .wk-ib-row + .wk-ib-row {
+  border-top: 1px solid var(--wk-border-light);
+}
 .wk-infobox dt {
-  color: var(--wk-text-muted);
+  color: var(--wk-text);
   font-family: var(--wk-chrome);
-  font-weight: 500;
+  font-weight: 600;
 }
 .wk-infobox dd {
   color: var(--wk-text);
   font-variant-numeric: tabular-nums;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 .wk-infobox .wk-ib-section {
   margin-top: 10px;
@@ -3719,4 +3942,243 @@
 }
 .wk-diff-context {
   color: var(--wk-text-muted);
+}
+
+/* ─── Search-first home (Wikipedia main-page register) ─── */
+.wk-home {
+  padding: 0 48px 120px;
+}
+.wk-home-masthead {
+  max-width: 720px;
+  margin: 56px auto 40px;
+  text-align: center;
+}
+.wk-home-title {
+  font-family: var(--wk-title-serif);
+  font-size: 44px;
+  font-weight: 400;
+  margin: 0 0 6px;
+  color: var(--wk-text);
+}
+.wk-home-tagline {
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  color: var(--wk-text-muted);
+  margin: 0 0 28px;
+}
+.wk-home-search {
+  position: relative;
+  text-align: left;
+}
+.wk-home-search-input {
+  width: 100%;
+  padding: 12px 18px;
+  font-family: var(--wk-chrome);
+  font-size: 17px;
+  color: var(--wk-text);
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border-strong);
+  border-radius: 6px;
+  outline: none;
+}
+.wk-home-search-input:focus {
+  border-color: var(--wk-text-muted);
+  box-shadow: 0 0 0 2px var(--wk-amber-bg);
+}
+.wk-home-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border-strong);
+  border-radius: 6px;
+  box-shadow: var(--wk-shadow-popover);
+}
+.wk-home-suggestions a {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  color: var(--wk-text);
+}
+.wk-home-suggestions a:hover {
+  background: var(--wk-paper-dark);
+}
+.wk-home-suggestions .wk-suggestion-group {
+  color: var(--wk-text-tertiary);
+  font-size: 12px;
+}
+.wk-home-suggestions-foot button {
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--wk-border-light);
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-wikilink);
+  cursor: pointer;
+}
+.wk-home-results {
+  margin-top: 24px;
+  text-align: left;
+  font-family: var(--wk-chrome);
+}
+.wk-home-results h2 {
+  font-family: var(--wk-title-serif);
+  font-size: 20px;
+  font-weight: 400;
+  border-bottom: 1px solid var(--wk-border);
+  padding-bottom: 4px;
+}
+.wk-home-results ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-home-results li {
+  margin: 0 0 10px;
+}
+.wk-home-results a {
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  display: block;
+}
+.wk-home-snippet {
+  font-size: 13px;
+  color: var(--wk-text-muted);
+}
+.wk-home-empty {
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-text-tertiary);
+  font-style: italic;
+}
+.wk-home-grid {
+  max-width: 880px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+@media (max-width: 860px) {
+  .wk-home-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.wk-home-card {
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  padding: 18px 20px;
+}
+.wk-home-card h2 {
+  font-family: var(--wk-title-serif);
+  font-size: 20px;
+  font-weight: 400;
+  margin: 0 0 12px;
+  border-bottom: 1px solid var(--wk-border);
+  padding-bottom: 4px;
+}
+.wk-home-categories {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+}
+.wk-home-categories li {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+.wk-home-categories .wk-count {
+  color: var(--wk-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.wk-home-actions {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--wk-border);
+  display: flex;
+  gap: 16px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+}
+.wk-home-recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+}
+.wk-home-recent li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--wk-border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wk-home-recent li:last-child {
+  border-bottom: 0;
+}
+.wk-home-recent-msg {
+  color: var(--wk-text);
+}
+.wk-home-recent-meta {
+  color: var(--wk-text-tertiary);
+  font-size: 12px;
+}
+.wk-home-recent-path {
+  font-family: var(--wk-mono);
+  font-size: 11px;
+}
+
+/* ─── Category index pages ─── */
+.wk-category-page {
+  padding: 0 48px 120px;
+  font-family: var(--wk-chrome);
+}
+.wk-category-inner {
+  max-width: var(--wk-article-max);
+  margin: 24px auto 0;
+}
+.wk-category-summary {
+  font-size: 14px;
+  color: var(--wk-text-muted);
+  margin: 0 0 20px;
+}
+.wk-category-letter h2 {
+  font-family: var(--wk-title-serif);
+  font-size: 22px;
+  font-weight: 400;
+  margin: 18px 0 8px;
+  border-bottom: 1px solid var(--wk-border);
+  padding-bottom: 2px;
+}
+.wk-category-letter ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  columns: 2;
+  column-gap: 40px;
+  font-size: 14px;
+}
+@media (max-width: 860px) {
+  .wk-category-letter ul {
+    columns: 1;
+  }
+}
+.wk-category-letter li {
+  padding: 3px 0;
+  break-inside: avoid;
 }

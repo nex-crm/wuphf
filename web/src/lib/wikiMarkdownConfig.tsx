@@ -41,6 +41,37 @@ export interface WikiMarkdownOptions {
    * instead of leaking to the document base URL.
    */
   articlePath?: string;
+  /**
+   * When provided, every H2 in the read view gets Wikipedia's small
+   * `[ edit ]` affordance to its right; clicking it opens the editor.
+   * The editor's live preview omits this (you are already editing).
+   */
+  onEditSection?: () => void;
+}
+
+/**
+ * Scroll to an in-page anchor (footnote ref/backref, heading slug) inside
+ * the article column. The app uses hash routing (`#/wiki/...`), so letting
+ * the browser follow `href="#user-content-fn-1"` would clobber the route —
+ * we intercept and scroll instead, with a brief Wikipedia-style highlight
+ * flash on the jump target.
+ */
+export function scrollToInPageAnchor(hash: string): void {
+  const id = decodeURIComponent(hash.replace(/^#/, ""));
+  if (!id) return;
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ block: "start", behavior: "smooth" });
+  el.classList.add("wk-jump-flash");
+  globalThis.setTimeout(() => el.classList.remove("wk-jump-flash"), 1600);
+}
+
+/**
+ * True for an in-page fragment href (`#summary`, `#user-content-fn-1`)
+ * as opposed to a hash-router route (`#/wiki/...`).
+ */
+function isInPageAnchor(href: string): boolean {
+  return href.startsWith("#") && !href.startsWith("#/");
 }
 
 /**
@@ -167,12 +198,50 @@ type ImageProps = ComponentProps<"img">;
 export function buildMarkdownComponents(
   options: WikiMarkdownOptions,
 ): Partial<Components> {
-  const { onNavigate, articlePath } = options;
+  const { onNavigate, articlePath, onEditSection } = options;
+  const headingWithEdit = onEditSection
+    ? ({ children, ...rest }: ComponentProps<"h2">): ReactElement => (
+        <h2 {...rest}>
+          {children}
+          <span className="wk-section-edit">
+            [{" "}
+            <button
+              type="button"
+              className="wk-section-edit-btn"
+              onClick={onEditSection}
+              aria-label="Edit this section"
+            >
+              edit
+            </button>{" "}
+            ]
+          </span>
+        </h2>
+      )
+    : undefined;
   return {
     blockquote: CalloutBlockquote,
+    ...(headingWithEdit ? { h2: headingWithEdit } : {}),
     a: (props: AnchorProps): ReactElement => {
       const record = props as Record<string, unknown>;
       const isWikilink = record["data-wikilink"] === "true";
+      // In-page fragments (footnote refs/backrefs, heading self-links from
+      // rehype-autolink-headings) must not clobber the hash route.
+      if (
+        !isWikilink &&
+        typeof props.href === "string" &&
+        isInPageAnchor(props.href)
+      ) {
+        const { href } = props;
+        return (
+          <a
+            {...props}
+            onClick={(e) => {
+              e.preventDefault();
+              scrollToInPageAnchor(href);
+            }}
+          />
+        );
+      }
       if (isWikilink && onNavigate) {
         const slug = record["data-slug"] as string | undefined;
         return (

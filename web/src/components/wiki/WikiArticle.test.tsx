@@ -690,7 +690,7 @@ describe("<WikiArticle history and refresh>", () => {
     );
 
     await screen.findByText("Original body");
-    fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     const editor = (await screen.findByTestId(
       "wk-tiptap-stub",
     )) as HTMLTextAreaElement;
@@ -1015,9 +1015,9 @@ describe("<WikiArticle open-in-edit hand-off>", () => {
     );
 
     // The Edit tab is active and the editor surface mounts without the user
-    // having to click "Edit source" first.
+    // having to click "Edit" first.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Edit source" })).toHaveClass(
+      expect(screen.getByRole("button", { name: "Edit" })).toHaveClass(
         "active",
       ),
     );
@@ -1036,9 +1036,7 @@ describe("<WikiArticle open-in-edit hand-off>", () => {
     );
 
     await screen.findByRole("heading", { name: "Customer X" });
-    expect(screen.getByRole("button", { name: "Article" })).toHaveClass(
-      "active",
-    );
+    expect(screen.getByRole("button", { name: "Read" })).toHaveClass("active");
     expect(screen.queryByTestId("wk-tiptap-stub")).toBeNull();
   });
 });
