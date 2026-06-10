@@ -4,7 +4,7 @@
 **Author:** Najmuzzaman (directive) + Claude (decisions), 2026-06-10
 **Doctrine:** Everything that does not support the core loop is waste. Remove those surfaces from FE and BE. The system stays super focused on delivering this one loop excellently.
 
-▶ **RESUME HERE:** Phase R (removals) not started. Execution order: R1 redactor → R2 spec surface → R3 plan mode → R4 office-hours intake → R5 skills-from-playbooks-only → B-phases. Read "Decisions" before touching anything.
+▶ **RESUME HERE (2026-06-10 evening):** R1 (redactor), R2 (spec surface), R3 (plan mode incl. #1058 plumbing), R5 (skills-from-playbooks-only, −9,065 lines) ALL SHIPPED on `feat/sota-uplift-phase0` / PR #1062 — office-eval 13/13 after every cut, CI fully green, main merged through #1065. IN FLIGHT: R4 (office-hours intake: task definition fields goal/deliverables/success_criteria + CEO forcing-question interview; wire-shape change → triangulation review required before commit). REMAINING: R6 surface sweep, then B1 learning hook → B2 team-KG/wiki → B3 playbook compilation+policies → B4 private-KG/notebooks → B5 Wikipedia-parity wiki → B6 update-first discipline.
 
 ---
 
