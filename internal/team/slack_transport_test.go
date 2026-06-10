@@ -3,6 +3,9 @@ package team
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"sync"
@@ -14,6 +17,46 @@ import (
 
 	teamTransport "github.com/nex-crm/wuphf/internal/team/transport"
 )
+
+// slackFormFromOptions renders the same form values Slack receives for a chat.*
+// call: text + thread_ts via UnsafeApplyMsgOptions, plus the JSON-encoded blocks
+// that slack-go only serialises when a request is actually built. It lets the
+// fake observe attached blocks exactly as Slack would, without a network round
+// trip. channelID seeds the same base values the real builder uses.
+func slackFormFromOptions(channelID string, opts ...slack.MsgOption) (url.Values, error) {
+	_, values, err := slack.UnsafeApplyMsgOptions("token", channelID, "https://slack.test/api/", opts...)
+	if err != nil {
+		return nil, err
+	}
+	// UnsafeApplyMsgOptions omits blocks (they are marshalled only at request
+	// build time). Re-derive them: a real *slack.Client against a recording
+	// server is overkill here, so drive slack-go's own message builder via a
+	// throwaway client and read back the rendered blocks form value.
+	if blocks := blocksFormValue(opts...); blocks != "" {
+		values.Set("blocks", blocks)
+	}
+	return values, nil
+}
+
+// blocksRecorder captures the blocks JSON slack-go serialises for a chat.* call.
+// It runs the options through a real *slack.Client pointed at an in-process
+// recording server exactly once per call, returning the "blocks" form field (or
+// "" when no blocks were attached).
+func blocksFormValue(opts ...slack.MsgOption) string {
+	var captured string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if v, err := url.ParseQuery(string(raw)); err == nil {
+			captured = v.Get("blocks")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"channel":"C0123","ts":"1700000000.0001"}`)
+	}))
+	defer srv.Close()
+	client := slack.New("xoxb-test", slack.OptionAPIURL(srv.URL+"/"))
+	_, _, _ = client.PostMessage("C0123", opts...)
+	return captured
+}
 
 // fakeSlackAPI is an in-memory slackAPI used by both the transport and bridge
 // tests. It records every PostMessageContext call (rendered to channel/text/
@@ -36,12 +79,32 @@ type fakeSlackAPI struct {
 
 	members    map[string][]string
 	membersErr error
+
+	updates   []fakeUpdate
+	updateErr error
+
+	ephemerals   []fakeEphemeral
+	ephemeralErr error
 }
 
 type fakePost struct {
 	ChannelID string
 	Text      string
 	ThreadTS  string
+	Blocks    string
+}
+
+type fakeUpdate struct {
+	ChannelID string
+	Timestamp string
+	Text      string
+	Blocks    string
+}
+
+type fakeEphemeral struct {
+	ChannelID string
+	UserID    string
+	Text      string
 }
 
 func newFakeSlackAPI() *fakeSlackAPI {
@@ -59,7 +122,7 @@ func (f *fakeSlackAPI) PostMessageContext(_ context.Context, channelID string, o
 	if f.postErr != nil && (f.postErrAt == 0 || f.postErrAt == f.postCalls) {
 		return "", "", f.postErr
 	}
-	_, values, err := slack.UnsafeApplyMsgOptions("token", channelID, "https://slack.test/api/", opts...)
+	values, err := slackFormFromOptions(channelID, opts...)
 	if err != nil {
 		return "", "", err
 	}
@@ -68,8 +131,62 @@ func (f *fakeSlackAPI) PostMessageContext(_ context.Context, channelID string, o
 		ChannelID: channelID,
 		Text:      firstValue(values, "text"),
 		ThreadTS:  firstValue(values, "thread_ts"),
+		Blocks:    firstValue(values, "blocks"),
 	})
 	return channelID, ts, nil
+}
+
+func (f *fakeSlackAPI) UpdateMessageContext(_ context.Context, channelID, timestamp string, opts ...slack.MsgOption) (string, string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.updateErr != nil {
+		return "", "", "", f.updateErr
+	}
+	values, err := slackFormFromOptions(channelID, opts...)
+	if err != nil {
+		return "", "", "", err
+	}
+	f.updates = append(f.updates, fakeUpdate{
+		ChannelID: channelID,
+		Timestamp: timestamp,
+		Text:      firstValue(values, "text"),
+		Blocks:    firstValue(values, "blocks"),
+	})
+	return channelID, timestamp, firstValue(values, "text"), nil
+}
+
+func (f *fakeSlackAPI) PostEphemeralContext(_ context.Context, channelID, userID string, opts ...slack.MsgOption) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ephemeralErr != nil {
+		return "", f.ephemeralErr
+	}
+	_, values, err := slack.UnsafeApplyMsgOptions("token", channelID, "https://slack.test/api/", opts...)
+	if err != nil {
+		return "", err
+	}
+	f.ephemerals = append(f.ephemerals, fakeEphemeral{
+		ChannelID: channelID,
+		UserID:    userID,
+		Text:      firstValue(values, "text"),
+	})
+	return "1700000000.9999", nil
+}
+
+func (f *fakeSlackAPI) snapshotUpdates() []fakeUpdate {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]fakeUpdate, len(f.updates))
+	copy(out, f.updates)
+	return out
+}
+
+func (f *fakeSlackAPI) snapshotEphemerals() []fakeEphemeral {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]fakeEphemeral, len(f.ephemerals))
+	copy(out, f.ephemerals)
+	return out
 }
 
 func (f *fakeSlackAPI) GetUserInfoContext(_ context.Context, userID string) (*slack.User, error) {

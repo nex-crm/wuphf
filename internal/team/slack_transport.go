@@ -47,6 +47,12 @@ type slackAPI interface {
 	// GetUsersInConversationContext lists the member ids of a channel, used to
 	// pre-warm the user → member-slug map.
 	GetUsersInConversationContext(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error)
+	// UpdateMessageContext edits a previously-posted message in place (chat.update),
+	// used by the approval gate to rewrite a decision card to its resolved state.
+	UpdateMessageContext(ctx context.Context, channelID, timestamp string, opts ...slack.MsgOption) (string, string, string, error)
+	// PostEphemeralContext posts a message visible only to one user (chat.postEphemeral),
+	// used by the approval gate to tell a clicker that a request is no longer active.
+	PostEphemeralContext(ctx context.Context, channelID, userID string, opts ...slack.MsgOption) (string, error)
 }
 
 // slackUserInfo is the cached resolution of a Slack user id.
@@ -74,6 +80,14 @@ func (c *slackClient) AuthTestContext(ctx context.Context) (*slack.AuthTestRespo
 
 func (c *slackClient) GetUsersInConversationContext(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error) {
 	return c.api.GetUsersInConversationContext(ctx, params)
+}
+
+func (c *slackClient) UpdateMessageContext(ctx context.Context, channelID, timestamp string, opts ...slack.MsgOption) (string, string, string, error) {
+	return c.api.UpdateMessageContext(ctx, channelID, timestamp, opts...)
+}
+
+func (c *slackClient) PostEphemeralContext(ctx context.Context, channelID, userID string, opts ...slack.MsgOption) (string, error) {
+	return c.api.PostEphemeralContext(ctx, channelID, userID, opts...)
 }
 
 // socketRunner is the inbound seam: it blocks reading Socket Mode events and
@@ -340,6 +354,16 @@ func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, e
 			log.Printf("[slack] route inbound error (leaving un-acked for redelivery): %v", err)
 			return false
 		}
+	case socketmode.EventTypeInteractive:
+		// Block Kit interactions (a human clicking an approval/decision button).
+		// handleInteractive always reports handled=true: a click is answered
+		// once and any failure is surfaced to the clicker ephemerally, never
+		// retried, so the interaction is always Ack'd.
+		callback, ok := evt.Data.(slack.InteractionCallback)
+		if !ok {
+			return true
+		}
+		return t.handleInteractive(ctx, callback)
 	}
 	return true
 }
@@ -418,6 +442,20 @@ func (t *SlackTransport) Send(ctx context.Context, msg transport.Outbound) error
 		return fmt.Errorf("slack: no channel mapped for %q", msg.Binding.ChannelSlug)
 	}
 	opts := []slack.MsgOption{slack.MsgOptionText(msg.Text, false)}
+	// A decision/interview message renders as an interactive Block Kit card with
+	// one button per option, so a human can approve/reject natively in Slack.
+	// transport.Outbound is text-only (shared kernel type, not Slack-specific), so
+	// the decision is re-derived here: only an outbound that formatSlackOutbound
+	// already rendered as a decision (the "📋 Decision needed" prefix from
+	// formatSlackDecision) is upgraded to blocks — ordinary chat posted while a
+	// decision is pending is left as plain text. When matched, the blocks REPLACE
+	// the plain text, keeping msg.Text as the notification fallback. No match (no
+	// active decision, or the request carries no options) falls through unchanged.
+	if isSlackDecisionText(msg.Text) {
+		if decision, ok := t.activeDecisionForChannel(msg.Binding.ChannelSlug); ok {
+			opts = append(opts, slack.MsgOptionBlocks(formatSlackInterviewBlocks(decision)...))
+		}
+	}
 	if msg.ThreadKey != "" {
 		opts = append(opts, slack.MsgOptionTS(msg.ThreadKey))
 	}
@@ -612,11 +650,23 @@ func formatSlackOutbound(msg channelMessage) string {
 	}
 }
 
+// slackDecisionPrefix is the leading marker every decision/interview message
+// carries. Send uses it (via isSlackDecisionText) to recognise the one outbound
+// message that should be upgraded from plain text to an interactive Block Kit
+// card, leaving ordinary chat posted during a pending decision as plain text.
+const slackDecisionPrefix = "📋 *Decision needed*"
+
+// isSlackDecisionText reports whether an outbound body was rendered as a decision
+// by formatSlackDecision (and therefore should be upgraded to interactive blocks).
+func isSlackDecisionText(text string) bool {
+	return strings.HasPrefix(text, slackDecisionPrefix)
+}
+
 // formatSlackDecision renders a human decision/interview message as Slack mrkdwn.
 // Dynamic fields are escaped (see formatSlackOutbound).
 func formatSlackDecision(msg channelMessage) string {
 	var sb strings.Builder
-	sb.WriteString("📋 *Decision needed*")
+	sb.WriteString(slackDecisionPrefix)
 	if msg.From != "" {
 		sb.WriteString(" from @")
 		sb.WriteString(slackEscape(msg.From))
