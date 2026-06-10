@@ -46,6 +46,13 @@ func defaultHeadlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notific
 			return l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
 		case isOpenAICompatKind(kind):
 			return l.runHeadlessOpenAICompatTurn(ctx, slug, notification, channel...)
+		case kind == provider.KindSlack:
+			// Foreign Slack agents have no local runtime: their "turn" is the
+			// outbound Slack relay (a real <@U…> mention), which the transport
+			// dispatcher already delivered. Falling through to the Claude
+			// runner would spawn a doomed subprocess for an agent that acts on
+			// its own in Slack — so the queued turn is a deliberate no-op.
+			return nil
 		default:
 			return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
 		}

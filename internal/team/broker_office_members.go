@@ -155,6 +155,10 @@ func cloneOfficeMemberForRead(member officeMember) officeMember {
 		openclaw := *member.Provider.Openclaw
 		clone.Provider.Openclaw = &openclaw
 	}
+	if member.Provider.Slack != nil {
+		slack := *member.Provider.Slack
+		clone.Provider.Slack = &slack
+	}
 	return clone
 }
 

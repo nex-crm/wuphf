@@ -121,6 +121,124 @@ func TestSlackResolveUserCachesBotAsNonHuman(t *testing.T) {
 	}
 }
 
+// A foreign bot REGISTERED via /slack/agents flows inbound attributed to its
+// office slug — the ingress half of multi-agent coordination — while
+// unregistered bots keep dropping (the registry is a fail-closed allowlist).
+func TestSlackRouteInboundRegisteredForeignAgent(t *testing.T) {
+	api := newFakeSlackAPI()
+	tr, b := newTestSlackTransport(t, "C0123", api)
+	tr.botUserID = "UBOT"
+	host := &brokerTransportHost{broker: b}
+	ctx := context.Background()
+
+	if _, err := b.RegisterSlackAgent("claude-bot", "Claude Bot", "U777"); err != nil {
+		t.Fatalf("RegisterSlackAgent: %v", err)
+	}
+
+	// Modern app post: bot_id + user set, no subtype.
+	if err := tr.routeInbound(ctx, host, &slackevents.MessageEvent{
+		User: "U777", BotID: "B7", Channel: "C0123", Text: "analysis done", TimeStamp: "2.1",
+	}); err != nil {
+		t.Fatalf("routeInbound registered agent: %v", err)
+	}
+	// bot_message subtype variant with a user id also flows.
+	if err := tr.routeInbound(ctx, host, &slackevents.MessageEvent{
+		SubType: "bot_message", User: "U777", BotID: "B7", Channel: "C0123", Text: "follow-up", TimeStamp: "2.2",
+	}); err != nil {
+		t.Fatalf("routeInbound bot_message registered agent: %v", err)
+	}
+
+	msgs := b.ChannelMessages("slack-general")
+	if len(msgs) != 2 {
+		t.Fatalf("registered agent messages should flow, got %d", len(msgs))
+	}
+	for _, m := range msgs {
+		if m.From != "claude-bot" {
+			t.Fatalf("agent message must be attributed to the registered slug, got From=%q", m.From)
+		}
+	}
+
+	// An unregistered bot still drops.
+	_ = tr.routeInbound(ctx, host, &slackevents.MessageEvent{
+		User: "U888", BotID: "B8", Channel: "C0123", Text: "noise", TimeStamp: "2.3",
+	})
+	if got := len(b.ChannelMessages("slack-general")); got != 2 {
+		t.Fatalf("unregistered bot must stay dropped, got %d messages", got)
+	}
+}
+
+// Even a (mis)registration of our OWN bot user id must not open an echo loop:
+// the self-drop wins over the registry.
+func TestSlackRouteInboundSelfDropBeatsRegistration(t *testing.T) {
+	api := newFakeSlackAPI()
+	tr, b := newTestSlackTransport(t, "C0123", api)
+	tr.botUserID = "UBOT"
+	host := &brokerTransportHost{broker: b}
+
+	if _, err := b.RegisterSlackAgent("self-echo", "Self", "UBOT"); err != nil {
+		t.Fatalf("RegisterSlackAgent: %v", err)
+	}
+	_ = tr.routeInbound(context.Background(), host, &slackevents.MessageEvent{
+		User: "UBOT", BotID: "B0", Channel: "C0123", Text: "echo", TimeStamp: "3.1",
+	})
+	if got := len(b.ChannelMessages("slack-general")); got != 0 {
+		t.Fatalf("own bot id must drop even when registered, got %d messages", got)
+	}
+}
+
+// An office message that tags a registered foreign agent is rendered with a
+// real <@U…> mention (built from the registry, never from text) so the foreign
+// bot actually wakes; unregistered tags stay escaped plain text.
+func TestSlackFormatOutboundLinksRegisteredAgentMentions(t *testing.T) {
+	api := newFakeSlackAPI()
+	tr, b := newTestSlackTransport(t, "C0123", api)
+	if _, err := b.RegisterSlackAgent("claude-bot", "Claude Bot", "U777"); err != nil {
+		t.Fatalf("RegisterSlackAgent: %v", err)
+	}
+
+	out, ok := tr.FormatOutbound(channelMessage{
+		From:    "ceo",
+		Channel: "slack-general",
+		Content: "@claude-bot please review the draft; @claude-bot-2 and @pm stay put. <!channel>",
+		Tagged:  []string{"claude-bot", "pm"},
+	})
+	if !ok {
+		t.Fatal("FormatOutbound should map slack-general")
+	}
+	if !strings.Contains(out.Text, "<@U777>") {
+		t.Fatalf("registered tag should become a real mention, got %q", out.Text)
+	}
+	if strings.Contains(out.Text, "@claude-bot-2 ") == false || strings.Contains(out.Text, "<@U777>-2") {
+		t.Fatalf("longer slug must not be partially rewritten, got %q", out.Text)
+	}
+	if !strings.Contains(out.Text, "@pm") {
+		t.Fatalf("unregistered tag must stay plain text, got %q", out.Text)
+	}
+	if strings.Contains(out.Text, "<!channel>") {
+		t.Fatalf("escaping must still neutralize control sequences, got %q", out.Text)
+	}
+}
+
+func TestReplaceMentionToken(t *testing.T) {
+	cases := []struct {
+		name, text, token, repl, want string
+	}{
+		{"whole token", "ping @bot now", "@bot", "<@U1>", "ping <@U1> now"},
+		{"token at end", "ping @bot", "@bot", "<@U1>", "ping <@U1>"},
+		{"longer slug untouched", "ping @bot-2", "@bot", "<@U1>", "ping @bot-2"},
+		{"email-like untouched", "mail@bot down", "@bot", "<@U1>", "mail@bot down"},
+		{"multiple", "@bot and @bot", "@bot", "<@U1>", "<@U1> and <@U1>"},
+		{"absent", "nothing here", "@bot", "<@U1>", "nothing here"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := replaceMentionToken(tc.text, tc.token, tc.repl); got != tc.want {
+				t.Fatalf("replaceMentionToken(%q) = %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
 // Only request-bearing payload envelopes may be Acked. Acking a connection-
 // lifecycle event like "hello" makes Slack drop the Socket Mode connection,
 // which caused a ~10s reconnect loop where no event ever landed (caught live).

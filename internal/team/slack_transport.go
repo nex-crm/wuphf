@@ -373,26 +373,27 @@ func (t *SlackTransport) handleEvent(ctx context.Context, host transport.Host, e
 }
 
 // routeInbound resolves the office channel for a Slack message event and delivers
-// it to the office via host.UpsertParticipant + host.ReceiveMessage. Bot-authored
-// messages, the bot's own messages, subtyped events (edits/joins/etc.), and
-// messages on unmapped channels are skipped. Returns a non-nil error only on a
-// Host contract failure (e.g. ErrBindingChannelMissing), matching telegram's
+// it to the office via host.UpsertParticipant + host.ReceiveMessage. Subtyped
+// events (edits/joins/etc.), the bot's own messages, and messages on unmapped
+// channels are skipped. Bot-authored messages are dropped UNLESS the author's
+// Slack user id is registered as a foreign agent via /slack/agents — those flow
+// inbound attributed to the registered office slug as non-human participants,
+// which is the ingress half of multi-agent coordination (the egress half is the
+// packer's @-mention delegation). Returns a non-nil error only on a Host
+// contract failure (e.g. ErrBindingChannelMissing), matching telegram's
 // routeInbound so the caller can surface it for supervised restart.
 func (t *SlackTransport) routeInbound(ctx context.Context, host transport.Host, msg *slackevents.MessageEvent) error {
 	if msg == nil {
 		return nil
 	}
-	// Skip non-plain messages: edits, deletes, joins, and bot_message subtypes
-	// all carry a SubType. Only a subtype-less message is a fresh human/agent post.
-	if msg.SubType != "" {
+	// Skip non-plain messages: edits, deletes, joins all carry a SubType. The
+	// one exception is "bot_message" — that is how some foreign bots' posts
+	// arrive, so it must reach the registry check below instead of dropping.
+	if msg.SubType != "" && msg.SubType != "bot_message" {
 		return nil
 	}
-	// Drop bot-authored messages (BotID set) and our own user id to avoid echo
-	// loops with the office's own outbound posts.
-	if msg.BotID != "" {
-		return nil
-	}
-	if msg.User == "" || (t.botUserID != "" && msg.User == t.botUserID) {
+	// Drop our own posts to avoid echo loops with the office's outbound relay.
+	if t.botUserID != "" && msg.User == t.botUserID {
 		return nil
 	}
 	if strings.TrimSpace(msg.Text) == "" {
@@ -407,7 +408,20 @@ func (t *SlackTransport) routeInbound(ctx context.Context, host transport.Host, 
 		return nil
 	}
 
-	fromName, human := t.resolveUser(ctx, msg.User)
+	// Resolve the sender. A registered foreign agent is attributed to its
+	// office slug and marked non-human; every OTHER bot-authored message —
+	// unregistered bot users, legacy bot_message posts without a user id, and
+	// our own posts when auth.test never resolved botUserID — drops here.
+	// Registration is the ingress allowlist: fail-closed by default.
+	var fromName string
+	var human bool
+	if agentSlug := t.foreignAgentSlug(msg.User); agentSlug != "" {
+		fromName, human = agentSlug, false
+	} else if msg.BotID != "" || msg.SubType == "bot_message" || msg.User == "" {
+		return nil
+	} else {
+		fromName, human = t.resolveUser(ctx, msg.User)
+	}
 
 	p := transport.Participant{
 		AdapterName: "slack",
@@ -434,6 +448,20 @@ func (t *SlackTransport) routeInbound(ctx context.Context, host transport.Host, 
 	}
 	t.setHealth(transport.HealthConnected, nil)
 	return nil
+}
+
+// foreignAgentSlug resolves a Slack user id to a registered foreign agent's
+// office slug via the /slack/agents registry. Returns "" for empty ids,
+// unregistered ids, and — as an echo guard even against a misconfigured
+// registration of our own bot — the transport's own bot user id.
+func (t *SlackTransport) foreignAgentSlug(userID string) string {
+	if userID == "" || t.Broker == nil {
+		return ""
+	}
+	if t.botUserID != "" && userID == t.botUserID {
+		return ""
+	}
+	return t.Broker.SlackAgentSlugByUserID(userID)
 }
 
 // Send delivers one outbound message to the Slack channel mapped to
@@ -469,8 +497,62 @@ func (t *SlackTransport) FormatOutbound(msg channelMessage) (transport.Outbound,
 	}
 	return transport.Outbound{
 		Binding: transport.Binding{Scope: transport.ScopeChannel, ChannelSlug: ch},
-		Text:    formatSlackOutbound(msg),
+		Text:    t.linkSlackAgentMentions(formatSlackOutbound(msg), msg.Tagged),
 	}, true
+}
+
+// linkSlackAgentMentions upgrades "@slug" tokens for TAGGED, REGISTERED foreign
+// agents into real <@U…> Slack mentions so the foreign bot is actually pinged —
+// without this, office agents addressing a Slack agent produce inert plain text
+// and the bot never wakes. Two properties keep this injection-safe: the user id
+// comes exclusively from the registry (SlackAgentUserIDBySlug — never from
+// message text), and the rewrite runs AFTER formatSlackOutbound has escaped
+// every dynamic field, so surrounding text cannot smuggle its own control
+// sequences. Tags that aren't registered foreign agents are left as escaped
+// plain text.
+func (t *SlackTransport) linkSlackAgentMentions(text string, tagged []string) string {
+	if t.Broker == nil || len(tagged) == 0 {
+		return text
+	}
+	for _, slug := range tagged {
+		userID := t.Broker.SlackAgentUserIDBySlug(slug)
+		if userID == "" {
+			continue
+		}
+		text = replaceMentionToken(text, "@"+slug, "<@"+slackEscape(userID)+">")
+	}
+	return text
+}
+
+// replaceMentionToken replaces whole-token occurrences of token in text with
+// replacement. An occurrence only counts when neither the byte before nor the
+// byte after could extend a slug, so "@bot" never rewrites inside "@bot-2" or
+// "mail@bot".
+func replaceMentionToken(text, token, replacement string) string {
+	var sb strings.Builder
+	for {
+		i := strings.Index(text, token)
+		if i < 0 {
+			sb.WriteString(text)
+			return sb.String()
+		}
+		end := i + len(token)
+		boundary := (i == 0 || !isSlugByte(text[i-1])) &&
+			(end >= len(text) || !isSlugByte(text[end]))
+		sb.WriteString(text[:i])
+		if boundary {
+			sb.WriteString(replacement)
+		} else {
+			sb.WriteString(token)
+		}
+		text = text[end:]
+	}
+}
+
+// isSlugByte reports whether c can be part of an office member slug.
+func isSlugByte(c byte) bool {
+	return c == '-' || c == '_' ||
+		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
 // channelIDForSlug returns the Slack channel id for the given office channel
