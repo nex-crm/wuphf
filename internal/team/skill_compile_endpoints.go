@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -75,24 +74,17 @@ func (b *Broker) handlePostSkillCompile(w http.ResponseWriter, r *http.Request) 
 // skillCompileStatsResponse is the JSON shape GET /skills/compile/stats
 // returns. Times are RFC3339 in UTC; durations are integer milliseconds.
 type skillCompileStatsResponse struct {
-	ManualClicksTotal             int64                          `json:"manual_clicks_total"`
-	CronTicksTotal                int64                          `json:"cron_ticks_total"`
-	ProposalsCreatedTotal         int64                          `json:"proposals_created_total"`
-	ProposalsApprovedTotal        int64                          `json:"proposals_approved_total"`
-	ProposalsRejectedByGuardTotal int64                          `json:"proposals_rejected_by_guard_total"`
-	LastTickDurationMs            int64                          `json:"last_tick_duration_ms"`
-	LastSkillCompilePassAt        string                         `json:"last_skill_compile_pass_at,omitempty"`
-	StageBProposalsTotal          int64                          `json:"stage_b_proposals_total"`
-	CounterNudgesFiredTotal       int64                          `json:"counter_nudges_fired_total"`
-	CounterPerAgent               map[string]SkillCounterMetrics `json:"counter_per_agent,omitempty"`
-	SelfHealCandidatesScanned     int64                          `json:"self_heal_candidates_scanned"`
-	SelfHealSkillsSynthesized     int64                          `json:"self_heal_skills_synthesized"`
-	SelfHealLLMRejections         int64                          `json:"self_heal_llm_rejections"`
-	// Embedding pipeline telemetry (Stage B semantic clustering).
-	EmbeddingCallsTotal       int64   `json:"embedding_calls_total"`
-	EmbeddingCacheHitsTotal   int64   `json:"embedding_cache_hits_total"`
-	EmbeddingCacheMissesTotal int64   `json:"embedding_cache_misses_total"`
-	EmbeddingCostUsd          float64 `json:"embedding_cost_usd"`
+	ManualClicksTotal             int64  `json:"manual_clicks_total"`
+	CronTicksTotal                int64  `json:"cron_ticks_total"`
+	ProposalsCreatedTotal         int64  `json:"proposals_created_total"`
+	ProposalsApprovedTotal        int64  `json:"proposals_approved_total"`
+	ProposalsRejectedByGuardTotal int64  `json:"proposals_rejected_by_guard_total"`
+	LastTickDurationMs            int64  `json:"last_tick_duration_ms"`
+	LastSkillCompilePassAt        string `json:"last_skill_compile_pass_at,omitempty"`
+	// Embedding pipeline telemetry (semantic dedup gate).
+	EmbeddingCallsTotal       int64 `json:"embedding_calls_total"`
+	EmbeddingCacheHitsTotal   int64 `json:"embedding_cache_hits_total"`
+	EmbeddingCacheMissesTotal int64 `json:"embedding_cache_misses_total"`
 }
 
 // handleGetSkillCompileStats returns a snapshot of the compile metrics.
@@ -104,7 +96,6 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 
 	b.mu.Lock()
 	snap := snapshotSkillCompileMetrics(&b.skillCompileMetrics)
-	counter := b.skillCounter
 	b.mu.Unlock()
 
 	resp := skillCompileStatsResponse{
@@ -114,20 +105,9 @@ func (b *Broker) handleGetSkillCompileStats(w http.ResponseWriter, r *http.Reque
 		ProposalsApprovedTotal:        snap.ProposalsApprovedTotal,
 		ProposalsRejectedByGuardTotal: snap.ProposalsRejectedByGuardTotal,
 		LastTickDurationMs:            snap.LastTickDurationMs,
-		StageBProposalsTotal:          snap.StageBProposalsTotal,
-		CounterNudgesFiredTotal:       snap.CounterNudgesFiredTotal,
-		SelfHealCandidatesScanned:     snap.SelfHealCandidatesScanned,
-		SelfHealSkillsSynthesized:     snap.SelfHealSkillsSynthesized,
-		SelfHealLLMRejections:         snap.SelfHealLLMRejections,
 		EmbeddingCallsTotal:           snap.EmbeddingCallsTotal,
 		EmbeddingCacheHitsTotal:       snap.EmbeddingCacheHitsTotal,
 		EmbeddingCacheMissesTotal:     snap.EmbeddingCacheMissesTotal,
-		// snap is a value-copy already loaded atomically by snapshotSkillCompileMetrics —
-		// no atomic load needed on the local copy, just convert the bits.
-		EmbeddingCostUsd: math.Float64frombits(snap.EmbeddingCostUsdBits),
-	}
-	if counter != nil {
-		resp.CounterPerAgent = counter.Stats()
 	}
 	if snap.LastSkillCompilePassAtNano != 0 {
 		resp.LastSkillCompilePassAt = time.Unix(0, snap.LastSkillCompilePassAtNano).UTC().Format(timeRFC3339)

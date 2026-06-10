@@ -35,8 +35,8 @@ const (
 	defaultSkillCompileCooldown = 25 * time.Minute
 )
 
-// SkillCompileMetrics captures cumulative + last-run telemetry for the Stage
-// A compile loop. All fields are updated and read atomically so callers need
+// SkillCompileMetrics captures cumulative + last-run telemetry for the
+// compile loop. All fields are updated and read atomically so callers need
 // not hold broker.mu.
 type SkillCompileMetrics struct {
 	ManualClicksTotal             int64
@@ -49,47 +49,19 @@ type SkillCompileMetrics struct {
 	// compile pass (0 = never). Updated and read via atomic.StoreInt64 /
 	// atomic.LoadInt64 so reads are safe without broker.mu.
 	LastSkillCompilePassAtNano int64
-	// StageBProposalsTotal counts proposals written by the Stage B
-	// synthesizer (LLM-synth from candidate signals). Incremented atomically
-	// once the unified write helper accepts the proposal.
-	StageBProposalsTotal int64
-	// CounterNudgesFiredTotal counts skill_review_nudge tasks fired by the
-	// Hermes-style per-agent counter (Stage B'). Incremented atomically by
-	// the tool-event hot path each time a nudge task is appended.
-	CounterNudgesFiredTotal int64
-	// SelfHealCandidatesScanned counts candidates with Source ==
-	// SourceSelfHealResolved that the synthesizer attempted to LLM-synthesize.
-	SelfHealCandidatesScanned int64
-	// SelfHealSkillsSynthesized counts self-heal candidates that the LLM
-	// accepted AND that successfully wrote through the unified funnel.
-	SelfHealSkillsSynthesized int64
-	// SelfHealLLMRejections counts self-heal candidates rejected by the LLM
-	// or by the post-LLM sanity checks (parse failures, name regex, body
-	// heading missing, length checks, etc.).
-	SelfHealLLMRejections int64
-	// EmbeddingCallsTotal is incremented every time the notebook scanner
-	// computes a fresh embedding (cache miss path). Cache hits do NOT
-	// bump this counter — see EmbeddingCacheHitsTotal.
+	// EmbeddingCallsTotal counts fresh embedding computations (cache miss
+	// path) in the semantic dedup gate. Cache hits do NOT bump this
+	// counter — see EmbeddingCacheHitsTotal.
 	EmbeddingCallsTotal int64
-	// EmbeddingCacheHitsTotal counts on-disk cache hits across all
-	// embedding paths. A high hit ratio is the goal — we never want to
-	// re-embed the same entry once it has stabilised in the cache.
+	// EmbeddingCacheHitsTotal counts embedding cache hits in the dedup gate.
 	EmbeddingCacheHitsTotal int64
 	// EmbeddingCacheMissesTotal counts cache misses (live API calls).
-	// EmbeddingCallsTotal == EmbeddingCacheMissesTotal in steady state;
-	// the two diverge when a single batched API call fans out to N
-	// per-text Set events.
 	EmbeddingCacheMissesTotal int64
-	// EmbeddingCostUsdBits stores a float64 USD cost using
-	// math.Float64bits. Updated via addFloatBits / loadFloatBits in
-	// notebook_signal_scanner_embeddings.go so reads + writes are
-	// lock-free.
-	EmbeddingCostUsdBits uint64
-	// SemanticDedupHitsTotal counts proposals that matched an existing
+	// SemanticDedupHitsTotal counts compiled skills that matched an existing
 	// skill via the semantic dedup gate (Jaro-Winkler or embedding cosine).
 	SemanticDedupHitsTotal int64
-	// SkillEnhancementsTotal counts proposals that enhanced an existing
-	// skill instead of being discarded or created as new.
+	// SkillEnhancementsTotal counts compile outputs that enhanced an existing
+	// skill instead of being discarded or created as new (update-first).
 	SkillEnhancementsTotal int64
 }
 
@@ -107,15 +79,9 @@ func snapshotSkillCompileMetrics(m *SkillCompileMetrics) SkillCompileMetrics {
 		ProposalsRejectedByGuardTotal: atomic.LoadInt64(&m.ProposalsRejectedByGuardTotal),
 		LastTickDurationMs:            atomic.LoadInt64(&m.LastTickDurationMs),
 		LastSkillCompilePassAtNano:    atomic.LoadInt64(&m.LastSkillCompilePassAtNano),
-		StageBProposalsTotal:          atomic.LoadInt64(&m.StageBProposalsTotal),
-		CounterNudgesFiredTotal:       atomic.LoadInt64(&m.CounterNudgesFiredTotal),
-		SelfHealCandidatesScanned:     atomic.LoadInt64(&m.SelfHealCandidatesScanned),
-		SelfHealSkillsSynthesized:     atomic.LoadInt64(&m.SelfHealSkillsSynthesized),
-		SelfHealLLMRejections:         atomic.LoadInt64(&m.SelfHealLLMRejections),
 		EmbeddingCallsTotal:           atomic.LoadInt64(&m.EmbeddingCallsTotal),
 		EmbeddingCacheHitsTotal:       atomic.LoadInt64(&m.EmbeddingCacheHitsTotal),
 		EmbeddingCacheMissesTotal:     atomic.LoadInt64(&m.EmbeddingCacheMissesTotal),
-		EmbeddingCostUsdBits:          atomic.LoadUint64(&m.EmbeddingCostUsdBits),
 		SemanticDedupHitsTotal:        atomic.LoadInt64(&m.SemanticDedupHitsTotal),
 		SkillEnhancementsTotal:        atomic.LoadInt64(&m.SkillEnhancementsTotal),
 	}
@@ -159,40 +125,6 @@ func (b *Broker) SetSkillScanner(s *SkillScanner) {
 	b.mu.Unlock()
 }
 
-// SetSkillSynthesizer replaces the broker's Stage B synthesizer — used by
-// tests to inject a fake aggregator + provider.
-func (b *Broker) SetSkillSynthesizer(s *SkillSynthesizer) {
-	b.mu.Lock()
-	b.skillSynthesizer = s
-	b.mu.Unlock()
-}
-
-// ensureSkillSynthesizer lazily constructs the Stage B synthesizer. Called the
-// first time compileWikiSkills runs so tests that never trigger a Stage B
-// pass pay no cost.
-func (b *Broker) ensureSkillSynthesizer() *SkillSynthesizer {
-	b.mu.Lock()
-	if b.skillSynthesizer != nil {
-		s := b.skillSynthesizer
-		b.mu.Unlock()
-		return s
-	}
-	b.mu.Unlock()
-
-	agg := NewStageBSignalAggregator(b)
-	provider := NewDefaultStageBLLMProvider(b)
-	synth := NewSkillSynthesizer(b, agg)
-	synth.provider = provider
-
-	b.mu.Lock()
-	if b.skillSynthesizer == nil {
-		b.skillSynthesizer = synth
-	}
-	out := b.skillSynthesizer
-	b.mu.Unlock()
-	return out
-}
-
 // compileWikiSkills runs a single Stage A scan + write pass. trigger is one
 // of "manual", "cron", "event"; tests may pass anything for traceability.
 //
@@ -225,31 +157,6 @@ func (b *Broker) compileWikiSkills(ctx context.Context, scopePath string, dryRun
 
 	scanner := b.ensureSkillScanner()
 	res, scanErr := scanner.Scan(ctx, scopePath, dryRun, trigger)
-
-	// Stage B: LLM synthesizer pass over candidate signals from PR 2-A. Only
-	// run when not in dry-run; the synthesizer writes proposals through the
-	// same unified funnel so dry-run would produce false positives. Counts
-	// fold into the returned ScanResult so callers see one combined number.
-	if !dryRun {
-		synth := b.ensureSkillSynthesizer()
-		bRes, bErr := synth.SynthesizeOnce(ctx, trigger)
-		if bErr != nil && !errors.Is(bErr, ErrSynthCoalesced) {
-			res.Errors = append(res.Errors, ScanError{
-				Slug:   "stage-b",
-				Reason: "synth: " + bErr.Error(),
-			})
-		}
-		res.Proposed += bRes.Synthesized
-		res.Deduped += bRes.Deduped
-		res.RejectedByGuard += bRes.RejectedByGuard
-		atomic.AddInt64(&b.skillCompileMetrics.StageBProposalsTotal, int64(bRes.Synthesized))
-		for _, e := range bRes.Errors {
-			res.Errors = append(res.Errors, ScanError{
-				Slug:   "stage-b:" + e.CandidateName,
-				Reason: e.Reason,
-			})
-		}
-	}
 
 	atomic.StoreInt64(&b.skillCompileMetrics.LastSkillCompilePassAtNano, time.Now().UTC().UnixNano())
 	atomic.StoreInt64(&b.skillCompileMetrics.LastTickDurationMs, res.DurationMs)

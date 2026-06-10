@@ -9,7 +9,7 @@ package team
 //	  agent_created (Stage B):  allow safe ONLY, REJECT caution + dangerous
 //
 // ScanSkill emits a verdict and a list of findings. The trust-ladder gate is
-// applied by the caller (writeSkillProposalLocked), so the same scan can be
+// applied by the caller (writeCompiledSkillLocked), so the same scan can be
 // re-used for runtime audits without forcing rejection semantics here.
 
 import (

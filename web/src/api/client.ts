@@ -602,10 +602,6 @@ export interface SkillSimilarRef {
 }
 
 export interface InterviewMetadata {
-  /** Set on enhance_skill_proposal interviews (PR 7 task #15). */
-  enhances_slug?: string;
-  /** Set on ambiguous-band skill_proposal interviews (PR 7 task #15). */
-  similar_to_existing?: SkillSimilarRef;
   [key: string]: unknown;
 }
 
@@ -629,10 +625,8 @@ export interface AgentRequest {
   updated_at?: string;
   /** Echoes the entity slug the request is about (e.g. a skill name). */
   reply_to?: string;
-  /** Structured metadata. Used by the enhance-existing UX (PR 7 task #14). */
+  /** Structured metadata attached by the broker (kind-specific). */
   metadata?: InterviewMetadata;
-  /** Full candidate spec on enhance_skill_proposal interviews. */
-  enhance_candidate?: Skill;
   redacted?: boolean;
   redaction_count?: number;
   redaction_reasons?: string[];
@@ -841,7 +835,7 @@ export interface Skill {
   updated_at?: string;
   /** Per-agent scoping (PR 7). Empty/missing = lead-routable shared skill. */
   owner_agents?: OwnerAgents;
-  /** Set on ambiguous-band proposals by the similarity gate (PR 7 task #15). */
+  /** Set by the similarity gate when this skill resembles another (legacy records). */
   similar_to_existing?: SkillSimilarRef;
   metadata?: SkillMetadata;
 }
@@ -898,10 +892,10 @@ export interface SkillOwnerToggleResponse {
 }
 
 /**
- * Enable a specific skill for a specific agent. Adds the agent slug to
+ * Assign a specific skill to a specific agent. Adds the agent slug to
  * the skill's owner_agents list (idempotent). Only OwnerAgents members
- * can invoke a skill via team_skill_run — see the AVAILABLE SKILLS /
- * DISCOVERABLE SKILLS split in the agent prompt.
+ * see the skill in their AVAILABLE SKILLS prompt block and can invoke
+ * it via team_skill_run.
  */
 export function enableSkillForAgent(
   name: string,

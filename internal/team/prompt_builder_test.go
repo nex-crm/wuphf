@@ -413,10 +413,8 @@ func TestPromptBuilder_VisualArtifactSelectivityRulePresentOnEverySurface(t *tes
 		"Artifact turns: AT MOST two chat messages",
 		"Non-artifact turns: AT MOST one chat message",
 		"No plan preamble",
-		// Unsolicited-tools ban — the hard ban on skill/task/wiki creation.
+		// Unsolicited-tools ban — the hard ban on task/wiki creation.
 		"DO NOT CALL these tools without an explicit human request",
-		"team_skill_create",
-		"make this a skill",
 		"team_task create / complete",
 		"team_wiki_write",
 		"save to wiki",
@@ -521,7 +519,7 @@ func TestPromptBuilder_ToolSearchAcceptanceLanguagePreserved(t *testing.T) {
 			"do it ONCE at the very start of your turn",
 			"single ToolSearch call",
 			"Load ONLY the schemas you actually plan to use",
-			"Do NOT preload team_skill_create or team_wiki_write",
+			"Do NOT preload team_wiki_write",
 			"Never call ToolSearch a second time in the same turn",
 			"Do NOT narrate the tool-loading process",
 		} {
@@ -543,9 +541,10 @@ func TestPromptBuilder_ToolSearchAcceptanceLanguagePreserved(t *testing.T) {
 
 func TestPromptBuilder_UnsolicitedToolBanIsExplicit(t *testing.T) {
 	// Live demo failure 2026-05-29: after answering a coffee question, the
-	// agent called team_skill_create to codify "research-html-article" and
-	// team_task to mark a task complete. Neither was requested. Pin an
-	// explicit ban so these tools are not called for self-codification.
+	// agent self-codified a skill and called team_task to mark a task
+	// complete. Neither was requested. team_skill_create is gone entirely
+	// (core-loop R5); pin the ban on the remaining tools plus the absence
+	// of any skill-creation tool mention.
 	pb := &promptBuilder{
 		isOneOnOne:  func() bool { return false },
 		isFocusMode: func() bool { return false },
@@ -564,10 +563,8 @@ func TestPromptBuilder_UnsolicitedToolBanIsExplicit(t *testing.T) {
 	}
 	for _, slug := range []string{"ceo", "pm"} {
 		got := pb.Build(slug)
-		// Ban must apply to all three tool families.
+		// Ban must apply to the remaining tool families.
 		for _, want := range []string{
-			"team_skill_create — ONLY when the human literally says",
-			"Answering a question well is NOT permission to codify",
 			"team_task create / complete — ONLY when the human assigned a task",
 			"Do not invent a task to mark complete after a chat answer",
 			"team_wiki_write — ONLY when the human says",
@@ -576,6 +573,9 @@ func TestPromptBuilder_UnsolicitedToolBanIsExplicit(t *testing.T) {
 			if !strings.Contains(got, want) {
 				t.Fatalf("%s prompt missing unsolicited-tool ban %q", slug, want)
 			}
+		}
+		if strings.Contains(got, "team_skill_create") {
+			t.Fatalf("%s prompt still mentions team_skill_create — the tool was removed", slug)
 		}
 	}
 }

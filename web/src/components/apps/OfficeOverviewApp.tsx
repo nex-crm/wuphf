@@ -15,11 +15,7 @@ import {
 } from "../../api/client";
 import { getOfficeTasks, type Task } from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
-import {
-  isAgentActive,
-  normalizeStatus,
-  taskMeta,
-} from "../../lib/officeStatus";
+import { isAgentActive, normalizeStatus } from "../../lib/officeStatus";
 import { router } from "../../lib/router";
 import { ActiveTasksPanel } from "./shared/ActiveTasksPanel";
 import { AgentPulsePanel } from "./shared/AgentPulsePanel";
@@ -49,7 +45,7 @@ interface OverviewData {
   recentArtifacts: Task[];
   activeAgents: OfficeMember[];
   pendingRequests: AgentRequest[];
-  proposedSkills: Skill[];
+  recentSkills: Skill[];
   upcomingJobs: SchedulerJob[];
   unhealthyProviders: LocalProviderStatus[];
   taskIsLoading: boolean;
@@ -166,7 +162,11 @@ function useOverviewData(): OverviewData {
     (r) => !r.status || r.status === "open" || r.status === "pending",
   );
 
-  const proposedSkills = allSkills.filter((s) => s.status === "proposed");
+  const recentSkills = allSkills
+    .filter((s) => s.status === "active")
+    .sort((a, b) =>
+      String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")),
+    );
   const unhealthyProviders = allProviders.filter(providerIsUnhealthy);
 
   const upcomingJobs = allJobs
@@ -191,7 +191,7 @@ function useOverviewData(): OverviewData {
     recentArtifacts,
     activeAgents,
     pendingRequests,
-    proposedSkills,
+    recentSkills,
     upcomingJobs,
     unhealthyProviders,
     taskIsLoading: tasks.isLoading,
@@ -347,23 +347,23 @@ function PendingReviewsSection({
   );
 }
 
-interface WikiProposalsSectionProps {
+interface CompiledSkillsSectionProps {
   skills: Skill[];
   isLoading: boolean;
 }
 
-function WikiProposalsSection({
+function CompiledSkillsSection({
   skills,
   isLoading,
-}: WikiProposalsSectionProps) {
+}: CompiledSkillsSectionProps) {
   return (
     <OverviewSection
-      title="Wiki proposals"
+      title="Compiled skills"
       count={skills.length}
-      id="wiki-proposals"
+      id="compiled-skills"
       action={
         skills.length > 0 ? (
-          <SectionLink onClick={goToSkills}>Review</SectionLink>
+          <SectionLink onClick={goToSkills}>View all</SectionLink>
         ) : null
       }
     >
@@ -371,7 +371,8 @@ function WikiProposalsSection({
         <SkeletonRows count={2} />
       ) : skills.length === 0 ? (
         <EmptyState action={{ label: "Go to skills", onClick: goToSkills }}>
-          No skill proposals awaiting review.
+          No compiled skills yet. Skills are compiled from playbook articles in
+          the wiki.
         </EmptyState>
       ) : (
         skills.slice(0, 4).map((s) => {
@@ -387,8 +388,8 @@ function WikiProposalsSection({
               label={s.title || s.name}
               body={s.description?.slice(0, 100)}
               meta={meta || undefined}
-              badge="proposed"
-              badgeClass="badge badge-yellow"
+              badge="active"
+              badgeClass="badge badge-green"
               onClick={goToSkills}
             />
           );
@@ -574,8 +575,8 @@ export function OfficeOverviewApp() {
           requests={data.pendingRequests}
           isLoading={data.requestsIsLoading}
         />
-        <WikiProposalsSection
-          skills={data.proposedSkills}
+        <CompiledSkillsSection
+          skills={data.recentSkills}
           isLoading={data.skillsIsLoading}
         />
         <ScheduledJobsSection

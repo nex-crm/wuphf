@@ -1,7 +1,7 @@
 package team
 
 // skill_dedup.go implements semantic skill deduplication. The write funnel
-// (writeSkillProposalLocked) calls findSimilarSkillsLocked before creating a
+// (writeCompiledSkillLocked) calls findSimilarSkillsLocked before creating a
 // new skill. Three tiers of comparison are applied in order:
 //
 //   - Tier 1: Jaro-Winkler on slugs (zero cost, reuses jaro_winkler.go)

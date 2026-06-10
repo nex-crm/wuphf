@@ -1,37 +1,37 @@
 package team
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
 )
 
-// skillProposalSpec is a convenience constructor so tests don't need to fill
+// compiledSkillSpec is a convenience constructor so tests don't need to fill
 // every field of teamSkill.
-func skillProposalSpec(name, description, createdBy string) teamSkill {
+func compiledSkillSpec(name, description, createdBy string) teamSkill {
 	return teamSkill{
 		Name:        name,
 		Description: description,
 		Content:     "Some content.",
 		CreatedBy:   createdBy,
 		Channel:     "general",
-		Status:      "proposed",
 	}
 }
 
-// callWriteSkillProposalLocked is a helper that acquires b.mu, calls
-// writeSkillProposalLocked, then checks that the lock is still held (i.e.
+// callWriteCompiledSkillLocked is a helper that acquires b.mu, calls
+// writeCompiledSkillLocked, then checks that the lock is still held (i.e.
 // the function returned with lock held as documented). It is safe to call
 // from tests because b.wikiWorker is nil so the deadlock-avoidance path is
 // exercised without an actual wiki worker goroutine.
-func callWriteSkillProposalLocked(b *Broker, spec teamSkill) (*teamSkill, error) {
+func callWriteCompiledSkillLocked(b *Broker, spec teamSkill) (*teamSkill, error) {
 	b.mu.Lock()
-	sk, err := b.writeSkillProposalLocked(spec)
+	sk, err := b.writeCompiledSkillLocked(spec)
 	b.mu.Unlock()
 	return sk, err
 }
 
-func TestWriteSkillProposalLocked_ValidatesName(t *testing.T) {
+func TestWriteCompiledSkillLocked_ValidatesName(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
@@ -42,24 +42,24 @@ func TestWriteSkillProposalLocked_ValidatesName(t *testing.T) {
 	}{
 		{
 			name:    "empty name",
-			spec:    skillProposalSpec("", "A description.", "archivist"),
+			spec:    compiledSkillSpec("", "A description.", "archivist"),
 			wantErr: "name is required",
 		},
 		{
 			name:    "whitespace name",
-			spec:    skillProposalSpec("   ", "A description.", "archivist"),
+			spec:    compiledSkillSpec("   ", "A description.", "archivist"),
 			wantErr: "name is required",
 		},
 		{
 			// skillSlug strips leading underscores → "-bad" which starts with dash
 			name:    "underscore-leading name produces dash-start slug",
-			spec:    skillProposalSpec("_bad", "A description.", "archivist"),
+			spec:    compiledSkillSpec("_bad", "A description.", "archivist"),
 			wantErr: "slug",
 		},
 		{
 			// skillSlug strips leading dashes but they are kept; "- bad" → "--bad"
 			name:    "dash-leading name stays invalid",
-			spec:    skillProposalSpec("-bad-start", "A description.", "archivist"),
+			spec:    compiledSkillSpec("-bad-start", "A description.", "archivist"),
 			wantErr: "slug",
 		},
 	}
@@ -68,7 +68,7 @@ func TestWriteSkillProposalLocked_ValidatesName(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := callWriteSkillProposalLocked(b, tc.spec)
+			_, err := callWriteCompiledSkillLocked(b, tc.spec)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -79,12 +79,12 @@ func TestWriteSkillProposalLocked_ValidatesName(t *testing.T) {
 	}
 }
 
-func TestWriteSkillProposalLocked_ValidatesDescription(t *testing.T) {
+func TestWriteCompiledSkillLocked_ValidatesDescription(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
-	spec := skillProposalSpec("my-skill", "", "archivist")
-	_, err := callWriteSkillProposalLocked(b, spec)
+	spec := compiledSkillSpec("my-skill", "", "archivist")
+	_, err := callWriteCompiledSkillLocked(b, spec)
 	if err == nil {
 		t.Fatal("expected error for empty description, got nil")
 	}
@@ -93,7 +93,7 @@ func TestWriteSkillProposalLocked_ValidatesDescription(t *testing.T) {
 	}
 }
 
-func TestWriteSkillProposalLocked_SystemAuthorWhitelist(t *testing.T) {
+func TestWriteCompiledSkillLocked_SystemAuthorWhitelist(t *testing.T) {
 	t.Parallel()
 
 	systemAuthors := []string{"archivist", "scanner", "system"}
@@ -103,8 +103,8 @@ func TestWriteSkillProposalLocked_SystemAuthorWhitelist(t *testing.T) {
 		t.Run("system_author_"+author, func(t *testing.T) {
 			t.Parallel()
 			b := newTestBroker(t)
-			spec := skillProposalSpec("my-skill-"+author, "A description.", author)
-			sk, err := callWriteSkillProposalLocked(b, spec)
+			spec := compiledSkillSpec("my-skill-"+author, "A description.", author)
+			sk, err := callWriteCompiledSkillLocked(b, spec)
 			if err != nil {
 				t.Fatalf("expected system author %q to bypass member check, got err: %v", author, err)
 			}
@@ -118,14 +118,14 @@ func TestWriteSkillProposalLocked_SystemAuthorWhitelist(t *testing.T) {
 	}
 }
 
-func TestWriteSkillProposalLocked_NonSystemAuthorRequiresMember(t *testing.T) {
+func TestWriteCompiledSkillLocked_NonSystemAuthorRequiresMember(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
 	// "random-agent" is not in the system author whitelist and not a
 	// registered team member — should return an error.
-	spec := skillProposalSpec("my-skill", "A description.", "random-agent")
-	_, err := callWriteSkillProposalLocked(b, spec)
+	spec := compiledSkillSpec("my-skill", "A description.", "random-agent")
+	_, err := callWriteCompiledSkillLocked(b, spec)
 	if err == nil {
 		t.Fatal("expected error for unregistered non-system author, got nil")
 	}
@@ -134,19 +134,19 @@ func TestWriteSkillProposalLocked_NonSystemAuthorRequiresMember(t *testing.T) {
 	}
 }
 
-func TestWriteSkillProposalLocked_DeduplicatesOnSlugCollision(t *testing.T) {
+func TestWriteCompiledSkillLocked_DeduplicatesOnSlugCollision(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
-	spec := skillProposalSpec("dedup-skill", "First write.", "archivist")
-	sk1, err := callWriteSkillProposalLocked(b, spec)
+	spec := compiledSkillSpec("dedup-skill", "First write.", "archivist")
+	sk1, err := callWriteCompiledSkillLocked(b, spec)
 	if err != nil {
 		t.Fatalf("first write: %v", err)
 	}
 
 	// Second write with the same name should return the existing skill.
-	spec2 := skillProposalSpec("dedup-skill", "Second write (different desc).", "archivist")
-	sk2, err := callWriteSkillProposalLocked(b, spec2)
+	spec2 := compiledSkillSpec("dedup-skill", "Second write (different desc).", "archivist")
+	sk2, err := callWriteCompiledSkillLocked(b, spec2)
 	if err != nil {
 		t.Fatalf("second write (dedup): %v", err)
 	}
@@ -173,15 +173,15 @@ func TestWriteSkillProposalLocked_DeduplicatesOnSlugCollision(t *testing.T) {
 	}
 }
 
-func TestWriteSkillProposalLocked_SuccessfulCreate(t *testing.T) {
+func TestWriteCompiledSkillLocked_SuccessfulCreate(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
-	spec := skillProposalSpec("send-digest", "Send a daily digest.", "archivist")
+	spec := compiledSkillSpec("send-digest", "Send a daily digest.", "archivist")
 	spec.Tags = []string{"comms"}
 	spec.Trigger = "Every morning"
 
-	sk, err := callWriteSkillProposalLocked(b, spec)
+	sk, err := callWriteCompiledSkillLocked(b, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -191,8 +191,8 @@ func TestWriteSkillProposalLocked_SuccessfulCreate(t *testing.T) {
 	if sk.Name != "send-digest" {
 		t.Errorf("Name: got %q, want 'send-digest'", sk.Name)
 	}
-	if sk.Status != "proposed" {
-		t.Errorf("Status: got %q, want 'proposed'", sk.Status)
+	if sk.Status != "active" {
+		t.Errorf("Status: got %q, want 'active' (compiled skills go live immediately)", sk.Status)
 	}
 	if sk.CreatedBy != "archivist" {
 		t.Errorf("CreatedBy: got %q, want 'archivist'", sk.CreatedBy)
@@ -206,50 +206,47 @@ func TestWriteSkillProposalLocked_SuccessfulCreate(t *testing.T) {
 		t.Error("skill not found in b.skills after creation")
 	}
 
-	// Verify a proposal request was appended.
+	// Core-loop R5: no approval interview is created — compilation is the
+	// only creation path and it activates directly.
 	b.mu.Lock()
-	var hasProposal bool
 	for _, req := range b.requests {
-		if req.Kind == "skill_proposal" && req.ReplyTo == "send-digest" {
-			hasProposal = true
-			break
+		if req.Kind == "skill_proposal" {
+			t.Errorf("unexpected skill_proposal request %q — the proposal flow was removed", req.ID)
 		}
 	}
 	b.mu.Unlock()
-	if !hasProposal {
-		t.Error("no skill_proposal request found in b.requests")
-	}
 }
 
-func TestWriteSkillProposalLocked_DefaultsStatus(t *testing.T) {
+func TestWriteCompiledSkillLocked_DefaultsStatus(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
-	// Status field left empty — should default to "proposed".
+	// Status field left empty — should default to "active" (core-loop R5:
+	// compiled skills go live immediately, no proposal state).
 	spec := teamSkill{
 		Name:        "auto-status",
-		Description: "Should default to proposed.",
+		Description: "Should default to active.",
 		Content:     "content",
 		CreatedBy:   "archivist",
 	}
-	sk, err := callWriteSkillProposalLocked(b, spec)
+	sk, err := callWriteCompiledSkillLocked(b, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if sk.Status != "proposed" {
-		t.Errorf("Status: got %q, want 'proposed'", sk.Status)
+	if sk.Status != "active" {
+		t.Errorf("Status: got %q, want 'active'", sk.Status)
 	}
 }
 
-func TestWriteSkillProposalLocked_PreservesDisabledFromStatus(t *testing.T) {
+func TestWriteCompiledSkillLocked_PreservesDisabledFromStatus(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
-	spec := skillProposalSpec("paused-proposal", "A paused proposal.", "archivist")
+	spec := compiledSkillSpec("paused-proposal", "A paused proposal.", "archivist")
 	spec.Status = "disabled"
 	spec.DisabledFromStatus = "proposed"
 
-	sk, err := callWriteSkillProposalLocked(b, spec)
+	sk, err := callWriteCompiledSkillLocked(b, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,17 +262,17 @@ func TestWriteSkillProposalLocked_PreservesDisabledFromStatus(t *testing.T) {
 	}
 }
 
-// TestWriteSkillProposalLocked_GuardRejectsDangerous covers the trust-ladder
+// TestWriteCompiledSkillLocked_GuardRejectsDangerous covers the trust-ladder
 // gate: a community-trust skill with a dangerous body is rejected outright,
 // the rejection counter is bumped, and no skill is appended to b.skills.
-func TestWriteSkillProposalLocked_GuardRejectsDangerous(t *testing.T) {
+func TestWriteCompiledSkillLocked_GuardRejectsDangerous(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
-	spec := skillProposalSpec("evil-skill", "Wipes the world.", "archivist")
+	spec := compiledSkillSpec("evil-skill", "Wipes the world.", "archivist")
 	spec.Content = "rm -rf /var/data\nThen continue with normal steps."
 
-	_, err := callWriteSkillProposalLocked(b, spec)
+	_, err := callWriteCompiledSkillLocked(b, spec)
 	if err == nil {
 		t.Fatal("expected guard rejection, got nil error")
 	}
@@ -300,17 +297,17 @@ func TestWriteSkillProposalLocked_GuardRejectsDangerous(t *testing.T) {
 	}
 }
 
-// TestWriteSkillProposalLocked_GuardAllowsCautionForCommunity verifies that
+// TestWriteCompiledSkillLocked_GuardAllowsCautionForCommunity verifies that
 // caution verdicts pass through under community trust (Stage A wiki source)
 // and the safety_scan stamp is preserved on the skill we just wrote.
-func TestWriteSkillProposalLocked_GuardAllowsCautionForCommunity(t *testing.T) {
+func TestWriteCompiledSkillLocked_GuardAllowsCautionForCommunity(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
-	spec := skillProposalSpec("install-doc", "Document install steps.", "archivist")
+	spec := compiledSkillSpec("install-doc", "Document install steps.", "archivist")
 	spec.Content = "Install: visit https://example.com/install for setup."
 
-	sk, err := callWriteSkillProposalLocked(b, spec)
+	sk, err := callWriteCompiledSkillLocked(b, spec)
 	if err != nil {
 		t.Fatalf("expected caution to pass under community trust, got: %v", err)
 	}
@@ -326,17 +323,17 @@ func TestWriteSkillProposalLocked_GuardAllowsCautionForCommunity(t *testing.T) {
 	}
 }
 
-// TestWriteSkillProposalLocked_GuardStampsSafetyScan verifies the safety_scan
+// TestWriteCompiledSkillLocked_GuardStampsSafetyScan verifies the safety_scan
 // metadata is rendered into the wiki copy when a skill writes successfully.
 // (This indirectly covers the safety_scan stamp by exercising the guard
 // scaffolding; the exact YAML payload is checked elsewhere.)
-func TestWriteSkillProposalLocked_GuardStampsSafetyScan(t *testing.T) {
+func TestWriteCompiledSkillLocked_GuardStampsSafetyScan(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
-	spec := skillProposalSpec("stamped", "A clean skill.", "archivist")
+	spec := compiledSkillSpec("stamped", "A clean skill.", "archivist")
 	spec.Content = "Step 1: do the thing.\nStep 2: report back."
-	sk, err := callWriteSkillProposalLocked(b, spec)
+	sk, err := callWriteCompiledSkillLocked(b, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -352,20 +349,20 @@ func TestWriteSkillProposalLocked_GuardStampsSafetyScan(t *testing.T) {
 	}
 }
 
-// TestWriteSkillProposalLocked_BackfillsSourceArticleOnDedup covers the
+// TestWriteCompiledSkillLocked_BackfillsSourceArticleOnDedup covers the
 // healing path for Stage A skills created before the provenance fix landed.
 // The existing skill carries an empty SourceArticle; the incoming spec has
 // it populated; dedup should copy the value through, persist, and surface a
 // log without creating a second skill.
-func TestWriteSkillProposalLocked_BackfillsSourceArticleOnDedup(t *testing.T) {
+func TestWriteCompiledSkillLocked_BackfillsSourceArticleOnDedup(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
 	// Seed an existing skill with empty SourceArticle (simulates a
 	// pre-fix Stage A proposal).
-	first := skillProposalSpec("provenance-skill", "Backfill provenance.", "archivist")
+	first := compiledSkillSpec("provenance-skill", "Backfill provenance.", "archivist")
 	first.SourceArticle = ""
-	sk1, err := callWriteSkillProposalLocked(b, first)
+	sk1, err := callWriteCompiledSkillLocked(b, first)
 	if err != nil {
 		t.Fatalf("seed write: %v", err)
 	}
@@ -384,9 +381,9 @@ func TestWriteSkillProposalLocked_BackfillsSourceArticleOnDedup(t *testing.T) {
 	b.mu.Unlock()
 
 	// Re-propose with provenance populated.
-	second := skillProposalSpec("provenance-skill", "Backfill provenance (again).", "archivist")
+	second := compiledSkillSpec("provenance-skill", "Backfill provenance (again).", "archivist")
 	second.SourceArticle = "team/playbooks/provenance-skill.md"
-	sk2, err := callWriteSkillProposalLocked(b, second)
+	sk2, err := callWriteCompiledSkillLocked(b, second)
 	if err != nil {
 		t.Fatalf("dedup write: %v", err)
 	}
@@ -424,21 +421,21 @@ func TestWriteSkillProposalLocked_BackfillsSourceArticleOnDedup(t *testing.T) {
 	}
 }
 
-// TestWriteSkillProposalLocked_DedupNoBackfillWhenAlreadySet ensures we do
+// TestWriteCompiledSkillLocked_DedupNoBackfillWhenAlreadySet ensures we do
 // NOT overwrite an existing non-empty SourceArticle on the dedup path.
-func TestWriteSkillProposalLocked_DedupNoBackfillWhenAlreadySet(t *testing.T) {
+func TestWriteCompiledSkillLocked_DedupNoBackfillWhenAlreadySet(t *testing.T) {
 	t.Parallel()
 	b := newTestBroker(t)
 
-	first := skillProposalSpec("already-set", "Has provenance.", "archivist")
+	first := compiledSkillSpec("already-set", "Has provenance.", "archivist")
 	first.SourceArticle = "team/playbooks/original.md"
-	if _, err := callWriteSkillProposalLocked(b, first); err != nil {
+	if _, err := callWriteCompiledSkillLocked(b, first); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	second := skillProposalSpec("already-set", "Different.", "archivist")
+	second := compiledSkillSpec("already-set", "Different.", "archivist")
 	second.SourceArticle = "team/playbooks/different.md"
-	sk, err := callWriteSkillProposalLocked(b, second)
+	sk, err := callWriteCompiledSkillLocked(b, second)
 	if err != nil {
 		t.Fatalf("dedup: %v", err)
 	}
@@ -447,7 +444,7 @@ func TestWriteSkillProposalLocked_DedupNoBackfillWhenAlreadySet(t *testing.T) {
 	}
 }
 
-func TestWriteSkillProposalLocked_ValidSlugVariants(t *testing.T) {
+func TestWriteCompiledSkillLocked_ValidSlugVariants(t *testing.T) {
 	t.Parallel()
 
 	validNames := []struct {
@@ -466,8 +463,8 @@ func TestWriteSkillProposalLocked_ValidSlugVariants(t *testing.T) {
 		t.Run(tc.input, func(t *testing.T) {
 			t.Parallel()
 			b := newTestBroker(t)
-			spec := skillProposalSpec(tc.input, "A description.", "archivist")
-			sk, err := callWriteSkillProposalLocked(b, spec)
+			spec := compiledSkillSpec(tc.input, "A description.", "archivist")
+			sk, err := callWriteCompiledSkillLocked(b, spec)
 			if err != nil {
 				t.Fatalf("name=%q: unexpected error: %v", tc.input, err)
 			}
@@ -475,5 +472,52 @@ func TestWriteSkillProposalLocked_ValidSlugVariants(t *testing.T) {
 				t.Errorf("name=%q: slug=%q, want %q", tc.input, skillSlug(sk.Name), tc.wantSlug)
 			}
 		})
+	}
+}
+
+// TestEnhanceSkillLocked_UpdateFirstThreshold pins the core-loop step 7.3
+// size threshold: enhancing an existing skill is rejected with
+// errSkillEnhanceTooLarge once the merged body would exceed
+// skillUpdateFirstMaxBytes, so the caller falls back to creating a new
+// skill instead of growing the existing one forever.
+func TestEnhanceSkillLocked_UpdateFirstThreshold(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+
+	big := strings.Repeat("x", skillUpdateFirstMaxBytes-100)
+	spec := compiledSkillSpec("big-skill", "A very large skill.", "archivist")
+	spec.Content = big
+	if _, err := callWriteCompiledSkillLocked(b, spec); err != nil {
+		t.Fatalf("seed skill: %v", err)
+	}
+
+	b.mu.Lock()
+	_, err := b.enhanceSkillLocked("big-skill", strings.Repeat("y", 200), "", "candidate-slug")
+	b.mu.Unlock()
+	if !errors.Is(err, errSkillEnhanceTooLarge) {
+		t.Fatalf("expected errSkillEnhanceTooLarge, got %v", err)
+	}
+}
+
+// TestWriteCompiledSkillLocked_AutoAssignsOwnerAgents pins core-loop step 8:
+// a compiled skill is auto-assigned to the office roster at creation so it
+// is loaded into every agent's prompt on the next build.
+func TestWriteCompiledSkillLocked_AutoAssignsOwnerAgents(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+
+	b.mu.Lock()
+	roster := b.allMemberSlugsLocked()
+	b.mu.Unlock()
+	if len(roster) == 0 {
+		t.Skip("test broker has no members; auto-assign has nothing to pin")
+	}
+
+	sk, err := callWriteCompiledSkillLocked(b, compiledSkillSpec("assigned-skill", "Auto-assigned to the roster.", "archivist"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sk.OwnerAgents) != len(roster) {
+		t.Fatalf("OwnerAgents: got %v, want full roster %v", sk.OwnerAgents, roster)
 	}
 }

@@ -75,7 +75,9 @@ export function HumanInterviewOverlay() {
             });
             // Refresh the grants list so the Integrations app reflects the new
             // grant immediately rather than after its staleTime.
-            await queryClient.invalidateQueries({ queryKey: ["action-grants"] });
+            await queryClient.invalidateQueries({
+              queryKey: ["action-grants"],
+            });
           } catch (grantErr: unknown) {
             // The standing grant did not stick, but the human still wants THIS
             // run approved — surface the failure and proceed with the approval
@@ -134,10 +136,6 @@ function BlockingInterview({
   onDismiss,
 }: BlockingInterviewProps) {
   const options = request.options ?? request.choices ?? [];
-  const isEnhanceInterview = request.kind === "enhance_skill_proposal";
-  const enhancesSlug = isEnhanceInterview
-    ? (request.metadata?.enhances_slug as string | undefined)
-    : undefined;
   const isApproval = request.kind === "approval";
   const isConnect = request.kind === "connect";
   const parsedApproval = isApproval
@@ -161,7 +159,7 @@ function BlockingInterview({
           {request.channel ? (
             <span className="interview-channel">in #{request.channel}</span>
           ) : null}
-                  </div>
+        </div>
         {/* Integration cards get dedicated surfaces: a Connect card that drives
             the OAuth flow, and an external-action approval card that owns its
             payload view + Approve / Always-allow / Reject. Everything else keeps
@@ -200,8 +198,6 @@ function BlockingInterview({
             request={request}
             options={options}
             submitting={submitting}
-            isEnhanceInterview={isEnhanceInterview}
-            enhancesSlug={enhancesSlug}
             parsedApproval={parsedApproval}
             onAnswer={onAnswer}
             onDismiss={onDismiss}
@@ -216,8 +212,6 @@ interface BlockingInterviewBodyProps {
   request: AgentRequest;
   options: NonNullable<AgentRequest["options"]>;
   submitting: boolean;
-  isEnhanceInterview: boolean;
-  enhancesSlug: string | undefined;
   parsedApproval: ReturnType<typeof parseApprovalContext>;
   onAnswer: (choiceId: string) => void;
   onDismiss: () => void;
@@ -227,97 +221,61 @@ function BlockingInterviewBody({
   request,
   options,
   submitting,
-  isEnhanceInterview,
-  enhancesSlug,
   parsedApproval,
   onAnswer,
   onDismiss,
 }: BlockingInterviewBodyProps) {
   return (
     <>
-        <h2 id="interview-title" className="interview-title">
-          {request.title && request.title !== "Request"
-            ? request.title
-            : "Human decision requested"}
-        </h2>
-        {isEnhanceInterview && enhancesSlug ? (
-          <div
-            className="interview-enhance-banner"
-            role="note"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 12px",
-              marginBottom: 12,
-              background: "var(--bg-warm, var(--neutral-50))",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              fontSize: 13,
-              color: "var(--text-secondary)",
-            }}
+      <h2 id="interview-title" className="interview-title">
+        {request.title && request.title !== "Request"
+          ? request.title
+          : "Human decision requested"}
+      </h2>
+      <p className="interview-question">{request.question}</p>
+      {parsedApproval ? (
+        <ApprovalContextView parsed={parsedApproval} />
+      ) : request.context ? (
+        <p className="interview-context" style={{ whiteSpace: "pre-wrap" }}>
+          {request.context}
+        </p>
+      ) : null}
+      {options.length > 0 ? (
+        <div className="interview-actions">
+          {options.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={`btn btn-sm ${opt.id === request.recommended_id ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => onAnswer(opt.id)}
+              disabled={submitting}
+              title={opt.description}
+            >
+              {opt.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={onDismiss}
+            disabled={submitting}
           >
-            <span aria-hidden="true" style={{ fontSize: 16 }}>
-              ≈
-            </span>
-            <span>
-              Similar to existing skill:{" "}
-              <strong
-                style={{
-                  color: "var(--text)",
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
-                {enhancesSlug}
-              </strong>
-              . Enhance it or approve anyway.
-            </span>
-          </div>
-        ) : null}
-        <p className="interview-question">{request.question}</p>
-        {parsedApproval ? (
-          <ApprovalContextView parsed={parsedApproval} />
-        ) : request.context ? (
-          <p className="interview-context" style={{ whiteSpace: "pre-wrap" }}>
-            {request.context}
-          </p>
-        ) : null}
-        {options.length > 0 ? (
-          <div className="interview-actions">
-            {options.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                className={`btn btn-sm ${opt.id === request.recommended_id ? "btn-primary" : "btn-ghost"}`}
-                onClick={() => onAnswer(opt.id)}
-                disabled={submitting}
-                title={opt.description}
-              >
-                {opt.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={onDismiss}
-              disabled={submitting}
-            >
-              Dismiss
-            </button>
-          </div>
-        ) : (
-          <div className="interview-empty">
-            No choices provided. Open the Requests app to respond.
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={onDismiss}
-              disabled={submitting}
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
+            Dismiss
+          </button>
+        </div>
+      ) : (
+        <div className="interview-empty">
+          No choices provided. Open the Requests app to respond.
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={onDismiss}
+            disabled={submitting}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
     </>
   );
 }

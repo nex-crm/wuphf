@@ -25,7 +25,7 @@ const skillFrontmatterMigrationSentinel = "team/skills/.system/migrated-anthropi
 // migrateSkillFrontmatterIfNeededLocked performs a one-time migration of all
 // in-memory skills to disk as Anthropic-format markdown files. The caller MUST
 // hold b.mu. Releases and re-acquires b.mu around each WikiWorker.Enqueue call
-// to avoid the deadlock described in writeSkillProposalLocked.
+// to avoid the deadlock described in writeCompiledSkillLocked.
 //
 // Steps:
 //  1. Check whether the sentinel already exists on disk — if so, return immediately.

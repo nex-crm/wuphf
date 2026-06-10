@@ -259,18 +259,6 @@ type Broker struct {
 	skillCompileInflight  bool
 	skillCompileCoalesced bool
 	skillScanner          *SkillScanner
-	// Skill synthesizer (Stage B) plumbing. Same coalesce semantics as
-	// Stage A; metrics + counters live on skillCompileMetrics.StageBProposalsTotal.
-	skillSynthesizer    *SkillSynthesizer
-	skillSynthInflight  bool
-	skillSynthCoalesced bool
-	// Hermes-style per-agent activity counter (Stage B'). Increments on
-	// every agent MCP tool call; resets on team_skill_create / team_skill_patch;
-	// fires a "skill_review_nudge" task when the threshold is crossed. Owns
-	// its own mutex so it can be hit from the tool-event hot path without
-	// blocking on b.mu. Lazily constructed by ensureSkillCounter so tests
-	// that never spawn a real agent pay no cost.
-	skillCounter *SkillCounter
 	// recentlyRejectedSkills holds in-memory snapshots of skills rejected in
 	// the last 60s so /skills/reject/undo can restore them. Keyed by undo
 	// token. Guarded by b.mu. See skill_crud_endpoints.go for GC semantics.
@@ -837,8 +825,7 @@ func (b *Broker) Stop() {
 // to the attacker's origin. Validate both RemoteAddr AND Host here.
 
 // SSE handlers and the tool-event audit channel (handleEvents,
-// handleAgentStream, handleAgentToolEvent, recordAgentToolEvent,
-// SkillCounter helpers) moved to broker_sse.go.
+// handleAgentStream, handleAgentToolEvent) moved to broker_sse.go.
 
 // ServeWebUI starts a static file server for the web UI on the given port.
 // Returns an error if the port cannot be bound (e.g. already in use).

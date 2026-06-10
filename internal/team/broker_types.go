@@ -686,15 +686,14 @@ type teamSkill struct {
 	// RelatedSkills lists slugs of other skills this skill overlaps with.
 	// Populated by the semantic dedup gate and the consolidation endpoint.
 	RelatedSkills []string `json:"related_skills,omitempty"`
-	// OwnerAgents is the set of agent slugs for which this skill is
-	// "enabled" — only enabled skills surface in the agent's AVAILABLE
-	// SKILLS prompt block and can be invoked via team_skill_run. All other
-	// active skills appear in DISCOVERABLE SKILLS; the agent must call
-	// request_skill_enable to ask the human to enable one before using it.
+	// OwnerAgents is the set of agent slugs this skill is assigned to —
+	// only assigned skills surface in an agent's AVAILABLE SKILLS prompt
+	// block and can be invoked via team_skill_run. Unassigned skills are
+	// invisible to that agent (core-loop step 8).
 	//
-	// Defaults: agent-proposed skills get OwnerAgents=[CreatedBy] so the
-	// creator can use it immediately on approval. Human-created skills get
-	// OwnerAgents=[] (must be enabled per agent via the agent Skills tab).
+	// Defaults: compilation and seeding auto-assign the whole office
+	// roster; the human or CEO narrows the set via the agent Skills tab
+	// (/skills/{name}/enable-for and /disable-for).
 	OwnerAgents []string `json:"owner_agents,omitempty"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`

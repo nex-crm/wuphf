@@ -113,8 +113,9 @@ describe("OfficeOverviewApp", () => {
           {
             name: "deploy-frontend",
             title: "Deploy frontend",
-            status: "proposed" as const,
+            status: "active" as const,
             created_by: "alex",
+            updated_at: new Date().toISOString(),
           },
         ],
       });
@@ -141,7 +142,7 @@ describe("OfficeOverviewApp", () => {
       expect(screen.getByText("Blocked tasks")).toBeInTheDocument();
       expect(screen.getByText("Agents working now")).toBeInTheDocument();
       expect(screen.getByText("Pending reviews")).toBeInTheDocument();
-      expect(screen.getByText("Wiki proposals")).toBeInTheDocument();
+      expect(screen.getByText("Compiled skills")).toBeInTheDocument();
       expect(screen.getByText("Next scheduled routines")).toBeInTheDocument();
       expect(screen.getByText("Recent artifacts")).toBeInTheDocument();
 
@@ -203,11 +204,11 @@ describe("OfficeOverviewApp", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows empty state for wiki proposals when none are pending", async () => {
+    it("shows empty state for compiled skills when none exist", async () => {
       render(wrap(<OfficeOverviewApp />));
 
       expect(
-        await screen.findByText("No skill proposals awaiting review."),
+        await screen.findByText(/No compiled skills yet/),
       ).toBeInTheDocument();
     });
 
@@ -349,19 +350,19 @@ describe("OfficeOverviewApp", () => {
       expect(await screen.findByText("Answer")).toBeInTheDocument();
     });
 
-    it("renders Review link when skill proposals exist", async () => {
+    it("renders View all link when compiled skills exist", async () => {
       mockGetSkillsList.mockResolvedValue({
         skills: [
           {
             name: "my-skill",
-            status: "proposed" as const,
+            status: "active" as const,
           },
         ],
       });
 
       render(wrap(<OfficeOverviewApp />));
 
-      expect(await screen.findByText("Review")).toBeInTheDocument();
+      expect(await screen.findByText("View all")).toBeInTheDocument();
     });
   });
 });

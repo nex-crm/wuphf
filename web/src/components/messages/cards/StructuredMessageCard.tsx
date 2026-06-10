@@ -5,7 +5,7 @@
  * Phase 5 consolidation (docs/specs/onboarding-into-office.md §"Phase 5 —
  * Polish and cleanups", TODO-D1): InterviewBar previously dispatched CEO kinds
  * inline; this module is the single sanitization audit point for both interview
- * kinds (approval, enhance_skill_proposal) and CEO kinds.
+ * kinds (approval) and CEO kinds.
  *
  * Security invariant: every string that enters a card payload passes through
  * sanitizeStructuredPayload before any component renders it. All card

@@ -1,24 +1,28 @@
 package team
 
-// skill_proposal_helper.go provides the unified funnel for all skill-write
-// paths: the Stage A scanner, MCP handler, and future synthesiser all call
-// writeSkillProposalLocked. The helper enforces Anthropic frontmatter
-// validation, system-author whitelisting, deduplication, and the deadlock-safe
-// lock-release-Enqueue-reacquire pattern required because WikiWorker.Enqueue
-// triggers PublishWikiEvent, which takes b.mu.
+// skill_compile_writer.go provides the unified write funnel for playbook
+// compilation — the ONLY path that creates skills (core-loop R5). The wiki
+// scanner calls writeCompiledSkillLocked. The helper enforces Anthropic
+// frontmatter validation, system-author whitelisting, update-first
+// consolidation (enhance an existing skill instead of creating a near
+// duplicate, within the skillUpdateFirstMaxBytes threshold), deduplication,
+// and the deadlock-safe lock-release-Enqueue-reacquire pattern required
+// because WikiWorker.Enqueue triggers PublishWikiEvent, which takes b.mu.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
 )
 
-// skillSystemAuthors is the whitelist of identities that may create skill
-// proposals without being registered as team members. These are internal
+// skillSystemAuthors is the whitelist of identities that may write compiled
+// skills without being registered as team members. These are internal
 // service identities, not human agents.
 var skillSystemAuthors = map[string]bool{
 	"archivist": true,
@@ -80,34 +84,38 @@ func verifySkillInvariantsPreserved(previousBody, mergedBody string) error {
 	return nil
 }
 
-// writeSkillProposalLocked is the unified write funnel for all skill proposals.
+// writeCompiledSkillLocked is the unified write funnel for compiled skills.
 //
 // The caller MUST hold b.mu on entry. The function releases b.mu while calling
 // WikiWorker.Enqueue (to avoid a deadlock with PublishWikiEvent which also
-// acquires b.mu), then re-acquires b.mu before updating b.skills and emitting
-// SSE. It re-checks deduplication after re-acquiring in case a concurrent
-// writer created the same slug while the lock was released.
+// acquires b.mu), then re-acquires b.mu before updating b.skills. It re-checks
+// deduplication after re-acquiring in case a concurrent writer created the
+// same slug while the lock was released.
 //
 // Steps:
 //  1. Validate Anthropic frontmatter: non-empty Name + Description, slug regex.
 //  2. System-author whitelist: bypass findMemberLocked for archivist/scanner/system.
 //  3. Dedup: return existing skill if findSkillByNameLocked matches.
+//     3b. Update-first: enhance a semantically similar existing skill in
+//     place while the merged body stays under skillUpdateFirstMaxBytes;
+//     fall through to a new skill once the threshold is exceeded.
 //  4. Render skill markdown via RenderSkillMarkdown.
 //  5. Release b.mu → WikiWorker.Enqueue → re-acquire b.mu.
 //  6. Re-check dedup (race window).
-//  7. Append to b.skills, emit SSE via appendSkillProposalRequestLocked.
-func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
+//  7. Append to b.skills (status active, auto-assigned to the office roster)
+//     and persist.
+func (b *Broker) writeCompiledSkillLocked(spec teamSkill) (*teamSkill, error) {
 	// --- Step 1: Validate ---
 	name := strings.TrimSpace(spec.Name)
 	if name == "" {
-		return nil, fmt.Errorf("writeSkillProposalLocked: name is required")
+		return nil, fmt.Errorf("writeCompiledSkillLocked: name is required")
 	}
 	if strings.TrimSpace(spec.Description) == "" {
-		return nil, fmt.Errorf("writeSkillProposalLocked: description is required for skill %q", name)
+		return nil, fmt.Errorf("writeCompiledSkillLocked: description is required for skill %q", name)
 	}
 	slug := skillSlug(name)
 	if !skillSlugRegex.MatchString(slug) {
-		return nil, fmt.Errorf("writeSkillProposalLocked: slug %q does not match ^[a-z0-9][a-z0-9-]*$", slug)
+		return nil, fmt.Errorf("writeCompiledSkillLocked: slug %q does not match ^[a-z0-9][a-z0-9-]*$", slug)
 	}
 
 	// --- Step 2: System-author check ---
@@ -115,7 +123,7 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 	if !skillSystemAuthors[createdBy] {
 		// Non-system author must be a registered team member.
 		if b.findMemberLocked(createdBy) == nil {
-			return nil, fmt.Errorf("writeSkillProposalLocked: created_by %q is not a registered team member", createdBy)
+			return nil, fmt.Errorf("writeCompiledSkillLocked: created_by %q is not a registered team member", createdBy)
 		}
 	}
 
@@ -131,14 +139,14 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		if existing.SourceArticle == "" && incoming != "" {
 			existing.SourceArticle = incoming
 			existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-			slog.Info("skill_proposal: backfilled source_article on existing dedup",
+			slog.Info("skill_compile: backfilled source_article on existing dedup",
 				"name", name, "source_article", incoming)
 			if err := b.saveLocked(); err != nil {
-				slog.Warn("skill_proposal: saveLocked after source_article backfill failed",
+				slog.Warn("skill_compile: saveLocked after source_article backfill failed",
 					"name", name, "err", err)
 			}
 		} else {
-			slog.Debug("writeSkillProposalLocked: skill already exists, skipping",
+			slog.Debug("writeCompiledSkillLocked: skill already exists, skipping",
 				"name", name, "existing_status", existing.Status)
 		}
 		return existing, nil
@@ -151,47 +159,60 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		candidateContent := strings.TrimSpace(spec.Content)
 		existingContent := strings.TrimSpace(best.Skill.Content)
 
-		// If the candidate has substantive new content, enhance the existing
-		// skill instead of discarding the candidate.
+		// Update-first (core-loop step 7.3): if the candidate has substantive
+		// new content, enhance the existing skill instead of creating a near
+		// duplicate — as long as the merged body stays under the
+		// skillUpdateFirstMaxBytes threshold.
+		thresholdExceeded := false
 		if candidateContent != "" && candidateContent != existingContent {
 			enhanced, enhErr := b.enhanceSkillLocked(best.Skill.Name, candidateContent, spec.Description, slug)
 			if enhErr == nil && enhanced != nil {
 				atomic.AddInt64(&b.skillCompileMetrics.SkillEnhancementsTotal, 1)
-				slog.Info("writeSkillProposalLocked: enhanced existing skill",
+				slog.Info("writeCompiledSkillLocked: enhanced existing skill",
 					"candidate", name, "existing", best.Skill.Name,
 					"tier", best.Tier)
 				return enhanced, nil
 			}
-			// Enhancement failed — surface the error rather than silently
-			// dropping the candidate's new content into the dedup discard
-			// path. A transient render/wiki failure should be retryable by
-			// the caller, not converted into a permanent loss of detail.
-			if enhErr != nil {
-				return nil, fmt.Errorf("writeSkillProposalLocked: enhance %q from candidate %q: %w",
+			if errors.Is(enhErr, errSkillEnhanceTooLarge) {
+				// The existing skill has hit the update-first size threshold.
+				// Per the spec, the candidate now becomes a NEW skill instead
+				// of growing the existing one further — fall through to the
+				// create path below.
+				thresholdExceeded = true
+				slog.Info("writeCompiledSkillLocked: update-first threshold reached, creating new skill",
+					"candidate", name, "existing", best.Skill.Name)
+			} else if enhErr != nil {
+				// Enhancement failed — surface the error rather than silently
+				// dropping the candidate's new content into the dedup discard
+				// path. A transient render/wiki failure should be retryable by
+				// the caller, not converted into a permanent loss of detail.
+				return nil, fmt.Errorf("writeCompiledSkillLocked: enhance %q from candidate %q: %w",
 					best.Skill.Name, name, enhErr)
 			}
 		}
 
-		// Pure duplicate — record the dedup linkage on the existing skill
-		// and persist both the broker state AND the wiki markdown so the
-		// on-disk frontmatter stays in sync with related_skills.
-		best.Skill.RelatedSkills = appendUnique(best.Skill.RelatedSkills, slug)
-		best.Skill.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		if err := b.saveLocked(); err != nil {
-			slog.Warn("writeSkillProposalLocked: saveLocked after dedup linkage failed",
-				"name", name, "err", err)
+		if !thresholdExceeded {
+			// Pure duplicate — record the dedup linkage on the existing skill
+			// and persist both the broker state AND the wiki markdown so the
+			// on-disk frontmatter stays in sync with related_skills.
+			best.Skill.RelatedSkills = appendUnique(best.Skill.RelatedSkills, slug)
+			best.Skill.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			if err := b.saveLocked(); err != nil {
+				slog.Warn("writeCompiledSkillLocked: saveLocked after dedup linkage failed",
+					"name", name, "err", err)
+			}
+			// Re-render the existing skill's wiki markdown so related_skills
+			// (surfaced in frontmatter per skill_frontmatter.go) does not drift
+			// from broker state. Failure here is logged but non-fatal: state
+			// is already persisted and the dedup decision itself is sound.
+			b.rerenderSkillWikiLocked(best.Skill, "dedup-linkage")
+			atomic.AddInt64(&b.skillCompileMetrics.SemanticDedupHitsTotal, 1)
+			slog.Info("writeCompiledSkillLocked: semantic dedup hit",
+				"candidate", name, "existing", best.Skill.Name,
+				"tier", best.Tier, "slug_score", best.SlugScore,
+				"desc_score", best.DescScore, "embed_cos", best.EmbedCos)
+			return best.Skill, nil
 		}
-		// Re-render the existing skill's wiki markdown so related_skills
-		// (surfaced in frontmatter per skill_frontmatter.go) does not drift
-		// from broker state. Failure here is logged but non-fatal: state
-		// is already persisted and the dedup decision itself is sound.
-		b.rerenderSkillWikiLocked(best.Skill, "dedup-linkage")
-		atomic.AddInt64(&b.skillCompileMetrics.SemanticDedupHitsTotal, 1)
-		slog.Info("writeSkillProposalLocked: semantic dedup hit",
-			"candidate", name, "existing", best.Skill.Name,
-			"tier", best.Tier, "slug_score", best.SlugScore,
-			"desc_score", best.DescScore, "embed_cos", best.EmbedCos)
-		return best.Skill, nil
 	}
 
 	// --- Step 4: Build in-memory struct + render markdown ---
@@ -200,13 +221,35 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 	if channel == "" {
 		channel = "general"
 	}
+	// Compiled skills go live immediately — there is no proposal/approval
+	// state in the compile path (core-loop R5). Humans curate after the
+	// fact via the Skills page (archive / restore / edit / per-agent
+	// assignment).
 	status := strings.TrimSpace(spec.Status)
 	if status == "" {
-		status = "proposed"
+		status = "active"
 	}
 	title := strings.TrimSpace(spec.Title)
 	if title == "" {
 		title = name
+	}
+
+	// Soft bloat warn (SkillOpt): the body is accepted but logged so the
+	// team can see when compilation is producing oversized skills.
+	if len(strings.TrimSpace(spec.Content)) > skillCompactnessSoftLimitBytes {
+		slog.Warn("writeCompiledSkillLocked: body above compactness soft limit",
+			"name", name, "body_bytes", len(spec.Content),
+			"soft_limit_bytes", skillCompactnessSoftLimitBytes)
+	}
+
+	// Auto-assignment (core-loop step 8): a compiled skill is assigned to
+	// the relevant agents at creation so it is loaded into their system
+	// context on the next prompt build. Until a finer relevance signal
+	// exists, "relevant" = the whole office roster; the human or CEO can
+	// narrow it afterwards via the per-agent enable/disable endpoints.
+	ownerAgents := append([]string(nil), spec.OwnerAgents...)
+	if len(ownerAgents) == 0 {
+		ownerAgents = b.allMemberSlugsLocked()
 	}
 
 	b.counter++
@@ -217,6 +260,7 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		Description:         strings.TrimSpace(spec.Description),
 		Content:             strings.TrimSpace(spec.Content),
 		CreatedBy:           createdBy,
+		OwnerAgents:         ownerAgents,
 		SourceArticle:       strings.TrimSpace(spec.SourceArticle),
 		Channel:             channel,
 		Tags:                append([]string(nil), spec.Tags...),
@@ -266,18 +310,18 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		return nil, fmt.Errorf("skill_guard: rejected (agent_created trust requires safe verdict) — %s", scan.Summary)
 	}
 	if scan.Verdict == VerdictCaution {
-		slog.Warn("writeSkillProposalLocked: caution verdict allowed under trust",
+		slog.Warn("writeCompiledSkillLocked: caution verdict allowed under trust",
 			"name", name, "trust", string(trust), "summary", scan.Summary)
 	}
 
 	// Render the markdown to write to the wiki.
 	mdBytes, err := RenderSkillMarkdown(fm, sk.Content)
 	if err != nil {
-		return nil, fmt.Errorf("writeSkillProposalLocked: render markdown for %q: %w", name, err)
+		return nil, fmt.Errorf("writeCompiledSkillLocked: render markdown for %q: %w", name, err)
 	}
 
 	wikiPath := "team/skills/" + slug + ".md"
-	commitMsg := "archivist: propose skill " + slug
+	commitMsg := "archivist: compile skill " + slug
 
 	// --- Step 5: DEADLOCK FIX — release b.mu before Enqueue ---
 	// WikiWorker.Enqueue blocks on its reply channel. The drain goroutine calls
@@ -299,33 +343,54 @@ func (b *Broker) writeSkillProposalLocked(spec teamSkill) (*teamSkill, error) {
 		if err != nil {
 			// Re-acquire before returning so deferred unlock works correctly.
 			b.mu.Lock()
-			slog.Warn("writeSkillProposalLocked: WikiWorker.Enqueue failed",
+			slog.Warn("writeCompiledSkillLocked: WikiWorker.Enqueue failed",
 				"slug", slug, "err", err)
-			return nil, fmt.Errorf("writeSkillProposalLocked: wiki enqueue for %q: %w", name, err)
+			return nil, fmt.Errorf("writeCompiledSkillLocked: wiki enqueue for %q: %w", name, err)
 		}
 	}
 
 	// --- Step 6: Re-acquire and re-check dedup (race window) ---
 	b.mu.Lock()
 	if existing := b.findSkillByNameLocked(name); existing != nil {
-		slog.Debug("writeSkillProposalLocked: skill created concurrently, returning existing",
+		slog.Debug("writeCompiledSkillLocked: skill created concurrently, returning existing",
 			"name", name, "sha", sha)
 		return existing, nil
 	}
 
-	// --- Step 7: Commit to in-memory index and emit SSE ---
+	// --- Step 7: Commit to in-memory index and persist ---
 	b.skills = append(b.skills, sk)
-	b.appendSkillProposalRequestLocked(sk, channel, now)
+	b.appendActionLocked("skill_update", "office", channel, createdBy,
+		truncateSummary(sk.Title+" [compiled]", 140), sk.ID)
+	if err := b.saveLocked(); err != nil {
+		slog.Warn("writeCompiledSkillLocked: saveLocked failed",
+			"name", name, "err", err)
+	}
 
 	result := &b.skills[len(b.skills)-1]
-	slog.Info("writeSkillProposalLocked: skill proposal created",
-		"name", name, "slug", slug, "created_by", createdBy, "sha", sha)
+	slog.Info("writeCompiledSkillLocked: compiled skill created",
+		"name", name, "slug", slug, "created_by", createdBy, "sha", sha,
+		"owner_agents", len(result.OwnerAgents))
 	return result, nil
+}
+
+// allMemberSlugsLocked returns every registered office member slug, sorted
+// for deterministic OwnerAgents assignment. Caller must hold b.mu.
+func (b *Broker) allMemberSlugsLocked() []string {
+	out := make([]string, 0, len(b.members))
+	for _, m := range b.members {
+		slug := strings.TrimSpace(m.Slug)
+		if slug == "" {
+			continue
+		}
+		out = append(out, slug)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // enhanceSkillLocked updates an existing skill's content and description with
 // new details from a candidate. The caller MUST hold b.mu on entry. The method
-// uses the same deadlock-safe unlock/relock pattern as writeSkillProposalLocked
+// uses the same deadlock-safe unlock/relock pattern as writeCompiledSkillLocked
 // for the WikiWorker.Enqueue call.
 //
 // This is the core of the "enhance instead of discard" behavior: when a new
@@ -349,6 +414,15 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription, ca
 	// pointing at a stale element while the lock is released for Enqueue.
 	updated := *sk
 	updated.Content = mergeSkillContent(sk.Content, newContent, "enhanced")
+
+	// Update-first threshold (core-loop step 7.3): growing an existing
+	// skill's scope is preferred over creating a new one, but only while
+	// the merged body stays under the file-size threshold. Past it, the
+	// caller falls back to creating a new skill.
+	if len(strings.TrimSpace(updated.Content)) > skillUpdateFirstMaxBytes {
+		return nil, fmt.Errorf("enhanceSkillLocked: %q: %w (merged %d > %d bytes)",
+			existingName, errSkillEnhanceTooLarge, len(updated.Content), skillUpdateFirstMaxBytes)
+	}
 
 	// Protected-invariant gate (SkillOpt §3): every <!-- INVARIANT-START -->
 	// block in the previous body MUST survive the merge verbatim. Step-level
@@ -413,164 +487,6 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription, ca
 
 	slog.Info("enhanceSkillLocked: skill enhanced",
 		"name", existingName, "slug", slug)
-	return live, nil
-}
-
-// renameAndEnhanceSkillLocked renames an existing skill to a broader slug
-// AND merges in newContent / newDescription in a single transaction. The
-// load-bearing intent: when the team has clearly outgrown an existing
-// skill's name (e.g. "pitch-deck-saas" now covers all pitch decks), the
-// LLM can signal `rename_to: pitch-deck-creation` and the existing skill
-// is renamed in place, with the old slug left behind as an archived
-// redirect stub so cached references resolve.
-//
-// Caller MUST hold b.mu on entry. The method uses the same deadlock-safe
-// unlock/relock pattern as enhanceSkillLocked for WikiWorker.Enqueue.
-//
-// Failure modes:
-//
-//   - oldName does not resolve to an existing skill → error.
-//   - newName slug fails validation → error (defensive; the synthesizer
-//     also pre-checks).
-//   - newName slug is already in use → error. Callers should fall back to
-//     plain enhanceSkillLocked rather than clobbering a distinct sibling.
-func (b *Broker) renameAndEnhanceSkillLocked(oldName, newName, newContent, newDescription string) (*teamSkill, error) {
-	existing := b.findSkillByNameLocked(oldName)
-	if existing == nil {
-		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: skill %q not found", oldName)
-	}
-	newName = strings.TrimSpace(newName)
-	if newName == "" {
-		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new name is empty")
-	}
-	newSlug := skillSlug(newName)
-	if !skillSlugRegex.MatchString(newSlug) {
-		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new slug %q does not match ^[a-z0-9][a-z0-9-]*$", newSlug)
-	}
-	if conflict := b.findSkillByNameLocked(newName); conflict != nil {
-		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new name %q already in use", newName)
-	}
-
-	oldSlug := skillSlug(existing.Name)
-	if oldSlug == newSlug {
-		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: new slug equals old slug (%q)", oldSlug)
-	}
-
-	newContent = strings.TrimSpace(newContent)
-	newDescription = strings.TrimSpace(newDescription)
-
-	// Build the renamed-and-enhanced state on a local copy so a concurrent
-	// append to b.skills cannot leave existing pointing at a stale element
-	// while the lock is released for the Enqueue calls.
-	updated := *existing
-	updated.Name = newName
-	updated.ID = "skill-" + newSlug
-	if strings.TrimSpace(updated.Title) == "" || strings.TrimSpace(updated.Title) == existing.Name {
-		updated.Title = newName
-	}
-	if newDescription != "" && len(newDescription) > len(updated.Description) {
-		updated.Description = newDescription
-	}
-	if newContent != "" {
-		updated.Content = mergeSkillContent(existing.Content, newContent, "renamed-from-"+oldSlug)
-	}
-
-	// Protected-invariant gate (SkillOpt §3): the rename path also counts
-	// as a step-level edit from the invariant region's point of view.
-	// Reject when a protected block does not survive into the new content.
-	if err := verifySkillInvariantsPreserved(existing.Content, updated.Content); err != nil {
-		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: %w", err)
-	}
-
-	// Keep a backlink to the old slug so the new skill carries provenance.
-	updated.RelatedSkills = appendUnique(append([]string(nil), existing.RelatedSkills...), oldSlug)
-	updated.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-
-	fm := teamSkillToFrontmatter(updated)
-	newMd, err := RenderSkillMarkdown(fm, updated.Content)
-	if err != nil {
-		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: render new markdown for %q: %w", newName, err)
-	}
-
-	// Redirect stub at the old path: archived status + renamed_to pointer
-	// so anyone resolving the old slug (link checker, cached agent index,
-	// human reader) sees where the content moved to.
-	stub := teamSkill{
-		Name:               existing.Name,
-		Title:              existing.Title,
-		Description:        "Renamed to " + newName + ".",
-		Content:            "This skill was renamed to [`" + newName + "`](./" + newSlug + ".md).\n",
-		CreatedBy:          "archivist",
-		Channel:            existing.Channel,
-		Tags:               append([]string(nil), existing.Tags...),
-		Status:             "archived",
-		DisabledFromStatus: existing.Status,
-		CreatedAt:          existing.CreatedAt,
-		UpdatedAt:          updated.UpdatedAt,
-	}
-	stubFm := teamSkillToFrontmatter(stub)
-	stubFm.Metadata.Wuphf.RenamedTo = newName
-	stubMd, err := RenderSkillMarkdown(stubFm, stub.Content)
-	if err != nil {
-		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: render stub markdown for %q: %w", existing.Name, err)
-	}
-
-	newWikiPath := "team/skills/" + newSlug + ".md"
-	oldWikiPath := "team/skills/" + oldSlug + ".md"
-	newCommit := "archivist: rename skill " + oldSlug + " → " + newSlug
-	stubCommit := "archivist: redirect " + oldSlug + " → " + newSlug
-
-	wikiWorker := b.wikiWorker
-	b.mu.Unlock()
-
-	if wikiWorker != nil {
-		if _, _, err := wikiWorker.Enqueue(
-			context.Background(),
-			newSlug,
-			newWikiPath,
-			string(newMd),
-			"replace",
-			newCommit,
-		); err != nil {
-			b.mu.Lock()
-			return nil, fmt.Errorf("renameAndEnhanceSkillLocked: wiki enqueue new for %q: %w", newName, err)
-		}
-		if _, _, err := wikiWorker.Enqueue(
-			context.Background(),
-			oldSlug,
-			oldWikiPath,
-			string(stubMd),
-			"replace",
-			stubCommit,
-		); err != nil {
-			b.mu.Lock()
-			return nil, fmt.Errorf("renameAndEnhanceSkillLocked: wiki enqueue stub for %q: %w", oldSlug, err)
-		}
-	}
-
-	b.mu.Lock()
-
-	// Re-resolve under the OLD name — the slice may have been reallocated
-	// during the unlock window.
-	live := b.findSkillByNameLocked(oldName)
-	if live == nil {
-		return nil, fmt.Errorf("renameAndEnhanceSkillLocked: skill %q vanished during rename", oldName)
-	}
-	// Apply the renamed shape in place. The skill ID and slug both update;
-	// other lookups (by ID or slug) re-resolve against the new identifiers.
-	*live = updated
-
-	b.invalidateSkillEmbeddingLocked(oldSlug)
-	b.invalidateSkillEmbeddingLocked(newSlug)
-
-	if saveErr := b.saveLocked(); saveErr != nil {
-		slog.Warn("renameAndEnhanceSkillLocked: saveLocked failed",
-			"old_slug", oldSlug, "new_slug", newSlug, "err", saveErr)
-	}
-
-	slog.Info("renameAndEnhanceSkillLocked: skill renamed",
-		"from", oldName, "to", newName,
-		"old_slug", oldSlug, "new_slug", newSlug)
 	return live, nil
 }
 

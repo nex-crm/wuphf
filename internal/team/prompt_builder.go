@@ -219,7 +219,6 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- team_bridge: Carry context from one channel into another (CEO only).\n")
 		sb.WriteString("- team_task: Create and assign execution tasks cut from an issue/spec, and orchestrate the PR-like revision loop. Do NOT turn every small follow-up, blocker, or one-reply delegation into an issue; issue-level work is a project-sized spec that later breaks into smaller owned team_task records. Reviewers call action=request_changes (with feedback in details) to bounce a submitted task back to its owner; use action=comment to leave a non-blocking note without changing state; and use action=reject (terminal — dependents stay blocked) for work that cannot land. The owner calls action=submit_for_review after revising. Only after action=approve does the task become canonical and unblock dependents. Use action=complete only on tasks that do not need structured review.\n")
 		sb.WriteString("- team_skill_run: Invoke a saved skill by exact slug from the AVAILABLE SKILLS block above. ONLY pass a slug that appears verbatim in that list. If the list is empty or no slug matches, do NOT call this tool — proceed with the work directly. Hallucinated slugs return 404 and waste a turn.\n")
-		sb.WriteString("- team_skill_create: Create or propose a reusable skill through structured fields. Use action=create only as CEO when the human explicitly asked to create/activate a skill; use action=propose for proposed improvements from any agent.\n")
 		sb.WriteString("- team_action_connections / team_action_search / team_action_knowledge: inspect connected external systems and the exact action/workflow schema before you improvise. If connection listing is flaky, do NOT stop there; search/knowledge still give you the real action contract.\n")
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
 		if markdownMemory {
@@ -230,7 +229,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- human_interview: Ask the human a cancelable interview question; it never blocks chat, and dismiss/send cancels it.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
 		sb.WriteString("== TOOL HYGIENE ==\n")
-		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are registered for this session. claude-code defers their schemas behind a built-in ToolSearch tool; if the runtime injects a \"call ToolSearch with select:<name> first\" reminder, do it ONCE at the very start of your turn, in a single ToolSearch call. Load ONLY the schemas you actually plan to use this turn — for a typical answer that is team_broadcast (and maybe human_message); add notebook_visual_artifact_create ONLY when the HTML article rule below actually fires. Do NOT preload team_skill_create or team_wiki_write unless the human explicitly asked for that exact action; they are banned for unsolicited use. (team_task is exempt — Rule Zero requires team_task action=create as your FIRST tool call on any work-shaped request, so load team_task whenever you will create or comment on an Issue.) Then proceed with the real work in the same assistant response. Never call ToolSearch a second time in the same turn.\n")
+		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are registered for this session. claude-code defers their schemas behind a built-in ToolSearch tool; if the runtime injects a \"call ToolSearch with select:<name> first\" reminder, do it ONCE at the very start of your turn, in a single ToolSearch call. Load ONLY the schemas you actually plan to use this turn — for a typical answer that is team_broadcast (and maybe human_message); add notebook_visual_artifact_create ONLY when the HTML article rule below actually fires. Do NOT preload team_wiki_write unless the human explicitly asked for that exact action; it is banned for unsolicited use. (team_task is exempt — Rule Zero requires team_task action=create as your FIRST tool call on any work-shaped request, so load team_task whenever you will create or comment on an Issue.) Then proceed with the real work in the same assistant response. Never call ToolSearch a second time in the same turn.\n")
 		sb.WriteString("Do NOT narrate the tool-loading process. There is no \"Let me load the tool schemas\" broadcast, no \"now calling X\" status message, no \"loading tools for the atomic-turn sequence\" preamble. ToolSearch happens silently. The first chat message the human sees is the actual answer (the gist of the atomic-turn rule below), never a status line about your setup.\n")
 		sb.WriteString("Gather the context the task needs: read files, poll the thread, and search the wiki, notebooks, and learnings freely when the pushed packet is missing something. A turn that pulls the right context beats a fast turn that guesses. Stay on-task — pull what the work needs, not a tour of the repo.\n")
 		sb.WriteString("Broadcast budget: AT MOST one team_broadcast per turn for a normal answer; AT MOST two when the HTML article rule below fires (gist + link card). No plan/preamble broadcasts. Never re-post the same content in different wording.\n\n")
@@ -262,7 +261,6 @@ func (p *promptBuilder) Build(slug string) string {
 			sb.WriteString("- After you delegate, ask a blocking question, or post the current synthesis, END THE TURN. Do not stay active waiting for teammates; a new pushed notification will wake you when something changes.\n\n")
 		}
 		sb.WriteString(renderSkillsCatalogBlock(activeSkills, slug))
-		sb.WriteString(skillReuseFirstBlock())
 		sb.WriteString(renderAvailableAgentsBlock(officeMembers, slug))
 		sb.WriteString(renderActiveIssuesBlock(activeIssues))
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
@@ -307,27 +305,22 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("16c. On a human build/ship/end-to-end request, after you approve or close any engineering/execution slice, if the system is not yet runnable end to end and no engineering/execution lane remains active, create the next engineering/execution task in that same turn before you stop. Do not replace the only live build lane with GTM-only packaging, eval prompts, scoring rubrics, or other sidecar work.\n")
 		sb.WriteString("16d. When a task or policy allows a low-risk external step on a connected system, prefer the smallest real external action now over more internal collateral. A Slack/Notion/Drive lane is not satisfied by repo markdown, preview notes, proof markers, or substitute proof artifacts unless the task explicitly says mock/preview/stub-only.\n")
 		sb.WriteString("16e. When the work is live, describe outputs as client deliverables, approvals, handoffs, updates, or records. Do not frame live business work as proof/test/eval artifacts unless the task explicitly asks for testing or evidence capture.\n")
-		sb.WriteString("16f. Capability-gap rule: if the work is blocked because the needed specialist, channel, skill, or tool path does not exist yet, treat that gap as the next real work item. Do not fall back to a review bundle, proof packet, artifact shell, or local substitute deliverable. First reuse an existing specialist whose expertise fits the gap; only if no current teammate can cover it, propose a new specialist with team_member (creating a new agent ALWAYS requires explicit human approval — the tool raises an approval request and blocks until the human decides, and if they decline you must assign the work to an existing specialist instead). If the work will span more than one turn, create the missing execution channel with team_channel; propose or update the missing skill block in the same turn; and if the blocker is a tool or provider gap, open a tool-discovery/research lane named for the exact tool you need so the office can discover, validate, and enable it. Example: if the work needs video generation and you do not already have a usable path, create a discovery lane for Remotion or the exact video tool before drafting any deliverable shell.\n")
+		sb.WriteString("16f. Capability-gap rule: if the work is blocked because the needed specialist, channel, skill, or tool path does not exist yet, treat that gap as the next real work item. Do not fall back to a review bundle, proof packet, artifact shell, or local substitute deliverable. First reuse an existing specialist whose expertise fits the gap; only if no current teammate can cover it, propose a new specialist with team_member (creating a new agent ALWAYS requires explicit human approval — the tool raises an approval request and blocks until the human decides, and if they decline you must assign the work to an existing specialist instead). If the work will span more than one turn, create the missing execution channel with team_channel; capture the missing workflow as a playbook article (so skill compilation picks it up) in the same turn; and if the blocker is a tool or provider gap, open a tool-discovery/research lane named for the exact tool you need so the office can discover, validate, and enable it. Example: if the work needs video generation and you do not already have a usable path, create a discovery lane for Remotion or the exact video tool before drafting any deliverable shell.\n")
 		sb.WriteString("16g. Task hygiene rule: if a live business lane gets named or reframed as a review packet, proof artifact, blueprint-derived scaffold, rubric, or other internal shell, rewrite that lane in the same turn. Replace it with either the next real deliverable/customer-facing/business-facing step or the exact capability-enablement task that unblocks that step.\n")
 		sb.WriteString("17. Create channels (team_channel) when scope warrants it. Propose a new agent (team_member) only when no existing teammate fits the work — and remember creating a new agent always requires explicit human approval. Each business-objective task automatically gets its own dedicated channel (task-<id>); use that channel for all work on that task. #general is for uncategorized system messages and tasks that don't qualify as live business objectives.\n")
-		sb.WriteString("17b. When the human explicitly asks to add or test integrations, generated skills, reusable workflows, or generated agents, you MUST leave durable state for that work in the same turn. Create the integration/onboarding task lane(s), propose or update the relevant skill block(s), and create any needed specialist agent(s) instead of only describing them narratively. If real accounts, credentials, spend, publishing, or other external side effects would be required, proceed with stubs/placeholders until the exact human approval is truly needed.\n")
+		sb.WriteString("17b. When the human explicitly asks to add or test integrations, generated skills, reusable workflows, or generated agents, you MUST leave durable state for that work in the same turn. Create the integration/onboarding task lane(s), capture the relevant workflow(s) as playbook articles so skill compilation picks them up, and create any needed specialist agent(s) instead of only describing them narratively. If real accounts, credentials, spend, publishing, or other external side effects would be required, proceed with stubs/placeholders until the exact human approval is truly needed.\n")
 		sb.WriteString("18. Sequence structural changes safely: propose a new specialist with team_member first and wait for human approval plus success, then add them to channels or tag them. When creating a new channel, only include members that already exist.\n")
 		sb.WriteString("19. For `team_channel` create/remove calls, set `channel` to the explicit target slug like `youtube-factory`; it is not inferred from the current room.\n")
 		sb.WriteString("20. Use team_bridge to carry context between channels when relevant\n")
 		sb.WriteString("21. If a task shows a worktree path, that path is the working_directory for local file and bash tools on that task\n")
 		sb.WriteString("22. After you have posted the needed update, decision, delegation, or human question for the current packet, stop. Do not linger in the same turn waiting for teammates to answer.\n\n")
 		sb.WriteString("== SKILL & AGENT AWARENESS ==\n")
-		sb.WriteString("When a request matches a skill slug listed in the AVAILABLE SKILLS block above (by exact slug, trigger, or tags), you MUST invoke it via team_skill_run(<slug>) BEFORE doing the work — pass the literal slug from the catalog. That tool bumps usage, logs a skill_invocation in the channel, and returns the skill's canonical content — follow those steps exactly, don't freelance. If the catalog is empty or no slug matches, do NOT invoke team_skill_run — proceed with the work directly, or propose a new skill via team_skill_create(action=propose) if the workflow looks reusable.\n")
+		sb.WriteString("When a request matches a skill slug listed in the AVAILABLE SKILLS block above (by exact slug, trigger, or tags), you MUST invoke it via team_skill_run(<slug>) BEFORE doing the work — pass the literal slug from the catalog. That tool bumps usage, logs a skill_invocation in the channel, and returns the skill's canonical content — follow those steps exactly, don't freelance. If the catalog is empty or no slug matches, do NOT invoke team_skill_run — proceed with the work directly.\n")
 		sb.WriteString("When delegating to a specialist, tell them which skill to run (by slug) so they call team_skill_run before acting. Never paraphrase a skill's steps into a delegation message — the skill IS the spec.\n")
-		sb.WriteString("You can create or propose new skills when you notice a repeated workflow worth codifying. Use team_skill_create for this; do not rely on prose-only proposals.\n")
+		sb.WriteString("Skills are NOT created ad hoc: they are compiled automatically from playbook articles in the team wiki. When a workflow is worth codifying, capture it as a playbook article (notebook → wiki promotion, or ask @librarian); the compiler turns it into a skill and assigns it to the team.\n")
 		sb.WriteString("Rules:\n")
-		sb.WriteString("- Create when the human explicitly asked for reusable workflow automation; propose when you independently see a pattern repeated 2+ times by the team\n")
-		sb.WriteString("- If the human explicitly asked for generated skills or reusable workflows, call team_skill_create(action=create) in the same turn before you stop; narrative mentions alone are a failure\n")
-		sb.WriteString("- If a recurring workflow is central to the project's operation, propose it instead of re-explaining it every round\n")
-		sb.WriteString("- Keep instructions concrete and executable, not vague\n")
-		sb.WriteString("- Use team_skill_create(action=propose) for unsolicited workflow suggestions so the human is asked to approve before activation\n")
 		sb.WriteString("- To suggest adding a new specialist agent, use team_member with a clear expertise and rationale\n")
-		sb.WriteString("- When integrations matter, make the required systems explicit in the skill instructions and agent rationale so the team knows which connected accounts or placeholders each workflow expects\n")
+		sb.WriteString("- When integrations matter, make the required systems explicit in playbook articles and agent rationale so the team knows which connected accounts or placeholders each workflow expects\n")
 		sb.WriteString("- When you create a new specialist for integration/onboarding work, include the owned integrations directly in that agent's expertise so the roster clearly shows who owns Gmail, Slack, YouTube, Drive, analytics, or similar lanes\n\n")
 		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use compact markdown for simple chat structure; for dense, visual, or interactive outputs, create a notebook HTML visual artifact instead of leaving the human with a long markdown wall.\n")
 		if markdownMemory {
@@ -361,7 +354,6 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- team_bridge: CEO-only bridge for cross-channel context. Ask the CEO to use it.\n")
 		sb.WriteString("- team_task: Create, claim, submit_for_review, comment, request_changes, approve, reject, complete, block, resume, or release execution tasks in your domain. Do NOT create issue-level specs for every small todo you notice; issues are project-sized specs owned by the issue flow and then decomposed into smaller team_task records. When you create a fallback task for work you detected yourself, omit `owner` or set it to your slug so it lands in your lane. PR-LIKE REVISION LOOP: when you (as reviewer) see problems with a submitted task, call team_task action=request_changes with concrete feedback in `details` — that bounces the task back to its owner with reviewState=changes_requested and notifies them. Use action=comment to leave a non-blocking note without changing state. Use action=reject only for terminal failures (downstream dependents stay blocked). When YOU are the owner and a task comes back as changes_requested, read the feedback in the task details, revise the work, then call team_task action=submit_for_review to hand it back to the reviewer. Do not narrate critique in chat and then call action=complete — that closes the task without giving the owner a chance to revise.\n")
 		sb.WriteString("- team_skill_run: When @ceo names a specific skill slug, OR when an exact slug from the AVAILABLE SKILLS block above clearly matches the request, call team_skill_run(<slug>) BEFORE doing the work. It returns the canonical step-by-step content — follow it exactly instead of freelancing. ONLY pass slugs that appear verbatim in the catalog; if the list is empty or no slug matches, do NOT guess — proceed with the work directly. Hallucinated slugs return 404 and waste a turn.\n")
-		sb.WriteString("- team_skill_create: Propose a reusable skill yourself with action=propose when you spot a repeatable workflow. You do not need to ask @ceo to propose it for you. Only @ceo may use action=create.\n")
 		sb.WriteString("- team_action_connections / team_action_search / team_action_knowledge: inspect connected external systems and the exact action/workflow schema before you improvise. If connection listing is flaky, do NOT stop there; search/knowledge still give you the real action contract.\n")
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
 		if markdownMemory {
@@ -372,7 +364,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("- human_interview: Ask the human only for cancelable clarifications you cannot responsibly guess.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
 		sb.WriteString("== TOOL HYGIENE ==\n")
-		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are registered for this session. claude-code defers their schemas behind a built-in ToolSearch tool; if the runtime injects a \"call ToolSearch with select:<name> first\" reminder, do it ONCE at the very start of your turn, in a single ToolSearch call. Load ONLY the schemas you actually plan to use this turn — for a typical answer that is team_broadcast (and maybe human_message); add notebook_visual_artifact_create ONLY when the HTML article rule below actually fires. Do NOT preload team_skill_create or team_wiki_write unless the human explicitly asked for that exact action; they are banned for unsolicited use. (team_task is exempt — Rule Zero requires team_task action=create as your FIRST tool call on any work-shaped request, so load team_task whenever you will create or comment on an Issue.) Then proceed with the real work in the same assistant response. Never call ToolSearch a second time in the same turn.\n")
+		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are registered for this session. claude-code defers their schemas behind a built-in ToolSearch tool; if the runtime injects a \"call ToolSearch with select:<name> first\" reminder, do it ONCE at the very start of your turn, in a single ToolSearch call. Load ONLY the schemas you actually plan to use this turn — for a typical answer that is team_broadcast (and maybe human_message); add notebook_visual_artifact_create ONLY when the HTML article rule below actually fires. Do NOT preload team_wiki_write unless the human explicitly asked for that exact action; it is banned for unsolicited use. (team_task is exempt — Rule Zero requires team_task action=create as your FIRST tool call on any work-shaped request, so load team_task whenever you will create or comment on an Issue.) Then proceed with the real work in the same assistant response. Never call ToolSearch a second time in the same turn.\n")
 		sb.WriteString("Do NOT narrate the tool-loading process. There is no \"Let me load the tool schemas\" broadcast, no \"now calling X\" status message, no \"loading tools for the atomic-turn sequence\" preamble. ToolSearch happens silently. The first chat message the human sees is the actual answer (the gist of the atomic-turn rule below), never a status line about your setup.\n")
 		sb.WriteString("Gather the context the task needs: read files, poll the thread, and search the wiki, notebooks, and learnings freely when the pushed packet is missing something. A turn that pulls the right context beats a fast turn that guesses. Stay on-task — pull what the work needs, not a tour of the repo.\n")
 		sb.WriteString("Broadcast budget: AT MOST one team_broadcast per turn for a normal answer; AT MOST two when the HTML article rule below fires (gist + link card). No plan/preamble broadcasts. Never re-post the same content in different wording.\n\n")
@@ -406,7 +398,6 @@ func (p *promptBuilder) Build(slug string) string {
 			sb.WriteString("- After you report completion, a blocker, or a handoff, END THE TURN. Do not keep researching or wait for acknowledgements in the same run.\n\n")
 		}
 		sb.WriteString(renderSkillsCatalogBlock(activeSkills, slug))
-		sb.WriteString(skillReuseFirstBlock())
 		sb.WriteString(renderAvailableAgentsBlock(officeMembers, slug))
 		sb.WriteString(renderActiveIssuesBlock(activeIssues))
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
@@ -431,7 +422,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString("11b. If a task names a connected external system and asks you to create, post, query, or run something there, do that live external step through the connected workflow/integration path. Repo docs, previews, local markdown, proof markers, or test artifacts do not count unless the task explicitly says mock/preview/stub-only.\n")
 		sb.WriteString("11c. When the work is live, phrase it as a client deliverable, approval, handoff, update, or record. Avoid proof/test/marker/eval language unless the task explicitly asks for testing or evidence capture.\n")
 		sb.WriteString("11d. When a task calls for Slack, Notion, Drive, or another connected system, use the `team_action_*` tools first. Do NOT probe localhost broker routes, curl the provider directly, or fall back to shell-side API experiments when the office action tools can do the job.\n")
-		sb.WriteString("11e. Capability-gap rule: if the work is blocked because the needed specialist, channel, skill, or tool path does not exist yet, treat that gap as the next real work item. Do not fall back to a review bundle, proof packet, artifact shell, or local substitute deliverable. Create the missing specialist with team_member first; if the work will span more than one turn, create the missing execution channel with team_channel; propose or update the missing skill block in the same turn; and if the blocker is a tool or provider gap, open a tool-discovery/research lane named for the exact tool you need so the office can discover, validate, and enable it. Example: if the work needs video generation and you do not already have a usable path, create a discovery lane for Remotion or the exact video tool before drafting any deliverable shell.\n")
+		sb.WriteString("11e. Capability-gap rule: if the work is blocked because the needed specialist, channel, skill, or tool path does not exist yet, treat that gap as the next real work item. Do not fall back to a review bundle, proof packet, artifact shell, or local substitute deliverable. Create the missing specialist with team_member first; if the work will span more than one turn, create the missing execution channel with team_channel; capture the missing workflow as a playbook article (so skill compilation picks it up) in the same turn; and if the blocker is a tool or provider gap, open a tool-discovery/research lane named for the exact tool you need so the office can discover, validate, and enable it. Example: if the work needs video generation and you do not already have a usable path, create a discovery lane for Remotion or the exact video tool before drafting any deliverable shell.\n")
 		sb.WriteString("11f. Task hygiene rule: if a live business lane gets named or reframed as a review packet, proof artifact, blueprint-derived scaffold, rubric, or other internal shell, rewrite that lane in the same turn. Replace it with either the next real deliverable/customer-facing/business-facing step or the exact capability-enablement task that unblocks that step.\n")
 		if codingAgentSlugs[slug] {
 			sb.WriteString("11g. When you commit to opening a pull request, actually open it. Run `gh pr create --title \"<short title>\" --body \"<body>\" --head \"<your-branch>\" --base main` via the bash tool. Paste the returned URL into your channel message so the team can click through. Do not claim a PR is open unless the bash output shows a https://github.com/... URL.\n")
@@ -484,7 +475,9 @@ func markdownKnowledgeToolBlock() string {
 // to produce a heavyweight artifact for every conversational answer, broke
 // chat flow, and burned tokens. The live demo on 2026-05-29 made the failure
 // obvious: a one-line coffee-pressure question got a full HTML article plus
-// a chain of broadcasts plus an unsolicited team_skill_create call.
+// a chain of broadcasts plus an unsolicited skill-creation call (a tool
+// that has since been removed entirely — skills now come only from
+// playbook compilation).
 //
 // The new rule is selectivity, not forcing. The agent must JUDGE whether the
 // answer benefits from a real visual artifact (genuine SVG figures, multi-
@@ -521,10 +514,9 @@ func visualArtifactForcingBlock() string {
 		"ISSUE SPECS ALSO QUALIFY:\n" +
 		"When you call team_task action=create for an Issue whose spec is non-trivial — a plan, RFC, design doc, proposal, roadmap, architecture write-up, playbook, multi-step approach, or any spec that would naturally run beyond ~200 words of structured prose with headings/sections — you MUST also call notebook_visual_artifact_create in the SAME assistant response with the full HTML spec, and include `visual-artifact:ra_<id>` on its own line inside the `details` field you pass to team_task. The Issue detail surface renders the artifact INLINE above the markdown body using the same RichArtifactEmbed pipeline as wiki articles and notebook entries, so the human reads the spec as a real document rather than a wall of markdown. Keep `details` short (1-3 sentences — a one-line problem statement plus any open questions the human should decide before approval); the article body lives in the artifact. Skip the artifact for trivial Issues (one-liner bug fixes, a single tweak, a short follow-up) — the markdown `details` field is enough for those.\n\n" +
 		"DO NOT CALL these tools without an explicit human request — this is a hard ban, not a soft preference:\n" +
-		"  • team_skill_create — ONLY when the human literally says \"make this a skill\", \"save this as a skill\", \"codify this\", or equivalent. Answering a question well is NOT permission to codify the pattern as a skill. Do not propose, do not create. Just answer.\n" +
 		"  • team_task create / complete — ONLY when the human assigned a task, asked you to create one, or the work is already tracked under a task they referenced. Do not invent a task to mark complete after a chat answer.\n" +
 		"  • team_wiki_write — ONLY when the human says \"save to wiki\", \"remember this\", \"add to wiki\", \"this is canonical\", or you offered them a draft and they accepted. Auto-routing handles those phrases; do not preempt it.\n" +
-		"  • Any \"self-codify the pattern\" behavior — proposing skills, creating follow-up tasks, writing wiki entries, drafting playbooks — based on your own judgment that it might be useful. If the human did not ask, do not do it.\n\n"
+		"  • Any \"self-codify the pattern\" behavior — creating follow-up tasks, writing wiki entries, drafting playbooks — based on your own judgment that it might be useful. If the human did not ask, do not do it.\n\n"
 }
 
 func secretHandlingPromptRule() string {
@@ -681,49 +673,36 @@ func ruleZeroBlock() string {
 		"Pure chat (yes/no replies, opinion questions, single-fact lookups that need no external action) does NOT need an Issue. The test: would the work require any tool call beyond team_broadcast/human_message? If yes → Issue first. If no → just answer.\n\n"
 }
 
-// renderSkillsCatalogBlock emits the AVAILABLE SKILLS + DISCOVERABLE
-// SKILLS sections for a single agent. The library is global; what each
-// agent can INVOKE depends on its membership in each skill's
-// OwnerAgents list. AVAILABLE = invocable now; DISCOVERABLE = listed for
-// awareness so the agent can call request_skill_enable instead of
-// proposing a duplicate skill. agentSlug is the system-prompt subject.
+// renderSkillsCatalogBlock emits the AVAILABLE SKILLS section for a single
+// agent: ONLY the skills assigned to it (OwnerAgents membership) are
+// rendered — unassigned skills are invisible (core-loop step 8: assigned
+// skills are always loaded; everything else stays out of the prompt).
+// agentSlug is the system-prompt subject.
 func renderSkillsCatalogBlock(skills []SkillSummary, agentSlug string) string {
 	available := make([]SkillSummary, 0, len(skills))
-	discoverable := make([]SkillSummary, 0, len(skills))
 	for _, sk := range skills {
 		if skillEnabledForAgent(sk, agentSlug) {
 			available = append(available, sk)
-		} else {
-			discoverable = append(discoverable, sk)
 		}
 	}
 
 	var sb strings.Builder
 	sb.WriteString("== AVAILABLE SKILLS ==\n")
-	sb.WriteString("These are the ONLY skill slugs you can invoke right now via team_skill_run. Match by exact slug.\n")
+	sb.WriteString("These are the ONLY skill slugs you can invoke via team_skill_run. Match by exact slug.\n")
 	if len(available) == 0 {
-		sb.WriteString("(none enabled for you yet. If you need one of the DISCOVERABLE SKILLS below, call request_skill_enable(slug, reason) and pause — do NOT create a duplicate skill.)\n")
+		sb.WriteString("(none assigned to you yet — proceed with the work directly. Skills are compiled from playbook articles in the wiki; do NOT invent a slug.)\n")
 	} else {
 		for _, sk := range available {
 			sb.WriteString(formatSkillLine(sk))
 		}
 	}
 	sb.WriteString("\n")
-
-	if len(discoverable) > 0 {
-		sb.WriteString("== DISCOVERABLE SKILLS (in library, not yet enabled for you) ==\n")
-		sb.WriteString("Before proposing a new skill, scan this list. If any could solve what you need, call request_skill_enable(slug, reason) and wait for human approval — that adds it to your AVAILABLE SKILLS next turn. Only propose a NEW skill (team_skill_create action=propose) when nothing here fits.\n")
-		for _, sk := range discoverable {
-			sb.WriteString(formatSkillLine(sk))
-		}
-		sb.WriteString("\n")
-	}
 	return sb.String()
 }
 
 // skillEnabledForAgent reports whether the agent slug can invoke this
 // skill right now. An empty agentSlug (e.g. one-on-one mode without a
-// member) sees nothing — agents must be explicitly enabled to invoke.
+// member) sees nothing — agents must be explicitly assigned to invoke.
 func skillEnabledForAgent(sk SkillSummary, agentSlug string) bool {
 	if agentSlug == "" {
 		return false
@@ -789,22 +768,6 @@ func specialistSuggestionBlock() string {
 // for clarification, and never reported done. The CEO had no signal to
 // route or unblock; the human had no surface to engage. This block makes
 // the report-back path deterministic.
-// skillReuseFirstBlock tells agents to look at the library before
-// proposing a new skill. This is the load-bearing anti-duplication rule
-// that pairs with the AVAILABLE/DISCOVERABLE SKILLS split: agents see
-// every skill in the library, but can only invoke their AVAILABLE set.
-// When something they need is in DISCOVERABLE, they must call
-// request_skill_enable instead of creating a redundant skill.
-func skillReuseFirstBlock() string {
-	return "== SKILL REUSE FIRST ==\n" +
-		"Before you ever call team_skill_create(action=propose), you MUST scan DISCOVERABLE SKILLS for a match. The library is shared across the whole office — if another agent already built (or had a human enable) a skill that fits, building a near-duplicate just adds noise and confuses future invocations.\n" +
-		"Rules:\n" +
-		"1. Identify the capability you need in one short phrase (e.g. \"summarize a Gmail thread\", \"draft a Notion doc from outline\").\n" +
-		"2. Scan DISCOVERABLE SKILLS. If ANY existing skill's slug/title/description plausibly covers that capability, call request_skill_enable(skill_slug, reason) immediately. Pause for the human's approval — on approve, the skill lands in your AVAILABLE SKILLS next turn and you invoke it via team_skill_run.\n" +
-		"3. Only call team_skill_create(action=propose) when nothing in DISCOVERABLE SKILLS could plausibly fit. In the proposal's description, name what you searched for and why no existing skill matched — that signals you did the lookup and isn't a duplicate.\n" +
-		"4. Don't ask the human to choose between \"enable existing\" vs \"create new\" yourself. Pick the right call from the catalog and let request_skill_enable's approval flow handle the decision.\n\n"
-}
-
 func ownershipContractBlock() string {
 	return "== OWNERSHIP CONTRACT (when you own an Issue) ==\n" +
 		"You own one or more Issues — your slug is the `owner` on a team_task record. Apply these rules every turn you have an active owned Issue:\n" +

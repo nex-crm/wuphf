@@ -476,7 +476,7 @@ func selfHealingTaskDetails(agentSlug, taskID, parentTitle string, reason agent.
 		"",
 		"1. Inspect the failed task and recent thread context. Use the pushed packet as authoritative; call team_poll or team_tasks only if context is missing.",
 		"2. Classify the blocker: missing specialist/channel, missing or outdated skill/playbook, missing tool/provider/integration, stale runtime/session, unclear human decision, or implementation bug.",
-		"3. Take the smallest reversible repair in office state. Prefer a bounded refresh/retry/requeue, reassignment, capability-check step, specialist/channel creation, skill proposal, playbook update, or exact human question before broad process changes.",
+		"3. Take the smallest reversible repair in office state. Prefer a bounded refresh/retry/requeue, reassignment, capability-check step, specialist/channel creation, playbook update, or exact human question before broad process changes.",
 		"4. If runtime/tool state looks stale, refresh or reconnect once and verify with a cheap health check before treating it as a human blocker.",
 		"5. Repair the missing capability first, then resume or requeue the original workflow with a concrete verification step. A self-heal that only reports the blocker is incomplete.",
 		"6. Treat learning as a post-repair review: propose a skill or update a wiki/playbook only when the workaround is durable and reusable. Include the trigger, failure signature, recovery step, verification signal, and any tool/provider/channel constraints. If nothing reusable was learned, leave skills unchanged.",

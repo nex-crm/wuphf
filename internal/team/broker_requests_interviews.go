@@ -685,20 +685,6 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "choice_text or custom_text required", http.StatusBadRequest)
 			return
 		}
-		// Skill proposals carry an irreversible side-effect (activate
-		// vs archive) that hangs off choiceID == "accept". Without an
-		// explicit choice_id, free-text answers fall through to the
-		// archive branch silently — surface that as a 400 instead.
-		if b.requests[i].Kind == "skill_proposal" {
-			switch choiceID {
-			case "accept", "reject":
-				// ok
-			default:
-				b.mu.Unlock()
-				http.Error(w, "skill_proposal answers require choice_id of 'accept' or 'reject'", http.StatusBadRequest)
-				return
-			}
-		}
 		answer := &interviewAnswer{
 			ChoiceID:   choiceID,
 			ChoiceText: choiceText,
@@ -717,33 +703,6 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		b.pendingInterview = firstBlockingRequest(b.requests)
 		pendingCascade = append(pendingCascade, b.unblockTasksForAnsweredRequestLocked(b.requests[i])...)
 
-		// Skill proposal callback: accept activates the skill, reject archives it.
-		if b.requests[i].Kind == "skill_proposal" {
-			replyTo := strings.TrimSpace(b.requests[i].ReplyTo)
-			for j := range b.skills {
-				if b.skills[j].Name == replyTo && b.skills[j].Status != "archived" {
-					activatedAt := time.Now().UTC().Format(time.RFC3339)
-					if choiceID == "accept" {
-						b.skills[j].Status = "active"
-						b.skills[j].UpdatedAt = activatedAt
-						b.counter++
-						b.appendMessageLocked(channelMessage{
-							ID:        fmt.Sprintf("msg-%d", b.counter),
-							From:      "system",
-							Channel:   normalizeChannelSlug(b.requests[i].Channel),
-							Kind:      "skill_activated",
-							Title:     "Skill Activated: " + b.skills[j].Title,
-							Content:   fmt.Sprintf("Skill **%s** is now active and ready to use.", b.skills[j].Title),
-							Timestamp: activatedAt,
-						})
-					} else {
-						b.skills[j].Status = "archived"
-						b.skills[j].UpdatedAt = activatedAt
-					}
-					break
-				}
-			}
-		}
 		b.maybeCreateApprovedSelfHealTaskLocked(b.requests[i])
 
 		b.counter++

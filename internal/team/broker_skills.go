@@ -110,18 +110,19 @@ type SkillSummary struct {
 	Slug        string
 	Title       string
 	Description string
-	// OwnerAgents lists agent slugs this skill is enabled for. Empty means
-	// library-only (no agent can invoke it until the human enables it for
-	// a specific agent via the Skills tab). Used by prompt_builder.go to
-	// split the catalog into AVAILABLE SKILLS (this agent can invoke) and
-	// DISCOVERABLE SKILLS (this agent must request enablement first).
+	// OwnerAgents lists agent slugs this skill is assigned to. Compilation
+	// auto-assigns the office roster at creation (core-loop step 8); the
+	// human or CEO can narrow it via the Skills tab. prompt_builder.go
+	// renders ONLY assigned skills into an agent's prompt — unassigned
+	// skills are invisible to that agent.
 	OwnerAgents []string
 }
 
 // ListActiveSkillSummaries returns slim summaries of every active skill,
 // sorted by slug so the rendered prompt block is byte-stable for prompt
 // caching. Mirrors ListPolicies semantics: only active (Status=="active")
-// records are returned; proposed and archived skills are filtered out.
+// records are returned; archived (and any legacy proposed) skills are
+// filtered out.
 //
 // Slim by design: the broker's full skill content can be many KB. We render
 // only the slug and a short description into the prompt so every agent has a
@@ -183,8 +184,17 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"skills": result})
 }
 
+// handlePostSkill creates a skill directly via HTTP. Agent-driven skill
+// creation was removed in core-loop R5 — skills are created ONLY by playbook
+// compilation. This endpoint remains as the INTERNAL seeding/install path
+// (e.g. `wuphf skills install` from a hub, test fixtures); it is not exposed
+// to agents through any MCP tool.
 func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		// Action is parsed only to fail closed: the propose flow was
+		// removed (core-loop R5), and a stale caller sending
+		// action=propose must NOT silently get an immediately-active
+		// skill instead of the approval gate it expected.
 		Action              string   `json:"action"`
 		Name                string   `json:"name"`
 		Title               string   `json:"title"`
@@ -209,12 +219,8 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	action := strings.TrimSpace(body.Action)
-	if action == "" {
-		action = "create"
-	}
-	if action != "create" && action != "propose" {
-		http.Error(w, "action must be create or propose", http.StatusBadRequest)
+	if action := strings.TrimSpace(body.Action); action != "" && action != "create" {
+		http.Error(w, "skill proposals were removed; skills are created only by playbook compilation", http.StatusGone)
 		return
 	}
 	if strings.TrimSpace(body.Name) == "" || strings.TrimSpace(body.Content) == "" || strings.TrimSpace(body.CreatedBy) == "" || strings.TrimSpace(body.Description) == "" {
@@ -231,12 +237,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		channel = "general"
 	}
 
-	status := "active"
-	msgKind := "skill_update"
-	if action == "propose" {
-		status = "proposed"
-		msgKind = "skill_proposal"
-	}
+	const msgKind = "skill_update"
 
 	b.mu.Lock()
 	unlocked := false
@@ -247,13 +248,6 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	createdBy := strings.TrimSpace(body.CreatedBy)
-	if action == "propose" {
-		createdBy = normalizeActorSlug(createdBy)
-		if b.findMemberLocked(createdBy) == nil {
-			http.Error(w, "created_by must be a registered agent for skill proposals", http.StatusForbidden)
-			return
-		}
-	}
 
 	if existing := b.findSkillByNameLocked(body.Name); existing != nil {
 		http.Error(w, "skill with this name already exists", http.StatusConflict)
@@ -265,14 +259,10 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		title = strings.TrimSpace(body.Name)
 	}
 
-	// Auto-enable defaults: when an agent proposes/creates a skill, it
-	// becomes immediately invocable for that agent on approval. Human-
-	// created skills stay library-only — the human picks which agents get
-	// to use them via the agent Skills tab.
-	var ownerAgents []string
-	if creatorSlug := normalizeActorSlug(createdBy); creatorSlug != "" && !isHumanMessageSender(creatorSlug) && b.findMemberLocked(creatorSlug) != nil {
-		ownerAgents = []string{creatorSlug}
-	}
+	// Auto-assignment (core-loop step 8): seeded/installed skills are
+	// assigned to the whole office roster so they are loaded for every
+	// agent; the human narrows the assignment via the Skills tab.
+	ownerAgents := b.allMemberSlugsLocked()
 
 	b.counter++
 	sk := teamSkill{
@@ -296,7 +286,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		LastExecutionAt:     strings.TrimSpace(body.LastExecutionAt),
 		LastExecutionStatus: strings.TrimSpace(body.LastExecutionStatus),
 		UsageCount:          0,
-		Status:              status,
+		Status:              "active",
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
@@ -308,13 +298,10 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		Channel:   channel,
 		Kind:      msgKind,
 		Title:     sk.Title,
-		Content:   fmt.Sprintf("Skill %q %sd by @%s", sk.Name, action, sk.CreatedBy),
+		Content:   fmt.Sprintf("Skill %q created by @%s", sk.Name, sk.CreatedBy),
 		Timestamp: now,
 	})
 	b.appendActionLocked(msgKind, "office", channel, sk.CreatedBy, truncateSummary(sk.Title, 140), sk.ID)
-	if action == "propose" {
-		b.appendSkillProposalRequestLocked(sk, channel, now)
-	}
 
 	if err := b.saveLocked(); err != nil {
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
@@ -332,7 +319,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 	unlocked = true
 
-	commitMsg := fmt.Sprintf("wuphf: %s skill %s", action, skSnapshot.Name)
+	commitMsg := fmt.Sprintf("wuphf: create skill %s", skSnapshot.Name)
 	// Use the broker lifecycle context, not r.Context(): the skill is
 	// already in broker state, and a client disconnect mid-Enqueue would
 	// cancel the SKILL.md commit and recreate the very "broker has it,
@@ -345,7 +332,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		// callers thinking the skill was not created when broker state has
 		// already been mutated.
 		slog.Warn("handlePostSkill: wiki enqueue failed",
-			"name", skSnapshot.Name, "action", action, "err", err)
+			"name", skSnapshot.Name, "err", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -479,13 +466,12 @@ func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 		sk.LastExecutionStatus = status
 	}
 	if s := strings.TrimSpace(body.Status); s != "" {
-		// Don't let PUT /skills smuggle a "proposed" skill into "active"
-		// without going through the human-approval flow that
-		// handlePostSkill action="propose" creates. Approval lives in
-		// handlePostRequestAnswer (skill_proposal kind); allowing this
-		// path to flip the status would let any caller bypass it.
+		// Legacy persisted state may still carry "proposed" skills from the
+		// retired proposal flow. Don't let PUT /skills smuggle one into
+		// "active" — the explicit /skills/{name}/approve endpoint is the
+		// only path that flips legacy proposed → active.
 		if sk.Status == "proposed" && s != "proposed" && s != "archived" {
-			http.Error(w, "proposed skills must be approved or rejected via the request answer flow", http.StatusForbidden)
+			http.Error(w, "legacy proposed skills must be activated via /skills/{name}/approve or archived", http.StatusForbidden)
 			return
 		}
 		sk.Status = s
@@ -626,14 +612,14 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 			"error":            "skill not found",
 			"requested":        skillName,
 			"available_skills": available,
-			"hint":             "Pass an exact slug from `available_skills`. If the list is empty, no skills exist yet — do not retry; propose one via team_skill_create(action=propose) if the workflow is reusable.",
+			"hint":             "Pass an exact slug from `available_skills`. If the list is empty, no skills exist yet — do not retry; proceed with the work directly. Skills are compiled from playbook articles in the wiki, not created ad hoc.",
 		})
 		return
 	}
 
-	// Security fix (Codex T3): only active skills may be invoked. Proposed or
-	// archived skills must not be executable — proposed means unapproved,
-	// archived means intentionally retired.
+	// Security fix (Codex T3): only active skills may be invoked. Legacy
+	// proposed or archived skills must not be executable — proposed means
+	// never activated, archived means intentionally retired.
 	if sk.Status != "active" {
 		http.Error(w, "skill not active (status="+sk.Status+")", http.StatusForbidden)
 		return
@@ -744,37 +730,6 @@ func (b *Broker) createSkillRunTaskLocked(sk *teamSkill, channel, invoker, now s
 	return task.ID, nil
 }
 
-func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string) {
-	title := strings.TrimSpace(skill.Title)
-	if title == "" {
-		title = strings.TrimSpace(skill.Name)
-	}
-	description := strings.TrimSpace(skill.Description)
-	createdBy := strings.TrimSpace(skill.CreatedBy)
-	if createdBy == "" {
-		createdBy = "system"
-	}
-	b.counter++
-	interview := humanInterview{
-		ID:        fmt.Sprintf("request-%d", b.counter),
-		Kind:      "skill_proposal",
-		Status:    "pending",
-		From:      createdBy,
-		Channel:   normalizeChannelSlug(channel),
-		Title:     "Approve skill: " + title,
-		Question:  fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", createdBy, title, description),
-		ReplyTo:   strings.TrimSpace(skill.Name),
-		Blocking:  false,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
-		{ID: "accept", Label: "Accept"},
-		{ID: "reject", Label: "Reject"},
-	})
-	b.requests = append(b.requests, interview)
-}
-
 // SeedDefaultSkills pre-populates the broker with the given skill specs.
 // It is idempotent: skills whose name already exists (by slug) are skipped.
 // No production callers remain; tests use it to set up broker skill state.
@@ -805,6 +760,7 @@ func (b *Broker) SeedDefaultSkills(specs []agent.PackSkillSpec) {
 			Description: strings.TrimSpace(spec.Description),
 			Content:     strings.TrimSpace(spec.Content),
 			CreatedBy:   "system",
+			OwnerAgents: b.allMemberSlugsLocked(),
 			Tags:        append([]string(nil), spec.Tags...),
 			Trigger:     strings.TrimSpace(spec.Trigger),
 			Status:      "active",

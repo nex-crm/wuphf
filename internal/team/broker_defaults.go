@@ -304,6 +304,16 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		if strings.TrimSpace(b.requests[i].Kind) == "" {
 			b.requests[i].Kind = "choice"
 		}
+		// core-loop R5 migration: the skill-proposal and skill-enable
+		// approval flows were removed. A pending card of either kind would
+		// render an Accept/Enable button with no effect behind it (the
+		// dead-Accept surface) — cancel them on load instead.
+		if kind := strings.TrimSpace(b.requests[i].Kind); kind == "skill_proposal" || kind == "skill_enable_request" {
+			if b.requests[i].Answered == nil && b.requests[i].Status != "canceled" {
+				b.requests[i].Status = "canceled"
+				b.requests[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			}
+		}
 		if strings.TrimSpace(b.requests[i].Status) == "" {
 			if b.requests[i].Answered != nil {
 				b.requests[i].Status = "answered"

@@ -62,44 +62,6 @@ describe("<HumanInterviewOverlay>", () => {
     expect(screen.getByText("No")).toBeInTheDocument();
   });
 
-  it("shows the enhance-existing banner for enhance_skill_proposal kind", () => {
-    const req = makeRequest({
-      kind: "enhance_skill_proposal",
-      title: "Enhance existing skill?",
-      options: [
-        { id: "enhance", label: "Enhance" },
-        { id: "approve_anyway", label: "Approve anyway" },
-        { id: "reject", label: "Reject" },
-      ],
-      recommended_id: "enhance",
-      metadata: { enhances_slug: "email-ops" },
-    });
-    useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
-    render(wrap(<HumanInterviewOverlay />));
-
-    expect(screen.getByText(/Similar to existing skill:/i)).toBeInTheDocument();
-    expect(screen.getByText("email-ops")).toBeInTheDocument();
-    expect(screen.getByText("Enhance")).toBeInTheDocument();
-    expect(screen.getByText("Approve anyway")).toBeInTheDocument();
-    expect(screen.getByText("Reject")).toBeInTheDocument();
-  });
-
-  it("does not show the enhance banner for a normal skill_proposal", () => {
-    const req = makeRequest({
-      kind: "skill_proposal",
-      options: [
-        { id: "accept", label: "Accept" },
-        { id: "reject", label: "Reject" },
-      ],
-    });
-    useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
-    render(wrap(<HumanInterviewOverlay />));
-
-    expect(
-      screen.queryByText(/Similar to existing skill:/i),
-    ).not.toBeInTheDocument();
-  });
-
   it("renders the EXTERNAL ACTION badge and Variant B layout for approval-kind requests", () => {
     const req = makeRequest({
       kind: "approval",
@@ -180,9 +142,7 @@ describe("<HumanInterviewOverlay>", () => {
     });
     useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
     render(wrap(<HumanInterviewOverlay />));
-    expect(
-      screen.getByText(/No structured payload/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/No structured payload/i)).toBeInTheDocument();
   });
 
   it("falls back to plain pre-wrap context for legacy/non-approval requests", () => {
@@ -204,22 +164,20 @@ describe("<HumanInterviewOverlay>", () => {
 
   it("styles the recommended option with btn-primary class", () => {
     const req = makeRequest({
-      kind: "enhance_skill_proposal",
       options: [
-        { id: "enhance", label: "Enhance" },
-        { id: "approve_anyway", label: "Approve anyway" },
+        { id: "proceed", label: "Proceed" },
+        { id: "hold", label: "Hold" },
         { id: "reject", label: "Reject" },
       ],
-      recommended_id: "enhance",
-      metadata: { enhances_slug: "existing-skill" },
+      recommended_id: "proceed",
     });
     useRequestsMock.mockReturnValue({ blockingPending: req, pending: [req] });
     render(wrap(<HumanInterviewOverlay />));
 
-    const enhanceBtn = screen.getByRole("button", { name: "Enhance" });
-    expect(enhanceBtn.className).toContain("btn-primary");
+    const proceedBtn = screen.getByRole("button", { name: "Proceed" });
+    expect(proceedBtn.className).toContain("btn-primary");
 
-    const approveBtn = screen.getByRole("button", { name: "Approve anyway" });
-    expect(approveBtn.className).toContain("btn-ghost");
+    const holdBtn = screen.getByRole("button", { name: "Hold" });
+    expect(holdBtn.className).toContain("btn-ghost");
   });
 });

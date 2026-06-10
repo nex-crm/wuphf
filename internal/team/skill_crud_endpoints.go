@@ -1114,7 +1114,7 @@ func yamlMarshalTombstone(tf tombstoneFile) (string, error) {
 
 // handleSkillEnableForAgent appends an agent slug to the skill's
 // OwnerAgents list. Idempotent. Used by the agent Skills tab and by
-// request_skill_enable's approval path. POST body: {"agent": "<slug>"}.
+// the agent Skills tab assignment flow. POST body: {"agent": "<slug>"}.
 func (b *Broker) handleSkillEnableForAgent(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
