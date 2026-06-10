@@ -336,11 +336,10 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 	if skipTask {
 		// Without a seeded task, #general would otherwise be empty (or hold
 		// only the lead-only warning) and the office looks broken on first
-		// open. Post a system welcome plus a presence line from the lead so
-		// the channel always has an affordance for what to do next AND feels
-		// staffed rather than abstract. The presence line is marked Kind=
-		// "demo_seed" so the launcher's notification path treats it as inert
-		// — it must not trigger an LLM dispatch.
+		// open. Post a system welcome so the channel always has an
+		// affordance for what to do next. No staged agent presence lines:
+		// the core loop wants a real first paint, not a fake-staffed one
+		// (core-loop R6 removed the demo_seed machinery).
 		b.counter++
 		b.appendMessageLocked(channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -350,18 +349,6 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 			Content:   welcomeMessageForMembers(b.members),
 			Timestamp: now,
 		})
-		if leadSlug, leadName := leadSlugAndName(b.members); leadSlug != "" {
-			b.counter++
-			b.appendMessageLocked(channelMessage{
-				ID:        fmt.Sprintf("msg-%d", b.counter),
-				From:      leadSlug,
-				Channel:   "general",
-				Kind:      "demo_seed",
-				Content:   fmt.Sprintf("%s online. Drop a directive in the composer and I'll break it down and dispatch the team.", leadName),
-				Tagged:    []string{},
-				Timestamp: now,
-			})
-		}
 		// seedFromBlueprintLocked mutated b.members/channels/tasks above; we
 		// must persist that even when the user skipped the kickoff task.
 		// Returning early without saveLocked() silently loses the seeded team

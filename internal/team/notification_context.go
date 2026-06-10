@@ -111,7 +111,7 @@ type notificationContextBuilder struct {
 
 // NotificationContext returns the recent-messages context block for the
 // given (channel, threadRoot) pair. Excludes the trigger message itself,
-// system messages, demo_seed posts, and STATUS chatter. Thread-scoped
+// system messages, and STATUS chatter. Thread-scoped
 // when threadRoot is non-empty (anchors at root + most-recent thread
 // activity); recent-channel fallback otherwise.
 //
@@ -142,9 +142,6 @@ func (b *notificationContextBuilder) NotificationContext(recipientSlug, channel,
 	recipient := normalizeActorSlug(recipientSlug)
 	baseFilter := func(m channelMessage) bool {
 		if m.From == "system" {
-			return false
-		}
-		if m.Kind == "demo_seed" {
 			return false
 		}
 		if strings.TrimSpace(triggerMsgID) != "" && strings.TrimSpace(m.ID) == strings.TrimSpace(triggerMsgID) {
@@ -526,7 +523,7 @@ func (b *notificationContextBuilder) ResponseInstructionForTarget(msg channelMes
 		}
 		return fmt.Sprintf("You are @%s. You already own matching work. Reply only with concrete progress or a blocker; do not re-triage the thread.", slug)
 	}
-	return fmt.Sprintf("You are @%s. You were woken because the thread brushes your domain. If you have a sharp in-character take, a push-back from your expertise, a quick observation, or a one-line crack that adds energy, drop it — short. Office banter and half-joke riffs are how real teams stumble into ideas, so don't suppress yours when something genuine lands. Skip the turn only if you truly have nothing to add; do not reply just to acknowledge.", slug)
+	return fmt.Sprintf("You are @%s. You were woken because the thread brushes your domain. If you have a sharp take, a push-back from your expertise, or a quick observation that moves the work, drop it — short. Skip the turn only if you truly have nothing to add; do not reply just to acknowledge.", slug)
 }
 
 // BuildMessageWorkPacket returns the work packet a notified agent receives

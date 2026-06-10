@@ -11,8 +11,8 @@ import {
 // blocking signals + the TUI's Esc-to-cancel flow).
 //
 // Wuphf's signature differentiator: agents can BLOCK on a human answer. The
-// broker holds a request, the web client polls /requests, and InterviewBar +
-// HumanInterviewOverlay render an actionable prompt above the composer. While
+// broker holds a request, the web client polls /requests, and InterviewBar
+// renders an actionable prompt above the composer. While
 // any blocking request is pending, /api/messages returns 409 (broker.go —
 // handlePostMessage), and Composer maps that to the "Answer or dismiss the
 // request above to send messages." toast. Zero web coverage of this loop today —

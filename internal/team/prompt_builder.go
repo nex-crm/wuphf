@@ -202,8 +202,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(fmt.Sprintf("You are the %s of the %s.\n\n", agentCfg.Name, p.packName()))
 		sb.WriteString(ruleZeroBlock())
 		sb.WriteString(companyCtx)
-		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
-		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
+		sb.WriteString(fmt.Sprintf("Core personality: %s\n\n", agentCfg.Personality))
 		sb.WriteString(p.agentFilesPromptBlock(slug))
 		sb.WriteString("== YOUR TEAM ==\n")
 		for _, member := range officeMembers {
@@ -251,13 +250,12 @@ func (p *promptBuilder) Build(slug string) string {
 			sb.WriteString("\n")
 		}
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
-		sb.WriteString(officeVibeBlock())
 		if p.isFocusMode() {
 			sb.WriteString("== DELEGATION MODE ==\n")
 			sb.WriteString("You are the routing hub. Specialists only act when you or the human explicitly @tag them.\n")
 			sb.WriteString("- Route and hold: dispatch work to the right specialist and WAIT. Never do their work while they are working.\n")
 			sb.WriteString("- Don't re-trigger: a [STATUS] or any reply from a specialist means they are working. When they finish, only respond if coordination is still needed — if the task is done and the human already has what they need, stay quiet.\n")
-			sb.WriteString("- Specialists report up to you on work, but a quick in-character reaction, push-back, or half-joke riff between teammates is fine — that's how a real office stumbles into ideas. Just keep full debates and re-routing coordinated through you.\n")
+			sb.WriteString("- Specialists report up to you on work. Keep full debates and re-routing coordinated through you.\n")
 			sb.WriteString("- After you delegate, ask a blocking question, or post the current synthesis, END THE TURN. Do not stay active waiting for teammates; a new pushed notification will wake you when something changes.\n\n")
 		}
 		sb.WriteString(renderSkillsCatalogBlock(activeSkills, slug))
@@ -279,8 +277,8 @@ func (p *promptBuilder) Build(slug string) string {
 		}
 		sb.WriteString("2. The pushed notification is your starting context — it contains thread context, task state, and agent activity. When it already answers the question, respond directly from it. When anything material is missing or ambiguous, pull it (team_poll, team_tasks, wiki/notebook search) before deciding. Acting on a guess you could have checked is the failure; gathering needed context is not.\n")
 		sb.WriteString("3. When routing a simple human @tagged request that should resolve in one reply, tag the specialist in your message and do NOT also create a team_task for the same work. For any multi-step build, cross-functional initiative, or work likely to need another round, you MUST create explicit team_task records for each owned lane before you send the kickoff so specialists wake up from durable task state. When those task records already exist, do NOT also tag the same specialists in the kickoff unless you need extra commentary outside the owned task.\n")
-		sb.WriteString("4. Tag the specialists who should weigh in. Don't tag everyone for everything — but don't be paranoid about a little cross-agent banter either: a sharp half-joke between teammates is how a real office stumbles into ideas. Suppress only filler and acknowledgement noise.\n")
-		sb.WriteString("5. Keep specialists in their lane on execution. You make the FINAL decision. A quick in-character reaction from them on someone else's lane is fine; full re-routing or scope debates run through you.\n")
+		sb.WriteString("4. Tag the specialists who should weigh in. Don't tag everyone for everything. Suppress filler and acknowledgement noise.\n")
+		sb.WriteString("5. Keep specialists in their lane on execution. You make the FINAL decision. Full re-routing or scope debates run through you.\n")
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")
 		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for cancelable clarifications, and team_request for blocking decisions\n")
 		if markdownMemory {
@@ -336,8 +334,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(ruleZeroBlock())
 		sb.WriteString(companyCtx)
 		sb.WriteString(fmt.Sprintf("Your expertise: %s\n\n", strings.Join(agentCfg.Expertise, ", ")))
-		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
-		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
+		sb.WriteString(fmt.Sprintf("Core personality: %s\n\n", agentCfg.Personality))
 		sb.WriteString(p.agentFilesPromptBlock(slug))
 		sb.WriteString("== YOUR TEAM ==\n")
 		sb.WriteString(fmt.Sprintf("- @%s (%s): TEAM LEAD — has final say on decisions\n", lead, p.nameFor(lead)))
@@ -387,12 +384,11 @@ func (p *promptBuilder) Build(slug string) string {
 		}
 		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
 		sb.WriteString("\n")
-		sb.WriteString(officeVibeBlock())
 		if p.isFocusMode() {
 			sb.WriteString("== DELEGATION MODE ==\n")
 			sb.WriteString("Delegation mode is enabled.\n")
 			sb.WriteString("- You take work directly from the human only when they explicitly tag you, or from @ceo when delegated.\n")
-			sb.WriteString("- A quick in-character reaction, joke, or sharp push-back to a teammate is welcome — that's the office talking. Don't open full debates or re-route work yourself; let @ceo coordinate that.\n")
+			sb.WriteString("- Don't open full debates or re-route work yourself; let @ceo coordinate that.\n")
 			sb.WriteString("- Do the work, then report completion, blockers, or handoff notes back to @ceo.\n")
 			sb.WriteString("- If another specialist should get involved, tell @ceo instead of routing it yourself.\n")
 			sb.WriteString("- After you report completion, a blocker, or a handoff, END THE TURN. Do not keep researching or wait for acknowledgements in the same run.\n\n")
@@ -408,7 +404,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(specialistSuggestionBlock())
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
 		sb.WriteString("1. The pushed notification is your starting context — it contains thread context and task state. When it already answers the question, respond directly and do the work. When anything material is missing or ambiguous, pull it (team_poll, team_tasks, wiki/notebook search) before deciding. Acting on a guess you could have checked is the failure; gathering needed context is not.\n")
-		sb.WriteString("2. Stay in your lane on execution. But you're a real teammate, not a silent worker: when a thread brushes your domain and you've got a sharp take, push-back, observation, or a quick in-character crack that adds energy or sparks a better idea, drop it. Real offices solve problems through half-joke banter. The line you don't cross: filler, restating what's been said, or grabbing someone else's work.\n")
+		sb.WriteString("2. Stay in your lane on execution. When a thread brushes your domain and you have a sharp take, push-back, or observation grounded in your expertise, drop it — short. The line you don't cross: filler, restating what's been said, or grabbing someone else's work.\n")
 		sb.WriteString("3. Push back when you disagree — explain why using your expertise\n")
 		sb.WriteString("4. Check team_requests before asking the human anything new\n")
 		sb.WriteString("5. For completion or recommendations, use human_message. For cancelable clarifications, use human_interview with options. For blocking human decisions, use team_request with kind `approval`, `confirm`, or `choice`.\n")
@@ -596,11 +592,6 @@ func clipPromptText(s string, max int) string {
 		return s[:max]
 	}
 	return strings.TrimSpace(s[:max-1]) + "…"
-}
-
-func officeVibeBlock() string {
-	return "== OFFICE VIBE ==\n" +
-		"This is a real team. Agents learn from each other the same way humans do — through short, in-character banter, half-joke push-back, and dropped observations between teammates. Don't suppress that. Real ideas usually fall out of riffing, not out of formal rounds. Keep replies short and alive; skip filler and pure acknowledgements.\n\n"
 }
 
 // renderActiveIssuesBlock emits the ACTIVE ISSUES section so the agent can

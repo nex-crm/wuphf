@@ -155,12 +155,6 @@ export const ROUTE_PATHS = {
   article: "/articles/$articleId",
   inbox: "/inbox",
   taskDecision: "/task/$taskId",
-  /** Back-compat redirect: `/issues` → `/tasks`. */
-  legacyIssues: "/issues",
-  /** Back-compat redirect: `/issues/$issueId` → `/tasks/$taskId`. */
-  legacyIssueDetail: "/issues/$issueId",
-  /** Back-compat redirect: `/issues/new` → `/tasks/new`. */
-  legacyIssueNew: "/issues/new",
   /** Routines surface index — alias for /apps/routines. */
   routines: "/routines",
   /** Composer for creating a routine from scratch. */
@@ -275,25 +269,6 @@ export const ROUTE_CONTRACTS: readonly RouteContract[] = [
     key: "taskDecision",
     path: ROUTE_PATHS.taskDecision,
     params: ["taskId"],
-    search: [],
-  },
-  // Back-compat redirects for the legacy /issues surface.
-  {
-    key: "legacyIssues",
-    path: ROUTE_PATHS.legacyIssues,
-    params: [],
-    search: [],
-  },
-  {
-    key: "legacyIssueDetail",
-    path: ROUTE_PATHS.legacyIssueDetail,
-    params: ["issueId"],
-    search: [],
-  },
-  {
-    key: "legacyIssueNew",
-    path: ROUTE_PATHS.legacyIssueNew,
-    params: [],
     search: [],
   },
   { key: "routines", path: ROUTE_PATHS.routines, params: [], search: [] },

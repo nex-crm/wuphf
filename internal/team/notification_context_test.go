@@ -102,13 +102,12 @@ func TestNotificationContext_ContextEmptyWhenNoMessages(t *testing.T) {
 	}
 }
 
-func TestNotificationContext_FiltersSystemAndDemoSeedAndStatus(t *testing.T) {
+func TestNotificationContext_FiltersSystemAndStatus(t *testing.T) {
 	msgs := []channelMessage{
 		{ID: "1", From: "you", Content: "human says hi"},
 		{ID: "2", From: "system", Content: "system bookkeeping"},
 		{ID: "3", From: "ceo", Content: "[STATUS] working"},
-		{ID: "4", From: "ceo", Kind: "demo_seed", Content: "fake activity"},
-		{ID: "5", From: "ceo", Content: "real reply"},
+		{ID: "4", From: "ceo", Content: "real reply"},
 	}
 	b := newTestNotifyContextBuilder(t, func(b *notificationContextBuilder) {
 		b.channelMessages = func(string) []channelMessage { return msgs }
@@ -120,7 +119,7 @@ func TestNotificationContext_FiltersSystemAndDemoSeedAndStatus(t *testing.T) {
 	if !strings.Contains(got, "real reply") {
 		t.Errorf("expected real ceo reply included; got %q", got)
 	}
-	for _, banned := range []string{"system bookkeeping", "STATUS", "fake activity"} {
+	for _, banned := range []string{"system bookkeeping", "STATUS"} {
 		if strings.Contains(got, banned) {
 			t.Errorf("expected %q filtered out, got %q", banned, got)
 		}
@@ -409,8 +408,8 @@ func TestNotificationContext_ResponseInstruction_TaggedTriggersTaggedGuidance(t 
 func TestNotificationContext_ResponseInstruction_UntaggedNonOwnerInvitedToChimeIn(t *testing.T) {
 	b := newTestNotifyContextBuilder(t)
 	got := b.ResponseInstructionForTarget(channelMessage{Channel: "general"}, "eng")
-	if !strings.Contains(got, "in-character") || !strings.Contains(got, "Skip the turn only if") {
-		t.Errorf("expected chime-in-with-personality default for untagged non-owner; got %q", got)
+	if !strings.Contains(got, "brushes your domain") || !strings.Contains(got, "Skip the turn only if") {
+		t.Errorf("expected the substantive chime-in default for untagged non-owner; got %q", got)
 	}
 }
 

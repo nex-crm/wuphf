@@ -1,8 +1,8 @@
 import type { SchedulerJob } from "../../../api/client";
 
 /**
- * Display label for a routine. Mirrors SystemSchedulesPanel's `labelOf`
- * so both surfaces resolve the same human-readable string.
+ * Display label for a routine — the canonical human-readable string for
+ * any surface that renders a SchedulerJob.
  */
 export function routineLabel(job: SchedulerJob): string {
   return job.label || job.name || job.slug || "(unnamed routine)";

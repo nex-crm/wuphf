@@ -5,7 +5,6 @@ import { CommandPaletteHost } from "../command/CommandPalette";
 import { TeamMemberWelcome } from "../join/TeamMemberWelcome";
 import { InterviewBar } from "../messages/InterviewBar";
 import { ThreadPanel } from "../messages/ThreadPanel";
-import { GettingStartedChecklist } from "../onboarding/GettingStartedChecklist";
 import { SearchModal } from "../search/SearchModal";
 import { HelpModalHost } from "../ui/HelpModal";
 import { VersionModalHost } from "../ui/VersionModal";
@@ -42,12 +41,6 @@ export function Shell({ children }: ShellProps) {
             chat — where it used to be absent, leaving an agent's clarifying
             question unanswerable without navigating to #general. */}
         <InterviewBar />
-        {/* Post-onboarding "Settle into your office" nudge. The component
-            self-hides while loading, once dismissed, or after every item is
-            done, so an unconditional mount inside the onboarded Shell is
-            safe — it docks above the StatusBar only for the brief window an
-            onboarded-but-not-settled founder is still finding their feet. */}
-        <GettingStartedChecklist />
         <StatusBar />
       </main>
       <ThreadPanel />

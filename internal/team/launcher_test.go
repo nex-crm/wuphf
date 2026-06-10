@@ -2025,8 +2025,8 @@ func TestResponseInstructionForTargetDMChannelRespondsHelpfully(t *testing.T) {
 	if strings.Contains(channelInstr, "messaging you directly") {
 		t.Errorf("non-DM should not get DM-direct guidance, got %q", channelInstr)
 	}
-	if !strings.Contains(channelInstr, "in-character") || !strings.Contains(channelInstr, "Skip the turn only if") {
-		t.Errorf("non-DM untagged should get chime-in-with-personality default, got %q", channelInstr)
+	if !strings.Contains(channelInstr, "brushes your domain") || !strings.Contains(channelInstr, "Skip the turn only if") {
+		t.Errorf("non-DM untagged should get the substantive chime-in default, got %q", channelInstr)
 	}
 
 	// DM with agent slug mismatch — wrong agent should not get DM instruction

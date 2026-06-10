@@ -37,17 +37,6 @@ type notifyDedupKey struct {
 }
 
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
-	// demo_seed messages exist purely to make #general feel staffed on first
-	// paint; they must never wake an agent or burn an LLM call. Filter at
-	// the central delivery point (not just notifyAgentsLoop) so other
-	// callers — primeVisibleAgents, replays, future routes — can't bypass
-	// it. Today these don't actually route demo_seed targets because the
-	// lead is the From and Tagged is empty, but a future @all-default
-	// change would silently turn the demo seed into an LLM-burning
-	// broadcast. One filter, one place.
-	if msg.Kind == "demo_seed" {
-		return
-	}
 	// Phase 2 onboarding is fully deterministic — the broker emits CEO
 	// cards from ceoDeterministicMessages and the user replies via the
 	// structured-card POST handlers. The CEO agent must NOT fire an LLM
