@@ -8,22 +8,24 @@
 
 ---
 
-## The Core Loop (canonical, verbatim intent)
+## The Core Loop (canonical — founder's structured version, 2026-06-10)
+
+The simplest end-to-end flow we want to work reliably:
 
 1. **Create a task.**
-2. **Understand** the goal, deliverables (and deliverable format), and success criteria; get access to needed tools and context **with human help** (human interview posted in chat AND Inbox).
-3. **Spin up the team and subtasks** around it.
-4. Agents work in **their own context space — their notebooks** — documenting pre-task research and post-task deliverables/learnings. Keeps each agent focused; nobody consumes everyone's context.
-5. **When done:** summarize what was delivered in the parent task and link the created artifact. **Every task must deliver an artifact in the wiki**, posted to chat and Inbox on completion.
-6. **Learn from completion deterministically** (a hook, not ad-hoc wiki writes): extract entities, associated entities, and their insights → add to the **knowledge graph**.
-7. The knowledge graph **writes wiki articles on entities**, associated to each other via links — exactly like Wikipedia.
-8. Detect **human-readable rich playbooks** in that knowledge → document as wiki articles linked to the right entities and other playbooks.
-9. The wiki reaches **full Wikipedia parity**: information architecture, UX, features, editing, article formatting, media richness, citations, navigation, appearance, flow, associations. No random folders — Wikipedia-style IA. You should not be able to tell you're not inside Wikipedia.
-10. **At regular intervals, compile playbooks into skills**, activated only for the most relevant agents. **This is the only way skills are created. No playbook → no skill.**
-11. Playbook compilation also creates **policies**, assignable to multiple agents just like skills — all agents or a subset (founder decision 2026-06-10). Policies can also be created on the fly in chat — **but only from human feedback**. Shape: an agent constitution — flat one-line rules, always in system context, two writers only (human chat feedback instantly; playbook compilation distilling a playbook's enforcement line). Rules that only matter inside one procedure live in that skill, never as policies — the dedup test for every new rule.
-12. **Skills and policies are always loaded** in an agent's system context.
-13. All other context is retrieved **on-demand** via hybrid search (BM25 + vector) from the agent's notebooks and the team wiki — at work start or mid-work. Agents **clearly show in chat the context they read and used**.
-14. On every subsequent run: **update existing** notebooks/articles/policies/skills first — prune outdated items, extend existing ones — instead of creating new. Reduce redundancy and slop.
+2. **Define the task clearly** — Goal · Deliverables (and required format) · Success criteria.
+3. **Gather missing context + get tool access (with human help)** — human interview captured in the task chat; async requests and approvals handled via **Inbox**.
+4. **Spin up the team** — assign owner agent(s); create subtasks where needed.
+5. **Agents execute with focused context** — agents continuously write to their **private knowledge graph** and use it to generate personal **notebooks**; notebooks hold pre-task research and post-task deliverables/learnings. Goal: stay focused without loading unnecessary context for everyone.
+6. **Deliver an artifact** — every task ships an artifact in the **Wiki/Knowledge Base**; post the artifact link back to the parent task and **Inbox**.
+7. **Run a deterministic "learning hook"** (intentional, not at the whim of the LLM):
+   1. **Extract structured knowledge** — entities, related entities, associated insights → the **Team Knowledge Graph**.
+   2. **Write or update wiki articles** — rich human-readable articles per entity, linked like Wikipedia, with Wikipedia-style citations and media placement; identify playbooks in new insights and draft them; always prefer updating existing articles over creating new ones.
+   3. **Compile playbooks into Skills & Policies** at regular intervals — skills can ONLY be created from playbook compilation; policies from playbook compilation AND from human feedback during chat; **always prefer updating an existing skill over creating new ones**, even when that grows a skill's scope, as long as the skill stays under the file-size (token) threshold; **policies are always single-threaded** (one atomic rule per policy).
+8. **Activate Skills & Policies for relevant agents** — auto-assigned to all relevant agents at skill/policy creation and during automatic agent creation by the CEO; the CEO can also assign a skill/policy to another agent during chat; assigned skills & policies are **always loaded** in that agent's system context.
+9. **Repeat the loop with retrieval + deduping** — new tasks retrieve context on-demand from Notebooks + Wiki (hybrid search); prefer updating existing artifacts over creating redundant ones (prune, expand, correct — even if it just means clearing outdated context).
+
+**Memory tiers implied by step 5 + 7:** private per-agent knowledge graph → generates that agent's notebooks (personal, focused); team knowledge graph → generates the wiki (shared, curated). Both written deterministically by hooks, not ad-hoc LLM whim.
 
 ## Removals (R-phases — the subtraction)
 
@@ -40,10 +42,10 @@
 
 | ID | Build | Builds on |
 |---|---|---|
-| B1 | **Deterministic completion hook**: on verified done — summarize into parent task, require + link the wiki artifact, post to chat + Inbox, extract entities/associations/insights → knowledge graph | task_distill.go seam (U4.1), verification gate (U1.1) |
+| B1 | **Deterministic completion hook**: on verified done — summarize into parent task, require + link the wiki artifact, post to chat + Inbox, extract entities/associations/insights → TEAM knowledge graph | task_distill.go seam (U4.1), verification gate (U1.1) |
 | B2 | **KG → entity wiki articles** with Wikipedia-style linking; kill folder taxonomy (Companies/People/… folders become categories/links) | wiki worker, entity graph (broker_entity*.go), Graph surface |
-| B3 | **Playbook detection → playbook articles → interval compilation into skills + policies**, scoped to most-relevant agents | skill_compile cron, SkillOpt, policies store |
-| B4 | **Notebooks as the agent's working context space** (pre-task research note + post-task deliverable/learnings note, per task) + on-demand hybrid retrieval (wire `internal/embedding` dense path into the U2 retrieval spine) + **"context I used" transparency posts in chat** | context_assembler.go, notebook system, U2 |
+| B3 | **Playbook detection → playbook articles → interval compilation into skills + policies** with auto-assignment to relevant agents at creation (and at CEO agent-creation time); CEO can reassign in chat; skill UPDATE-FIRST under a token-size threshold (grow scope before creating new); policies single-threaded (atomic) | skill_compile cron, SkillOpt, policies store |
+| B4 | **Private per-agent knowledge graph → generated notebooks** (agents continuously write structured knowledge to their private KG; notebooks — pre-task research + post-task deliverables/learnings — are generated views of it) + on-demand hybrid retrieval (wire `internal/embedding` dense path into the U2 retrieval spine) + **"context I used" transparency posts in chat** | context_assembler.go, notebook system, entity graph, U2 |
 | B5 | **Wikipedia-parity wiki UX** | Tiptap (already in PR #1018 lineage). **DECISION FLAG:** docmost is AGPL-3.0; WUPHF is MIT — embedding docmost as a library imposes AGPL obligations on every distribution. Recommended: docmost as the UX reference (it's also Tiptap-based), native implementation. If literal docmost embedding is wanted anyway, that's a licensing decision for the founder to make explicitly. |
 | B6 | **Update-first knowledge discipline**: retrieval-before-write on every store (notebook/article/policy/skill); prune/extend instead of create; staleness pruning | relevantLearnings seam, wiki lint/archiver |
 
