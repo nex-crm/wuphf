@@ -25,7 +25,7 @@ import "strings"
 const defaultMaxMessages = 500
 
 func (b *Broker) appendMessageLocked(msg channelMessage) channelMessage {
-	msg = sanitizeChannelMessageSecrets(msg)
+	// redaction removed (core-loop R1)
 	// Tag the message with the sender's current in-flight task so
 	// the agent-context builder can suppress pre-review chatter from
 	// downstream consumers. Already-stamped messages (system posts
@@ -159,8 +159,6 @@ func (b *Broker) publishActionLocked(action officeActionLog) {
 }
 
 func (b *Broker) publishActivityLocked(activity agentActivitySnapshot) {
-	activity.Activity = redactSecretsInText(activity.Activity)
-	activity.Detail = redactSecretsInText(activity.Detail)
 	for _, ch := range b.activitySubscribers {
 		select {
 		case ch <- activity:

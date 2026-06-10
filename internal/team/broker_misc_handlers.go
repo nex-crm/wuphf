@@ -292,7 +292,7 @@ func (b *Broker) handleSignals(w http.ResponseWriter, r *http.Request) {
 	copy(signals, b.signals)
 	b.mu.Unlock()
 	for i, sig := range signals {
-		signals[i] = sanitizeOfficeSignalRecord(sig)
+		signals[i] = sig
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"signals": signals})
@@ -308,7 +308,7 @@ func (b *Broker) handleDecisions(w http.ResponseWriter, r *http.Request) {
 	copy(decisions, b.decisions)
 	b.mu.Unlock()
 	for i, dec := range decisions {
-		decisions[i] = sanitizeOfficeDecisionRecord(dec)
+		decisions[i] = dec
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"decisions": decisions})

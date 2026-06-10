@@ -207,7 +207,6 @@ func (b *Broker) Requests(channel string, includeResolved bool) []humanInterview
 }
 
 func cloneHumanInterview(req humanInterview) humanInterview {
-	req = sanitizeHumanInterview(req)
 	clone := req
 	if len(req.Options) > 0 {
 		clone.Options = append([]interviewOption(nil), req.Options...)

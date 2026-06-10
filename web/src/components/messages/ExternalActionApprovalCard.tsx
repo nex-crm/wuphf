@@ -9,7 +9,6 @@ import {
   GenericIntegrationLogo,
   ToolkitBrandLogo,
 } from "../apps/integrations/IntegrationLogos";
-import { RedactedBadge } from "../ui/RedactedBadge";
 
 // ExternalActionApprovalCard is the dedicated approval surface for a mutating
 // integration action the deterministic resolver classified as `approve`
@@ -186,10 +185,7 @@ export function ExternalActionApprovalCard({
             <span className="eac-action-id mono">{identity.actionId}</span>
           ) : null}
         </div>
-        {request.redacted ? (
-          <RedactedBadge reasons={request.redaction_reasons} />
-        ) : null}
-      </header>
+              </header>
 
       {request.connection_unverified ? (
         <p className="eac-unverified" role="status">

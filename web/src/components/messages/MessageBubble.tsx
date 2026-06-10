@@ -21,7 +21,6 @@ import { useChannelSlug, useCurrentTaskId } from "../../routes/useCurrentRoute";
 import { useAppStore } from "../../stores/app";
 import { HarnessBadge } from "../ui/HarnessBadge";
 import { PixelAvatar } from "../ui/PixelAvatar";
-import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 import {
   ArtifactSkeleton,
@@ -334,9 +333,6 @@ export function MessageBubble({
           <span className="message-time" title={message.timestamp}>
             {formatTime(message.timestamp)}
           </span>
-          {Boolean(message.redacted) && (
-            <RedactedBadge reasons={message.redaction_reasons} />
-          )}
         </div>
 
         {/* Text — humans render mention chips via safe ReactNode children;

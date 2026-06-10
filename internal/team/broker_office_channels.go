@@ -1305,7 +1305,7 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	for _, msg := range lastMessages {
-		msg = sanitizeChannelMessageSecrets(msg)
+		// redaction removed (core-loop R1)
 		content := msg.Content
 		if len(content) > 80 {
 			content = content[:80]

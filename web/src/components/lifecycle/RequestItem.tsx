@@ -6,7 +6,6 @@ import {
   requestOptionNeedsText,
   requestOptionTextHint,
 } from "../../lib/requestOptions";
-import { RedactedBadge } from "../ui/RedactedBadge";
 
 interface RequestItemProps {
   request: AgentRequest;
@@ -49,10 +48,7 @@ export function RequestItem({
         {request.blocking ? (
           <span className="badge badge-yellow">BLOCKING</span>
         ) : null}
-        {request.redacted ? (
-          <RedactedBadge reasons={request.redaction_reasons} />
-        ) : null}
-      </div>
+              </div>
 
       {request.title && request.title !== "Request" && (
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>

@@ -9,7 +9,6 @@ import {
 } from "../../api/client";
 import { useRequests } from "../../hooks/useRequests";
 import { parseApprovalContext } from "../../lib/parseApprovalContext";
-import { RedactedBadge } from "../ui/RedactedBadge";
 import { showNotice } from "../ui/Toast";
 import { ApprovalContextView } from "./ApprovalContextView";
 import { ConnectIntegrationCard } from "./ConnectIntegrationCard";
@@ -162,10 +161,7 @@ function BlockingInterview({
           {request.channel ? (
             <span className="interview-channel">in #{request.channel}</span>
           ) : null}
-          {request.redacted && !isApproval ? (
-            <RedactedBadge reasons={request.redaction_reasons} />
-          ) : null}
-        </div>
+                  </div>
         {/* Integration cards get dedicated surfaces: a Connect card that drives
             the OAuth flow, and an external-action approval card that owns its
             payload view + Approve / Always-allow / Reject. Everything else keeps

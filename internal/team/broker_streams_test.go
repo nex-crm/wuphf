@@ -41,31 +41,6 @@ func TestAgentStreamBuffer_RecentReturnsBoundedHistory(t *testing.T) {
 	}
 }
 
-func TestAgentStreamBufferRedactsSecretsFromHistoryAndSubscribers(t *testing.T) {
-	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
-	secret := "sk-" + strings.Repeat("C", 24)
-
-	out, cancel := s.subscribeTask("task-1")
-	defer cancel()
-	s.PushTask("task-1", "streamed key: "+secret+"\n")
-
-	history := strings.Join(s.recentTask("task-1"), "")
-	if strings.Contains(history, secret) {
-		t.Fatalf("task history leaked secret: %q", history)
-	}
-	if !strings.Contains(history, "[REDACTED]") {
-		t.Fatalf("task history missing redaction marker: %q", history)
-	}
-
-	got := <-out
-	if strings.Contains(got, secret) {
-		t.Fatalf("subscriber leaked secret: %q", got)
-	}
-	if !strings.Contains(got, "[REDACTED]") {
-		t.Fatalf("subscriber missing redaction marker: %q", got)
-	}
-}
-
 func TestAgentStreamBuffer_TaskScopedHistoryAndSubscribers(t *testing.T) {
 	s := &agentStreamBuffer{subs: make(map[int]agentStreamSubscriber)}
 	s.PushTask("task-1", "one")
@@ -222,25 +197,6 @@ func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
 	got := <-msgs
 	if got.ID != want.ID || got.Content != want.Content {
 		t.Fatalf("unexpected subscribed message: %+v", got)
-	}
-}
-
-func TestBrokerMessageSubscribersReceiveRedactedMessages(t *testing.T) {
-	b := newTestBroker(t)
-	msgs, unsubscribe := b.SubscribeMessages(4)
-	defer unsubscribe()
-	secret := "sk-" + strings.Repeat("D", 24)
-
-	if _, err := b.PostMessage("ceo", "general", "model key: "+secret, nil, ""); err != nil {
-		t.Fatalf("PostMessage: %v", err)
-	}
-
-	got := <-msgs
-	if strings.Contains(got.Content, secret) {
-		t.Fatalf("subscribed message leaked secret: %+v", got)
-	}
-	if !got.Redacted || got.RedactionCount != 1 {
-		t.Fatalf("subscribed message missing redaction metadata: %+v", got)
 	}
 }
 

@@ -41,7 +41,7 @@ func (b *Broker) ReportIncident(agentSlug, targetChannel, replyTo, detail string
 	if !classification.Visible {
 		return channelMessage{}, incidentRecord{}, false, nil
 	}
-	safeDetail := redactSecretsInText(detail)
+	safeDetail := detail
 
 	// Issue #933: provider auth failures (e.g. claude returning "Not logged
 	// in - Please run /login") would otherwise post as agent-authored chat
@@ -154,9 +154,7 @@ func (b *Broker) Incidents() []incidentRecord {
 }
 
 func sanitizeIncidentRecord(inc incidentRecord) incidentRecord {
-	inc.Detail = redactSecretsInText(inc.Detail)
 	inc.NormalizedKey = normalizedIncidentKey(inc.Agent, inc.Channel, inc.Detail)
-	inc.SelfHealError = redactSecretsInText(inc.SelfHealError)
 	return inc
 }
 
@@ -485,7 +483,6 @@ func (b *Broker) ensureSelfHealApprovalRequestLocked(issue *incidentRecord, clas
 		UpdatedAt:     now,
 	}
 	req.Options, req.RecommendedID = normalizeRequestOptions(req.Kind, req.RecommendedID, req.Options)
-	req = sanitizeHumanInterview(req)
 	b.scheduleRequestLifecycleLocked(&req)
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)

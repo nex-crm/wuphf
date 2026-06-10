@@ -559,7 +559,6 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		if req.Title == "" {
 			req.Title = "Request"
 		}
-		req = sanitizeHumanInterview(req)
 		b.scheduleRequestLifecycleLocked(&req)
 		b.requests = append(b.requests, req)
 		b.pendingInterview = firstBlockingRequest(b.requests)
@@ -702,12 +701,11 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		}
 		answer := &interviewAnswer{
 			ChoiceID:   choiceID,
-			ChoiceText: redactSecretsInText(choiceText),
-			CustomText: redactSecretsInText(customText),
+			ChoiceText: choiceText,
+			CustomText: customText,
 			AnsweredAt: time.Now().UTC().Format(time.RFC3339),
 		}
 		b.requests[i].Answered = answer
-		b.requests[i] = sanitizeHumanInterview(b.requests[i])
 		b.requests[i].Status = "answered"
 		b.requests[i].UpdatedAt = answer.AnsweredAt
 		b.requests[i].ReminderAt = ""

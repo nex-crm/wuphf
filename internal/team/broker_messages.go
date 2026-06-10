@@ -579,7 +579,6 @@ func (b *Broker) CreateRequest(req humanInterview) (humanInterview, error) {
 	if strings.TrimSpace(req.Title) == "" {
 		req.Title = "Request"
 	}
-	req = sanitizeHumanInterview(req)
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	b.appendActionLocked("request_created", "office", channel, req.From, truncateSummary(req.Title+" "+req.Question, 140), req.ID)
@@ -858,7 +857,7 @@ func FormatChannelView(messages []channelMessage) string {
 
 	var sb strings.Builder
 	for _, m := range messages {
-		m = sanitizeChannelMessageSecrets(m)
+		// redaction removed (core-loop R1)
 		ts := m.Timestamp
 		if len(ts) > 19 {
 			ts = ts[11:19]
@@ -975,5 +974,5 @@ func cloneChannelMessageForRead(msg channelMessage) channelMessage {
 		clone.RedactionReasons = append([]string(nil), msg.RedactionReasons...)
 	}
 	clone.Usage = cloneMessageUsage(msg.Usage)
-	return sanitizeChannelMessageSecrets(clone)
+	return clone
 }

@@ -194,37 +194,23 @@ func (b *Broker) loadState() error {
 	// match Store lookups keyed by "engineering__human".
 	for i := range b.messages {
 		b.messages[i].Channel = channel.MigrateDMSlugString(b.messages[i].Channel)
-		b.messages[i] = sanitizeChannelMessageSecrets(b.messages[i])
+		// redaction removed (core-loop R1): messages stored and shown verbatim
 	}
 	for i := range b.incidents {
 		b.incidents[i] = sanitizeIncidentRecord(b.incidents[i])
 	}
 	for i := range b.tasks {
 		b.tasks[i].Channel = channel.MigrateDMSlugString(b.tasks[i].Channel)
-		b.tasks[i] = sanitizeTeamTask(b.tasks[i])
-	}
-	for i := range b.watchdogs {
-		b.watchdogs[i] = sanitizeWatchdogAlert(b.watchdogs[i])
-	}
-	for i := range b.scheduler {
-		b.scheduler[i] = sanitizeSchedulerJob(b.scheduler[i])
 	}
 	for i := range b.requests {
 		b.requests[i].Channel = channel.MigrateDMSlugString(b.requests[i].Channel)
-		b.requests[i] = sanitizeHumanInterview(b.requests[i])
 	}
 	if b.pendingInterview != nil {
-		pending := sanitizeHumanInterview(*b.pendingInterview)
+		pending := *b.pendingInterview
 		b.pendingInterview = &pending
 	}
 	for i := range b.actions {
 		b.actions[i] = sanitizeOfficeActionLog(b.actions[i])
-	}
-	for i := range b.signals {
-		b.signals[i] = sanitizeOfficeSignalRecord(b.signals[i])
-	}
-	for i := range b.decisions {
-		b.decisions[i] = sanitizeOfficeDecisionRecord(b.decisions[i])
 	}
 	// b.ensureDefaultChannelsLocked() // channels come from saved state
 	b.ensureDefaultOfficeMembersLocked()
@@ -270,7 +256,7 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	}
 	messages := make([]channelMessage, len(b.messages))
 	for i, msg := range b.messages {
-		messages[i] = sanitizeChannelMessageSecrets(msg)
+		messages[i] = msg
 	}
 	actions := make([]officeActionLog, len(b.actions))
 	for i, action := range b.actions {
@@ -282,7 +268,7 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	}
 	requests := make([]humanInterview, len(b.requests))
 	for i, req := range b.requests {
-		requests[i] = sanitizeHumanInterview(req)
+		requests[i] = req
 	}
 	approvalAudit := make([]ApprovalAuditEntry, len(b.approvalAudit))
 	for i, entry := range b.approvalAudit {
@@ -290,23 +276,23 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 	}
 	signals := make([]officeSignalRecord, len(b.signals))
 	for i, sig := range b.signals {
-		signals[i] = sanitizeOfficeSignalRecord(sig)
+		signals[i] = sig
 	}
 	decisions := make([]officeDecisionRecord, len(b.decisions))
 	for i, dec := range b.decisions {
-		decisions[i] = sanitizeOfficeDecisionRecord(dec)
+		decisions[i] = dec
 	}
 	watchdogs := make([]watchdogAlert, len(b.watchdogs))
 	for i, alert := range b.watchdogs {
-		watchdogs[i] = sanitizeWatchdogAlert(alert)
+		watchdogs[i] = alert
 	}
 	tasks := make([]teamTask, len(b.tasks))
 	for i, task := range b.tasks {
-		tasks[i] = sanitizeTeamTask(task)
+		tasks[i] = task
 	}
 	scheduler := make([]schedulerJob, len(b.scheduler))
 	for i, job := range b.scheduler {
-		scheduler[i] = sanitizeSchedulerJob(job)
+		scheduler[i] = job
 	}
 	state := brokerState{
 		ChannelStore:       channelStoreRaw,
