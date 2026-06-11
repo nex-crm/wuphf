@@ -166,6 +166,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		registerSharedMemoryTools(server)
 
 		registerSkillTools(server)
+		registerRoutineTools(server)
 
 		mcp.AddTool(server, readOnlyTool(
 			"team_runtime_state",
@@ -219,6 +220,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
 		registerSkillTools(server)
+		registerRoutineTools(server)
 		if isLead || isLibrarian {
 			registerNotebookReviewTool(server)
 		}
@@ -325,6 +327,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"Invoke a named team skill. When the request matches an available skill (see the skill list in your prompt), call this BEFORE doing the work — do not freelance. Bumps the skill's usage, logs a skill_invocation in the channel so the office sees you followed the playbook, and returns the skill's canonical step-by-step content for you to execute.",
 	), handleTeamSkillRun)
 	registerSkillTools(server)
+	registerRoutineTools(server)
 
 	// Gate external-action tools behind a configured provider. Registering 14
 	// empty action tools inflates the MCP tool schema and pushes the total

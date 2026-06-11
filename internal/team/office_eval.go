@@ -228,6 +228,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"utterance-routing", evalJobUtteranceRouting},
 		{"task-integrity", evalJobTaskIntegrity},
 		{"knowledge-integrity", evalJobKnowledgeIntegrity},
+		{"scheduler-truth", evalJobSchedulerTruth},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))

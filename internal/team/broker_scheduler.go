@@ -617,6 +617,13 @@ func (b *Broker) handleSchedulerSubpath(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// routines is the agent registration sub-resource (team_routine MCP
+	// tool): persistent, deduped standing automations. Not a per-job path.
+	if rest == "routines" {
+		b.handleRegisterRoutine(w, r)
+		return
+	}
+
 	// /scheduler/{slug}/run — POST only, force-triggers the job once without
 	// touching next_run or the recurring schedule.
 	if strings.HasSuffix(rest, "/run") {
