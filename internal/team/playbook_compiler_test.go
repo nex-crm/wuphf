@@ -12,6 +12,26 @@ import (
 // newPlaybookFixture spins up a wiki repo + wiki worker + execution log
 // isolated to t.TempDir(). Used by the compiler and auto-recompile tests
 // so each case gets a fresh filesystem.
+
+// testTickUntil polls cond on a ticker until it returns true or the timeout
+// elapses — the repo's deterministic-wait discipline (no bare sleeps in
+// tests; CONTRIBUTING gate).
+func testTickUntil(t *testing.T, timeout time.Duration, cond func() bool) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if cond() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		<-ticker.C
+	}
+}
+
 func newPlaybookFixture(t *testing.T) (*Repo, *WikiWorker, *ExecutionLog, func()) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "wiki")
@@ -149,15 +169,11 @@ func TestWikiWrite_TriggersAutoRecompile(t *testing.T) {
 		t.Fatalf("second enqueue: %v", err)
 	}
 	// Poll until the compiled skill reflects the new H1.
-	deadline := time.Now().Add(3 * time.Second)
 	var latest string
-	for time.Now().Before(deadline) {
+	testTickUntil(t, 3*time.Second, func() bool {
 		latest = readCompiled(t, repo, "pricing-negotiations")
-		if strings.Contains(latest, "Pricing negotiations v2") {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return strings.Contains(latest, "Pricing negotiations v2")
+	})
 	if !strings.Contains(latest, "Pricing negotiations v2") {
 		t.Errorf("auto-recompile did not pick up new source — got %q, first=%q", latest, first)
 	}
@@ -277,14 +293,12 @@ func readCompiled(t *testing.T, repo *Repo, slug string) string {
 func waitForCompiledSkill(t *testing.T, repo *Repo, slug string, timeout time.Duration) {
 	t.Helper()
 	p := filepath.Join(repo.Root(), "team", "playbooks", ".compiled", slug, "SKILL.md")
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(p); err == nil {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
+	if !testTickUntil(t, timeout, func() bool {
+		_, err := os.Stat(p)
+		return err == nil
+	}) {
+		t.Fatalf("compiled skill for %q did not appear within %s", slug, timeout)
 	}
-	t.Fatalf("compiled skill for %q did not appear within %s", slug, timeout)
 }
 
 // The compile hook must fold the compiled skill into broker skill state so
@@ -315,20 +329,17 @@ func TestPlaybookCompile_RegistersBrokerSkill(t *testing.T) {
 	// The registrar runs from the auto-recompile side goroutine — poll the
 	// broker's active-skill catalog (the same projection prompt building
 	// and GET /skills derive from).
-	deadline := time.Now().Add(3 * time.Second)
 	var found *SkillSummary
-	for time.Now().Before(deadline) && found == nil {
+	testTickUntil(t, 3*time.Second, func() bool {
 		for _, s := range b.ListActiveSkillSummaries() {
 			if s.Slug == "renewal-outreach" {
 				snap := s
 				found = &snap
-				break
+				return true
 			}
 		}
-		if found == nil {
-			time.Sleep(20 * time.Millisecond)
-		}
-	}
+		return false
+	})
 	if found == nil {
 		t.Fatal("compiled playbook skill never appeared in broker skill state")
 	}
@@ -389,13 +400,11 @@ func TestPlaybookRecompile_DoesNotDuplicateBrokerSkill(t *testing.T) {
 		}
 		return n
 	}
-	// Wait until at least one registration landed, then give the second
-	// compile time to (incorrectly) duplicate before asserting it didn't.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) && count() == 0 {
-		time.Sleep(20 * time.Millisecond)
-	}
-	time.Sleep(150 * time.Millisecond)
+	// Wait until at least one registration landed, then until the worker
+	// queue fully drains — at that point a duplicating second compile
+	// would already have registered, so the assertion is deterministic.
+	testTickUntil(t, 3*time.Second, func() bool { return count() > 0 })
+	testTickUntil(t, 3*time.Second, func() bool { return worker.QueueLength() == 0 })
 	if got := count(); got != 1 {
 		t.Fatalf("expected exactly 1 broker skill for qbr-prep, got %d", got)
 	}
