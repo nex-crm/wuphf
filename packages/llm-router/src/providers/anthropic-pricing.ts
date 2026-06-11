@@ -70,12 +70,13 @@ export interface AnthropicModelPricing {
 export type AnthropicPricingTable = Readonly<Record<string, AnthropicModelPricing>>;
 
 /**
- * Built-in pricing for the Claude 4.x family, current as of 2026-05.
+ * Built-in pricing for the Claude 4.x and Fable families, current as of 2026-06.
  *
  *   Opus 4.5 / 4.6 / 4.7:  $5  / $25 / $0.50 / $6.25  per MTok
  *   Opus 4.1 (legacy):     $15 / $75 / $1.50 / $18.75 per MTok
  *   Sonnet 4.5 / 4.6:      $3  / $15 / $0.30 / $3.75  per MTok
  *   Haiku 4.5:             $1  / $5  / $0.10 / $1.25  per MTok
+ *   Fable 5:               $10 / $50 / $1.00 / $12.50 per MTok
  *
  * Opus 4.5+ dropped 3x from the 4.1 generation per Anthropic's
  * 2025-11 announcement. The previous draft of this table used 4.1
@@ -117,6 +118,13 @@ export const DEFAULT_ANTHROPIC_PRICING: AnthropicPricingTable = Object.freeze({
     outputMicroUsdPerMTok: 25_000_000,
     cacheReadMicroUsdPerMTok: 500_000,
     cacheCreationMicroUsdPerMTok: 6_250_000,
+  }),
+  // Fable 5: $10 / $50 / $1 / $12.50 per MTok.
+  "claude-fable-5": Object.freeze({
+    inputMicroUsdPerMTok: 10_000_000,
+    outputMicroUsdPerMTok: 50_000_000,
+    cacheReadMicroUsdPerMTok: 1_000_000,
+    cacheCreationMicroUsdPerMTok: 12_500_000,
   }),
   // Sonnet 4.x family ($3 / $15 / $0.30 / $3.75 per MTok)
   "claude-sonnet-4-5": Object.freeze({

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import type { LLMRuntimeKind } from "../../api/client";
 import { get, post } from "../../api/client";
+import { runtimeProviderLabel } from "../../lib/runtimeProviders";
 import { showNotice } from "../ui/Toast";
 import { LocalProviderPicker } from "./LocalProviderPicker";
 import { isValidUrl, OpenAICompatibleInput } from "./OpenAICompatibleInput";
@@ -56,7 +58,8 @@ interface RuntimeCardProps {
   isSubmitting: boolean;
   anySubmitting: boolean;
   expanded: boolean;
-  onPick: (spec: RuntimeSpec) => void;
+  selected: boolean;
+  onToggle: (spec: RuntimeSpec) => void;
   onInstall: (url: string) => void;
   onCopySignIn: (command: string) => void;
   onToggleGuide: (binary: string) => void;
@@ -94,7 +97,8 @@ function RuntimeCard({
   isSubmitting,
   anySubmitting,
   expanded,
-  onPick,
+  selected,
+  onToggle,
   onInstall,
   onCopySignIn,
   onToggleGuide,
@@ -133,8 +137,9 @@ function RuntimeCard({
     >
       <button
         type="button"
-        className={`pre-pick-card${available ? " available" : " missing"}${isUnauthed ? " unauthed" : ""}`}
+        className={`pre-pick-card${available ? " available" : " missing"}${isUnauthed ? " unauthed" : ""}${selected ? " selected" : ""}`}
         data-testid={`pre-pick-card-${spec.provider}`}
+        aria-pressed={selected}
         data-signed-in={signedIn === undefined ? "unknown" : String(signedIn)}
         // CodeRabbit fix (PR #889): guard against clicks during prereq detection
         // and any in-flight submission. Both disable conditions must hold.
@@ -160,7 +165,7 @@ function RuntimeCard({
             }
             return;
           }
-          onPick(spec);
+          onToggle(spec);
         }}
       >
         <div className="pre-pick-card-head">
@@ -227,13 +232,13 @@ function isCliProvider(provider: RuntimeSpec["provider"] | string): boolean {
 /** Returns true when any of the form sections has meaningful content. */
 function hasConfigContent(
   isCliRuntime: boolean,
-  localProvider: string,
+  localProviders: readonly LLMRuntimeKind[],
   oaiUrl: string,
   apiKeys: Record<string, string>,
 ): boolean {
   return (
     isCliRuntime ||
-    localProvider.trim().length > 0 ||
+    localProviders.length > 0 ||
     oaiCompatFilled(oaiUrl) ||
     anyApiKeyFilled(apiKeys)
   );
@@ -242,7 +247,7 @@ function hasConfigContent(
 type ConfigPayload = {
   memory_backend: "markdown";
   llm_provider?: string;
-  llm_provider_priority?: string[];
+  llm_provider_priority?: LLMRuntimeKind[];
   anthropic_api_key?: string;
   openai_api_key?: string;
   gemini_api_key?: string;
@@ -255,9 +260,8 @@ type ConfigPayload = {
  * All user-supplied strings are sanitized via sanitizeConfigString.
  */
 function buildConfigPayload(
-  isCliRuntime: boolean,
-  provider: string,
-  localProvider: string,
+  selectedProviders: LLMRuntimeKind[],
+  localProviders: LLMRuntimeKind[],
   oaiUrl: string,
   // _oaiKey is intentionally unused on the current write path: the OAI-
   // compatible endpoint section writes only to provider_endpoints, never
@@ -269,13 +273,17 @@ function buildConfigPayload(
   apiKeys: Record<string, string>,
 ): ConfigPayload {
   const payload: ConfigPayload = { memory_backend: "markdown" };
+  const providerPriority = Array.from(
+    new Set(
+      [...selectedProviders, ...localProviders].filter(
+        Boolean,
+      ) as LLMRuntimeKind[],
+    ),
+  );
 
-  if (isCliRuntime) {
-    payload.llm_provider = provider;
-    payload.llm_provider_priority = [provider];
-  } else if (localProvider.trim().length > 0) {
-    payload.llm_provider = localProvider;
-    payload.llm_provider_priority = [localProvider];
+  if (providerPriority.length > 0) {
+    payload.llm_provider = providerPriority[0];
+    payload.llm_provider_priority = providerPriority;
   } else if (oaiCompatFilled(oaiUrl)) {
     // Custom OAI-compatible endpoint goes into provider_endpoints. We do
     // NOT write to openclaw_* here — that conflated OpenClaw (a gateway
@@ -335,13 +343,15 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
   const [prereqsLoaded, setPrereqsLoaded] = useState(false);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string>("");
+  const [selectedProviders, setSelectedProviders] = useState<LLMRuntimeKind[]>(
+    [],
+  );
 
   // API key state (one entry per API_KEY_FIELDS entry)
   const [apiKeys, setApiKeys] =
     useState<Record<string, string>>(EMPTY_API_KEYS);
 
-  // Local provider single-select
-  const [localProvider, setLocalProvider] = useState<string>("");
+  const [localProviders, setLocalProviders] = useState<LLMRuntimeKind[]>([]);
 
   // OpenAI-compatible custom endpoint
   const [oaiUrl, setOaiUrl] = useState<string>("");
@@ -396,15 +406,15 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
     [prereqs],
   );
 
-  // canContinue is true when any of the five paths is ready:
-  // (a) a CLI runtime card was clicked (handled by commitChoice immediately)
+  // canContinue is true when any setup path is ready:
+  // (a) at least one detected CLI runtime card is selected
   // (b) at least one API key is entered
   // (c) a local provider is selected
-  // (d) OAI-compatible URL+key filled and URL valid
-  // (e) "I'll add one later" skip (also handled directly)
+  // (d) OAI-compatible URL is valid
   const canContinueFromForm =
+    selectedProviders.length > 0 ||
     anyApiKeyFilled(apiKeys) ||
-    localProvider.trim().length > 0 ||
+    localProviders.length > 0 ||
     oaiCompatFilled(oaiUrl);
 
   function handleApiKeyChange(key: string, value: string): void {
@@ -471,18 +481,23 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
       // typed into the form sections — the contract is "sandbox until you
       // configure later". Trigger: provider === null only.
       const isSkipChoice = provider === null;
-      const providerStr = isCli ? (provider as string) : "";
+      const selected =
+        isCli && typeof provider === "string"
+          ? Array.from(
+              new Set([...selectedProviders, provider as LLMRuntimeKind]),
+            )
+          : selectedProviders;
       const configPayload = buildConfigPayload(
-        isCli,
-        providerStr,
-        localProvider,
+        selected,
+        localProviders,
         oaiUrl,
         oaiKey,
         apiKeys,
       );
       if (
         !isSkipChoice &&
-        hasConfigContent(isCli, localProvider, oaiUrl, apiKeys)
+        (selected.length > 0 ||
+          hasConfigContent(isCli, localProviders, oaiUrl, apiKeys))
       ) {
         await post("/config", configPayload);
       }
@@ -533,6 +548,25 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
   }
 
   const anySubmitting = Boolean(submitting);
+  function toggleProvider(provider: LLMRuntimeKind): void {
+    setSelectedProviders((prev) =>
+      prev.includes(provider)
+        ? prev.filter((id) => id !== provider)
+        : [...prev, provider],
+    );
+  }
+
+  function toggleLocalProvider(provider: string): void {
+    setLocalProviders((prev) =>
+      prev.includes(provider as LLMRuntimeKind)
+        ? prev.filter((id) => id !== provider)
+        : [...prev, provider as LLMRuntimeKind],
+    );
+  }
+
+  const selectedProviderLabels = [...selectedProviders, ...localProviders].map(
+    runtimeProviderLabel,
+  );
 
   return (
     <div className="pre-pick-screen" data-testid="pre-pick-screen">
@@ -559,7 +593,13 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
               isSubmitting={submitting === state.spec.label}
               anySubmitting={anySubmitting}
               expanded={expandedGuide === state.spec.binary}
-              onPick={(spec) => void commitChoice(spec.provider, spec.label)}
+              selected={
+                state.spec.provider !== null &&
+                selectedProviders.includes(state.spec.provider)
+              }
+              onToggle={(spec) => {
+                if (spec.provider) toggleProvider(spec.provider);
+              }}
               onInstall={openInstallPage}
               onCopySignIn={handleCopySignIn}
               onToggleGuide={handleToggleGuide}
@@ -641,8 +681,8 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
             Run inference on this machine. No cloud key required.
           </p>
           <LocalProviderPicker
-            selected={localProvider}
-            onSelect={(kind) => setLocalProvider(kind)}
+            selected={localProviders}
+            onToggle={toggleLocalProvider}
           />
         </section>
 
@@ -680,6 +720,11 @@ export function PrePickScreen({ onComplete }: PrePickScreenProps) {
             >
               {submitting === "form" ? "Opening your office…" : "Continue  →"}
             </button>
+            {selectedProviderLabels.length > 0 ? (
+              <div className="pre-pick-selected-summary">
+                Selected: {selectedProviderLabels.join(", ")}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

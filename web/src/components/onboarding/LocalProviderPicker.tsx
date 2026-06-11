@@ -5,13 +5,13 @@ import { getLocalProvidersStatus } from "../../api/client";
 import { LOCAL_PROVIDER_LABELS } from "./runtimeConstants";
 
 interface LocalProviderPickerProps {
-  /** Currently selected provider kind, empty string if none selected. */
-  selected: string;
-  onSelect: (kind: string) => void;
+  /** Currently selected provider kinds. */
+  selected: readonly string[];
+  onToggle: (kind: string) => void;
 }
 
 /**
- * Single-select grid of local OpenAI-compatible runtime tiles.
+ * Multi-select grid of local OpenAI-compatible runtime tiles.
  *
  * Ported from the deleted wizard/LocalLLMPicker.tsx. Probes
  * /status/local-providers on mount to show install status per tile.
@@ -20,7 +20,7 @@ interface LocalProviderPickerProps {
  */
 export function LocalProviderPicker({
   selected,
-  onSelect,
+  onToggle,
 }: LocalProviderPickerProps) {
   const [status, setStatus] = useState<LocalProviderStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,8 +64,9 @@ export function LocalProviderPicker({
           data-testid="pre-pick-local-fetch-error"
         >
           Could not reach the broker to check installed runtimes:{" "}
-          <code>{fetchError}</code>. You can still pick one — install commands
-          are in <strong>Settings &rarr; Local LLMs</strong> after onboarding.
+          <code>{fetchError}</code>. You can still pick providers — install
+          commands are in <strong>Settings &rarr; Local LLMs</strong> after
+          onboarding.
         </div>
       ) : null}
       {!loading ? (
@@ -81,7 +82,7 @@ export function LocalProviderPicker({
             const running = Boolean(s?.reachable);
             const supported = statusKnown ? s.platform_supported : true;
             const selectable = supported && installed;
-            const isSelected = selected === meta.kind;
+            const isSelected = selected.includes(meta.kind);
 
             const classes = [
               "runtime-tile",
@@ -108,7 +109,7 @@ export function LocalProviderPicker({
                 className={classes}
                 onClick={() => {
                   if (!selectable) return;
-                  onSelect(isSelected ? "" : meta.kind);
+                  onToggle(meta.kind);
                 }}
                 disabled={!selectable}
                 aria-pressed={isSelected}

@@ -4501,6 +4501,7 @@ button.verification-badge {
 }
 
 .issue-new-form-field input,
+.issue-new-form-field select,
 .issue-new-form-field textarea {
   font: inherit;
   font-size: var(--text-md);
@@ -4518,6 +4519,7 @@ button.verification-badge {
 }
 
 .issue-new-form-field input:focus,
+.issue-new-form-field select:focus,
 .issue-new-form-field textarea:focus {
   outline: none;
   border-color: var(--accent, #5b8def);

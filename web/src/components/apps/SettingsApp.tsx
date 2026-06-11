@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Refresh, WarningTriangle } from "iconoir-react";
 
@@ -16,6 +16,7 @@ import {
 } from "../../api/client";
 import { useOfficeMembers } from "../../hooks/useMembers";
 import { router } from "../../lib/router";
+import { normalizeProviderList } from "../../lib/runtimeProviders";
 import { useAppStore } from "../../stores/app";
 import { CredentialRegistrationPanel } from "../cosign";
 import { CommandRow } from "../ui/CommandRow";
@@ -31,6 +32,7 @@ import { NexConnectPanel } from "./NexConnectPanel";
 import { ImageGenSection } from "./SettingsApp.imageGen";
 import { Field, KeyField, SaveButton } from "./settings/components";
 import { SECTION_GROUPS } from "./settings/constants";
+import { RuntimeProviderChecklist } from "./settings/RuntimeProviderChecklist";
 import { styles } from "./settings/styles";
 import type { SectionId, SectionProps } from "./settings/types";
 
@@ -68,20 +70,6 @@ function useShredAction() {
     }
   };
 }
-
-const PROVIDER_LABELS: Record<LLMRuntimeKind, string> = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-  opencode: "Opencode",
-  "mlx-lm": "MLX-LM (Apple Silicon)",
-  ollama: "Ollama",
-  exo: "Exo",
-};
-const CLOUD_KINDS: ReadonlySet<LLMRuntimeKind> = new Set([
-  "claude-code",
-  "codex",
-  "opencode",
-]);
 
 // TeamLeadPicker reads the office roster so the human picks from real
 // agents rather than typing a slug. The saved value persists as a slug on
@@ -128,10 +116,22 @@ function TeamLeadPicker({
   );
 }
 
+function sameProviders(
+  a: readonly LLMRuntimeKind[] | null,
+  b: readonly LLMRuntimeKind[],
+) {
+  if (a === null) return false;
+  return a.length === b.length && a.every((provider, i) => provider === b[i]);
+}
+
 function GeneralSection({ cfg, save }: SectionProps) {
-  const [provider, setProvider] = useState<LLMRuntimeKind | "">(
-    (cfg.llm_provider as LLMRuntimeKind | undefined) ?? "claude-code",
-  );
+  const initialProviders =
+    cfg.llm_provider_priority && cfg.llm_provider_priority.length > 0
+      ? cfg.llm_provider_priority
+      : cfg.llm_provider
+        ? [cfg.llm_provider]
+        : [];
+  const [providers, setProviders] = useState<string[]>(initialProviders);
   const [teamLead, setTeamLead] = useState(cfg.team_lead_slug ?? "");
   const [maxConcurrent, setMaxConcurrent] = useState(
     cfg.max_concurrent_agents ? String(cfg.max_concurrent_agents) : "",
@@ -143,21 +143,19 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const [blueprint, setBlueprint] = useState(cfg.blueprint ?? "");
   const [email, setEmail] = useState(cfg.email ?? "");
   const [devUrl, setDevUrl] = useState(cfg.dev_url ?? "");
-
-  const llmKinds: LLMRuntimeKind[] = (cfg.llm_provider_kinds ?? [
-    "claude-code",
-    "codex",
-    "opencode",
-    "mlx-lm",
-    "ollama",
-    "exo",
-  ]) as LLMRuntimeKind[];
-  const cloudKinds = llmKinds.filter((k) => CLOUD_KINDS.has(k));
-  const localKinds = llmKinds.filter((k) => !CLOUD_KINDS.has(k));
+  const [connectedProviders, setConnectedProviders] = useState<
+    LLMRuntimeKind[] | null
+  >(null);
+  const updateConnectedProviders = useCallback((next: LLMRuntimeKind[]) => {
+    setConnectedProviders((prev) => (sameProviders(prev, next) ? prev : next));
+  }, []);
 
   const onSave = async () => {
+    const providerPriority =
+      connectedProviders ?? normalizeProviderList(providers);
     const patch: ConfigUpdate = {
-      llm_provider: provider as ConfigUpdate["llm_provider"],
+      llm_provider: providerPriority[0] ?? "",
+      llm_provider_priority: providerPriority,
       default_format: format,
       blueprint,
       email,
@@ -177,47 +175,12 @@ function GeneralSection({ cfg, save }: SectionProps) {
         Core runtime settings. These map to CLI flags and config file entries.
       </p>
 
-      <div style={styles.groupTitle}>Default runtime for new agents</div>
-      <p
-        style={{
-          fontSize: 12,
-          color: "var(--text-tertiary)",
-          margin: "0 0 12px 0",
-          lineHeight: 1.5,
-        }}
-      >
-        Picked for new agents at creation time. Existing agents keep whatever
-        runtime they already have — change those one at a time from each agent's
-        profile (Runtime section). To import OpenClaw or Hermes agents into the
-        team, use the Integrations app — those gateways are not runtimes you
-        assign here.
-      </p>
-      <Field label="Runtime" hint="--provider">
-        <select
-          style={styles.input}
-          value={provider}
-          onChange={(e) => setProvider(e.target.value as LLMRuntimeKind | "")}
-        >
-          {cloudKinds.length > 0 && (
-            <optgroup label="Cloud">
-              {cloudKinds.map((kind) => (
-                <option key={kind} value={kind}>
-                  {PROVIDER_LABELS[kind] ?? kind}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {localKinds.length > 0 && (
-            <optgroup label="Local">
-              {localKinds.map((kind) => (
-                <option key={kind} value={kind}>
-                  {PROVIDER_LABELS[kind] ?? kind}
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
-      </Field>
+      <RuntimeProviderChecklist
+        configuredKinds={cfg.llm_provider_kinds}
+        selectedProviders={providers}
+        onSelectedProvidersChange={setProviders}
+        onConnectedProvidersChange={updateConnectedProviders}
+      />
       <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agents</div>
       <Field label="Team Lead" hint="Agent that leads operations">
         <TeamLeadPicker value={teamLead} onChange={setTeamLead} />

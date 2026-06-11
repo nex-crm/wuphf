@@ -2174,6 +2174,11 @@
   color: var(--warning-500);
 }
 
+.pre-pick-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
 .pre-pick-card-install {
   font-size: 12px;
   color: var(--accent);
@@ -2192,7 +2197,15 @@
 
 .pre-pick-secondary-row {
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+}
+
+.pre-pick-selected-summary {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .pre-pick-secondary-button {

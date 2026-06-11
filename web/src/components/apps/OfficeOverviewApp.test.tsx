@@ -4,7 +4,9 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  get,
   getAllRequests,
+  getConfig,
   getLocalProvidersStatus,
   getOfficeMembers,
   getScheduler,
@@ -16,7 +18,9 @@ import { OfficeOverviewApp } from "./OfficeOverviewApp";
 // ── Mocks ──────────────────────────────────────────────────────────
 
 vi.mock("../../api/client", () => ({
+  get: vi.fn(),
   getAllRequests: vi.fn(),
+  getConfig: vi.fn(),
   getLocalProvidersStatus: vi.fn(),
   getOfficeMembers: vi.fn(),
   getScheduler: vi.fn(),
@@ -38,6 +42,8 @@ const mockGetAllRequests = vi.mocked(getAllRequests);
 const mockGetSkillsList = vi.mocked(getSkillsList);
 const mockGetScheduler = vi.mocked(getScheduler);
 const mockGetLocalProvidersStatus = vi.mocked(getLocalProvidersStatus);
+const mockGet = vi.mocked(get);
+const mockGetConfig = vi.mocked(getConfig);
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -55,6 +61,8 @@ function emptyDefaults() {
   mockGetSkillsList.mockResolvedValue({ skills: [] });
   mockGetScheduler.mockResolvedValue({ jobs: [] });
   mockGetLocalProvidersStatus.mockResolvedValue([]);
+  mockGetConfig.mockResolvedValue({ llm_provider_priority: [] });
+  mockGet.mockResolvedValue({ prereqs: [] });
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -229,12 +237,16 @@ describe("OfficeOverviewApp", () => {
     });
   });
 
-  describe("provider warnings", () => {
+  describe("connected providers", () => {
     beforeEach(() => {
       emptyDefaults();
     });
 
-    it("shows provider warning section when a provider is unhealthy", async () => {
+    it("does not show offline providers", async () => {
+      mockGetConfig.mockResolvedValue({
+        llm_provider: "ollama",
+        llm_provider_priority: ["ollama"],
+      });
       mockGetLocalProvidersStatus.mockResolvedValue([
         {
           kind: "ollama",
@@ -250,38 +262,21 @@ describe("OfficeOverviewApp", () => {
 
       render(wrap(<OfficeOverviewApp />));
 
-      expect(
-        await screen.findByText("1 provider unreachable"),
-      ).toBeInTheDocument();
-      expect(screen.getByText("ollama")).toBeInTheDocument();
+      await screen.findByText("Active runs");
+      expect(screen.queryByText("ollama")).not.toBeInTheDocument();
     });
 
-    it("shows links to Settings and Provider Doctor when providers are unhealthy", async () => {
+    it("shows connected providers and links to Settings and Provider Doctor", async () => {
+      mockGetConfig.mockResolvedValue({
+        llm_provider: "exo",
+        llm_provider_priority: ["exo"],
+      });
       mockGetLocalProvidersStatus.mockResolvedValue([
         {
           kind: "exo",
-          binary_installed: false,
+          binary_installed: true,
           endpoint: "http://localhost:52415",
           model: "llama-3.2-3b",
-          reachable: false,
-          probed: true,
-          platform_supported: true,
-        },
-      ]);
-
-      render(wrap(<OfficeOverviewApp />));
-
-      expect(await screen.findByText("Settings")).toBeInTheDocument();
-      expect(screen.getByText("Provider Doctor")).toBeInTheDocument();
-    });
-
-    it("does not show provider warning section when all providers are healthy", async () => {
-      mockGetLocalProvidersStatus.mockResolvedValue([
-        {
-          kind: "ollama",
-          binary_installed: true,
-          endpoint: "http://localhost:11434",
-          model: "llama3",
           reachable: true,
           probed: true,
           platform_supported: true,
@@ -290,23 +285,45 @@ describe("OfficeOverviewApp", () => {
 
       render(wrap(<OfficeOverviewApp />));
 
-      // Wait for data to load; then confirm no warning banner.
-      await screen.findByText("Active runs");
-      expect(
-        screen.queryByText("1 provider unreachable"),
-      ).not.toBeInTheDocument();
+      expect(await screen.findByText("1 provider connected")).toBeInTheDocument();
+      expect(screen.getByText("Exo")).toBeInTheDocument();
+      expect(await screen.findByText("Settings")).toBeInTheDocument();
+      expect(screen.getByText("Provider Doctor")).toBeInTheDocument();
     });
 
-    it("does not show provider warning section when providers list is empty", async () => {
+    it("does not show connected providers that are not configured", async () => {
+      mockGetConfig.mockResolvedValue({
+        llm_provider: "codex",
+        llm_provider_priority: ["codex"],
+      });
+      mockGetLocalProvidersStatus.mockResolvedValue([
+        {
+          kind: "exo",
+          binary_installed: true,
+          endpoint: "http://localhost:52415",
+          model: "llama-3.2-3b",
+          reachable: true,
+          probed: true,
+          platform_supported: true,
+        },
+      ]);
+
+      render(wrap(<OfficeOverviewApp />));
+
+      await screen.findByText("Active runs");
+      expect(screen.queryByText(/provider.*connected/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Exo")).not.toBeInTheDocument();
+    });
+
+    it("does not show provider section when providers list is empty", async () => {
       mockGetLocalProvidersStatus.mockResolvedValue([]);
 
       render(wrap(<OfficeOverviewApp />));
 
       await screen.findByText("Active runs");
-      expect(
-        screen.queryByText(/provider.*unreachable/),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/provider.*connected/)).not.toBeInTheDocument();
     });
+
   });
 
   describe("section links", () => {

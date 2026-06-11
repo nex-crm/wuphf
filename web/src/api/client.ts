@@ -1210,7 +1210,8 @@ export interface ConfigSnapshot {
 }
 
 export type ConfigUpdate = Partial<{
-  llm_provider: LLMProvider;
+  llm_provider: LLMProvider | "";
+  llm_provider_priority: LLMRuntimeKind[];
   provider_endpoints: Record<string, ProviderEndpoint>;
   memory_backend: MemoryBackend;
   action_provider: ActionProvider;

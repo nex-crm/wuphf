@@ -3,7 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 
 import {
   type AgentRequest,
+  get,
   getAllRequests,
+  getConfig,
   getLocalProvidersStatus,
   getOfficeMembers,
   getScheduler,
@@ -17,6 +19,11 @@ import { getOfficeTasks, type Task } from "../../api/tasks";
 import { formatRelativeTime } from "../../lib/format";
 import { isAgentActive, normalizeStatus } from "../../lib/officeStatus";
 import { router } from "../../lib/router";
+import {
+  configuredConnectedRuntimeProviders,
+  type RuntimeProviderOption,
+} from "../../lib/runtimeProviders";
+import type { PrereqResult } from "../onboarding/runtimes";
 import { ActiveTasksPanel } from "./shared/ActiveTasksPanel";
 import { AgentPulsePanel } from "./shared/AgentPulsePanel";
 
@@ -47,7 +54,7 @@ interface OverviewData {
   pendingRequests: AgentRequest[];
   recentSkills: Skill[];
   upcomingJobs: SchedulerJob[];
-  unhealthyProviders: LocalProviderStatus[];
+  connectedProviders: RuntimeProviderOption[];
   taskIsLoading: boolean;
   membersIsLoading: boolean;
   requestsIsLoading: boolean;
@@ -90,10 +97,6 @@ function goToHealthCheck(): void {
 }
 
 // ── Data helpers ───────────────────────────────────────────────────
-
-function providerIsUnhealthy(p: LocalProviderStatus): boolean {
-  return p.probed && !p.reachable;
-}
 
 function taskBadgeClass(status: string): string {
   return status === "done" ? "badge badge-green" : "badge badge-accent";
@@ -138,6 +141,19 @@ function useOverviewData(): OverviewData {
     refetchInterval: 30_000,
   });
 
+  const config = useQuery({
+    queryKey: ["overview-config"],
+    queryFn: getConfig,
+    refetchInterval: 30_000,
+  });
+
+  const prereqs = useQuery({
+    queryKey: ["overview-runtime-prereqs"],
+    queryFn: () =>
+      get<{ prereqs?: PrereqResult[] } | PrereqResult[]>("/onboarding/prereqs"),
+    refetchInterval: 30_000,
+  });
+
   const allTasks: Task[] = tasks.data?.tasks ?? [];
   const allMembers: OfficeMember[] = members.data?.members ?? [];
   const allRequests: AgentRequest[] = requests.data?.requests ?? [];
@@ -146,6 +162,9 @@ function useOverviewData(): OverviewData {
   const allProviders: LocalProviderStatus[] = Array.isArray(providers.data)
     ? providers.data
     : [];
+  const prereqList = Array.isArray(prereqs.data)
+    ? prereqs.data
+    : (prereqs.data?.prereqs ?? []);
 
   const activeTasks = allTasks.filter((t) => {
     const s = normalizeStatus(t.status);
@@ -167,7 +186,12 @@ function useOverviewData(): OverviewData {
     .sort((a, b) =>
       String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")),
     );
-  const unhealthyProviders = allProviders.filter(providerIsUnhealthy);
+  const connectedProviders = config.data
+    ? configuredConnectedRuntimeProviders(config.data, {
+        prereqs: prereqList,
+        localStatuses: allProviders,
+      })
+    : [];
 
   const upcomingJobs = allJobs
     .filter((j) => j.next_run || j.due_at)
@@ -193,13 +217,14 @@ function useOverviewData(): OverviewData {
     pendingRequests,
     recentSkills,
     upcomingJobs,
-    unhealthyProviders,
+    connectedProviders,
     taskIsLoading: tasks.isLoading,
     membersIsLoading: members.isLoading,
     requestsIsLoading: requests.isLoading,
     skillsIsLoading: skills.isLoading,
     schedulerIsLoading: scheduler.isLoading,
-    providersIsFetched: providers.isFetched,
+    providersIsFetched:
+      providers.isFetched && config.isFetched && prereqs.isFetched,
   };
 }
 
@@ -545,9 +570,8 @@ export function OfficeOverviewApp() {
         </div>
       </div>
 
-      {/* Provider warnings — always at top so they are impossible to miss */}
-      {data.providersIsFetched && data.unhealthyProviders.length > 0 ? (
-        <ProviderWarningsSection providers={data.unhealthyProviders} />
+      {data.providersIsFetched && data.connectedProviders.length > 0 ? (
+        <ConnectedProvidersSection providers={data.connectedProviders} />
       ) : null}
 
       {/* Section grid */}
@@ -592,20 +616,22 @@ export function OfficeOverviewApp() {
   );
 }
 
-// ── Provider warnings section ──────────────────────────────────────
+// ── Connected providers section ────────────────────────────────────
 
-interface ProviderWarningsSectionProps {
-  providers: LocalProviderStatus[];
+interface ConnectedProvidersSectionProps {
+  providers: RuntimeProviderOption[];
 }
 
-function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
+function ConnectedProvidersSection({
+  providers,
+}: ConnectedProvidersSectionProps) {
   return (
     <section
-      id="provider-warnings"
-      aria-label="Provider warnings"
+      id="connected-providers"
+      aria-label="Connected providers"
       style={{
-        background: "var(--warning-100, #fbf5dc)",
-        border: "1px solid var(--warning-300, #ffb647)",
+        background: "var(--green-bg)",
+        border: "1px solid var(--border)",
         borderRadius: 8,
         padding: "12px 16px",
       }}
@@ -622,11 +648,11 @@ function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
           style={{
             fontSize: 13,
             fontWeight: 600,
-            color: "var(--warning-500, #994200)",
+            color: "var(--text)",
           }}
         >
           {providers.length} provider{providers.length !== 1 ? "s" : ""}{" "}
-          unreachable
+          connected
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <SectionLink onClick={goToSettings}>Settings</SectionLink>
@@ -635,10 +661,10 @@ function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
       </div>
       {providers.map((p) => (
         <div
-          key={p.kind}
+          key={p.id}
           style={{
             fontSize: 13,
-            color: "var(--warning-500, #994200)",
+            color: "var(--text)",
             marginBottom: 4,
             display: "flex",
             alignItems: "center",
@@ -650,21 +676,15 @@ function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
               width: 6,
               height: 6,
               borderRadius: "50%",
-              background: "var(--warning-400, #ce6b09)",
+              background: "var(--green)",
               flexShrink: 0,
             }}
           />
-          <strong>{p.kind}</strong>
-          {p.binary_installed && !p.reachable
-            ? " — installed but not running"
-            : " — not reachable"}
-          {p.endpoint ? (
-            <span
-              style={{ color: "var(--warning-400, #ce6b09)", fontSize: 11 }}
-            >
-              ({p.endpoint})
-            </span>
-          ) : null}
+          <strong>{p.label}</strong>
+          {" — ready"}
+          <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
+            ({p.desc})
+          </span>
         </div>
       ))}
       <div
@@ -674,8 +694,8 @@ function ProviderWarningsSection({ providers }: ProviderWarningsSectionProps) {
           color: "var(--warning-400, #ce6b09)",
         }}
       >
-        Agents assigned to these providers will stall. Open Settings or Provider
-        Doctor to fix the connection.
+        Task creation and runtime switching only show configured providers that
+        pass connection checks.
       </div>
     </section>
   );
