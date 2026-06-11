@@ -298,6 +298,23 @@ func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents
 	if err := b.postKickoffLocked(bp, selectedAgents, task, skipTask, synthesized); err != nil {
 		return err
 	}
+	// Pack/auto-seeded lanes obey the same drafting→human-activation gate as
+	// composer tasks (ten-out-of-ten A2, V3-N9: pack lanes self-started
+	// despite "queued… whenever you want to kick them off"). Seeded starter
+	// tasks land as Issues in Drafting — visible on the board with Approve &
+	// Start, refused by the pre-start gates, never dispatched until the human
+	// activates them. Runs after postKickoffLocked so the awaiting-start
+	// notices allocate counter-based IDs that postKickoff's reset cannot
+	// collide with. The Backup & Migration system task is exempt.
+	for i := range b.tasks {
+		if b.tasks[i].System || b.tasks[i].LifecycleState != "" {
+			continue
+		}
+		b.tasks[i].TaskType = "issue"
+		if err := b.applyLifecycleStateLocked(&b.tasks[i], LifecycleStateDrafting); err != nil {
+			log.Printf("onboarding: park seeded task %s in drafting: %v", b.tasks[i].ID, err)
+		}
+	}
 	// Signal subscribers (the launcher) that the office roster was replaced
 	// wholesale. Individual member_created events aren't emitted by this path
 	// — seedFromBlueprintLocked rewrites b.members directly — so without this

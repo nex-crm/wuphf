@@ -70,15 +70,36 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 	if owner == "" {
 		owner = agentSlug
 	}
-	// Look up the parent Issue's title so the human-facing self-heal
-	// title carries real context ("Agent stuck on: Send VC outreach")
-	// instead of an opaque task ID.
+	// Look up the parent Issue so the human-facing self-heal title carries
+	// real context ("Agent stuck on: Send VC outreach") and the agent half
+	// of the details carries the parent's FULL work contract — never just
+	// the clipped escalation reason (ten-out-of-ten A3: a v3 lane worked
+	// off a truncated source and shipped a second conflicting brief).
 	parentTitle := ""
+	parentDetails := ""
 	if parent := b.findTaskByIDLocked(taskID); parent != nil {
 		parentTitle = strings.TrimSpace(parent.Title)
+		parentDetails = selfHealingParentContract(parent)
+	}
+	// Resolve the root Issue up front so the new lane lands as a sub-issue
+	// of the stalled parent AND the covering-lane dedupe below can scan
+	// against the right anchor. Walk all the way up (the FE nests one deep);
+	// a cycle or unexpectedly deep chain is bounded by maxParentWalkHops.
+	parentIssueID := strings.TrimSpace(taskID)
+	const maxParentWalkHops = 5
+	for hop := 0; hop < maxParentWalkHops; hop++ {
+		src := b.findTaskByIDLocked(parentIssueID)
+		if src == nil {
+			break
+		}
+		next := strings.TrimSpace(src.ParentIssueID)
+		if next == "" || next == parentIssueID {
+			break
+		}
+		parentIssueID = next
 	}
 	title := selfHealingTaskTitle(agentSlug, taskID, parentTitle, reason)
-	details := selfHealingTaskDetails(agentSlug, taskID, parentTitle, reason, detail)
+	details := selfHealingTaskDetails(agentSlug, taskID, parentTitle, parentDetails, reason, detail)
 	createdBy := selfHealingCreatedByForMode(b.sessionMode)
 	channel := b.preferredTaskChannelLocked("general", createdBy, owner, title, details)
 	if b.findChannelLocked(channel) == nil {
@@ -95,6 +116,25 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		PipelineID: "incident",
 	})
 	mergeOverflow := false
+	if existing == nil {
+		// Covering-lane dedupe (ten-out-of-ten A1, V3-N8): before opening a
+		// new repair lane, check whether an OPEN lane already covers the same
+		// work — either an active self-heal child of the same root Issue, or
+		// any open task in the channel whose title is slug-similar to the
+		// stalled work. The v3 run spawned OFFICE-8/-262/-295 around the same
+		// primaries and the deliverables scattered across them.
+		if lane := b.findOpenLaneCoveringWorkLocked(channel, parentIssueID, taskID, parentTitle); lane != nil {
+			if isSelfHealingTask(lane) {
+				existing = lane // merge the incident into the open repair lane
+			} else {
+				// A primary open task already covers this work. Do not open a
+				// duplicate repair lane and do not pollute the primary's
+				// contract with incident plumbing — report it as the reused
+				// lane so the caller's audit trail points at real work.
+				return *lane, true, nil
+			}
+		}
+	}
 	if existing == nil {
 		if overflow := b.findOverflowSelfHealForAgentLocked(agentSlug); overflow != nil {
 			existing = overflow
@@ -147,25 +187,6 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 		return *existing, true, nil
 	}
 
-	// Resolve the parent Issue for the new self-heal record so it lands
-	// as a sub-issue under the originating Issue rather than floating as
-	// a standalone task. Walk all the way up to the root Issue so we
-	// don't create sub-sub-issues (the FE only nests one deep). A cycle
-	// or unexpectedly deep chain is bounded by maxParentWalkHops below.
-	parentIssueID := strings.TrimSpace(taskID)
-	const maxParentWalkHops = 5
-	for hop := 0; hop < maxParentWalkHops; hop++ {
-		src := b.findTaskByIDLocked(parentIssueID)
-		if src == nil {
-			break
-		}
-		next := strings.TrimSpace(src.ParentIssueID)
-		if next == "" || next == parentIssueID {
-			break
-		}
-		parentIssueID = next
-	}
-
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.counter++
 	task := teamTask{
@@ -206,6 +227,152 @@ func (b *Broker) requestSelfHealingLocked(agentSlug, taskID string, reason agent
 	}
 	b.emitTaskTransitionAutoNotebook(&task, "", createdBy)
 	return task, false, nil
+}
+
+// selfHealLaneSimilarityThreshold is the Jaro-Winkler score above which two
+// normalized work titles are treated as covering the same work. Matches the
+// ≥0.9 tier used by the entity resolver and skill dedupe.
+const selfHealLaneSimilarityThreshold = 0.90
+
+// normalizedWorkTitle reduces a task title to its comparable work phrase:
+// strips the self-heal "[@slug] " provenance prefix and the reason-verb
+// prefix ("Agent stuck on: …"), lowercases, and collapses whitespace.
+func normalizedWorkTitle(title string) string {
+	t := strings.TrimSpace(title)
+	if strings.HasPrefix(t, selfHealingTitleAgentPrefix) {
+		if close := strings.Index(t, "] "); close > len(selfHealingTitleAgentPrefix) {
+			t = t[close+2:]
+		}
+	}
+	if colon := strings.Index(t, ": "); colon > 0 {
+		verb := t[:colon]
+		switch verb {
+		case "Agent stuck on", "Repeated errors blocked", "Missing capability for", "Help needed on":
+			t = t[colon+2:]
+		}
+	}
+	return strings.Join(strings.Fields(strings.ToLower(t)), " ")
+}
+
+// findOpenLaneCoveringWorkLocked returns an open (non-terminal) task that
+// already covers the work the new self-heal would duplicate:
+//
+//   - an active self-heal lane parented under the same root Issue, or
+//   - any open task in the channel whose normalized title is slug-similar
+//     (Jaro-Winkler ≥ selfHealLaneSimilarityThreshold) to the stalled
+//     parent's title.
+//
+// The stalled parent itself, its root Issue, and system tasks are excluded.
+// Caller holds b.mu.
+func (b *Broker) findOpenLaneCoveringWorkLocked(channel, rootIssueID, stalledTaskID, parentTitle string) *teamTask {
+	if b == nil {
+		return nil
+	}
+	rootIssueID = strings.TrimSpace(rootIssueID)
+	stalledTaskID = strings.TrimSpace(stalledTaskID)
+	normParent := normalizedWorkTitle(parentTitle)
+	for i := range b.tasks {
+		t := &b.tasks[i]
+		if t.System || isTerminalTeamTaskStatus(t.status) {
+			continue
+		}
+		switch strings.TrimSpace(t.ID) {
+		case "", stalledTaskID, rootIssueID:
+			continue
+		}
+		if isSelfHealingTask(t) && rootIssueID != "" && strings.TrimSpace(t.ParentIssueID) == rootIssueID {
+			return t
+		}
+		if normParent == "" || normalizeChannelSlug(t.Channel) != channel {
+			continue
+		}
+		if JaroWinkler(normalizedWorkTitle(t.Title), normParent) >= selfHealLaneSimilarityThreshold {
+			return t
+		}
+	}
+	return nil
+}
+
+// selfHealingParentContract renders the stalled parent's full work contract
+// (Details plus the structured Definition goal/deliverables when present) for
+// embedding in the self-heal lane. Agent-facing content must come from
+// Details/Definition — a repair lane that only sees the clipped escalation
+// reason re-derives the work from a truncated source (ten-out-of-ten A3).
+func selfHealingParentContract(parent *teamTask) string {
+	if parent == nil {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if def := parent.Definition; def != nil {
+		if goal := strings.TrimSpace(def.Goal); goal != "" {
+			parts = append(parts, "Goal: "+goal)
+		}
+		for _, d := range def.Deliverables {
+			name := strings.TrimSpace(d.Name)
+			if name == "" {
+				continue
+			}
+			line := "Deliverable: " + name
+			if format := strings.TrimSpace(d.Format); format != "" {
+				line += " (" + format + ")"
+			}
+			parts = append(parts, line)
+		}
+	}
+	if details := strings.TrimSpace(parent.Details); details != "" {
+		parts = append(parts, details)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+// attachSelfHealCompletionToParentLocked routes a finished self-heal lane's
+// outcome back onto the stalled parent (ten-out-of-ten A1, V3-N8): the
+// delivered artifact is recorded on the PARENT, the delivery is noted in the
+// parent's details, and the parent advances through the legitimate path —
+// into Review for the human's decision, never straight to done. Pre-start
+// parents (drafting/intake) only receive the artifact + note: the human's
+// Approve & Start gate stays sovereign. Caller holds b.mu; the caller's
+// saveLocked persists the parent mutation alongside the child's.
+func (b *Broker) attachSelfHealCompletionToParentLocked(child *teamTask) {
+	if b == nil || child == nil || !isSelfHealingTask(child) {
+		return
+	}
+	parentID := strings.TrimSpace(child.ParentIssueID)
+	if parentID == "" {
+		return
+	}
+	parent := b.findTaskByIDLocked(parentID)
+	if parent == nil || parent.System || isTerminalTeamTaskStatus(parent.status) {
+		return
+	}
+	artifact := strings.TrimSpace(child.Artifact)
+	if artifact == "" {
+		return
+	}
+	if strings.TrimSpace(parent.Artifact) == "" {
+		parent.Artifact = artifact
+	}
+	note := fmt.Sprintf("Self-heal %s delivered for this task — artifact: %s. The deliverable belongs to THIS task; review it here.", child.ID, artifact)
+	if err := appendTaskDetailLocked(parent, note); err != nil {
+		log.Printf("self-healing: attach completion note to parent %s: %v", parent.ID, err)
+	}
+	parentChannel := normalizeChannelSlug(parent.Channel)
+	if parentChannel == "" {
+		parentChannel = "general"
+	}
+	switch parent.LifecycleState {
+	case LifecycleStateReview, LifecycleStateDecision:
+		// already awaiting the human — the artifact + note are enough
+	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady:
+		// never started by the human — do not skip the activation gate
+	default:
+		if err := b.applyLifecycleStateLocked(parent, LifecycleStateReview); err != nil {
+			log.Printf("self-healing: advance parent %s to review: %v", parent.ID, err)
+		}
+	}
+	parent.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	b.appendActionLocked("task_updated", "office", parentChannel, "system",
+		truncateSummary(parent.Title+" [self-heal delivered]", 140), parent.ID)
 }
 
 // requestCapabilitySelfHealingHook is a swap-able test hook used by the
@@ -423,7 +590,7 @@ func selfHealingTaskTitle(agentSlug, taskID, parentTitle string, reason agent.Es
 //     agent uses to recover. Same content as before so agent behavior
 //     doesn't regress. Visually separated by a divider so the operator
 //     can scroll past it.
-func selfHealingTaskDetails(agentSlug, taskID, parentTitle string, reason agent.EscalationReason, detail string) string {
+func selfHealingTaskDetails(agentSlug, taskID, parentTitle, parentDetails string, reason agent.EscalationReason, detail string) string {
 	agentName := agentDisplayNameFromSlug(agentSlug)
 	who := strings.TrimSpace(agentSlug)
 	if who == "" {
@@ -450,7 +617,7 @@ func selfHealingTaskDetails(agentSlug, taskID, parentTitle string, reason agent.
 
 	whatNeeds := whatNeedsToHappen(reason)
 
-	return strings.Join([]string{
+	lines := []string{
 		"## What happened",
 		"",
 		humanReasonSummary(reason, agentName),
@@ -471,6 +638,20 @@ func selfHealingTaskDetails(agentSlug, taskID, parentTitle string, reason agent.
 		fmt.Sprintf("- Original task: %s", originalTask),
 		fmt.Sprintf("- Trigger: %s", trigger),
 		fmt.Sprintf("- Detail: %s", detail),
+	}
+	// Full work contract of the stalled task (A3): the escalation detail
+	// above is a clipped one-liner; the repair lane must work from the
+	// parent's verbatim Details/Definition, never re-derive the work from a
+	// truncated echo.
+	if contract := strings.TrimSpace(parentDetails); contract != "" {
+		lines = append(lines,
+			"",
+			"**Original task contract (verbatim — work from THIS, not from the clipped detail above):**",
+			"",
+			contract,
+		)
+	}
+	lines = append(lines,
 		"",
 		"**Repair loop:**",
 		"",
@@ -481,7 +662,8 @@ func selfHealingTaskDetails(agentSlug, taskID, parentTitle string, reason agent.
 		"5. Repair the missing capability first, then resume or requeue the original workflow with a concrete verification step. A self-heal that only reports the blocker is incomplete.",
 		"6. Treat learning as a post-repair review: propose a skill or update a wiki/playbook only when the workaround is durable and reusable. Include the trigger, failure signature, recovery step, verification signal, and any tool/provider/channel constraints. If nothing reusable was learned, leave skills unchanged.",
 		"7. Do not mark this self-healing task complete until the original task is unblocked, resumed/requeued with a clearer owner/cut line, or explicitly blocked behind a human decision.",
-	}, "\n")
+	)
+	return strings.Join(lines, "\n")
 }
 
 // whatNeedsToHappen returns the operator-facing next-step guidance for

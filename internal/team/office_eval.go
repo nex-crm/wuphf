@@ -210,6 +210,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"live-paths", evalJobLivePaths},
 		{"workspace-isolation", evalJobWorkspaceIsolation},
 		{"utterance-routing", evalJobUtteranceRouting},
+		{"task-integrity", evalJobTaskIntegrity},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))

@@ -1360,6 +1360,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			b.AppendPacketFeedbackLocked(task.ID, actor, feedback)
 		}
 		if reachedDone {
+			// Self-heal parent attach (ten-out-of-ten A1): a repair lane that
+			// lands done with a deliverable routes the artifact + completion
+			// back onto the stalled PARENT through the legitimate path
+			// (artifact recorded, parent into Review for the human decision).
+			// Runs before the done-post so the announcement reflects the
+			// final ownership. Same locked section — persisted together.
+			b.attachSelfHealCompletionToParentLocked(task)
 			// Deterministic done-post (core-loop B1): announce the delivery
 			// in the task channel and raise a non-blocking Inbox notice.
 			// Runs before saveLocked so the message + notice persist with

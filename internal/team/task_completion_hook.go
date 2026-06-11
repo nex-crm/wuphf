@@ -102,6 +102,20 @@ func (b *Broker) postTaskDeliveredLocked(task *teamTask) {
 	if b == nil || task == nil || task.System {
 		return
 	}
+	// Idempotency per (task, terminal transition) — ten-out-of-ten A4. The
+	// v3 run saw the same delivery announced repeatedly; the deterministic
+	// layer must emit exactly one task_delivered post + one Inbox notice per
+	// landing. CompletedAt is the landing's identity: markTaskDone stamps it
+	// once per landing and every rework path (request_changes, reopen, any
+	// non-done status) clears it, so a genuine re-delivery gets a fresh key
+	// while replays of the SAME landing are suppressed.
+	doneKey := strings.TrimSpace(task.CompletedAt)
+	if doneKey == "" {
+		doneKey = strings.TrimSpace(task.UpdatedAt)
+	}
+	if doneKey != "" && task.DonePostedFor == doneKey {
+		return
+	}
 	taskChannel := normalizeChannelSlug(task.Channel)
 	if taskChannel == "" {
 		taskChannel = "general"
@@ -157,6 +171,13 @@ func (b *Broker) postTaskDeliveredLocked(task *teamTask) {
 	b.requests = append(b.requests, notice)
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	b.appendActionLocked("request_created", "office", taskChannel, noticeFrom, truncateSummary(notice.Title+" "+notice.Question, 140), notice.ID)
+	task.DonePostedFor = doneKey
+	// Single-source state hint (ten-out-of-ten A2): a delivered task can no
+	// longer be "waiting on you to start". Retire any still-pending
+	// awaiting-start notice so the two hints are mutually exclusive — the v3
+	// inbox showed "OFFICE-172 delivered" and "OFFICE-172 is waiting on you —
+	// press Approve & Start" side by side ([19:23:59]).
+	b.resolveAwaitingStartNoticeLocked(task.ID)
 }
 
 // ── Deterministic entity extraction (B1 step 3) ──────────────────────────────

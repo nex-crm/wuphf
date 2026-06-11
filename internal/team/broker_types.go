@@ -347,10 +347,19 @@ type teamTask struct {
 	// records of what each headless turn on this task said, mutated, and
 	// how it ended. Rendered into every participant's packet as the living
 	// task brief. Bounded to taskLedgerMaxEntries.
-	Ledger      []TaskLedgerEntry `json:"ledger,omitempty"`
-	CreatedAt   string            `json:"created_at"`
-	UpdatedAt   string            `json:"updated_at"`
-	CompletedAt string            `json:"completed_at,omitempty"`
+	Ledger []TaskLedgerEntry `json:"ledger,omitempty"`
+	// DonePostedFor is the CompletedAt timestamp the deterministic done-post
+	// (task_completion_hook.go postTaskDeliveredLocked) was emitted for.
+	// Exactly one task_delivered chat post + one Inbox notice per
+	// (task, terminal transition): re-stamps of the same landing (status
+	// flapping non-done→done within one delivery, replayed mutations) are
+	// suppressed, while a real rework cycle (request_changes clears
+	// CompletedAt, the re-landing stamps a new one) posts again. Wire key
+	// "done_posted_for" is additive (ten-out-of-ten A4, v3 6× done-messages).
+	DonePostedFor string `json:"done_posted_for,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+	CompletedAt   string `json:"completed_at,omitempty"`
 	// System marks a task as a permanent system-owned task that may not
 	// be deleted or removed. The "Backup & Migration" task (ID: task-general)
 	// is the only current system task; it owns the #general channel so all
@@ -483,6 +492,7 @@ type teamTaskWire struct {
 	HumanObjection       *TaskReviewObjection    `json:"human_objection,omitempty"`
 	HumanNotePending     *TaskHumanNote          `json:"human_note_pending,omitempty"`
 	Ledger               []TaskLedgerEntry       `json:"ledger,omitempty"`
+	DonePostedFor        string                  `json:"done_posted_for,omitempty"`
 	CreatedAt            string                  `json:"created_at"`
 	UpdatedAt            string                  `json:"updated_at"`
 	CompletedAt          string                  `json:"completed_at,omitempty"`
@@ -537,6 +547,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		HumanObjection:       t.HumanObjection,
 		HumanNotePending:     t.HumanNotePending,
 		Ledger:               t.Ledger,
+		DonePostedFor:        t.DonePostedFor,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
 		CompletedAt:          t.CompletedAt,
@@ -593,6 +604,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.HumanObjection = w.HumanObjection
 	t.HumanNotePending = w.HumanNotePending
 	t.Ledger = w.Ledger
+	t.DonePostedFor = w.DonePostedFor
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt
 	t.CompletedAt = w.CompletedAt

@@ -308,6 +308,26 @@ func (r *Repo) Commit(ctx context.Context, slug, relPath, content, mode, message
 	var bytesWritten int
 	switch mode {
 	case "create", "replace":
+		// Byte-identical fold (ten-out-of-ten A4): a replace whose content
+		// matches the file already on disk AND already committed is a no-op —
+		// return HEAD without rewriting the file. The rewrite used to bump
+		// the article's mtime, which changed index/all.md ("updated <mtime>"
+		// rows), which made the staged diff non-empty, which turned every
+		// identical retry into a real commit (v3 [20:15]: the same "confirm
+		// contact" change triple-committed). The git-status guard keeps the
+		// fold away from externally-written files (the Obsidian watcher
+		// writes content to disk first, then asks the repo to commit it —
+		// that path is dirty, never folded).
+		if existing, readErr := os.ReadFile(fullPath); readErr == nil && string(existing) == content {
+			porcelain, statusErr := r.runGitLocked(ctx, "system", "status", "--porcelain", "--", filepath.ToSlash(relPath))
+			if statusErr == nil && strings.TrimSpace(porcelain) == "" {
+				headSha, headErr := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+				if headErr != nil {
+					return "", 0, fmt.Errorf("wiki: resolve HEAD sha: %w", headErr)
+				}
+				return strings.TrimSpace(headSha), len(content), nil
+			}
+		}
 		if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
 			return "", 0, fmt.Errorf("wiki: write article: %w", err)
 		}
