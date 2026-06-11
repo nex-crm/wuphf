@@ -15,6 +15,11 @@ import {
   type TaskActivityEvent,
   type TaskActivityEventKind,
 } from "../../api/tasks";
+import {
+  humanizeLifecycleState,
+  humanizeStateTokens,
+  humanizeTurnOutcome,
+} from "../../lib/humanizeActivity";
 import { router } from "../../lib/router";
 
 interface TaskActivityFeedProps {
@@ -155,17 +160,15 @@ function ActivityRow({ event }: { event: TaskActivityEvent }) {
         {event.kind === "lifecycle" && event.lifecycle ? (
           <div className="issue-activity-feed-lifecycle">
             <span className="issue-activity-feed-state">
-              {event.lifecycle.from || "—"}
+              {humanizeLifecycleState(event.lifecycle.from ?? "") || "—"}
             </span>
             <ArrowRight width={12} height={12} aria-hidden="true" />
             <span className="issue-activity-feed-state">
-              {event.lifecycle.to || "—"}
+              {humanizeLifecycleState(event.lifecycle.to ?? "") || "—"}
             </span>
           </div>
         ) : null}
-        {event.summary ? (
-          <p className="issue-activity-feed-summary">{event.summary}</p>
-        ) : null}
+        <ActivitySummary event={event} />
         {event.kind === "request" && event.request ? (
           <RequestResolution req={event.request} />
         ) : null}
@@ -175,6 +178,22 @@ function ActivityRow({ event }: { event: TaskActivityEvent }) {
       </div>
     </li>
   );
+}
+
+/**
+ * Render-boundary humanization (ten-out-of-ten E1): the activity feed is a
+ * human surface, so raw runtime exhaust never renders verbatim. Settled
+ * turn outcomes route through humanizeTurnOutcome ("signal: killed:
+ * signal: killed" → an honest one-liner, v3 [18:14:10]); other summaries
+ * get lifecycle enum tokens replaced with plain labels.
+ */
+function ActivitySummary({ event }: { event: TaskActivityEvent }) {
+  const raw = event.summary?.trim() ?? "";
+  if (!raw) return null;
+  const text =
+    event.kind === "turn" ? humanizeTurnOutcome(raw) : humanizeStateTokens(raw);
+  if (!text) return null;
+  return <p className="issue-activity-feed-summary">{text}</p>;
 }
 
 /**
@@ -235,8 +254,8 @@ function iconForKind(kind: TaskActivityEventKind) {
       return <GitFork width={14} height={14} aria-hidden="true" />;
     case "turn":
       return <Refresh width={14} height={14} aria-hidden="true" />;
-    case "action":
     default:
+      // "action" and any future kinds.
       return <CheckCircle width={14} height={14} aria-hidden="true" />;
   }
 }
@@ -255,8 +274,8 @@ function verbForEvent(event: TaskActivityEvent): string {
       return "added a sub-task";
     case "turn":
       return "ran a turn";
-    case "action":
     default:
+      // "action" and any future kinds.
       return event.summary || "took action";
   }
 }

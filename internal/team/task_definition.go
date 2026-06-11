@@ -18,6 +18,7 @@ package team
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -81,6 +82,60 @@ func normalizeTaskDefinition(in *TaskDefinition, now string) (*TaskDefinition, e
 		}
 	}
 	return out, nil
+}
+
+// definitionPlaceholderRegex matches bracketed-uppercase placeholders an
+// agent left in a definition field instead of asking — "[CONTACT NAME]",
+// "[NEEDS CONFIRMATION: ARR]", "[TBD]". Requiring an ALL-CAPS opener keeps
+// ordinary markdown links ("[Q4 brief](…)") out of the match.
+var definitionPlaceholderRegex = regexp.MustCompile(`\[[A-Z][A-Z0-9 _:,'%$.-]*`)
+
+// definitionGapMarkers reports the placeholder/gap markers present in a
+// definition's text fields — the deterministic E5 intake gate (ten-out-of-ten:
+// v3's CEO wrote around "[CONTACT NAME]" holes without interviewing). A gap is
+// a bracketed-uppercase placeholder, a "NEEDS CONFIRMATION" flag, or a "TBD"
+// token in goal / deliverables / success criteria. Returned strings name the
+// offending fields so the raised interview can quote them.
+func definitionGapMarkers(def *TaskDefinition) []string {
+	if def == nil {
+		return nil
+	}
+	var gaps []string
+	check := func(field, text string) {
+		if hasDefinitionPlaceholder(text) {
+			gaps = append(gaps, fmt.Sprintf("%s: %q", field, strings.TrimSpace(text)))
+		}
+	}
+	check("goal", def.Goal)
+	for _, d := range def.Deliverables {
+		check("deliverable", d.Name)
+		check("deliverable format", d.Format)
+	}
+	for _, c := range def.SuccessCriteria {
+		check("success criterion", c)
+	}
+	return gaps
+}
+
+// hasDefinitionPlaceholder reports whether one definition field carries a
+// placeholder/gap marker.
+func hasDefinitionPlaceholder(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	upper := strings.ToUpper(text)
+	if strings.Contains(upper, "NEEDS CONFIRMATION") {
+		return true
+	}
+	// "TBD" as a standalone word (not a substring of e.g. "outbound").
+	for _, tok := range strings.FieldsFunc(upper, func(r rune) bool {
+		return !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9')
+	}) {
+		if tok == "TBD" {
+			return true
+		}
+	}
+	return definitionPlaceholderRegex.MatchString(text)
 }
 
 // taskDefinitionPacketLines renders the definition for work packets

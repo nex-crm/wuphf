@@ -274,3 +274,78 @@ func TestExecutionPacketCarriesDefinition(t *testing.T) {
 		}
 	}
 }
+
+// TestDefinitionGapMarkers pins the deterministic E5 placeholder detector
+// (ten-out-of-ten): bracketed-uppercase placeholders, "NEEDS CONFIRMATION",
+// and standalone "TBD" tokens are gaps; ordinary prose and markdown links
+// are not.
+func TestDefinitionGapMarkers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		def  *TaskDefinition
+		want int
+	}{
+		{name: "nil definition", def: nil, want: 0},
+		{
+			name: "clean definition",
+			def: &TaskDefinition{
+				Goal:            "Ship the Q4 renewal outreach to the approved list",
+				Deliverables:    []TaskDeliverable{{Name: "outreach drafts", Format: "markdown in the wiki"}},
+				SuccessCriteria: []string{"All three accounts have a confirmed contact"},
+			},
+			want: 0,
+		},
+		{
+			name: "bracketed uppercase placeholder in goal",
+			def:  &TaskDefinition{Goal: "Email [CONTACT NAME] at Acme about the renewal"},
+			want: 1,
+		},
+		{
+			name: "needs-confirmation flag in criteria",
+			def: &TaskDefinition{
+				Goal:            "Confirm the Corti contract value",
+				SuccessCriteria: []string{"ARR figure verified (currently needs confirmation)"},
+			},
+			want: 1,
+		},
+		{
+			name: "TBD token in deliverable",
+			def: &TaskDefinition{
+				Goal:         "Draft the QBR one-pager",
+				Deliverables: []TaskDeliverable{{Name: "one-pager (owner TBD)"}},
+			},
+			want: 1,
+		},
+		{
+			name: "TBD must be a standalone word",
+			def:  &TaskDefinition{Goal: "Plan the outbound campaign for the fall cohort"},
+			want: 0,
+		},
+		{
+			name: "markdown link is not a placeholder",
+			def:  &TaskDefinition{Goal: "Update the brief per [the Q4 plan](team/plans/q4.md)"},
+			want: 0,
+		},
+		{
+			name: "multiple gaps across fields",
+			def: &TaskDefinition{
+				Goal:            "Email [CONTACT NAME] about [RENEWAL DATE]",
+				SuccessCriteria: []string{"value confirmed (NEEDS CONFIRMATION)"},
+			},
+			want: 2, // goal counted once per field, criteria once
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := definitionGapMarkers(tc.def)
+			if len(got) != tc.want {
+				t.Errorf("definitionGapMarkers: got %d gaps %v, want %d", len(got), got, tc.want)
+			}
+		})
+	}
+}

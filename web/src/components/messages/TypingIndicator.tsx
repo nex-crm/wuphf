@@ -1,5 +1,6 @@
 import type { OfficeMember } from "../../api/client";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
+import { humanizeActivity } from "../../lib/humanizeActivity";
 import { OFFICE_LOADING_PHRASES } from "../../lib/officeLoadingPhrases";
 import { useCurrentRoute } from "../../routes/useCurrentRoute";
 import { PixelAvatar } from "../ui/PixelAvatar";
@@ -125,15 +126,21 @@ function buildLabel(active: ReadonlyArray<OfficeMember>): string {
  *
  * When exactly one agent is active we show its detail; with several active
  * we suppress it to avoid implying one agent's progress is shared.
+ *
+ * The raw broker string can carry runtime internals — tool-call JSON
+ * ('[{"tool_name":"mcp__…","type":"tool_reference"}]'), MCP tool ids,
+ * process exhaust (ICP-eval v3 [18:43:37]: raw JSON rendered verbatim in
+ * the "CEO is typing" preview). humanizeActivity collapses anything
+ * machine-shaped to "Working…" so the strip never shows code.
  */
 function resolveProgressDetail(active: ReadonlyArray<OfficeMember>): string {
   if (active.length !== 1) return "";
   const [member] = active;
-  return (
+  const raw =
     member.liveActivity?.trim() ||
     member.task?.trim() ||
     member.activity?.trim() ||
     member.detail?.trim() ||
-    ""
-  );
+    "";
+  return humanizeActivity(raw);
 }

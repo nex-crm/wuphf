@@ -193,7 +193,16 @@ func (b *notificationContextBuilder) NotificationContext(recipientSlug, channel,
 	formatContext := func(items []channelMessage) string {
 		var sb strings.Builder
 		for _, m := range items {
-			sb.WriteString(fmt.Sprintf("@%s: %s\n", m.From, truncate(m.Content, threadMessageClipChars)))
+			// Human-authored messages render in FULL — the human's words are
+			// the work contract, and clipping them is how the v3 run absorbed
+			// half a redline message and re-asked for the other half
+			// (ten-out-of-ten Wave E handoff). Agent/system chatter keeps the
+			// clip as a token-overflow guard.
+			content := m.Content
+			if !isHumanMessageSender(m.From) {
+				content = truncate(content, threadMessageClipChars)
+			}
+			sb.WriteString(fmt.Sprintf("@%s: %s\n", m.From, content))
 		}
 		return strings.TrimRight(sb.String(), "\n")
 	}

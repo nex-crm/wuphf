@@ -59,13 +59,16 @@ const JIM_WALK_IN_MS = 2600;
 const JIM_WALK_OUT_MS = 2200;
 const JIM_CHAT_LINE_MS = 3000;
 
+// Tone rule (ten-out-of-ten E1): no sarcastic or dismissive filler on a
+// work surface — "Of course it didn't. Classic." read as broken copy to a
+// real operator (ICP-eval v3 [17:41:35]). Keep the chatter warm, not snide.
 const JIM_PAM_CONVERSATIONS: readonly (readonly JimPamLine[])[] = [
   [
     {
       who: "jim",
       text: "Did you hear? CEO merged 12 PRs. Didn't ask anyone.",
     },
-    { who: "pam", text: "Of course it didn't. Classic." },
+    { who: "pam", text: "Twelve? I'd better update the wiki." },
     { who: "jim", text: "Honestly kind of amazing." },
   ],
   [

@@ -14,6 +14,7 @@
  * glance whether work started, finished, was blocked, or needs them.
  */
 
+import { humanizeLifecycleState } from "../../../lib/humanizeActivity";
 import { router } from "../../../lib/router";
 
 export type TaskLifecycleTransition =
@@ -127,8 +128,8 @@ function presentationFor(
         icon: "✏️",
         accent: "review",
       };
-    case "generic":
     default:
+      // "generic" and any future transitions.
       return { eyebrow: "Task updated", icon: "📋", accent: "neutral" };
   }
 }
@@ -169,8 +170,12 @@ export function TaskLifecycleCard({
         </span>
         <span className="issue-lifecycle-card-title">{title}</span>
         {payload.from_state && payload.to_state ? (
+          // Lifecycle enums never render raw at the human boundary —
+          // "running → blocked_on_pr_merge" read as engineering jargon to
+          // a RevOps operator (ICP-eval v3 [17:33:18]).
           <span className="issue-lifecycle-card-meta">
-            {payload.from_state} → {payload.to_state}
+            {humanizeLifecycleState(payload.from_state)} →{" "}
+            {humanizeLifecycleState(payload.to_state)}
           </span>
         ) : null}
       </span>

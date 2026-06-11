@@ -5,6 +5,7 @@ import type { OfficeMember } from "../../api/client";
 import { post } from "../../api/client";
 import { useChannelMembers, useOfficeMembers } from "../../hooks/useMembers";
 import { formatAgentName } from "../../lib/agentName";
+import { humanizeActivity } from "../../lib/humanizeActivity";
 import { useAppStore } from "../../stores/app";
 import { PixelAvatar } from "../ui/PixelAvatar";
 import { showNotice, showUndoToast } from "../ui/Toast";
@@ -23,25 +24,10 @@ function memberDisplayName(member: OfficeMember): string {
   return formatAgentName(member.slug);
 }
 
-// Live activity strings can leak raw runtime internals — MCP tool ids
-// ("running mcp__wuphf_wiki_lookup"), snake_case tool names
-// ("running wuphf_office_members"), or whole tool-call JSON blobs
-// ([{"tool name":"wuphf_…"}]). A person scanning the participant rail should
-// never see code. Collapse anything that looks like a raw identifier/payload
-// to a clean "Working…"; pass through genuine prose ("waiting for work").
-function humanizeActivity(raw: string): string {
-  const s = raw.trim();
-  if (!s) return s;
-  const looksRaw =
-    s.startsWith("[") ||
-    s.startsWith("{") ||
-    s.includes('"tool') ||
-    s.includes("mcp__") ||
-    // optional "running"/"using" verb + a snake_case identifier and nothing else
-    /^(?:running|using)?\s*[a-z0-9]+(?:_[a-z0-9]+)+$/i.test(s);
-  return looksRaw ? "Working…" : s;
-}
-
+// Live activity strings can leak raw runtime internals — MCP tool ids,
+// snake_case tool names, or whole tool-call JSON blobs. The shared
+// humanizeActivity (lib/humanizeActivity.ts) collapses anything
+// machine-shaped to "Working…" and passes genuine prose through.
 function memberActivity(member: OfficeMember): string {
   if (member.disabled) return "Disabled in this channel";
   const live =

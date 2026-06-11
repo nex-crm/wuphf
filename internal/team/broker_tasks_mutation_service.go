@@ -1375,6 +1375,14 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		if action == "comment" {
 			b.AppendPacketFeedbackLocked(task.ID, actor, strings.TrimSpace(body.Details))
 		}
+		if action == "define" {
+			// E5 intake gate (ten-out-of-ten): a Definition that lands with
+			// placeholder markers or access needs raises the batched human
+			// interview deterministically — before any subtask dispatch can
+			// write around the holes. Runs before saveLocked so the request
+			// persists with the define mutation.
+			b.raiseDefinitionGapInterviewLocked(task, actor)
+		}
 		if submitForReviewTriggered {
 			// Capture the submitted artifact (code, copy, plan) into
 			// the Decision Packet's feedback thread so reviewers see

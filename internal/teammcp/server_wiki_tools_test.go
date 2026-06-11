@@ -21,8 +21,17 @@ func TestHandleTeamWikiWriteRequiresHumanRequestByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler returned transport error: %v", err)
 	}
-	if !isToolError(res) || !strings.Contains(toolErrorText(res), "requires human_request") {
+	if !isToolError(res) || !strings.Contains(toolErrorText(res), "human_request") {
 		t.Fatalf("expected missing-human-request tool error, got %#v text=%q", res, toolErrorText(res))
+	}
+	// Human-boundary copy guard (ten-out-of-ten E1b): the gate's wording must
+	// be safe for an agent to relay — no "broker message ID" jargon leading
+	// the message (ICP-eval v3 [18:07]).
+	if !strings.Contains(toolErrorText(res), "direct go-ahead") {
+		t.Fatalf("gate error lost its human wording: %q", toolErrorText(res))
+	}
+	if strings.Contains(toolErrorText(res), "broker message ID") {
+		t.Fatalf("gate error leads with broker jargon again: %q", toolErrorText(res))
 	}
 }
 

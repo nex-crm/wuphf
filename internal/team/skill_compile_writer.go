@@ -22,12 +22,15 @@ import (
 )
 
 // skillSystemAuthors is the whitelist of identities that may write compiled
-// skills without being registered as team members. These are internal
-// service identities, not human agents.
+// skills without being registered as team members. Compiled artifacts are
+// attributed to the librarian — the real acting roster identity (ten-out-of-
+// ten E4: "@archivist" was a name no roster showed). "archivist" stays
+// accepted for skills persisted before the rename.
 var skillSystemAuthors = map[string]bool{
-	"archivist": true,
-	"scanner":   true,
-	"system":    true,
+	LibrarianSlug: true,
+	"archivist":   true,
+	"scanner":     true,
+	"system":      true,
 }
 
 // skillSlugRegex validates the Anthropic Agent Skills slug format.
@@ -94,7 +97,7 @@ func verifySkillInvariantsPreserved(previousBody, mergedBody string) error {
 //
 // Steps:
 //  1. Validate Anthropic frontmatter: non-empty Name + Description, slug regex.
-//  2. System-author whitelist: bypass findMemberLocked for archivist/scanner/system.
+//  2. System-author whitelist: bypass findMemberLocked for librarian/archivist/scanner/system.
 //  3. Dedup: return existing skill if findSkillByNameLocked matches.
 //     3b. Update-first: enhance a semantically similar existing skill in
 //     place while the merged body stays under skillUpdateFirstMaxBytes;
@@ -282,11 +285,11 @@ func (b *Broker) writeCompiledSkillLocked(spec teamSkill) (*teamSkill, error) {
 	}
 
 	// --- Step 4a: Skill guard (PR 1b) ---
-	// Trust ladder: archivist/scanner == community (Stage A wiki source).
-	// Future synth-from-LLM authors will use agent_created.
+	// Trust ladder: librarian/archivist/scanner == community (Stage A wiki
+	// source). Future synth-from-LLM authors will use agent_created.
 	trust := TrustCommunity
 	switch createdBy {
-	case "archivist", "scanner":
+	case LibrarianSlug, "archivist", "scanner":
 		trust = TrustCommunity
 	case "system":
 		trust = TrustTrusted
@@ -321,7 +324,7 @@ func (b *Broker) writeCompiledSkillLocked(spec teamSkill) (*teamSkill, error) {
 	}
 
 	wikiPath := "team/skills/" + slug + ".md"
-	commitMsg := "archivist: compile skill " + slug
+	commitMsg := LibrarianSlug + ": compile skill " + slug
 
 	// --- Step 5: DEADLOCK FIX — release b.mu before Enqueue ---
 	// WikiWorker.Enqueue blocks on its reply channel. The drain goroutine calls
@@ -395,7 +398,7 @@ func (b *Broker) RegisterCompiledPlaybookSkill(slug, sourcePath string, skillByt
 	}
 	fm.Metadata.Wuphf.SourceArticles = appendUnique(fm.Metadata.Wuphf.SourceArticles, sourcePath)
 	spec := specToTeamSkill(fm, body, sourcePath)
-	spec.CreatedBy = "archivist"
+	spec.CreatedBy = LibrarianSlug
 	// Compiled skills go live immediately (core-loop R5); the human curates
 	// after the fact via the Skills page.
 	spec.Status = "active"
@@ -503,7 +506,7 @@ func (b *Broker) enhanceSkillLocked(existingName, newContent, newDescription, ca
 	}
 
 	wikiPath := "team/skills/" + slug + ".md"
-	commitMsg := "archivist: enhance skill " + slug
+	commitMsg := LibrarianSlug + ": enhance skill " + slug
 
 	// Deadlock-safe: release b.mu before WikiWorker.Enqueue.
 	wikiWorker := b.wikiWorker
@@ -572,7 +575,7 @@ func (b *Broker) rerenderSkillWikiLocked(sk *teamSkill, reason string) {
 		return
 	}
 	wikiPath := "team/skills/" + slug + ".md"
-	commitMsg := "archivist: rerender skill " + slug + " (" + reason + ")"
+	commitMsg := LibrarianSlug + ": rerender skill " + slug + " (" + reason + ")"
 	b.mu.Unlock()
 	_, _, enqErr := wikiWorker.Enqueue(
 		context.Background(),

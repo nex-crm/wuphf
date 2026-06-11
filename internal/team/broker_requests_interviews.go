@@ -383,6 +383,86 @@ func (b *Broker) cancelActiveHumanInterviewsLocked(actor, reason, channel, reply
 	return count
 }
 
+// raiseDefinitionGapInterviewLocked is the deterministic E5 intake gate
+// (ten-out-of-ten Wave E): when an agent lands a Definition that still
+// carries placeholder markers ("[CONTACT NAME]", "NEEDS CONFIRMATION",
+// "TBD") or names access the team does not have, the broker raises ONE
+// batched human interview for the task — by contract, not prompt-hope
+// (v3's CEO wrote around the holes without asking). Caller holds b.mu.
+//
+// Idempotent: an active human interview already linked to the task (any
+// asker) or an earlier gap-interview with the same dedupe key short-
+// circuits, so a re-define never stacks duplicates. Human-authored
+// definitions never raise — the human wrote the placeholder knowingly.
+// Returns the request id ("" when nothing was raised).
+func (b *Broker) raiseDefinitionGapInterviewLocked(task *teamTask, actor string) string {
+	if task == nil || task.Definition == nil || isHumanMessageSender(actor) {
+		return ""
+	}
+	gaps := definitionGapMarkers(task.Definition)
+	if len(gaps) == 0 && len(task.Definition.AccessNeeded) == 0 {
+		return ""
+	}
+	dedupeKey := "definition-gap:" + task.ID
+	for i := range b.requests {
+		if !requestIsActive(b.requests[i]) {
+			continue
+		}
+		if strings.TrimSpace(b.requests[i].DedupeKey) == dedupeKey {
+			return b.requests[i].ID
+		}
+		if requestIsHumanInterview(b.requests[i]) && strings.TrimSpace(b.requests[i].IssueID) == task.ID {
+			return b.requests[i].ID
+		}
+	}
+
+	channel := normalizeChannelSlug(task.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	from := strings.TrimSpace(actor)
+	if from == "" {
+		from = "office"
+	}
+	var qb strings.Builder
+	fmt.Fprintf(&qb, "Before the team starts %q, a few details are missing:\n", strings.TrimSpace(task.Title))
+	for _, gap := range gaps {
+		qb.WriteString("- " + gap + "\n")
+	}
+	for _, access := range task.Definition.AccessNeeded {
+		qb.WriteString("- access needed: " + access + "\n")
+	}
+	qb.WriteString("Reply with the missing details (or tell the team to proceed as-is).")
+
+	options, recommended := requestOptionDefaults("interview")
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.counter++
+	req := humanInterview{
+		ID:            fmt.Sprintf("request-%d", b.counter),
+		Kind:          "interview",
+		Status:        "pending",
+		From:          from,
+		Channel:       channel,
+		Title:         "Missing details for " + task.ID,
+		Question:      qb.String(),
+		Options:       options,
+		RecommendedID: recommended,
+		DedupeKey:     dedupeKey,
+		IssueID:       task.ID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	b.scheduleRequestLifecycleLocked(&req)
+	// Loud ask: announce in the task channel and anchor the thread so a
+	// reply routes back as the answer (same contract as handlePostRequest).
+	b.postRequestRaisedChatMessageLocked(&req)
+	b.requests = append(b.requests, req)
+	b.pendingInterview = firstBlockingRequest(b.requests)
+	b.appendActionLocked("request_created", "office", channel, from,
+		truncateSummary(req.Title+" "+req.Question, 140), req.ID)
+	return req.ID
+}
+
 func normalizeRequestKind(kind string) string {
 	kind = strings.TrimSpace(strings.ToLower(kind))
 	if kind == "" {

@@ -155,4 +155,51 @@ describe("<TaskActivityFeed>", () => {
 
     expect(await screen.findByText(/No activity yet/i)).toBeInTheDocument();
   });
+
+  it("renders lifecycle enums as plain labels, never raw snake_case (E1)", async () => {
+    // ICP-eval v3 [17:33:18]: "blocked_on_pr_merge" read as engineering
+    // jargon to a RevOps operator on a human surface.
+    tasksApi.getTaskActivity.mockResolvedValue({
+      task_id: "task-1",
+      events: [
+        {
+          id: "ev-blocked",
+          kind: "lifecycle",
+          timestamp: "2026-06-09T10:00:00Z",
+          actor: "ceo",
+          lifecycle: { from: "running", to: "blocked_on_pr_merge" },
+        },
+      ] satisfies TaskActivityEvent[],
+    });
+    renderFeed();
+
+    expect(
+      await screen.findByText("Blocked on review merge"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.queryByText(/blocked_on_pr_merge/)).not.toBeInTheDocument();
+  });
+
+  it("never renders raw process exhaust in turn summaries (E1)", async () => {
+    // ICP-eval v3 [18:14:10]: raw "signal: killed: signal: killed" lines
+    // rendered verbatim in the Activity rail.
+    tasksApi.getTaskActivity.mockResolvedValue({
+      task_id: "task-1",
+      events: [
+        {
+          id: "ev-killed-turn",
+          kind: "turn",
+          timestamp: "2026-06-09T10:05:00Z",
+          actor: "engineer",
+          summary: "signal: killed: signal: killed",
+        },
+      ] satisfies TaskActivityEvent[],
+    });
+    renderFeed();
+
+    expect(
+      await screen.findByText("Turn was interrupted before finishing."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/signal: killed/)).not.toBeInTheDocument();
+  });
 });

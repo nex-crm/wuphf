@@ -96,7 +96,7 @@ func TestWriteCompiledSkillLocked_ValidatesDescription(t *testing.T) {
 func TestWriteCompiledSkillLocked_SystemAuthorWhitelist(t *testing.T) {
 	t.Parallel()
 
-	systemAuthors := []string{"archivist", "scanner", "system"}
+	systemAuthors := []string{LibrarianSlug, "archivist", "scanner", "system"}
 
 	for _, author := range systemAuthors {
 		author := author
@@ -519,5 +519,35 @@ func TestWriteCompiledSkillLocked_AutoAssignsOwnerAgents(t *testing.T) {
 	}
 	if len(sk.OwnerAgents) != len(roster) {
 		t.Fatalf("OwnerAgents: got %v, want full roster %v", sk.OwnerAgents, roster)
+	}
+}
+
+// TestRegisterCompiledPlaybookSkill_AttributesToLibrarian pins ten-out-of-ten
+// E4: compiled artifacts are attributed to the real acting roster identity
+// (librarian), not the "@archivist" commit-author name no roster ever showed
+// (ICP-eval v3 [18:21:15]: 'Created by "@archivist" — an agent name never
+// shown in the roster').
+func TestRegisterCompiledPlaybookSkill_AttributesToLibrarian(t *testing.T) {
+	t.Parallel()
+	b := newTestBroker(t)
+
+	skillMD := []byte("---\nname: renewal-outreach\ndescription: Run the renewal outreach playbook.\n---\n\n## Steps\n\n1. Pull the account brief.\n2. Draft the outreach.\n")
+	if !b.RegisterCompiledPlaybookSkill("renewal-outreach", "team/playbooks/renewal-outreach.md", skillMD) {
+		t.Fatal("expected a new broker skill to be registered")
+	}
+
+	b.mu.Lock()
+	var registered *teamSkill
+	for i := range b.skills {
+		if b.skills[i].Name == "renewal-outreach" {
+			registered = &b.skills[i]
+		}
+	}
+	b.mu.Unlock()
+	if registered == nil {
+		t.Fatal("registered skill not found in broker state")
+	}
+	if registered.CreatedBy != LibrarianSlug {
+		t.Errorf("CreatedBy: got %q, want %q", registered.CreatedBy, LibrarianSlug)
 	}
 }

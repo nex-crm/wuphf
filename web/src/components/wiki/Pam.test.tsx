@@ -72,7 +72,12 @@ describe("<Pam>", () => {
       vi.advanceTimersByTime(3000);
     });
     expect(
-      screen.getByText("Of course it didn't. Classic."),
+      screen.getByText("Twelve? I'd better update the wiki."),
     ).toBeInTheDocument();
+    // Tone regression guard (ten-out-of-ten E1): the sarcastic filler line
+    // must never come back on a work surface (ICP-eval v3 [17:41:35]).
+    expect(
+      screen.queryByText("Of course it didn't. Classic."),
+    ).not.toBeInTheDocument();
   });
 });

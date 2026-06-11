@@ -306,9 +306,9 @@ func (s *SkillScanner) Scan(ctx context.Context, scopePath string, dryRun bool, 
 		// Stamp provenance + author identity onto the frontmatter before the
 		// write helper takes over.
 		fm.Metadata.Wuphf.SourceArticles = appendUnique(fm.Metadata.Wuphf.SourceArticles, c.relPath)
-		fm.Metadata.Wuphf.CreatedBy = "archivist"
+		fm.Metadata.Wuphf.CreatedBy = LibrarianSlug
 		spec := specToTeamSkill(fm, body, c.relPath)
-		spec.CreatedBy = "archivist"
+		spec.CreatedBy = LibrarianSlug
 		// Source-article frontmatter can opt into skill creation, but it is
 		// not authoritative for lifecycle state. Compiled skills go live
 		// immediately (core-loop R5 — no proposal/approval state).
@@ -514,7 +514,7 @@ func specToTeamSkill(fm SkillFrontmatter, body, sourceArticle string) teamSkill 
 		Title:              wuphf.Title,
 		Description:        fm.Description,
 		Content:            body,
-		CreatedBy:          stringOr(wuphf.CreatedBy, "archivist"),
+		CreatedBy:          stringOr(wuphf.CreatedBy, LibrarianSlug),
 		SourceArticle:      src,
 		Channel:            "general",
 		Tags:               append([]string(nil), wuphf.Tags...),
