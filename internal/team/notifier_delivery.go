@@ -159,7 +159,11 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 	// Review, and ChangesRequested tasks are blocked here — agents may still
 	// post comments via the comment endpoint, which does not go through this
 	// path. ErrIssueNotApproved is the sentinel; log and drop (no retry).
-	if task.LifecycleState != "" && !isExecutableTeamTaskStatus(task.LifecycleState) {
+	// task_followup bypasses the gate by design: it targets DELIVERED
+	// (terminal) tasks — the human posted after delivery and the owner must
+	// wake to answer or reopen (done-integrity fix family).
+	if action.Kind != taskFollowUpActionKind &&
+		task.LifecycleState != "" && !isExecutableTeamTaskStatus(task.LifecycleState) {
 		return
 	}
 	channel := normalizeChannelSlug(task.Channel)

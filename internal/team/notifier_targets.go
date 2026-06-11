@@ -187,6 +187,19 @@ func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask
 		}
 	}
 
+	// Post-done follow-up (done-integrity): the human posted in a delivered
+	// task's channel. Wake the OWNER — they hold the context to reopen or
+	// answer; the lead is not re-routed here (the message loop already woke
+	// it for the channel post itself).
+	if action.Kind == taskFollowUpActionKind {
+		if owner != "" && owner != actor {
+			addImmediate(owner)
+		} else if lead != "" && lead != actor {
+			addImmediate(lead)
+		}
+		return immediate, delayed
+	}
+
 	if owner == "" {
 		if lead != "" && lead != actor {
 			addImmediate(lead)

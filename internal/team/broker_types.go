@@ -372,6 +372,17 @@ type TaskReviewObjection struct {
 	Body string `json:"body,omitempty"`
 	// At is the RFC3339 timestamp the objection was raised.
 	At string `json:"at"`
+	// ArtifactHash is the content hash ("sha256:<hex>") of the task's
+	// delivered artifact at the moment changes were requested. On the next
+	// agent resubmission (submit_for_review/complete) the broker requires
+	// the artifact bytes to have CHANGED — a byte-identical "revision" is
+	// refused (gateTaskResubmissionArtifactDelta; ICP-eval v2 [00:30]:
+	// "revised and back in review" with an untouched file). Empty when the
+	// task had no artifact or the file was unreadable at request time.
+	// Additive wire key "artifact_hash"; rides teamTaskWire through the
+	// shared TaskReviewObjection pointer on changes_requested /
+	// human_objection.
+	ArtifactHash string `json:"artifact_hash,omitempty"`
 }
 
 // TaskHumanNote records one human message posted into a task's channel

@@ -180,6 +180,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"notebook-bookends", evalJobNotebookBookends},
 		{"hybrid-retrieval", evalJobHybridRetrieval},
 		{"grounding", evalJobGrounding},
+		{"done-integrity", evalJobDoneIntegrity},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))
@@ -1673,5 +1674,215 @@ func evalJobGrounding(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	r.add(job, "human_note_pending round-trips the teamTask wire",
 		strings.Contains(string(blob), `"human_note_pending"`) && rt != nil && rt.Halt && rt.Body == "stop the line" && rt.From == "human",
 		fmt.Sprintf("blob=%s", truncate(string(blob), 200)), "")
+	return nil
+}
+
+// evalJobDoneIntegrity: make done mean done (done-integrity fix family;
+// ICP-eval v2 [01:22], [01:36], [00:30], [01:48]/[01:58]). Three contracts:
+//
+//	(a) DoD → machine verification at intake — a create whose details state
+//	    "Definition of done: a file out/report.md exists" auto-derives a
+//	    required command check (with the action-log stamp), the done claim
+//	    is blocked while the file is missing, and succeeds once it exists.
+//	(b) artifact delta on resubmission — after a human request_changes on a
+//	    task with a readable artifact, an agent resubmission with a
+//	    byte-identical artifact is refused; modifying the artifact clears
+//	    the gate. An unverifiable artifact degrades to an audit stamp.
+//	(c) post-done routing — a human message in a delivered task's channel
+//	    arms the follow-up note + task_followup action, and the owner is
+//	    re-enqueued (headlessCodexRunTurnOverride seam) with a packet that
+//	    leads FOLLOW-UP ON DELIVERED TASK and names the reopen path.
+func evalJobDoneIntegrity(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "done-integrity"
+
+	// (a) DoD in the create text → required machine check, harness-enforced.
+	created, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Build the launch report",
+		Details:   "Definition of done: a file out/report.md exists. Don't tell me it's done unless that check passes.",
+		Owner:     "eng",
+		CreatedBy: "ceo",
+	})
+	if err != nil {
+		return err
+	}
+	dodTask := fx.broker.TaskByID(created.Task.ID)
+	derived := dodTask != nil && dodTask.Verification != nil &&
+		dodTask.Verification.Kind == taskVerificationKindCommand &&
+		dodTask.Verification.Required &&
+		strings.Contains(dodTask.Verification.Spec, "out/report.md")
+	r.add(job, "explicit DoD in the create text auto-derives a required machine check", derived,
+		fmt.Sprintf("verification=%+v", dodTask.Verification), "")
+	stamped := false
+	for _, a := range fx.broker.Actions() {
+		if a.Kind == "verification_derived" && a.RelatedID == created.Task.ID &&
+			strings.Contains(a.Summary, "verification auto-derived from DoD") {
+			stamped = true
+		}
+	}
+	r.add(job, "auto-derivation is stamped on the action log", stamped, "", "")
+
+	_, blockedErr := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: created.Task.ID, Channel: "general", CreatedBy: "eng"})
+	var mutationErr *TaskMutationError
+	stillNotDone := fx.broker.TaskByID(created.Task.ID) != nil &&
+		!strings.EqualFold(strings.TrimSpace(fx.broker.TaskByID(created.Task.ID).status), "done")
+	r.add(job, "done claim is blocked while the DoD file is missing",
+		errors.As(blockedErr, &mutationErr) && mutationErr.Kind == TaskMutationVerificationFailed && stillNotDone,
+		fmt.Sprintf("err=%v", blockedErr), "")
+
+	// Produce the file the DoD demands; fixture tasks have no worktree, so
+	// pin the derived relative check to the scratch dir (the lifecycle-basic
+	// pattern). The DERIVED shape was asserted above before this rewrite.
+	dodFile := filepath.Join(fx.scratchDir, "out", "report.md")
+	if err := os.MkdirAll(filepath.Dir(dodFile), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(dodFile, []byte("# Launch report\n"), 0o644); err != nil {
+		return err
+	}
+	fx.broker.mu.Lock()
+	if t := fx.broker.taskByIDLocked(created.Task.ID); t != nil && t.Verification != nil {
+		t.Verification.Spec = "test -f " + dodFile
+	}
+	fx.broker.mu.Unlock()
+	_, completeErr := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: created.Task.ID, Channel: "general", CreatedBy: "eng"})
+	verified := fx.broker.TaskByID(created.Task.ID)
+	r.add(job, "done claim succeeds once the DoD file exists",
+		completeErr == nil && verified != nil && verified.VerificationResult != nil && verified.VerificationResult.Pass,
+		fmt.Sprintf("err=%v result=%+v", completeErr, verified.VerificationResult), "")
+
+	// (b) Artifact delta on resubmission. The artifact lives in the wiki so
+	// the gate resolves it through the wiki root.
+	worker := fx.broker.WikiWorker()
+	if worker == nil {
+		return fmt.Errorf("wiki worker not wired")
+	}
+	const deltaArtifact = "team/accounts/launch-onepager.md"
+	if _, _, err := worker.Enqueue(context.Background(), ArchivistAuthor, deltaArtifact,
+		"# One-pager v1\nchampion: Jordan Park\n", "replace", "fixture: one-pager v1"); err != nil {
+		return err
+	}
+	worker.WaitForIdle()
+	deltaCreated, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Build the Acme exec one-pager",
+		Details: "Draft the exec one-pager from the account brief.", Owner: "eng", CreatedBy: "ceo",
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "submit_for_review", ID: deltaCreated.Task.ID, Channel: "general", CreatedBy: "eng",
+		Details: "First draft attached.", ArtifactPath: deltaArtifact,
+	}); err != nil {
+		return err
+	}
+	if _, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "request_changes", ID: deltaCreated.Task.ID, Channel: "general", CreatedBy: "human",
+		Details: "Wrong champion — use Dana Whitfield.",
+	}); err != nil {
+		return err
+	}
+	bounced := fx.broker.TaskByID(deltaCreated.Task.ID)
+	r.add(job, "request_changes stamps the artifact content hash",
+		bounced != nil && bounced.ChangesRequested != nil &&
+			strings.HasPrefix(bounced.ChangesRequested.ArtifactHash, "sha256:"),
+		fmt.Sprintf("changes_requested=%+v", bounced.ChangesRequested), "")
+
+	_, identicalErr := fx.broker.MutateTask(TaskPostRequest{
+		Action: "submit_for_review", ID: deltaCreated.Task.ID, Channel: "general", CreatedBy: "eng",
+		Details: "Revised per feedback.",
+	})
+	r.add(job, "byte-identical resubmission is blocked",
+		errors.As(identicalErr, &mutationErr) && mutationErr.Kind == TaskMutationInvalid &&
+			strings.Contains(mutationErr.Message, "byte-identical"),
+		fmt.Sprintf("err=%v", identicalErr), "")
+
+	if _, _, err := worker.Enqueue(context.Background(), ArchivistAuthor, deltaArtifact,
+		"# One-pager v2\nchampion: Dana Whitfield\n", "replace", "fixture: one-pager v2"); err != nil {
+		return err
+	}
+	worker.WaitForIdle()
+	_, changedErr := fx.broker.MutateTask(TaskPostRequest{
+		Action: "submit_for_review", ID: deltaCreated.Task.ID, Channel: "general", CreatedBy: "eng",
+		Details: "Revised with Dana Whitfield.",
+	})
+	r.add(job, "resubmission succeeds after the artifact changes", changedErr == nil,
+		fmt.Sprintf("err=%v", changedErr), "")
+
+	// (c) Post-done routing: human posts in a delivered task's channel →
+	// follow-up note + task_followup action → owner re-enqueued through the
+	// wake seam with the FOLLOW-UP packet.
+	doneTask, _, err := fx.broker.EnsureTask("general", "Ship the landing page for the beta waitlist",
+		"Build landing/index.html with the email capture form.", "eng", "ceo", "")
+	if err != nil {
+		return err
+	}
+	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: doneTask.ID, Channel: "general", CreatedBy: "eng"}); err != nil {
+		return err
+	}
+	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "approve", ID: doneTask.ID, Channel: "general", CreatedBy: "ceo"}); err != nil {
+		return err
+	}
+	delivered := fx.broker.TaskByID(doneTask.ID)
+	doneChannel := normalizeChannelSlug(delivered.Channel)
+	if doneChannel == "" || doneChannel == "general" {
+		return fmt.Errorf("done-integrity: expected a per-task channel for the delivered task, got %q", delivered.Channel)
+	}
+	const followUpMsg = "Make the tagline punchier — keep everything else."
+	if _, err := fx.broker.PostMessage("you", doneChannel, followUpMsg, nil, ""); err != nil {
+		return err
+	}
+	after := fx.broker.TaskByID(doneTask.ID)
+	r.add(job, "human post in a delivered task's channel arms the follow-up note",
+		after != nil && strings.EqualFold(strings.TrimSpace(after.status), "done") &&
+			after.HumanNotePending != nil && strings.Contains(after.HumanNotePending.Body, "tagline punchier"),
+		fmt.Sprintf("status=%q note=%+v", strings.TrimSpace(after.status), after.HumanNotePending), "")
+	followUpAction := false
+	for _, a := range fx.broker.Actions() {
+		if a.Kind == taskFollowUpActionKind && a.RelatedID == doneTask.ID {
+			followUpAction = true
+		}
+	}
+	r.add(job, "follow-up wake action is appended for the owner", followUpAction, "", "")
+
+	// The wake path: task_followup routes to the OWNER and bypasses the
+	// executable-lifecycle dispatch gate (the task is terminal by design).
+	immediate, _ := fx.launcher.taskNotificationTargets(officeActionLog{
+		Kind: taskFollowUpActionKind, Actor: "human", Channel: doneChannel, RelatedID: doneTask.ID,
+	}, *after)
+	ownerTargeted := len(immediate) == 1 && immediate[0].Slug == "eng"
+	r.add(job, "follow-up targets the owner", ownerTargeted, fmt.Sprintf("immediate=%+v", immediate), "")
+
+	woke := make(chan string, 1)
+	stub := func(_ *Launcher, _ context.Context, slug, notification string, _ ...string) error {
+		select {
+		case woke <- slug + "\n" + notification:
+		default:
+		}
+		return nil
+	}
+	prior := headlessCodexRunTurnOverride.Load()
+	headlessCodexRunTurnOverride.Store(&stub)
+	defer headlessCodexRunTurnOverride.Store(prior)
+	fx.launcher.sendTaskUpdate(
+		notificationTarget{Slug: "eng"},
+		officeActionLog{Kind: taskFollowUpActionKind, Actor: "human", Channel: doneChannel, RelatedID: doneTask.ID},
+		*after,
+		"Human follow-up on delivered task.",
+	)
+	dispatched := ""
+	select {
+	case dispatched = <-woke:
+	case <-time.After(8 * time.Second):
+	}
+	fx.launcher.stopHeadlessWorkers()
+	r.add(job, "owner is re-enqueued with the FOLLOW-UP packet",
+		strings.HasPrefix(dispatched, "eng\n") &&
+			strings.Contains(dispatched, "FOLLOW-UP ON DELIVERED TASK") &&
+			strings.Contains(dispatched, "tagline punchier") &&
+			strings.Contains(dispatched, "action=reopen"),
+		fmt.Sprintf("dispatched=%d chars", len(dispatched)), "")
+	consumed := fx.broker.TaskByID(doneTask.ID)
+	r.add(job, "follow-up packet build consumes the note",
+		consumed != nil && consumed.HumanNotePending == nil, "", "")
 	return nil
 }

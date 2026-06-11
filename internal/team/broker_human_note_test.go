@@ -67,7 +67,10 @@ func TestHumanNote_LeadingHaltTokens(t *testing.T) {
 func TestHumanNote_HumanPostMarksRunningTaskOnly(t *testing.T) {
 	t.Parallel()
 	b := newHumanNoteTestBroker(t)
-	// Add a non-running sibling and a system task in the same channel.
+	// Add a non-running sibling and a system task in the same channel. The
+	// done sibling lives in #general, so the post-done follow-up marking
+	// (broker_task_followup_test.go) does not apply either — #general is
+	// the lobby and never wakes legacy done tasks.
 	b.tasks = append(b.tasks,
 		teamTask{ID: "task-note-2", Channel: "general", Title: "Done work", Owner: "eng", status: "done"},
 		teamTask{ID: "task-note-3", Channel: "general", Title: "Backup & Migration", Owner: "ceo", status: "in_progress", System: true},

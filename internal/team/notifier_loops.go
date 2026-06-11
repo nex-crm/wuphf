@@ -107,7 +107,8 @@ func (l *Launcher) notifyTaskActionsLoop() {
 		if l.broker.HasPendingInterview() {
 			continue
 		}
-		if action.Kind != "task_created" && action.Kind != "task_updated" && action.Kind != "task_unblocked" {
+		if action.Kind != "task_created" && action.Kind != "task_updated" &&
+			action.Kind != "task_unblocked" && action.Kind != taskFollowUpActionKind {
 			continue
 		}
 		task, ok := l.taskForAction(action)
@@ -117,8 +118,11 @@ func (l *Launcher) notifyTaskActionsLoop() {
 		// Skip "done" tasks for task_created / task_updated — the agent that completed
 		// the task should send a follow-up broadcast which wakes CEO via the message
 		// loop. But for task_unblocked the task status is still "in_progress" (it was
-		// just unblocked), so we must never skip it regardless of status.
-		if action.Kind != "task_unblocked" && strings.EqualFold(strings.TrimSpace(task.status), "done") {
+		// just unblocked), so we must never skip it regardless of status. task_followup
+		// exists PRECISELY for done tasks (a human posted after delivery), so it also
+		// passes the done-skip.
+		if action.Kind != "task_unblocked" && action.Kind != taskFollowUpActionKind &&
+			strings.EqualFold(strings.TrimSpace(task.status), "done") {
 			continue
 		}
 		func() {

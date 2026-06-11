@@ -874,7 +874,11 @@ func changesRequestedPacketLines(task teamTask) []string {
 // humanNotePacketBlock renders the pending human note for the task owner's
 // packet. Empty for non-owners (the note is addressed to the working agent)
 // and when no note is pending. The HALT variant names the standing stop
-// order explicitly.
+// order explicitly. For a task in a terminal-done state the note is a
+// post-delivery follow-up (done-integrity fix family): the block leads with
+// FOLLOW-UP ON DELIVERED TASK and tells the owner exactly how to act —
+// reopen for revision requests, answer for questions — instead of leaving
+// the human's post in a dead zone (ICP-eval v2 [01:48]/[01:58]).
 func humanNotePacketBlock(task teamTask, slug string) string {
 	note := task.HumanNotePending
 	if note == nil {
@@ -886,6 +890,12 @@ func humanNotePacketBlock(task teamTask, slug string) string {
 	body := strings.TrimSpace(note.Body)
 	if body == "" {
 		return ""
+	}
+	if taskInTerminalDoneState(&task) {
+		return fmt.Sprintf(
+			"FOLLOW-UP ON DELIVERED TASK — the human posted after delivery: @%s said: %s\nIf this is a revision request, reopen the task (team_task action=reopen id=%s) and do the work; if it is a question, answer it in the task channel.",
+			note.From, body, task.ID,
+		)
 	}
 	block := fmt.Sprintf("HUMAN POSTED WHILE YOU WORKED — read before continuing: @%s said: %s", note.From, body)
 	if note.Halt {
@@ -912,6 +922,8 @@ func (b *notificationContextBuilder) TaskNotificationContent(action officeAction
 		verb = "Task unblocked — dependencies resolved, ready to start"
 	case "watchdog_alert":
 		verb = "Watchdog reminder"
+	case taskFollowUpActionKind:
+		verb = "Follow-up on delivered task"
 	}
 	owner := strings.TrimSpace(task.Owner)
 	if owner == "" {

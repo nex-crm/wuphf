@@ -25,6 +25,8 @@ package team
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -244,5 +246,162 @@ func (b *Broker) gateTaskCompletionVerification(body TaskPostRequest) error {
 			nil,
 		)
 	}
+	return nil
+}
+
+// ── Resubmission artifact delta (done-integrity fix family) ─────────────────
+//
+// ICP-eval v2 [00:30]: after a human request-changes, @ae announced "revised
+// and back in review" while the artifact on disk was byte-identical — the
+// review gate accepted a resubmission with zero artifact delta. The broker
+// now stamps a content hash of the delivered artifact at request_changes
+// time (TaskReviewObjection.ArtifactHash) and, on the next agent
+// submit_for_review/complete, requires the artifact bytes to have CHANGED.
+// When the artifact cannot be read (no worktree, external/visual-artifact
+// reference), the resubmission is allowed but the action log records that
+// no delta could be verified.
+
+// taskResubmitUnverifiedActionKind is the audit-trail action kind stamped
+// when a changes-requested task is resubmitted without a verifiable
+// artifact delta. Not a notify-loop kind — audit only.
+const taskResubmitUnverifiedActionKind = "task_resubmit_unverified"
+
+// taskResubmitGateAction reports whether the mutation re-lands work that a
+// reviewer previously bounced.
+func taskResubmitGateAction(action string) bool {
+	switch action {
+	case "submit_for_review", "complete":
+		return true
+	}
+	return false
+}
+
+// resolveTaskArtifactFile maps a wiki-relative artifact reference onto a
+// readable file, trying the task worktree first, then the wiki root.
+// Returns "" when the reference is not a readable file anywhere (external
+// reference, visual-artifact id, missing roots).
+func resolveTaskArtifactFile(artifact, workDir, wikiRoot string) string {
+	artifact = strings.TrimSpace(artifact)
+	if artifact == "" || validateTaskArtifactPath(artifact) != nil {
+		return ""
+	}
+	rel := filepath.FromSlash(artifact)
+	for _, root := range []string{strings.TrimSpace(workDir), strings.TrimSpace(wikiRoot)} {
+		if root == "" {
+			continue
+		}
+		full := filepath.Join(root, rel)
+		if info, err := os.Stat(full); err == nil && !info.IsDir() {
+			return full
+		}
+	}
+	return ""
+}
+
+// hashTaskArtifactFile returns "sha256:<hex>" of the file content, or ""
+// when the file cannot be read. MUST be called without b.mu held.
+func hashTaskArtifactFile(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// wikiRootLocked returns the active wiki repo root, or "". Caller holds b.mu.
+func (b *Broker) wikiRootLocked() string {
+	if b.wikiWorker == nil || b.wikiWorker.Repo() == nil {
+		return ""
+	}
+	return b.wikiWorker.Repo().Root()
+}
+
+// computeTaskArtifactHash peeks the task's artifact reference under lock and
+// hashes the resolved file outside it (same lock discipline as the
+// verification gate). Returns the artifact reference it hashed and the hash
+// ("" when unreadable). MUST be called without b.mu held.
+func (b *Broker) computeTaskArtifactHash(taskID string) (artifact, hash string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return "", ""
+	}
+	b.mu.Lock()
+	task := b.taskByIDLocked(taskID)
+	if task == nil || strings.TrimSpace(task.Artifact) == "" {
+		b.mu.Unlock()
+		return "", ""
+	}
+	artifact = strings.TrimSpace(task.Artifact)
+	workDir := strings.TrimSpace(task.WorktreePath)
+	wikiRoot := b.wikiRootLocked()
+	b.mu.Unlock()
+	return artifact, hashTaskArtifactFile(resolveTaskArtifactFile(artifact, workDir, wikiRoot))
+}
+
+// gateTaskResubmissionArtifactDelta is the MutateTask pre-phase for agent
+// resubmissions of changes-requested work. It returns nil when the mutation
+// may proceed and a TaskMutationInvalid error when the artifact is
+// byte-identical to the version the reviewer bounced. Runs alongside the
+// verification peek — file reads happen OUTSIDE b.mu. Human actors are
+// exempt (the human knows what they reviewed; their actions also clear the
+// objection on the locked path).
+func (b *Broker) gateTaskResubmissionArtifactDelta(body TaskPostRequest) error {
+	action := strings.TrimSpace(body.Action)
+	if !taskResubmitGateAction(action) {
+		return nil
+	}
+	actor := strings.TrimSpace(body.CreatedBy)
+	if isHumanMessageSender(actor) {
+		return nil
+	}
+	id := strings.TrimSpace(body.ID)
+	if id == "" {
+		return nil
+	}
+
+	// Peek phase: copy what the check needs, under lock.
+	b.mu.Lock()
+	task := b.taskByIDLocked(id)
+	if task == nil || task.ChangesRequested == nil || strings.TrimSpace(task.Artifact) == "" {
+		b.mu.Unlock()
+		return nil
+	}
+	storedHash := strings.TrimSpace(task.ChangesRequested.ArtifactHash)
+	artifact := strings.TrimSpace(task.Artifact)
+	workDir := strings.TrimSpace(task.WorktreePath)
+	wikiRoot := b.wikiRootLocked()
+	channel := normalizeChannelSlug(task.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	b.mu.Unlock()
+
+	// Compare phase: no lock held.
+	currentHash := hashTaskArtifactFile(resolveTaskArtifactFile(artifact, workDir, wikiRoot))
+	if storedHash != "" && currentHash != "" {
+		if currentHash == storedHash {
+			return taskMutationError(
+				TaskMutationInvalid,
+				fmt.Sprintf("cannot %s %s: resubmission requires an artifact change — the artifact (%s) is byte-identical to the version changes were requested on. Edit the deliverable to address the feedback, then resubmit.", action, id, artifact),
+				nil,
+			)
+		}
+		return nil
+	}
+
+	// Stamp phase: the delta could not be verified (no readable worktree or
+	// wiki copy, external reference, or no hash was captured at
+	// request_changes time). Allow the resubmission but leave the audit
+	// line. Persisted by the resubmitting mutation's own saveLocked.
+	b.mu.Lock()
+	if t := b.taskByIDLocked(id); t != nil && t.ChangesRequested != nil {
+		b.appendActionLocked(taskResubmitUnverifiedActionKind, "office", channel, actor,
+			truncateSummary("resubmitted without verifiable artifact delta: "+artifact, 140), id)
+	}
+	b.mu.Unlock()
 	return nil
 }

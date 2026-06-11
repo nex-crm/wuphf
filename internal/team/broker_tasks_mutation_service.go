@@ -104,16 +104,49 @@ func humanNoteLeadsWithHalt(content string) bool {
 	return false
 }
 
-// markHumanNoteOnRunningTasksLocked stamps HumanNotePending on every
-// running, non-system task that lives in the message's channel. Called from
-// the message-post paths for HUMAN senders only — the live failure this
-// closes is ICP-eval v2 [00:50]: a typed "Stop — do not build a placeholder"
-// was never seen by the mid-turn agent and the fabricated one-pager shipped
-// anyway. Per-task channels make this 1:1 in practice; #general's archived
-// system task is excluded by the running-status guard. Pure in-memory field
-// writes under the already-held lock — the caller's saveLocked persists it.
-// Caller must hold b.mu.
-func (b *Broker) markHumanNoteOnRunningTasksLocked(msg channelMessage) {
+// taskFollowUpActionKind is the action kind appended when a human posts
+// into a DELIVERED task's channel. notifyTaskActionsLoop forwards it past
+// the done-skip so the owner is re-engaged through the same wake path
+// reopen uses (B1) — the structural fix for the post-done dead zone
+// (ICP-eval v2 [01:48]/[01:58]: "make the tagline punchier" on a delivered
+// task died in a 22-minute void).
+const taskFollowUpActionKind = "task_followup"
+
+// taskInTerminalDoneState reports whether the task sits in a delivered
+// terminal state (done/approved) — the states where a later human post is a
+// follow-up on shipped work rather than mid-flight steering. Archived tasks
+// are excluded: the legacy channel fold-in parks orphaned chat under
+// archived owner tasks that must never wake on lobby traffic.
+func taskInTerminalDoneState(task *teamTask) bool {
+	if task == nil || task.LifecycleState == LifecycleStateArchived {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(task.status), "done") ||
+		task.LifecycleState == LifecycleStateApproved
+}
+
+// markHumanNoteOnChannelTasksLocked stamps HumanNotePending on every
+// non-system task in the message's channel that is either RUNNING or in a
+// terminal-done state. Called from the message-post paths for HUMAN senders
+// only.
+//
+// Running tasks: the live failure this closes is ICP-eval v2 [00:50] — a
+// typed "Stop — do not build a placeholder" was never seen by the mid-turn
+// agent and the fabricated one-pager shipped anyway. Per-task channels make
+// this 1:1 in practice; #general's archived system task is excluded by the
+// status guard.
+//
+// Done tasks (done-integrity fix family): a human post after delivery is a
+// follow-up — the note is stamped the same way AND a task_followup action
+// is appended so the notify loop re-engages the OWNER with a packet that
+// leads "FOLLOW-UP ON DELIVERED TASK" (humanNotePacketBlock). Restricted to
+// non-#general channels: #general is the office lobby holding every legacy
+// done task, and waking all their owners on any lobby post would be a
+// broadcast storm; per-task channels are where the live dead zone occurred.
+//
+// Pure in-memory writes under the already-held lock — the caller's
+// saveLocked persists them. Caller must hold b.mu.
+func (b *Broker) markHumanNoteOnChannelTasksLocked(msg channelMessage) {
 	if !isHumanMessageSender(msg.From) || strings.TrimSpace(msg.Content) == "" {
 		return
 	}
@@ -135,7 +168,9 @@ func (b *Broker) markHumanNoteOnRunningTasksLocked(msg channelMessage) {
 		}
 		running := strings.EqualFold(strings.TrimSpace(task.status), "in_progress") ||
 			task.LifecycleState == LifecycleStateRunning
-		if !running {
+		followUp := !running && channel != "general" &&
+			taskInTerminalDoneState(task) && strings.TrimSpace(task.Owner) != ""
+		if !running && !followUp {
 			continue
 		}
 		// Fresh struct every time (rollback safety; see TaskHumanNote).
@@ -144,6 +179,10 @@ func (b *Broker) markHumanNoteOnRunningTasksLocked(msg channelMessage) {
 			Body: truncate(strings.TrimSpace(msg.Content), humanNoteHaltClipChars),
 			At:   now,
 			Halt: humanNoteLeadsWithHalt(msg.Content),
+		}
+		if followUp {
+			b.appendActionLocked(taskFollowUpActionKind, "office", channel, strings.TrimSpace(msg.From),
+				truncateSummary("human follow-up on delivered task: "+strings.TrimSpace(msg.Content), 140), task.ID)
 		}
 	}
 }
@@ -253,6 +292,13 @@ func (b *Broker) checkTaskActionAuthLocked(action, actor, targetTaskID string) e
 		// can cancel anything via the lead path above. Specialists
 		// can't cancel work they don't own.
 		"cancel": true,
+		// reopen lets the owner pick their own delivered task back up —
+		// the post-done follow-up packet ("FOLLOW-UP ON DELIVERED TASK")
+		// instructs the owner to reopen when the human's post is a
+		// revision request, and an owner-scoped reopen on their own work
+		// is a status transition, not a scope edit. Reopening someone
+		// ELSE's task stays CEO/human-only.
+		"reopen": true,
 	}
 	// Reviewer-allowed actions: an agent assigned as a reviewer on the
 	// task can bounce work back with request_changes and (in PR-loop
@@ -426,12 +472,30 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		channel = "general"
 	}
 
+	// Resubmission artifact-delta gate (done-integrity): an agent re-landing
+	// changes-requested work must have actually changed the delivered
+	// artifact. Runs BEFORE the lock below because it reads artifact files
+	// (lock discipline in task_verification.go), and before the verification
+	// gate so a blocked resubmission never pays for a command check.
+	if err := b.gateTaskResubmissionArtifactDelta(body); err != nil {
+		return TaskResponse{}, err
+	}
+
 	// U1.1 verification gate: a complete/approve on a task with a required
 	// definition-of-done check must pass that check first. Runs BEFORE the
 	// lock below because checks execute external commands (lock discipline
 	// in task_verification.go).
 	if err := b.gateTaskCompletionVerification(body); err != nil {
 		return TaskResponse{}, err
+	}
+
+	// Artifact-hash capture for request_changes (done-integrity): hash the
+	// delivered artifact NOW, outside the lock, so the objection stamped
+	// below can carry it. Empty when the task has no artifact or the file
+	// is unreadable — the resubmission gate then degrades to an audit stamp.
+	var requestChangesArtifact, requestChangesArtifactHash string
+	if action == "request_changes" {
+		requestChangesArtifact, requestChangesArtifactHash = b.computeTaskArtifactHash(body.ID)
 	}
 
 	b.mu.Lock()
@@ -563,6 +627,17 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			rollbackTask()
 			return TaskResponse{}, taskMutationError(TaskMutationInvalid, verr.Error(), nil)
 		}
+		// DoD→verification at intake (done-integrity, task_dod_derive.go):
+		// when the creating text states an explicit machine-checkable
+		// definition of done and no verification was passed, encode it now —
+		// the human's check gates done from the first turn.
+		dodDerived := false
+		if verification == nil {
+			if derived := deriveTaskVerificationFromDetails(body.Details); derived != nil {
+				verification = derived
+				dodDerived = true
+			}
+		}
 		task := teamTask{
 			ID:               taskID,
 			Channel:          channel,
@@ -664,6 +739,10 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			task = b.tasks[len(b.tasks)-1]
 		}
 		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
+		if dodDerived {
+			b.appendActionLocked("verification_derived", "office", channel, "system",
+				truncateSummary("verification auto-derived from DoD: "+verification.Spec, 140), task.ID)
+		}
 		// Seed a Decision Packet for Issues so the /tasks/{id} read path
 		// returns 200 immediately instead of 404 "decision packet not yet
 		// available". Pre-fix: tasks created via team_task action=create
@@ -906,6 +985,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				Body:  strings.TrimSpace(body.Details),
 				At:    now,
 			}
+			// Pin the artifact's content hash (computed outside the lock
+			// above) so the resubmission gate can require a real delta.
+			// Only stamp when the artifact reference is still the one we
+			// hashed — a concurrent mutation may have swapped it.
+			if requestChangesArtifactHash != "" && strings.TrimSpace(task.Artifact) == requestChangesArtifact {
+				objection.ArtifactHash = requestChangesArtifactHash
+			}
 			task.ChangesRequested = objection
 			if isHumanMessageSender(actor) {
 				task.HumanObjection = objection
@@ -956,11 +1042,19 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			}
 			task.Definition = def
 			// Machine-checkable success criteria arrive WITH their check
-			// in the same call (the broker never parses criteria text
-			// into commands). Only set when no check exists yet so a
-			// re-define cannot silently replace an established gate.
-			if defVerification != nil && task.Verification == nil {
-				task.Verification = defVerification
+			// in the same call. Only set when no check exists yet so a
+			// re-define cannot silently replace an established gate. When
+			// the CEO dropped a human-stated DoD anyway, the conservative
+			// deriver (task_dod_derive.go) backstops it from the criteria
+			// text and stamps the action log.
+			if task.Verification == nil {
+				if defVerification != nil {
+					task.Verification = defVerification
+				} else if derived := deriveTaskVerificationFromDefinition(def); derived != nil {
+					task.Verification = derived
+					b.appendActionLocked("verification_derived", "office", taskChannel, "system",
+						truncateSummary("verification auto-derived from DoD: "+derived.Spec, 140), task.ID)
+				}
 			}
 			appendDetails = true
 		case "reject":
