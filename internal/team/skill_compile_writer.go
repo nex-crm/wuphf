@@ -373,6 +373,60 @@ func (b *Broker) writeCompiledSkillLocked(spec teamSkill) (*teamSkill, error) {
 	return result, nil
 }
 
+// RegisterCompiledPlaybookSkill folds a deterministically compiled playbook
+// skill (team/playbooks/.compiled/{slug}/SKILL.md) into broker skill state so
+// GET /skills — and therefore the Config→Skills surface — lists it the moment
+// the compile lands. Before this hook the playbook compiler wrote the file to
+// disk while the broker stayed empty, so the product showed "No skills yet"
+// next to a wiki chip pointing at a real compiled skill (ICP eval N9).
+//
+// The write rides the same writeCompiledSkillLocked funnel as the Stage A
+// scanner, so dedup, the safety guard, and roster auto-assignment all apply.
+// Idempotent: a recompile of an already-registered slug dedups to the
+// existing record. Human rejections are respected via the tombstone.
+//
+// Returns true only when a NEW broker skill was created for this slug.
+func (b *Broker) RegisterCompiledPlaybookSkill(slug, sourcePath string, skillBytes []byte) bool {
+	fm, body, err := ParseSkillMarkdown(skillBytes)
+	if err != nil {
+		slog.Warn("playbook skill register: parse compiled SKILL.md failed",
+			"slug", slug, "err", err)
+		return false
+	}
+	fm.Metadata.Wuphf.SourceArticles = appendUnique(fm.Metadata.Wuphf.SourceArticles, sourcePath)
+	spec := specToTeamSkill(fm, body, sourcePath)
+	spec.CreatedBy = "archivist"
+	// Compiled skills go live immediately (core-loop R5); the human curates
+	// after the fact via the Skills page.
+	spec.Status = "active"
+	spec.DisabledFromStatus = ""
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Respect human rejections: a tombstoned slug or source article must not
+	// resurrect through the deterministic register path.
+	if entries, _ := b.loadSkillTombstoneLocked(); len(entries) > 0 {
+		for _, e := range entries {
+			if skillSlug(e.Slug) == skillSlug(fm.Name) || strings.TrimSpace(e.SourceArticle) == sourcePath {
+				return false
+			}
+		}
+	}
+
+	existed := b.findSkillByNameLocked(fm.Name) != nil
+	sk, werr := b.writeCompiledSkillLocked(spec)
+	if werr != nil {
+		slog.Warn("playbook skill register: write funnel rejected",
+			"slug", slug, "err", werr)
+		return false
+	}
+	// Semantic dedup / enhance can return a DIFFERENT existing skill — only
+	// count a creation when the returned record carries this slug and the
+	// slug did not exist before the call.
+	return sk != nil && !existed && skillSlug(sk.Name) == skillSlug(fm.Name)
+}
+
 // allMemberSlugsLocked returns every registered office member slug, sorted
 // for deterministic OwnerAgents assignment. Caller must hold b.mu.
 func (b *Broker) allMemberSlugsLocked() []string {

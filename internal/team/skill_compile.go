@@ -156,7 +156,19 @@ func (b *Broker) compileWikiSkills(ctx context.Context, scopePath string, dryRun
 	b.mu.Unlock()
 
 	scanner := b.ensureSkillScanner()
+
+	// Deterministic pre-pass (ICP eval N9): compiled playbook skills already
+	// on disk must become visible in broker state even when the LLM scanner
+	// can't promote their draft source (no skill frontmatter + flaky/absent
+	// LLM). This is what makes the manual Compile button honest for an
+	// office whose .compiled/ tree predates the auto-register hook.
+	registered := 0
+	if !dryRun {
+		registered = b.registerCompiledPlaybookSkillsFromDisk()
+	}
+
 	res, scanErr := scanner.Scan(ctx, scopePath, dryRun, trigger)
+	res.Proposed += registered
 
 	atomic.StoreInt64(&b.skillCompileMetrics.LastSkillCompilePassAtNano, time.Now().UTC().UnixNano())
 	atomic.StoreInt64(&b.skillCompileMetrics.LastTickDurationMs, res.DurationMs)
@@ -186,6 +198,48 @@ func (b *Broker) compileWikiSkills(ctx context.Context, scopePath string, dryRun
 	}
 
 	return res, scanErr
+}
+
+// registerCompiledPlaybookSkillsFromDisk walks team/playbooks/.compiled/*/
+// SKILL.md and registers every compiled playbook skill broker state does not
+// know about yet. Deterministic — no LLM. Returns the number of NEWLY
+// registered skills; already-registered slugs dedup to a no-op inside
+// RegisterCompiledPlaybookSkill.
+func (b *Broker) registerCompiledPlaybookSkillsFromDisk() int {
+	b.mu.Lock()
+	worker := b.wikiWorker
+	b.mu.Unlock()
+	if worker == nil {
+		return 0
+	}
+	repo := worker.Repo()
+	if repo == nil {
+		return 0
+	}
+	dir := filepath.Join(repo.Root(), filepath.FromSlash(PlaybookCompiledDirRel))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// Missing dir just means no playbook has compiled yet.
+		return 0
+	}
+	registered := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		slug := e.Name()
+		if !slugPattern.MatchString(slug) {
+			continue
+		}
+		raw, rerr := os.ReadFile(filepath.Join(dir, slug, "SKILL.md"))
+		if rerr != nil {
+			continue
+		}
+		if b.RegisterCompiledPlaybookSkill(slug, playbookSourceRel(slug), raw) {
+			registered++
+		}
+	}
+	return registered
 }
 
 // startSkillCompileCron launches the background ticker. Called from the

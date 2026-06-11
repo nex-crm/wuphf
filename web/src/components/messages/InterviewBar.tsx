@@ -172,19 +172,29 @@ export function InterviewBar() {
     setCursor((i) => Math.min(i + 1, visible.length - 1));
   const handlePrev = () => setCursor((i) => Math.max(i - 1, 0));
 
+  // kind="notice" rows are non-blocking FYIs (delivery acknowledgements,
+  // "waiting on you" hints) — NOT questions. Labeling them INTERVIEW with
+  // "@x asks" made the bar cry wolf (ICP eval N8: 10+ notices drowned 3
+  // real interviews). Notices get a neutral NOTICE badge and drop "asks".
+  const isNotice = current.kind === "notice";
+
   return (
     <>
       <CeoCardSection />
       <section className="interview-bar" aria-label="Pending agent request">
         <div className="interview-bar-head">
-          <span className="badge badge-yellow">
-            {current.blocking ? "BLOCKING" : "INTERVIEW"}
+          <span
+            className={`badge ${isNotice ? "badge-neutral" : "badge-yellow"}`}
+          >
+            {current.blocking ? "BLOCKING" : isNotice ? "NOTICE" : "INTERVIEW"}
           </span>
           {current.kind === "approval" ? (
             <span className="badge badge-orange">EXTERNAL ACTION</span>
           ) : null}
           <span className="interview-bar-from">
-            @{current.from || "agent"} asks
+            {isNotice
+              ? `from @${current.from || "agent"}`
+              : `@${current.from || "agent"} asks`}
           </span>
           {current.channel ? (
             <span className="interview-bar-channel">in #{current.channel}</span>

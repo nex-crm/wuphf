@@ -1194,6 +1194,13 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		}
 		if reassignTriggered {
 			b.postTaskReassignNotificationsLocked(actor, task, reassignPrevOwner)
+			// A draft that just gained its owner is now actionable — the
+			// only way forward is the human's Approve & Start, so raise
+			// the (deduped) "waiting on you" notice that creation skipped
+			// while the task was ownerless (ICP eval N5).
+			if task.LifecycleState == LifecycleStateDrafting {
+				b.postTaskAwaitingStartNoticeLocked(task)
+			}
 		}
 		if cancelTriggered {
 			b.postTaskCancelNotificationsLocked(actor, task, cancelPrevOwner)

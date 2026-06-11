@@ -16,7 +16,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskDocument as TaskDocumentType } from "./TaskDocument";
-import { normalizeTaskDocument, TaskDocument } from "./TaskDocument";
+import {
+  DraftingWaitingHint,
+  normalizeTaskDocument,
+  TaskDocument,
+} from "./TaskDocument";
 
 const lifecycleApi = vi.hoisted(() => ({
   postDecision: vi.fn(() =>
@@ -323,5 +327,36 @@ describe.skip("<TaskDocument> — Approve & Start", () => {
     renderDoc(BASE_DOC);
     // Error banner should NOT be present initially.
     expect(screen.queryByTestId("approve-and-start-error")).toBeNull();
+  });
+});
+
+// ── DraftingWaitingHint (ICP eval N5) ───────────────────────────────────
+//
+// Pure component — tested directly (not via the full <TaskDocument>
+// mount, which is describe.skip'd above pending the vitest hang FIXME).
+// The wiring is a single unconditional render in the chat column.
+describe("<DraftingWaitingHint>", () => {
+  it("tells the human the task is waiting on Approve & Start while drafting", () => {
+    render(<DraftingWaitingHint lifecycleState="drafting" />);
+    const hint = screen.getByTestId("drafting-waiting-hint");
+    expect(hint).toHaveTextContent(
+      "Waiting on you — this task starts when you press Approve & Start.",
+    );
+    expect(hint).toHaveAttribute("role", "status");
+  });
+
+  it("renders nothing outside drafting", () => {
+    for (const state of [
+      "running",
+      "review",
+      "approved",
+      "rejected",
+    ] as const) {
+      const { unmount } = render(
+        <DraftingWaitingHint lifecycleState={state} />,
+      );
+      expect(screen.queryByTestId("drafting-waiting-hint")).toBeNull();
+      unmount();
+    }
   });
 });

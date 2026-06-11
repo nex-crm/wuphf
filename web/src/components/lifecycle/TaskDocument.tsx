@@ -143,7 +143,7 @@ function normalizeDeliverables(value: unknown): TaskDeliverable[] {
   for (const item of value) {
     const d = recordValue(item);
     const name = d ? nonEmptyString(d.name) : undefined;
-    if (!d || !name) continue;
+    if (!(d && name)) continue;
     out.push({ name, format: nonEmptyString(d.format) });
   }
   return out;
@@ -159,7 +159,7 @@ function normalizeTaskDefinition(
 ): TaskDefinitionShape | undefined {
   const rec = recordValue(value);
   const goal = rec ? nonEmptyString(rec.goal) : undefined;
-  if (!rec || !goal) {
+  if (!(rec && goal)) {
     return undefined;
   }
   const deliverables = normalizeDeliverables(rec.deliverables);
@@ -378,6 +378,30 @@ function TaskDocumentError({
 }
 
 // ── Lifecycle action buttons ───────────────────────────────────────────
+
+/**
+ * Inline system hint shown at the top of the task chat while the task is
+ * in `drafting`. In drafting the ONLY way forward is the human pressing
+ * Approve & Start, but nothing used to say so — humans stared at a silent
+ * task for 10+ minutes (ICP eval N5). Renders null for every other state.
+ */
+export function DraftingWaitingHint({
+  lifecycleState,
+}: {
+  lifecycleState: LifecycleState;
+}) {
+  if (lifecycleState !== "drafting") return null;
+  return (
+    <div
+      className="issue-doc-waiting-hint"
+      role="status"
+      data-testid="drafting-waiting-hint"
+    >
+      Waiting on you — this task starts when you press{" "}
+      <strong>Approve &amp; Start</strong>.
+    </div>
+  );
+}
 
 /**
  * Approve & Start button. Visible only during `drafting` state.
@@ -681,6 +705,7 @@ export function TaskDocument({ taskId, initialDocument }: TaskDocumentProps) {
       <div className="issue-doc-body issue-doc-body--split">
         <main className="issue-doc-chat" aria-label="Chat">
           <div className="issue-doc-chat-header">Chat</div>
+          <DraftingWaitingHint lifecycleState={doc.lifecycleState} />
           <TaskChannelChat channel={doc.channel} />
         </main>
 

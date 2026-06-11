@@ -173,3 +173,59 @@ describe("<InterviewBar> approval UX", () => {
     });
   });
 });
+
+describe("<InterviewBar> notice framing (N8)", () => {
+  const notice: AgentRequest = {
+    id: "request-notice-1",
+    from: "ae",
+    channel: "task-office-2",
+    kind: "notice",
+    status: "pending",
+    title: "OFFICE-4 delivered",
+    question:
+      "Renewal sequences delivered: 3 sequences ready — artifact: agents/ae/notebook/renewal-sequences.md",
+    options: [{ id: "acknowledge", label: "Acknowledge" }],
+    recommended_id: "acknowledge",
+    blocking: false,
+    created_at: "2026-06-10T00:00:00Z",
+  };
+
+  it("labels kind=notice rows NOTICE and never says 'asks'", () => {
+    setPending([notice]);
+    render(wrap(<InterviewBar />));
+
+    expect(screen.getByText("NOTICE")).toBeInTheDocument();
+    expect(screen.queryByText("INTERVIEW")).not.toBeInTheDocument();
+    expect(screen.queryByText(/asks/)).not.toBeInTheDocument();
+    expect(screen.getByText("from @ae")).toBeInTheDocument();
+    expect(screen.getByText("OFFICE-4 delivered")).toBeInTheDocument();
+  });
+
+  it("keeps INTERVIEW framing with 'asks' for real interview kinds", () => {
+    const interview: AgentRequest = {
+      id: "request-real-interview",
+      from: "ceo",
+      channel: "task-office-2",
+      kind: "interview",
+      status: "pending",
+      question: "Who should own the Acme renewal?",
+      options: [{ id: "answer_directly", label: "Answer directly" }],
+      blocking: false,
+      created_at: "2026-06-10T00:00:00Z",
+    };
+    setPending([interview]);
+    render(wrap(<InterviewBar />));
+
+    expect(screen.getByText("INTERVIEW")).toBeInTheDocument();
+    expect(screen.queryByText("NOTICE")).not.toBeInTheDocument();
+    expect(screen.getByText("@ceo asks")).toBeInTheDocument();
+  });
+
+  it("still lets the human acknowledge a notice", () => {
+    setPending([notice]);
+    render(wrap(<InterviewBar />));
+    expect(
+      screen.getByRole("button", { name: /Acknowledge/i }),
+    ).toBeInTheDocument();
+  });
+});

@@ -758,6 +758,19 @@ func (w *WikiWorker) EnqueuePlaybookCompile(ctx context.Context, slug, authorSlu
 	defer cancel()
 	select {
 	case result := <-req.ReplyCh:
+		if result.Err == nil {
+			// Fold the compiled skill into broker skill state so the
+			// Skills surface lists it (ICP eval N9: SKILL.md on disk,
+			// "No skills yet" in the product). Safe to call from this
+			// goroutine: the drain slot was released with the reply, so
+			// the registrar's own wiki write can enter the queue. The
+			// byte-identical recompile no-op path still runs this so an
+			// office whose state predates the registrar self-heals on
+			// the next recompile.
+			if reg, ok := w.publisher.(playbookSkillRegistrar); ok {
+				reg.RegisterCompiledPlaybookSkill(slug, sourcePath, skillBytes)
+			}
+		}
 		return result.SHA, result.BytesWritten, result.Err
 	case <-waitCtx.Done():
 		return "", 0, fmt.Errorf("playbook: compile write timed out after %s", wikiWriteTimeout)

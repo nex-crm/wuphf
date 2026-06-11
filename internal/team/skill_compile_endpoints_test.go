@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -165,5 +167,79 @@ func TestGetSkillCompileStats_ReturnsMetrics(t *testing.T) {
 	// Sanity: parses as RFC3339.
 	if _, err := time.Parse(time.RFC3339, stats.LastSkillCompilePassAt); err != nil {
 		t.Fatalf("LastSkillCompilePassAt should be RFC3339: %v", err)
+	}
+}
+
+// Live N9 repro: a compiled playbook SKILL.md sits on disk (written before
+// the auto-register hook existed) while broker skill state is empty — the
+// Skills page says "No skills yet" and the manual Compile button no-ops
+// because the draft source has no skill frontmatter and the LLM path is
+// unavailable. The deterministic pre-pass in compileWikiSkills must
+// register the on-disk skill and report it in the response so the FE's
+// post-compile refetch shows it immediately.
+func TestPostSkillCompile_RegistersOnDiskCompiledPlaybookSkills(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("repo init: %v", err)
+	}
+	srcRel := "team/playbooks/renewal-outreach.md"
+	srcFull := filepath.Join(root, filepath.FromSlash(srcRel))
+	if err := os.MkdirAll(filepath.Dir(srcFull), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	src := "---\ndraft: true\n---\n# Renewal outreach\n\nRun the renewal motion for at-risk accounts.\n"
+	if err := os.WriteFile(srcFull, []byte(src), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	// Write the compiled SKILL.md to disk WITHOUT registering it anywhere —
+	// the exact pre-fix end state.
+	if _, _, err := CompilePlaybook(repo, srcRel); err != nil {
+		t.Fatalf("compile playbook: %v", err)
+	}
+
+	b := newTestBroker(t)
+	// instantProvider classifies every article as not-a-skill, mirroring an
+	// LLM that never promotes the draft. Only the deterministic pre-pass can
+	// surface the skill.
+	b.SetSkillScanner(NewSkillScanner(b, &instantProvider{}, 100))
+	worker := NewWikiWorker(repo, b)
+	worker.Start(context.Background())
+	defer worker.Stop()
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+
+	srv := newCompileTestServer(t, b)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/skills/compile", bytes.NewBufferString(`{}`))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 200, got %d: %s", res.StatusCode, string(raw))
+	}
+	var result ScanResult
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Proposed < 1 {
+		t.Fatalf("expected the registered on-disk skill to be reported (proposed >= 1), got %+v", result)
+	}
+
+	found := false
+	for _, s := range b.ListActiveSkillSummaries() {
+		if s.Slug == "renewal-outreach" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("on-disk compiled playbook skill was not registered into broker state by the compile pass")
 	}
 }

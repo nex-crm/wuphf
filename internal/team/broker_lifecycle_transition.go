@@ -546,6 +546,17 @@ func (b *Broker) applyLifecycleStateLocked(task *teamTask, newState LifecycleSta
 	if prev != "" && prev != LifecycleStateUnknown {
 		b.postIssueLifecycleCardLocked(task, prev, newState, "system")
 	}
+	// A task entering drafting can only move forward via the human's
+	// Approve & Start — raise the non-blocking "waiting on you" Inbox
+	// notice so the human is told instead of staring at a silent task
+	// (ICP eval N5). Deduped per task inside the helper. Leaving drafting
+	// self-resolves a still-pending notice: the human just acted, so the
+	// hint must not linger asking for an acknowledgement.
+	if newState == LifecycleStateDrafting && prev != LifecycleStateDrafting {
+		b.postTaskAwaitingStartNoticeLocked(task)
+	} else if prev == LifecycleStateDrafting && newState != LifecycleStateDrafting {
+		b.resolveAwaitingStartNoticeLocked(task.ID)
+	}
 	return nil
 }
 

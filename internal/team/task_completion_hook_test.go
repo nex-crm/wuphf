@@ -119,6 +119,11 @@ func TestArtifactGate_DonePostAndNoticeWithArtifact(t *testing.T) {
 		if req.Kind != "notice" || strings.TrimSpace(req.IssueID) != taskID {
 			continue
 		}
+		// The drafting-entry "waiting on you" notice (N5) shares the
+		// kind=notice primitive — this test pins the DELIVERY notice only.
+		if req.Title == awaitingStartNoticeTitle(taskID) {
+			continue
+		}
 		noticeCount++
 		if req.Blocking || req.Required {
 			t.Fatalf("delivery notice must be non-blocking/non-required: %+v", req)

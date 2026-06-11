@@ -286,3 +286,117 @@ func waitForCompiledSkill(t *testing.T, repo *Repo, slug string, timeout time.Du
 	}
 	t.Fatalf("compiled skill for %q did not appear within %s", slug, timeout)
 }
+
+// The compile hook must fold the compiled skill into broker skill state so
+// GET /skills — the Config→Skills surface — lists it the moment the compile
+// lands. Pre-fix the SKILL.md existed on disk while the product said
+// "No skills yet" (ICP eval N9). The source playbook here uses the B3 draft
+// shape (frontmatter carries only `draft: true`, no skill name/description)
+// so the LLM-scanner fast path could never have promoted it.
+func TestPlaybookCompile_RegistersBrokerSkill(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("repo init: %v", err)
+	}
+	b := newTestBroker(t)
+	worker := NewWikiWorker(repo, b)
+	worker.Start(context.Background())
+	defer worker.Stop()
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+
+	body := "---\ndraft: true\n---\n# Renewal outreach\n\nRun the renewal motion for at-risk accounts.\n\n## Steps\n\n1. Pull the renewal list.\n2. Draft the sequences.\n"
+	writePlaybookSource(t, worker, "renewal-outreach", body)
+	waitForCompiledSkill(t, repo, "renewal-outreach", 2*time.Second)
+
+	// The registrar runs from the auto-recompile side goroutine — poll the
+	// broker's active-skill catalog (the same projection prompt building
+	// and GET /skills derive from).
+	deadline := time.Now().Add(3 * time.Second)
+	var found *SkillSummary
+	for time.Now().Before(deadline) && found == nil {
+		for _, s := range b.ListActiveSkillSummaries() {
+			if s.Slug == "renewal-outreach" {
+				snap := s
+				found = &snap
+				break
+			}
+		}
+		if found == nil {
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if found == nil {
+		t.Fatal("compiled playbook skill never appeared in broker skill state")
+	}
+
+	b.mu.Lock()
+	var sk *teamSkill
+	for i := range b.skills {
+		if skillSlug(b.skills[i].Name) == "renewal-outreach" {
+			sk = &b.skills[i]
+			break
+		}
+	}
+	b.mu.Unlock()
+	if sk == nil {
+		t.Fatal("skill record missing from b.skills")
+	}
+	if sk.Status != "active" {
+		t.Fatalf("status: got %q, want active", sk.Status)
+	}
+	if sk.SourceArticle != "team/playbooks/renewal-outreach.md" {
+		t.Fatalf("source article: got %q", sk.SourceArticle)
+	}
+}
+
+// A recompile of an already-registered playbook must not mint a duplicate
+// broker skill — the register path dedups by slug.
+func TestPlaybookRecompile_DoesNotDuplicateBrokerSkill(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("repo init: %v", err)
+	}
+	b := newTestBroker(t)
+	worker := NewWikiWorker(repo, b)
+	worker.Start(context.Background())
+	defer worker.Stop()
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+
+	writePlaybookSource(t, worker, "qbr-prep", "# QBR prep\n\nPrepare the QBR brief.\n")
+	waitForCompiledSkill(t, repo, "qbr-prep", 2*time.Second)
+	// Second source write triggers another compile + register round-trip.
+	if _, _, err := worker.Enqueue(context.Background(), "pm", "team/playbooks/qbr-prep.md",
+		"# QBR prep v2\n\nPrepare the QBR brief, now with risk callouts.\n", "replace", "update"); err != nil {
+		t.Fatalf("second enqueue: %v", err)
+	}
+
+	count := func() int {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		n := 0
+		for i := range b.skills {
+			if skillSlug(b.skills[i].Name) == "qbr-prep" && b.skills[i].Status != "archived" {
+				n++
+			}
+		}
+		return n
+	}
+	// Wait until at least one registration landed, then give the second
+	// compile time to (incorrectly) duplicate before asserting it didn't.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && count() == 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := count(); got != 1 {
+		t.Fatalf("expected exactly 1 broker skill for qbr-prep, got %d", got)
+	}
+}

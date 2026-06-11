@@ -28,3 +28,12 @@ type PlaybookExecutionRecordedEvent struct {
 type playbookEventPublisher interface {
 	PublishPlaybookExecutionRecorded(evt PlaybookExecutionRecordedEvent)
 }
+
+// playbookSkillRegistrar is the extension the WikiWorker uses to fold a
+// freshly compiled playbook skill into broker skill state. Without it the
+// compiled SKILL.md exists on disk while GET /skills (and the Config→Skills
+// surface) says "No skills yet" — the v2 ICP eval's N9 finding. Broker
+// satisfies this interface (see skill_compile_writer.go).
+type playbookSkillRegistrar interface {
+	RegisterCompiledPlaybookSkill(slug, sourcePath string, skillBytes []byte) bool
+}
