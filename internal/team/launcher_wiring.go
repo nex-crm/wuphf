@@ -171,6 +171,26 @@ func newNotifyCtx(l *Launcher) *notificationContextBuilder {
 			// behavior — and BM25 ∪ dense with RRF fusion when one is.
 			return hybridWikiSearch(ctx, l.broker.WikiIndex(), query, topK)
 		},
+		searchWikiArticles: func(terms []string, limit int) []wikiArticleHit {
+			if l.broker == nil {
+				return nil
+			}
+			worker := l.broker.WikiWorker()
+			if worker == nil {
+				return nil
+			}
+			// File-level search over team/ articles — the corpus the office
+			// actually wrote — for the mandatory RETRIEVED CONTEXT block.
+			// The derived fact index (searchWiki above) misses articles the
+			// extractor has not processed; this path cannot.
+			return searchWikiArticlesByTerms(worker.Repo(), terms, limit)
+		},
+		consumeTaskHumanNote: func(taskID string) {
+			if l.broker == nil {
+				return
+			}
+			l.broker.ConsumeTaskHumanNote(taskID)
+		},
 	}
 }
 

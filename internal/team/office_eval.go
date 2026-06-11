@@ -179,6 +179,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"playbook-compilation", evalJobPlaybookCompilation},
 		{"notebook-bookends", evalJobNotebookBookends},
 		{"hybrid-retrieval", evalJobHybridRetrieval},
+		{"grounding", evalJobGrounding},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))
@@ -1513,5 +1514,164 @@ func evalJobHybridRetrieval(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	r.add(job, "hybrid: dense-adjacent learning reaches the work packet",
 		strings.Contains(packet, "cap nav depth at two levels"),
 		fmt.Sprintf("packet=%d chars", len(packet)), "")
+	return nil
+}
+
+// evalJobGrounding: ground execution in retrieval, forbid fabrication
+// (core-loop grader fix family #2; ICP-eval v2 [00:00], [00:10], [00:47],
+// [00:50]). Four contracts:
+//
+//	(a) full-fidelity titles — a long money-bearing title renders its full
+//	    amount in the owner's packet and wake content (the live $61k
+//	    account was briefed as $6k off a display-clipped title);
+//	(b) mandatory task-start retrieval — a task whose details mention an
+//	    entity with an existing wiki article gets a RETRIEVED CONTEXT
+//	    block listing that article (title + path), and the wiki hit rides
+//	    the context manifest; a task with no wiki hits carries the
+//	    explicit "(searched the wiki for: … — no hits)" line so a false
+//	    "no data" claim is impossible to make honestly;
+//	(c) stop-order backstop — a human message posted into a running
+//	    task's channel leads the owner's next packet ("HUMAN POSTED WHILE
+//	    YOU WORKED"); a leading "stop" blocks complete until a packet
+//	    build consumed the note, after which complete succeeds. Non-halt
+//	    notes ride the packet without blocking.
+//	(d) the human_note_pending wire shape is additive and round-trips.
+func evalJobGrounding(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "grounding"
+
+	// (a) Long money-bearing title: the amount sits past the old 120-char
+	// display clip; the owner's packet and wake content must carry it.
+	moneyTitle := "Renew the Corti Labs contract before the Q4 board review and make sure the two unresolved support escalations are handled escalation-first in every touch ($61,000 ARR at risk)"
+	moneyTask, _, err := fx.broker.EnsureTask("general", moneyTitle, "", "eng", "ceo", "")
+	if err != nil {
+		return err
+	}
+	moneyPacket := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *fx.broker.TaskByID(moneyTask.ID), "Task assigned to you.")
+	r.add(job, "owner packet carries the full money-bearing title", strings.Contains(moneyPacket, "$61,000"),
+		fmt.Sprintf("title=%d chars packet=%d chars", len(moneyTitle), len(moneyPacket)), "")
+	moneyWake := fx.launcher.notifyCtx().TaskNotificationContent(officeActionLog{Kind: "task_updated", Actor: "ceo"}, *fx.broker.TaskByID(moneyTask.ID))
+	r.add(job, "wake notification carries the full money-bearing title", strings.Contains(moneyWake, "$61,000"), "", "")
+
+	// (b) Mandatory retrieval: an approved wiki article about the entity
+	// must surface in the packet's RETRIEVED CONTEXT block by title + path.
+	worker := fx.broker.WikiWorker()
+	if worker == nil {
+		return fmt.Errorf("wiki worker not wired")
+	}
+	const acmePath = "team/accounts/acme-corp.md"
+	acmeArticle := "# Acme Corp — renewal brief\n\nRED risk. Owner on record: Dana Whitfield. $48k ARR, renewal Q3.\n"
+	if _, _, err := worker.Enqueue(context.Background(), ArchivistAuthor, acmePath, acmeArticle, "replace", "fixture: acme account brief"); err != nil {
+		return err
+	}
+	acmeTask, _, err := fx.broker.EnsureTask("general", "Prepare the Acme Corp QBR one-pager",
+		"Build the QBR one-pager for Acme Corp using our account briefs and the renewal playbook.", "eng", "ceo", "")
+	if err != nil {
+		return err
+	}
+	acmePacket, acmeContext := fx.launcher.notifyCtx().BuildTaskExecutionPacketWithContext("eng", officeActionLog{Actor: "ceo"}, *fx.broker.TaskByID(acmeTask.ID), "Task assigned to you.")
+	carriesHit := strings.Contains(acmePacket, "RETRIEVED CONTEXT") &&
+		strings.Contains(acmePacket, "wiki:"+acmePath) &&
+		strings.Contains(acmePacket, "Acme Corp — renewal brief")
+	r.add(job, "packet's RETRIEVED CONTEXT lists the existing entity article (title + path)", carriesHit,
+		fmt.Sprintf("packet=%d chars", len(acmePacket)), "")
+	hitOnManifest := false
+	for _, item := range acmeContext {
+		if item == "wiki:"+acmePath {
+			hitOnManifest = true
+		}
+	}
+	r.add(job, "wiki hit rides the context_used manifest", hitOnManifest, fmt.Sprintf("context_used=%v", acmeContext), "")
+
+	noHitTask, _, err := fx.broker.EnsureTask("general", "Tune the quokka zephyr cadence experiment",
+		"Calibrate the quokka zephyr cadence rig.", "eng", "ceo", "")
+	if err != nil {
+		return err
+	}
+	noHitPacket := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *fx.broker.TaskByID(noHitTask.ID), "Task assigned to you.")
+	r.add(job, "no wiki hits → packet carries the explicit searched-no-hits line",
+		strings.Contains(noHitPacket, "(searched the wiki for:") && strings.Contains(noHitPacket, "no hits"),
+		fmt.Sprintf("packet=%d chars", len(noHitPacket)), "")
+
+	// (c) Stop-order backstop. Force the task running, post a human "stop"
+	// into its channel, and walk the gate: complete blocked → packet leads
+	// with the note (consuming it) → complete succeeds.
+	stopTask, _, err := fx.broker.EnsureTask("general", "Draft the renewal outreach sequence", "Draft the outreach sequence for the renewal book.", "eng", "ceo", "")
+	if err != nil {
+		return err
+	}
+	// EnsureTask mints a per-task channel for business-objective work; the
+	// human's stop order lands in THAT channel, like the live run.
+	stopChannel := normalizeChannelSlug(stopTask.Channel)
+	if stopChannel == "" {
+		stopChannel = "general"
+	}
+	fx.broker.mu.Lock()
+	if t := fx.broker.taskByIDLocked(stopTask.ID); t != nil {
+		t.LifecycleState = LifecycleStateRunning
+		t.status = "in_progress"
+	}
+	fx.broker.mu.Unlock()
+	const stopOrder = "Stop — do not build a placeholder. Read team/accounts/acme-corp.md first; Dana Whitfield is the owner on record."
+	if _, err := fx.broker.PostMessage("you", stopChannel, stopOrder, nil, ""); err != nil {
+		return err
+	}
+	marked := fx.broker.TaskByID(stopTask.ID)
+	r.add(job, "human message in a running task's channel arms human_note_pending with halt",
+		marked != nil && marked.HumanNotePending != nil && marked.HumanNotePending.Halt &&
+			strings.Contains(marked.HumanNotePending.Body, "Dana Whitfield"),
+		fmt.Sprintf("note=%+v", marked.HumanNotePending), "")
+
+	_, blockedErr := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: stopTask.ID, Channel: "general", CreatedBy: "eng"})
+	var mutationErr *TaskMutationError
+	r.add(job, "leading stop blocks agent complete until a packet consumed the note",
+		errors.As(blockedErr, &mutationErr) && mutationErr.Kind == TaskMutationForbidden &&
+			strings.Contains(mutationErr.Message, "stop order"),
+		fmt.Sprintf("err=%v", blockedErr), "")
+
+	stopPacket := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng", officeActionLog{Actor: "ceo"}, *fx.broker.TaskByID(stopTask.ID), "Continue.")
+	r.add(job, "owner's next packet leads with HUMAN POSTED WHILE YOU WORKED",
+		strings.HasPrefix(stopPacket, "HUMAN POSTED WHILE YOU WORKED") && strings.Contains(stopPacket, stopOrder),
+		fmt.Sprintf("packet head=%q", truncate(stopPacket, 120)), "")
+	consumed := fx.broker.TaskByID(stopTask.ID)
+	r.add(job, "packet build consumes the note", consumed != nil && consumed.HumanNotePending == nil, "", "")
+	_, completeErr := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: stopTask.ID, Channel: "general", CreatedBy: "eng"})
+	r.add(job, "complete succeeds once a packet consumed the note", completeErr == nil, fmt.Sprintf("err=%v", completeErr), "")
+
+	// Non-halt note: rides the next packet's top but never blocks.
+	fyiTask, _, err := fx.broker.EnsureTask("general", "Assemble the Brightline expansion brief", "Assemble the expansion brief for Brightline.", "eng", "ceo", "")
+	if err != nil {
+		return err
+	}
+	fyiChannel := normalizeChannelSlug(fyiTask.Channel)
+	if fyiChannel == "" {
+		fyiChannel = "general"
+	}
+	fx.broker.mu.Lock()
+	if t := fx.broker.taskByIDLocked(fyiTask.ID); t != nil {
+		t.LifecycleState = LifecycleStateRunning
+		t.status = "in_progress"
+	}
+	fx.broker.mu.Unlock()
+	if _, err := fx.broker.PostMessage("you", fyiChannel, "FYI the Brightline seat count changed to 240 this morning.", nil, ""); err != nil {
+		return err
+	}
+	_, fyiCompleteErr := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: fyiTask.ID, Channel: "general", CreatedBy: "eng"})
+	r.add(job, "non-halt human note never blocks complete", fyiCompleteErr == nil, fmt.Sprintf("err=%v", fyiCompleteErr), "")
+
+	// (d) Wire round-trip: human_note_pending survives the teamTaskWire
+	// shadow under its additive snake_case key.
+	wireTask := teamTask{ID: "task-wire", Title: "wire probe", HumanNotePending: &TaskHumanNote{From: "human", Body: "stop the line", At: "2026-06-10T00:00:00Z", Halt: true}}
+	blob, err := json.Marshal(wireTask)
+	if err != nil {
+		return err
+	}
+	var roundTripped teamTask
+	if err := json.Unmarshal(blob, &roundTripped); err != nil {
+		return err
+	}
+	rt := roundTripped.HumanNotePending
+	r.add(job, "human_note_pending round-trips the teamTask wire",
+		strings.Contains(string(blob), `"human_note_pending"`) && rt != nil && rt.Halt && rt.Body == "stop the line" && rt.From == "human",
+		fmt.Sprintf("blob=%s", truncate(string(blob), 200)), "")
 	return nil
 }

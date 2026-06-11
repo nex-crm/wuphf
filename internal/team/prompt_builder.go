@@ -275,6 +275,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(issueScopingFrameworkBlock())
 		sb.WriteString(approvalLifecycleBlock())
 		sb.WriteString(ownershipContractBlock())
+		sb.WriteString(groundingBlock())
 		sb.WriteString(ceoIssueManagementBlock())
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
 		if markdownMemory {
@@ -410,6 +411,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(issueScopingFrameworkBlock())
 		sb.WriteString(approvalLifecycleBlock())
 		sb.WriteString(ownershipContractBlock())
+		sb.WriteString(groundingBlock())
 		sb.WriteString(specialistSuggestionBlock())
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
 		sb.WriteString("1. The pushed notification is your starting context — it contains thread context and task state. When it already answers the question, respond directly and do the work. When anything material is missing or ambiguous, pull it (team_poll, team_tasks, wiki/notebook search) before deciding. Acting on a guess you could have checked is the failure; gathering needed context is not.\n")
@@ -779,6 +781,17 @@ func ownershipContractBlock() string {
 		"5. Blocked on something external → team_task action=comment with a clear blocker line + post a one-line human_message tagging the human so they can unblock. If the blocker requires their explicit decision, use human_interview (rule 2) instead.\n" +
 		"6. Don't go silent. If a turn passes and you have an owned Issue with no progress, leave a comment naming what you're doing or what's blocking. Silence reads as failure.\n" +
 		"7. Don't speak for an Issue you don't own. If you see an Issue that needs work and the owner is someone else, post a team_task action=comment tagging that owner (or @ceo if the owner is unclear) instead of doing the work yourself.\n\n"
+}
+
+// groundingBlock is the anti-fabrication contract (core-loop grader fix
+// family #2; ICP-eval v2 [00:47]/[00:50]: the CEO invented Jordan Park,
+// Sarah Chen, and Marcus Webb for a customer QBR with zero disclaimer).
+// Every deliverable fact must trace to a source the packet put in front of
+// the agent; missing facts get asked or marked, never invented. Kept under
+// ~120 words by design — it is paid on every turn.
+func groundingBlock() string {
+	return "== GROUNDING (every agent — hard rule) ==\n" +
+		"Every named person, company, and number in your deliverables MUST come from the packet's RETRIEVED CONTEXT, the task definition/details, the chat thread, or a wiki/file/tool result you actually read this turn. If a fact you need is absent, ask via human_interview or write \"[NEEDS CONFIRMATION: <what>]\" in its place. Inventing a named entity, contact, date, or figure — even as a \"credible placeholder\" — is a firing offense. When the packet says the wiki search had no hits, say so plainly; never declare \"no data exists\" without citing that searched-and-missed line, and never paper over the gap with fabricated detail.\n\n"
 }
 
 // renderAvailableAgentsBlock emits the AVAILABLE AGENTS section so any

@@ -1022,3 +1022,44 @@ func TestPromptBuilder_PoliciesFilteredByAgentAssignment(t *testing.T) {
 		t.Fatalf("ceo prompt scope filter broken:\n%s", ceo)
 	}
 }
+
+// TestPromptBuilder_GroundingBlockOnLeadAndSpecialist pins the
+// anti-fabrication contract (ICP-eval v2 [00:47]/[00:50]: three invented
+// humans shipped in a customer QBR): both office surfaces must carry the
+// grounding rule, and the block itself must name the sourcing contract,
+// the [NEEDS CONFIRMATION] escape hatch, and the no-hits honesty rule.
+func TestPromptBuilder_GroundingBlockOnLeadAndSpecialist(t *testing.T) {
+	block := groundingBlock()
+	for _, want := range []string{
+		"== GROUNDING",
+		"RETRIEVED CONTEXT",
+		"human_interview",
+		"[NEEDS CONFIRMATION:",
+		"firing offense",
+		"no hits",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("groundingBlock missing %q", want)
+		}
+	}
+
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "Test Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO", Role: "ceo"},
+				{Slug: "eng", Name: "Engineer", Role: "eng"},
+			}
+		},
+		policies: func() []officePolicy { return nil },
+		nameFor:  func(slug string) string { return slug },
+	}
+	for _, slug := range []string{"ceo", "eng"} {
+		if got := pb.Build(slug); !strings.Contains(got, "== GROUNDING") {
+			t.Errorf("prompt for %q missing the grounding block", slug)
+		}
+	}
+}

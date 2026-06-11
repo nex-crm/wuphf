@@ -332,6 +332,17 @@ type teamTask struct {
 	// #1, ICP-eval v2 J2: "CEO self-approves over a human rejection").
 	// Wire key "human_objection" is additive.
 	HumanObjection *TaskReviewObjection `json:"human_objection,omitempty"`
+	// HumanNotePending is the latest human message posted into this task's
+	// channel while the task was running, not yet consumed by a packet
+	// build. The owner's NEXT packet renders it at the very top ("HUMAN
+	// POSTED WHILE YOU WORKED") and consumes it. When Halt is set (the
+	// message led with stop/wait/hold), submit_for_review and complete by
+	// any agent are blocked until a packet build has consumed the note —
+	// the structural backstop for the ignored mid-turn stop order
+	// (ICP-eval v2 [00:50]). Wire key "human_note_pending" is additive.
+	// Always assign a fresh struct — never mutate in place — so
+	// mutation-snapshot rollbacks stay correct.
+	HumanNotePending *TaskHumanNote `json:"human_note_pending,omitempty"`
 	// Ledger is the per-turn journal (task_ledger.go, U2.3): distilled
 	// records of what each headless turn on this task said, mutated, and
 	// how it ended. Rendered into every participant's packet as the living
@@ -361,6 +372,22 @@ type TaskReviewObjection struct {
 	Body string `json:"body,omitempty"`
 	// At is the RFC3339 timestamp the objection was raised.
 	At string `json:"at"`
+}
+
+// TaskHumanNote records one human message posted into a task's channel
+// while the task was running (teamTask.HumanNotePending). Consumed —
+// cleared — by the next packet build for the task's owner.
+type TaskHumanNote struct {
+	// From is the human sender ("human" or "human:<slug>").
+	From string `json:"from"`
+	// Body is the verbatim message text.
+	Body string `json:"body,omitempty"`
+	// At is the RFC3339 timestamp the message was posted.
+	At string `json:"at"`
+	// Halt is true when the message led with a stop token (stop / wait /
+	// hold): submit_for_review and complete by agents are blocked until a
+	// packet build consumes the note.
+	Halt bool `json:"halt,omitempty"`
 }
 
 // Status returns the persisted status string. Read accessor for callers
@@ -443,6 +470,7 @@ type teamTaskWire struct {
 	Artifact             string                  `json:"artifact,omitempty"`
 	ChangesRequested     *TaskReviewObjection    `json:"changes_requested,omitempty"`
 	HumanObjection       *TaskReviewObjection    `json:"human_objection,omitempty"`
+	HumanNotePending     *TaskHumanNote          `json:"human_note_pending,omitempty"`
 	Ledger               []TaskLedgerEntry       `json:"ledger,omitempty"`
 	CreatedAt            string                  `json:"created_at"`
 	UpdatedAt            string                  `json:"updated_at"`
@@ -496,6 +524,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		Artifact:             t.Artifact,
 		ChangesRequested:     t.ChangesRequested,
 		HumanObjection:       t.HumanObjection,
+		HumanNotePending:     t.HumanNotePending,
 		Ledger:               t.Ledger,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
@@ -551,6 +580,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.Artifact = w.Artifact
 	t.ChangesRequested = w.ChangesRequested
 	t.HumanObjection = w.HumanObjection
+	t.HumanNotePending = w.HumanNotePending
 	t.Ledger = w.Ledger
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt

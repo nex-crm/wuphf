@@ -35,9 +35,13 @@ const (
 	threadMessageClipChars = 2000
 	// taskDetailsClipChars clips the task spec text injected into packets.
 	taskDetailsClipChars = 4096
-	// taskListTitleClipChars / taskListDetailsClipChars clip per-task lines
-	// in multi-task summary lists.
-	taskListTitleClipChars   = 120
+	// taskListDetailsClipChars clips per-task DETAIL lines in multi-task
+	// summary lists. Titles are deliberately NOT display-clipped in any
+	// agent-facing string: the live $61k→"$6…" failure (ICP-eval v2
+	// [00:00]) came from a lane working off a truncated title as if it
+	// were the work contract. Titles render full (bounded only by
+	// taskDetailsClipChars as an overflow guard); UI surfaces may clip
+	// for display, packets must not.
 	taskListDetailsClipChars = 512
 	// triggerContentClipChars clips the trigger message in execution packets.
 	triggerContentClipChars = 4000
@@ -111,6 +115,17 @@ type notificationContextBuilder struct {
 	// carries no knowledge block.
 	searchLearnings func(query string, limit int) []LearningSearchResult
 	searchWiki      func(ctx context.Context, query string, topK int) []SearchHit
+
+	// searchWikiArticles is the file-level wiki search behind the mandatory
+	// RETRIEVED CONTEXT block (context_assembler.go retrievedWikiContext):
+	// scores team/ articles by distinct-term containment. Nil-safe: when
+	// unset (markdown memory off, bare test fixtures) the block is omitted.
+	searchWikiArticles func(terms []string, limit int) []wikiArticleHit
+
+	// consumeTaskHumanNote clears teamTask.HumanNotePending after the
+	// owner's packet has rendered it — consumption releases the halt gate
+	// on submit_for_review/complete. Nil-safe for bare fixtures.
+	consumeTaskHumanNote func(taskID string)
 
 	// taskByID returns the task with the given ID (or nil). Used by the
 	// pre-review filter to decide whether a message tagged with
@@ -340,7 +355,7 @@ func (b *notificationContextBuilder) TaskNotificationContext(channelSlug, slug s
 		if taskChannel == "" {
 			taskChannel = "general"
 		}
-		line := fmt.Sprintf("- #%s on #%s %s (%s)", task.ID, taskChannel, truncate(task.Title, taskListTitleClipChars), meta)
+		line := fmt.Sprintf("- #%s on #%s %s (%s)", task.ID, taskChannel, truncate(task.Title, taskDetailsClipChars), meta)
 		if details := strings.TrimSpace(task.Details); details != "" {
 			line += ": " + truncate(details, taskListDetailsClipChars)
 		}
@@ -592,7 +607,16 @@ func (b *notificationContextBuilder) BuildMessageWorkPacketWithContext(msg chann
 	}
 	var contextUsed []string
 	if task, ok := b.RelevantTaskForTarget(msg, slug); ok {
-		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, taskListTitleClipChars), strings.TrimSpace(task.status)))
+		// Full title: the title is part of the work contract, never a
+		// display label here (the $61k→"$6…" lane brief, ICP-eval v2).
+		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, taskDetailsClipChars), strings.TrimSpace(task.status)))
+		if note := humanNotePacketBlock(task, slug); note != "" {
+			// HUMAN POSTED WHILE YOU WORKED leads the whole packet.
+			lines = append([]string{note}, lines...)
+			if b.consumeTaskHumanNote != nil {
+				b.consumeTaskHumanNote(task.ID)
+			}
+		}
 		if defLines := taskDefinitionPacketLines(task.Definition); len(defLines) > 0 {
 			lines = append(lines, "- Task definition (the contract this work executes against):")
 			lines = append(lines, defLines...)
@@ -602,6 +626,10 @@ func (b *notificationContextBuilder) BuildMessageWorkPacketWithContext(msg chann
 		}
 		if path := strings.TrimSpace(task.WorktreePath); path != "" {
 			lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
+		}
+		if retrieved, manifest := b.retrievedWikiContext(task); retrieved != "" {
+			lines = append(lines, retrieved)
+			contextUsed = append(contextUsed, manifest...)
 		}
 		if knowledge, manifest := b.taskKnowledgeContext(task); knowledge != "" {
 			lines = append(lines, knowledge)
@@ -681,9 +709,23 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacketWithContext(slug st
 	lines := []string{
 		fmt.Sprintf("[Task update from @%s]", action.Actor),
 		"Work packet:",
-		fmt.Sprintf("- Task: #%s %s", task.ID, truncate(task.Title, taskListTitleClipChars)),
+		// Full title — the title is part of the work contract. The live
+		// $61k account was briefed as $6k because a lane worked off the
+		// display-clipped title (ICP-eval v2 [00:00]/[00:10]).
+		fmt.Sprintf("- Task: #%s %s", task.ID, truncate(task.Title, taskDetailsClipChars)),
 		fmt.Sprintf("- Status: %s", strings.TrimSpace(task.status)),
 		fmt.Sprintf("- Owner: @%s", slug),
+	}
+	// A human message posted into this task's channel while the work ran
+	// leads the ENTIRE packet — before the task header — and its render
+	// here consumes the marker (releasing the halt gate on
+	// submit_for_review/complete). ICP-eval v2 [00:50]: a typed stop order
+	// was never seen and the fabricated deliverable shipped over it.
+	if note := humanNotePacketBlock(task, slug); note != "" {
+		lines = append([]string{note}, lines...)
+		if b.consumeTaskHumanNote != nil {
+			b.consumeTaskHumanNote(task.ID)
+		}
 	}
 	// Latest request-changes feedback leads the packet (core-loop grader
 	// fix family #1, ICP-eval v2 J2): the reviewer's verbatim text rides
@@ -721,6 +763,15 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacketWithContext(slug st
 		lines = append(lines, "  Fix the work so the definition-of-done check passes, then complete again. Do not try to bypass the check.")
 	}
 	var contextUsed []string
+	// Mandatory task-start retrieval (anti-fabrication fix family #2):
+	// every execution packet carries the RETRIEVED CONTEXT block — top
+	// wiki-article hits for the task's own terms, or the explicit
+	// "(searched the wiki for: … — no hits)" line — so a false "no data
+	// in the wiki" claim is impossible to make honestly.
+	if retrieved, manifest := b.retrievedWikiContext(task); retrieved != "" {
+		lines = append(lines, retrieved)
+		contextUsed = append(contextUsed, manifest...)
+	}
 	if knowledge, manifest := b.taskKnowledgeContext(task); knowledge != "" {
 		lines = append(lines, knowledge)
 		contextUsed = append(contextUsed, manifest...)
@@ -818,6 +869,29 @@ func changesRequestedPacketLines(task teamTask) []string {
 		lines = append(lines, "  This objection is from the HUMAN and is sovereign: no agent (including the lead/CEO) can approve or complete this task while it stands. Only the human can clear it by approving or completing.")
 	}
 	return lines
+}
+
+// humanNotePacketBlock renders the pending human note for the task owner's
+// packet. Empty for non-owners (the note is addressed to the working agent)
+// and when no note is pending. The HALT variant names the standing stop
+// order explicitly.
+func humanNotePacketBlock(task teamTask, slug string) string {
+	note := task.HumanNotePending
+	if note == nil {
+		return ""
+	}
+	if !strings.EqualFold(strings.TrimSpace(task.Owner), strings.TrimSpace(slug)) {
+		return ""
+	}
+	body := strings.TrimSpace(note.Body)
+	if body == "" {
+		return ""
+	}
+	block := fmt.Sprintf("HUMAN POSTED WHILE YOU WORKED — read before continuing: @%s said: %s", note.From, body)
+	if note.Halt {
+		block += "\nThis was a STOP order. Do not submit or complete this task until you have addressed it; act on the human's instruction first."
+	}
+	return block
 }
 
 // TaskNotificationContent returns the short single-line task notification

@@ -84,6 +84,104 @@ func humanObjectionOpenMessage(taskID, action string, obj *TaskReviewObjection) 
 	return msg
 }
 
+// humanNoteHaltClipChars bounds the note body stored on the task (and
+// therefore rendered at the top of the next packet).
+const humanNoteHaltClipChars = 2000
+
+// humanNoteLeadsWithHalt reports whether a human message opens with a stop
+// token ("stop", "wait", "hold" — covers "hold on") as its leading word.
+func humanNoteLeadsWithHalt(content string) bool {
+	fields := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(content)), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z')
+	})
+	if len(fields) == 0 {
+		return false
+	}
+	switch fields[0] {
+	case "stop", "wait", "hold":
+		return true
+	}
+	return false
+}
+
+// markHumanNoteOnRunningTasksLocked stamps HumanNotePending on every
+// running, non-system task that lives in the message's channel. Called from
+// the message-post paths for HUMAN senders only — the live failure this
+// closes is ICP-eval v2 [00:50]: a typed "Stop — do not build a placeholder"
+// was never seen by the mid-turn agent and the fabricated one-pager shipped
+// anyway. Per-task channels make this 1:1 in practice; #general's archived
+// system task is excluded by the running-status guard. Pure in-memory field
+// writes under the already-held lock — the caller's saveLocked persists it.
+// Caller must hold b.mu.
+func (b *Broker) markHumanNoteOnRunningTasksLocked(msg channelMessage) {
+	if !isHumanMessageSender(msg.From) || strings.TrimSpace(msg.Content) == "" {
+		return
+	}
+	channel := normalizeChannelSlug(msg.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	now := strings.TrimSpace(msg.Timestamp)
+	if now == "" {
+		now = time.Now().UTC().Format(time.RFC3339)
+	}
+	for i := range b.tasks {
+		task := &b.tasks[i]
+		if task.System {
+			continue
+		}
+		if normalizeChannelSlug(task.Channel) != channel {
+			continue
+		}
+		running := strings.EqualFold(strings.TrimSpace(task.status), "in_progress") ||
+			task.LifecycleState == LifecycleStateRunning
+		if !running {
+			continue
+		}
+		// Fresh struct every time (rollback safety; see TaskHumanNote).
+		task.HumanNotePending = &TaskHumanNote{
+			From: strings.TrimSpace(msg.From),
+			Body: truncate(strings.TrimSpace(msg.Content), humanNoteHaltClipChars),
+			At:   now,
+			Halt: humanNoteLeadsWithHalt(msg.Content),
+		}
+	}
+}
+
+// ConsumeTaskHumanNote clears the pending human note on a task. Called by
+// the packet builder when the owner's next packet has rendered the note —
+// consumption is "the packet carried it", which also releases the halt gate
+// on submit_for_review/complete.
+func (b *Broker) ConsumeTaskHumanNote(taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if b == nil || taskID == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	task := b.findTaskByIDLocked(taskID)
+	if task == nil || task.HumanNotePending == nil {
+		return
+	}
+	task.HumanNotePending = nil
+	if err := b.saveLocked(); err != nil {
+		log.Printf("task %s: persist human-note consumption: %v", taskID, err)
+	}
+}
+
+// humanNoteHaltMessage names the unread stop order in the forbidden error
+// so the blocked agent knows exactly why the transition is refused.
+func humanNoteHaltMessage(taskID, action string, note *TaskHumanNote) string {
+	excerpt := strings.TrimSpace(note.Body)
+	if len(excerpt) > 280 {
+		excerpt = excerpt[:277] + "..."
+	}
+	return fmt.Sprintf(
+		"cannot %s %s: the human posted a stop order in this task's channel at %s that you have not yet processed: %q. Read it, address it, and wait for your next work packet (which carries the note) before retrying.",
+		action, taskID, note.At, excerpt,
+	)
+}
+
 // checkTaskActionAuthLocked enforces the hybrid CEO-managed Issues
 // model. Returns nil when the actor may perform the action on the
 // (optional) target task, or a TaskMutationForbidden error with a
@@ -654,6 +752,26 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// Rollback safety: the pre-mutation snapshot restores both
 			// pointers if a later gate in this mutation fails.
 			task.ChangesRequested = nil
+		}
+		// Stop-order backstop (anti-fabrication fix family #2, ICP-eval v2
+		// [00:50]): a human message that led with stop/wait/hold in this
+		// task's channel blocks submit_for_review and complete by agents
+		// until a packet build has consumed the note — an agent cannot land
+		// work past a stop order it never read. A human performing the
+		// action clears the note (they know what they said). Non-halt notes
+		// never block; they only ride the next packet's top.
+		if action == "complete" || action == "submit_for_review" {
+			if note := task.HumanNotePending; note != nil {
+				if isHumanMessageSender(actor) {
+					task.HumanNotePending = nil
+				} else if note.Halt {
+					return TaskResponse{}, taskMutationError(
+						TaskMutationForbidden,
+						humanNoteHaltMessage(task.ID, action, note),
+						nil,
+					)
+				}
+			}
 		}
 		switch action {
 		case "claim", "assign":

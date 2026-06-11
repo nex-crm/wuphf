@@ -236,6 +236,14 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	msg = b.appendMessageLocked(msg)
 	total := len(b.messages)
 
+	// Stop-order backstop: a human message in a running task's channel is
+	// stamped on the task so the owner's next packet leads with it (and a
+	// leading stop/wait/hold blocks submit/complete until then). In-memory
+	// field write only; saveLocked below persists it.
+	if isHumanMessageSender(msg.From) {
+		b.markHumanNoteOnRunningTasksLocked(msg)
+	}
+
 	// Track which agents were tagged — they should show "typing" immediately
 	if len(msg.Tagged) > 0 && isHumanMessageSender(msg.From) {
 		if b.lastTaggedAt == nil {
@@ -472,6 +480,11 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	msg = b.appendMessageLocked(msg)
+	// Stop-order backstop: same marking as the HTTP post path — human
+	// messages into a running task's channel ride the owner's next packet.
+	if isHumanMessageSender(msg.From) {
+		b.markHumanNoteOnRunningTasksLocked(msg)
+	}
 	// Clear typing indicator — agent has replied
 	if b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
