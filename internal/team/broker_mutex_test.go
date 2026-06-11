@@ -52,11 +52,11 @@ func TestContendedMutexLogsSlowAcquireWithCaller(t *testing.T) {
 	var m contendedMutex
 	m.Lock()
 	released := make(chan struct{})
-	go func() {
-		time.Sleep(slowLockWaitThreshold + 200*time.Millisecond)
+	timer := time.AfterFunc(slowLockWaitThreshold+200*time.Millisecond, func() {
 		m.Unlock()
 		close(released)
-	}()
+	})
+	t.Cleanup(func() { timer.Stop() })
 	m.Lock() // waits past the threshold
 	guarded := true
 	m.Unlock()
@@ -79,10 +79,9 @@ func TestContendedMutexLogsSlowAcquireWithCaller(t *testing.T) {
 	// Rate limit: a second slow wait inside slowLockLogMinInterval stays
 	// silent so a pile-up behind one long holder logs once, not per waiter.
 	m.Lock()
-	go func() {
-		time.Sleep(slowLockWaitThreshold + 200*time.Millisecond)
+	timer = time.AfterFunc(slowLockWaitThreshold+200*time.Millisecond, func() {
 		m.Unlock()
-	}()
+	})
 	m.Lock()
 	guarded = false
 	m.Unlock()
