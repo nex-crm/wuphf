@@ -448,6 +448,14 @@ func (b *Broker) handleTaskDecision(w http.ResponseWriter, r *http.Request, acto
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		if errors.Is(err, ErrHumanObjectionOpen) {
+			// Human-sovereignty gate: a non-human approve hit an open
+			// human request-changes objection. 409 (not 500) with the
+			// full message so the blocked agent reads whose "no" stands
+			// and how to proceed.
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
 		log.Printf("broker: record decision task=%q action=%q: %v", id, action, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return

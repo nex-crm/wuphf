@@ -174,6 +174,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"turn-journal", evalJobTurnJournal},
 		{"compounding-loop", evalJobCompoundingLoop},
 		{"completion-hook", evalJobCompletionHook},
+		{"human-sovereignty", evalJobHumanSovereignty},
 		{"entity-articles", evalJobEntityArticles},
 		{"playbook-compilation", evalJobPlaybookCompilation},
 		{"notebook-bookends", evalJobNotebookBookends},
@@ -749,6 +750,132 @@ func evalJobCompletionHook(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	fx.launcher.stopHeadlessWorkers()
 	r.add(job, "reopen re-enqueues the owner's headless turn",
 		executable && strings.HasPrefix(dispatched, "eng\n") && strings.Contains(dispatched, taskID),
+		fmt.Sprintf("lifecycle=%s status=%q dispatched=%d chars", reopened.LifecycleState, strings.TrimSpace(reopened.status), len(dispatched)), "")
+	return nil
+}
+
+// evalJobHumanSovereignty: the human's "no" is sovereign and audible
+// (core-loop grader fix family #1; ICP-eval v2 observations [00:55],
+// [01:04], [01:06]). One task journeys through the three mechanisms:
+//
+//	(a) feedback-in-packet — the human's request-changes TEXT renders
+//	    verbatim in the owner's next execution packet AND in the wake
+//	    notification content, not as a bare "changes requested" flag
+//	    ([00:55]: "The feedback isn't visible in the packet").
+//	(b) open objection hard-blocks terminal transitions — while the
+//	    human's objection stands, approve/complete by ANY agent (the
+//	    lead included, on both the team_task path and the
+//	    /tasks/{id}/decision path) is refused with an error naming the
+//	    objection; a HUMAN approve clears it and lands the task
+//	    ([01:04]: "CEO self-approves over a human rejection").
+//	(c) reopen symmetric with close — the lead reopens the closed task
+//	    and the owner is re-enqueued through the same wake path a fresh
+//	    assignment uses ([01:06]: the CEO could close over an objection
+//	    in one message but believed it could not reopen).
+func evalJobHumanSovereignty(fx *officeEvalFixture, r *OfficeEvalReport) error {
+	const job = "human-sovereignty"
+	created, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Draft the renewal one-pager",
+		Details: "Draft the renewal one-pager for the Q4 account review.",
+		Owner:   "eng", CreatedBy: "ceo",
+	})
+	if err != nil {
+		return err
+	}
+	taskID := created.Task.ID
+	if _, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "submit_for_review", ID: taskID, Channel: "general", CreatedBy: "eng",
+		Details: "First draft attached.",
+	}); err != nil {
+		return err
+	}
+
+	// (a) Human bounces the work with concrete feedback.
+	const feedback = "Use Dana as the champion, not a fabricated contact, and rebuild the Corti sequence escalation-first."
+	if _, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "request_changes", ID: taskID, Channel: "general",
+		Details: feedback, CreatedBy: "human",
+	}); err != nil {
+		return err
+	}
+	bounced := fx.broker.TaskByID(taskID)
+	if bounced == nil {
+		return fmt.Errorf("human-sovereignty: task %s vanished after request_changes", taskID)
+	}
+	packet := fx.launcher.notifyCtx().BuildTaskExecutionPacket("eng",
+		officeActionLog{Kind: "task_updated", Actor: "human"}, *bounced, "Revise per feedback.")
+	r.add(job, "request-changes feedback renders verbatim in the owner's execution packet",
+		strings.Contains(packet, "CHANGES REQUESTED by @human") && strings.Contains(packet, feedback),
+		fmt.Sprintf("packet=%d chars", len(packet)), "")
+	wake := fx.launcher.notifyCtx().TaskNotificationContent(
+		officeActionLog{Kind: "task_updated", Actor: "human"}, *bounced)
+	r.add(job, "request-changes feedback renders in the wake notification content",
+		strings.Contains(wake, "CHANGES REQUESTED by @human") && strings.Contains(wake, feedback),
+		fmt.Sprintf("wake=%d chars", len(wake)), "")
+
+	// (b) Every agent path to a terminal transition is refused while the
+	// human's objection is open — the error names the objection.
+	_, ceoApproveErr := fx.broker.MutateTask(TaskPostRequest{Action: "approve", ID: taskID, Channel: "general", CreatedBy: "ceo"})
+	var mutationErr *TaskMutationError
+	ceoBlocked := errors.As(ceoApproveErr, &mutationErr) && mutationErr.Kind == TaskMutationForbidden &&
+		strings.Contains(mutationErr.Message, "@human") && strings.Contains(mutationErr.Message, "Dana")
+	r.add(job, "lead approve is blocked while the human objection is open", ceoBlocked,
+		fmt.Sprintf("err=%v", ceoApproveErr), "")
+	_, ownerCompleteErr := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: taskID, Channel: "general", CreatedBy: "eng"})
+	ownerBlocked := errors.As(ownerCompleteErr, &mutationErr) && mutationErr.Kind == TaskMutationForbidden
+	r.add(job, "owner complete is blocked while the human objection is open", ownerBlocked,
+		fmt.Sprintf("err=%v", ownerCompleteErr), "")
+	decisionErr := fx.broker.RecordTaskDecision(taskID, "approve", "ceo")
+	notDone := fx.broker.TaskByID(taskID) != nil && !strings.EqualFold(strings.TrimSpace(fx.broker.TaskByID(taskID).status), "done")
+	r.add(job, "decision-endpoint agent approve is blocked while the human objection is open",
+		errors.Is(decisionErr, ErrHumanObjectionOpen) && notDone,
+		fmt.Sprintf("err=%v", decisionErr), "")
+
+	// A HUMAN approve clears the objection and lands the task.
+	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "approve", ID: taskID, Channel: "general", CreatedBy: "human"}); err != nil {
+		r.add(job, "human approve clears the objection and lands the task", false, err.Error(), "")
+		return nil
+	}
+	done := fx.broker.TaskByID(taskID)
+	r.add(job, "human approve clears the objection and lands the task",
+		done != nil && strings.EqualFold(strings.TrimSpace(done.status), "done") &&
+			done.HumanObjection == nil && done.ChangesRequested == nil,
+		fmt.Sprintf("status=%q objection=%v changes=%v", strings.TrimSpace(done.status), done.HumanObjection, done.ChangesRequested), "")
+
+	// (c) The lead reopens the closed task; the owner is re-enqueued
+	// through the same wake path a fresh assignment uses (B1 seam).
+	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "reopen", ID: taskID, Channel: "general", CreatedBy: "ceo"}); err != nil {
+		r.add(job, "lead reopen re-engages the owner", false, err.Error(), "")
+		return nil
+	}
+	reopened := fx.broker.TaskByID(taskID)
+	executable := reopened != nil && isExecutableTeamTaskStatus(reopened.LifecycleState) &&
+		strings.EqualFold(strings.TrimSpace(reopened.status), "in_progress")
+	woke := make(chan string, 1)
+	stub := func(_ *Launcher, _ context.Context, slug, notification string, _ ...string) error {
+		select {
+		case woke <- slug + "\n" + notification:
+		default:
+		}
+		return nil
+	}
+	prior := headlessCodexRunTurnOverride.Load()
+	headlessCodexRunTurnOverride.Store(&stub)
+	defer headlessCodexRunTurnOverride.Store(prior)
+	fx.launcher.sendTaskUpdate(
+		notificationTarget{Slug: "eng"},
+		officeActionLog{Kind: "task_updated", Actor: "ceo", Channel: reopened.Channel, RelatedID: taskID},
+		*reopened,
+		"Task reopened — resume work.",
+	)
+	dispatched := ""
+	select {
+	case dispatched = <-woke:
+	case <-time.After(8 * time.Second):
+	}
+	fx.launcher.stopHeadlessWorkers()
+	r.add(job, "lead reopen re-engages the owner", executable &&
+		strings.HasPrefix(dispatched, "eng\n") && strings.Contains(dispatched, taskID),
 		fmt.Sprintf("lifecycle=%s status=%q dispatched=%d chars", reopened.LifecycleState, strings.TrimSpace(reopened.status), len(dispatched)), "")
 	return nil
 }

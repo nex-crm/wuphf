@@ -861,12 +861,36 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 		var currentState LifecycleState
 		if task := b.findTaskByIDLocked(taskID); task != nil {
 			currentState = task.LifecycleState
+			// Human-sovereignty gate (mirrors MutateTask): an open human
+			// request-changes objection blocks approve for every
+			// non-human actor — agents that share the broker token land
+			// here via /tasks/{id}/decision. Humans pass and the clear
+			// happens after the successful transition below.
+			if action == RecordDecisionApprove && !actor.isHuman {
+				if obj := task.HumanObjection; obj != nil {
+					return fmt.Errorf("%w: %s", ErrHumanObjectionOpen, humanObjectionOpenMessage(taskID, "approve", obj))
+				}
+			}
 		}
 		target, reason = lifecycleStateForDecisionAction(action, currentState)
 		// Approving from Drafting (activate) starts the owner working.
 		startingWork := action == RecordDecisionApprove && currentState == LifecycleStateDrafting
 		if _, err := b.transitionLifecycleLocked(taskID, target, reason); err != nil {
 			return fmt.Errorf("record decision: transition: %w", err)
+		}
+		// Mirror the MutateTask clear: a HUMAN approve retires their open
+		// objection, and any successful approve retires the latest
+		// request-changes stamp so the next packet drops the banner.
+		// Non-human approves only reach here when no objection was open
+		// (the gate above returned otherwise). Persisted by the
+		// saveLocked in OnDecisionRecorded after this section unlocks.
+		if action == RecordDecisionApprove {
+			if task := b.findTaskByIDLocked(taskID); task != nil {
+				if actor.isHuman {
+					task.HumanObjection = nil
+				}
+				task.ChangesRequested = nil
+			}
 		}
 		// Wake the owner so work actually STARTS on approval. The
 		// transition above only posts a From=system lifecycle card, which
@@ -930,6 +954,23 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 			// task lookup happens via findTaskByIDLocked so we can
 			// pull the current owner inside the lock.
 			if task := b.findTaskByIDLocked(taskID); task != nil {
+				// Stamp the feedback TEXT on the task itself — same
+				// contract as MutateTask's request_changes — so the
+				// "What needs to change?" box from the Inbox reaches
+				// the owner's next execution packet verbatim instead
+				// of dying in the Decision Packet feedback log
+				// (ICP-eval v2 J2). A human reviewer's request also
+				// arms (or refreshes) the sovereignty gate. Fresh
+				// struct each time: rollback safety.
+				objection := &TaskReviewObjection{
+					Actor: taskObjectionActor(actorSlug),
+					Body:  trimmedComment,
+					At:    time.Now().UTC().Format(time.RFC3339),
+				}
+				task.ChangesRequested = objection
+				if actor.isHuman {
+					task.HumanObjection = objection
+				}
 				b.postTaskRequestChangesNotificationsLocked(actorSlug, task, trimmedComment)
 			}
 		}

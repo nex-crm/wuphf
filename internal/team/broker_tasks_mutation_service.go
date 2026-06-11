@@ -52,6 +52,38 @@ func taskMutationError(kind TaskMutationErrorKind, message string, cause error) 
 	return &TaskMutationError{Kind: kind, Message: message, Cause: cause}
 }
 
+// ErrHumanObjectionOpen marks an approve blocked by an open human
+// request-changes objection on the decision-endpoint path
+// (recordTaskDecisionInternal). The HTTP handler maps it to 409.
+var ErrHumanObjectionOpen = errors.New("human objection open")
+
+// taskObjectionActor normalizes the attribution slug stored on a
+// TaskReviewObjection. An empty actor is the local operator (the same
+// convention checkTaskActionAuthLocked uses), attributed as "human".
+func taskObjectionActor(actor string) string {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return "human"
+	}
+	return actor
+}
+
+// humanObjectionOpenMessage names the open objection in the forbidden
+// error so the blocked agent knows exactly whose "no" stands and how to
+// proceed (revise + resubmit, then wait for the human).
+func humanObjectionOpenMessage(taskID, action string, obj *TaskReviewObjection) string {
+	excerpt := strings.TrimSpace(obj.Body)
+	if len(excerpt) > 280 {
+		excerpt = excerpt[:277] + "..."
+	}
+	msg := fmt.Sprintf("cannot %s %s: an open human objection stands — @%s requested changes at %s", action, taskID, obj.Actor, obj.At)
+	if excerpt != "" {
+		msg += fmt.Sprintf(": %q", excerpt)
+	}
+	msg += ". Only the human can approve or complete this task while their objection is open. Address the feedback, resubmit with team_task action=submit_for_review, and wait for the human's decision."
+	return msg
+}
+
 // checkTaskActionAuthLocked enforces the hybrid CEO-managed Issues
 // model. Returns nil when the actor may perform the action on the
 // (optional) target task, or a TaskMutationForbidden error with a
@@ -596,6 +628,33 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		rejectTriggered := false
 		submitForReviewTriggered := false
 		beforeStatus := task.status
+		// Human-sovereignty gate (core-loop grader fix family #1): while a
+		// human request-changes objection is open on this task, no agent —
+		// including the CEO/lead and internal system actors — may land it.
+		// Only a human actor can approve/complete, which also clears the
+		// objection; a human request_changes below refreshes it. ICP-eval
+		// v2 J2: the CEO approved its subordinate's blind revision one
+		// message after the human's standing rejection.
+		if action == "approve" || action == "complete" {
+			if obj := task.HumanObjection; obj != nil {
+				if !isHumanMessageSender(actor) {
+					return TaskResponse{}, taskMutationError(
+						TaskMutationForbidden,
+						humanObjectionOpenMessage(task.ID, action, obj),
+						nil,
+					)
+				}
+				task.HumanObjection = nil
+			}
+			// Any actor that legitimately reaches approve/complete also
+			// retires the latest request-changes stamp: the rework cycle
+			// it described is over, so the next packet must not carry a
+			// stale "CHANGES REQUESTED" banner. (Agent-reviewer verdicts
+			// have no HumanObjection, so this is the only clear they get.)
+			// Rollback safety: the pre-mutation snapshot restores both
+			// pointers if a later gate in this mutation fails.
+			task.ChangesRequested = nil
+		}
 		switch action {
 		case "claim", "assign":
 			if strings.TrimSpace(body.Owner) == "" {
@@ -718,6 +777,21 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			task.blocked = false
 			appendDetails = true
 			requestChangesTriggered = true
+			// Stamp the feedback TEXT on the task itself so it renders in
+			// the owner's next execution packet and wake notification —
+			// the Decision Packet feedback log alone is invisible to the
+			// reworking agent (ICP-eval v2 J2). A HUMAN reviewer's
+			// request additionally arms (or refreshes) the sovereignty
+			// gate above. Fresh struct each time: rollback safety.
+			objection := &TaskReviewObjection{
+				Actor: taskObjectionActor(actor),
+				Body:  strings.TrimSpace(body.Details),
+				At:    now,
+			}
+			task.ChangesRequested = objection
+			if isHumanMessageSender(actor) {
+				task.HumanObjection = objection
+			}
 		case "submit_for_review":
 			// Explicit "hand off to reviewer" action so executor
 			// agents have a verb that matches PR-review intent

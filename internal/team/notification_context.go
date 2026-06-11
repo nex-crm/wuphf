@@ -41,6 +41,16 @@ const (
 	taskListDetailsClipChars = 512
 	// triggerContentClipChars clips the trigger message in execution packets.
 	triggerContentClipChars = 4000
+	// changesRequestedClipChars clips the latest request-changes feedback
+	// rendered in execution packets. Generous on purpose: ICP-eval v2 J2
+	// found agents reworking blind because the human's typed feedback was
+	// invisible or truncated ("The feedback text is truncated in the
+	// packet"), so this block must carry the full review verbatim for any
+	// realistic comment length.
+	changesRequestedClipChars = 4000
+	// changesRequestedNotifyClipChars clips the same feedback inside the
+	// short single-line wake notification header.
+	changesRequestedNotifyClipChars = 600
 	// leadTaskContextLimit is how many task summaries the lead's packet carries.
 	leadTaskContextLimit = 10
 )
@@ -675,6 +685,15 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacketWithContext(slug st
 		fmt.Sprintf("- Status: %s", strings.TrimSpace(task.status)),
 		fmt.Sprintf("- Owner: @%s", slug),
 	}
+	// Latest request-changes feedback leads the packet (core-loop grader
+	// fix family #1, ICP-eval v2 J2): the reviewer's verbatim text rides
+	// on the task itself (teamTask.ChangesRequested) because the Decision
+	// Packet feedback log is invisible to the reworking agent. Rendered
+	// BEFORE the definition so a bounced task's next turn opens with what
+	// the reviewer actually said, not a bare "changes requested" flag.
+	if lines2 := changesRequestedPacketLines(task); len(lines2) > 0 {
+		lines = append(lines, lines2...)
+	}
 	// R4 definition: the structured intake contract leads the packet — the
 	// goal, deliverables (+format), success criteria, and access this work
 	// is executed against (task_definition.go).
@@ -776,6 +795,31 @@ func (b *notificationContextBuilder) BuildTaskExecutionPacketWithContext(slug st
 	return strings.Join(lines, "\n"), contextUsed
 }
 
+// changesRequestedPacketLines renders the LATEST request-changes verdict
+// stored on the task (teamTask.ChangesRequested) for the execution packet.
+// Returns nil when no verdict is pending. When the verdict is the open
+// HUMAN objection (teamTask.HumanObjection), the block also states the
+// sovereignty contract: no agent — including the lead — can approve or
+// complete the task until the human clears it.
+func changesRequestedPacketLines(task teamTask) []string {
+	obj := task.ChangesRequested
+	if obj == nil {
+		return nil
+	}
+	body := strings.TrimSpace(obj.Body)
+	if body == "" {
+		body = "(no written feedback was provided)"
+	}
+	lines := []string{
+		fmt.Sprintf("- CHANGES REQUESTED by @%s: %s", obj.Actor, truncate(body, changesRequestedClipChars)),
+		"  Address this feedback FIRST — point by point, in the actual artifact — then resubmit with team_task action=submit_for_review. Do not guess at what the reviewer meant when the text above answers it.",
+	}
+	if task.HumanObjection != nil {
+		lines = append(lines, "  This objection is from the HUMAN and is sovereign: no agent (including the lead/CEO) can approve or complete this task while it stands. Only the human can clear it by approving or completing.")
+	}
+	return lines
+}
+
 // TaskNotificationContent returns the short single-line task notification
 // header (verb, owner, status, optional pipeline / review / execMode /
 // worktree / guidance / framing / capability / hygiene fragments).
@@ -848,7 +892,23 @@ func (b *notificationContextBuilder) TaskNotificationContent(action officeAction
 	if taskLooksLikeLiveBusinessObjective(&task) {
 		hygiene = "\n" + taskHygieneCoachingBlock()
 	}
-	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s). Context is included — do NOT call team_poll or team_tasks. Respond with the concrete next step immediately. Stay in your lane. Once you have posted the needed update, STOP and wait for the next pushed notification.%s%s%s%s", verb, task.ID, channelSlug, task.Title, details, owner, status, pipeline, review, execMode, worktree, guidance, framing, capability, hygiene)
+	// The latest request-changes verdict rides the wake content itself (not
+	// only the full execution packet) so the bounced owner's very first
+	// line of context names who said no and what they said. ICP-eval v2 J2:
+	// "the feedback isn't visible in the packet" cost the human a manual
+	// re-explanation on every changes-request.
+	changes := ""
+	if obj := task.ChangesRequested; obj != nil {
+		body := strings.TrimSpace(obj.Body)
+		if body == "" {
+			body = "(no written feedback was provided)"
+		}
+		changes = fmt.Sprintf(" CHANGES REQUESTED by @%s: %s", obj.Actor, truncate(body, changesRequestedNotifyClipChars))
+		if task.HumanObjection != nil {
+			changes += " This is the HUMAN's objection — only the human can approve or complete this task while it stands."
+		}
+	}
+	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s).%s Context is included — do NOT call team_poll or team_tasks. Respond with the concrete next step immediately. Stay in your lane. Once you have posted the needed update, STOP and wait for the next pushed notification.%s%s%s%s", verb, task.ID, channelSlug, task.Title, details, owner, status, pipeline, review, execMode, worktree, changes, guidance, framing, capability, hygiene)
 }
 
 // ── package-level helpers used inside the builder ──────────────────────

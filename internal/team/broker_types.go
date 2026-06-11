@@ -314,6 +314,24 @@ type teamTask struct {
 	// WITH a Definition cannot reach done until this is set; tasks without
 	// one keep legacy behavior. Wire key "artifact" is additive.
 	Artifact string `json:"artifact,omitempty"`
+	// ChangesRequested is the LATEST request-changes verdict on this task
+	// (any reviewer — human or agent). Stored on the task itself so the
+	// feedback TEXT rides into the owner's next execution packet and wake
+	// notification ("CHANGES REQUESTED by <actor>: <text>") instead of
+	// living only in the Decision Packet feedback log, which agents
+	// reported they could not read (ICP-eval v2, J2). Refreshed on every
+	// request_changes; cleared when a HUMAN actor approves or completes
+	// the task. Wire key "changes_requested" is additive.
+	ChangesRequested *TaskReviewObjection `json:"changes_requested,omitempty"`
+	// HumanObjection is the open human "no": set when a HUMAN actor
+	// issues request_changes on this task. While non-nil, approve and
+	// complete by ANY agent — including the CEO/lead — return
+	// TaskMutationForbidden naming the objection; only a human actor can
+	// approve/complete (which clears it) or refresh it with another
+	// request_changes. The human's no is sovereign (core-loop fix family
+	// #1, ICP-eval v2 J2: "CEO self-approves over a human rejection").
+	// Wire key "human_objection" is additive.
+	HumanObjection *TaskReviewObjection `json:"human_objection,omitempty"`
 	// Ledger is the per-turn journal (task_ledger.go, U2.3): distilled
 	// records of what each headless turn on this task said, mutated, and
 	// how it ended. Rendered into every participant's packet as the living
@@ -327,6 +345,22 @@ type teamTask struct {
 	// is the only current system task; it owns the #general channel so all
 	// 141 fallback call sites that post to "general" keep working unchanged.
 	System bool `json:"system,omitempty"`
+}
+
+// TaskReviewObjection records one request-changes verdict (who, what,
+// when) directly on the task. Two task fields carry it: ChangesRequested
+// (latest verdict from anyone, for packet rendering) and HumanObjection
+// (the open human "no", for the sovereignty gate in MutateTask /
+// recordTaskDecisionInternal). Always assign a fresh struct — never
+// mutate one in place — so mutation-snapshot rollbacks stay correct.
+type TaskReviewObjection struct {
+	// Actor is the reviewer who requested the changes ("human", a
+	// "human:<slug>" session sender, or an agent slug).
+	Actor string `json:"actor"`
+	// Body is the verbatim feedback text supplied with the request.
+	Body string `json:"body,omitempty"`
+	// At is the RFC3339 timestamp the objection was raised.
+	At string `json:"at"`
 }
 
 // Status returns the persisted status string. Read accessor for callers
@@ -407,6 +441,8 @@ type teamTaskWire struct {
 	VerificationResult   *TaskVerificationResult `json:"verification_result,omitempty"`
 	Definition           *TaskDefinition         `json:"definition,omitempty"`
 	Artifact             string                  `json:"artifact,omitempty"`
+	ChangesRequested     *TaskReviewObjection    `json:"changes_requested,omitempty"`
+	HumanObjection       *TaskReviewObjection    `json:"human_objection,omitempty"`
 	Ledger               []TaskLedgerEntry       `json:"ledger,omitempty"`
 	CreatedAt            string                  `json:"created_at"`
 	UpdatedAt            string                  `json:"updated_at"`
@@ -458,6 +494,8 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		VerificationResult:   t.VerificationResult,
 		Definition:           t.Definition,
 		Artifact:             t.Artifact,
+		ChangesRequested:     t.ChangesRequested,
+		HumanObjection:       t.HumanObjection,
 		Ledger:               t.Ledger,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
@@ -511,6 +549,8 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.VerificationResult = w.VerificationResult
 	t.Definition = w.Definition
 	t.Artifact = w.Artifact
+	t.ChangesRequested = w.ChangesRequested
+	t.HumanObjection = w.HumanObjection
 	t.Ledger = w.Ledger
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt
