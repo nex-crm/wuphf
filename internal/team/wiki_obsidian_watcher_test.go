@@ -163,6 +163,47 @@ func TestObsidianWatcher_NotifyWriteFiltersOwnEvents(t *testing.T) {
 	requireHEADStable(t, repo, first, 500*time.Millisecond)
 }
 
+// B3/B4 knowledge-integrity regression: a worker (agent-authored) commit
+// makes the file identical to HEAD, so the watcher's fsnotify echo must NOT
+// produce a follow-up "wiki: external edit" commit attributed to the human
+// identity. Production never calls NotifyWrite for worker commits — the v3
+// run's git history was all "human · wiki: external edit" because every
+// agent commit was echoed with a fresh sentinel stamp, and that sentinel
+// commit re-triggered the watcher into a commit storm ("173 revisions").
+func TestObsidianWatcher_WorkerCommitEchoKeepsAgentAuthor(t *testing.T) {
+	repo, worker, _, teardown := newObsidianWatcherFixture(t)
+	defer teardown()
+
+	rel := "team/people/agent-authored.md"
+	if _, _, err := worker.Enqueue(context.Background(), "eng", rel,
+		"# Agent authored\n\nWritten through the worker.\n", "create", "agent: brief"); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	worker.WaitForIdle()
+	head, err := repo.HeadSHA(context.Background())
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+
+	// The fsnotify echo of the worker's own write must be dropped by the
+	// dirty-vs-HEAD guard (fixture debounce is 50ms; give it 10x).
+	requireHEADStable(t, repo, head, 500*time.Millisecond)
+
+	refs, err := repo.Log(context.Background(), rel)
+	if err != nil {
+		t.Fatalf("log: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("expected exactly 1 commit for %s; got %d: %#v", rel, len(refs), refs)
+	}
+	if refs[0].Author != "eng" {
+		t.Fatalf("agent write misattributed: author=%q want %q", refs[0].Author, "eng")
+	}
+	if strings.Contains(refs[0].Message, "external edit") {
+		t.Fatalf("worker commit must not be an external-edit echo: %q", refs[0].Message)
+	}
+}
+
 func TestObsidianWatcher_DebounceCoalescesRapidWrites(t *testing.T) {
 	repo, _, watcher, teardown := newObsidianWatcherFixture(t)
 	defer teardown()

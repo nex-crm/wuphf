@@ -209,8 +209,11 @@ type taskCompletionEntity struct {
 //   - explicit @mentions in title/details/goal/deliverables → people
 //     (agents and humans referenced by slug), minus plumbing slugs;
 //   - capitalized multi-word names in the Definition goal + deliverable
-//     names (per B1: goal/deliverables only) → companies, slugified via
-//     the existing slugify normalizer and validated against slugPattern.
+//     names + task details → companies, slugified via the existing
+//     slugify normalizer and validated against slugPattern. Details are
+//     included (B1 knowledge-integrity) because chat-born tasks routinely
+//     name the customer only in Details — the v3 run's defined tasks
+//     carried "Acme Corp"/"Corti Labs" there and extraction found nothing.
 //
 // Bounded to maxTaskCompletionEntities, first-seen order.
 func taskCompletionEntities(task teamTask) []taskCompletionEntity {
@@ -249,7 +252,7 @@ func taskCompletionEntities(task teamTask) []taskCompletionEntity {
 		}
 		add(taskCompletionEntity{Kind: EntityKindPeople, Slug: slug, Name: "@" + slug})
 	}
-	nameSource := goal + "\n" + deliverableText
+	nameSource := goal + "\n" + deliverableText + "\n" + task.Details
 	for _, name := range capitalizedNamePattern.FindAllString(nameSource, -1) {
 		add(taskCompletionEntity{Kind: EntityKindCompanies, Slug: slugify(name), Name: strings.TrimSpace(name)})
 	}

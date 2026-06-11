@@ -463,8 +463,12 @@ func evalJobLivePaths(fx *officeEvalFixture, r *OfficeEvalReport) error {
 	r.add(job, "dependent stays blocked past the upstream approval click",
 		downFound && downBlocked, fmt.Sprintf("found=%v blocked=%v", downFound, downBlocked), "")
 
-	// Completion WITH artifact releases it.
+	// Completion WITH artifact releases it. The artifact must exist on disk
+	// (B5 existence gate — a phantom path no longer passes).
 	const upArtifact = "team/research/competitor-pricing.md"
+	if err := fx.seedWikiFile(upArtifact, "# Competitor pricing research\n"); err != nil {
+		return err
+	}
 	if _, err := fx.broker.MutateTask(TaskPostRequest{
 		Action: "complete", ID: upID, Channel: "general", CreatedBy: "eng", ArtifactPath: upArtifact,
 	}); err != nil {

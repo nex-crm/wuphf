@@ -159,6 +159,22 @@ func (fx *officeEvalFixture) activateTask(taskID string) error {
 	return err
 }
 
+// seedWikiFile materializes a deliverable file under the fixture's wiki
+// root so the B5 artifact-existence gate (knowledge-integrity) sees a real
+// file — done now requires the artifact to exist, not just be named. Plain
+// disk write; existence does not require a commit.
+func (fx *officeEvalFixture) seedWikiFile(relPath, content string) error {
+	worker := fx.broker.WikiWorker()
+	if worker == nil || worker.Repo() == nil {
+		return fmt.Errorf("seed wiki file: no wiki worker")
+	}
+	full := filepath.Join(worker.Repo().Root(), filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(full, []byte(content), 0o600)
+}
+
 // RunOfficeEvals runs every eval job in its own scratch office under dir
 // and returns the combined report. dir must be a writable scratch directory
 // (the caller owns its lifetime; t.TempDir() or os.MkdirTemp both work).
@@ -211,6 +227,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"workspace-isolation", evalJobWorkspaceIsolation},
 		{"utterance-routing", evalJobUtteranceRouting},
 		{"task-integrity", evalJobTaskIntegrity},
+		{"knowledge-integrity", evalJobKnowledgeIntegrity},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))

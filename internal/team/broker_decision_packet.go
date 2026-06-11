@@ -849,6 +849,16 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 			return err
 		}
 	}
+	// B5 done-artifact existence pre-phase (mirrors MutateTask): stat the
+	// artifact a terminal approve would land done with OUTSIDE the lock.
+	// The locked gate below compares the checked reference against the
+	// task's artifact at gate time so a concurrent rewrite cannot bind a
+	// stale verdict.
+	var decisionArtifactRef string
+	decisionArtifactExists := true
+	if action == RecordDecisionApprove {
+		decisionArtifactRef, decisionArtifactExists = b.peekTaskDoneArtifact(TaskPostRequest{Action: "approve", ID: taskID})
+	}
 	// TODO(v1.1): auto-merge evaluator — once a safe-class definition
 	// (e.g. wiki-only edits with all green checks and zero
 	// critical/major grades) lands, route merge actions through the
@@ -911,6 +921,22 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 					return taskMutationError(
 						TaskMutationArtifactRequired,
 						fmt.Sprintf("task %s has a Definition, so it cannot be approved into done without a delivered artifact. Have the owner publish the deliverable to the wiki and complete with artifact_path set, then approve.", taskID),
+						nil,
+					)
+				}
+				// (3) B5 knowledge-integrity: the recorded artifact must
+				// EXIST — a phantom path is the same chat-only-deliverable
+				// leak as no artifact at all (V3-N10). Existence was
+				// computed outside the lock in the pre-phase above.
+				if !isPreExecutionLifecycleState(currentState) &&
+					currentState != LifecycleStateApproved &&
+					task.Definition != nil &&
+					strings.TrimSpace(task.Artifact) != "" &&
+					strings.TrimSpace(task.Artifact) == decisionArtifactRef &&
+					!decisionArtifactExists {
+					return taskMutationError(
+						TaskMutationArtifactRequired,
+						fmt.Sprintf("task %s cannot be approved into done: artifact %q does not exist in the wiki (or the task worktree). Have the owner publish the real deliverable first, then approve.", taskID, decisionArtifactRef),
 						nil,
 					)
 				}
@@ -1026,6 +1052,18 @@ func (b *Broker) recordTaskDecisionInternal(taskID, rawAction string, actor deci
 	// OnDecisionRecorded acquires b.mu itself; call it after Unlock
 	// to avoid a self-deadlock through the unblock cascade.
 	b.OnDecisionRecorded(taskID)
+	// B1 knowledge-integrity: a terminal approve on the DECISION path is a
+	// done transition, so it must queue the same distillation hook MutateTask
+	// queues on reachedDone. The v3 live run terminalized every one of its
+	// six done tasks through this path (Inbox "Approve" → /tasks/{id}/decision
+	// → LifecycleStateApproved) and the hook never fired — entity facts,
+	// graph edges, and entity articles all stayed empty after two full
+	// journeys ([20:14] "4 nodes · 0 edges"). distillCompletedTask is
+	// single-flight + idempotent, so overlap with the MutateTask trigger
+	// (approve-after-complete) is safe.
+	if action == RecordDecisionApprove && target == LifecycleStateApproved {
+		b.queueTaskDistillation(taskID)
+	}
 	return nil
 }
 

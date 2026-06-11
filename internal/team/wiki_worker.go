@@ -29,6 +29,8 @@ package team
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -215,6 +217,26 @@ type WikiWorker struct {
 	// cancel(); <-worker.Done() })` so tempdir removal is deterministic.
 	drainDone       chan struct{}
 	notebookCommits atomic.Int64 // PromotionSweep gate; reader: NotebookCommitCount
+
+	// lastStandardWrite folds byte-identical consecutive standard wiki
+	// writes per path (B4 knowledge-integrity: no commit storms — "173
+	// revisions on a minutes-old article"). Keyed by rel path; only the
+	// drain goroutine touches it, so no lock is needed.
+	lastStandardWrite map[string]foldedWrite
+}
+
+// foldedWrite is the drain loop's memo of the most recent standard wiki
+// write per path, used to fold byte-identical repeats into a no-op reply.
+type foldedWrite struct {
+	Mode        string
+	ContentHash string
+	SHA         string
+}
+
+// contentHashForFold keys the B4 fold: same mode + same bytes = same write.
+func contentHashForFold(mode, content string) string {
+	sum := sha256.Sum256([]byte(mode + "\x00" + content))
+	return hex.EncodeToString(sum[:])
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
@@ -392,11 +414,30 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		// agents/{slug}/notebook/... — scoped to the author.
 		sha, n, err = w.repo.CommitNotebook(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
 	} else {
+		// B2 update-first (wiki_update_first.go): an agent create whose
+		// target directory already holds a similar-slug article is rerouted
+		// to append onto the existing file — update, never duplicate. The
+		// rerouted path/mode are written back onto req so the event fan-out
+		// and index reconcile below see the file that actually changed.
+		req.Path, req.Mode = routeAgentCreateToSimilarSlug(w.repo.Root(), req.Slug, req.Path, req.Mode)
+		// B4 coalesce: a byte-identical consecutive write to the same path
+		// folds into the previous commit instead of committing again.
+		foldKey := contentHashForFold(req.Mode, req.Content)
+		if prev, ok := w.lastStandardWrite[req.Path]; ok && prev.Mode == req.Mode && prev.ContentHash == foldKey {
+			req.ReplyCh <- wikiWriteResult{SHA: prev.SHA, BytesWritten: len(req.Content)}
+			return
+		}
 		// Wiki Commit owns the full atomic unit: write article bytes, regen
 		// the catalog, stage both, commit together. That keeps the working
 		// tree clean and the index commit attributable to the same author as
 		// the article edit. No post-commit IndexRegen here.
 		sha, n, err = w.repo.Commit(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
+		if err == nil {
+			if w.lastStandardWrite == nil {
+				w.lastStandardWrite = make(map[string]foldedWrite)
+			}
+			w.lastStandardWrite[req.Path] = foldedWrite{Mode: req.Mode, ContentHash: foldKey, SHA: sha}
+		}
 	}
 	if err != nil {
 		// On ErrWikiSHAMismatch the human path returns the current HEAD

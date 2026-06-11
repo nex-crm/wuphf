@@ -85,7 +85,11 @@ func evalJobCompletionHook(fx *officeEvalFixture, r *OfficeEvalReport) error {
 
 	// (b) Same finishing action with artifact_path lands done, posts the
 	// done-post to the task channel, and raises the non-blocking Inbox notice.
+	// The artifact must exist on disk (B5 existence gate).
 	const artifact = "team/playbooks/acme-renewal.md"
+	if err := fx.seedWikiFile(artifact, "# Acme renewal brief\n"); err != nil {
+		return err
+	}
 	if err := finish(artifact); err != nil {
 		r.add(job, "defined task reaches done once artifact_path is passed", false, err.Error(), "")
 		return nil
@@ -350,6 +354,9 @@ func evalJobEntityArticles(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		if err := fx.activateTask(id); err != nil {
 			return "", err
 		}
+		if err := fx.seedWikiFile(artifact, "# "+deliverable+"\n"); err != nil {
+			return "", err
+		}
 		if _, err := fx.broker.MutateTask(TaskPostRequest{
 			Action: "complete", ID: id, Channel: "general", CreatedBy: "eng", ArtifactPath: artifact,
 		}); err != nil {
@@ -519,6 +526,9 @@ func evalJobPlaybookCompilation(fx *officeEvalFixture, r *OfficeEvalReport) erro
 			return "", err
 		}
 		if err := fx.activateTask(id); err != nil {
+			return "", err
+		}
+		if err := fx.seedWikiFile(artifact, "# Investor update\n"); err != nil {
 			return "", err
 		}
 		if _, err := fx.broker.MutateTask(TaskPostRequest{
@@ -837,6 +847,9 @@ func evalJobNotebookBookends(fx *officeEvalFixture, r *OfficeEvalReport) error {
 
 	// (c) Verified done appends the post-task section with the artifact link.
 	const artifact = "team/briefs/onboarding-teardown.md"
+	if err := fx.seedWikiFile(artifact, "# Onboarding teardown brief\n"); err != nil {
+		return err
+	}
 	if _, err := fx.broker.MutateTask(TaskPostRequest{
 		Action: "complete", ID: id, Channel: "general", CreatedBy: "eng", ArtifactPath: artifact,
 	}); err != nil {

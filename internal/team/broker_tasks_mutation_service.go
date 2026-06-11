@@ -573,6 +573,18 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 		requestChangesArtifact, requestChangesArtifactHash = b.computeTaskArtifactHash(body.ID)
 	}
 
+	// B5 done-artifact existence pre-phase: stat the artifact this mutation
+	// would land done with OUTSIDE the lock (file I/O discipline), so the
+	// reachedDone gate below can reject phantom paths without holding b.mu
+	// across an os.Stat. The locked gate compares the checked reference
+	// against the task's artifact at gate time to stay race-safe.
+	var doneArtifactRef string
+	doneArtifactExists := true
+	switch action {
+	case "complete", "approve":
+		doneArtifactRef, doneArtifactExists = b.peekTaskDoneArtifact(body)
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -1284,6 +1296,24 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				fmt.Sprintf(
 					"task %s has a Definition, so it cannot reach done without a delivered artifact. Publish the deliverable to the wiki, then retry this %s with artifact_path set to the wiki-relative path (e.g. \"team/playbooks/launch.md\") or the visual-artifact id.",
 					task.ID, action,
+				),
+				nil,
+			)
+		}
+		// B5 knowledge-integrity: the artifact must EXIST, not merely be a
+		// non-empty string — phantom paths are how the v3 run shipped
+		// chat-only deliverables past the gate (V3-N10). Existence was
+		// checked outside the lock in the pre-phase; binding here only when
+		// the reference matches what was checked keeps the gate race-safe
+		// against concurrent artifact rewrites.
+		if reachedDone && task.Definition != nil &&
+			strings.TrimSpace(task.Artifact) == doneArtifactRef && !doneArtifactExists {
+			rollbackTask()
+			return TaskResponse{}, taskMutationError(
+				TaskMutationArtifactRequired,
+				fmt.Sprintf(
+					"task %s cannot reach done: artifact %q does not exist in the wiki (or the task worktree). Publish the deliverable first, then retry this %s with artifact_path pointing at the real file.",
+					task.ID, doneArtifactRef, action,
 				),
 				nil,
 			)

@@ -331,6 +331,66 @@ func resolveTaskArtifactFile(artifact, workDir, wikiRoot string) string {
 	return ""
 }
 
+// taskArtifactExists reports whether an artifact reference resolves to a
+// real deliverable: a readable file in the task worktree or the wiki repo,
+// or a stored visual artifact (ra_<hex> id with its metadata on disk).
+// B5 knowledge-integrity: "done" with a Definition requires the artifact to
+// EXIST, not merely be a non-empty string — the v3 run leaked chat-only
+// deliverables through phantom artifact paths (QBR one-pager = msg-303
+// only, V3-N10). MUST be called without b.mu held (file I/O).
+func taskArtifactExists(artifact, workDir, wikiRoot string) bool {
+	artifact = strings.TrimSpace(artifact)
+	if artifact == "" {
+		return false
+	}
+	if validateRichArtifactID(artifact) == nil {
+		wikiRoot = strings.TrimSpace(wikiRoot)
+		if wikiRoot == "" {
+			return false
+		}
+		meta := filepath.Join(wikiRoot, filepath.FromSlash(richArtifactMetaPath(artifact)))
+		info, err := os.Stat(meta)
+		return err == nil && !info.IsDir()
+	}
+	return resolveTaskArtifactFile(artifact, workDir, wikiRoot) != ""
+}
+
+// peekTaskDoneArtifact is the unlocked pre-phase for the B5 done-artifact
+// existence gate in MutateTask. It peeks (under lock) the artifact reference
+// this mutation would land done with — body.ArtifactPath when set, else the
+// task's stored artifact — and stats it outside the lock. Returns the
+// reference checked and whether it exists; ("", true) when the task has no
+// Definition (no gate) or cannot be found (downstream handles not-found).
+func (b *Broker) peekTaskDoneArtifact(body TaskPostRequest) (string, bool) {
+	id := strings.TrimSpace(body.ID)
+	if id == "" {
+		return "", true
+	}
+	b.mu.Lock()
+	task := b.taskByIDLocked(id)
+	if task == nil || task.Definition == nil {
+		b.mu.Unlock()
+		return "", true
+	}
+	artifact := strings.TrimSpace(body.ArtifactPath)
+	if artifact == "" {
+		artifact = strings.TrimSpace(task.Artifact)
+	}
+	workDir := strings.TrimSpace(task.WorktreePath)
+	wikiRoot := b.wikiRootLocked()
+	b.mu.Unlock()
+	if artifact == "" {
+		return "", false
+	}
+	if workDir == "" && wikiRoot == "" {
+		// No root to verify against (no wiki backend, no worktree): degrade
+		// open — the same posture as the resubmission-delta gate. The live
+		// system always has a wiki root, so the existence gate binds there.
+		return artifact, true
+	}
+	return artifact, taskArtifactExists(artifact, workDir, wikiRoot)
+}
+
 // hashTaskArtifactFile returns "sha256:<hex>" of the file content, or ""
 // when the file cannot be read. MUST be called without b.mu held.
 func hashTaskArtifactFile(path string) string {

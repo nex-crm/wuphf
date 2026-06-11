@@ -1141,6 +1141,27 @@ func (r *Repo) stageAllLocked(ctx context.Context) error {
 	return nil
 }
 
+// PathDirty reports whether relPath differs from its committed HEAD state
+// (modified or untracked). The Obsidian watcher uses this to distinguish a
+// REAL external edit from the fsnotify echo of an internal committed write:
+// after the wiki worker (or a promotion apply) writes-and-commits, the file
+// is byte-identical to HEAD by the time the watcher's debounce fires, so
+// there is nothing external to attribute. Without this check the watcher
+// stamped a fresh `last_human_edit_ts` sentinel on every echo — content
+// always differed, so every agent-authored commit was followed by a
+// human-attributed "wiki: external edit" commit, and that sentinel commit
+// re-triggered the watcher into a commit storm (B3 + B4: the v3 run's
+// all-human git history and "173 revisions" on a minutes-old article).
+func (r *Repo) PathDirty(ctx context.Context, relPath string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out, err := r.runGitLocked(ctx, "system", "status", "--porcelain", "--", filepath.ToSlash(relPath))
+	if err != nil {
+		return false, fmt.Errorf("wiki: git status %s: %w", relPath, err)
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
 // runGitLocked runs `git` with per-commit identity flags in the repo root.
 // Caller must hold r.mu. The slug is used as both the author name and the
 // local-part of the author email so git log / git blame stay useful.
