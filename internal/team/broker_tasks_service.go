@@ -130,7 +130,12 @@ func (b *Broker) ListTasks(req TaskListRequest) (TaskListResponse, error) {
 		if !b.viewerCanSeeTaskLocked(viewerSlug, &task) {
 			continue
 		}
-		result = append(result, task)
+		// Deep copy: the HTTP handler JSON-encodes the returned slice
+		// AFTER b.mu is released (copy-under-lock-then-serialize). A
+		// shallow struct copy still aliases Ledger/Reviewers/pointer
+		// fields, so an in-place mutation (e.g. AppendTaskLedgerEntry)
+		// would race the encoder (F1.b, ten-out-of-ten Wave F).
+		result = append(result, cloneTeamTaskForRollback(task))
 	}
 
 	return TaskListResponse{Channel: channel, Tasks: result}, nil

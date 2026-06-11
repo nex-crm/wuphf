@@ -357,9 +357,18 @@ type teamTask struct {
 	// CompletedAt, the re-landing stamps a new one) posts again. Wire key
 	// "done_posted_for" is additive (ten-out-of-ten A4, v3 6× done-messages).
 	DonePostedFor string `json:"done_posted_for,omitempty"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
-	CompletedAt   string `json:"completed_at,omitempty"`
+	// StalledSince is the RFC3339 timestamp at which the silent-stall
+	// watchdog (broker_task_stall.go) observed this RUNNING task had
+	// produced no observable trace — no non-system channel message, no
+	// non-system action, no ledger bump — for taskStallThreshold. Empty
+	// when the task is not stalled; cleared automatically when fresh
+	// activity lands or the task leaves running. Lifecycle-state-adjacent
+	// honesty marker (ten-out-of-ten Wave F2, v3 [19:05:30] 21-minute
+	// running-but-silent stall). Wire key "stalled_since" is additive.
+	StalledSince string `json:"stalled_since,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+	CompletedAt  string `json:"completed_at,omitempty"`
 	// System marks a task as a permanent system-owned task that may not
 	// be deleted or removed. The "Backup & Migration" task (ID: task-general)
 	// is the only current system task; it owns the #general channel so all
@@ -493,6 +502,7 @@ type teamTaskWire struct {
 	HumanNotePending     *TaskHumanNote          `json:"human_note_pending,omitempty"`
 	Ledger               []TaskLedgerEntry       `json:"ledger,omitempty"`
 	DonePostedFor        string                  `json:"done_posted_for,omitempty"`
+	StalledSince         string                  `json:"stalled_since,omitempty"`
 	CreatedAt            string                  `json:"created_at"`
 	UpdatedAt            string                  `json:"updated_at"`
 	CompletedAt          string                  `json:"completed_at,omitempty"`
@@ -548,6 +558,7 @@ func (t teamTask) MarshalJSON() ([]byte, error) {
 		HumanNotePending:     t.HumanNotePending,
 		Ledger:               t.Ledger,
 		DonePostedFor:        t.DonePostedFor,
+		StalledSince:         t.StalledSince,
 		CreatedAt:            t.CreatedAt,
 		UpdatedAt:            t.UpdatedAt,
 		CompletedAt:          t.CompletedAt,
@@ -605,6 +616,7 @@ func (t *teamTask) UnmarshalJSON(data []byte) error {
 	t.HumanNotePending = w.HumanNotePending
 	t.Ledger = w.Ledger
 	t.DonePostedFor = w.DonePostedFor
+	t.StalledSince = w.StalledSince
 	t.CreatedAt = w.CreatedAt
 	t.UpdatedAt = w.UpdatedAt
 	t.CompletedAt = w.CompletedAt

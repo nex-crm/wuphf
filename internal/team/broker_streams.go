@@ -589,6 +589,13 @@ func (b *Broker) runActivityWatchdog(ctx context.Context) {
 			// Expire blocking connect/fallback cards the human never answered so
 			// they cannot wedge a channel forever (slice 3b backstop).
 			b.expireStaleIntegrationDecisionsLocked(now)
+			// Silent-stall honesty (Wave F2): a RUNNING task with no
+			// observable trace for taskStallThreshold gets a visible
+			// stall marker + one honest chat line; markers self-clear
+			// when activity resumes (broker_task_stall.go).
+			if b.markSilentRunningTasksLocked(now, taskStallThreshold) {
+				_ = b.saveLocked()
+			}
 			b.mu.Unlock()
 		}
 	}

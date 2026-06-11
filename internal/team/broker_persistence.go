@@ -317,7 +317,13 @@ func (b *Broker) prepareBrokerStateWriteLocked() (brokerStateWrite, error) {
 			return usage
 		}(),
 	}
-	data, err := json.MarshalIndent(state, "", "  ")
+	// Compact marshal, not MarshalIndent: this runs UNDER b.mu (the state
+	// is shared by reference, so the snapshot above is only safe to encode
+	// while the lock is held), and on a busy office the state file reaches
+	// megabytes. Indent roughly doubles both the encode CPU spent inside
+	// the lock and the bytes written per save (F1, ten-out-of-ten Wave F).
+	// The file is machine-read on load; pipe through `jq .` to inspect.
+	data, err := json.Marshal(state)
 	if err != nil {
 		return brokerStateWrite{}, err
 	}

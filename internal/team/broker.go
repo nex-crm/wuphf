@@ -179,11 +179,14 @@ type Broker struct {
 	scanTracker             *scanStatusTracker
 	nextSubscriberID        int
 	agentStreams            map[string]*agentStreamBuffer
-	mu                      sync.Mutex
-	officeMemberMutationMu  sync.Mutex
-	stateWriteMu            sync.Mutex
-	stateWriteSeq           atomic.Uint64
-	stateWriteApplied       atomic.Uint64
+	// mu is the broker's single big lock. contendedMutex == sync.Mutex
+	// semantics plus sampled slow-wait logging (broker_mutex.go) so a
+	// long holder wedging every endpoint is visible in the log.
+	mu                     contendedMutex
+	officeMemberMutationMu sync.Mutex
+	stateWriteMu           sync.Mutex
+	stateWriteSeq          atomic.Uint64
+	stateWriteApplied      atomic.Uint64
 	// configMu serializes handleConfig POST reads/writes so concurrent
 	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
 	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can

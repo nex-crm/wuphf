@@ -462,8 +462,17 @@ func (l *Launcher) runHeadlessCodexQueue(lane headlessLane, stop <-chan struct{}
 				l.recoverFailedHeadlessTurn(slug, exhaustedTurn, startedAt, err.Error())
 			default:
 				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
-				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
-				l.recoverFailedHeadlessTurn(slug, turn, startedAt, err.Error())
+				detail := err.Error()
+				if isTurnKilledError(err) {
+					// Killed turn (SIGKILL/SIGTERM): post one honest
+					// system note and humanize the detail that flows
+					// into progress + recovery, so the user never has
+					// to parse raw `signal: killed` exhaust (Wave F2).
+					detail = turnKilledHumanDetail(slug)
+					l.postTurnKilledNote(slug, turn.Channel)
+				}
+				l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), headlessProgressMetrics{})
+				l.recoverFailedHeadlessTurn(slug, turn, startedAt, detail)
 			}
 			l.recordTaskLedgerEntry(slug, turn, startedAt, err)
 			l.finishHeadlessTurn(lane)

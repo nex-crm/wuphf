@@ -274,7 +274,18 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		delete(b.lastTaggedAt, msg.From)
 	}
 
-	if err := b.saveLocked(); err != nil {
+	// Snapshot-then-write: prepare the state write (prune + marshal) under
+	// the lock, but perform the DISK write after releasing b.mu. Message
+	// posting is the broker's hottest mutation (agent relays, system posts,
+	// human chat); holding the big lock across file I/O here serialized
+	// every other endpoint behind disk latency (F1, ten-out-of-ten Wave F).
+	// The seq guard in writeBrokerState drops this write if a newer state
+	// snapshot lands first, so out-of-order completion cannot regress the
+	// file. Failure semantics are unchanged: the message stays in memory
+	// and the caller gets a 500, exactly as the locked save behaved.
+	b.pruneCompletedTasksLocked()
+	write, err := b.prepareBrokerStateWriteLocked()
+	if err != nil {
 		b.mu.Unlock()
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 		return
@@ -284,6 +295,10 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// handler performs.
 	b.flushPendingAutoNotebookTransitionsLocked(answerCascade, "system")
 	b.mu.Unlock()
+	if err := b.writeBrokerState(write); err != nil {
+		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+		return
+	}
 
 	// PR 2: human "remember" intent. Hook fires AFTER b.mu.Unlock() and ONLY
 	// for human senders. Handle is a non-blocking enqueue; the classifier and
