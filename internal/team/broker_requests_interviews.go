@@ -279,6 +279,56 @@ func firstBlockingRequest(requests []humanInterview) *humanInterview {
 	return nil
 }
 
+// firstBlockingRequestInChannel scopes the chat gate to one channel: a
+// blocking request parks NEW chat in ITS channel until answered, but must
+// not gag the human everywhere else (ICP-eval v3 fix family #2: one buried
+// card must never wedge the office). Requests with an empty channel are
+// treated as #general.
+func firstBlockingRequestInChannel(requests []humanInterview, channel string) *humanInterview {
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	for i := range requests {
+		if !requestBlocksMessages(requests[i]) {
+			continue
+		}
+		reqChannel := normalizeChannelSlug(requests[i].Channel)
+		if reqChannel == "" {
+			reqChannel = "general"
+		}
+		if reqChannel == channel {
+			req := requests[i]
+			return &req
+		}
+	}
+	return nil
+}
+
+// AgentAwaitingInterviewAnswer reports whether slug has an active
+// human_interview pending — its current turn is parked in the
+// /interview/answer poll loop. The notifier delivery path uses this to
+// suppress NEW turns for the asking agent only, instead of the old
+// office-wide drop (v3 [19:23:59]: one unanswered interview silenced every
+// agent, including a librarian directly @-mentioned in another channel).
+func (b *Broker) AgentAwaitingInterviewAnswer(slug string) bool {
+	slug = strings.ToLower(strings.TrimSpace(slug))
+	if b == nil || slug == "" {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, req := range b.requests {
+		if !requestIsHumanInterview(req) || !requestIsActive(req) {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(req.From)) == slug {
+			return true
+		}
+	}
+	return false
+}
+
 func firstActiveHumanInterview(requests []humanInterview) *humanInterview {
 	for i := range requests {
 		if requestIsHumanInterview(requests[i]) && requestIsActive(requests[i]) {
@@ -571,6 +621,11 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			req.Title = "Request"
 		}
 		b.scheduleRequestLifecycleLocked(&req)
+		// Loud ask (v3 fix family #2): announce the request in its channel
+		// and, when it has no thread anchor, make the announcement the
+		// anchor so a thread reply routes back as the answer. Must run
+		// before the append below so the stamped ReplyTo persists.
+		b.postRequestRaisedChatMessageLocked(&req)
 		b.requests = append(b.requests, req)
 		b.pendingInterview = firstBlockingRequest(b.requests)
 		b.appendActionLocked("request_created", "office", channel, req.From, truncateSummary(req.Title+" "+req.Question, 140), req.ID)
@@ -702,19 +757,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			CustomText: customText,
 			AnsweredAt: time.Now().UTC().Format(time.RFC3339),
 		}
-		b.requests[i].Answered = answer
-		b.requests[i].Status = "answered"
-		b.requests[i].UpdatedAt = answer.AnsweredAt
-		b.requests[i].ReminderAt = ""
-		b.requests[i].FollowUpAt = ""
-		b.requests[i].RecheckAt = ""
-		b.requests[i].DueAt = ""
-		b.completeSchedulerJobsLocked("request", b.requests[i].ID, b.requests[i].Channel)
-		pendingCascade := b.unblockDependentsLocked(b.requests[i].ID)
-		b.pendingInterview = firstBlockingRequest(b.requests)
-		pendingCascade = append(pendingCascade, b.unblockTasksForAnsweredRequestLocked(b.requests[i])...)
-
-		b.maybeCreateApprovedSelfHealTaskLocked(b.requests[i])
+		pendingCascade := b.applyRequestAnswerLocked(&b.requests[i], answer, answerActor)
 
 		b.counter++
 		msg := channelMessage{
@@ -727,7 +770,6 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		}
 		msg.Content = formatRequestAnswerMessage(b.requests[i], *answer)
 		msg = b.appendMessageLocked(msg)
-		b.appendActionLocked("request_answered", "office", b.requests[i].Channel, answerActor, truncateSummary(msg.Content, 140), b.requests[i].ID)
 		if err := b.saveLocked(); err != nil {
 			b.mu.Unlock()
 			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
@@ -742,6 +784,163 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 	}
 	b.mu.Unlock()
 	http.Error(w, "request not found", http.StatusNotFound)
+}
+
+// applyRequestAnswerLocked is the single mutation core for answering a
+// request: stamps the answer, completes scheduler jobs, releases dependents,
+// recomputes the blocking pointer, and appends the request_answered action.
+// Shared by the /requests/answer HTTP handler and the human thread-reply
+// routing below so both paths have identical side effects. Caller must hold
+// b.mu and is responsible for saveLocked + flushing the returned cascade.
+func (b *Broker) applyRequestAnswerLocked(req *humanInterview, answer *interviewAnswer, actor string) []pendingTaskTransition {
+	if req == nil || answer == nil {
+		return nil
+	}
+	req.Answered = answer
+	req.Status = "answered"
+	req.UpdatedAt = answer.AnsweredAt
+	req.ReminderAt = ""
+	req.FollowUpAt = ""
+	req.RecheckAt = ""
+	req.DueAt = ""
+	b.completeSchedulerJobsLocked("request", req.ID, req.Channel)
+	pendingCascade := b.unblockDependentsLocked(req.ID)
+	b.pendingInterview = firstBlockingRequest(b.requests)
+	pendingCascade = append(pendingCascade, b.unblockTasksForAnsweredRequestLocked(*req)...)
+	b.maybeCreateApprovedSelfHealTaskLocked(*req)
+	b.appendActionLocked("request_answered", "office", req.Channel, actor,
+		truncateSummary(formatRequestAnswerMessage(*req, *answer), 140), req.ID)
+	return pendingCascade
+}
+
+// threadRootLocked walks the reply_to chain of a message id to its thread
+// root within one channel. Returns the input id when it has no parent (it
+// IS the root) and guards against reply cycles. Caller must hold b.mu.
+func (b *Broker) threadRootLocked(channel, msgID string) string {
+	msgID = strings.TrimSpace(msgID)
+	if msgID == "" {
+		return ""
+	}
+	channel = normalizeChannelSlug(channel)
+	byID := make(map[string]string, len(b.messages)) // id -> reply_to
+	for _, m := range b.messages {
+		if normalizeChannelSlug(m.Channel) != channel {
+			continue
+		}
+		if id := strings.TrimSpace(m.ID); id != "" {
+			byID[id] = strings.TrimSpace(m.ReplyTo)
+		}
+	}
+	seen := map[string]bool{}
+	current := msgID
+	for {
+		if seen[current] {
+			return current
+		}
+		seen[current] = true
+		parent, ok := byID[current]
+		if !ok || parent == "" {
+			return current
+		}
+		current = parent
+	}
+}
+
+// answerInterviewFromHumanThreadReplyLocked routes a human THREAD reply to
+// an active interview as the interview's answer. ICP-eval v3 [19:24:53]:
+// the Inbox interview card's only affordance was a "Reply to thread…" box,
+// and the submitted reply reached no agent — the requesting agent kept
+// polling /interview/answer while the human's answer sat as an ordinary
+// chat message. Matching is thread-anchored: the reply's thread root must
+// equal the interview's anchor (req.ReplyTo, which request creation now
+// guarantees via the raised-chat announcement below). The polling agent's
+// human_interview tool returns the reply text in its current turn — the
+// answer reaches the agent without any extra wake. Returns the answered
+// request's unblock cascade (nil when nothing matched). Caller holds b.mu
+// and is responsible for saveLocked + flushing the cascade.
+func (b *Broker) answerInterviewFromHumanThreadReplyLocked(msg channelMessage) (answered bool, cascade []pendingTaskTransition) {
+	if !isHumanMessageSender(msg.From) {
+		return false, nil
+	}
+	content := strings.TrimSpace(msg.Content)
+	replyTo := strings.TrimSpace(msg.ReplyTo)
+	if content == "" || replyTo == "" {
+		return false, nil
+	}
+	channel := normalizeChannelSlug(msg.Channel)
+	msgRoot := b.threadRootLocked(channel, replyTo)
+	for i := range b.requests {
+		req := &b.requests[i]
+		if !requestIsHumanInterview(*req) || !requestIsActive(*req) {
+			continue
+		}
+		if normalizeChannelSlug(req.Channel) != channel {
+			continue
+		}
+		anchor := strings.TrimSpace(req.ReplyTo)
+		if anchor == "" {
+			continue
+		}
+		if anchor != replyTo && b.threadRootLocked(channel, anchor) != msgRoot {
+			continue
+		}
+		answer := &interviewAnswer{
+			ChoiceID:   "answer_directly",
+			ChoiceText: "Answer directly",
+			CustomText: content,
+			AnsweredAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		return true, b.applyRequestAnswerLocked(req, answer, strings.TrimSpace(msg.From))
+	}
+	return false, nil
+}
+
+// postRequestRaisedChatMessageLocked announces a newly raised
+// human-decision request in its channel as a system chat message, so the
+// ask is visible where the human actually works — not only as an Inbox row
+// (ICP-eval v3 [19:23:59]: a blocking interview sat buried in the Inbox for
+// 44 minutes with no push while the office stalled behind it). From
+// "system" so the announcement can never wake other agents
+// (notifyAgentsLoop skips system senders). For requests with no thread
+// anchor, the announcement message BECOMES the anchor (req.ReplyTo) so a
+// human "Reply to thread…" on it routes back as the interview answer.
+// Caller must hold b.mu; the caller's saveLocked persists the message.
+func (b *Broker) postRequestRaisedChatMessageLocked(req *humanInterview) {
+	if b == nil || req == nil || req.Secret {
+		return
+	}
+	if !requestIsHumanInterview(*req) && !requestNeedsHumanDecision(*req) {
+		return
+	}
+	channel := normalizeChannelSlug(req.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	label := "request"
+	if requestIsHumanInterview(*req) {
+		label = "interview"
+	}
+	urgency := ""
+	if req.Blocking || req.Required {
+		urgency = " (blocking)"
+	}
+	question := strings.TrimSpace(req.Question)
+	content := fmt.Sprintf("❓ @%s asks you%s (%s %s): %s\nAnswer it in the Inbox, or reply in this thread.", req.From, urgency, label, req.ID, question)
+	b.counter++
+	msg := channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "system",
+		Channel:   channel,
+		Kind:      "human_request_raised",
+		Title:     strings.TrimSpace(req.Title),
+		Content:   content,
+		ReplyTo:   strings.TrimSpace(req.ReplyTo),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	msg = b.appendMessageLocked(msg)
+	if strings.TrimSpace(req.ReplyTo) == "" {
+		req.ReplyTo = msg.ID
+	}
 }
 
 func (b *Broker) unblockTasksForAnsweredRequestLocked(req humanInterview) []pendingTaskTransition {

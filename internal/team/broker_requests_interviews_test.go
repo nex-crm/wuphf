@@ -681,7 +681,7 @@ func TestBrokerCancelBlockingApprovalUnblocksMessages(t *testing.T) {
 	}
 }
 
-func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) {
+func TestBrokerHumanInterviewDoesNotBlockAndThreadReplyAnswers(t *testing.T) {
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
@@ -801,6 +801,9 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 		t.Fatalf("expected invalid send to leave interview pending, got %+v", pendingAnswer)
 	}
 
+	// A human THREAD reply on the interview's anchor is the ANSWER (v3
+	// fix family #2, [19:24:53]) — it must not cancel the interview the
+	// human is answering.
 	messageBody, _ := json.Marshal(map[string]any{
 		"from":     "you",
 		"channel":  "general",
@@ -839,8 +842,11 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 	for _, listed := range listing.Requests {
 		byID[listed.ID] = listed
 	}
-	if byID[created.Request.ID].Status != "canceled" {
-		t.Fatalf("expected replied-to interview to be canceled after human message, got %+v", byID[created.Request.ID])
+	if byID[created.Request.ID].Status != "answered" {
+		t.Fatalf("expected replied-to interview to be ANSWERED by the thread reply, got %+v", byID[created.Request.ID])
+	}
+	if got := byID[created.Request.ID].Answered; got == nil || got.CustomText != "Let's keep moving in this thread." {
+		t.Fatalf("expected the human's reply text as the answer, got %+v", got)
 	}
 	if byID[createdFollowUp.Request.ID].Status != "pending" {
 		t.Fatalf("expected queued follow-up interview to remain pending, got %+v", byID[createdFollowUp.Request.ID])
@@ -878,8 +884,9 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 	if err := json.NewDecoder(resp.Body).Decode(&answer); err != nil {
 		t.Fatalf("decode interview answer: %v", err)
 	}
-	if answer.Answered != nil || answer.Status != "canceled" {
-		t.Fatalf("expected canceled interview answer state, got %+v", answer)
+	if answer.Answered == nil || answer.Status != "answered" ||
+		answer.Answered.CustomText != "Let's keep moving in this thread." {
+		t.Fatalf("expected the polling agent to receive the thread-reply answer, got %+v", answer)
 	}
 }
 

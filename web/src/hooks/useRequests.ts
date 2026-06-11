@@ -11,10 +11,11 @@ export interface RequestsState {
 const REQUEST_REFETCH_MS = 5_000;
 
 // Global view of requests across every channel the human can access. The
-// broker rejects new messages with 409 whenever ANY blocking request is
-// pending, so the overlay + inline interview bar must reflect that same
-// cross-channel state — otherwise the human sees "nothing blocking" here
-// while sending stays blocked by a request in a channel they aren't viewing.
+// broker's blocking gate is CHANNEL-scoped (a blocking request 409s new
+// chat in ITS channel only), but the interview bar still renders the
+// cross-channel queue so a pending ask in another channel stays visible.
+// Consumers that act on `blockingPending` should scope it to their own
+// channel (see Composer) rather than treating it as office-wide.
 export function useRequests(): RequestsState {
   const { data } = useQuery({
     queryKey: ["requests", "all"],

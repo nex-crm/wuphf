@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { NavArrowLeft, NavArrowRight, Xmark } from "iconoir-react";
 
 import {
+  type AgentRequest,
   answerRequest,
   cancelRequest,
   type InterviewOption,
@@ -45,6 +46,17 @@ import { StructuredMessageCard } from "./cards/StructuredMessageCard";
  *   1. Backend: sanitizeContextValue in broker_onboarding.go (PR #684)
  *   2. Frontend: all card components render strings as text, never innerHTML
  */
+/**
+ * Pin rank for the interview-bar queue: 0 = blocking/required asks (the
+ * office is waiting on this answer), 1 = plain interviews (an agent asked
+ * a question), 2 = everything else (notices, FYIs).
+ */
+export function requestPinRank(request: AgentRequest): number {
+  if (request.blocking === true || request.required === true) return 0;
+  if ((request.kind ?? "").toLowerCase() === "interview") return 1;
+  return 2;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cognitive complexity is baselined for a focused follow-up refactor.
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: Existing function length is baselined for a focused follow-up refactor.
 export function InterviewBar() {
@@ -68,7 +80,15 @@ export function InterviewBar() {
 
   const queue = useMemo(() => {
     if (isOnboarding) return [];
+    // Pin order: blocking/required asks first, then real interviews, then
+    // notices/FYIs; oldest-first within each class. The old pure
+    // created_at sort buried a blocking interview behind a pile of stale
+    // delivery notices — the live v3 run never surfaced one for 44
+    // minutes while the office stalled behind it.
     const sorted = [...pending].sort((a, b) => {
+      const ra = requestPinRank(a);
+      const rb = requestPinRank(b);
+      if (ra !== rb) return ra - rb;
       const ta = a.created_at ?? "";
       const tb = b.created_at ?? "";
       return ta.localeCompare(tb);

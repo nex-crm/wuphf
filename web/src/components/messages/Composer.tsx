@@ -172,8 +172,19 @@ export function Composer({ channel }: { channel?: string } = {}) {
   // If the human chooses to type into the channel instead of clicking a
   // blocking interview's button, treat that as "I'm replying in chat
   // instead." Cancel the interview so the broker unblocks, and let the
-  // agent see the typed message as the new context.
-  const { blockingPending } = useRequests();
+  // agent see the typed message as the new context. Channel-scoped to
+  // match the broker's gate: a blocking request only parks chat in ITS
+  // channel now, so typing in #general must not cancel an approval that
+  // is pending in some task channel.
+  const { pending: pendingRequests } = useRequests();
+  const blockingPending = useMemo(
+    () =>
+      pendingRequests.find(
+        (r) =>
+          r.blocking === true && (!r.channel || r.channel === currentChannel),
+      ) ?? null,
+    [pendingRequests, currentChannel],
+  );
   const leadSlug = useMemo(
     () => resolveLeadSlug(cfg?.team_lead_slug, members),
     [cfg?.team_lead_slug, members],

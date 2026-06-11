@@ -191,6 +191,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"grounding", evalJobGrounding},
 		{"done-integrity", evalJobDoneIntegrity},
 		{"live-paths", evalJobLivePaths},
+		{"utterance-routing", evalJobUtteranceRouting},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))

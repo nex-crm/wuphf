@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type AgentRequest,
   answerRequest,
-  getRequests,
+  getAllRequests,
 } from "../../api/client";
 import type { InboxItem } from "../../lib/types/inbox";
 import { DecisionInbox } from "./DecisionInbox";
@@ -16,7 +16,7 @@ vi.mock("../../api/client", async (importOriginal) => {
   return {
     ...actual,
     answerRequest: vi.fn(),
-    getRequests: vi.fn(),
+    getAllRequests: vi.fn(),
   };
 });
 
@@ -100,7 +100,9 @@ const WREN_REVIEW: InboxItem = {
 
 describe("<DecisionInbox> (mail-style)", () => {
   beforeEach(() => {
-    vi.mocked(getRequests).mockResolvedValue({ requests: [ADA_FULL_REQUEST] });
+    vi.mocked(getAllRequests).mockResolvedValue({
+      requests: [ADA_FULL_REQUEST],
+    });
     vi.mocked(answerRequest).mockResolvedValue({});
   });
 
@@ -243,5 +245,55 @@ describe("<DecisionInbox> (mail-style)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Broker unavailable",
     );
+  });
+
+  it("resolves a request raised in another channel and renders its answer options", async () => {
+    // ICP-eval v3 [19:23:59]: a pending interview raised in a task channel
+    // rendered "answered or no longer active" with NO answer buttons,
+    // because the detail pane fetched requests for the LAST-VISITED channel
+    // only. The fetch is now cross-channel (scope=all).
+    const interviewItem: InboxItem = {
+      kind: "request",
+      requestId: "req-iv-1",
+      title: "Human interview",
+      agentSlug: "ada",
+      channel: "task-office-9",
+      createdAt: "2026-05-11T12:45:00Z",
+      request: {
+        kind: "interview",
+        question: "Two things needed before I queue the sends.",
+        from: "ada",
+      },
+    };
+    vi.mocked(getAllRequests).mockResolvedValue({
+      requests: [
+        {
+          id: "req-iv-1",
+          kind: "interview",
+          from: "ada",
+          channel: "task-office-9",
+          title: "Human interview",
+          question: "Two things needed before I queue the sends.",
+          status: "pending",
+          blocking: false,
+          options: [
+            {
+              id: "answer_directly",
+              label: "Answer directly",
+              requires_text: true,
+            },
+          ],
+        },
+      ],
+    });
+
+    render(wrap(<DecisionInbox initialItems={[interviewItem]} />));
+
+    expect(
+      await screen.findByRole("button", { name: /Answer directly/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/answered or is no longer active/i),
+    ).not.toBeInTheDocument();
   });
 });

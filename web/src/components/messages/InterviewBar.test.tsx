@@ -229,3 +229,80 @@ describe("<InterviewBar> notice framing (N8)", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("<InterviewBar> pinned ordering (v3 buried-interview fix)", () => {
+  const makeRequest = (over: Partial<AgentRequest>): AgentRequest => ({
+    id: "request-0",
+    from: "ae",
+    channel: "general",
+    kind: "notice",
+    status: "pending",
+    question: "placeholder",
+    options: [{ id: "acknowledge", label: "Acknowledge" }],
+    blocking: false,
+    created_at: "2026-06-11T00:00:00Z",
+    ...over,
+  });
+
+  it("pins a blocking ask above older notices and interviews", () => {
+    // The live v3 run buried a blocking interview behind a pile of older
+    // delivery notices for 44 minutes — the bar must show the blocking
+    // ask FIRST regardless of created_at.
+    const oldNotice = makeRequest({
+      id: "request-1",
+      kind: "notice",
+      question: "OFFICE-4 delivered.",
+      created_at: "2026-06-11T00:00:00Z",
+    });
+    const oldInterview = makeRequest({
+      id: "request-2",
+      kind: "interview",
+      question: "Which tone do you prefer?",
+      options: [{ id: "answer_directly", label: "Answer directly" }],
+      created_at: "2026-06-11T00:01:00Z",
+    });
+    const newBlocking = makeRequest({
+      id: "request-3",
+      kind: "approval",
+      question: "Send the three renewal emails now?",
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "reject", label: "Reject" },
+      ],
+      blocking: true,
+      created_at: "2026-06-11T00:30:00Z",
+    });
+    setPending([oldNotice, oldInterview, newBlocking]);
+    render(wrap(<InterviewBar />));
+
+    expect(screen.getByText("BLOCKING")).toBeInTheDocument();
+    expect(
+      screen.getByText("Send the three renewal emails now?"),
+    ).toBeInTheDocument();
+    // 1/3 — the blocking ask is the FIRST card in the queue.
+    expect(screen.getByText("1/3")).toBeInTheDocument();
+  });
+
+  it("ranks interviews above notices when nothing blocks", () => {
+    const oldNotice = makeRequest({
+      id: "request-1",
+      kind: "notice",
+      question: "OFFICE-4 delivered.",
+      created_at: "2026-06-11T00:00:00Z",
+    });
+    const newerInterview = makeRequest({
+      id: "request-2",
+      kind: "interview",
+      question: "Two things needed before I queue the sends.",
+      options: [{ id: "answer_directly", label: "Answer directly" }],
+      created_at: "2026-06-11T00:10:00Z",
+    });
+    setPending([oldNotice, newerInterview]);
+    render(wrap(<InterviewBar />));
+
+    expect(
+      screen.getByText("Two things needed before I queue the sends."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+  });
+});

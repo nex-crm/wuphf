@@ -617,6 +617,17 @@ func (b *notificationContextBuilder) BuildMessageWorkPacketWithContext(msg chann
 				b.consumeTaskHumanNote(task.ID)
 			}
 		}
+		// Latest request-changes feedback rides the message wake too: the
+		// live request_changes wake reaches the owner as a CHANNEL message
+		// (postTaskRequestChangesNotificationsLocked), not a task-execution
+		// turn — changes_requested is not an executable state — so this
+		// packet is the one the reworking owner actually reads first
+		// (v3 [17:50]: "No written feedback came through").
+		if strings.EqualFold(strings.TrimSpace(task.Owner), strings.TrimSpace(slug)) {
+			if rcLines := changesRequestedPacketLines(task); len(rcLines) > 0 {
+				lines = append(lines, rcLines...)
+			}
+		}
 		if defLines := taskDefinitionPacketLines(task.Definition); len(defLines) > 0 {
 			lines = append(lines, "- Task definition (the contract this work executes against):")
 			lines = append(lines, defLines...)
@@ -897,6 +908,12 @@ func humanNotePacketBlock(task teamTask, slug string) string {
 			note.From, body, task.ID,
 		)
 	}
+	if taskAwaitsHumanFollowUpWake(&task) {
+		return fmt.Sprintf(
+			"HUMAN POSTED ON YOUR WAITING TASK — read and respond before anything else: @%s said: %s\nThe task sits in %s. Absorb the message, apply what it asks in the actual work, and answer in the task channel; resubmit if it changes the deliverable.",
+			note.From, body, task.LifecycleState,
+		)
+	}
 	block := fmt.Sprintf("HUMAN POSTED WHILE YOU WORKED — read before continuing: @%s said: %s", note.From, body)
 	if note.Halt {
 		block += "\nThis was a STOP order. Do not submit or complete this task until you have addressed it; act on the human's instruction first."
@@ -923,7 +940,11 @@ func (b *notificationContextBuilder) TaskNotificationContent(action officeAction
 	case "watchdog_alert":
 		verb = "Watchdog reminder"
 	case taskFollowUpActionKind:
-		verb = "Follow-up on delivered task"
+		if taskInTerminalDoneState(&task) {
+			verb = "Follow-up on delivered task"
+		} else {
+			verb = "Human posted in this task's channel — respond now"
+		}
 	}
 	owner := strings.TrimSpace(task.Owner)
 	if owner == "" {

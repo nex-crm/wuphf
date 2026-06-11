@@ -138,6 +138,36 @@ func taskInTerminalDoneState(task *teamTask) bool {
 		task.LifecycleState == LifecycleStateApproved
 }
 
+// taskAwaitsHumanFollowUpWake reports whether a task sits in a waiting
+// state where a human post in its channel must WAKE the owner (the
+// task_followup path) because no naturally scheduled agent turn will ever
+// carry the note: review, decision, changes_requested, blocked, and the
+// terminal done/approved states. Pre-start states (drafting/intake/ready/
+// queued) are excluded — they have the Approve & Start waiting-hint flow —
+// and archived tasks never wake on channel traffic (legacy fold-ins).
+func taskAwaitsHumanFollowUpWake(task *teamTask) bool {
+	if task == nil {
+		return false
+	}
+	switch task.LifecycleState {
+	case LifecycleStateReview, LifecycleStateDecision,
+		LifecycleStateChangesRequested, LifecycleStateBlockedOnPRMerge:
+		return true
+	}
+	if taskInTerminalDoneState(task) {
+		return true
+	}
+	// Legacy tasks without a typed state: fall back to the bare status
+	// signals for the same waiting states.
+	if task.LifecycleState == "" || task.LifecycleState == LifecycleStateUnknown {
+		switch strings.ToLower(strings.TrimSpace(task.status)) {
+		case "review", "blocked":
+			return true
+		}
+	}
+	return false
+}
+
 // markHumanNoteOnChannelTasksLocked stamps HumanNotePending on every
 // non-system task in the message's channel that is either RUNNING or in a
 // terminal-done state. Called from the message-post paths for HUMAN senders
@@ -149,13 +179,19 @@ func taskInTerminalDoneState(task *teamTask) bool {
 // this 1:1 in practice; #general's archived system task is excluded by the
 // status guard.
 //
-// Done tasks (done-integrity fix family): a human post after delivery is a
-// follow-up — the note is stamped the same way AND a task_followup action
-// is appended so the notify loop re-engages the OWNER with a packet that
-// leads "FOLLOW-UP ON DELIVERED TASK" (humanNotePacketBlock). Restricted to
+// Non-running tasks (done-integrity + utterance-routing fix families): a
+// human post into a task channel whose task sits in ANY waiting state —
+// review, decision, changes_requested, blocked, or terminal done/approved —
+// is steering with no natural next agent turn to ride. The note is stamped
+// the same way AND a task_followup action is appended so the notify loop
+// re-engages the OWNER (ICP-eval v3 [17:51→18:02]: redlines posted into a
+// decision-state task channel got 14 minutes of dead air; v2's 22-minute
+// post-done void was the same failure on done tasks). Restricted to
 // non-#general channels: #general is the office lobby holding every legacy
 // done task, and waking all their owners on any lobby post would be a
 // broadcast storm; per-task channels are where the live dead zone occurred.
+// Drafting/pre-start tasks keep the waiting-hint flow (Approve & Start) and
+// archived tasks never wake on lobby traffic.
 //
 // Pure in-memory writes under the already-held lock — the caller's
 // saveLocked persists them. Caller must hold b.mu.
@@ -179,10 +215,16 @@ func (b *Broker) markHumanNoteOnChannelTasksLocked(msg channelMessage) {
 		if normalizeChannelSlug(task.Channel) != channel {
 			continue
 		}
-		running := strings.EqualFold(strings.TrimSpace(task.status), "in_progress") ||
-			task.LifecycleState == LifecycleStateRunning
+		// "Running" means an execution turn can naturally carry the note:
+		// the typed Running state, or a legacy task whose only signal is
+		// status=in_progress. Review/Decision/ChangesRequested ALSO carry
+		// the legacy in_progress status (lifecycleDerivedFields) but have
+		// NO natural next turn — they must take the wake path below, so
+		// the typed state wins over the legacy status here.
+		running := task.LifecycleState == LifecycleStateRunning ||
+			(task.LifecycleState == "" && strings.EqualFold(strings.TrimSpace(task.status), "in_progress"))
 		followUp := !running && channel != "general" &&
-			taskInTerminalDoneState(task) && strings.TrimSpace(task.Owner) != ""
+			taskAwaitsHumanFollowUpWake(task) && strings.TrimSpace(task.Owner) != ""
 		if !running && !followUp {
 			continue
 		}
@@ -194,8 +236,12 @@ func (b *Broker) markHumanNoteOnChannelTasksLocked(msg channelMessage) {
 			Halt: humanNoteLeadsWithHalt(msg.Content),
 		}
 		if followUp {
+			summary := "human follow-up on delivered task: "
+			if !taskInTerminalDoneState(task) {
+				summary = "human posted in waiting task's channel: "
+			}
 			b.appendActionLocked(taskFollowUpActionKind, "office", channel, strings.TrimSpace(msg.From),
-				truncateSummary("human follow-up on delivered task: "+strings.TrimSpace(msg.Content), 140), task.ID)
+				truncateSummary(summary+strings.TrimSpace(msg.Content), 140), task.ID)
 		}
 	}
 }
@@ -479,6 +525,22 @@ func reconcileTaskReviewState(task *teamTask, action string) {
 func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 	action := strings.TrimSpace(body.Action)
 	actor := strings.TrimSpace(body.CreatedBy)
+	// Live FE payload shim (v3 fix family #2, [17:47→17:50]): the task
+	// toolbar's reason-bearing verbs send the typed text as override_reason
+	// (web/src/api/tasks.ts updateTaskStatus), NOT as details. Every
+	// feedback consumer below reads body.Details, so the human's
+	// "What needs to change?" text was dropped on the live path three runs
+	// in a row ("No written feedback came through"). Fold the reason into
+	// Details for the verbs whose semantics are "feedback text", so the
+	// objection stamp, the wake notification, and the packet all carry it.
+	if strings.TrimSpace(body.Details) == "" {
+		switch action {
+		case "request_changes", "reject", "block", "cancel":
+			if reason := strings.TrimSpace(body.OverrideReason); reason != "" {
+				body.Details = reason
+			}
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	channel := normalizeChannelSlug(body.Channel)
 	if channel == "" {

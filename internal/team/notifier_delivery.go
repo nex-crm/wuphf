@@ -166,6 +166,15 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		task.LifecycleState != "" && !isExecutableTeamTaskStatus(task.LifecycleState) {
 		return
 	}
+	// Scoped interview gate (v3 fix family #2): while THIS agent waits on
+	// its own human interview, its current turn is parked in the
+	// /interview/answer poll — enqueueing a new turn would duplicate work
+	// once the answer lands. Suppress only this agent; every other agent
+	// keeps working (the old office-wide drop wedged the whole office
+	// behind one buried card, [19:23:59]).
+	if l.broker != nil && l.broker.AgentAwaitingInterviewAnswer(target.Slug) {
+		return
+	}
 	channel := normalizeChannelSlug(task.Channel)
 	if channel == "" {
 		channel = "general"
@@ -250,6 +259,12 @@ func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog,
 }
 
 func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessage) {
+	// Scoped interview gate — same contract as sendTaskUpdate: suppress
+	// new turns ONLY for the agent whose own interview is pending (its
+	// turn is parked in the answer poll); everyone else keeps working.
+	if l.broker != nil && l.broker.AgentAwaitingInterviewAnswer(target.Slug) {
+		return
+	}
 	channel := normalizeChannelSlug(msg.Channel)
 	if channel == "" {
 		channel = "general"

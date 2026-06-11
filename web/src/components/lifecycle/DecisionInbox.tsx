@@ -17,7 +17,7 @@ import {
 import {
   type AgentRequest,
   answerRequest,
-  getRequests,
+  getAllRequests,
 } from "../../api/client";
 import {
   getInboxItems,
@@ -31,7 +31,6 @@ import {
 } from "../../api/notebook";
 import type { InboxItem, InboxItemKind } from "../../lib/types/inbox";
 import { SEV_ORDER, SEVERITY_TOKENS } from "../../lib/types/lifecycle";
-import { useFallbackChannelSlug } from "../../routes/useCurrentRoute";
 import { RequestItem } from "./RequestItem";
 
 const TaskDocumentRoute = lazy(() =>
@@ -756,11 +755,15 @@ function RequestBody({
   item: Extract<InboxItem, { kind: "request" }>;
 }) {
   const queryClient = useQueryClient();
-  const channel = useFallbackChannelSlug();
   const [answerError, setAnswerError] = useState<string | null>(null);
+  // Cross-channel fetch (scope=all): the request lives in ITS channel, not
+  // the channel the human last visited. The old per-channel fetch failed to
+  // resolve any request raised elsewhere, so the detail pane fell back to
+  // "answered or no longer active" with NO answer buttons — the live v3 run
+  // saw a pending interview with no answer field for 44 minutes.
   const requestsQuery = useQuery({
-    queryKey: ["requests", channel],
-    queryFn: () => getRequests(channel),
+    queryKey: ["requests", "all"],
+    queryFn: () => getAllRequests(),
     refetchInterval: 5_000,
   });
   const allRequests: AgentRequest[] = requestsQuery.data?.requests ?? [];
@@ -783,7 +786,7 @@ function RequestBody({
     queryKey: ["approval-audit", "by-request", auditTargetId],
     queryFn: () => getApprovalAuditByRequest(auditTargetId),
     enabled: !!fullRequest && !isPending,
-    refetchInterval: !!fullRequest && !isPending ? 5_000 : false,
+    refetchInterval: fullRequest && !isPending ? 5_000 : false,
   });
   const auditEntries: ApprovalAuditEntry[] = auditQuery.data ?? [];
 

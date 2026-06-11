@@ -75,9 +75,13 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.mu.Lock()
-	if firstBlockingRequest(b.requests) != nil {
+	// The blocking-request chat gate is CHANNEL-scoped: a pending approval
+	// in task A's channel parks chat there until answered, but the human
+	// keeps talking everywhere else. The old office-wide 409 meant one
+	// buried card silenced the whole office (v3 fix family #2).
+	if firstBlockingRequestInChannel(b.requests, body.Channel) != nil {
 		b.mu.Unlock()
-		http.Error(w, "request pending; answer required before chat resumes", http.StatusConflict)
+		http.Error(w, "request pending in this channel; answer required before chat resumes here", http.StatusConflict)
 		return
 	}
 
@@ -218,10 +222,6 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if humanSenderMayCancelInterviews(body.From) {
-		b.cancelActiveHumanInterviewsLocked(body.From, "Human sent a new message; unanswered interview canceled.", channel, replyTo)
-	}
-
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      body.From,
@@ -236,13 +236,26 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	msg = b.appendMessageLocked(msg)
 	total := len(b.messages)
 
-	// Stop-order backstop + post-done follow-up: a human message in a
-	// running task's channel is stamped on the task so the owner's next
-	// packet leads with it (and a leading stop/wait/hold blocks
-	// submit/complete until then); in a DELIVERED task's channel it also
-	// appends the task_followup action that re-engages the owner.
+	// Human utterance routing (v3 fix family #2), in priority order:
+	//  1. A thread reply anchored to an active interview IS the interview
+	//     answer — the requesting agent's poll returns it ([19:24:53]: the
+	//     reply box was a dead letter). This must run BEFORE the legacy
+	//     cancel below, which used to cancel the very interview the human
+	//     was answering.
+	//  2. Otherwise a fresh human message cancels a stale same-channel
+	//     interview (the agent re-reads the chat instead).
+	//  3. Stop-order backstop + waiting-task follow-up: the message is
+	//     stamped on this channel's tasks so the owner's next packet leads
+	//     with it; tasks with no natural next turn (review/decision/
+	//     changes-requested/blocked/done) also get the task_followup wake.
 	// In-memory writes only; saveLocked below persists them.
+	var answerCascade []pendingTaskTransition
 	if isHumanMessageSender(msg.From) {
+		var answeredInterview bool
+		answeredInterview, answerCascade = b.answerInterviewFromHumanThreadReplyLocked(msg)
+		if !answeredInterview && humanSenderMayCancelInterviews(msg.From) {
+			b.cancelActiveHumanInterviewsLocked(msg.From, "Human sent a new message; unanswered interview canceled.", channel, replyTo)
+		}
 		b.markHumanNoteOnChannelTasksLocked(msg)
 	}
 
@@ -266,6 +279,10 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 		return
 	}
+	// Flush any task transitions released by an interview answered via
+	// thread reply — same post-persist cascade the /requests/answer
+	// handler performs.
+	b.flushPendingAutoNotebookTransitionsLocked(answerCascade, "system")
 	b.mu.Unlock()
 
 	// PR 2: human "remember" intent. Hook fires AFTER b.mu.Unlock() and ONLY
@@ -446,8 +463,9 @@ func (b *Broker) PostSystemMessage(channel, content, kind string) {
 func (b *Broker) PostMessage(from, channel, content string, tagged []string, replyTo string) (channelMessage, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if firstBlockingRequest(b.requests) != nil {
-		return channelMessage{}, fmt.Errorf("request pending; answer required before chat resumes")
+	// Channel-scoped gate — see handlePostMessage for the rationale.
+	if firstBlockingRequestInChannel(b.requests, channel) != nil {
+		return channelMessage{}, fmt.Errorf("request pending in this channel; answer required before chat resumes here")
 	}
 	channel = normalizeChannelSlug(channel)
 	if channel == "" {
@@ -466,9 +484,6 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	if !b.canAccessChannelLocked(from, channel) {
 		return channelMessage{}, fmt.Errorf("channel access denied")
 	}
-	if humanSenderMayCancelInterviews(from) {
-		b.cancelActiveHumanInterviewsLocked(from, "Human sent a new message; unanswered interview canceled.", channel, replyTo)
-	}
 	b.counter++
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -482,11 +497,18 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	msg = b.appendMessageLocked(msg)
-	// Stop-order backstop + post-done follow-up: same marking as the HTTP
-	// post path — human messages into a running task's channel ride the
-	// owner's next packet; into a delivered task's channel they also
-	// append the task_followup wake action.
+	// Human utterance routing — same priority order as handlePostMessage:
+	// thread-reply-to-interview answers the interview; otherwise a fresh
+	// human message cancels a stale same-channel interview; the note is
+	// stamped on this channel's tasks with the task_followup wake for
+	// waiting states.
+	var answerCascade []pendingTaskTransition
 	if isHumanMessageSender(msg.From) {
+		var answeredInterview bool
+		answeredInterview, answerCascade = b.answerInterviewFromHumanThreadReplyLocked(msg)
+		if !answeredInterview && humanSenderMayCancelInterviews(msg.From) {
+			b.cancelActiveHumanInterviewsLocked(msg.From, "Human sent a new message; unanswered interview canceled.", channel, msg.ReplyTo)
+		}
 		b.markHumanNoteOnChannelTasksLocked(msg)
 	}
 	// Clear typing indicator — agent has replied
@@ -497,6 +519,7 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, err
 	}
+	b.flushPendingAutoNotebookTransitionsLocked(answerCascade, "system")
 	// PostMessage intentionally does NOT auto-write notebook entries.
 	// Notebooks are for properly drafted working notes and learnings
 	// authored via the notebook_write MCP tool. Auto-writing every
@@ -596,6 +619,9 @@ func (b *Broker) CreateRequest(req humanInterview) (humanInterview, error) {
 	if strings.TrimSpace(req.Title) == "" {
 		req.Title = "Request"
 	}
+	// Loud ask (v3 fix family #2): same announcement + thread-anchor
+	// contract as the HTTP create path in handlePostRequest.
+	b.postRequestRaisedChatMessageLocked(&req)
 	b.requests = append(b.requests, req)
 	b.pendingInterview = firstBlockingRequest(b.requests)
 	b.appendActionLocked("request_created", "office", channel, req.From, truncateSummary(req.Title+" "+req.Question, 140), req.ID)
