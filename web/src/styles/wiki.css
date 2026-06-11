@@ -1290,6 +1290,29 @@
   width: 100%;
   max-width: 1280px;
 }
+/* Honest load states for the catalog view: a centered status line while
+   loading, an alert + retry when the broker doesn't answer. Both reuse
+   the catalog padding so the layout doesn't jump on resolve. */
+.wk-catalog--loading,
+.wk-catalog--error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  color: var(--wk-text-muted);
+}
+.wk-catalog-retry {
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: 2px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.wk-catalog-retry:hover {
+  border-color: var(--wk-border-strong);
+}
 .wk-catalog-header {
   display: grid;
   grid-template-columns: 1fr auto;

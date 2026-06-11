@@ -3,12 +3,12 @@ import { useCallback, useEffect, useState } from "react";
 import { getSkillsList } from "../../api/client";
 import {
   type DiscoveredSection,
-  fetchCatalog,
   fetchCatalogStrict,
   fetchSections,
   subscribeSectionsUpdated,
   type WikiCatalogEntry,
 } from "../../api/wiki";
+import { useOfficeStats } from "../../hooks/useOfficeStats";
 import EditLogFooter from "./EditLogFooter";
 import { APP_NAV_PREFIX } from "./tree/WikiTree";
 import FileViewer, { isMarkdownPath } from "./viewers/FileViewer";
@@ -102,16 +102,42 @@ export default function Wiki({
   const [catalog, setCatalog] = useState<WikiCatalogEntry[]>([]);
   const [sections, setSections] = useState<DiscoveredSection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadNonce, setLoadNonce] = useState(0);
   const [sidebarSkills, setSidebarSkills] = useState<SidebarSkill[]>([]);
+
+  // Shared derived-stats source: the home header's "N articles" reads
+  // the broker's count (same filter as /wiki/catalog) instead of the
+  // length of whatever slice of the catalog has loaded — the v3 "main
+  // page says 0 articles, All-files says 19" contradiction came from
+  // counting different local lists.
 
   useEffect(() => {
     let cancelled = false;
-    // Parallel fetch: catalog and sections are independent.
-    Promise.all([fetchCatalog(), fetchSections()])
+    void loadNonce;
+    setLoading(true);
+    setLoadError(null);
+    // Parallel fetch: catalog and sections are independent. The STRICT
+    // catalog fetch is deliberate: the lenient fetchCatalog() swallows
+    // errors into an empty list, which is precisely how the home page
+    // rendered "0 articles" as fact over a failed load (C4). Here the
+    // error must reach the catch so the catalog view can show the
+    // broker-not-responding state instead.
+    Promise.all([fetchCatalogStrict(), fetchSections()])
       .then(([c, s]) => {
         if (cancelled) return;
         setCatalog(c);
         setSections(s);
+      })
+      .catch((err: unknown) => {
+        // Honest failure: never render "0 articles" as fact over a
+        // failed load. The catalog view below switches to an explicit
+        // broker-not-responding state with a retry.
+        if (!cancelled) {
+          setLoadError(
+            err instanceof Error ? err.message : "Could not reach the broker.",
+          );
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -119,7 +145,7 @@ export default function Wiki({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadNonce]);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,6 +263,30 @@ export default function Wiki({
             onNavigate={(path) => onNavigate(path)}
             externalRefreshNonce={externalRefreshNonce}
           />
+        ) : loading ? (
+          <main
+            className="wiki-main wk-catalog wk-catalog--loading"
+            data-testid="wk-catalog-loading"
+            aria-busy="true"
+          >
+            <p className="wk-catalog-stats">Loading wiki…</p>
+          </main>
+        ) : loadError ? (
+          <main
+            className="wiki-main wk-catalog wk-catalog--error"
+            data-testid="wk-catalog-error"
+          >
+            <p className="wk-catalog-stats" role="alert">
+              Broker not responding — {loadError}
+            </p>
+            <button
+              type="button"
+              className="wk-catalog-retry"
+              onClick={() => setLoadNonce((n) => n + 1)}
+            >
+              Retry
+            </button>
+          </main>
         ) : (
           <WikiHome catalog={catalog} onNavigate={(path) => onNavigate(path)} />
         )}

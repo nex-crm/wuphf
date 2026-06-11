@@ -116,7 +116,14 @@ export default function ReviewQueueKanban() {
     }
   };
 
-  const totalCounts = `${reviews.length} reviews · ${grouped.pending.length + grouped["in-review"].length + grouped["changes-requested"].length} open · ${grouped.approved.length} recently approved`;
+  // Honest header (C4 / V3-N7): never render "0 reviews · 0 open" as
+  // fact while the load is still pending or failed — the v3 eval caught
+  // the header claiming zeros over a hung /review/list.
+  const totalCounts = loading
+    ? "Loading…"
+    : error
+      ? "Unavailable"
+      : `${reviews.length} reviews · ${grouped.pending.length + grouped["in-review"].length + grouped["changes-requested"].length} open · ${grouped.approved.length} recently approved`;
 
   return (
     <div className="notebook-surface" data-testid="review-queue-surface">
@@ -162,7 +169,7 @@ export default function ReviewQueueKanban() {
         ) : error ? (
           <>
             <p className="nb-error" role="alert">
-              Error: {error}
+              Broker not responding — {error}
             </p>
             <button
               type="button"
@@ -172,6 +179,10 @@ export default function ReviewQueueKanban() {
               Retry
             </button>
           </>
+        ) : reviews.length === 0 ? (
+          <p className="nb-empty-prompt" data-testid="review-queue-empty">
+            No reviews yet — agent submissions land here for your sign-off.
+          </p>
         ) : (
           <ul className="nb-review-columns">
             {STATE_ORDER.map((state) => (

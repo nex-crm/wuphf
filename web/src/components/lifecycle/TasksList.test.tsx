@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import type { OfficeStatsTasks } from "../../api/platform";
 import type { Task } from "../../api/tasks";
 import { TasksList } from "./TasksList";
 
@@ -14,13 +15,13 @@ function makeTask(overrides: Partial<Task>): Task {
   };
 }
 
-function renderList(tasks: Task[]) {
+function renderList(tasks: Task[], stats?: OfficeStatsTasks) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <TasksList initialTasks={tasks} />
+      <TasksList initialTasks={tasks} initialStats={stats} />
     </QueryClientProvider>,
   );
 }
@@ -118,5 +119,43 @@ describe("<TasksList>", () => {
 
     const done = screen.getByTestId("issues-kanban-column-done");
     expect(done).toHaveTextContent("Approved task");
+  });
+
+  it("lane header counts consume the shared /office/stats payload (C1)", () => {
+    // One running card locally, but the shared stats payload reports the
+    // office-wide truth — the lane header must render the stats number,
+    // not a private re-count (the v1 "header 1 blocked vs Blocked lane 0"
+    // drift came from two surfaces deriving counts differently).
+    renderList(
+      [
+        makeTask({
+          id: "task-running",
+          title: "Running task",
+          task_type: "issue",
+          lifecycle_state: "running",
+        }),
+      ],
+      {
+        backlog: 2,
+        active: 4,
+        blocked: 1,
+        review: 1,
+        needs_human: 3,
+        done: 5,
+        archive: 0,
+      },
+    );
+
+    const countFor = (stage: string) =>
+      screen
+        .getByTestId(`issues-kanban-column-${stage}`)
+        .querySelector(".issues-kanban-column-count")?.textContent;
+
+    expect(countFor("backlog")).toBe("2");
+    expect(countFor("in_progress")).toBe("4");
+    expect(countFor("blocked")).toBe("1");
+    expect(countFor("needs_human")).toBe("3");
+    expect(countFor("done")).toBe("5");
+    expect(countFor("archive")).toBe("0");
   });
 });

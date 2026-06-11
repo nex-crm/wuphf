@@ -550,6 +550,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/reactions", b.requireAuth(b.handleReactions))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
+	// Single derived-stats source: every surface-level count (header
+	// strip, board lane headers, dashboard tiles, inbox badge, wiki
+	// home) reads this one endpoint so the numbers cannot drift.
+	mux.HandleFunc("/office/stats", b.requireAuth(b.handleOfficeStats))
 	mux.HandleFunc("/office-members/generate", b.requireAuth(b.handleGenerateMember))
 	mux.HandleFunc("/channels", b.requireAuth(b.handleChannels))
 	mux.HandleFunc("/channels/dm", b.requireAuth(b.handleCreateDM))

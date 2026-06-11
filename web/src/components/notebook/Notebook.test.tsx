@@ -98,6 +98,33 @@ describe("<Notebook>", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("flips a broker-timeout into the honest error state, not an eternal spinner (C3)", async () => {
+    // The v3 eval caught the Notebooks tab at "Loading bookshelf…" for
+    // 60s+ — the catalog GET had no timeout, so a wedged broker left
+    // the promise pending forever. The api client now aborts GETs and
+    // throws this message; the surface must land on the retry state.
+    vi.spyOn(api, "fetchCatalog").mockRejectedValue(
+      new Error("Broker not responding — request timed out."),
+    );
+    render(
+      <Notebook
+        agentSlug={null}
+        entrySlug={null}
+        onOpenCatalog={() => {}}
+        onOpenAgent={() => {}}
+        onOpenEntry={() => {}}
+        onNavigateWiki={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /broker not responding/i,
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByText(/Loading bookshelf/)).toBeNull();
+  });
+
   it("subscribes to notebook events on mount and unsubscribes on unmount", () => {
     const unsub = vi.fn();
     const spy = vi

@@ -172,3 +172,46 @@ export function getVersion() {
 export function getUsage() {
   return get<UsageData>("/usage");
 }
+
+// ── Office stats — single derived-stats source ──
+//
+// Mirrors team.OfficeStats on the Go side (GET /office/stats). Every
+// surface-level count (header runtime strip, board lane headers,
+// dashboard tiles, inbox badge, wiki home count) consumes this one
+// payload via useOfficeStats so the numbers cannot drift between
+// surfaces that each used to derive their own.
+
+export interface OfficeStatsTasks {
+  backlog: number;
+  /** Board "In progress" lane (running / planning / review / changes_requested). */
+  active: number;
+  blocked: number;
+  /** Subset of `active` currently sitting with reviewers. */
+  review: number;
+  needs_human: number;
+  done: number;
+  archive: number;
+}
+
+export interface OfficeStatsRequests {
+  /** Pending requests the human must act on (blocking or required). */
+  blocking: number;
+  /** Pending informational, non-blocking requests. */
+  notices: number;
+}
+
+export interface OfficeStats {
+  tasks: OfficeStatsTasks;
+  requests: OfficeStatsRequests;
+  /** Unified-inbox badge count (requests + reviews + attention tasks). */
+  inbox_attention: number;
+  /** Curated wiki article count (same filter as /wiki/catalog). */
+  wiki_articles: number;
+  /** Agents whose live activity snapshot reports a working status. */
+  agents_active: number;
+  generated_at: string;
+}
+
+export function getOfficeStats() {
+  return get<OfficeStats>("/office/stats");
+}

@@ -27,9 +27,13 @@ vi.mock("../../api/client", () => ({
   getSkillsList: vi.fn(),
 }));
 
-vi.mock("../../api/tasks", () => ({
-  getOfficeTasks: vi.fn(),
-}));
+vi.mock("../../api/tasks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/tasks")>();
+  return {
+    ...actual,
+    getOfficeTasks: vi.fn(),
+  };
+});
 
 // Router navigation — avoid "not in browser context" errors in jsdom.
 vi.mock("../../lib/router", () => ({

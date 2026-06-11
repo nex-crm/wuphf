@@ -1026,6 +1026,8 @@ func TestBrokerMuxAuthCoverage(t *testing.T) {
 		// office members + channels
 		"/office-members",
 		"/office-members/generate",
+		// derived stats (single source for surface counts)
+		"/office/stats",
 		"/channels",
 		"/channels/dm",
 		"/channels/generate",

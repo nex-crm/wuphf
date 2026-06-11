@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { type ApiError, connectBroker, initApi, post } from "./client";
+import {
+  type ApiError,
+  connectBroker,
+  GET_TIMEOUT_MS,
+  get,
+  getRequestSignal,
+  initApi,
+  post,
+} from "./client";
 
 describe("connectBroker", () => {
   afterEach(() => {
@@ -82,5 +90,62 @@ describe("connectBroker", () => {
       errorCode: "store_busy",
       retryAfter: "1",
     } satisfies Partial<ApiError>);
+  });
+});
+
+// C3/C4 regression: a wedged broker must never leave a read surface on
+// an eternal spinner — GETs carry a timeout signal by default, and a
+// timeout abort surfaces as an honest "broker not responding" error
+// the surfaces can render with a retry.
+describe("get timeout", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("always attaches an abort signal to GETs (no infinite hang)", () => {
+    // No caller-provided signal → a timeout signal is created. This is
+    // the layer the Notebooks-tab 60s+ spinner bug lived at: plain
+    // fetch with no signal never gives up on a wedged broker.
+    const signal = getRequestSignal();
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal.aborted).toBe(false);
+    expect(GET_TIMEOUT_MS).toBeGreaterThan(0);
+
+    // Caller-provided signals win (no double-abort surprises).
+    const controller = new AbortController();
+    expect(getRequestSignal({ signal: controller.signal })).toBe(
+      controller.signal,
+    );
+  });
+
+  it("surfaces a timeout abort as a broker-not-responding error", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input: RequestInfo | URL, _init?: RequestInit) => {
+        const err = new DOMException(
+          "The operation timed out.",
+          "TimeoutError",
+        );
+        return Promise.reject(err);
+      },
+    );
+
+    await expect(get("/notebook/catalog")).rejects.toThrow(
+      /broker not responding/i,
+    );
+  });
+
+  it("passes the timeout signal to fetch", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await get("/office/stats");
+
+    const init = fetchMock.mock.calls.at(-1)?.[1];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
 });

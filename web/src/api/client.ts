@@ -114,6 +114,40 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Default timeout for read (GET) requests. Without it, a wedged broker
+ * left every list surface on an eternal spinner (the Notebooks tab sat
+ * on "Loading bookshelf…" for 60s+ in the v3 eval) because plain
+ * `fetch` never gives up. 20s is generous for any healthy list
+ * endpoint while still letting surfaces flip to an honest
+ * "broker not responding — retry" state. Callers with a longer-running
+ * read can pass their own `timeoutMs`.
+ */
+export const GET_TIMEOUT_MS = 20_000;
+
+interface GetOptions {
+  signal?: AbortSignal;
+  /** Override the default GET_TIMEOUT_MS for slow endpoints. */
+  timeoutMs?: number;
+}
+
+/**
+ * Builds the signal for a GET: the caller's signal when provided,
+ * otherwise a timeout signal so no read can hang forever. Exported for
+ * the regression test pinning the no-eternal-spinner contract.
+ */
+export function getRequestSignal(options?: GetOptions): AbortSignal {
+  if (options?.signal) return options.signal;
+  return AbortSignal.timeout(options?.timeoutMs ?? GET_TIMEOUT_MS);
+}
+
+function describeGetError(err: unknown): Error | null {
+  if (err instanceof Error && err.name === "TimeoutError") {
+    return new Error("Broker not responding — request timed out.");
+  }
+  return null;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -141,6 +175,7 @@ export class ApiError extends Error {
 export async function get<T = unknown>(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
+  options?: GetOptions,
 ): Promise<T> {
   let url = baseURL() + path;
   if (params) {
@@ -152,7 +187,15 @@ export async function get<T = unknown>(
       .join("&");
     if (qs) url += `?${qs}`;
   }
-  const r = await fetch(url, { headers: authHeaders() });
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      headers: authHeaders(),
+      signal: getRequestSignal(options),
+    });
+  } catch (err) {
+    throw describeGetError(err) ?? err;
+  }
   if (!r.ok) {
     throw await apiErrorFromResponse(r);
   }
@@ -162,6 +205,7 @@ export async function get<T = unknown>(
 export async function getText(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
+  options?: GetOptions,
 ): Promise<string> {
   let url = baseURL() + path;
   if (params) {
@@ -173,7 +217,15 @@ export async function getText(
       .join("&");
     if (qs) url += `?${qs}`;
   }
-  const r = await fetch(url, { headers: authHeaders() });
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      headers: authHeaders(),
+      signal: getRequestSignal(options),
+    });
+  } catch (err) {
+    throw describeGetError(err) ?? err;
+  }
   if (!r.ok) {
     throw await apiErrorFromResponse(r);
   }

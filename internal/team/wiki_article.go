@@ -133,11 +133,15 @@ type CatalogEntry struct {
 // Pass includeArchived=true to include them (for admin/recovery views).
 //
 // Shape matches web/src/api/wiki.ts WikiCatalogEntry.
-func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog, includeArchived bool) ([]CatalogEntry, error) {
+// walkCatalogArticles walks team/ applying the catalog's accept rules
+// (skip team/inbox + team/skills, dot-prefixed files, non-.md files,
+// and — unless includeArchived — archived tombstones) and invokes fn
+// for every accepted article. Shared by BuildCatalog and CountArticles
+// so the "what counts as an article" filter cannot drift between the
+// catalog listing and the derived-stats count.
+func (r *Repo) walkCatalogArticles(includeArchived bool, fn func(rel string, content []byte, archived bool)) error {
 	teamDir := r.TeamDir()
-	var entries []CatalogEntry
-
-	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
+	return filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			// Missing or unreadable entries shouldn't blow up the whole
 			// catalog: skip and keep walking. Anything else (disk corruption,
@@ -196,6 +200,30 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 			return nil
 		}
 
+		fn(rel, content, isArchived)
+		return nil
+	})
+}
+
+// CountArticles returns the number of curated wiki articles using the
+// exact filter rules /wiki/catalog applies (non-archived team/*.md,
+// inbox + skills + dotfiles excluded). Used by GET /office/stats so the
+// wiki home "N articles" count and the catalog list can never disagree.
+func (r *Repo) CountArticles() (int, error) {
+	count := 0
+	err := r.walkCatalogArticles(false, func(string, []byte, bool) {
+		count++
+	})
+	if err != nil {
+		return 0, fmt.Errorf("wiki: count articles: %w", err)
+	}
+	return count, nil
+}
+
+func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog, includeArchived bool) ([]CatalogEntry, error) {
+	var entries []CatalogEntry
+
+	walkErr := r.walkCatalogArticles(includeArchived, func(rel string, content []byte, isArchived bool) {
 		entry := CatalogEntry{
 			Path:      rel,
 			Archived:  isArchived,
@@ -204,7 +232,6 @@ func (r *Repo) BuildCatalog(ctx context.Context, sortBy string, readLog *ReadLog
 			WordCount: countWords(content),
 		}
 		entries = append(entries, entry)
-		return nil
 	})
 	if walkErr != nil {
 		return nil, fmt.Errorf("wiki: walk team/: %w", walkErr)

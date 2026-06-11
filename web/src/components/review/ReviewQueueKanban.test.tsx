@@ -161,6 +161,39 @@ describe("<ReviewQueueKanban>", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("never renders zero counts as fact while the load is pending (C4)", () => {
+    // The v3 eval caught the header claiming "0 reviews · 0 open · 0
+    // recently approved" over a hung /review/list. Pending must read as
+    // pending — keep the promise unresolved and assert no zeros render.
+    vi.spyOn(api, "fetchReviews").mockImplementation(
+      () => new Promise(() => {}),
+    );
+    render(<ReviewQueueKanban />);
+    expect(screen.getByText(/Loading reviews/)).toBeInTheDocument();
+    expect(screen.queryByText(/0 reviews/)).toBeNull();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+  });
+
+  it("marks the header counts unavailable on a failed load (C4)", async () => {
+    vi.spyOn(api, "fetchReviews").mockRejectedValue(
+      new Error("Broker not responding — request timed out."),
+    );
+    render(<ReviewQueueKanban />);
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(screen.queryByText(/0 reviews/)).toBeNull();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+  });
+
+  it("shows true empty copy when the load succeeds with zero reviews (C4)", async () => {
+    vi.spyOn(api, "fetchReviews").mockResolvedValue([]);
+    render(<ReviewQueueKanban />);
+    await waitFor(() =>
+      expect(screen.getByTestId("review-queue-empty")).toBeInTheDocument(),
+    );
+    // Counts may honestly read zero now — the load actually completed.
+    expect(screen.getByText(/0 reviews/)).toBeInTheDocument();
+  });
+
   it("renders the grade badge inside the Kanban for a card aged >= 12 hours", async () => {
     const oldCard = {
       ...mkReview("r5", "pending", "Old pending"),

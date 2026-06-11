@@ -19,12 +19,14 @@
 import { memo, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+import type { OfficeStatsTasks } from "../../api/platform";
 import { getScheduler, type SchedulerJob } from "../../api/scheduler";
 import {
   getOfficeTasks,
   type Task,
   taskToLifecycleState,
 } from "../../api/tasks";
+import { useOfficeStats } from "../../hooks/useOfficeStats";
 import { router } from "../../lib/router";
 import { formatTaskTitleForDisplay } from "../../lib/taskTitle";
 import {
@@ -267,6 +269,35 @@ function TasksEmptyState({ onOpenCreate }: { onOpenCreate: () => void }) {
 interface TasksListProps {
   /** Used in tests to skip the fetch. */
   initialTasks?: Task[];
+  /** Used in tests to seed the shared stats counts without a broker. */
+  initialStats?: OfficeStatsTasks;
+}
+
+/**
+ * Maps a board stage onto its field in the shared /office/stats tasks
+ * payload. `scheduled` returns null — that lane is fed by routines, not
+ * lifecycle state, so its count always comes from the local job list.
+ */
+function statsCountForStage(
+  stats: OfficeStatsTasks,
+  stage: LifecycleStage,
+): number | null {
+  switch (stage) {
+    case "backlog":
+      return stats.backlog;
+    case "in_progress":
+      return stats.active;
+    case "blocked":
+      return stats.blocked;
+    case "needs_human":
+      return stats.needs_human;
+    case "done":
+      return stats.done;
+    case "archive":
+      return stats.archive;
+    default:
+      return null;
+  }
 }
 
 // Per-lane collapse preference, persisted across reloads. A lane with no
@@ -299,7 +330,7 @@ function readLanePrefs(): Record<string, boolean> {
   return {};
 }
 
-export function TasksList({ initialTasks }: TasksListProps = {}) {
+export function TasksList({ initialTasks, initialStats }: TasksListProps = {}) {
   const [query, setQuery] = useState("");
   // Inline dialog replaces /tasks/new full-page form for the in-app path.
   // The route stays mounted as a fallback for direct URL navigation.
@@ -344,6 +375,14 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
     refetchInterval: 15_000,
     enabled: !initialTasks,
   });
+
+  // Shared derived-stats source: lane header counts read the same
+  // /office/stats payload the header strip / dashboard / inbox badge
+  // consume, so the board header can never disagree with the rest of
+  // the shell. Bucketing parity (stats ↔ the cards rendered below) is
+  // pinned server-side by TestOfficeStats_MatchesListEndpoints.
+  const statsResult = useOfficeStats();
+  const statsTasks = initialStats ?? statsResult.data?.tasks;
 
   const allTasks = result.data?.tasks ?? [];
   const tasks = useMemo(() => allTasks.filter(isIssueTask), [allTasks]);
@@ -422,9 +461,18 @@ export function TasksList({ initialTasks }: TasksListProps = {}) {
   }
 
   function columnCount(stage: LifecycleStage): number {
-    return stage === "scheduled"
-      ? filteredScheduled.length
-      : columns[stage].length;
+    if (stage === "scheduled") {
+      return filteredScheduled.length;
+    }
+    // Unfiltered board: lane header counts come from the shared stats
+    // payload (one source for every surface). While a search filter is
+    // active — or before the stats query resolves — the count reflects
+    // exactly the cards rendered below it.
+    if (!query.trim() && statsTasks) {
+      const fromStats = statsCountForStage(statsTasks, stage);
+      if (fromStats !== null) return fromStats;
+    }
+    return columns[stage].length;
   }
 
   return (

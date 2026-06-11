@@ -230,6 +230,43 @@ describe("<DecisionInbox> (mail-style)", () => {
     ).toBeGreaterThan(0);
   });
 
+  it("renders a cross-channel blocking request as actionable, not 'no longer active' (C5)", async () => {
+    // The v3 eval caught a live needs-action card claiming "This
+    // request has been answered or is no longer active" — the detail
+    // body resolved requests with a channel-scoped fetch while the
+    // request lived in another channel. The all-scope fetch must find
+    // it and render the answer controls.
+    const crossChannelItem: InboxItem = {
+      ...ADA_REQUEST,
+      requestId: "req-ops",
+      title: "Approve the ops runbook?",
+      channel: "ops",
+      request: {
+        kind: "approval",
+        question: "Approve the ops runbook?",
+        from: "ada",
+      },
+    };
+    const crossChannelRequest: AgentRequest = {
+      ...ADA_FULL_REQUEST,
+      id: "req-ops",
+      channel: "ops",
+      title: "Approve the ops runbook?",
+      question: "Approve the ops runbook?",
+      blocking: true,
+    };
+    vi.mocked(getAllRequests).mockResolvedValue({
+      requests: [crossChannelRequest],
+    });
+
+    render(wrap(<DecisionInbox initialItems={[crossChannelItem]} />));
+
+    expect(
+      await screen.findByRole("button", { name: "Approve" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/answered or is no longer active/i)).toBeNull();
+  });
+
   it("shows a deterministic error when answering a request fails", async () => {
     vi.mocked(answerRequest).mockRejectedValueOnce(
       new Error("Broker unavailable"),
