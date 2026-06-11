@@ -93,8 +93,65 @@ describe("<ReviewQueueKanban>", () => {
     );
     await user.click(screen.getByRole("button", { name: "Approve" }));
     await waitFor(() => {
-      expect(updateSpy).toHaveBeenCalledWith("r1", "approved");
+      expect(updateSpy).toHaveBeenCalledWith("r1", "approved", {
+        rationale: undefined,
+      });
     });
+  });
+
+  it("passes the typed rationale through on request-changes", async () => {
+    vi.spyOn(api, "fetchReviews").mockResolvedValue([
+      mkReview("r1", "in-review", "My card"),
+    ]);
+    const updateSpy = vi.spyOn(api, "updateReviewState").mockResolvedValue({
+      ...mkReview("r1", "changes-requested", "My card"),
+    });
+    render(<ReviewQueueKanban />);
+    await waitFor(() =>
+      expect(screen.getByText("My card")).toBeInTheDocument(),
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByText("My card"));
+    await waitFor(() =>
+      expect(screen.getByTestId("nb-review-drawer")).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "Request changes" }));
+    await user.type(
+      screen.getByTestId("nb-review-rationale-input"),
+      "Merge, don't duplicate.",
+    );
+    await user.click(screen.getByTestId("nb-review-rationale-submit"));
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith("r1", "changes-requested", {
+        rationale: "Merge, don't duplicate.",
+      });
+    });
+  });
+
+  it("surfaces a visible error when a review action fails", async () => {
+    vi.spyOn(api, "fetchReviews").mockResolvedValue([
+      mkReview("r1", "in-review", "My card"),
+    ]);
+    vi.spyOn(api, "updateReviewState").mockRejectedValue(
+      new Error('{"error":"rationale is required"}'),
+    );
+    render(<ReviewQueueKanban />);
+    await waitFor(() =>
+      expect(screen.getByText("My card")).toBeInTheDocument(),
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByText("My card"));
+    await waitFor(() =>
+      expect(screen.getByTestId("nb-review-drawer")).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("nb-review-action-error"),
+      ).toBeInTheDocument();
+    });
+    // The drawer stays open on failure so the human sees the error.
+    expect(screen.getByTestId("nb-review-drawer")).toBeInTheDocument();
   });
 
   it("surfaces an error state + Retry button on fetch failure", async () => {

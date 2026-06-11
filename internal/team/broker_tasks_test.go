@@ -2932,6 +2932,19 @@ func TestBrokerUpdatesTaskByIDAcrossChannels(t *testing.T) {
 		t.Fatalf("expected planning task, got %+v", created)
 	}
 
+	// Created issues land in drafting; the human's approve activates them
+	// (drafting→running) before any completion is possible (v3 fix
+	// family #1: completion from a pre-start state is impossible).
+	activated := post(map[string]any{
+		"action":     "approve",
+		"channel":    "general",
+		"id":         created.ID,
+		"created_by": "human",
+	})
+	if activated.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("expected approve to activate the drafting task, got %+v", activated)
+	}
+
 	completed := post(map[string]any{
 		"action":     "complete",
 		"channel":    "general",

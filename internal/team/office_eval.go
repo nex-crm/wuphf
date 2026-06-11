@@ -146,6 +146,19 @@ func newOfficeEvalFixture(dir string) (*officeEvalFixture, error) {
 	}, nil
 }
 
+// activateTask passes the human Approve & Start gate for a Drafting task the
+// way the live FE does (human approve → drafting→running). Tasks created via
+// MutateTask action=create land in Drafting, and completion or review-
+// submission from a pre-start state is impossible by contract (ICP-eval v3
+// fix family #1) — eval flows that drive work must pass the gate first, the
+// same as live users.
+func (fx *officeEvalFixture) activateTask(taskID string) error {
+	_, err := fx.broker.MutateTask(TaskPostRequest{
+		Action: "approve", ID: taskID, Channel: "general", CreatedBy: "human",
+	})
+	return err
+}
+
 // RunOfficeEvals runs every eval job in its own scratch office under dir
 // and returns the combined report. dir must be a writable scratch directory
 // (the caller owns its lifetime; t.TempDir() or os.MkdirTemp both work).
@@ -177,6 +190,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"hybrid-retrieval", evalJobHybridRetrieval},
 		{"grounding", evalJobGrounding},
 		{"done-integrity", evalJobDoneIntegrity},
+		{"live-paths", evalJobLivePaths},
 	}
 	for i, job := range jobs {
 		fx, err := newOfficeEvalFixture(filepath.Join(dir, fmt.Sprintf("job-%d", i)))
@@ -226,6 +240,9 @@ func evalJobLifecycleBasic(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		VerificationKind: "command", VerificationSpec: "test -f proof.txt", VerificationRequired: true,
 	})
 	if err != nil {
+		return err
+	}
+	if err := fx.activateTask(gated.Task.ID); err != nil {
 		return err
 	}
 	_, completeErr := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: gated.Task.ID, Channel: "general", CreatedBy: "eng"})
@@ -567,6 +584,9 @@ func evalJobCompoundingLoop(fx *officeEvalFixture, r *OfficeEvalReport) error {
 		VerificationKind: "command", VerificationSpec: "exit 0", VerificationRequired: true,
 	})
 	if err != nil {
+		return err
+	}
+	if err := fx.activateTask(created.Task.ID); err != nil {
 		return err
 	}
 	if _, err := fx.broker.MutateTask(TaskPostRequest{Action: "complete", ID: created.Task.ID, Channel: "general", CreatedBy: "eng"}); err != nil {

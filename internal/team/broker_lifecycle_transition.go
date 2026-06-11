@@ -55,6 +55,20 @@ func isExecutableTeamTaskStatus(s LifecycleState) bool {
 	return s == LifecycleStateRunning || s == LifecycleStateApproved
 }
 
+// isPreExecutionLifecycleState reports whether a task has not yet entered
+// execution: no agent turn has legitimately run for it and no work product
+// can exist. An "approve" on a task in one of these states means "start the
+// work" (activation), NEVER "accept the delivered work" (terminal) — the
+// ICP-eval v3 J2 failure was Approve & Start resolving to terminal
+// `approved` on zero-work tasks ([19:04], shot 28).
+func isPreExecutionLifecycleState(s LifecycleState) bool {
+	switch s {
+	case LifecycleStateDrafting, LifecycleStateIntake, LifecycleStateReady, LifecycleStateQueuedBehindOwner:
+		return true
+	}
+	return false
+}
+
 // lifecycleMigrationOnce ensures migrateLifecycleStatesLocked runs at most
 // once per broker process even if multiple startup hooks call into it.
 // Keyed by *Broker so multiple brokers (typically only in tests) each
@@ -450,6 +464,18 @@ func (b *Broker) reindexTaskLifecycleFromLegacyLocked(task *teamTask) {
 	prev := task.LifecycleState
 	task.LifecycleState = derived
 	b.indexLifecycleLocked(task.ID, prev, derived)
+	// Re-stamp the persisted Decision Packet whenever a legacy mutation
+	// moved the typed state. GET /tasks/{id} (the task-detail page) serves
+	// the PACKET's lifecycleState while the board list serves the task's —
+	// before this hook, every legacy mutation path (claim/assign/approve/
+	// complete/submit_for_review in MutateTask) updated the task but left
+	// the packet stale, so the page showed "drafting"/"decision" while the
+	// board showed "approved" (ICP-eval v3 [18:12:57], [20:08:01]) and the
+	// human's Approve & Start click was judged against a state the page
+	// never showed (J2 [19:04]). No-op when no packet exists for the task.
+	if prev != derived {
+		b.onLifecycleTransitionLocked(task.ID, prev, derived)
+	}
 }
 
 func (b *Broker) markTaskQueuedBehindActiveOwnerLocked(task *teamTask) {
@@ -557,6 +583,13 @@ func (b *Broker) applyLifecycleStateLocked(task *teamTask, newState LifecycleSta
 	} else if prev == LifecycleStateDrafting && newState != LifecycleStateDrafting {
 		b.resolveAwaitingStartNoticeLocked(task.ID)
 	}
+	// Keep the persisted Decision Packet's lifecycleState in lockstep with
+	// the task on EVERY typed-state write — direct applyLifecycleStateLocked
+	// callers (reopen / reject / archive in MutateTask) used to skip the
+	// packet flush that transitionLifecycleLocked performed, leaving the
+	// task-detail read (which serves the packet) stale against the board
+	// (which serves the task). No-op when the task has no packet.
+	b.onLifecycleTransitionLocked(task.ID, prev, newState)
 	return nil
 }
 
@@ -589,11 +622,11 @@ func (b *Broker) transitionLifecycleLocked(taskID string, newState LifecycleStat
 			log.Printf("broker: lifecycle transition for task %q recovered from %s -> %s (reason=%q)",
 				taskID, LifecycleStateUnknown, newState, reason)
 		}
-		// Lane C: every transition triggers a Decision Packet flush
-		// when the broker has a packet for the task, plus debounced
-		// running-state durability. The hook is a no-op when no
-		// packet has been seeded for the task.
-		b.onLifecycleTransitionLocked(taskID, prev, newState)
+		// Lane C: the Decision Packet flush + debounced running-state
+		// durability now ride applyLifecycleStateLocked itself, so EVERY
+		// typed-state write path (including the legacy reindex and the
+		// direct apply callers) keeps the packet in lockstep — no second
+		// call here.
 		// Lane D wire (#9): when a task enters review, auto-resolve
 		// the reviewer set from the watching configuration and stamp
 		// it onto the task. Skip when the task already carries a

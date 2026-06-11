@@ -44,7 +44,22 @@ func completionHookCreateDefinedTask(t *testing.T, b *Broker) string {
 	}); err != nil {
 		t.Fatalf("define: %v", err)
 	}
+	approveAndStartAsHuman(t, b, created.Task.ID)
 	return created.Task.ID
+}
+
+// approveAndStartAsHuman activates a Drafting task the way the live FE
+// does (human Approve & Start → drafting→running). Tasks created via
+// MutateTask action=create land in Drafting, and completion from a
+// pre-start state is impossible by contract (ICP-eval v3 fix family #1),
+// so test flows must pass the human gate before driving work.
+func approveAndStartAsHuman(t *testing.T, b *Broker, taskID string) {
+	t.Helper()
+	if _, err := b.MutateTask(TaskPostRequest{
+		Action: "approve", ID: taskID, Channel: "general", CreatedBy: "human",
+	}); err != nil {
+		t.Fatalf("approve & start %s: %v", taskID, err)
+	}
 }
 
 // finishTask drives a task to done through whichever path its review
@@ -151,6 +166,7 @@ func TestArtifactGate_LegacyTaskWithoutDefinitionUnaffected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	approveAndStartAsHuman(t, b, created.Task.ID)
 	if err := finishTask(t, b, created.Task.ID, ""); err != nil {
 		t.Fatalf("legacy task must complete without artifact: %v", err)
 	}
@@ -188,6 +204,7 @@ func TestReopen_OwnedTaskReturnsToRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	approveAndStartAsHuman(t, b, created.Task.ID)
 	if err := finishTask(t, b, created.Task.ID, ""); err != nil {
 		t.Fatalf("finish: %v", err)
 	}

@@ -119,6 +119,7 @@ func TestDistillHandlesPunctuatedTitles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	approveAndStartAsHuman(t, b, created.Task.ID)
 	if _, err := b.MutateTask(TaskPostRequest{Action: "complete", ID: created.Task.ID, Channel: "general", CreatedBy: "eng"}); err != nil {
 		t.Fatal(err)
 	}

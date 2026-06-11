@@ -42,6 +42,7 @@ export default function ReviewQueueKanban() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -90,16 +91,28 @@ export default function ReviewQueueKanban() {
     ? (reviews.find((r) => r.id === activeId) ?? null)
     : null;
 
-  const handleStateChange = async (id: string, nextState: ReviewState) => {
+  const handleStateChange = async (
+    id: string,
+    nextState: ReviewState,
+    rationale?: string,
+  ): Promise<boolean> => {
+    setActionError(null);
     // Optimistic update.
     setReviews((prev) =>
       prev.map((r) => (r.id === id ? { ...r, state: nextState } : r)),
     );
     try {
-      await updateReviewState(id, nextState);
-    } catch {
-      // Rollback on failure.
+      await updateReviewState(id, nextState, { rationale });
+      return true;
+    } catch (err: unknown) {
+      // Rollback AND say so. The live v3 run returned 400/409/500 across
+      // the whole queue with zero feedback — the human watched a frozen
+      // board and concluded every review control was dead ([18:14:39]).
+      setActionError(
+        err instanceof Error ? err.message : "Review action failed.",
+      );
       setRefreshTick((n) => n + 1);
+      return false;
     }
   };
 
@@ -133,6 +146,15 @@ export default function ReviewQueueKanban() {
           <h1 className="nb-review-queue-title">Reviews</h1>
           <div className="nb-review-queue-meta">{totalCounts}</div>
         </header>
+        {actionError ? (
+          <p
+            className="nb-error"
+            role="alert"
+            data-testid="nb-review-board-action-error"
+          >
+            Could not update the review: {actionError}
+          </p>
+        ) : null}
         {loading ? (
           <div className="nb-loading" aria-busy="true">
             Loading reviews…
@@ -168,13 +190,18 @@ export default function ReviewQueueKanban() {
         <ReviewDetail
           review={active}
           onClose={() => setActiveId(null)}
+          actionError={actionError}
           onApprove={(id) => {
-            void handleStateChange(id, "approved");
-            setActiveId(null);
+            void handleStateChange(id, "approved").then((ok) => {
+              if (ok) setActiveId(null);
+            });
           }}
-          onRequestChanges={(id) => {
-            void handleStateChange(id, "changes-requested");
-            setActiveId(null);
+          onRequestChanges={(id, rationale) => {
+            void handleStateChange(id, "changes-requested", rationale).then(
+              (ok) => {
+                if (ok) setActiveId(null);
+              },
+            );
           }}
         />
       ) : null}

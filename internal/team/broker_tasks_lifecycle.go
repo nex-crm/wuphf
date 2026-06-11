@@ -424,6 +424,22 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 // b.mu before the persist would leak notebook entries for transitions the
 // broker subsequently rolled back on save failure (CodeRabbit, major).
 func (b *Broker) unblockDependentsLocked(completedTaskID string) []pendingTaskTransition {
+	// Dependency release requires COMPLETION, not an approval click
+	// (ICP-eval v3 [18:45:40]: OFFICE-253 was released the moment the human
+	// approved OFFICE-246, then ran against a one-pager that never existed).
+	// OnDecisionRecorded fires this cascade after EVERY decision — including
+	// Drafting→Running activations — so verify the named upstream actually
+	// reached a terminal status before releasing anything that waited on it.
+	// IDs that don't resolve to a task (answered humanInterview requests)
+	// pass through: request resolution is checked per-dependent below.
+	for i := range b.tasks {
+		if b.tasks[i].ID == completedTaskID {
+			if !isTerminalTeamTaskStatus(b.tasks[i].status) {
+				return nil
+			}
+			break
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	var pending []pendingTaskTransition
 	for i := range b.tasks {

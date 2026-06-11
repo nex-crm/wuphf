@@ -171,6 +171,34 @@ func TestMutateTaskCreatesAndCompletesTask(t *testing.T) {
 		t.Fatalf("expected broker state to include created task, got %+v", b.tasks)
 	}
 
+	// Completion from drafting is impossible by contract (ICP-eval v3 fix
+	// family #1, J3): an agent "complete" on a pre-start task must be
+	// refused with a structured conflict.
+	_, preStartErr := b.MutateTask(TaskPostRequest{
+		Action:    "complete",
+		ID:        created.Task.ID,
+		Channel:   "general",
+		CreatedBy: "ceo",
+	})
+	var preStartMutationErr *TaskMutationError
+	if !errors.As(preStartErr, &preStartMutationErr) || preStartMutationErr.Kind != TaskMutationConflict {
+		t.Fatalf("complete from drafting: want conflict, got %v", preStartErr)
+	}
+
+	// The human's approve ACTIVATES the drafting task (drafting→running).
+	activated, err := b.MutateTask(TaskPostRequest{
+		Action:    "approve",
+		ID:        created.Task.ID,
+		Channel:   "general",
+		CreatedBy: "human",
+	})
+	if err != nil {
+		t.Fatalf("MutateTask approve & start: %v", err)
+	}
+	if activated.Task.LifecycleState != LifecycleStateRunning {
+		t.Fatalf("approve on drafting: want running, got %q", activated.Task.LifecycleState)
+	}
+
 	updated, err := b.MutateTask(TaskPostRequest{
 		Action:    "complete",
 		ID:        created.Task.ID,

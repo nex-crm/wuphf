@@ -68,6 +68,19 @@ func taskObjectionActor(actor string) string {
 	return actor
 }
 
+// isInternalTaskActor reports whether the actor slug is one of the broker's
+// internal recovery identities (auto-resolve safety net, self-heal, intake
+// driver, migrations). These are exempt from the pre-start gates: they own
+// legacy fold-in paths that must be able to park state. The empty slug is
+// the local operator convention (same as checkTaskActionAuthLocked).
+func isInternalTaskActor(actor string) bool {
+	switch strings.ToLower(strings.TrimSpace(actor)) {
+	case "", "system", "broker", "nex":
+		return true
+	}
+	return false
+}
+
 // humanObjectionOpenMessage names the open objection in the forbidden
 // error so the blocked agent knows exactly whose "no" stands and how to
 // proceed (revise + resubmit, then wait for the human).
@@ -832,6 +845,58 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 			// pointers if a later gate in this mutation fails.
 			task.ChangesRequested = nil
 		}
+		// Pre-start gate (ICP-eval v3 fix family #1, J3 [19:52–19:57]): a
+		// Drafting task has not been started — the human's Approve & Start
+		// is the only way into execution. Completion or review-submission
+		// from Drafting is impossible for every non-internal actor: the v3
+		// run had the CEO work and "complete" OFFICE-337 while the pill
+		// still read drafting, with no human gate ever passed. Internal
+		// recovery actors (system/broker/nex, empty) are exempt — they own
+		// migration/fold-in paths that park legacy state.
+		if action == "complete" || action == "submit_for_review" {
+			if task.LifecycleState == LifecycleStateDrafting && !isInternalTaskActor(actor) {
+				return TaskResponse{}, taskMutationError(
+					TaskMutationConflict,
+					fmt.Sprintf("task %s has not been started — it is in drafting, waiting on the human to press Approve & Start. Work cannot be %sd from a pre-start state.", task.ID, strings.ReplaceAll(action, "_", " ")),
+					nil,
+				)
+			}
+		}
+		// Approve on a pre-start task means "start the work", never "accept
+		// delivered work" — there is no work. A HUMAN approve activates the
+		// task through the same Drafting→Running transition the Approve &
+		// Start button uses; an agent approve is refused because the start
+		// authorization belongs to the human (v3 J2 [19:04]: zero-work tasks
+		// closed terminally at the click).
+		if action == "approve" && task.LifecycleState == LifecycleStateDrafting {
+			if !isHumanMessageSender(actor) && !isInternalTaskActor(actor) {
+				return TaskResponse{}, taskMutationError(
+					TaskMutationForbidden,
+					fmt.Sprintf("task %s is in drafting — only the human can approve & start it. Wait for the human's Approve & Start.", task.ID),
+					nil,
+				)
+			}
+			if err := b.applyLifecycleStateLocked(task, LifecycleStateRunning); err != nil {
+				return TaskResponse{}, taskMutationError(TaskMutationConflict, "could not start task", err)
+			}
+			task.UpdatedAt = now
+			b.ensureTaskOwnerChannelMembershipLocked(taskChannel, task.Owner)
+			b.queueTaskBehindActiveOwnerLaneLocked(task)
+			b.scheduleTaskLifecycleLocked(task)
+			if err := b.syncTaskWorktreeLocked(task); err != nil {
+				rollbackTask()
+				return TaskResponse{}, taskMutationError(TaskMutationWorktreeFailed, "failed to manage task worktree", err)
+			}
+			// Wake the owner through the same notify path the decision
+			// endpoint's Drafting→Running activation uses.
+			b.appendActionLocked("task_updated", "office", taskChannel, actor, truncateSummary(task.Title+" [approved]", 140), task.ID)
+			if err := b.saveLocked(); err != nil {
+				rollbackTask()
+				return TaskResponse{}, taskMutationError(TaskMutationPersistFailed, "failed to persist broker state", err)
+			}
+			b.emitTaskTransitionAutoNotebook(task, beforeStatus, actor)
+			return TaskResponse{Task: *task}, nil
+		}
 		// Stop-order backstop (anti-fabrication fix family #2, ICP-eval v2
 		// [00:50]): a human message that led with stop/wait/hold in this
 		// task's channel blocks submit_for_review and complete by agents
@@ -944,10 +1009,15 @@ func (b *Broker) MutateTask(body TaskPostRequest) (TaskResponse, error) {
 				reopenTarget = LifecycleStateRunning
 			}
 			task.CompletedAt = ""
-			// Pre-set LifecycleState so applyLifecycleStateLocked sees
-			// prev==new and suppresses the redundant lifecycle chat card
-			// (same pattern the Drafting-only reopen used).
-			task.LifecycleState = reopenTarget
+			// Apply with the REAL previous state. The old pre-set
+			// (task.LifecycleState = reopenTarget before apply) made
+			// prev==new to suppress the lifecycle chat card, but it also
+			// broke the inverse index: indexLifecycleLocked never removed
+			// the task from its terminal (approved/rejected) bucket, so a
+			// reopened task stayed listed as approved on every index-backed
+			// surface while its page said running — one more board/page
+			// state split (ICP-eval v3 fix family #1). The card a real
+			// transition emits is honest signal: the human reopened work.
 			if err := b.applyLifecycleStateLocked(task, reopenTarget); err != nil {
 				return TaskResponse{}, taskMutationError(TaskMutationConflict, "could not reopen issue", err)
 			}

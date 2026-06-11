@@ -98,6 +98,15 @@ func createVerifiedTask(t *testing.T, b *Broker, spec string) string {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	// Pass the human gate: created issues land in Drafting and completion
+	// from a pre-start state is impossible by contract (v3 fix family #1).
+	// A human approve on a Drafting task ACTIVATES it (drafting→running)
+	// without running the DoD check — the check binds on completion.
+	if _, err := b.MutateTask(TaskPostRequest{
+		Action: "approve", ID: resp.Task.ID, Channel: "general", CreatedBy: "human",
+	}); err != nil {
+		t.Fatalf("approve & start: %v", err)
+	}
 	return resp.Task.ID
 }
 

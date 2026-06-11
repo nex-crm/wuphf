@@ -13,7 +13,11 @@ interface ReviewDetailProps {
   review: ReviewItem;
   onClose: () => void;
   onApprove?: (id: string) => void;
-  onRequestChanges?: (id: string) => void;
+  /** Request changes requires a rationale — the broker 400s without one. */
+  onRequestChanges?: (id: string, rationale: string) => void;
+  /** Last failed action's error, rendered inside the drawer so a broken
+   *  approve/request-changes is never silent (ICP-eval v3 [18:14:39]). */
+  actionError?: string | null;
 }
 
 export default function ReviewDetail({
@@ -21,6 +25,7 @@ export default function ReviewDetail({
   onClose,
   onApprove,
   onRequestChanges,
+  actionError,
 }: ReviewDetailProps) {
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -56,13 +61,25 @@ export default function ReviewDetail({
           Proposed path: {review.proposed_wiki_path}
         </div>
 
+        {actionError ? (
+          <p
+            className="nb-error"
+            role="alert"
+            data-testid="nb-review-action-error"
+          >
+            Could not update this review: {actionError}
+          </p>
+        ) : null}
+
         <InlineReviewThread
           reviewerSlug={review.reviewer_slug}
           state={review.state}
           comments={review.comments}
           onApprove={onApprove ? () => onApprove(review.id) : undefined}
           onRequestChanges={
-            onRequestChanges ? () => onRequestChanges(review.id) : undefined
+            onRequestChanges
+              ? (rationale) => onRequestChanges(review.id, rationale)
+              : undefined
           }
         />
       </aside>

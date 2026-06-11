@@ -207,12 +207,20 @@ export interface Task {
  * rather than failing.
  */
 export function taskToLifecycleState(task: Task | undefined): LifecycleState {
+  // The broker's typed lifecycle_state is the source of truth and wins over
+  // every legacy field. Pre-fix, pipeline_stage==="draft" was checked FIRST,
+  // so a task whose typed state had moved on (legacy mutations preserve the
+  // stale pipeline_stage tuple) still rendered "drafting" with a live
+  // Approve & Start button — the human's click was then judged by the broker
+  // against a state the page never showed (ICP-eval v3 [19:04]: zero-work
+  // tasks closed terminally at the click; [20:08]: board "approved" vs page
+  // "drafting" for the same task).
+  const ls = task?.lifecycle_state;
+  if (ls && isLifecycleState(ls)) return ls;
   if (task?.pipeline_stage === "draft") return "drafting";
   // Legacy plan-mode tasks (removed core-loop R3) persisted pipeline_stage
   // "plan" with status in_progress; the status map below resolves them to
   // "running", matching the broker's legacy-state shim.
-  const ls = task?.lifecycle_state;
-  if (ls && isLifecycleState(ls)) return ls;
   switch (task?.status) {
     case "open":
       return "intake";

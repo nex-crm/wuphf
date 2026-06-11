@@ -201,6 +201,14 @@ func (b *Broker) gateTaskCompletionVerification(body TaskPostRequest) error {
 		b.mu.Unlock()
 		return nil
 	}
+	// Approve on a pre-execution task is an ACTIVATION (start work), not a
+	// done-claim — running the definition-of-done check before any work has
+	// happened would block the human's Approve & Start forever. The check
+	// binds on the completing transition instead.
+	if strings.TrimSpace(body.Action) == "approve" && isPreExecutionLifecycleState(task.LifecycleState) {
+		b.mu.Unlock()
+		return nil
+	}
 	v := *task.Verification
 	workDir := strings.TrimSpace(task.WorktreePath)
 	b.mu.Unlock()
