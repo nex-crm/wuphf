@@ -1209,7 +1209,10 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	text := textFromResult(t, result)
 	for _, want := range []string{
 		fmt.Sprintf("Runtime state for #%s", taskChannel),
-		"Pending human requests: 1",
+		// 2 = the fixture's blocking approval + the drafting "Waiting on
+		// you" notice the broker now raises on owner-assigned drafting
+		// tasks (v2-eval N5 fix).
+		"Pending human requests: 2",
 		"Current focus: Approve release from @ceo.",
 		"working_directory ",
 		"Runtime capabilities:",
