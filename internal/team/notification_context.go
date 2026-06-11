@@ -916,7 +916,13 @@ func humanNotePacketBlock(task teamTask, slug string) string {
 	}
 	block := fmt.Sprintf("HUMAN POSTED WHILE YOU WORKED — read before continuing: @%s said: %s", note.From, body)
 	if note.Halt {
-		block += "\nThis was a STOP order. Do not submit or complete this task until you have addressed it; act on the human's instruction first."
+		// V3-N6: a Stop is a PAUSE, never a license to "put things back".
+		// The v3 live run had the agent answer a Stop by running
+		// `git checkout HEAD` and silently destroying the session's
+		// deliverable while narrating "exactly as it was" ([20:03]).
+		block += "\nThis was a STOP order. PAUSE the work now. Do NOT discard or revert any work. Report state and wait." +
+			" Never run git checkout/reset/restore/clean or delete files in response to a Stop — reverting requires an explicit human instruction to revert." +
+			" Do not submit or complete this task until the human's instruction is addressed."
 	}
 	return block
 }

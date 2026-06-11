@@ -50,14 +50,10 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 		return fmt.Errorf("broker is not running")
 	}
 
-	workspaceDir := strings.TrimSpace(l.cwd)
-	if worktreeDir := l.headlessTaskWorkspaceDir(slug, headlessTurnTaskID(ctx)); worktreeDir != "" {
-		workspaceDir = worktreeDir
-	}
-	workspaceDir = normalizeHeadlessWorkspaceDir(workspaceDir)
-	if workspaceDir == "" {
-		workspaceDir = "."
-	}
+	// Workspace isolation (V3-N5): task worktree when this turn's task has
+	// one, else the agent's scratch dir inside the office runtime home.
+	// NEVER the broker process launch cwd.
+	workspaceDir, isTaskWorktree := l.headlessTurnWorkspace(slug, headlessTurnTaskID(ctx))
 
 	promptText := buildHeadlessOpencodePrompt(l.buildPrompt(slug), notification)
 	args := buildHeadlessOpencodeArgs(config.ResolveOpencodeModel(), promptText)
@@ -78,7 +74,7 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	env = stripEnvKeys(env, []string{"CODEX_HOME"})
 	env = stripEnvKeys(env, headlessOpencodeSecretEnvVars)
 	env = setEnvValue(env, "NO_COLOR", "1")
-	if workspaceDir != strings.TrimSpace(l.cwd) {
+	if isTaskWorktree {
 		env = append(env, "WUPHF_WORKTREE_PATH="+workspaceDir)
 	}
 	opencodeConfigPath, err := l.writeHeadlessOpencodeMCPConfig(slug)

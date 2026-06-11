@@ -169,3 +169,76 @@ func TestVerificationFailureRendersInExecutionPacket(t *testing.T) {
 		t.Fatalf("packet must carry the failure output; got:\n%s", packet)
 	}
 }
+
+// TestVerificationGateRunsInOwnerScratchDirWhenNoWorktree pins the V3-N5
+// isolation half of the J3 chain: a task without a worktree runs its DoD
+// check in the OWNER'S agent scratch dir (where the owner's headless turns
+// execute), never the broker process cwd — a stale host-repo file must not
+// false-pass the check, and the agent's real deliverable must be seen.
+func TestVerificationGateRunsInOwnerScratchDirWhenNoWorktree(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("WUPHF_RUNTIME_HOME", home)
+	b := newVerificationTestBroker(t)
+	id := createVerifiedTask(t, b, "test -f j3-deliverable.html")
+	if wt := strings.TrimSpace(b.TaskByID(id).WorktreePath); wt != "" {
+		t.Fatalf("fixture task must have no worktree; got %q", wt)
+	}
+
+	// Plant a decoy in the process cwd: if the gate still ran there, the
+	// check would false-pass without any agent work.
+	cwd, _ := os.Getwd()
+	decoy := filepath.Join(cwd, "j3-deliverable.html")
+	if err := os.WriteFile(decoy, []byte("stale host file"), 0o644); err != nil {
+		t.Fatalf("write decoy: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(decoy) })
+
+	if _, err := b.MutateTask(TaskPostRequest{Action: "complete", ID: id, Channel: "general", CreatedBy: "eng"}); err == nil {
+		t.Fatal("complete must fail while the deliverable exists only in the process cwd")
+	}
+
+	// The deliverable lands where the owner's turns actually run.
+	scratch := agentScratchDir("eng")
+	if err := os.WriteFile(filepath.Join(scratch, "j3-deliverable.html"), []byte("real work"), 0o644); err != nil {
+		t.Fatalf("write deliverable: %v", err)
+	}
+	if _, err := b.MutateTask(TaskPostRequest{Action: "complete", ID: id, Channel: "general", CreatedBy: "eng"}); err != nil {
+		t.Fatalf("complete with the deliverable in the owner scratch dir: %v", err)
+	}
+	task := b.TaskByID(id)
+	if task == nil || task.VerificationResult == nil || !task.VerificationResult.Pass {
+		t.Fatalf("pass must be stamped; got %+v", task.VerificationResult)
+	}
+}
+
+// TestVerificationGateDefersToPreStartGateOnDrafting pins the J3-chain
+// ordering fix: an agent complete on a DRAFTING task must be refused by the
+// pre-start gate ("Approve & Start"), not by a premature DoD check run —
+// the verification_failed error told the agent the work just needed fixing
+// when the real blocker was the missing human activation.
+func TestVerificationGateDefersToPreStartGateOnDrafting(t *testing.T) {
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	b := newVerificationTestBroker(t)
+	resp, err := b.MutateTask(TaskPostRequest{
+		Action: "create", Channel: "general", Title: "Gated drafting work",
+		Details: "work with a definition of done", Owner: "eng", CreatedBy: "ceo",
+		VerificationKind: "command", VerificationSpec: "exit 1", VerificationRequired: true,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, completeErr := b.MutateTask(TaskPostRequest{Action: "complete", ID: resp.Task.ID, Channel: "general", CreatedBy: "eng"})
+	var mErr *TaskMutationError
+	if !errors.As(completeErr, &mErr) {
+		t.Fatalf("want TaskMutationError; got %v", completeErr)
+	}
+	if mErr.Kind == TaskMutationVerificationFailed {
+		t.Fatalf("drafting complete must hit the pre-start gate, not the DoD check; got %v", completeErr)
+	}
+	if !strings.Contains(mErr.Message, "Approve & Start") {
+		t.Fatalf("refusal must name the Approve & Start path; got %q", mErr.Message)
+	}
+	if got := b.TaskByID(resp.Task.ID); got.VerificationResult != nil {
+		t.Fatalf("no check may run for a pre-start agent complete; stamped %+v", got.VerificationResult)
+	}
+}

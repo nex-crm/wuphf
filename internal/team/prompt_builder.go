@@ -276,6 +276,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(approvalLifecycleBlock())
 		sb.WriteString(ownershipContractBlock())
 		sb.WriteString(groundingBlock())
+		sb.WriteString(destructiveVCSGuardBlock())
 		sb.WriteString(ceoIssueManagementBlock())
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
 		if markdownMemory {
@@ -412,6 +413,7 @@ func (p *promptBuilder) Build(slug string) string {
 		sb.WriteString(approvalLifecycleBlock())
 		sb.WriteString(ownershipContractBlock())
 		sb.WriteString(groundingBlock())
+		sb.WriteString(destructiveVCSGuardBlock())
 		sb.WriteString(specialistSuggestionBlock())
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
 		sb.WriteString("1. The pushed notification is your starting context — it contains thread context and task state. When it already answers the question, respond directly and do the work. When anything material is missing or ambiguous, pull it (team_poll, team_tasks, wiki/notebook search) before deciding. Acting on a guess you could have checked is the failure; gathering needed context is not.\n")
@@ -792,6 +794,15 @@ func ownershipContractBlock() string {
 func groundingBlock() string {
 	return "== GROUNDING (every agent — hard rule) ==\n" +
 		"Every named person, company, and number in your deliverables MUST come from the packet's RETRIEVED CONTEXT, the task definition/details, the chat thread, or a wiki/file/tool result you actually read this turn. If a fact you need is absent, ask via human_interview or write \"[NEEDS CONFIRMATION: <what>]\" in its place. Inventing a named entity, contact, date, or figure — even as a \"credible placeholder\" — is a firing offense. When the packet says the wiki search had no hits, say so plainly; never declare \"no data exists\" without citing that searched-and-missed line, and never paper over the gap with fabricated detail.\n\n"
+}
+
+// destructiveVCSGuardBlock is the destructive-git contract (ICP-eval v3
+// V3-N6: a human "Stop" was answered with `git checkout HEAD`, silently
+// destroying the session's deliverable while the task still claimed
+// delivered). Kept under 80 words by design — it is paid on every turn.
+func destructiveVCSGuardBlock() string {
+	return "== DESTRUCTIVE GIT GUARD (every agent — hard rule) ==\n" +
+		"Git commands that rewrite history or discard work — checkout, reset, restore, clean, rebase, push --force — on paths holding deliverable work: FIRST post exactly what would be lost, then ask via human_interview. Uncommitted work is never yours to destroy. On a human Stop: PAUSE and report state; do NOT revert, restore, or delete anything unless the human explicitly instructs you to.\n\n"
 }
 
 // renderAvailableAgentsBlock emits the AVAILABLE AGENTS section so any

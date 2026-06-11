@@ -1063,3 +1063,49 @@ func TestPromptBuilder_GroundingBlockOnLeadAndSpecialist(t *testing.T) {
 		}
 	}
 }
+
+// TestPromptBuilder_DestructiveVCSGuardOnLeadAndSpecialist pins the
+// destructive-git contract (ICP-eval v3 V3-N6: a human "Stop" was answered
+// with `git checkout HEAD`, destroying the session's deliverable). Both
+// office surfaces must carry the guard; the block itself must name the
+// work-discarding commands, the ask-first contract, and the Stop=pause rule.
+func TestPromptBuilder_DestructiveVCSGuardOnLeadAndSpecialist(t *testing.T) {
+	block := destructiveVCSGuardBlock()
+	for _, want := range []string{
+		"== DESTRUCTIVE GIT GUARD",
+		"push --force",
+		"what would be lost",
+		"human_interview",
+		"never yours to destroy",
+		"PAUSE and report state",
+		"do NOT revert",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("destructiveVCSGuardBlock missing %q", want)
+		}
+	}
+	// The guard is paid on every turn: keep the body under 80 words.
+	if words := len(strings.Fields(block)); words > 95 { // header + <=80-word body
+		t.Errorf("destructiveVCSGuardBlock too long: %d words", words)
+	}
+
+	pb := &promptBuilder{
+		isOneOnOne:  func() bool { return false },
+		isFocusMode: func() bool { return false },
+		packName:    func() string { return "Test Office" },
+		leadSlug:    func() string { return "ceo" },
+		members: func() []officeMember {
+			return []officeMember{
+				{Slug: "ceo", Name: "CEO", Role: "ceo"},
+				{Slug: "eng", Name: "Engineer", Role: "eng"},
+			}
+		},
+		policies: func() []officePolicy { return nil },
+		nameFor:  func(slug string) string { return slug },
+	}
+	for _, slug := range []string{"ceo", "eng"} {
+		if got := pb.Build(slug); !strings.Contains(got, "== DESTRUCTIVE GIT GUARD") {
+			t.Errorf("prompt for %q missing the destructive git guard", slug)
+		}
+	}
+}

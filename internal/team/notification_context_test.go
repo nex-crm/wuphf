@@ -773,6 +773,15 @@ func TestNotificationContext_HumanNoteLeadsPacketAndConsumes(t *testing.T) {
 	if !strings.Contains(packet, "STOP order") {
 		t.Errorf("halt note must name the stop order:\n%s", packet)
 	}
+	// V3-N6: a Stop is a pause, never a revert license — the v3 live run
+	// answered a Stop with `git checkout HEAD` and destroyed the session's
+	// deliverable. The halt block must carry the do-not-revert contract.
+	if !strings.Contains(packet, "Do NOT discard or revert any work. Report state and wait.") {
+		t.Errorf("halt note must carry the do-not-revert instruction:\n%s", packet)
+	}
+	if !strings.Contains(packet, "explicit human instruction to revert") {
+		t.Errorf("halt note must require an explicit human instruction before any revert:\n%s", packet)
+	}
 	if len(consumed) != 1 || consumed[0] != "t1" {
 		t.Errorf("owner packet build must consume the note exactly once; got %v", consumed)
 	}

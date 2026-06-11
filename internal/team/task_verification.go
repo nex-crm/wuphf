@@ -89,8 +89,11 @@ func normalizeTaskVerification(kind, spec string, required bool) (*TaskVerificat
 }
 
 // runTaskVerification executes a verification check. It MUST be called
-// without b.mu held. workDir is the task's worktree (or empty for the
-// process cwd).
+// without b.mu held. workDir is the directory the task's work actually
+// lives in — its worktree, or the owner's agent scratch dir when the task
+// has none. Callers must never pass the broker process cwd: a relative
+// `test -f` probe against the host launch directory can false-pass on
+// stale host files (V3-N5) and never sees the agent's real deliverable.
 func runTaskVerification(v TaskVerification, workDir string) TaskVerificationResult {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res := TaskVerificationResult{Kind: v.Kind, CheckedAt: now}
@@ -209,12 +212,34 @@ func (b *Broker) gateTaskCompletionVerification(body TaskPostRequest) error {
 		b.mu.Unlock()
 		return nil
 	}
+	// Complete on a pre-execution task is refused by the pre-start gate in
+	// the locked mutation phase for every non-internal actor ("Approve &
+	// Start first"). Let that gate own the error: failing the DoD check
+	// here instead told the agent the work just needs fixing when the real
+	// blocker is the missing human activation — and executed a command
+	// before any work could exist. Internal recovery actors still run the
+	// check, since the pre-start gate exempts them.
+	if strings.TrimSpace(body.Action) == "complete" && isPreExecutionLifecycleState(task.LifecycleState) &&
+		!isInternalTaskActor(strings.TrimSpace(body.CreatedBy)) {
+		b.mu.Unlock()
+		return nil
+	}
 	v := *task.Verification
 	workDir := strings.TrimSpace(task.WorktreePath)
+	owner := strings.TrimSpace(task.Owner)
 	b.mu.Unlock()
 
 	if v.Kind == taskVerificationKindNone {
 		return nil
+	}
+
+	// No task worktree: the owner's turns ran in their agent scratch dir
+	// (headless_workspace.go), so the check must look there — never the
+	// broker process cwd, where a relative file probe can false-pass on
+	// stale host-repo files (V3-N5/J3: landing/index.html predating the
+	// run) and never sees the agent's real deliverable.
+	if workDir == "" {
+		workDir = agentScratchDir(owner)
 	}
 
 	// Execute phase: no lock held.

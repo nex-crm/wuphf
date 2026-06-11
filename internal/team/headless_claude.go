@@ -72,12 +72,22 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			}
 		}
 	}
+	if worktreeDir == "" {
+		// Non-coding agents (CEO included) still honor an assigned
+		// local_worktree path on this turn's task.
+		worktreeDir = strings.TrimSpace(l.headlessTaskWorkspaceDir(slug, headlessTurnTaskID(ctx)))
+	}
 
 	cmd := headlessClaudeCommandContext(ctx, "claude", args...)
 	if worktreeDir != "" {
 		cmd.Dir = worktreeDir
 	} else {
-		cmd.Dir = l.cwd
+		// V3-N5: a turn without a task worktree (chat turns, office-mode
+		// task turns) runs in the agent's scratch dir inside the office
+		// runtime home — NEVER the broker process launch cwd. The v3 live
+		// run had the CEO writing landing/index.html into (and later
+		// `git checkout`-destroying it inside) the founder's host repo.
+		cmd.Dir = agentScratchDir(slug)
 	}
 	configureHeadlessProcess(cmd)
 	env := l.buildHeadlessClaudeEnv(slug)

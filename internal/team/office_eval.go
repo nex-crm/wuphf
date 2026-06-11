@@ -170,6 +170,23 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 	// installs the deterministic stub for its own scope.
 	setRetrievalEmbedding(nil, nil)
 	defer resetRetrievalEmbedding()
+	// Pin the office runtime home to the eval scratch dir — the same env
+	// knob the live office launches with. Agent scratch dirs and DoD-check
+	// working dirs (headless_workspace.go) derive from it; without the pin
+	// a `go run ./cmd/office-eval` would create dirs under the developer's
+	// real ~/.wuphf. Restored on return; in `go test` the package init
+	// already pins this var to a leaked tempdir, so the override nests.
+	priorHome, hadHome := os.LookupEnv("WUPHF_RUNTIME_HOME")
+	if err := os.Setenv("WUPHF_RUNTIME_HOME", dir); err != nil {
+		return nil, fmt.Errorf("office eval: pin runtime home: %w", err)
+	}
+	defer func() {
+		if hadHome {
+			_ = os.Setenv("WUPHF_RUNTIME_HOME", priorHome)
+		} else {
+			_ = os.Unsetenv("WUPHF_RUNTIME_HOME")
+		}
+	}()
 	jobs := []struct {
 		name string
 		run  func(*officeEvalFixture, *OfficeEvalReport) error
@@ -191,6 +208,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"grounding", evalJobGrounding},
 		{"done-integrity", evalJobDoneIntegrity},
 		{"live-paths", evalJobLivePaths},
+		{"workspace-isolation", evalJobWorkspaceIsolation},
 		{"utterance-routing", evalJobUtteranceRouting},
 	}
 	for i, job := range jobs {

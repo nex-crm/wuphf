@@ -34,14 +34,11 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		return err
 	}
 
-	workspaceDir := strings.TrimSpace(l.cwd)
-	if worktreeDir := l.headlessTaskWorkspaceDir(slug, headlessTurnTaskID(ctx)); worktreeDir != "" {
-		workspaceDir = worktreeDir
-	}
-	workspaceDir = normalizeHeadlessWorkspaceDir(workspaceDir)
-	if workspaceDir == "" {
-		workspaceDir = "."
-	}
+	// Workspace isolation (V3-N5): task worktree when this turn's task has
+	// one, else the agent's scratch dir inside the office runtime home.
+	// NEVER the broker process launch cwd — the v3 live run had agents
+	// writing into (and `git checkout`-reverting) the founder's host repo.
+	workspaceDir, isTaskWorktree := l.headlessTurnWorkspace(slug, headlessTurnTaskID(ctx))
 
 	overrides, err := l.buildCodexOfficeConfigOverrides(slug)
 	if err != nil {
@@ -86,7 +83,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	cmd := headlessCodexCommandContext(ctx, "codex", args...)
 	cmd.Dir = workspaceDir
 	cmd.Env = l.buildHeadlessCodexEnv(slug, workspaceDir, firstNonEmpty(channel...))
-	if workspaceDir != strings.TrimSpace(l.cwd) {
+	if isTaskWorktree {
 		cmd.Env = append(cmd.Env, "WUPHF_WORKTREE_PATH="+workspaceDir)
 	}
 	stdinText := buildHeadlessCodexPrompt(l.buildPrompt(slug), notification)
@@ -578,15 +575,11 @@ func normalizeHeadlessWorkspaceDir(path string) string {
 }
 
 func (l *Launcher) headlessCodexWorkspaceCacheDir(workspaceDir string) string {
+	// No fallback to l.cwd / process cwd (V3-N5): the resolved turn
+	// workspace is never empty on the headless path, and a cache dir must
+	// never be minted inside the host launch directory. Empty in → empty
+	// out; the caller simply skips the GOCACHE/GOTMPDIR overrides.
 	base := strings.TrimSpace(workspaceDir)
-	if base == "" {
-		base = strings.TrimSpace(l.cwd)
-	}
-	if base == "" {
-		if wd, err := os.Getwd(); err == nil {
-			base = wd
-		}
-	}
 	if base == "" {
 		return ""
 	}

@@ -203,11 +203,21 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	if !strings.Contains(joinedArgs, `mcp_servers.nex.env_vars=["WUPHF_API_KEY", "NEX_API_KEY"]`) {
 		t.Fatalf("expected nex env var forwarding, got %#v", record.Args)
 	}
-	if got := argValue(record.Args, "-C"); !samePath(got, l.cwd) {
-		t.Fatalf("expected codex workspace root %q, got %q", l.cwd, got)
+	// V3-N5 isolation contract: a turn without a task worktree runs in the
+	// agent's scratch dir under the runtime home — NEVER the broker
+	// process launch cwd (l.cwd).
+	wantScratch := filepath.Join(tmpHome, ".wuphf", "agent-scratch", "ceo")
+	if got := argValue(record.Args, "-C"); !samePath(got, wantScratch) {
+		t.Fatalf("expected codex workspace root %q (agent scratch), got %q", wantScratch, got)
 	}
-	if !samePath(record.Dir, l.cwd) {
-		t.Fatalf("expected command dir %q, got %q", l.cwd, record.Dir)
+	if !samePath(record.Dir, wantScratch) {
+		t.Fatalf("expected command dir %q (agent scratch), got %q", wantScratch, record.Dir)
+	}
+	if samePath(record.Dir, l.cwd) {
+		t.Fatalf("command dir must never be the broker launch cwd %q", l.cwd)
+	}
+	if containsEnvPrefix(record.Env, "WUPHF_WORKTREE_PATH=") {
+		t.Fatalf("scratch-dir turn must not advertise WUPHF_WORKTREE_PATH, got %#v", record.Env)
 	}
 	if !containsEnv(record.Env, "WUPHF_AGENT_SLUG=ceo") {
 		t.Fatalf("expected agent env, got %#v", record.Env)
@@ -222,11 +232,11 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	if !containsEnv(record.Env, "WUPHF_HEADLESS_PROVIDER=codex") {
 		t.Fatalf("expected headless provider env, got %#v", record.Env)
 	}
-	if got := envValue(record.Env, "GOCACHE"); !samePath(got, filepath.Join(l.cwd, ".wuphf", "cache", "go-build", "ceo")) {
-		t.Fatalf("expected repo-local GOCACHE, got %#v", record.Env)
+	if got := envValue(record.Env, "GOCACHE"); !samePath(got, filepath.Join(wantScratch, ".wuphf", "cache", "go-build", "ceo")) {
+		t.Fatalf("expected scratch-local GOCACHE, got %#v", record.Env)
 	}
-	if got := envValue(record.Env, "GOTMPDIR"); !samePath(got, filepath.Join(l.cwd, ".wuphf", "cache", "go-tmp", "ceo")) {
-		t.Fatalf("expected repo-local GOTMPDIR, got %#v", record.Env)
+	if got := envValue(record.Env, "GOTMPDIR"); !samePath(got, filepath.Join(wantScratch, ".wuphf", "cache", "go-tmp", "ceo")) {
+		t.Fatalf("expected scratch-local GOTMPDIR, got %#v", record.Env)
 	}
 	if !containsEnvPrefix(record.Env, "WUPHF_BROKER_TOKEN=") {
 		t.Fatalf("expected broker token env, got %#v", record.Env)

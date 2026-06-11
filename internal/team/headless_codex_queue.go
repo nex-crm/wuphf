@@ -725,12 +725,13 @@ func (l *Launcher) beginHeadlessCodexTurn(lane headlessLane) (headlessCodexTurn,
 	// the agent has several tasks in flight at once. See headless_runtime.go.
 	turnCtx = withHeadlessTurnTaskID(turnCtx, turn.TaskID)
 	startedAt := time.Now()
-	workspaceDir := ""
-	if worktreeDir := l.headlessTaskWorkspaceDir(slug, turn.TaskID); worktreeDir != "" {
-		workspaceDir = worktreeDir
-	} else if codingAgentSlugs[slug] {
-		workspaceDir = normalizeHeadlessWorkspaceDir(l.cwd)
-	}
+	// Launch-param record (V3-N5): the active turn carries the working
+	// directory the runner will execute in — the task worktree when this
+	// turn's task has one, else the agent's scratch dir inside the office
+	// runtime home. Never the broker process launch cwd. The recovery
+	// durability guard keys off the snapshot delta; a non-git scratch dir
+	// snapshots to "" so it never trips that guard.
+	workspaceDir, _ := l.headlessTurnWorkspace(slug, turn.TaskID)
 	l.headless.active[lane] = &headlessCodexActiveTurn{
 		Turn:              turn,
 		StartedAt:         startedAt,
