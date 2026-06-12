@@ -64,6 +64,7 @@ describe("<Notebook>", () => {
     vi.spyOn(api, "fetchAgentEntries").mockResolvedValue({
       agent: AGENT_SUMMARY,
       entries: [],
+      reviews: [],
     });
     render(
       <Notebook

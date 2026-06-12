@@ -298,9 +298,13 @@ export async function fetchCatalog(): Promise<NotebookCatalogSummary> {
   };
 }
 
-export async function fetchAgentEntries(
-  agentSlug: string,
-): Promise<{ agent: NotebookAgentSummary | null; entries: NotebookEntry[] }> {
+export async function fetchAgentEntries(agentSlug: string): Promise<{
+  agent: NotebookAgentSummary | null;
+  entries: NotebookEntry[];
+  /** Reviews touching this agent's entries — lets the notebook viewer
+   *  render the in-place review bar without a second /review/list fetch. */
+  reviews: ReviewItem[];
+}> {
   if (!shouldUseMocks()) {
     // Backend exposes list-by-slug; synthesize the agent header client-side
     // from the catalog so one route missing doesn't blank the page.
@@ -345,10 +349,18 @@ export async function fetchAgentEntries(
         };
       }),
     );
-    return { agent, entries };
+    return {
+      agent,
+      entries,
+      reviews: reviews.filter((review) => review.agent_slug === agentSlug),
+    };
   }
   const agent = MOCK_AGENTS.find((a) => a.agent_slug === agentSlug) ?? null;
-  return { agent, entries: mockAgentEntries(agentSlug) };
+  return {
+    agent,
+    entries: mockAgentEntries(agentSlug),
+    reviews: MOCK_REVIEWS.filter((review) => review.agent_slug === agentSlug),
+  };
 }
 
 export async function fetchEntry(

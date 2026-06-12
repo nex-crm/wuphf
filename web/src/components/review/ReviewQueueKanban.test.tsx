@@ -63,6 +63,19 @@ describe("<ReviewQueueKanban>", () => {
     expect(screen.getByText("In review one")).toBeInTheDocument();
   });
 
+  it("opens the notebook entry in place when a card is clicked with a navigator", async () => {
+    vi.spyOn(api, "fetchReviews").mockResolvedValue(MOCK_REVIEWS);
+    const onOpenEntry = vi.fn();
+    render(<ReviewQueueKanban onOpenEntry={onOpenEntry} />);
+    await waitFor(() =>
+      expect(screen.getByText("Pending one")).toBeInTheDocument(),
+    );
+    await userEvent.setup().click(screen.getByText("Pending one"));
+    expect(onOpenEntry).toHaveBeenCalledWith("pm", "e");
+    // No drawer — the click target is the notebook item itself.
+    expect(screen.queryByTestId("nb-review-drawer")).toBeNull();
+  });
+
   it("opens the detail drawer when a card is clicked", async () => {
     vi.spyOn(api, "fetchReviews").mockResolvedValue(MOCK_REVIEWS);
     render(<ReviewQueueKanban />);
@@ -146,9 +159,7 @@ describe("<ReviewQueueKanban>", () => {
     );
     await user.click(screen.getByRole("button", { name: "Approve" }));
     await waitFor(() => {
-      expect(
-        screen.getByTestId("nb-review-action-error"),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("nb-review-action-error")).toBeInTheDocument();
     });
     // The drawer stays open on failure so the human sees the error.
     expect(screen.getByTestId("nb-review-drawer")).toBeInTheDocument();

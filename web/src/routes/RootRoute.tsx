@@ -497,7 +497,9 @@ function WikiSurface({ current, route }: WikiSurfaceProps) {
             onNavigateWiki={(path) => navigateWikiArticle(path || null)}
           />
         )}
-        {current === "reviews" && <ReviewQueueKanban />}
+        {current === "reviews" && (
+          <ReviewQueueKanban onOpenEntry={navigateNotebookEntry} />
+        )}
       </div>
     </div>
   );

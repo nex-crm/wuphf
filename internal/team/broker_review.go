@@ -655,7 +655,63 @@ func (b *Broker) reviewRequestChanges(w http.ResponseWriter, r *http.Request, id
 	b.mu.Lock()
 	b.postNotebookPromotionResolvedCardLocked(updated.ID, updated.SourcePath, updated.TargetPath, body.ActorSlug, PromotionDecisionChangesRequested, body.Rationale, updated.SourceSlug)
 	b.mu.Unlock()
+	// A human "request changes" is actionable feedback, not just a state
+	// stamp: turn it into a task owned by the notebook's author so the
+	// revision actually gets scheduled (founder directive, review-in-place).
+	if isHumanReviewActor(body.ActorSlug) {
+		b.createReviewChangeTask(updated, body.ActorSlug, body.Rationale)
+	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// isHumanReviewActor reports whether a review actor_slug denotes the human
+// operator. The web UI posts an empty actor_slug for human actions; "human"
+// and "you" are the trusted human pseudo-slugs used elsewhere on the task
+// surface.
+func isHumanReviewActor(actorSlug string) bool {
+	switch strings.ToLower(strings.TrimSpace(actorSlug)) {
+	case "", "human", "you":
+		return true
+	default:
+		return false
+	}
+}
+
+// createReviewChangeTask creates the follow-up task for a human
+// request-changes decision: owned by the notebook entry's author agent,
+// carrying the reviewer's comment verbatim plus the notebook path and the
+// resubmit instruction. Best-effort composition — the review transition is
+// the primary record, so a task-create failure is logged, never bounced
+// back onto the review response. Caller must NOT hold b.mu (MutateTask
+// locks internally). Returns the created task ID, or "" on failure.
+func (b *Broker) createReviewChangeTask(p *Promotion, actorSlug, rationale string) string {
+	if p == nil || strings.TrimSpace(p.SourceSlug) == "" {
+		return ""
+	}
+	title := strings.TrimSpace(b.reviewItemForPromotion(p).EntryTitle)
+	if title == "" {
+		title = notebookEntrySlug(p.SourcePath)
+	}
+	createdBy := strings.TrimSpace(actorSlug)
+	if createdBy == "" {
+		createdBy = "human"
+	}
+	details := strings.TrimSpace(rationale) +
+		"\n\nNotebook item: " + p.SourcePath +
+		"\nRevise the notebook entry to address this feedback, then resubmit it for review."
+	resp, err := b.MutateTask(TaskPostRequest{
+		Action:    "create",
+		Channel:   "general",
+		Title:     "Update notebook item: " + title,
+		Details:   details,
+		Owner:     p.SourceSlug,
+		CreatedBy: createdBy,
+	})
+	if err != nil {
+		log.Printf("review %s: request-changes follow-up task create failed: %v", p.ID, err)
+		return ""
+	}
+	return resp.Task.ID
 }
 
 func (b *Broker) reviewReject(w http.ResponseWriter, r *http.Request, id string) {

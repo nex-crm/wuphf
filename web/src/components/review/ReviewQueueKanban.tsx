@@ -11,7 +11,13 @@ import ReviewColumn from "./ReviewColumn";
 import ReviewDetail from "./ReviewDetail";
 import "../../styles/notebook.css";
 
-/** `/reviews` 5-column Kanban + detail drawer backed by the broker review log. */
+/**
+ * `/reviews` 5-column Kanban backed by the broker review log. The board is
+ * the queue OVERVIEW; clicking a card opens the notebook item itself (the
+ * notebook viewer route carries the in-place Approve / Request-changes bar)
+ * via `onOpenEntry`. The detail drawer remains the fallback for callers
+ * that don't pass a navigator and for reviews missing entry coordinates.
+ */
 
 type ReviewColumnState = Extract<
   ReviewState,
@@ -38,7 +44,14 @@ function reviewColumnState(state: ReviewState): ReviewColumnState {
   return state;
 }
 
-export default function ReviewQueueKanban() {
+interface ReviewQueueKanbanProps {
+  /** Opens the notebook entry view for a review card (in-place review). */
+  onOpenEntry?: (agentSlug: string, entrySlug: string) => void;
+}
+
+export default function ReviewQueueKanban({
+  onOpenEntry,
+}: ReviewQueueKanbanProps = {}) {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -191,7 +204,14 @@ export default function ReviewQueueKanban() {
                 title={STATE_TITLE[state]}
                 items={grouped[state]}
                 activeId={activeId}
-                onOpenCard={(id) => setActiveId(id)}
+                onOpenCard={(id) => {
+                  const review = reviews.find((r) => r.id === id);
+                  if (onOpenEntry && review?.agent_slug && review.entry_slug) {
+                    onOpenEntry(review.agent_slug, review.entry_slug);
+                    return;
+                  }
+                  setActiveId(id);
+                }}
               />
             ))}
           </ul>

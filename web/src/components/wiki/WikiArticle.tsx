@@ -45,6 +45,7 @@ import PageStatsPanel from "./PageStatsPanel";
 import PlaybookExecutionLog from "./PlaybookExecutionLog";
 import PlaybookSkillBadge from "./PlaybookSkillBadge";
 import ReferencedBy from "./ReferencedBy";
+import RequestAIChangeControl from "./RequestAIChangeControl";
 import SeeAlso from "./SeeAlso";
 import type { SourceItem } from "./Sources";
 import Sources from "./Sources";
@@ -569,6 +570,7 @@ export default function WikiArticle({
             onChange={setTab}
             rightRail={context ? [context] : undefined}
           />
+          <RequestAIChangeControl title={article.title} path={article.path} />
           <ArticleDeleteControl
             title={article.title}
             path={article.path}

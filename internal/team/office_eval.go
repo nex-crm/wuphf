@@ -215,6 +215,7 @@ func RunOfficeEvals(dir string) (*OfficeEvalReport, error) {
 		{"utterance-routing", evalJobUtteranceRouting},
 		{"task-integrity", evalJobTaskIntegrity},
 		{"knowledge-integrity", evalJobKnowledgeIntegrity},
+		{"review-change-tasks", evalJobReviewChangeTasks},
 		{"scheduler-truth", evalJobSchedulerTruth},
 		{"human-boundary", evalJobHumanBoundary},
 		{"platform-honesty", evalJobPlatformHonesty},
