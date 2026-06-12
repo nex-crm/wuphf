@@ -6,8 +6,10 @@ The broker UI contract is a Go HTTP server bound to `127.0.0.1` that serves the
 React bundle, a same-origin reverse proxy for HTTP and SSE API calls, and the
 loopback WebSocket transport used by the agent terminal. The contract is the
 same no matter which host starts it: today's `cmd/wuphf` binary used by
-`npx wuphf`, and the future `cmd/wuphf-desktop` Wails shell, must both rely on
-the broker listener rather than inventing a second app-data IPC surface.
+`npx wuphf`, and any external desktop host (the Electron shell lives in the
+`nex-crm/nex-local` repo, which vendors `packages/@wuphf/broker`), must both
+rely on the broker listener rather than inventing a second app-data IPC
+surface.
 
 ## Listener
 
@@ -91,9 +93,9 @@ another asset path unless this document and the code change together.
    raw Vite source files, because browsers would load TypeScript sources as
    static text and leave the app stalled.
 
-This order is part of the host contract. `cmd/wuphf` and `cmd/wuphf-desktop`
-should both start the same broker web listener and let it decide which bundle
-source is available.
+This order is part of the host contract. `cmd/wuphf` and any external desktop
+host should both start the same broker web listener and let it decide which
+bundle source is available.
 
 ## API Surface
 
@@ -204,18 +206,20 @@ If `/api-token` fails, `initApi()` falls back to direct broker mode and tries
 browser flows and manual broker connection paths. It is not the desktop
 bootstrap contract.
 
-The desktop implication is strict: the Wails WebView must load the React bundle
-from the broker web UI loopback origin, for example
+The desktop implication is strict: a desktop host's WebView or renderer (today
+the Electron renderer in `nex-crm/nex-local`) must load the React bundle from
+the broker web UI loopback origin, for example
 `http://127.0.0.1:<web-port>/`, so `/api-token` is a same-origin request. A
-`wails://` asset URL would make `/api-token` target the WebView asset scheme
-instead of the broker web UI listener, forcing the app into fallback behavior
-and bypassing the same bootstrap path that browser mode uses.
+custom asset scheme URL (`file://`, `app://`, and the like) would make
+`/api-token` target the asset scheme instead of the broker web UI listener,
+forcing the app into fallback behavior and bypassing the same bootstrap path
+that browser mode uses.
 
 The token is sensitive. The HTTP/SSE proxy path injects it server-side, but the
 React process still receives it from `/api-token` because the current
 WebSocket and direct fallback paths need it. That is why `/api-token` is guarded
-by loopback `RemoteAddr` and loopback `Host`, and why desktop should not create
-a second token delivery mechanism through Wails bindings.
+by loopback `RemoteAddr` and loopback `Host`, and why a desktop host should not
+create a second token delivery mechanism through native shell bindings.
 
 ## Coexistence With Workspace Ports
 
@@ -256,14 +260,14 @@ share a bearer token file.
 
 ## What Is Not Part Of The Contract
 
-Wails events are not an app-data transport. `runtime.EventsEmit`, generated
-Wails bindings, or any other Wails RPC surface may be used for OS verbs only:
+Native shell events are not an app-data transport. Electron contextBridge/IPC,
+Wails bindings, or any other native RPC surface may be used for OS verbs only:
 tray, notifications, dock badges, deep links, autostart, and updater status.
 Messages, tasks, wiki state, requests, receipts, terminal bytes, and all other
 product data stay on broker HTTP, SSE, or WebSocket.
 
-`wails://` or another asset scheme is not the React bootstrap origin for the
-desktop app. The WebView loads the broker web UI loopback URL so the same
+A custom asset scheme is not the React bootstrap origin for a desktop app. The
+WebView or renderer loads the broker web UI loopback URL so the same
 `/api-token`, `/api/*`, `/api/events`, and terminal WebSocket behavior applies
 in browser mode and desktop mode.
 

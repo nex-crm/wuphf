@@ -23,18 +23,6 @@
       "!**/*.generated.tsx"
     ]
   },
-  "overrides": [
-    {
-      "includes": ["src/desktop/**"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": "off"
-          }
-        }
-      }
-    }
-  ],
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -77,9 +65,9 @@
           "level": "error",
           "options": {
             "paths": {
-              "@wails/runtime": "Wails runtime imports are reserved for web/src/desktop/. App data must use loopback HTTP/SSE/WebSocket.",
-              "@wailsapp/runtime": "Wails runtime imports are reserved for web/src/desktop/. App data must use loopback HTTP/SSE/WebSocket.",
-              "wails-bindings": "Wails bindings are reserved for web/src/desktop/. App data must use loopback HTTP/SSE/WebSocket."
+              "@wails/runtime": "Wails imports are forbidden — the desktop shell lives in nex-crm/nex-local. App data must use loopback HTTP/SSE/WebSocket.",
+              "@wailsapp/runtime": "Wails imports are forbidden — the desktop shell lives in nex-crm/nex-local. App data must use loopback HTTP/SSE/WebSocket.",
+              "wails-bindings": "Wails imports are forbidden — the desktop shell lives in nex-crm/nex-local. App data must use loopback HTTP/SSE/WebSocket."
             },
             "patterns": [
               {
@@ -89,7 +77,7 @@
                   "wails-bindings/**",
                   "wailsjs/**"
                 ],
-                "message": "Wails imports are reserved for web/src/desktop/. App data must use loopback HTTP/SSE/WebSocket."
+                "message": "Wails imports are forbidden — the desktop shell lives in nex-crm/nex-local. App data must use loopback HTTP/SSE/WebSocket."
               }
             ]
           }

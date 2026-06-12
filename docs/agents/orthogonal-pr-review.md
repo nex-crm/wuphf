@@ -36,7 +36,7 @@ different prompts).
 | 3 | Build / runtime parity (`build-parity`) | codex | Does the build still produce equivalent output? Externalization preserved? |
 | 4 | Scope discipline (`scope`) | claude (`staff-code-reviewer`) | Is the diff narrowly the advertised change, no drive-bys? |
 | 5 | Repo conventions (`conventions`) | codex | CLAUDE.md / AGENTS.md / INSTRUCTIONS.md compliance |
-| 6 | Security / IPC (`ipc`) | codex | Allowlist intact? No `any` across contextBridge? Sandbox preserved? |
+| 6 | Security / IPC (`ipc`) | codex | Broker loopback boundary intact? Bind still `127.0.0.1`-only, bearer enforced on `/api/*`, no newly trusted origins? |
 | 7 | Test coverage equivalence (`coverage`) | codex | Do tests still cover what they should? Versioning consistent? |
 | 8 | Beta / pre-release stability (`beta`) | codex | If pinning a beta: how risky, what's the upgrade path? |
 | 9 | Adversarial sweep (`adversarial`) | codex | "Assume earlier lenses missed something — what is it?" Always include. |
